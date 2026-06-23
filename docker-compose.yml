@@ -13,7 +13,7 @@ services:
       - yomi_pgdata:/var/lib/postgresql/data
     networks:
       - yomi_internal          # private: only the BFF can reach the DB
-    # NOTE: deliberately NO `ports:` and NOT on proxy/proxy_internal -> unreachable from outside
+    # NOTE: deliberately NO `ports:` and only on yomi_internal -> unreachable from outside the stack
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U yomi -d yomi"]
       interval: 10s
@@ -53,7 +53,7 @@ services:
       - yomi_config:/config                                  # writable app config (custom sites list)
     networks:
       - yomi_internal            # reach the DB
-      - proxy_internal           # reach komga:25600 AND be reachable by NPM
+      - yomi_app                 # reach the web + flaresolverr
     expose:
       - "3000"
     depends_on:
@@ -75,9 +75,10 @@ services:
     restart: unless-stopped
     expose:
       - "80"
+    ports:
+      - "${WEB_PORT:-3000}:80"   # open the app at http://localhost:3000 (front with a reverse proxy for HTTPS)
     networks:
-      - proxy_internal           # reached by NPM, can reach yomi-bff
-      - proxy                    # public ingress (mirrors house pattern)
+      - yomi_app
     depends_on:
       - yomi-bff
     healthcheck:
@@ -98,19 +99,17 @@ services:
       LOG_LEVEL: info
       TZ: UTC
     networks:
-      - proxy_internal
+      - yomi_app
     expose:
       - "8191"
     labels:
       - com.centurylinklabs.watchtower.enable=false
 
 networks:
-  yomi_internal:
+  yomi_internal:                 # private: only db + bff (DB never leaves this network)
     driver: bridge
-  proxy_internal:
-    external: true
-  proxy:
-    external: true
+  yomi_app:                      # app tier: bff + web + flaresolverr talk to each other
+    driver: bridge
 
 volumes:
   yomi_pgdata:

@@ -13,3 +13,5 @@ sources-pack/
 # mounted source plugins (user-supplied); keep the empty default dir but not its contents
 sources/*
 !sources/.gitkeep
+# server-specific compose override (reverse-proxy networks) — the committed compose runs standalone
+docker-compose.override.yml

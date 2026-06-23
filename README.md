@@ -75,16 +75,57 @@ polished, installable, multi-user reader that also fetches — with webtoons as 
 | `yomi-db` | Private Postgres (no host port) |
 | `yomi-flaresolverr` | Optional headless-Chrome Cloudflare solver, used only by Cloudflare-protected source plugins |
 
-## Quick start
+## Install
+
+**Requirements:** Docker + Docker Compose, and a manga library on disk laid out as `<series>/<chapter>`, where
+each chapter is a `.cbz`, a `.cbr`, or a folder of images (an archive may carry a `ComicInfo.xml` for metadata).
+Everything else runs in containers — no Node, no database, nothing to install on the host.
 
 ```bash
+git clone https://github.com/AngeloSha/yomi.git
+cd yomi
 cp .env.example .env
-# put your CBZ library path in .env:  LIBRARY_PATH=/path/to/your/manga   (read-only)
-bash scripts/setup.sh            # generates secrets + your login password, brings the stack up
+# edit .env and point LIBRARY_PATH at your library (mounted read-only), e.g.
+#   LIBRARY_PATH=/path/to/your/manga
+bash scripts/setup.sh        # generates DB/JWT secrets + your admin password, fixes volume perms, starts the stack
 ```
 
-Open the app, log in, and your library appears. Layout on disk is `<series>/<chapter>`, where each chapter is a
-`.cbz`, a `.cbr`, or a folder of images (an archive may carry a `ComicInfo.xml` for metadata).
+When it finishes, open **http://localhost:3000**, log in with the admin account you just created, and your
+library appears. `setup.sh` starts four containers:
+
+| Container | Role |
+|---|---|
+| `yomi-web` | the PWA (what you open in the browser) |
+| `yomi-bff` | the API |
+| `yomi-db` | private Postgres (never exposed) |
+| `yomi-flaresolverr` | Cloudflare solver — **started automatically**; sources that need it use it with no config |
+
+Prefer to wire it up by hand? After editing `.env`:
+
+```bash
+docker compose up -d             # build + start everything; app at http://localhost:3000
+docker compose logs -f yomi-bff  # watch it boot
+```
+
+Change the port with `WEB_PORT` in `.env` (`WEB_PORT=8080` → http://localhost:8080).
+
+### Serving it on a domain (HTTPS)
+
+The committed compose is **standalone** — it publishes the app on a local port and creates its own private
+networks, so a fresh clone just works. To put it on a public domain with TLS, front `yomi-web` with any reverse
+proxy (Caddy, Traefik, Nginx Proxy Manager, …) and set `PUBLIC_ORIGIN` in `.env` to your URL. If your proxy
+reaches containers over a shared Docker network, add a `docker-compose.override.yml` next to the compose file to
+attach `yomi-web` to it — Compose loads it automatically:
+
+```yaml
+# docker-compose.override.yml  (server-specific; keep it out of git)
+networks:
+  proxy:
+    external: true
+services:
+  yomi-web:
+    networks: [yomi_app, proxy]   # keep yomi_app so it still reaches the API
+```
 
 ## Sources (optional)
 
@@ -115,7 +156,8 @@ Everything is in `.env` (see `.env.example`). Notably:
 - `LIBRARY_BACKEND` — `owned` (read your CBZ library, default) or `komga` (read from a Komga server).
 - `LIBRARY_PATH` — host path to your CBZ library (read-only mount at `/library`).
 - `SOURCES_PATH` — host path to a built source pack (empty by default = no sources).
-- `PUBLIC_ORIGIN` — the URL the app is served from.
+- `WEB_PORT` — host port the app is published on (default `3000`).
+- `PUBLIC_ORIGIN` — the URL the app is served from (match your domain behind a reverse proxy).
 
 ## License
 

@@ -1,13 +1,14 @@
 #!/usr/bin/env bash
-# Yomi one-time secret setup. Run on the server:  bash scripts/setup.sh
-# - mints (or accepts) a Komga API key
-# - hashes your app login password with argon2id (stored base64; plaintext never persisted)
-# - writes them into .env, ensures the yomi DB exists, recreates the BFF
+# Yomi one-time setup. Run from the repo root:  bash scripts/setup.sh
+# - generates DB/JWT secrets and hashes your admin password (argon2id; plaintext never persisted)
+# - writes them into .env, brings the whole stack up, ensures the DB + login work
 set -euo pipefail
 
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ENV_FILE="$DIR/.env"
 COMPOSE=(docker compose --project-directory "$DIR" -f "$DIR/docker-compose.yml")
+# a server-specific override (e.g. reverse-proxy networks) is applied automatically when present
+[ -f "$DIR/docker-compose.override.yml" ] && COMPOSE+=(-f "$DIR/docker-compose.override.yml")
 
 [ -f "$ENV_FILE" ] || { cp "$DIR/.env.example" "$ENV_FILE" 2>/dev/null && echo "Created .env from .env.example"; }
 [ -f "$ENV_FILE" ] || { echo "Missing $ENV_FILE"; exit 1; }
@@ -82,6 +83,15 @@ grep -v -E '^(KOMGA_API_KEY|INITIAL_USER_PASSWORD_HASH_B64)=' "$ENV_FILE" > "$TM
 mv "$TMP" "$ENV_FILE"
 chmod 600 "$ENV_FILE"
 
+# ---- 3b. Bring the whole stack up (db, bff, web, flaresolverr) --------------
+echo "==> Starting the stack (this builds the images on first run)…"
+"${COMPOSE[@]}" up -d
+echo "   waiting for the database…"
+for _ in $(seq 1 30); do
+  docker exec -e PGPASSWORD="$DB_PASSWORD" yomi-db pg_isready -U yomi -h 127.0.0.1 >/dev/null 2>&1 && break
+  sleep 1
+done
+
 # ---- 4. Ensure DB exists, set the live user's password ----------------------
 echo "==> Ensuring 'yomi' database exists"
 docker exec -e PGPASSWORD="$DB_PASSWORD" yomi-db psql -U yomi -h 127.0.0.1 -d postgres -tc \
@@ -113,8 +123,8 @@ done
 echo
 echo "✓ Done. Verifying login…"
 sleep 2
-if docker run --rm --network proxy_internal -e PW="$AP1" yomi-bff:prod node -e '
-  fetch("http://yomi-bff:3000/auth/login",{method:"POST",headers:{"content-type":"application/json"},
+if docker run --rm --network "container:yomi-bff" -e PW="$AP1" yomi-bff:prod node -e '
+  fetch("http://127.0.0.1:3000/auth/login",{method:"POST",headers:{"content-type":"application/json"},
     body:JSON.stringify({password:process.env.PW})}).then(async r=>{
     console.log("login HTTP",r.status); process.exit(r.ok?0:1);}).catch(e=>{console.error(e.message);process.exit(1);});
 '; then echo "✓ Login works. Yomi backend is live."; else echo "⚠ Login test failed — check: docker logs yomi-bff"; fi
