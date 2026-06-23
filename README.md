@@ -195,6 +195,16 @@ Koryomi is free and open-source. If it's useful to you, you can help fund contin
 You'll also find a **♡ Sponsor** button at the top of this repo's GitHub page, and a **Support Koryomi** card inside
 the app under **Profile** and **Admin → Settings**.
 
+## Contributors
+
+Koryomi is built and maintained by [@AngeloSha](https://github.com/AngeloSha). Pull requests, bug reports, and
+feature ideas are all welcome: start with [CONTRIBUTING.md](CONTRIBUTING.md), or open an
+[issue](https://github.com/AngeloSha/koryomi/issues).
+
+Thanks to everyone who has helped build Koryomi:
+
+[![Koryomi contributors](https://contrib.rocks/image?repo=AngeloSha/koryomi)](https://github.com/AngeloSha/koryomi/graphs/contributors)
+
 ## License
 
 [MPL-2.0](LICENSE). Source plugins are **not** part of this repository; they fetch from third-party sites and
