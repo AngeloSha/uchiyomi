@@ -1,5 +1,7 @@
 # Yomi
 
+[![Support Yomi on Ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/angeloshaheen)
+
 A self-hosted, installable (PWA) manga / manhwa reader with a true-black OLED interface and a vertical-scroll
 webtoon reader as the centerpiece. Point it at your own CBZ library and read on any device.
 
@@ -158,6 +160,15 @@ Everything is in `.env` (see `.env.example`). Notably:
 - `SOURCES_PATH` — host path to a built source pack (empty by default = no sources).
 - `WEB_PORT` — host port the app is published on (default `3000`).
 - `PUBLIC_ORIGIN` — the URL the app is served from (match your domain behind a reverse proxy).
+
+## Support
+
+Yomi is free and open-source. If it's useful to you, you can help fund continued development:
+
+**[☕ Buy me a coffee on Ko-fi →](https://ko-fi.com/angeloshaheen)**
+
+You'll also find a **♡ Sponsor** button at the top of this repo's GitHub page, and a **Support Yomi** card inside
+the app under **Profile** and **Admin → Settings**.
 
 ## License
 

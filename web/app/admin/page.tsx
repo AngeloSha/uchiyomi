@@ -322,6 +322,11 @@ function Settings() {
         <input type="number" min={1} max={168} value={hours ?? data.updater_hours} onChange={(e) => setHours(Number(e.target.value))} className={fld} />
         <button onClick={() => save({ updaterHours: hours ?? data.updater_hours }, 'Saved')} className="btn-accent mt-2 w-full py-2 text-sm">Save interval</button>
       </div>
+      <div className="card p-4">
+        <h3 className="mb-1 font-display text-base font-semibold">Support Yomi</h3>
+        <p className="mb-3 text-sm text-fog-400">Yomi is free &amp; open-source. If you find it useful, you can help fund development.</p>
+        <a href="https://ko-fi.com/angeloshaheen" target="_blank" rel="noopener noreferrer" className="btn-accent flex w-full items-center justify-center gap-2 py-2 text-sm">☕ Buy me a coffee</a>
+      </div>
     </div>
   );
 }

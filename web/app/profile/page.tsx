@@ -323,6 +323,25 @@ export default function ProfilePage() {
         </div>
       </section>
 
+      {/* support the project */}
+      <section className="px-5 pt-6 lg:px-0">
+        <a
+          href="https://ko-fi.com/angeloshaheen"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="card flex items-center justify-between gap-3 p-4 transition active:scale-[0.99]"
+        >
+          <span className="flex items-center gap-3">
+            <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-accent-soft text-lg">☕</span>
+            <span className="flex flex-col">
+              <span className="font-display text-sm font-semibold text-fog-100">Support Yomi</span>
+              <span className="text-[12px] text-fog-400">Free &amp; open-source — buy me a coffee on Ko-fi</span>
+            </span>
+          </span>
+          <IcChevronRight className="text-fog-500" width={18} height={18} />
+        </a>
+      </section>
+
       {/* logout */}
       <section className="px-5 pb-10 pt-8">
         <button onClick={logout} className="btn-ghost w-full text-red-300">Sign out</button>
