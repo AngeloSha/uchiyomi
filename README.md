@@ -2,6 +2,8 @@
 
 *The all-in-one **\*arr stack** for manga: discover, grab, monitor, and read, self-hosted in one PWA.*
 
+### 🌐 [**koryomi.com**](https://koryomi.com) · 🐙 [GitHub](https://github.com/AngeloSha/koryomi) · ☕ [Ko-fi](https://ko-fi.com/angeloshaheen)
+
 A self-hosted, installable (PWA) manga / manhwa reader with a true-black OLED interface and a vertical-scroll
 webtoon reader as the centerpiece. Point it at your own CBZ library and read on any device.
 
