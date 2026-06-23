@@ -1,5 +1,7 @@
 # Yomi
 
+*The all-in-one **\*arr stack** for manga — discover, grab, monitor, and read, self-hosted in one PWA.*
+
 A self-hosted, installable (PWA) manga / manhwa reader with a true-black OLED interface and a vertical-scroll
 webtoon reader as the centerpiece. Point it at your own CBZ library and read on any device.
 
@@ -12,6 +14,21 @@ ones you want.
 
 > 📖 **[Full usage guide →](docs/USAGE.md)** — every screen walked through with screenshots (library, reader,
 > Discover, admin, security, offline).
+
+## One app instead of a stack
+
+Self-hosting manga the usual way means a pile of services — an indexer, a grabber that watches for new
+releases, a download client, a Cloudflare solver, and a media server to read it all: four or five containers
+and a weekend of compose files. **Yomi folds the whole pipeline — discover → grab → monitor → serve → read —
+into a single image.** Point it at your library, add sources by URL, and it does the rest.
+
+| The usual self-hosted stack | Yomi, built in |
+| --- | --- |
+| **Prowlarr / Jackett** — indexers & search | Add a source by pasting its URL (engine auto-detected) + bundled MangaDex, all searchable in Discover |
+| **Sonarr / Radarr** — grab + watch for new releases | Add to library, then a scheduled updater auto-grabs new chapters (per-series, configurable interval) |
+| **qBittorrent** — download client | Built-in chapter downloader → CBZ, with offline PWA sync |
+| **FlareSolverr** — Cloudflare solver | Bundled and wired in — nothing to configure |
+| **Jellyfin / Plex** — multi-user server + apps | OLED PWA reader: per-user progress, household/leaderboard, offline, 2FA, a Jellyfin-style admin panel |
 
 ## Features
 
@@ -158,6 +175,16 @@ Everything is in `.env` (see `.env.example`). Notably:
 - `SOURCES_PATH` — host path to a built source pack (empty by default = no sources).
 - `WEB_PORT` — host port the app is published on (default `3000`).
 - `PUBLIC_ORIGIN` — the URL the app is served from (match your domain behind a reverse proxy).
+
+## Roadmap
+
+Actively developed. On deck:
+
+- 🔔 **Push notifications** — get alerted the moment a followed series gets a new chapter.
+- 📥 **Import your follows** — bring an existing list (Tachiyomi/Mihon backup or MangaDex follows) in one step.
+- 📡 **OPDS feed** — browse & read Yomi from other reader apps (Panels, Chunky, …).
+
+Also exploring: unified library-and-source search, AniList progress sync, and a first-run setup wizard.
 
 ## Support
 
