@@ -10,7 +10,7 @@ export function Wordmark({ className = '' }: { className?: string }) {
 export function Mark({ size = 40, className = '' }: { size?: number; className?: string }) {
   return (
     // eslint-disable-next-line @next/next/no-img-element
-    <img src="/icons/yomi-mark.svg" width={size} height={size} alt="" aria-hidden className={`shrink-0 ${className}`} />
+    <img src="/icons/koryomi-mark.png" width={size} height={size} alt="" aria-hidden className={`shrink-0 rounded-md ${className}`} />
   );
 }
 
