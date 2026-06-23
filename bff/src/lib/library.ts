@@ -1,6 +1,6 @@
 // Owned library scanner: reads the CBZ folder Suwayomi writes (replacing Komga's library role).
 // Layout: <root>/<source>/<series title>/<chapter>.cbz ; each cbz carries ComicInfo.xml + page images.
-import { readdir, stat } from 'fs/promises';
+import { readdir, stat, readFile } from 'fs/promises';
 import { join } from 'path';
 import { createHash } from 'crypto';
 import sharp from 'sharp';
@@ -9,6 +9,9 @@ import { q } from './db';
 // node-stream-zip reads the central directory only (cheap) and can stream a single entry.
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const StreamZip = require('node-stream-zip');
+// node-unrar-js: pure-wasm RAR reader (no native build) for .cbr comic archives.
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const { createExtractorFromData } = require('node-unrar-js');
 
 export const LIBRARY_ROOT = process.env.LIBRARY_ROOT || '/library';
 const IMG = /\.(jpe?g|png|webp|gif|avif)$/i;
@@ -64,13 +67,62 @@ function naturalCmp(a: string, b: string): number {
   return numFromName(a) - numFromName(b) || a.localeCompare(b);
 }
 
-/** Open one CBZ; return its ComicInfo.xml (if any) and image page count. */
-async function readCbz(path: string): Promise<{ xml: string; pages: number }> {
+// A "chapter" can be a CBZ (zip), a CBR (rar), or a loose folder of images. These helpers read all three so
+// the scanner + page server are format-agnostic. (The downloader still WRITES CBZ; this is read-side only.)
+type ChapterKind = 'zip' | 'rar' | 'dir';
+function chapterKind(path: string): ChapterKind {
+  if (/\.(cbz|zip)$/i.test(path)) return 'zip';
+  if (/\.(cbr|rar)$/i.test(path)) return 'rar';
+  return 'dir';
+}
+
+/** Chapter entries inside a series folder: .cbz/.cbr/.zip/.rar files + subfolders that contain images. */
+export async function listChapters(folderAbs: string): Promise<string[]> {
+  const out: string[] = [];
+  for (const e of await readdir(folderAbs, { withFileTypes: true }).catch(() => [])) {
+    if (e.isFile() && /\.(cbz|cbr|zip|rar)$/i.test(e.name)) out.push(e.name);
+    else if (e.isDirectory() && (await readdir(join(folderAbs, e.name)).catch(() => [])).some((n) => IMG.test(n))) out.push(e.name);
+  }
+  return out.sort(naturalCmp);
+}
+
+// ---- RAR (.cbr) via node-unrar-js (wasm; reads a whole archive from memory) ----
+async function rarExtractor(path: string): Promise<any> {
+  const buf = await readFile(path);
+  const data = buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength);
+  return createExtractorFromData({ data });
+}
+async function rarHeaders(ex: any): Promise<any[]> {
+  return [...ex.getFileList().fileHeaders].filter((h: any) => !h.flags?.directory);
+}
+async function rarExtract(ex: any, name: string): Promise<Buffer> {
+  const files = [...ex.extract({ files: [name] }).files];
+  const f = files.find((x: any) => x.fileHeader?.name === name) || files[0];
+  if (!f?.extraction) throw new Error('rar entry not found');
+  return Buffer.from(f.extraction);
+}
+
+/** Open one chapter (CBZ/CBR/folder); return its ComicInfo.xml (if any) + image page count. */
+async function readArchive(path: string): Promise<{ xml: string; pages: number }> {
+  const k = chapterKind(path);
+  if (k === 'dir') {
+    const names = await readdir(path).catch(() => []);
+    const xmlName = names.find((n) => /comicinfo\.xml$/i.test(n));
+    const xml = xmlName ? await readFile(join(path, xmlName), 'utf8').catch(() => '') : '';
+    return { xml, pages: names.filter((n) => IMG.test(n)).length };
+  }
+  if (k === 'rar') {
+    const ex = await rarExtractor(path);
+    const headers = await rarHeaders(ex);
+    const xmlH = headers.find((h) => /comicinfo\.xml$/i.test(h.name));
+    let xml = '';
+    if (xmlH) { try { xml = (await rarExtract(ex, xmlH.name)).toString('utf8'); } catch {} }
+    return { xml, pages: headers.filter((h) => IMG.test(h.name)).length };
+  }
   const zip = new StreamZip.async({ file: path });
   try {
     const entries = await zip.entries();
-    let pages = 0;
-    let xml = '';
+    let pages = 0, xml = '';
     for (const name of Object.keys(entries)) {
       if (entries[name].isDirectory) continue;
       if (IMG.test(name)) pages++;
@@ -82,21 +134,25 @@ async function readCbz(path: string): Promise<{ xml: string; pages: number }> {
   }
 }
 
-/** Sorted list of image entry names inside a CBZ (used by the page server). */
+/** Sorted image page names inside a chapter (CBZ/CBR/folder) — used by the page server. */
 export async function cbzPages(path: string): Promise<string[]> {
+  const k = chapterKind(path);
+  if (k === 'dir') return (await readdir(path).catch(() => [])).filter((n) => IMG.test(n)).sort(naturalCmp);
+  if (k === 'rar') return (await rarHeaders(await rarExtractor(path))).map((h) => h.name).filter((n) => IMG.test(n)).sort(naturalCmp);
   const zip = new StreamZip.async({ file: path });
   try {
     const entries = await zip.entries();
-    return Object.keys(entries)
-      .filter((n) => !entries[n].isDirectory && IMG.test(n))
-      .sort(naturalCmp);
+    return Object.keys(entries).filter((n) => !entries[n].isDirectory && IMG.test(n)).sort(naturalCmp);
   } finally {
     await zip.close();
   }
 }
 
-/** Raw bytes of a single entry inside a CBZ (used by the page server). */
+/** Raw bytes of a single page (CBZ/CBR/folder) — used by the page server. */
 export async function cbzEntry(path: string, name: string): Promise<Buffer> {
+  const k = chapterKind(path);
+  if (k === 'dir') return readFile(join(path, name));
+  if (k === 'rar') return rarExtract(await rarExtractor(path), name);
   const zip = new StreamZip.async({ file: path });
   try {
     return await zip.entryData(name);
@@ -105,26 +161,25 @@ export async function cbzEntry(path: string, name: string): Promise<Buffer> {
   }
 }
 
-/** Real pixel dimensions of every page (opens the cbz once). The reader needs these to reserve the right
- *  height per page — without them, tall webtoon pages overlap. Cached in lib_books.page_dims after first read. */
+/** Real pixel dimensions of every page (CBZ/CBR/folder). The reader needs these to reserve the right height
+ *  per page — without them, tall webtoon pages overlap. Cached in lib_books.page_dims after first read. */
 export async function cbzPageDims(path: string): Promise<Array<{ name: string; width: number | null; height: number | null }>> {
-  const zip = new StreamZip.async({ file: path });
-  try {
-    const entries = await zip.entries();
-    const names = Object.keys(entries).filter((n) => !entries[n].isDirectory && IMG.test(n)).sort(naturalCmp);
-    const out: Array<{ name: string; width: number | null; height: number | null }> = [];
-    for (const name of names) {
-      try {
-        const m = await sharp(await zip.entryData(name)).metadata();
-        out.push({ name, width: m.width ?? null, height: m.height ?? null });
-      } catch {
-        out.push({ name, width: null, height: null });
-      }
-    }
+  const out: Array<{ name: string; width: number | null; height: number | null }> = [];
+  const dim = async (name: string, bytes: Buffer) => {
+    try { const m = await sharp(bytes).metadata(); out.push({ name, width: m.width ?? null, height: m.height ?? null }); }
+    catch { out.push({ name, width: null, height: null }); }
+  };
+  if (chapterKind(path) === 'zip') {
+    // CBZ fast path: open the archive once for all pages
+    const zip = new StreamZip.async({ file: path });
+    try {
+      const entries = await zip.entries();
+      for (const name of Object.keys(entries).filter((n) => !entries[n].isDirectory && IMG.test(n)).sort(naturalCmp)) await dim(name, await zip.entryData(name));
+    } finally { await zip.close(); }
     return out;
-  } finally {
-    await zip.close();
   }
+  for (const name of await cbzPages(path)) await dim(name, await cbzEntry(path, name));
+  return out;
 }
 
 // Owned download dir (writable; separate from Suwayomi's read library so permissions stay clean).
@@ -148,13 +203,13 @@ export async function persistScan(): Promise<{ series: number; books: number; ms
         if (!sd.isDirectory()) continue;
         const folderRel = `${src.name}/${sd.name}`;
         const folderAbs = join(root, src.name, sd.name);
-        const files = (await readdir(folderAbs).catch(() => [])).filter((f) => f.toLowerCase().endsWith('.cbz')).sort(naturalCmp);
+        const files = await listChapters(folderAbs); // .cbz/.cbr files + loose image folders
         if (!files.length) continue;
         const seriesId = sid(folderRel);
 
         if (!seenSeries.has(seriesId)) {
           seenSeries.add(seriesId);
-          const firstXml = (await readCbz(join(folderAbs, files[0])).catch(() => ({ xml: '', pages: 0 }))).xml;
+          const firstXml = (await readArchive(join(folderAbs, files[0])).catch(() => ({ xml: '', pages: 0 }))).xml;
           await q(
             `INSERT INTO lib_series (id, source, title, summary, author, status, genres, web, folder, books_count, cover_book_id, scanned_at)
              VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11, now())
@@ -177,7 +232,7 @@ export async function persistScan(): Promise<{ series: number; books: number; ms
           const st = await stat(join(folderAbs, f)).catch(() => null);
           const b = params.length;
           tuples.push(`($${b + 1},$${b + 2},$${b + 3},$${b + 4},$${b + 5},$${b + 6},$${b + 7},$${b + 8})`);
-          params.push(bid(rel), seriesId, src.name, rel, numFromName(f), f.replace(/\.cbz$/i, ''), st ? Math.floor(st.mtimeMs) : 0, root);
+          params.push(bid(rel), seriesId, src.name, rel, numFromName(f), f.replace(/\.(cbz|cbr|zip|rar)$/i, ''), st ? Math.floor(st.mtimeMs) : 0, root);
           nBooks++;
         }
         await q(
@@ -213,7 +268,7 @@ export async function scanLibrary(
         .sort(naturalCmp);
       if (!files.length) continue;
 
-      const firstXml = (await readCbz(join(folderAbs, files[0])).catch(() => ({ xml: '', pages: 0 }))).xml;
+      const firstXml = (await readArchive(join(folderAbs, files[0])).catch(() => ({ xml: '', pages: 0 }))).xml;
       const series: ScanSeries = {
         id: sid(folderRel),
         source: src.name,
@@ -227,7 +282,7 @@ export async function scanLibrary(
         books: [],
       };
       for (const f of files) {
-        const info = await readCbz(join(folderAbs, f)).catch(() => ({ xml: '', pages: 0 }));
+        const info = await readArchive(join(folderAbs, f)).catch(() => ({ xml: '', pages: 0 }));
         series.books.push({
           id: bid(`${folderRel}/${f}`),
           seriesId: series.id,

@@ -17,8 +17,9 @@ ones you want.
 
 - **Vertical webtoon reader** — continuous multi-chapter scroll, pinch/double-tap zoom, AMOLED/sepia themes,
   per-series memory, auto-hiding chrome, keyboard nav on desktop.
-- **Library** — fast CBZ scanner (reads `ComicInfo.xml`), cover-art ambient theming, genres, an Updates feed
-  with new-chapter badges, and discovery rails (For You / trending / similar).
+- **Library** — fast scanner for **CBZ, CBR, and loose image folders** (reads `ComicInfo.xml`), cover-art
+  ambient theming, genres, an Updates feed with new-chapter badges, and discovery rails (For You / trending /
+  similar).
 - **Multi-user** — username + password accounts, per-user reading progress / favorites / history, avatars,
   streaks, and a "household" leaderboard.
 - **Offline** — installable PWA with offline downloads + smart auto-sync of favorites.
@@ -58,9 +59,12 @@ Suwayomi) fetches chapters but is Android-only or wraps them in a basic web UI. 
 | 2FA · lockout · audit · sessions | ✅ | basic | ❌ | ❌ |
 | Add a source by pasting a URL | ✅ | — | extensions | extension repos |
 
-**Honest caveats:** Komga and Kavita are more mature for pure library management and handle more formats
-(PDF/EPUB); Tachiyomi/Mihon have a far larger source catalog. Yomi's edge is the *combination* — a polished,
-installable, multi-user reader that also fetches — and a design that treats webtoons as first-class.
+**Honest caveats** (narrower than they look): Komga/Kavita are more mature for general library management, and
+Tachiyomi/Mihon list more individual sources. But Yomi reads **CBZ, CBR, and loose image folders** — it skips
+PDF/EPUB *on purpose* (those are ebook formats; Yomi is built for image-based manga) — and its **three engines
+each cover a whole *family* of sites** (most aggregators run Madara, MangaThemesia, or Manganato), so "add a
+source by URL" reaches far more sites than the engine count suggests. Yomi's real edge is the *combination* — a
+polished, installable, multi-user reader that also fetches — with webtoons as first-class.
 
 ## Architecture
 
@@ -79,8 +83,8 @@ cp .env.example .env
 bash scripts/setup.sh            # generates secrets + your login password, brings the stack up
 ```
 
-Open the app, log in, and your library appears. Layout on disk is `<series>/<chapter>.cbz` (each CBZ may carry
-a `ComicInfo.xml`).
+Open the app, log in, and your library appears. Layout on disk is `<series>/<chapter>`, where each chapter is a
+`.cbz`, a `.cbr`, or a folder of images (an archive may carry a `ComicInfo.xml` for metadata).
 
 ## Sources (optional)
 

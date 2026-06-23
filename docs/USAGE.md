@@ -24,8 +24,9 @@ bash scripts/setup.sh        # generates secrets + your login password, brings t
 ```
 
 `setup.sh` walks you through choosing the **admin password**, generates the DB/JWT secrets, fixes volume
-ownership, and starts the four containers (`yomi-web`, `yomi-bff`, `yomi-db`, `yomi-flaresolverr`). Your CBZ
-library on disk should be laid out as `<series>/<chapter>.cbz` (each CBZ may carry a `ComicInfo.xml`).
+ownership, and starts the four containers (`yomi-web`, `yomi-bff`, `yomi-db`, `yomi-flaresolverr`). Your library
+on disk should be laid out as `<series>/<chapter>`, where each chapter is a `.cbz`, a `.cbr`, or a folder of
+images (an archive may carry a `ComicInfo.xml` for metadata).
 
 Open the app at your `PUBLIC_ORIGIN` (e.g. `http://localhost:3000`).
 
