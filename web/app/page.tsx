@@ -52,7 +52,7 @@ export default function HomePage() {
     <div className="min-h-screen-d">
       {/* top bar (mobile only — desktop uses the global TopNav) */}
       <header className="safe-top sticky top-0 z-30 flex items-center justify-between px-5 pb-3 lg:hidden">
-        <Lockup className="text-2xl" markSize={26} />
+        <Lockup className="text-2xl" markSize={36} />
         <div className="flex items-center gap-2">
           <Link href="/updates" className="relative grid h-10 w-10 place-items-center rounded-full border border-ink-700 bg-ink-850/70 text-fog-300 backdrop-blur">
             <IcBell width={19} height={19} />

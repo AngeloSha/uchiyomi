@@ -50,7 +50,7 @@ export function TopNav() {
   return (
     <header className="sticky top-0 z-40 hidden border-b border-ink-800/70 bg-ink-950/80 backdrop-blur-xl lg:block">
       <div className="flex items-center gap-6 px-8 py-3">
-        <Link href="/"><Lockup className="text-2xl" markSize={28} /></Link>
+        <Link href="/"><Lockup className="text-2xl" markSize={38} /></Link>
         <nav className="flex items-center gap-1">
           {links.map(({ href, label, Icon, match }) => {
             const active = match(path);
