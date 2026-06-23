@@ -15,6 +15,10 @@ import { readFile, writeFile, mkdir, rm } from 'fs/promises';
 import { dirname } from 'path';
 import sharp from 'sharp';
 import { ART_DIR, artFile } from '../lib/seriesArt';
+import { addSeriesFromSource, findBestMatch } from './sources';
+
+type ImportJob = { running: boolean; total: number; done: number; added: number; already: number; notFound: number; failed: number; startedAt: number; details: Array<{ title: string; status: string; source?: string }> };
+let importJob: ImportJob | null = null;
 
 export default async function adminRoutes(app: FastifyInstance) {
   app.addHook('preHandler', authenticate);
@@ -202,6 +206,36 @@ export default async function adminRoutes(app: FastifyInstance) {
     await logAudit('series.art_override', { userId: userIdOf(req), detail: { id, kind, mode }, req });
     return { ok: true };
   });
+
+  // ---- bulk import: paste a list of titles, match each to a source, add it ----
+  app.post('/api/admin/import', async (req, reply) => {
+    if (importJob?.running) return reply.code(409).send({ error: 'busy', message: 'An import is already running.' });
+    const b = z.object({ titles: z.array(z.string()).min(1).max(500), autoUpdate: z.boolean().optional(), chapterCount: z.number().int().positive().optional() }).safeParse(req.body);
+    if (!b.success) return reply.code(400).send({ error: 'bad_request', message: 'Paste at least one title.' });
+    const titles = [...new Set(b.data.titles.map((t) => t.replace(/^[-*•\d.\s]+/, '').trim()).filter(Boolean))].slice(0, 500);
+    if (!titles.length) return reply.code(400).send({ error: 'bad_request', message: 'No titles found.' });
+    const job: ImportJob = { running: true, total: titles.length, done: 0, added: 0, already: 0, notFound: 0, failed: 0, startedAt: Date.now(), details: [] };
+    importJob = job;
+    await logAudit('import.start', { userId: userIdOf(req), detail: { count: titles.length }, req });
+    void (async () => {
+      for (const title of titles) {
+        try {
+          const m = await findBestMatch(title);
+          if (!m) { job.notFound++; job.details.push({ title, status: 'not_found' }); }
+          else {
+            const r = await addSeriesFromSource({ source: m.source, sourceId: m.sourceId, autoUpdate: b.data.autoUpdate, chapterCount: b.data.chapterCount });
+            if (r.ok && (r.chapters ?? 0) > 0) { job.added++; job.details.push({ title, status: 'added', source: m.source }); }
+            else if (r.ok) { job.already++; job.details.push({ title, status: 'already', source: m.source }); }
+            else { job.failed++; job.details.push({ title, status: r.error || 'failed', source: m.source }); }
+          }
+        } catch { job.failed++; job.details.push({ title, status: 'error' }); }
+        job.done++;
+      }
+      job.running = false;
+    })();
+    return { ok: true, total: titles.length };
+  });
+  app.get('/api/admin/import/status', async () => ({ job: importJob }));
 
   // ---- provider/source health control ----
   app.get('/api/admin/sources', async () => ({ content: await healthAll() }));

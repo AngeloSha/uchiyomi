@@ -49,6 +49,91 @@ function pickBest<T extends { title: string }>(list: T[], term: string): T | nul
 const withTimeout = <T>(p: Promise<T>, ms: number): Promise<T> =>
   Promise.race([p, new Promise<T>((_, rej) => setTimeout(() => rej(new Error('timeout')), ms))]);
 
+export interface AddResult {
+  ok: boolean; status: number; error?: string; message?: string;
+  title?: string; folder?: string; chapters?: number;
+  existing?: { title: string; source: string }; blockStatus?: string;
+}
+
+/** Add one series from a source to the library (downloads chapter 1 synchronously, the rest in background).
+ *  Shared by POST /api/sources/add and the bulk importer. Returns a result instead of touching the reply. */
+export async function addSeriesFromSource(opts: {
+  source?: string; sourceId?: string; force?: boolean; chapterCount?: number; autoUpdate?: boolean;
+}): Promise<AddResult> {
+  const { source, sourceId, force, chapterCount, autoUpdate } = opts;
+  const src = source ? getSource(source) : null;
+  if (!src || !sourceId) return { ok: false, status: 400, error: 'bad_request' };
+  if (await isDisabled(source!)) return { ok: false, status: 403, error: 'disabled', message: `${src.name} is disabled by the admin.` };
+
+  const series = await src.getSeries(sourceId).catch(() => null);
+  const title = series?.title || 'Series';
+  const folder = `${src.name}/${sanitize(title)}`;
+
+  if (await one<{ id: string }>('SELECT id FROM lib_series WHERE folder = $1', [folder])) {
+    return { ok: true, status: 200, title, folder, chapters: 0, message: 'already in library' };
+  }
+  if (!force) {
+    const dup = await one<{ title: string; source: string }>(
+      `SELECT title, source FROM lib_series WHERE lower(regexp_replace(title, '[^a-zA-Z0-9]', '', 'g')) = $1 AND folder <> $2 LIMIT 1`,
+      [norm(title), folder]);
+    if (dup) return { ok: false, status: 409, error: 'duplicate', existing: dup, message: `You already have "${dup.title}" from ${dup.source}. Add this copy anyway?` };
+  }
+
+  const chapters = await src.listChapters(sourceId).catch(() => []);
+  if (!chapters.length) return { ok: false, status: 404, error: 'no_chapters', message: 'No readable chapters for this title on this source. Try a different source.' };
+  const selected = chapterCount && chapterCount > 0 ? chapters.slice(0, chapterCount) : chapters;
+  const meta = { series: title, summary: series?.summary, author: series?.author, genres: series?.genres, url: series?.url, status: series?.status };
+  jobs.set(folder, { title, total: selected.length, done: 0, status: 'downloading' });
+
+  let firstPages = 0; let blockReason: string | null = null;
+  try { const r = await downloadChapter({ sourceId: source!, seriesFolder: folder, chapter: selected[0], meta }); firstPages = r.skipped ? 1 : r.pages; }
+  catch (e: any) { blockReason = e?.blockStatus || null; }
+  if (!firstPages) {
+    jobs.delete(folder);
+    if (blockReason) {
+      const verb = blockReason === 'rate_limited' ? 'rate-limiting' : blockReason === 'blocked' ? 'blocking' : 'unreachable for';
+      return { ok: false, status: 429, error: 'blocked', blockStatus: blockReason, message: `${src.name} is currently ${verb} downloads — wait a bit or pick another source.` };
+    }
+    return { ok: false, status: 422, error: 'undownloadable', message: 'No downloadable chapters here — this title may be licensed or hosted externally on this source. Try a different source.' };
+  }
+  const j0 = jobs.get(folder); if (j0) j0.done = 1;
+  await persistScan().catch(() => {});
+  await q('UPDATE lib_series SET auto_update = $1, source_id = $2, source_series_id = $3 WHERE folder = $4',
+    [autoUpdate !== false, source, sourceId, folder]).catch(() => {});
+  if (series?.coverUrl) {
+    await q(`INSERT INTO series_art (series_id, cover) SELECT id, $1 FROM lib_series WHERE folder = $2
+      ON CONFLICT (series_id) DO UPDATE SET cover = COALESCE(series_art.cover, EXCLUDED.cover)`, [series.coverUrl, folder]).catch(() => {});
+  }
+  fetchAniListArt(title)
+    .then((a) => q(`INSERT INTO series_art (series_id, banner, cover) SELECT id, $1, $2 FROM lib_series WHERE folder = $3
+      ON CONFLICT (series_id) DO UPDATE SET banner = COALESCE(series_art.banner, EXCLUDED.banner), cover = COALESCE(series_art.cover, EXCLUDED.cover)`, [a.banner, a.cover, folder]))
+    .catch(() => {});
+  void (async () => {
+    for (const ch of selected.slice(1)) {
+      try { await downloadChapter({ sourceId: source!, seriesFolder: folder, chapter: ch, meta }); }
+      catch (e: any) { if (e?.blockStatus) { const j = jobs.get(folder); if (j) { j.status = 'error'; j.reason = e.blockStatus; } break; } }
+      const j = jobs.get(folder); if (j) { j.done++; if (j.done % 5 === 0) await persistScan().catch(() => {}); }
+    }
+    await persistScan().catch(() => {});
+    const j = jobs.get(folder); if (j && j.status !== 'error') j.status = 'done';
+  })();
+  return { ok: true, status: 200, title, folder, chapters: selected.length };
+}
+
+/** Best single cross-source match for a title (searches sources in preferred order, returns the first real hit). */
+export async function findBestMatch(term: string): Promise<{ source: string; sourceId: string; title: string } | null> {
+  for (const id of findOrder()) {
+    const src = getSource(id);
+    if (!src) continue;
+    if (await isDisabled(id).catch(() => false)) continue;
+    try {
+      const best = pickBest(await withTimeout(src.search(term), 20000), term);
+      if (best?.sourceId) return { source: id, sourceId: best.sourceId, title: best.title };
+    } catch { /* try next source */ }
+  }
+  return null;
+}
+
 export default async function sourceRoutes(app: FastifyInstance) {
   app.addHook('preHandler', authenticate);
 
@@ -127,83 +212,13 @@ export default async function sourceRoutes(app: FastifyInstance) {
   app.post('/api/sources/add', async (req, reply) => {
     const { source, sourceId, force, chapterCount, autoUpdate } = (req.body ?? {}) as
       { source?: string; sourceId?: string; force?: boolean; chapterCount?: number; autoUpdate?: boolean };
-    const src = source ? getSource(source) : null;
-    if (!src || !sourceId) return reply.code(400).send({ error: 'bad_request' });
-    if (await isDisabled(source!)) return reply.code(403).send({ error: 'disabled', message: `${src.name} is disabled by the admin.` });
+    if (!source || !sourceId) return reply.code(400).send({ error: 'bad_request' });
     // permission: non-admins can be denied the ability to add/download series
     const me = await one<{ role: string; perms: { canDownload?: boolean } }>('SELECT role, perms FROM users WHERE id = $1', [(req as any).user?.sub]);
     if (me && me.role !== 'admin' && me.perms?.canDownload === false) return reply.code(403).send({ error: 'forbidden', message: "You don't have permission to add series." });
-
-    const series = await src.getSeries(sourceId).catch(() => null);
-    const title = series?.title || 'Series';
-    const folder = `${src.name}/${sanitize(title)}`;
-
-    // duplicate guard: same title already in the library from a *different* source → warn unless forced.
-    if (!force) {
-      const dup = await one<{ title: string; source: string }>(
-        `SELECT title, source FROM lib_series WHERE lower(regexp_replace(title, '[^a-zA-Z0-9]', '', 'g')) = $1 AND folder <> $2 LIMIT 1`,
-        [norm(title), folder],
-      );
-      if (dup) return reply.code(409).send({ error: 'duplicate', existing: dup, message: `You already have "${dup.title}" from ${dup.source}. Add this copy anyway?` });
-    }
-
-    const chapters = await src.listChapters(sourceId).catch(() => []);
-    if (!chapters.length) return reply.code(404).send({ error: 'no_chapters', message: 'No readable chapters for this title on this source. Try a different source.' });
-    // chapters are sorted ascending → "first N" if a count was chosen, else the whole series.
-    const selected = chapterCount && chapterCount > 0 ? chapters.slice(0, chapterCount) : chapters;
-
-    const meta = { series: title, summary: series?.summary, author: series?.author, genres: series?.genres, url: series?.url, status: series?.status };
-    jobs.set(folder, { title, total: selected.length, done: 0, status: 'downloading' });
-
-    // first chapter synchronously so the series appears + is readable right away
-    let firstPages = 0;
-    let blockReason: string | null = null;
-    try {
-      const r = await downloadChapter({ sourceId: source!, seriesFolder: folder, chapter: selected[0], meta });
-      firstPages = r.skipped ? 1 : r.pages;
-    } catch (e: any) { blockReason = e?.blockStatus || null; }
-    if (!firstPages) {
-      jobs.delete(folder);
-      if (blockReason) {
-        const verb = blockReason === 'rate_limited' ? 'rate-limiting' : blockReason === 'blocked' ? 'blocking' : 'unreachable for';
-        return reply.code(429).send({ error: 'blocked', status: blockReason, message: `${src.name} is currently ${verb} downloads — wait a bit or pick another source.` });
-      }
-      return reply.code(422).send({ error: 'undownloadable', message: 'No downloadable chapters here — this title may be licensed or hosted externally on this source. Try a different source.' });
-    }
-    logAudit('download.add', { userId: (req as any).user?.sub, detail: { title, source, chapters: selected.length }, req });
-    const j0 = jobs.get(folder); if (j0) j0.done = 1;
-    await persistScan().catch(() => {});
-
-    // honour the auto-update choice (default on) + stamp the source routing so the updater can find new chapters
-    // without reverse-parsing display names/urls (source = adapter id, sourceId = the adapter's series id/url).
-    await q('UPDATE lib_series SET auto_update = $1, source_id = $2, source_series_id = $3 WHERE folder = $4',
-      [autoUpdate !== false, source, sourceId, folder]).catch(() => {});
-
-    // give the new series a real cover immediately: the source's own cover (exact match, always present).
-    if (series?.coverUrl) {
-      await q(`INSERT INTO series_art (series_id, cover) SELECT id, $1 FROM lib_series WHERE folder = $2
-        ON CONFLICT (series_id) DO UPDATE SET cover = COALESCE(series_art.cover, EXCLUDED.cover)`, [series.coverUrl, folder]).catch(() => {});
-    }
-    // AniList backfills the wide banner (and the cover only if we somehow still have none), fire-and-forget
-    fetchAniListArt(title)
-      .then((a) => q(`INSERT INTO series_art (series_id, banner, cover) SELECT id, $1, $2 FROM lib_series WHERE folder = $3
-        ON CONFLICT (series_id) DO UPDATE SET banner = COALESCE(series_art.banner, EXCLUDED.banner), cover = COALESCE(series_art.cover, EXCLUDED.cover)`, [a.banner, a.cover, folder]))
-      .catch(() => {});
-
-    // the rest in the background — stop early if the source starts blocking us
-    void (async () => {
-      for (const ch of selected.slice(1)) {
-        try { await downloadChapter({ sourceId: source!, seriesFolder: folder, chapter: ch, meta }); }
-        catch (e: any) {
-          if (e?.blockStatus) { const j = jobs.get(folder); if (j) { j.status = 'error'; j.reason = e.blockStatus; } break; }
-        }
-        const j = jobs.get(folder);
-        if (j) { j.done++; if (j.done % 5 === 0) await persistScan().catch(() => {}); }
-      }
-      await persistScan().catch(() => {});
-      const j = jobs.get(folder); if (j && j.status !== 'error') j.status = 'done';
-    })();
-
-    return { ok: true, title, folder, chapters: selected.length };
+    const r = await addSeriesFromSource({ source, sourceId, force, chapterCount, autoUpdate });
+    if (!r.ok) return reply.code(r.status).send({ error: r.error, message: r.message, existing: r.existing, status: r.blockStatus });
+    logAudit('download.add', { userId: (req as any).user?.sub, detail: { title: r.title, source, chapters: r.chapters }, req });
+    return { ok: true, title: r.title, folder: r.folder, chapters: r.chapters };
   });
 }

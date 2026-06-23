@@ -191,6 +191,20 @@ function Providers() {
     setAdding(false);
   };
   const removeSite = async (id: string) => { try { await api(`/api/admin/sources/custom/${id}`, { method: 'DELETE' }); toast('Removed', 'success'); inval(); } catch { toast('Failed', 'error'); } };
+
+  type ImportJob = { running: boolean; total: number; done: number; added: number; already: number; notFound: number; failed: number; details: Array<{ title: string; status: string; source?: string }> };
+  const [imp, setImp] = useState('');
+  const [importing, setImporting] = useState(false);
+  const { data: importStatus, refetch: refetchImport } = useQuery({ queryKey: ['admin-import'], queryFn: () => api<{ job: ImportJob | null }>('/api/admin/import/status'), refetchInterval: 2000 });
+  const job = importStatus?.job;
+  const runImport = async () => {
+    const titles = imp.split('\n').map((t) => t.trim()).filter(Boolean);
+    if (!titles.length) return;
+    setImporting(true);
+    try { await api('/api/admin/import', { json: { titles } }); toast(`Importing ${titles.length} title${titles.length === 1 ? '' : 's'}…`, 'success'); refetchImport(); }
+    catch (e: any) { toast(msgOf(e, 'Import failed to start'), 'error'); }
+    setImporting(false);
+  };
   const list = srcs?.content || [];
   return (
     <div>
@@ -227,6 +241,33 @@ function Providers() {
                   <span className={c.ok ? 'text-emerald-400' : 'text-red-400'}>{c.ok ? '✓' : '✗'}</span>
                   <span className="text-fog-200">{c.name}</span>
                   <span className="text-fog-500">— {c.detail}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </div>
+
+      {/* Import a list of titles */}
+      <div className="card mb-3 p-3">
+        <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-fog-500">Import a list</p>
+        <p className="mb-2 text-[11px] text-fog-500">Paste titles (one per line) — e.g. from a Tachiyomi/Mihon backup or your MangaDex follows. Koryomi searches your sources for each and adds the best match.</p>
+        <textarea value={imp} onChange={(e) => setImp(e.target.value)} rows={4} placeholder={'Solo Leveling\nThe Beginning After The End\n…'} className={`${fld} resize-y`} />
+        <button onClick={runImport} disabled={importing || job?.running || !imp.trim()} className="btn-accent mt-2 w-full py-2 text-sm disabled:opacity-50">
+          {job?.running ? `Importing… ${job.done}/${job.total}` : importing ? 'Starting…' : 'Import titles'}
+        </button>
+        {job && (
+          <div className="mt-2.5 rounded-xl border border-ink-700 bg-ink-900/50 p-2.5 text-xs">
+            <p className="mb-1.5 font-semibold text-fog-300">{job.running ? `Working… ${job.done}/${job.total}` : `Done — ${job.added} added · ${job.already} already had · ${job.notFound} not found · ${job.failed} failed`}</p>
+            <div className="mb-2 h-1.5 overflow-hidden rounded-full bg-ink-700"><div className="h-full bg-accent transition-all" style={{ width: `${job.total ? (job.done / job.total) * 100 : 0}%` }} /></div>
+            <ul className="max-h-40 space-y-0.5 overflow-y-auto">
+              {(job.details || []).slice(-40).reverse().map((d, i) => (
+                <li key={i} className="flex items-center gap-2">
+                  <span className={d.status === 'added' ? 'text-emerald-400' : d.status === 'already' ? 'text-fog-500' : d.status === 'not_found' ? 'text-amber-400' : 'text-red-400'}>
+                    {d.status === 'added' ? '✓' : d.status === 'already' ? '·' : d.status === 'not_found' ? '?' : '✗'}
+                  </span>
+                  <span className="min-w-0 flex-1 truncate text-fog-200">{d.title}</span>
+                  {d.source && <span className="shrink-0 text-fog-500">{d.source}</span>}
                 </li>
               ))}
             </ul>
