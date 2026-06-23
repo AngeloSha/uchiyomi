@@ -1,0 +1,15 @@
+.env
+node_modules/
+bff/node_modules/
+web/node_modules/
+web/.next/
+web/out/
+bff/dist/
+data/
+*.log
+.npm/
+# the scraper "source pack" is a SEPARATE, arm's-length repo — never commit it into the core
+sources-pack/
+# mounted source plugins (user-supplied); keep the empty default dir but not its contents
+sources/*
+!sources/.gitkeep

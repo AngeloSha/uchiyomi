@@ -1,0 +1,32 @@
+# syntax=docker/dockerfile:1.7
+# ---------- deps ----------
+FROM node:22-alpine AS deps
+WORKDIR /app
+COPY package.json package-lock.json* ./
+# sharp + @node-rs/argon2 ship prebuilt musl binaries; no build toolchain needed.
+RUN if [ -f package-lock.json ]; then npm ci --no-audit --no-fund; \
+    else npm install --no-audit --no-fund; fi
+
+# ---------- build ----------
+FROM node:22-alpine AS build
+WORKDIR /app
+COPY --from=deps /app/node_modules ./node_modules
+COPY . .
+RUN npm run build
+
+# ---------- runtime ----------
+FROM node:22-alpine AS runtime
+WORKDIR /app
+ENV NODE_ENV=production
+# prune dev deps for a lean runtime image
+COPY package.json package-lock.json* ./
+RUN if [ -f package-lock.json ]; then npm ci --omit=dev --no-audit --no-fund; \
+    else npm install --omit=dev --no-audit --no-fund; fi
+COPY --from=build /app/dist ./dist
+RUN mkdir -p /cache && addgroup -g 10002 -S yomi && adduser -u 10002 -S -G yomi yomi \
+ && chown -R yomi:yomi /cache /app
+USER yomi
+EXPOSE 3000
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+  CMD wget -qO- http://127.0.0.1:3000/healthz >/dev/null 2>&1 || exit 1
+CMD ["node", "dist/server.js"]

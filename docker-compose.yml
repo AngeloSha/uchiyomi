@@ -1,0 +1,119 @@
+# Yomi — self-hosted OLED manga/manhwa reader (bring-your-own CBZ library)
+# services: yomi-db (private Postgres) · yomi-bff (Fastify API) · yomi-web (static PWA) · yomi-flaresolverr (optional)
+services:
+  yomi-db:
+    image: supabase/postgres:15.8.1.085
+    container_name: yomi-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: yomi
+      POSTGRES_USER: yomi
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD required}
+    volumes:
+      - yomi_pgdata:/var/lib/postgresql/data
+    networks:
+      - yomi_internal          # private: only the BFF can reach the DB
+    # NOTE: deliberately NO `ports:` and NOT on proxy/proxy_internal -> unreachable from outside
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U yomi -d yomi"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    labels:
+      - com.centurylinklabs.watchtower.enable=false
+
+  yomi-bff:
+    build: ./bff
+    image: yomi-bff:prod
+    container_name: yomi-bff
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+      DATABASE_URL: postgres://yomi:${DB_PASSWORD}@yomi-db:5432/yomi
+      KOMGA_BASE_URL: ${KOMGA_BASE_URL:-http://komga:25600}
+      KOMGA_API_KEY: ${KOMGA_API_KEY:-}        # only used when LIBRARY_BACKEND=komga
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET required}
+      INITIAL_USER_PASSWORD_HASH_B64: ${INITIAL_USER_PASSWORD_HASH_B64:?run scripts/setup.sh}
+      PUBLIC_ORIGIN: ${PUBLIC_ORIGIN:-http://localhost:3000}
+      CACHE_DIR: /cache
+      CACHE_MAX_BYTES: "16106127360"   # 15 GiB image cache cap
+      LIBRARY_ROOT: /library
+      DL_ROOT: /library-dl             # owned, writable download dir (separate from Suwayomi's read library)
+      LIBRARY_BACKEND: owned           # Phase-1 cutover: serve from the owned CBZ library, not Komga
+      FLARESOLVERR_URL: http://yomi-flaresolverr:8191   # Cloudflare solver for Cloudflare-protected sources
+      SOURCES_DIR: /sources            # runtime source plugins are loaded from here (none = scraper-free core)
+      CUSTOM_SITES_FILE: /config/sites.json   # admin-added Madara/Manganato sites (Add-a-site form)
+    volumes:
+      - yomi_imgcache:/cache
+      - ${LIBRARY_PATH:-./library}:/library:ro                # your existing CBZ library (bring-your-own), read-only
+      - yomi_library:/library-dl                             # owned, writable download dir
+      - ${SOURCES_PATH:-./sources}:/sources:ro               # user-supplied source plugins (compiled .js)
+      - yomi_config:/config                                  # writable app config (custom sites list)
+    networks:
+      - yomi_internal            # reach the DB
+      - proxy_internal           # reach komga:25600 AND be reachable by NPM
+    expose:
+      - "3000"
+    depends_on:
+      yomi-db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/healthz >/dev/null 2>&1 || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    labels:
+      - com.centurylinklabs.watchtower.enable=false
+
+  yomi-web:
+    build: ./web
+    image: yomi-web:prod
+    container_name: yomi-web
+    restart: unless-stopped
+    expose:
+      - "80"
+    networks:
+      - proxy_internal           # reached by NPM, can reach yomi-bff
+      - proxy                    # public ingress (mirrors house pattern)
+    depends_on:
+      - yomi-bff
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1/ >/dev/null 2>&1 || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    labels:
+      - com.centurylinklabs.watchtower.enable=false
+
+  # Cloudflare solver (headless Chrome) — lets the Aqua Manga source adapter get past Cloudflare.
+  yomi-flaresolverr:
+    image: ghcr.io/flaresolverr/flaresolverr:latest
+    container_name: yomi-flaresolverr
+    restart: unless-stopped
+    environment:
+      LOG_LEVEL: info
+      TZ: UTC
+    networks:
+      - proxy_internal
+    expose:
+      - "8191"
+    labels:
+      - com.centurylinklabs.watchtower.enable=false
+
+networks:
+  yomi_internal:
+    driver: bridge
+  proxy_internal:
+    external: true
+  proxy:
+    external: true
+
+volumes:
+  yomi_pgdata:
+  yomi_imgcache:
+  yomi_library:
+  yomi_config:

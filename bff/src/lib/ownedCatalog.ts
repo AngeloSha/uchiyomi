@@ -1,0 +1,176 @@
+// Owned catalog backend: a drop-in for the `komga` client, returning Komga-shaped series/book DTOs from
+// the lib_* tables. enrichSeries/booksForUser in catalog.ts then add per-user state exactly as before.
+import { q, one } from './db';
+import { cbzPageDims, LIBRARY_ROOT, persistScan } from './library';
+
+interface Page<T> { content: T[]; totalElements: number; totalPages: number; number: number; size: number; first: boolean; last: boolean }
+function page<T>(content: T[], total: number, p: number, size: number): Page<T> {
+  const totalPages = Math.max(1, Math.ceil(total / size));
+  return { content, totalElements: total, totalPages, number: p, size, first: p <= 0, last: p >= totalPages - 1 };
+}
+
+const SERIES_COLS = 'id, title, summary, status, genres, author, books_count, cover_book_id, web, created_at, latest_mtime';
+
+function seriesDto(r: any) {
+  const genres: string[] = r.genres ?? [];
+  const summary: string = r.summary ?? '';
+  const count: number = r.books_count ?? 0;
+  return {
+    id: r.id,
+    libraryId: 'lib',
+    name: r.title,
+    booksCount: count,
+    booksReadCount: 0,
+    booksUnreadCount: count,
+    booksInProgressCount: 0,
+    metadata: {
+      title: r.title,
+      status: r.status ? String(r.status).toUpperCase() : '',
+      summary,
+      readingDirection: 'WEBTOON',
+      publisher: r.author ?? '',
+      genres,
+      tags: [],
+      ageRating: null,
+      language: 'en',
+    },
+    booksMetadata: { summary, genres, tags: [] },
+  };
+}
+
+function bookDto(r: any) {
+  const num: number = r.number ?? 0;
+  return {
+    id: r.id,
+    seriesId: r.series_id,
+    seriesTitle: r.series_title ?? '',
+    name: r.title,
+    number: num,
+    media: { pagesCount: r.pages ?? 0, mediaType: 'application/vnd.comicbook+zip', status: 'READY' },
+    metadata: { title: r.title, number: String(num), numberSort: num, summary: '', releaseDate: null },
+  };
+}
+
+function mediaType(name: string): string {
+  const e = name.toLowerCase().split('.').pop();
+  return e === 'png' ? 'image/png' : e === 'webp' ? 'image/webp' : e === 'gif' ? 'image/gif' : e === 'avif' ? 'image/avif' : 'image/jpeg';
+}
+
+// Translate the subset of Komga's condition tree the app actually builds into a SQL predicate.
+function condSql(cond: any, params: any[]): string {
+  if (!cond || typeof cond !== 'object') return 'TRUE';
+  if (Array.isArray(cond.allOf)) return cond.allOf.length ? '(' + cond.allOf.map((c: any) => condSql(c, params)).join(' AND ') + ')' : 'TRUE';
+  if (Array.isArray(cond.anyOf)) return cond.anyOf.length ? '(' + cond.anyOf.map((c: any) => condSql(c, params)).join(' OR ') + ')' : 'TRUE';
+  if (cond.genre && cond.genre.value != null) {
+    params.push(String(cond.genre.value));
+    const ex = `EXISTS (SELECT 1 FROM unnest(genres) AS g WHERE lower(g) = lower($${params.length}))`;
+    return cond.genre.operator === 'isNot' ? `NOT ${ex}` : ex;
+  }
+  // readStatus / releaseDate / library / other per-user or unsupported predicates: match all
+  return 'TRUE';
+}
+
+function sortSql(sort?: string): string {
+  if (!sort) return 'title ASC';
+  const [field, dir0] = String(sort).split(',');
+  const dir = (dir0 || 'asc').toLowerCase() === 'desc' ? 'DESC' : 'ASC';
+  if (/random/i.test(field)) return 'random()';
+  if (/title|name/i.test(field)) return `title ${dir}`;
+  if (/created|added/i.test(field)) return `created_at ${dir}`;
+  if (/updated|date|modified/i.test(field)) return `latest_mtime ${dir}`;
+  return `title ${dir}`;
+}
+
+const total = async (where = 'TRUE', params: any[] = []) =>
+  (await one<{ c: number }>(`SELECT count(*)::int AS c FROM lib_series WHERE ${where}`, params))?.c ?? 0;
+
+export const owned = {
+  libraries: async () => [{ id: 'lib', name: 'Library' }],
+
+  genres: async () => (await q<{ g: string }>('SELECT DISTINCT g FROM lib_series, unnest(genres) AS g ORDER BY g')).map((r) => r.g),
+
+  series: async (id: string) => {
+    const r = await one(`SELECT ${SERIES_COLS} FROM lib_series WHERE id = $1`, [id]);
+    if (!r) throw Object.assign(new Error('series not found'), { statusCode: 404 });
+    return seriesDto(r);
+  },
+
+  seriesNew: async (p = 0, size = 20) => {
+    const rows = await q(`SELECT ${SERIES_COLS} FROM lib_series ORDER BY created_at DESC, title ASC LIMIT $1 OFFSET $2`, [size, p * size]);
+    return page(rows.map(seriesDto), await total(), p, size);
+  },
+
+  seriesUpdated: async (p = 0, size = 20) => {
+    const rows = await q(`SELECT ${SERIES_COLS} FROM lib_series ORDER BY latest_mtime DESC, title ASC LIMIT $1 OFFSET $2`, [size, p * size]);
+    return page(rows.map(seriesDto), await total(), p, size);
+  },
+
+  booksOnDeck: async (_p = 0, size = 20) => page([] as any[], 0, 0, size), // owned: continue-reading is served from read_progress in catalog
+
+  searchSeries: async (body: any, p = 0, size = 40, sort?: string) => {
+    const params: any[] = [];
+    let where = body?.condition ? condSql(body.condition, params) : 'TRUE';
+    if (body?.fullTextSearch) {
+      params.push(`%${body.fullTextSearch}%`);
+      where = `(${where}) AND title ILIKE $${params.length}`;
+    }
+    const t = await total(where, params);
+    const rows = await q(
+      `SELECT ${SERIES_COLS} FROM lib_series WHERE ${where} ORDER BY ${sortSql(sort)} LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
+      [...params, size, p * size],
+    );
+    return page(rows.map(seriesDto), t, p, size);
+  },
+
+  seriesBooks: async (id: string, p = 0, size = 100, sort = 'metadata.numberSort,asc') => {
+    const dir = /desc/i.test(sort) ? 'DESC' : 'ASC';
+    const st = (await one<{ title: string }>('SELECT title FROM lib_series WHERE id = $1', [id]))?.title ?? '';
+    const t = (await one<{ c: number }>('SELECT count(*)::int AS c FROM lib_books WHERE series_id = $1', [id]))?.c ?? 0;
+    const rows = await q(`SELECT * FROM lib_books WHERE series_id = $1 ORDER BY number ${dir}, file ${dir} LIMIT $2 OFFSET $3`, [id, size, p * size]);
+    return page(rows.map((r) => bookDto({ ...r, series_title: st })), t, p, size);
+  },
+
+  book: async (id: string) => {
+    const r = await one('SELECT b.*, s.title AS series_title FROM lib_books b JOIN lib_series s ON s.id = b.series_id WHERE b.id = $1', [id]);
+    if (!r) throw Object.assign(new Error('book not found'), { statusCode: 404 });
+    return bookDto(r);
+  },
+
+  bookPages: async (id: string) => {
+    const r = await one<{ file: string; root: string; page_dims: Array<{ name: string; width: number | null; height: number | null }> | null }>(
+      'SELECT file, root, page_dims FROM lib_books WHERE id = $1',
+      [id],
+    );
+    if (!r) return [];
+    if (Array.isArray(r.page_dims) && r.page_dims.length) {
+      return r.page_dims.map((p, i) => ({ number: i + 1, fileName: p.name, mediaType: mediaType(p.name), width: p.width ?? null, height: p.height ?? null, sizeBytes: null }));
+    }
+    const dims = await cbzPageDims(`${r.root || LIBRARY_ROOT}/${r.file}`).catch(() => [] as Array<{ name: string; width: number | null; height: number | null }>);
+    if (dims.length) q('UPDATE lib_books SET pages = $1, page_dims = $2 WHERE id = $3', [dims.length, JSON.stringify(dims), id]).catch(() => {});
+    return dims.map((p, i) => ({ number: i + 1, fileName: p.name, mediaType: mediaType(p.name), width: p.width, height: p.height, sizeBytes: null }));
+  },
+
+  bookNext: async (id: string) => {
+    const b = await one<{ series_id: string; number: number }>('SELECT series_id, number FROM lib_books WHERE id = $1', [id]);
+    if (!b) throw Object.assign(new Error('not found'), { statusCode: 404 });
+    const n = await one('SELECT bk.*, s.title AS series_title FROM lib_books bk JOIN lib_series s ON s.id = bk.series_id WHERE bk.series_id = $1 AND bk.number > $2 ORDER BY bk.number ASC LIMIT 1', [b.series_id, b.number]);
+    if (!n) throw Object.assign(new Error('no next'), { statusCode: 404 });
+    return bookDto(n);
+  },
+
+  bookPrevious: async (id: string) => {
+    const b = await one<{ series_id: string; number: number }>('SELECT series_id, number FROM lib_books WHERE id = $1', [id]);
+    if (!b) throw Object.assign(new Error('not found'), { statusCode: 404 });
+    const n = await one('SELECT bk.*, s.title AS series_title FROM lib_books bk JOIN lib_series s ON s.id = bk.series_id WHERE bk.series_id = $1 AND bk.number < $2 ORDER BY bk.number DESC LIMIT 1', [b.series_id, b.number]);
+    if (!n) throw Object.assign(new Error('no previous'), { statusCode: 404 });
+    return bookDto(n);
+  },
+
+  setReadProgress: async () => {}, // owned: read_progress is the source of truth (no native store to mirror to)
+
+  scanLibrary: async () => { await persistScan(); },
+
+  seriesThumbPath: (id: string) => `/img/lib/series/${encodeURIComponent(id)}/thumb`,
+  bookThumbPath: (id: string) => `/img/lib/books/${encodeURIComponent(id)}/thumb`,
+  bookPagePath: (id: string, n: number) => `/img/lib/books/${encodeURIComponent(id)}/page/${n}`,
+};

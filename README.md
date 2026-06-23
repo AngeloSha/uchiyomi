@@ -1,0 +1,86 @@
+# Yomi
+
+A self-hosted, installable (PWA) manga / manhwa reader with a true-black OLED interface and a vertical-scroll
+webtoon reader as the centerpiece. Point it at your own CBZ library and read on any device.
+
+![Yomi home](docs/hero.png)
+
+Yomi is a **bring-your-own-library reader** — like Komga / Kavita / Calibre-web, it reads comics *you* supply.
+It bundles **MangaDex** (the official public API) plus generic engines for the common manga-site families, so
+you can also add sources by pasting a site's URL — but it ships with **no specific sites baked in**; you add the
+ones you want.
+
+> 📖 **[Full usage guide →](docs/USAGE.md)** — every screen walked through with screenshots (library, reader,
+> Discover, admin, security, offline).
+
+## Features
+
+- **Vertical webtoon reader** — continuous multi-chapter scroll, pinch/double-tap zoom, AMOLED/sepia themes,
+  per-series memory, auto-hiding chrome, keyboard nav on desktop.
+- **Library** — fast CBZ scanner (reads `ComicInfo.xml`), cover-art ambient theming, genres, an Updates feed
+  with new-chapter badges, and discovery rails (For You / trending / similar).
+- **Multi-user** — username + password accounts, per-user reading progress / favorites / history, avatars,
+  streaks, and a "household" leaderboard.
+- **Offline** — installable PWA with offline downloads + smart auto-sync of favorites.
+- **Security** — argon2id passwords, JWT + rotating refresh tokens, login lockout, an audit log,
+  session/device management, and optional TOTP two-factor auth.
+- **Admin** — a Jellyfin-style panel: members & permissions, provider health, scheduled tasks, activity feed,
+  active sessions, and server settings (name, open registration, auto-update interval).
+
+![Library](docs/library.png)
+
+## Architecture
+
+| Service | What it is |
+| --- | --- |
+| `yomi-web` | Next.js static-export PWA on nginx; reverse-proxies `/api`, `/auth`, `/img` to the BFF (single origin) |
+| `yomi-bff` | Fastify + TypeScript API: auth, catalog over the CBZ library, disk image cache, the source loader |
+| `yomi-db` | Private Postgres (no host port) |
+| `yomi-flaresolverr` | Optional headless-Chrome Cloudflare solver, used only by Cloudflare-protected source plugins |
+
+## Quick start
+
+```bash
+cp .env.example .env
+# put your CBZ library path in .env:  LIBRARY_PATH=/path/to/your/manga   (read-only)
+bash scripts/setup.sh            # generates secrets + your login password, brings the stack up
+```
+
+Open the app, log in, and your library appears. Layout on disk is `<series>/<chapter>.cbz` (each CBZ may carry
+a `ComicInfo.xml`).
+
+## Sources (optional)
+
+Yomi can fetch new chapters from external providers. It bundles a few **generic engines** — parsers for the
+common manga-site families (Madara / MangaThemesia / Manganato) — but **no specific sites**. Nothing fetches
+anything until *you* add a site:
+
+**Admin → Providers → Add a site** — pick the engine, paste a site's homepage URL, done. It loads instantly
+(no rebuild). The engines are generic parsers; you supply the URLs, and you're responsible for using them in
+line with those sites' terms and your local law.
+
+A handful of one-off, site-specific sources (e.g. an official API client) aren't engines and aren't bundled —
+those live in a separate **yomi-sources** pack you can build and mount:
+
+```bash
+# .env
+SOURCES_PATH=/path/to/yomi-sources/dist     # compiled .js plugins, mounted read-only at /sources
+```
+
+The reader scans `SOURCES_DIR` (`/sources`) at boot and registers every plugin it finds. Drop in or update a
+plugin and hit **Admin → Providers → Reload** (`POST /api/admin/sources/reload`) — no rebuild. With no sites
+added and no pack mounted, Yomi is just a clean reader for the library you already own.
+
+## Configuration
+
+Everything is in `.env` (see `.env.example`). Notably:
+
+- `LIBRARY_BACKEND` — `owned` (read your CBZ library, default) or `komga` (read from a Komga server).
+- `LIBRARY_PATH` — host path to your CBZ library (read-only mount at `/library`).
+- `SOURCES_PATH` — host path to a built source pack (empty by default = no sources).
+- `PUBLIC_ORIGIN` — the URL the app is served from.
+
+## License
+
+[MPL-2.0](LICENSE). Source plugins are **not** part of this repository; they fetch from third-party sites and
+are your responsibility to use in line with those sites' terms and your local law.

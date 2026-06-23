@@ -1,0 +1,136 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --accent: 124 92 255; /* electric violet #7c5cff — themeable from Settings */
+  --vh: 1vh;
+}
+
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+    background: #000;
+  }
+  body {
+    @apply bg-ink-950 text-fog-50 font-sans antialiased;
+    overscroll-behavior-y: none;
+    text-rendering: optimizeLegibility;
+  }
+  /* honor iPhone notches / home indicator everywhere */
+  .safe-t { padding-top: env(safe-area-inset-top); }
+  .safe-b { padding-bottom: env(safe-area-inset-bottom); }
+  ::selection { background: rgb(var(--accent) / 0.35); }
+
+  /* slim, dark scrollbars */
+  * { scrollbar-width: thin; scrollbar-color: #26262f transparent; }
+  *::-webkit-scrollbar { width: 8px; height: 8px; }
+  *::-webkit-scrollbar-thumb { background: #26262f; border-radius: 99px; }
+  *::-webkit-scrollbar-track { background: transparent; }
+}
+
+@layer components {
+  .h-screen-d { height: calc(var(--vh, 1vh) * 100); }
+  .min-h-screen-d { min-height: calc(var(--vh, 1vh) * 100); }
+
+  /* Status-bar / notch safe clearance for top bars. Lives in the components layer so a plain
+     `pt-*` utility no longer silently overrides it; pair with `lg:pt-*` to override on desktop. */
+  .safe-top { padding-top: max(0.9rem, calc(env(safe-area-inset-top) + 0.55rem)); }
+  .safe-bottom { padding-bottom: max(0.8rem, calc(env(safe-area-inset-bottom) + 0.4rem)); }
+
+  .btn-accent {
+    @apply inline-flex items-center justify-center gap-2 rounded-full bg-accent px-5 py-3
+           font-semibold text-black transition active:scale-[0.97];
+    box-shadow: 0 8px 30px -10px rgb(var(--accent) / 0.7);
+  }
+  .btn-ghost {
+    @apply inline-flex items-center justify-center gap-2 rounded-full border border-ink-600
+           bg-ink-800/60 px-5 py-3 font-medium text-fog-100 backdrop-blur
+           transition hover:border-ink-500 active:scale-[0.97];
+  }
+  .chip {
+    @apply inline-flex items-center gap-1.5 rounded-full border border-ink-600 bg-ink-800/60
+           px-3 py-1.5 text-sm text-fog-300 transition;
+  }
+  .chip-active {
+    @apply border-transparent bg-accent-soft text-accent;
+  }
+  .card {
+    @apply rounded-3xl border border-ink-700/70 bg-ink-850/70 backdrop-blur;
+  }
+  .skeleton {
+    @apply relative overflow-hidden bg-ink-800;
+  }
+  .skeleton::after {
+    content: '';
+    @apply absolute inset-0 animate-shimmer;
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.04), transparent);
+    transform: translateX(-100%);
+  }
+  .hide-scrollbar::-webkit-scrollbar { display: none; }
+  .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+}
+
+/* aurora the home hero with a soft accent bloom */
+.aurora {
+  background:
+    radial-gradient(60% 80% at 20% 0%, rgb(var(--accent) / 0.22), transparent 60%),
+    radial-gradient(50% 60% at 90% 10%, rgb(var(--accent) / 0.10), transparent 55%);
+}
+
+/* ============ cinematic FX ============ */
+.fx-grain {
+  position: fixed; inset: 0; z-index: 2; pointer-events: none;
+  opacity: 0.05; mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  background-size: 180px 180px;
+}
+.fx-vignette {
+  position: fixed; inset: 0; z-index: 2; pointer-events: none;
+  background: radial-gradient(125% 100% at 50% 0%, transparent 52%, rgba(0,0,0,0.5) 100%);
+}
+.fx-mesh {
+  position: fixed; inset: -25%; z-index: 0; pointer-events: none;
+  filter: blur(90px) saturate(1.25); opacity: 0.55;
+  background:
+    radial-gradient(38% 40% at 18% 28%, rgb(var(--accent) / 0.20), transparent 70%),
+    radial-gradient(40% 48% at 82% 18%, rgba(34, 211, 238, 0.10), transparent 70%),
+    radial-gradient(52% 52% at 62% 92%, rgb(var(--accent) / 0.14), transparent 70%);
+  animation: mesh-drift 26s ease-in-out infinite alternate;
+}
+@keyframes mesh-drift {
+  0% { transform: translate3d(0, 0, 0) scale(1); }
+  100% { transform: translate3d(2%, -3%, 0) scale(1.14); }
+}
+
+.glass {
+  background: rgba(10, 10, 15, 0.55);
+  backdrop-filter: blur(20px) saturate(1.3);
+  -webkit-backdrop-filter: blur(20px) saturate(1.3);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+}
+.glass-strong {
+  background: rgba(6, 6, 9, 0.78);
+  backdrop-filter: blur(24px) saturate(1.3);
+  -webkit-backdrop-filter: blur(24px) saturate(1.3);
+}
+
+/* gradient hairline border (accent-lit) */
+.grad-border { position: relative; }
+.grad-border::before {
+  content: ''; position: absolute; inset: 0; border-radius: inherit; padding: 1px;
+  background: linear-gradient(140deg, rgb(var(--accent) / 0.55), rgba(255, 255, 255, 0.06) 42%, transparent 72%);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor; mask-composite: exclude; pointer-events: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fx-mesh { animation: none; }
+  *, *::before, *::after { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; }
+}
+
+/* Lenis momentum scroll */
+html.lenis, html.lenis body { height: auto; }
+.lenis.lenis-smooth { scroll-behavior: auto !important; }
+.lenis.lenis-smooth [data-lenis-prevent] { overscroll-behavior: contain; }
+.lenis.lenis-stopped { overflow: hidden; }
