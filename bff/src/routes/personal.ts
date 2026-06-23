@@ -4,6 +4,7 @@ import { q, one } from '../lib/db';
 import { komga } from '../lib/komga';
 import { authenticate, userIdOf, issueOpdsToken } from '../lib/auth';
 import { env } from '../env';
+import { pushEnabled, vapidPublicKey, saveSubscription, removeSubscription } from '../lib/push';
 
 function computeStreaks(days: string[]): { current: number; longest: number } {
   if (!days.length) return { current: 0, longest: 0 };
@@ -31,6 +32,21 @@ export default async function personalRoutes(app: FastifyInstance) {
   app.post('/api/opds/token', async (req) => {
     const token = await issueOpdsToken(userIdOf(req));
     return { token, url: `${env.PUBLIC_ORIGIN.replace(/\/$/, '')}/opds` };
+  });
+
+  // ---- web push: new-chapter notifications ----
+  app.get('/api/push/key', async () => ({ enabled: pushEnabled(), key: vapidPublicKey() }));
+  app.post('/api/push/subscribe', async (req, reply) => {
+    const b = z.object({ endpoint: z.string().url(), keys: z.object({ p256dh: z.string(), auth: z.string() }), deviceId: z.string().optional() }).safeParse(req.body);
+    if (!b.success) return reply.code(400).send({ error: 'bad_request' });
+    await saveSubscription(userIdOf(req), { endpoint: b.data.endpoint, keys: b.data.keys }, b.data.deviceId);
+    return { ok: true };
+  });
+  app.post('/api/push/unsubscribe', async (req, reply) => {
+    const b = z.object({ endpoint: z.string() }).safeParse(req.body);
+    if (!b.success) return reply.code(400).send({ error: 'bad_request' });
+    await removeSubscription(userIdOf(req), b.data.endpoint);
+    return { ok: true };
   });
 
   // ---- favorites ----

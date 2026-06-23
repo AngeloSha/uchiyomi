@@ -7,6 +7,7 @@ import { getSource } from './sources';
 import { downloadChapter } from './downloader';
 import { persistScan } from './library';
 import { blockedNow } from './sourceHealth';
+import { notifyNewChapter } from './push';
 
 export async function updateSeries(seriesId: string, maxNew = 10): Promise<{ title: string; added: number; available: number }> {
   const s = await one<any>('SELECT id,title,source_id,source_series_id,web,folder,summary,author,genres,status FROM lib_series WHERE id=$1', [seriesId]);
@@ -38,6 +39,7 @@ export async function updateSeries(seriesId: string, maxNew = 10): Promise<{ tit
       // a failed chapter shouldn't abort the rest
     }
   }
+  if (added) notifyNewChapter(seriesId, s.title, added).catch(() => {});
   return { title: s.title, added, available: chapters.length };
 }
 

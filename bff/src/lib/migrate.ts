@@ -264,6 +264,17 @@ CREATE TABLE IF NOT EXISTS opds_tokens (
   created_at timestamptz NOT NULL DEFAULT now(),
   last_seen  timestamptz
 );
+
+-- web-push subscriptions for new-chapter notifications (one row per browser/device endpoint)
+CREATE TABLE IF NOT EXISTS push_subscriptions (
+  user_id    uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  endpoint   text NOT NULL,
+  p256dh     text NOT NULL,
+  auth       text NOT NULL,
+  device_id  text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (user_id, endpoint)
+);
 `;
 
 export async function migrate(): Promise<void> {

@@ -10,6 +10,13 @@ import { Avatar, AVATAR_EMOJIS, AVATAR_COLORS } from '@/components/Avatar';
 import { SecurityPanel } from '@/components/SecurityPanel';
 import { IcDownload, IcSparkle, IcCheck, IcUser, IcChevronRight } from '@/components/icons';
 
+function urlB64ToUint8(s: string): Uint8Array {
+  const pad = '='.repeat((4 - (s.length % 4)) % 4);
+  const b64 = (s + pad).replace(/-/g, '+').replace(/_/g, '/');
+  const raw = atob(b64);
+  return Uint8Array.from([...raw].map((c) => c.charCodeAt(0)));
+}
+
 const ACCENTS = [
   { name: 'Violet', hex: '#7c5cff' },
   { name: 'Cyan', hex: '#22d3ee' },
@@ -80,6 +87,44 @@ export default function ProfilePage() {
     setOpdsBusy(true);
     try { setOpds(await api<{ token: string; url: string }>('/api/opds/token', { method: 'POST' })); } catch {}
     setOpdsBusy(false);
+  };
+
+  const [pushSupported] = useState(() => typeof window !== 'undefined' && 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window);
+  const [pushEnabledSrv, setPushEnabledSrv] = useState(false);
+  const [pushKey, setPushKey] = useState('');
+  const [pushOn, setPushOn] = useState(false);
+  const [pushBusy, setPushBusy] = useState(false);
+  useEffect(() => {
+    (async () => {
+      try {
+        const k = await api<{ enabled: boolean; key: string }>('/api/push/key');
+        setPushEnabledSrv(k.enabled); setPushKey(k.key);
+        if (k.enabled && typeof navigator !== 'undefined' && 'serviceWorker' in navigator) {
+          const reg = await navigator.serviceWorker.ready;
+          setPushOn(!!(await reg.pushManager.getSubscription()));
+        }
+      } catch {}
+    })();
+  }, []);
+  const togglePush = async () => {
+    if (!pushSupported) return;
+    setPushBusy(true);
+    try {
+      const reg = await navigator.serviceWorker.ready;
+      if (pushOn) {
+        const sub = await reg.pushManager.getSubscription();
+        if (sub) { await api('/api/push/unsubscribe', { json: { endpoint: sub.endpoint } }).catch(() => {}); await sub.unsubscribe().catch(() => {}); }
+        setPushOn(false);
+      } else {
+        const perm = await Notification.requestPermission();
+        if (perm === 'granted') {
+          const sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: urlB64ToUint8(pushKey) as unknown as BufferSource });
+          const j = sub.toJSON() as { endpoint?: string; keys?: { p256dh: string; auth: string } };
+          if (j.endpoint && j.keys) { await api('/api/push/subscribe', { json: { endpoint: j.endpoint, keys: j.keys } }); setPushOn(true); }
+        }
+      }
+    } catch {}
+    setPushBusy(false);
   };
 
   const setGoal = async (n?: number) => {
@@ -330,6 +375,22 @@ export default function ProfilePage() {
           )}
         </div>
       </section>
+
+      {/* new-chapter notifications */}
+      {pushEnabledSrv && (
+        <section className="px-5 pt-6 lg:px-0">
+          <h2 className="mb-3 font-display text-base font-semibold">Notifications</h2>
+          <div className="card flex items-center justify-between gap-3 p-4">
+            <div className="min-w-0">
+              <p className="text-sm text-fog-100">New-chapter alerts</p>
+              <p className="text-xs text-fog-500">{pushSupported ? 'Get a push notification when one of your favorites gets a new chapter.' : 'Not supported on this browser.'}</p>
+            </div>
+            <button onClick={togglePush} disabled={!pushSupported || pushBusy} className={`relative h-7 w-12 shrink-0 rounded-full transition disabled:opacity-40 ${pushOn ? 'bg-accent' : 'bg-ink-600'}`}>
+              <span className={`absolute top-0.5 h-6 w-6 rounded-full bg-white transition-all ${pushOn ? 'left-[22px]' : 'left-0.5'}`} />
+            </button>
+          </div>
+        </section>
+      )}
 
       {/* external readers (OPDS) */}
       <section className="px-5 pt-6 lg:px-0">

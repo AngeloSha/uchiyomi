@@ -29,6 +29,18 @@ DB_PASSWORD="$(grep -E '^DB_PASSWORD=' "$ENV_FILE" | head -1 | cut -d= -f2-)"
 echo "==> Building BFF image (needed for hashing + key minting helpers)…"
 docker build -q -t yomi-bff:prod "$DIR/bff" >/dev/null
 
+# web-push (VAPID) keys for new-chapter notifications — generate once if absent
+if ! grep -qE '^VAPID_PUBLIC_KEY=.+' "$ENV_FILE"; then
+  VJSON="$(docker run --rm yomi-bff:prod node -e 'console.log(JSON.stringify(require("web-push").generateVAPIDKeys()))' 2>/dev/null || true)"
+  VPUB="$(printf '%s' "$VJSON" | sed -n 's/.*"publicKey":"\([^"]*\)".*/\1/p')"
+  VPRIV="$(printf '%s' "$VJSON" | sed -n 's/.*"privateKey":"\([^"]*\)".*/\1/p')"
+  if [ -n "$VPUB" ] && [ -n "$VPRIV" ]; then
+    grep -qE '^VAPID_PUBLIC_KEY=' "$ENV_FILE" && sed -i "s|^VAPID_PUBLIC_KEY=.*|VAPID_PUBLIC_KEY=$VPUB|" "$ENV_FILE" || echo "VAPID_PUBLIC_KEY=$VPUB" >> "$ENV_FILE"
+    grep -qE '^VAPID_PRIVATE_KEY=' "$ENV_FILE" && sed -i "s|^VAPID_PRIVATE_KEY=.*|VAPID_PRIVATE_KEY=$VPRIV|" "$ENV_FILE" || echo "VAPID_PRIVATE_KEY=$VPRIV" >> "$ENV_FILE"
+    echo "  ✓ generated VAPID push keys"
+  fi
+fi
+
 # ---- 1. Content backend (Komga only if LIBRARY_BACKEND=komga) ----------------
 LIBRARY_BACKEND="$(grep -E '^LIBRARY_BACKEND=' "$ENV_FILE" | head -1 | cut -d= -f2- || true)"
 KOMGA_KEY=""
