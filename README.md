@@ -1,7 +1,5 @@
 # Yomi
 
-[![Support Yomi on Ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/angeloshaheen)
-
 A self-hosted, installable (PWA) manga / manhwa reader with a true-black OLED interface and a vertical-scroll
 webtoon reader as the centerpiece. Point it at your own CBZ library and read on any device.
 
