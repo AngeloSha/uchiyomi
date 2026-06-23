@@ -1,0 +1,38 @@
+name: CI
+
+# Builds the two deployable images on every pull request (and on pushes to main).
+# A green build proves deps install and the app compiles: `tsc` for the BFF and
+# `next build` for the web app. These two jobs are required to pass before a PR
+# can be merged into main (see branch protection).
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DOCKER_BUILDKIT: "1"
+
+jobs:
+  build-bff:
+    name: Build BFF
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the BFF image
+        run: docker build -t koryomi-bff:ci ./bff
+
+  build-web:
+    name: Build Web
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the web image
+        run: docker build -t koryomi-web:ci ./web
