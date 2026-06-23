@@ -46,7 +46,7 @@ export default function UpdatesPage() {
         </div>
       ) : items.length === 0 ? (
         <EmptyState art={ART.emptyUpdates} title="You're all caught up"
-          sub="Favorite some series and new chapters will appear here as Suwayomi downloads them."
+          sub="Favorite some series and new chapters will appear here as Koryomi downloads them."
           cta={{ href: '/library', label: 'Browse library' }} />
       ) : (
         <div className="space-y-3 px-4 pt-3 lg:mx-auto lg:max-w-2xl lg:px-0">

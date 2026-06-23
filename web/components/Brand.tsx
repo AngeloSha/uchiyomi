@@ -1,7 +1,7 @@
 export function Wordmark({ className = '' }: { className?: string }) {
   return (
     <span className={`font-brand font-bold tracking-tight ${className}`}>
-      yomi<span className="text-accent">.</span>
+      koryomi<span className="text-accent">.</span>
     </span>
   );
 }
