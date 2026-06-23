@@ -14,6 +14,7 @@ export function makeManganato(cfg: { id: string; name: string; base: string; ord
   return {
     id: cfg.id,
     name: cfg.name,
+    imageReferer: `${base}/`, // covers/images often live on a separate hotlink-protected CDN that wants the SITE origin as Referer
     requiresCloudflare: true, // Manganato-engine sites sit behind Cloudflare
     preferredOrder: cfg.order,
 

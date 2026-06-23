@@ -45,9 +45,16 @@ async function fetchCoverImage(u: string, source?: string): Promise<Buffer> {
     referer: staticReferer ?? `${new URL(u).origin}/`,
   };
   if (src?.requiresCloudflare) {
-    const s = await cfSession(u);
-    headers.cookie = s.cookie;
-    headers['user-agent'] = s.userAgent;
+    // Best-effort: many sources host covers on a separate CDN that ISN'T Cloudflare-protected, where
+    // FlareSolverr fails to "solve a challenge". Don't let that abort the cover — the Referer alone is
+    // usually enough. Attach cf cookies when we can; otherwise fall through to a plain fetch.
+    try {
+      const s = await cfSession(u);
+      headers.cookie = s.cookie;
+      headers['user-agent'] = s.userAgent;
+    } catch {
+      /* image host isn't behind Cloudflare — proceed with the referer-only headers */
+    }
   }
   const r = await fetch(u, { headers, signal: AbortSignal.timeout(20000) });
   if (!r.ok) throw Object.assign(new Error('cover'), { statusCode: r.status });
@@ -84,10 +91,11 @@ export default async function imageRoutes(app: FastifyInstance) {
   // Series cover: prefer the real cover art (AniList, cached in series_art.cover); fall back to the first
   // page of chapter 1. Distinct cache variants so it upgrades to the real cover once one is known.
   const serveLibSeriesThumb = async (req: FastifyRequest, reply: FastifyReply, id: string) => {
-    const art = await one<{ cover: string | null }>('SELECT cover FROM series_art WHERE series_id = $1', [id]);
+    const art = await one<{ cover: string | null; source_id: string | null }>(
+      'SELECT a.cover, s.source_id FROM series_art a LEFT JOIN lib_series s ON s.id = a.series_id WHERE a.series_id = $1', [id]);
     if (art?.cover) {
       return serveImage(req, reply, `lib-sthumb:${id}:c`, async () => {
-        const input = await fetchCoverImage(art.cover!); // CF-aware: handles AniList CDN and Aqua's Cloudflare host
+        const input = await fetchCoverImage(art.cover!, art.source_id || undefined); // pass source -> correct Referer for hotlink-protected cover CDNs
         storeColor(id, input);
         const buffer = await sharp(input).resize({ width: 400, withoutEnlargement: true }).webp({ quality: 80 }).toBuffer();
         return { buffer, contentType: 'image/webp' };
@@ -223,10 +231,9 @@ export default async function imageRoutes(app: FastifyInstance) {
     // (banner or portrait cover). A short-wide banner can't fill a near-square mobile hero sharply, so we
     // treat all art the same → consistent, always full-bleed (no empty bars, no floating poster), crop hidden.
     const variant = `artw5:${id}:${art.banner ? 'b' : 'c'}`;
+    const srcRow = await one<{ source_id: string | null }>('SELECT source_id FROM lib_series WHERE id = $1', [id]);
     return serveImage(req, reply, variant, async () => {
-      const r = await fetch(url, { signal: AbortSignal.timeout(12000) });
-      if (!r.ok) throw Object.assign(new Error(`art ${r.status}`), { statusCode: r.status });
-      const input = Buffer.from(await r.arrayBuffer());
+      const input = await fetchCoverImage(url, srcRow?.source_id || undefined); // browser headers + source Referer for hotlink-protected CDNs
       const buffer = await sharp(input)
         .resize(1280, 820, { fit: 'cover' })
         .blur(22)
