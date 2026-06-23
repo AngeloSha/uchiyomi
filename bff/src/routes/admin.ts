@@ -76,6 +76,36 @@ export default async function adminRoutes(app: FastifyInstance) {
   const writeSites = async (list: Site[]) => { await mkdir(dirname(SITES_FILE), { recursive: true }).catch(() => {}); await writeFile(SITES_FILE, JSON.stringify(list, null, 2)); };
   const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, '').slice(0, 40);
 
+  // After adding a site, actually exercise it (search → series → chapters → pages) so the admin gets immediate
+  // ✓/✗ feedback instead of discovering a parse failure later. Best-effort; bounded by a caller-side timeout.
+  const smokeTest = async (src: any): Promise<{ ok: boolean; checks: Array<{ name: string; ok: boolean; detail: string }> }> => {
+    const checks: Array<{ name: string; ok: boolean; detail: string }> = [];
+    const clip = (s: any) => String(s || '').slice(0, 80);
+    let results: any[] = [];
+    let searchOk = false;
+    let searchDetail = 'no results — markup may not match this engine';
+    for (const qq of ['the', 'one', 'love', 'a']) {
+      try { const r = await src.search(qq); if (Array.isArray(r) && r.length) { results = r; searchOk = true; searchDetail = `${r.length} result(s)`; break; } }
+      catch (e: any) { searchDetail = clip(e?.message || 'error'); }
+    }
+    checks.push({ name: 'Search', ok: searchOk, detail: searchDetail });
+    if (!searchOk) return { ok: false, checks };
+    let chapters: any[] = [];
+    try {
+      const series = await src.getSeries(results[0].sourceId);
+      checks.push({ name: 'Series page', ok: !!series?.title, detail: series?.title ? clip(series.title) : 'no data' });
+      chapters = await src.listChapters(results[0].sourceId);
+      checks.push({ name: 'Chapters', ok: chapters.length > 0, detail: chapters.length ? `${chapters.length} chapter(s)` : 'none found' });
+    } catch (e: any) {
+      checks.push({ name: 'Series / chapters', ok: false, detail: clip(e?.message || 'error') });
+    }
+    if (chapters.length) {
+      try { const pages = await src.getPageUrls(chapters[0].sourceId); checks.push({ name: 'Pages', ok: pages.length > 0, detail: pages.length ? `${pages.length} page(s)` : 'none found' }); }
+      catch (e: any) { checks.push({ name: 'Pages', ok: false, detail: clip(e?.message || 'error') }); }
+    }
+    return { ok: checks.every((c) => c.ok), checks };
+  };
+
   app.get('/api/admin/sources/custom', async () => ({ content: await readSites() }));
   app.post('/api/admin/sources/custom', async (req, reply) => {
     const b = z.object({ engine: z.enum(['auto', 'madara', 'manganato', 'mangathemesia']), name: z.string().min(1).max(60), base: z.string().url() }).safeParse(req.body);
@@ -95,7 +125,16 @@ export default async function adminRoutes(app: FastifyInstance) {
     await writeSites(list);
     reloadAll();
     await logAudit('source.custom_add', { userId: userIdOf(req), detail: { id, engine, base: b.data.base }, req });
-    return reply.send({ ok: true, id, engine, available: listSources().length });
+    // Verify the freshly-added site actually works, bounded so a slow/Cloudflare-heavy site can't hang the request.
+    const added = getSource(id);
+    const smoke = added
+      ? await Promise.race([
+          smokeTest(added),
+          new Promise<{ ok: boolean; timedOut: boolean; checks: Array<{ name: string; ok: boolean; detail: string }> }>((res) =>
+            setTimeout(() => res({ ok: false, timedOut: true, checks: [{ name: 'Verify', ok: false, detail: 'timed out — site is slow or heavily protected; added anyway' }] }), 30000)),
+        ])
+      : { ok: false, checks: [{ name: 'Verify', ok: false, detail: 'source failed to load' }] };
+    return reply.send({ ok: true, id, engine, available: listSources().length, smoke });
   });
   app.delete('/api/admin/sources/custom/:id', async (req) => {
     const { id } = req.params as { id: string };

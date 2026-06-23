@@ -172,10 +172,21 @@ function Providers() {
   const [sname, setSname] = useState('');
   const [sbase, setSbase] = useState('');
   const [adding, setAdding] = useState(false);
+  type Smoke = { ok: boolean; timedOut?: boolean; checks: { name: string; ok: boolean; detail: string }[] };
+  const [smoke, setSmoke] = useState<{ name: string; res: Smoke } | null>(null);
   const addSite = async () => {
     if (!sname.trim() || !sbase.trim()) return;
-    setAdding(true);
-    try { const r = await api<{ engine?: string }>('/api/admin/sources/custom', { json: { engine: eng, name: sname.trim(), base: sbase.trim() } }); toast(`Added ${sname.trim()}${eng === 'auto' && r.engine ? ` (${r.engine})` : ''}`, 'success'); setSname(''); setSbase(''); inval(); }
+    setAdding(true); setSmoke(null);
+    const nm = sname.trim();
+    try {
+      const r = await api<{ engine?: string; smoke?: Smoke }>('/api/admin/sources/custom', { json: { engine: eng, name: nm, base: sbase.trim() } });
+      const eng2 = eng === 'auto' && r.engine ? ` (${r.engine})` : '';
+      if (r.smoke) setSmoke({ name: nm, res: r.smoke });
+      if (r.smoke && r.smoke.ok) toast(`Added ${nm}${eng2} — verified ✓`, 'success');
+      else if (r.smoke) toast(`Added ${nm}${eng2}, but some checks failed — see below`, 'error');
+      else toast(`Added ${nm}${eng2}`, 'success');
+      setSname(''); setSbase(''); inval();
+    }
     catch (e: any) { toast(msgOf(e, "Couldn't add — check the URL or pick the engine manually"), 'error'); }
     setAdding(false);
   };
@@ -203,6 +214,24 @@ function Providers() {
           <button onClick={addSite} disabled={adding || !sname.trim() || !sbase.trim()} className="btn-accent px-4 text-sm disabled:opacity-50">{adding ? 'Adding…' : 'Add'}</button>
         </div>
         <p className="mt-1.5 text-[11px] text-fog-500">Just paste a site&apos;s homepage URL — the engine is auto-detected (or pick it). Picked up instantly, no restart. Works for sites on the Madara, MangaThemesia, or Manganato engines.</p>
+        {smoke && (
+          <div className={`mt-2.5 rounded-xl border p-2.5 ${smoke.res.ok ? 'border-emerald-600/30 bg-emerald-600/10' : 'border-amber-600/30 bg-amber-600/10'}`}>
+            <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-fog-400">
+              {smoke.res.ok ? `✓ ${smoke.name} verified — search, chapters & pages all work`
+                : smoke.res.timedOut ? `${smoke.name}: verification timed out — slow or heavily protected site (added anyway)`
+                : `${smoke.name}: some checks failed — this site may be only partly supported`}
+            </p>
+            <ul className="space-y-1">
+              {smoke.res.checks.map((c, i) => (
+                <li key={i} className="flex items-start gap-2 text-xs">
+                  <span className={c.ok ? 'text-emerald-400' : 'text-red-400'}>{c.ok ? '✓' : '✗'}</span>
+                  <span className="text-fog-200">{c.name}</span>
+                  <span className="text-fog-500">— {c.detail}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
       </div>
 
       {list.length === 0 ? (
