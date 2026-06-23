@@ -45,7 +45,7 @@ two-factor auth, you'll be asked for your 6-digit code (or a recovery code) afte
 
 ![Library](library.jpg)
 
-The **Library** tab is your whole collection. Tabs across the top sort it — **Curated**, **Newest**, **Most
+The **Library** tab is your whole collection. Tabs across the top sort it: **Curated**, **Newest**, **Most
 read**. Each cover shows a **NEW** ribbon when there are unread chapters. Click a cover to open the series.
 
 The top bar has **Home** (a daily-pick hero + "For you" rails), **Library**, **Browse** (by genre), and
@@ -59,13 +59,13 @@ The top bar has **Home** (a daily-pick hero + "For you" rails), **Library**, **B
 
 The series page shows the cover, an ambient backdrop, genres, description, and the **chapter grid**.
 
-- **Start reading** — jumps to where you left off (or chapter 1).
-- **Favorite** (heart) — adds it to your favorites + smart offline sync.
-- **Download all** — saves every chapter for offline reading.
+- **Start reading** jumps to where you left off (or chapter 1).
+- **Favorite** (heart) adds it to your favorites + smart offline sync.
+- **Download all** saves every chapter for offline reading.
 - Click any chapter to read it; the ⬇ on a chapter downloads just that one. Toggle **Oldest/Newest** to flip
   the order.
 
-Progress, favorites, and history are **per-user** — each account has its own.
+Progress, favorites, and history are **per-user**, so each account has its own.
 
 ---
 
@@ -78,9 +78,9 @@ you keep scrolling through a series without interruption.
 
 - **Tap** the middle to show/hide the chrome (top bar + controls).
 - **Pinch / double-tap** to zoom (width multiplier).
-- **Themes** — AMOLED black, sepia, or gray, from the reader settings.
-- **Per-series memory** — your zoom/theme choices are remembered per title.
-- **Desktop** — use `[` / `]` (or the chapter dropdown) to move between chapters; the page is centered with
+- **Themes:** AMOLED black, sepia, or gray, from the reader settings.
+- **Per-series memory:** your zoom/theme choices are remembered per title.
+- **Desktop:** use `[` / `]` (or the chapter dropdown) to move between chapters; the page is centered with
   comfortable margins.
 
 It remembers your scroll position, so closing and reopening drops you right back where you were.
@@ -93,9 +93,9 @@ It remembers your scroll position, so closing and reopening drops you right back
 
 **Discover** is how you add new series to your library.
 
-- **Trending** rail — popular manhwa you don't already have. Each card shows the description + chapter count.
-- **Search** — pick a source, type a title. Results you already own are marked **✓ In library**.
-- **Find & add** — tapping a trending card searches every installed source and shows which ones carry it
+- **Trending** rail: popular manhwa you don't already have. Each card shows the description + chapter count.
+- **Search:** pick a source, type a title. Results you already own are marked **✓ In library**.
+- **Find & add:** tapping a trending card searches every installed source and shows which ones carry it
   (Aqua-style preferred sources first). Pick a provider, choose **how many chapters** to download (All or first
   N), toggle **auto-update**, and add it. It downloads chapter 1 immediately so the series shows up right away,
   then grabs the rest in the background (with a progress bar).
@@ -109,24 +109,24 @@ or cancel. A heads-up appears if you queue a lot of chapters at once (sources ca
 
 ![Add a site](admin-providers.jpg)
 
-**MangaDex works out of the box** (the official public API) — nothing to set up. Everything else you add
+**MangaDex works out of the box** (the official public API), with nothing to set up. Everything else you add
 yourself in **Admin → Providers** by pasting a site's URL. Koryomi bundles generic **engines** for three common
-manga-site families — **Madara**, **MangaThemesia**, and **Manganato** — and most manga sites run one of them.
+manga-site families (**Madara**, **MangaThemesia**, and **Manganato**), and most manga sites run one of them.
 
 ### Add a site — step by step
 
 1. Go to **Admin → Providers** (Profile → *Admin & server settings* → **Providers** tab).
 2. In the **Add a site** box, leave the engine on **Auto-detect**.
-3. Paste the site's **homepage URL** — the root only, e.g. `https://some-manga-site.com`. Not a deep link to a
+3. Paste the site's **homepage URL**, the root only, e.g. `https://some-manga-site.com`. Not a deep link to a
    specific series or chapter.
-4. Type a **Name** (any label you like — it's just what shows in your source list).
-5. Click **Add**. Koryomi fetches the homepage, figures out the engine, and the source goes live **instantly — no
+4. Type a **Name** (any label you like; it's just what shows in your source list).
+5. Click **Add**. Koryomi fetches the homepage, figures out the engine, and the source goes live **instantly, no
    restart**. It then appears in the list and is searchable from **Discover**.
 
 ### Will a site work?
 
-Koryomi can read a site if it runs one of the three bundled engines. You don't need to know which — Auto-detect
-handles it — but here's how to recognize them by their URLs/layout:
+Koryomi can read a site if it runs one of the three bundled engines. You don't need to know which (Auto-detect
+handles it), but here's how to recognize them by their URLs/layout:
 
 | Engine | Tell-tale signs |
 | --- | --- |
@@ -134,33 +134,33 @@ handles it — but here's how to recognize them by their URLs/layout:
 | **MangaThemesia** | Series at `…/manga/<name>/` or `…/series/<name>/`; the homepage is a grid of cover "cards"; the reader is one long vertical scroll. |
 | **Manganato family** | Big general-manga catalogs; the search page lives at `…/search/story/<query>`. |
 
-Not sure? Just paste the URL and add it. Worst case, Auto-detect replies that it can't tell — then you pick an
+Not sure? Just paste the URL and add it. Worst case, Auto-detect replies that it can't tell, and then you pick an
 engine manually from the dropdown, or conclude the site isn't supported (next box).
 
 ### After you add a source
 
 Open **Discover**, pick your new source in the dropdown (or use **Find & add** on a trending card), search a
-title, and add it to your library — see [section 6](#6-discover--add-new-series). New sources also join the
+title, and add it to your library (see [section 6](#6-discover--add-new-series)). New sources also join the
 cross-source search there automatically.
 
 ### Managing sources
 
-Each source shows a **health** badge — `ok`, `rate-limited`, `blocked`, or `off`. From the list you can:
+Each source shows a **health** badge: `ok`, `rate-limited`, `blocked`, or `off`. From the list you can:
 
 - **Disable** / **Enable** a source,
 - **Clear** a temporary block (if a site rate-limited you after heavy downloading),
 - **Remove** a site you added (the built-in MangaDex can't be removed),
-- **Reload sources** — re-scan after dropping a compiled source-plugin pack into `SOURCES_DIR`.
+- **Reload sources** to re-scan after dropping a compiled source-plugin pack into `SOURCES_DIR`.
 
 ### When a site won't work
 
 If Auto-detect can't identify it *and* no manually-picked engine returns search results, the site runs an engine
-Koryomi doesn't support out of the box — typically an **API-only** site or a **JavaScript-rendered (SPA)** one.
+Koryomi doesn't support out of the box, typically an **API-only** site or a **JavaScript-rendered (SPA)** one.
 Those need a code-level adapter (a source plugin); the three bundled engines cover the large majority of manga
 sites, but not every one.
 
 > **Cloudflare:** many sites sit behind Cloudflare. The bundled `yomi-flaresolverr` service handles that
-> automatically — just make sure that container is running (it is, by default).
+> automatically; just make sure that container is running (it is, by default).
 
 ---
 
@@ -168,24 +168,24 @@ sites, but not every one.
 
 Reachable from **Profile → Admin & server settings** (admins only). It's a tabbed, Jellyfin-style panel.
 
-**Overview** — library stats + recent member activity.
+**Overview:** library stats + recent member activity.
 
 ![Members](admin-members.jpg)
 
-**Members** — create accounts (user or admin), reset passwords, and per-user controls: make admin/member,
+**Members:** create accounts (user or admin), reset passwords, and per-user controls: make admin/member,
 disable, or allow/deny downloads. Each row shows whether the member has 2FA on.
 
-**Providers** — the source health + Add-a-site controls from section 7.
+**Providers:** the source health + Add-a-site controls from section 7.
 
-**Tasks** — run the **library scan** or **check-for-new-chapters** on demand, and see when each last ran.
+**Tasks:** run the **library scan** or **check-for-new-chapters** on demand, and see when each last ran.
 
-**Activity** — the audit feed: every login (success and failure), user change, settings change, source action.
+**Activity:** the audit feed, every login (success and failure), user change, settings change, source action.
 
-**Sessions** — every active session across all users, with one-click revoke.
+**Sessions:** every active session across all users, with one-click revoke.
 
 ![Settings](admin-settings.jpg)
 
-**Settings** — server name, an **open-registration** toggle (let anyone sign up), and the **auto-update
+**Settings:** server name, an **open-registration** toggle (let anyone sign up), and the **auto-update
 interval** (how often Koryomi checks your library for new chapters).
 
 ---
@@ -196,11 +196,11 @@ interval** (how often Koryomi checks your library for new chapters).
 
 In **Profile → Security** (every user has this):
 
-- **Change password** — requires your current password; changing it signs out your other devices.
-- **Two-factor authentication** — tap **Set up 2FA**, scan the QR with any authenticator app (Google
+- **Change password:** requires your current password; changing it signs out your other devices.
+- **Two-factor authentication:** tap **Set up 2FA**, scan the QR with any authenticator app (Google
   Authenticator, Authy, 1Password…), enter a code to enable, and **save your recovery codes** (shown once).
   After that, logins ask for the 6-digit code. Disable it anytime by confirming your password.
-- **Active sessions** — see every device you're signed in on (with IP + last-active), revoke any one, or
+- **Active sessions:** see every device you're signed in on (with IP + last-active), revoke any one, or
   **Log out others** in a single click.
 
 Koryomi also locks an account after repeated failed logins and records everything in the admin audit feed.
@@ -209,7 +209,7 @@ Koryomi also locks an account after repeated failed logins and records everythin
 
 ## 10. Install as an app & offline
 
-Koryomi is a **PWA** — in your browser's menu choose **Install app** (or "Add to Home Screen" on mobile) to get a
+Koryomi is a **PWA**. In your browser's menu choose **Install app** (or "Add to Home Screen" on mobile) to get a
 standalone, full-screen app icon.
 
 **Offline:** favorite a series (or use **Download all** / a chapter's ⬇), and those chapters are stored on the
