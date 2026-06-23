@@ -29,6 +29,39 @@ ones you want.
 
 ![Library](docs/library.png)
 
+## Why Yomi?
+
+Most self-hosted manga tools make you pick a side. A **library server** (Komga, Kavita) reads files you supply
+but can't fetch new chapters and ships a fairly utilitarian reader. A **source app** (Tachiyomi / Mihon,
+Suwayomi) fetches chapters but is Android-only or wraps them in a basic web UI. Yomi is the rare one that does
+**both**, in a single app that's actually a pleasure to use:
+
+- **Server *and* sources in one.** Own your library *and* pull new chapters — no Komga-plus-Suwayomi-plus-a-
+  reader Frankenstein to stitch together.
+- **A reader you'll actually want to open.** True-black OLED, with a **webtoon-first** vertical reader
+  (continuous multi-chapter scroll, pinch-zoom, themes, per-series memory) — not a long-strip mode bolted onto a
+  page-turn comics viewer.
+- **Installable, offline, every device.** A real PWA — add to home screen, read offline, no app store — on
+  phone, tablet, or desktop from one codebase.
+- **Built for a household.** Per-user progress, favorites, history, avatars, streaks, a leaderboard — plus the
+  security most self-hosted manga tools skip: **TOTP two-factor**, login lockout, an audit log, and
+  session/device management, all behind a Jellyfin-style admin panel.
+- **Add a source by pasting a URL.** Auto-detect figures out the engine — no extension repos to wire up.
+
+| | Yomi | Komga / Kavita | Tachiyomi / Mihon | Suwayomi |
+| --- | :---: | :---: | :---: | :---: |
+| Self-hosted, multi-user server | ✅ | ✅ | ❌ *(Android app)* | ✅ |
+| Fetches new chapters from sources | ✅ | ❌ *(you supply files)* | ✅ | ✅ |
+| OLED design + webtoon-first reader | ✅ | basic | ✅ *(mobile)* | basic |
+| Installable PWA + offline, any device | ✅ | partial | Android only | partial |
+| Per-user progress + household features | ✅ | ✅ | ❌ | limited |
+| 2FA · lockout · audit · sessions | ✅ | basic | ❌ | ❌ |
+| Add a source by pasting a URL | ✅ | — | extensions | extension repos |
+
+**Honest caveats:** Komga and Kavita are more mature for pure library management and handle more formats
+(PDF/EPUB); Tachiyomi/Mihon have a far larger source catalog. Yomi's edge is the *combination* — a polished,
+installable, multi-user reader that also fetches — and a design that treats webtoons as first-class.
+
 ## Architecture
 
 | Service | What it is |
