@@ -108,17 +108,58 @@ or cancel. A heads-up appears if you queue a lot of chapters at once (sources ca
 
 ![Add a site](admin-providers.jpg)
 
-Yomi ships with **MangaDex** working out of the box (the official public API) plus generic **engines** for the
-common manga-site families. You add more sources yourself in **Admin → Providers**:
+**MangaDex works out of the box** (the official public API) — nothing to set up. Everything else you add
+yourself in **Admin → Providers** by pasting a site's URL. Yomi bundles generic **engines** for three common
+manga-site families — **Madara**, **MangaThemesia**, and **Manganato** — and most manga sites run one of them.
 
-**Add a site** — paste a site's homepage URL, leave the engine on **Auto-detect** (or pick Madara /
-MangaThemesia / Manganato), and click **Add**. It's live instantly — no restart. Auto-detect fetches the page
-and figures out the engine for you. It works for sites running one of those three engine families; a brand-new
-engine type would need a code-level adapter.
+### Add a site — step by step
 
-Below the form, every source shows its **health** (ok / rate-limited / blocked / off). You can **Disable** a
-source, **Clear** a temporary block, or **Remove** a site you added. **Reload sources** re-scans after you drop
-in a source plugin pack.
+1. Go to **Admin → Providers** (Profile → *Admin & server settings* → **Providers** tab).
+2. In the **Add a site** box, leave the engine on **Auto-detect**.
+3. Paste the site's **homepage URL** — the root only, e.g. `https://some-manga-site.com`. Not a deep link to a
+   specific series or chapter.
+4. Type a **Name** (any label you like — it's just what shows in your source list).
+5. Click **Add**. Yomi fetches the homepage, figures out the engine, and the source goes live **instantly — no
+   restart**. It then appears in the list and is searchable from **Discover**.
+
+### Will a site work?
+
+Yomi can read a site if it runs one of the three bundled engines. You don't need to know which — Auto-detect
+handles it — but here's how to recognize them by their URLs/layout:
+
+| Engine | Tell-tale signs |
+| --- | --- |
+| **Madara** | A WordPress manga theme. Series pages look like `…/manga/<name>/`, chapters like `…/manga/<name>/chapter-12/`. Extremely common for manhwa/manhua. |
+| **MangaThemesia** | Series at `…/manga/<name>/` or `…/series/<name>/`; the homepage is a grid of cover "cards"; the reader is one long vertical scroll. |
+| **Manganato family** | Big general-manga catalogs; the search page lives at `…/search/story/<query>`. |
+
+Not sure? Just paste the URL and add it. Worst case, Auto-detect replies that it can't tell — then you pick an
+engine manually from the dropdown, or conclude the site isn't supported (next box).
+
+### After you add a source
+
+Open **Discover**, pick your new source in the dropdown (or use **Find & add** on a trending card), search a
+title, and add it to your library — see [section 6](#6-discover--add-new-series). New sources also join the
+cross-source search there automatically.
+
+### Managing sources
+
+Each source shows a **health** badge — `ok`, `rate-limited`, `blocked`, or `off`. From the list you can:
+
+- **Disable** / **Enable** a source,
+- **Clear** a temporary block (if a site rate-limited you after heavy downloading),
+- **Remove** a site you added (the built-in MangaDex can't be removed),
+- **Reload sources** — re-scan after dropping a compiled source-plugin pack into `SOURCES_DIR`.
+
+### When a site won't work
+
+If Auto-detect can't identify it *and* no manually-picked engine returns search results, the site runs an engine
+Yomi doesn't support out of the box — typically an **API-only** site or a **JavaScript-rendered (SPA)** one.
+Those need a code-level adapter (a source plugin); the three bundled engines cover the large majority of manga
+sites, but not every one.
+
+> **Cloudflare:** many sites sit behind Cloudflare. The bundled `yomi-flaresolverr` service handles that
+> automatically — just make sure that container is running (it is, by default).
 
 ---
 
