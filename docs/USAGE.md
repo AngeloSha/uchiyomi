@@ -1,6 +1,6 @@
-# Yomi — User Guide
+# Koryomi — User Guide
 
-Everything you can do in Yomi, screen by screen. For install/configuration see the [README](../README.md).
+Everything you can do in Koryomi, screen by screen. For install/configuration see the [README](../README.md).
 
 - [1. First run & setup](#1-first-run--setup)
 - [2. Signing in](#2-signing-in)
@@ -100,7 +100,7 @@ It remembers your scroll position, so closing and reopening drops you right back
   N), toggle **auto-update**, and add it. It downloads chapter 1 immediately so the series shows up right away,
   then grabs the rest in the background (with a progress bar).
 
-If you try to add a title you already have from another source, Yomi warns you and lets you add a separate copy
+If you try to add a title you already have from another source, Koryomi warns you and lets you add a separate copy
 or cancel. A heads-up appears if you queue a lot of chapters at once (sources can rate-limit heavy downloads).
 
 ---
@@ -110,7 +110,7 @@ or cancel. A heads-up appears if you queue a lot of chapters at once (sources ca
 ![Add a site](admin-providers.jpg)
 
 **MangaDex works out of the box** (the official public API) — nothing to set up. Everything else you add
-yourself in **Admin → Providers** by pasting a site's URL. Yomi bundles generic **engines** for three common
+yourself in **Admin → Providers** by pasting a site's URL. Koryomi bundles generic **engines** for three common
 manga-site families — **Madara**, **MangaThemesia**, and **Manganato** — and most manga sites run one of them.
 
 ### Add a site — step by step
@@ -120,12 +120,12 @@ manga-site families — **Madara**, **MangaThemesia**, and **Manganato** — and
 3. Paste the site's **homepage URL** — the root only, e.g. `https://some-manga-site.com`. Not a deep link to a
    specific series or chapter.
 4. Type a **Name** (any label you like — it's just what shows in your source list).
-5. Click **Add**. Yomi fetches the homepage, figures out the engine, and the source goes live **instantly — no
+5. Click **Add**. Koryomi fetches the homepage, figures out the engine, and the source goes live **instantly — no
    restart**. It then appears in the list and is searchable from **Discover**.
 
 ### Will a site work?
 
-Yomi can read a site if it runs one of the three bundled engines. You don't need to know which — Auto-detect
+Koryomi can read a site if it runs one of the three bundled engines. You don't need to know which — Auto-detect
 handles it — but here's how to recognize them by their URLs/layout:
 
 | Engine | Tell-tale signs |
@@ -155,7 +155,7 @@ Each source shows a **health** badge — `ok`, `rate-limited`, `blocked`, or `of
 ### When a site won't work
 
 If Auto-detect can't identify it *and* no manually-picked engine returns search results, the site runs an engine
-Yomi doesn't support out of the box — typically an **API-only** site or a **JavaScript-rendered (SPA)** one.
+Koryomi doesn't support out of the box — typically an **API-only** site or a **JavaScript-rendered (SPA)** one.
 Those need a code-level adapter (a source plugin); the three bundled engines cover the large majority of manga
 sites, but not every one.
 
@@ -186,7 +186,7 @@ disable, or allow/deny downloads. Each row shows whether the member has 2FA on.
 ![Settings](admin-settings.jpg)
 
 **Settings** — server name, an **open-registration** toggle (let anyone sign up), and the **auto-update
-interval** (how often Yomi checks your library for new chapters).
+interval** (how often Koryomi checks your library for new chapters).
 
 ---
 
@@ -203,13 +203,13 @@ In **Profile → Security** (every user has this):
 - **Active sessions** — see every device you're signed in on (with IP + last-active), revoke any one, or
   **Log out others** in a single click.
 
-Yomi also locks an account after repeated failed logins and records everything in the admin audit feed.
+Koryomi also locks an account after repeated failed logins and records everything in the admin audit feed.
 
 ---
 
 ## 10. Install as an app & offline
 
-Yomi is a **PWA** — in your browser's menu choose **Install app** (or "Add to Home Screen" on mobile) to get a
+Koryomi is a **PWA** — in your browser's menu choose **Install app** (or "Add to Home Screen" on mobile) to get a
 standalone, full-screen app icon.
 
 **Offline:** favorite a series (or use **Download all** / a chapter's ⬇), and those chapters are stored on the

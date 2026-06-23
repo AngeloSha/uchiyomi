@@ -3,7 +3,7 @@
 import { SourceAdapter, SourceSeries, SourceChapter } from './types';
 
 const API = 'https://api.mangadex.org';
-const HEADERS = { 'user-agent': 'Yomi/1.0 (self-hosted personal reader)' };
+const HEADERS = { 'user-agent': 'Koryomi/1.0 (self-hosted personal reader)' };
 const RATINGS = ['safe', 'suggestive', 'erotica'].map((r) => `contentRating[]=${r}`).join('&');
 
 async function jget(url: string): Promise<any> {

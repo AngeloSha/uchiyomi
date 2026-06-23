@@ -1,6 +1,6 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import sharp from 'sharp';
-import { IMG_COOKIE } from '../lib/auth';
+import { IMG_COOKIE, resolveOpdsBasic } from '../lib/auth';
 import { komga, komgaImage } from '../lib/komga';
 import { serveImage } from '../lib/imageCache';
 import { dominantHex } from '../lib/color';
@@ -67,12 +67,10 @@ export default async function imageRoutes(app: FastifyInstance) {
   // Browser <img> tags can't set Authorization; authorize via the stateless yomi_img cookie.
   app.addHook('preHandler', async (req: FastifyRequest, reply: FastifyReply) => {
     const token = req.cookies?.[IMG_COOKIE];
-    if (!token) return reply.code(401).send({ error: 'unauthorized' });
-    try {
-      app.jwt.verify(token);
-    } catch {
-      return reply.code(401).send({ error: 'unauthorized' });
-    }
+    if (token) { try { app.jwt.verify(token); return; } catch { /* fall through to OPDS auth */ } }
+    // OPDS readers load covers/pages with the same HTTP Basic token as the feed
+    if (await resolveOpdsBasic(req.headers.authorization)) return;
+    return reply.code(401).send({ error: 'unauthorized' });
   });
 
   // ---- owned library image helpers: serve thumbnails + pages straight from the CBZ files ----

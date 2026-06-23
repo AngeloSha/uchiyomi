@@ -1,4 +1,4 @@
-// Creates/updates the Nginx Proxy Manager host for Yomi via its API.
+// Creates/updates the Nginx Proxy Manager host for Koryomi via its API.
 // Run through scripts/add-proxy.sh (which supplies creds via env).
 const NPM = process.env.NPM_URL || 'http://npm:81';
 const EMAIL = process.env.NPM_EMAIL;

@@ -1,4 +1,4 @@
--- Yomi schema (no pgcrypto extension needed: gen_random_uuid() is in Postgres core).
+-- Koryomi schema (no pgcrypto extension needed: gen_random_uuid() is in Postgres core).
 CREATE TABLE IF NOT EXISTS users (
   id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   display_name  text NOT NULL DEFAULT 'me',

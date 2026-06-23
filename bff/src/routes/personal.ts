@@ -2,7 +2,8 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { q, one } from '../lib/db';
 import { komga } from '../lib/komga';
-import { authenticate, userIdOf } from '../lib/auth';
+import { authenticate, userIdOf, issueOpdsToken } from '../lib/auth';
+import { env } from '../env';
 
 function computeStreaks(days: string[]): { current: number; longest: number } {
   if (!days.length) return { current: 0, longest: 0 };
@@ -25,6 +26,12 @@ function computeStreaks(days: string[]): { current: number; longest: number } {
 
 export default async function personalRoutes(app: FastifyInstance) {
   app.addHook('preHandler', authenticate);
+
+  // issue/rotate the caller's OPDS token (shown once); used as the HTTP Basic password in an external reader
+  app.post('/api/opds/token', async (req) => {
+    const token = await issueOpdsToken(userIdOf(req));
+    return { token, url: `${env.PUBLIC_ORIGIN.replace(/\/$/, '')}/opds` };
+  });
 
   // ---- favorites ----
   app.get('/api/favorites', async (req) => {

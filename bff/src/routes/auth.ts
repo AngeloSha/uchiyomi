@@ -136,7 +136,7 @@ export default async function authRoutes(app: FastifyInstance) {
   // public branding + whether sign-up is open (for the login screen)
   app.get('/auth/config', async () => {
     const s = await one<{ server_name: string; allow_registration: boolean }>('SELECT server_name, allow_registration FROM server_settings WHERE id = 1');
-    return { serverName: s?.server_name || 'Yomi', allowRegistration: !!s?.allow_registration };
+    return { serverName: s?.server_name || 'Koryomi', allowRegistration: !!s?.allow_registration };
   });
 
   // self-registration (only when the admin enabled it) → creates a plain user + logs in

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Yomi one-time setup. Run from the repo root:  bash scripts/setup.sh
+# Koryomi one-time setup. Run from the repo root:  bash scripts/setup.sh
 # - generates DB/JWT secrets and hashes your admin password (argon2id; plaintext never persisted)
 # - writes them into .env, brings the whole stack up, ensures the DB + login work
 set -euo pipefail
@@ -34,7 +34,7 @@ LIBRARY_BACKEND="$(grep -E '^LIBRARY_BACKEND=' "$ENV_FILE" | head -1 | cut -d= -
 KOMGA_KEY=""
 if [ "${LIBRARY_BACKEND:-owned}" = "komga" ]; then
 echo
-echo "Komga API key — needed so Yomi can read your Komga library."
+echo "Komga API key — needed so Koryomi can read your Komga library."
 read -rp "Paste an existing Komga API key, or leave blank to mint one: " KOMGA_KEY
 if [ -z "${KOMGA_KEY:-}" ]; then
   read -rp "  Komga username/email: " KU
@@ -58,7 +58,7 @@ fi
 
 # ---- 2. App login password --------------------------------------------------
 echo
-echo "App login password — what you'll type to open Yomi on your phone."
+echo "App login password — what you'll type to open Koryomi on your phone."
 read -rsp "  Choose a password (or PIN): " AP1; echo
 read -rsp "  Confirm: " AP2; echo
 [ "$AP1" = "$AP2" ] || { echo "Passwords don't match."; exit 1; }
@@ -127,4 +127,4 @@ if docker run --rm --network "container:yomi-bff" -e PW="$AP1" yomi-bff:prod nod
   fetch("http://127.0.0.1:3000/auth/login",{method:"POST",headers:{"content-type":"application/json"},
     body:JSON.stringify({password:process.env.PW})}).then(async r=>{
     console.log("login HTTP",r.status); process.exit(r.ok?0:1);}).catch(e=>{console.error(e.message);process.exit(1);});
-'; then echo "✓ Login works. Yomi backend is live."; else echo "⚠ Login test failed — check: docker logs yomi-bff"; fi
+'; then echo "✓ Login works. Koryomi backend is live."; else echo "⚠ Login test failed — check: docker logs yomi-bff"; fi

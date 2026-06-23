@@ -76,7 +76,7 @@ export default function HomePage() {
           <div className="absolute inset-0 bg-gradient-to-t from-ink-950 via-ink-950/55 to-ink-950/15" />
           <div className="absolute inset-x-0 bottom-0 px-5 pb-12 lg:px-14">
             <span className="mb-2 inline-flex items-center gap-1.5 rounded-full bg-black/45 px-3 py-1.5 text-xs font-medium text-accent backdrop-blur"><IcSparkle width={13} height={13} /> Welcome</span>
-            <h1 className="font-brand text-4xl font-bold leading-tight text-white drop-shadow lg:text-6xl">Welcome to Yomi</h1>
+            <h1 className="font-brand text-4xl font-bold leading-tight text-white drop-shadow lg:text-6xl">Welcome to Koryomi</h1>
             <p className="mb-4 mt-1 text-sm text-fog-300">Your cinematic library awaits.</p>
             <Link href="/library" className="btn-accent">Browse library</Link>
           </div>

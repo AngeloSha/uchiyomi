@@ -28,6 +28,29 @@ function sha256(s: string): string {
   return createHash('sha256').update(s).digest('hex');
 }
 
+/** Issue (or rotate) a user's OPDS token. The raw token is shown once; only its hash is stored. */
+export async function issueOpdsToken(userId: string): Promise<string> {
+  const token = randomBytes(24).toString('base64url');
+  await q(
+    `INSERT INTO opds_tokens (user_id, token_hash, created_at) VALUES ($1, $2, now())
+     ON CONFLICT (user_id) DO UPDATE SET token_hash = EXCLUDED.token_hash, created_at = now()`,
+    [userId, sha256(token)],
+  );
+  return token;
+}
+
+/** Resolve an HTTP Basic `Authorization` header (password = the OPDS token) to a user id, or null. */
+export async function resolveOpdsBasic(authHeader?: string): Promise<string | null> {
+  if (!authHeader || !/^basic /i.test(authHeader)) return null;
+  let decoded = '';
+  try { decoded = Buffer.from(authHeader.slice(6).trim(), 'base64').toString('utf8'); } catch { return null; }
+  const pass = decoded.slice(decoded.indexOf(':') + 1);
+  if (!pass) return null;
+  const row = await one<{ user_id: string }>('SELECT user_id FROM opds_tokens WHERE token_hash = $1', [sha256(pass)]);
+  if (row) q('UPDATE opds_tokens SET last_seen = now() WHERE user_id = $1', [row.user_id]).catch(() => {});
+  return row?.user_id ?? null;
+}
+
 /** Issue a fresh opaque refresh token and persist its hash. Returns the raw token. */
 export async function issueRefreshToken(
   userId: string,

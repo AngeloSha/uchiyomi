@@ -19,6 +19,7 @@ import imageRoutes from './routes/images';
 import personalRoutes from './routes/personal';
 import downloadRoutes from './routes/downloads';
 import sourceRoutes from './routes/sources';
+import opdsRoutes from './routes/opds';
 
 async function main() {
   await migrate();
@@ -55,6 +56,7 @@ async function main() {
   await app.register(personalRoutes);
   await app.register(downloadRoutes);
   await app.register(sourceRoutes);
+  await app.register(opdsRoutes);
 
   app.setErrorHandler((err, req, reply) => {
     if (err instanceof KomgaError) {

@@ -9,18 +9,18 @@ const sans = Inter({ subsets: ['latin'], variable: '--font-sans', display: 'swap
 const brand = Unbounded({ subsets: ['latin'], variable: '--font-brand', weight: ['600', '700', '800'], display: 'swap' });
 
 export const metadata: Metadata = {
-  title: 'Yomi — your library, your way',
+  title: 'Koryomi — your library, your way',
   description: 'A cinematic, personal reader for your manga & manhwa.',
   manifest: '/manifest.webmanifest',
-  appleWebApp: { capable: true, statusBarStyle: 'black-translucent', title: 'Yomi' },
+  appleWebApp: { capable: true, statusBarStyle: 'black-translucent', title: 'Koryomi' },
   icons: { icon: '/icons/favicon.png', apple: '/icons/apple-touch-icon.png' },
   openGraph: {
-    title: 'Yomi',
+    title: 'Koryomi',
     description: 'A cinematic, personal reader for your manga & manhwa.',
     images: ['/art/og.jpg'],
     type: 'website',
   },
-  twitter: { card: 'summary_large_image', title: 'Yomi', images: ['/art/og.jpg'] },
+  twitter: { card: 'summary_large_image', title: 'Koryomi', images: ['/art/og.jpg'] },
 };
 
 export const viewport: Viewport = {

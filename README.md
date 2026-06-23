@@ -1,13 +1,13 @@
-# Yomi
+# Koryomi
 
 *The all-in-one **\*arr stack** for manga — discover, grab, monitor, and read, self-hosted in one PWA.*
 
 A self-hosted, installable (PWA) manga / manhwa reader with a true-black OLED interface and a vertical-scroll
 webtoon reader as the centerpiece. Point it at your own CBZ library and read on any device.
 
-![Yomi home](docs/hero.png)
+![Koryomi home](docs/hero.png)
 
-Yomi is a **bring-your-own-library reader** — like Komga / Kavita / Calibre-web, it reads comics *you* supply.
+Koryomi is a **bring-your-own-library reader** — like Komga / Kavita / Calibre-web, it reads comics *you* supply.
 It bundles **MangaDex** (the official public API) plus generic engines for the common manga-site families, so
 you can also add sources by pasting a site's URL — but it ships with **no specific sites baked in**; you add the
 ones you want.
@@ -19,10 +19,10 @@ ones you want.
 
 Self-hosting manga the usual way means a pile of services — an indexer, a grabber that watches for new
 releases, a download client, a Cloudflare solver, and a media server to read it all: four or five containers
-and a weekend of compose files. **Yomi folds the whole pipeline — discover → grab → monitor → serve → read —
+and a weekend of compose files. **Koryomi folds the whole pipeline — discover → grab → monitor → serve → read —
 into a single image.** Point it at your library, add sources by URL, and it does the rest.
 
-| The usual self-hosted stack | Yomi, built in |
+| The usual self-hosted stack | Koryomi, built in |
 | --- | --- |
 | **Prowlarr / Jackett** — indexers & search | Add a source by pasting its URL (engine auto-detected) + bundled MangaDex, all searchable in Discover |
 | **Sonarr / Radarr** — grab + watch for new releases | Add to library, then a scheduled updater auto-grabs new chapters (per-series, configurable interval) |
@@ -47,11 +47,11 @@ into a single image.** Point it at your library, add sources by URL, and it does
 
 ![Library](docs/library.png)
 
-## Why Yomi?
+## Why Koryomi?
 
 Most self-hosted manga tools make you pick a side. A **library server** (Komga, Kavita) reads files you supply
 but can't fetch new chapters and ships a fairly utilitarian reader. A **source app** (Tachiyomi / Mihon,
-Suwayomi) fetches chapters but is Android-only or wraps them in a basic web UI. Yomi is the rare one that does
+Suwayomi) fetches chapters but is Android-only or wraps them in a basic web UI. Koryomi is the rare one that does
 **both**, in a single app that's actually a pleasure to use:
 
 - **Server *and* sources in one.** Own your library *and* pull new chapters — no Komga-plus-Suwayomi-plus-a-
@@ -66,7 +66,7 @@ Suwayomi) fetches chapters but is Android-only or wraps them in a basic web UI. 
   session/device management, all behind a Jellyfin-style admin panel.
 - **Add a source by pasting a URL.** Auto-detect figures out the engine — no extension repos to wire up.
 
-| | Yomi | Komga / Kavita | Tachiyomi / Mihon | Suwayomi |
+| | Koryomi | Komga / Kavita | Tachiyomi / Mihon | Suwayomi |
 | --- | :---: | :---: | :---: | :---: |
 | Self-hosted, multi-user server | ✅ | ✅ | ❌ *(Android app)* | ✅ |
 | Fetches new chapters from sources | ✅ | ❌ *(you supply files)* | ✅ | ✅ |
@@ -77,10 +77,10 @@ Suwayomi) fetches chapters but is Android-only or wraps them in a basic web UI. 
 | Add a source by pasting a URL | ✅ | — | extensions | extension repos |
 
 **Honest caveats** (narrower than they look): Komga/Kavita are more mature for general library management, and
-Tachiyomi/Mihon list more individual sources. But Yomi reads **CBZ, CBR, and loose image folders** — it skips
-PDF/EPUB *on purpose* (those are ebook formats; Yomi is built for image-based manga) — and its **three engines
+Tachiyomi/Mihon list more individual sources. But Koryomi reads **CBZ, CBR, and loose image folders** — it skips
+PDF/EPUB *on purpose* (those are ebook formats; Koryomi is built for image-based manga) — and its **three engines
 each cover a whole *family* of sites** (most aggregators run Madara, MangaThemesia, or Manganato), so "add a
-source by URL" reaches far more sites than the engine count suggests. Yomi's real edge is the *combination* — a
+source by URL" reaches far more sites than the engine count suggests. Koryomi's real edge is the *combination* — a
 polished, installable, multi-user reader that also fetches — with webtoons as first-class.
 
 ## Architecture
@@ -146,7 +146,7 @@ services:
 
 ## Sources (optional)
 
-Yomi can fetch new chapters from external providers. It bundles a few **generic engines** — parsers for the
+Koryomi can fetch new chapters from external providers. It bundles a few **generic engines** — parsers for the
 common manga-site families (Madara / MangaThemesia / Manganato) — but **no specific sites**. Nothing fetches
 anything until *you* add a site:
 
@@ -164,7 +164,7 @@ SOURCES_PATH=/path/to/yomi-sources/dist     # compiled .js plugins, mounted read
 
 The reader scans `SOURCES_DIR` (`/sources`) at boot and registers every plugin it finds. Drop in or update a
 plugin and hit **Admin → Providers → Reload** (`POST /api/admin/sources/reload`) — no rebuild. With no sites
-added and no pack mounted, Yomi is just a clean reader for the library you already own.
+added and no pack mounted, Koryomi is just a clean reader for the library you already own.
 
 ## Configuration
 
@@ -182,17 +182,17 @@ Actively developed. On deck:
 
 - 🔔 **Push notifications** — get alerted the moment a followed series gets a new chapter.
 - 📥 **Import your follows** — bring an existing list (Tachiyomi/Mihon backup or MangaDex follows) in one step.
-- 📡 **OPDS feed** — browse & read Yomi from other reader apps (Panels, Chunky, …).
+- 📡 **OPDS feed** — browse & read Koryomi from other reader apps (Panels, Chunky, …).
 
 Also exploring: unified library-and-source search, AniList progress sync, and a first-run setup wizard.
 
 ## Support
 
-Yomi is free and open-source. If it's useful to you, you can help fund continued development:
+Koryomi is free and open-source. If it's useful to you, you can help fund continued development:
 
 **[☕ Buy me a coffee on Ko-fi →](https://ko-fi.com/angeloshaheen)**
 
-You'll also find a **♡ Sponsor** button at the top of this repo's GitHub page, and a **Support Yomi** card inside
+You'll also find a **♡ Sponsor** button at the top of this repo's GitHub page, and a **Support Koryomi** card inside
 the app under **Profile** and **Admin → Settings**.
 
 ## License

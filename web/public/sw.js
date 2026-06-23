@@ -1,4 +1,4 @@
-/* Yomi service worker — app-shell + runtime caching.
+/* Koryomi service worker — app-shell + runtime caching.
    Explicit offline chapter downloads live in IndexedDB (managed by the app);
    this SW handles the shell, static assets, and casual image/API re-reads. */
 const VERSION = 'v3';

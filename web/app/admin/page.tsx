@@ -237,7 +237,7 @@ function Providers() {
       {list.length === 0 ? (
         <div className="card p-6 text-center">
           <p className="text-sm font-semibold text-fog-100">No sources installed</p>
-          <p className="mx-auto mt-1 max-w-md text-xs text-fog-500">Mount a compiled source pack at the server&apos;s <code className="rounded bg-ink-800 px-1 py-0.5">SOURCES_DIR</code>, then hit Reload. With none installed, Yomi reads only the library you already own.</p>
+          <p className="mx-auto mt-1 max-w-md text-xs text-fog-500">Mount a compiled source pack at the server&apos;s <code className="rounded bg-ink-800 px-1 py-0.5">SOURCES_DIR</code>, then hit Reload. With none installed, Koryomi reads only the library you already own.</p>
         </div>
       ) : (
         <div className="card divide-y divide-ink-800/70 overflow-hidden">
@@ -352,8 +352,8 @@ function Settings() {
         <button onClick={() => save({ updaterHours: hours ?? data.updater_hours }, 'Saved')} className="btn-accent mt-2 w-full py-2 text-sm">Save interval</button>
       </div>
       <div className="card p-4">
-        <h3 className="mb-1 font-display text-base font-semibold">Support Yomi</h3>
-        <p className="mb-3 text-sm text-fog-400">Yomi is free &amp; open-source. If you find it useful, you can help fund development.</p>
+        <h3 className="mb-1 font-display text-base font-semibold">Support Koryomi</h3>
+        <p className="mb-3 text-sm text-fog-400">Koryomi is free &amp; open-source. If you find it useful, you can help fund development.</p>
         <a href="https://ko-fi.com/angeloshaheen" target="_blank" rel="noopener noreferrer" className="btn-accent flex w-full items-center justify-center gap-2 py-2 text-sm">☕ Buy me a coffee</a>
       </div>
     </div>

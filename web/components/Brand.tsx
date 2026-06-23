@@ -6,7 +6,7 @@ export function Wordmark({ className = '' }: { className?: string }) {
   );
 }
 
-// The Yomi logo mark — a kanji-for-"read" monogram (generated with Higgsfield), violet→magenta on the OLED brand.
+// The Koryomi logo mark — a kanji-for-"read" monogram (generated with Higgsfield), violet→magenta on the OLED brand.
 export function Mark({ size = 40, className = '' }: { size?: number; className?: string }) {
   return (
     // eslint-disable-next-line @next/next/no-img-element

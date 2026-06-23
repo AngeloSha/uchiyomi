@@ -239,7 +239,7 @@ CREATE TABLE IF NOT EXISTS source_health (
 -- server-wide settings (single row, id=1)
 CREATE TABLE IF NOT EXISTS server_settings (
   id                 int PRIMARY KEY DEFAULT 1 CHECK (id = 1),
-  server_name        text    NOT NULL DEFAULT 'Yomi',
+  server_name        text    NOT NULL DEFAULT 'Koryomi',
   allow_registration boolean NOT NULL DEFAULT false,
   updater_hours      int     NOT NULL DEFAULT 6,
   updated_at         timestamptz NOT NULL DEFAULT now()
@@ -255,6 +255,14 @@ CREATE TABLE IF NOT EXISTS series_overrides (
   cover      text,
   banner     text,
   updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+-- per-user token for OPDS clients (used as the HTTP Basic password); one token per user, regenerate overwrites
+CREATE TABLE IF NOT EXISTS opds_tokens (
+  user_id    uuid PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  token_hash text NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  last_seen  timestamptz
 );
 `;
 

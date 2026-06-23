@@ -1,4 +1,4 @@
-# Yomi — self-hosted OLED manga/manhwa reader (bring-your-own CBZ library)
+# Koryomi — self-hosted OLED manga/manhwa reader (bring-your-own CBZ library)
 # services: yomi-db (private Postgres) · yomi-bff (Fastify API) · yomi-web (static PWA) · yomi-flaresolverr (optional)
 services:
   yomi-db:

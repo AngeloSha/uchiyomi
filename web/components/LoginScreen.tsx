@@ -88,7 +88,7 @@ export function LoginScreen() {
           )}
           {errMsg && <p className="mt-2 text-sm text-red-400">{errMsg}</p>}
           <button type="submit" disabled={busy || (needTotp ? !code.trim() : !pw)} className="btn-accent mt-4 w-full disabled:opacity-50">
-            {busy ? (needTotp ? 'Verifying…' : 'Opening…') : needTotp ? 'Verify' : 'Open Yomi'}
+            {busy ? (needTotp ? 'Verifying…' : 'Opening…') : needTotp ? 'Verify' : 'Open Koryomi'}
           </button>
           {needTotp && (
             <button type="button" onClick={() => { setNeedTotp(false); setErrMsg(''); setCode(''); }} className="mt-3 w-full text-center text-xs text-fog-500 hover:text-fog-300">‹ Back</button>

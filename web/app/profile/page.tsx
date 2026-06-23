@@ -74,6 +74,14 @@ export default function ProfilePage() {
     try { await api('/api/settings', { method: 'PUT', json: { smartOffline: next } }); } catch {}
   };
 
+  const [opds, setOpds] = useState<{ token: string; url: string } | null>(null);
+  const [opdsBusy, setOpdsBusy] = useState(false);
+  const genOpds = async () => {
+    setOpdsBusy(true);
+    try { setOpds(await api<{ token: string; url: string }>('/api/opds/token', { method: 'POST' })); } catch {}
+    setOpdsBusy(false);
+  };
+
   const setGoal = async (n?: number) => {
     const goal = n ?? Number(prompt('Chapters per week goal', String(stats?.weeklyGoal || 10)) || 0);
     if (!goal || goal < 1) return;
@@ -119,7 +127,7 @@ export default function ProfilePage() {
         <Avatar avatar={av} size={48} />
         <div>
           <h1 className="font-display text-xl font-bold">{user?.displayName && user.displayName !== 'me' ? user.displayName : 'Your reading'}</h1>
-          <p className="text-xs text-fog-500">{stats?.last_read_at ? `Last read ${relativeTime(stats.last_read_at)}` : 'Welcome to Yomi'}</p>
+          <p className="text-xs text-fog-500">{stats?.last_read_at ? `Last read ${relativeTime(stats.last_read_at)}` : 'Welcome to Koryomi'}</p>
         </div>
       </header>
 
@@ -191,7 +199,7 @@ export default function ProfilePage() {
         )}
 
         <Link href="/wrapped" className="card mt-3 flex items-center justify-between p-4">
-          <span className="flex items-center gap-3 text-sm text-fog-200"><IcSparkle className="text-accent" width={20} height={20} /> Your Yomi Wrapped</span>
+          <span className="flex items-center gap-3 text-sm text-fog-200"><IcSparkle className="text-accent" width={20} height={20} /> Your Koryomi Wrapped</span>
           <IcChevronRight className="text-fog-500" width={18} height={18} />
         </Link>
       </section>
@@ -268,7 +276,7 @@ export default function ProfilePage() {
 
       {/* install */}
       <section className="px-5 pt-6">
-        <h2 className="mb-3 font-display text-base font-semibold">Install Yomi</h2>
+        <h2 className="mb-3 font-display text-base font-semibold">Install Koryomi</h2>
         {standalone ? (
           <div className="card flex items-center gap-3 p-4 text-sm text-fog-300">
             <IcCheck className="text-accent" /> Installed — running as an app.
@@ -323,6 +331,25 @@ export default function ProfilePage() {
         </div>
       </section>
 
+      {/* external readers (OPDS) */}
+      <section className="px-5 pt-6 lg:px-0">
+        <h2 className="mb-3 font-display text-base font-semibold">External readers (OPDS)</h2>
+        <div className="card p-4">
+          <p className="text-sm text-fog-100">Read Koryomi in another app</p>
+          <p className="mt-1 text-xs text-fog-500">Add Koryomi as an OPDS catalog in readers like Panels, Chunky, KOReader, or Moon+. Generate a personal link, then enter the URL + credentials below in your reader.</p>
+          {!opds ? (
+            <button onClick={genOpds} disabled={opdsBusy} className="btn-accent mt-3 w-full py-2 text-sm disabled:opacity-50">{opdsBusy ? 'Generating…' : 'Generate OPDS link'}</button>
+          ) : (
+            <div className="mt-3 space-y-2 text-xs">
+              <div><span className="text-fog-500">Catalog URL</span><div className="mt-0.5 break-all rounded-lg border border-ink-700 bg-ink-900/60 px-2 py-1.5 font-mono text-fog-100">{opds.url}</div></div>
+              <div><span className="text-fog-500">Username</span><div className="mt-0.5 rounded-lg border border-ink-700 bg-ink-900/60 px-2 py-1.5 font-mono text-fog-100">{user?.username || 'me'}</div></div>
+              <div><span className="text-fog-500">Password — copy now, shown once</span><div className="mt-0.5 break-all rounded-lg border border-ink-700 bg-ink-900/60 px-2 py-1.5 font-mono text-accent">{opds.token}</div></div>
+              <p className="text-[11px] text-fog-500">Generating again replaces the previous token.</p>
+            </div>
+          )}
+        </div>
+      </section>
+
       {/* support the project */}
       <section className="px-5 pt-6 lg:px-0">
         <a
@@ -334,7 +361,7 @@ export default function ProfilePage() {
           <span className="flex items-center gap-3">
             <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-accent-soft text-lg">☕</span>
             <span className="flex flex-col">
-              <span className="font-display text-sm font-semibold text-fog-100">Support Yomi</span>
+              <span className="font-display text-sm font-semibold text-fog-100">Support Koryomi</span>
               <span className="text-[12px] text-fog-400">Free &amp; open-source — buy me a coffee on Ko-fi</span>
             </span>
           </span>
@@ -346,7 +373,7 @@ export default function ProfilePage() {
       <section className="px-5 pb-10 pt-8">
         <button onClick={logout} className="btn-ghost w-full text-red-300">Sign out</button>
         <p className="mt-4 flex items-center justify-center gap-1 text-center text-[11px] text-fog-600">
-          <IcSparkle width={12} height={12} /> Yomi · personal reader for your Komga library
+          <IcSparkle width={12} height={12} /> Koryomi · personal reader for your Komga library
         </p>
       </section>
     </div>
