@@ -31,6 +31,8 @@ export interface Series {
   booksMetadata?: { summary?: string; genres?: string[]; tags?: string[] };
   color?: string | null;
   yomi?: YomiFlags;
+  artVersion?: number; // bumps when an admin edits the cover/banner → cache-busts the image URLs
+  overrides?: { title: string | null; summary: string | null; cover: string | null; banner: string | null };
 }
 
 export interface ReadProgress {

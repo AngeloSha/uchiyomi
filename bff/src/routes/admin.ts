@@ -11,8 +11,10 @@ import { authenticate, requireAdmin, userIdOf, revokeAllSessions, revokeRefreshT
 import { logAudit, recentAudit } from '../lib/audit';
 import { healthAll, setDisabled, clearBlock } from '../lib/sourceHealth';
 import { reloadAll, listSources, getSource, detectEngine } from '../lib/sources';
-import { readFile, writeFile, mkdir } from 'fs/promises';
+import { readFile, writeFile, mkdir, rm } from 'fs/promises';
 import { dirname } from 'path';
+import sharp from 'sharp';
+import { ART_DIR, artFile } from '../lib/seriesArt';
 
 export default async function adminRoutes(app: FastifyInstance) {
   app.addHook('preHandler', authenticate);
@@ -142,6 +144,63 @@ export default async function adminRoutes(app: FastifyInstance) {
     reloadAll();
     await logAudit('source.custom_remove', { userId: userIdOf(req), detail: { id }, req });
     return { ok: true, available: listSources().length };
+  });
+
+  // ---- admin-editable series metadata + art overrides (Jellyfin-style) ----
+  // Edit title/summary; an empty value clears the override (back to the source's own metadata).
+  app.put('/api/admin/series/:id/meta', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const b = z.object({ title: z.string().max(300).nullish(), summary: z.string().max(8000).nullish() }).safeParse(req.body);
+    if (!b.success) return reply.code(400).send({ error: 'bad_request' });
+    const norm = (v: string | null | undefined) => { const s = (v ?? '').trim(); return s ? s : null; };
+    await q(
+      `INSERT INTO series_overrides (series_id, title, summary, updated_at) VALUES ($1, $2, $3, now())
+       ON CONFLICT (series_id) DO UPDATE SET title = $2, summary = $3, updated_at = now()`,
+      [id, norm(b.data.title), norm(b.data.summary)],
+    );
+    await logAudit('series.meta_override', { userId: userIdOf(req), detail: { id }, req });
+    return { ok: true };
+  });
+
+  // Set/replace a cover or background: paste a URL, upload an image (base64 data URL), or reset to automatic.
+  app.put('/api/admin/series/:id/art', { bodyLimit: 12 * 1024 * 1024 }, async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const b = z.object({
+      kind: z.enum(['cover', 'banner']),
+      mode: z.enum(['url', 'upload', 'reset']),
+      url: z.string().url().optional(),
+      dataUrl: z.string().optional(),
+    }).safeParse(req.body);
+    if (!b.success) return reply.code(400).send({ error: 'bad_request' });
+    const { kind, mode } = b.data;
+    let value: string | null = null;
+    if (mode === 'url') {
+      if (!b.data.url) return reply.code(400).send({ error: 'no_url', message: 'Paste an image URL.' });
+      value = b.data.url;
+      await rm(artFile(id, kind), { force: true }).catch(() => {});
+    } else if (mode === 'upload') {
+      const m = /^data:image\/[a-z0-9.+-]+;base64,(.+)$/i.exec(b.data.dataUrl || '');
+      if (!m) return reply.code(400).send({ error: 'bad_image', message: 'Upload a valid image.' });
+      let buf: Buffer;
+      try {
+        const maxW = kind === 'banner' ? 1600 : 1000;
+        buf = await sharp(Buffer.from(m[1], 'base64')).rotate().resize({ width: maxW, withoutEnlargement: true }).webp({ quality: 86 }).toBuffer();
+      } catch { return reply.code(400).send({ error: 'bad_image', message: "That file isn't a readable image." }); }
+      await mkdir(ART_DIR, { recursive: true }).catch(() => {});
+      await writeFile(artFile(id, kind), buf);
+      value = 'upload';
+    } else {
+      await rm(artFile(id, kind), { force: true }).catch(() => {});
+      value = null;
+    }
+    const col = kind === 'cover' ? 'cover' : 'banner';
+    await q(
+      `INSERT INTO series_overrides (series_id, ${col}, updated_at) VALUES ($1, $2, now())
+       ON CONFLICT (series_id) DO UPDATE SET ${col} = $2, updated_at = now()`,
+      [id, value],
+    );
+    await logAudit('series.art_override', { userId: userIdOf(req), detail: { id, kind, mode }, req });
+    return { ok: true };
   });
 
   // ---- provider/source health control ----

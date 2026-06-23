@@ -264,7 +264,19 @@ export default async function catalogRoutes(app: FastifyInstance) {
        ON CONFLICT (user_id, series_id) DO UPDATE SET seen_books_count = EXCLUDED.seen_books_count, seen_at = now()`,
       [userIdOf(req), id, series.booksCount ?? 0],
     );
-    return (await enrichSeries(req, [series]))[0];
+    const out: any = (await enrichSeries(req, [series]))[0];
+    // apply admin metadata overrides (title/summary shown here; cover/banner are handled by the image server)
+    const ov = await one<{ title: string | null; summary: string | null; cover: string | null; banner: string | null; v: string }>(
+      'SELECT title, summary, cover, banner, EXTRACT(EPOCH FROM updated_at) * 1000 AS v FROM series_overrides WHERE series_id = $1',
+      [id],
+    );
+    if (ov) {
+      if (ov.title) { out.name = ov.title; if (out.metadata) out.metadata.title = ov.title; }
+      if (ov.summary != null) { if (out.metadata) out.metadata.summary = ov.summary; if (out.booksMetadata) out.booksMetadata.summary = ov.summary; }
+      out.artVersion = Math.floor(Number(ov.v)) || 0;
+      out.overrides = { title: ov.title, summary: ov.summary, cover: ov.cover, banner: ov.banner };
+    }
+    return out;
   });
 
   // Updates feed: favorited series that gained chapters since you last opened them.

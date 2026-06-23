@@ -5,9 +5,9 @@ import { genreBackdrop } from '@/lib/art';
 /** Series backdrop: the BFF composites a wide, blurred, darkened full-bleed ambient from the series art
  *  (AniList banner or portrait cover), so we just render it object-cover — fills the hero on any aspect,
  *  no empty bars, no floating poster. Genre art is the fallback. `className` positions the wrapper. */
-export function Backdrop({ seriesId, genres, className = '' }: { seriesId?: string; genres?: string[]; className?: string }) {
+export function Backdrop({ seriesId, genres, className = '', version }: { seriesId?: string; genres?: string[]; className?: string; version?: number }) {
   const fallback = genreBackdrop(genres);
-  const real = seriesId ? `/img/series/${encodeURIComponent(seriesId)}/backdrop` : fallback;
+  const real = seriesId ? `/img/series/${encodeURIComponent(seriesId)}/backdrop${version ? `?av=${version}` : ''}` : fallback;
   const [src, setSrc] = useState(real);
   useEffect(() => { setSrc(real); }, [real]);
   return (

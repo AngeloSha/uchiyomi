@@ -11,6 +11,7 @@ const schema = z.object({
   INITIAL_USER_PASSWORD_HASH_B64: z.string().min(1),
   PUBLIC_ORIGIN: z.string().url().default('http://localhost:3000'),
   CACHE_DIR: z.string().default('/cache'),
+  CONFIG_DIR: z.string().default('/config'),
   CACHE_MAX_BYTES: z.coerce.number().default(16 * 1024 * 1024 * 1024),
   ACCESS_TTL_SECONDS: z.coerce.number().default(60 * 15),
   REFRESH_TTL_DAYS: z.coerce.number().default(60),

@@ -73,7 +73,7 @@ export async function api<T = any>(path: string, opts: Opts = {}): Promise<T> {
 // ---- image URLs (authorized by the httpOnly yomi_img cookie) ----
 export const img = {
   // ?v bump = one-time cache-bust so clients pinned to the old immutable panel thumbnails refetch the real covers
-  seriesThumb: (id: string) => `/img/series/${encodeURIComponent(id)}/thumb?v=2`,
+  seriesThumb: (id: string, av?: number) => `/img/series/${encodeURIComponent(id)}/thumb?v=2${av ? `&av=${av}` : ''}`,
   bookThumb: (id: string) => `/img/books/${encodeURIComponent(id)}/thumb`,
   page: (bookId: string, n: number, w?: number) =>
     `/img/books/${encodeURIComponent(bookId)}/page/${n}${w ? `?w=${w}` : ''}`,

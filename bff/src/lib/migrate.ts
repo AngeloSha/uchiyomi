@@ -245,6 +245,17 @@ CREATE TABLE IF NOT EXISTS server_settings (
   updated_at         timestamptz NOT NULL DEFAULT now()
 );
 INSERT INTO server_settings (id) VALUES (1) ON CONFLICT (id) DO NOTHING;
+
+-- admin-editable per-series metadata + art overrides
+-- cover/banner: 'upload' = a file under <CONFIG_DIR>/series-art; an http(s) URL = pasted; null = use automatic art
+CREATE TABLE IF NOT EXISTS series_overrides (
+  series_id  text PRIMARY KEY,
+  title      text,
+  summary    text,
+  cover      text,
+  banner     text,
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
 `;
 
 export async function migrate(): Promise<void> {

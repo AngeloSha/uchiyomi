@@ -9,7 +9,9 @@ import { LIBRARY_ROOT, cbzPages, cbzEntry } from '../lib/library';
 import { cfSession } from '../lib/sources/flaresolverr';
 import { getSource } from '../lib/sources';
 import { join } from 'path';
+import { readFile } from 'fs/promises';
 import { q, one } from '../lib/db';
+import { artFile } from '../lib/seriesArt';
 
 async function fetchUpstream(path: string): Promise<Buffer> {
   const res = await komgaImage(path);
@@ -101,6 +103,18 @@ export default async function imageRoutes(app: FastifyInstance) {
   // Series cover: prefer the real cover art (AniList, cached in series_art.cover); fall back to the first
   // page of chapter 1. Distinct cache variants so it upgrades to the real cover once one is known.
   const serveLibSeriesThumb = async (req: FastifyRequest, reply: FastifyReply, id: string) => {
+    // admin override wins (uploaded file or pasted URL); variant carries updated_at so edits bust the cache
+    const ovr = await one<{ cover: string | null; v: string }>('SELECT cover, EXTRACT(EPOCH FROM updated_at) * 1000 AS v FROM series_overrides WHERE series_id = $1', [id]);
+    if (ovr?.cover) {
+      return serveImage(req, reply, `lib-sthumb:${id}:ov:${Math.floor(Number(ovr.v))}`, async () => {
+        let input: Buffer;
+        if (ovr.cover === 'upload') input = await readFile(artFile(id, 'cover'));
+        else { try { input = await fetchCoverImage(ovr.cover!); } catch { input = await firstPageInput(id); } }
+        storeColor(id, input);
+        const buffer = await sharp(input).resize({ width: 400, withoutEnlargement: true }).webp({ quality: 80 }).toBuffer();
+        return { buffer, contentType: 'image/webp' };
+      });
+    }
     const art = await one<{ cover: string | null; source_id: string | null }>(
       'SELECT a.cover, s.source_id FROM series_art a LEFT JOIN lib_series s ON s.id = a.series_id WHERE a.series_id = $1', [id]);
     if (art?.cover) {
@@ -210,6 +224,17 @@ export default async function imageRoutes(app: FastifyInstance) {
   // Looked up lazily on first view and cached in series_art, so newly-added series get art automatically.
   app.get('/img/series/:id/backdrop', async (req, reply) => {
     const { id } = req.params as { id: string };
+    // admin override wins (uploaded banner/cover or pasted URL)
+    const ovr = await one<{ banner: string | null; v: string }>('SELECT banner, EXTRACT(EPOCH FROM updated_at) * 1000 AS v FROM series_overrides WHERE series_id = $1', [id]);
+    if (ovr?.banner) {
+      return serveImage(req, reply, `artw5:${id}:ov:${Math.floor(Number(ovr.v))}`, async () => {
+        let input: Buffer;
+        if (ovr.banner === 'upload') input = await readFile(artFile(id, 'banner'));
+        else { try { input = await fetchCoverImage(ovr.banner!); } catch { input = await firstPageInput(id); } }
+        const buffer = await sharp(input).resize(1280, 820, { fit: 'cover' }).blur(22).modulate({ brightness: 0.82, saturation: 1.18 }).webp({ quality: 80 }).toBuffer();
+        return { buffer, contentType: 'image/webp' };
+      });
+    }
     let art = await one<{ banner: string | null; cover: string | null }>(
       'SELECT banner, cover FROM series_art WHERE series_id = $1',
       [id],

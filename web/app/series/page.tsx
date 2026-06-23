@@ -1,5 +1,5 @@
 'use client';
-import { Suspense, useEffect, useMemo, useState } from 'react';
+import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, img } from '@/lib/api';
@@ -10,7 +10,66 @@ import { applyCover, clearCover } from '@/lib/theme';
 import { Img, Backdrop, Rail, SectionTitle } from '@/components/ui';
 import { SeriesCard } from '@/components/cards';
 import { useToast } from '@/components/Toast';
+import { useAuth } from '@/lib/auth';
 import { IcChevronLeft, IcHeart, IcStar, IcPlay, IcDownload, IcCheck, IcTrash, IcSliders } from '@/components/icons';
+
+const fld = 'w-full rounded-lg border border-ink-700 bg-ink-900/60 px-3 py-2 text-sm text-fog-100 outline-none transition focus:border-accent/60';
+
+function ArtEditor({ label, kind, busy, onUpload, onSetUrl, onReset }: { label: string; kind: 'cover' | 'banner'; busy: boolean; onUpload: (k: 'cover' | 'banner', f: File) => void; onSetUrl: (k: 'cover' | 'banner', url: string) => void; onReset: (k: 'cover' | 'banner') => void }) {
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [url, setUrl] = useState('');
+  return (
+    <div className="mt-4 border-t border-ink-800 pt-3">
+      <p className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-fog-500">{label}</p>
+      <div className="flex flex-wrap items-center gap-2">
+        <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) onUpload(kind, f); e.currentTarget.value = ''; }} />
+        <button onClick={() => fileRef.current?.click()} disabled={busy} className="btn-ghost px-3 py-1.5 text-xs disabled:opacity-50">Upload image</button>
+        <button onClick={() => onReset(kind)} disabled={busy} className="chip text-xs disabled:opacity-50">Reset to auto</button>
+      </div>
+      <div className="mt-2 flex gap-2">
+        <input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="…or paste an image URL" autoCapitalize="none" className={`${fld} flex-1`} />
+        <button onClick={() => { onSetUrl(kind, url); setUrl(''); }} disabled={busy || !url.trim()} className="btn-accent px-3 text-xs disabled:opacity-50">Set</button>
+      </div>
+    </div>
+  );
+}
+
+function SeriesEditModal({ id, series, onClose, onSaved }: { id: string; series: Series; onClose: () => void; onSaved: () => void }) {
+  const toast = useToast();
+  const [title, setTitle] = useState(series.metadata?.title || series.name || '');
+  const [summary, setSummary] = useState(series.metadata?.summary || series.booksMetadata?.summary || '');
+  const [busy, setBusy] = useState(false);
+  const dataUrlOf = (f: File) => new Promise<string>((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result)); r.onerror = () => rej(new Error('read')); r.readAsDataURL(f); });
+  const putArt = async (kind: 'cover' | 'banner', body: Record<string, unknown>) => { await api(`/api/admin/series/${id}/art`, { method: 'PUT', json: { kind, ...body } }); onSaved(); };
+  const onUpload = async (kind: 'cover' | 'banner', f: File) => {
+    if (f.size > 11 * 1024 * 1024) { toast('Image too large (max ~11 MB)', 'error'); return; }
+    setBusy(true);
+    try { await putArt(kind, { mode: 'upload', dataUrl: await dataUrlOf(f) }); toast(`${kind === 'cover' ? 'Cover' : 'Background'} updated`, 'success'); }
+    catch { toast('Upload failed', 'error'); }
+    setBusy(false);
+  };
+  const onSetUrl = async (kind: 'cover' | 'banner', url: string) => { if (!url.trim()) return; setBusy(true); try { await putArt(kind, { mode: 'url', url: url.trim() }); toast('Updated', 'success'); } catch { toast('Failed — check the URL', 'error'); } setBusy(false); };
+  const onReset = async (kind: 'cover' | 'banner') => { setBusy(true); try { await putArt(kind, { mode: 'reset' }); toast('Reset to automatic', 'success'); } catch { toast('Failed', 'error'); } setBusy(false); };
+  const saveText = async () => { setBusy(true); try { await api(`/api/admin/series/${id}/meta`, { method: 'PUT', json: { title, summary } }); toast('Saved', 'success'); onSaved(); } catch { toast('Failed', 'error'); } setBusy(false); };
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-ink-950/70 p-4 backdrop-blur-sm" onClick={onClose}>
+      <div className="glass max-h-[88vh] w-full max-w-md overflow-y-auto rounded-2xl border border-ink-700 p-5" onClick={(e) => e.stopPropagation()}>
+        <div className="mb-3 flex items-start justify-between gap-3">
+          <h3 className="font-display text-lg font-semibold leading-tight">Edit series</h3>
+          <button onClick={onClose} className="shrink-0 text-fog-500 hover:text-fog-200">✕</button>
+        </div>
+        <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-fog-500">Title</label>
+        <input value={title} onChange={(e) => setTitle(e.target.value)} className={fld} />
+        <label className="mb-1 mt-3 block text-xs font-semibold uppercase tracking-wider text-fog-500">Description</label>
+        <textarea value={summary} onChange={(e) => setSummary(e.target.value)} rows={5} className={`${fld} resize-y`} />
+        <button onClick={saveText} disabled={busy} className="btn-accent mt-2 w-full py-2 text-sm disabled:opacity-50">Save title &amp; description</button>
+        <ArtEditor label="Cover" kind="cover" busy={busy} onUpload={onUpload} onSetUrl={onSetUrl} onReset={onReset} />
+        <ArtEditor label="Background" kind="banner" busy={busy} onUpload={onUpload} onSetUrl={onSetUrl} onReset={onReset} />
+        <p className="mt-4 text-[11px] leading-relaxed text-fog-500">Changes apply for everyone. “Reset to auto” restores the automatic source / AniList / first-page art.</p>
+      </div>
+    </div>
+  );
+}
 
 function StarRating({ value, onSet }: { value: number | null; onSet: (n: number) => void }) {
   return (
@@ -66,6 +125,8 @@ function SeriesInner() {
   const router = useRouter();
   const qc = useQueryClient();
   const toast = useToast();
+  const { isAdmin } = useAuth();
+  const [editing, setEditing] = useState(false);
   const [asc, setAsc] = useState(true);
   const [downloaded, setDownloaded] = useState<Set<string>>(new Set());
   const [showSummary, setShowSummary] = useState(false);
@@ -177,6 +238,12 @@ function SeriesInner() {
         <StarRating value={rating} onSet={setStars} />
         <span className="text-xs text-fog-500">{rating ? `${rating}/5` : 'Rate this'}</span>
       </div>
+      {isAdmin && (
+        <button onClick={() => setEditing(true)} className="mt-1 flex items-center justify-center gap-2 rounded-full border border-ink-700 py-2.5 text-sm text-fog-300">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9" /><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" /></svg>
+          Edit details
+        </button>
+      )}
     </div>
   );
 
@@ -230,7 +297,7 @@ function SeriesInner() {
 
       {/* banner — real art pulled from the internet (AniList), genre-banner fallback */}
       <div className="relative -mt-[58px] h-64 overflow-hidden lg:mt-0 lg:h-[22rem] lg:rounded-3xl">
-        {series && <Backdrop seriesId={id} genres={series.metadata?.genres} className="absolute inset-0" />}
+        {series && <Backdrop seriesId={id} genres={series.metadata?.genres} version={series.artVersion} className="absolute inset-0" />}
         <div className="absolute inset-0 bg-gradient-to-t from-ink-950 via-ink-950/65 to-ink-950/30" />
         <div className="pointer-events-none absolute inset-0" style={{ background: 'radial-gradient(85% 95% at 22% 0%, rgb(var(--cover, 124 92 255) / 0.32), transparent 62%)' }} />
       </div>
@@ -241,7 +308,7 @@ function SeriesInner() {
         <div className="-mt-20 lg:-mt-32 lg:sticky lg:top-20 lg:self-start">
           <div className="flex items-end gap-4 lg:block">
             <div className="h-44 w-32 shrink-0 overflow-hidden rounded-2xl border border-ink-600 shadow-lift lg:h-auto lg:w-full">
-              {series && <Img src={img.seriesThumb(id)} alt={series.name} className="aspect-[2/3] h-full w-full" />}
+              {series && <Img src={img.seriesThumb(id, series.artVersion)} alt={series.name} className="aspect-[2/3] h-full w-full" />}
             </div>
             {/* title beside cover on mobile */}
             <div className="min-w-0 pb-1 lg:hidden">
@@ -263,6 +330,8 @@ function SeriesInner() {
           {Chapters}
         </div>
       </div>
+
+      {editing && series && <SeriesEditModal id={id} series={series} onClose={() => setEditing(false)} onSaved={() => { qc.invalidateQueries({ queryKey: ['series', id] }); }} />}
 
       {(similar?.content?.length ?? 0) > 0 && (
         <section className="mt-10">
