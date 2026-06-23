@@ -78,6 +78,8 @@ export async function downloadChapter(input: DownloadInput): Promise<{ file: str
     try {
       const r = await fetch(u, { headers, signal: AbortSignal.timeout(45000) });
       if (!r.ok) { if (r.status >= 400) worst = Math.max(worst, r.status); continue; }
+      const ct = (r.headers.get('content-type') || '').toLowerCase();
+      if (/^text\/|html|json/.test(ct)) { worst = Math.max(worst, 415); continue; } // hotlink/error page, not an image — don't pack garbage
       const buf = Buffer.from(await r.arrayBuffer());
       if (buf.length < 256) continue; // skip blocked/empty
       const ext = ((u.split('?')[0].split('.').pop() || 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '') || 'jpg').slice(0, 4);

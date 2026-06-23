@@ -87,6 +87,16 @@ export default async function imageRoutes(app: FastifyInstance) {
       .then((hex) => q(`INSERT INTO series_colors (series_id, color) VALUES ($1,$2)
         ON CONFLICT (series_id) DO UPDATE SET color=EXCLUDED.color, updated_at=now()`, [id, hex]))
       .catch(() => {});
+  // Bytes of a series' first downloaded page — the universal fallback when a remote cover/backdrop URL can't be
+  // fetched (hotlink-protected CDN, dead link, timeout, unparsed cover). Guarantees art for any downloaded series.
+  const firstPageInput = async (id: string): Promise<Buffer> => {
+    const s = await one<{ cover_book_id: string }>('SELECT cover_book_id FROM lib_series WHERE id = $1', [id]);
+    const abs = s?.cover_book_id ? await bookFileAbs(s.cover_book_id) : null;
+    if (!abs) throw Object.assign(new Error('no cover'), { statusCode: 404 });
+    const pages = await cbzPages(abs);
+    if (!pages[0]) throw Object.assign(new Error('empty'), { statusCode: 404 });
+    return cbzEntry(abs, pages[0]);
+  };
 
   // Series cover: prefer the real cover art (AniList, cached in series_art.cover); fall back to the first
   // page of chapter 1. Distinct cache variants so it upgrades to the real cover once one is known.
@@ -95,19 +105,17 @@ export default async function imageRoutes(app: FastifyInstance) {
       'SELECT a.cover, s.source_id FROM series_art a LEFT JOIN lib_series s ON s.id = a.series_id WHERE a.series_id = $1', [id]);
     if (art?.cover) {
       return serveImage(req, reply, `lib-sthumb:${id}:c`, async () => {
-        const input = await fetchCoverImage(art.cover!, art.source_id || undefined); // pass source -> correct Referer for hotlink-protected cover CDNs
+        // remote cover first; on ANY failure (hotlink CDN, dead link, timeout) fall back to the first page
+        let input: Buffer;
+        try { input = await fetchCoverImage(art.cover!, art.source_id || undefined); }
+        catch { input = await firstPageInput(id); }
         storeColor(id, input);
         const buffer = await sharp(input).resize({ width: 400, withoutEnlargement: true }).webp({ quality: 80 }).toBuffer();
         return { buffer, contentType: 'image/webp' };
       });
     }
     return serveImage(req, reply, `lib-sthumb:${id}:p`, async () => {
-      const s = await one<{ cover_book_id: string }>('SELECT cover_book_id FROM lib_series WHERE id = $1', [id]);
-      const abs = s?.cover_book_id ? await bookFileAbs(s.cover_book_id) : null;
-      if (!abs) throw Object.assign(new Error('no cover'), { statusCode: 404 });
-      const pages = await cbzPages(abs);
-      if (!pages[0]) throw Object.assign(new Error('empty'), { statusCode: 404 });
-      const input = await cbzEntry(abs, pages[0]);
+      const input = await firstPageInput(id);
       storeColor(id, input);
       const buffer = await sharp(input).resize({ width: 400, withoutEnlargement: true }).webp({ quality: 72 }).toBuffer();
       return { buffer, contentType: 'image/webp' };
@@ -226,14 +234,20 @@ export default async function imageRoutes(app: FastifyInstance) {
       }
     }
     const url = art.banner || art.cover;
-    if (!url) return reply.code(404).send({ error: 'no_art' });
     // artw4 = a wide, full-bleed, blurred + darkened ambient backdrop composited from whatever art we have
     // (banner or portrait cover). A short-wide banner can't fill a near-square mobile hero sharply, so we
     // treat all art the same → consistent, always full-bleed (no empty bars, no floating poster), crop hidden.
-    const variant = `artw5:${id}:${art.banner ? 'b' : 'c'}`;
+    const variant = url ? `artw5:${id}:${art.banner ? 'b' : 'c'}` : `artw5:${id}:p`;
     const srcRow = await one<{ source_id: string | null }>('SELECT source_id FROM lib_series WHERE id = $1', [id]);
     return serveImage(req, reply, variant, async () => {
-      const input = await fetchCoverImage(url, srcRow?.source_id || undefined); // browser headers + source Referer for hotlink-protected CDNs
+      // remote art (AniList banner / source cover) first; fall back to the first downloaded page so the hero is never empty
+      let input: Buffer;
+      try {
+        if (!url) throw new Error('no remote art');
+        input = await fetchCoverImage(url, srcRow?.source_id || undefined);
+      } catch {
+        input = await firstPageInput(id);
+      }
       const buffer = await sharp(input)
         .resize(1280, 820, { fit: 'cover' })
         .blur(22)
