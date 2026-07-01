@@ -12,23 +12,25 @@ Everything you can do in Koryomi, screen by screen. For install/configuration se
 - [8. The admin panel](#8-the-admin-panel)
 - [9. Security: 2FA, sessions, password](#9-security-2fa-sessions-password)
 - [10. Install as an app & offline](#10-install-as-an-app--offline)
+- [11. Troubleshooting & FAQ](#11-troubleshooting--faq)
 
 ---
 
 ## 1. First run & setup
 
 ```bash
-cp .env.example .env
-# set your library path in .env:  LIBRARY_PATH=/path/to/your/manga   (read-only)
-bash scripts/setup.sh        # generates secrets + your login password, brings the stack up
+docker compose up -d         # no config needed — secrets are generated automatically
 ```
 
-`setup.sh` walks you through choosing the **admin password**, generates the DB/JWT secrets, fixes volume
-ownership, and starts the four containers (`yomi-web`, `yomi-bff`, `yomi-db`, `yomi-flaresolverr`). Your library
-on disk should be laid out as `<series>/<chapter>`, where each chapter is a `.cbz`, a `.cbr`, or a folder of
-images (an archive may carry a `ComicInfo.xml` for metadata).
+Open the app at your `PUBLIC_ORIGIN` (e.g. `http://localhost:3000`) and **create your admin account in the
+browser** on first run (the first account created becomes the server admin). To read an existing collection,
+point `LIBRARY_PATH` at it first (`cp .env.example .env`, set `LIBRARY_PATH=/path/to/your/manga`, then
+`docker compose up -d`). Your library on disk should be laid out as `<series>/<chapter>`, where each chapter is a
+`.cbz`, a `.cbr`, or a folder of images (an archive may carry a `ComicInfo.xml` for metadata).
 
-Open the app at your `PUBLIC_ORIGIN` (e.g. `http://localhost:3000`).
+Prefer a CLI-seeded admin? Run `bash scripts/setup.sh` instead — it generates the secrets, creates the admin from
+a password you type, fixes volume ownership, and starts the four containers (`yomi-web`, `yomi-bff`, `yomi-db`,
+`yomi-flaresolverr`).
 
 ---
 
@@ -215,6 +217,31 @@ standalone, full-screen app icon.
 **Offline:** favorite a series (or use **Download all** / a chapter's ⬇), and those chapters are stored on the
 device for reading with no connection. The **Downloads** screen shows what's saved and a **Sync now** button;
 with smart-offline on, your favorites' next unread chapters auto-download while you're online.
+
+---
+
+## 11. Troubleshooting & FAQ
+
+**The app loads but my library is empty.** Point `LIBRARY_PATH` at your manga and restart: it mounts read-only at
+`/library` and should be laid out as `<series>/<chapter>`. New or changed files are picked up by the scheduled
+scan; you can also force a rescan from the admin panel, or restart the stack.
+
+**I never set an admin password / can't sign in.** If no users exist yet, just open the app and the first-run
+screen lets you create the admin. If an admin already exists, reset the password under **Profile → Security**.
+
+**A source/site won't add.** Paste the site's **base URL** (e.g. `https://example.com`), not a series page.
+Koryomi auto-detects the engine (Madara, MangaThemesia, Manganato); Cloudflare-protected sites are handled
+automatically by the bundled FlareSolverr. A ⛔/⚠ badge on a source means it's temporarily blocked or
+rate-limited — wait a bit, or try another source.
+
+**Behind a reverse proxy, login/cookies don't stick.** Set `PUBLIC_ORIGIN` to the exact public URL you use (e.g.
+`https://manga.example.com`) so cookies and CORS match, and serve it over HTTPS.
+
+**"Install app" / Add to Home Screen isn't offered.** PWAs need a secure context: serve Koryomi over HTTPS (or
+`http://localhost`). On iOS, use Safari → Share → Add to Home Screen.
+
+**I lost my 2FA device.** Enter one of the recovery codes (shown when you enabled 2FA) on the login screen instead
+of the 6-digit code. An admin can also disable 2FA for a member from the admin Members panel.
 
 ---
 

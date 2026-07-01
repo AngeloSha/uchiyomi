@@ -290,9 +290,10 @@ export async function migrate(): Promise<void> {
     client.release();
   }
 
-  // Seed the admin from the env-provided argon2 hash (plaintext never stored).
+  // Seed the admin from the OPTIONAL env-provided argon2 hash (plaintext never stored). If no hash is set, the
+  // users table is left empty and the first-run web setup (POST /api/setup) creates the admin instead.
   const existing = await one<{ id: string }>('SELECT id FROM users LIMIT 1');
-  if (!existing) {
+  if (!existing && env.initialUserPasswordHash) {
     const row = await one<{ id: string }>(
       `INSERT INTO users (display_name, username, role, password_hash, auth_kind)
        VALUES ('admin', 'admin', 'admin', $1, 'password') RETURNING id`,
@@ -305,7 +306,7 @@ export async function migrate(): Promise<void> {
         [row.id],
       );
     }
-  } else {
+  } else if (existing) {
     // pre-existing single user -> promote it to admin
     await pool.query(
       `UPDATE users SET role='admin', username=COALESCE(username,'admin')

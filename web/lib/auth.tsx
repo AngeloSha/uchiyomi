@@ -21,6 +21,7 @@ interface AuthCtx {
   user: User | null;
   isAdmin: boolean;
   login: (username: string, password: string, code?: string) => Promise<{ ok: boolean; totp?: boolean; error?: string }>;
+  firstRunSetup: (username: string, password: string) => Promise<{ ok: boolean; error?: string }>;
   logout: () => Promise<void>;
   setSettings: (partial: Record<string, any>) => void;
   setAvatar: (avatar: Avatar) => void;
@@ -96,6 +97,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  // First-run setup: create the very first admin (when the server has no users), then log straight in.
+  const firstRunSetup = async (username: string, password: string): Promise<{ ok: boolean; error?: string }> => {
+    try {
+      const res = await api<{ accessToken: string; user: User }>('/api/setup', { json: { username, password } });
+      setAccessToken(res.accessToken);
+      setUser(res.user);
+      applyAccent(res.user.settings);
+      setStatus('authed');
+      return { ok: true };
+    } catch (e: any) {
+      let body: any = {};
+      try { body = JSON.parse(e?.body || '{}'); } catch {}
+      return { ok: false, error: body.message || 'Setup failed — please try again.' };
+    }
+  };
+
   const logout = async () => {
     try {
       await api('/auth/logout', { method: 'POST' });
@@ -113,7 +130,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const setAvatar = (avatar: Avatar) => setUser((u) => (u ? { ...u, avatar } : u));
 
   return (
-    <Ctx.Provider value={{ status, user, isAdmin: user?.role === 'admin', login, logout, setSettings, setAvatar }}>
+    <Ctx.Provider value={{ status, user, isAdmin: user?.role === 'admin', login, firstRunSetup, logout, setSettings, setAvatar }}>
       {children}
     </Ctx.Provider>
   );

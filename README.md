@@ -7,7 +7,7 @@
 A self-hosted, installable (PWA) manga / manhwa reader with a true-black OLED interface and a vertical-scroll
 webtoon reader as the centerpiece. Point it at your own CBZ library and read on any device.
 
-![Koryomi home](docs/hero.png)
+![Koryomi — self-hosted manga reader](docs/koryomi-demo.gif)
 
 Koryomi is a **bring-your-own-library reader**. Like Komga / Kavita / Calibre-web, it reads comics *you* supply.
 It bundles **MangaDex** (the official public API) plus generic engines for the common manga-site families, so
@@ -103,14 +103,12 @@ Everything else runs in containers: no Node, no database, nothing to install on 
 ```bash
 git clone https://github.com/AngeloSha/koryomi.git
 cd koryomi
-cp .env.example .env
-# edit .env and point LIBRARY_PATH at your library (mounted read-only), e.g.
-#   LIBRARY_PATH=/path/to/your/manga
-bash scripts/setup.sh        # generates DB/JWT secrets + your admin password, fixes volume perms, starts the stack
+docker compose up -d         # no config needed — secrets are generated automatically
 ```
 
-When it finishes, open **http://localhost:3000**, log in with the admin account you just created, and your
-library appears. `setup.sh` starts four containers:
+Then open **http://localhost:3000** and **create your admin account right in the browser** on first run. To read
+your existing library, point `LIBRARY_PATH` at it first: `cp .env.example .env`, set
+`LIBRARY_PATH=/path/to/your/manga`, then `docker compose up -d`. It runs four containers:
 
 | Container | Role |
 |---|---|
@@ -119,10 +117,10 @@ library appears. `setup.sh` starts four containers:
 | `yomi-db` | private Postgres (never exposed) |
 | `yomi-flaresolverr` | Cloudflare solver — **started automatically**; sources that need it use it with no config |
 
-Prefer to wire it up by hand? After editing `.env`:
+Prefer a CLI-seeded admin instead of the browser setup step? Run `bash scripts/setup.sh` (it generates the
+secrets, creates the admin from a password you type, fixes volume perms, and starts the stack). Either way:
 
 ```bash
-docker compose up -d             # build + start everything; app at http://localhost:3000
 docker compose logs -f yomi-bff  # watch it boot
 ```
 

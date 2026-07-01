@@ -78,6 +78,32 @@ async function userPayload(userId: string) {
 }
 
 export default async function authRoutes(app: FastifyInstance) {
+  // ---- first-run setup: create the very first admin from the browser, no env secret needed ----
+  app.get('/api/setup/status', async () => {
+    const c = await one<{ c: number }>('SELECT count(*)::int AS c FROM users');
+    return { needsSetup: (c?.c ?? 0) === 0 };
+  });
+
+  app.post('/api/setup', { config: { rateLimit: { max: 5, timeWindow: '10 minutes' } } }, async (req, reply) => {
+    const b = z.object({ username: z.string().min(2).max(64).regex(/^[a-zA-Z0-9._-]+$/), password: z.string() }).safeParse(req.body);
+    if (!b.success) return reply.code(400).send({ error: 'bad_request', message: 'Username: letters, numbers, . _ - (2–64 chars).' });
+    // once any user exists, setup is closed forever
+    if (await one('SELECT id FROM users LIMIT 1')) return reply.code(403).send({ error: 'already_configured', message: 'This server is already set up.' });
+    const pwErr = passwordError(b.data.password);
+    if (pwErr) return reply.code(400).send({ error: 'weak_password', message: pwErr });
+    const row = await one<{ id: string }>(
+      `INSERT INTO users (display_name, username, role, password_hash, auth_kind) VALUES ($1, $2, 'admin', $3, 'password') RETURNING id`,
+      [b.data.username, b.data.username, await hash(b.data.password)],
+    );
+    if (!row) return reply.code(500).send({ error: 'setup_failed' });
+    await q(`INSERT INTO app_settings (user_id, data) VALUES ($1, '{}'::jsonb) ON CONFLICT (user_id) DO NOTHING`, [row.id]);
+    await logAudit('setup.complete', { userId: row.id, username: b.data.username, req });
+    const refresh = await issueRefreshToken(row.id, { ip: clientIp(req), userAgent: (req.headers['user-agent'] as string) || null });
+    reply.setCookie(REFRESH_COOKIE, refresh, cookieOptions());
+    setImgCookie(app, reply, row.id);
+    return reply.send({ ...signAccess(app, row.id, 'admin'), user: await userPayload(row.id) });
+  });
+
   app.post('/auth/login', { config: { rateLimit: { max: 10, timeWindow: '5 minutes' } } }, async (req, reply) => {
     const parsed = loginBody.safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ error: 'bad_request' });

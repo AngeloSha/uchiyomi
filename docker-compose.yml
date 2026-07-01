@@ -8,7 +8,7 @@ services:
     environment:
       POSTGRES_DB: yomi
       POSTGRES_USER: yomi
-      POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD required}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-koryomi}   # internal-only DB (no published port); override in .env for extra safety
     volumes:
       - yomi_pgdata:/var/lib/postgresql/data
     networks:
@@ -31,11 +31,11 @@ services:
     environment:
       NODE_ENV: production
       PORT: "3000"
-      DATABASE_URL: postgres://yomi:${DB_PASSWORD}@yomi-db:5432/yomi
+      DATABASE_URL: postgres://yomi:${DB_PASSWORD:-koryomi}@yomi-db:5432/yomi
       KOMGA_BASE_URL: ${KOMGA_BASE_URL:-http://komga:25600}
       KOMGA_API_KEY: ${KOMGA_API_KEY:-}        # only used when LIBRARY_BACKEND=komga
-      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET required}
-      INITIAL_USER_PASSWORD_HASH_B64: ${INITIAL_USER_PASSWORD_HASH_B64:?run scripts/setup.sh}
+      JWT_SECRET: ${JWT_SECRET:-}                                 # optional: auto-generated + persisted to /config if empty
+      INITIAL_USER_PASSWORD_HASH_B64: ${INITIAL_USER_PASSWORD_HASH_B64:-}   # optional: first-run web setup creates the admin
       PUBLIC_ORIGIN: ${PUBLIC_ORIGIN:-http://localhost:3000}
       CACHE_DIR: /cache
       CACHE_MAX_BYTES: "16106127360"   # 15 GiB image cache cap
