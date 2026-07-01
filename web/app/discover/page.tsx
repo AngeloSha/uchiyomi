@@ -9,6 +9,7 @@ interface SourceResult { sourceId: string; source: string; title: string; coverU
 interface Job { folder: string; title: string; total: number; done: number; status: string }
 interface Trending { title: string; cover: string | null; description: string; genres: string[]; score: number | null; chapters: number | null; status: string | null }
 interface Provider { source: string; name: string; sourceId: string; title: string; coverUrl?: string }
+interface SearchGroup { title: string; coverUrl?: string; inLibrary?: boolean; providers: Provider[] }
 interface Detail { source: string; sourceId: string; title: string; summary: string; coverUrl: string | null; genres: string[]; status: string; count: number; first: number | null; last: number | null }
 interface AddModal { title: string; fallbackDesc?: string; providers?: Provider[]; picked?: Provider; detail?: Detail; loading: boolean; count: number; autoUpdate: boolean; adding: boolean; dup?: string }
 
@@ -33,6 +34,7 @@ export default function DiscoverPage() {
   const [source, setSource] = useState('mangadex');
   const [q, setQ] = useState('');
   const [results, setResults] = useState<SourceResult[]>([]);
+  const [searchGroups, setSearchGroups] = useState<SearchGroup[]>([]);
   const [searching, setSearching] = useState(false);
   const [mode, setMode] = useState<'search' | 'latest' | null>(null);
   const [modal, setModal] = useState<AddModal | null>(null);
@@ -44,10 +46,12 @@ export default function DiscoverPage() {
     if (!term) return;
     setSearching(true);
     setResults([]);
+    setSearchGroups([]);
     setMode('search');
     try {
-      const r = await api<{ content: SourceResult[] }>(`/api/sources/search?source=${source}&q=${encodeURIComponent(term)}`);
-      setResults(r.content);
+      // search every source at once; each card carries all providers that have the title
+      const r = await api<{ content: SearchGroup[] }>(`/api/sources/search-all?q=${encodeURIComponent(term)}`);
+      setSearchGroups(r.content);
     } catch { toast('Search failed', 'error'); } finally { setSearching(false); }
   };
 
@@ -55,6 +59,7 @@ export default function DiscoverPage() {
   const browseLatest = async () => {
     setSearching(true);
     setResults([]);
+    setSearchGroups([]);
     setMode('latest');
     setQ('');
     try {
@@ -81,11 +86,23 @@ export default function DiscoverPage() {
     } catch { setModal((m) => (m ? { ...m, providers: [], loading: false } : m)); }
   };
 
-  // Search result → straight to the detail/options step (source already chosen)
+  // Single-provider result (a rail / the Newest grid) → straight to the detail/options step.
   const openResult = (r: SourceResult) => {
     const pk: Provider = { source: r.source, name: '', sourceId: r.sourceId, title: r.title, coverUrl: r.coverUrl };
     setModal({ title: r.title, picked: pk, loading: true, count: 0, autoUpdate: true, adding: false });
     loadDetail(pk);
+  };
+
+  // Cross-source search hit → choose which source to add from (or skip the chooser if only one has it).
+  const openSearchGroup = (g: SearchGroup) => {
+    if (g.inLibrary) return;
+    if (g.providers.length === 1) {
+      const pk = g.providers[0];
+      setModal({ title: g.title, picked: pk, loading: true, count: 0, autoUpdate: true, adding: false });
+      loadDetail(pk);
+    } else {
+      setModal({ title: g.title, providers: g.providers, loading: false, count: 0, autoUpdate: true, adding: false });
+    }
   };
 
   const pickProvider = (p: Provider) => { setModal((m) => (m ? { ...m, picked: p, loading: true } : m)); loadDetail(p); };
@@ -131,21 +148,26 @@ export default function DiscoverPage() {
             </p>
           </div>
         ) : (
-          <form onSubmit={search} className="flex flex-wrap gap-2">
-            <select value={source} onChange={(e) => setSource(e.target.value)} className="rounded-xl border border-ink-700 bg-ink-850 px-3 py-2.5 text-sm text-fog-100 outline-none focus:border-accent">
-              {(sources?.content || []).map((s) => <option key={s.id} value={s.id}>{s.name}{s.status === 'blocked' ? ' ⛔ blocked' : s.status === 'rate_limited' ? ' ⚠ rate-limited' : s.status === 'disabled' ? ' (off)' : ''}</option>)}
-            </select>
-            <div className="flex min-w-[180px] flex-1 items-center gap-2 rounded-xl border border-ink-700 bg-ink-850 px-3 focus-within:border-accent">
-              <IcSearch width={18} height={18} className="text-fog-500" />
-              <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search a title…" className="w-full bg-transparent py-2.5 text-sm text-fog-50 outline-none placeholder:text-fog-500" />
+          <div className="space-y-2.5">
+            <form onSubmit={search} className="flex gap-2">
+              <div className="flex min-w-[180px] flex-1 items-center gap-2 rounded-xl border border-ink-700 bg-ink-850 px-3 focus-within:border-accent">
+                <IcSearch width={18} height={18} className="text-fog-500" />
+                <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search all sources…" className="w-full bg-transparent py-2.5 text-sm text-fog-50 outline-none placeholder:text-fog-500" />
+              </div>
+              <button className="btn-accent px-6">Search</button>
+            </form>
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-xs text-fog-500">Browse newest from</span>
+              <select value={source} onChange={(e) => setSource(e.target.value)} className="rounded-xl border border-ink-700 bg-ink-850 px-3 py-2 text-sm text-fog-100 outline-none focus:border-accent">
+                {(sources?.content || []).map((s) => <option key={s.id} value={s.id}>{s.name}{s.status === 'blocked' ? ' ⛔ blocked' : s.status === 'rate_limited' ? ' ⚠ rate-limited' : s.status === 'disabled' ? ' (off)' : ''}</option>)}
+              </select>
+              {selectedSource?.latest && (
+                <button type="button" onClick={browseLatest} className="rounded-xl border border-ink-700 bg-ink-850 px-4 py-2 text-sm font-medium text-fog-100 transition hover:border-accent">
+                  ✦ Newest
+                </button>
+              )}
             </div>
-            <button className="btn-accent px-6">Search</button>
-            {selectedSource?.latest && (
-              <button type="button" onClick={browseLatest} className="rounded-xl border border-ink-700 bg-ink-850 px-4 py-2.5 text-sm font-medium text-fog-100 transition hover:border-accent">
-                ✦ Newest
-              </button>
-            )}
-          </form>
+          </div>
         )}
 
         {activeJobs.length > 0 && (
@@ -165,8 +187,8 @@ export default function DiscoverPage() {
           </div>
         )}
 
-        {/* Trending recommendations — shown until the user runs a search or browses newest */}
-        {mode !== 'latest' && !searching && results.length === 0 && recs.length > 0 && (
+        {/* Trending recommendations — shown on the Discover landing (before any search / newest browse) */}
+        {mode === null && !searching && recs.length > 0 && (
           <section className="mt-6">
             <div className="mb-3 flex items-center gap-2">
               <IcSparkle width={18} height={18} className="text-accent" />
@@ -202,7 +224,7 @@ export default function DiscoverPage() {
         )}
 
         {/* Per-provider "latest" rails — browse each source's newest releases (like a Tachiyomi extension) */}
-        {mode !== 'latest' && !searching && results.length === 0 &&
+        {mode === null && !searching &&
           (sources?.content || []).filter((s) => s.latest && s.status !== 'disabled').map((s) => (
             <ProviderRail key={s.id} s={s} onOpen={openResult} />
           ))}
@@ -213,9 +235,15 @@ export default function DiscoverPage() {
             <h2 className="font-display text-lg font-semibold">Newest on {sourceName}</h2>
           </div>
         )}
+        {mode === 'search' && (searching || searchGroups.length > 0) && (
+          <div className="mb-1 mt-6 flex items-center gap-2">
+            <IcSearch width={18} height={18} className="text-accent" />
+            <h2 className="font-display text-lg font-semibold">Results across your sources</h2>
+          </div>
+        )}
         <div className="mt-5 grid grid-cols-3 gap-x-3 gap-y-5 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-7 xl:grid-cols-8 2xl:grid-cols-9">
           {searching && Array.from({ length: 12 }).map((_, i) => <div key={i} className="skeleton aspect-[2/3] rounded-2xl" />)}
-          {!searching && results.map((r) => (
+          {!searching && mode === 'latest' && results.map((r) => (
             <div key={r.sourceId} className="group">
               <div className={`relative aspect-[2/3] overflow-hidden rounded-2xl border border-ink-700/60 bg-ink-800 ${r.inLibrary ? 'opacity-55' : ''}`}>
                 {r.coverUrl ? (
@@ -231,12 +259,32 @@ export default function DiscoverPage() {
               <p className="mt-1.5 line-clamp-2 text-xs text-fog-200">{r.title}</p>
             </div>
           ))}
+          {!searching && mode === 'search' && searchGroups.map((g) => (
+            <div key={g.title} className="group">
+              <div className={`relative aspect-[2/3] overflow-hidden rounded-2xl border border-ink-700/60 bg-ink-800 ${g.inLibrary ? 'opacity-55' : ''}`}>
+                {g.coverUrl ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={cover(g.providers[0]?.source, g.coverUrl)} alt={g.title} loading="lazy" className="h-full w-full object-cover" />
+                ) : <div className="grid h-full place-items-center text-ink-500"><IcSparkle width={28} height={28} /></div>}
+                {g.providers.length > 1 && !g.inLibrary && (
+                  <span className="absolute right-1.5 top-1.5 rounded-md bg-ink-950/80 px-1.5 py-0.5 text-[10px] font-semibold text-fog-200 backdrop-blur">{g.providers.length} sources</span>
+                )}
+                {g.inLibrary ? (
+                  <span className="absolute inset-x-0 bottom-0 bg-emerald-600/85 py-2 text-center text-xs font-semibold text-white backdrop-blur">✓ In library</span>
+                ) : (
+                  <button onClick={() => openSearchGroup(g)} className="absolute inset-x-0 bottom-0 bg-accent/90 py-2 text-xs font-semibold text-white opacity-0 backdrop-blur transition group-hover:opacity-100">+ Add to library</button>
+                )}
+              </div>
+              <p className="mt-1.5 line-clamp-2 text-xs text-fog-200">{g.title}</p>
+            </div>
+          ))}
         </div>
 
-        {!searching && results.length === 0 && (q || mode === 'latest') && (
-          <p className="py-16 text-center text-sm text-fog-500">
-            {mode === 'latest' ? 'Could not load the newest list for this source.' : 'No results — try another source or title.'}
-          </p>
+        {!searching && mode === 'search' && searchGroups.length === 0 && q && (
+          <p className="py-16 text-center text-sm text-fog-500">No results across your sources — try another title.</p>
+        )}
+        {!searching && mode === 'latest' && results.length === 0 && (
+          <p className="py-16 text-center text-sm text-fog-500">Could not load the newest list for this source.</p>
         )}
       </div>
 

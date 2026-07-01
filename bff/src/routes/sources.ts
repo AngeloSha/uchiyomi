@@ -165,6 +165,39 @@ export default async function sourceRoutes(app: FastifyInstance) {
     return { content: results.map((r) => ({ ...r, inLibrary: have.has(norm(r.title)) })) };
   });
 
+  // Search a title across ALL enabled providers at once, grouped so one card carries every source that
+  // has it — the UI then lets you choose which source to add from (like the trending flow).
+  app.get('/api/sources/search-all', async (req) => {
+    const term = ((req.query as { q?: string }).q || '').trim();
+    if (!term) return { content: [] };
+    const per = await Promise.all(findOrder().map(async (id) => {
+      const src = getSource(id);
+      if (!src) return [];
+      if (await isDisabled(id).catch(() => false)) return [];
+      try { return (await withTimeout(src.search(term), 20000)).slice(0, 12).map((r) => ({ ...r, name: src.name })); }
+      catch { return []; }
+    }));
+    // group by normalized title → one card that carries every provider offering it (preferred order preserved)
+    const groups = new Map<string, { title: string; coverUrl?: string; providers: { source: string; name: string; sourceId: string; coverUrl?: string; title: string }[] }>();
+    for (const list of per) for (const r of list) {
+      if (!r.sourceId || !r.title) continue;
+      const key = norm(r.title);
+      if (!key) continue;
+      let g = groups.get(key);
+      if (!g) { g = { title: r.title, coverUrl: r.coverUrl, providers: [] }; groups.set(key, g); }
+      if (!g.coverUrl && r.coverUrl) g.coverUrl = r.coverUrl;
+      if (!g.providers.some((p) => p.source === r.source)) {
+        g.providers.push({ source: r.source, name: r.name, sourceId: r.sourceId, coverUrl: r.coverUrl, title: r.title });
+      }
+    }
+    const have = new Set((await q<{ title: string }>('SELECT title FROM lib_series')).map((x) => norm(x.title)));
+    const out = [...groups.values()]
+      .map((g) => ({ ...g, inLibrary: have.has(norm(g.title)) }))
+      .sort((a, b) => b.providers.length - a.providers.length)
+      .slice(0, 30);
+    return { content: out };
+  });
+
   // Browse a source's newest / recently-updated series (no query). Same card shape as search.
   app.get('/api/sources/latest', async (req) => {
     const { source, page } = req.query as { source?: string; page?: string };
