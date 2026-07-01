@@ -43,6 +43,31 @@ export function makeManganato(cfg: { id: string; name: string; base: string; ord
       return out;
     },
 
+    // Browse the site's most recently updated series (Manganato's /genre-all listing, default latest order).
+    async latest(page = 1) {
+      const p = Math.max(1, page);
+      const h = await cfGet(`${base}/genre-all${p > 1 ? `/${p}` : ''}`);
+      const covers = new Map<string, string>();
+      for (const m of h.matchAll(/<a[^>]+href="([^"]+\/manga\/[^"]+)"[^>]*>\s*<img[^>]+src="([^"]+)"/gi)) covers.set(norm(m[1]), norm(m[2]));
+      const out: SourceSeries[] = [];
+      const seen = new Set<string>();
+      for (const m of h.matchAll(/(?:genres-item-name|item-title)[^>]*>\s*<a[^>]+href="([^"]+\/manga\/[^"]+)"[^>]*>([\s\S]*?)<\/a>/gi)) {
+        const url = norm(m[1]);
+        if (seen.has(url)) continue;
+        seen.add(url);
+        out.push({ sourceId: url, source: cfg.id, title: strip(m[2]), url, coverUrl: covers.get(url) });
+      }
+      if (!out.length) {
+        for (const m of h.matchAll(/<a[^>]+href="([^"]+\/manga\/[^"]+)"[^>]*>\s*<img[^>]+alt="([^"]*?)"/gi)) {
+          const url = norm(m[1]);
+          if (seen.has(url)) continue;
+          seen.add(url);
+          out.push({ sourceId: url, source: cfg.id, title: strip(m[2]).replace(/\s+class=.*$/i, ''), url, coverUrl: covers.get(url) });
+        }
+      }
+      return out;
+    },
+
     async getSeries(id) {
       const url = mangaUrl(id);
       const h = await cfGet(url);

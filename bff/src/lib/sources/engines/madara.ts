@@ -10,6 +10,23 @@ const norm = (u: string) => u.replace(/^\/\//, 'https://').replace(/&amp;/g, '&'
 export function makeMadara(cfg: { id: string; name: string; base: string; order?: number }): SourceAdapter {
   const base = cfg.base.replace(/\/$/, '');
   const mangaUrl = (id: string) => (id.startsWith('http') ? id : `${base}/manga/${id}/`);
+  // Madara search-result and latest-listing pages share the same result-card markup, so parse both here.
+  const parseResults = (h: string): SourceSeries[] => {
+    const covers = new Map<string, string>();
+    for (const m of h.matchAll(/class="[^"]*tab-thumb[^"]*"[^>]*>\s*<a[^>]+href="([^"]+)"[^>]*>\s*<img[^>]+(?:data-src|src)="([^"]+)"/gi)) {
+      covers.set(norm(m[1]), norm(m[2]));
+    }
+    const out: SourceSeries[] = [];
+    const seen = new Set<string>();
+    // match `post-title` as a class token in any tag (div/h3/…) with extra classes — sites tweak this markup
+    for (const m of h.matchAll(/class="[^"]*\bpost-title\b[^"]*"[^>]*>[\s\S]*?<a[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi)) {
+      const url = norm(m[1]);
+      if (seen.has(url)) continue;
+      seen.add(url);
+      out.push({ sourceId: url, source: cfg.id, title: strip(m[2]), url, coverUrl: covers.get(url) });
+    }
+    return out;
+  };
 
   return {
     id: cfg.id,
@@ -19,22 +36,14 @@ export function makeMadara(cfg: { id: string; name: string; base: string; order?
     preferredOrder: cfg.order,
 
     async search(query) {
-      const h = await cfGet(`${base}/?s=${encodeURIComponent(query)}&post_type=wp-manga`);
-      // each result has a thumbnail <a href=manga><img src=cover> and a post-title <a href=manga>title
-      const covers = new Map<string, string>();
-      for (const m of h.matchAll(/class="[^"]*tab-thumb[^"]*"[^>]*>\s*<a[^>]+href="([^"]+)"[^>]*>\s*<img[^>]+(?:data-src|src)="([^"]+)"/gi)) {
-        covers.set(norm(m[1]), norm(m[2]));
-      }
-      const out: SourceSeries[] = [];
-      const seen = new Set<string>();
-      // match `post-title` as a class token in any tag (div/h3/…) with extra classes — sites tweak this markup
-      for (const m of h.matchAll(/class="[^"]*\bpost-title\b[^"]*"[^>]*>[\s\S]*?<a[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi)) {
-        const url = norm(m[1]);
-        if (seen.has(url)) continue;
-        seen.add(url);
-        out.push({ sourceId: url, source: cfg.id, title: strip(m[2]), url, coverUrl: covers.get(url) });
-      }
-      return out;
+      return parseResults(await cfGet(`${base}/?s=${encodeURIComponent(query)}&post_type=wp-manga`));
+    },
+
+    // Browse the site's most recently updated series (Madara's `m_orderby=latest` listing).
+    async latest(page = 1) {
+      const p = Math.max(1, page);
+      const path = p > 1 ? `/page/${p}/?s=&post_type=wp-manga&m_orderby=latest` : `/?s=&post_type=wp-manga&m_orderby=latest`;
+      return parseResults(await cfGet(`${base}${path}`));
     },
 
     async getSeries(id) {

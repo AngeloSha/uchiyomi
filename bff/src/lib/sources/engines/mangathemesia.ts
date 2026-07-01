@@ -11,6 +11,19 @@ const numOf = (s: string) => { const m = s.match(/(\d+(?:\.\d+)?)/); return m ? 
 
 export function makeMangaThemesia(cfg: { id: string; name: string; base: string; order?: number }): SourceAdapter {
   const base = cfg.base.replace(/\/$/, '');
+  // Search results and the /manga/?order=update listing share the same `.bsx` cards, so parse both here.
+  const parseBsx = (h: string): SourceSeries[] => {
+    const out: SourceSeries[] = [];
+    const seen = new Set<string>();
+    for (const m of h.matchAll(/<div class="bsx">\s*<a[^>]+href="([^"]+)"[^>]*title="([^"]*)"[^>]*>([\s\S]*?)<\/a>/gi)) {
+      const url = norm(m[1]);
+      if (seen.has(url)) continue;
+      seen.add(url);
+      const cover = (m[3].match(/<img[^>]+(?:data-src|src)="([^"]+)"/i) || [])[1];
+      out.push({ sourceId: url, source: cfg.id, title: strip(m[2]), url, coverUrl: cover ? norm(cover) : undefined });
+    }
+    return out;
+  };
 
   return {
     id: cfg.id,
@@ -20,18 +33,14 @@ export function makeMangaThemesia(cfg: { id: string; name: string; base: string;
     preferredOrder: cfg.order,
 
     async search(query) {
-      const h = await cfGet(`${base}/?s=${encodeURIComponent(query)}`);
-      const out: SourceSeries[] = [];
-      const seen = new Set<string>();
-      // result cards: <div class="bsx"><a href="<series>" title="<title>"> … <img data-src/src="<cover>">
-      for (const m of h.matchAll(/<div class="bsx">\s*<a[^>]+href="([^"]+)"[^>]*title="([^"]*)"[^>]*>([\s\S]*?)<\/a>/gi)) {
-        const url = norm(m[1]);
-        if (seen.has(url)) continue;
-        seen.add(url);
-        const cover = (m[3].match(/<img[^>]+(?:data-src|src)="([^"]+)"/i) || [])[1];
-        out.push({ sourceId: url, source: cfg.id, title: strip(m[2]), url, coverUrl: cover ? norm(cover) : undefined });
-      }
-      return out;
+      return parseBsx(await cfGet(`${base}/?s=${encodeURIComponent(query)}`));
+    },
+
+    // Browse the site's most recently updated series (MangaThemesia's /manga/?order=update listing).
+    async latest(page = 1) {
+      const p = Math.max(1, page);
+      const path = p > 1 ? `/manga/?page=${p}&order=update` : `/manga/?order=update`;
+      return parseBsx(await cfGet(`${base}${path}`));
     },
 
     async getSeries(id) {

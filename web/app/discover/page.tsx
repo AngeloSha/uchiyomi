@@ -19,7 +19,7 @@ const looksCss = (s: string) => s.length > 2500 || /<\/?(?:style|script)\b|\.[a-
 export default function DiscoverPage() {
   const toast = useToast();
   const qc = useQueryClient();
-  const { data: sources } = useQuery({ queryKey: ['sources'], queryFn: () => api<{ content: { id: string; name: string; status?: string }[] }>('/api/sources'), refetchInterval: 30000 });
+  const { data: sources } = useQuery({ queryKey: ['sources'], queryFn: () => api<{ content: { id: string; name: string; status?: string; latest?: boolean }[] }>('/api/sources'), refetchInterval: 30000 });
   // Always pull fresh trending when Discover is opened or refocused (installed PWAs have no manual refresh,
   // and a stale/empty cached result must never get pinned for the session).
   const { data: trending } = useQuery({
@@ -34,6 +34,7 @@ export default function DiscoverPage() {
   const [q, setQ] = useState('');
   const [results, setResults] = useState<SourceResult[]>([]);
   const [searching, setSearching] = useState(false);
+  const [mode, setMode] = useState<'search' | 'latest' | null>(null);
   const [modal, setModal] = useState<AddModal | null>(null);
   const { data: jobs } = useQuery({ queryKey: ['source-jobs'], queryFn: () => api<{ content: Job[] }>('/api/sources/jobs'), refetchInterval: 4000 });
 
@@ -43,10 +44,23 @@ export default function DiscoverPage() {
     if (!term) return;
     setSearching(true);
     setResults([]);
+    setMode('search');
     try {
       const r = await api<{ content: SourceResult[] }>(`/api/sources/search?source=${source}&q=${encodeURIComponent(term)}`);
       setResults(r.content);
     } catch { toast('Search failed', 'error'); } finally { setSearching(false); }
+  };
+
+  // Browse a source's newest releases (no query) — the "Newest" button.
+  const browseLatest = async () => {
+    setSearching(true);
+    setResults([]);
+    setMode('latest');
+    setQ('');
+    try {
+      const r = await api<{ content: SourceResult[] }>(`/api/sources/latest?source=${source}`);
+      setResults(r.content);
+    } catch { toast('Could not load newest', 'error'); } finally { setSearching(false); }
   };
 
   const patch = (p: Partial<AddModal>) => setModal((m) => (m ? { ...m, ...p } : m));
@@ -97,6 +111,8 @@ export default function DiscoverPage() {
   const activeJobs = (jobs?.content || []).filter((j) => j.status === 'downloading');
   const recs = (trending?.content || []).slice(0, 18);
   const presets = (n: number) => [10, 25, 50, 100, 200].filter((x) => x < n);
+  const selectedSource = (sources?.content || []).find((s) => s.id === source);
+  const sourceName = selectedSource?.name || '';
 
   return (
     <div className="min-h-screen-d">
@@ -124,6 +140,11 @@ export default function DiscoverPage() {
               <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search a title…" className="w-full bg-transparent py-2.5 text-sm text-fog-50 outline-none placeholder:text-fog-500" />
             </div>
             <button className="btn-accent px-6">Search</button>
+            {selectedSource?.latest && (
+              <button type="button" onClick={browseLatest} className="rounded-xl border border-ink-700 bg-ink-850 px-4 py-2.5 text-sm font-medium text-fog-100 transition hover:border-accent">
+                ✦ Newest
+              </button>
+            )}
           </form>
         )}
 
@@ -144,8 +165,8 @@ export default function DiscoverPage() {
           </div>
         )}
 
-        {/* Trending recommendations — shown until the user runs a search */}
-        {!searching && results.length === 0 && recs.length > 0 && (
+        {/* Trending recommendations — shown until the user runs a search or browses newest */}
+        {mode !== 'latest' && !searching && results.length === 0 && recs.length > 0 && (
           <section className="mt-6">
             <div className="mb-3 flex items-center gap-2">
               <IcSparkle width={18} height={18} className="text-accent" />
@@ -180,6 +201,18 @@ export default function DiscoverPage() {
           </section>
         )}
 
+        {/* Per-provider "latest" rails — browse each source's newest releases (like a Tachiyomi extension) */}
+        {mode !== 'latest' && !searching && results.length === 0 &&
+          (sources?.content || []).filter((s) => s.latest && s.status !== 'disabled').map((s) => (
+            <ProviderRail key={s.id} s={s} onOpen={openResult} />
+          ))}
+
+        {mode === 'latest' && (searching || results.length > 0) && (
+          <div className="mb-1 mt-6 flex items-center gap-2">
+            <IcSparkle width={18} height={18} className="text-accent" />
+            <h2 className="font-display text-lg font-semibold">Newest on {sourceName}</h2>
+          </div>
+        )}
         <div className="mt-5 grid grid-cols-3 gap-x-3 gap-y-5 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-7 xl:grid-cols-8 2xl:grid-cols-9">
           {searching && Array.from({ length: 12 }).map((_, i) => <div key={i} className="skeleton aspect-[2/3] rounded-2xl" />)}
           {!searching && results.map((r) => (
@@ -200,13 +233,55 @@ export default function DiscoverPage() {
           ))}
         </div>
 
-        {!searching && q && results.length === 0 && (
-          <p className="py-16 text-center text-sm text-fog-500">No results — try another source or title.</p>
+        {!searching && results.length === 0 && (q || mode === 'latest') && (
+          <p className="py-16 text-center text-sm text-fog-500">
+            {mode === 'latest' ? 'Could not load the newest list for this source.' : 'No results — try another source or title.'}
+          </p>
         )}
       </div>
 
       {modal && <AddDialog modal={modal} patch={patch} close={() => setModal(null)} pickProvider={pickProvider} doAdd={doAdd} presets={presets} />}
     </div>
+  );
+}
+
+// One horizontal rail of a single source's newest releases. Self-hides if the source returns nothing
+// (e.g. a generic engine that couldn't parse its latest page), so failed providers don't clutter Discover.
+function ProviderRail({ s, onOpen }: { s: { id: string; name: string }; onOpen: (r: SourceResult) => void }) {
+  const { data, isLoading } = useQuery({
+    queryKey: ['latest', s.id],
+    queryFn: () => api<{ content: SourceResult[] }>(`/api/sources/latest?source=${s.id}`),
+    staleTime: 5 * 60_000,
+  });
+  const items = (data?.content || []).slice(0, 18);
+  if (!isLoading && items.length === 0) return null;
+  return (
+    <section className="mt-6">
+      <div className="mb-3 flex items-center gap-2">
+        <IcSparkle width={18} height={18} className="text-accent" />
+        <h2 className="font-display text-lg font-semibold">Latest on {s.name}</h2>
+        <span className="text-xs text-fog-500">newest releases</span>
+      </div>
+      <div className="-mx-4 flex snap-x gap-3 overflow-x-auto px-4 pb-2 lg:mx-0 lg:px-0 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        {isLoading && Array.from({ length: 8 }).map((_, i) => <div key={i} className="skeleton aspect-[2/3] w-36 shrink-0 rounded-2xl" />)}
+        {items.map((r) => (
+          <button key={r.sourceId} onClick={() => !r.inLibrary && onOpen(r)} className="group w-36 shrink-0 snap-start text-left">
+            <div className={`relative aspect-[2/3] overflow-hidden rounded-2xl border border-ink-700/60 bg-ink-800 ${r.inLibrary ? 'opacity-55' : ''}`}>
+              {r.coverUrl ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={cover(r.source, r.coverUrl)} alt={r.title} loading="lazy" className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-[1.06]" />
+              ) : <div className="grid h-full place-items-center text-ink-500"><IcSparkle width={24} height={24} /></div>}
+              {r.inLibrary ? (
+                <span className="absolute inset-x-0 bottom-0 bg-emerald-600/85 py-1.5 text-center text-[11px] font-semibold text-white backdrop-blur">✓ In library</span>
+              ) : (
+                <span className="absolute inset-x-0 bottom-0 bg-accent/90 py-1.5 text-center text-[11px] font-semibold text-white opacity-0 backdrop-blur transition group-hover:opacity-100">+ Add</span>
+              )}
+            </div>
+            <p className="mt-1.5 line-clamp-1 text-xs font-medium text-fog-100">{r.title}</p>
+          </button>
+        ))}
+      </div>
+    </section>
   );
 }
 

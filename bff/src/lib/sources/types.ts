@@ -27,6 +27,8 @@ export interface SourceAdapter {
   getSeries(id: string): Promise<SourceSeries | null>;
   listChapters(seriesId: string): Promise<SourceChapter[]>;
   getPageUrls(chapterId: string): Promise<string[]>;
+  /** optional: browse the source's newest / recently-updated series (no search query). `page` is 1-based. */
+  latest?(page?: number): Promise<SourceSeries[]>;
   // ---- optional, plugin-declared capabilities (the core consults these instead of hardcoding ids) ----
   /** page/cover images sit behind Cloudflare → fetch them with FlareSolverr session cookies. */
   requiresCloudflare?: boolean;

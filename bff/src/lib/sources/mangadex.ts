@@ -49,6 +49,13 @@ export const mangadex: SourceAdapter = {
     return (j.data || []).map(toSeries);
   },
 
+  // Browse recently-updated series (no query) — powers the Discover "Newest" view.
+  async latest(page = 1) {
+    const offset = (Math.max(1, page) - 1) * 24;
+    const j = await jget(`${API}/manga?order[latestUploadedChapter]=desc&limit=24&offset=${offset}&hasAvailableChapters=true&availableTranslatedLanguage[]=en&${RATINGS}&includes[]=cover_art&includes[]=author`);
+    return (j.data || []).map(toSeries);
+  },
+
   async getSeries(id) {
     const j = await jget(`${API}/manga/${id}?includes[]=cover_art&includes[]=author`);
     return j.data ? toSeries(j.data) : null;

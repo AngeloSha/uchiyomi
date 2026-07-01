@@ -144,7 +144,7 @@ export default async function sourceRoutes(app: FastifyInstance) {
       content: listSources().map((s) => {
         const h = health.get(s.id);
         const blocked = !!(h?.blocked_until && new Date(h.blocked_until).getTime() > now);
-        return { id: s.id, name: s.name, status: h?.disabled ? 'disabled' : blocked ? h!.status : 'ok', blockedUntil: blocked ? h!.blocked_until : null };
+        return { id: s.id, name: s.name, latest: typeof s.latest === 'function', status: h?.disabled ? 'disabled' : blocked ? h!.status : 'ok', blockedUntil: blocked ? h!.blocked_until : null };
       }),
     };
   });
@@ -161,6 +161,20 @@ export default async function sourceRoutes(app: FastifyInstance) {
     const seen = new Set<string>();
     const results = raw.filter((r) => !!r.sourceId && !seen.has(r.sourceId) && (seen.add(r.sourceId), true)).slice(0, 24);
     // flag titles already in the library so the UI can mark them instead of offering a duplicate add
+    const have = new Set((await q<{ title: string }>('SELECT title FROM lib_series')).map((r) => norm(r.title)));
+    return { content: results.map((r) => ({ ...r, inLibrary: have.has(norm(r.title)) })) };
+  });
+
+  // Browse a source's newest / recently-updated series (no query). Same card shape as search.
+  app.get('/api/sources/latest', async (req) => {
+    const { source, page } = req.query as { source?: string; page?: string };
+    const src = source ? getSource(source) : null;
+    if (!src || typeof src.latest !== 'function') return { content: [] };
+    if (await isDisabled(source!).catch(() => false)) return { content: [] };
+    const p = Math.max(1, parseInt(page || '1', 10) || 1);
+    const raw = await src.latest(p).catch(() => []);
+    const seen = new Set<string>();
+    const results = raw.filter((r) => !!r.sourceId && !seen.has(r.sourceId) && (seen.add(r.sourceId), true)).slice(0, 24);
     const have = new Set((await q<{ title: string }>('SELECT title FROM lib_series')).map((r) => norm(r.title)));
     return { content: results.map((r) => ({ ...r, inLibrary: have.has(norm(r.title)) })) };
   });
