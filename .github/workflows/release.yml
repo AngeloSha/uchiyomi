@@ -1,0 +1,41 @@
+name: Release
+
+# Publishes multi-arch Docker images to GHCR when you push a version tag (e.g. `git tag v0.1.0 && git push --tags`).
+# Uses the built-in GITHUB_TOKEN (no extra secrets). The published images are what make the CasaOS/Unraid/Umbrel
+# one-click manifests installable.
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  images:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - { service: bff, image: ghcr.io/angelosha/koryomi-bff }
+          - { service: web, image: ghcr.io/angelosha/koryomi-web }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and push ${{ matrix.service }}
+        uses: docker/build-push-action@v6
+        with:
+          context: ./${{ matrix.service }}
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ${{ matrix.image }}:latest
+            ${{ matrix.image }}:${{ github.ref_name }}
