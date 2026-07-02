@@ -39,9 +39,13 @@ into a single image.** Point it at your library, add sources by URL, and it does
 - **Library:** fast scanner for **CBZ, CBR, and loose image folders** (reads `ComicInfo.xml`), cover-art
   ambient theming, genres, an Updates feed with new-chapter badges, and discovery rails (For You / trending /
   similar).
+- **Discover:** one search across **every source at once** (one card per title; pick which provider to add
+  from), a **newest-releases rail per source**, and a global trending-manhwa rail.
 - **Multi-user:** username + password accounts, per-user reading progress / favorites / history, avatars,
   streaks, and a "household" leaderboard.
 - **Offline:** installable PWA with offline downloads + smart auto-sync of favorites.
+- **Push notifications:** opt-in web push the moment a followed series gets a new chapter.
+- **OPDS:** browse & read your Koryomi library from other reader apps (Panels, Chunky, KOReader, …).
 - **Security:** argon2id passwords, JWT + rotating refresh tokens, login lockout, an audit log,
   session/device management, and optional TOTP two-factor auth.
 - **Admin:** a Jellyfin-style panel with members & permissions, provider health, scheduled tasks, activity feed,
@@ -180,11 +184,12 @@ Everything is in `.env` (see `.env.example`). Notably:
 
 Actively developed. On deck:
 
-- 🔔 **Push notifications:** get alerted the moment a followed series gets a new chapter.
-- 📥 **Import your follows:** bring an existing list (Tachiyomi/Mihon backup or MangaDex follows) in one step.
-- 📡 **OPDS feed:** browse & read Koryomi from other reader apps (Panels, Chunky, …).
+- 📥 **Import your follows:** bring a Tachiyomi/Mihon backup or MangaDex follows list in one step (admins can
+  already bulk-add by pasting a list of titles).
+- 🧭 **Per-source genre & popular browsing:** rounding out the newest-releases rails.
 
-Also exploring: unified library-and-source search, AniList progress sync, and a first-run setup wizard.
+Also exploring: AniList progress sync. Recently shipped: 🔔 push notifications, 📡 OPDS, browser-based
+first-run setup, and cross-source search.
 
 ## Support
 

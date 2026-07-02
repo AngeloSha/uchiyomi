@@ -96,11 +96,15 @@ It remembers your scroll position, so closing and reopening drops you right back
 **Discover** is how you add new series to your library.
 
 - **Trending** rail: popular manhwa you don't already have. Each card shows the description + chapter count.
-- **Search:** pick a source, type a title. Results you already own are marked **✓ In library**.
-- **Find & add:** tapping a trending card searches every installed source and shows which ones carry it
-  (Aqua-style preferred sources first). Pick a provider, choose **how many chapters** to download (All or first
-  N), toggle **auto-update**, and add it. It downloads chapter 1 immediately so the series shows up right away,
-  then grabs the rest in the background (with a progress bar).
+- **Latest on …** rails: every source gets its own row of that site's newest releases, so you can browse
+  what just came out without searching. The **✦ Newest** button (next to *Browse newest from*) opens a full
+  grid of one source's latest.
+- **Search:** type a title once and Koryomi searches **all your sources at the same time**. Results are
+  de-duplicated into one card per title (a small badge shows how many sources carry it), and anything you
+  already own is marked **✓ In library**.
+- **Add:** tap a card and pick which source to add it from (skipped when only one has it). Choose **how many
+  chapters** to download (All or first N), toggle **auto-update**, and add it. It downloads chapter 1
+  immediately so the series shows up right away, then grabs the rest in the background (with a progress bar).
 
 If you try to add a title you already have from another source, Koryomi warns you and lets you add a separate copy
 or cancel. A heads-up appears if you queue a lot of chapters at once (sources can rate-limit heavy downloads).
