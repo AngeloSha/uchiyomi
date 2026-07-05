@@ -67,6 +67,16 @@ export function makeMadara(cfg: { id: string; name: string; base: string; order?
 
     async listChapters(seriesId) {
       const url = mangaUrl(seriesId);
+      // Only accept chapters that belong to THIS manga. Sites embed "popular/hot chapters" widgets linking to
+      // OTHER titles; without this scope those get scraped as phantom chapters (e.g. Martial Peak ch. 3862 on a
+      // Necromancer page). We compare the manga-slug in each chapter url to the series slug.
+      const slug = url.replace(/[?#].*$/, '').replace(/\/+$/, '').split('/').pop()!.toLowerCase();
+      const mine = (u: string) => {
+        const m = u.toLowerCase().match(/\/([^/]+)\/chapter[-_/]/);
+        if (!slug || !m) return true;                       // can't identify the chapter's manga → keep (lenient)
+        const cs = m[1];
+        return cs === slug || cs.startsWith(slug) || slug.startsWith(cs); // same title (allow slug aliases), reject others
+      };
       let h = '';
       try { h = await cfPost(`${url.replace(/\/$/, '')}/ajax/chapters/`, ''); } catch {}
       if (!/chapter/i.test(h)) h = await cfGet(url);
@@ -74,7 +84,7 @@ export function makeMadara(cfg: { id: string; name: string; base: string; order?
       // standard Madara: <li class="wp-manga-chapter"><a href="...">Chapter N</a> … <span class="chapter-release-date">…</span></li>
       for (const li of h.matchAll(/<li[^>]*class="[^"]*wp-manga-chapter[^"]*"[^>]*>([\s\S]*?)<\/li>/gi)) {
         const m = li[1].match(/<a[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/i);
-        if (!m) continue;
+        if (!m || !mine(norm(m[1]))) continue;
         const label = strip(m[2]);
         const num = parseFloat((label.match(/(\d+(?:\.\d+)?)/) || [])[1]);
         if (Number.isNaN(num)) continue;
@@ -86,7 +96,7 @@ export function makeMadara(cfg: { id: string; name: string; base: string; order?
         const seenU = new Set<string>();
         for (const m of h.matchAll(/href="([^"]*\/chapter[-/][0-9][^"]*)"/gi)) {
           const cu = norm(m[1]);
-          if (seenU.has(cu)) continue;
+          if (seenU.has(cu) || !mine(cu)) continue;
           seenU.add(cu);
           const num = parseFloat(((cu.match(/chapter[-/]([0-9]+(?:[.-][0-9]+)?)/i) || [])[1] || '').replace('-', '.'));
           if (!Number.isNaN(num)) out.push({ sourceId: cu, number: num, title: `Chapter ${num}` });

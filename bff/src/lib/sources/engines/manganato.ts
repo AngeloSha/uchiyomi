@@ -85,7 +85,17 @@ export function makeManganato(cfg: { id: string; name: string; base: string; ord
     },
 
     async listChapters(seriesId) {
-      const h = await cfGet(mangaUrl(seriesId));
+      const url = mangaUrl(seriesId);
+      // Only accept chapters under THIS manga's slug — homepage/sidebar widgets link to other titles' chapters and
+      // would otherwise be scraped as phantom chapters (e.g. a stray "2021").
+      const slug = url.replace(/[?#].*$/, '').replace(/\/+$/, '').split('/').pop()!.toLowerCase();
+      const mine = (u: string) => {
+        const m = u.toLowerCase().match(/\/([^/]+)\/chapter[-_/]/);
+        if (!slug || !m) return true;                       // can't identify the chapter's manga → keep (lenient)
+        const cs = m[1];
+        return cs === slug || cs.startsWith(slug) || slug.startsWith(cs); // same title (allow slug aliases), reject others
+      };
+      const h = await cfGet(url);
       const out: SourceChapter[] = [];
       const seen = new Set<string>();
       // chapter rows carry a release date in the sibling <span class="chapter-time" title="Jul 01,2026 12:00">
@@ -97,7 +107,7 @@ export function makeManganato(cfg: { id: string; name: string; base: string; ord
       }
       for (const m of h.matchAll(/href="([^"]+\/manga\/[^"]+\/chapter[^"]*)"/gi)) {
         const cu = norm(m[1]);
-        if (seen.has(cu)) continue;
+        if (seen.has(cu) || !mine(cu)) continue;
         seen.add(cu);
         const num = parseFloat(((cu.match(/chapter[-_]([0-9]+(?:[.-][0-9]+)?)/i) || [])[1] || '').replace('-', '.'));
         if (!Number.isNaN(num)) out.push({ sourceId: cu, number: num, title: `Chapter ${num}`, publishedAt: dates.get(cu) });
