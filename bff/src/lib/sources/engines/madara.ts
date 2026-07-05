@@ -3,6 +3,7 @@
 // Cloudflare-protected sites work via the core's FlareSolverr client. Series ids are the manga page URL.
 import { SourceAdapter, SourceSeries, SourceChapter } from '../types';
 import { cfGet, cfPost } from '../flaresolverr';
+import { parseWhen } from '../dates';
 
 const strip = (s: string) => s.replace(/<[^>]+>/g, '').replace(/&amp;/g, '&').replace(/\s+/g, ' ').trim();
 const norm = (u: string) => u.replace(/^\/\//, 'https://').replace(/&amp;/g, '&').trim();
@@ -70,11 +71,15 @@ export function makeMadara(cfg: { id: string; name: string; base: string; order?
       try { h = await cfPost(`${url.replace(/\/$/, '')}/ajax/chapters/`, ''); } catch {}
       if (!/chapter/i.test(h)) h = await cfGet(url);
       const out: SourceChapter[] = [];
-      // standard Madara: <li class="wp-manga-chapter"><a href="...">Chapter N</a>
-      for (const m of h.matchAll(/<li[^>]*class="[^"]*wp-manga-chapter[^"]*"[^>]*>\s*<a[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi)) {
+      // standard Madara: <li class="wp-manga-chapter"><a href="...">Chapter N</a> … <span class="chapter-release-date">…</span></li>
+      for (const li of h.matchAll(/<li[^>]*class="[^"]*wp-manga-chapter[^"]*"[^>]*>([\s\S]*?)<\/li>/gi)) {
+        const m = li[1].match(/<a[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/i);
+        if (!m) continue;
         const label = strip(m[2]);
         const num = parseFloat((label.match(/(\d+(?:\.\d+)?)/) || [])[1]);
-        if (!Number.isNaN(num)) out.push({ sourceId: norm(m[1]), number: num, title: label });
+        if (Number.isNaN(num)) continue;
+        const when = parseWhen((li[1].match(/chapter-release-date[^>]*>([\s\S]*?)<\/(?:span|div)>/i) || [])[1]);
+        out.push({ sourceId: norm(m[1]), number: num, title: label, publishedAt: when });
       }
       // Madara variants: plain links like /manga/<slug>/chapter-N
       if (!out.length) {

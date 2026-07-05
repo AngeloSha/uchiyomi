@@ -2,14 +2,15 @@
 import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
+import { relativeTime } from '@/lib/format';
 import { useToast } from '@/components/Toast';
 import { IcSearch, IcSparkle } from '@/components/icons';
 
-interface SourceResult { sourceId: string; source: string; title: string; coverUrl?: string; inLibrary?: boolean }
+interface SourceResult { sourceId: string; source: string; title: string; coverUrl?: string; inLibrary?: boolean; updatedAt?: string }
 interface Job { folder: string; title: string; total: number; done: number; status: string }
 interface Trending { title: string; cover: string | null; description: string; genres: string[]; score: number | null; chapters: number | null; status: string | null }
 interface Provider { source: string; name: string; sourceId: string; title: string; coverUrl?: string }
-interface SearchGroup { title: string; coverUrl?: string; inLibrary?: boolean; providers: Provider[] }
+interface SearchGroup { title: string; coverUrl?: string; inLibrary?: boolean; updatedAt?: string; providers: Provider[] }
 interface Detail { source: string; sourceId: string; title: string; summary: string; coverUrl: string | null; genres: string[]; status: string; count: number; first: number | null; last: number | null }
 interface AddModal { title: string; fallbackDesc?: string; providers?: Provider[]; picked?: Provider; detail?: Detail; loading: boolean; count: number; autoUpdate: boolean; adding: boolean; dup?: string }
 
@@ -257,6 +258,7 @@ export default function DiscoverPage() {
                 )}
               </div>
               <p className="mt-1.5 line-clamp-2 text-xs text-fog-200">{r.title}</p>
+              {r.updatedAt && <p className="mt-0.5 text-[10px] text-fog-500">updated {relativeTime(r.updatedAt)}</p>}
             </div>
           ))}
           {!searching && mode === 'search' && searchGroups.map((g) => (
@@ -276,6 +278,7 @@ export default function DiscoverPage() {
                 )}
               </div>
               <p className="mt-1.5 line-clamp-2 text-xs text-fog-200">{g.title}</p>
+              {g.updatedAt && <p className="mt-0.5 text-[10px] text-fog-500">updated {relativeTime(g.updatedAt)}</p>}
             </div>
           ))}
         </div>
@@ -326,6 +329,7 @@ function ProviderRail({ s, onOpen }: { s: { id: string; name: string }; onOpen: 
               )}
             </div>
             <p className="mt-1.5 line-clamp-1 text-xs font-medium text-fog-100">{r.title}</p>
+            {r.updatedAt && <p className="mt-0.5 text-[10px] text-fog-500">updated {relativeTime(r.updatedAt)}</p>}
           </button>
         ))}
       </div>

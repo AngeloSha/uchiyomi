@@ -294,7 +294,17 @@ export default async function catalogRoutes(app: FastifyInstance) {
       const newCount = Math.max(0, (s.booksCount ?? 0) - (seenMap.get(s.id) ?? 0));
       if (newCount > 0) out.push({ series: (await enrichSeries(req, [s]))[0], newCount });
     }
-    out.sort((a, b) => b.newCount - a.newCount);
+    // newest chapter date per series: source release date when stamped, else the file's mtime
+    if (out.length) {
+      const latest = await q<{ series_id: string; latest: string }>(
+        `SELECT series_id, max(COALESCE(published_at, to_timestamp(mtime / 1000.0))) AS latest
+         FROM lib_books WHERE series_id = ANY($1) GROUP BY series_id`,
+        [out.map((o) => o.series.id)],
+      );
+      const byId = new Map(latest.map((r) => [r.series_id, r.latest]));
+      for (const o of out as any[]) o.latestAt = byId.get(o.series.id) || null;
+    }
+    out.sort((a: any, b: any) => (Date.parse(b.latestAt || 0) || 0) - (Date.parse(a.latestAt || 0) || 0) || b.newCount - a.newCount);
     return { content: out };
   });
 

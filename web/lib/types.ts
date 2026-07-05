@@ -23,6 +23,7 @@ export interface Series {
   id: string;
   libraryId: string;
   name: string;
+  created?: string | null; // when the series entered the library
   booksCount: number;
   booksReadCount: number;
   booksUnreadCount: number;

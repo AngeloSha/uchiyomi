@@ -4,7 +4,7 @@ import type { FastifyInstance } from 'fastify';
 import { authenticate } from '../lib/auth';
 import { getSource, listSources } from '../lib/sources';
 import { downloadChapter, sanitize } from '../lib/downloader';
-import { persistScan } from '../lib/library';
+import { persistScan, setBookDates } from '../lib/library';
 import { fetchAniListArt, fetchTrendingManhwa, TrendingItem } from '../lib/anilist';
 import { q, one } from '../lib/db';
 import { healthAll, isDisabled } from '../lib/sourceHealth';
@@ -98,6 +98,7 @@ export async function addSeriesFromSource(opts: {
   }
   const j0 = jobs.get(folder); if (j0) j0.done = 1;
   await persistScan().catch(() => {});
+  await setBookDates(folder, selected).catch(() => {});
   await q('UPDATE lib_series SET auto_update = $1, source_id = $2, source_series_id = $3 WHERE folder = $4',
     [autoUpdate !== false, source, sourceId, folder]).catch(() => {});
   if (series?.coverUrl) {
@@ -115,6 +116,7 @@ export async function addSeriesFromSource(opts: {
       const j = jobs.get(folder); if (j) { j.done++; if (j.done % 5 === 0) await persistScan().catch(() => {}); }
     }
     await persistScan().catch(() => {});
+    await setBookDates(folder, selected).catch(() => {});
     const j = jobs.get(folder); if (j && j.status !== 'error') j.status = 'done';
   })();
   return { ok: true, status: 200, title, folder, chapters: selected.length };
@@ -178,14 +180,15 @@ export default async function sourceRoutes(app: FastifyInstance) {
       catch { return []; }
     }));
     // group by normalized title → one card that carries every provider offering it (preferred order preserved)
-    const groups = new Map<string, { title: string; coverUrl?: string; providers: { source: string; name: string; sourceId: string; coverUrl?: string; title: string }[] }>();
+    const groups = new Map<string, { title: string; coverUrl?: string; updatedAt?: string; providers: { source: string; name: string; sourceId: string; coverUrl?: string; title: string }[] }>();
     for (const list of per) for (const r of list) {
       if (!r.sourceId || !r.title) continue;
       const key = norm(r.title);
       if (!key) continue;
       let g = groups.get(key);
-      if (!g) { g = { title: r.title, coverUrl: r.coverUrl, providers: [] }; groups.set(key, g); }
+      if (!g) { g = { title: r.title, coverUrl: r.coverUrl, updatedAt: r.updatedAt, providers: [] }; groups.set(key, g); }
       if (!g.coverUrl && r.coverUrl) g.coverUrl = r.coverUrl;
+      if (!g.updatedAt && r.updatedAt) g.updatedAt = r.updatedAt;
       if (!g.providers.some((p) => p.source === r.source)) {
         g.providers.push({ source: r.source, name: r.name, sourceId: r.sourceId, coverUrl: r.coverUrl, title: r.title });
       }

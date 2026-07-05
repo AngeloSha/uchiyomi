@@ -19,6 +19,7 @@ function seriesDto(r: any) {
     id: r.id,
     libraryId: 'lib',
     name: r.title,
+    created: r.created_at ? new Date(r.created_at).toISOString() : null, // when the series entered the library
     booksCount: count,
     booksReadCount: 0,
     booksUnreadCount: count,
@@ -40,6 +41,12 @@ function seriesDto(r: any) {
 
 function bookDto(r: any) {
   const num: number = r.number ?? 0;
+  // release date: the source's chapter date when stamped, else when the file landed in the library
+  const released = r.published_at
+    ? new Date(r.published_at).toISOString()
+    : r.mtime && Number(r.mtime) > 0
+      ? new Date(Number(r.mtime)).toISOString()
+      : null;
   return {
     id: r.id,
     seriesId: r.series_id,
@@ -47,7 +54,7 @@ function bookDto(r: any) {
     name: r.title,
     number: num,
     media: { pagesCount: r.pages ?? 0, mediaType: 'application/vnd.comicbook+zip', status: 'READY' },
-    metadata: { title: r.title, number: String(num), numberSort: num, summary: '', releaseDate: null },
+    metadata: { title: r.title, number: String(num), numberSort: num, summary: '', releaseDate: released },
   };
 }
 

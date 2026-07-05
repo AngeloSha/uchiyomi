@@ -4,6 +4,7 @@
 // series page URL (search returns them), so /series, /manga or /komik path prefixes all work.
 import { SourceAdapter, SourceSeries, SourceChapter } from '../types';
 import { cfGet } from '../flaresolverr';
+import { parseWhen } from '../dates';
 
 const strip = (s: string) => s.replace(/<[^>]+>/g, '').replace(/&amp;/g, '&').replace(/&#0?39;|&apos;/g, "'").replace(/&quot;/g, '"').replace(/\s+/g, ' ').trim();
 const norm = (u: string) => u.replace(/^\/\//, 'https://').replace(/&amp;/g, '&').trim();
@@ -61,11 +62,11 @@ export function makeMangaThemesia(cfg: { id: string; name: string; base: string;
       const h = await cfGet(url);
       const out: SourceChapter[] = [];
       const seen = new Set<string>();
-      // #chapterlist <li data-num> … <a href="<chapter>"> … <span class="chapternum">Chapter N</span>
-      for (const m of h.matchAll(/<li[^>]*data-num=[\s\S]*?<a[^>]+href="([^"]+)"[\s\S]*?<span class="chapternum">([\s\S]*?)<\/span>/gi)) {
+      // #chapterlist <li data-num> … <a href="<chapter>"> … <span class="chapternum">Chapter N</span> <span class="chapterdate">DATE</span>
+      for (const m of h.matchAll(/<li[^>]*data-num=[\s\S]*?<a[^>]+href="([^"]+)"[\s\S]*?<span class="chapternum">([\s\S]*?)<\/span>(?:\s*<span class="chapterdate">([\s\S]*?)<\/span>)?/gi)) {
         const cu = norm(m[1]);
         const num = numOf(strip(m[2]));
-        if (!seen.has(cu) && !Number.isNaN(num)) { seen.add(cu); out.push({ sourceId: cu, number: num, title: strip(m[2]) }); }
+        if (!seen.has(cu) && !Number.isNaN(num)) { seen.add(cu); out.push({ sourceId: cu, number: num, title: strip(m[2]), publishedAt: parseWhen(m[3]) }); }
       }
       // fallback: any anchor directly wrapping a chapternum span
       if (!out.length) {

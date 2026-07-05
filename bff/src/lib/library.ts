@@ -248,6 +248,27 @@ export async function persistScan(): Promise<{ series: number; books: number; ms
   return { series: seenSeries.size, books: nBooks, ms: Date.now() - t0 };
 }
 
+/**
+ * Stamp source release dates onto a series' books (matched by chapter number). Called after persistScan by the
+ * add flow and the updater — the scanner itself never touches published_at, so stamps survive rescans.
+ */
+export async function setBookDates(folder: string, chapters: { number: number; publishedAt?: string }[]): Promise<void> {
+  const dated = chapters.filter((c) => c.publishedAt && Number.isFinite(c.number));
+  if (!dated.length) return;
+  const values: string[] = [];
+  const params: any[] = [folder];
+  for (const c of dated) {
+    params.push(c.number, c.publishedAt);
+    values.push(`($${params.length - 1}::real, $${params.length}::timestamptz)`);
+  }
+  await q(
+    `UPDATE lib_books b SET published_at = v.p
+     FROM (VALUES ${values.join(',')}) AS v(n, p), lib_series s
+     WHERE s.folder = $1 AND b.series_id = s.id AND b.number = v.n AND b.published_at IS DISTINCT FROM v.p`,
+    params,
+  );
+}
+
 /** Walk the library and return the full series/book tree with metadata + page counts. */
 export async function scanLibrary(
   root: string = LIBRARY_ROOT,

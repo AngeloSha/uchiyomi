@@ -3,6 +3,7 @@
 // core's FlareSolverr client. Series ids are the manga page URL.
 import { SourceAdapter, SourceSeries, SourceChapter } from '../types';
 import { cfGet } from '../flaresolverr';
+import { parseWhen } from '../dates';
 
 const strip = (s: string) => s.replace(/<[^>]+>/g, '').replace(/&amp;/g, '&').replace(/&#0?39;|&apos;/g, "'").replace(/&quot;/g, '"').replace(/\s+/g, ' ').trim();
 const norm = (u: string) => u.replace(/^\/\//, 'https://').replace(/&amp;/g, '&').trim();
@@ -87,12 +88,19 @@ export function makeManganato(cfg: { id: string; name: string; base: string; ord
       const h = await cfGet(mangaUrl(seriesId));
       const out: SourceChapter[] = [];
       const seen = new Set<string>();
+      // chapter rows carry a release date in the sibling <span class="chapter-time" title="Jul 01,2026 12:00">
+      const dates = new Map<string, string>();
+      for (const li of h.matchAll(/<li[^>]*class="[^"]*a-h[^"]*"[^>]*>([\s\S]*?)<\/li>/gi)) {
+        const href = (li[1].match(/href="([^"]+\/chapter[^"]*)"/i) || [])[1];
+        const when = parseWhen((li[1].match(/chapter-time[^>]*title="([^"]+)"/i) || li[1].match(/class="[^"]*chapter-time[^"]*"[^>]*>([^<]+)/i) || [])[1]);
+        if (href && when) dates.set(norm(href), when);
+      }
       for (const m of h.matchAll(/href="([^"]+\/manga\/[^"]+\/chapter[^"]*)"/gi)) {
         const cu = norm(m[1]);
         if (seen.has(cu)) continue;
         seen.add(cu);
         const num = parseFloat(((cu.match(/chapter[-_]([0-9]+(?:[.-][0-9]+)?)/i) || [])[1] || '').replace('-', '.'));
-        if (!Number.isNaN(num)) out.push({ sourceId: cu, number: num, title: `Chapter ${num}` });
+        if (!Number.isNaN(num)) out.push({ sourceId: cu, number: num, title: `Chapter ${num}`, publishedAt: dates.get(cu) });
       }
       return out.sort((a, b) => a.number - b.number);
     },

@@ -35,6 +35,7 @@ function toSeries(m: any): SourceSeries {
     author: author?.attributes?.name,
     coverUrl: cover?.attributes?.fileName ? `https://uploads.mangadex.org/covers/${m.id}/${cover.attributes.fileName}` : undefined,
     url: `https://mangadex.org/title/${m.id}`,
+    updatedAt: a.updatedAt || a.createdAt || undefined,
   };
 }
 
@@ -71,7 +72,7 @@ export const mangadex: SourceAdapter = {
       for (const c of j.data || []) {
         const num = parseFloat(c.attributes?.chapter);
         if (Number.isNaN(num)) continue;
-        all.push({ sourceId: c.id, number: num, title: c.attributes?.title || undefined, lang: c.attributes?.translatedLanguage, pages: c.attributes?.pages });
+        all.push({ sourceId: c.id, number: num, title: c.attributes?.title || undefined, lang: c.attributes?.translatedLanguage, pages: c.attributes?.pages, publishedAt: c.attributes?.publishAt || c.attributes?.readableAt || undefined });
       }
       offset += 500;
       if (!j.data?.length) break;

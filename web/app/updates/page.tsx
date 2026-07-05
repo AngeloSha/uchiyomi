@@ -4,13 +4,14 @@ import { useRouter } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, img } from '@/lib/api';
 import { Series } from '@/lib/types';
+import { relativeTime } from '@/lib/format';
 import { Img } from '@/components/ui';
 import { useToast } from '@/components/Toast';
 import { EmptyState } from '@/components/EmptyState';
 import { ART } from '@/lib/art';
 import { IcChevronLeft, IcBell, IcCheck } from '@/components/icons';
 
-interface UpdateItem { series: Series; newCount: number }
+interface UpdateItem { series: Series; newCount: number; latestAt?: string | null }
 
 export default function UpdatesPage() {
   const router = useRouter();
@@ -50,14 +51,17 @@ export default function UpdatesPage() {
           cta={{ href: '/library', label: 'Browse library' }} />
       ) : (
         <div className="space-y-3 px-4 pt-3 lg:mx-auto lg:max-w-2xl lg:px-0">
-          {items.map(({ series, newCount }) => (
+          {items.map(({ series, newCount, latestAt }) => (
             <Link key={series.id} href={`/series/?id=${series.id}`} className="card flex items-center gap-3 p-3">
               <div className="h-20 w-14 shrink-0 overflow-hidden rounded-xl border border-ink-700">
                 <Img src={img.seriesThumb(series.id)} alt={series.name} className="h-full w-full" />
               </div>
               <div className="min-w-0 flex-1">
                 <p className="truncate text-sm font-medium text-fog-100">{series.metadata?.title || series.name}</p>
-                <p className="mt-0.5 text-xs text-accent">+{newCount} new chapter{newCount > 1 ? 's' : ''}</p>
+                <p className="mt-0.5 text-xs text-accent">
+                  +{newCount} new chapter{newCount > 1 ? 's' : ''}
+                  {latestAt && <span className="text-fog-500"> · {relativeTime(latestAt)}</span>}
+                </p>
               </div>
               <span className="grid h-7 min-w-7 place-items-center rounded-full bg-accent px-2 text-xs font-bold text-black">{newCount}</span>
             </Link>

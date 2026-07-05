@@ -10,6 +10,7 @@ export interface SourceSeries {
   author?: string;
   coverUrl?: string; // remote cover image
   url?: string; // canonical web url
+  updatedAt?: string; // ISO timestamp of the source's last update to this series (when the source exposes it)
 }
 
 export interface SourceChapter {
@@ -18,6 +19,7 @@ export interface SourceChapter {
   title?: string;
   lang?: string;
   pages?: number;
+  publishedAt?: string; // ISO release date of the chapter on the source (best-effort for scraped sites)
 }
 
 export interface SourceAdapter {

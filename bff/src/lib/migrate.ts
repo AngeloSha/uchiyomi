@@ -175,6 +175,8 @@ ALTER TABLE lib_series ADD COLUMN IF NOT EXISTS latest_mtime bigint      NOT NUL
 ALTER TABLE lib_books  ADD COLUMN IF NOT EXISTS root text NOT NULL DEFAULT '/library';
 -- cached per-page pixel dimensions [{name,width,height}] (the reader needs these to lay pages out)
 ALTER TABLE lib_books  ADD COLUMN IF NOT EXISTS page_dims jsonb;
+-- chapter release date on the source (stamped at download/update time; NULL for library-only books)
+ALTER TABLE lib_books  ADD COLUMN IF NOT EXISTS published_at timestamptz;
 -- whether the scheduled updater pulls new chapters for this series (user choice at add time)
 ALTER TABLE lib_series ADD COLUMN IF NOT EXISTS auto_update boolean NOT NULL DEFAULT true;
 -- source routing for the updater: the adapter id + that adapter's stable series id/url, stamped at add time.

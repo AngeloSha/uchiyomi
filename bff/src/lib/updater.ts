@@ -3,13 +3,16 @@
 // lib_series.source_id / source_series_id columns stamped at add time (backfilled once for older rows) —
 // no display-name keyword matching or <Web>-url reverse-parsing.
 import { q, one } from './db';
-import { getSource } from './sources';
+import { getSource, SourceChapter } from './sources';
 import { downloadChapter } from './downloader';
-import { persistScan } from './library';
+import { persistScan, setBookDates } from './library';
 import { blockedNow } from './sourceHealth';
 import { notifyNewChapter } from './push';
 
-export async function updateSeries(seriesId: string, maxNew = 10): Promise<{ title: string; added: number; available: number }> {
+export async function updateSeries(
+  seriesId: string,
+  maxNew = 10,
+): Promise<{ title: string; added: number; available: number; folder?: string; chapters?: SourceChapter[] }> {
   const s = await one<any>('SELECT id,title,source_id,source_series_id,web,folder,summary,author,genres,status FROM lib_series WHERE id=$1', [seriesId]);
   if (!s) return { title: '', added: 0, available: 0 };
   const src = s.source_id ? getSource(s.source_id) : null;
@@ -40,7 +43,9 @@ export async function updateSeries(seriesId: string, maxNew = 10): Promise<{ tit
     }
   }
   if (added) notifyNewChapter(seriesId, s.title, added).catch(() => {});
-  return { title: s.title, added, available: chapters.length };
+  // backfill release dates onto already-scanned books; freshly downloaded ones are stamped after the sweep's scan
+  await setBookDates(s.folder, chapters).catch(() => {});
+  return { title: s.title, added, available: chapters.length, folder: s.folder, chapters };
 }
 
 /** Sweep the library for new chapters. onlyFavorites keeps a manual run quick; throttled for politeness. */
@@ -49,11 +54,14 @@ export async function runUpdateAll(opts: { onlyFavorites?: boolean; maxNew?: num
     ? (await q<{ series_id: string }>('SELECT DISTINCT f.series_id FROM favorites f JOIN lib_series s ON s.id = f.series_id WHERE s.auto_update')).map((r) => r.series_id)
     : (await q<{ id: string }>('SELECT id FROM lib_series WHERE auto_update ORDER BY latest_mtime DESC')).map((r) => r.id);
   let added = 0;
+  const dated: { folder: string; chapters: SourceChapter[] }[] = [];
   for (const id of ids) {
-    const r = await updateSeries(id, opts.maxNew ?? 10).catch(() => ({ added: 0 }));
+    const r = await updateSeries(id, opts.maxNew ?? 10).catch(() => ({ added: 0 } as { added: number; folder?: string; chapters?: SourceChapter[] }));
     added += r.added;
+    if (r.added && r.folder && r.chapters?.length) dated.push({ folder: r.folder, chapters: r.chapters });
     await new Promise((res) => setTimeout(res, 1500));
   }
   if (added) await persistScan();
+  for (const d of dated) await setBookDates(d.folder, d.chapters).catch(() => {}); // stamp the books the scan just created
   return { series: ids.length, added };
 }

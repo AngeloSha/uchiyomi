@@ -4,7 +4,7 @@ import { useSearchParams, useRouter } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, img } from '@/lib/api';
 import { Book, Page, Series } from '@/lib/types';
-import { chapterLabel } from '@/lib/format';
+import { chapterLabel, relativeTime } from '@/lib/format';
 import { listDownloads, downloadChapter, deleteDownload } from '@/lib/downloads';
 import { applyCover, clearCover } from '@/lib/theme';
 import { Img, Backdrop, Rail, SectionTitle } from '@/components/ui';
@@ -104,6 +104,9 @@ function ChapterRow({ book, downloaded, onReader, onToggleDownload }: {
           )}
         </div>
       </button>
+      {book.metadata?.releaseDate && (
+        <span className="shrink-0 text-[11px] text-fog-500">{relativeTime(book.metadata.releaseDate)}</span>
+      )}
       <button
         onClick={async () => {
           if (busy) return;
@@ -252,6 +255,7 @@ function SeriesInner() {
       {meta?.status && <span className="capitalize">{meta.status.toLowerCase()}</span>}
       {series && <span>· {series.booksCount} chapters</span>}
       {(series?.booksUnreadCount ?? 0) > 0 && <span className="text-accent">· {series!.booksUnreadCount} unread</span>}
+      {series?.created && <span>· added {relativeTime(series.created)}</span>}
     </div>
   );
 
