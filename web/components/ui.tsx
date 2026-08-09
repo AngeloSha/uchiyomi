@@ -4,10 +4,32 @@ import { genreBackdrop } from '@/lib/art';
 
 /** Series backdrop: the BFF composites a wide, blurred, darkened full-bleed ambient from the series art
  *  (AniList banner or portrait cover), so we just render it object-cover — fills the hero on any aspect,
- *  no empty bars, no floating poster. Genre art is the fallback. `className` positions the wrapper. */
-export function Backdrop({ seriesId, genres, className = '', version }: { seriesId?: string; genres?: string[]; className?: string; version?: number }) {
+ *  no empty bars, no floating poster. Genre art is the fallback. `className` positions the wrapper.
+ *  `hero` requests the sharp variant: the real art, served in a frame that matches the viewport
+ *  (`ar=wide` desktop / `ar=tall` phone) so the client barely crops — mismatched shapes come back as the
+ *  whole image over a blurred self-fill instead of a double-cropped zoom. */
+/** True at/above the lg breakpoint; tracks rotations/resizes. Lazy init avoids a wrong first value. */
+export function useWideViewport(): boolean {
+  const [wide, setWide] = useState(() => (typeof window === 'undefined' ? true : window.matchMedia('(min-width: 1024px)').matches));
+  useEffect(() => {
+    const mq = window.matchMedia('(min-width: 1024px)');
+    const apply = () => setWide(mq.matches);
+    mq.addEventListener('change', apply);
+    return () => mq.removeEventListener('change', apply);
+  }, []);
+  return wide;
+}
+
+/** Backdrop URL builder — shared by <Backdrop> and preloaders (e.g. the hero preloading its next slide). */
+export const backdropUrl = (seriesId: string, opts: { hero?: boolean; wide?: boolean; version?: number } = {}) => {
+  const params = [opts.version ? `av=${opts.version}` : '', opts.hero ? `style=hero&ar=${opts.wide ? 'wide' : 'tall'}` : ''].filter(Boolean).join('&');
+  return `/img/series/${encodeURIComponent(seriesId)}/backdrop${params ? `?${params}` : ''}`;
+};
+
+export function Backdrop({ seriesId, genres, className = '', version, hero }: { seriesId?: string; genres?: string[]; className?: string; version?: number; hero?: boolean }) {
   const fallback = genreBackdrop(genres);
-  const real = seriesId ? `/img/series/${encodeURIComponent(seriesId)}/backdrop${version ? `?av=${version}` : ''}` : fallback;
+  const wide = useWideViewport();
+  const real = seriesId ? backdropUrl(seriesId, { hero, wide, version }) : fallback;
   const [src, setSrc] = useState(real);
   useEffect(() => { setSrc(real); }, [real]);
   return (

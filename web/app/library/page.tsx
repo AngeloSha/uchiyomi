@@ -14,7 +14,7 @@ const SORTS = [
   { key: 'updated', label: 'Updated', sort: 'lastModified,desc' },
   { key: 'new', label: 'Newest', sort: 'createdDate,desc' },
   { key: 'az', label: 'A–Z', sort: 'metadata.titleSort,asc' },
-  { key: 'unread', label: 'Most unread', sort: 'booksCount,desc' },
+  { key: 'unread', label: 'Most chapters', sort: 'booksCount,desc' }, // honest label: sorts by total chapters (per-user unread isn't sortable server-side)
 ];
 
 function LibraryInner() {

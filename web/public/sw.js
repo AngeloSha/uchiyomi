@@ -1,7 +1,7 @@
 /* Koryomi service worker — app-shell + runtime caching.
    Explicit offline chapter downloads live in IndexedDB (managed by the app);
    this SW handles the shell, static assets, and casual image/API re-reads. */
-const VERSION = 'v3';
+const VERSION = 'v4';
 const SHELL = `yomi-shell-${VERSION}`;
 const STATIC = `yomi-static-${VERSION}`;
 const IMG = `yomi-img-${VERSION}`;
@@ -145,4 +145,69 @@ self.addEventListener('notificationclick', (event) => {
       if (clients.openWindow) return clients.openWindow(target);
     })(),
   );
+});
+
+// If the browser rotates the push endpoint, the old subscription silently dies — re-subscribe with the
+// same server key and re-register it, so new-chapter notifications survive without a manual re-toggle.
+self.addEventListener('pushsubscriptionchange', (event) => {
+  event.waitUntil(
+    (async () => {
+      try {
+        const key = event.oldSubscription && event.oldSubscription.options && event.oldSubscription.options.applicationServerKey;
+        if (!key) return;
+        const sub = await self.registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key });
+        const token = await freshAccessToken();
+        if (!token) return;
+        const j = sub.toJSON();
+        await fetch('/api/push/subscribe', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
+          body: JSON.stringify({ endpoint: j.endpoint, keys: j.keys }),
+        });
+      } catch (_) { /* next Profile visit re-subscribes by hand */ }
+    })(),
+  );
+});
+
+// ---- background sync: flush the queued reading-progress outbox even when the app is closed ----
+function reqp(r) {
+  return new Promise((res, rej) => { r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); });
+}
+async function freshAccessToken() {
+  // the SW has no in-memory access token; mint one from the httpOnly refresh cookie
+  try {
+    const r = await fetch('/auth/refresh', { method: 'POST', credentials: 'include' });
+    if (!r.ok) return null;
+    return (await r.json()).accessToken || null;
+  } catch (_) { return null; }
+}
+async function flushOutboxSW() {
+  let db;
+  try { db = await reqp(indexedDB.open('yomi-offline')); } catch (_) { return; }
+  if (!db.objectStoreNames.contains('outbox')) return;
+  const ro = db.transaction('outbox', 'readonly').objectStore('outbox');
+  let keys, vals;
+  try { [keys, vals] = await Promise.all([reqp(ro.getAllKeys()), reqp(ro.getAll())]); } catch (_) { return; }
+  if (!vals || !vals.length) return;
+  const token = await freshAccessToken();
+  if (!token) return;
+  for (let i = 0; i < vals.length; i++) {
+    const ev = vals[i];
+    try {
+      const r = await fetch(`/api/books/${ev.bookId}/progress`, {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
+        body: JSON.stringify({ page: ev.page, completed: ev.completed, seriesId: ev.seriesId, deviceId: ev.deviceId }),
+      });
+      // success or permanent rejection -> drop the entry; transient failures stay queued
+      if (r.ok || (r.status >= 400 && r.status < 500 && r.status !== 401 && r.status !== 429)) {
+        const rw = db.transaction('outbox', 'readwrite');
+        rw.objectStore('outbox').delete(keys[i]);
+        await new Promise((res) => { rw.oncomplete = res; rw.onerror = res; rw.onabort = res; });
+      }
+    } catch (_) { /* still offline — the sync retries later */ }
+  }
+}
+self.addEventListener('sync', (event) => {
+  if (event.tag === 'yomi-progress') event.waitUntil(flushOutboxSW());
 });

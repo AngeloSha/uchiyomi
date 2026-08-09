@@ -89,7 +89,15 @@ async function main() {
       }
       setTimeout(tick, hours * 60 * 60 * 1000).unref();
     };
-    setTimeout(tick, 6 * 60 * 60 * 1000).unref(); // first run after 6h
+    // first run honors the configured interval too (a 1h setting shouldn't wait 6h after a reboot)
+    void (async () => {
+      let hours = 6;
+      try {
+        const s = await pool.query('SELECT updater_hours FROM server_settings WHERE id = 1');
+        hours = Math.min(168, Math.max(1, s.rows[0]?.updater_hours || 6));
+      } catch { /* settings row not readable yet — keep the 6h default */ }
+      setTimeout(tick, hours * 60 * 60 * 1000).unref();
+    })();
   }
 
   await app.listen({ host: '0.0.0.0', port: env.PORT });

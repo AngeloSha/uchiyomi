@@ -1,7 +1,9 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { q, one } from '../lib/db';
-import { komga } from '../lib/komga';
+// backend-agnostic content client: the owned library in owned mode, Komga otherwise. The old direct
+// `lib/komga` import silently nulled every series lookup here after the owned-library cutover.
+import { content as komga } from '../lib/backend';
 import { authenticate, userIdOf, issueOpdsToken } from '../lib/auth';
 import { env } from '../env';
 import { pushEnabled, vapidPublicKey, saveSubscription, removeSubscription } from '../lib/push';
@@ -155,6 +157,18 @@ export default async function personalRoutes(app: FastifyInstance) {
     return { ok: true };
   });
 
+  // Reorder a collection: the full series-id list in its new order rewrites the positions.
+  app.put('/api/collections/:id/items', async (req) => {
+    const uid = userIdOf(req);
+    const { id } = req.params as { id: string };
+    const { seriesIds } = z.object({ seriesIds: z.array(z.string().min(1)).max(500) }).parse(req.body);
+    const owns = await one('SELECT id FROM collections WHERE id = $1 AND user_id = $2', [id, uid]);
+    if (!owns) return { ok: false };
+    for (let i = 0; i < seriesIds.length; i++)
+      await q('UPDATE collection_items SET position = $3 WHERE collection_id = $1 AND series_id = $2', [id, seriesIds[i], i]);
+    return { ok: true };
+  });
+
   // ---- ratings ----
   app.put('/api/ratings/:seriesId', async (req) => {
     const uid = userIdOf(req);
@@ -206,12 +220,19 @@ export default async function personalRoutes(app: FastifyInstance) {
   app.get('/api/history', async (req) => {
     const uid = userIdOf(req);
     const limit = Math.min(Number((req.query as Record<string, string>).limit) || 50, 200);
-    // most-recent event per book
+    // most-recent event per book, newest first, with display titles for the history timeline
     return {
       content: await q(
-        `SELECT DISTINCT ON (book_id) book_id, series_id, page, completed, created_at
-         FROM reading_events WHERE user_id = $1
-         ORDER BY book_id, created_at DESC
+        `SELECT e.book_id, e.series_id, e.page, e.completed, e.created_at,
+                COALESCE(b.title, '') AS book_title, COALESCE(s.title, '') AS series_title
+         FROM (
+           SELECT DISTINCT ON (book_id) book_id, series_id, page, completed, created_at
+           FROM reading_events WHERE user_id = $1
+           ORDER BY book_id, created_at DESC
+         ) e
+         LEFT JOIN lib_books b ON b.id = e.book_id
+         LEFT JOIN lib_series s ON s.id = e.series_id
+         ORDER BY e.created_at DESC
          LIMIT $2`,
         [uid, limit],
       ),

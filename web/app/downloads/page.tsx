@@ -1,7 +1,7 @@
 'use client';
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { listDownloads, deleteDownload, storageEstimate, OfflineChapter } from '@/lib/downloads';
+import { listDownloads, deleteDownload, deleteSeriesDownloads, clearAllDownloads, storageEstimate, OfflineChapter } from '@/lib/downloads';
 import { runSmartOffline } from '@/lib/offlineSync';
 import { bytes } from '@/lib/format';
 import { useToast } from '@/components/Toast';
@@ -37,6 +37,20 @@ export default function DownloadsPage() {
     refresh();
   };
 
+  const removeSeries = async (seriesId: string, title: string, count: number) => {
+    if (!window.confirm(`Delete all ${count} downloaded chapters of “${title}”?`)) return;
+    const n = await deleteSeriesDownloads(seriesId);
+    toast(`Deleted ${n} chapters`, 'success');
+    refresh();
+  };
+
+  const removeAll = async () => {
+    if (!window.confirm(`Delete all ${items.length} downloaded chapters on this device?`)) return;
+    const n = await clearAllDownloads();
+    toast(`Deleted ${n} chapters`, 'success');
+    refresh();
+  };
+
   const sync = async () => {
     if (syncing) return;
     setSyncing(true);
@@ -67,6 +81,11 @@ export default function DownloadsPage() {
         <div className="mt-1 flex items-center gap-2 text-xs text-fog-500">
           <span>{items.length} chapters · {bytes(totalBytes)}</span>
           {!online && <span className="inline-flex items-center gap-1 text-accent"><IcWifiOff width={13} height={13} /> offline</span>}
+          {items.length > 0 && (
+            <button onClick={removeAll} className="ml-auto inline-flex items-center gap-1 text-fog-500 transition hover:text-red-400">
+              <IcTrash width={13} height={13} /> Delete all
+            </button>
+          )}
         </div>
         {usage.quota > 0 && (
           <div className="mt-3">
@@ -86,7 +105,16 @@ export default function DownloadsPage() {
         <div className="px-5 pt-4">
           {Object.entries(groups).map(([series, chapters]) => (
             <section key={series} className="mb-6">
-              <h2 className="mb-2 font-display text-base font-semibold text-fog-100">{series}</h2>
+              <div className="mb-2 flex items-center justify-between gap-2">
+                <h2 className="min-w-0 truncate font-display text-base font-semibold text-fog-100">{series}</h2>
+                <div className="flex shrink-0 items-center gap-2 text-[11px] text-fog-500">
+                  <span>{chapters.length} ch · {bytes(chapters.reduce((a, c) => a + (c.totalBytes || 0), 0))}</span>
+                  <button onClick={() => removeSeries(chapters[0].seriesId, series, chapters.length)}
+                    className="inline-flex items-center gap-1 transition hover:text-red-400" aria-label={`Delete all of ${series}`}>
+                    <IcTrash width={13} height={13} />
+                  </button>
+                </div>
+              </div>
               <div className="card divide-y divide-ink-800/70 overflow-hidden">
                 {chapters.map((c) => (
                   <div key={c.bookId} className="flex items-center gap-3 px-4 py-3">

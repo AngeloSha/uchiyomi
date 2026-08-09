@@ -5,10 +5,11 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { requestPersist, storageEstimate } from '@/lib/downloads';
+import { deviceId } from '@/lib/device';
 import { bytes, relativeTime } from '@/lib/format';
 import { Avatar, AVATAR_EMOJIS, AVATAR_COLORS } from '@/components/Avatar';
 import { SecurityPanel } from '@/components/SecurityPanel';
-import { IcDownload, IcSparkle, IcCheck, IcUser, IcChevronRight } from '@/components/icons';
+import { IcDownload, IcSparkle, IcCheck, IcUser, IcChevronRight, IcRefresh } from '@/components/icons';
 
 function urlB64ToUint8(s: string): Uint8Array {
   const pad = '='.repeat((4 - (s.length % 4)) % 4);
@@ -120,7 +121,7 @@ export default function ProfilePage() {
         if (perm === 'granted') {
           const sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: urlB64ToUint8(pushKey) as unknown as BufferSource });
           const j = sub.toJSON() as { endpoint?: string; keys?: { p256dh: string; auth: string } };
-          if (j.endpoint && j.keys) { await api('/api/push/subscribe', { json: { endpoint: j.endpoint, keys: j.keys } }); setPushOn(true); }
+          if (j.endpoint && j.keys) { await api('/api/push/subscribe', { json: { endpoint: j.endpoint, keys: j.keys, deviceId: deviceId() } }); setPushOn(true); }
         }
       }
     } catch {}
@@ -243,6 +244,10 @@ export default function ProfilePage() {
           </div>
         )}
 
+        <Link href="/history" className="card mt-3 flex items-center justify-between p-4">
+          <span className="flex items-center gap-3 text-sm text-fog-200"><IcRefresh className="text-accent" width={20} height={20} /> Reading history</span>
+          <IcChevronRight className="text-fog-500" width={18} height={18} />
+        </Link>
         <Link href="/wrapped" className="card mt-3 flex items-center justify-between p-4">
           <span className="flex items-center gap-3 text-sm text-fog-200"><IcSparkle className="text-accent" width={20} height={20} /> Your Koryomi Wrapped</span>
           <IcChevronRight className="text-fog-500" width={18} height={18} />

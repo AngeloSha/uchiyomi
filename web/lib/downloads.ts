@@ -105,6 +105,21 @@ export async function deleteDownload(bookId: string): Promise<void> {
   api(`/api/downloads/${bookId}?deviceId=${deviceId()}`, { method: 'DELETE' }).catch(() => {});
 }
 
+/** Remove every offline chapter of one series. Returns how many were deleted. */
+export async function deleteSeriesDownloads(seriesId: string): Promise<number> {
+  const all = await listDownloads();
+  const mine = all.filter((c) => c.seriesId === seriesId);
+  for (const c of mine) await deleteDownload(c.bookId);
+  return mine.length;
+}
+
+/** Remove all offline chapters on this device. Returns how many were deleted. */
+export async function clearAllDownloads(): Promise<number> {
+  const all = await listDownloads();
+  for (const c of all) await deleteDownload(c.bookId);
+  return all.length;
+}
+
 export async function storageEstimate(): Promise<{ usage: number; quota: number }> {
   if (typeof navigator !== 'undefined' && navigator.storage?.estimate) {
     const e = await navigator.storage.estimate();
@@ -132,13 +147,18 @@ export interface ProgressEvent {
 
 export async function queueProgress(ev: ProgressEvent): Promise<void> {
   const d = await db();
-  await d.add('outbox', { ...ev, ts: Date.now() });
+  await d.add('outbox', { ...ev, ts: Date.now(), tries: 0 });
+  // background sync: the SW flushes the outbox when connectivity returns, even if the app is closed
+  try {
+    const reg = await navigator.serviceWorker?.ready;
+    await (reg as any)?.sync?.register('yomi-progress');
+  } catch { /* no background-sync support — the foreground online/timer flush still runs */ }
 }
 
 export async function flushOutbox(): Promise<number> {
   const d = await db();
   const keys = await d.getAllKeys('outbox');
-  const all = (await d.getAll('outbox')) as ProgressEvent[];
+  const all = (await d.getAll('outbox')) as Array<ProgressEvent & { tries?: number }>;
   let sent = 0;
   for (let i = 0; i < all.length; i++) {
     const ev = all[i];
@@ -150,7 +170,11 @@ export async function flushOutbox(): Promise<number> {
       await d.delete('outbox', keys[i]);
       sent++;
     } catch {
-      break; // still offline; try again later
+      // don't let one poisoned entry (deleted book, bad payload) block the whole queue forever:
+      // count the failure and drop the entry after 5 attempts; keep trying the rest this pass
+      const tries = (ev.tries ?? 0) + 1;
+      if (tries >= 5) await d.delete('outbox', keys[i]);
+      else await d.put('outbox', { ...ev, tries }); // outbox has keyPath 'id' — the record carries its own key
     }
   }
   return sent;

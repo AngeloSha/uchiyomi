@@ -1,18 +1,60 @@
 'use client';
 import Link from 'next/link';
+import { useCallback, useRef, useState } from 'react';
 import { img } from '@/lib/api';
 import { Book, Series } from '@/lib/types';
 import { chapterLabel, progressOf } from '@/lib/format';
 import { Img, ProgressBar } from './ui';
 import { IcHeart, IcPlay } from './icons';
 
+/** Pointer-tracked 3D tilt + moving glare for cover cards. Desktop-only (hover+fine pointer),
+ *  disabled under prefers-reduced-motion; on touch the handlers never fire so nothing changes. */
+function useTilt() {
+  const [style, setStyle] = useState<React.CSSProperties | undefined>();
+  const [glare, setGlare] = useState<React.CSSProperties>({ opacity: 0 });
+  const ok = useRef<boolean | null>(null);
+  const enabled = () => {
+    if (ok.current === null)
+      ok.current = typeof window !== 'undefined' &&
+        window.matchMedia('(hover: hover) and (pointer: fine)').matches &&
+        !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    return ok.current;
+  };
+  const onPointerMove = useCallback((e: React.PointerEvent<HTMLElement>) => {
+    if (!enabled()) return;
+    const r = e.currentTarget.getBoundingClientRect();
+    const px = (e.clientX - r.left) / r.width - 0.5;   // -0.5 .. 0.5
+    const py = (e.clientY - r.top) / r.height - 0.5;
+    setStyle({
+      transform: `perspective(700px) rotateX(${(-py * 8).toFixed(2)}deg) rotateY(${(px * 10).toFixed(2)}deg) translateY(-6px) scale(1.03)`,
+      transition: 'transform 120ms ease-out',
+    });
+    setGlare({
+      opacity: 1,
+      background: `radial-gradient(220px circle at ${((px + 0.5) * 100).toFixed(1)}% ${((py + 0.5) * 100).toFixed(1)}%, rgba(255,255,255,0.18), transparent 60%)`,
+    });
+  }, []);
+  const onPointerLeave = useCallback(() => {
+    setStyle({ transform: 'perspective(700px) rotateX(0deg) rotateY(0deg)', transition: 'transform 320ms ease' });
+    setGlare({ opacity: 0, transition: 'opacity 320ms ease' });
+  }, []);
+  return { style, glare, onPointerMove, onPointerLeave };
+}
+
 /** Portrait series cover -> series detail. */
 export function SeriesCard({ series, w = 'w-32' }: { series: Series; w?: string }) {
   const unread = series.booksUnreadCount ?? 0;
+  const tilt = useTilt();
   return (
     <Link href={`/series/?id=${series.id}`} className={`group shrink-0 ${w} [scroll-snap-align:start]`}>
-      <div className="grad-border relative aspect-[2/3] overflow-hidden rounded-2xl border border-ink-700/60 shadow-lift transition-all duration-300 group-hover:-translate-y-1.5 group-hover:shadow-glow group-active:scale-[0.97]">
+      <div
+        onPointerMove={tilt.onPointerMove}
+        onPointerLeave={tilt.onPointerLeave}
+        style={tilt.style}
+        className="grad-border relative aspect-[2/3] overflow-hidden rounded-2xl border border-ink-700/60 shadow-lift transition-all duration-300 group-hover:-translate-y-1.5 group-hover:shadow-glow group-active:scale-[0.97]"
+      >
         <Img src={img.seriesThumb(series.id)} alt={series.metadata?.title || series.name} className="h-full w-full transition-transform duration-500 group-hover:scale-[1.07]" />
+        <div aria-hidden className="pointer-events-none absolute inset-0 z-10" style={tilt.glare} />
         {series.yomi?.favorite && (
           <span className="absolute left-2 top-2 z-10 rounded-full bg-black/55 p-1.5 text-accent backdrop-blur">
             <IcHeart width={14} height={14} fill="currentColor" stroke="none" />
