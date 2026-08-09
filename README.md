@@ -35,14 +35,21 @@ into a single image.** Point it at your library, add sources by URL, and it does
 ## Features
 
 - **Vertical webtoon reader:** continuous multi-chapter scroll, pinch/double-tap zoom, AMOLED/sepia themes,
-  per-series memory, auto-hiding chrome, keyboard nav on desktop.
+  per-series memory, auto-hiding chrome, keyboard nav on desktop — plus **double-page spreads** for classic
+  manga (RTL-aware), a **page-preview scrubber**, and an end-of-series **Up Next** card with suggestions.
+- **Cinematic art everywhere:** real banner + cover art pulled from AniList / Kitsu / MangaDex with a one-click
+  **backfill** and an admin **Art Review** picker; the home hero shows each series' actual art sharp,
+  aspect-aware for phone and desktop, pre-warmed so it loads instantly.
 - **Library:** fast scanner for **CBZ, CBR, and loose image folders** (reads `ComicInfo.xml`), cover-art
   ambient theming, genres, an Updates feed with new-chapter badges, and discovery rails (For You / trending /
-  similar).
+  similar / "because you read …").
+- **Command palette:** press **Ctrl+K** anywhere — instant series search, quick actions, recent items.
+- **Collections:** hand-curated reading lists with accent colors, reorderable, surfaced on Home.
 - **Discover:** one search across **every source at once** (one card per title; pick which provider to add
   from), a **newest-releases rail per source**, and a global trending-manhwa rail.
-- **Multi-user:** username + password accounts, per-user reading progress / favorites / history, avatars,
-  streaks, and a "household" leaderboard.
+- **Multi-user:** username + password accounts, per-user reading progress / favorites / history timeline,
+  avatars, streaks, and a "household" leaderboard — with accurate completion tracking, mark-as-read
+  anywhere, and bulk offline-download management.
 - **Offline:** installable PWA with offline downloads + smart auto-sync of favorites.
 - **Push notifications:** opt-in web push the moment a followed series gets a new chapter.
 - **OPDS:** browse & read your Koryomi library from other reader apps (Panels, Chunky, KOReader, …).

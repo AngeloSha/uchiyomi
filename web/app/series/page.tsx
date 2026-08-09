@@ -1,5 +1,6 @@
 'use client';
-import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
+import { Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { motion } from 'framer-motion';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, img } from '@/lib/api';
@@ -71,6 +72,63 @@ function SeriesEditModal({ id, series, onClose, onSaved }: { id: string; series:
   );
 }
 
+interface CollectionRow { id: string; name: string; accent: string | null; item_count: number }
+
+/** "Add to collection" sheet: pick an existing list or create one inline. */
+function CollectionSheet({ seriesId, onClose }: { seriesId: string; onClose: () => void }) {
+  const toast = useToast();
+  const qc = useQueryClient();
+  const [name, setName] = useState('');
+  const { data, isLoading } = useQuery({ queryKey: ['collections'], queryFn: () => api<{ content: CollectionRow[] }>('/api/collections') });
+  const add = async (c: CollectionRow) => {
+    try {
+      await api(`/api/collections/${c.id}/items`, { json: { seriesId } });
+      toast(`Added to ${c.name}`, 'success');
+      qc.invalidateQueries({ queryKey: ['collections'] });
+      qc.invalidateQueries({ queryKey: ['collection', c.id] });
+      onClose();
+    } catch { toast('Failed', 'error'); }
+  };
+  const createAndAdd = async () => {
+    const n = name.trim();
+    if (!n) return;
+    try {
+      const c = await api<CollectionRow>('/api/collections', { json: { name: n } });
+      await add(c);
+    } catch { toast('Failed to create', 'error'); }
+  };
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-ink-950/70 p-4 backdrop-blur-sm" onClick={onClose}>
+      <div className="glass w-full max-w-sm rounded-2xl border border-ink-700 p-5" onClick={(e) => e.stopPropagation()}>
+        <div className="mb-3 flex items-start justify-between gap-3">
+          <h3 className="font-display text-lg font-semibold">Add to collection</h3>
+          <button onClick={onClose} className="shrink-0 text-fog-500 hover:text-fog-200">✕</button>
+        </div>
+        {isLoading ? (
+          <div className="skeleton h-24 rounded-xl" />
+        ) : (
+          <div className="max-h-64 space-y-1.5 overflow-y-auto">
+            {(data?.content ?? []).map((c) => (
+              <button key={c.id} onClick={() => add(c)}
+                className="flex w-full items-center gap-2.5 rounded-xl border border-ink-700 px-3 py-2.5 text-left transition hover:border-accent/50">
+                <span aria-hidden className="h-4 w-1.5 shrink-0 rounded-full" style={{ background: c.accent || 'rgb(var(--accent))' }} />
+                <span className="min-w-0 truncate text-sm text-fog-100">{c.name}</span>
+                <span className="ml-auto shrink-0 text-[11px] text-fog-500">{c.item_count}</span>
+              </button>
+            ))}
+            {!(data?.content ?? []).length && <p className="py-2 text-center text-xs text-fog-500">No collections yet — create one below.</p>}
+          </div>
+        )}
+        <div className="mt-3 flex gap-2 border-t border-ink-800 pt-3">
+          <input value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && createAndAdd()}
+            placeholder="New collection…" className={`${fld} flex-1`} />
+          <button onClick={createAndAdd} disabled={!name.trim()} className="btn-accent px-3 text-xs disabled:opacity-50">Create</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function StarRating({ value, onSet }: { value: number | null; onSet: (n: number) => void }) {
   return (
     <div className="flex items-center gap-1">
@@ -83,19 +141,25 @@ function StarRating({ value, onSet }: { value: number | null; onSet: (n: number)
   );
 }
 
-function ChapterRow({ book, downloaded, onReader, onToggleDownload }: {
+function ChapterRow({ book, downloaded, onReader, onToggleDownload, onMark }: {
   book: Book;
   downloaded: boolean;
   onReader: () => void;
   onToggleDownload: () => Promise<void>;
+  onMark: (mode: 'read' | 'unread' | 'previous') => void;
 }) {
   const [busy, setBusy] = useState(false);
+  const [menu, setMenu] = useState(false);
   const rp = book.readProgress;
   const state = rp?.completed ? 'read' : rp ? 'reading' : 'unread';
 
   return (
-    <div className="flex items-center gap-3 border-b border-ink-800/70 py-3">
+    <div className="flex items-center gap-3 border-b border-ink-800/70 py-2.5">
       <button onClick={onReader} className="flex min-w-0 flex-1 items-center gap-3 text-left">
+        <div className={`relative h-14 w-10 shrink-0 overflow-hidden rounded-lg border ${state === 'read' ? 'border-ink-800 opacity-45' : 'border-ink-700'}`}>
+          <Img src={img.bookThumb(book.id)} alt="" className="h-full w-full" />
+          {state === 'reading' && <span className="absolute inset-x-0 bottom-0 h-0.5 bg-accent" />}
+        </div>
         <span className={`h-2 w-2 shrink-0 rounded-full ${state === 'read' ? 'bg-ink-600' : state === 'reading' ? 'bg-accent' : 'bg-accent/40'}`} />
         <div className="min-w-0">
           <p className={`truncate text-sm ${state === 'read' ? 'text-fog-500' : 'text-fog-100'}`}>{chapterLabel(book)}</p>
@@ -119,6 +183,27 @@ function ChapterRow({ book, downloaded, onReader, onToggleDownload }: {
       >
         {busy ? <span className="text-[10px] font-semibold text-accent">…</span> : downloaded ? <IcCheck width={16} height={16} /> : <IcDownload width={16} height={16} />}
       </button>
+      <div className="relative shrink-0">
+        <button onClick={() => setMenu((m) => !m)} aria-label="Chapter actions"
+          className="grid h-9 w-9 place-items-center rounded-full border border-ink-700 text-fog-500">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.8" /><circle cx="12" cy="12" r="1.8" /><circle cx="19" cy="12" r="1.8" /></svg>
+        </button>
+        {menu && (
+          <>
+            <div className="fixed inset-0 z-20" onClick={() => setMenu(false)} />
+            <div className="absolute right-0 top-10 z-30 w-48 overflow-hidden rounded-xl border border-ink-700 bg-ink-900 shadow-lift">
+              <button onClick={() => { setMenu(false); onMark(rp?.completed ? 'unread' : 'read'); }}
+                className="block w-full px-3.5 py-2.5 text-left text-xs text-fog-200 hover:bg-ink-800">
+                {rp?.completed ? 'Mark unread' : 'Mark read'}
+              </button>
+              <button onClick={() => { setMenu(false); onMark('previous'); }}
+                className="block w-full px-3.5 py-2.5 text-left text-xs text-fog-200 hover:bg-ink-800">
+                Mark previous as read
+              </button>
+            </div>
+          </>
+        )}
+      </div>
     </div>
   );
 }
@@ -130,6 +215,7 @@ function SeriesInner() {
   const toast = useToast();
   const { isAdmin } = useAuth();
   const [editing, setEditing] = useState(false);
+  const [collecting, setCollecting] = useState(false);
   const [asc, setAsc] = useState(true);
   const [downloaded, setDownloaded] = useState<Set<string>>(new Set());
   const [showSummary, setShowSummary] = useState(false);
@@ -198,6 +284,41 @@ function SeriesInner() {
     }
   };
 
+  // manual read-state changes go through the same progress endpoint the reader uses, but `silent`
+  // so bulk-marking a backlog doesn't count as chapters "read this week" on the leaderboard
+  const setRead = async (targets: Book[], completed: boolean) => {
+    for (const b of targets) {
+      try {
+        await api(`/api/books/${b.id}/progress`, {
+          method: 'PUT',
+          json: { page: completed ? b.media.pagesCount || 1 : 0, completed, seriesId: id, silent: true },
+        });
+      } catch {}
+    }
+    qc.invalidateQueries({ queryKey: ['series-books', id] });
+    qc.invalidateQueries({ queryKey: ['series', id] });
+    qc.invalidateQueries({ queryKey: ['home'] });
+  };
+  const markChapter = async (b: Book, mode: 'read' | 'unread' | 'previous') => {
+    if (mode === 'previous') {
+      const prev = (books?.content ?? []).filter((x) => x.number < b.number && !x.readProgress?.completed);
+      if (!prev.length) { toast('Nothing before this chapter is unread'); return; }
+      toast(`Marking ${prev.length} chapter${prev.length > 1 ? 's' : ''} read…`);
+      await setRead(prev, true);
+      toast(`Marked ${prev.length} read`, 'success');
+    } else {
+      await setRead([b], mode === 'read');
+      toast(mode === 'read' ? 'Marked read' : 'Marked unread', 'success');
+    }
+  };
+  const markAllRead = async () => {
+    const todo = (books?.content ?? []).filter((b) => !b.readProgress?.completed);
+    if (!todo.length) { toast('Everything is already read', 'success'); return; }
+    toast(`Marking ${todo.length} chapters read…`);
+    await setRead(todo, true);
+    toast(`Marked ${todo.length} chapters read`, 'success');
+  };
+
   const downloadAll = async () => {
     if (downloadingAll || !books) return;
     const todo = books.content.filter((b) => !downloaded.has(b.id));
@@ -222,6 +343,16 @@ function SeriesInner() {
   const meta = series?.metadata;
   const summary = meta?.summary || series?.booksMetadata?.summary;
   const title = meta?.title || series?.name || '…';
+  const author = meta?.author || meta?.publisher || '';
+  // "Updated {X ago}" from the newest chapter's date (always available; a real publish date exists for only some series)
+  const updatedAt = useMemo(() => {
+    const ts = (books?.content ?? [])
+      .map((b) => b.metadata?.releaseDate)
+      .filter(Boolean)
+      .map((d) => new Date(d as string).getTime())
+      .filter((n) => !Number.isNaN(n));
+    return ts.length ? new Date(Math.max(...ts)).toISOString() : null;
+  }, [books]);
 
   // shared blocks (rendered once)
   const Actions = (
@@ -237,6 +368,10 @@ function SeriesInner() {
           <IcDownload width={18} height={18} /> {downloadingAll ? 'Saving…' : 'Download all'}
         </button>
       </div>
+      <button onClick={() => setCollecting(true)} className="flex items-center justify-center gap-2 rounded-full border border-ink-700 py-2.5 text-sm text-fog-300">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><path d="M4 6h16M4 12h16M4 18h10" /><path d="M19 15v6M16 18h6" /></svg>
+        Add to collection
+      </button>
       <div className="mt-1 flex items-center justify-between">
         <StarRating value={rating} onSet={setStars} />
         <span className="text-xs text-fog-500">{rating ? `${rating}/5` : 'Rate this'}</span>
@@ -250,12 +385,22 @@ function SeriesInner() {
     </div>
   );
 
+  const metaBits: ReactNode[] = [
+    author ? <span className="text-fog-300">by {author}</span> : null,
+    meta?.status ? <span className="capitalize">{meta.status.toLowerCase()}</span> : null,
+    series ? <>{series.booksCount} chapters</> : null,
+    (series?.booksUnreadCount ?? 0) > 0 ? <span className="text-accent">{series!.booksUnreadCount} unread</span> : null,
+    updatedAt ? <>Updated {relativeTime(updatedAt)}</> : null,
+    rating ? <span className="text-accent">★ {rating}/5</span> : null,
+  ].filter(Boolean);
   const Meta = (
     <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-fog-400 lg:text-sm">
-      {meta?.status && <span className="capitalize">{meta.status.toLowerCase()}</span>}
-      {series && <span>· {series.booksCount} chapters</span>}
-      {(series?.booksUnreadCount ?? 0) > 0 && <span className="text-accent">· {series!.booksUnreadCount} unread</span>}
-      {series?.created && <span>· added {relativeTime(series.created)}</span>}
+      {metaBits.map((n, i) => (
+        <span key={i} className="inline-flex items-center gap-2">
+          {i > 0 && <span aria-hidden className="text-ink-600">·</span>}
+          {n}
+        </span>
+      ))}
     </div>
   );
 
@@ -273,16 +418,20 @@ function SeriesInner() {
 
   const Chapters = (
     <div>
-      <div className="mb-1 flex items-center justify-between">
+      <div className="mb-1 flex items-center justify-between gap-2">
         <h2 className="font-display text-lg font-semibold">Chapters</h2>
-        <button onClick={() => setAsc((a) => !a)} className="chip text-xs">
-          <IcSliders width={14} height={14} /> {asc ? 'Oldest' : 'Newest'}
-        </button>
+        <div className="flex items-center gap-1.5">
+          <button onClick={markAllRead} className="chip text-xs"><IcCheck width={14} height={14} /> Mark all read</button>
+          <button onClick={() => setAsc((a) => !a)} className="chip text-xs">
+            <IcSliders width={14} height={14} /> {asc ? 'Oldest' : 'Newest'}
+          </button>
+        </div>
       </div>
       <div className="lg:grid lg:gap-x-8 lg:[grid-template-columns:repeat(auto-fill,minmax(250px,1fr))]">
         {chapters.map((b) => (
           <ChapterRow key={b.id} book={b} downloaded={downloaded.has(b.id)}
-            onReader={() => router.push(`/reader/?book=${b.id}`)} onToggleDownload={() => toggleDownload(b.id)} />
+            onReader={() => router.push(`/reader/?book=${b.id}`)} onToggleDownload={() => toggleDownload(b.id)}
+            onMark={(mode) => markChapter(b, mode)} />
         ))}
         {!books && Array.from({ length: 8 }).map((_, i) => <div key={i} className="skeleton my-3 h-6 rounded" />)}
       </div>
@@ -304,6 +453,18 @@ function SeriesInner() {
         {series && <Backdrop seriesId={id} genres={series.metadata?.genres} version={series.artVersion} className="absolute inset-0" />}
         <div className="absolute inset-0 bg-gradient-to-t from-ink-950 via-ink-950/65 to-ink-950/30" />
         <div className="pointer-events-none absolute inset-0" style={{ background: 'radial-gradient(85% 95% at 22% 0%, rgb(var(--cover, 124 92 255) / 0.32), transparent 62%)' }} />
+        {/* desktop title-over-art (Jellyfin style) — offset to the right of the floating poster */}
+        <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.55, delay: 0.08, ease: [0.22, 0.61, 0.36, 1] }}
+          className="pointer-events-none absolute inset-x-0 bottom-0 hidden flex-col justify-end p-8 lg:flex lg:pl-[288px]">
+          {(meta?.status || rating) && (
+            <div className="mb-2 flex items-center gap-2">
+              {meta?.status && <span className="chip text-[11px] capitalize">{meta.status.toLowerCase()}</span>}
+              {rating ? <span className="chip text-[11px] text-accent">★ {rating}/5</span> : null}
+            </div>
+          )}
+          <h1 className="font-display text-4xl font-bold leading-tight text-white [text-shadow:0_2px_16px_rgba(0,0,0,0.6)]">{title}</h1>
+          <div className="mt-2">{Meta}</div>
+        </motion.div>
       </div>
 
       {/* content */}
@@ -311,9 +472,10 @@ function SeriesInner() {
         {/* cover + actions */}
         <div className="-mt-20 lg:-mt-32 lg:sticky lg:top-20 lg:self-start">
           <div className="flex items-end gap-4 lg:block">
-            <div className="h-44 w-32 shrink-0 overflow-hidden rounded-2xl border border-ink-600 shadow-lift lg:h-auto lg:w-full">
-              {series && <Img src={img.seriesThumb(id, series.artVersion)} alt={series.name} className="aspect-[2/3] h-full w-full" />}
-            </div>
+            <motion.div initial={{ opacity: 0, y: 18, scale: 0.97 }} animate={{ opacity: 1, y: 0, scale: 1 }} transition={{ duration: 0.5, ease: [0.22, 0.61, 0.36, 1] }}
+              className="h-44 w-32 shrink-0 overflow-hidden rounded-2xl border border-ink-600 shadow-lift lg:h-auto lg:w-full">
+              {series && <Img src={img.seriesThumb(id, series.artVersion, 800)} alt={series.name} className="aspect-[2/3] h-full w-full" />}
+            </motion.div>
             {/* title beside cover on mobile */}
             <div className="min-w-0 pb-1 lg:hidden">
               <h1 className="font-display text-2xl font-bold leading-tight text-white">{title}</h1>
@@ -324,11 +486,7 @@ function SeriesInner() {
         </div>
 
         {/* info + chapters */}
-        <div className="mt-7 flex flex-col gap-4 lg:mt-2">
-          <div className="hidden lg:block">
-            <h1 className="font-display text-3xl font-bold leading-tight text-white">{title}</h1>
-            <div className="mt-1">{Meta}</div>
-          </div>
+        <div className="mt-7 flex flex-col gap-4 lg:mt-4">
           {Genres}
           {Summary}
           {Chapters}
@@ -336,6 +494,7 @@ function SeriesInner() {
       </div>
 
       {editing && series && <SeriesEditModal id={id} series={series} onClose={() => setEditing(false)} onSaved={() => { qc.invalidateQueries({ queryKey: ['series', id] }); }} />}
+      {collecting && <CollectionSheet seriesId={id} onClose={() => setCollecting(false)} />}
 
       {(similar?.content?.length ?? 0) > 0 && (
         <section className="mt-10">

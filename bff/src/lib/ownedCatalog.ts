@@ -29,6 +29,7 @@ function seriesDto(r: any) {
       status: r.status ? String(r.status).toUpperCase() : '',
       summary,
       readingDirection: 'WEBTOON',
+      author: r.author ?? '',
       publisher: r.author ?? '',
       genres,
       tags: [],

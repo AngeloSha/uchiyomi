@@ -7,6 +7,7 @@ export interface ReaderPrefs {
   autoScroll: number; // px/frame, 0 = off
   fitWidth: boolean;
   theme: ReaderTheme;
+  spread: boolean; // paged mode: two pages side by side (manga double-page convention)
 }
 
 export const DEFAULT_PREFS: ReaderPrefs = {
@@ -16,6 +17,7 @@ export const DEFAULT_PREFS: ReaderPrefs = {
   autoScroll: 0,
   fitWidth: true,
   theme: 'amoled',
+  spread: false,
 };
 
 const KEY = 'yomi_reader_prefs';
@@ -40,6 +42,7 @@ export interface SeriesPrefs {
   mode?: ReaderPrefs['mode'];
   theme?: ReaderTheme;
   zoom?: number;
+  spread?: boolean;
 }
 
 export function loadSeriesPrefs(seriesId: string): SeriesPrefs {

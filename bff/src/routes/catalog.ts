@@ -6,6 +6,7 @@ import { content as komga, NATIVE_PROGRESS } from '../lib/backend';
 import { dominantHex } from '../lib/color';
 import { runtime } from '../lib/runtime';
 import { authenticate, roleOf, userIdOf } from '../lib/auth';
+import { warmHeroBackdrops } from './images';
 
 async function seriesColors(ids: string[]): Promise<Map<string, string>> {
   if (!ids.length) return new Map();
@@ -98,6 +99,9 @@ const progressBody = z.object({
   completed: z.boolean().default(false),
   seriesId: z.string().optional(),
   deviceId: z.string().max(128).optional(),
+  // manual mark-as-read: update read_progress but skip the reading_events append, so bulk-marking a
+  // backlog doesn't inflate the weekly leaderboard / stats (events = chapters actually read in the app)
+  silent: z.boolean().default(false),
 });
 
 const forYouCache = new Map<string, { ts: number; pool: any[] }>();
@@ -148,8 +152,8 @@ export default async function catalogRoutes(app: FastifyInstance) {
   app.get('/api/leaderboard', async () => {
     const rows = await q(
       `SELECT u.id, u.display_name, u.username, u.avatar,
-              count(e.*) FILTER (WHERE e.completed AND e.created_at > now() - interval '7 days')::int AS week,
-              count(e.*) FILTER (WHERE e.completed)::int AS total
+              count(DISTINCT e.book_id) FILTER (WHERE e.completed AND e.created_at > now() - interval '7 days')::int AS week,
+              count(DISTINCT e.book_id) FILTER (WHERE e.completed)::int AS total
        FROM users u LEFT JOIN reading_events e ON e.user_id = u.id
        GROUP BY u.id ORDER BY week DESC, total DESC`,
     );
@@ -185,7 +189,10 @@ export default async function catalogRoutes(app: FastifyInstance) {
     for (const s of [...taste, ...((updated as any).content ?? [])]) if (s && !seen.has(s.id)) { seen.add(s.id); merged.push(s); }
     const h = (str: string) => { let x = 0; for (let i = 0; i < str.length; i++) x = (x * 131 + str.charCodeAt(i)) >>> 0; return x; };
     merged.sort((a, b) => h(a.id + today) - h(b.id + today));
-    return { content: await enrichSeries(req, merged.slice(0, 7)) };
+    const picks = merged.slice(0, 7);
+    // pre-generate both hero frames for today's picks so the carousel never waits on sharp/remote fetches
+    void warmHeroBackdrops(picks.map((s) => s.id));
+    return { content: await enrichSeries(req, picks) };
   });
 
   app.post('/api/refresh', async () => {
@@ -401,27 +408,41 @@ export default async function catalogRoutes(app: FastifyInstance) {
   app.put('/api/books/:id/progress', async (req, reply) => {
     const uid = userIdOf(req);
     const { id } = req.params as { id: string };
-    const { page, completed, seriesId, deviceId } = progressBody.parse(req.body ?? {});
+    const { page, completed, seriesId, deviceId, silent } = progressBody.parse(req.body ?? {});
 
     let sid = seriesId;
-    if (!sid) {
-      try { sid = (await komga.book(id)).seriesId; } catch { sid = 'unknown'; }
+    let done = completed;
+    // Safety net for any client: reaching the last page IS completion, even if the client never sends the
+    // explicit completed ping (fast scroll-past starved streaks/leaderboard). pagesCount can be 0/unknown
+    // for owned books, so only trust it when it's a real count.
+    if (!sid || !done) {
+      try {
+        const b = await komga.book(id);
+        if (!sid) sid = b.seriesId;
+        const pc = b?.media?.pagesCount ?? 0;
+        if (!done && pc > 1 && page >= pc - 1) done = true;
+      } catch { if (!sid) sid = 'unknown'; }
     }
 
+    // Organic reading pings can only UPGRADE to completed (re-opening a read chapter must not un-read it);
+    // explicit user intent (mark read/unread → silent=true) writes exactly what it says.
     await q(
       `INSERT INTO read_progress (user_id, book_id, series_id, page, completed)
        VALUES ($1, $2, $3, $4, $5)
        ON CONFLICT (user_id, book_id)
-       DO UPDATE SET page = EXCLUDED.page, completed = EXCLUDED.completed, updated_at = now()`,
-      [uid, id, sid, page, completed],
+       DO UPDATE SET page = EXCLUDED.page,
+         completed = CASE WHEN $6 THEN EXCLUDED.completed ELSE (read_progress.completed OR EXCLUDED.completed) END,
+         updated_at = now()`,
+      [uid, id, sid, page, done, silent],
     );
-    await q(
-      `INSERT INTO reading_events (user_id, series_id, book_id, page, completed, device_id)
-       VALUES ($1, $2, $3, $4, $5, $6)`,
-      [uid, sid, id, page, completed, deviceId ?? null],
-    );
+    if (!silent)
+      await q(
+        `INSERT INTO reading_events (user_id, series_id, book_id, page, completed, device_id)
+         VALUES ($1, $2, $3, $4, $5, $6)`,
+        [uid, sid, id, page, done, deviceId ?? null],
+      );
 
-    if (NATIVE_PROGRESS && roleOf(req) === 'admin') komga.setReadProgress(id, page, completed).catch(() => {});
+    if (NATIVE_PROGRESS && roleOf(req) === 'admin') komga.setReadProgress(id, page, done).catch(() => {});
     return reply.send({ ok: true });
   });
 }

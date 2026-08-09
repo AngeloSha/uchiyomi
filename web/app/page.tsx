@@ -17,6 +17,41 @@ import { PullToRefresh } from '@/components/PullToRefresh';
 import { Avatar } from '@/components/Avatar';
 import { Lockup } from '@/components/Brand';
 
+interface CollectionRow { id: string; name: string; accent: string | null; item_count: number }
+
+/** One home rail per (non-empty) collection, capped at 3 — links through to the collection page. */
+function CollectionRails() {
+  const { data } = useQuery({ queryKey: ['collections'], queryFn: () => api<{ content: CollectionRow[] }>('/api/collections'), staleTime: 300000 });
+  const cols = (data?.content ?? []).filter((c) => c.item_count > 0).slice(0, 3);
+  if (!cols.length) return null;
+  return (
+    <>
+      {cols.map((c) => <CollectionRail key={c.id} col={c} />)}
+    </>
+  );
+}
+
+function CollectionRail({ col }: { col: CollectionRow }) {
+  const { data } = useQuery({
+    queryKey: ['collection', col.id],
+    queryFn: () => api<{ items: Series[] }>(`/api/collections/${col.id}`),
+    staleTime: 300000,
+  });
+  const items = data?.items ?? [];
+  if (!items.length) return null;
+  return (
+    <section className="pt-8">
+      <SectionTitle action={<Link href={`/collection/?id=${col.id}`} className="text-xs text-accent">See all</Link>}>
+        <span className="inline-flex items-center gap-2">
+          <span aria-hidden className="h-4 w-1.5 rounded-full" style={{ background: col.accent || 'rgb(var(--accent))' }} />
+          {col.name}
+        </span>
+      </SectionTitle>
+      <Rail>{items.slice(0, 12).map((s) => <SeriesCard key={s.id} series={s} />)}</Rail>
+    </section>
+  );
+}
+
 function greeting() {
   const h = new Date().getHours();
   if (h < 5) return 'Late night reading';
@@ -32,6 +67,19 @@ export default function HomePage() {
   const { data: foryou } = useQuery({ queryKey: ['foryou'], queryFn: () => api<{ genres: string[]; content: Series[] }>('/api/foryou'), staleTime: 600000 });
   const { data: trending } = useQuery({ queryKey: ['trending'], queryFn: () => api<{ content: Series[] }>('/api/trending'), staleTime: 300000 });
   const { data: featured } = useQuery({ queryKey: ['featured'], queryFn: () => api<{ content: Series[] }>('/api/featured'), staleTime: 600000 });
+
+  // "Because you read X" — seed a named recommendation rail from what you're currently reading (else a top favorite)
+  const seed = data?.onDeck?.[0]
+    ? { id: data.onDeck[0].seriesId, name: data.onDeck[0].seriesTitle }
+    : data?.favorites?.[0]
+      ? { id: data.favorites[0].id, name: data.favorites[0].metadata?.title || data.favorites[0].name }
+      : null;
+  const { data: because } = useQuery({
+    queryKey: ['because', seed?.id ?? 'none'],
+    queryFn: () => api<{ content: Series[] }>(`/api/series/${seed!.id}/similar`),
+    enabled: !!seed?.id,
+    staleTime: 600000,
+  });
 
   // Auto-scan Komga on open so new Suwayomi chapters surface, then refetch.
   useEffect(() => {
@@ -107,6 +155,16 @@ export default function HomePage() {
         </section>
       )}
 
+      {/* Because you read X */}
+      {seed && (because?.content?.length ?? 0) > 0 && (
+        <section className="pt-8">
+          <SectionTitle>Because you read {seed.name}</SectionTitle>
+          <Rail>
+            {because!.content.map((s) => <SeriesCard key={s.id} series={s} />)}
+          </Rail>
+        </section>
+      )}
+
       {/* New episodes */}
       <section className="pt-8">
         <SectionTitle action={<Link href="/library?sort=updated" className="text-xs text-accent">See all</Link>}>
@@ -131,6 +189,9 @@ export default function HomePage() {
         </section>
       )}
 
+      {/* Your collections */}
+      <CollectionRails />
+
       {/* Recently added */}
       <section className="pt-8">
         <SectionTitle action={<Link href="/library?sort=new" className="text-xs text-accent">See all</Link>}>
@@ -143,12 +204,19 @@ export default function HomePage() {
         )}
       </section>
 
-      {/* Trending across accounts */}
+      {/* Trending across accounts — Netflix-style Top 10 with big rank numerals */}
       {(trending?.content?.length ?? 0) > 0 && (
         <section className="pt-8">
-          <SectionTitle>Trending in your library</SectionTitle>
+          <SectionTitle>Top 10 in your library</SectionTitle>
           <Rail>
-            {trending!.content.map((s) => <SeriesCard key={s.id} series={s} />)}
+            {trending!.content.slice(0, 10).map((s, i) => (
+              <div key={s.id} className="flex shrink-0 items-end [scroll-snap-align:start]">
+                <span aria-hidden className="rank-numeral -mr-5 mb-6 select-none font-display text-[88px] font-black leading-[0.78]">
+                  {i + 1}
+                </span>
+                <SeriesCard series={s} />
+              </div>
+            ))}
           </Rail>
         </section>
       )}

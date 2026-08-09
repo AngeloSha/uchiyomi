@@ -77,33 +77,39 @@ export function makeMadara(cfg: { id: string; name: string; base: string; order?
         const cs = m[1];
         return cs === slug || cs.startsWith(slug) || slug.startsWith(cs); // same title (allow slug aliases), reject others
       };
-      let h = '';
-      try { h = await cfPost(`${url.replace(/\/$/, '')}/ajax/chapters/`, ''); } catch {}
-      if (!/chapter/i.test(h)) h = await cfGet(url);
-      const out: SourceChapter[] = [];
-      // standard Madara: <li class="wp-manga-chapter"><a href="...">Chapter N</a> … <span class="chapter-release-date">…</span></li>
-      for (const li of h.matchAll(/<li[^>]*class="[^"]*wp-manga-chapter[^"]*"[^>]*>([\s\S]*?)<\/li>/gi)) {
-        const m = li[1].match(/<a[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/i);
-        if (!m || !mine(norm(m[1]))) continue;
-        const label = strip(m[2]);
-        const num = parseFloat((label.match(/(\d+(?:\.\d+)?)/) || [])[1]);
-        if (Number.isNaN(num)) continue;
-        const when = parseWhen((li[1].match(/chapter-release-date[^>]*>([\s\S]*?)<\/(?:span|div)>/i) || [])[1]);
-        out.push({ sourceId: norm(m[1]), number: num, title: label, publishedAt: when });
-      }
-      // Madara variants: plain links like /manga/<slug>/chapter-N
-      if (!out.length) {
-        const seenU = new Set<string>();
-        for (const m of h.matchAll(/href="([^"]*\/chapter[-/][0-9][^"]*)"/gi)) {
-          const cu = norm(m[1]);
-          if (seenU.has(cu) || !mine(cu)) continue;
-          seenU.add(cu);
-          const num = parseFloat(((cu.match(/chapter[-/]([0-9]+(?:[.-][0-9]+)?)/i) || [])[1] || '').replace('-', '.'));
-          if (!Number.isNaN(num)) out.push({ sourceId: cu, number: num, title: `Chapter ${num}` });
+      const parse = (h: string): SourceChapter[] => {
+        const out: SourceChapter[] = [];
+        // standard Madara: <li class="wp-manga-chapter"><a href="...">Chapter N</a> … <span class="chapter-release-date">…</span></li>
+        for (const li of h.matchAll(/<li[^>]*class="[^"]*wp-manga-chapter[^"]*"[^>]*>([\s\S]*?)<\/li>/gi)) {
+          const m = li[1].match(/<a[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/i);
+          if (!m || !mine(norm(m[1]))) continue;
+          const label = strip(m[2]);
+          const num = parseFloat((label.match(/(\d+(?:\.\d+)?)/) || [])[1]);
+          if (Number.isNaN(num)) continue;
+          const when = parseWhen((li[1].match(/chapter-release-date[^>]*>([\s\S]*?)<\/(?:span|div)>/i) || [])[1]);
+          out.push({ sourceId: norm(m[1]), number: num, title: label, publishedAt: when });
         }
-      }
-      const seen = new Set<number>();
-      return out.filter((c) => (seen.has(c.number) ? false : (seen.add(c.number), true))).sort((a, b) => a.number - b.number);
+        // Madara variants: plain links like /manga/<slug>/chapter-N
+        if (!out.length) {
+          const seenU = new Set<string>();
+          for (const m of h.matchAll(/href="([^"]*\/chapter[-/][0-9][^"]*)"/gi)) {
+            const cu = norm(m[1]);
+            if (seenU.has(cu) || !mine(cu)) continue;
+            seenU.add(cu);
+            const num = parseFloat(((cu.match(/chapter[-/]([0-9]+(?:[.-][0-9]+)?)/i) || [])[1] || '').replace('-', '.'));
+            if (!Number.isNaN(num)) out.push({ sourceId: cu, number: num, title: `Chapter ${num}` });
+          }
+        }
+        const seen = new Set<number>();
+        return out.filter((c) => (seen.has(c.number) ? false : (seen.add(c.number), true))).sort((a, b) => a.number - b.number);
+      };
+      // Prefer Madara's ajax chapter partial, but some sites (e.g. ManhuaPlus) now return a bogus full page there
+      // whose only chapter links are cross-title widgets — after slug-scoping that parses to nothing for THIS series.
+      // When the ajax path yields no chapters, fall back to the main manga page, which carries the real chapter list.
+      let out: SourceChapter[] = [];
+      try { out = parse(await cfPost(`${url.replace(/\/$/, '')}/ajax/chapters/`, '')); } catch {}
+      if (!out.length) out = parse(await cfGet(url));
+      return out;
     },
 
     async getPageUrls(chapterId) {

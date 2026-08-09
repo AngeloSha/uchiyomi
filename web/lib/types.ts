@@ -12,6 +12,7 @@ export interface SeriesMetadata {
   status?: string;
   summary?: string;
   readingDirection?: 'LEFT_TO_RIGHT' | 'RIGHT_TO_LEFT' | 'VERTICAL' | 'WEBTOON';
+  author?: string;
   publisher?: string;
   genres?: string[];
   tags?: string[];

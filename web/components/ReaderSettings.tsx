@@ -70,6 +70,17 @@ export function ReaderSettings({
             className="w-full accent-[rgb(var(--accent))]" />
         </Row>
 
+        {prefs.mode === 'paged' && (
+          <Row label="Pages per view">
+            <div className="grid grid-cols-2 gap-2">
+              <button onClick={() => set({ spread: false })}
+                className={`rounded-2xl border py-3 text-sm ${!prefs.spread ? 'border-accent bg-accent-soft text-accent' : 'border-ink-700 text-fog-300'}`}>Single</button>
+              <button onClick={() => set({ spread: true })}
+                className={`rounded-2xl border py-3 text-sm ${prefs.spread ? 'border-accent bg-accent-soft text-accent' : 'border-ink-700 text-fog-300'}`}>Double spread</button>
+            </div>
+          </Row>
+        )}
+
         {prefs.mode === 'vertical' && (
           <>
             <Row label={`Page gap · ${prefs.gap}px`}>
