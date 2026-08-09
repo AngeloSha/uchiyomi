@@ -16,9 +16,14 @@ import { dirname } from 'path';
 import sharp from 'sharp';
 import { ART_DIR, artFile } from '../lib/seriesArt';
 import { addSeriesFromSource, findBestMatch } from './sources';
+import { fetchAniListArt, fetchAniListCandidates, fetchAnimeBanner } from '../lib/anilist';
+import { fetchKitsuBanner } from '../lib/kitsu';
 
 type ImportJob = { running: boolean; total: number; done: number; added: number; already: number; notFound: number; failed: number; startedAt: number; details: Array<{ title: string; status: string; source?: string }> };
 let importJob: ImportJob | null = null;
+
+type ArtJob = { running: boolean; total: number; done: number; banners: number; covers: number; misses: number; startedAt: number };
+let artJob: ArtJob | null = null;
 
 export default async function adminRoutes(app: FastifyInstance) {
   app.addHook('preHandler', authenticate);
@@ -206,6 +211,115 @@ export default async function adminRoutes(app: FastifyInstance) {
     await logAudit('series.art_override', { userId: userIdOf(req), detail: { id, kind, mode }, req });
     return { ok: true };
   });
+
+  // ---- art review: per-series art status + candidates + bulk backfill ----
+
+  // Every series with its art status, worst-first — feeds the admin Art Review gallery.
+  app.get('/api/admin/art/overview', async () => {
+    const rows = await q<any>(
+      `SELECT s.id, s.title, s.books_count,
+              (a.banner IS NOT NULL AND a.banner <> '') AS has_banner,
+              (a.cover  IS NOT NULL AND a.cover  <> '') AS has_cover,
+              (o.banner IS NOT NULL) AS override_banner,
+              (o.cover  IS NOT NULL) AS override_cover,
+              EXTRACT(EPOCH FROM o.updated_at) * 1000 AS override_v
+       FROM lib_series s
+       LEFT JOIN series_art a ON a.series_id = s.id
+       LEFT JOIN series_overrides o ON o.series_id = s.id
+       ORDER BY (o.banner IS NOT NULL OR o.cover IS NOT NULL), (a.banner IS NOT NULL AND a.banner <> ''),
+                (a.cover IS NOT NULL AND a.cover <> ''), s.title`,
+    );
+    return { content: rows };
+  });
+
+  // Art options for one series: AniList matches (banner + cover) and MangaDex covers — the admin picks one.
+  app.get('/api/admin/art/candidates/:id', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const s = await one<{ title: string }>('SELECT title FROM lib_series WHERE id = $1', [id]);
+    if (!s) return reply.code(404).send({ error: 'not_found' });
+    const cleaned = s.title.replace(/\([^)]*\)/g, '').replace(/\s*[-–—:].*$/, '').trim() || s.title;
+    const [anilist, anilistLoose, kitsu, md] = await Promise.all([
+      fetchAniListCandidates(s.title).catch(() => []),
+      cleaned !== s.title ? fetchAniListCandidates(cleaned).catch(() => []) : Promise.resolve([]),
+      fetchKitsuBanner(s.title).then((b) => (b ? [{ title: s.title, banner: b, cover: null as string | null }] : [])).catch(() => []),
+      (async () => {
+        try {
+          const mdSrc = getSource('mangadex');
+          if (!mdSrc) return [];
+          const res = await mdSrc.search(s.title);
+          return (res || []).slice(0, 5).map((r) => ({ title: r.title, banner: null as string | null, cover: r.coverUrl || null }));
+        } catch { return []; }
+      })(),
+    ]);
+    // merge, dedupe by image URL, label the origin
+    const seen = new Set<string>();
+    const out: Array<{ origin: string; title: string; banner: string | null; cover: string | null }> = [];
+    for (const [origin, list] of [['anilist', anilist], ['anilist', anilistLoose], ['kitsu', kitsu], ['mangadex', md]] as const) {
+      for (const c of list) {
+        const key = c.banner || c.cover || '';
+        if (!key || seen.has(key)) continue;
+        seen.add(key);
+        out.push({ origin, ...c });
+      }
+    }
+    return { title: s.title, content: out };
+  });
+
+  // Bulk backfill: re-hunt art for series missing a banner (or any art). AniList first (cleaned-title retry),
+  // MangaDex cover as a second source. Runs in the background; poll /api/admin/art/backfill/status.
+  app.post('/api/admin/art/backfill', async (req, reply) => {
+    if (artJob?.running) return reply.code(409).send({ error: 'busy', message: 'A backfill is already running.' });
+    const targets = await q<{ id: string; title: string }>(
+      `SELECT s.id, s.title FROM lib_series s
+       LEFT JOIN series_art a ON a.series_id = s.id
+       LEFT JOIN series_overrides o ON o.series_id = s.id
+       WHERE (a.banner IS NULL OR a.banner = '') AND o.banner IS NULL
+       ORDER BY s.title`,
+    );
+    const job: ArtJob = { running: true, total: targets.length, done: 0, banners: 0, covers: 0, misses: 0, startedAt: Date.now() };
+    artJob = job;
+    await logAudit('art.backfill_start', { userId: userIdOf(req), detail: { count: targets.length }, req });
+    void (async () => {
+      for (const t of targets) {
+        try {
+          // banner hunt, widest net first-hit-wins: AniList manga (banner or its anime adaptation's, same
+          // query) → harsher-cleaned retry → direct AniList ANIME search → Kitsu wide cover.
+          let art = await fetchAniListArt(t.title).catch(() => ({ banner: null as string | null, cover: null as string | null }));
+          const harsh = t.title.replace(/\([^)]*\)/g, '').replace(/\s*[-–—:].*$/, '').trim();
+          if (!art.banner && harsh && harsh !== t.title) {
+            const retry = await fetchAniListArt(harsh).catch(() => ({ banner: null, cover: null }));
+            art = { banner: retry.banner ?? art.banner, cover: art.cover ?? retry.cover };
+          }
+          if (!art.banner) art.banner = await fetchAnimeBanner(t.title).catch(() => null);
+          if (!art.banner) art.banner = await fetchKitsuBanner(t.title);
+          if (!art.banner && harsh && harsh !== t.title) art.banner = await fetchKitsuBanner(harsh);
+          if (!art.cover) {
+            try {
+              const mdSrc = getSource('mangadex');
+              const res = mdSrc ? await mdSrc.search(t.title) : [];
+              art.cover = res?.[0]?.coverUrl || null;
+            } catch { /* mangadex miss is fine */ }
+          }
+          if (art.banner || art.cover) {
+            await q(
+              `INSERT INTO series_art (series_id, banner, cover) VALUES ($1, $2, $3)
+               ON CONFLICT (series_id) DO UPDATE SET
+                 banner = COALESCE(EXCLUDED.banner, series_art.banner),
+                 cover  = COALESCE(EXCLUDED.cover,  series_art.cover), fetched_at = now()`,
+              [t.id, art.banner, art.cover],
+            );
+            if (art.banner) job.banners++;
+            else job.covers++;
+          } else job.misses++;
+        } catch { job.misses++; }
+        job.done++;
+        await new Promise((r) => setTimeout(r, 2200)); // stay under AniList's ~30 req/min
+      }
+      job.running = false;
+    })();
+    return { ok: true, total: targets.length };
+  });
+  app.get('/api/admin/art/backfill/status', async () => ({ job: artJob }));
 
   // ---- bulk import: paste a list of titles, match each to a source, add it ----
   app.post('/api/admin/import', async (req, reply) => {

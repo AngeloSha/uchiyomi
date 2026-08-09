@@ -5,7 +5,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { AnimatePresence, motion } from 'framer-motion';
 import { api, img } from '@/lib/api';
 import { Series } from '@/lib/types';
-import { Backdrop } from './ui';
+import { Backdrop, backdropUrl, useWideViewport } from './ui';
 import { applyCover } from '@/lib/theme';
 import { IcPlay, IcHeart, IcChevronLeft, IcChevronRight } from './icons';
 
@@ -45,6 +45,14 @@ export function HeroCarousel({ slides }: { slides: Series[] }) {
   }, [i, n, paused]);
   useEffect(() => { if (cur?.color) applyCover(cur.color); }, [cur?.color]);
 
+  // preload the NEXT slide's backdrop while the current one shows → rotation never waits on the network
+  const wide = useWideViewport();
+  useEffect(() => {
+    if (n < 2) return;
+    const nxt = slides[(i + 1) % n];
+    if (nxt) { const im = new Image(); im.src = backdropUrl(nxt.id, { hero: true, wide }); }
+  }, [i, n, slides, wide]);
+
   if (!n || !cur) return null;
   const go = (d: number) => setI((v) => (v + d + n) % n);
   const summary = cur.metadata?.summary || cur.booksMetadata?.summary;
@@ -59,11 +67,12 @@ export function HeroCarousel({ slides }: { slides: Series[] }) {
     >
       <AnimatePresence>
         <motion.div key={cur.id} initial={{ opacity: 0, scale: 1.06 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.9, ease: [0.22, 1, 0.36, 1] }} className="absolute inset-0">
-          {/* real art pulled from the internet (AniList), genre-banner fallback, tinted by cover color */}
-          <Backdrop seriesId={cur.id} genres={cur.metadata?.genres} className="absolute inset-0" />
-          <div className="absolute inset-0 bg-gradient-to-t from-ink-950 via-ink-950/55 to-ink-950/35" />
-          <div className="absolute inset-0 bg-gradient-to-r from-ink-950/90 via-ink-950/45 to-transparent" />
-          <div className="absolute inset-0" style={{ background: 'radial-gradient(60% 70% at 22% 55%, rgb(var(--cover, 124 92 255) / 0.26), transparent 70%)' }} />
+          {/* real art pulled from the internet (AniList) — sharp banner in the hero; genre-banner fallback.
+              Scrims stay light so the actual art shows: clear top, legibility gradient only bottom-left. */}
+          <Backdrop seriesId={cur.id} genres={cur.metadata?.genres} hero className="absolute inset-0" />
+          <div className="absolute inset-0 bg-gradient-to-t from-ink-950 via-ink-950/30 to-transparent" />
+          <div className="absolute inset-0 bg-gradient-to-r from-ink-950/65 via-ink-950/20 to-transparent" />
+          <div className="absolute inset-0" style={{ background: 'radial-gradient(60% 70% at 22% 55%, rgb(var(--cover, 124 92 255) / 0.12), transparent 70%)' }} />
         </motion.div>
       </AnimatePresence>
 
@@ -71,7 +80,7 @@ export function HeroCarousel({ slides }: { slides: Series[] }) {
         <div className="flex items-end gap-7">
           <Link href={`/series/?id=${cur.id}`} className="hidden h-72 w-48 shrink-0 overflow-hidden rounded-2xl border border-white/10 shadow-lift transition hover:-translate-y-1 lg:block">
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={img.seriesThumb(cur.id)} alt={cur.metadata?.title || cur.name} className="h-full w-full object-cover" />
+            <img src={img.seriesThumb(cur.id, undefined, 800)} alt={cur.metadata?.title || cur.name} className="h-full w-full object-cover" />
           </Link>
           <div className="max-w-xl">
             <span className="mb-3 inline-flex items-center gap-1.5 rounded-full bg-white/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-wider text-fog-100 backdrop-blur">★ Daily pick</span>

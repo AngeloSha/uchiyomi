@@ -1,5 +1,6 @@
 // Pull real per-series art from AniList (free, no key): a wide bannerImage + a high-res cover.
-const QUERY = `query($s:String){Media(search:$s,type:MANGA,sort:SEARCH_MATCH){title{romaji english}coverImage{extraLarge}bannerImage}}`;
+// The manga entry often has no banner while its ANIME adaptation does — pull relations in the same query.
+const QUERY = `query($s:String){Media(search:$s,type:MANGA,sort:SEARCH_MATCH){title{romaji english}coverImage{extraLarge}bannerImage relations{edges{node{type bannerImage}}}}}`;
 
 function clean(t: string): string {
   return t
@@ -35,10 +36,67 @@ export async function fetchAniListArt(rawTitle: string, retry = 0): Promise<{ ba
   if (!r.ok) throw new Error(`anilist ${r.status}`); // transient -> don't cache
   const j: any = await r.json();
   const m = j?.data?.Media;
-  return { banner: m?.bannerImage ?? null, cover: m?.coverImage?.extraLarge ?? null };
+  // banner priority: the manga's own, else its anime adaptation's (same request, no extra rate cost)
+  const relBanner = (m?.relations?.edges ?? [])
+    .map((e: any) => e?.node)
+    .find((n: any) => n?.type === 'ANIME' && n.bannerImage)?.bannerImage ?? null;
+  return { banner: m?.bannerImage ?? relBanner, cover: m?.coverImage?.extraLarge ?? null };
+}
+
+const ANIME_QUERY = `query($s:String){Media(search:$s,type:ANIME,sort:SEARCH_MATCH){bannerImage}}`;
+
+/** Banner from a direct ANIME search — adapted titles often match the anime by name when the manga entry has no banner. */
+export async function fetchAnimeBanner(rawTitle: string, retry = 0): Promise<string | null> {
+  const s = clean(rawTitle);
+  if (!s) return null;
+  const r = await fetch('https://graphql.anilist.co', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', accept: 'application/json' },
+    body: JSON.stringify({ query: ANIME_QUERY, variables: { s } }),
+    signal: AbortSignal.timeout(10000),
+  });
+  if (r.status === 429 && retry < 2) {
+    const wait = Math.min(6, Number(r.headers.get('retry-after')) || 4);
+    await new Promise((res) => setTimeout(res, (wait + 0.5) * 1000));
+    return fetchAnimeBanner(rawTitle, retry + 1);
+  }
+  if (!r.ok) return null;
+  const j: any = await r.json();
+  return j?.data?.Media?.bannerImage ?? null;
 }
 
 const TRENDING = `query($page:Int){Page(page:$page,perPage:40){media(type:MANGA,countryOfOrigin:"KR",sort:TRENDING_DESC,isAdult:false){title{romaji english}coverImage{extraLarge large}bannerImage description(asHtml:false)genres averageScore chapters status}}}`;
+
+const CANDIDATES = `query($s:String){Page(perPage:5){media(search:$s,type:MANGA,sort:SEARCH_MATCH){title{romaji english}coverImage{extraLarge}bannerImage}}}`;
+
+export interface ArtCandidate { title: string; banner: string | null; cover: string | null }
+
+/** Top AniList matches for a title (art review UI) — several options, not just the best match. */
+export async function fetchAniListCandidates(rawTitle: string, retry = 0): Promise<ArtCandidate[]> {
+  const s = rawTitle.trim();
+  if (!s) return [];
+  const r = await fetch('https://graphql.anilist.co', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', accept: 'application/json' },
+    body: JSON.stringify({ query: CANDIDATES, variables: { s } }),
+    signal: AbortSignal.timeout(10000),
+  });
+  if (r.status === 429 && retry < 2) {
+    const wait = Math.min(6, Number(r.headers.get('retry-after')) || 4);
+    await new Promise((res) => setTimeout(res, (wait + 0.5) * 1000));
+    return fetchAniListCandidates(rawTitle, retry + 1);
+  }
+  if (!r.ok) return [];
+  const j: any = await r.json();
+  const media: any[] = j?.data?.Page?.media ?? [];
+  return media
+    .map((m) => ({
+      title: m.title?.english || m.title?.romaji || '',
+      banner: m.bannerImage ?? null,
+      cover: m.coverImage?.extraLarge ?? null,
+    }))
+    .filter((c) => c.title && (c.banner || c.cover));
+}
 
 export interface TrendingItem {
   title: string;

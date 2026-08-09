@@ -2,7 +2,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { api, ApiError } from '@/lib/api';
+import { api, ApiError, img } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { triggerRefresh } from '@/lib/refresh';
 import { bytes, relativeTime } from '@/lib/format';
@@ -10,7 +10,7 @@ import { useToast } from '@/components/Toast';
 import { Avatar } from '@/components/Avatar';
 import { IcChevronLeft, IcTrash, IcPlus, IcRefresh } from '@/components/icons';
 
-const TABS = ['Overview', 'Members', 'Providers', 'Tasks', 'Activity', 'Sessions', 'Settings'] as const;
+const TABS = ['Overview', 'Members', 'Providers', 'Art', 'Tasks', 'Activity', 'Sessions', 'Settings'] as const;
 type Tab = (typeof TABS)[number];
 const msgOf = (e: any, fb: string) => { try { return JSON.parse(e?.body || '{}').message || fb; } catch { return fb; } };
 const fld = 'w-full rounded-xl border border-ink-700 bg-ink-900 px-3 py-2.5 text-sm text-fog-50 outline-none focus:border-accent';
@@ -39,6 +39,7 @@ export default function AdminPage() {
         {tab === 'Overview' && <Overview />}
         {tab === 'Members' && <Members />}
         {tab === 'Providers' && <Providers />}
+        {tab === 'Art' && <ArtReview />}
         {tab === 'Tasks' && <Tasks />}
         {tab === 'Activity' && <Activity />}
         {tab === 'Sessions' && <Sessions />}
@@ -302,6 +303,150 @@ function Providers() {
           })}
         </div>
       )}
+    </div>
+  );
+}
+
+// ---- Art Review: see every series' art at a glance, fix the ugly ones in two clicks ----
+interface ArtRow { id: string; title: string; books_count: number; has_banner: boolean; has_cover: boolean; override_banner: boolean; override_cover: boolean; override_v: number | null }
+interface ArtCandidate { origin: string; title: string; banner: string | null; cover: string | null }
+
+function ArtReview() {
+  const toast = useToast();
+  const qc = useQueryClient();
+  const [filter, setFilter] = useState<'all' | 'nobanner' | 'nocover' | 'fixed'>('nobanner');
+  const [open, setOpen] = useState<ArtRow | null>(null); // series whose candidate sheet is open
+  const [bust, setBust] = useState<Record<string, number>>({}); // per-series cache-bust after an apply
+  const { data } = useQuery({ queryKey: ['admin-art'], queryFn: () => api<{ content: ArtRow[] }>('/api/admin/art/overview') });
+  const { data: bf } = useQuery({
+    queryKey: ['admin-art-backfill'],
+    queryFn: () => api<{ job: any }>('/api/admin/art/backfill/status'),
+    refetchInterval: (q) => (q.state.data?.job?.running ? 3000 : false),
+  });
+  const rows = (data?.content ?? []).filter((r) =>
+    filter === 'all' ? true
+    : filter === 'nobanner' ? !r.has_banner && !r.override_banner
+    : filter === 'nocover' ? !r.has_cover && !r.override_cover
+    : r.override_banner || r.override_cover,
+  );
+  const startBackfill = async () => {
+    try {
+      const r = await api<{ total: number }>('/api/admin/art/backfill', { method: 'POST' });
+      toast(`Hunting art for ${r.total} series…`, 'success');
+      qc.invalidateQueries({ queryKey: ['admin-art-backfill'] });
+    } catch (e: any) { toast(msgOf(e, 'Backfill already running?'), 'error'); }
+  };
+  const job = bf?.job;
+  return (
+    <div className="space-y-4">
+      <div className="card p-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="font-display text-lg font-semibold">Cover &amp; banner health</h2>
+            <p className="text-xs text-fog-500">Backfill re-hunts AniList + MangaDex for missing art. Click a series to pick art by hand.</p>
+          </div>
+          <button onClick={startBackfill} disabled={!!job?.running} className="btn-accent px-4 py-2 text-sm disabled:opacity-50">
+            {job?.running ? `Backfilling ${job.done}/${job.total}…` : 'Backfill missing banners'}
+          </button>
+        </div>
+        {job && !job.running && (
+          <p className="mt-2 text-xs text-fog-400">Last run: +{job.banners} banners, +{job.covers} covers, {job.misses} not found.</p>
+        )}
+      </div>
+      <div className="flex gap-1.5 overflow-x-auto pb-1">
+        {([['nobanner', 'Missing banner'], ['nocover', 'Missing cover'], ['fixed', 'Overridden'], ['all', 'All']] as const).map(([k, label]) => (
+          <button key={k} onClick={() => setFilter(k)} className={`shrink-0 rounded-full px-3 py-1.5 text-xs font-medium ${filter === k ? 'bg-accent text-white' : 'bg-ink-800 text-fog-300'}`}>
+            {label}{k !== 'all' ? ` (${(data?.content ?? []).filter((r) => (k === 'nobanner' ? !r.has_banner && !r.override_banner : k === 'nocover' ? !r.has_cover && !r.override_cover : r.override_banner || r.override_cover)).length})` : ''}
+          </button>
+        ))}
+      </div>
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+        {rows.map((r) => (
+          <button key={r.id} onClick={() => setOpen(r)} className="card overflow-hidden p-0 text-left transition hover:border-accent/40">
+            <div className="relative h-16 w-full overflow-hidden bg-ink-900">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={`/img/series/${encodeURIComponent(r.id)}/backdrop?rv=${bust[r.id] || 0}`} alt="" className="h-full w-full object-cover" loading="lazy" />
+              {!r.has_banner && !r.override_banner && <span className="absolute right-1 top-1 rounded bg-red-600/80 px-1.5 py-0.5 text-[9px] font-bold text-white">NO BANNER</span>}
+            </div>
+            <div className="flex items-center gap-2 p-2">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={`${img.seriesThumb(r.id)}&rv=${bust[r.id] || 0}`} alt="" className="h-12 w-8 shrink-0 rounded object-cover" loading="lazy" />
+              <div className="min-w-0">
+                <p className="truncate text-xs font-medium text-fog-100">{r.title}</p>
+                <p className="text-[10px] text-fog-500">
+                  {(r.override_banner || r.override_cover) ? 'custom art' : r.has_banner ? 'banner ✓' : r.has_cover ? 'cover only' : 'first-page art'}
+                </p>
+              </div>
+            </div>
+          </button>
+        ))}
+      </div>
+      {open && <ArtPicker row={open} onClose={() => setOpen(null)} onApplied={() => { setBust((b) => ({ ...b, [open.id]: Date.now() })); qc.invalidateQueries({ queryKey: ['admin-art'] }); }} />}
+    </div>
+  );
+}
+
+function ArtPicker({ row, onClose, onApplied }: { row: ArtRow; onClose: () => void; onApplied: () => void }) {
+  const toast = useToast();
+  const [busy, setBusy] = useState(false);
+  const { data, isLoading } = useQuery({
+    queryKey: ['admin-art-cand', row.id],
+    queryFn: () => api<{ content: ArtCandidate[] }>(`/api/admin/art/candidates/${row.id}`),
+    staleTime: 10 * 60 * 1000,
+  });
+  const apply = async (kind: 'cover' | 'banner', url: string) => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await api(`/api/admin/series/${row.id}/art`, { method: 'PUT', json: { kind, mode: 'url', url } });
+      toast(`${kind === 'banner' ? 'Banner' : 'Cover'} updated`, 'success');
+      onApplied();
+    } catch { toast('Failed to apply', 'error'); }
+    setBusy(false);
+  };
+  const reset = async (kind: 'cover' | 'banner') => {
+    if (busy) return;
+    setBusy(true);
+    try { await api(`/api/admin/series/${row.id}/art`, { method: 'PUT', json: { kind, mode: 'reset' } }); toast('Reset to automatic', 'success'); onApplied(); }
+    catch { toast('Failed', 'error'); }
+    setBusy(false);
+  };
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-ink-950/70 p-4 backdrop-blur-sm" onClick={onClose}>
+      <div className="glass max-h-[88vh] w-full max-w-2xl overflow-y-auto rounded-2xl border border-ink-700 p-5" onClick={(e) => e.stopPropagation()}>
+        <div className="mb-3 flex items-start justify-between gap-3">
+          <h3 className="font-display text-lg font-semibold leading-tight">{row.title}</h3>
+          <button onClick={onClose} className="shrink-0 text-fog-500 hover:text-fog-200">✕</button>
+        </div>
+        {(row.override_banner || row.override_cover) && (
+          <div className="mb-3 flex gap-2">
+            {row.override_cover && <button onClick={() => reset('cover')} disabled={busy} className="chip text-xs">Reset cover to auto</button>}
+            {row.override_banner && <button onClick={() => reset('banner')} disabled={busy} className="chip text-xs">Reset banner to auto</button>}
+          </div>
+        )}
+        {isLoading ? (
+          <p className="py-8 text-center text-sm text-fog-500">Searching AniList + MangaDex…</p>
+        ) : !(data?.content?.length) ? (
+          <p className="py-8 text-center text-sm text-fog-500">No candidates found — use Edit details on the series page to paste a URL.</p>
+        ) : (
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+            {data!.content.map((c, i) => (
+              <div key={i} className="card overflow-hidden p-0">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={c.banner || c.cover || ''} alt="" className="h-28 w-full object-cover" loading="lazy" />
+                <div className="p-2">
+                  <p className="truncate text-[11px] text-fog-300">{c.title}</p>
+                  <p className="text-[10px] uppercase tracking-wide text-fog-500">{c.origin}</p>
+                  <div className="mt-1.5 flex gap-1.5">
+                    {c.banner && <button onClick={() => apply('banner', c.banner!)} disabled={busy} className="btn-accent flex-1 px-2 py-1 text-[11px] disabled:opacity-50">Use as banner</button>}
+                    {c.cover && <button onClick={() => apply('cover', c.cover!)} disabled={busy} className="btn-ghost flex-1 px-2 py-1 text-[11px] disabled:opacity-50">Use as cover</button>}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

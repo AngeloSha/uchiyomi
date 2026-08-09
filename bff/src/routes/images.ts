@@ -2,7 +2,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import sharp from 'sharp';
 import { IMG_COOKIE, resolveOpdsBasic } from '../lib/auth';
 import { komga, komgaImage } from '../lib/komga';
-import { serveImage } from '../lib/imageCache';
+import { serveImage, getOrFetch } from '../lib/imageCache';
 import { dominantHex } from '../lib/color';
 import { fetchAniListArt } from '../lib/anilist';
 import { LIBRARY_ROOT, cbzPages, cbzEntry } from '../lib/library';
@@ -63,6 +63,122 @@ async function fetchCoverImage(u: string, source?: string): Promise<Buffer> {
   return Buffer.from(await r.arrayBuffer());
 }
 
+// ---- series backdrop recipes (module-level so the pre-warmer can build them without a request) ----
+const bookFileAbs = async (id: string): Promise<string | null> => {
+  const r = await one<{ file: string; root: string }>('SELECT file, root FROM lib_books WHERE id = $1', [id]);
+  return r ? join(r.root || LIBRARY_ROOT, r.file) : null;
+};
+// Bytes of a series' first downloaded page — the universal fallback when a remote cover/backdrop URL can't be
+// fetched (hotlink-protected CDN, dead link, timeout, unparsed cover). Guarantees art for any downloaded series.
+const firstPageInput = async (id: string): Promise<Buffer> => {
+  const s = await one<{ cover_book_id: string }>('SELECT cover_book_id FROM lib_series WHERE id = $1', [id]);
+  const abs = s?.cover_book_id ? await bookFileAbs(s.cover_book_id) : null;
+  if (!abs) throw Object.assign(new Error('no cover'), { statusCode: 404 });
+  const pages = await cbzPages(abs);
+  if (!pages[0]) throw Object.assign(new Error('empty'), { statusCode: 404 });
+  return cbzEntry(abs, pages[0]);
+};
+
+// Hero frames match the two client viewports (lg desktop strip / phone portrait) so the browser barely crops.
+const HERO_FRAMES = { wide: { w: 1920, h: 720 }, tall: { w: 1080, h: 1200 } } as const;
+type HeroAr = keyof typeof HERO_FRAMES;
+const ambientComposite = (input: Buffer) =>
+  sharp(input).resize(1600, 1024, { fit: 'cover' }).blur(22).modulate({ brightness: 0.82, saturation: 1.18 }).webp({ quality: 80 }).toBuffer();
+const heroSharp = async (input: Buffer, ar: HeroAr) => {
+  const f = HERO_FRAMES[ar];
+  const meta = await sharp(input).metadata();
+  const srcAspect = meta.width && meta.height ? meta.width / meta.height : 1;
+  const frameAspect = f.w / f.h;
+  const ratio = Math.max(srcAspect, frameAspect) / Math.min(srcAspect, frameAspect);
+  if (ratio <= 1.35) {
+    // shapes are close — a mild saliency crop fills the frame without wrecking the art
+    return sharp(input).resize(f.w, f.h, { fit: 'cover', position: 'attention' }).modulate({ brightness: 0.95 }).webp({ quality: 82 }).toBuffer();
+  }
+  // shapes differ a lot — sharp art shown whole over a blurred self-fill (no crop, no zoom)
+  const fg = await sharp(input).resize(f.w, f.h, { fit: 'inside' }).toBuffer();
+  return sharp(input)
+    .resize(f.w, f.h, { fit: 'cover' })
+    .blur(28)
+    .modulate({ brightness: 0.62, saturation: 1.15 })
+    .composite([{ input: fg, gravity: 'centre' }])
+    .webp({ quality: 82 })
+    .toBuffer();
+};
+
+/** Resolve a backdrop's cache variant + producer for (series, style, frame) — shared by the route and warmer. */
+async function backdropRecipe(id: string, hero: boolean, ar: HeroAr): Promise<{ variant: string; producer: () => Promise<{ buffer: Buffer; contentType: string }> }> {
+  // admin override wins (uploaded banner/cover or pasted URL)
+  const ovr = await one<{ banner: string | null; v: string }>('SELECT banner, EXTRACT(EPOCH FROM updated_at) * 1000 AS v FROM series_overrides WHERE series_id = $1', [id]);
+  if (ovr?.banner) {
+    return {
+      variant: `artw7${hero ? `h${ar}` : ''}:${id}:ov:${Math.floor(Number(ovr.v))}`,
+      producer: async () => {
+        let input: Buffer;
+        if (ovr.banner === 'upload') input = await readFile(artFile(id, 'banner'));
+        else { try { input = await fetchCoverImage(ovr.banner!); } catch { input = await firstPageInput(id); } }
+        const buffer = hero ? await heroSharp(input, ar) : await ambientComposite(input);
+        return { buffer, contentType: 'image/webp' };
+      },
+    };
+  }
+  let art = await one<{ banner: string | null; cover: string | null }>('SELECT banner, cover FROM series_art WHERE series_id = $1', [id]);
+  if (!art) {
+    try {
+      let title = '';
+      try {
+        const lib = await one<{ title: string }>('SELECT title FROM lib_series WHERE id = $1', [id]);
+        if (lib?.title) title = lib.title;
+        else { const s = await komga.series(id); title = s?.metadata?.title || s?.name || ''; }
+      } catch {}
+      const fetched = title ? await fetchAniListArt(title) : { banner: null, cover: null };
+      await q(
+        `INSERT INTO series_art (series_id, banner, cover) VALUES ($1, $2, $3)
+         ON CONFLICT (series_id) DO UPDATE SET banner = EXCLUDED.banner, cover = EXCLUDED.cover, fetched_at = now()`,
+        [id, fetched.banner, fetched.cover],
+      );
+      art = fetched;
+    } catch {
+      art = { banner: null, cover: null }; // transient AniList error: don't cache; fall back this view
+    }
+  }
+  const url = art.banner || art.cover;
+  const sharpHero = hero && !!url; // banner OR cover: show the real art sharp; only the no-art first-page fallback stays ambient
+  const variant = url ? `artw${sharpHero ? `7h${ar}` : '6'}:${id}:${art.banner ? 'b' : 'c'}` : `artw6:${id}:p`;
+  const srcRow = await one<{ source_id: string | null }>('SELECT source_id FROM lib_series WHERE id = $1', [id]);
+  return {
+    variant,
+    producer: async () => {
+      // remote art (AniList banner / source cover) first; fall back to the first downloaded page so the hero is never empty
+      let input: Buffer;
+      try {
+        if (!url) throw new Error('no remote art');
+        input = await fetchCoverImage(url, srcRow?.source_id || undefined);
+      } catch {
+        input = await firstPageInput(id);
+      }
+      const buffer = sharpHero ? await heroSharp(input, ar) : await ambientComposite(input);
+      return { buffer, contentType: 'image/webp' };
+    },
+  };
+}
+
+/** Pre-generate both hero frames for a set of series so the carousel never waits on sharp/remote fetches.
+ *  Disk-cache aware (getOrFetch): already-warm entries cost one stat() each. Fire-and-forget. */
+const warmed = new Set<string>();
+export async function warmHeroBackdrops(ids: string[]): Promise<void> {
+  for (const id of ids) {
+    for (const ar of ['wide', 'tall'] as const) {
+      const tag = `${id}:${ar}`;
+      if (warmed.has(tag)) continue;
+      try {
+        const r = await backdropRecipe(id, true, ar);
+        await getOrFetch(r.variant, r.producer);
+        warmed.add(tag);
+      } catch { /* warming is best-effort */ }
+    }
+  }
+}
+
 export default async function imageRoutes(app: FastifyInstance) {
   // Browser <img> tags can't set Authorization; authorize via the stateless yomi_img cookie.
   app.addHook('preHandler', async (req: FastifyRequest, reply: FastifyReply) => {
@@ -78,58 +194,51 @@ export default async function imageRoutes(app: FastifyInstance) {
     const e = name.toLowerCase().split('.').pop() || '';
     return e === 'png' ? 'image/png' : e === 'webp' ? 'image/webp' : e === 'gif' ? 'image/gif' : e === 'avif' ? 'image/avif' : 'image/jpeg';
   };
-  const bookFileAbs = async (id: string): Promise<string | null> => {
-    const r = await one<{ file: string; root: string }>('SELECT file, root FROM lib_books WHERE id = $1', [id]);
-    return r ? join(r.root || LIBRARY_ROOT, r.file) : null;
-  };
   const storeColor = (id: string, input: Buffer) =>
     dominantHex(input)
       .then((hex) => q(`INSERT INTO series_colors (series_id, color) VALUES ($1,$2)
         ON CONFLICT (series_id) DO UPDATE SET color=EXCLUDED.color, updated_at=now()`, [id, hex]))
       .catch(() => {});
-  // Bytes of a series' first downloaded page — the universal fallback when a remote cover/backdrop URL can't be
-  // fetched (hotlink-protected CDN, dead link, timeout, unparsed cover). Guarantees art for any downloaded series.
-  const firstPageInput = async (id: string): Promise<Buffer> => {
-    const s = await one<{ cover_book_id: string }>('SELECT cover_book_id FROM lib_series WHERE id = $1', [id]);
-    const abs = s?.cover_book_id ? await bookFileAbs(s.cover_book_id) : null;
-    if (!abs) throw Object.assign(new Error('no cover'), { statusCode: 404 });
-    const pages = await cbzPages(abs);
-    if (!pages[0]) throw Object.assign(new Error('empty'), { statusCode: 404 });
-    return cbzEntry(abs, pages[0]);
+  // Hi-res poster variants: covers default to 400px (cards), the detail poster + hero request 800/1600.
+  // Only whitelisted widths are honored so the cache can't be spammed with arbitrary sizes.
+  const thumbWidth = (req: FastifyRequest): number => {
+    const w = Number((req.query as any)?.w);
+    return w === 800 || w === 1600 ? w : 400;
   };
-
   // Series cover: prefer the real cover art (AniList, cached in series_art.cover); fall back to the first
   // page of chapter 1. Distinct cache variants so it upgrades to the real cover once one is known.
   const serveLibSeriesThumb = async (req: FastifyRequest, reply: FastifyReply, id: string) => {
+    const w = thumbWidth(req);
+    const wk = w === 400 ? '' : `:w${w}`; // 400 keeps the legacy cache key so existing entries stay warm
     // admin override wins (uploaded file or pasted URL); variant carries updated_at so edits bust the cache
     const ovr = await one<{ cover: string | null; v: string }>('SELECT cover, EXTRACT(EPOCH FROM updated_at) * 1000 AS v FROM series_overrides WHERE series_id = $1', [id]);
     if (ovr?.cover) {
-      return serveImage(req, reply, `lib-sthumb:${id}:ov:${Math.floor(Number(ovr.v))}`, async () => {
+      return serveImage(req, reply, `lib-sthumb:${id}:ov:${Math.floor(Number(ovr.v))}${wk}`, async () => {
         let input: Buffer;
         if (ovr.cover === 'upload') input = await readFile(artFile(id, 'cover'));
         else { try { input = await fetchCoverImage(ovr.cover!); } catch { input = await firstPageInput(id); } }
         storeColor(id, input);
-        const buffer = await sharp(input).resize({ width: 400, withoutEnlargement: true }).webp({ quality: 80 }).toBuffer();
+        const buffer = await sharp(input).resize({ width: w, withoutEnlargement: true }).webp({ quality: 80 }).toBuffer();
         return { buffer, contentType: 'image/webp' };
       });
     }
     const art = await one<{ cover: string | null; source_id: string | null }>(
       'SELECT a.cover, s.source_id FROM series_art a LEFT JOIN lib_series s ON s.id = a.series_id WHERE a.series_id = $1', [id]);
     if (art?.cover) {
-      return serveImage(req, reply, `lib-sthumb:${id}:c`, async () => {
+      return serveImage(req, reply, `lib-sthumb:${id}:c${wk}`, async () => {
         // remote cover first; on ANY failure (hotlink CDN, dead link, timeout) fall back to the first page
         let input: Buffer;
         try { input = await fetchCoverImage(art.cover!, art.source_id || undefined); }
         catch { input = await firstPageInput(id); }
         storeColor(id, input);
-        const buffer = await sharp(input).resize({ width: 400, withoutEnlargement: true }).webp({ quality: 80 }).toBuffer();
+        const buffer = await sharp(input).resize({ width: w, withoutEnlargement: true }).webp({ quality: 80 }).toBuffer();
         return { buffer, contentType: 'image/webp' };
       });
     }
-    return serveImage(req, reply, `lib-sthumb:${id}:p`, async () => {
+    return serveImage(req, reply, `lib-sthumb:${id}:p${wk}`, async () => {
       const input = await firstPageInput(id);
       storeColor(id, input);
-      const buffer = await sharp(input).resize({ width: 400, withoutEnlargement: true }).webp({ quality: 72 }).toBuffer();
+      const buffer = await sharp(input).resize({ width: w, withoutEnlargement: true }).webp({ quality: 72 }).toBuffer();
       return { buffer, contentType: 'image/webp' };
     });
   };
@@ -164,11 +273,12 @@ export default async function imageRoutes(app: FastifyInstance) {
     });
   };
 
-  // Series cover thumbnail -> webp ~400px (fast encode, universal support, tiny).
+  // Series cover thumbnail -> webp (400px default; ?w=800|1600 for the detail poster / hero).
   app.get('/img/series/:id/thumb', async (req, reply) => {
     const { id } = req.params as { id: string };
     if (id.startsWith('s_')) return serveLibSeriesThumb(req, reply, id);
-    return serveImage(req, reply, `series-thumb:${id}:webp:400`, async () => {
+    const w = thumbWidth(req);
+    return serveImage(req, reply, `series-thumb:${id}:webp:${w}`, async () => {
       const input = await fetchUpstream(komga.seriesThumbPath(id));
       // ambient theming: store the cover's dominant color (fire-and-forget, once per cover)
       dominantHex(input)
@@ -180,7 +290,7 @@ export default async function imageRoutes(app: FastifyInstance) {
           ),
         )
         .catch(() => {});
-      const buffer = await sharp(input).resize({ width: 400, withoutEnlargement: true }).webp({ quality: 72 }).toBuffer();
+      const buffer = await sharp(input).resize({ width: w, withoutEnlargement: true }).webp({ quality: 72 }).toBuffer();
       return { buffer, contentType: 'image/webp' };
     });
   });
@@ -220,65 +330,13 @@ export default async function imageRoutes(app: FastifyInstance) {
 
   // Real per-series art pulled from the internet (AniList): wide banner, else high-res cover.
   // Looked up lazily on first view and cached in series_art, so newly-added series get art automatically.
+  // ?style=hero → the REAL art sharp, frame-aware (?ar=wide|tall). Recipe + warmer live at module level.
   app.get('/img/series/:id/backdrop', async (req, reply) => {
     const { id } = req.params as { id: string };
-    // admin override wins (uploaded banner/cover or pasted URL)
-    const ovr = await one<{ banner: string | null; v: string }>('SELECT banner, EXTRACT(EPOCH FROM updated_at) * 1000 AS v FROM series_overrides WHERE series_id = $1', [id]);
-    if (ovr?.banner) {
-      return serveImage(req, reply, `artw5:${id}:ov:${Math.floor(Number(ovr.v))}`, async () => {
-        let input: Buffer;
-        if (ovr.banner === 'upload') input = await readFile(artFile(id, 'banner'));
-        else { try { input = await fetchCoverImage(ovr.banner!); } catch { input = await firstPageInput(id); } }
-        const buffer = await sharp(input).resize(1280, 820, { fit: 'cover' }).blur(22).modulate({ brightness: 0.82, saturation: 1.18 }).webp({ quality: 80 }).toBuffer();
-        return { buffer, contentType: 'image/webp' };
-      });
-    }
-    let art = await one<{ banner: string | null; cover: string | null }>(
-      'SELECT banner, cover FROM series_art WHERE series_id = $1',
-      [id],
-    );
-    if (!art) {
-      try {
-        let title = '';
-        try {
-          const lib = await one<{ title: string }>('SELECT title FROM lib_series WHERE id = $1', [id]);
-          if (lib?.title) title = lib.title;
-          else { const s = await komga.series(id); title = s?.metadata?.title || s?.name || ''; }
-        } catch {}
-        const fetched = title ? await fetchAniListArt(title) : { banner: null, cover: null };
-        await q(
-          `INSERT INTO series_art (series_id, banner, cover) VALUES ($1, $2, $3)
-           ON CONFLICT (series_id) DO UPDATE SET banner = EXCLUDED.banner, cover = EXCLUDED.cover, fetched_at = now()`,
-          [id, fetched.banner, fetched.cover],
-        );
-        art = fetched;
-      } catch {
-        art = { banner: null, cover: null }; // transient AniList error: don't cache; fall back this view
-      }
-    }
-    const url = art.banner || art.cover;
-    // artw4 = a wide, full-bleed, blurred + darkened ambient backdrop composited from whatever art we have
-    // (banner or portrait cover). A short-wide banner can't fill a near-square mobile hero sharply, so we
-    // treat all art the same → consistent, always full-bleed (no empty bars, no floating poster), crop hidden.
-    const variant = url ? `artw5:${id}:${art.banner ? 'b' : 'c'}` : `artw5:${id}:p`;
-    const srcRow = await one<{ source_id: string | null }>('SELECT source_id FROM lib_series WHERE id = $1', [id]);
-    return serveImage(req, reply, variant, async () => {
-      // remote art (AniList banner / source cover) first; fall back to the first downloaded page so the hero is never empty
-      let input: Buffer;
-      try {
-        if (!url) throw new Error('no remote art');
-        input = await fetchCoverImage(url, srcRow?.source_id || undefined);
-      } catch {
-        input = await firstPageInput(id);
-      }
-      const buffer = await sharp(input)
-        .resize(1280, 820, { fit: 'cover' })
-        .blur(22)
-        .modulate({ brightness: 0.82, saturation: 1.18 })
-        .webp({ quality: 80 })
-        .toBuffer();
-      return { buffer, contentType: 'image/webp' };
-    });
+    const hero = (req.query as Record<string, string>)?.style === 'hero';
+    const ar: HeroAr = (req.query as Record<string, string>)?.ar === 'tall' ? 'tall' : 'wide';
+    const r = await backdropRecipe(id, hero, ar);
+    return serveImage(req, reply, r.variant, r.producer);
   });
 
   // direct owned-library image routes (the /img/series & /img/books routes above also reach these by id prefix)

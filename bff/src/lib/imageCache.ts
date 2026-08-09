@@ -41,8 +41,9 @@ async function writeAtomic(file: string, data: Buffer | string): Promise<void> {
   await fs.rename(tmp, file);
 }
 
-/** Get cached metadata for `variant`, fetching+storing via `fetcher` on a miss. */
-async function getOrFetch(
+/** Get cached metadata for `variant`, fetching+storing via `fetcher` on a miss.
+ *  Exported for cache pre-warmers (e.g. hero backdrops) that want to populate the cache without a request. */
+export async function getOrFetch(
   variant: string,
   fetcher: () => Promise<{ buffer: Buffer; contentType: string }>,
 ): Promise<{ key: string; meta: Meta }> {
@@ -111,9 +112,13 @@ export async function serveImage(
   // keyed by their full source URL (srccover:<url>). Library thumbnails/backdrops use a STABLE url whose
   // content can change (panel→real cover, AniList refresh) → keep those revalidatable.
   const immutable = /^(?:lib-)?page:/.test(variant) || variant.startsWith('srccover:');
+  // hero backdrops: content changes only when the art itself changes (rare; admin overrides bust via ?av=)
+  // → let browsers hold them a day so the carousel doesn't refetch on every visit.
   const cacheControl = immutable
     ? 'public, max-age=31536000, immutable'
-    : 'public, max-age=300, stale-while-revalidate=604800';
+    : variant.startsWith('artw7h')
+      ? 'public, max-age=86400, stale-while-revalidate=604800'
+      : 'public, max-age=300, stale-while-revalidate=604800';
   return serveFromDisk(request, reply, bin, meta, cacheControl);
 }
 

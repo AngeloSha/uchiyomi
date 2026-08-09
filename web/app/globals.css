@@ -134,3 +134,10 @@ html.lenis, html.lenis body { height: auto; }
 .lenis.lenis-smooth { scroll-behavior: auto !important; }
 .lenis.lenis-smooth [data-lenis-prevent] { overscroll-behavior: contain; }
 .lenis.lenis-stopped { overflow: hidden; }
+
+/* Netflix-style Top-10 rank numerals: hollow accent-stroked digits behind the cover cards */
+.rank-numeral {
+  color: transparent;
+  -webkit-text-stroke: 2px rgb(var(--accent) / 0.5);
+  text-shadow: 0 6px 28px rgb(var(--accent) / 0.16);
+}
