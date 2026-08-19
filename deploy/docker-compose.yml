@@ -57,6 +57,15 @@ services:
       VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:-}
       VAPID_SUBJECT: ${VAPID_SUBJECT:-}
       BACKUP_KEEP: ${BACKUP_KEEP:-14}
+      # Optional single sign-on. Leave OIDC_ISSUER empty and nothing changes; set it plus a client id
+      # and a "Continue with ..." button appears on the login screen. See docs/api.md.
+      OIDC_ISSUER: ${OIDC_ISSUER:-}
+      OIDC_CLIENT_ID: ${OIDC_CLIENT_ID:-}
+      OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET:-}
+      OIDC_NAME: ${OIDC_NAME:-SSO}
+      OIDC_ALLOW_SIGNUP: ${OIDC_ALLOW_SIGNUP:-false}
+      OIDC_LINK_BY_USERNAME: ${OIDC_LINK_BY_USERNAME:-false}
+      OIDC_ADMIN_GROUP: ${OIDC_ADMIN_GROUP:-}
     volumes:
       - ${LIBRARY_PATH:-./library}:/library:ro   # your existing comics — never written to
       - ${SOURCES_PATH:-./sources}:/sources:ro   # optional built source pack
