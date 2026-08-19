@@ -5,7 +5,7 @@ import { useSearchParams, useRouter } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, img } from '@/lib/api';
 import { Book, Page, Series } from '@/lib/types';
-import { chapterLabel, relativeTime } from '@/lib/format';
+import { chapterLabel, isVolumeName, relativeTime } from '@/lib/format';
 import { listDownloads, downloadChapter, deleteDownload } from '@/lib/downloads';
 import { applyCover, clearCover } from '@/lib/theme';
 import { Img, Backdrop, Rail, SectionTitle } from '@/components/ui';
@@ -353,6 +353,11 @@ function SeriesInner() {
       .filter((n) => !Number.isNaN(n));
     return ts.length ? new Date(Math.max(...ts)).toISOString() : null;
   }, [books]);
+  // volume-based series (old manga stored as tomes) get "volumes" wording instead of "chapters"
+  const mostlyVolumes = useMemo(() => {
+    const c = books?.content ?? [];
+    return c.length > 0 && c.filter((b) => isVolumeName(b.name || b.metadata?.title)).length > c.length / 2;
+  }, [books]);
 
   // shared blocks (rendered once)
   const Actions = (
@@ -388,7 +393,7 @@ function SeriesInner() {
   const metaBits: ReactNode[] = [
     author ? <span className="text-fog-300">by {author}</span> : null,
     meta?.status ? <span className="capitalize">{meta.status.toLowerCase()}</span> : null,
-    series ? <>{series.booksCount} chapters</> : null,
+    series ? <>{series.booksCount} {mostlyVolumes ? 'volumes' : 'chapters'}</> : null,
     (series?.booksUnreadCount ?? 0) > 0 ? <span className="text-accent">{series!.booksUnreadCount} unread</span> : null,
     updatedAt ? <>Updated {relativeTime(updatedAt)}</> : null,
     rating ? <span className="text-accent">★ {rating}/5</span> : null,

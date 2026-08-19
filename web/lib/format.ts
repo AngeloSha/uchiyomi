@@ -17,9 +17,18 @@ export function progressOf(b: { media: { pagesCount: number }; readProgress?: { 
   return total ? Math.min(1, b.readProgress.page / total) : 0;
 }
 
-export function chapterLabel(b: { metadata?: { number?: string }; number?: number; name?: string }): string {
+// Volume-style archives ("Tome 01.cbr", "Berserk T41", "v01") should read "Vol. N", not "Ch. N".
+// Chapter markers win so release-version suffixes ("Ch. 5 v2") stay chapters.
+const CHAPTER_MARK = /\b(?:ch(?:ap(?:ter|itre)?)?|episode|ep)\b\.?\s*\d/i;
+const VOLUME_WORD = /\b(?:tome|volume|vol)\.?\s*\d/i;
+const VOLUME_SHORT = /\b[tv]\.?\s?\d/i; // T05 / v01 / t.3 — boundary keeps "Titan 05" a chapter
+export function isVolumeName(name?: string | null): boolean {
+  return !!name && !CHAPTER_MARK.test(name) && (VOLUME_WORD.test(name) || VOLUME_SHORT.test(name));
+}
+
+export function chapterLabel(b: { metadata?: { number?: string; title?: string }; number?: number; name?: string }): string {
   const n = b.metadata?.number ?? (b.number != null ? String(b.number) : '');
-  if (n) return `Ch. ${n}`;
+  if (n) return isVolumeName(b.name || b.metadata?.title) ? `Vol. ${n}` : `Ch. ${n}`;
   return b.name || '';
 }
 
