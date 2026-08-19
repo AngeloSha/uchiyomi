@@ -1,5 +1,38 @@
 # Changelog
 
+## v0.3.0 — 2026-08-19
+
+Groundwork release: don't lose your data, don't ship broken reading, and don't retype your library.
+
+### Backups
+- Nightly backup of the database and your config, rotated automatically (14 runs by default) and restorable
+  with plain `psql` — no matching tool versions needed. Runs at a configurable hour, shows up in
+  **Admin → Tasks** with its last run and size, and has a **Run now** button.
+- Point `BACKUP_PATH` at a host directory — ideally on a different physical disk, so a dead drive doesn't
+  take the backups with it. Downloaded chapters and the image cache are deliberately excluded: both are
+  large and reproducible.
+- Restore instructions in [docs/USAGE.md](docs/USAGE.md#11-backups--restore).
+
+### Import
+- Bring a library over from **Mihon / Tachiyomi** (`.tachibk` backup) or a **public MangaDex list**. Titles
+  are parsed and shown for review first, with anything already in your library filtered out, before any
+  importing starts. Pasting a plain list still works.
+- Private MangaDex follows are not supported: they need an account login, which Koryomi doesn't ask for.
+
+### Fixes
+- **Downloads are now paced.** Every add previously spawned its own uncapped background download loop, so a
+  large import meant hundreds of simultaneous downloads against a handful of sites — a good way to get your
+  server blocked. All downloads now share a per-source concurrency limit and a politeness gap.
+- Chapter dates: `"Chapter 12"` was being accepted as a date (December 2001) and could be stamped as a
+  release date. Date parsing now requires text that actually looks like a date.
+
+### Under the hood
+- A test suite (30 tests) covering the logic that has actually broken before: the phantom-chapter guard,
+  date parsing, volume vs chapter labelling, chapter ordering, hero art fitting, backup parsing, download
+  pacing, and the reading-progress rules (run against a real Postgres, since they live in SQL). CI runs it
+  on every pull request — previously a green build only proved the code compiled.
+- Lockfiles added, so builds are reproducible.
+
 ## v0.2.1 — 2026-08-09
 
 - Volume-based libraries read correctly: archives named as tomes (`Tome 01.cbr`, `Berserk T41`, `v01`) now
