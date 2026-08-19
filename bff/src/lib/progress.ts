@@ -10,6 +10,7 @@
 //  * Explicit user intent (mark read / mark unread, sent with `silent`) writes exactly what it says, and is
 //    kept out of reading_events so bulk-marking a backlog doesn't inflate this week's stats.
 import { q } from './db';
+import { pushSeriesProgressAsync } from './trackers';
 
 export interface ProgressWrite {
   userId: string;
@@ -41,4 +42,7 @@ export async function writeProgress(w: ProgressWrite): Promise<void> {
       [w.userId, w.seriesId, w.bookId, w.page, w.completed, w.deviceId ?? null],
     );
   }
+  // Finishing a chapter is the only thing worth telling an external tracker about. Fire-and-forget on
+  // purpose: a tracker being slow or down must never delay a page turn or fail the write above.
+  if (w.completed && w.seriesId && w.seriesId !== 'unknown') pushSeriesProgressAsync(w.userId, w.seriesId);
 }

@@ -5,6 +5,7 @@ import { komga, komgaImage } from '../lib/komga';
 import { serveImage, getOrFetch } from '../lib/imageCache';
 import { dominantHex } from '../lib/color';
 import { fetchAniListArt } from '../lib/anilist';
+import { linkSeries } from '../lib/trackers';
 import { LIBRARY_ROOT, cbzPages, cbzEntry } from '../lib/library';
 import { cfSession } from '../lib/sources/flaresolverr';
 import { getSource } from '../lib/sources';
@@ -132,6 +133,8 @@ async function backdropRecipe(id: string, hero: boolean, ar: HeroAr): Promise<{ 
          ON CONFLICT (series_id) DO UPDATE SET banner = EXCLUDED.banner, cover = EXCLUDED.cover, fetched_at = now()`,
         [id, fetched.banner, fetched.cover],
       );
+      // the same match also anchors tracker sync — record it while we have it
+      if (fetched.mediaId) await linkSeries(id, fetched.mediaId, fetched.mediaTitle ?? null);
       art = fetched;
     } catch {
       art = { banner: null, cover: null }; // transient AniList error: don't cache; fall back this view

@@ -7,6 +7,8 @@ import { content as komga } from '../lib/backend';
 import { authenticate, userIdOf, issueOpdsToken } from '../lib/auth';
 import { env } from '../env';
 import { pushEnabled, vapidPublicKey, saveSubscription, removeSubscription } from '../lib/push';
+import { statusFor, saveConnection, disconnect, whoAmI, pushSeriesProgress } from '../lib/trackers';
+import { logAudit } from '../lib/audit';
 
 function computeStreaks(days: string[]): { current: number; longest: number } {
   if (!days.length) return { current: 0, longest: 0 };
@@ -305,6 +307,48 @@ export default async function personalRoutes(app: FastifyInstance) {
   });
 
   // ---- settings ----
+  // ---- external progress trackers (AniList) ----
+  app.get('/api/trackers', async (req) => ({ content: await statusFor(userIdOf(req)) }));
+
+  // Connect by pasting a token. AniList tokens are scopeless and long-lived, so this is the honest,
+  // dependency-free path: no client registration, nothing to configure server-side.
+  app.post('/api/trackers/anilist', async (req, reply) => {
+    const b = z.object({ token: z.string().min(20).max(4000) }).safeParse(req.body);
+    if (!b.success) return reply.code(400).send({ error: 'bad_request', message: 'Paste your AniList token.' });
+    let who;
+    try {
+      who = await whoAmI(b.data.token.trim());
+    } catch {
+      return reply.code(400).send({ error: 'rejected', message: 'AniList did not accept that token.' });
+    }
+    if (!who) return reply.code(400).send({ error: 'rejected', message: 'AniList did not accept that token.' });
+    // AniList tokens last a year and cannot be refreshed; record the expiry so we can warn before it lapses.
+    const expires = new Date(Date.now() + 365 * 86400000);
+    await saveConnection(userIdOf(req), 'anilist', b.data.token.trim(), who.name, expires);
+    await logAudit('tracker.connect', { userId: userIdOf(req), detail: { provider: 'anilist', account: who.name }, req });
+    return { ok: true, account: who.name };
+  });
+
+  app.delete('/api/trackers/:provider', async (req) => {
+    const { provider } = req.params as { provider: string };
+    await disconnect(userIdOf(req), provider as any);
+    await logAudit('tracker.disconnect', { userId: userIdOf(req), detail: { provider }, req });
+    return { ok: true };
+  });
+
+  // Push everything already finished, for a freshly-connected account.
+  app.post('/api/trackers/anilist/backfill', async (req) => {
+    const uid = userIdOf(req);
+    const rows = await q<{ series_id: string }>(
+      `SELECT DISTINCT rp.series_id FROM read_progress rp
+         JOIN series_trackers st ON st.series_id = rp.series_id AND st.provider = 'anilist'
+        WHERE rp.user_id = $1 AND rp.completed = true`,
+      [uid],
+    );
+    void (async () => { for (const r of rows) await pushSeriesProgress(uid, r.series_id).catch(() => {}); })();
+    return { ok: true, series: rows.length };
+  });
+
   app.get('/api/settings', async (req) => {
     const uid = userIdOf(req);
     const row = await one<{ data: unknown }>('SELECT data FROM app_settings WHERE user_id = $1', [uid]);

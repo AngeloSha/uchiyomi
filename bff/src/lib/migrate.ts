@@ -253,6 +253,31 @@ ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS backup_hour        int NOT 
 ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS backup_last_run    timestamptz;
 ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS backup_last_result jsonb;
 
+-- external progress trackers (AniList today; provider leaves room for MAL/Kitsu without a migration)
+-- access_token is encrypted at rest: AniList issues scopeless tokens with near-full account access.
+CREATE TABLE IF NOT EXISTS user_trackers (
+  user_id      uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  provider     text NOT NULL,
+  access_token text NOT NULL,
+  account_name text,
+  expires_at   timestamptz,
+  enabled      boolean NOT NULL DEFAULT true,
+  last_sync_at timestamptz,
+  last_error   text,
+  created_at   timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (user_id, provider)
+);
+-- which external entry a library series maps to. Resolved once from the same AniList match used for art.
+CREATE TABLE IF NOT EXISTS series_trackers (
+  series_id   text NOT NULL,
+  provider    text NOT NULL,
+  external_id text NOT NULL,
+  title       text,
+  linked_by   uuid REFERENCES users(id) ON DELETE SET NULL,  -- null = matched automatically
+  updated_at  timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (series_id, provider)
+);
+
 -- admin-editable per-series metadata + art overrides
 -- cover/banner: 'upload' = a file under <CONFIG_DIR>/series-art; an http(s) URL = pasted; null = use automatic art
 CREATE TABLE IF NOT EXISTS series_overrides (

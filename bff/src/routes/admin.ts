@@ -18,6 +18,7 @@ import sharp from 'sharp';
 import { ART_DIR, artFile } from '../lib/seriesArt';
 import { addSeriesFromSource, findBestMatch, norm } from './sources';
 import { titlesFromBackup } from '../lib/tachibk';
+import { linkSeries } from '../lib/trackers';
 import { titlesFromMangadexList } from '../lib/mangadexList';
 import { fetchAniListArt, fetchAniListCandidates, fetchAnimeBanner } from '../lib/anilist';
 import { fetchKitsuBanner } from '../lib/kitsu';
@@ -325,6 +326,7 @@ export default async function adminRoutes(app: FastifyInstance) {
                  cover  = COALESCE(EXCLUDED.cover,  series_art.cover), fetched_at = now()`,
               [t.id, art.banner, art.cover],
             );
+            if ((art as any).mediaId) await linkSeries(t.id, (art as any).mediaId, (art as any).mediaTitle ?? null);
             if (art.banner) job.banners++;
             else job.covers++;
           } else job.misses++;
@@ -337,6 +339,36 @@ export default async function adminRoutes(app: FastifyInstance) {
     return { ok: true, total: targets.length };
   });
   app.get('/api/admin/art/backfill/status', async () => ({ job: artJob }));
+
+  // ---- link existing series to AniList entries so tracker sync has an anchor ----
+  // Art was matched long before trackers existed, so those series have cached art but no link. This
+  // re-resolves only what's missing, paced for AniList's ~30 req/min limit.
+  let relinkJob: { running: boolean; total: number; done: number; linked: number; misses: number } | null = null;
+  app.post('/api/admin/trackers/relink', async (req, reply) => {
+    if (relinkJob?.running) return reply.code(409).send({ error: 'busy' });
+    const targets = await q<{ id: string; title: string }>(
+      `SELECT s.id, s.title FROM lib_series s
+         LEFT JOIN series_trackers t ON t.series_id = s.id AND t.provider = 'anilist'
+        WHERE t.series_id IS NULL ORDER BY s.books_count DESC`,
+    );
+    const job = { running: true, total: targets.length, done: 0, linked: 0, misses: 0 };
+    relinkJob = job;
+    await logAudit('tracker.relink_start', { userId: userIdOf(req), detail: { count: targets.length }, req });
+    void (async () => {
+      for (const t of targets) {
+        try {
+          const m = await fetchAniListArt(t.title);
+          if (m.mediaId) { await linkSeries(t.id, m.mediaId, m.mediaTitle ?? null); job.linked++; }
+          else job.misses++;
+        } catch { job.misses++; }
+        job.done++;
+        await new Promise((r) => setTimeout(r, 2200)); // stay under AniList's rate limit
+      }
+      job.running = false;
+    })();
+    return { ok: true, total: targets.length };
+  });
+  app.get('/api/admin/trackers/relink/status', async () => ({ job: relinkJob }));
 
   // ---- import intake: turn a Mihon/Tachiyomi backup or a MangaDex list into a reviewable title list ----
   // Parsing is separate from importing on purpose: adding hundreds of series is slow and hits other people's

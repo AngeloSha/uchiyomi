@@ -9,7 +9,11 @@ import { deviceId } from '@/lib/device';
 import { bytes, relativeTime } from '@/lib/format';
 import { Avatar, AVATAR_EMOJIS, AVATAR_COLORS } from '@/components/Avatar';
 import { SecurityPanel } from '@/components/SecurityPanel';
+import { useToast } from '@/components/Toast';
 import { IcDownload, IcSparkle, IcCheck, IcUser, IcChevronRight, IcRefresh } from '@/components/icons';
+
+const msgOf = (e: any, fb: string) => { try { return JSON.parse(e?.body || '{}').message || fb; } catch { return fb; } };
+const fld = 'w-full rounded-xl border border-ink-700 bg-ink-850 px-3 py-2.5 text-sm text-fog-100 outline-none focus:border-accent';
 
 function urlB64ToUint8(s: string): Uint8Array {
   const pad = '='.repeat((4 - (s.length % 4)) % 4);
@@ -397,6 +401,12 @@ export default function ProfilePage() {
         </section>
       )}
 
+      {/* progress tracking */}
+      <section className="px-5 pt-6 lg:px-0">
+        <h2 className="mb-3 font-display text-base font-semibold">Progress tracking</h2>
+        <TrackerPanel />
+      </section>
+
       {/* external readers (OPDS) */}
       <section className="px-5 pt-6 lg:px-0">
         <h2 className="mb-3 font-display text-base font-semibold">External readers (OPDS)</h2>
@@ -442,6 +452,88 @@ export default function ProfilePage() {
           <IcSparkle width={12} height={12} /> Uchiyomi · personal reader for your Komga library
         </p>
       </section>
+    </div>
+  );
+}
+
+interface TrackerStatus {
+  provider: string; connected: boolean; accountName: string | null;
+  expiresAt: string | null; expiringSoon: boolean; lastSyncAt: string | null; lastError: string | null;
+}
+
+/** Connect an AniList account so finished chapters push automatically. Token-paste rather than an OAuth
+ *  round-trip: AniList tokens are scopeless and long-lived, so this needs nothing configured server-side. */
+function TrackerPanel() {
+  const toast = useToast();
+  const [token, setToken] = useState('');
+  const [busy, setBusy] = useState(false);
+  const { data, refetch } = useQuery({ queryKey: ['trackers'], queryFn: () => api<{ content: TrackerStatus[] }>('/api/trackers') });
+  const anilist = (data?.content || []).find((t) => t.provider === 'anilist');
+
+  const connect = async () => {
+    if (!token.trim()) return;
+    setBusy(true);
+    try {
+      const r = await api<{ account: string }>('/api/trackers/anilist', { json: { token: token.trim() } });
+      toast(`Connected to AniList as ${r.account}`, 'success');
+      setToken('');
+      refetch();
+      const b = await api<{ series: number }>('/api/trackers/anilist/backfill', { json: {} });
+      if (b.series) toast(`Syncing ${b.series} series you've already finished…`);
+    } catch (e: any) { toast(msgOf(e, 'AniList did not accept that token'), 'error'); }
+    setBusy(false);
+  };
+  const disconnect = async () => {
+    try { await api('/api/trackers/anilist', { method: 'DELETE' }); toast('Disconnected', 'success'); refetch(); }
+    catch { toast('Could not disconnect', 'error'); }
+  };
+
+  if (anilist?.connected) {
+    return (
+      <div className="card p-4">
+        <div className="flex items-center justify-between gap-3">
+          <div className="min-w-0">
+            <p className="text-sm text-fog-100">AniList — <span className="text-accent">{anilist.accountName}</span></p>
+            <p className="mt-0.5 text-xs text-fog-500">
+              Finished chapters sync automatically
+              {anilist.lastSyncAt && <> · last synced {relativeTime(anilist.lastSyncAt)}</>}
+            </p>
+          </div>
+          <button onClick={disconnect} className="chip shrink-0 text-xs">Disconnect</button>
+        </div>
+        {anilist.expiringSoon && (
+          <p className="mt-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-2.5 py-1.5 text-xs text-amber-300">
+            This AniList token expires {anilist.expiresAt ? relativeTime(anilist.expiresAt) : 'soon'}. AniList can&apos;t refresh tokens,
+            so reconnect before then to keep syncing.
+          </p>
+        )}
+        {anilist.lastError && (
+          <p className="mt-2 rounded-lg border border-red-500/30 bg-red-500/10 px-2.5 py-1.5 text-xs text-red-300">{anilist.lastError}</p>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="card p-4">
+      <p className="text-sm text-fog-100">Sync your reading to AniList</p>
+      <p className="mt-1 text-xs text-fog-500">
+        Finish a chapter here and your AniList list updates on its own. Paste an access token from
+        {' '}<a href="https://anilist.co/settings/developer" target="_blank" rel="noreferrer" className="text-accent underline">AniList → Developer</a>
+        {' '}(create a client, then authorise it to get a token).
+      </p>
+      <p className="mt-1 text-[11px] text-fog-600">
+        AniList tokens carry full access to your AniList account and can&apos;t be scoped — it&apos;s stored encrypted here, and
+        you can disconnect at any time.
+      </p>
+      <div className="mt-3 flex gap-2">
+        <input value={token} onChange={(e) => setToken(e.target.value)} type="password" placeholder="AniList access token"
+          autoCapitalize="none" autoCorrect="off" className={`${fld} flex-1`} />
+        <button onClick={connect} disabled={busy || !token.trim()} className="btn-accent px-4 text-sm disabled:opacity-50">
+          {busy ? 'Checking…' : 'Connect'}
+        </button>
+      </div>
+      {anilist?.lastError && <p className="mt-2 text-xs text-red-300">{anilist.lastError}</p>}
     </div>
   );
 }

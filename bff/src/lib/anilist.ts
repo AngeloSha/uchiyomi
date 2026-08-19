@@ -1,6 +1,8 @@
 // Pull real per-series art from AniList (free, no key): a wide bannerImage + a high-res cover.
 // The manga entry often has no banner while its ANIME adaptation does — pull relations in the same query.
-const QUERY = `query($s:String){Media(search:$s,type:MANGA,sort:SEARCH_MATCH){title{romaji english}coverImage{extraLarge}bannerImage relations{edges{node{type bannerImage}}}}}`;
+// `id` is the AniList media id — the anchor progress sync writes against, so it is captured here rather
+// than re-resolved later by another fuzzy title search.
+const QUERY = `query($s:String){Media(search:$s,type:MANGA,sort:SEARCH_MATCH){id title{romaji english}coverImage{extraLarge}bannerImage relations{edges{node{type bannerImage}}}}}`;
 
 function clean(t: string): string {
   return t
@@ -17,7 +19,10 @@ function clean(t: string): string {
  * Throws on transient network/5xx errors (so the caller doesn't cache a miss);
  * returns nulls on a genuine "no match".
  */
-export async function fetchAniListArt(rawTitle: string, retry = 0): Promise<{ banner: string | null; cover: string | null }> {
+export async function fetchAniListArt(
+  rawTitle: string,
+  retry = 0,
+): Promise<{ banner: string | null; cover: string | null; mediaId?: number | null; mediaTitle?: string | null }> {
   const s = clean(rawTitle);
   if (!s) return { banner: null, cover: null };
   const r = await fetch('https://graphql.anilist.co', {
@@ -40,7 +45,12 @@ export async function fetchAniListArt(rawTitle: string, retry = 0): Promise<{ ba
   const relBanner = (m?.relations?.edges ?? [])
     .map((e: any) => e?.node)
     .find((n: any) => n?.type === 'ANIME' && n.bannerImage)?.bannerImage ?? null;
-  return { banner: m?.bannerImage ?? relBanner, cover: m?.coverImage?.extraLarge ?? null };
+  return {
+    banner: m?.bannerImage ?? relBanner,
+    cover: m?.coverImage?.extraLarge ?? null,
+    mediaId: m?.id ?? null,
+    mediaTitle: m?.title?.english || m?.title?.romaji || null,
+  };
 }
 
 const ANIME_QUERY = `query($s:String){Media(search:$s,type:ANIME,sort:SEARCH_MATCH){bannerImage}}`;
