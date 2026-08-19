@@ -217,3 +217,70 @@ GET    /opds                      GET    /opds/series
 GET    /opds/series/:id           GET    /opds/search
 GET    /opds/opensearch.xml       GET    /opds/book/:id/file
 ```
+
+---
+
+# Single sign-on (OIDC)
+
+Uchiyomi can sign people in through an identity provider you already run: Authentik, Authelia, Keycloak,
+Pocket ID, Zitadel, or any other OpenID Connect provider.
+
+SSO is **additional**, never a replacement. Local accounts, 2FA, lockout and session revocation all keep
+working exactly as before, so you are not locked out if the identity provider is down.
+
+## Setting it up
+
+In your identity provider, create an OAuth2/OpenID Connect application with:
+
+- **Redirect URI**: `https://your-server/auth/oidc/callback`
+- **Grant type**: authorization code (PKCE is used automatically)
+- **Scopes**: `openid profile email`
+
+Then set these on the `yomi-bff` container and restart it:
+
+```yaml
+environment:
+  OIDC_ISSUER: https://auth.example.com/application/o/uchiyomi/
+  OIDC_CLIENT_ID: your-client-id
+  OIDC_CLIENT_SECRET: your-client-secret
+  OIDC_NAME: Authentik          # the name shown on the button
+```
+
+`OIDC_ISSUER` is the base URL that serves `/.well-known/openid-configuration`. If SSO doesn't appear on the
+login screen, that URL is usually the reason: fetch it yourself and check it returns JSON.
+
+A **Continue with …** button appears on the login screen once the issuer and client id are set. Nothing else
+changes until someone uses it.
+
+## Who is allowed in
+
+By default, signing in through the identity provider only works for people who already have a linked account
+here, which is the safe default but means nobody can get in yet. Pick one of these:
+
+```yaml
+  OIDC_LINK_BY_USERNAME: "true"   # adopt the existing local account with the same username
+  OIDC_ALLOW_SIGNUP: "true"       # create an account the first time someone signs in
+```
+
+`OIDC_LINK_BY_USERNAME` is what you usually want on a server whose users already exist. The first time
+someone signs in through SSO, their existing account is adopted: same account, same reading progress,
+favorites and history, now reachable through the identity provider as well as their password. An account
+already linked to a different SSO identity is never taken over.
+
+Optionally map admin rights from a group:
+
+```yaml
+  OIDC_ADMIN_GROUP: uchiyomi-admins
+```
+
+When set, roles follow the identity provider on every sign-in: in the group means admin here, out of it means
+an ordinary user. Leave it unset to keep managing roles in the admin panel.
+
+## Notes
+
+- Boolean settings read the actual word, so `"false"` means false.
+- The ID token's signature is verified against the issuer's published keys on every sign-in, along with its
+  issuer, audience, expiry and nonce.
+- SSO sessions appear in **Profile → Security** as a device named "SSO" and can be revoked like any other.
+- Signing in through SSO does not ask for a second factor here; your identity provider is responsible for
+  that. Local password logins still use Uchiyomi's own 2FA.

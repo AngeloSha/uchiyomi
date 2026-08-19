@@ -22,6 +22,14 @@ function ensureJwtSecret(): string {
 }
 process.env.JWT_SECRET = ensureJwtSecret();
 
+// z.coerce.boolean() is a trap for env vars: it is just Boolean(value), so the STRING "false" comes out true
+// and a flag can only ever be turned off by leaving it unset. Read the actual word instead.
+const envFlag = (def: boolean) =>
+  z
+    .string()
+    .optional()
+    .transform((v) => (v === undefined || v.trim() === '' ? def : /^(1|true|yes|on)$/i.test(v.trim())));
+
 const schema = z.object({
   NODE_ENV: z.string().default('production'),
   PORT: z.coerce.number().default(3000),
@@ -35,6 +43,21 @@ const schema = z.object({
   PUBLIC_ORIGIN: z.string().url().default('http://localhost:3000'),
   CACHE_DIR: z.string().default('/cache'),
   CONFIG_DIR: z.string().default('/config'),
+  // Optional OIDC / SSO. Everything stays off unless an issuer and client id are set, so an install that
+  // doesn't want it is unaffected. There is no refresh handling on purpose: we mint our own session at the
+  // end of the flow and the IdP is only consulted at login.
+  OIDC_ISSUER: z.string().default(''),
+  OIDC_CLIENT_ID: z.string().default(''),
+  OIDC_CLIENT_SECRET: z.string().default(''),
+  OIDC_NAME: z.string().default('SSO'),
+  OIDC_SCOPES: z.string().default('openid profile email'),
+  // Create an account the first time an unknown person signs in through the IdP.
+  OIDC_ALLOW_SIGNUP: envFlag(false),
+  // Adopt an existing local account whose username matches the one the IdP reports. Off by default: turning
+  // it on means trusting your IdP to be authoritative over usernames, which is true when you run it yourself.
+  OIDC_LINK_BY_USERNAME: envFlag(false),
+  // Users in this IdP group become admins here (leave empty to keep roles managed locally).
+  OIDC_ADMIN_GROUP: z.string().default(''),
   VAPID_PUBLIC_KEY: z.string().default(''),
   VAPID_PRIVATE_KEY: z.string().default(''),
   VAPID_SUBJECT: z.string().default('mailto:admin@uchiyomi.com'),

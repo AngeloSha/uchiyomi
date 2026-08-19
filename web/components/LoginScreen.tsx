@@ -6,6 +6,17 @@ import { api } from '@/lib/api';
 import { ART } from '@/lib/art';
 import { Mark, Wordmark } from './Brand';
 
+const SSO_ERRORS: Record<string, string> = {
+  no_account: "You signed in successfully, but there's no account here for you yet. Ask the admin to create one.",
+  username_taken: 'An account with that username already exists here and is not linked to SSO.',
+  disabled: 'That account is disabled.',
+  expired: 'That sign-in took too long. Please try again.',
+  state_mismatch: 'That sign-in could not be verified. Please try again.',
+  exchange_failed: 'The login provider rejected the sign-in.',
+  oidc_unavailable: 'Could not reach the login provider.',
+  access_denied: 'Sign-in was cancelled.',
+};
+
 export function LoginScreen() {
   const { login, firstRunSetup } = useAuth();
   const [mode, setMode] = useState<'checking' | 'login' | 'setup'>('checking');
@@ -16,6 +27,7 @@ export function LoginScreen() {
   const [needTotp, setNeedTotp] = useState(false);
   const [busy, setBusy] = useState(false);
   const [errMsg, setErrMsg] = useState('');
+  const [sso, setSso] = useState<{ enabled: boolean; name: string }>({ enabled: false, name: '' });
   const err = !!errMsg;
 
   // First-run detection: if the server has no users yet, show a create-admin form instead of login.
@@ -27,7 +39,17 @@ export function LoginScreen() {
       } catch {
         setMode('login');
       }
+      try {
+        const c = await api<{ oidc?: { enabled: boolean; name: string } }>('/auth/config');
+        if (c.oidc?.enabled) setSso(c.oidc);
+      } catch { /* SSO is optional; a failure here just means no button */ }
     })();
+    // the OIDC callback sends people back here with a reason when it couldn't sign them in
+    const reason = new URLSearchParams(window.location.search).get('sso_error');
+    if (reason) {
+      setErrMsg(SSO_ERRORS[reason] || 'Could not sign in with SSO.');
+      window.history.replaceState({}, '', window.location.pathname);
+    }
   }, []);
 
   const submit = async (e: React.FormEvent) => {
@@ -160,6 +182,18 @@ export function LoginScreen() {
             </button>
             {needTotp && (
               <button type="button" onClick={() => { setNeedTotp(false); setErrMsg(''); setCode(''); }} className="mt-3 w-full text-center text-xs text-fog-500 hover:text-fog-300">‹ Back</button>
+            )}
+            {sso.enabled && !needTotp && (
+              <>
+                <div className="my-4 flex items-center gap-3">
+                  <span className="h-px flex-1 bg-ink-700" />
+                  <span className="text-[11px] uppercase tracking-wider text-fog-600">or</span>
+                  <span className="h-px flex-1 bg-ink-700" />
+                </div>
+                <a href="/auth/oidc/start" className="block w-full rounded-xl border border-ink-700 bg-ink-850/60 py-2.5 text-center text-sm text-fog-100 transition hover:border-accent hover:text-white">
+                  Continue with {sso.name}
+                </a>
+              </>
             )}
           </form>
         )}

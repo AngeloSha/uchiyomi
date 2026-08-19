@@ -297,6 +297,13 @@ CREATE TABLE IF NOT EXISTS opds_tokens (
   last_seen  timestamptz
 );
 
+-- OIDC identity linked to a local account. Kept alongside the password columns rather than replacing them,
+-- so a person can have both and local login keeps working if the identity provider is down.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS oidc_sub    text;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS oidc_issuer text;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_users_oidc ON users (oidc_issuer, oidc_sub)
+  WHERE oidc_sub IS NOT NULL;
+
 -- long-lived personal tokens for scripts and integrations. Unlike the OPDS token these reach /api/*,
 -- so they carry explicit scopes: read is GET-only, write allows mutations, admin is required on top of an
 -- admin account before a token may touch /api/admin/*. Only the hash is stored; the raw value is shown once.

@@ -53,6 +53,9 @@ into a single image.** Point it at your library, add sources by URL, and it does
 - **Offline:** installable PWA with offline downloads + smart auto-sync of favorites.
 - **Push notifications:** opt-in web push the moment a followed series gets a new chapter.
 - **OPDS:** browse & read your Uchiyomi library from other reader apps (Panels, Chunky, KOReader, …).
+- **Single sign-on:** optional OIDC login against Authentik, Authelia, Keycloak or anything else that speaks
+  OpenID Connect, with optional group-to-admin mapping. Local accounts and 2FA keep working alongside it,
+  so a provider outage can't lock you out. See [docs/api.md](docs/api.md#single-sign-on-oidc).
 - **Scriptable:** long-lived, revocable API tokens with read / write / admin scopes, so a backup script or
   a cron job can talk to the API without a browser session. See [docs/api.md](docs/api.md).
 - **AniList sync:** connect your account once and finishing a chapter updates your AniList list on its own.
@@ -102,6 +105,7 @@ Suwayomi) fetches chapters but is Android-only or wraps them in a basic web UI. 
 | Automatic nightly backups | ✅ | ❌ | ❌ | ❌ |
 | Library health checks | ✅ | ❌ | ❌ | ❌ |
 | Scoped API tokens for scripts | ✅ | ✅ | ❌ | ❌ |
+| SSO / OIDC login | ✅ | Kavita only | ❌ | ❌ |
 
 **Honest caveats** (narrower than they look): Komga/Kavita are more mature for general library management, and
 Tachiyomi/Mihon list more individual sources. But Uchiyomi reads **CBZ, CBR, and loose image folders**. It skips

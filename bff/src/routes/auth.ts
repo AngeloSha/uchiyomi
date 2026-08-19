@@ -28,6 +28,8 @@ import {
   validateRefreshToken,
 } from '../lib/auth';
 import { generateRecoveryCodes, generateSecret, otpauthURL, sha256, verifyTotp } from '../lib/totp';
+import { oidcEnabled, oidcName, beginLogin, completeLogin, isAdminByGroup, type OidcClaims } from '../lib/oidc';
+import { randomBytes } from 'crypto';
 
 const loginBody = z.object({
   username: z.string().max(64).optional(),
@@ -162,8 +164,138 @@ export default async function authRoutes(app: FastifyInstance) {
   // public branding + whether sign-up is open (for the login screen)
   app.get('/auth/config', async () => {
     const s = await one<{ server_name: string; allow_registration: boolean }>('SELECT server_name, allow_registration FROM server_settings WHERE id = 1');
-    return { serverName: s?.server_name || 'Uchiyomi', allowRegistration: !!s?.allow_registration };
+    return {
+      serverName: s?.server_name || 'Uchiyomi',
+      allowRegistration: !!s?.allow_registration,
+      oidc: oidcEnabled() ? { enabled: true, name: oidcName() } : { enabled: false, name: '' },
+    };
   });
+
+
+  // ---- OIDC / SSO -----------------------------------------------------------
+  // An additional way in, never a replacement: password login, 2FA, lockout and session revocation are
+  // untouched, and the callback finishes by minting exactly the session a password login would.
+  const OIDC_COOKIE = 'yomi_oidc';
+
+  app.get('/auth/oidc/start', async (req, reply) => {
+    if (!oidcEnabled()) return reply.code(404).send({ error: 'not_configured' });
+    let start;
+    try {
+      start = await beginLogin();
+    } catch (e) {
+      app.log.error({ err: e }, 'oidc: could not start login');
+      return reply.code(502).send({ error: 'oidc_unavailable', message: 'Could not reach the login provider.' });
+    }
+    // The PKCE verifier and nonce must survive the round trip but must not be readable by scripts, and
+    // must not outlive the login attempt.
+    const ticket = app.jwt.sign(
+      { typ: 'oidc', state: start.state, nonce: start.nonce, verifier: start.verifier },
+      { expiresIn: 600 },
+    );
+    reply.setCookie(OIDC_COOKIE, ticket, {
+      httpOnly: true, secure: 'auto', sameSite: 'lax', path: '/auth/oidc', maxAge: 600,
+    });
+    return reply.redirect(start.url);
+  });
+
+  app.get('/auth/oidc/callback', async (req, reply) => {
+    if (!oidcEnabled()) return reply.code(404).send({ error: 'not_configured' });
+    const fail = async (reason: string, detail?: string) => {
+      await logAudit('login.oidc_fail', { detail: { reason, detail }, req });
+      reply.clearCookie(OIDC_COOKIE, { path: '/auth/oidc' });
+      const origin = env.PUBLIC_ORIGIN.replace(/\/$/, '');
+      return reply.redirect(`${origin}/login?sso_error=${encodeURIComponent(reason)}`);
+    };
+
+    const { code, state, error } = req.query as { code?: string; state?: string; error?: string };
+    if (error) return fail(error);
+    if (!code || !state) return fail('missing_code');
+
+    const raw = (req.cookies as Record<string, string | undefined>)[OIDC_COOKIE];
+    if (!raw) return fail('expired');
+    let ticket: { typ?: string; state?: string; nonce?: string; verifier?: string };
+    try {
+      ticket = app.jwt.verify(raw);
+    } catch {
+      return fail('expired');
+    }
+    if (ticket.typ !== 'oidc' || !ticket.state || ticket.state !== state) return fail('state_mismatch');
+
+    let claims: OidcClaims;
+    try {
+      claims = await completeLogin(code, ticket.verifier!, ticket.nonce!);
+    } catch (e) {
+      app.log.error({ err: e }, 'oidc: login failed');
+      return fail('exchange_failed', (e as Error).message);
+    }
+    reply.clearCookie(OIDC_COOKIE, { path: '/auth/oidc' });
+
+    let userId: string;
+    try {
+      userId = await resolveOidcUser(claims);
+    } catch (e) {
+      return fail((e as Error).message);
+    }
+
+    const row = await one<{ role: string; disabled: boolean; username: string | null }>(
+      'SELECT role, disabled, username FROM users WHERE id = $1', [userId],
+    );
+    if (!row || row.disabled) return fail('disabled');
+
+    const refresh = await issueRefreshToken(userId, {
+      deviceName: 'SSO', ip: clientIp(req), userAgent: (req.headers['user-agent'] as string) || null,
+    });
+    reply.setCookie(REFRESH_COOKIE, refresh, cookieOptions());
+    setImgCookie(app, reply, userId);
+    await logAudit('login.oidc_ok', { userId, username: row.username || undefined, req });
+    // The session lives in the refresh cookie; the app picks it up on load and exchanges it for an access token.
+    return reply.redirect(env.PUBLIC_ORIGIN.replace(/\/$/, '') + '/');
+  });
+
+  /** Map an OIDC identity to a local account, creating or adopting one only where configured to. */
+  async function resolveOidcUser(claims: OidcClaims): Promise<string> {
+    const existing = await one<{ id: string }>(
+      'SELECT id FROM users WHERE oidc_issuer = $1 AND oidc_sub = $2', [claims.issuer, claims.sub],
+    );
+    if (existing) {
+      // keep the role in step with the IdP when group mapping is configured
+      if (env.OIDC_ADMIN_GROUP) {
+        await q('UPDATE users SET role = $2 WHERE id = $1', [existing.id, isAdminByGroup(claims) ? 'admin' : 'user']);
+      }
+      return existing.id;
+    }
+
+    const wanted = (claims.username || claims.email?.split('@')[0] || '').replace(/[^a-zA-Z0-9._-]/g, '');
+    if (!wanted) throw new Error('no_username');
+
+    if (env.OIDC_LINK_BY_USERNAME) {
+      const local = await one<{ id: string; oidc_sub: string | null }>(
+        'SELECT id, oidc_sub FROM users WHERE username = $1', [wanted],
+      );
+      // Never steal an account already bound to a different SSO identity.
+      if (local && !local.oidc_sub) {
+        await q('UPDATE users SET oidc_issuer = $2, oidc_sub = $3 WHERE id = $1', [local.id, claims.issuer, claims.sub]);
+        await logAudit('user.oidc_linked', { userId: local.id, username: wanted, detail: { issuer: claims.issuer } });
+        return local.id;
+      }
+      if (local) throw new Error('username_taken');
+    }
+
+    if (!env.OIDC_ALLOW_SIGNUP) throw new Error('no_account');
+
+    // Unusable password: this account can only ever be reached through the IdP.
+    const placeholder = await hash(randomBytes(32).toString('base64url'));
+    let username = wanted;
+    for (let i = 2; await one('SELECT 1 FROM users WHERE username = $1', [username]); i++) username = `${wanted}${i}`;
+    const rows = await q<{ id: string }>(
+      `INSERT INTO users (display_name, username, role, password_hash, auth_kind, oidc_issuer, oidc_sub)
+       VALUES ($1,$2,$3,$4,'oidc',$5,$6) RETURNING id`,
+      [claims.displayName || username, username, isAdminByGroup(claims) ? 'admin' : 'user',
+       placeholder, claims.issuer, claims.sub],
+    );
+    await logAudit('user.oidc_created', { userId: rows[0].id, username, detail: { issuer: claims.issuer } });
+    return rows[0].id;
+  }
 
   // self-registration (only when the admin enabled it) → creates a plain user + logs in
   app.post('/auth/register', { config: { rateLimit: { max: 5, timeWindow: '10 minutes' } } }, async (req, reply) => {
