@@ -1,5 +1,29 @@
 # Changelog
 
+## v0.4.0 — 2026-08-19
+
+**Koryomi is now Uchiyomi.**
+
+The old name didn't work in Japanese: romanized, "Koryomi" reads as こ-りょ-み (ko-**ryo**-mi), because `ryo`
+is a single mora りょ — so the よみ of 読み ("reading") never survived. That broke the link to Tachiyomi
+(立ち読み) and Suwayomi that the name was meant to signal, and left the 読 mark claiming something the name
+didn't say.
+
+**Uchiyomi** (うちよみ, 内読み) keeps よみ intact and follows the convention the ecosystem already uses:
+Tachiyomi is standing-reading, Suwayomi is sitting-reading, **Uchiyomi is reading at home** — which is what a
+self-hosted reader is. The logo evolves to match: the same faceted 読, now sheltered under a roof.
+
+### Nothing to migrate
+Only the product name changed. `yomi` is the shared root of both names, so every stateful identifier is
+untouched — the database and its volumes, the offline IndexedDB, auth cookies, saved reader preferences, OPDS
+entry ids, and container names. **Existing installs upgrade in place: nobody is logged out, no reading
+progress resets, no downloaded chapter is orphaned.**
+
+### If you pull images
+Images now publish to **`ghcr.io/angelosha/uchiyomi-bff`** and **`ghcr.io/angelosha/uchiyomi-web`**. GHCR does
+not redirect renamed packages, so the old `koryomi-*` images stay published and keep working — update your
+compose file when convenient. The GitHub repo moved to `AngeloSha/uchiyomi`; the old URL redirects.
+
 ## v0.3.0 — 2026-08-19
 
 Groundwork release: don't lose your data, don't ship broken reading, and don't retype your library.
