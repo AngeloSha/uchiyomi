@@ -182,7 +182,22 @@ Reachable from **Profile → Admin & server settings** (admins only). It's a tab
 **Members:** create accounts (user or admin), reset passwords, and per-user controls: make admin/member,
 disable, or allow/deny downloads. Each row shows whether the member has 2FA on.
 
-**Providers:** the source health + Add-a-site controls from section 7.
+**Providers:** the source health + Add-a-site controls from section 7. This tab also holds **Import a list**,
+for moving a library over from another app:
+
+- **Mihon / Tachiyomi backup** — pick your `.tachibk` (or `.proto.gz`) file. Only the titles are read; the
+  file never leaves your server, and nothing about your Mihon sources or accounts is used.
+- **MangaDex list** — paste the link to a **public** custom list. Private follows would need a MangaDex
+  login, which Koryomi never asks for; make a list public and share that instead.
+- **Paste titles** — one per line, from anywhere.
+
+Whichever you use, the titles land in the box for you to review first. Anything already in your library is
+removed from the list automatically, so you can delete lines you don't want before starting. Koryomi then
+searches your configured sources for each title and adds the best match, showing live progress and a
+per-title result (added / already had / not found / failed).
+
+Importing hundreds of titles takes a while on purpose: downloads are paced so a big import doesn't hammer
+the sites you're pulling from and get your server blocked.
 
 **Tasks:** run the **library scan** or **check-for-new-chapters** on demand, and see when each last ran.
 

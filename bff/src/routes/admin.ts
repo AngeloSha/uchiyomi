@@ -16,7 +16,9 @@ import { readFile, writeFile, mkdir, rm } from 'fs/promises';
 import { dirname } from 'path';
 import sharp from 'sharp';
 import { ART_DIR, artFile } from '../lib/seriesArt';
-import { addSeriesFromSource, findBestMatch } from './sources';
+import { addSeriesFromSource, findBestMatch, norm } from './sources';
+import { titlesFromBackup } from '../lib/tachibk';
+import { titlesFromMangadexList } from '../lib/mangadexList';
 import { fetchAniListArt, fetchAniListCandidates, fetchAnimeBanner } from '../lib/anilist';
 import { fetchKitsuBanner } from '../lib/kitsu';
 
@@ -335,6 +337,44 @@ export default async function adminRoutes(app: FastifyInstance) {
     return { ok: true, total: targets.length };
   });
   app.get('/api/admin/art/backfill/status', async () => ({ job: artJob }));
+
+  // ---- import intake: turn a Mihon/Tachiyomi backup or a MangaDex list into a reviewable title list ----
+  // Parsing is separate from importing on purpose: adding hundreds of series is slow and hits other people's
+  // servers, so the admin gets to see and trim the list first.
+  app.post('/api/admin/import/parse', { bodyLimit: 12 * 1024 * 1024 }, async (req, reply) => {
+    const b = z
+      .object({
+        // a .tachibk / .proto.gz as a data URL (there's no multipart plugin; this mirrors the art upload)
+        dataUrl: z.string().optional(),
+        // a public MangaDex list URL or id
+        mangadexList: z.string().optional(),
+      })
+      .safeParse(req.body);
+    if (!b.success) return reply.code(400).send({ error: 'bad_request' });
+
+    let titles: string[] = [];
+    let origin = '';
+    try {
+      if (b.data.dataUrl) {
+        const m = /^data:[^;]*;base64,(.+)$/s.exec(b.data.dataUrl);
+        if (!m) return reply.code(400).send({ error: 'bad_request', message: 'Could not read that file.' });
+        titles = titlesFromBackup(Buffer.from(m[1], 'base64'));
+        origin = 'backup';
+      } else if (b.data.mangadexList) {
+        titles = await titlesFromMangadexList(b.data.mangadexList);
+        origin = 'mangadex';
+      } else {
+        return reply.code(400).send({ error: 'bad_request', message: 'Provide a backup file or a MangaDex list.' });
+      }
+    } catch (e) {
+      return reply.code(422).send({ error: 'parse_failed', message: (e as Error)?.message || 'Could not read that.' });
+    }
+
+    // flag what's already here so the admin isn't re-importing their own library
+    const have = new Set((await q<{ title: string }>('SELECT title FROM lib_series')).map((r) => norm(r.title)));
+    const items = titles.slice(0, 500).map((title) => ({ title, inLibrary: have.has(norm(title)) }));
+    return { origin, total: titles.length, truncated: titles.length > 500, items };
+  });
 
   // ---- bulk import: paste a list of titles, match each to a source, add it ----
   app.post('/api/admin/import', async (req, reply) => {

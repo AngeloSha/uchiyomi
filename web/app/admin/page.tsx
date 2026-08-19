@@ -1,5 +1,5 @@
 'use client';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, ApiError, img } from '@/lib/api';
@@ -206,6 +206,35 @@ function Providers() {
     catch (e: any) { toast(msgOf(e, 'Import failed to start'), 'error'); }
     setImporting(false);
   };
+
+  // --- intake: parse a backup/list into the textarea for review, importing nothing yet ---
+  type ParseResult = { origin: string; total: number; truncated: boolean; items: Array<{ title: string; inLibrary: boolean }> };
+  const backupRef = useRef<HTMLInputElement>(null);
+  const [mdUrl, setMdUrl] = useState('');
+  const [parsing, setParsing] = useState(false);
+  const [parsed, setParsed] = useState<{ total: number; already: number; truncated: boolean } | null>(null);
+  const applyParsed = (r: ParseResult) => {
+    // pre-filter what's already here: re-importing your own library is just a slow no-op
+    const fresh = r.items.filter((i) => !i.inLibrary).map((i) => i.title);
+    setImp(fresh.join('\n'));
+    setParsed({ total: r.total, already: r.items.length - fresh.length, truncated: r.truncated });
+    toast(fresh.length ? `${fresh.length} titles ready to review` : 'Everything in that list is already in your library', fresh.length ? 'success' : undefined);
+  };
+  const parseBackup = async (f: File) => {
+    if (f.size > 10 * 1024 * 1024) { toast('That file is unusually large (max ~10 MB)', 'error'); return; }
+    setParsing(true);
+    try {
+      const dataUrl = await new Promise<string>((res, rej) => { const rd = new FileReader(); rd.onload = () => res(String(rd.result)); rd.onerror = () => rej(new Error('read')); rd.readAsDataURL(f); });
+      applyParsed(await api<ParseResult>('/api/admin/import/parse', { json: { dataUrl } }));
+    } catch (e: any) { toast(msgOf(e, 'Could not read that backup'), 'error'); }
+    setParsing(false);
+  };
+  const parseMangadex = async () => {
+    setParsing(true);
+    try { applyParsed(await api<ParseResult>('/api/admin/import/parse', { json: { mangadexList: mdUrl.trim() } })); }
+    catch (e: any) { toast(msgOf(e, 'Could not read that list'), 'error'); }
+    setParsing(false);
+  };
   const list = srcs?.content || [];
   return (
     <div>
@@ -252,10 +281,34 @@ function Providers() {
       {/* Import a list of titles */}
       <div className="card mb-3 p-3">
         <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-fog-500">Import a list</p>
-        <p className="mb-2 text-[11px] text-fog-500">Paste titles (one per line) — e.g. from a Tachiyomi/Mihon backup or your MangaDex follows. Koryomi searches your sources for each and adds the best match.</p>
-        <textarea value={imp} onChange={(e) => setImp(e.target.value)} rows={4} placeholder={'Solo Leveling\nThe Beginning After The End\n…'} className={`${fld} resize-y`} />
+        <p className="mb-2 text-[11px] text-fog-500">Bring your library over from another app. Koryomi searches your sources for each title and adds the best match.</p>
+
+        {/* file / MangaDex intake — parsed into a reviewable list before anything is added */}
+        <div className="mb-2 flex flex-wrap items-center gap-2">
+          <input ref={backupRef} type="file" accept=".tachibk,.proto.gz,.gz" className="hidden"
+            onChange={(e) => { const f = e.target.files?.[0]; if (f) parseBackup(f); e.currentTarget.value = ''; }} />
+          <button onClick={() => backupRef.current?.click()} disabled={parsing} className="btn-ghost px-3 py-1.5 text-xs disabled:opacity-50">
+            {parsing ? 'Reading…' : 'Mihon / Tachiyomi backup'}
+          </button>
+          <span className="text-[11px] text-fog-600">or</span>
+          <input value={mdUrl} onChange={(e) => setMdUrl(e.target.value)} placeholder="public MangaDex list link" autoCapitalize="none" className={`${fld} min-w-0 flex-1`} />
+          <button onClick={() => parseMangadex()} disabled={parsing || !mdUrl.trim()} className="chip text-xs disabled:opacity-50">Load</button>
+        </div>
+        <p className="mb-2 text-[10px] text-fog-600">A .tachibk backup stays on your server — only the titles are read. MangaDex lists must be public; private follows need a MangaDex login, which Koryomi doesn&apos;t ask for.</p>
+
+        <textarea value={imp} onChange={(e) => setImp(e.target.value)} rows={4} placeholder={'…or paste titles, one per line'} className={`${fld} resize-y`} />
+        {parsed && (
+          <div className="mt-2 rounded-xl border border-ink-700 bg-ink-900/50 p-2.5 text-xs">
+            <p className="text-fog-300">
+              Found <strong className="text-fog-100">{parsed.total}</strong> titles
+              {parsed.already > 0 && <> · <span className="text-fog-500">{parsed.already} already in your library (skipped)</span></>}
+              {parsed.truncated && <> · <span className="text-amber-400">capped at 500</span></>}
+            </p>
+            <p className="mt-1 text-[11px] text-fog-500">Loaded into the box above — edit or delete lines before importing.</p>
+          </div>
+        )}
         <button onClick={runImport} disabled={importing || job?.running || !imp.trim()} className="btn-accent mt-2 w-full py-2 text-sm disabled:opacity-50">
-          {job?.running ? `Importing… ${job.done}/${job.total}` : importing ? 'Starting…' : 'Import titles'}
+          {job?.running ? `Importing… ${job.done}/${job.total}` : importing ? 'Starting…' : `Import ${imp.trim() ? imp.trim().split('\n').filter((l) => l.trim()).length + ' ' : ''}titles`}
         </button>
         {job && (
           <div className="mt-2.5 rounded-xl border border-ink-700 bg-ink-900/50 p-2.5 text-xs">

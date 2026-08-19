@@ -15,7 +15,8 @@ const jobs = new Map<string, Job>();
 
 // Trending recommendations are global + slow-moving; cache the AniList pull for a few hours.
 let trendingCache: { at: number; items: TrendingItem[] } | null = null;
-const norm = (t: string) => t.toLowerCase().replace(/[^a-z0-9]+/g, '');
+/** Canonical title key used for dedupe, grouping and "already in library" checks. */
+export const norm = (t: string) => t.toLowerCase().replace(/[^a-z0-9]+/g, '');
 
 // Provider order for cross-source "find": by each source's declared preferredOrder (Aqua = 0), then
 // registry/load order. Derived from the loaded sources so it works with whatever the user has installed.

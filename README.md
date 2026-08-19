@@ -55,6 +55,9 @@ into a single image.** Point it at your library, add sources by URL, and it does
 - **OPDS:** browse & read your Koryomi library from other reader apps (Panels, Chunky, KOReader, …).
 - **Security:** argon2id passwords, JWT + rotating refresh tokens, login lockout, an audit log,
   session/device management, and optional TOTP two-factor auth.
+- **Bring your library with you:** import a **Mihon/Tachiyomi backup** (`.tachibk`) or a public **MangaDex
+  list** — Koryomi reads the titles, shows you what it found (flagging what you already have), and adds the
+  rest from your own sources. Pasting a plain list of titles works too.
 - **Backups built in:** a nightly dump of the database + your config, rotated automatically, restorable with
   plain `psql` — point it at another disk with one env var. ([how to restore](docs/USAGE.md#11-backups--restore))
 - **Admin:** a Jellyfin-style panel with members & permissions, provider health, scheduled tasks, activity feed,
@@ -193,8 +196,6 @@ Everything is in `.env` (see `.env.example`). Notably:
 
 Actively developed. On deck:
 
-- 📥 **Import your follows:** bring a Tachiyomi/Mihon backup or MangaDex follows list in one step (admins can
-  already bulk-add by pasting a list of titles).
 - 🧭 **Per-source genre & popular browsing:** rounding out the newest-releases rails.
 
 Also exploring: AniList progress sync. Recently shipped: 🔔 push notifications, 📡 OPDS, browser-based

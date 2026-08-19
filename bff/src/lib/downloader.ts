@@ -9,6 +9,7 @@ import { getSource, SourceChapter, SourceSeries } from './sources';
 import { cfSession } from './sources/flaresolverr';
 import { DL_ROOT } from './library';
 import { classify, reportOk, reportFail, SourceStatus } from './sourceHealth';
+import { withGate } from './gate';
 
 export function sanitize(s: string): string {
   return (s || '').replace(/[\/\\:*?"<>|]+/g, '_').replace(/\s+/g, ' ').trim().slice(0, 150) || 'untitled';
@@ -38,6 +39,11 @@ export interface DownloadInput {
   meta?: Partial<SourceSeries> & { series?: string };
 }
 
+// Politeness limits, applied per source. Adding a series and importing hundreds both fan out through here,
+// so this is the one place that decides how hard we ever hit a site.
+const DL_CONCURRENCY = Number(process.env.DOWNLOAD_CONCURRENCY || 2);
+const DL_MIN_GAP_MS = Number(process.env.DOWNLOAD_MIN_GAP_MS || 1200);
+
 /** Download one chapter into <LIBRARY_ROOT>/<seriesFolder>/Chapter <n>.cbz. Skips if already present. */
 export async function downloadChapter(input: DownloadInput): Promise<{ file: string; pages: number; skipped?: boolean }> {
   const src = getSource(input.sourceId);
@@ -45,8 +51,18 @@ export async function downloadChapter(input: DownloadInput): Promise<{ file: str
 
   const rel = join(input.seriesFolder, `Chapter ${input.chapter.number}.cbz`);
   const abs = join(DL_ROOT, rel);
+  // the already-downloaded check is free, so do it before queueing for a slot
   if (await stat(abs).then(() => true).catch(() => false)) return { file: rel, pages: 0, skipped: true };
 
+  return withGate(input.sourceId, () => fetchChapter(src, input, rel), { concurrency: DL_CONCURRENCY, minGapMs: DL_MIN_GAP_MS });
+}
+
+async function fetchChapter(
+  src: NonNullable<ReturnType<typeof getSource>>,
+  input: DownloadInput,
+  rel: string,
+): Promise<{ file: string; pages: number; skipped?: boolean }> {
+  const abs = join(DL_ROOT, rel);
   let urls: string[];
   try {
     urls = await src.getPageUrls(input.chapter.sourceId);
