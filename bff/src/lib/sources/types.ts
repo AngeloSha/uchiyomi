@@ -36,6 +36,8 @@ export interface SourceAdapter {
   requiresCloudflare?: boolean;
   /** Referer to send when fetching page/cover images (string, or derived from the chapter url). */
   imageReferer?: string | ((chapterUrl: string) => string);
+  /** Extra headers for page/cover image fetches — e.g. auth for a source that proxies its own images. */
+  imageHeaders?: Record<string, string> | ((imageUrl: string) => Record<string, string>);
   /** Lower = earlier in the cross-source "find" provider order (default: large). */
   preferredOrder?: number;
 }

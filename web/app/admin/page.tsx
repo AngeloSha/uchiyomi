@@ -279,6 +279,9 @@ function Providers() {
         )}
       </div>
 
+      {/* Extension sources, from an optional Suwayomi server running Mihon/Tachiyomi extensions */}
+      <Extensions />
+
       {/* Import a list of titles */}
       <div className="card mb-3 p-3">
         <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-fog-500">Import a list</p>
@@ -684,6 +687,130 @@ function Health() {
           </div>
         );
       })}
+    </div>
+  );
+}
+
+interface ExtStatus { configured: boolean; reachable: boolean; version?: string | null; error?: string; enabled?: number; known?: number }
+interface ExtSource { id: string; name: string; lang: string | null; nsfw: boolean; supportsLatest: boolean; enabled: boolean }
+
+/**
+ * Sources provided by Mihon/Tachiyomi extensions, via an optional Suwayomi server.
+ *
+ * Installing extensions deliberately links out to that server's own UI: Uchiyomi never fetches, lists or
+ * installs extension packages itself. All this panel does is choose which of the sources an installed
+ * extension provides become Uchiyomi sources.
+ */
+function Extensions() {
+  const toast = useToast();
+  const qc = useQueryClient();
+  const [q2, setQ2] = useState('');
+  const [busy, setBusy] = useState<string | null>(null);
+  const [smoke, setSmoke] = useState<{ name: string; res: any } | null>(null);
+
+  const { data: status } = useQuery({ queryKey: ['ext-status'], queryFn: () => api<ExtStatus>('/api/admin/extensions/status') });
+  const { data: srcs } = useQuery({
+    queryKey: ['ext-sources', q2],
+    queryFn: () => api<{ content: ExtSource[]; reachable: boolean; total: number }>(`/api/admin/extensions/sources?q=${encodeURIComponent(q2)}`),
+    enabled: !!status?.configured,
+  });
+
+  if (!status) return null;
+
+  if (!status.configured) {
+    return (
+      <div className="card mb-3 p-3">
+        <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-fog-500">Extensions</p>
+        <p className="text-[11px] leading-relaxed text-fog-500">
+          Uchiyomi can also read from Mihon / Tachiyomi extensions by talking to a Suwayomi server, which runs them
+          for you. That reaches far more sites than the built-in engines. It&apos;s off until you point Uchiyomi at
+          one with <code className="text-fog-300">SUWAYOMI_URL</code> — see docs/extensions.md.
+        </p>
+      </div>
+    );
+  }
+
+  const list = srcs?.content || [];
+  const on = list.filter((s) => s.enabled).length;
+
+  const toggle = async (s: ExtSource) => {
+    setBusy(s.id);
+    try {
+      const r = await api<{ smoke: any }>(`/api/admin/extensions/sources/${encodeURIComponent(s.id)}`, { json: { enabled: !s.enabled } });
+      qc.invalidateQueries({ queryKey: ['ext-sources'] });
+      qc.invalidateQueries({ queryKey: ['ext-status'] });
+      qc.invalidateQueries({ queryKey: ['sources'] });
+      if (!s.enabled && r.smoke) setSmoke({ name: s.name, res: r.smoke });
+      else setSmoke(null);
+      toast(s.enabled ? `Turned off ${s.name}` : `Added ${s.name}`, 'success');
+    } catch { toast('Could not change that source', 'error'); }
+    setBusy(null);
+  };
+
+  return (
+    <div className="card mb-3 p-3">
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+        <p className="text-xs font-semibold uppercase tracking-wider text-fog-500">Extensions</p>
+        <span className={`rounded-full border px-2 py-0.5 text-[10px] ${status.reachable ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300' : 'border-red-500/40 bg-red-500/10 text-red-300'}`}>
+          {status.reachable ? `connected${status.version ? ` · ${status.version}` : ''}` : 'server unreachable'}
+        </span>
+      </div>
+
+      {!status.reachable ? (
+        <p className="text-[11px] text-fog-500">
+          Can&apos;t reach the extension server{status.error ? ` (${status.error})` : ''}. Uchiyomi keeps working; extension
+          sources just stay unavailable until it&apos;s back.
+        </p>
+      ) : (
+        <>
+          <p className="mb-2 text-[11px] leading-relaxed text-fog-500">
+            Sources from the extensions installed on your Suwayomi server. Switch on the ones you want — each one you
+            enable is searched every time you search, so pick the ones you actually read.
+            {' '}Install or remove extensions in Suwayomi&apos;s own web UI.
+          </p>
+          <div className="mb-2 flex flex-wrap items-center gap-2">
+            <input value={q2} onChange={(e) => setQ2(e.target.value)} placeholder="Filter sources…"
+              className="min-w-[160px] flex-1 rounded-lg border border-ink-700 bg-ink-850 px-2.5 py-1.5 text-xs text-fog-100 outline-none focus:border-accent" />
+            <span className="text-[11px] text-fog-500">{on} of {srcs?.total ?? 0} enabled</span>
+          </div>
+
+          {smoke && (
+            <div className={`mb-2 rounded-lg border p-2 text-[11px] ${smoke.res.ok ? 'border-emerald-500/30 bg-emerald-500/5 text-emerald-300' : 'border-amber-500/30 bg-amber-500/5 text-amber-300'}`}>
+              {smoke.res.ok ? `✓ ${smoke.name} verified — search, chapters & pages all work`
+                : smoke.res.timedOut ? `${smoke.name}: verification timed out — slow or heavily protected site (enabled anyway)`
+                : `${smoke.name}: some checks failed — this source may be only partly usable`}
+              <ul className="mt-1 space-y-0.5">
+                {(smoke.res.checks || []).map((c: any) => (
+                  <li key={c.name} className="text-fog-400">{c.ok ? '✓' : '✗'} {c.name} — {c.detail}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          <div className="max-h-72 space-y-1 overflow-y-auto">
+            {list.map((s) => (
+              <div key={s.id} className="flex items-center gap-2 rounded-lg border border-ink-700/60 bg-ink-850/40 px-2.5 py-1.5">
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-xs text-fog-100">
+                    {s.name}
+                    {s.nsfw && <span className="ml-1.5 rounded bg-red-500/15 px-1 py-0.5 text-[9px] text-red-300">18+</span>}
+                  </p>
+                  {s.lang && <p className="text-[10px] text-fog-600">{s.lang}</p>}
+                </div>
+                <button onClick={() => toggle(s)} disabled={busy === s.id}
+                  className={`shrink-0 rounded-full px-2.5 py-1 text-[11px] transition disabled:opacity-50 ${s.enabled ? 'bg-accent text-white' : 'bg-ink-700 text-fog-300 hover:text-fog-100'}`}>
+                  {busy === s.id ? '…' : s.enabled ? 'On' : 'Off'}
+                </button>
+              </div>
+            ))}
+            {!list.length && (
+              <p className="py-2 text-[11px] text-fog-600">
+                No extensions installed on that server yet. Install some in Suwayomi&apos;s web UI, then they show up here.
+              </p>
+            )}
+          </div>
+        </>
+      )}
     </div>
   );
 }

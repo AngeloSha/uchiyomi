@@ -53,6 +53,10 @@ into a single image.** Point it at your library, add sources by URL, and it does
 - **Offline:** installable PWA with offline downloads + smart auto-sync of favorites.
 - **Push notifications:** opt-in web push the moment a followed series gets a new chapter.
 - **OPDS:** browse & read your Uchiyomi library from other reader apps (Panels, Chunky, KOReader, …).
+- **Mihon / Tachiyomi extensions:** optionally read from the Mihon extension ecosystem by pointing Uchiyomi at a
+  [Suwayomi](https://github.com/Suwayomi/Suwayomi-Server) server, which runs those Android/Kotlin extensions for
+  you. Uchiyomi still owns the library, reader, downloads and updates; it just asks that server for
+  search/chapters/pages. Off by default. See [docs/extensions.md](docs/extensions.md).
 - **Single sign-on:** optional OIDC login against Authentik, Authelia, Keycloak or anything else that speaks
   OpenID Connect, with optional group-to-admin mapping. Local accounts and 2FA keep working alongside it,
   so a provider outage can't lock you out. See [docs/api.md](docs/api.md#single-sign-on-oidc).
@@ -106,9 +110,11 @@ Suwayomi) fetches chapters but is Android-only or wraps them in a basic web UI. 
 | Library health checks | ✅ | ❌ | ❌ | ❌ |
 | Scoped API tokens for scripts | ✅ | ✅ | ❌ | ❌ |
 | SSO / OIDC login | ✅ | Kavita only | ❌ | ❌ |
+| Reaches Mihon's extension ecosystem | ✅ *(optional bridge)* | ❌ | ✅ | ✅ |
 
 **Honest caveats** (narrower than they look): Komga/Kavita are more mature for general library management, and
-Tachiyomi/Mihon list more individual sources. But Uchiyomi reads **CBZ, CBR, and loose image folders**. It skips
+Tachiyomi/Mihon list more individual sources out of the box (Uchiyomi can now reach those same extensions, but
+via a second container you have to run). But Uchiyomi reads **CBZ, CBR, and loose image folders**. It skips
 PDF/EPUB *on purpose* (those are ebook formats; Uchiyomi is built for image-based manga), and its **three engines
 each cover a whole *family* of sites** (most aggregators run Madara, MangaThemesia, or Manganato), so "add a
 source by URL" reaches far more sites than the engine count suggests. Uchiyomi's real edge is the *combination*: a

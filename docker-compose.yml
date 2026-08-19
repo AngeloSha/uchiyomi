@@ -45,6 +45,12 @@ services:
       FLARESOLVERR_URL: http://yomi-flaresolverr:8191   # Cloudflare solver for Cloudflare-protected sources
       SOURCES_DIR: /sources            # runtime source plugins are loaded from here (none = scraper-free core)
       CUSTOM_SITES_FILE: /config/sites.json   # admin-added Madara/Manganato sites (Add-a-site form)
+      # Optional extension engine: a Suwayomi server that runs Mihon/Tachiyomi extensions. Empty = off, and
+      # nothing about Uchiyomi changes. Start it with:  docker compose --profile extensions up -d
+      SUWAYOMI_URL: ${SUWAYOMI_URL:-}
+      SUWAYOMI_USERNAME: ${SUWAYOMI_USERNAME:-}
+      SUWAYOMI_PASSWORD: ${SUWAYOMI_PASSWORD:-}
+      SUWAYOMI_MAX_SOURCES: ${SUWAYOMI_MAX_SOURCES:-25}
     volumes:
       - yomi_imgcache:/cache
       - ${LIBRARY_PATH:-./library}:/library:ro                # your existing CBZ library (bring-your-own), read-only
@@ -106,6 +112,30 @@ services:
     labels:
       - com.centurylinklabs.watchtower.enable=false
 
+  # Optional extension engine. Runs Mihon/Tachiyomi extensions (which are Android/Kotlin) on the JVM and
+  # exposes them over an API; Uchiyomi keeps owning the library, reader, downloads and updates and only asks
+  # it for search/chapters/pages. Profile-gated: it does NOT start unless you ask for it with
+  #   docker compose --profile extensions up -d
+  # then set SUWAYOMI_URL=http://yomi-suwayomi:4567 and install extensions in its own web UI.
+  yomi-suwayomi:
+    image: ghcr.io/suwayomi/suwayomi-server:stable
+    container_name: yomi-suwayomi
+    restart: unless-stopped
+    profiles: [extensions]
+    environment:
+      TZ: UTC
+      # Uchiyomi does the downloading and owns the library; this instance must never write into it.
+      AUTO_DOWNLOAD_CHAPTERS: "false"
+      DOWNLOAD_AS_CBZ: "true"
+    volumes:
+      - yomi_suwayomi:/home/suwayomi/.local/share/Tachidesk
+    networks:
+      - yomi_app
+    expose:
+      - "4567"
+    labels:
+      - com.centurylinklabs.watchtower.enable=false
+
 networks:
   yomi_internal:                 # private: only db + bff (DB never leaves this network)
     driver: bridge
@@ -117,4 +147,5 @@ volumes:
   yomi_imgcache:
   yomi_library:
   yomi_config:
+  yomi_suwayomi:  # optional extension engine's own data (extensions + its database)
   yomi_backups:   # default backup target; set BACKUP_PATH to a host dir (ideally another disk) to override

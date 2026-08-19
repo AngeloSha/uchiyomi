@@ -297,6 +297,17 @@ CREATE TABLE IF NOT EXISTS opds_tokens (
   last_seen  timestamptz
 );
 
+-- Suwayomi-provided sources (one per source in an installed Mihon/Tachiyomi extension) that the operator
+-- has switched on. Suwayomi may expose hundreds of them; only the enabled ones are registered as Uchiyomi
+-- sources, because cross-source search fans out to every registered source.
+CREATE TABLE IF NOT EXISTS suwayomi_sources (
+  source_id text PRIMARY KEY,
+  name      text NOT NULL,
+  lang      text,
+  enabled   boolean NOT NULL DEFAULT true,
+  added_at  timestamptz NOT NULL DEFAULT now()
+);
+
 -- OIDC identity linked to a local account. Kept alongside the password columns rather than replacing them,
 -- so a person can have both and local login keeps working if the identity provider is down.
 ALTER TABLE users ADD COLUMN IF NOT EXISTS oidc_sub    text;

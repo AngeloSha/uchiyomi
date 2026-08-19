@@ -8,7 +8,7 @@ import { env } from './env';
 import { pool } from './lib/db';
 import { runtime } from './lib/runtime';
 import { migrate } from './lib/migrate';
-import { loadSources, loadCustomSites, loadBuiltins, listSources } from './lib/sources';
+import { loadSources, loadCustomSites, loadBuiltins, listSources, loadSuwayomiSources } from './lib/sources';
 import { runUpdateAll } from './lib/updater';
 import { startSweeper } from './lib/imageCache';
 import { runBackup, msUntilHour } from './lib/backup';
@@ -27,7 +27,10 @@ async function main() {
   const bi = loadBuiltins(); // always-on built-ins bundled in the core (MangaDex)
   const ls = loadSources(); // bespoke source plugins from SOURCES_DIR (the optional pack)
   const cs = loadCustomSites(); // user-added engine sites from /config/sites.json (built via the in-core engines)
-  console.log(`[sources] ${listSources().length} source(s) available (${bi} built-in, ${ls.loaded} pack, ${cs} custom)`);
+  // Extension sources from an optional Suwayomi server. Fails soft: unset or unreachable just means none.
+  const sw = await loadSuwayomiSources();
+  const swNote = sw.configured ? `, ${sw.registered} extension${sw.reachable ? '' : ' (server unreachable)'}` : '';
+  console.log(`[sources] ${listSources().length} source(s) available (${bi} built-in, ${ls.loaded} pack, ${cs} custom${swNote})`);
 
   const app = Fastify({
     logger: { level: env.NODE_ENV === 'production' ? 'info' : 'debug' },

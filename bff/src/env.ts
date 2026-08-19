@@ -58,6 +58,15 @@ const schema = z.object({
   OIDC_LINK_BY_USERNAME: envFlag(false),
   // Users in this IdP group become admins here (leave empty to keep roles managed locally).
   OIDC_ADMIN_GROUP: z.string().default(''),
+  // Optional Suwayomi server used purely as an extension engine: it runs Mihon/Tachiyomi's Kotlin extensions
+  // on the JVM and exposes them over GraphQL. Empty issuer = feature off, exactly like OIDC. Uchiyomi keeps
+  // owning the library, reader, downloads and updates; Suwayomi only answers search/chapters/pages.
+  SUWAYOMI_URL: z.string().default(''),
+  SUWAYOMI_USERNAME: z.string().default(''),
+  SUWAYOMI_PASSWORD: z.string().default(''),
+  // Suwayomi can expose hundreds of sources; cross-source search fans out to every REGISTERED source, so
+  // registration is opt-in per source and additionally capped here.
+  SUWAYOMI_MAX_SOURCES: z.coerce.number().int().min(1).max(500).default(25),
   VAPID_PUBLIC_KEY: z.string().default(''),
   VAPID_PRIVATE_KEY: z.string().default(''),
   VAPID_SUBJECT: z.string().default('mailto:admin@uchiyomi.com'),

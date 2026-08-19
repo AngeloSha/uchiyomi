@@ -47,6 +47,7 @@ async function fetchCoverImage(u: string, source?: string): Promise<Buffer> {
     'accept-language': 'en-US,en;q=0.9',
     'sec-fetch-dest': 'image', 'sec-fetch-mode': 'no-cors', 'sec-fetch-site': 'cross-site',
     referer: staticReferer ?? `${new URL(u).origin}/`,
+    ...(typeof src?.imageHeaders === 'function' ? src.imageHeaders(u) : src?.imageHeaders ?? {}),
   };
   if (src?.requiresCloudflare) {
     // Best-effort: many sources host covers on a separate CDN that ISN'T Cloudflare-protected, where

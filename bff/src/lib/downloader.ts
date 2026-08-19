@@ -10,6 +10,7 @@ import { cfSession } from './sources/flaresolverr';
 import { DL_ROOT } from './library';
 import { classify, reportOk, reportFail, SourceStatus } from './sourceHealth';
 import { withGate } from './gate';
+import { imageExt } from './imageExt';
 
 export function sanitize(s: string): string {
   return (s || '').replace(/[\/\\:*?"<>|]+/g, '_').replace(/\s+/g, ' ').trim().slice(0, 150) || 'untitled';
@@ -91,6 +92,9 @@ async function fetchChapter(
       'user-agent': cf?.userAgent || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36',
     };
     if (cf?.cookie) headers.cookie = cf.cookie;
+    // Source-declared extra headers (e.g. auth for a source that proxies its own images). Declared as a
+    // capability rather than keyed off the adapter id, so the core never special-cases a particular source.
+    Object.assign(headers, typeof src.imageHeaders === 'function' ? src.imageHeaders(u) : src.imageHeaders ?? {});
     try {
       const r = await fetch(u, { headers, signal: AbortSignal.timeout(45000) });
       if (!r.ok) { if (r.status >= 400) worst = Math.max(worst, r.status); continue; }
@@ -98,8 +102,9 @@ async function fetchChapter(
       if (/^text\/|html|json/.test(ct)) { worst = Math.max(worst, 415); continue; } // hotlink/error page, not an image — don't pack garbage
       const buf = Buffer.from(await r.arrayBuffer());
       if (buf.length < 256) continue; // skip blocked/empty
-      const ext = ((u.split('?')[0].split('.').pop() || 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '') || 'jpg').slice(0, 4);
-      zip.addFile(`${String(++n).padStart(4, '0')}.${ext}`, buf);
+      // Content-Type first: some sources (and any source proxied through an extension server) serve pages
+      // from extension-less URLs, and a wrong extension makes the chapter read as zero pages.
+      zip.addFile(`${String(++n).padStart(4, '0')}.${imageExt(u, ct)}`, buf);
     } catch {
       if (!worst) worst = 1; // network/timeout
     }

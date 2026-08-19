@@ -11,7 +11,7 @@ import { runUpdateAll, updateSeries } from '../lib/updater';
 import { authenticate, requireAdmin, userIdOf, revokeAllSessions, revokeRefreshTokenById, passwordError } from '../lib/auth';
 import { logAudit, recentAudit } from '../lib/audit';
 import { healthAll, setDisabled, clearBlock } from '../lib/sourceHealth';
-import { reloadAll, listSources, getSource, detectEngine } from '../lib/sources';
+import { reloadAll, listSources, getSource, detectEngine, listRemoteSources, suwayomiConfigured, suwayomiAbout, swAdapterId } from '../lib/sources';
 import { readFile, writeFile, mkdir, rm } from 'fs/promises';
 import { dirname } from 'path';
 import sharp from 'sharp';
@@ -93,7 +93,7 @@ export default async function adminRoutes(app: FastifyInstance) {
 
   // reload source plugins from SOURCES_DIR (after dropping in / updating a source pack) — no restart needed
   app.post('/api/admin/sources/reload', async (req) => {
-    const r = reloadAll(); // rescan pack + re-add built-ins + config sites
+    const r = await reloadAll(); // rescan pack + re-add built-ins, config sites and extension sources
     await logAudit('source.reload', { userId: userIdOf(req), detail: r, req });
     return { ok: true, ...r, available: listSources().length };
   });
@@ -153,7 +153,7 @@ export default async function adminRoutes(app: FastifyInstance) {
     if (getSource(id) || list.some((s) => s.id === id)) return reply.code(409).send({ error: 'exists', message: `A source named "${b.data.name}" already exists — pick another name.` });
     list.push({ engine, id, name: b.data.name, base: b.data.base.replace(/\/+$/, ''), order: 100 });
     await writeSites(list);
-    reloadAll();
+    await reloadAll();
     await logAudit('source.custom_add', { userId: userIdOf(req), detail: { id, engine, base: b.data.base }, req });
     // Verify the freshly-added site actually works, bounded so a slow/Cloudflare-heavy site can't hang the request.
     const added = getSource(id);
@@ -169,7 +169,7 @@ export default async function adminRoutes(app: FastifyInstance) {
   app.delete('/api/admin/sources/custom/:id', async (req) => {
     const { id } = req.params as { id: string };
     await writeSites((await readSites()).filter((s) => s.id !== id));
-    reloadAll();
+    await reloadAll();
     await logAudit('source.custom_remove', { userId: userIdOf(req), detail: { id }, req });
     return { ok: true, available: listSources().length };
   });
@@ -340,6 +340,88 @@ export default async function adminRoutes(app: FastifyInstance) {
     return { ok: true, total: targets.length };
   });
   app.get('/api/admin/art/backfill/status', async () => ({ job: artJob }));
+
+  // ---- extensions (Mihon/Tachiyomi sources, via an optional Suwayomi server) ----
+  // Uchiyomi never fetches or installs extension APKs itself: installing is a link out to Suwayomi's own UI.
+  // All this does is let the operator choose WHICH of the extension's sources become Uchiyomi sources.
+  app.get('/api/admin/extensions/status', async () => {
+    if (!suwayomiConfigured()) return { configured: false, reachable: false };
+    let version: string | null = null;
+    let reachable = false;
+    let error: string | undefined;
+    try {
+      version = (await suwayomiAbout()).version;
+      reachable = true;
+    } catch (e) {
+      error = (e as Error)?.message || 'unreachable';
+    }
+    const counts = await one<{ enabled: number; known: number }>(
+      `SELECT count(*) FILTER (WHERE enabled)::int AS enabled, count(*)::int AS known FROM suwayomi_sources`,
+    );
+    return { configured: true, reachable, version, error, enabled: counts?.enabled ?? 0, known: counts?.known ?? 0 };
+  });
+
+  // The full source list, joined with what we have switched on. Falls back to the remembered rows when the
+  // extension server is briefly unreachable, so the page still renders something useful.
+  app.get('/api/admin/extensions/sources', async (req) => {
+    if (!suwayomiConfigured()) return { content: [], reachable: false };
+    const { q: term, lang } = req.query as { q?: string; lang?: string };
+    let remote: Array<{ id: string; name: string; displayName?: string | null; lang?: string | null; isNsfw?: boolean | null; supportsLatest?: boolean | null }> = [];
+    let reachable = true;
+    try {
+      remote = await listRemoteSources();
+    } catch {
+      reachable = false;
+      remote = (await q<{ source_id: string; name: string; lang: string | null }>(
+        'SELECT source_id, name, lang FROM suwayomi_sources ORDER BY name',
+      )).map((r) => ({ id: r.source_id, name: r.name, lang: r.lang }));
+    }
+    const on = new Set(
+      (await q<{ source_id: string }>('SELECT source_id FROM suwayomi_sources WHERE enabled = true')).map((r) => r.source_id),
+    );
+    const needle = (term || '').trim().toLowerCase();
+    const content = remote
+      .map((s) => ({
+        id: String(s.id),
+        name: s.displayName?.trim() || s.name,
+        lang: s.lang || null,
+        nsfw: !!s.isNsfw,
+        supportsLatest: !!s.supportsLatest,
+        enabled: on.has(String(s.id)),
+      }))
+      .filter((s) => (!needle || s.name.toLowerCase().includes(needle)) && (!lang || s.lang === lang))
+      .sort((a, b) => Number(b.enabled) - Number(a.enabled) || a.name.localeCompare(b.name));
+    return { content, reachable, total: remote.length };
+  });
+
+  app.post('/api/admin/extensions/sources/:id', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const b = z.object({ enabled: z.boolean() }).safeParse(req.body);
+    if (!b.success) return reply.code(400).send({ error: 'bad_request' });
+    if (!suwayomiConfigured()) return reply.code(400).send({ error: 'not_configured', message: 'No extension server is configured.' });
+
+    // Take the name from the live list so the row is meaningful even before the source is ever used.
+    const remote = await listRemoteSources().catch(() => []);
+    const match = remote.find((s) => String(s.id) === id);
+    await q(
+      `INSERT INTO suwayomi_sources (source_id, name, lang, enabled) VALUES ($1,$2,$3,$4)
+       ON CONFLICT (source_id) DO UPDATE SET enabled = EXCLUDED.enabled,
+         name = COALESCE(NULLIF(EXCLUDED.name, ''), suwayomi_sources.name)`,
+      [id, match ? (match.displayName?.trim() || match.name) : id, match?.lang ?? null, b.data.enabled],
+    );
+    await reloadAll();
+    await logAudit(b.data.enabled ? 'source.extension_enable' : 'source.extension_disable', {
+      userId: userIdOf(req), detail: { id, name: match?.name }, req,
+    });
+
+    // Prove it actually works now rather than letting the user discover it later from an empty search.
+    let smoke = null;
+    if (b.data.enabled) {
+      const adapter = getSource(swAdapterId(id));
+      if (adapter) smoke = await smokeTest(adapter);
+    }
+    return { ok: true, smoke };
+  });
 
   // ---- library health ----
   // Read-only aggregate over the library. Every check is a plain query, so this is safe to hit whenever
