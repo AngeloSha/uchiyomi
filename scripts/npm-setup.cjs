@@ -5,6 +5,10 @@ const EMAIL = process.env.NPM_EMAIL;
 const PASS = process.env.NPM_PASS;
 const LE_EMAIL = process.env.LE_EMAIL || EMAIL;
 const DOMAIN = process.env.DOMAIN || 'yomi.example.com';
+// which container to forward to — the app by default, but the same script can front any container
+// on the proxy network (e.g. a marketing site) by setting FORWARD_HOST.
+const FORWARD_HOST = process.env.FORWARD_HOST || 'yomi-web';
+const FORWARD_PORT = Number(process.env.FORWARD_PORT || 80);
 
 async function call(method, path, token, body) {
   const r = await fetch(NPM + path, {
@@ -25,8 +29,8 @@ async function call(method, path, token, body) {
 const baseHost = (certId, ssl) => ({
   domain_names: [DOMAIN],
   forward_scheme: 'http',
-  forward_host: 'yomi-web',
-  forward_port: 80,
+  forward_host: FORWARD_HOST,
+  forward_port: FORWARD_PORT,
   access_list_id: '0',
   certificate_id: certId || 0,
   ssl_forced: ssl,
@@ -51,7 +55,7 @@ const baseHost = (certId, ssl) => ({
     console.log(`• Proxy host already exists (id ${host.id})`);
   } else {
     host = await call('POST', '/api/nginx/proxy-hosts', token, baseHost(0, false));
-    console.log(`✓ Created proxy host ${DOMAIN} -> yomi-web:80 (id ${host.id})`);
+    console.log(`✓ Created proxy host ${DOMAIN} -> ${FORWARD_HOST}:${FORWARD_PORT} (id ${host.id})`);
   }
 
   let certId = host.certificate_id || 0;
