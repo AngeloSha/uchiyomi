@@ -4,6 +4,7 @@
 import { SourceAdapter, SourceSeries, SourceChapter } from '../types';
 import { cfGet, cfPost } from '../flaresolverr';
 import { parseWhen } from '../dates';
+import { seriesSlug, isOwnChapterUrl } from '../slug';
 
 const strip = (s: string) => s.replace(/<[^>]+>/g, '').replace(/&amp;/g, '&').replace(/\s+/g, ' ').trim();
 const norm = (u: string) => u.replace(/^\/\//, 'https://').replace(/&amp;/g, '&').trim();
@@ -67,16 +68,10 @@ export function makeMadara(cfg: { id: string; name: string; base: string; order?
 
     async listChapters(seriesId) {
       const url = mangaUrl(seriesId);
-      // Only accept chapters that belong to THIS manga. Sites embed "popular/hot chapters" widgets linking to
-      // OTHER titles; without this scope those get scraped as phantom chapters (e.g. Martial Peak ch. 3862 on a
-      // Necromancer page). We compare the manga-slug in each chapter url to the series slug.
-      const slug = url.replace(/[?#].*$/, '').replace(/\/+$/, '').split('/').pop()!.toLowerCase();
-      const mine = (u: string) => {
-        const m = u.toLowerCase().match(/\/([^/]+)\/chapter[-_/]/);
-        if (!slug || !m) return true;                       // can't identify the chapter's manga → keep (lenient)
-        const cs = m[1];
-        return cs === slug || cs.startsWith(slug) || slug.startsWith(cs); // same title (allow slug aliases), reject others
-      };
+      // Only accept chapters that belong to THIS manga — sites embed "popular/hot chapters" widgets linking to
+      // other titles, which would otherwise be scraped as phantom chapters. See lib/sources/slug.ts.
+      const slug = seriesSlug(url);
+      const mine = (u: string) => isOwnChapterUrl(u, slug);
       const parse = (h: string): SourceChapter[] => {
         const out: SourceChapter[] = [];
         // standard Madara: <li class="wp-manga-chapter"><a href="...">Chapter N</a> … <span class="chapter-release-date">…</span></li>

@@ -12,6 +12,7 @@ import { join } from 'path';
 import { readFile } from 'fs/promises';
 import { q, one } from '../lib/db';
 import { artFile } from '../lib/seriesArt';
+import { HERO_FRAMES, heroFit, type HeroAr } from '../lib/heroFrame';
 
 async function fetchUpstream(path: string): Promise<Buffer> {
   const res = await komgaImage(path);
@@ -80,17 +81,12 @@ const firstPageInput = async (id: string): Promise<Buffer> => {
 };
 
 // Hero frames match the two client viewports (lg desktop strip / phone portrait) so the browser barely crops.
-const HERO_FRAMES = { wide: { w: 1920, h: 720 }, tall: { w: 1080, h: 1200 } } as const;
-type HeroAr = keyof typeof HERO_FRAMES;
 const ambientComposite = (input: Buffer) =>
   sharp(input).resize(1600, 1024, { fit: 'cover' }).blur(22).modulate({ brightness: 0.82, saturation: 1.18 }).webp({ quality: 80 }).toBuffer();
 const heroSharp = async (input: Buffer, ar: HeroAr) => {
   const f = HERO_FRAMES[ar];
   const meta = await sharp(input).metadata();
-  const srcAspect = meta.width && meta.height ? meta.width / meta.height : 1;
-  const frameAspect = f.w / f.h;
-  const ratio = Math.max(srcAspect, frameAspect) / Math.min(srcAspect, frameAspect);
-  if (ratio <= 1.35) {
+  if (heroFit(meta.width ?? 0, meta.height ?? 0, ar) === 'crop') {
     // shapes are close — a mild saliency crop fills the frame without wrecking the art
     return sharp(input).resize(f.w, f.h, { fit: 'cover', position: 'attention' }).modulate({ brightness: 0.95 }).webp({ quality: 82 }).toBuffer();
   }

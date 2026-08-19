@@ -13,6 +13,14 @@ export function parseWhen(raw?: string | null): string | undefined {
   if (rel) return new Date(Date.now() - Number(rel[1]) * UNIT_MS[rel[2].toLowerCase().replace(/ute$/, '')]).toISOString();
   if (/^(today|new)$/i.test(s)) return new Date().toISOString();
   if (/^yesterday$/i.test(s)) return new Date(Date.now() - 86_400_000).toISOString();
+  // Date.parse is far too lenient to trust on arbitrary scraped text — it reads "Chapter 12" as a December
+  // date, which would stamp chapter labels as release dates. Only hand it strings that actually look like a
+  // date: an ISO/numeric form, or a month name alongside a 4-digit year.
+  const looksAbsolute =
+    /\b\d{4}-\d{1,2}-\d{1,2}\b/.test(s) ||
+    /\b\d{1,2}[/.]\d{1,2}[/.]\d{2,4}\b/.test(s) ||
+    (/\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\b/i.test(s) && /\b\d{4}\b/.test(s));
+  if (!looksAbsolute) return undefined;
   // "Jul 01,2026 12:00" (Manganato) needs a space after the comma for Date.parse
   const t = Date.parse(s.replace(/,(?=\S)/, ', '));
   if (!Number.isNaN(t) && t > Date.parse('1990-01-01') && t < Date.now() + 2 * 86_400_000) return new Date(t).toISOString();

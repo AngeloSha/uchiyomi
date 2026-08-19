@@ -4,6 +4,7 @@
 import { SourceAdapter, SourceSeries, SourceChapter } from '../types';
 import { cfGet } from '../flaresolverr';
 import { parseWhen } from '../dates';
+import { seriesSlug, isOwnChapterUrl } from '../slug';
 
 const strip = (s: string) => s.replace(/<[^>]+>/g, '').replace(/&amp;/g, '&').replace(/&#0?39;|&apos;/g, "'").replace(/&quot;/g, '"').replace(/\s+/g, ' ').trim();
 const norm = (u: string) => u.replace(/^\/\//, 'https://').replace(/&amp;/g, '&').trim();
@@ -86,15 +87,10 @@ export function makeManganato(cfg: { id: string; name: string; base: string; ord
 
     async listChapters(seriesId) {
       const url = mangaUrl(seriesId);
-      // Only accept chapters under THIS manga's slug — homepage/sidebar widgets link to other titles' chapters and
-      // would otherwise be scraped as phantom chapters (e.g. a stray "2021").
-      const slug = url.replace(/[?#].*$/, '').replace(/\/+$/, '').split('/').pop()!.toLowerCase();
-      const mine = (u: string) => {
-        const m = u.toLowerCase().match(/\/([^/]+)\/chapter[-_/]/);
-        if (!slug || !m) return true;                       // can't identify the chapter's manga → keep (lenient)
-        const cs = m[1];
-        return cs === slug || cs.startsWith(slug) || slug.startsWith(cs); // same title (allow slug aliases), reject others
-      };
+      // Only accept chapters under THIS manga's slug — sidebar widgets link to other titles' chapters and would
+      // otherwise be scraped as phantom chapters (e.g. a stray "2021"). See lib/sources/slug.ts.
+      const slug = seriesSlug(url);
+      const mine = (u: string) => isOwnChapterUrl(u, slug);
       const h = await cfGet(url);
       const out: SourceChapter[] = [];
       const seen = new Set<string>();

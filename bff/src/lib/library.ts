@@ -5,6 +5,7 @@ import { join } from 'path';
 import { createHash } from 'crypto';
 import sharp from 'sharp';
 import { q } from './db';
+import { numFromName, naturalCmp } from './naming';
 
 // node-stream-zip reads the central directory only (cheap) and can stream a single entry.
 // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -59,13 +60,7 @@ function cleanSummary(s: string | null): string | null {
 function cleanStatus(s: string | null): string | null {
   return s && !looksLikeCss(s) && s.length < 60 ? s : null; // a real status is one short word
 }
-function numFromName(name: string): number {
-  const m = name.match(/(\d+(?:\.\d+)?)/);
-  return m ? parseFloat(m[1]) : 0;
-}
-function naturalCmp(a: string, b: string): number {
-  return numFromName(a) - numFromName(b) || a.localeCompare(b);
-}
+// numFromName / naturalCmp live in ./naming (dependency-free so they're unit-testable)
 
 // A "chapter" can be a CBZ (zip), a CBR (rar), or a loose folder of images. These helpers read all three so
 // the scanner + page server are format-agnostic. (The downloader still WRITES CBZ; this is read-side only.)

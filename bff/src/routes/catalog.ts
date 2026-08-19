@@ -7,6 +7,7 @@ import { dominantHex } from '../lib/color';
 import { runtime } from '../lib/runtime';
 import { authenticate, roleOf, userIdOf } from '../lib/auth';
 import { warmHeroBackdrops } from './images';
+import { writeProgress, reachedEnd } from '../lib/progress';
 
 async function seriesColors(ids: string[]): Promise<Map<string, string>> {
   if (!ids.length) return new Map();
@@ -413,34 +414,16 @@ export default async function catalogRoutes(app: FastifyInstance) {
     let sid = seriesId;
     let done = completed;
     // Safety net for any client: reaching the last page IS completion, even if the client never sends the
-    // explicit completed ping (fast scroll-past starved streaks/leaderboard). pagesCount can be 0/unknown
-    // for owned books, so only trust it when it's a real count.
+    // explicit completed ping (fast scroll-past starved streaks/leaderboard).
     if (!sid || !done) {
       try {
         const b = await komga.book(id);
         if (!sid) sid = b.seriesId;
-        const pc = b?.media?.pagesCount ?? 0;
-        if (!done && pc > 1 && page >= pc - 1) done = true;
+        if (!done && reachedEnd(page, b?.media?.pagesCount ?? 0)) done = true;
       } catch { if (!sid) sid = 'unknown'; }
     }
 
-    // Organic reading pings can only UPGRADE to completed (re-opening a read chapter must not un-read it);
-    // explicit user intent (mark read/unread → silent=true) writes exactly what it says.
-    await q(
-      `INSERT INTO read_progress (user_id, book_id, series_id, page, completed)
-       VALUES ($1, $2, $3, $4, $5)
-       ON CONFLICT (user_id, book_id)
-       DO UPDATE SET page = EXCLUDED.page,
-         completed = CASE WHEN $6 THEN EXCLUDED.completed ELSE (read_progress.completed OR EXCLUDED.completed) END,
-         updated_at = now()`,
-      [uid, id, sid, page, done, silent],
-    );
-    if (!silent)
-      await q(
-        `INSERT INTO reading_events (user_id, series_id, book_id, page, completed, device_id)
-         VALUES ($1, $2, $3, $4, $5, $6)`,
-        [uid, sid, id, page, done, deviceId ?? null],
-      );
+    await writeProgress({ userId: uid, bookId: id, seriesId: sid!, page, completed: done, silent, deviceId });
 
     if (NATIVE_PROGRESS && roleOf(req) === 'admin') komga.setReadProgress(id, page, done).catch(() => {});
     return reply.send({ ok: true });

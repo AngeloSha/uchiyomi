@@ -1,9 +1,12 @@
 name: CI
 
-# Builds the two deployable images on every pull request (and on pushes to main).
-# A green build proves deps install and the app compiles: `tsc` for the BFF and
-# `next build` for the web app. These two jobs are required to pass before a PR
-# can be merged into main (see branch protection).
+# Builds the two deployable images and runs the test suites on every pull request
+# (and on pushes to main). A green build proves deps install and the app compiles:
+# `tsc` for the BFF and `next build` for the web app. The Tests job additionally
+# proves behaviour — including the reading-progress rules, which are enforced in
+# SQL and so run against a real Postgres.
+# Build BFF / Build Web are required to pass before a PR can be merged into main
+# (see branch protection).
 
 on:
   push:
@@ -36,3 +39,40 @@ jobs:
       - uses: actions/checkout@v4
       - name: Build the web image
         run: docker build -t koryomi-web:ci ./web
+
+  test:
+    name: Tests
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: koryomi_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      # the reading-progress rules live in SQL, so those tests need a real database
+      TEST_DATABASE_URL: postgres://test:test@127.0.0.1:5432/koryomi_test
+      TZ: UTC
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: BFF tests
+        working-directory: ./bff
+        run: |
+          npm install --no-audit --no-fund
+          npm test
+      - name: Web tests
+        working-directory: ./web
+        run: |
+          npm install --no-audit --no-fund
+          npm test
