@@ -18,8 +18,8 @@ jobs:
     strategy:
       matrix:
         include:
-          - { service: bff, image: ghcr.io/angelosha/koryomi-bff }
-          - { service: web, image: ghcr.io/angelosha/koryomi-web }
+          - { service: bff, image: ghcr.io/angelosha/uchiyomi-bff }
+          - { service: web, image: ghcr.io/angelosha/uchiyomi-web }
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-qemu-action@v3

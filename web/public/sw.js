@@ -1,4 +1,4 @@
-/* Koryomi service worker — app-shell + runtime caching.
+/* Uchiyomi service worker — app-shell + runtime caching.
    Explicit offline chapter downloads live in IndexedDB (managed by the app);
    this SW handles the shell, static assets, and casual image/API re-reads. */
 const VERSION = 'v4';
@@ -121,7 +121,7 @@ self.addEventListener('fetch', (e) => {
 self.addEventListener('push', (event) => {
   let data = {};
   try { data = event.data ? event.data.json() : {}; } catch (_) {}
-  const title = data.title || 'Koryomi';
+  const title = data.title || 'Uchiyomi';
   event.waitUntil(
     self.registration.showNotification(title, {
       body: data.body || 'A new chapter is available',

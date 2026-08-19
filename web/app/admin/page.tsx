@@ -281,7 +281,7 @@ function Providers() {
       {/* Import a list of titles */}
       <div className="card mb-3 p-3">
         <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-fog-500">Import a list</p>
-        <p className="mb-2 text-[11px] text-fog-500">Bring your library over from another app. Koryomi searches your sources for each title and adds the best match.</p>
+        <p className="mb-2 text-[11px] text-fog-500">Bring your library over from another app. Uchiyomi searches your sources for each title and adds the best match.</p>
 
         {/* file / MangaDex intake — parsed into a reviewable list before anything is added */}
         <div className="mb-2 flex flex-wrap items-center gap-2">
@@ -294,7 +294,7 @@ function Providers() {
           <input value={mdUrl} onChange={(e) => setMdUrl(e.target.value)} placeholder="public MangaDex list link" autoCapitalize="none" className={`${fld} min-w-0 flex-1`} />
           <button onClick={() => parseMangadex()} disabled={parsing || !mdUrl.trim()} className="chip text-xs disabled:opacity-50">Load</button>
         </div>
-        <p className="mb-2 text-[10px] text-fog-600">A .tachibk backup stays on your server — only the titles are read. MangaDex lists must be public; private follows need a MangaDex login, which Koryomi doesn&apos;t ask for.</p>
+        <p className="mb-2 text-[10px] text-fog-600">A .tachibk backup stays on your server — only the titles are read. MangaDex lists must be public; private follows need a MangaDex login, which Uchiyomi doesn&apos;t ask for.</p>
 
         <textarea value={imp} onChange={(e) => setImp(e.target.value)} rows={4} placeholder={'…or paste titles, one per line'} className={`${fld} resize-y`} />
         {parsed && (
@@ -332,7 +332,7 @@ function Providers() {
       {list.length === 0 ? (
         <div className="card p-6 text-center">
           <p className="text-sm font-semibold text-fog-100">No sources installed</p>
-          <p className="mx-auto mt-1 max-w-md text-xs text-fog-500">Mount a compiled source pack at the server&apos;s <code className="rounded bg-ink-800 px-1 py-0.5">SOURCES_DIR</code>, then hit Reload. With none installed, Koryomi reads only the library you already own.</p>
+          <p className="mx-auto mt-1 max-w-md text-xs text-fog-500">Mount a compiled source pack at the server&apos;s <code className="rounded bg-ink-800 px-1 py-0.5">SOURCES_DIR</code>, then hit Reload. With none installed, Uchiyomi reads only the library you already own.</p>
         </div>
       ) : (
         <div className="card divide-y divide-ink-800/70 overflow-hidden">
@@ -599,8 +599,8 @@ function Settings() {
         <button onClick={() => save({ updaterHours: hours ?? data.updater_hours }, 'Saved')} className="btn-accent mt-2 w-full py-2 text-sm">Save interval</button>
       </div>
       <div className="card p-4">
-        <h3 className="mb-1 font-display text-base font-semibold">Support Koryomi</h3>
-        <p className="mb-3 text-sm text-fog-400">Koryomi is free &amp; open-source. If you find it useful, you can help fund development.</p>
+        <h3 className="mb-1 font-display text-base font-semibold">Support Uchiyomi</h3>
+        <p className="mb-3 text-sm text-fog-400">Uchiyomi is free &amp; open-source. If you find it useful, you can help fund development.</p>
         <a href="https://ko-fi.com/angeloshaheen" target="_blank" rel="noopener noreferrer" className="btn-accent flex w-full items-center justify-center gap-2 py-2 text-sm">☕ Buy me a coffee</a>
       </div>
     </div>

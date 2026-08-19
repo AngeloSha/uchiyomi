@@ -1,5 +1,5 @@
 // OPDS 1.2 catalog so external comic readers (Panels, Chunky, KOReader, Moon+, …) can browse + download from
-// Koryomi. Read-only. Auth is HTTP Basic where the password is a per-user OPDS token (issued from the profile);
+// Uchiyomi. Read-only. Auth is HTTP Basic where the password is a per-user OPDS token (issued from the profile);
 // the token resolves to a user via opds_tokens. Covers reuse /img/* (its preHandler also accepts this Basic auth).
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { createReadStream } from 'node:fs';
@@ -24,7 +24,7 @@ function feed(o: { id: string; title: string; self: string; kind: 'nav' | 'acq';
   const links = [
     `<link rel="self" href="${esc(o.self)}" type="${o.kind === 'nav' ? NAV : ACQ}"/>`,
     `<link rel="start" href="/opds" type="${NAV}"/>`,
-    `<link rel="search" href="/opds/search?q={searchTerms}" type="${ACQ}" title="Search Koryomi"/>`,
+    `<link rel="search" href="/opds/search?q={searchTerms}" type="${ACQ}" title="Search Uchiyomi"/>`,
     o.up ? `<link rel="up" href="${esc(o.up)}" type="${NAV}"/>` : '',
     o.next ? `<link rel="next" href="${esc(o.next)}" type="${ACQ}"/>` : '',
   ].filter(Boolean).join('\n  ');
@@ -33,7 +33,7 @@ function feed(o: { id: string; title: string; self: string; kind: 'nav' | 'acq';
   <id>${esc(o.id)}</id>
   <title>${esc(o.title)}</title>
   <updated>${now}</updated>
-  <author><name>Koryomi</name></author>
+  <author><name>Uchiyomi</name></author>
   ${links}
   ${o.entries.join('\n  ')}
 </feed>`;
@@ -51,14 +51,14 @@ export default async function opdsRoutes(app: FastifyInstance) {
   // HTTP Basic auth: password = a per-user OPDS token. Prompts the client when missing/invalid.
   app.addHook('preHandler', async (req: FastifyRequest, reply: FastifyReply) => {
     const uid = await resolveOpdsBasic(req.headers.authorization);
-    if (!uid) { reply.header('WWW-Authenticate', 'Basic realm="Koryomi OPDS"'); return reply.code(401).send('Unauthorized'); }
+    if (!uid) { reply.header('WWW-Authenticate', 'Basic realm="Uchiyomi OPDS"'); return reply.code(401).send('Unauthorized'); }
     (req as { opdsUser?: string }).opdsUser = uid;
   });
 
   // root navigation feed
   app.get('/opds', async (_req, reply) =>
     sendXml(reply, 'nav', feed({
-      id: 'yomi:opds:root', title: 'Koryomi', self: '/opds', kind: 'nav',
+      id: 'yomi:opds:root', title: 'Uchiyomi', self: '/opds', kind: 'nav',
       entries: [
         navEntry('Recently updated', '/opds/series?sort=updated', 'Series with the newest chapters'),
         navEntry('All series (A–Z)', '/opds/series?sort=title', 'Your whole library'),
@@ -70,8 +70,8 @@ export default async function opdsRoutes(app: FastifyInstance) {
     reply.header('Content-Type', 'application/opensearchdescription+xml').send(
       `<?xml version="1.0" encoding="UTF-8"?>
 <OpenSearchDescription xmlns="http://a9.com/-/spec/opensearch/1.1/">
-  <ShortName>Koryomi</ShortName>
-  <Description>Search the Koryomi library</Description>
+  <ShortName>Uchiyomi</ShortName>
+  <Description>Search the Uchiyomi library</Description>
   <Url type="${ACQ}" template="/opds/search?q={searchTerms}"/>
 </OpenSearchDescription>`));
 

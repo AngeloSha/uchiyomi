@@ -1,6 +1,6 @@
 // Reader for Mihon / Tachiyomi library backups (.tachibk, formerly .proto.gz) — gzipped protobuf.
 //
-// We only need the manga titles: Koryomi re-resolves each title against the user's own configured sources,
+// We only need the manga titles: Uchiyomi re-resolves each title against the user's own configured sources,
 // so none of Mihon's source ids, chapters, tracking or categories matter here. That lets us walk the wire
 // format directly instead of taking a protobuf dependency, and makes the parser immune to schema changes —
 // unknown fields are skipped generically by wire type.

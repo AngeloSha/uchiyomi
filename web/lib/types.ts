@@ -1,6 +1,6 @@
-// Loose shapes for the Komga DTOs we consume (only the fields Koryomi uses).
+// Loose shapes for the Komga DTOs we consume (only the fields Uchiyomi uses).
 
-export interface KoryomiFlags {
+export interface UchiyomiFlags {
   favorite: boolean;
   rating: number | null;
   unread?: number;
@@ -32,7 +32,7 @@ export interface Series {
   metadata: SeriesMetadata;
   booksMetadata?: { summary?: string; genres?: string[]; tags?: string[] };
   color?: string | null;
-  yomi?: KoryomiFlags;
+  yomi?: UchiyomiFlags;
   artVersion?: number; // bumps when an admin edits the cover/banner → cache-busts the image URLs
   overrides?: { title: string | null; summary: string | null; cover: string | null; banner: string | null };
 }

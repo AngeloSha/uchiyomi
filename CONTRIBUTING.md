@@ -1,4 +1,4 @@
-# Contributing to Koryomi
+# Contributing to Uchiyomi
 
 Thanks for your interest. Bug reports, feature ideas, and pull requests are all welcome.
 
@@ -6,7 +6,7 @@ Thanks for your interest. Bug reports, feature ideas, and pull requests are all 
 - `bff/`: the Fastify + TypeScript API (auth, library scanner, image server, sources, scheduled updater).
 - `web/`: the Next.js PWA (reader, library, discover, admin).
 - `docs/`: the user guide and screenshots.
-- Source adapters live in the separate `koryomi-sources` pack, not in this repo.
+- Source adapters live in the separate `uchiyomi-sources` pack, not in this repo.
 
 ## Run it locally
 ```bash
@@ -29,7 +29,7 @@ Most tests are plain unit tests over pure helpers. A few rules — the reading-p
 SQL, so they run against a real Postgres and are skipped unless you point them at one:
 
 ```
-TEST_DATABASE_URL=postgres://test:test@127.0.0.1:5432/koryomi_test npm test
+TEST_DATABASE_URL=postgres://test:test@127.0.0.1:5432/uchiyomi_test npm test
 ```
 
 CI runs both suites (with a throwaway Postgres) on every pull request.

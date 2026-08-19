@@ -16,7 +16,7 @@ A clear description of the bug.
 What you expected to happen instead.
 
 **Setup**
-- Koryomi version or commit:
+- Uchiyomi version or commit:
 - Deploy method (docker compose, etc.):
 - Browser / device:
 

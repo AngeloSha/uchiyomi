@@ -51,7 +51,7 @@ export function verifyTotp(secret: string, token: string, window = 1): boolean {
   return false;
 }
 
-export const otpauthURL = (secret: string, account: string, issuer = 'Koryomi'): string =>
+export const otpauthURL = (secret: string, account: string, issuer = 'Uchiyomi'): string =>
   `otpauth://totp/${encodeURIComponent(issuer)}:${encodeURIComponent(account)}?secret=${secret}&issuer=${encodeURIComponent(issuer)}&algorithm=SHA1&digits=6&period=30`;
 
 export const sha256 = (s: string): string => createHash('sha256').update(s).digest('hex');

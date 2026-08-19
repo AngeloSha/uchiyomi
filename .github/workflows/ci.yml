@@ -30,7 +30,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Build the BFF image
-        run: docker build -t koryomi-bff:ci ./bff
+        run: docker build -t uchiyomi-bff:ci ./bff
 
   build-web:
     name: Build Web
@@ -38,7 +38,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Build the web image
-        run: docker build -t koryomi-web:ci ./web
+        run: docker build -t uchiyomi-web:ci ./web
 
   test:
     name: Tests
@@ -49,7 +49,7 @@ jobs:
         env:
           POSTGRES_USER: test
           POSTGRES_PASSWORD: test
-          POSTGRES_DB: koryomi_test
+          POSTGRES_DB: uchiyomi_test
         ports:
           - 5432:5432
         options: >-
@@ -59,7 +59,7 @@ jobs:
           --health-retries 10
     env:
       # the reading-progress rules live in SQL, so those tests need a real database
-      TEST_DATABASE_URL: postgres://test:test@127.0.0.1:5432/koryomi_test
+      TEST_DATABASE_URL: postgres://test:test@127.0.0.1:5432/uchiyomi_test
       TZ: UTC
     steps:
       - uses: actions/checkout@v4

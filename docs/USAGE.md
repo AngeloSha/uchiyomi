@@ -1,6 +1,6 @@
-# Koryomi — User Guide
+# Uchiyomi — User Guide
 
-Everything you can do in Koryomi, screen by screen. For install/configuration see the [README](../README.md).
+Everything you can do in Uchiyomi, screen by screen. For install/configuration see the [README](../README.md).
 
 - [1. First run & setup](#1-first-run--setup)
 - [2. Signing in](#2-signing-in)
@@ -100,14 +100,14 @@ It remembers your scroll position, so closing and reopening drops you right back
 - **Latest on …** rails: every source gets its own row of that site's newest releases, so you can browse
   what just came out without searching. The **✦ Newest** button (next to *Browse newest from*) opens a full
   grid of one source's latest.
-- **Search:** type a title once and Koryomi searches **all your sources at the same time**. Results are
+- **Search:** type a title once and Uchiyomi searches **all your sources at the same time**. Results are
   de-duplicated into one card per title (a small badge shows how many sources carry it), and anything you
   already own is marked **✓ In library**.
 - **Add:** tap a card and pick which source to add it from (skipped when only one has it). Choose **how many
   chapters** to download (All or first N), toggle **auto-update**, and add it. It downloads chapter 1
   immediately so the series shows up right away, then grabs the rest in the background (with a progress bar).
 
-If you try to add a title you already have from another source, Koryomi warns you and lets you add a separate copy
+If you try to add a title you already have from another source, Uchiyomi warns you and lets you add a separate copy
 or cancel. A heads-up appears if you queue a lot of chapters at once (sources can rate-limit heavy downloads).
 
 ---
@@ -117,7 +117,7 @@ or cancel. A heads-up appears if you queue a lot of chapters at once (sources ca
 ![Add a site](admin-providers.jpg)
 
 **MangaDex works out of the box** (the official public API), with nothing to set up. Everything else you add
-yourself in **Admin → Providers** by pasting a site's URL. Koryomi bundles generic **engines** for three common
+yourself in **Admin → Providers** by pasting a site's URL. Uchiyomi bundles generic **engines** for three common
 manga-site families (**Madara**, **MangaThemesia**, and **Manganato**), and most manga sites run one of them.
 
 ### Add a site — step by step
@@ -127,12 +127,12 @@ manga-site families (**Madara**, **MangaThemesia**, and **Manganato**), and most
 3. Paste the site's **homepage URL**, the root only, e.g. `https://some-manga-site.com`. Not a deep link to a
    specific series or chapter.
 4. Type a **Name** (any label you like; it's just what shows in your source list).
-5. Click **Add**. Koryomi fetches the homepage, figures out the engine, and the source goes live **instantly, no
+5. Click **Add**. Uchiyomi fetches the homepage, figures out the engine, and the source goes live **instantly, no
    restart**. It then appears in the list and is searchable from **Discover**.
 
 ### Will a site work?
 
-Koryomi can read a site if it runs one of the three bundled engines. You don't need to know which (Auto-detect
+Uchiyomi can read a site if it runs one of the three bundled engines. You don't need to know which (Auto-detect
 handles it), but here's how to recognize them by their URLs/layout:
 
 | Engine | Tell-tale signs |
@@ -162,7 +162,7 @@ Each source shows a **health** badge: `ok`, `rate-limited`, `blocked`, or `off`.
 ### When a site won't work
 
 If Auto-detect can't identify it *and* no manually-picked engine returns search results, the site runs an engine
-Koryomi doesn't support out of the box, typically an **API-only** site or a **JavaScript-rendered (SPA)** one.
+Uchiyomi doesn't support out of the box, typically an **API-only** site or a **JavaScript-rendered (SPA)** one.
 Those need a code-level adapter (a source plugin); the three bundled engines cover the large majority of manga
 sites, but not every one.
 
@@ -188,11 +188,11 @@ for moving a library over from another app:
 - **Mihon / Tachiyomi backup** — pick your `.tachibk` (or `.proto.gz`) file. Only the titles are read; the
   file never leaves your server, and nothing about your Mihon sources or accounts is used.
 - **MangaDex list** — paste the link to a **public** custom list. Private follows would need a MangaDex
-  login, which Koryomi never asks for; make a list public and share that instead.
+  login, which Uchiyomi never asks for; make a list public and share that instead.
 - **Paste titles** — one per line, from anywhere.
 
 Whichever you use, the titles land in the box for you to review first. Anything already in your library is
-removed from the list automatically, so you can delete lines you don't want before starting. Koryomi then
+removed from the list automatically, so you can delete lines you don't want before starting. Uchiyomi then
 searches your configured sources for each title and adds the best match, showing live progress and a
 per-title result (added / already had / not found / failed).
 
@@ -208,7 +208,7 @@ the sites you're pulling from and get your server blocked.
 ![Settings](admin-settings.jpg)
 
 **Settings:** server name, an **open-registration** toggle (let anyone sign up), and the **auto-update
-interval** (how often Koryomi checks your library for new chapters).
+interval** (how often Uchiyomi checks your library for new chapters).
 
 ---
 
@@ -225,13 +225,13 @@ In **Profile → Security** (every user has this):
 - **Active sessions:** see every device you're signed in on (with IP + last-active), revoke any one, or
   **Log out others** in a single click.
 
-Koryomi also locks an account after repeated failed logins and records everything in the admin audit feed.
+Uchiyomi also locks an account after repeated failed logins and records everything in the admin audit feed.
 
 ---
 
 ## 10. Install as an app & offline
 
-Koryomi is a **PWA**. In your browser's menu choose **Install app** (or "Add to Home Screen" on mobile) to get a
+Uchiyomi is a **PWA**. In your browser's menu choose **Install app** (or "Add to Home Screen" on mobile) to get a
 standalone, full-screen app icon.
 
 **Offline:** favorite a series (or use **Download all** / a chapter's ⬇), and those chapters are stored on the
@@ -242,7 +242,7 @@ with smart-offline on, your favorites' next unread chapters auto-download while 
 
 ## 11. Backups & restore
 
-Koryomi backs itself up. Every night (03:00 by default) it writes a compressed dump of the database plus an
+Uchiyomi backs itself up. Every night (03:00 by default) it writes a compressed dump of the database plus an
 archive of your config to `/backups`, keeping the most recent 14 runs. You can also run it on demand from
 **Admin → Tasks → Backup database & config → Run now**, which shows the last run time and size.
 
@@ -256,11 +256,11 @@ you control — ideally **a different physical disk than your Docker volumes**, 
 the backups with it:
 
 ```
-BACKUP_PATH=/mnt/backups/koryomi
+BACKUP_PATH=/mnt/backups/uchiyomi
 ```
 
 The directory must be writable by uid `10002` (the app's user):
-`docker run --rm -v /mnt/backups:/b alpine chown 10002:10002 /b/koryomi`
+`docker run --rm -v /mnt/backups:/b alpine chown 10002:10002 /b/uchiyomi`
 
 Tune with `BACKUP_KEEP` (how many runs to retain, default 14) and the backup hour in the database
 (`server_settings.backup_hour`).
@@ -299,14 +299,14 @@ scan; you can also force a rescan from the admin panel, or restart the stack.
 screen lets you create the admin. If an admin already exists, reset the password under **Profile → Security**.
 
 **A source/site won't add.** Paste the site's **base URL** (e.g. `https://example.com`), not a series page.
-Koryomi auto-detects the engine (Madara, MangaThemesia, Manganato); Cloudflare-protected sites are handled
+Uchiyomi auto-detects the engine (Madara, MangaThemesia, Manganato); Cloudflare-protected sites are handled
 automatically by the bundled FlareSolverr. A ⛔/⚠ badge on a source means it's temporarily blocked or
 rate-limited — wait a bit, or try another source.
 
 **Behind a reverse proxy, login/cookies don't stick.** Set `PUBLIC_ORIGIN` to the exact public URL you use (e.g.
 `https://manga.example.com`) so cookies and CORS match, and serve it over HTTPS.
 
-**"Install app" / Add to Home Screen isn't offered.** PWAs need a secure context: serve Koryomi over HTTPS (or
+**"Install app" / Add to Home Screen isn't offered.** PWAs need a secure context: serve Uchiyomi over HTTPS (or
 `http://localhost`). On iOS, use Safari → Share → Add to Home Screen.
 
 **I lost my 2FA device.** Enter one of the recovery codes (shown when you enabled 2FA) on the login screen instead

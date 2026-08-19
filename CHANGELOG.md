@@ -17,7 +17,7 @@ Groundwork release: don't lose your data, don't ship broken reading, and don't r
 - Bring a library over from **Mihon / Tachiyomi** (`.tachibk` backup) or a **public MangaDex list**. Titles
   are parsed and shown for review first, with anything already in your library filtered out, before any
   importing starts. Pasting a plain list still works.
-- Private MangaDex follows are not supported: they need an account login, which Koryomi doesn't ask for.
+- Private MangaDex follows are not supported: they need an account login, which Uchiyomi doesn't ask for.
 
 ### Fixes
 - **Downloads are now paced.** Every add previously spawned its own uncapped background download loop, so a

@@ -1,4 +1,4 @@
-<!-- Thanks for contributing to Koryomi! Keep PRs focused: one topic per PR. -->
+<!-- Thanks for contributing to Uchiyomi! Keep PRs focused: one topic per PR. -->
 
 ## Summary
 <!-- What does this change and why? -->

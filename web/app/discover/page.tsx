@@ -144,7 +144,7 @@ export default function DiscoverPage() {
           <div className="glass rounded-2xl p-6 text-center">
             <p className="font-display text-lg font-semibold text-fog-100">No sources installed</p>
             <p className="mx-auto mt-1 max-w-md text-sm text-fog-400">
-              Koryomi reads the library you already own. To search and add new series, mount a source pack at{' '}
+              Uchiyomi reads the library you already own. To search and add new series, mount a source pack at{' '}
               <code className="rounded bg-ink-800 px-1.5 py-0.5 text-[12px]">SOURCES_DIR</code> and reload it from Admin → Providers.
             </p>
           </div>

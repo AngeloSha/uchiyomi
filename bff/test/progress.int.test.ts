@@ -11,7 +11,7 @@ const DSN = process.env.TEST_DATABASE_URL;
 if (DSN) {
   process.env.DATABASE_URL = DSN;
   process.env.JWT_SECRET = process.env.JWT_SECRET || 'test-secret-at-least-16-chars';
-  process.env.CONFIG_DIR = process.env.CONFIG_DIR || '/tmp/koryomi-test-config';
+  process.env.CONFIG_DIR = process.env.CONFIG_DIR || '/tmp/uchiyomi-test-config';
 }
 
 // imported lazily so the module's Pool isn't constructed when we're skipping

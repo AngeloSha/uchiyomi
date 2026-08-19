@@ -1,15 +1,15 @@
-# Koryomi
+# Uchiyomi
 
 *The all-in-one **\*arr stack** for manga: discover, grab, monitor, and read, self-hosted in one PWA.*
 
-### 🌐 [**koryomi.com**](https://koryomi.com) · 🐙 [GitHub](https://github.com/AngeloSha/koryomi) · ☕ [Ko-fi](https://ko-fi.com/angeloshaheen)
+### 🌐 [**uchiyomi.com**](https://uchiyomi.com) · 🐙 [GitHub](https://github.com/AngeloSha/uchiyomi) · ☕ [Ko-fi](https://ko-fi.com/angeloshaheen)
 
 A self-hosted, installable (PWA) manga / manhwa reader with a true-black OLED interface and a vertical-scroll
 webtoon reader as the centerpiece. Point it at your own CBZ library and read on any device.
 
-![Koryomi — self-hosted manga reader](docs/koryomi-demo.gif)
+![Uchiyomi — self-hosted manga reader](docs/uchiyomi-demo.gif)
 
-Koryomi is a **bring-your-own-library reader**. Like Komga / Kavita / Calibre-web, it reads comics *you* supply.
+Uchiyomi is a **bring-your-own-library reader**. Like Komga / Kavita / Calibre-web, it reads comics *you* supply.
 It bundles **MangaDex** (the official public API) plus generic engines for the common manga-site families, so
 you can also add sources by pasting a site's URL, but it ships with **no specific sites baked in**; you add the
 ones you want.
@@ -21,10 +21,10 @@ ones you want.
 
 Self-hosting manga the usual way means a pile of services: an indexer, a grabber that watches for new
 releases, a download client, a Cloudflare solver, and a media server to read it all, so four or five containers
-and a weekend of compose files. **Koryomi folds the whole pipeline (discover → grab → monitor → serve → read)
+and a weekend of compose files. **Uchiyomi folds the whole pipeline (discover → grab → monitor → serve → read)
 into a single image.** Point it at your library, add sources by URL, and it does the rest.
 
-| The usual self-hosted stack | Koryomi, built in |
+| The usual self-hosted stack | Uchiyomi, built in |
 | --- | --- |
 | **Prowlarr / Jackett** — indexers & search | Add a source by pasting its URL (engine auto-detected) + bundled MangaDex, all searchable in Discover |
 | **Sonarr / Radarr** — grab + watch for new releases | Add to library, then a scheduled updater auto-grabs new chapters (per-series, configurable interval) |
@@ -52,11 +52,11 @@ into a single image.** Point it at your library, add sources by URL, and it does
   anywhere, and bulk offline-download management.
 - **Offline:** installable PWA with offline downloads + smart auto-sync of favorites.
 - **Push notifications:** opt-in web push the moment a followed series gets a new chapter.
-- **OPDS:** browse & read your Koryomi library from other reader apps (Panels, Chunky, KOReader, …).
+- **OPDS:** browse & read your Uchiyomi library from other reader apps (Panels, Chunky, KOReader, …).
 - **Security:** argon2id passwords, JWT + rotating refresh tokens, login lockout, an audit log,
   session/device management, and optional TOTP two-factor auth.
 - **Bring your library with you:** import a **Mihon/Tachiyomi backup** (`.tachibk`) or a public **MangaDex
-  list** — Koryomi reads the titles, shows you what it found (flagging what you already have), and adds the
+  list** — Uchiyomi reads the titles, shows you what it found (flagging what you already have), and adds the
   rest from your own sources. Pasting a plain list of titles works too.
 - **Backups built in:** a nightly dump of the database + your config, rotated automatically, restorable with
   plain `psql` — point it at another disk with one env var. ([how to restore](docs/USAGE.md#11-backups--restore))
@@ -65,11 +65,11 @@ into a single image.** Point it at your library, add sources by URL, and it does
 
 ![Library](docs/library.png)
 
-## Why Koryomi?
+## Why Uchiyomi?
 
 Most self-hosted manga tools make you pick a side. A **library server** (Komga, Kavita) reads files you supply
 but can't fetch new chapters and ships a fairly utilitarian reader. A **source app** (Tachiyomi / Mihon,
-Suwayomi) fetches chapters but is Android-only or wraps them in a basic web UI. Koryomi is the rare one that does
+Suwayomi) fetches chapters but is Android-only or wraps them in a basic web UI. Uchiyomi is the rare one that does
 **both**, in a single app that's actually a pleasure to use:
 
 - **Server *and* sources in one.** Own your library *and* pull new chapters, with no Komga-plus-Suwayomi-plus-a-
@@ -84,7 +84,7 @@ Suwayomi) fetches chapters but is Android-only or wraps them in a basic web UI. 
   session/device management, all behind a Jellyfin-style admin panel.
 - **Add a source by pasting a URL.** Auto-detect figures out the engine; no extension repos to wire up.
 
-| | Koryomi | Komga / Kavita | Tachiyomi / Mihon | Suwayomi |
+| | Uchiyomi | Komga / Kavita | Tachiyomi / Mihon | Suwayomi |
 | --- | :---: | :---: | :---: | :---: |
 | Self-hosted, multi-user server | ✅ | ✅ | ❌ *(Android app)* | ✅ |
 | Fetches new chapters from sources | ✅ | ❌ *(you supply files)* | ✅ | ✅ |
@@ -95,10 +95,10 @@ Suwayomi) fetches chapters but is Android-only or wraps them in a basic web UI. 
 | Add a source by pasting a URL | ✅ | — | extensions | extension repos |
 
 **Honest caveats** (narrower than they look): Komga/Kavita are more mature for general library management, and
-Tachiyomi/Mihon list more individual sources. But Koryomi reads **CBZ, CBR, and loose image folders**. It skips
-PDF/EPUB *on purpose* (those are ebook formats; Koryomi is built for image-based manga), and its **three engines
+Tachiyomi/Mihon list more individual sources. But Uchiyomi reads **CBZ, CBR, and loose image folders**. It skips
+PDF/EPUB *on purpose* (those are ebook formats; Uchiyomi is built for image-based manga), and its **three engines
 each cover a whole *family* of sites** (most aggregators run Madara, MangaThemesia, or Manganato), so "add a
-source by URL" reaches far more sites than the engine count suggests. Koryomi's real edge is the *combination*: a
+source by URL" reaches far more sites than the engine count suggests. Uchiyomi's real edge is the *combination*: a
 polished, installable, multi-user reader that also fetches, with webtoons as first-class.
 
 ## Architecture
@@ -117,8 +117,8 @@ each chapter is a `.cbz`, a `.cbr`, or a folder of images (an archive may carry 
 Everything else runs in containers: no Node, no database, nothing to install on the host.
 
 ```bash
-git clone https://github.com/AngeloSha/koryomi.git
-cd koryomi
+git clone https://github.com/AngeloSha/uchiyomi.git
+cd uchiyomi
 docker compose up -d         # no config needed — secrets are generated automatically
 ```
 
@@ -162,7 +162,7 @@ services:
 
 ## Sources (optional)
 
-Koryomi can fetch new chapters from external providers. It bundles a few **generic engines** (parsers for the
+Uchiyomi can fetch new chapters from external providers. It bundles a few **generic engines** (parsers for the
 common manga-site families: Madara / MangaThemesia / Manganato) but **no specific sites**. Nothing fetches
 anything until *you* add a site:
 
@@ -180,7 +180,7 @@ SOURCES_PATH=/path/to/yomi-sources/dist     # compiled .js plugins, mounted read
 
 The reader scans `SOURCES_DIR` (`/sources`) at boot and registers every plugin it finds. Drop in or update a
 plugin and hit **Admin → Providers → Reload** (`POST /api/admin/sources/reload`); no rebuild. With no sites
-added and no pack mounted, Koryomi is just a clean reader for the library you already own.
+added and no pack mounted, Uchiyomi is just a clean reader for the library you already own.
 
 ## Configuration
 
@@ -203,22 +203,22 @@ first-run setup, and cross-source search.
 
 ## Support
 
-Koryomi is free and open-source. If it's useful to you, you can help fund continued development:
+Uchiyomi is free and open-source. If it's useful to you, you can help fund continued development:
 
 **[☕ Buy me a coffee on Ko-fi →](https://ko-fi.com/angeloshaheen)**
 
-You'll also find a **♡ Sponsor** button at the top of this repo's GitHub page, and a **Support Koryomi** card inside
+You'll also find a **♡ Sponsor** button at the top of this repo's GitHub page, and a **Support Uchiyomi** card inside
 the app under **Profile** and **Admin → Settings**.
 
 ## Contributors
 
-Koryomi is built and maintained by [@AngeloSha](https://github.com/AngeloSha). Pull requests, bug reports, and
+Uchiyomi is built and maintained by [@AngeloSha](https://github.com/AngeloSha). Pull requests, bug reports, and
 feature ideas are all welcome: start with [CONTRIBUTING.md](CONTRIBUTING.md), or open an
-[issue](https://github.com/AngeloSha/koryomi/issues).
+[issue](https://github.com/AngeloSha/uchiyomi/issues).
 
-Thanks to everyone who has helped build Koryomi:
+Thanks to everyone who has helped build Uchiyomi:
 
-[![Koryomi contributors](https://contrib.rocks/image?repo=AngeloSha/koryomi)](https://github.com/AngeloSha/koryomi/graphs/contributors)
+[![Uchiyomi contributors](https://contrib.rocks/image?repo=AngeloSha/uchiyomi)](https://github.com/AngeloSha/uchiyomi/graphs/contributors)
 
 ## License
 

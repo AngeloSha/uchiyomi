@@ -241,7 +241,7 @@ CREATE TABLE IF NOT EXISTS source_health (
 -- server-wide settings (single row, id=1)
 CREATE TABLE IF NOT EXISTS server_settings (
   id                 int PRIMARY KEY DEFAULT 1 CHECK (id = 1),
-  server_name        text    NOT NULL DEFAULT 'Koryomi',
+  server_name        text    NOT NULL DEFAULT 'Uchiyomi',
   allow_registration boolean NOT NULL DEFAULT false,
   updater_hours      int     NOT NULL DEFAULT 6,
   updated_at         timestamptz NOT NULL DEFAULT now()
