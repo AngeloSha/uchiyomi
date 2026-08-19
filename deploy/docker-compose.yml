@@ -10,11 +10,15 @@
 # Then open http://localhost:8080 and create your admin account in the browser.
 # No secrets to generate, no config file to edit.
 #
-# Optional overrides (put them in a .env file next to this one):
+# Optional overrides (put them in a .env file next to this one — it is picked up automatically):
 #   LIBRARY_PATH=/mnt/media/comics   your existing CBZ/CBR library (mounted read-only; default: ./library)
 #   WEB_PORT=8080                    host port to serve on
 #   DB_PASSWORD=...                  only used inside the private network; the DB has no published port
 #   PUBLIC_ORIGIN=https://manga.example.com   set this if you put it behind a reverse proxy
+#   BACKUP_PATH=/mnt/backups/uchiyomi   where nightly backups go — ideally a different disk than your Docker
+#                                       volumes, so a dead drive doesn't take the backups with it
+#   SOURCES_PATH=/path/to/sources/dist  a built source pack, mounted read-only (optional; none by default)
+#   VAPID_PUBLIC_KEY= / VAPID_PRIVATE_KEY= / VAPID_SUBJECT=   enable web push (see docs/USAGE.md)
 
 services:
   uchiyomi-db:
@@ -48,12 +52,18 @@ services:
       SOURCES_DIR: /sources
       CUSTOM_SITES_FILE: /config/sites.json
       # JWT_SECRET is generated and persisted to /config on first boot if you don't set one.
+      # Web push is off unless you supply keys (see docs/USAGE.md).
+      VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:-}
+      VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:-}
+      VAPID_SUBJECT: ${VAPID_SUBJECT:-}
+      BACKUP_KEEP: ${BACKUP_KEEP:-14}
     volumes:
       - ${LIBRARY_PATH:-./library}:/library:ro   # your existing comics — never written to
+      - ${SOURCES_PATH:-./sources}:/sources:ro   # optional built source pack
       - uchiyomi_downloads:/library-dl           # chapters Uchiyomi downloads
       - uchiyomi_config:/config                  # secrets, custom sites, art overrides
       - uchiyomi_cache:/cache                    # image cache (safe to delete)
-      - uchiyomi_backups:/backups                # nightly database + config backups
+      - ${BACKUP_PATH:-uchiyomi_backups}:/backups # nightly database + config backups
     depends_on:
       uchiyomi-db:
         condition: service_healthy

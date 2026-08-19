@@ -6,7 +6,7 @@ Thanks for your interest. Bug reports, feature ideas, and pull requests are all 
 - `bff/`: the Fastify + TypeScript API (auth, library scanner, image server, sources, scheduled updater).
 - `web/`: the Next.js PWA (reader, library, discover, admin).
 - `docs/`: the user guide and screenshots.
-- Source adapters live in the separate `uchiyomi-sources` pack, not in this repo.
+- Source adapters live in the separate `yomi-sources` pack, not in this repo.
 
 ## Run it locally
 ```bash

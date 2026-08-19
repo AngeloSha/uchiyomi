@@ -83,7 +83,19 @@ export async function pruneBackups(keep = env.BACKUP_KEEP): Promise<string[]> {
 export async function runBackup(): Promise<BackupResult> {
   const started = Date.now();
   const dir = path.join(env.BACKUP_DIR, stamp());
-  await fs.mkdir(dir, { recursive: true });
+  try {
+    await fs.mkdir(dir, { recursive: true });
+  } catch (e) {
+    // The usual cause is a host directory bind-mounted at BACKUP_DIR that the app's user can't write.
+    // This runs unattended overnight, so say exactly how to fix it rather than leaving a bare errno.
+    if ((e as NodeJS.ErrnoException)?.code === 'EACCES' || (e as NodeJS.ErrnoException)?.code === 'EPERM') {
+      throw new Error(
+        `cannot write to ${env.BACKUP_DIR} — the backup directory must be writable by uid 10002. ` +
+          `If it is a host folder, run:  docker run --rm -v <that folder>:/b alpine chown 10002:10002 /b`,
+      );
+    }
+    throw e;
+  }
 
   await dumpSql(path.join(dir, 'db.sql.gz'));
 

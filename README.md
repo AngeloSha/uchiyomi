@@ -103,6 +103,8 @@ polished, installable, multi-user reader that also fetches, with webtoons as fir
 
 ## Architecture
 
+*(Development stack — see the install section above for the container names used by `deploy/docker-compose.yml`.)*
+
 | Service | What it is |
 | --- | --- |
 | `yomi-web` | Next.js static-export PWA on nginx; reverse-proxies `/api`, `/auth`, `/img` to the BFF (single origin) |
@@ -154,15 +156,16 @@ docker compose logs -f uchiyomi-bff  # watch it boot
 Cloning the repo and want a CLI-seeded admin instead of the browser setup step? `bash scripts/setup.sh`
 generates the secrets, creates the admin from a password you type, fixes volume perms, and starts the stack.
 
-Change the port with `WEB_PORT` in `.env` (e.g. `WEB_PORT=9000` → http://localhost:9000).
+Change the port with `WEB_PORT` in `.env` (default `8080`; e.g. `WEB_PORT=9000` → http://localhost:9000).
 
 ### Serving it on a domain (HTTPS)
 
-The committed compose is **standalone**: it publishes the app on a local port and creates its own private
-networks, so a fresh clone just works. To put it on a public domain with TLS, front `yomi-web` with any reverse
-proxy (Caddy, Traefik, Nginx Proxy Manager, …) and set `PUBLIC_ORIGIN` in `.env` to your URL. If your proxy
-reaches containers over a shared Docker network, add a `docker-compose.override.yml` next to the compose file to
-attach `yomi-web` to it, and Compose loads it automatically:
+The compose file is **standalone**: it publishes the app on a local port and creates its own private networks,
+so a fresh install just works. To put it on a public domain with TLS, front the web container with any reverse
+proxy (Caddy, Traefik, Nginx Proxy Manager, …) and set `PUBLIC_ORIGIN` in `.env` to your URL.
+
+If your proxy reaches containers over a shared Docker network, drop a `docker-compose.override.yml` next to the
+compose file — Compose loads it automatically:
 
 ```yaml
 # docker-compose.override.yml  (server-specific; keep it out of git)
@@ -170,9 +173,12 @@ networks:
   proxy:
     external: true
 services:
-  yomi-web:
-    networks: [yomi_app, proxy]   # keep yomi_app so it still reaches the API
+  uchiyomi-web:
+    networks: [uchiyomi_app, proxy]   # keep uchiyomi_app so it still reaches the API
 ```
+
+> Using the development stack from a clone instead? Its service and network are named `yomi-web` and
+> `yomi_app`.
 
 ## Sources (optional)
 

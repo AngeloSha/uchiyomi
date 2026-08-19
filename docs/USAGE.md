@@ -46,7 +46,7 @@ two-factor auth, you'll be asked for your 6-digit code (or a recovery code) afte
 
 ## 3. Your library
 
-![Library](library.jpg)
+![Library](library.png)
 
 The **Library** tab is your whole collection. Tabs across the top sort it: **Curated**, **Newest**, **Most
 read**. Each cover shows a **NEW** ribbon when there are unread chapters. Click a cover to open the series.
@@ -274,17 +274,22 @@ Restore the database into a **fresh, empty** database first and check it looks r
 one:
 
 ```
-docker exec yomi-bff sh -c 'gunzip -c /backups/20260819-030000/db.sql.gz' | docker exec -i -e PGPASSWORD="$DB_PASSWORD" yomi-db psql -U yomi -h 127.0.0.1 -d yomi
+docker exec uchiyomi-bff sh -c 'gunzip -c /backups/20260819-030000/db.sql.gz' | docker exec -i -e PGPASSWORD="$DB_PASSWORD" uchiyomi-db psql -U yomi -h 127.0.0.1 -d yomi
 ```
 
 Then restore the config files (custom sites, uploaded cover art, the JWT secret):
 
 ```
-docker exec -i yomi-bff sh -c 'tar -xzf - -C /config' < config.tar.gz
+docker exec -i uchiyomi-bff sh -c 'tar -xzf - -C /config' < config.tar.gz
 ```
 
-Restart the app afterwards (`docker compose restart yomi-bff`). If you restore the database *without* the
+Restart the app afterwards (`docker compose restart uchiyomi-bff`). If you restore the database *without* the
 config archive, any admin-uploaded cover art will be missing even though the database still references it.
+
+> Container names above match `deploy/docker-compose.yml`, the recommended install. If you cloned the repo and
+> run the development stack instead, the containers are `yomi-bff` / `yomi-db` — substitute accordingly.
+> (The development stack also runs Postgres 15 rather than 16; the dumps are plain SQL, so they restore either
+> way, but don't expect the two data directories to be interchangeable.)
 
 > Test your restore at least once, into a scratch database, while nothing is on fire. An untested backup is
 > a guess.
