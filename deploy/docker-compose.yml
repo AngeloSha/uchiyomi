@@ -1,0 +1,94 @@
+# Uchiyomi — install from the published images.
+#
+# This is the file to use if you just want to run Uchiyomi. It pulls prebuilt multi-arch images
+# (amd64 + arm64) instead of compiling anything, so it starts in seconds on a NAS or a Pi.
+# The repo's top-level docker-compose.yml builds from source and is meant for development.
+#
+#   curl -O https://raw.githubusercontent.com/AngeloSha/uchiyomi/main/deploy/docker-compose.yml
+#   docker compose up -d
+#
+# Then open http://localhost:8080 and create your admin account in the browser.
+# No secrets to generate, no config file to edit.
+#
+# Optional overrides (put them in a .env file next to this one):
+#   LIBRARY_PATH=/mnt/media/comics   your existing CBZ/CBR library (mounted read-only; default: ./library)
+#   WEB_PORT=8080                    host port to serve on
+#   DB_PASSWORD=...                  only used inside the private network; the DB has no published port
+#   PUBLIC_ORIGIN=https://manga.example.com   set this if you put it behind a reverse proxy
+
+services:
+  uchiyomi-db:
+    image: postgres:16-alpine
+    container_name: uchiyomi-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: yomi
+      POSTGRES_USER: yomi
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-uchiyomi}
+    volumes:
+      - uchiyomi_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U yomi -d yomi"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks: [uchiyomi_internal]
+
+  uchiyomi-bff:
+    image: ghcr.io/angelosha/uchiyomi-bff:latest
+    container_name: uchiyomi-bff
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+      DATABASE_URL: postgres://yomi:${DB_PASSWORD:-uchiyomi}@uchiyomi-db:5432/yomi
+      LIBRARY_BACKEND: owned
+      PUBLIC_ORIGIN: ${PUBLIC_ORIGIN:-http://localhost:8080}
+      FLARESOLVERR_URL: http://uchiyomi-flaresolverr:8191
+      SOURCES_DIR: /sources
+      CUSTOM_SITES_FILE: /config/sites.json
+      # JWT_SECRET is generated and persisted to /config on first boot if you don't set one.
+    volumes:
+      - ${LIBRARY_PATH:-./library}:/library:ro   # your existing comics — never written to
+      - uchiyomi_downloads:/library-dl           # chapters Uchiyomi downloads
+      - uchiyomi_config:/config                  # secrets, custom sites, art overrides
+      - uchiyomi_cache:/cache                    # image cache (safe to delete)
+      - uchiyomi_backups:/backups                # nightly database + config backups
+    depends_on:
+      uchiyomi-db:
+        condition: service_healthy
+    networks:
+      uchiyomi_internal:
+      uchiyomi_app:
+        # the web image's nginx proxies to this hostname
+        aliases: [yomi-bff]
+
+  uchiyomi-web:
+    image: ghcr.io/angelosha/uchiyomi-web:latest
+    container_name: uchiyomi-web
+    restart: unless-stopped
+    ports:
+      - "${WEB_PORT:-8080}:80"
+    depends_on:
+      - uchiyomi-bff
+    networks: [uchiyomi_app]
+
+  # Only used when you add a source that sits behind Cloudflare. Harmless to leave running.
+  uchiyomi-flaresolverr:
+    image: ghcr.io/flaresolverr/flaresolverr:latest
+    container_name: uchiyomi-flaresolverr
+    restart: unless-stopped
+    environment:
+      LOG_LEVEL: warning
+    networks: [uchiyomi_app]
+
+networks:
+  uchiyomi_internal:   # database only — deliberately not reachable from outside the stack
+  uchiyomi_app:
+
+volumes:
+  uchiyomi_pgdata:
+  uchiyomi_downloads:
+  uchiyomi_config:
+  uchiyomi_cache:
+  uchiyomi_backups:

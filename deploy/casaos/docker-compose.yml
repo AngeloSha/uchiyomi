@@ -1,0 +1,127 @@
+name: uchiyomi
+
+services:
+  uchiyomi-db:
+    container_name: uchiyomi-db
+    hostname: uchiyomi-db
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: yomi
+      POSTGRES_USER: yomi
+      POSTGRES_PASSWORD: uchiyomi
+    volumes:
+      - /DATA/AppData/uchiyomi/pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U yomi -d yomi"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+    networks:
+      - uchiyomi
+
+  uchiyomi-bff:
+    container_name: uchiyomi-bff
+    hostname: uchiyomi-bff
+    image: ghcr.io/angelosha/uchiyomi-bff:latest
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+      DATABASE_URL: postgres://yomi:uchiyomi@uchiyomi-db:5432/yomi
+      LIBRARY_BACKEND: owned
+      PUBLIC_ORIGIN: http://localhost:8080
+      FLARESOLVERR_URL: http://uchiyomi-flaresolverr:8191
+      SOURCES_DIR: /sources
+      CUSTOM_SITES_FILE: /config/sites.json
+    volumes:
+      # your existing comics, read-only — point this at wherever you keep them
+      - /DATA/Media/Comics:/library:ro
+      - /DATA/AppData/uchiyomi/downloads:/library-dl
+      - /DATA/AppData/uchiyomi/config:/config
+      - /DATA/AppData/uchiyomi/cache:/cache
+      - /DATA/AppData/uchiyomi/backups:/backups
+    depends_on:
+      uchiyomi-db:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      uchiyomi:
+        # the web image's nginx proxies to this hostname, so keep the alias whatever the service is called
+        aliases:
+          - yomi-bff
+
+  uchiyomi-web:
+    container_name: uchiyomi-web
+    hostname: uchiyomi-web
+    image: ghcr.io/angelosha/uchiyomi-web:latest
+    ports:
+      - "8080:80"
+    depends_on:
+      - uchiyomi-bff
+    restart: unless-stopped
+    networks:
+      - uchiyomi
+
+  # Cloudflare solver — only used when you add a source that sits behind Cloudflare.
+  uchiyomi-flaresolverr:
+    container_name: uchiyomi-flaresolverr
+    hostname: uchiyomi-flaresolverr
+    image: ghcr.io/flaresolverr/flaresolverr:latest
+    environment:
+      LOG_LEVEL: warning
+    restart: unless-stopped
+    networks:
+      - uchiyomi
+
+networks:
+  uchiyomi:
+    name: uchiyomi
+
+x-casaos:
+  architectures:
+    - amd64
+    - arm64
+  main: uchiyomi-web
+  author: AngeloSha
+  developer: AngeloSha
+  category: Media
+  store_app_id: uchiyomi
+  icon: https://raw.githubusercontent.com/AngeloSha/uchiyomi/main/web/public/icons/icon-512.png
+  thumbnail: https://raw.githubusercontent.com/AngeloSha/uchiyomi/main/web/public/art/og.jpg
+  screenshot_link:
+    - https://raw.githubusercontent.com/AngeloSha/uchiyomi/main/docs/hero.png
+    - https://raw.githubusercontent.com/AngeloSha/uchiyomi/main/docs/library.png
+    - https://raw.githubusercontent.com/AngeloSha/uchiyomi/main/docs/discover.jpg
+    - https://raw.githubusercontent.com/AngeloSha/uchiyomi/main/docs/series.jpg
+  title:
+    en_US: Uchiyomi
+  tagline:
+    en_US: The all-in-one *arr stack for manga
+  description:
+    en_US: |
+      Uchiyomi is a self-hosted manga and manhwa reader that also fetches new chapters — the whole pipeline
+      (discover, grab, monitor, serve, read) in one place instead of a stack of containers.
+
+      Point it at a folder of CBZ/CBR files and read them on any device through a true-black OLED interface
+      built webtoon-first: continuous vertical scroll across chapters, pinch zoom, per-series settings, and
+      double-page spreads for classic manga. It installs as a PWA, so it works offline and lives on your home
+      screen without an app store.
+
+      Unlike a plain library server, it can also follow series: add a source by pasting a site's URL, and a
+      scheduled updater grabs new chapters as they appear. Bring your library over from Mihon/Tachiyomi with a
+      backup file, or from a public MangaDex list.
+
+      Built for a household — per-user reading progress, favourites, history and a leaderboard, plus two-factor
+      auth, an audit log and a Jellyfin-style admin panel. It backs itself up nightly, and there is no account,
+      no telemetry and no cloud: your library stays yours.
+  tips:
+    before_install:
+      en_US: |
+        Set the **Comics** path to the folder holding your existing CBZ/CBR files — it is mounted read-only, so
+        Uchiyomi never modifies what you already have. Leave it as-is if you are starting from an empty library.
+
+        On first launch, open the web UI and create your admin account in the browser. There is no default
+        password to change.
+  port_map: "8080"
+  scheme: http
+  index: /

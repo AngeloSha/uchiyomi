@@ -116,31 +116,45 @@ polished, installable, multi-user reader that also fetches, with webtoons as fir
 each chapter is a `.cbz`, a `.cbr`, or a folder of images (an archive may carry a `ComicInfo.xml` for metadata).
 Everything else runs in containers: no Node, no database, nothing to install on the host.
 
+Grab one file and start it — this pulls prebuilt **multi-arch images (amd64 + arm64)**, so there's nothing to
+compile and it comes up in seconds even on a NAS or a Raspberry Pi:
+
 ```bash
-git clone https://github.com/AngeloSha/uchiyomi.git
-cd uchiyomi
-docker compose up -d         # no config needed — secrets are generated automatically
+curl -O https://raw.githubusercontent.com/AngeloSha/uchiyomi/main/deploy/docker-compose.yml
+docker compose up -d
 ```
 
-Then open **http://localhost:3000** and **create your admin account right in the browser** on first run. To read
-your existing library, point `LIBRARY_PATH` at it first: `cp .env.example .env`, set
-`LIBRARY_PATH=/path/to/your/manga`, then `docker compose up -d`. It runs four containers:
+Then open **http://localhost:8080** and **create your admin account right in the browser**. There are no
+secrets to generate and no config file to edit.
+
+To read a library you already have, point `LIBRARY_PATH` at it (it's mounted **read-only** — Uchiyomi never
+writes to your existing files):
+
+```bash
+echo "LIBRARY_PATH=/path/to/your/manga" > .env
+docker compose up -d
+```
+
+> Cloning the repo instead? The top-level `docker-compose.yml` **builds from source** and is meant for
+> development. For running Uchiyomi, use `deploy/docker-compose.yml` above.
+
+It runs four containers:
 
 | Container | Role |
 |---|---|
-| `yomi-web` | the PWA (what you open in the browser) |
-| `yomi-bff` | the API |
-| `yomi-db` | private Postgres (never exposed) |
-| `yomi-flaresolverr` | Cloudflare solver — **started automatically**; sources that need it use it with no config |
-
-Prefer a CLI-seeded admin instead of the browser setup step? Run `bash scripts/setup.sh` (it generates the
-secrets, creates the admin from a password you type, fixes volume perms, and starts the stack). Either way:
+| `uchiyomi-web` | the PWA (what you open in the browser) |
+| `uchiyomi-bff` | the API |
+| `uchiyomi-db` | private Postgres (no published port — unreachable from outside the stack) |
+| `uchiyomi-flaresolverr` | Cloudflare solver — **started automatically**; sources that need it use it with no config |
 
 ```bash
-docker compose logs -f yomi-bff  # watch it boot
+docker compose logs -f uchiyomi-bff  # watch it boot
 ```
 
-Change the port with `WEB_PORT` in `.env` (`WEB_PORT=8080` → http://localhost:8080).
+Cloning the repo and want a CLI-seeded admin instead of the browser setup step? `bash scripts/setup.sh`
+generates the secrets, creates the admin from a password you type, fixes volume perms, and starts the stack.
+
+Change the port with `WEB_PORT` in `.env` (e.g. `WEB_PORT=9000` → http://localhost:9000).
 
 ### Serving it on a domain (HTTPS)
 
