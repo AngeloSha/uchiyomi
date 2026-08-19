@@ -23,8 +23,11 @@ COPY package.json package-lock.json* ./
 RUN if [ -f package-lock.json ]; then npm ci --omit=dev --no-audit --no-fund; \
     else npm install --omit=dev --no-audit --no-fund; fi
 COPY --from=build /app/dist ./dist
-RUN mkdir -p /cache && addgroup -g 10002 -S yomi && adduser -u 10002 -S -G yomi yomi \
- && chown -R yomi:yomi /cache /app
+# postgresql-client supplies pg_dump/pg_restore for the built-in backup task (it reaches the DB over the
+# network via DATABASE_URL — the container has no docker socket, so it can't shell out to the db container).
+RUN apk add --no-cache postgresql16-client tar gzip
+RUN mkdir -p /cache /backups && addgroup -g 10002 -S yomi && adduser -u 10002 -S -G yomi yomi \
+ && chown -R yomi:yomi /cache /backups /app
 USER yomi
 EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \

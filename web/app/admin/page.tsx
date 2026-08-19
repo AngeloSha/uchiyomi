@@ -451,6 +451,14 @@ function ArtPicker({ row, onClose, onApplied }: { row: ArtRow; onClose: () => vo
   );
 }
 
+/** Tasks report different result shapes (updater: chapters added; backup: size on disk). */
+function taskResult(r: any): string {
+  if (!r) return '';
+  if (typeof r.added === 'number') return ` · +${r.added} chapters`;
+  if (typeof r.bytes === 'number') return ` · ${bytes(r.bytes)}`;
+  return '';
+}
+
 function Tasks() {
   const toast = useToast();
   const qc = useQueryClient();
@@ -462,7 +470,7 @@ function Tasks() {
         <div key={t.id} className="flex items-center gap-3 px-4 py-3.5">
           <div className="min-w-0 flex-1">
             <p className="text-sm text-fog-100">{t.name}</p>
-            <p className="text-[11px] text-fog-500">{t.schedule} · {t.lastRun ? `last run ${relativeTime(new Date(t.lastRun).toISOString())}` : 'not run yet'}{t.lastResult ? ` · +${t.lastResult.added} chapters` : ''}</p>
+            <p className="text-[11px] text-fog-500">{t.schedule} · {t.lastRun ? `last run ${relativeTime(new Date(t.lastRun).toISOString())}` : 'not run yet'}{taskResult(t.lastResult)}</p>
           </div>
           <button onClick={() => run(t.id)} disabled={t.running} className="chip text-xs disabled:opacity-50">{t.running ? 'Running…' : 'Run now'}</button>
         </div>

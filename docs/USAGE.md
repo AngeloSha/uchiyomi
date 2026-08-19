@@ -12,7 +12,8 @@ Everything you can do in Koryomi, screen by screen. For install/configuration se
 - [8. The admin panel](#8-the-admin-panel)
 - [9. Security: 2FA, sessions, password](#9-security-2fa-sessions-password)
 - [10. Install as an app & offline](#10-install-as-an-app--offline)
-- [11. Troubleshooting & FAQ](#11-troubleshooting--faq)
+- [11. Backups & restore](#11-backups--restore)
+- [12. Troubleshooting & FAQ](#12-troubleshooting--faq)
 
 ---
 
@@ -224,7 +225,56 @@ with smart-offline on, your favorites' next unread chapters auto-download while 
 
 ---
 
-## 11. Troubleshooting & FAQ
+## 11. Backups & restore
+
+Koryomi backs itself up. Every night (03:00 by default) it writes a compressed dump of the database plus an
+archive of your config to `/backups`, keeping the most recent 14 runs. You can also run it on demand from
+**Admin → Tasks → Backup database & config → Run now**, which shows the last run time and size.
+
+**What's in a backup:** accounts and passwords, everyone's reading progress and history, favorites,
+collections, ratings, the catalogue, your admin art overrides, and any custom sites you added.
+**What isn't:** downloaded chapter files and the image cache — those are large and re-downloadable, so
+including them would turn a 3 MB backup into a 70 GB one.
+
+**Where they go.** By default a Docker volume. Point `BACKUP_PATH` at a host directory to put them somewhere
+you control — ideally **a different physical disk than your Docker volumes**, so a failed drive doesn't take
+the backups with it:
+
+```
+BACKUP_PATH=/mnt/backups/koryomi
+```
+
+The directory must be writable by uid `10002` (the app's user):
+`docker run --rm -v /mnt/backups:/b alpine chown 10002:10002 /b/koryomi`
+
+Tune with `BACKUP_KEEP` (how many runs to retain, default 14) and the backup hour in the database
+(`server_settings.backup_hour`).
+
+### Restoring
+
+Each backup folder is named by timestamp and holds `db.sql.gz` and `config.tar.gz`. The dump is plain SQL, so
+any `psql` can restore it — no matching tool versions required.
+
+Restore the database into a **fresh, empty** database first and check it looks right before touching your real
+one:
+
+```
+docker exec yomi-bff sh -c 'gunzip -c /backups/20260819-030000/db.sql.gz' | docker exec -i -e PGPASSWORD="$DB_PASSWORD" yomi-db psql -U yomi -h 127.0.0.1 -d yomi
+```
+
+Then restore the config files (custom sites, uploaded cover art, the JWT secret):
+
+```
+docker exec -i yomi-bff sh -c 'tar -xzf - -C /config' < config.tar.gz
+```
+
+Restart the app afterwards (`docker compose restart yomi-bff`). If you restore the database *without* the
+config archive, any admin-uploaded cover art will be missing even though the database still references it.
+
+> Test your restore at least once, into a scratch database, while nothing is on fire. An untested backup is
+> a guess.
+
+## 12. Troubleshooting & FAQ
 
 **The app loads but my library is empty.** Point `LIBRARY_PATH` at your manga and restart: it mounts read-only at
 `/library` and should be laid out as `<series>/<chapter>`. New or changed files are picked up by the scheduled

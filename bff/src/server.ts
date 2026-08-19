@@ -11,6 +11,7 @@ import { migrate } from './lib/migrate';
 import { loadSources, loadCustomSites, loadBuiltins, listSources } from './lib/sources';
 import { runUpdateAll } from './lib/updater';
 import { startSweeper } from './lib/imageCache';
+import { runBackup, msUntilHour } from './lib/backup';
 import { KomgaError } from './lib/komga';
 import authRoutes from './routes/auth';
 import adminRoutes from './routes/admin';
@@ -98,6 +99,34 @@ async function main() {
       } catch { /* settings row not readable yet — keep the 6h default */ }
       setTimeout(tick, hours * 60 * 60 * 1000).unref();
     })();
+  }
+
+  // Nightly backup, aligned to a wall-clock hour and re-read from settings each run so it stays live-editable.
+  {
+    const backupTick = async () => {
+      try {
+        runtime.backingUp = true;
+        const r = await runBackup();
+        runtime.lastBackup = Date.now();
+        runtime.lastBackupResult = { bytes: r.bytes, ms: r.ms };
+        app.log.info(`backup: ${(r.bytes / 1024 / 1024).toFixed(1)} MB in ${r.ms}ms -> ${r.dir}`);
+      } catch (e) {
+        app.log.error(e as any);
+      } finally {
+        runtime.backingUp = false;
+      }
+      setTimeout(backupTick, await nextBackupDelay()).unref();
+    };
+    const nextBackupDelay = async (): Promise<number> => {
+      let hour = 3;
+      try {
+        const s = await pool.query('SELECT backup_hour FROM server_settings WHERE id = 1');
+        const h = Number(s.rows[0]?.backup_hour);
+        if (Number.isInteger(h) && h >= 0 && h <= 23) hour = h;
+      } catch { /* settings not readable yet — keep 03:00 */ }
+      return msUntilHour(hour);
+    };
+    void (async () => { setTimeout(backupTick, await nextBackupDelay()).unref(); })();
   }
 
   await app.listen({ host: '0.0.0.0', port: env.PORT });

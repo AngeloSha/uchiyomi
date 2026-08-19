@@ -6,6 +6,7 @@ import { content as komga } from '../lib/backend';
 import { cacheBytes } from '../lib/imageCache';
 import { runtime } from '../lib/runtime';
 import { persistScan } from '../lib/library';
+import { runBackup } from '../lib/backup';
 import { runUpdateAll, updateSeries } from '../lib/updater';
 import { authenticate, requireAdmin, userIdOf, revokeAllSessions, revokeRefreshTokenById, passwordError } from '../lib/auth';
 import { logAudit, recentAudit } from '../lib/audit';
@@ -55,10 +56,15 @@ export default async function adminRoutes(app: FastifyInstance) {
 
   // ---- scheduled tasks ----
   app.get('/api/admin/tasks', async () => {
-    const s = await one<{ updater_hours: number }>('SELECT updater_hours FROM server_settings WHERE id = 1');
+    const s = await one<{ updater_hours: number; backup_hour: number; backup_last_run: string | null; backup_last_result: any }>(
+      'SELECT updater_hours, backup_hour, backup_last_run, backup_last_result FROM server_settings WHERE id = 1',
+    );
+    // the backup's last run is persisted, so prefer the DB value over the in-memory one (which resets on restart)
+    const backupLast = runtime.lastBackup || (s?.backup_last_run ? new Date(s.backup_last_run).getTime() : null);
     return { content: [
       { id: 'scan', name: 'Library scan', schedule: 'on demand', lastRun: runtime.lastScan || null, running: false },
       { id: 'update', name: 'Check for new chapters', schedule: `every ${s?.updater_hours ?? 6}h`, lastRun: runtime.lastUpdate || null, lastResult: runtime.lastUpdateResult, running: runtime.updating },
+      { id: 'backup', name: 'Backup database & config', schedule: `daily at ${String(s?.backup_hour ?? 3).padStart(2, '0')}:00`, lastRun: backupLast, lastResult: runtime.lastBackupResult ?? s?.backup_last_result ?? null, running: runtime.backingUp },
     ] };
   });
   app.post('/api/admin/tasks/:id/run', async (req) => {
@@ -66,6 +72,15 @@ export default async function adminRoutes(app: FastifyInstance) {
     await logAudit('task.run', { userId: userIdOf(req), detail: { task: id }, req });
     if (id === 'scan') return { ok: true, ...(await persistScan()) };
     if (id === 'update') { runUpdateAll({ maxNew: 10 }).then((r) => { runtime.lastUpdate = Date.now(); runtime.lastUpdateResult = { series: r.series, added: r.added }; }).catch(() => {}); return { ok: true, started: true }; }
+    if (id === 'backup') {
+      if (runtime.backingUp) return { ok: false, error: 'busy' };
+      runtime.backingUp = true;
+      runBackup()
+        .then((r) => { runtime.lastBackup = Date.now(); runtime.lastBackupResult = { bytes: r.bytes, ms: r.ms }; })
+        .catch(() => {})
+        .finally(() => { runtime.backingUp = false; });
+      return { ok: true, started: true };
+    }
     return { ok: false };
   });
 

@@ -55,6 +55,8 @@ into a single image.** Point it at your library, add sources by URL, and it does
 - **OPDS:** browse & read your Koryomi library from other reader apps (Panels, Chunky, KOReader, …).
 - **Security:** argon2id passwords, JWT + rotating refresh tokens, login lockout, an audit log,
   session/device management, and optional TOTP two-factor auth.
+- **Backups built in:** a nightly dump of the database + your config, rotated automatically, restorable with
+  plain `psql` — point it at another disk with one env var. ([how to restore](docs/USAGE.md#11-backups--restore))
 - **Admin:** a Jellyfin-style panel with members & permissions, provider health, scheduled tasks, activity feed,
   active sessions, and server settings (name, open registration, auto-update interval).
 

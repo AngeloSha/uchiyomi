@@ -247,6 +247,11 @@ CREATE TABLE IF NOT EXISTS server_settings (
   updated_at         timestamptz NOT NULL DEFAULT now()
 );
 INSERT INTO server_settings (id) VALUES (1) ON CONFLICT (id) DO NOTHING;
+-- nightly backup task: hour of day to run (local time) and the last run's outcome, persisted so the admin
+-- Tasks view still reports it after a restart (the in-memory runtime state resets).
+ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS backup_hour        int NOT NULL DEFAULT 3;
+ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS backup_last_run    timestamptz;
+ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS backup_last_result jsonb;
 
 -- admin-editable per-series metadata + art overrides
 -- cover/banner: 'upload' = a file under <CONFIG_DIR>/series-art; an http(s) URL = pasted; null = use automatic art

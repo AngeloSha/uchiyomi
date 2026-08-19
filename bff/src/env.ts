@@ -39,6 +39,8 @@ const schema = z.object({
   VAPID_PRIVATE_KEY: z.string().default(''),
   VAPID_SUBJECT: z.string().default('mailto:admin@koryomi.app'),
   CACHE_MAX_BYTES: z.coerce.number().default(16 * 1024 * 1024 * 1024),
+  BACKUP_DIR: z.string().default('/backups'),
+  BACKUP_KEEP: z.coerce.number().int().min(1).max(365).default(14), // nightly dumps to retain
   ACCESS_TTL_SECONDS: z.coerce.number().default(60 * 15),
   REFRESH_TTL_DAYS: z.coerce.number().default(60),
 });

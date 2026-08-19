@@ -51,6 +51,7 @@ services:
       - yomi_library:/library-dl                             # owned, writable download dir
       - ${SOURCES_PATH:-./sources}:/sources:ro               # user-supplied source plugins (compiled .js)
       - yomi_config:/config                                  # writable app config (custom sites list)
+      - ${BACKUP_PATH:-yomi_backups}:/backups                # nightly DB + config backups (see docs/USAGE.md)
     networks:
       - yomi_internal            # reach the DB
       - yomi_app                 # reach the web + flaresolverr
@@ -116,3 +117,4 @@ volumes:
   yomi_imgcache:
   yomi_library:
   yomi_config:
+  yomi_backups:   # default backup target; set BACKUP_PATH to a host dir (ideally another disk) to override
