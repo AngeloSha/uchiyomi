@@ -3,7 +3,8 @@ import Link from 'next/link';
 import { useCallback, useRef, useState } from 'react';
 import { img } from '@/lib/api';
 import { Book, Series } from '@/lib/types';
-import { chapterLabel, progressOf } from '@/lib/format';
+import { chapterLabel, progressOf, relativeTime } from '@/lib/format';
+import { deviceId } from '@/lib/device';
 import { Img, ProgressBar } from './ui';
 import { IcHeart, IcPlay } from './icons';
 
@@ -80,6 +81,9 @@ export function SeriesCard({ series, w = 'w-32' }: { series: Series; w?: string 
 /** Wide "continue reading" card for an on-deck book. */
 export function ContinueCard({ book }: { book: Book }) {
   const pct = progressOf(book);
+  // Progress already syncs across devices; this just says where you left off, and only when that was
+  // somewhere else — "you were reading this on the device you're holding" is noise.
+  const elsewhere = book.lastDevice && book.lastDevice.id !== deviceId() ? book.lastDevice : null;
   return (
     <Link
       href={`/reader/?book=${book.id}`}
@@ -89,7 +93,12 @@ export function ContinueCard({ book }: { book: Book }) {
       <div className="absolute inset-0 bg-gradient-to-t from-black via-black/45 to-black/10" />
       <div className="absolute inset-x-0 bottom-0 p-4">
         <p className="line-clamp-1 font-display text-base font-semibold text-white">{book.seriesTitle}</p>
-        <p className="mb-2 text-xs text-fog-300">{chapterLabel(book)}</p>
+        <p className="mb-2 text-xs text-fog-300">
+          {chapterLabel(book)}
+          {elsewhere && (
+            <span className="text-fog-500"> · on {elsewhere.name || 'another device'}{elsewhere.at ? ` ${relativeTime(elsewhere.at)}` : ''}</span>
+          )}
+        </p>
         <ProgressBar value={pct || 0.02} />
       </div>
       <span className="absolute right-3 top-3 grid h-10 w-10 place-items-center rounded-full bg-accent text-black shadow-glow transition group-hover:scale-110 group-active:scale-90">

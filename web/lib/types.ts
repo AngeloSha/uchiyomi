@@ -54,6 +54,8 @@ export interface BookMetadata {
 
 export interface Book {
   id: string;
+  /** where this book was last read, when that was another device (see /api/home) */
+  lastDevice?: { id: string; name: string | null; at: string } | null;
   seriesId: string;
   seriesTitle: string;
   name: string;

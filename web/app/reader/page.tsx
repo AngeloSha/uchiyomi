@@ -9,7 +9,7 @@ import { chapterLabel } from '@/lib/format';
 import { deviceId } from '@/lib/device';
 import { getOfflineChapter, getPageBlob, queueProgress } from '@/lib/downloads';
 import { applyCover, clearCover } from '@/lib/theme';
-import { ReaderPrefs, loadPrefs, savePrefs, loadSeriesPrefs, saveSeriesPrefs, THEME_FILTER } from '@/lib/readerPrefs';
+import { ReaderPrefs, loadPrefs, savePrefs, loadSeriesPrefs, saveSeriesPrefs, syncPrefsFromServer, THEME_FILTER } from '@/lib/readerPrefs';
 import { ReaderSettings } from '@/components/ReaderSettings';
 import { Rail, SectionTitle } from '@/components/ui';
 import { SeriesCard } from '@/components/cards';
@@ -381,6 +381,15 @@ function ReaderInner() {
     api<{ color: string | null }>(`/api/series/${seriesId}/color`).then((r) => { if (alive) applyCover(r.color); }).catch(() => {});
     return () => { alive = false; clearCover(); };
   }, [seriesId]);
+
+  // ---- adopt this account's reader settings (they follow the user, not the browser) ----
+  const pulledPrefs = useRef(false);
+  useEffect(() => {
+    if (pulledPrefs.current) return;
+    pulledPrefs.current = true;
+    // localStorage already painted; this catches up a device that hasn't seen your settings yet
+    syncPrefsFromServer().then((p) => setPrefs((cur) => ({ ...cur, ...p }))).catch(() => {});
+  }, []);
 
   // ---- per-series memory (mode/theme/zoom) ----
   useEffect(() => {

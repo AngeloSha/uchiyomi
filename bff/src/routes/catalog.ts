@@ -229,6 +229,28 @@ export default async function catalogRoutes(app: FastifyInstance) {
       komga.seriesNew(0, 20).catch(() => ({ content: [] })),
     ]);
 
+    // Which device each in-progress book was last read on. Reading progress is already shared across devices;
+    // this just says where you left it, so picking up on another screen doesn't feel like guesswork.
+    // The client hides it when the device is the one you're already holding.
+    if (onDeck.length) {
+      const ids = onDeck.map((b: any) => b.id);
+      const seen = await q<{ book_id: string; device_id: string | null; created_at: string; device_name: string | null }>(
+        `SELECT DISTINCT ON (e.book_id) e.book_id, e.device_id, e.created_at,
+                (SELECT rt.device_name FROM refresh_tokens rt
+                  WHERE rt.user_id = e.user_id AND rt.device_id = e.device_id AND rt.device_name IS NOT NULL
+                  ORDER BY rt.last_seen DESC LIMIT 1) AS device_name
+           FROM reading_events e
+          WHERE e.user_id = $1 AND e.book_id = ANY($2) AND e.device_id IS NOT NULL
+          ORDER BY e.book_id, e.created_at DESC`,
+        [uid, ids],
+      ).catch(() => []);
+      const byBook = new Map(seen.map((r) => [r.book_id, r]));
+      for (const b of onDeck as any[]) {
+        const r = byBook.get(b.id);
+        if (r?.device_id) b.lastDevice = { id: r.device_id, name: r.device_name || null, at: new Date(r.created_at).toISOString() };
+      }
+    }
+
     const favIds = (
       await q<{ series_id: string }>('SELECT series_id FROM favorites WHERE user_id = $1 ORDER BY created_at DESC LIMIT 20', [uid])
     ).map((r) => r.series_id);
