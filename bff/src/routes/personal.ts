@@ -4,7 +4,7 @@ import { q, one } from '../lib/db';
 // backend-agnostic content client: the owned library in owned mode, Komga otherwise. The old direct
 // `lib/komga` import silently nulled every series lookup here after the owned-library cutover.
 import { content as komga } from '../lib/backend';
-import { authenticate, userIdOf, issueOpdsToken } from '../lib/auth';
+import { authenticate, userIdOf, roleOf, issueOpdsToken, issueApiToken, listApiTokens, revokeApiToken, API_SCOPES } from '../lib/auth';
 import { env } from '../env';
 import { pushEnabled, vapidPublicKey, saveSubscription, removeSubscription } from '../lib/push';
 import { statusFor, saveConnection, disconnect, whoAmI, pushSeriesProgress } from '../lib/trackers';
@@ -36,6 +36,42 @@ export default async function personalRoutes(app: FastifyInstance) {
   app.post('/api/opds/token', async (req) => {
     const token = await issueOpdsToken(userIdOf(req));
     return { token, url: `${env.PUBLIC_ORIGIN.replace(/\/$/, '')}/opds` };
+  });
+
+  // ---- personal API tokens ----
+  // Deliberately mirrors the sessions panel: list, create once, revoke. The raw token is returned by the
+  // create call and never again, because only its hash is stored.
+  app.get('/api/tokens', async (req) => ({ content: await listApiTokens(userIdOf(req)) }));
+
+  app.post('/api/tokens', async (req, reply) => {
+    const b = z
+      .object({
+        name: z.string().trim().min(1).max(60),
+        scopes: z.array(z.enum(API_SCOPES)).min(1),
+        expiresInDays: z.number().int().min(1).max(3650).nullable().optional(),
+      })
+      .safeParse(req.body);
+    if (!b.success) return reply.code(400).send({ error: 'bad_request', message: 'Give the token a name and at least one scope.' });
+
+    // Only an admin may mint an admin-scoped token; otherwise any user could self-promote their automation.
+    const scopes = b.data.scopes;
+    if (scopes.includes('admin') && roleOf(req) !== 'admin') {
+      return reply.code(403).send({ error: 'forbidden', message: 'Only an admin can create an admin token.' });
+    }
+    // 'write' and 'admin' both imply being able to read
+    if (!scopes.includes('read')) scopes.push('read');
+
+    const expires = b.data.expiresInDays ? new Date(Date.now() + b.data.expiresInDays * 86400000) : null;
+    const { id, token } = await issueApiToken(userIdOf(req), b.data.name, scopes, expires);
+    await logAudit('token.create', { userId: userIdOf(req), detail: { id, name: b.data.name, scopes }, req });
+    return { id, token };
+  });
+
+  app.delete('/api/tokens/:id', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    if (!(await revokeApiToken(userIdOf(req), id))) return reply.code(404).send({ error: 'not_found' });
+    await logAudit('token.revoke', { userId: userIdOf(req), detail: { id }, req });
+    return { ok: true };
   });
 
   // ---- web push: new-chapter notifications ----

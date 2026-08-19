@@ -147,11 +147,118 @@ export function roleOf(request: FastifyRequest): string {
 
 /** Route guard: 403 unless the verified user is an admin. Run after `authenticate`. */
 export async function requireAdmin(request: FastifyRequest, reply: FastifyReply): Promise<void> {
-  if (roleOf(request) !== 'admin') reply.code(403).send({ error: 'forbidden' });
+  if (roleOf(request) !== 'admin') return reply.code(403).send({ error: 'forbidden' });
+  // An admin's API token still needs the admin scope, so a token left in a script cannot manage the server
+  // just because its owner happens to be an admin. Session logins have no tokenScopes and are unaffected.
+  const scopes = (request.user as { tokenScopes?: string[] }).tokenScopes;
+  if (scopes && !scopes.includes('admin')) {
+    return reply.code(403).send({ error: 'forbidden', message: 'This token does not have the admin scope.' });
+  }
+}
+
+
+// ---- long-lived API tokens -------------------------------------------------
+// Automation was hostile before these: every /api/* call needed a 15-minute JWT, and the only stable
+// credential (the OPDS token) reaches /opds/* and /img/* only. These are opaque, hashed at rest, revocable,
+// and scoped, so a token pasted into a cron job can be read-only and cannot touch the admin API.
+
+/** Distinctive prefix so an API token is never mistaken for (or fed to) the JWT verifier. */
+export const API_TOKEN_PREFIX = 'uy_';
+export const API_SCOPES = ['read', 'write', 'admin'] as const;
+export type ApiScope = (typeof API_SCOPES)[number];
+
+const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
+
+export interface ApiTokenRow {
+  id: string;
+  name: string;
+  scopes: string[];
+  createdAt: string;
+  lastSeen: string | null;
+  expiresAt: string | null;
+  expired: boolean;
+}
+
+/** Mint a token. The raw value is returned once and never stored; only its hash is kept. */
+export async function issueApiToken(
+  userId: string,
+  name: string,
+  scopes: ApiScope[],
+  expiresAt: Date | null,
+): Promise<{ id: string; token: string }> {
+  const token = API_TOKEN_PREFIX + randomBytes(32).toString('base64url');
+  const rows = await q<{ id: string }>(
+    `INSERT INTO api_tokens (user_id, name, token_hash, scopes, expires_at)
+     VALUES ($1,$2,$3,$4,$5) RETURNING id`,
+    [userId, name, sha256(token), scopes, expiresAt],
+  );
+  return { id: rows[0].id, token };
+}
+
+export async function listApiTokens(userId: string): Promise<ApiTokenRow[]> {
+  const rows = await q<{
+    id: string; name: string; scopes: string[]; created_at: string;
+    last_seen: string | null; expires_at: string | null;
+  }>(
+    `SELECT id, name, scopes, created_at, last_seen, expires_at
+       FROM api_tokens WHERE user_id = $1 ORDER BY created_at DESC`,
+    [userId],
+  );
+  const now = Date.now();
+  return rows.map((r) => ({
+    id: r.id,
+    name: r.name,
+    scopes: r.scopes,
+    createdAt: new Date(r.created_at).toISOString(),
+    lastSeen: r.last_seen ? new Date(r.last_seen).toISOString() : null,
+    expiresAt: r.expires_at ? new Date(r.expires_at).toISOString() : null,
+    expired: !!r.expires_at && new Date(r.expires_at).getTime() < now,
+  }));
+}
+
+/** Scoped to the owner on purpose: a user can only revoke their own tokens. */
+export async function revokeApiToken(userId: string, id: string): Promise<boolean> {
+  const rows = await q<{ id: string }>(
+    'DELETE FROM api_tokens WHERE id = $1 AND user_id = $2 RETURNING id',
+    [id, userId],
+  );
+  return rows.length > 0;
+}
+
+interface ResolvedToken { id: string; userId: string; role: string; scopes: string[] }
+
+async function resolveApiToken(raw: string): Promise<ResolvedToken | null> {
+  const row = await one<{ id: string; user_id: string; scopes: string[]; expires_at: string | null; role: string }>(
+    `SELECT t.id, t.user_id, t.scopes, t.expires_at, u.role
+       FROM api_tokens t JOIN users u ON u.id = t.user_id
+      WHERE t.token_hash = $1`,
+    [sha256(raw)],
+  );
+  if (!row) return null;
+  if (row.expires_at && new Date(row.expires_at).getTime() < Date.now()) return null;
+  // best-effort; a failed last_seen write must not fail the request
+  q('UPDATE api_tokens SET last_seen = now() WHERE id = $1', [row.id]).catch(() => {});
+  return { id: row.id, userId: row.user_id, role: row.role, scopes: row.scopes };
 }
 
 /** Preflight guard usable as a route preHandler. */
 export async function authenticate(request: FastifyRequest, reply: FastifyReply): Promise<void> {
+  // An API token is recognised by its prefix and resolved from the database. Everything else takes the
+  // original JWT path untouched, so sessions, 2FA and refresh behave exactly as before.
+  const header = request.headers.authorization;
+  if (header && /^bearer /i.test(header)) {
+    const raw = header.slice(7).trim();
+    if (raw.startsWith(API_TOKEN_PREFIX)) {
+      const tok = await resolveApiToken(raw);
+      if (!tok) return reply.code(401).send({ error: 'unauthorized' });
+      if (!tok.scopes.includes('write') && !SAFE_METHODS.has(request.method)) {
+        return reply.code(403).send({ error: 'forbidden', message: 'This token is read-only.' });
+      }
+      // shaped like a verified JWT payload so userIdOf/roleOf work unchanged downstream
+      (request as { user?: unknown }).user = { sub: tok.userId, role: tok.role, tokenScopes: tok.scopes };
+      return;
+    }
+  }
   try {
     await request.jwtVerify();
   } catch {

@@ -8,6 +8,7 @@ import { useToast } from '@/components/Toast';
 interface Session { id: string; device_name: string | null; ip: string | null; user_agent: string | null; last_seen: string; created_at: string; current: boolean }
 
 const msgOf = (e: any, fb: string) => { try { return JSON.parse(e?.body || '{}').message || fb; } catch { return fb; } };
+const fld = 'w-full rounded-xl border border-ink-700 bg-ink-850 px-3 py-2.5 text-sm text-fog-100 outline-none focus:border-accent';
 const rel = (d?: string | null) => {
   if (!d) return '';
   const s = Math.floor((Date.now() - new Date(d).getTime()) / 1000);
@@ -54,7 +55,6 @@ export function SecurityPanel() {
   const revoke = async (id: string) => { await api(`/auth/sessions/${id}`, { method: 'DELETE' }); qc.invalidateQueries({ queryKey: ['sessions'] }); };
   const logoutAll = async () => { await api('/auth/logout-all', { method: 'POST' }); qc.invalidateQueries({ queryKey: ['sessions'] }); toast('Signed out everywhere else', 'success'); };
 
-  const fld = 'w-full rounded-xl border border-ink-700 bg-ink-850 px-3 py-2.5 text-sm text-fog-100 outline-none focus:border-accent';
 
   return (
     <div className="space-y-6">
@@ -119,6 +119,95 @@ export function SecurityPanel() {
             </div>
           ))}
         </div>
+      </div>
+
+      <ApiTokens />
+    </div>
+  );
+}
+
+interface ApiToken { id: string; name: string; scopes: string[]; createdAt: string; lastSeen: string | null; expiresAt: string | null; expired: boolean }
+
+/** Long-lived tokens for scripts and integrations. Shown once on creation, revocable at any time. */
+function ApiTokens() {
+  const { user } = useAuth();
+  const toast = useToast();
+  const qc = useQueryClient();
+  const [open, setOpen] = useState(false);
+  const [name, setName] = useState('');
+  const [write, setWrite] = useState(false);
+  const [admin, setAdmin] = useState(false);
+  const [fresh, setFresh] = useState<string | null>(null);
+
+  const { data } = useQuery({ queryKey: ['api-tokens'], queryFn: () => api<{ content: ApiToken[] }>('/api/tokens') });
+  const tokens = data?.content || [];
+
+  const create = async () => {
+    const scopes = ['read', ...(write ? ['write'] : []), ...(admin ? ['admin'] : [])];
+    try {
+      const r = await api<{ token: string }>('/api/tokens', { json: { name: name.trim(), scopes } });
+      setFresh(r.token);
+      setName(''); setWrite(false); setAdmin(false); setOpen(false);
+      qc.invalidateQueries({ queryKey: ['api-tokens'] });
+    } catch (e: any) { toast(msgOf(e, 'Could not create the token'), 'error'); }
+  };
+  const revoke = async (id: string) => {
+    try { await api(`/api/tokens/${id}`, { method: 'DELETE' }); qc.invalidateQueries({ queryKey: ['api-tokens'] }); toast('Token revoked', 'success'); }
+    catch { toast('Could not revoke', 'error'); }
+  };
+
+  return (
+    <div className="card p-4">
+      <div className="mb-1 flex items-center justify-between">
+        <h3 className="text-sm font-semibold text-fog-100">API tokens</h3>
+        {!open && <button onClick={() => setOpen(true)} className="text-xs text-accent hover:underline">New token</button>}
+      </div>
+      <p className="mb-3 text-xs text-fog-500">For scripts and integrations. A normal login expires every 15 minutes; these don&apos;t, so treat one like a password.</p>
+
+      {fresh && (
+        <div className="mb-3 rounded-xl border border-accent/40 bg-accent/10 p-3">
+          <p className="text-xs text-fog-100">Copy this now. It won&apos;t be shown again.</p>
+          <p className="mt-1.5 break-all rounded-lg border border-ink-700 bg-ink-900/60 px-2 py-1.5 font-mono text-xs text-accent">{fresh}</p>
+          <button onClick={() => setFresh(null)} className="mt-2 text-xs text-fog-400 hover:underline">Done</button>
+        </div>
+      )}
+
+      {open && (
+        <div className="mb-3 space-y-2 rounded-xl border border-ink-700/70 bg-ink-850/50 p-3">
+          <input value={name} onChange={(e) => setName(e.target.value)} placeholder="What is it for? e.g. backup script" className={fld} />
+          <label className="flex items-center gap-2 text-xs text-fog-300">
+            <input type="checkbox" checked={write} onChange={(e) => setWrite(e.target.checked)} className="accent-accent" />
+            Allow changes (without this the token can only read)
+          </label>
+          {user?.role === 'admin' && (
+            <label className="flex items-center gap-2 text-xs text-fog-300">
+              <input type="checkbox" checked={admin} onChange={(e) => setAdmin(e.target.checked)} className="accent-accent" />
+              Allow server administration
+            </label>
+          )}
+          <div className="flex gap-2 pt-1">
+            <button onClick={create} disabled={!name.trim()} className="btn-accent flex-1 py-2 text-sm disabled:opacity-50">Create</button>
+            <button onClick={() => { setOpen(false); setName(''); }} className="chip text-xs">Cancel</button>
+          </div>
+        </div>
+      )}
+
+      <div className="space-y-2">
+        {tokens.map((t) => (
+          <div key={t.id} className="flex items-center justify-between rounded-xl border border-ink-700/70 bg-ink-850/50 px-3 py-2">
+            <div className="min-w-0">
+              <p className="truncate text-sm text-fog-100">{t.name}
+                {t.expired && <span className="ml-2 rounded bg-red-500/20 px-1.5 py-0.5 text-[10px] font-semibold text-red-300">Expired</span>}
+              </p>
+              <p className="truncate text-xs text-fog-500">
+                {t.scopes.includes('admin') ? 'admin' : t.scopes.includes('write') ? 'read + write' : 'read only'}
+                {' · '}{t.lastSeen ? `last used ${rel(t.lastSeen)}` : 'never used'}
+              </p>
+            </div>
+            <button onClick={() => revoke(t.id)} className="shrink-0 text-xs text-red-300 hover:underline">Revoke</button>
+          </div>
+        ))}
+        {!tokens.length && !open && <p className="text-xs text-fog-600">No tokens yet.</p>}
       </div>
     </div>
   );

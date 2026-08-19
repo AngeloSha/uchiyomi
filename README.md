@@ -53,6 +53,8 @@ into a single image.** Point it at your library, add sources by URL, and it does
 - **Offline:** installable PWA with offline downloads + smart auto-sync of favorites.
 - **Push notifications:** opt-in web push the moment a followed series gets a new chapter.
 - **OPDS:** browse & read your Uchiyomi library from other reader apps (Panels, Chunky, KOReader, …).
+- **Scriptable:** long-lived, revocable API tokens with read / write / admin scopes, so a backup script or
+  a cron job can talk to the API without a browser session. See [docs/api.md](docs/api.md).
 - **AniList sync:** connect your account once and finishing a chapter updates your AniList list on its own.
   Progress is the highest chapter you've *finished*, so re-reading an old one never rewinds your list, and
   AniList being down or your token expiring can never block or slow down your reading.
@@ -98,6 +100,8 @@ Suwayomi) fetches chapters but is Android-only or wraps them in a basic web UI. 
 | Add a source by pasting a URL | ✅ | — | extensions | extension repos |
 | Syncs your progress to AniList | ✅ | Kavita only | ✅ | ✅ |
 | Automatic nightly backups | ✅ | ❌ | ❌ | ❌ |
+| Library health checks | ✅ | ❌ | ❌ | ❌ |
+| Scoped API tokens for scripts | ✅ | ✅ | ❌ | ❌ |
 
 **Honest caveats** (narrower than they look): Komga/Kavita are more mature for general library management, and
 Tachiyomi/Mihon list more individual sources. But Uchiyomi reads **CBZ, CBR, and loose image folders**. It skips

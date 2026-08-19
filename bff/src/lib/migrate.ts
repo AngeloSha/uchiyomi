@@ -297,6 +297,21 @@ CREATE TABLE IF NOT EXISTS opds_tokens (
   last_seen  timestamptz
 );
 
+-- long-lived personal tokens for scripts and integrations. Unlike the OPDS token these reach /api/*,
+-- so they carry explicit scopes: read is GET-only, write allows mutations, admin is required on top of an
+-- admin account before a token may touch /api/admin/*. Only the hash is stored; the raw value is shown once.
+CREATE TABLE IF NOT EXISTS api_tokens (
+  id         uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id    uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  name       text NOT NULL,
+  token_hash text NOT NULL UNIQUE,
+  scopes     text[] NOT NULL DEFAULT '{read}',
+  created_at timestamptz NOT NULL DEFAULT now(),
+  last_seen  timestamptz,
+  expires_at timestamptz
+);
+CREATE INDEX IF NOT EXISTS api_tokens_user_idx ON api_tokens (user_id);
+
 -- web-push subscriptions for new-chapter notifications (one row per browser/device endpoint)
 CREATE TABLE IF NOT EXISTS push_subscriptions (
   user_id    uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
