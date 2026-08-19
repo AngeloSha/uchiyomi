@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.2.1 — 2026-08-09
+
+- Volume-based libraries read correctly: archives named as tomes (`Tome 01.cbr`, `Berserk T41`, `v01`) now
+  label as **Vol. N** instead of Ch. N, and a mostly-volume series reports "N volumes". Chapter markers still
+  win, so a release-version suffix like `Ch. 5 v2` stays a chapter.
+
 ## v0.2.0 — 2026-08-09
 
 The "cinematic + convenient" release.
