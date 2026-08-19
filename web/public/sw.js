@@ -1,7 +1,9 @@
 /* Uchiyomi service worker — app-shell + runtime caching.
    Explicit offline chapter downloads live in IndexedDB (managed by the app);
    this SW handles the shell, static assets, and casual image/API re-reads. */
-const VERSION = 'v4';
+// Bump on any change to cached assets. /icons is served cache-first, so the rebrand's new icons only reach
+// existing visitors once this changes — the activate handler evicts every cache whose name doesn't end in it.
+const VERSION = 'v5';
 const SHELL = `yomi-shell-${VERSION}`;
 const STATIC = `yomi-static-${VERSION}`;
 const IMG = `yomi-img-${VERSION}`;
