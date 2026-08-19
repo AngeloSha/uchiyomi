@@ -19,6 +19,7 @@ import { ART_DIR, artFile } from '../lib/seriesArt';
 import { addSeriesFromSource, findBestMatch, norm } from './sources';
 import { titlesFromBackup } from '../lib/tachibk';
 import { linkSeries } from '../lib/trackers';
+import { runHealthChecks } from '../lib/health';
 import { titlesFromMangadexList } from '../lib/mangadexList';
 import { fetchAniListArt, fetchAniListCandidates, fetchAnimeBanner } from '../lib/anilist';
 import { fetchKitsuBanner } from '../lib/kitsu';
@@ -339,6 +340,11 @@ export default async function adminRoutes(app: FastifyInstance) {
     return { ok: true, total: targets.length };
   });
   app.get('/api/admin/art/backfill/status', async () => ({ job: artJob }));
+
+  // ---- library health ----
+  // Read-only aggregate over the library. Every check is a plain query, so this is safe to hit whenever
+  // the tab is opened rather than needing a background job.
+  app.get('/api/admin/health', async () => runHealthChecks());
 
   // ---- link existing series to AniList entries so tracker sync has an anchor ----
   // Art was matched long before trackers existed, so those series have cached art but no link. This

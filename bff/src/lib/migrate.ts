@@ -309,16 +309,28 @@ CREATE TABLE IF NOT EXISTS push_subscriptions (
 );
 `;
 
+// Serialises migrate() across processes. CREATE TABLE IF NOT EXISTS is not safe to run concurrently:
+// two connections racing on the same new type or table collide inside pg_type's unique index rather than
+// one of them quietly no-opping. Anything that can start two BFFs at once -- a second replica, a restart
+// overlapping a slow boot, or a test suite running files in parallel -- hits it.
+const MIGRATE_LOCK = 8_263_195; // arbitrary, just has to be stable across processes
+
 export async function migrate(): Promise<void> {
   const client = await pool.connect();
   try {
-    await client.query('BEGIN');
-    await client.query(DDL);
-    await client.query('COMMIT');
-  } catch (e) {
-    await client.query('ROLLBACK');
-    throw e;
+    // blocks until any other migrating process finishes, then finds the work already done
+    await client.query('SELECT pg_advisory_lock($1)', [MIGRATE_LOCK]);
+    try {
+      await client.query('BEGIN');
+      await client.query(DDL);
+      await client.query('COMMIT');
+    } catch (e) {
+      await client.query('ROLLBACK');
+      throw e;
+    }
   } finally {
+    // release before returning the connection to the pool, or the lock outlives this call
+    await client.query('SELECT pg_advisory_unlock($1)', [MIGRATE_LOCK]).catch(() => {});
     client.release();
   }
 

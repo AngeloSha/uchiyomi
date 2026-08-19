@@ -10,7 +10,7 @@ import { useToast } from '@/components/Toast';
 import { Avatar } from '@/components/Avatar';
 import { IcChevronLeft, IcTrash, IcPlus, IcRefresh } from '@/components/icons';
 
-const TABS = ['Overview', 'Members', 'Providers', 'Art', 'Tasks', 'Activity', 'Sessions', 'Settings'] as const;
+const TABS = ['Overview', 'Members', 'Providers', 'Art', 'Health', 'Tasks', 'Activity', 'Sessions', 'Settings'] as const;
 type Tab = (typeof TABS)[number];
 const msgOf = (e: any, fb: string) => { try { return JSON.parse(e?.body || '{}').message || fb; } catch { return fb; } };
 const fld = 'w-full rounded-xl border border-ink-700 bg-ink-900 px-3 py-2.5 text-sm text-fog-50 outline-none focus:border-accent';
@@ -40,6 +40,7 @@ export default function AdminPage() {
         {tab === 'Members' && <Members />}
         {tab === 'Providers' && <Providers />}
         {tab === 'Art' && <ArtReview />}
+        {tab === 'Health' && <Health />}
         {tab === 'Tasks' && <Tasks />}
         {tab === 'Activity' && <Activity />}
         {tab === 'Sessions' && <Sessions />}
@@ -603,6 +604,86 @@ function Settings() {
         <p className="mb-3 text-sm text-fog-400">Uchiyomi is free &amp; open-source. If you find it useful, you can help fund development.</p>
         <a href="https://ko-fi.com/angeloshaheen" target="_blank" rel="noopener noreferrer" className="btn-accent flex w-full items-center justify-center gap-2 py-2 text-sm">☕ Buy me a coffee</a>
       </div>
+    </div>
+  );
+}
+
+interface HealthItem { seriesId?: string; title: string; detail: string }
+interface HealthCheck { id: string; title: string; status: 'ok' | 'warn' | 'problem'; summary: string; note?: string; items: HealthItem[] }
+
+const HEALTH_TONE: Record<HealthCheck['status'], string> = {
+  problem: 'border-red-500/40 bg-red-500/10 text-red-300',
+  warn: 'border-amber-500/40 bg-amber-500/10 text-amber-300',
+  ok: 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300',
+};
+const HEALTH_LABEL: Record<HealthCheck['status'], string> = { problem: 'Needs attention', warn: 'Worth a look', ok: 'All good' };
+
+/** Read-only audit of the library: gaps, truncated downloads, duplicates, and failing sources. */
+function Health() {
+  const [open, setOpen] = useState<string | null>(null);
+  const { data, isFetching, refetch } = useQuery({
+    queryKey: ['admin-health'],
+    queryFn: () => api<{ generatedAt: string; checks: HealthCheck[] }>('/api/admin/health'),
+  });
+  const checks = data?.checks || [];
+  const bad = checks.filter((c) => c.status !== 'ok').length;
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-xs text-fog-500">
+          {!data ? 'Checking your library…'
+            : bad ? `${bad} of ${checks.length} checks found something`
+            : 'Everything looks healthy'}
+          {data && <> · checked {relativeTime(data.generatedAt)}</>}
+        </p>
+        <button onClick={() => refetch()} disabled={isFetching} className="chip shrink-0 text-xs disabled:opacity-50">
+          {isFetching ? 'Checking…' : 'Re-check'}
+        </button>
+      </div>
+
+      {checks.map((c) => {
+        const isOpen = open === c.id;
+        return (
+          <div key={c.id} className="card overflow-hidden">
+            <button
+              onClick={() => setOpen(isOpen ? null : c.id)}
+              disabled={!c.items.length}
+              className="flex w-full items-center gap-3 px-4 py-3.5 text-left disabled:cursor-default"
+            >
+              <span className={`shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-medium ${HEALTH_TONE[c.status]}`}>
+                {HEALTH_LABEL[c.status]}
+              </span>
+              <div className="min-w-0 flex-1">
+                <p className="text-sm text-fog-100">{c.title}</p>
+                <p className="text-[11px] text-fog-500">{c.summary}</p>
+              </div>
+              {!!c.items.length && (
+                <span className="shrink-0 text-xs text-fog-500">{isOpen ? 'Hide' : 'Show'}</span>
+              )}
+            </button>
+
+            {isOpen && (
+              <div className="border-t border-ink-800/70">
+                {c.note && <p className="px-4 pt-3 text-[11px] leading-relaxed text-fog-500">{c.note}</p>}
+                <div className="divide-y divide-ink-800/70">
+                  {c.items.map((it, i) => (
+                    <div key={`${c.id}-${i}`} className="flex items-center gap-3 px-4 py-2.5">
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm text-fog-100">{it.title}</p>
+                        <p className="text-[11px] text-fog-500">{it.detail}</p>
+                      </div>
+                      {it.seriesId && (
+                        <a href={`/series/${it.seriesId}`} className="chip shrink-0 text-xs">Open</a>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }
