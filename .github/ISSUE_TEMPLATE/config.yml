@@ -1,5 +1,11 @@
 blank_issues_enabled: true
 contact_links:
+  - name: Questions, ideas and show-and-tell
+    url: https://github.com/AngeloSha/uchiyomi/discussions
+    about: Ask how something works, propose a feature, or show what you built. Faster than an issue.
+  - name: Report a security vulnerability
+    url: https://github.com/AngeloSha/uchiyomi/security/advisories/new
+    about: Please report privately rather than opening a public issue. See SECURITY.md.
   - name: Support Uchiyomi
     url: https://ko-fi.com/angeloshaheen
     about: Back the project (and the native apps) on Ko-fi

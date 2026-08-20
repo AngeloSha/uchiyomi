@@ -2,7 +2,12 @@
 
 *The all-in-one **\*arr stack** for manga: discover, grab, monitor, and read, self-hosted in one PWA.*
 
-### 🌐 [**uchiyomi.com**](https://uchiyomi.com) · 🐙 [GitHub](https://github.com/AngeloSha/uchiyomi) · ☕ [Ko-fi](https://ko-fi.com/angeloshaheen)
+[![CI](https://github.com/AngeloSha/uchiyomi/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/AngeloSha/uchiyomi/actions/workflows/ci.yml)
+[![Latest release](https://img.shields.io/github/v/release/AngeloSha/uchiyomi?label=release&color=7c5cff)](https://github.com/AngeloSha/uchiyomi/releases/latest)
+[![License: MPL-2.0](https://img.shields.io/badge/license-MPL--2.0-blue.svg)](LICENSE)
+[![Container images](https://img.shields.io/badge/ghcr.io-amd64%20%2B%20arm64-2496ED?logo=docker&logoColor=white)](https://github.com/AngeloSha?tab=packages&repo_name=uchiyomi)
+
+### 🌐 [**uchiyomi.com**](https://uchiyomi.com) · 🐙 [GitHub](https://github.com/AngeloSha/uchiyomi) · ☕ [Ko-fi](https://ko-fi.com/angeloshaheen) · 📜 [Changelog](CHANGELOG.md)
 
 A self-hosted, installable (PWA) manga / manhwa reader with a true-black OLED interface and a vertical-scroll
 webtoon reader as the centerpiece. Point it at your own CBZ library and read on any device.
@@ -90,6 +95,19 @@ into a single image.** Point it at your library, add sources by URL, and it does
 
 ![Library](docs/shots/library.webp)
 
+### On a phone
+
+Installed to the home screen it's the same app, not a cut-down one — the reader, the library and offline
+downloads all come along.
+
+<p>
+  <img src="docs/shots/phone-home.webp" alt="The Uchiyomi home screen on a phone" width="240">
+  <img src="docs/shots/phone-library.webp" alt="The library on a phone" width="240">
+  <img src="docs/shots/phone-reader.webp" alt="The webtoon reader on a phone, mid-chapter" width="240">
+</p>
+
+> 📸 Every screen, walked through with captions: **[docs/USAGE.md](docs/USAGE.md)**.
+
 ## Why Uchiyomi?
 
 Most self-hosted manga tools make you pick a side. A **library server** (Komga, Kavita) reads files you supply
@@ -142,7 +160,7 @@ household, with webtoons first-class.
 
 ## Architecture
 
-*(Development stack — see the install section above for the container names used by `deploy/docker-compose.yml`.)*
+*(Development stack — see [Install](#install) below for the container names `deploy/docker-compose.yml` uses.)*
 
 | Service | What it is |
 | --- | --- |
@@ -158,7 +176,10 @@ each chapter is a `.cbz`, a `.cbr`, or a folder of images (an archive may carry 
 Everything else runs in containers: no Node, no database, nothing to install on the host.
 
 Grab one file and start it — this pulls prebuilt **multi-arch images (amd64 + arm64)**, so there's nothing to
-compile and it comes up in seconds even on a NAS or a Raspberry Pi:
+compile and it comes up in seconds even on a NAS or a Raspberry Pi.
+
+> **Don't clone the repo to install it.** The top-level `docker-compose.yml` builds from source and is the
+> *development* stack. The one command below is the whole install.
 
 ```bash
 curl -O https://raw.githubusercontent.com/AngeloSha/uchiyomi/main/deploy/docker-compose.yml
@@ -176,8 +197,8 @@ echo "LIBRARY_PATH=/path/to/your/manga" > .env
 docker compose up -d
 ```
 
-> Cloning the repo instead? The top-level `docker-compose.yml` **builds from source** and is meant for
-> development. For running Uchiyomi, use `deploy/docker-compose.yml` above.
+**On CasaOS?** Use [`deploy/casaos/docker-compose.yml`](deploy/casaos/docker-compose.yml) instead — import it
+as a custom app and it appears with an icon like any store app.
 
 It runs five containers:
 
@@ -249,7 +270,8 @@ Everything is in `.env` (see `.env.example`). Notably:
 - `LIBRARY_BACKEND`: `owned` (read your CBZ library, default) or `komga` (read from a Komga server).
 - `LIBRARY_PATH`: host path to your CBZ library (read-only mount at `/library`).
 - `SOURCES_PATH`: host path to a built source pack (empty by default = no sources).
-- `WEB_PORT`: host port the app is published on (default `3000`).
+- `WEB_PORT`: host port the app is published on — `8080` with `deploy/docker-compose.yml`, `3000` in the
+  development stack.
 - `PUBLIC_ORIGIN`: the URL the app is served from (match your domain behind a reverse proxy).
 
 ## Roadmap
@@ -275,6 +297,10 @@ the app under **Profile** and **Admin → Settings**.
 Uchiyomi is built and maintained by [@AngeloSha](https://github.com/AngeloSha). Pull requests, bug reports, and
 feature ideas are all welcome: start with [CONTRIBUTING.md](CONTRIBUTING.md), or open an
 [issue](https://github.com/AngeloSha/uchiyomi/issues).
+
+- 💬 **[Discussions](https://github.com/AngeloSha/uchiyomi/discussions)** — questions, ideas, and what you've built with it
+- 📜 **[Releases](https://github.com/AngeloSha/uchiyomi/releases)** / **[Changelog](CHANGELOG.md)** — watch the repo to hear about new ones
+- 🔒 **[Security policy](SECURITY.md)** — please report vulnerabilities privately
 
 Thanks to everyone who has helped build Uchiyomi:
 

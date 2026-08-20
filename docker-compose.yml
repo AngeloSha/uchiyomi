@@ -1,152 +1,65 @@
-# Uchiyomi — self-hosted OLED manga/manhwa reader (bring-your-own CBZ library)
-# services: yomi-db (private Postgres) · yomi-bff (Fastify API) · yomi-web (static PWA) · yomi-flaresolverr (optional)
+# Umami — cookieless, self-hosted analytics for uchiyomi.com.
+#
+# Deliberately NOT given a hostname of its own. koryomi-web reverse-proxies it at https://uchiyomi.com/stats/,
+# which means: no new DNS record, and the tracker is first-party, so the content blockers that self-hosters
+# run do not silently delete the only measurement this project has.
+#
+# The subnet is pinned because this host has exhausted Docker's default address pools; a new project that
+# lets Docker choose fails to create its network.
+
 services:
-  yomi-db:
-    image: supabase/postgres:15.8.1.085
-    container_name: yomi-db
+  umami-db:
+    image: postgres:16-alpine
+    container_name: umami-db
     restart: unless-stopped
     environment:
-      POSTGRES_DB: yomi
-      POSTGRES_USER: yomi
-      POSTGRES_PASSWORD: ${DB_PASSWORD:-uchiyomi}   # internal-only DB (no published port); override in .env for extra safety
+      POSTGRES_DB: umami
+      POSTGRES_USER: umami
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?set DB_PASSWORD in .env}
     volumes:
-      - yomi_pgdata:/var/lib/postgresql/data
-    networks:
-      - yomi_internal          # private: only the BFF can reach the DB
-    # NOTE: deliberately NO `ports:` and only on yomi_internal -> unreachable from outside the stack
+      - umami-db:/var/lib/postgresql/data
+    networks: [umami_internal]
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U yomi -d yomi"]
+      test: ["CMD-SHELL", "pg_isready -U umami -d umami"]
       interval: 10s
       timeout: 5s
-      retries: 5
-    labels:
-      - com.centurylinklabs.watchtower.enable=false
-
-  yomi-bff:
-    build: ./bff
-    image: yomi-bff:prod
-    container_name: yomi-bff
-    restart: unless-stopped
-    env_file: .env
-    environment:
-      NODE_ENV: production
-      PORT: "3000"
-      DATABASE_URL: postgres://yomi:${DB_PASSWORD:-uchiyomi}@yomi-db:5432/yomi
-      KOMGA_BASE_URL: ${KOMGA_BASE_URL:-http://komga:25600}
-      KOMGA_API_KEY: ${KOMGA_API_KEY:-}        # only used when LIBRARY_BACKEND=komga
-      JWT_SECRET: ${JWT_SECRET:-}                                 # optional: auto-generated + persisted to /config if empty
-      INITIAL_USER_PASSWORD_HASH_B64: ${INITIAL_USER_PASSWORD_HASH_B64:-}   # optional: first-run web setup creates the admin
-      PUBLIC_ORIGIN: ${PUBLIC_ORIGIN:-http://localhost:3000}
-      CACHE_DIR: /cache
-      CACHE_MAX_BYTES: "16106127360"   # 15 GiB image cache cap
-      LIBRARY_ROOT: /library
-      DL_ROOT: /library-dl             # owned, writable download dir (separate from Suwayomi's read library)
-      LIBRARY_BACKEND: owned           # Phase-1 cutover: serve from the owned CBZ library, not Komga
-      FLARESOLVERR_URL: http://yomi-flaresolverr:8191   # Cloudflare solver for Cloudflare-protected sources
-      SOURCES_DIR: /sources            # runtime source plugins are loaded from here (none = scraper-free core)
-      CUSTOM_SITES_FILE: /config/sites.json   # admin-added Madara/Manganato sites (Add-a-site form)
-      # Extension engine: a Suwayomi server that runs Mihon/Tachiyomi extensions. Wired up by default;
-      # set SUWAYOMI_URL to an empty string in .env to turn the feature off entirely.
-      SUWAYOMI_URL: ${SUWAYOMI_URL:-http://yomi-suwayomi:4567}
-      SUWAYOMI_USERNAME: ${SUWAYOMI_USERNAME:-}
-      SUWAYOMI_PASSWORD: ${SUWAYOMI_PASSWORD:-}
-      SUWAYOMI_MAX_SOURCES: ${SUWAYOMI_MAX_SOURCES:-25}
-    volumes:
-      - yomi_imgcache:/cache
-      - ${LIBRARY_PATH:-./library}:/library:ro                # your existing CBZ library (bring-your-own), read-only
-      - yomi_library:/library-dl                             # owned, writable download dir
-      - ${SOURCES_PATH:-./sources}:/sources:ro               # user-supplied source plugins (compiled .js)
-      - yomi_config:/config                                  # writable app config (custom sites list)
-      - ${BACKUP_PATH:-yomi_backups}:/backups                # nightly DB + config backups (see docs/USAGE.md)
-    networks:
-      - yomi_internal            # reach the DB
-      - yomi_app                 # reach the web + flaresolverr
-    expose:
-      - "3000"
-    depends_on:
-      yomi-db:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/healthz >/dev/null 2>&1 || exit 1"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
+      retries: 10
       start_period: 20s
     labels:
       - com.centurylinklabs.watchtower.enable=false
 
-  yomi-web:
-    build: ./web
-    image: yomi-web:prod
-    container_name: yomi-web
+  umami:
+    image: ghcr.io/umami-software/umami:postgresql-latest
+    container_name: umami
     restart: unless-stopped
-    expose:
-      - "80"
-    ports:
-      - "${WEB_PORT:-3000}:80"   # open the app at http://localhost:3000 (front with a reverse proxy for HTTPS)
-    networks:
-      - yomi_app
+    environment:
+      DATABASE_URL: postgresql://umami:${DB_PASSWORD:?}@umami-db:5432/umami
+      DATABASE_TYPE: postgresql
+      APP_SECRET: ${APP_SECRET:?set APP_SECRET in .env}
+      BASE_PATH: /stats
+      DISABLE_TELEMETRY: "1"
     depends_on:
-      - yomi-bff
+      umami-db:
+        condition: service_healthy
+    expose:
+      - "3000"
+    networks: [umami_internal, proxy]
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1/ >/dev/null 2>&1 || exit 1"]
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/stats/api/heartbeat >/dev/null 2>&1 || exit 1"]
       interval: 30s
       timeout: 5s
-      retries: 3
-      start_period: 10s
+      retries: 5
+      start_period: 60s
     labels:
       - com.centurylinklabs.watchtower.enable=false
-
-  # Cloudflare solver (headless Chrome) — lets the Aqua Manga source adapter get past Cloudflare.
-  yomi-flaresolverr:
-    image: ghcr.io/flaresolverr/flaresolverr:latest
-    container_name: yomi-flaresolverr
-    restart: unless-stopped
-    environment:
-      LOG_LEVEL: info
-      TZ: UTC
-    networks:
-      - yomi_app
-    expose:
-      - "8191"
-    labels:
-      - com.centurylinklabs.watchtower.enable=false
-
-  # Extension engine. Runs Mihon/Tachiyomi extensions (which are Android/Kotlin) on the JVM and exposes them
-  # over an API; Uchiyomi keeps owning the library, reader, downloads and updates and only asks it for
-  # search/chapters/pages. Browse and install extensions from Uchiyomi's own admin panel.
-  #
-  # Pinned rather than :stable on purpose -- :stable is v2.2.2100, which is older than the extension API the
-  # current repository indexes require, so it sees an empty catalogue.
-  # It is a JVM and sits around 800MB of RAM. Do not want it? Set SUWAYOMI_URL= (empty) in .env.
-  yomi-suwayomi:
-    image: ghcr.io/suwayomi/suwayomi-server:v2.3.2243
-    container_name: yomi-suwayomi
-    restart: unless-stopped
-    environment:
-      TZ: UTC
-      # Uchiyomi does the downloading and owns the library; this instance must never write into it.
-      AUTO_DOWNLOAD_CHAPTERS: "false"
-      DOWNLOAD_AS_CBZ: "true"
-    volumes:
-      - yomi_suwayomi:/home/suwayomi/.local/share/Tachidesk
-    networks:
-      - yomi_app
-    expose:
-      - "4567"
-    labels:
-      - com.centurylinklabs.watchtower.enable=false
-
-networks:
-  yomi_internal:                 # private: only db + bff (DB never leaves this network)
-    driver: bridge
-  yomi_app:                      # app tier: bff + web + flaresolverr talk to each other
-    driver: bridge
 
 volumes:
-  yomi_pgdata:
-  yomi_imgcache:
-  yomi_library:
-  yomi_config:
-  yomi_suwayomi:  # optional extension engine's own data (extensions + its database)
-  yomi_backups:   # default backup target; set BACKUP_PATH to a host dir (ideally another disk) to override
+  umami-db:
+
+networks:
+  umami_internal:
+    ipam:
+      config:
+        - subnet: 10.81.0.0/24
+  proxy:
+    external: true
