@@ -122,6 +122,15 @@ x-casaos:
 
         On first launch, open the web UI and create your admin account in the browser. There is no default
         password to change.
+
+        **Run this once before installing.** Uchiyomi runs as a non-root user (uid 10002), and the folders
+        CasaOS creates for an app belong to root, so without this its downloads, image cache and settings
+        are unwritable:
+
+        ```
+        sudo mkdir -p /DATA/AppData/uchiyomi/{downloads,config,cache,backups}
+        sudo chown -R 10002:10002 /DATA/AppData/uchiyomi
+        ```
   port_map: "8080"
   scheme: http
   index: /

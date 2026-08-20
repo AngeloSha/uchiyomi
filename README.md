@@ -232,7 +232,19 @@ you first installed, indefinitely, with nothing to tell you. Watch
 [releases](https://github.com/AngeloSha/uchiyomi/releases) to know when there is something to pull.
 
 Upgrading in place is safe: accounts, reading progress, downloads and settings live in named volumes, and the
-database migrates itself on boot. Nobody is logged out.
+database migrates itself on boot.
+
+> **Installed before v0.5.1?** Those builds left the `config` and `downloads` volumes owned by root, while the
+> app runs as uid 10002 — so chapter downloads failed, adding a site returned an error, and because the JWT
+> secret could not be saved, **everyone was signed out on every restart**. Newer images create those
+> directories correctly, but Docker never re-seeds a volume that already exists, so fix yours once:
+>
+> ```bash
+> docker compose down
+> docker volume ls | grep uchiyomi        # confirm the names, they are prefixed by your folder
+> docker run --rm -v uchiyomi_config:/a -v uchiyomi_downloads:/b alpine chown -R 10002:10002 /a /b
+> docker compose up -d
+> ```
 
 ### Serving it on a domain (HTTPS)
 

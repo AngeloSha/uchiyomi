@@ -26,8 +26,12 @@ COPY --from=build /app/dist ./dist
 # postgresql-client supplies pg_dump/pg_restore for the built-in backup task (it reaches the DB over the
 # network via DATABASE_URL — the container has no docker socket, so it can't shell out to the db container).
 RUN apk add --no-cache postgresql16-client tar gzip
-RUN mkdir -p /cache /backups && addgroup -g 10002 -S yomi && adduser -u 10002 -S -G yomi yomi \
- && chown -R yomi:yomi /cache /backups /app
+# Every path the app writes to must exist here and be owned by the app user. Docker seeds a NEW named
+# volume from the image directory it covers, so a directory missing here becomes a root:root mountpoint
+# the non-root process cannot write -- which silently costs you downloads, custom sources, and a
+# persisted JWT secret (sessions then die on every restart).
+RUN mkdir -p /cache /backups /config /library-dl && addgroup -g 10002 -S yomi && adduser -u 10002 -S -G yomi yomi \
+ && chown -R yomi:yomi /cache /backups /config /library-dl /app
 USER yomi
 EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
