@@ -325,6 +325,10 @@ async function main() {
     await ph.goto(`${BASE}/`, { waitUntil: 'networkidle2', timeout: 60000 });
     await settle(ph, 900); await shot(ph, 'phone-home');
   }
+  if (want('phone-library')) {
+    await ph.goto(`${BASE}/library/`, { waitUntil: 'networkidle2', timeout: 60000 });
+    await settle(ph, 900); await shot(ph, 'phone-library');
+  }
   if (want('phone-downloads')) {
     await ph.goto(`${BASE}/downloads/`, { waitUntil: 'networkidle2', timeout: 60000 });
     await settle(ph, 600); await shot(ph, 'phone-downloads');
