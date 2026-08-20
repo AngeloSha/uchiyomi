@@ -63,6 +63,11 @@ Images now publish to **`ghcr.io/angelosha/uchiyomi-bff`** and **`ghcr.io/angelo
 not redirect renamed packages, so the old `koryomi-*` images stay published and keep working — update your
 compose file when convenient. The GitHub repo moved to `AngeloSha/uchiyomi`; the old URL redirects.
 
+> **Correction (2026-08-21):** that was half right, and the wrong half matters. The old images stay *pullable*
+> but never update — releases only publish `uchiyomi-*` — so `koryomi-*:latest` sits frozen at v0.3.0 while
+> still looking current to anyone reading the tag. Don't stay on them: switch any reference to
+> `ghcr.io/angelosha/uchiyomi-bff` and `ghcr.io/angelosha/uchiyomi-web`.
+
 ## v0.3.0 — 2026-08-19
 
 Groundwork release: don't lose your data, don't ship broken reading, and don't retype your library.
