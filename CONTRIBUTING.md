@@ -5,7 +5,7 @@ Thanks for your interest. Bug reports, feature ideas, and pull requests are all 
 ## Project layout
 - `bff/`: the Fastify + TypeScript API (auth, library scanner, image server, sources, scheduled updater).
 - `web/`: the Next.js PWA (reader, library, discover, admin).
-- `docs/`: the user guide and screenshots.
+- `docs/`: the user guide and screenshots. Screenshots are **generated**, not hand-taken — see [docs/SCREENSHOTS.md](docs/SCREENSHOTS.md) and re-run the rig if you change a screen.
 - Source adapters live in the separate `yomi-sources` pack, not in this repo.
 
 ## Run it locally

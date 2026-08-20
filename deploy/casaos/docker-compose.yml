@@ -89,10 +89,10 @@ x-casaos:
   icon: https://raw.githubusercontent.com/AngeloSha/uchiyomi/main/web/public/icons/icon-512.png
   thumbnail: https://raw.githubusercontent.com/AngeloSha/uchiyomi/main/web/public/art/og.jpg
   screenshot_link:
-    - https://raw.githubusercontent.com/AngeloSha/uchiyomi/main/docs/hero.png
-    - https://raw.githubusercontent.com/AngeloSha/uchiyomi/main/docs/library.png
-    - https://raw.githubusercontent.com/AngeloSha/uchiyomi/main/docs/discover.jpg
-    - https://raw.githubusercontent.com/AngeloSha/uchiyomi/main/docs/series.jpg
+    - https://raw.githubusercontent.com/AngeloSha/uchiyomi/main/docs/shots/home.webp
+    - https://raw.githubusercontent.com/AngeloSha/uchiyomi/main/docs/shots/library.webp
+    - https://raw.githubusercontent.com/AngeloSha/uchiyomi/main/docs/shots/discover.webp
+    - https://raw.githubusercontent.com/AngeloSha/uchiyomi/main/docs/shots/admin-extensions.webp
   title:
     en_US: Uchiyomi
   tagline:

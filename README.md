@@ -7,7 +7,7 @@
 A self-hosted, installable (PWA) manga / manhwa reader with a true-black OLED interface and a vertical-scroll
 webtoon reader as the centerpiece. Point it at your own CBZ library and read on any device.
 
-![Uchiyomi — self-hosted manga reader](docs/uchiyomi-demo.gif)
+[![Uchiyomi — self-hosted manga reader](docs/shots/home.webp)](https://uchiyomi.com)
 
 Uchiyomi is a **bring-your-own-library reader**. Like Komga / Kavita / Calibre-web, it reads comics *you* supply.
 It bundles **MangaDex** (the official public API) plus generic engines for the common manga-site families, so
@@ -37,6 +37,9 @@ into a single image.** Point it at your library, add sources by URL, and it does
 - **Vertical webtoon reader:** continuous multi-chapter scroll, pinch/double-tap zoom, AMOLED/sepia themes,
   per-series memory, auto-hiding chrome, keyboard nav on desktop — plus **double-page spreads** for classic
   manga (RTL-aware), a **page-preview scrubber**, and an end-of-series **Up Next** card with suggestions.
+
+  <img src="docs/shots/reader.webp" alt="The Uchiyomi reader, mid-chapter" width="820">
+
 - **Cinematic art everywhere:** real banner + cover art pulled from AniList / Kitsu / MangaDex with a one-click
   **backfill** and an admin **Art Review** picker; the home hero shows each series' actual art sharp,
   aspect-aware for phone and desktop, pre-warmed so it loads instantly.
@@ -47,6 +50,9 @@ into a single image.** Point it at your library, add sources by URL, and it does
 - **Collections:** hand-curated reading lists with accent colors, reorderable, surfaced on Home.
 - **Discover:** one search across **every source at once** (one card per title; pick which provider to add
   from), a **newest-releases rail per source**, and a global trending-manhwa rail.
+
+  <img src="docs/shots/discover.webp" alt="Searching every source at once" width="820">
+
 - **Multi-user:** username + password accounts, per-user reading progress / favorites / history timeline,
   avatars, streaks, and a "household" leaderboard — with accurate completion tracking, mark-as-read
   anywhere, and bulk offline-download management.
@@ -58,6 +64,9 @@ into a single image.** Point it at your library, add sources by URL, and it does
   [Suwayomi](https://github.com/Suwayomi/Suwayomi-Server) engine that starts with the stack and configures
   itself; Uchiyomi still owns the library, reader, downloads and updates. See
   [docs/extensions.md](docs/extensions.md).
+
+  <img src="docs/shots/admin-extensions.webp" alt="Browsing and installing extensions from the admin panel" width="820">
+
 - **Single sign-on:** optional OIDC login against Authentik, Authelia, Keycloak or anything else that speaks
   OpenID Connect, with optional group-to-admin mapping. Local accounts and 2FA keep working alongside it,
   so a provider outage can't lock you out. See [docs/api.md](docs/api.md#single-sign-on-oidc).
@@ -66,17 +75,20 @@ into a single image.** Point it at your library, add sources by URL, and it does
 - **AniList sync:** connect your account once and finishing a chapter updates your AniList list on its own.
   Progress is the highest chapter you've *finished*, so re-reading an old one never rewinds your list, and
   AniList being down or your token expiring can never block or slow down your reading.
+
+  <img src="docs/shots/crop-anilist.webp" alt="Connecting an AniList account" width="820">
+
 - **Security:** argon2id passwords, JWT + rotating refresh tokens, login lockout, an audit log,
   session/device management, and optional TOTP two-factor auth.
 - **Bring your library with you:** import a **Mihon/Tachiyomi backup** (`.tachibk`) or a public **MangaDex
   list** — Uchiyomi reads the titles, shows you what it found (flagging what you already have), and adds the
   rest from your own sources. Pasting a plain list of titles works too.
 - **Backups built in:** a nightly dump of the database + your config, rotated automatically, restorable with
-  plain `psql` — point it at another disk with one env var. ([how to restore](docs/USAGE.md#11-backups--restore))
+  plain `psql` — point it at another disk with one env var. ([how to restore](docs/USAGE.md#12-backups--restore))
 - **Admin:** a Jellyfin-style panel with members & permissions, provider health, scheduled tasks, activity feed,
   active sessions, and server settings (name, open registration, auto-update interval).
 
-![Library](docs/library.png)
+![Library](docs/shots/library.webp)
 
 ## Why Uchiyomi?
 
@@ -84,6 +96,9 @@ Most self-hosted manga tools make you pick a side. A **library server** (Komga, 
 but can't fetch new chapters and ships a fairly utilitarian reader. A **source app** (Tachiyomi / Mihon,
 Suwayomi) fetches chapters but is Android-only or wraps them in a basic web UI. Uchiyomi is the rare one that does
 **both**, in a single app that's actually a pleasure to use:
+
+
+  <img src="docs/shots/admin-health.webp" alt="The library health checks in the admin panel" width="820">
 
 - **Server *and* sources in one.** Own your library *and* pull new chapters, with no Komga-plus-Suwayomi-plus-a-
   reader Frankenstein to stitch together.
@@ -160,7 +175,7 @@ docker compose up -d
 > Cloning the repo instead? The top-level `docker-compose.yml` **builds from source** and is meant for
 > development. For running Uchiyomi, use `deploy/docker-compose.yml` above.
 
-It runs four containers:
+It runs five containers:
 
 | Container | Role |
 |---|---|
@@ -168,6 +183,7 @@ It runs four containers:
 | `uchiyomi-bff` | the API |
 | `uchiyomi-db` | private Postgres (no published port — unreachable from outside the stack) |
 | `uchiyomi-flaresolverr` | Cloudflare solver — **started automatically**; sources that need it use it with no config |
+| `uchiyomi-suwayomi` | the extension engine, so Mihon / Tachiyomi extensions work ([docs](docs/extensions.md)) |
 
 ```bash
 docker compose logs -f uchiyomi-bff  # watch it boot
