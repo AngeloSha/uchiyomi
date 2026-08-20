@@ -20,7 +20,7 @@ BFF_IMAGE=${BFF_IMAGE:-yomi-bff:prod}
 SHOT_USER=shotbot
 OUT_PNG=$(mktemp -d)
 OUT_WEBP="$REPO/docs/shots"
-ONLY=""; YES=0; SITE=""
+ONLY=""; YES=0; SITE=""; RECORD=0
 SITE_DIR=${SITE_DIR:-/opt/compose/koryomi/site/assets/shots}
 
 while [ $# -gt 0 ]; do
@@ -28,6 +28,7 @@ while [ $# -gt 0 ]; do
     --only) ONLY="$2"; shift 2 ;;
     --yes|-y) YES=1; shift ;;
     --site) SITE="$SITE_DIR"; shift ;;
+    --record) RECORD=1; shift ;;
     --site-dir) SITE="$2"; shift 2 ;;
     *) echo "unknown option: $1" >&2; exit 2 ;;
   esac
@@ -55,6 +56,8 @@ fi
 cleanup() {
   local rc=$?
   psql "DELETE FROM users WHERE username='$SHOT_USER'" >/dev/null 2>&1 || true
+  # the capture container writes as its own user, so hand the files back before removing them
+  docker run --rm -u 0 -v "$OUT_PNG":/t alpine sh -c 'rm -rf /t/* /t/.[!.]* 2>/dev/null' >/dev/null 2>&1 || true
   rm -rf "$OUT_PNG"
   [ $rc -eq 0 ] || echo "(cleaned up after a failure)" >&2
 }
@@ -76,6 +79,35 @@ BOOK_ID=${SHOT_BOOK_ID:-$(psql "SELECT b.id FROM lib_books b WHERE b.series_id='
 echo "· series $SERIES_ID · book $BOOK_ID"
 
 chmod 777 "$OUT_PNG"
+
+if [ "$RECORD" = "1" ]; then
+  # Record the tour instead of taking stills. Encoding happens on the host, which has ffmpeg with x264,
+  # vp9 and animated-webp — no extra image needed.
+  docker run --rm --network "$NET" -w /home/pptruser \
+    -e SHOT_BASE="$BASE" -e SHOT_OUT=/out -e SHOT_USER="$SHOT_USER" -e SHOT_PASS="$PW" \
+    -e SHOT_SERIES_ID="$SERIES_ID" -e SHOT_BOOK_ID="$BOOK_ID" \
+    -v "$OUT_PNG":/out -v "$REPO/scripts/shots":/home/pptruser/shots:ro \
+    ghcr.io/puppeteer/puppeteer:latest node /home/pptruser/shots/record.mjs
+
+  DEMO="${DEMO_DIR:-/opt/compose/koryomi/site/assets/demo}"
+  mkdir -p "$DEMO"
+  F="$OUT_PNG/frames"
+  echo "· encoding"
+  # The walk-through is deliberately paced for a human driving it; a looping hero does not need those
+  # pauses, so speed it up. Real time is ~50s, which is far too long to loop; SPEED brings it to ~23s.
+  SPEED=${DEMO_SPEED:-2.2}
+  ffmpeg -y -loglevel error -f concat -safe 0 -i "$F/concat.txt" -vf "setpts=PTS/$SPEED,scale=1280:-2,fps=30" \
+    -c:v libx264 -profile:v high -pix_fmt yuv420p -crf 28 -movflags +faststart -an "$DEMO/tour.mp4"
+  ffmpeg -y -loglevel error -f concat -safe 0 -i "$F/concat.txt" -vf "setpts=PTS/$SPEED,scale=1280:-2,fps=30" \
+    -c:v libvpx-vp9 -crf 40 -b:v 0 -row-mt 1 -an "$DEMO/tour.webm"
+  ffmpeg -y -loglevel error -f concat -safe 0 -i "$F/concat.txt" -vf "scale=1280:-2" -frames:v 1 "$DEMO/tour-poster.webp"
+  # GitHub will not play an MP4 inline, so the README gets an animated WebP instead.
+  ffmpeg -y -loglevel error -f concat -safe 0 -i "$F/concat.txt" -vf "setpts=PTS/$SPEED,scale=800:-2,fps=11" \
+    -t 12 -c:v libwebp_anim -lossless 0 -q:v 55 -loop 0 "$REPO/docs/shots/tour.webp"
+  ls -la "$DEMO" "$REPO/docs/shots/tour.webp" | grep -E "tour|total" | sed 's/^/  /'
+  exit 0
+fi
+
 docker run --rm --network "$NET" \
   -w /home/pptruser \
   -e SHOT_BASE="$BASE" -e SHOT_OUT=/out -e SHOT_USER="$SHOT_USER" -e SHOT_PASS="$PW" \

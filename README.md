@@ -7,7 +7,7 @@
 A self-hosted, installable (PWA) manga / manhwa reader with a true-black OLED interface and a vertical-scroll
 webtoon reader as the centerpiece. Point it at your own CBZ library and read on any device.
 
-[![Uchiyomi — self-hosted manga reader](docs/shots/home.webp)](https://uchiyomi.com)
+[![Uchiyomi — a walk through the app](docs/shots/tour.webp)](https://uchiyomi.com)
 
 Uchiyomi is a **bring-your-own-library reader**. Like Komga / Kavita / Calibre-web, it reads comics *you* supply.
 It bundles **MangaDex** (the official public API) plus generic engines for the common manga-site families, so
