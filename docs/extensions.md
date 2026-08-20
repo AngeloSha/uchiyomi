@@ -1,88 +1,79 @@
 # Extensions (Mihon / Tachiyomi sources)
 
-Uchiyomi ships **generic engines** that reach whole families of manga sites by URL, which covers most sites
-without any code. This page is about the other option: reading from the **Mihon / Tachiyomi extension
-ecosystem**, which reaches far more sites than any set of engines can.
+Uchiyomi ships **generic engines** that reach whole families of manga sites by URL. On top of that it can use
+the **Mihon / Tachiyomi extension ecosystem** — the same extensions those apps use, roughly 1,400 of them.
 
-It is optional, off by default, and nothing about Uchiyomi changes until you turn it on.
+You browse and install them from **Admin → Providers → Extensions**. There is nothing to set up first.
 
-## Why it needs a second container
+## Using it
+
+1. Open **Admin → Providers**. The Extensions panel says `ready`.
+2. **Add a repository** (once). Uchiyomi doesn't host extensions, so you point it at a repository you trust —
+   the same URL you would paste into Mihon. Open **Manage** in the Extensions panel and add it.
+3. **Search and click Add.** The extension installs, its sources switch on straight away, and it is
+   searchable from Discover immediately. No second step, no restart.
+
+Adult extensions are hidden until you tap **18+**. Installed ones show **Remove**, and one with a newer
+version shows **Update**.
+
+## Why there is a second container
 
 Those extensions are Kotlin, compiled to Android bytecode and shipped as APKs. They cannot run in Uchiyomi's
-Node server, and there is no converter — "porting" them would mean rewriting hundreds of them by hand.
+Node server, and there is no converter — "porting" them would mean rewriting hundreds by hand.
 
 [Suwayomi](https://github.com/Suwayomi/Suwayomi-Server) is the one project that solved this. It converts an
 extension's Android bytecode to JVM bytecode and supplies a fake Android runtime so the extension believes it
 is on a phone, right down to a headless browser for the ones that need to get past Cloudflare.
 
-So Uchiyomi runs Suwayomi as an **extension engine** and nothing else. Uchiyomi keeps owning your library,
-reader, downloads, updates, users and UI; Suwayomi only answers "search this", "list these chapters", "give me
-this chapter's pages". You never need to open it except to install extensions.
+So Uchiyomi runs Suwayomi as an **extension engine** and nothing else. It starts with the rest of the stack,
+Uchiyomi configures itself to talk to it, and you never open it. Uchiyomi keeps owning your library, reader,
+downloads, updates, users and UI; the engine only answers "search this", "list these chapters", "give me this
+chapter's pages".
 
-The cost is honest: it is a JVM, so budget a few hundred MB of RAM.
-
-## Turning it on
-
-**1. Start the engine.** It is profile-gated, so it does not start unless you ask for it:
-
-```bash
-docker compose --profile extensions up -d
-```
-
-**2. Point Uchiyomi at it** in your `.env`, then restart the BFF:
-
-```
-SUWAYOMI_URL=http://yomi-suwayomi:4567
-```
-
-If your Suwayomi has authentication on (`AUTH_MODE=simple_login`), add `SUWAYOMI_USERNAME` and
-`SUWAYOMI_PASSWORD` too. You can also point at a Suwayomi you already run — Uchiyomi does not care whose it
-is, only that it can reach it.
-
-**3. Install extensions in Suwayomi's own web UI.** Uchiyomi never fetches, lists or installs extension
-packages, and ships no extension-repo URL; that is deliberate, see "Where the line is" below. Suwayomi needs
-an extension repository configured before it will show you anything to install — that is its documentation's
-territory, not ours.
-
-**4. Switch on the sources you want**, in **Admin → Providers → Extensions**. Every source you enable becomes
-an ordinary Uchiyomi source: it shows up in Discover, in cross-source search, and in the updater.
-
-## Why sources are opt-in one at a time
-
-A full extension set exposes several hundred sources. Uchiyomi's cross-source search queries **every**
-enabled source each time you search, so enabling all of them would make search unusable and would hammer
-several hundred sites at once. Enable the handful you actually read.
-
-There is a hard ceiling too, `SUWAYOMI_MAX_SOURCES` (default 25). If you exceed it the extra sources are
-skipped and the server log says exactly how many were dropped.
+The cost is honest: it is a JVM and sits around 800 MB of RAM once running.
 
 ## How it behaves
 
-- **Enabling a source tests it immediately** — search, series page, chapter list and pages — and shows you the
-  result, so a source that cannot actually work says so now rather than looking empty later.
-- **Uchiyomi does the downloading.** Chapters land in your own library as CBZ files, exactly like every other
-  source, so there is one library, one updater and one set of files. Suwayomi is not a second library.
-- **Cloudflare is Suwayomi's problem, not ours.** These sources skip Uchiyomi's FlareSolverr entirely.
-- **If the engine is down, Uchiyomi is fine.** It boots normally, the built-in engines keep working, the admin
-  panel says the server is unreachable, and extension-backed series simply do not update until it is back.
-- **Series stay routed** by the source they were added from, so the scheduled updater keeps pulling new
-  chapters for them with no further involvement from you.
+- **Uchiyomi does the downloading.** Chapters land in your own library as CBZ files exactly like every other
+  source, so there is one library, one updater and one set of files.
+- **Cloudflare is the engine's problem, not ours.** These sources skip Uchiyomi's FlareSolverr entirely.
+- **If the engine is down, Uchiyomi is fine.** It boots normally, the built-in engines keep working, the panel
+  says it is unreachable, and extension-backed series simply do not update until it is back.
+- **Series stay routed** by the source they came from, so the scheduled updater keeps pulling new chapters.
 
-One caveat worth knowing: a series added through an extension is routed using an id from Suwayomi's own
-database. If you wipe that database, those series lose their routing and stop updating (they stay in your
-library, and re-adding them repairs it). Back it up along with everything else, or don't delete its volume.
+Two things worth knowing:
+
+- A series added through an extension is routed using an id from the engine's own database. Wiping that
+  database loses the routing for those series (they stay in your library; re-adding repairs it). Don't delete
+  its volume.
+- Every source you enable is queried on every cross-source search. Installing a handful is fine; installing
+  hundreds would make search slow and hammer a lot of sites at once. `SUWAYOMI_MAX_SOURCES` (default 25) is a
+  backstop, and it logs what it skipped rather than silently dropping it.
+
+## Turning it off
+
+Set `SUWAYOMI_URL=` (empty) in `.env` and restart the BFF; the panel disappears and nothing else changes. To
+reclaim the RAM as well, `docker compose stop yomi-suwayomi`.
+
+## Settings
+
+| Variable | Default | What it does |
+| --- | --- | --- |
+| `SUWAYOMI_URL` | the bundled engine | Where the extension engine is. Empty turns the feature off. |
+| `SUWAYOMI_USERNAME` / `SUWAYOMI_PASSWORD` | empty | Only if your engine has authentication enabled. |
+| `SUWAYOMI_MAX_SOURCES` | `25` | Ceiling on how many extension sources register at once. |
+
+You can point `SUWAYOMI_URL` at a Suwayomi you already run instead of the bundled one; Uchiyomi doesn't care
+whose it is.
+
+The image is pinned rather than tracking `:stable`, because `:stable` is older than the extension API today's
+repository indexes require and would show an empty catalogue.
 
 ## Where the line is
 
-Uchiyomi's published code contains **no scraper and no site name**, and this feature does not change that.
-The bridge is an API client for a separate open-source server that *you* install, configure and populate.
-
-Two deliberate limits keep it that way:
-
-- **No extension store inside Uchiyomi.** It never downloads, lists or installs extension packages, and ships
-  no default repository. Installing is a trip to Suwayomi's UI. Building the store is the step that would turn
-  a reader into a distributor.
-- **Nothing bundled by default.** The container is profile-gated and `SUWAYOMI_URL` is empty, so a fresh
-  install starts no JVM and reaches no third-party site.
+Uchiyomi's code contains **no scraper, no site name, and no repository URL**. The catalogue you browse comes
+from repositories *you* add, and the engine does the fetching and installing. Uchiyomi never hosts or
+redistributes an extension, and ships no default repository — so nothing is fetched from anywhere until you
+choose a source for it.
 
 What you point it at, and whether that is lawful where you live, is your call and your responsibility.

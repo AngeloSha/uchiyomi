@@ -66,9 +66,9 @@ services:
       OIDC_ALLOW_SIGNUP: ${OIDC_ALLOW_SIGNUP:-false}
       OIDC_LINK_BY_USERNAME: ${OIDC_LINK_BY_USERNAME:-false}
       OIDC_ADMIN_GROUP: ${OIDC_ADMIN_GROUP:-}
-      # Optional extension engine: a Suwayomi server running Mihon/Tachiyomi extensions. Empty = off.
-      # Start it with:  docker compose --profile extensions up -d   (see docs/extensions.md)
-      SUWAYOMI_URL: ${SUWAYOMI_URL:-}
+      # Extension engine (Mihon/Tachiyomi extensions), wired up by default. Set to an empty string to
+      # turn the feature off entirely. See docs/extensions.md.
+      SUWAYOMI_URL: ${SUWAYOMI_URL:-http://uchiyomi-suwayomi:4567}
       SUWAYOMI_USERNAME: ${SUWAYOMI_USERNAME:-}
       SUWAYOMI_PASSWORD: ${SUWAYOMI_PASSWORD:-}
       SUWAYOMI_MAX_SOURCES: ${SUWAYOMI_MAX_SOURCES:-25}
@@ -107,14 +107,13 @@ services:
       LOG_LEVEL: warning
     networks: [uchiyomi_app]
 
-  # Optional extension engine (Mihon/Tachiyomi extensions on the JVM). Profile-gated: it does NOT start
-  # unless you ask for it with `docker compose --profile extensions up -d`. Then set
-  # SUWAYOMI_URL=http://uchiyomi-suwayomi:4567 and install extensions in its own web UI.
+  # Extension engine (Mihon/Tachiyomi extensions on the JVM). Browse and install them from Uchiyomi's own
+  # admin panel. Pinned rather than :stable because :stable is older than the extension API today's
+  # repository indexes require. It is a JVM and sits around 800MB of RAM.
   uchiyomi-suwayomi:
-    image: ghcr.io/suwayomi/suwayomi-server:stable
+    image: ghcr.io/suwayomi/suwayomi-server:v2.3.2243
     container_name: uchiyomi-suwayomi
     restart: unless-stopped
-    profiles: [extensions]
     environment:
       TZ: ${TZ:-UTC}
       # Uchiyomi owns the library and does the downloading; this must never write into it.

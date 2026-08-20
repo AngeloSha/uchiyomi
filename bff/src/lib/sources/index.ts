@@ -5,7 +5,7 @@ export { getSource, listSources, sourceIds, loadSources, reloadSources, register
 export { loadCustomSites } from './customSites';
 export { loadBuiltins } from './builtins';
 export { reloadAll } from './reload';
-export { loadSuwayomiSources, enabledSourceIds } from './suwayomi/register';
+export { loadSuwayomiSources, enabledSourceIds, scheduleSuwayomiRetry } from './suwayomi/register';
 export { listRemoteSources, swAdapterId, isSwAdapterId } from './suwayomi/sources';
 export { suwayomiConfigured, aboutServer as suwayomiAbout } from './suwayomi/client';
 export { detectEngine } from './detect';

@@ -82,3 +82,35 @@ export async function loadSuwayomiSources(list: () => Promise<RemoteSource[]> = 
   }
   return { configured: true, reachable: true, available: remote.length, registered, skipped };
 }
+
+/**
+ * Keep trying, quietly, after a failed first load.
+ *
+ * The engine is a JVM and takes longer to accept connections than Uchiyomi does to boot, so on a cold
+ * `docker compose up` the first attempt reliably fails. Without this the extension sources stay missing and
+ * the panel says "unreachable" until someone thinks to hit reload -- which is exactly the kind of "turn it on
+ * yourself" friction this feature is not supposed to have.
+ *
+ * Backs off and gives up rather than retrying forever: if it is still refusing after a few minutes it is
+ * genuinely not there, and the panel says so honestly.
+ */
+export function scheduleSuwayomiRetry(delaysMs: number[] = [5_000, 15_000, 30_000, 60_000, 120_000]): void {
+  if (!suwayomiConfigured()) return;
+  let i = 0;
+  const attempt = async (): Promise<void> => {
+    if (i >= delaysMs.length) return;
+    const wait = delaysMs[i++];
+    setTimeout(() => {
+      void loadSuwayomiSources()
+        .then((r) => {
+          if (r.reachable) {
+            console.log(`[sources] suwayomi: connected on retry (${r.registered} extension source(s))`);
+            return;
+          }
+          void attempt();
+        })
+        .catch(() => attempt());
+    }, wait).unref?.();
+  };
+  void attempt();
+}

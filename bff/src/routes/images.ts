@@ -9,6 +9,7 @@ import { linkSeries } from '../lib/trackers';
 import { LIBRARY_ROOT, cbzPages, cbzEntry } from '../lib/library';
 import { cfSession } from '../lib/sources/flaresolverr';
 import { getSource } from '../lib/sources';
+import { suwayomiUrl, suwayomiImageHeaders } from '../lib/sources/suwayomi/client';
 import { join } from 'path';
 import { readFile } from 'fs/promises';
 import { q, one } from '../lib/db';
@@ -350,6 +351,27 @@ export default async function imageRoutes(app: FastifyInstance) {
   });
 
   // Proxy a remote source cover (for search results); handles Cloudflare sites via FlareSolverr cookies.
+  // Extension icons live on the extension server, which a browser can't reach (it is on an internal network),
+  // so proxy them same-origin. Same lesson as source covers: cross-origin images are unreliable in an
+  // installed PWA, same-origin is not.
+  app.get('/img/extensions/icon/:pkgName', async (req, reply) => {
+    const { pkgName } = req.params as { pkgName: string };
+    // the package name lands in a URL path, so allow only what a package name can actually contain
+    if (!/^[A-Za-z0-9._-]{1,200}$/.test(pkgName)) return reply.code(400).send({ error: 'bad' });
+    return serveImage(req, reply, `swicon:${pkgName}`, async () => {
+      const r = await fetch(suwayomiUrl(`/api/v1/extension/icon/${pkgName}`), {
+        headers: suwayomiImageHeaders(),
+        signal: AbortSignal.timeout(15000),
+      });
+      if (!r.ok) throw new Error(`extension icon ${r.status}`);
+      const buffer = await sharp(Buffer.from(await r.arrayBuffer()))
+        .resize({ width: 96, withoutEnlargement: true })
+        .webp({ quality: 80 })
+        .toBuffer();
+      return { buffer, contentType: 'image/webp' };
+    });
+  });
+
   app.get('/img/sources/cover', async (req, reply) => {
     const { u, source } = req.query as { u?: string; source?: string };
     if (!u) return reply.code(400).send({ error: 'bad' });

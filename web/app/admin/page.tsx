@@ -692,27 +692,38 @@ function Health() {
 }
 
 interface ExtStatus { configured: boolean; reachable: boolean; version?: string | null; error?: string; enabled?: number; known?: number }
-interface ExtSource { id: string; name: string; lang: string | null; nsfw: boolean; supportsLatest: boolean; enabled: boolean }
+interface CatalogExt { pkgName: string; name: string; lang: string | null; versionName: string | null; iconUrl: string | null; installed: boolean; hasUpdate: boolean; obsolete: boolean; nsfw: boolean }
+interface Catalog { content: CatalogExt[]; total: number; matched: number; shown: number; installed: number; updatable: number; hiddenAdult: number; langs: string[] }
 
 /**
- * Sources provided by Mihon/Tachiyomi extensions, via an optional Suwayomi server.
+ * Browse and install Mihon / Tachiyomi extensions.
  *
- * Installing extensions deliberately links out to that server's own UI: Uchiyomi never fetches, lists or
- * installs extension packages itself. All this panel does is choose which of the sources an installed
- * extension provides become Uchiyomi sources.
+ * Installing one switches its sources on in the same action — having to find them again in a second list is
+ * exactly the friction this replaced. Uchiyomi never hosts extensions: the catalogue comes from repositories
+ * the operator adds here, and the extension server does the fetching.
  */
 function Extensions() {
   const toast = useToast();
   const qc = useQueryClient();
   const [q2, setQ2] = useState('');
+  const [lang, setLang] = useState('');
+  const [onlyInstalled, setOnlyInstalled] = useState(false);
+  const [showAdult, setShowAdult] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
-  const [smoke, setSmoke] = useState<{ name: string; res: any } | null>(null);
+  const [repoUrl, setRepoUrl] = useState('');
+  const [addingRepo, setAddingRepo] = useState(false);
+  const [showRepos, setShowRepos] = useState(false);
 
   const { data: status } = useQuery({ queryKey: ['ext-status'], queryFn: () => api<ExtStatus>('/api/admin/extensions/status') });
-  const { data: srcs } = useQuery({
-    queryKey: ['ext-sources', q2],
-    queryFn: () => api<{ content: ExtSource[]; reachable: boolean; total: number }>(`/api/admin/extensions/sources?q=${encodeURIComponent(q2)}`),
-    enabled: !!status?.configured,
+  const { data: repos } = useQuery({
+    queryKey: ['ext-repos'],
+    queryFn: () => api<{ content: string[] }>('/api/admin/extensions/repos'),
+    enabled: !!status?.configured && !!status?.reachable,
+  });
+  const { data: cat, isFetching } = useQuery({
+    queryKey: ['ext-catalog', q2, lang, onlyInstalled, showAdult],
+    queryFn: () => api<Catalog>(`/api/admin/extensions/catalog?q=${encodeURIComponent(q2)}&lang=${encodeURIComponent(lang)}${onlyInstalled ? '&installed=true' : ''}${showAdult ? '&nsfw=true' : ''}`),
+    enabled: !!status?.configured && !!status?.reachable,
   });
 
   if (!status) return null;
@@ -722,92 +733,183 @@ function Extensions() {
       <div className="card mb-3 p-3">
         <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-fog-500">Extensions</p>
         <p className="text-[11px] leading-relaxed text-fog-500">
-          Uchiyomi can also read from Mihon / Tachiyomi extensions by talking to a Suwayomi server, which runs them
-          for you. That reaches far more sites than the built-in engines. It&apos;s off until you point Uchiyomi at
-          one with <code className="text-fog-300">SUWAYOMI_URL</code> — see docs/extensions.md.
+          The extension engine isn&apos;t running. It normally starts with the rest of Uchiyomi — if you turned it
+          off, bring it back with <code className="text-fog-300">docker compose up -d yomi-suwayomi</code>.
         </p>
       </div>
     );
   }
 
-  const list = srcs?.content || [];
-  const on = list.filter((s) => s.enabled).length;
+  const refreshAll = () => {
+    qc.invalidateQueries({ queryKey: ['ext-catalog'] });
+    qc.invalidateQueries({ queryKey: ['ext-status'] });
+    qc.invalidateQueries({ queryKey: ['ext-repos'] });
+    qc.invalidateQueries({ queryKey: ['sources'] });
+  };
 
-  const toggle = async (s: ExtSource) => {
-    setBusy(s.id);
+  const act = async (e: CatalogExt, action: 'install' | 'uninstall' | 'update') => {
+    setBusy(e.pkgName);
     try {
-      const r = await api<{ smoke: any }>(`/api/admin/extensions/sources/${encodeURIComponent(s.id)}`, { json: { enabled: !s.enabled } });
-      qc.invalidateQueries({ queryKey: ['ext-sources'] });
-      qc.invalidateQueries({ queryKey: ['ext-status'] });
-      qc.invalidateQueries({ queryKey: ['sources'] });
-      if (!s.enabled && r.smoke) setSmoke({ name: s.name, res: r.smoke });
-      else setSmoke(null);
-      toast(s.enabled ? `Turned off ${s.name}` : `Added ${s.name}`, 'success');
-    } catch { toast('Could not change that source', 'error'); }
+      const r = await api<{ sources: number }>(`/api/admin/extensions/catalog/${encodeURIComponent(e.pkgName)}`, { json: { action } });
+      refreshAll();
+      toast(action === 'uninstall' ? `Removed ${e.name}`
+        : action === 'update' ? `Updated ${e.name}`
+        : `Added ${e.name}${r.sources ? ` — ${r.sources} source${r.sources === 1 ? '' : 's'} ready to search` : ''}`, 'success');
+    } catch (err: any) { toast(msgOf(err, `Could not ${action} ${e.name}`), 'error'); }
     setBusy(null);
   };
+
+  const refreshRepos = async () => {
+    setBusy('__refresh');
+    try {
+      const r = await api<{ count: number }>('/api/admin/extensions/refresh', { json: {} });
+      refreshAll();
+      toast(`Refreshed — ${r.count} extension${r.count === 1 ? '' : 's'} available`, 'success');
+    } catch { toast('Could not refresh the list', 'error'); }
+    setBusy(null);
+  };
+
+  const addRepo = async () => {
+    if (!repoUrl.trim()) return;
+    setAddingRepo(true);
+    try {
+      const r = await api<{ url: string; corrected: boolean; total: number }>('/api/admin/extensions/repos', { json: { url: repoUrl.trim() } });
+      setRepoUrl('');
+      refreshAll();
+      toast(r.total ? `Added — ${r.total} extension${r.total === 1 ? '' : 's'} available${r.corrected ? ' (used the full index)' : ''}`
+                    : 'Added, but that repository returned no extensions', r.total ? 'success' : 'error');
+    } catch (e: any) { toast(msgOf(e, 'Could not add that repository'), 'error'); }
+    setAddingRepo(false);
+  };
+
+  const removeRepo = async (url: string) => {
+    try {
+      await api('/api/admin/extensions/repos', { method: 'DELETE', json: { url } });
+      refreshAll();
+      toast('Repository removed', 'success');
+    } catch { toast('Could not remove it', 'error'); }
+  };
+
+  const list = cat?.content || [];
 
   return (
     <div className="card mb-3 p-3">
       <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
         <p className="text-xs font-semibold uppercase tracking-wider text-fog-500">Extensions</p>
-        <span className={`rounded-full border px-2 py-0.5 text-[10px] ${status.reachable ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300' : 'border-red-500/40 bg-red-500/10 text-red-300'}`}>
-          {status.reachable ? `connected${status.version ? ` · ${status.version}` : ''}` : 'server unreachable'}
-        </span>
+        <div className="flex items-center gap-2">
+          <span className={`rounded-full border px-2 py-0.5 text-[10px] ${status.reachable ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300' : 'border-red-500/40 bg-red-500/10 text-red-300'}`}>
+            {status.reachable ? `ready${status.version ? ` · ${status.version}` : ''}` : 'engine unreachable'}
+          </span>
+          {status.reachable && (
+            <button onClick={refreshRepos} disabled={busy === '__refresh'} className="chip text-[11px] disabled:opacity-50">
+              {busy === '__refresh' ? 'Refreshing…' : '↻ Refresh'}
+            </button>
+          )}
+        </div>
       </div>
 
       {!status.reachable ? (
         <p className="text-[11px] text-fog-500">
-          Can&apos;t reach the extension server{status.error ? ` (${status.error})` : ''}. Uchiyomi keeps working; extension
-          sources just stay unavailable until it&apos;s back.
+          Can&apos;t reach the extension engine{status.error ? ` (${status.error})` : ''}. Uchiyomi keeps working; extensions
+          are just unavailable until it&apos;s back.
         </p>
       ) : (
         <>
           <p className="mb-2 text-[11px] leading-relaxed text-fog-500">
-            Sources from the extensions installed on your Suwayomi server. Switch on the ones you want — each one you
-            enable is searched every time you search, so pick the ones you actually read.
-            {' '}Install or remove extensions in Suwayomi&apos;s own web UI.
+            The same extensions Mihon and Tachiyomi use. Adding one switches its sources on straight away, so it&apos;s
+            searchable from Discover immediately.
           </p>
-          <div className="mb-2 flex flex-wrap items-center gap-2">
-            <input value={q2} onChange={(e) => setQ2(e.target.value)} placeholder="Filter sources…"
-              className="min-w-[160px] flex-1 rounded-lg border border-ink-700 bg-ink-850 px-2.5 py-1.5 text-xs text-fog-100 outline-none focus:border-accent" />
-            <span className="text-[11px] text-fog-500">{on} of {srcs?.total ?? 0} enabled</span>
+
+          {/* repositories — where the catalogue comes from */}
+          <div className="mb-2 rounded-lg border border-ink-700/60 bg-ink-850/40 p-2">
+            <button onClick={() => setShowRepos(!showRepos)} className="flex w-full items-center justify-between text-left">
+              <span className="text-[11px] text-fog-300">
+                {repos?.content.length
+                  ? `${repos.content.length} extension ${repos.content.length === 1 ? 'repository' : 'repositories'} · ${cat?.total ?? 0} extensions available`
+                  : 'No extension repository yet — add one to see extensions'}
+              </span>
+              <span className="text-[11px] text-fog-500">{showRepos ? 'Hide' : 'Manage'}</span>
+            </button>
+            {showRepos && (
+              <div className="mt-2 space-y-1.5">
+                {(repos?.content || []).map((u) => (
+                  <div key={u} className="flex items-center gap-2">
+                    <span className="min-w-0 flex-1 truncate font-mono text-[10px] text-fog-400">{u}</span>
+                    <button onClick={() => removeRepo(u)} className="shrink-0 text-[11px] text-red-300 hover:underline">Remove</button>
+                  </div>
+                ))}
+                <div className="flex gap-2 pt-1">
+                  <input value={repoUrl} onChange={(e) => setRepoUrl(e.target.value)} placeholder="https://…/index.json"
+                    autoCapitalize="none" autoCorrect="off"
+                    className="min-w-0 flex-1 rounded-lg border border-ink-700 bg-ink-850 px-2.5 py-1.5 text-xs text-fog-100 outline-none focus:border-accent" />
+                  <button onClick={addRepo} disabled={addingRepo || !repoUrl.trim()} className="btn-accent shrink-0 px-3 py-1.5 text-xs disabled:opacity-50">
+                    {addingRepo ? 'Checking…' : 'Add'}
+                  </button>
+                </div>
+                <p className="text-[10px] leading-relaxed text-fog-600">
+                  Uchiyomi doesn&apos;t host extensions, so you point it at a repository you trust — the same URL you&apos;d
+                  use in Mihon. If it hands back an empty list, Uchiyomi retries the full <code>index.json</code>, which is
+                  where most repositories now keep the real catalogue.
+                </p>
+              </div>
+            )}
           </div>
 
-          {smoke && (
-            <div className={`mb-2 rounded-lg border p-2 text-[11px] ${smoke.res.ok ? 'border-emerald-500/30 bg-emerald-500/5 text-emerald-300' : 'border-amber-500/30 bg-amber-500/5 text-amber-300'}`}>
-              {smoke.res.ok ? `✓ ${smoke.name} verified — search, chapters & pages all work`
-                : smoke.res.timedOut ? `${smoke.name}: verification timed out — slow or heavily protected site (enabled anyway)`
-                : `${smoke.name}: some checks failed — this source may be only partly usable`}
-              <ul className="mt-1 space-y-0.5">
-                {(smoke.res.checks || []).map((c: any) => (
-                  <li key={c.name} className="text-fog-400">{c.ok ? '✓' : '✗'} {c.name} — {c.detail}</li>
-                ))}
-              </ul>
-            </div>
+          {/* search + filters */}
+          <div className="mb-2 flex flex-wrap items-center gap-2">
+            <input value={q2} onChange={(e) => setQ2(e.target.value)} placeholder="Search extensions…"
+              className="min-w-[150px] flex-1 rounded-lg border border-ink-700 bg-ink-850 px-2.5 py-1.5 text-xs text-fog-100 outline-none focus:border-accent" />
+            <select value={lang} onChange={(e) => setLang(e.target.value)}
+              className="rounded-lg border border-ink-700 bg-ink-850 px-2 py-1.5 text-xs text-fog-100 outline-none focus:border-accent">
+              <option value="">All languages</option>
+              {(cat?.langs || []).map((l) => <option key={l} value={l}>{l}</option>)}
+            </select>
+            <button onClick={() => setShowAdult(!showAdult)}
+              className={`rounded-full px-2.5 py-1 text-[11px] transition ${showAdult ? 'bg-accent text-white' : 'bg-ink-700 text-fog-300 hover:text-fog-100'}`}>
+              18+
+            </button>
+            <button onClick={() => setOnlyInstalled(!onlyInstalled)}
+              className={`rounded-full px-2.5 py-1 text-[11px] transition ${onlyInstalled ? 'bg-accent text-white' : 'bg-ink-700 text-fog-300 hover:text-fog-100'}`}>
+              Added{status.enabled ? ` (${cat?.installed ?? 0})` : ''}
+            </button>
+          </div>
+
+          {cat && cat.matched > cat.shown && (
+            <p className="mb-1 text-[10px] text-fog-600">Showing {cat.shown} of {cat.matched} matches — narrow the search to see the rest.</p>
           )}
 
-          <div className="max-h-72 space-y-1 overflow-y-auto">
-            {list.map((s) => (
-              <div key={s.id} className="flex items-center gap-2 rounded-lg border border-ink-700/60 bg-ink-850/40 px-2.5 py-1.5">
+          <div className="max-h-96 space-y-1 overflow-y-auto">
+            {list.map((e) => (
+              <div key={e.pkgName} className="flex items-center gap-2 rounded-lg border border-ink-700/60 bg-ink-850/40 px-2.5 py-1.5">
+                {e.iconUrl
+                  ? <img src={e.iconUrl} alt="" width={22} height={22} className="h-[22px] w-[22px] shrink-0 rounded" loading="lazy" />
+                  : <span className="h-[22px] w-[22px] shrink-0 rounded bg-ink-700" />}
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-xs text-fog-100">
-                    {s.name}
-                    {s.nsfw && <span className="ml-1.5 rounded bg-red-500/15 px-1 py-0.5 text-[9px] text-red-300">18+</span>}
+                    {e.name}
+                    {e.nsfw && <span className="ml-1.5 rounded bg-red-500/15 px-1 py-0.5 text-[9px] text-red-300">18+</span>}
+                    {e.obsolete && <span className="ml-1.5 rounded bg-amber-500/15 px-1 py-0.5 text-[9px] text-amber-300">obsolete</span>}
                   </p>
-                  {s.lang && <p className="text-[10px] text-fog-600">{s.lang}</p>}
+                  <p className="text-[10px] text-fog-600">{e.lang || 'all'}{e.versionName ? ` · v${e.versionName}` : ''}</p>
                 </div>
-                <button onClick={() => toggle(s)} disabled={busy === s.id}
-                  className={`shrink-0 rounded-full px-2.5 py-1 text-[11px] transition disabled:opacity-50 ${s.enabled ? 'bg-accent text-white' : 'bg-ink-700 text-fog-300 hover:text-fog-100'}`}>
-                  {busy === s.id ? '…' : s.enabled ? 'On' : 'Off'}
+                {e.hasUpdate && (
+                  <button onClick={() => act(e, 'update')} disabled={busy === e.pkgName}
+                    className="shrink-0 rounded-full bg-amber-500/20 px-2.5 py-1 text-[11px] text-amber-200 disabled:opacity-50">
+                    {busy === e.pkgName ? '…' : 'Update'}
+                  </button>
+                )}
+                <button onClick={() => act(e, e.installed ? 'uninstall' : 'install')} disabled={busy === e.pkgName}
+                  className={`shrink-0 rounded-full px-2.5 py-1 text-[11px] transition disabled:opacity-50 ${e.installed ? 'bg-ink-700 text-fog-300 hover:text-fog-100' : 'bg-accent text-white'}`}>
+                  {busy === e.pkgName ? '…' : e.installed ? 'Remove' : 'Add'}
                 </button>
               </div>
             ))}
-            {!list.length && (
+            {!list.length && !isFetching && (
               <p className="py-2 text-[11px] text-fog-600">
-                No extensions installed on that server yet. Install some in Suwayomi&apos;s web UI, then they show up here.
+                {cat?.total ? 'Nothing matches that search.' : 'No extensions yet — add a repository above to see what’s available.'}
               </p>
             )}
+            {isFetching && !list.length && <p className="py-2 text-[11px] text-fog-600">Loading…</p>}
           </div>
         </>
       )}

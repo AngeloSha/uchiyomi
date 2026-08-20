@@ -1,5 +1,5 @@
 import { hash } from '@node-rs/argon2';
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyReply } from 'fastify';
 import { z } from 'zod';
 import { q, one } from '../lib/db';
 import { content as komga } from '../lib/backend';
@@ -12,6 +12,7 @@ import { authenticate, requireAdmin, userIdOf, revokeAllSessions, revokeRefreshT
 import { logAudit, recentAudit } from '../lib/audit';
 import { healthAll, setDisabled, clearBlock } from '../lib/sourceHealth';
 import { reloadAll, listSources, getSource, detectEngine, listRemoteSources, suwayomiConfigured, suwayomiAbout, swAdapterId } from '../lib/sources';
+import { listExtensions, refreshExtensions, setExtensionState, sourcesOfExtension, getRepos, setRepos, normalizeRepoUrl, altRepoUrl } from '../lib/sources/suwayomi/extensions';
 import { readFile, writeFile, mkdir, rm } from 'fs/promises';
 import { dirname } from 'path';
 import sharp from 'sharp';
@@ -421,6 +422,165 @@ export default async function adminRoutes(app: FastifyInstance) {
       if (adapter) smoke = await smokeTest(adapter);
     }
     return { ok: true, smoke };
+  });
+
+  // ---- the extension catalogue ----
+  // Uchiyomi is a remote control for the operator's own extension server here: the catalogue comes from
+  // repositories THEY configured, and that server does the fetching and installing. No repository URL ships
+  // in this codebase and nothing is fetched until one is added.
+  const needExt = (reply: FastifyReply) =>
+    suwayomiConfigured() ? null : reply.code(400).send({ error: 'not_configured', message: 'No extension server is configured.' });
+
+  app.get('/api/admin/extensions/catalog', async (req, reply) => {
+    if (needExt(reply)) return;
+    const { q: term, lang, installed, nsfw } = req.query as { q?: string; lang?: string; installed?: string; nsfw?: string };
+    let all;
+    try {
+      all = await listExtensions();
+    } catch (e) {
+      return reply.code(502).send({ error: 'unreachable', message: (e as Error)?.message || 'Could not reach the extension server.' });
+    }
+    const needle = (term || '').trim().toLowerCase();
+    const filtered = all
+      .filter((e) => (!needle || e.name.toLowerCase().includes(needle) || e.pkgName.toLowerCase().includes(needle)))
+      .filter((e) => (!lang || lang === 'all' ? true : e.lang === lang))
+      .filter((e) => (installed === 'true' ? e.installed : true))
+      // adult extensions are hidden unless asked for — this is a household server by default, and they
+      // otherwise dominate the top of an alphabetical list
+      .filter((e) => (nsfw === 'true' ? true : !e.nsfw || e.installed))
+      // installed first, then updatable, then alphabetical — the things you can act on float up
+      .sort((a, b) => Number(b.installed) - Number(a.installed) || Number(b.hasUpdate) - Number(a.hasUpdate) || a.name.localeCompare(b.name));
+    const langs = [...new Set(all.map((e) => e.lang).filter(Boolean))].sort() as string[];
+    // Serve icons through our own origin; the extension server is not reachable from a browser.
+    const withIcons = filtered.map((e) => ({ ...e, iconUrl: e.iconUrl ? `/img/extensions/icon/${e.pkgName}` : null }));
+    return {
+      content: withIcons.slice(0, 400),
+      total: all.length,
+      shown: Math.min(filtered.length, 400),
+      matched: filtered.length,
+      installed: all.filter((e) => e.installed).length,
+      updatable: all.filter((e) => e.hasUpdate).length,
+      hiddenAdult: nsfw === 'true' ? 0 : all.filter((e) => e.nsfw && !e.installed).length,
+      langs,
+    };
+  });
+
+  app.post('/api/admin/extensions/refresh', async (req, reply) => {
+    if (needExt(reply)) return;
+    try {
+      const n = await refreshExtensions();
+      await logAudit('extension.refresh', { userId: userIdOf(req), detail: { count: n }, req });
+      return { ok: true, count: n };
+    } catch (e) {
+      return reply.code(502).send({ error: 'unreachable', message: (e as Error)?.message || 'Could not refresh.' });
+    }
+  });
+
+  app.post('/api/admin/extensions/catalog/:pkgName', async (req, reply) => {
+    if (needExt(reply)) return;
+    const { pkgName } = req.params as { pkgName: string };
+    const b = z.object({ action: z.enum(['install', 'uninstall', 'update']) }).safeParse(req.body);
+    if (!b.success) return reply.code(400).send({ error: 'bad_request' });
+
+    // Ask which sources this extension provides BEFORE acting: once it is uninstalled it provides none, and
+    // we would leave the rows behind claiming sources that no longer exist.
+    const enable = b.data.action !== 'uninstall';
+    const priorSources = enable ? [] : await sourcesOfExtension(pkgName).catch(() => []);
+
+    try {
+      await setExtensionState(pkgName, b.data.action);
+    } catch (e) {
+      return reply.code(502).send({ error: 'failed', message: (e as Error)?.message || 'The extension server refused that.' });
+    }
+    await logAudit(`extension.${b.data.action}`, { userId: userIdOf(req), detail: { pkgName }, req });
+
+    // Installing an extension and then having to hunt for its sources in a second list is exactly the
+    // friction this feature exists to remove, so switch them on (or off) as part of the same action.
+    const provided = enable ? await sourcesOfExtension(pkgName).catch(() => []) : priorSources;
+    for (const s of provided) {
+      await q(
+        `INSERT INTO suwayomi_sources (source_id, name, lang, enabled) VALUES ($1,$2,$3,$4)
+         ON CONFLICT (source_id) DO UPDATE SET enabled = EXCLUDED.enabled, name = EXCLUDED.name, lang = EXCLUDED.lang`,
+        [s.id, s.name, s.lang, enable],
+      ).catch(() => {});
+    }
+    if (b.data.action === 'uninstall') {
+      // the sources are gone from the server too; don't leave rows implying otherwise
+      await q('DELETE FROM suwayomi_sources WHERE source_id = ANY($1)', [provided.map((s) => s.id)]).catch(() => {});
+    }
+    const r = await reloadAll();
+    return { ok: true, sources: provided.length, registered: r.suwayomi };
+  });
+
+  // ---- extension repositories ----
+  app.get('/api/admin/extensions/repos', async (req, reply) => {
+    if (needExt(reply)) return;
+    try {
+      return { content: await getRepos() };
+    } catch (e) {
+      return reply.code(502).send({ error: 'unreachable', message: (e as Error)?.message || 'Could not reach the extension server.' });
+    }
+  });
+
+  app.post('/api/admin/extensions/repos', async (req, reply) => {
+    if (needExt(reply)) return;
+    const b = z.object({ url: z.string().url().max(500) }).safeParse(req.body);
+    if (!b.success) return reply.code(400).send({ error: 'bad_request', message: 'That does not look like a repository URL.' });
+
+    const wanted = normalizeRepoUrl(b.data.url);
+    const current = await getRepos().catch((): string[] => []);
+    if (current.includes(wanted)) return reply.code(409).send({ error: 'exists', message: 'That repository is already added.' });
+
+    const before = (await listExtensions().catch(() => [])).length;
+    let error: string | undefined;
+
+    // Suwayomi applies a settings change asynchronously, so the FIRST read after adding a repository still
+    // sees the old list and comes back empty. Retry until the catalogue actually grows.
+    const attempt = async (url: string): Promise<number> => {
+      await setRepos([...current, url]);
+      let n = before;
+      for (let i = 0; i < 4; i++) {
+        try {
+          await refreshExtensions();
+          error = undefined;
+        } catch (e) {
+          error = (e as Error)?.message || 'could not read that repository';
+        }
+        n = (await listExtensions().catch(() => [])).length;
+        if (n > before) break;
+        await new Promise((r) => setTimeout(r, 700));
+      }
+      return n;
+    };
+
+    let used = wanted;
+    let total = await attempt(wanted);
+
+    // Still nothing after retrying? Repository layouts vary, and a bare directory URL is a reasonable thing
+    // to paste, so try the full-index form of the same URL as a last resort -- keeping it only if it did
+    // better, since for many repositories the original form is the correct one.
+    if (total <= before) {
+      const alt = altRepoUrl(wanted);
+      if (alt && alt !== wanted) {
+        const altTotal = await attempt(alt);
+        if (altTotal > total) { used = alt; total = altTotal; }
+        else await setRepos([...current, wanted]); // no better; keep what they typed
+      }
+    }
+
+    await logAudit('extension.repo_add', { userId: userIdOf(req), detail: { url: used, extensions: total }, req });
+    return { ok: true, url: used, corrected: used !== wanted, total, error };
+  });
+
+  app.delete('/api/admin/extensions/repos', async (req, reply) => {
+    if (needExt(reply)) return;
+    const b = z.object({ url: z.string().max(500) }).safeParse(req.body);
+    if (!b.success) return reply.code(400).send({ error: 'bad_request' });
+    const current = await getRepos().catch((): string[] => []);
+    await setRepos(current.filter((u) => u !== b.data.url));
+    await refreshExtensions().catch(() => 0);
+    await logAudit('extension.repo_remove', { userId: userIdOf(req), detail: { url: b.data.url }, req });
+    return { ok: true };
   });
 
   // ---- library health ----

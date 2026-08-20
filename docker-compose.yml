@@ -45,9 +45,9 @@ services:
       FLARESOLVERR_URL: http://yomi-flaresolverr:8191   # Cloudflare solver for Cloudflare-protected sources
       SOURCES_DIR: /sources            # runtime source plugins are loaded from here (none = scraper-free core)
       CUSTOM_SITES_FILE: /config/sites.json   # admin-added Madara/Manganato sites (Add-a-site form)
-      # Optional extension engine: a Suwayomi server that runs Mihon/Tachiyomi extensions. Empty = off, and
-      # nothing about Uchiyomi changes. Start it with:  docker compose --profile extensions up -d
-      SUWAYOMI_URL: ${SUWAYOMI_URL:-}
+      # Extension engine: a Suwayomi server that runs Mihon/Tachiyomi extensions. Wired up by default;
+      # set SUWAYOMI_URL to an empty string in .env to turn the feature off entirely.
+      SUWAYOMI_URL: ${SUWAYOMI_URL:-http://yomi-suwayomi:4567}
       SUWAYOMI_USERNAME: ${SUWAYOMI_USERNAME:-}
       SUWAYOMI_PASSWORD: ${SUWAYOMI_PASSWORD:-}
       SUWAYOMI_MAX_SOURCES: ${SUWAYOMI_MAX_SOURCES:-25}
@@ -112,16 +112,17 @@ services:
     labels:
       - com.centurylinklabs.watchtower.enable=false
 
-  # Optional extension engine. Runs Mihon/Tachiyomi extensions (which are Android/Kotlin) on the JVM and
-  # exposes them over an API; Uchiyomi keeps owning the library, reader, downloads and updates and only asks
-  # it for search/chapters/pages. Profile-gated: it does NOT start unless you ask for it with
-  #   docker compose --profile extensions up -d
-  # then set SUWAYOMI_URL=http://yomi-suwayomi:4567 and install extensions in its own web UI.
+  # Extension engine. Runs Mihon/Tachiyomi extensions (which are Android/Kotlin) on the JVM and exposes them
+  # over an API; Uchiyomi keeps owning the library, reader, downloads and updates and only asks it for
+  # search/chapters/pages. Browse and install extensions from Uchiyomi's own admin panel.
+  #
+  # Pinned rather than :stable on purpose -- :stable is v2.2.2100, which is older than the extension API the
+  # current repository indexes require, so it sees an empty catalogue.
+  # It is a JVM and sits around 800MB of RAM. Do not want it? Set SUWAYOMI_URL= (empty) in .env.
   yomi-suwayomi:
-    image: ghcr.io/suwayomi/suwayomi-server:stable
+    image: ghcr.io/suwayomi/suwayomi-server:v2.3.2243
     container_name: yomi-suwayomi
     restart: unless-stopped
-    profiles: [extensions]
     environment:
       TZ: UTC
       # Uchiyomi does the downloading and owns the library; this instance must never write into it.

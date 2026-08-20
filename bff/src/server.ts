@@ -8,7 +8,7 @@ import { env } from './env';
 import { pool } from './lib/db';
 import { runtime } from './lib/runtime';
 import { migrate } from './lib/migrate';
-import { loadSources, loadCustomSites, loadBuiltins, listSources, loadSuwayomiSources } from './lib/sources';
+import { loadSources, loadCustomSites, loadBuiltins, listSources, loadSuwayomiSources, scheduleSuwayomiRetry } from './lib/sources';
 import { runUpdateAll } from './lib/updater';
 import { startSweeper } from './lib/imageCache';
 import { runBackup, msUntilHour } from './lib/backup';
@@ -29,7 +29,10 @@ async function main() {
   const cs = loadCustomSites(); // user-added engine sites from /config/sites.json (built via the in-core engines)
   // Extension sources from an optional Suwayomi server. Fails soft: unset or unreachable just means none.
   const sw = await loadSuwayomiSources();
-  const swNote = sw.configured ? `, ${sw.registered} extension${sw.reachable ? '' : ' (server unreachable)'}` : '';
+  const swNote = sw.configured ? `, ${sw.registered} extension${sw.reachable ? '' : ' (engine still starting)'}` : '';
+  // The engine is a JVM and is usually still booting when we get here, so keep trying in the background
+  // rather than leaving the feature switched off until someone notices and reloads.
+  if (sw.configured && !sw.reachable) scheduleSuwayomiRetry();
   console.log(`[sources] ${listSources().length} source(s) available (${bi} built-in, ${ls.loaded} pack, ${cs} custom${swNote})`);
 
   const app = Fastify({
