@@ -10,6 +10,10 @@
 # Then open http://localhost:8080 and create your admin account in the browser.
 # No secrets to generate, no config file to edit.
 #
+# To UPDATE later:
+#   docker compose pull      <- required; `up -d` alone will not fetch a newer :latest
+#   docker compose up -d
+#
 # Optional overrides (put them in a .env file next to this one — it is picked up automatically):
 #   LIBRARY_PATH=/mnt/media/comics   your existing CBZ/CBR library (mounted read-only; default: ./library)
 #   WEB_PORT=8080                    host port to serve on

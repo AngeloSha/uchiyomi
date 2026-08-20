@@ -24,6 +24,9 @@ Everything you can do in Uchiyomi, screen by screen. For install/configuration s
 docker compose up -d         # no config needed — secrets are generated automatically
 ```
 
+> **Updating later:** run `docker compose pull` *before* `docker compose up -d`. Without the pull, Docker
+> keeps using the `:latest` image it already has and you stay on your installed version silently.
+
 Open the app at your `PUBLIC_ORIGIN` (e.g. `http://localhost:3000`) and **create your admin account in the
 browser** on first run (the first account created becomes the server admin). To read an existing collection,
 point `LIBRARY_PATH` at it first (`cp .env.example .env`, set `LIBRARY_PATH=/path/to/your/manga`, then

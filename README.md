@@ -219,6 +219,21 @@ generates the secrets, creates the admin from a password you type, fixes volume 
 
 Change the port with `WEB_PORT` in `.env` (default `8080`; e.g. `WEB_PORT=9000` → http://localhost:9000).
 
+### Updating
+
+```bash
+docker compose pull
+docker compose up -d
+```
+
+**`docker compose up -d` on its own is not enough.** The images are pinned to `:latest`, and Docker reuses a
+tag it already has rather than checking for a newer one — so without the `pull` you stay on whatever version
+you first installed, indefinitely, with nothing to tell you. Watch
+[releases](https://github.com/AngeloSha/uchiyomi/releases) to know when there is something to pull.
+
+Upgrading in place is safe: accounts, reading progress, downloads and settings live in named volumes, and the
+database migrates itself on boot. Nobody is logged out.
+
 ### Serving it on a domain (HTTPS)
 
 The compose file is **standalone**: it publishes the app on a local port and creates its own private networks,
