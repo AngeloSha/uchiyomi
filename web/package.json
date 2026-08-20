@@ -6,7 +6,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "test": "node --import tsx --test \"test/**/*.test.ts\""
+    "test": "node --import tsx --test \"test/*.test.ts\""
   },
   "dependencies": {
     "@tanstack/react-query": "^5.59.0",

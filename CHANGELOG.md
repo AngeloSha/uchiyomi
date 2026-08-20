@@ -61,12 +61,13 @@ progress resets, no downloaded chapter is orphaned.**
 ### If you pull images
 Images now publish to **`ghcr.io/angelosha/uchiyomi-bff`** and **`ghcr.io/angelosha/uchiyomi-web`**. GHCR does
 not redirect renamed packages, so the old `koryomi-*` images stay published and keep working — update your
-compose file when convenient. The GitHub repo moved to `AngeloSha/uchiyomi`; the old URL redirects.
+compose file when convenient. ~~The GitHub repo moved to `AngeloSha/uchiyomi`; the old URL redirects.~~ The
+repo move is still true; the promise about the images is not.
 
-> **Correction (2026-08-21):** that was half right, and the wrong half matters. The old images stay *pullable*
-> but never update — releases only publish `uchiyomi-*` — so `koryomi-*:latest` sits frozen at v0.3.0 while
-> still looking current to anyone reading the tag. Don't stay on them: switch any reference to
-> `ghcr.io/angelosha/uchiyomi-bff` and `ghcr.io/angelosha/uchiyomi-web`.
+> **Correction (2026-08-21): the `koryomi-*` packages have been deleted, and `docker pull` of them now fails.**
+> Keeping them published turned out to be worse than removing them: releases only ever publish `uchiyomi-*`,
+> so `koryomi-*:latest` sat frozen at v0.3.0 while still reading as "latest" to anyone running it. Point your
+> compose file at `ghcr.io/angelosha/uchiyomi-bff` and `ghcr.io/angelosha/uchiyomi-web`.
 
 ## v0.3.0 — 2026-08-19
 

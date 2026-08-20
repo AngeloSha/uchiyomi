@@ -168,6 +168,7 @@ household, with webtoons first-class.
 | `yomi-bff` | Fastify + TypeScript API: auth, catalog over the CBZ library, disk image cache, the source loader |
 | `yomi-db` | Private Postgres (no host port) |
 | `yomi-flaresolverr` | Optional headless-Chrome Cloudflare solver, used only by Cloudflare-protected source plugins |
+| `yomi-suwayomi` | The extension engine that runs Mihon / Tachiyomi extensions — a JVM, ~800 MB; set `SUWAYOMI_URL=` empty to turn it off ([docs](docs/extensions.md)) |
 
 ## Install
 
@@ -278,12 +279,14 @@ anything until *you* add a site:
 (no rebuild). The engines are generic parsers; you supply the URLs, and you're responsible for using them in
 line with those sites' terms and your local law.
 
-A handful of one-off, site-specific sources (e.g. an official API client) aren't engines and aren't bundled;
-those live in a separate **yomi-sources** pack you can build and mount:
+A handful of one-off, site-specific sources (e.g. an official API client) aren't engines and aren't bundled.
+Nothing is published for you to drop in — the loader will register any compiled CommonJS plugin you build
+yourself against the contract in [`bff/src/lib/sources/loader.ts`](bff/src/lib/sources/loader.ts), mounted
+read-only:
 
 ```bash
 # .env
-SOURCES_PATH=/path/to/yomi-sources/dist     # compiled .js plugins, mounted read-only at /sources
+SOURCES_PATH=/path/to/your/plugins/dist     # compiled .js plugins, mounted read-only at /sources
 ```
 
 The reader scans `SOURCES_DIR` (`/sources`) at boot and registers every plugin it finds. Drop in or update a

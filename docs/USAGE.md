@@ -370,7 +370,18 @@ rate-limited — wait a bit, or try another source.
 `http://localhost`). On iOS, use Safari → Share → Add to Home Screen.
 
 **I lost my 2FA device.** Enter one of the recovery codes (shown when you enabled 2FA) on the login screen instead
-of the 6-digit code. An admin can also disable 2FA for a member from the admin Members panel.
+of the 6-digit code — that is the intended way back in, so keep them somewhere that is not the phone.
+
+If the recovery codes are gone too, the account cannot be recovered from the UI: turning 2FA off is
+self-service (**Profile → Security**) and needs the account's own password, and there is deliberately no admin
+override. Someone with server access can clear it directly:
+
+```bash
+docker compose exec uchiyomi-db psql -U yomi -d yomi \
+  -c "UPDATE users SET totp_enabled = false, totp_secret = NULL, recovery_codes = '{}' WHERE username = 'them';"
+```
+
+(The database user and database are both `yomi` in the shipped compose files, even on the install path.)
 
 ---
 

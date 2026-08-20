@@ -53,7 +53,7 @@ Two things worth knowing:
 ## Turning it off
 
 Set `SUWAYOMI_URL=` (empty) in `.env` and restart the BFF; the panel disappears and nothing else changes. To
-reclaim the RAM as well, `docker compose stop yomi-suwayomi`.
+reclaim the RAM as well, `docker compose stop uchiyomi-suwayomi` (`yomi-suwayomi` in the development stack).
 
 ## Settings
 

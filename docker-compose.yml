@@ -48,7 +48,7 @@ services:
       CACHE_MAX_BYTES: "16106127360"   # 15 GiB image cache cap
       LIBRARY_ROOT: /library
       DL_ROOT: /library-dl             # owned, writable download dir (separate from Suwayomi's read library)
-      LIBRARY_BACKEND: owned           # Phase-1 cutover: serve from the owned CBZ library, not Komga
+      LIBRARY_BACKEND: ${LIBRARY_BACKEND:-owned}           # Phase-1 cutover: serve from the owned CBZ library, not Komga
       FLARESOLVERR_URL: http://yomi-flaresolverr:8191   # Cloudflare solver for Cloudflare-protected sources
       SOURCES_DIR: /sources            # runtime source plugins are loaded from here (none = scraper-free core)
       CUSTOM_SITES_FILE: /config/sites.json   # admin-added Madara/Manganato sites (Add-a-site form)

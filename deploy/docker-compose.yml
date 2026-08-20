@@ -50,7 +50,7 @@ services:
       NODE_ENV: production
       PORT: "3000"
       DATABASE_URL: postgres://yomi:${DB_PASSWORD:-uchiyomi}@uchiyomi-db:5432/yomi
-      LIBRARY_BACKEND: owned
+      LIBRARY_BACKEND: ${LIBRARY_BACKEND:-owned}
       PUBLIC_ORIGIN: ${PUBLIC_ORIGIN:-http://localhost:8080}
       FLARESOLVERR_URL: http://uchiyomi-flaresolverr:8191
       SOURCES_DIR: /sources

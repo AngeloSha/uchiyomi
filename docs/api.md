@@ -3,7 +3,7 @@
 Everything the web app does, it does over this API, so anything you can do in the browser you can script.
 
 This page covers how to authenticate and the endpoints worth scripting. It is not an exhaustive dump of all
-130 routes; the full list is at the bottom for reference.
+142 routes; the full list is at the bottom for reference.
 
 ## Authenticating
 
@@ -42,7 +42,9 @@ same panel as your active sessions.
 
 ### Images and OPDS
 
-`/img/*` is authorised by a cookie rather than a header, because `<img>` tags can't send one. `/opds/*` uses
+`/img/*` is authorised by the `yomi_img` cookie rather than a header, because `<img>` tags can't send one — it
+also accepts an OPDS token over HTTP Basic, so an OPDS reader can load covers and pages with the same
+credentials it uses for the feed. `/opds/*` uses
 HTTP Basic with your OPDS token as the password (**Profile → External readers**). Neither accepts API tokens.
 
 ## Conventions
@@ -77,15 +79,30 @@ the write can only ever move a chapter forward to completed, never back.
 
 If you have a tracker connected, finishing a chapter this way syncs it like any other.
 
-**Add a series by URL**
+**Add a series**
+
+Two steps: find it, then add the result. Adding takes a source and that source's own id for the series, not a
+URL.
 
 ```bash
+# 1. find it — searches your enabled sources in order and returns {source, sourceId, title, ...}
+curl -H "Authorization: Bearer $TOK" "https://your-server/api/sources/find?q=solo+leveling"
+
+# 2. add it
 curl -X POST -H "Authorization: Bearer $TOK" -H 'Content-Type: application/json' \
-  -d '{"url": "https://example-manga-site.com/manga/some-title"}' \
+  -d '{"source":"mangadex","sourceId":"32d76d19-8a05-4db0-9fc2-e0b0648fe9d0","chapterCount":10,"autoUpdate":true}' \
   https://your-server/api/sources/add
 ```
 
-The engine is detected from the URL. Returns `409` if the series is already in your library.
+`chapterCount` limits how many of the most recent chapters to grab (omit for all); `autoUpdate` enrols it in the
+scheduled updater.
+
+Responses worth handling: **200** with `message: "already in library"` if you have that exact series already,
+and **409** `duplicate` if a series with the same title came from a *different* source — retry with
+`"force": true` to add the second copy anyway. Adding can also be denied with **403** for a non-admin whose
+`canDownload` permission is off.
+
+To add a whole *site* rather than one series, that is `POST /api/admin/sources/custom` (admin scope).
 
 **Search everything at once**
 
@@ -131,6 +148,7 @@ GET    /auth/me                   POST   /auth/password
 GET    /auth/sessions             DELETE /auth/sessions/:id
 POST   /auth/totp/setup           POST   /auth/totp/enable
 POST   /auth/totp/disable
+GET    /auth/oidc/start             GET    /auth/oidc/callback
 ```
 
 ### Library and reading
@@ -206,10 +224,23 @@ POST   /api/admin/import          POST   /api/admin/import/parse
 GET    /api/admin/import/status
 ```
 
+### Admin — extensions (Mihon / Tachiyomi)
+
+Present only when an extension engine is configured; see [extensions.md](extensions.md).
+
+```
+GET    /api/admin/extensions/status      GET    /api/admin/extensions/catalog
+POST   /api/admin/extensions/catalog/:pkgName
+GET    /api/admin/extensions/repos       POST   /api/admin/extensions/repos
+DELETE /api/admin/extensions/repos       POST   /api/admin/extensions/refresh
+GET    /api/admin/extensions/sources     POST   /api/admin/extensions/sources/:id
+```
+
 ### Images and OPDS
 Cookie and HTTP Basic respectively, as described above.
 ```
 GET    /img/series/:id/thumb      GET    /img/series/:id/backdrop
+GET    /img/extensions/icon/:pkgName
 GET    /img/books/:id/thumb       GET    /img/books/:id/page/:n
 GET    /img/lib/series/:id/thumb  GET    /img/lib/books/:id/thumb
 GET    /img/lib/books/:id/page/:n GET    /img/sources/cover
@@ -236,7 +267,7 @@ In your identity provider, create an OAuth2/OpenID Connect application with:
 - **Grant type**: authorization code (PKCE is used automatically)
 - **Scopes**: `openid profile email`
 
-Then set these on the `yomi-bff` container and restart it:
+Then set these on the `uchiyomi-bff` container and restart it (`yomi-bff` if you run the development stack):
 
 ```yaml
 environment:

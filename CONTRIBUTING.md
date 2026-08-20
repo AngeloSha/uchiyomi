@@ -6,7 +6,8 @@ Thanks for your interest. Bug reports, feature ideas, and pull requests are all 
 - `bff/`: the Fastify + TypeScript API (auth, library scanner, image server, sources, scheduled updater).
 - `web/`: the Next.js PWA (reader, library, discover, admin).
 - `docs/`: the user guide and screenshots. Screenshots are **generated**, not hand-taken — see [docs/SCREENSHOTS.md](docs/SCREENSHOTS.md) and re-run the rig if you change a screen.
-- Source adapters live in the separate `yomi-sources` pack, not in this repo.
+- Site-specific source adapters are deliberately **not** in this repo. The loader registers any compiled
+  CommonJS plugin mounted at `/sources`; the contract is in `bff/src/lib/sources/loader.ts`.
 
 ## Run it locally
 ```bash
@@ -22,7 +23,8 @@ Open http://localhost:3000, create the admin account, and add a source by URL.
 - Please don't hardcode new default sources that point at specific sites. The engine system already reaches whole families of sites by URL, which is the point.
 
 ## Tests
-Run them with `npm test` in `bff/` or `web/` (Node 20+; the runner is Node's built-in test runner via `tsx`,
+Run them with `npm test` in `bff/` or `web/` (**Node 22+**, matching CI and the Dockerfiles; the runner is
+Node's built-in test runner via `tsx`,
 so there's nothing extra to install beyond `npm install`).
 
 Most tests are plain unit tests over pure helpers. A few rules — the reading-progress ones — are enforced in
