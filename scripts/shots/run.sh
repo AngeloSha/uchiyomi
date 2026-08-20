@@ -93,16 +93,15 @@ if [ "$RECORD" = "1" ]; then
   mkdir -p "$DEMO"
   F="$OUT_PNG/frames"
   echo "· encoding"
-  # The walk-through is deliberately paced for a human driving it; a looping hero does not need those
-  # pauses, so speed it up. Real time is ~50s, which is far too long to loop; SPEED brings it to ~23s.
-  SPEED=${DEMO_SPEED:-2.2}
-  ffmpeg -y -loglevel error -f concat -safe 0 -i "$F/concat.txt" -vf "setpts=PTS/$SPEED,scale=1280:-2,fps=30" \
-    -c:v libx264 -profile:v high -pix_fmt yuv420p -crf 28 -movflags +faststart -an "$DEMO/tour.mp4"
-  ffmpeg -y -loglevel error -f concat -safe 0 -i "$F/concat.txt" -vf "setpts=PTS/$SPEED,scale=1280:-2,fps=30" \
+  # No global speed-up: record.mjs varies the rate per segment and writes it into the frame durations, so
+  # the moments worth watching play near real time while loading and dead air are compressed.
+  ffmpeg -y -loglevel error -f concat -safe 0 -i "$F/concat.txt" -vf "scale=1280:-2,fps=30" \
+    -c:v libx264 -profile:v high -pix_fmt yuv420p -crf 31 -movflags +faststart -an "$DEMO/tour.mp4"
+  ffmpeg -y -loglevel error -f concat -safe 0 -i "$F/concat.txt" -vf "scale=1280:-2,fps=30" \
     -c:v libvpx-vp9 -crf 40 -b:v 0 -row-mt 1 -an "$DEMO/tour.webm"
   ffmpeg -y -loglevel error -f concat -safe 0 -i "$F/concat.txt" -vf "scale=1280:-2" -frames:v 1 "$DEMO/tour-poster.webp"
   # GitHub will not play an MP4 inline, so the README gets an animated WebP instead.
-  ffmpeg -y -loglevel error -f concat -safe 0 -i "$F/concat.txt" -vf "setpts=PTS/$SPEED,scale=800:-2,fps=11" \
+  ffmpeg -y -loglevel error -f concat -safe 0 -i "$F/concat.txt" -vf "scale=800:-2,fps=11" \
     -t 12 -c:v libwebp_anim -lossless 0 -q:v 55 -loop 0 "$REPO/docs/shots/tour.webp"
   ls -la "$DEMO" "$REPO/docs/shots/tour.webp" | grep -E "tour|total" | sed 's/^/  /'
   exit 0

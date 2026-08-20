@@ -45,41 +45,65 @@ async function main() {
   const client = await page.createCDPSession();
   const frames = [];
   client.on('Page.screencastFrame', async ({ data, sessionId, metadata }) => {
-    frames.push({ data, t: metadata.timestamp });
+    frames.push({ data, t: metadata.timestamp, wall: Date.now() });
     try { await client.send('Page.screencastFrameAck', { sessionId }); } catch {}
   });
   await client.send('Page.startScreencast', { format: 'jpeg', quality: 92, everyNthFrame: 1 });
   const t0 = Date.now();
-  const beat = async (ms) => sleep(ms);
+
+  // Pacing is baked in PER SEGMENT rather than applied to the whole clip afterwards. A flat speed-up
+  // compresses the parts worth watching exactly as hard as the waiting, which is how the first cut ended up
+  // both too fast to follow AND cutting away before a search had returned anything.
+  //
+  // `hold` marks something worth seeing and plays near real time; `skim` marks loading and dead air and is
+  // compressed hard. `rates` records when each change happened, and the durations written into the concat
+  // manifest are divided accordingly, so ffmpeg encodes at 1x.
+  const rates = [{ t: Date.now(), r: 4.5 }];
+  const setRate = (r) => rates.push({ t: Date.now(), r });
+  const hold = async (ms) => { setRate(1.15); await sleep(ms); setRate(4.5); };
+  const skim = async (ms) => { setRate(4.5); await sleep(ms); };
+  /** Wait for something real to appear, skimming the wait, then hold on the result. */
+  const awaitThen = async (fn, holdMs, timeout = 40000) => {
+    setRate(6);
+    await page.waitForFunction(fn, { timeout, polling: 400 }).catch(() => {});
+    await hold(holdMs);
+  };
+  const beat = skim;
 
   // ---- the route ----
-  await beat(1800);                                                     // home, settling
+  await hold(1700);                                                     // home
 
   // command palette
   await page.keyboard.down('Control'); await page.keyboard.press('KeyK'); await page.keyboard.up('Control');
-  await beat(700);
-  for (const ch of 'martial') { await page.keyboard.type(ch); await beat(90); }
-  await beat(1400);
+  await hold(600);
+  for (const ch of 'martial') { await page.keyboard.type(ch); await sleep(85); }
+  await hold(1500);
   await page.keyboard.press('Escape');
   await beat(500);
 
   // a series, with its art resolving on camera
   if (SERIES_ID) {
     await page.goto(`${BASE}/series/?id=${SERIES_ID}`, { waitUntil: 'networkidle2', timeout: 45000 });
-    await beat(2600);
+    // wait for the cover art to actually resolve rather than filming a placeholder
+    await awaitThen(() => [...document.images].some((i) => i.complete && i.naturalWidth > 200), 1500);
     await page.evaluate(() => window.scrollBy({ top: 420, behavior: 'smooth' }));
-    await beat(1600);
+    await hold(1500);
   }
 
   // the reader — the centerpiece, and the one thing never shown moving.
   // Scroll continuously through a chapter boundary so the "Up Next" divider passes on camera.
   if (BOOK_ID) {
     await page.goto(`${BASE}/reader/?book=${BOOK_ID}`, { waitUntil: 'networkidle2', timeout: 45000 });
-    await beat(2200);
+    await hold(1400);
     await page.evaluate(async () => {
       const el = document.querySelector('[data-lenis-prevent]');
       if (!el) return;
-      const target = el.scrollHeight - el.clientHeight;
+      // Start a fifth of the way in. Page one of a scanlated chapter is usually a credits page covered in
+      // another site's branding, Patreon and Discord links -- not something to put on a homepage. The still
+      // screenshots already skip it; the recording has to as well.
+      el.scrollTop = Math.floor(el.scrollHeight * 0.2);
+      await new Promise((r) => setTimeout(r, 600));
+      const target = Math.floor(el.scrollHeight * 0.92);
       const start = performance.now(), dur = 7000, from = el.scrollTop;
       await new Promise((res) => {
         const step = (now) => {
@@ -90,39 +114,56 @@ async function main() {
         requestAnimationFrame(step);
       });
     });
-    await beat(1200);
+    await hold(900);
   }
 
   // discover, mid-search
   await page.goto(`${BASE}/discover/`, { waitUntil: 'networkidle2', timeout: 45000 });
-  await beat(1500);
+  await hold(900);
   const box = await page.$('input[placeholder*="Search"]');
-  if (box) { await box.click(); for (const ch of 'solo leveling') { await page.keyboard.type(ch); await beat(70); } await page.keyboard.press('Enter'); await beat(7000); }
+  if (box) {
+    await box.click();
+    for (const ch of 'solo leveling') { await page.keyboard.type(ch); await sleep(70); }
+    await page.keyboard.press('Enter');
+    // A cross-source search takes 10-20s. Wait for real result cards instead of guessing at a duration --
+    // the first cut used a fixed 7s and cut away before anything had rendered.
+    await awaitThen(() => document.body.innerText.includes('In library') ||
+      document.querySelectorAll('img[src*="/img/sources/cover"]').length > 2, 3000, 45000);
+  }
 
   // admin: health, then the extension browser
   await page.goto(`${BASE}/admin/`, { waitUntil: 'networkidle2', timeout: 45000 });
-  await beat(1200);
+  await hold(700);
   const clickTab = async (name) => {
     const h = await page.evaluateHandle((t) => [...document.querySelectorAll('button')].find((b) => (b.textContent || '').trim() === t), name);
     if (h.asElement()) await h.asElement().click();
   };
-  await clickTab('Health'); await beat(2400);
-  await clickTab('Providers'); await beat(1600);
+  await clickTab('Health');
+  await awaitThen(() => /checks found something|All good/i.test(document.body.innerText), 2400);
+  await clickTab('Providers'); await skim(900);
   const f = await page.$('input[placeholder*="Search extensions"]');
-  if (f) { await f.click(); for (const ch of 'manga') { await page.keyboard.type(ch); await beat(90); } await beat(2600); }
+  if (f) {
+    await f.click();
+    for (const ch of 'manga') { await page.keyboard.type(ch); await sleep(85); }
+    await awaitThen(() => document.querySelectorAll('img[src*="/img/extensions/icon/"]').length > 3, 2200);
+  }
   // hover an Add button, deliberately without clicking: this is the live server.
   const add = await page.evaluateHandle(() => [...document.querySelectorAll('button')].find((b) => (b.textContent || '').trim() === 'Add'));
-  if (add.asElement()) { await add.asElement().hover(); await beat(1800); }
+  if (add.asElement()) { await add.asElement().hover(); await hold(1600); }
 
   await client.send('Page.stopScreencast');
   console.log(`  captured ${frames.length} frames over ${((Date.now() - t0) / 1000).toFixed(1)}s`);
 
-  // Write frames plus a concat manifest carrying the real inter-frame gaps, so pacing survives the encode.
+  // Write frames plus a concat manifest. Durations are the real inter-frame gaps divided by whatever
+  // rate was in force at that moment, so the pacing is already correct and ffmpeg encodes at 1x.
+  const rateAt = (w) => { let r = rates[0].r; for (const c of rates) { if (c.t <= w) r = c.r; else break; } return r; };
   const lines = [];
   for (let i = 0; i < frames.length; i++) {
     const name = `f${String(i).padStart(5, '0')}.jpg`;
     await writeFile(`${OUT}/frames/${name}`, Buffer.from(frames[i].data, 'base64'));
-    const dur = i + 1 < frames.length ? Math.max(0.016, Math.min(0.5, frames[i + 1].t - frames[i].t)) : 0.08;
+    const wall = i + 1 < frames.length ? Math.max(0.016, Math.min(0.5, frames[i + 1].t - frames[i].t)) : 0.08;
+    const rate = rateAt(frames[i].wall);
+    const dur = Math.max(0.012, wall / rate);
     lines.push(`file '${name}'`, `duration ${dur.toFixed(4)}`);
   }
   lines.push(`file 'f${String(frames.length - 1).padStart(5, '0')}.jpg'`);

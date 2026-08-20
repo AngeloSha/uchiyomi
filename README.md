@@ -116,25 +116,29 @@ Suwayomi) fetches chapters but is Android-only or wraps them in a basic web UI. 
 | --- | :---: | :---: | :---: | :---: |
 | Self-hosted, multi-user server | ✅ | ✅ | ❌ *(Android app)* | ✅ |
 | Fetches new chapters from sources | ✅ | ❌ *(you supply files)* | ✅ | ✅ |
-| OLED design + webtoon-first reader | ✅ | basic | ✅ *(mobile)* | basic |
+| OLED design + webtoon-first reader | ✅ | basic | mobile | basic |
 | Installable PWA + offline, any device | ✅ | partial | Android only | partial |
-| Per-user progress + household features | ✅ | ✅ | ❌ | limited |
+| Per-user progress + household | ✅ | ✅ | ❌ | limited |
 | 2FA · lockout · audit · sessions | ✅ | basic | ❌ | ❌ |
 | Add a source by pasting a URL | ✅ | — | extensions | extension repos |
-| Syncs your progress to AniList | ✅ | Kavita only | ✅ | ✅ |
+| Syncs progress to AniList | ✅ | Kavita+, paid | ✅ | ✅ |
 | Automatic nightly backups | ✅ | ❌ | ❌ | ❌ |
-| Library health checks | ✅ | ❌ | ❌ | ❌ |
-| Scoped API tokens for scripts | ✅ | ✅ | ❌ | ❌ |
-| SSO / OIDC login | ✅ | Kavita only | ❌ | ❌ |
-| Reaches Mihon's extension ecosystem | ✅ | ❌ | ✅ | ✅ |
+| Finds chapter gaps & bad downloads | ✅ | partial | ❌ | ❌ |
+| API tokens, scoped read / write / admin | ✅ | keys, unscoped | ❌ | ❌ |
+| Single sign-on (OIDC) | ✅ | ✅ | ❌ | ❌ |
+| Reaches Mihon's extensions | ✅ | ❌ | ✅ | ✅ |
 
-**Honest caveats** (narrower than they look): Komga/Kavita are more mature for general library management, and
-Tachiyomi/Mihon have a longer track record with their extension ecosystem, though Uchiyomi now reaches the same
-extensions. But Uchiyomi reads **CBZ, CBR, and loose image folders**. It skips
-PDF/EPUB *on purpose* (those are ebook formats; Uchiyomi is built for image-based manga), and its **three engines
-each cover a whole *family* of sites** (most aggregators run Madara, MangaThemesia, or Manganato), so "add a
-source by URL" reaches far more sites than the engine count suggests. Uchiyomi's real edge is the *combination*: a
-polished, installable, multi-user reader that also fetches, with webtoons as first-class.
+**Honest caveats.** Komga and Kavita are further along at managing a library: Uchiyomi edits two metadata fields
+(title and summary), never writes back to your files, and can't delete, rename or merge anything. It reads
+**CBZ, CBR and loose image folders**, and skips PDF/EPUB *on purpose* — those are ebook formats, and this is
+built for image-based manga. Extensions don't run natively either: they run in a second container
+([Suwayomi](docs/extensions.md), and a JVM's worth of memory), and you paste a repository URL once, exactly as
+you would in Mihon.
+
+Against that, the three built-in engines each cover a whole *family* of sites (most aggregators run Madara,
+MangaThemesia or Manganato), so "add a source by URL" reaches far more than the engine count suggests. And the
+real edge is the combination nobody else offers: one app that finds, fetches, tracks and reads, for a whole
+household, with webtoons first-class.
 
 ## Architecture
 
