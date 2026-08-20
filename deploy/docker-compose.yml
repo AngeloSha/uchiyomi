@@ -55,7 +55,8 @@ services:
       FLARESOLVERR_URL: http://uchiyomi-flaresolverr:8191
       SOURCES_DIR: /sources
       CUSTOM_SITES_FILE: /config/sites.json
-      # JWT_SECRET is generated and persisted to /config on first boot if you don't set one.
+      # Generated and persisted to /config on first boot when left empty; set JWT_SECRET in .env to pin it.
+      JWT_SECRET: ${JWT_SECRET:-}
       # Web push is off unless you supply keys (see docs/USAGE.md).
       VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:-}
       VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:-}

@@ -199,7 +199,9 @@ docker compose up -d
 ```
 
 **On CasaOS?** Use [`deploy/casaos/docker-compose.yml`](deploy/casaos/docker-compose.yml) instead — import it
-as a custom app and it appears with an icon like any store app.
+as a custom app and it appears with an icon like any store app. That manifest ships four containers rather
+than five — it leaves out the extension engine, so Mihon/Tachiyomi extensions are off there; add
+`uchiyomi-suwayomi` from `deploy/docker-compose.yml` and set `SUWAYOMI_URL` if you want them.
 
 It runs five containers:
 
