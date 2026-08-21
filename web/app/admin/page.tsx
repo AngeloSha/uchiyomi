@@ -7,10 +7,11 @@ import { useAuth } from '@/lib/auth';
 import { triggerRefresh } from '@/lib/refresh';
 import { bytes, relativeTime } from '@/lib/format';
 import { useToast } from '@/components/Toast';
+import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { Avatar } from '@/components/Avatar';
 import { IcChevronLeft, IcTrash, IcPlus, IcRefresh } from '@/components/icons';
 
-const TABS = ['Overview', 'Members', 'Providers', 'Art', 'Health', 'Tasks', 'Activity', 'Sessions', 'Settings'] as const;
+const TABS = ['Overview', 'Members', 'Providers', 'Art', 'Health', 'Library', 'Tasks', 'Activity', 'Sessions', 'Settings'] as const;
 type Tab = (typeof TABS)[number];
 const msgOf = (e: any, fb: string) => { try { return JSON.parse(e?.body || '{}').message || fb; } catch { return fb; } };
 const fld = 'w-full rounded-xl border border-ink-700 bg-ink-900 px-3 py-2.5 text-sm text-fog-50 outline-none focus:border-accent';
@@ -41,6 +42,7 @@ export default function AdminPage() {
         {tab === 'Providers' && <Providers />}
         {tab === 'Art' && <ArtReview />}
         {tab === 'Health' && <Health />}
+      {tab === 'Library' && <LibraryPanel />}
         {tab === 'Tasks' && <Tasks />}
         {tab === 'Activity' && <Activity />}
         {tab === 'Sessions' && <Sessions />}
@@ -611,7 +613,7 @@ function Settings() {
   );
 }
 
-interface HealthItem { seriesId?: string; title: string; detail: string }
+interface HealthItem { seriesId?: string; seriesIds?: string[]; titles?: string[]; title: string; detail: string }
 interface HealthCheck { id: string; title: string; status: 'ok' | 'warn' | 'problem'; summary: string; note?: string; items: HealthItem[] }
 
 const HEALTH_TONE: Record<HealthCheck['status'], string> = {
@@ -622,8 +624,67 @@ const HEALTH_TONE: Record<HealthCheck['status'], string> = {
 const HEALTH_LABEL: Record<HealthCheck['status'], string> = { problem: 'Needs attention', warn: 'Worth a look', ok: 'All good' };
 
 /** Read-only audit of the library: gaps, truncated downloads, duplicates, and failing sources. */
+interface DeletedRow { id: string; title: string; folder: string; books_count: number; deleted_at: string }
+
+/** What has been removed from the library, and the way back. Removing never touches files, so this is
+ *  always reversible -- the series keeps its id, and with it everyone's progress, favourites and ratings. */
+function LibraryPanel() {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const [busy, setBusy] = useState<string | null>(null);
+  const { data, isLoading } = useQuery({
+    queryKey: ['admin-deleted'],
+    queryFn: () => api<{ content: DeletedRow[] }>('/api/admin/series/deleted'),
+  });
+  const rows = data?.content || [];
+
+  const restore = async (r: DeletedRow) => {
+    setBusy(r.id);
+    try {
+      await api(`/api/admin/series/${r.id}/restore`, { method: 'POST' });
+      toast(`\u201c${r.title}\u201d is back in the library`, 'success');
+      qc.invalidateQueries({ queryKey: ['admin-deleted'] });
+    } catch (e) { toast(msgOf(e, 'Could not restore it'), 'error'); }
+    setBusy(null);
+  };
+
+  return (
+    <div className="space-y-3">
+      <p className="text-xs text-fog-500">
+        Removing a series hides it from the library, search and the updater. Its files are left exactly where
+        they are, and everyone&rsquo;s reading progress is kept, so putting it back changes nothing else.
+      </p>
+      {isLoading ? (
+        <div className="card p-4 text-sm text-fog-500">Loading\u2026</div>
+      ) : !rows.length ? (
+        <div className="card p-6 text-center text-sm text-fog-500">Nothing has been removed.</div>
+      ) : (
+        <div className="card divide-y divide-ink-800/70">
+          {rows.map((r) => (
+            <div key={r.id} className="flex items-center gap-3 px-4 py-3">
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm text-fog-100">{r.title}</p>
+                <p className="truncate text-[11px] text-fog-500">
+                  {r.books_count} chapter{r.books_count === 1 ? '' : 's'} \u00b7 removed {relativeTime(r.deleted_at)} \u00b7 {r.folder}
+                </p>
+              </div>
+              <button onClick={() => restore(r)} disabled={busy === r.id} className="chip shrink-0 text-xs disabled:opacity-50">
+                {busy === r.id ? 'Restoring\u2026' : 'Put back'}
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function Health() {
   const [open, setOpen] = useState<string | null>(null);
+  const [merge, setMerge] = useState<HealthItem | null>(null);
+  const [keepFirst, setKeepFirst] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const toast = useToast();
   const { data, isFetching, refetch } = useQuery({
     queryKey: ['admin-health'],
     queryFn: () => api<{ generatedAt: string; checks: HealthCheck[] }>('/api/admin/health'),
@@ -645,6 +706,40 @@ function Health() {
         </button>
       </div>
 
+      {merge && merge.seriesIds && (
+        <ConfirmDialog
+          title="Merge these two?"
+          confirmLabel="Merge"
+          busy={busy}
+          body={
+            <>
+              <p>Every chapter, and everyone&rsquo;s reading progress, favourites and ratings, move onto the copy you keep. <strong className="text-fog-100">Nothing is deleted</strong> &mdash; no chapter is dropped even if both copies have it, and no files are touched.</p>
+              <div className="mt-3 space-y-2">
+                {(merge.titles || []).map((t, i) => (
+                  <label key={i} className="flex cursor-pointer items-center gap-2 rounded-lg border border-ink-700 px-3 py-2 text-sm">
+                    <input type="radio" checked={keepFirst === (i === 0)} onChange={() => setKeepFirst(i === 0)} />
+                    <span className="truncate">Keep <strong className="text-fog-100">{t}</strong></span>
+                  </label>
+                ))}
+              </div>
+            </>
+          }
+          onConfirm={async () => {
+            const [a, b] = merge.seriesIds!;
+            const keep = keepFirst ? a : b;
+            const gone = keepFirst ? b : a;
+            setBusy(true);
+            try {
+              const r = await api<{ moved: number }>(`/api/admin/series/${gone}/merge`, { method: 'POST', json: { into: keep } });
+              toast(`Merged \u2014 ${r.moved} chapter${r.moved === 1 ? '' : 's'} moved`, 'success');
+              setMerge(null);
+              refetch();
+            } catch (e) { toast(msgOf(e, 'Could not merge'), 'error'); }
+            setBusy(false);
+          }}
+          onClose={() => setMerge(null)}
+        />
+      )}
       {checks.map((c) => {
         const isOpen = open === c.id;
         return (
@@ -676,6 +771,9 @@ function Health() {
                         <p className="truncate text-sm text-fog-100">{it.title}</p>
                         <p className="text-[11px] text-fog-500">{it.detail}</p>
                       </div>
+                      {c.id === 'duplicates' && it.seriesIds && it.seriesIds.length === 2 && (
+                        <button onClick={() => setMerge(it)} className="chip shrink-0 text-xs hover:border-accent/50 hover:text-accent">Merge</button>
+                      )}
                       {it.seriesId && (
                         <a href={`/series/${it.seriesId}`} className="chip shrink-0 text-xs">Open</a>
                       )}

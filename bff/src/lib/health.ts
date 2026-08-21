@@ -15,6 +15,9 @@ export type HealthStatus = 'ok' | 'warn' | 'problem';
 
 export interface HealthItem {
   seriesId?: string;
+  /** Every series this item is about. The duplicates check needs both, so a merge can act on them. */
+  seriesIds?: string[];
+  titles?: string[];
   title: string;
   detail: string;
 }
@@ -171,7 +174,13 @@ async function duplicateSeries(): Promise<HealthCheck> {
     note:
       'Detected by two series matching the same AniList entry, so it catches copies added from different ' +
       'sources under different names. Progress tracking works best with one copy of each.',
-    items: rows.map((r) => ({ seriesId: r.ids[0], title: r.titles, detail: 'Same AniList entry' })),
+    items: rows.map((r) => ({
+        seriesId: r.ids[0],
+        seriesIds: r.ids,
+        titles: r.titles.split(' + '),
+        title: r.titles,
+        detail: 'Same AniList entry',
+      })),
   };
 }
 

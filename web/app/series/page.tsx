@@ -11,6 +11,7 @@ import { applyCover, clearCover } from '@/lib/theme';
 import { Img, Backdrop, Rail, SectionTitle } from '@/components/ui';
 import { SeriesCard } from '@/components/cards';
 import { useToast } from '@/components/Toast';
+import { ConfirmDialog, msgOf } from '@/components/ConfirmDialog';
 import { useAuth } from '@/lib/auth';
 import { IcChevronLeft, IcHeart, IcStar, IcPlay, IcDownload, IcCheck, IcTrash, IcSliders } from '@/components/icons';
 
@@ -360,6 +361,21 @@ function SeriesInner() {
   }, [books]);
 
   // shared blocks (rendered once)
+  const [deleting, setDeleting] = useState(false);
+  const [busyAdmin, setBusyAdmin] = useState(false);
+
+  const doDelete = async () => {
+    setBusyAdmin(true);
+    try {
+      await api(`/api/admin/series/${id}`, { method: 'DELETE' });
+      toast('Series removed from the library', 'success');
+      router.push('/library');
+    } catch (e) {
+      toast(msgOf(e, 'Could not remove it'), 'error');
+    }
+    setBusyAdmin(false);
+  };
+
   const Actions = (
     <div className="mt-4 flex flex-col gap-2">
       <button onClick={() => resumeBook && router.push(`/reader/?book=${resumeBook.id}`)} className="btn-accent w-full">
@@ -382,10 +398,16 @@ function SeriesInner() {
         <span className="text-xs text-fog-500">{rating ? `${rating}/5` : 'Rate this'}</span>
       </div>
       {isAdmin && (
-        <button onClick={() => setEditing(true)} className="mt-1 flex items-center justify-center gap-2 rounded-full border border-ink-700 py-2.5 text-sm text-fog-300">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9" /><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" /></svg>
-          Edit details
-        </button>
+        <>
+          <button onClick={() => setEditing(true)} className="mt-1 flex items-center justify-center gap-2 rounded-full border border-ink-700 py-2.5 text-sm text-fog-300">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9" /><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" /></svg>
+            Edit details
+          </button>
+          <button onClick={() => setDeleting(true)} className="flex items-center justify-center gap-2 rounded-full border border-ink-700 py-2.5 text-sm text-fog-500 hover:border-rose-500/40 hover:text-rose-300">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14" /></svg>
+            Remove from library
+          </button>
+        </>
       )}
     </div>
   );
@@ -498,7 +520,24 @@ function SeriesInner() {
         </div>
       </div>
 
-      {editing && series && <SeriesEditModal id={id} series={series} onClose={() => setEditing(false)} onSaved={() => { qc.invalidateQueries({ queryKey: ['series', id] }); }} />}
+      {deleting && series && (
+        <ConfirmDialog
+          title="Remove from library?"
+          danger
+          busy={busyAdmin}
+          confirmLabel="Remove"
+          confirmText={series.name}
+          body={
+            <>
+              <p><strong className="text-fog-100">No files are deleted.</strong> The chapters stay exactly where they are on disk, and nothing in your library folder is touched.</p>
+              <p className="mt-2">Everyone&rsquo;s reading progress, history, favourites and ratings are kept, so you can put it back at any time from Admin &rarr; Library, or just add it again.</p>
+            </>
+          }
+          onConfirm={doDelete}
+          onClose={() => setDeleting(false)}
+        />
+      )}
+      {editing && series && <SeriesEditModal id={id} series={series} onClose={() => setEditing(false)} onSaved={() => { for (const k of [['series', id], ['series-books', id], ['home'], ['library']]) qc.invalidateQueries({ queryKey: k }); }} />}
       {collecting && <CollectionSheet seriesId={id} onClose={() => setCollecting(false)} />}
 
       {(similar?.content?.length ?? 0) > 0 && (
