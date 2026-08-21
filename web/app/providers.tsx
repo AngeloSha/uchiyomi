@@ -11,7 +11,11 @@ export function Providers({ children }: { children: ReactNode }) {
     () =>
       new QueryClient({
         defaultOptions: {
-          queries: { staleTime: 60_000, retry: 1, refetchOnWindowFocus: false },
+          // Refetch when you come back to the tab. Reading is inherently multi-device -- finish a chapter
+          // on your phone, pick up the laptop -- and with this off a tab left open all day would happily
+          // show you this morning's state forever. There is no manual refresh on desktop either:
+          // PullToRefresh is touch-only, so the only escape was reloading the page.
+          queries: { staleTime: 30_000, retry: 1, refetchOnWindowFocus: true, refetchOnReconnect: true },
         },
       }),
   );

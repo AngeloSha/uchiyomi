@@ -407,7 +407,11 @@ DECLARE
     ARRAY['series_overrides', 'series_id', 'lib_series', 'CASCADE'],
     ARRAY['notes',            'series_id', 'lib_series', 'CASCADE'],
     ARRAY['read_progress',    'series_id', 'lib_series', 'CASCADE'],
-    ARRAY['read_progress',    'book_id',   'lib_books',  'CASCADE'],
+    -- NOT cascade. Deleting a chapter row must never silently delete what someone read of it: that is the
+    -- one loss this project has no way to undo, and it syncs outward to AniList before anyone notices.
+    -- RESTRICT keeps the reference honest while making any future chapter cleanup fail loudly, so whoever
+    -- writes it has to decide what happens to the history first.
+    ARRAY['read_progress',    'book_id',   'lib_books',  'RESTRICT'],
     -- a note about a series outlives any one chapter of it
     ARRAY['notes',            'book_id',   'lib_books',  'SET NULL'],
     -- the cover pointer should blank rather than dangle
@@ -531,6 +535,23 @@ const DATA_MIGRATIONS: { id: string; run: (c: PoolClient) => Promise<void> }[] =
       }
     },
   },
+  // Installs that already have the CASCADE version of this constraint (it shipped in the FK pass) keep it,
+  // because the DO block above only creates constraints that are missing. Swap it in place.
+  {
+    id: '0004-read-progress-book-restrict',
+    run: async (c) => {
+      const cur = await c.query(
+        `SELECT confdeltype FROM pg_constraint WHERE conname = 'fk_read_progress_book_id'`,
+      );
+      if (!cur.rowCount || cur.rows[0].confdeltype !== 'c') return; // absent, or already not-cascade
+      await c.query(`ALTER TABLE read_progress DROP CONSTRAINT fk_read_progress_book_id`);
+      await c.query(
+        `ALTER TABLE read_progress ADD CONSTRAINT fk_read_progress_book_id
+           FOREIGN KEY (book_id) REFERENCES lib_books(id) ON DELETE RESTRICT NOT VALID`,
+      );
+    },
+  },
+
 ];
 
 export async function migrate(): Promise<void> {

@@ -132,6 +132,9 @@ async function tasteRecs(req: FastifyRequest): Promise<any[]> {
   return pool;
 }
 
+// How many series the Continue Reading rail carries. 20 hid 33 of the heaviest user's 53 in progress.
+const ON_DECK_LIMIT = 60;
+
 export default async function catalogRoutes(app: FastifyInstance) {
   app.addHook('preHandler', authenticate);
 
@@ -214,9 +217,44 @@ export default async function catalogRoutes(app: FastifyInstance) {
       onDeckP = komga.booksOnDeck(0, 20).then((r: any) => r.content).catch(() => []);
     } else {
       onDeckP = (async () => {
+        // One row per series you have been reading lately: the chapter you are part-way through, or -- if you
+        // finished it -- the next one you have not read.
+        //
+        // It used to be only `completed = false`, so finishing a chapter dropped the series out of Continue
+        // Reading entirely and nothing put the next one in front of you. You had to remember what you were
+        // reading and go find it, which is precisely the job this rail exists to do.
+        //
+        // Scoped to series touched in the last 90 days so the list stays short, ordered by when you last read.
         const rows = await q<{ book_id: string }>(
-          'SELECT book_id FROM read_progress WHERE user_id = $1 AND completed = false ORDER BY updated_at DESC LIMIT 20',
-          [uid],
+          `WITH recent AS (
+             SELECT series_id, max(updated_at) AS last_read
+               FROM read_progress
+              WHERE user_id = $1 AND updated_at > now() - interval '90 days'
+              GROUP BY series_id
+           ),
+           pick AS (
+             SELECT r.series_id, r.last_read,
+                    COALESCE(
+                      -- the chapter you are part-way through wins
+                      (SELECT p.book_id FROM read_progress p
+                         WHERE p.user_id = $1 AND p.series_id = r.series_id AND p.completed = false
+                         ORDER BY p.updated_at DESC LIMIT 1),
+                      -- otherwise the lowest-numbered chapter you have not finished
+                      (SELECT b.id FROM lib_books b
+                         WHERE b.series_id = r.series_id
+                           AND NOT EXISTS (
+                             SELECT 1 FROM read_progress p2
+                              WHERE p2.user_id = $1 AND p2.book_id = b.id AND p2.completed
+                           )
+                         ORDER BY b.number ASC, b.file ASC LIMIT 1)
+                    ) AS book_id
+               FROM recent r
+           )
+           SELECT book_id FROM pick
+            WHERE book_id IS NOT NULL      -- a series you have finished entirely drops out, correctly
+            ORDER BY last_read DESC
+            LIMIT $2`,
+          [uid, ON_DECK_LIMIT],
         );
         const books = (await Promise.all(rows.map((r) => komga.book(r.book_id).catch(() => null)))).filter(Boolean) as any[];
         return overlay(books, await userProgress(uid, books.map((b) => b.id)));
