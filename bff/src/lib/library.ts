@@ -5,6 +5,9 @@ import { join } from 'path';
 import sharp from 'sharp';
 import { q, tx } from './db';
 import { newSeriesId, newBookId } from './ids';
+import { env } from '../env';
+import { fingerprintChapter } from './fingerprint';
+import { findRematch, applyRematch, logRematch, MIN_BOOKS } from './rematch';
 import { numFromName, naturalCmp } from './naming';
 
 // node-stream-zip reads the central directory only (cheap) and can stream a single entry.
@@ -179,6 +182,70 @@ export const DL_ROOT = process.env.DL_ROOT || '/library-dl';
  * lib_books. Each book records the root it lives in so the image server can resolve it. Page counts fill
  * lazily on first read. books_count + latest_mtime are recomputed across roots at the end.
  */
+/** Every `<source>/<series>` folder that exists under either root right now. */
+async function foldersOnDisk(): Promise<string[]> {
+  const out: string[] = [];
+  for (const root of [LIBRARY_ROOT, DL_ROOT]) {
+    for (const src of await readdir(root, { withFileTypes: true }).catch(() => [])) {
+      if (!src.isDirectory()) continue;
+      for (const sd of await readdir(join(root, src.name), { withFileTypes: true }).catch(() => [])) {
+        if (sd.isDirectory()) out.push(`${src.name}/${sd.name}`);
+      }
+    }
+  }
+  return out;
+}
+
+/**
+ * Decide whether this unknown folder is an existing series that moved. Returns the series to reuse, or null
+ * to fall through to creating a new one — which is exactly what happens today.
+ */
+async function tryRematch(
+  folderRel: string,
+  folderAbs: string,
+  files: string[],
+  root: string,
+  onDisk: string[],
+): Promise<{ id: string; oldFolder: string } | null> {
+  if (files.length < MIN_BOOKS) return null;
+
+  // Fingerprint this folder's chapters. Only happens for folders we have never seen, so it is not on the
+  // common path of a rescan.
+  const fps = await Promise.all(
+    files.map(async (f) => ({
+      rel: `${folderRel}/${f}`,
+      root,
+      fingerprint: (await fingerprintChapter(join(folderAbs, f))).fingerprint,
+    })),
+  );
+  const list = fps.map((f) => f.fingerprint).filter((x): x is string => !!x);
+
+  const { match, reason, candidates } = await findRematch(list, onDisk);
+  if (!match) {
+    if (candidates.length) {
+      await logRematch(env.LIBRARY_REMATCH === 'apply' ? 'apply' : 'report', {
+        folder: folderRel, matched: false, reason,
+        candidates: candidates.map((c) => ({ title: c.title, folder: c.oldFolder, overlap: Number(c.overlap.toFixed(2)) })),
+      });
+    }
+    return null;
+  }
+
+  const detail = {
+    folder: folderRel, matched: true, series: match.title, from: match.oldFolder,
+    seriesId: match.seriesId, shared: match.shared, overlap: Number(match.overlap.toFixed(2)),
+  };
+
+  if (env.LIBRARY_REMATCH === 'report') {
+    await logRematch('report', { ...detail, applied: false });
+    return null; // report mode changes nothing
+  }
+
+  const moved = await tx((qq) => applyRematch(qq, match.seriesId, match.oldFolder, folderRel, fps));
+  await logRematch('apply', { ...detail, applied: true, booksRepointed: moved.moved });
+  return { id: match.seriesId, oldFolder: match.oldFolder };
+}
+
 export async function persistScan(): Promise<{ series: number; books: number; ms: number }> {
   const t0 = Date.now();
   let nBooks = 0;
@@ -186,6 +253,9 @@ export async function persistScan(): Promise<{ series: number; books: number; ms
   // folder legitimately exists under both roots (a series part-fetched by the engine, part downloaded here),
   // and merging them into one series is deliberate.
   const seenFolders = new Map<string, string>();
+  // Every folder that exists on disk this pass. A series still sitting at its own path has not moved, so it
+  // must never be offered as the answer for a different folder.
+  const onDisk = await foldersOnDisk();
   for (const root of [LIBRARY_ROOT, DL_ROOT]) {
     const sources = await readdir(root, { withFileTypes: true }).catch(() => []);
     for (const src of sources) {
@@ -199,8 +269,18 @@ export async function persistScan(): Promise<{ series: number; books: number; ms
         if (!files.length) continue;
 
         // One folder per transaction: a half-applied folder is a corrupt library, not a stale one.
+        // Only a folder with no row of its own can be a move. Anything already known is the normal path.
+        let rematched: { id: string; oldFolder: string } | null = null;
+        if (env.LIBRARY_REMATCH !== 'off' && !seenFolders.has(folderRel)) {
+          rematched = await tryRematch(folderRel, folderAbs, files, root, onDisk);
+        }
+
         const seriesId = await tx(async (qq) => {
           let id = seenFolders.get(folderRel);
+          if (!id && rematched) {
+            id = rematched.id;
+            seenFolders.set(folderRel, id);
+          }
           if (!id) {
             const firstXml = (await readArchive(join(folderAbs, files[0])).catch(() => ({ xml: '', pages: 0 }))).xml;
             // Conflict on FOLDER, not id: the row keeps whatever id it already had, so ids survive a rescan

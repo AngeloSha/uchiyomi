@@ -67,6 +67,13 @@ const schema = z.object({
   // Suwayomi can expose hundreds of sources; cross-source search fans out to every REGISTERED source, so
   // registration is opt-in per source and additionally capped here.
   SUWAYOMI_MAX_SOURCES: z.coerce.number().int().min(1).max(500).default(25),
+  // Recognising a series whose folder was renamed or moved, by matching its chapters' content fingerprints.
+  //   off    - a moved folder becomes a new series, as it always has
+  //   report - work out what it WOULD match and write it to the audit log, change nothing
+  //   apply  - actually move the series to its new folder, keeping progress, favourites and covers
+  // Defaults to off: a wrong match moves someone's reading progress onto the wrong series, so this is opt-in
+  // and 'report' exists so an operator can read the proposed matches before ever trusting it.
+  LIBRARY_REMATCH: z.enum(['off', 'report', 'apply']).default('off'),
   VAPID_PUBLIC_KEY: z.string().default(''),
   VAPID_PRIVATE_KEY: z.string().default(''),
   VAPID_SUBJECT: z.string().default('mailto:admin@uchiyomi.com'),
