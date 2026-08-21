@@ -186,6 +186,23 @@ ALTER TABLE lib_series ADD COLUMN IF NOT EXISTS auto_update boolean NOT NULL DEF
 ALTER TABLE lib_series ADD COLUMN IF NOT EXISTS source_id        text;
 ALTER TABLE lib_series ADD COLUMN IF NOT EXISTS source_series_id text;
 
+-- Content identity, so a chapter can be recognised after it moves. Derived from the archive's central
+-- directory (entry names + CRC-32 + uncompressed sizes), which is cheap to read and survives recompression.
+-- Nothing reads these yet; a background job fills them in, and fp_at is set even on failure so an unreadable
+-- file is attempted once rather than retried on every pass.
+ALTER TABLE lib_books  ADD COLUMN IF NOT EXISTS fingerprint text;
+ALTER TABLE lib_books  ADD COLUMN IF NOT EXISTS fp_kind     text;         -- zip | rar | dir | error
+ALTER TABLE lib_books  ADD COLUMN IF NOT EXISTS fp_at       timestamptz;  -- when it was last attempted
+ALTER TABLE lib_books  ADD COLUMN IF NOT EXISTS size        bigint;
+CREATE INDEX IF NOT EXISTS lib_books_fp_idx ON lib_books (fingerprint) WHERE fingerprint IS NOT NULL;
+-- breadcrumb for a series that gets rematched to a new folder, so a wrong match can be reversed
+ALTER TABLE lib_series ADD COLUMN IF NOT EXISTS folder_prev text;
+
+-- A book is unique per (root, file), not per file: the same relative path legitimately exists under both the
+-- read library and the download dir. Strictly weaker than the old constraint, so it cannot fail to apply.
+ALTER TABLE lib_books DROP CONSTRAINT IF EXISTS lib_books_file_key;
+CREATE UNIQUE INDEX IF NOT EXISTS lib_books_root_file_idx ON lib_books (root, file);
+
 -- per-user "new chapters since last seen" (Updates feed + NEW badges)
 CREATE TABLE IF NOT EXISTS series_seen (
   user_id          uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
