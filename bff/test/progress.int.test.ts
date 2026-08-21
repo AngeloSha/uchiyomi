@@ -30,6 +30,18 @@ async function setup(): Promise<{ mod: Mod; q: any; userId: string }> {
     `INSERT INTO users (username, display_name, password_hash, role) VALUES ($1,$2,$3,'user') RETURNING id`,
     ['progress-test', 'Progress Test', 'x'],
   );
+  // read_progress now has real foreign keys, so the series and chapter it refers to have to exist. They
+  // never did before, which is precisely the kind of thing the constraints were added to stop.
+  await q(
+    `INSERT INTO lib_series (id, source, title, folder, books_count) VALUES ($1,'test','Progress Test',$1,1)
+     ON CONFLICT (id) DO NOTHING`,
+    [SERIES],
+  );
+  await q(
+    `INSERT INTO lib_books (id, series_id, source, file, number, title, root)
+     VALUES ($1,$2,'test',$1,1,'Chapter 1','/library') ON CONFLICT (id) DO NOTHING`,
+    [BOOK, SERIES],
+  );
   return { mod, q, userId: rows[0].id };
 }
 

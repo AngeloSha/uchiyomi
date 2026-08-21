@@ -207,6 +207,57 @@ ALTER TABLE lib_series ADD COLUMN IF NOT EXISTS deleted_at  timestamptz;
 ALTER TABLE lib_series ADD COLUMN IF NOT EXISTS merged_into text;
 CREATE INDEX IF NOT EXISTS lib_series_live_idx ON lib_series (id) WHERE deleted_at IS NULL AND merged_into IS NULL;
 
+-- ── Referential integrity ─────────────────────────────────────────────────────────────────────────────
+-- Twelve tables have always held a series or book id as bare text with no foreign key, so nothing told you
+-- when one of them forgot to clean up. It shows: series_art was 47% orphaned before this landed.
+--
+-- Added NOT VALID, which takes a brief lock and skips the scan; a runOnce step validates them afterwards,
+-- once the existing orphans have been quarantined. Two tables deliberately get NO constraint, see below.
+CREATE TABLE IF NOT EXISTS orphan_refs (
+  id  bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  at  timestamptz NOT NULL DEFAULT now(),
+  tbl text  NOT NULL,
+  col text  NOT NULL,
+  row jsonb NOT NULL
+);
+
+DO $$
+DECLARE
+  spec text[];
+  specs text[][] := ARRAY[
+    ARRAY['favorites',        'series_id', 'lib_series', 'CASCADE'],
+    ARRAY['collection_items', 'series_id', 'lib_series', 'CASCADE'],
+    ARRAY['ratings',          'series_id', 'lib_series', 'CASCADE'],
+    ARRAY['series_colors',    'series_id', 'lib_series', 'CASCADE'],
+    ARRAY['series_art',       'series_id', 'lib_series', 'CASCADE'],
+    ARRAY['series_seen',      'series_id', 'lib_series', 'CASCADE'],
+    ARRAY['series_trackers',  'series_id', 'lib_series', 'CASCADE'],
+    ARRAY['series_overrides', 'series_id', 'lib_series', 'CASCADE'],
+    ARRAY['notes',            'series_id', 'lib_series', 'CASCADE'],
+    ARRAY['read_progress',    'series_id', 'lib_series', 'CASCADE'],
+    ARRAY['read_progress',    'book_id',   'lib_books',  'CASCADE'],
+    -- a note about a series outlives any one chapter of it
+    ARRAY['notes',            'book_id',   'lib_books',  'SET NULL'],
+    -- the cover pointer should blank rather than dangle
+    ARRAY['lib_series',       'cover_book_id', 'lib_books', 'SET NULL'],
+    ARRAY['lib_series',       'merged_into',   'lib_series', 'SET NULL']
+  ];
+  nm text;
+BEGIN
+  FOREACH spec SLICE 1 IN ARRAY specs LOOP
+    nm := 'fk_' || spec[1] || '_' || spec[2];
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = nm) THEN
+      EXECUTE format(
+        'ALTER TABLE %I ADD CONSTRAINT %I FOREIGN KEY (%I) REFERENCES %I(id) ON DELETE %s NOT VALID',
+        spec[1], nm, spec[2], spec[3], spec[4]);
+    END IF;
+  END LOOP;
+END $$;
+-- Deliberately NOT constrained: reading_events is an append-only record of things that actually happened and
+-- feeds stats, streaks, Wrapped and the leaderboard -- cascading it would rewrite someone's history because a
+-- file moved. offline_downloads describes bytes on a user's phone, which the server cannot reconcile anyway.
+
+
 -- A book is unique per (root, file), not per file: the same relative path legitimately exists under both the
 -- read library and the download dir. Strictly weaker than the old constraint, so it cannot fail to apply.
 ALTER TABLE lib_books DROP CONSTRAINT IF EXISTS lib_books_file_key;
@@ -423,6 +474,63 @@ export async function runOnce(
 const DATA_MIGRATIONS: { id: string; run: (c: PoolClient) => Promise<void> }[] = [
   // Proves the mechanism end to end on real installs before anything depends on it.
   { id: '0001-noop', run: async (c) => { await c.query('SELECT 1'); } },
+
+  // Copy every orphaned row into orphan_refs BEFORE deleting it, so "we removed your data" is recoverable
+  // with one UPDATE rather than a restore from last night's dump. Small tables; bounded and fast.
+  {
+    id: '0002-quarantine-orphans',
+    run: async (c) => {
+      const targets: [string, string, string][] = [
+        ['favorites', 'series_id', 'lib_series'],
+        ['collection_items', 'series_id', 'lib_series'],
+        ['ratings', 'series_id', 'lib_series'],
+        ['series_colors', 'series_id', 'lib_series'],
+        ['series_art', 'series_id', 'lib_series'],
+        ['series_seen', 'series_id', 'lib_series'],
+        ['series_trackers', 'series_id', 'lib_series'],
+        ['series_overrides', 'series_id', 'lib_series'],
+        ['notes', 'series_id', 'lib_series'],
+        ['read_progress', 'series_id', 'lib_series'],
+        ['read_progress', 'book_id', 'lib_books'],
+      ];
+      for (const [tbl, col, parent] of targets) {
+        await c.query(
+          `INSERT INTO orphan_refs (tbl, col, row)
+           SELECT $1, $2, to_jsonb(t) FROM ${tbl} t
+            WHERE t.${col} IS NOT NULL AND NOT EXISTS (SELECT 1 FROM ${parent} p WHERE p.id = t.${col})`,
+          [tbl, col],
+        );
+        await c.query(
+          `DELETE FROM ${tbl} t WHERE t.${col} IS NOT NULL
+             AND NOT EXISTS (SELECT 1 FROM ${parent} p WHERE p.id = t.${col})`,
+        );
+      }
+      // book notes point at nothing rather than being thrown away
+      await c.query(
+        `UPDATE notes SET book_id = NULL
+          WHERE book_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM lib_books b WHERE b.id = notes.book_id)`,
+      );
+      await c.query(
+        `UPDATE lib_series SET cover_book_id = NULL
+          WHERE cover_book_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM lib_books b WHERE b.id = cover_book_id)`,
+      );
+    },
+  },
+
+  // Now the data is clean, promote the NOT VALID constraints. VALIDATE takes only a SHARE UPDATE EXCLUSIVE
+  // lock, so it blocks neither reads nor writes.
+  {
+    id: '0003-validate-fks',
+    run: async (c) => {
+      const rows = await c.query<{ conname: string; tbl: string }>(
+        `SELECT conname, conrelid::regclass::text AS tbl FROM pg_constraint
+          WHERE contype = 'f' AND NOT convalidated AND conname LIKE 'fk_%'`,
+      );
+      for (const r of rows.rows) {
+        await c.query(`ALTER TABLE ${r.tbl} VALIDATE CONSTRAINT "${r.conname}"`);
+      }
+    },
+  },
 ];
 
 export async function migrate(): Promise<void> {
