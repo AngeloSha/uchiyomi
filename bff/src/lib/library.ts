@@ -2,9 +2,9 @@
 // Layout: <root>/<source>/<series title>/<chapter>.cbz ; each cbz carries ComicInfo.xml + page images.
 import { readdir, stat, readFile } from 'fs/promises';
 import { join } from 'path';
-import { createHash } from 'crypto';
 import sharp from 'sharp';
-import { q } from './db';
+import { q, tx } from './db';
+import { newSeriesId, newBookId } from './ids';
 import { numFromName, naturalCmp } from './naming';
 
 // node-stream-zip reads the central directory only (cheap) and can stream a single entry.
@@ -38,12 +38,6 @@ export interface ScanSeries {
   books: ScanBook[];
 }
 
-function sid(rel: string): string {
-  return 's_' + createHash('sha1').update(rel).digest('hex').slice(0, 20);
-}
-function bid(rel: string): string {
-  return 'b_' + createHash('sha1').update(rel).digest('hex').slice(0, 20);
-}
 function field(xml: string, tag: string): string | null {
   // allow an optional XML namespace prefix, e.g. <ty:PublishingStatusTachiyomi>
   const m = xml.match(new RegExp(`<(?:\\w+:)?${tag}\\b[^>]*>([\\s\\S]*?)</(?:\\w+:)?${tag}>`, 'i'));
@@ -188,7 +182,10 @@ export const DL_ROOT = process.env.DL_ROOT || '/library-dl';
 export async function persistScan(): Promise<{ series: number; books: number; ms: number }> {
   const t0 = Date.now();
   let nBooks = 0;
-  const seenSeries = new Set<string>();
+  // folderRel -> series id, so the second root reuses the row the first root created. The same relative
+  // folder legitimately exists under both roots (a series part-fetched by the engine, part downloaded here),
+  // and merging them into one series is deliberate.
+  const seenFolders = new Map<string, string>();
   for (const root of [LIBRARY_ROOT, DL_ROOT]) {
     const sources = await readdir(root, { withFileTypes: true }).catch(() => []);
     for (const src of sources) {
@@ -200,47 +197,69 @@ export async function persistScan(): Promise<{ series: number; books: number; ms
         const folderAbs = join(root, src.name, sd.name);
         const files = await listChapters(folderAbs); // .cbz/.cbr files + loose image folders
         if (!files.length) continue;
-        const seriesId = sid(folderRel);
 
-        if (!seenSeries.has(seriesId)) {
-          seenSeries.add(seriesId);
-          const firstXml = (await readArchive(join(folderAbs, files[0])).catch(() => ({ xml: '', pages: 0 }))).xml;
-          await q(
-            `INSERT INTO lib_series (id, source, title, summary, author, status, genres, web, folder, books_count, cover_book_id, scanned_at)
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11, now())
-             ON CONFLICT (id) DO UPDATE SET source=EXCLUDED.source, title=EXCLUDED.title, summary=EXCLUDED.summary,
-               author=EXCLUDED.author, status=EXCLUDED.status, genres=EXCLUDED.genres, web=EXCLUDED.web,
-               cover_book_id=EXCLUDED.cover_book_id, scanned_at=now()`,
-            [
-              seriesId, src.name, field(firstXml, 'Series') || sd.name, cleanSummary(field(firstXml, 'Summary')),
-              field(firstXml, 'Writer'), cleanStatus(field(firstXml, 'PublishingStatusTachiyomi') || field(firstXml, 'PublishingStatus')),
-              (field(firstXml, 'Genre') || '').split(',').map((s) => s.trim()).filter(Boolean),
-              field(firstXml, 'Web'), folderRel, files.length, bid(`${folderRel}/${files[0]}`),
-            ],
+        // One folder per transaction: a half-applied folder is a corrupt library, not a stale one.
+        const seriesId = await tx(async (qq) => {
+          let id = seenFolders.get(folderRel);
+          if (!id) {
+            const firstXml = (await readArchive(join(folderAbs, files[0])).catch(() => ({ xml: '', pages: 0 }))).xml;
+            // Conflict on FOLDER, not id: the row keeps whatever id it already had, so ids survive a rescan
+            // without being derived from the path. A brand-new folder mints one.
+            const rows = await qq<{ id: string }>(
+              `INSERT INTO lib_series (id, source, title, summary, author, status, genres, web, folder, books_count, scanned_at)
+               VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10, now())
+               ON CONFLICT (folder) DO UPDATE SET source=EXCLUDED.source, title=EXCLUDED.title, summary=EXCLUDED.summary,
+                 author=EXCLUDED.author, status=EXCLUDED.status, genres=EXCLUDED.genres, web=EXCLUDED.web,
+                 scanned_at=now()
+               RETURNING id`,
+              [
+                newSeriesId(), src.name, field(firstXml, 'Series') || sd.name, cleanSummary(field(firstXml, 'Summary')),
+                field(firstXml, 'Writer'), cleanStatus(field(firstXml, 'PublishingStatusTachiyomi') || field(firstXml, 'PublishingStatus')),
+                (field(firstXml, 'Genre') || '').split(',').map((s) => s.trim()).filter(Boolean),
+                field(firstXml, 'Web'), folderRel, files.length,
+              ],
+            );
+            id = rows[0].id;
+            seenFolders.set(folderRel, id);
+          }
+
+          const params: any[] = [];
+          const tuples: string[] = [];
+          for (const f of files) {
+            const rel = `${folderRel}/${f}`;
+            const st = await stat(join(folderAbs, f)).catch(() => null);
+            const b = params.length;
+            tuples.push(`($${b + 1},$${b + 2},$${b + 3},$${b + 4},$${b + 5},$${b + 6},$${b + 7},$${b + 8})`);
+            params.push(newBookId(), id, src.name, rel, numFromName(f), f.replace(/\.(cbz|cbr|zip|rar)$/i, ''), st ? Math.floor(st.mtimeMs) : 0, root);
+            nBooks++;
+          }
+          // Conflict on (root, file) for the same reason: an existing book keeps its id, and the same
+          // relative path under a different root is a different book rather than a collision.
+          await qq(
+            `INSERT INTO lib_books (id, series_id, source, file, number, title, mtime, root) VALUES ${tuples.join(',')}
+             ON CONFLICT (root, file) DO UPDATE SET series_id=EXCLUDED.series_id, number=EXCLUDED.number,
+               title=EXCLUDED.title, mtime=EXCLUDED.mtime, updated_at=now()`,
+            params,
           );
-        }
 
-        const params: any[] = [];
-        const tuples: string[] = [];
-        for (const f of files) {
-          const rel = `${folderRel}/${f}`;
-          const st = await stat(join(folderAbs, f)).catch(() => null);
-          const b = params.length;
-          tuples.push(`($${b + 1},$${b + 2},$${b + 3},$${b + 4},$${b + 5},$${b + 6},$${b + 7},$${b + 8})`);
-          params.push(bid(rel), seriesId, src.name, rel, numFromName(f), f.replace(/\.(cbz|cbr|zip|rar)$/i, ''), st ? Math.floor(st.mtimeMs) : 0, root);
-          nBooks++;
-        }
-        await q(
-          `INSERT INTO lib_books (id, series_id, source, file, number, title, mtime, root) VALUES ${tuples.join(',')}
-           ON CONFLICT (id) DO UPDATE SET number=EXCLUDED.number, title=EXCLUDED.title, mtime=EXCLUDED.mtime, root=EXCLUDED.root, updated_at=now()`,
-          params,
-        );
+          // Set the cover AFTER the books exist. It used to be computed by hashing the first chapter's path,
+          // which only worked while ids were a pure function of the path -- now it would dangle, and a
+          // dangling cover_book_id takes out every cover and backdrop in the product.
+          await qq(
+            `UPDATE lib_series SET cover_book_id = (
+               SELECT id FROM lib_books WHERE series_id = $1 ORDER BY number ASC, file ASC LIMIT 1
+             ) WHERE id = $1`,
+            [id],
+          );
+          return id;
+        });
+        void seriesId;
       }
     }
   }
   await q(`UPDATE lib_series s SET books_count = c.n, latest_mtime = COALESCE(c.mt, 0)
            FROM (SELECT series_id, count(*) AS n, max(mtime) AS mt FROM lib_books GROUP BY series_id) c WHERE c.series_id = s.id`);
-  return { series: seenSeries.size, books: nBooks, ms: Date.now() - t0 };
+  return { series: seenFolders.size, books: nBooks, ms: Date.now() - t0 };
 }
 
 /**
@@ -264,52 +283,3 @@ export async function setBookDates(folder: string, chapters: { number: number; p
   );
 }
 
-/** Walk the library and return the full series/book tree with metadata + page counts. */
-export async function scanLibrary(
-  root: string = LIBRARY_ROOT,
-  opts: { maxSeries?: number } = {},
-): Promise<ScanSeries[]> {
-  const out: ScanSeries[] = [];
-  const sources = await readdir(root, { withFileTypes: true }).catch(() => []);
-  for (const src of sources) {
-    if (!src.isDirectory()) continue;
-    const seriesDirs = await readdir(join(root, src.name), { withFileTypes: true }).catch(() => []);
-    for (const sd of seriesDirs) {
-      if (!sd.isDirectory()) continue;
-      if (opts.maxSeries && out.length >= opts.maxSeries) return out;
-      const folderRel = `${src.name}/${sd.name}`;
-      const folderAbs = join(root, src.name, sd.name);
-      const files = (await readdir(folderAbs).catch(() => []))
-        .filter((f) => f.toLowerCase().endsWith('.cbz'))
-        .sort(naturalCmp);
-      if (!files.length) continue;
-
-      const firstXml = (await readArchive(join(folderAbs, files[0])).catch(() => ({ xml: '', pages: 0 }))).xml;
-      const series: ScanSeries = {
-        id: sid(folderRel),
-        source: src.name,
-        title: field(firstXml, 'Series') || sd.name,
-        summary: cleanSummary(field(firstXml, 'Summary')),
-        author: field(firstXml, 'Writer'),
-        status: cleanStatus(field(firstXml, 'PublishingStatusTachiyomi') || field(firstXml, 'PublishingStatus')),
-        genres: (field(firstXml, 'Genre') || '').split(',').map((s) => s.trim()).filter(Boolean),
-        web: field(firstXml, 'Web'),
-        folder: folderRel,
-        books: [],
-      };
-      for (const f of files) {
-        const info = await readArchive(join(folderAbs, f)).catch(() => ({ xml: '', pages: 0 }));
-        series.books.push({
-          id: bid(`${folderRel}/${f}`),
-          seriesId: series.id,
-          file: `${folderRel}/${f}`,
-          number: parseFloat(field(info.xml, 'Number') || '') || numFromName(f),
-          title: field(info.xml, 'Title') || f.replace(/\.cbz$/i, ''),
-          pages: info.pages,
-        });
-      }
-      out.push(series);
-    }
-  }
-  return out;
-}

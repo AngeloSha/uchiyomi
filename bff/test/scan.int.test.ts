@@ -235,10 +235,10 @@ test('persistScan: the same series under BOTH roots merges into one row', { skip
   );
 });
 
-test('persistScan: TODAY the same filename in both roots collapses to one row', { skip }, async () => {
-  // Both paths hash to the same book id, so the second root's upsert overwrites the first's `root`. The file
-  // in the other root becomes unreachable to the page server. This is the narrow, genuine bug inside the
-  // otherwise-deliberate two-root merge.
+test('persistScan: the same filename in both roots is two books, not one', { skip }, async () => {
+  // This used to collapse: both paths hashed to the same book id, so the second root's upsert rewrote the
+  // first's `root` and the other file became unreachable to the page server. Books are now keyed by
+  // (root, file), so each one keeps its own row and stays readable.
   const src = 'T!collide';
   await writeCbz(chapter(ROOT_A, src, 'Collide', 'Chapter 1.cbz'), { series: 'Collide', pixel: 'from-root-a' });
   await writeCbz(chapter(ROOT_B, src, 'Collide', 'Chapter 1.cbz'), { series: 'Collide', pixel: 'from-root-b' });
@@ -247,8 +247,26 @@ test('persistScan: TODAY the same filename in both roots collapses to one row', 
 
   const s = await oneSeries(`${src}/Collide`);
   const books = await booksOf(s.id);
-  assert.equal(books.length, 1, 'EXPECTED TO FAIL once ids are not path-derived: two files, one row');
-  assert.equal(books[0].root, ROOT_B, 'the later root wins and the earlier file is orphaned on disk');
+  assert.equal(books.length, 2, 'the two roots should hold two distinct books');
+  assert.deepEqual(books.map((b) => b.root).sort(), [ROOT_A, ROOT_B].sort());
+  assert.equal(new Set(books.map((b) => b.id)).size, 2, 'the two books share an id');
+});
+
+test('persistScan: ids are no longer derived from the path', { skip }, async () => {
+  // The point of the whole change: two libraries laid out identically must not produce identical ids, and
+  // an id must not be reconstructible from a folder name.
+  const src = 'T!minted';
+  await writeCbz(chapter(ROOT_A, src, 'Minted', 'Chapter 1.cbz'), { series: 'Minted' });
+  await persistScan();
+  const s = await oneSeries(`${src}/Minted`);
+
+  const { createHash } = await import('crypto');
+  const oldStyle = 's_' + createHash('sha1').update(`${src}/Minted`).digest('hex').slice(0, 20);
+  assert.notEqual(s.id, oldStyle, 'the id is still a hash of the folder path');
+  assert.match(s.id, /^s_[0-9a-f]{20}$/, 'the id changed shape, which would break existing URLs and OPDS feeds');
+
+  const [book] = await booksOf(s.id);
+  assert.match(book.id, /^b_[0-9a-f]{20}$/, 'book ids changed shape');
 });
 
 test('persistScan: a folder with no chapters is skipped entirely', { skip }, async () => {
