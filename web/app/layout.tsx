@@ -1,12 +1,31 @@
 import type { Metadata, Viewport } from 'next';
-import { Space_Grotesk, Inter, Unbounded } from 'next/font/google';
+import localFont from 'next/font/local';
 import './globals.css';
 import { Providers } from './providers';
 import { AppShell } from '@/components/AppShell';
 
-const display = Space_Grotesk({ subsets: ['latin'], variable: '--font-display', display: 'swap' });
-const sans = Inter({ subsets: ['latin'], variable: '--font-sans', display: 'swap' });
-const brand = Unbounded({ subsets: ['latin'], variable: '--font-brand', weight: ['600', '700', '800'], display: 'swap' });
+// Self-hosted rather than next/font/google: that fetches from fonts.gstatic.com at BUILD time, so a blip
+// there fails the image build outright -- which is how v0.5.1 shipped half-published, with the API image
+// pushed and the web image not. These are the same latin-subset variable files Google serves; keeping them
+// in the repo also means the image builds behind a firewall and with no third-party call.
+const display = localFont({
+  src: './fonts/SpaceGrotesk-latin.woff2',
+  variable: '--font-display',
+  display: 'swap',
+  weight: '300 700',
+});
+const sans = localFont({
+  src: './fonts/Inter-latin.woff2',
+  variable: '--font-sans',
+  display: 'swap',
+  weight: '100 900',
+});
+const brand = localFont({
+  src: './fonts/Unbounded-latin.woff2',
+  variable: '--font-brand',
+  display: 'swap',
+  weight: '600 800',
+});
 
 export const metadata: Metadata = {
   title: 'Uchiyomi — your library, your way',
