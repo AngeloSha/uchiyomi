@@ -1,5 +1,84 @@
 # Changelog
 
+## v0.6.0 — 2026-08-22
+
+**Your library stops being a list of folders and starts being a list of series.** Until now a series was
+whatever a folder was called, and its identity was derived from the path. Rename the folder, move it to
+another disk, or let a source rename it for you, and Uchiyomi saw a brand new series: a second copy in the
+library, an empty progress bar, and the one you had actually been reading stranded under a name that no
+longer existed.
+
+### Series management
+
+- **Delete a series.** It hides rather than erases. Chapters, favourites, ratings, notes and above all your
+  reading history stay attached to something real, so it is undoable and nothing silently rewrites your
+  stats. A hidden series stays hidden across a rescan instead of reappearing under a new id.
+- **Restore one**, exactly as it was.
+- **Merge two into one**, for when the same series arrived twice from different sources. Everything the
+  absorbed series held moves across, including every chapter and every progress row. Chapters that look
+  like duplicates are deliberately **kept, not de-duplicated**: dropping one means folding two progress rows
+  into one, and getting that wrong marks chapters unread and then syncs that outward to your AniList account,
+  where it cannot be undone. Duplicate chapter numbers are untidy; lost reading progress is not recoverable.
+- **Stop following a series**, or check one for new chapters on demand rather than waiting for the sweep.
+
+### The library recognises files that moved
+
+Chapters now carry a **content fingerprint** taken from the archive's index rather than its path, so a
+renamed or relocated folder is matched back to the series it belongs to instead of being imported as a
+stranger. Library ids are minted rather than derived from the path, which is what made the old behaviour
+inevitable. Existing libraries are fingerprinted in the background, a slice at a time.
+
+### Continue Reading offers the next chapter
+
+Finishing a chapter used to remove the series from Continue Reading, and nothing put the next one in front
+of you: you had to remember what you were reading and go find it, which is the one job that rail has. It now
+shows the chapter you are part-way through, or the next one you have not read. A series you have finished
+entirely still drops out. The rail also stopped being capped at 20, which was hiding most of a heavy
+reader's list.
+
+Also in the reader: **the manga name at the top is now a link to its series.** It was plain text, and the
+back arrow beside it returns you to wherever you opened the chapter from, so from the home rail there was no
+route to the series at all short of searching for it by name.
+
+### Images stop waiting on things they already have
+
+Covers were cached for five minutes, so most cover requests were round trips that returned a byte-identical
+image. They are cached for a day now, which is safe because every way the art can change already busts the
+url. Chapter thumbnails opened each archive twice, once to list it and once to read one page. Hero art warmed
+one frame at a time. The disk cache walked every file every ten minutes to conclude it had nothing to do, and
+its "least recently used" eviction sorted by *write* time, which a read never updates, so the first time it
+filled it would have discarded the covers you look at daily and kept last night's page images.
+
+### Your data now has referential integrity
+
+Postgres enforces 14 foreign keys that were previously enforced by hope. Rows that already pointed at nothing
+are copied into an `orphan_refs` table **before** being removed, so anything reclaimed is one `UPDATE` from
+coming back rather than a restore from last night's dump.
+
+`read_progress` deliberately does **not** cascade when a chapter is deleted. Nothing deletes chapters today,
+but a cascade would have turned any future cleanup into silent, unrecoverable loss of reading history, so it
+fails loudly instead and makes whoever writes that cleanup decide what should happen.
+
+### Upgrading from v0.5.1
+
+This release **migrates your database on first boot**, and the migration is one way. It adds columns and
+foreign keys, and it moves rows that reference series or chapters which no longer exist into `orphan_refs`.
+On the instance this was developed against that was 199 rows, none of them reading progress.
+
+It is applied automatically and is safe to run, but it is the first release to change existing data rather
+than only add to it, so taking a dump first is the cautious move:
+
+```bash
+docker compose exec -T uchiyomi-db pg_dump -U yomi yomi > uchiyomi-before-0.6.0.sql
+docker compose pull
+docker compose up -d
+```
+
+That dump contains password hashes and API tokens. Delete it once the upgrade looks right.
+
+As always, `docker compose up -d` alone does **not** fetch a newer image. Without the `pull` you stay on the
+version you already have.
+
 ## v0.5.1 — 2026-08-21
 
 **A fresh install could not write two of its own volumes.** If you installed from

@@ -3,7 +3,7 @@
 Everything the web app does, it does over this API, so anything you can do in the browser you can script.
 
 This page covers how to authenticate and the endpoints worth scripting. It is not an exhaustive dump of all
-142 routes; the full list is at the bottom for reference.
+150 routes; the full list is at the bottom for reference.
 
 ## Authenticating
 
@@ -138,6 +138,13 @@ burst of requests will be slow rather than refused. Don't poll them in a tight l
 Grouped by the module that serves them. Anything under `/api/admin/` needs an admin account **and** the
 `admin` scope.
 
+### Health
+```
+GET    /healthz
+```
+The only unauthenticated route, and what the container healthcheck polls. It answers before login exists, so
+it is also the right thing to point a reverse proxy or an uptime monitor at.
+
 ### Authentication and setup
 ```
 GET    /api/setup/status          POST   /api/setup
@@ -217,6 +224,12 @@ GET    /api/admin/sources         POST   /api/admin/sources/:id/:action
 POST   /api/admin/sources/reload  GET    /api/admin/sources/custom
 POST   /api/admin/sources/custom  DELETE /api/admin/sources/custom/:id
 PUT    /api/admin/series/:id/art  PUT    /api/admin/series/:id/meta
+PATCH  /api/admin/series/:id      DELETE /api/admin/series/:id
+POST   /api/admin/series/:id/restore
+POST   /api/admin/series/:id/merge
+GET    /api/admin/series/deleted
+POST   /api/admin/series/:id/check
+GET    /api/admin/series/:id/check
 GET    /api/admin/art/overview    GET    /api/admin/art/candidates/:id
 POST   /api/admin/art/backfill    GET    /api/admin/art/backfill/status
 POST   /api/admin/trackers/relink GET    /api/admin/trackers/relink/status

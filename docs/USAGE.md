@@ -81,11 +81,25 @@ The series page shows the cover, an ambient backdrop, genres, description, and t
 
 Progress, favorites, and history are **per-user**, so each account has its own.
 
+**If you are an admin**, the series page also carries the controls for that series:
+
+- **Edit** its title and summary, or its cover and banner art. A rename applies everywhere — search, sorting,
+  the reader header — and never touches the folder on disk.
+- **Auto-update** toggles whether the updater keeps checking this one for new chapters, and **Check now**
+  runs that check immediately instead of waiting for the next sweep.
+- **Delete** hides the series rather than erasing it. Chapters, ratings, favourites and everyone's reading
+  history stay attached, so nothing is lost and it can be put back (see section 8). A hidden series stays
+  hidden when the library is rescanned instead of reappearing as a new one.
+
 ---
 
 ## 5. The reader
 
 ![Reader](shots/reader.webp)
+
+Tap the middle of the page to raise the top bar, then tap the **series name** on it to jump to that series.
+The back arrow beside it does something different on purpose: it returns you to wherever you opened the
+chapter from, which is often Home rather than the series.
 
 The centerpiece: a smooth **vertical webtoon scroll**. It auto-appends the next chapter as you near the end, so
 you keep scrolling through a series without interruption.
@@ -210,6 +224,15 @@ numbers that can't be real, and any source that is failing or blocked. Each chec
 it cannot see. Hit **Re-check** to run them again.
 
 ![Library health](shots/admin-health.webp)
+
+**Library:** every series you have deleted, with **Restore** to put one back exactly as it was. Deleting
+happens on the series page itself (section 4); this tab is where hidden series go and how you get them back.
+
+**Merging duplicates** is on the **Health** tab, attached to the duplicate check that finds them: where it
+reports the same title sitting in your library twice, **Merge** folds one into the other. Every chapter and
+every progress row moves to the survivor. Chapters that look like duplicates are **kept**, not removed --
+dropping one would mean folding two progress rows into one, and getting that wrong marks chapters unread and
+then pushes that to your AniList account, where it cannot be undone.
 
 **Members:** create accounts (user or admin), reset passwords, and per-user controls: make admin/member,
 disable, or allow/deny downloads. Each row shows whether the member has 2FA on.

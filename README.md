@@ -51,6 +51,14 @@ into a single image.** Point it at your library, add sources by URL, and it does
 - **Library:** fast scanner for **CBZ, CBR, and loose image folders** (reads `ComicInfo.xml`), cover-art
   ambient theming, genres, an Updates feed with new-chapter badges, and discovery rails (For You / trending /
   similar / "because you read …").
+- **Your library survives files moving:** chapters carry a content fingerprint taken from the archive itself
+  rather than its path, so renaming a folder — or a source renaming it for you — matches back to the series
+  you were already reading instead of importing a second copy with an empty progress bar.
+- **Series management:** hide a series, restore it, or **merge** two that arrived from different sources into
+  one. Hiding keeps every chapter, rating and reading-history row attached, so it is undoable. Merging moves
+  everything across and deliberately keeps duplicate chapters rather than guessing which to drop, because
+  folding two progress rows into one is how chapters silently become unread. Also: unfollow a single series,
+  or check one for new chapters without waiting for the sweep.
 - **Command palette:** press **Ctrl+K** anywhere — instant series search, quick actions, recent items.
 - **Collections:** hand-curated reading lists with accent colors, reorderable, surfaced on Home.
 - **Discover:** one search across **every source at once** (one card per title; pick which provider to add
@@ -312,8 +320,9 @@ Actively developed. On deck:
 
 - 🧭 **Per-source genre & popular browsing:** rounding out the newest-releases rails.
 
-Recently shipped: 🔗 AniList progress sync, 🔔 push notifications, 📡 OPDS, browser-based first-run
-setup, and cross-source search.
+Recently shipped: 🗂️ series delete / restore / merge, 🔎 content fingerprinting so renamed folders are
+recognised, 🔗 AniList progress sync, 🔔 push notifications, 📡 OPDS, browser-based first-run setup, and
+cross-source search.
 
 ## Support
 
