@@ -1,5 +1,54 @@
 # Changelog
 
+## v0.5.1 — 2026-08-21
+
+**A fresh install could not write two of its own volumes.** If you installed from
+`deploy/docker-compose.yml`, this one matters and the upgrade note below is not optional.
+
+The runtime image created and gave ownership of `/cache` and `/backups` to the app user, but not `/config`
+or `/library-dl`. Docker seeds a new named volume from the image directory it covers, so a directory the
+image never creates arrives owned by root — and Uchiyomi runs as an unprivileged user. Three things failed
+because of it, and none of them said why:
+
+- **every chapter download failed**, so "it also fetches new chapters" did not work at all on a first install
+- **adding a site by URL returned a bare error**, because that writes `/config/sites.json`
+- **the generated JWT secret could not be saved**, so a new one was made on each boot — which signed
+  *everybody* out on every restart
+
+The setup script had always fixed this itself, but it only runs if you clone the repo, which is explicitly
+not the documented way to install. All four directories are now created and owned correctly in the image.
+
+### If you installed before this release
+
+A new image cannot fix a volume you already have: Docker never re-seeds one that exists. Do this once.
+
+```bash
+docker compose down
+docker volume ls | grep uchiyomi        # confirm the names — they are prefixed by your folder
+docker run --rm -v uchiyomi_config:/a -v uchiyomi_downloads:/b alpine chown -R 10002:10002 /a /b
+docker compose pull
+docker compose up -d
+```
+
+**On CasaOS**, the app directories are host bind mounts, which never inherit ownership from an image, so
+this is a permanent requirement rather than a one-off:
+`sudo chown -R 10002:10002 /DATA/AppData/uchiyomi`.
+
+### Updating, in general
+
+`docker compose up -d` on its own does **not** fetch a newer image — Docker reuses the `:latest` it already
+has. Run `docker compose pull` first. This was never written down before, which means anyone who installed
+earlier and tried to update has been sitting on their original version without knowing.
+
+### Also
+
+`JWT_SECRET` can now actually be set in `.env`; the install compose named it but never passed it through, so
+setting it did nothing. `LIBRARY_BACKEND` had the same problem and is now a real setting rather than a
+hardcoded value. And a pass over the documentation removed a set of claims that were simply untrue: an API
+example that could never have worked, a 2FA recovery route that does not exist, a Node version the test suite
+cannot run on, and a sources project that was never published. The route reference now matches the code
+exactly — 142 documented, 142 real.
+
 ## v0.5.0 — 2026-08-20
 
 The release that closes the gap with Mihon and Suwayomi, and one that finally shows the product.
@@ -102,7 +151,7 @@ Groundwork release: don't lose your data, don't ship broken reading, and don't r
   on every pull request — previously a green build only proved the code compiled.
 - Lockfiles added, so builds are reproducible.
 
-## v0.2.1 — 2026-08-09
+## v0.2.1 — 2026-08-19
 
 - Volume-based libraries read correctly: archives named as tomes (`Tome 01.cbr`, `Berserk T41`, `v01`) now
   label as **Vol. N** instead of Ch. N, and a mostly-volume series reports "N volumes". Chapter markers still
@@ -149,6 +198,6 @@ The "cinematic + convenient" release.
 - Madara engine: falls back to the manga page when a site's ajax chapter endpoint serves junk (fixes
   ManhuaPlus updates), on top of the earlier cross-title widget scoping fix.
 
-## v0.1.0 — 2026-07-19
+## v0.1.0 — 2026-07-02
 
 Initial public release.
