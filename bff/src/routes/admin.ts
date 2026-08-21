@@ -6,6 +6,7 @@ import { content as komga } from '../lib/backend';
 import { cacheBytes } from '../lib/imageCache';
 import { runtime } from '../lib/runtime';
 import { persistScan } from '../lib/library';
+import { deleteSeries, restoreSeries, mergeSeries, getSeriesRow } from '../lib/libraryAdmin';
 import { runFingerprintBackfill, fingerprintRemaining, fpState } from '../lib/fingerprintJob';
 import { runBackup } from '../lib/backup';
 import { runUpdateAll, updateSeries } from '../lib/updater';
@@ -193,6 +194,63 @@ export default async function adminRoutes(app: FastifyInstance) {
 
   // ---- admin-editable series metadata + art overrides (Jellyfin-style) ----
   // Edit title/summary; an empty value clears the override (back to the source's own metadata).
+  // ---- library management: hide, restore, merge ----
+  // Delete HIDES the series rather than erasing it: the id survives, so favourites, ratings, notes and
+  // reading history stay attached to something real, and the action is undoable. Files are never touched.
+  app.delete('/api/admin/series/:id', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const row = await getSeriesRow(id);
+    if (!row) return reply.code(404).send({ error: 'not_found' });
+    if (row.deleted_at) return reply.code(400).send({ error: 'already_deleted', message: 'That series is already hidden.' });
+    if (row.merged_into) return reply.code(400).send({ error: 'merged', message: 'That series was merged into another one.' });
+    const r = await deleteSeries(id);
+    await logAudit('series.delete', { userId: userIdOf(req), detail: { id, title: row.title, books: r.books }, req });
+    return r;
+  });
+
+  app.post('/api/admin/series/:id/restore', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const row = await getSeriesRow(id);
+    if (!row) return reply.code(404).send({ error: 'not_found' });
+    if (!row.deleted_at) return reply.code(400).send({ error: 'not_deleted', message: 'That series is not hidden.' });
+    await restoreSeries(id);
+    await logAudit('series.restore', { userId: userIdOf(req), detail: { id, title: row.title }, req });
+    return { ok: true };
+  });
+
+  /** Hidden series, so the admin can see and undo what was deleted. */
+  app.get('/api/admin/series/deleted', async () => ({
+    content: await q(
+      `SELECT id, title, folder, books_count, deleted_at FROM lib_series
+        WHERE deleted_at IS NOT NULL ORDER BY deleted_at DESC`,
+    ),
+  }));
+
+  // Merge :id INTO the series named in the body. Chapters and everything a user owns move across; nothing
+  // is de-duplicated and no chapter row is deleted, so no reading progress can be lost.
+  app.post('/api/admin/series/:id/merge', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const b = z.object({ into: z.string().min(1).max(64) }).safeParse(req.body);
+    if (!b.success) return reply.code(400).send({ error: 'bad_request', message: 'Which series should it merge into?' });
+    if (b.data.into === id) return reply.code(400).send({ error: 'same_series', message: 'A series cannot merge into itself.' });
+
+    const from = await getSeriesRow(id);
+    const into = await getSeriesRow(b.data.into);
+    if (!from || !into) return reply.code(404).send({ error: 'not_found' });
+    for (const [row, which] of [[from, 'source'], [into, 'target']] as const) {
+      if (row.deleted_at) return reply.code(400).send({ error: 'deleted', message: `The ${which} series is hidden. Restore it first.` });
+      if (row.merged_into) return reply.code(400).send({ error: 'merged', message: `The ${which} series was already merged into another one.` });
+    }
+
+    const r = await mergeSeries(id, into.id);
+    await logAudit('series.merge', {
+      userId: userIdOf(req),
+      detail: { from: id, fromTitle: from.title, into: into.id, intoTitle: into.title, ...r },
+      req,
+    });
+    return r;
+  });
+
   app.put('/api/admin/series/:id/meta', async (req, reply) => {
     const { id } = req.params as { id: string };
     const b = z.object({ title: z.string().max(300).nullish(), summary: z.string().max(8000).nullish() }).safeParse(req.body);
