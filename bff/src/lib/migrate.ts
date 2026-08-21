@@ -1,3 +1,4 @@
+import type { PoolClient } from 'pg';
 import { pool, one } from './db';
 import { env } from '../env';
 
@@ -340,6 +341,16 @@ CREATE TABLE IF NOT EXISTS push_subscriptions (
   created_at timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (user_id, endpoint)
 );
+
+-- Ledger for run-once DATA migrations. The DDL string above stays the home for everything idempotent
+-- (CREATE / ALTER ... IF NOT EXISTS, which can safely run on every boot). Anything that would corrupt data
+-- by running twice goes through runOnce() instead, which stamps this table IN THE SAME TRANSACTION as its
+-- own work -- so "applied but not recorded" and "recorded but not applied" are both unrepresentable.
+CREATE TABLE IF NOT EXISTS schema_migrations (
+  id         text PRIMARY KEY,
+  applied_at timestamptz NOT NULL DEFAULT now(),
+  ms         integer
+);
 `;
 
 // Serialises migrate() across processes. CREATE TABLE IF NOT EXISTS is not safe to run concurrently:
@@ -347,6 +358,46 @@ CREATE TABLE IF NOT EXISTS push_subscriptions (
 // one of them quietly no-opping. Anything that can start two BFFs at once -- a second replica, a restart
 // overlapping a slow boot, or a test suite running files in parallel -- hits it.
 const MIGRATE_LOCK = 8_263_195; // arbitrary, just has to be stable across processes
+
+/**
+ * Run a data migration exactly once, ever.
+ *
+ * Must be called with MIGRATE_LOCK held, so two booting processes cannot both decide the work is pending.
+ * The stamp is written inside the same transaction as the work: if `fn` throws, the rollback takes the stamp
+ * with it and the step is retried on the next boot, and there is no state where the ledger disagrees with
+ * the database.
+ *
+ * These hold a transaction open during boot, so the rule is: **pure SQL, bounded, and fast even on a large
+ * library.** Anything that touches the filesystem -- reading forty thousand archives, say -- belongs in a
+ * background job with its own progress, never here, or boot time grows with the size of someone's library.
+ */
+export async function runOnce(
+  client: PoolClient,
+  id: string,
+  fn: (c: PoolClient) => Promise<void>,
+): Promise<boolean> {
+  const done = await client.query('SELECT 1 FROM schema_migrations WHERE id = $1', [id]);
+  if (done.rowCount) return false;
+  const t0 = Date.now();
+  await client.query('BEGIN');
+  try {
+    await fn(client);
+    await client.query('INSERT INTO schema_migrations (id, ms) VALUES ($1, $2)', [id, Date.now() - t0]);
+    await client.query('COMMIT');
+    return true;
+  } catch (e) {
+    await client.query('ROLLBACK');
+    throw e;
+  }
+}
+
+/**
+ * Run-once data migrations, oldest first. Ids are permanent: renaming one re-runs it everywhere.
+ */
+const DATA_MIGRATIONS: { id: string; run: (c: PoolClient) => Promise<void> }[] = [
+  // Proves the mechanism end to end on real installs before anything depends on it.
+  { id: '0001-noop', run: async (c) => { await c.query('SELECT 1'); } },
+];
 
 export async function migrate(): Promise<void> {
   const client = await pool.connect();
@@ -360,6 +411,10 @@ export async function migrate(): Promise<void> {
     } catch (e) {
       await client.query('ROLLBACK');
       throw e;
+    }
+    // after the DDL, still under the lock, so the tables they touch are guaranteed to exist
+    for (const m of DATA_MIGRATIONS) {
+      if (await runOnce(client, m.id, m.run)) console.log(`[migrate] applied ${m.id}`);
     }
   } finally {
     // release before returning the connection to the pool, or the lock outlives this call
