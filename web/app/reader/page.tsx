@@ -1,5 +1,6 @@
 'use client';
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import Link from 'next/link';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { AnimatePresence, motion } from 'framer-motion';
 import { useQuery } from '@tanstack/react-query';
@@ -367,6 +368,13 @@ function ReaderInner() {
   const prevId = activeIdx > 0 ? chapterRefs[activeIdx - 1]?.id : undefined;
   const nextId = activeIdx >= 0 && activeIdx < chapterRefs.length - 1 ? chapterRefs[activeIdx + 1]?.id : undefined;
 
+  // The chapter you are reading always belongs to a series, but nothing in the reader linked to it. The title
+  // was plain text, and the chevron beside it is a history back, which from the home Continue rail lands on
+  // home. So while reading there was no way to reach the series short of searching for it by name.
+  // Prefer the ACTIVE chapter's series over chapters[0]'s: continuous reading appends chapters as you go.
+  const activeSeriesId = activeChapter?.seriesId || seriesId;
+  const seriesHref = activeSeriesId ? `/series/?id=${activeSeriesId}` : null;
+
   const back = () => (typeof window !== 'undefined' && window.history.length > 1 ? router.back() : router.push(seriesId ? `/series/?id=${seriesId}` : '/'));
   const goChapter = (cid?: string) => { if (cid) router.replace(`/reader/?book=${cid}`); };
   const toggleFullscreen = () => {
@@ -482,6 +490,17 @@ function ReaderInner() {
   const pageInChapter = activeChapter ? (flat[current]?.number ?? 0) : 0;
   const chapterPageCount = activeChapter?.pages.length ?? 0;
 
+  // the header's two-line "what you are reading" block, wrapped in a link to the series when we know its id
+  const titleBlock = (
+    <>
+      <p className="flex items-center gap-1 text-sm font-medium text-white transition group-hover:text-accent">
+        <span className="truncate">{activeChapter?.seriesTitle || 'Reading'}</span>
+        {seriesHref && <IcChevronRight width={14} height={14} className="shrink-0 text-fog-500 transition group-hover:text-accent" />}
+      </p>
+      <p className="truncate text-[11px] text-fog-400">{activeChapter?.title}</p>
+    </>
+  );
+
   // end-of-series "Up Next" card (rendered at the tail of both reading modes)
   const upNextCard = (
     <motion.div initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5 }}
@@ -489,7 +508,9 @@ function ReaderInner() {
       <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-fog-500">You finished</p>
       <h2 className="mt-1.5 font-display text-2xl font-bold text-white">{activeChapter?.seriesTitle || 'this series'}</h2>
       <div className="mt-6 flex justify-center gap-2">
-        <button onClick={back} className="btn-ghost text-sm">Back to series</button>
+        {/* labelled "Back to series", so go to the series -- `back` is history-first and from the home
+            Continue rail would land on home instead */}
+        <button onClick={() => (seriesHref ? router.push(seriesHref) : back())} className="btn-ghost text-sm">Back to series</button>
         <button onClick={() => router.push('/')} className="btn-accent text-sm">Home</button>
       </div>
       {!!upNext?.content?.length && (
@@ -575,10 +596,19 @@ function ReaderInner() {
               <button onClick={back} className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-black/45 text-white backdrop-blur">
                 <IcChevronLeft width={22} height={22} />
               </button>
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-medium text-white">{activeChapter?.seriesTitle || 'Reading'}</p>
-                <p className="truncate text-[11px] text-fog-400">{activeChapter?.title}</p>
-              </div>
+              {/* Tapping the title is the route to the series while reading, and the chevron is the whole
+                  affordance -- without it this reads as inert as it used to. BOTH lines are inside the link
+                  deliberately: the title alone is a ~20px strip wedged between two 40px buttons, and a
+                  near-miss lands on the header's transparent gradient and does nothing at all, which is the
+                  same dead tap being complained about. active:opacity-80 because touch has no hover. */}
+              {seriesHref ? (
+                <Link href={seriesHref} aria-label={`Open ${activeChapter?.seriesTitle || 'this'} series page`}
+                  className="group min-w-0 flex-1 transition active:opacity-80">
+                  {titleBlock}
+                </Link>
+              ) : (
+                <div className="min-w-0 flex-1">{titleBlock}</div>
+              )}
               {/* desktop chapter jump */}
               {chapterRefs.length > 0 && (
                 <select value={activeChapter?.id || ''} onChange={(e) => goChapter(e.target.value)}
