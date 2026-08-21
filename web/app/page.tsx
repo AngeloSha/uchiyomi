@@ -140,7 +140,7 @@ export default function HomePage() {
         <section className="pt-4">
           <SectionTitle>Keep reading</SectionTitle>
           <Rail>
-            {data!.onDeck.map((b) => <ContinueCard key={b.id} book={b} />)}
+            {data!.onDeck.map((b, i) => <ContinueCard key={b.id} book={b} eager={i < 4} />)}
           </Rail>
         </section>
       )}
@@ -172,7 +172,7 @@ export default function HomePage() {
         </SectionTitle>
         {isLoading ? <RailSkeleton /> : (
           <Rail>
-            {(data?.updated ?? []).map((s) => <SeriesCard key={s.id} series={s} />)}
+            {(data?.updated ?? []).map((s, i) => <SeriesCard key={s.id} series={s} eager={i < 8} />)}
           </Rail>
         )}
       </section>

@@ -42,8 +42,11 @@ function useTilt() {
   return { style, glare, onPointerMove, onPointerLeave };
 }
 
-/** Portrait series cover -> series detail. */
-export function SeriesCard({ series, w = 'w-32' }: { series: Series; w?: string }) {
+/** Portrait series cover -> series detail.
+ *
+ *  `eager` skips lazy-loading for tiles that are on screen at first paint. A lazy <img> waits for layout
+ *  before the browser will even queue the request, so on the first rail it is pure added latency. */
+export function SeriesCard({ series, w = 'w-32', eager = false }: { series: Series; w?: string; eager?: boolean }) {
   const unread = series.booksUnreadCount ?? 0;
   const tilt = useTilt();
   return (
@@ -54,7 +57,7 @@ export function SeriesCard({ series, w = 'w-32' }: { series: Series; w?: string 
         style={tilt.style}
         className="grad-border relative aspect-[2/3] overflow-hidden rounded-2xl border border-ink-700/60 shadow-lift transition-all duration-300 group-hover:-translate-y-1.5 group-hover:shadow-glow group-active:scale-[0.97]"
       >
-        <Img src={img.seriesThumb(series.id)} alt={series.metadata?.title || series.name} className="h-full w-full transition-transform duration-500 group-hover:scale-[1.07]" />
+        <Img src={img.seriesThumb(series.id)} alt={series.metadata?.title || series.name} eager={eager} className="h-full w-full transition-transform duration-500 group-hover:scale-[1.07]" />
         <div aria-hidden className="pointer-events-none absolute inset-0 z-10" style={tilt.glare} />
         {series.yomi?.favorite && (
           <span className="absolute left-2 top-2 z-10 rounded-full bg-black/55 p-1.5 text-accent backdrop-blur">
@@ -79,7 +82,7 @@ export function SeriesCard({ series, w = 'w-32' }: { series: Series; w?: string 
 }
 
 /** Wide "continue reading" card for an on-deck book. */
-export function ContinueCard({ book }: { book: Book }) {
+export function ContinueCard({ book, eager = false }: { book: Book; eager?: boolean }) {
   const pct = progressOf(book);
   // Progress already syncs across devices; this just says where you left off, and only when that was
   // somewhere else — "you were reading this on the device you're holding" is noise.
@@ -89,7 +92,7 @@ export function ContinueCard({ book }: { book: Book }) {
       href={`/reader/?book=${book.id}`}
       className="group relative h-44 w-72 shrink-0 overflow-hidden rounded-3xl border border-ink-700/60 shadow-lift transition-all duration-300 hover:-translate-y-1 hover:shadow-glow [scroll-snap-align:start]"
     >
-      <Img src={img.bookThumb(book.id)} alt={book.seriesTitle} className="absolute inset-0 h-full w-full transition-transform duration-500 group-hover:scale-105" />
+      <Img src={img.bookThumb(book.id)} alt={book.seriesTitle} eager={eager} className="absolute inset-0 h-full w-full transition-transform duration-500 group-hover:scale-105" />
       <div className="absolute inset-0 bg-gradient-to-t from-black via-black/45 to-black/10" />
       <div className="absolute inset-x-0 bottom-0 p-4">
         <p className="line-clamp-1 font-display text-base font-semibold text-white">{book.seriesTitle}</p>
@@ -109,12 +112,12 @@ export function ContinueCard({ book }: { book: Book }) {
 }
 
 /** Grid tile (library / search). */
-export function SeriesTile({ series }: { series: Series }) {
+export function SeriesTile({ series, eager = false }: { series: Series; eager?: boolean }) {
   const unread = series.booksUnreadCount ?? 0;
   return (
     <Link href={`/series/?id=${series.id}`} className="group">
       <div className="grad-border relative aspect-[2/3] overflow-hidden rounded-2xl border border-ink-700/60 transition-all duration-300 group-hover:-translate-y-1 group-hover:shadow-glow group-active:scale-[0.97]">
-        <Img src={img.seriesThumb(series.id)} alt={series.metadata?.title || series.name} className="h-full w-full transition-transform duration-500 group-hover:scale-[1.07]" />
+        <Img src={img.seriesThumb(series.id)} alt={series.metadata?.title || series.name} eager={eager} className="h-full w-full transition-transform duration-500 group-hover:scale-[1.07]" />
         {series.yomi?.favorite && (
           <span className="absolute left-1.5 top-1.5 z-10 rounded-full bg-black/55 p-1 text-accent backdrop-blur">
             <IcHeart width={12} height={12} fill="currentColor" stroke="none" />

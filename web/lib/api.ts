@@ -74,9 +74,12 @@ export async function api<T = any>(path: string, opts: Opts = {}): Promise<T> {
 export const img = {
   // ?v bump = one-time cache-bust so clients pinned to the old immutable panel thumbnails refetch the real covers
   // w: hi-res poster variant (800|1600) for the detail poster / hero; cards use the 400px default
+  // A falsy id means the caller rendered a tile before its data arrived. Returning '' makes <img> skip the
+  // request entirely; Img shows its placeholder. Requesting /img/series/undefined/thumb only ever produced a
+  // server error and a broken tile.
   seriesThumb: (id: string, av?: number, w?: number) =>
-    `/img/series/${encodeURIComponent(id)}/thumb?v=2${av ? `&av=${av}` : ''}${w ? `&w=${w}` : ''}`,
-  bookThumb: (id: string) => `/img/books/${encodeURIComponent(id)}/thumb`,
+    id ? `/img/series/${encodeURIComponent(id)}/thumb?v=2${av ? `&av=${av}` : ''}${w ? `&w=${w}` : ''}` : '',
+  bookThumb: (id: string) => (id ? `/img/books/${encodeURIComponent(id)}/thumb` : ''),
   page: (bookId: string, n: number, w?: number) =>
     `/img/books/${encodeURIComponent(bookId)}/page/${n}${w ? `?w=${w}` : ''}`,
 };

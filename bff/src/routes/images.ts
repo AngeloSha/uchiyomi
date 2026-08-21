@@ -6,7 +6,7 @@ import { serveImage, getOrFetch } from '../lib/imageCache';
 import { dominantHex } from '../lib/color';
 import { fetchAniListArt } from '../lib/anilist';
 import { linkSeries } from '../lib/trackers';
-import { LIBRARY_ROOT, cbzPages, cbzEntry } from '../lib/library';
+import { LIBRARY_ROOT, cbzPageAt } from '../lib/library';
 import { cfSession } from '../lib/sources/flaresolverr';
 import { getSource } from '../lib/sources';
 import { suwayomiUrl, suwayomiImageHeaders } from '../lib/sources/suwayomi/client';
@@ -37,6 +37,8 @@ async function fetchUpstreamWithType(path: string): Promise<{ buffer: Buffer; co
   };
 }
 
+const CF_IMAGE_TIMEOUT_MS = 5000;
+
 /** Fetch a remote cover image as raw bytes. Sends browser-ish headers (AniList/MangaDex CDNs reject bare
  *  requests) and, for Cloudflare-protected source hosts (Aqua/ManhuaPlus), attaches FlareSolverr cookies. */
 async function fetchCoverImage(u: string, source?: string): Promise<Buffer> {
@@ -55,11 +57,21 @@ async function fetchCoverImage(u: string, source?: string): Promise<Buffer> {
     // FlareSolverr fails to "solve a challenge". Don't let that abort the cover — the Referer alone is
     // usually enough. Attach cf cookies when we can; otherwise fall through to a plain fetch.
     try {
-      const s = await cfSession(u);
+      // Capped hard. cfSession is built for solving a real challenge on a page load and will sit there for
+      // up to 95 seconds; behind an <img> that is a tile that never resolves. The cookies are an optimisation
+      // here -- the plain referer-only fetch below usually works -- so waiting more than a moment for them is
+      // strictly worse than going without.
+      let timer: NodeJS.Timeout | undefined;
+      const s = await Promise.race([
+        cfSession(u),
+        new Promise<never>((_, rej) => {
+          timer = setTimeout(() => rej(new Error('cf timeout')), CF_IMAGE_TIMEOUT_MS);
+        }),
+      ]).finally(() => clearTimeout(timer)); // or the loser holds the event loop open for 5s
       headers.cookie = s.cookie;
       headers['user-agent'] = s.userAgent;
     } catch {
-      /* image host isn't behind Cloudflare — proceed with the referer-only headers */
+      /* image host isn't behind Cloudflare, or took too long — proceed with the referer-only headers */
     }
   }
   const r = await fetch(u, { headers, signal: AbortSignal.timeout(20000) });
@@ -78,9 +90,9 @@ const firstPageInput = async (id: string): Promise<Buffer> => {
   const s = await one<{ cover_book_id: string }>('SELECT cover_book_id FROM lib_series WHERE id = $1', [id]);
   const abs = s?.cover_book_id ? await bookFileAbs(s.cover_book_id) : null;
   if (!abs) throw Object.assign(new Error('no cover'), { statusCode: 404 });
-  const pages = await cbzPages(abs);
-  if (!pages[0]) throw Object.assign(new Error('empty'), { statusCode: 404 });
-  return cbzEntry(abs, pages[0]);
+  const first = await cbzPageAt(abs, 0);
+  if (!first) throw Object.assign(new Error('empty'), { statusCode: 404 });
+  return first.bytes;
 };
 
 // Hero frames match the two client viewports (lg desktop strip / phone portrait) so the browser barely crops.
@@ -164,20 +176,43 @@ async function backdropRecipe(id: string, hero: boolean, ar: HeroAr): Promise<{ 
 }
 
 /** Pre-generate both hero frames for a set of series so the carousel never waits on sharp/remote fetches.
- *  Disk-cache aware (getOrFetch): already-warm entries cost one stat() each. Fire-and-forget. */
+ *  Disk-cache aware (getOrFetch): already-warm entries cost one stat() each. Fire-and-forget.
+ *
+ *  Two things this has to get right. It ran strictly one frame after another, so warming today's seven picks
+ *  was fourteen sequential remote fetches and sharp encodes -- long enough that the carousel could easily
+ *  reach a frame before the warmer did, which is the case warming exists to prevent. And the `warmed` tag was
+ *  only recorded AFTER the work finished, so two callers arriving together both did all of it.
+ *
+ *  The concurrency cap is deliberately low: this is background work competing with the requests someone is
+ *  actually waiting on, and sharp already uses a thread pool per call. */
 const warmed = new Set<string>();
+const WARM_CONCURRENCY = 3;
+
 export async function warmHeroBackdrops(ids: string[]): Promise<void> {
+  const jobs: Array<{ id: string; ar: HeroAr; tag: string }> = [];
   for (const id of ids) {
     for (const ar of ['wide', 'tall'] as const) {
       const tag = `${id}:${ar}`;
       if (warmed.has(tag)) continue;
-      try {
-        const r = await backdropRecipe(id, true, ar);
-        await getOrFetch(r.variant, r.producer);
-        warmed.add(tag);
-      } catch { /* warming is best-effort */ }
+      warmed.add(tag); // claim it up front so a second caller does not duplicate the work
+      jobs.push({ id, ar, tag });
     }
   }
+  if (!jobs.length) return;
+
+  let next = 0;
+  const worker = async (): Promise<void> => {
+    while (next < jobs.length) {
+      const job = jobs[next++];
+      try {
+        const r = await backdropRecipe(job.id, true, job.ar);
+        await getOrFetch(r.variant, r.producer);
+      } catch {
+        warmed.delete(job.tag); // best-effort, but let a later pass retry it
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(WARM_CONCURRENCY, jobs.length) }, worker));
 }
 
 export default async function imageRoutes(app: FastifyInstance) {
@@ -247,11 +282,10 @@ export default async function imageRoutes(app: FastifyInstance) {
     serveImage(req, reply, `lib-bthumb:${id}`, async () => {
       const abs = await bookFileAbs(id);
       if (!abs) throw Object.assign(new Error('no book'), { statusCode: 404 });
-      const pages = await cbzPages(abs);
-      if (!pages[0]) throw Object.assign(new Error('empty'), { statusCode: 404 });
-      q('UPDATE lib_books SET pages=$1 WHERE id=$2 AND pages<>$1', [pages.length, id]).catch(() => {});
-      const input = await cbzEntry(abs, pages[0]);
-      const buffer = await sharp(input).resize({ width: 400, withoutEnlargement: true }).webp({ quality: 72 }).toBuffer();
+      const first = await cbzPageAt(abs, 0);
+      if (!first) throw Object.assign(new Error('empty'), { statusCode: 404 });
+      q('UPDATE lib_books SET pages=$1 WHERE id=$2 AND pages<>$1', [first.total, id]).catch(() => {});
+      const buffer = await sharp(first.bytes).resize({ width: 400, withoutEnlargement: true }).webp({ quality: 72 }).toBuffer();
       return { buffer, contentType: 'image/webp' };
     });
   const serveLibBookPage = async (req: FastifyRequest, reply: FastifyReply, id: string, pageNo: number, w: number) => {
@@ -259,18 +293,17 @@ export default async function imageRoutes(app: FastifyInstance) {
     if (!abs) return reply.code(404).send({ error: 'no_book' });
     if (w && Number.isInteger(w) && w >= 64 && w <= 2000) {
       return serveImage(req, reply, `lib-page:${id}:${pageNo}:w${w}`, async () => {
-        const name = (await cbzPages(abs))[pageNo - 1];
-        if (!name) throw Object.assign(new Error('no page'), { statusCode: 404 });
-        const buffer = await sharp(await cbzEntry(abs, name)).resize({ width: w, withoutEnlargement: true }).webp({ quality: 74 }).toBuffer();
+        const page = await cbzPageAt(abs, pageNo - 1);
+        if (!page) throw Object.assign(new Error('no page'), { statusCode: 404 });
+        const buffer = await sharp(page.bytes).resize({ width: w, withoutEnlargement: true }).webp({ quality: 74 }).toBuffer();
         return { buffer, contentType: 'image/webp' };
       });
     }
     return serveImage(req, reply, `lib-page:${id}:${pageNo}`, async () => {
-      const pages = await cbzPages(abs);
-      q('UPDATE lib_books SET pages=$1 WHERE id=$2 AND pages<>$1', [pages.length, id]).catch(() => {});
-      const name = pages[pageNo - 1];
-      if (!name) throw Object.assign(new Error('no page'), { statusCode: 404 });
-      return { buffer: await cbzEntry(abs, name), contentType: libCt(name) };
+      const page = await cbzPageAt(abs, pageNo - 1);
+      if (!page) throw Object.assign(new Error('no page'), { statusCode: 404 });
+      q('UPDATE lib_books SET pages=$1 WHERE id=$2 AND pages<>$1', [page.total, id]).catch(() => {});
+      return { buffer: page.bytes, contentType: libCt(page.name) };
     });
   };
 

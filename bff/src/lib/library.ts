@@ -153,6 +153,42 @@ export async function cbzEntry(path: string, name: string): Promise<Buffer> {
   }
 }
 
+/**
+ * One page, by index, opening the archive exactly once.
+ *
+ * Every caller wanted a page AND the page count, and got them by calling cbzPages() then cbzEntry() -- two
+ * independent opens of the same file. On the chapter-thumbnail route that is two opens per tile, and a series
+ * page fires hundreds of those at a library that mostly lives on a spinning disk.
+ *
+ * Returns null when the index is out of range, so callers keep their own 404 wording.
+ */
+export async function cbzPageAt(
+  path: string,
+  index: number,
+): Promise<{ name: string; bytes: Buffer; total: number } | null> {
+  const k = chapterKind(path);
+  if (k === 'dir') {
+    const names = (await readdir(path).catch(() => [])).filter((n) => IMG.test(n)).sort(naturalCmp);
+    const name = names[index];
+    return name ? { name, bytes: await readFile(join(path, name)), total: names.length } : null;
+  }
+  if (k === 'rar') {
+    const ex = await rarExtractor(path); // one extractor for both the listing and the read
+    const names = (await rarHeaders(ex)).map((h) => h.name).filter((n) => IMG.test(n)).sort(naturalCmp);
+    const name = names[index];
+    return name ? { name, bytes: await rarExtract(ex, name), total: names.length } : null;
+  }
+  const zip = new StreamZip.async({ file: path });
+  try {
+    const entries = await zip.entries();
+    const names = Object.keys(entries).filter((n) => !entries[n].isDirectory && IMG.test(n)).sort(naturalCmp);
+    const name = names[index];
+    return name ? { name, bytes: await zip.entryData(name), total: names.length } : null;
+  } finally {
+    await zip.close();
+  }
+}
+
 /** Real pixel dimensions of every page (CBZ/CBR/folder). The reader needs these to reserve the right height
  *  per page — without them, tall webtoon pages overlap. Cached in lib_books.page_dims after first read. */
 export async function cbzPageDims(path: string): Promise<Array<{ name: string; width: number | null; height: number | null }>> {

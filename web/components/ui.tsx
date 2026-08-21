@@ -53,7 +53,9 @@ export function Img({
   eager?: boolean;
 }) {
   const [loaded, setLoaded] = useState(false);
-  const [error, setError] = useState(false);
+  const [failed, setFailed] = useState(false);
+  const error = failed || !src; // no src at all is the same broken tile as a src that 404s
+  const setError = setFailed;
   return (
     <div className={`relative overflow-hidden bg-ink-800 ${className}`}>
       {!loaded && !error && <div className="skeleton absolute inset-0" />}
