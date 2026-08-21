@@ -9,7 +9,7 @@ function page<T>(content: T[], total: number, p: number, size: number): Page<T> 
   return { content, totalElements: total, totalPages, number: p, size, first: p <= 0, last: p >= totalPages - 1 };
 }
 
-const SERIES_COLS = 'id, title, summary, status, genres, author, books_count, cover_book_id, web, created_at, latest_mtime';
+const SERIES_COLS = 'id, title, summary, status, genres, author, books_count, cover_book_id, web, created_at, latest_mtime, auto_update';
 
 /**
  * The one place a series is read from.
@@ -25,7 +25,8 @@ const SERIES_COLS = 'id, title, summary, status, genres, author, books_count, co
  */
 const SERIES_SRC = `(
   SELECT s.id, COALESCE(o.title, s.title) AS title, COALESCE(o.summary, s.summary) AS summary,
-         s.status, s.genres, s.author, s.books_count, s.cover_book_id, s.web, s.created_at, s.latest_mtime
+         s.status, s.genres, s.author, s.books_count, s.cover_book_id, s.web, s.created_at, s.latest_mtime,
+         s.auto_update
     FROM lib_series s LEFT JOIN series_overrides o ON o.series_id = s.id
    WHERE s.deleted_at IS NULL AND s.merged_into IS NULL
 ) sv`;
@@ -60,6 +61,8 @@ function seriesDto(r: any) {
       language: 'en',
     },
     booksMetadata: { summary, genres, tags: [] },
+    // whether the scheduled updater pulls new chapters for this series; settable from the series page
+    autoUpdate: r.auto_update !== false,
   };
 }
 

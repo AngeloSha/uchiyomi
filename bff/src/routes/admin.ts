@@ -32,6 +32,8 @@ let importJob: ImportJob | null = null;
 
 type ArtJob = { running: boolean; total: number; done: number; banners: number; covers: number; misses: number; startedAt: number };
 let artJob: ArtJob | null = null;
+// per-series "check for new chapters" runs, so the UI can poll instead of blocking on a long download
+const seriesChecks = new Map<string, { running: boolean; added?: number; error?: string; startedAt?: number; finishedAt?: number }>();
 
 export default async function adminRoutes(app: FastifyInstance) {
   app.addHook('preHandler', authenticate);
@@ -194,6 +196,38 @@ export default async function adminRoutes(app: FastifyInstance) {
 
   // ---- admin-editable series metadata + art overrides (Jellyfin-style) ----
   // Edit title/summary; an empty value clears the override (back to the source's own metadata).
+  // Per-series settings. auto_update could only ever be chosen at add time, and the UI never read it back,
+  // so there was no way to stop the updater chasing a series you had finished with.
+  app.patch('/api/admin/series/:id', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const b = z.object({ autoUpdate: z.boolean() }).safeParse(req.body);
+    if (!b.success) return reply.code(400).send({ error: 'bad_request' });
+    const r = await q<{ id: string }>('UPDATE lib_series SET auto_update = $2 WHERE id = $1 RETURNING id', [id, b.data.autoUpdate]);
+    if (!r.length) return reply.code(404).send({ error: 'not_found' });
+    await logAudit('series.settings', { userId: userIdOf(req), detail: { id, autoUpdate: b.data.autoUpdate }, req });
+    return { ok: true, autoUpdate: b.data.autoUpdate };
+  });
+
+  // "Check for new chapters" for one series. updateSeries downloads synchronously and can run for minutes,
+  // so this starts it and returns; the UI polls the status below rather than holding a request open.
+  app.post('/api/admin/series/:id/check', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    if (seriesChecks.get(id)?.running) return reply.code(409).send({ error: 'busy', message: 'Already checking that series.' });
+    const row = await getSeriesRow(id);
+    if (!row) return reply.code(404).send({ error: 'not_found' });
+    seriesChecks.set(id, { running: true, startedAt: Date.now() });
+    void updateSeries(id, Number((req.body as any)?.maxNew) || 10)
+      .then((r) => seriesChecks.set(id, { running: false, added: r.added, finishedAt: Date.now() }))
+      .catch((e) => seriesChecks.set(id, { running: false, error: (e as Error)?.message || 'failed', finishedAt: Date.now() }));
+    await logAudit('series.check', { userId: userIdOf(req), detail: { id, title: row.title }, req });
+    return { ok: true, started: true };
+  });
+
+  app.get('/api/admin/series/:id/check', async (req) => {
+    const { id } = req.params as { id: string };
+    return seriesChecks.get(id) ?? { running: false };
+  });
+
   // ---- library management: hide, restore, merge ----
   // Delete HIDES the series rather than erasing it: the id survives, so favourites, ratings, notes and
   // reading history stay attached to something real, and the action is undoable. Files are never touched.
@@ -811,7 +845,9 @@ export default async function adminRoutes(app: FastifyInstance) {
     };
   });
 
-  const permsShape = z.object({ canDownload: z.boolean().optional(), canManage: z.boolean().optional() });
+  // canDownload is the only permission that is actually enforced (sources.ts, adding a series). A flag
+  // that is toggleable and checked nowhere is worse than no flag, so there is deliberately only one.
+  const permsShape = z.object({ canDownload: z.boolean().optional() });
 
   app.post('/api/admin/users', async (req, reply) => {
     const b = z

@@ -21,6 +21,8 @@ export interface SeriesMetadata {
 }
 
 export interface Series {
+  /** Whether the scheduled updater fetches new chapters for this series. */
+  autoUpdate?: boolean;
   id: string;
   libraryId: string;
   name: string;

@@ -231,7 +231,7 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS locked_until        timestamptz;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS totp_secret         text;                       -- base32; pending until totp_enabled
 ALTER TABLE users ADD COLUMN IF NOT EXISTS totp_enabled        boolean     NOT NULL DEFAULT false;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS recovery_codes      text[]      NOT NULL DEFAULT '{}'; -- sha256 of one-time codes
-ALTER TABLE users ADD COLUMN IF NOT EXISTS perms               jsonb       NOT NULL DEFAULT '{}'; -- {canDownload?, canManage?}
+ALTER TABLE users ADD COLUMN IF NOT EXISTS perms               jsonb       NOT NULL DEFAULT '{}'; -- {canDownload?}
 ALTER TABLE users ADD COLUMN IF NOT EXISTS password_changed_at timestamptz NOT NULL DEFAULT now();
 
 -- richer session/device info for the sessions UI

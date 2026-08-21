@@ -52,7 +52,37 @@ function SeriesEditModal({ id, series, onClose, onSaved }: { id: string; series:
   };
   const onSetUrl = async (kind: 'cover' | 'banner', url: string) => { if (!url.trim()) return; setBusy(true); try { await putArt(kind, { mode: 'url', url: url.trim() }); toast('Updated', 'success'); } catch { toast('Failed — check the URL', 'error'); } setBusy(false); };
   const onReset = async (kind: 'cover' | 'banner') => { setBusy(true); try { await putArt(kind, { mode: 'reset' }); toast('Reset to automatic', 'success'); } catch { toast('Failed', 'error'); } setBusy(false); };
-  const saveText = async () => { setBusy(true); try { await api(`/api/admin/series/${id}/meta`, { method: 'PUT', json: { title, summary } }); toast('Saved', 'success'); onSaved(); } catch { toast('Failed', 'error'); } setBusy(false); };
+  const saveText = async () => { setBusy(true); try { await api(`/api/admin/series/${id}/meta`, { method: 'PUT', json: { title, summary } }); toast('Saved', 'success'); onSaved(); } catch (e) { toast(msgOf(e, 'Could not save'), 'error'); } setBusy(false); };
+
+  const [autoUpdate, setAutoUpdate] = useState(series.autoUpdate !== false);
+  const toggleAuto = async (next: boolean) => {
+    setAutoUpdate(next);
+    try { await api(`/api/admin/series/${id}`, { method: 'PATCH', json: { autoUpdate: next } }); }
+    catch (e) { setAutoUpdate(!next); toast(msgOf(e, 'Could not change that'), 'error'); }
+  };
+
+  const [checking, setChecking] = useState(false);
+  const checkNow = async () => {
+    setChecking(true);
+    try {
+      await api(`/api/admin/series/${id}/check`, { method: 'POST' });
+      toast('Checking for new chapters\u2026', 'info');
+      // the download runs on the server; poll rather than hold the request open
+      const started = Date.now();
+      const tick = async () => {
+        const st = await api<{ running: boolean; added?: number; error?: string }>(`/api/admin/series/${id}/check`).catch(() => null);
+        if (st && !st.running) {
+          setChecking(false);
+          if (st.error) toast('Check failed', 'error');
+          else { toast(st.added ? `Added ${st.added} new chapter${st.added === 1 ? '' : 's'}` : 'Already up to date', 'success'); onSaved(); }
+          return;
+        }
+        if (Date.now() - started > 10 * 60_000) { setChecking(false); return; }
+        setTimeout(tick, 3000);
+      };
+      setTimeout(tick, 2000);
+    } catch (e) { setChecking(false); toast(msgOf(e, 'Could not start a check'), 'error'); }
+  };
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-ink-950/70 p-4 backdrop-blur-sm" onClick={onClose}>
       <div className="glass max-h-[88vh] w-full max-w-md overflow-y-auto rounded-2xl border border-ink-700 p-5" onClick={(e) => e.stopPropagation()}>
@@ -65,6 +95,18 @@ function SeriesEditModal({ id, series, onClose, onSaved }: { id: string; series:
         <label className="mb-1 mt-3 block text-xs font-semibold uppercase tracking-wider text-fog-500">Description</label>
         <textarea value={summary} onChange={(e) => setSummary(e.target.value)} rows={5} className={`${fld} resize-y`} />
         <button onClick={saveText} disabled={busy} className="btn-accent mt-2 w-full py-2 text-sm disabled:opacity-50">Save title &amp; description</button>
+        <div className="mt-4 rounded-xl border border-ink-700 p-3">
+          <label className="flex cursor-pointer items-center justify-between gap-3 text-sm">
+            <span>
+              <span className="text-fog-100">Follow new chapters</span>
+              <span className="mt-0.5 block text-[11px] leading-relaxed text-fog-500">The scheduled check fetches new chapters for this series.</span>
+            </span>
+            <input type="checkbox" checked={autoUpdate} onChange={(e) => toggleAuto(e.target.checked)} className="size-4 shrink-0 accent-accent" />
+          </label>
+          <button onClick={checkNow} disabled={checking} className="mt-2 w-full rounded-full border border-ink-700 py-2 text-sm text-fog-300 disabled:opacity-50">
+            {checking ? 'Checking\u2026' : 'Check for new chapters now'}
+          </button>
+        </div>
         <ArtEditor label="Cover" kind="cover" busy={busy} onUpload={onUpload} onSetUrl={onSetUrl} onReset={onReset} />
         <ArtEditor label="Background" kind="banner" busy={busy} onUpload={onUpload} onSetUrl={onSetUrl} onReset={onReset} />
         <p className="mt-4 text-[11px] leading-relaxed text-fog-500">Changes apply for everyone. “Reset to auto” restores the automatic source / AniList / first-page art.</p>
