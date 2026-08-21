@@ -9,6 +9,7 @@ import { pool } from './lib/db';
 import { runtime } from './lib/runtime';
 import { migrate } from './lib/migrate';
 import { loadSources, loadCustomSites, loadBuiltins, listSources, loadSuwayomiSources, scheduleSuwayomiRetry } from './lib/sources';
+import { scheduleFingerprintBackfill } from './lib/fingerprintJob';
 import { runUpdateAll } from './lib/updater';
 import { startSweeper } from './lib/imageCache';
 import { runBackup, msUntilHour } from './lib/backup';
@@ -136,6 +137,11 @@ async function main() {
   }
 
   await app.listen({ host: '0.0.0.0', port: env.PORT });
+
+  // Content fingerprints for the library, filled in behind the server rather than during boot: it reads
+  // every archive on disk, so putting it on the boot path would make start-up time grow with the size of
+  // someone's library. Nothing reads the column yet, so not finishing is harmless.
+  if (process.env.LIBRARY_BACKEND === 'owned') scheduleFingerprintBackfill();
 }
 
 main().catch((e) => {

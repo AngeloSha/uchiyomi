@@ -6,6 +6,7 @@ import { content as komga } from '../lib/backend';
 import { cacheBytes } from '../lib/imageCache';
 import { runtime } from '../lib/runtime';
 import { persistScan } from '../lib/library';
+import { runFingerprintBackfill, fingerprintRemaining, fpState } from '../lib/fingerprintJob';
 import { runBackup } from '../lib/backup';
 import { runUpdateAll, updateSeries } from '../lib/updater';
 import { authenticate, requireAdmin, userIdOf, revokeAllSessions, revokeRefreshTokenById, passwordError } from '../lib/auth';
@@ -70,6 +71,15 @@ export default async function adminRoutes(app: FastifyInstance) {
       { id: 'scan', name: 'Library scan', schedule: 'on demand', lastRun: runtime.lastScan || null, running: false },
       { id: 'update', name: 'Check for new chapters', schedule: `every ${s?.updater_hours ?? 6}h`, lastRun: runtime.lastUpdate || null, lastResult: runtime.lastUpdateResult, running: runtime.updating },
       { id: 'backup', name: 'Backup database & config', schedule: `daily at ${String(s?.backup_hour ?? 3).padStart(2, '0')}:00`, lastRun: backupLast, lastResult: runtime.lastBackupResult ?? s?.backup_last_result ?? null, running: runtime.backingUp },
+      {
+        id: 'fingerprint',
+        name: 'Fingerprint library files',
+        schedule: 'once, in the background',
+        lastRun: fpState.finishedAt,
+        lastResult: fpState.finishedAt ? { done: fpState.done, failed: fpState.failed, ms: fpState.ms } : null,
+        running: fpState.running,
+        remaining: await fingerprintRemaining().catch(() => null),
+      },
     ] };
   });
   app.post('/api/admin/tasks/:id/run', async (req) => {
@@ -77,6 +87,12 @@ export default async function adminRoutes(app: FastifyInstance) {
     await logAudit('task.run', { userId: userIdOf(req), detail: { task: id }, req });
     if (id === 'scan') return { ok: true, ...(await persistScan()) };
     if (id === 'update') { runUpdateAll({ maxNew: 10 }).then((r) => { runtime.lastUpdate = Date.now(); runtime.lastUpdateResult = { series: r.series, added: r.added }; }).catch(() => {}); return { ok: true, started: true }; }
+    if (id === 'fingerprint') {
+      if (fpState.running) return { ok: false, error: 'busy' };
+      // never awaited: on a large library this is minutes, and the caller is an admin clicking a button
+      runFingerprintBackfill().catch(() => {});
+      return { ok: true, started: true };
+    }
     if (id === 'backup') {
       if (runtime.backingUp) return { ok: false, error: 'busy' };
       runtime.backingUp = true;
