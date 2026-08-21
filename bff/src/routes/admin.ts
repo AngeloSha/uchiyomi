@@ -263,7 +263,9 @@ export default async function adminRoutes(app: FastifyInstance) {
        LEFT JOIN series_art a ON a.series_id = s.id
        LEFT JOIN series_overrides o ON o.series_id = s.id
        ORDER BY (o.banner IS NOT NULL OR o.cover IS NOT NULL), (a.banner IS NOT NULL AND a.banner <> ''),
-                (a.cover IS NOT NULL AND a.cover <> ''), s.title`,
+                (a.cover IS NOT NULL AND a.cover <> ''), s.title
+        WHERE s.deleted_at IS NULL AND s.merged_into IS NULL
+      `,
     );
     return { content: rows };
   });
@@ -309,7 +311,7 @@ export default async function adminRoutes(app: FastifyInstance) {
       `SELECT s.id, s.title FROM lib_series s
        LEFT JOIN series_art a ON a.series_id = s.id
        LEFT JOIN series_overrides o ON o.series_id = s.id
-       WHERE (a.banner IS NULL OR a.banner = '') AND o.banner IS NULL
+       WHERE s.deleted_at IS NULL AND s.merged_into IS NULL AND (a.banner IS NULL OR a.banner = '') AND o.banner IS NULL
        ORDER BY s.title`,
     );
     const job: ArtJob = { running: true, total: targets.length, done: 0, banners: 0, covers: 0, misses: 0, startedAt: Date.now() };
@@ -613,7 +615,7 @@ export default async function adminRoutes(app: FastifyInstance) {
     const targets = await q<{ id: string; title: string }>(
       `SELECT s.id, s.title FROM lib_series s
          LEFT JOIN series_trackers t ON t.series_id = s.id AND t.provider = 'anilist'
-        WHERE t.series_id IS NULL ORDER BY s.books_count DESC`,
+        WHERE s.deleted_at IS NULL AND s.merged_into IS NULL AND t.series_id IS NULL ORDER BY s.books_count DESC`,
     );
     const job = { running: true, total: targets.length, done: 0, linked: 0, misses: 0 };
     relinkJob = job;

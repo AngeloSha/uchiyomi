@@ -11,6 +11,29 @@ function page<T>(content: T[], total: number, p: number, size: number): Page<T> 
 
 const SERIES_COLS = 'id, title, summary, status, genres, author, books_count, cover_book_id, web, created_at, latest_mtime';
 
+/**
+ * The one place a series is read from.
+ *
+ * Two things have to be true of every series query and were previously true of almost none of them:
+ *   1. the admin's title/summary override wins, so a renamed series is findable by its new name, sorts under
+ *      it, and carries it into the reader, OPDS and offline manifests -- not just its own detail page;
+ *   2. a deleted or merged-away series is invisible.
+ *
+ * Doing it in a subquery rather than at each call site means `title ILIKE`, `ORDER BY title` and every rail
+ * agree by construction. `GET /api/series/:id` still reads series_overrides directly afterwards, because it
+ * additionally returns `overrides` and `artVersion` for the edit modal and thumbnail cache-busting.
+ */
+const SERIES_SRC = `(
+  SELECT s.id, COALESCE(o.title, s.title) AS title, COALESCE(o.summary, s.summary) AS summary,
+         s.status, s.genres, s.author, s.books_count, s.cover_book_id, s.web, s.created_at, s.latest_mtime
+    FROM lib_series s LEFT JOIN series_overrides o ON o.series_id = s.id
+   WHERE s.deleted_at IS NULL AND s.merged_into IS NULL
+) sv`;
+
+/** The overridden title for one series, for the book DTOs that carry seriesTitle. */
+const SERIES_TITLE_SQL = 'COALESCE(o.title, s.title)';
+const SERIES_TITLE_JOIN = 'JOIN lib_series s ON s.id = %col% LEFT JOIN series_overrides o ON o.series_id = s.id';
+
 function seriesDto(r: any) {
   const genres: string[] = r.genres ?? [];
   const summary: string = r.summary ?? '';
@@ -90,26 +113,26 @@ function sortSql(sort?: string): string {
 }
 
 const total = async (where = 'TRUE', params: any[] = []) =>
-  (await one<{ c: number }>(`SELECT count(*)::int AS c FROM lib_series WHERE ${where}`, params))?.c ?? 0;
+  (await one<{ c: number }>(`SELECT count(*)::int AS c FROM ${SERIES_SRC} WHERE ${where}`, params))?.c ?? 0;
 
 export const owned = {
   libraries: async () => [{ id: 'lib', name: 'Library' }],
 
-  genres: async () => (await q<{ g: string }>('SELECT DISTINCT g FROM lib_series, unnest(genres) AS g ORDER BY g')).map((r) => r.g),
+  genres: async () => (await q<{ g: string }>(`SELECT DISTINCT g FROM ${SERIES_SRC}, unnest(genres) AS g ORDER BY g`)).map((r) => r.g),
 
   series: async (id: string) => {
-    const r = await one(`SELECT ${SERIES_COLS} FROM lib_series WHERE id = $1`, [id]);
+    const r = await one(`SELECT ${SERIES_COLS} FROM ${SERIES_SRC} WHERE id = $1`, [id]);
     if (!r) throw Object.assign(new Error('series not found'), { statusCode: 404 });
     return seriesDto(r);
   },
 
   seriesNew: async (p = 0, size = 20) => {
-    const rows = await q(`SELECT ${SERIES_COLS} FROM lib_series ORDER BY created_at DESC, title ASC LIMIT $1 OFFSET $2`, [size, p * size]);
+    const rows = await q(`SELECT ${SERIES_COLS} FROM ${SERIES_SRC} ORDER BY created_at DESC, title ASC LIMIT $1 OFFSET $2`, [size, p * size]);
     return page(rows.map(seriesDto), await total(), p, size);
   },
 
   seriesUpdated: async (p = 0, size = 20) => {
-    const rows = await q(`SELECT ${SERIES_COLS} FROM lib_series ORDER BY latest_mtime DESC, title ASC LIMIT $1 OFFSET $2`, [size, p * size]);
+    const rows = await q(`SELECT ${SERIES_COLS} FROM ${SERIES_SRC} ORDER BY latest_mtime DESC, title ASC LIMIT $1 OFFSET $2`, [size, p * size]);
     return page(rows.map(seriesDto), await total(), p, size);
   },
 
@@ -124,7 +147,7 @@ export const owned = {
     }
     const t = await total(where, params);
     const rows = await q(
-      `SELECT ${SERIES_COLS} FROM lib_series WHERE ${where} ORDER BY ${sortSql(sort)} LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
+      `SELECT ${SERIES_COLS} FROM ${SERIES_SRC} WHERE ${where} ORDER BY ${sortSql(sort)} LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
       [...params, size, p * size],
     );
     return page(rows.map(seriesDto), t, p, size);
@@ -132,14 +155,14 @@ export const owned = {
 
   seriesBooks: async (id: string, p = 0, size = 100, sort = 'metadata.numberSort,asc') => {
     const dir = /desc/i.test(sort) ? 'DESC' : 'ASC';
-    const st = (await one<{ title: string }>('SELECT title FROM lib_series WHERE id = $1', [id]))?.title ?? '';
+    const st = (await one<{ title: string }>(`SELECT title FROM ${SERIES_SRC} WHERE id = $1`, [id]))?.title ?? '';
     const t = (await one<{ c: number }>('SELECT count(*)::int AS c FROM lib_books WHERE series_id = $1', [id]))?.c ?? 0;
     const rows = await q(`SELECT * FROM lib_books WHERE series_id = $1 ORDER BY number ${dir}, file ${dir} LIMIT $2 OFFSET $3`, [id, size, p * size]);
     return page(rows.map((r) => bookDto({ ...r, series_title: st })), t, p, size);
   },
 
   book: async (id: string) => {
-    const r = await one('SELECT b.*, s.title AS series_title FROM lib_books b JOIN lib_series s ON s.id = b.series_id WHERE b.id = $1', [id]);
+    const r = await one(`SELECT b.*, ${SERIES_TITLE_SQL} AS series_title FROM lib_books b ${SERIES_TITLE_JOIN.replace('%col%', 'b.series_id')} WHERE b.id = $1`, [id]);
     if (!r) throw Object.assign(new Error('book not found'), { statusCode: 404 });
     return bookDto(r);
   },
@@ -161,7 +184,7 @@ export const owned = {
   bookNext: async (id: string) => {
     const b = await one<{ series_id: string; number: number }>('SELECT series_id, number FROM lib_books WHERE id = $1', [id]);
     if (!b) throw Object.assign(new Error('not found'), { statusCode: 404 });
-    const n = await one('SELECT bk.*, s.title AS series_title FROM lib_books bk JOIN lib_series s ON s.id = bk.series_id WHERE bk.series_id = $1 AND bk.number > $2 ORDER BY bk.number ASC LIMIT 1', [b.series_id, b.number]);
+    const n = await one(`SELECT bk.*, ${SERIES_TITLE_SQL} AS series_title FROM lib_books bk ${SERIES_TITLE_JOIN.replace('%col%', 'bk.series_id')} WHERE bk.series_id = $1 AND bk.number > $2 ORDER BY bk.number ASC LIMIT 1`, [b.series_id, b.number]);
     if (!n) throw Object.assign(new Error('no next'), { statusCode: 404 });
     return bookDto(n);
   },
@@ -169,7 +192,7 @@ export const owned = {
   bookPrevious: async (id: string) => {
     const b = await one<{ series_id: string; number: number }>('SELECT series_id, number FROM lib_books WHERE id = $1', [id]);
     if (!b) throw Object.assign(new Error('not found'), { statusCode: 404 });
-    const n = await one('SELECT bk.*, s.title AS series_title FROM lib_books bk JOIN lib_series s ON s.id = bk.series_id WHERE bk.series_id = $1 AND bk.number < $2 ORDER BY bk.number DESC LIMIT 1', [b.series_id, b.number]);
+    const n = await one(`SELECT bk.*, ${SERIES_TITLE_SQL} AS series_title FROM lib_books bk ${SERIES_TITLE_JOIN.replace('%col%', 'bk.series_id')} WHERE bk.series_id = $1 AND bk.number < $2 ORDER BY bk.number DESC LIMIT 1`, [b.series_id, b.number]);
     if (!n) throw Object.assign(new Error('no previous'), { statusCode: 404 });
     return bookDto(n);
   },

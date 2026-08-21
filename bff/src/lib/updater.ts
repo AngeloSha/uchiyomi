@@ -13,7 +13,7 @@ export async function updateSeries(
   seriesId: string,
   maxNew = 10,
 ): Promise<{ title: string; added: number; available: number; folder?: string; chapters?: SourceChapter[] }> {
-  const s = await one<any>('SELECT id,title,source_id,source_series_id,web,folder,summary,author,genres,status FROM lib_series WHERE id=$1', [seriesId]);
+  const s = await one<any>('SELECT id,title,source_id,source_series_id,web,folder,summary,author,genres,status FROM lib_series WHERE id=$1 AND deleted_at IS NULL AND merged_into IS NULL', [seriesId]);
   if (!s) return { title: '', added: 0, available: 0 };
   const src = s.source_id ? getSource(s.source_id) : null;
   const ref = s.source_series_id;
@@ -51,8 +51,8 @@ export async function updateSeries(
 /** Sweep the library for new chapters. onlyFavorites keeps a manual run quick; throttled for politeness. */
 export async function runUpdateAll(opts: { onlyFavorites?: boolean; maxNew?: number } = {}): Promise<{ series: number; added: number }> {
   const ids = opts.onlyFavorites
-    ? (await q<{ series_id: string }>('SELECT DISTINCT f.series_id FROM favorites f JOIN lib_series s ON s.id = f.series_id WHERE s.auto_update')).map((r) => r.series_id)
-    : (await q<{ id: string }>('SELECT id FROM lib_series WHERE auto_update ORDER BY latest_mtime DESC')).map((r) => r.id);
+    ? (await q<{ series_id: string }>('SELECT DISTINCT f.series_id FROM favorites f JOIN lib_series s ON s.id = f.series_id WHERE s.auto_update AND s.deleted_at IS NULL AND s.merged_into IS NULL')).map((r) => r.series_id)
+    : (await q<{ id: string }>('SELECT id FROM lib_series WHERE auto_update AND deleted_at IS NULL AND merged_into IS NULL ORDER BY latest_mtime DESC')).map((r) => r.id);
   let added = 0;
   const dated: { folder: string; chapters: SourceChapter[] }[] = [];
   for (const id of ids) {

@@ -84,7 +84,10 @@ export default async function opdsRoutes(app: FastifyInstance) {
     let where = 'TRUE';
     if (query?.trim()) { params.push(`%${query.trim()}%`); where = `title ILIKE $${params.length}`; }
     const rows = await q<{ id: string; title: string; summary: string | null; author: string | null; books_count: number }>(
-      `SELECT id, title, summary, author, books_count FROM lib_series WHERE ${where} ORDER BY ${order} LIMIT ${PAGE_SIZE} OFFSET ${p * PAGE_SIZE}`,
+      `SELECT id, title, summary, author, books_count FROM (SELECT s.id, COALESCE(o.title, s.title) AS title, COALESCE(o.summary, s.summary) AS summary,
+                s.author, s.books_count
+           FROM lib_series s LEFT JOIN series_overrides o ON o.series_id = s.id
+          WHERE s.deleted_at IS NULL AND s.merged_into IS NULL) sv WHERE ${where} ORDER BY ${order} LIMIT ${PAGE_SIZE} OFFSET ${p * PAGE_SIZE}`,
       params,
     );
     const entries = rows.map((s) =>
@@ -110,7 +113,10 @@ export default async function opdsRoutes(app: FastifyInstance) {
 
   async function opdsSeriesSearch(_req: FastifyRequest, reply: FastifyReply, query: string) {
     const rows = await q<{ id: string; title: string; summary: string | null; books_count: number }>(
-      `SELECT id, title, summary, books_count FROM lib_series WHERE title ILIKE $1 ORDER BY title ASC LIMIT ${PAGE_SIZE}`,
+      `SELECT id, title, summary, books_count FROM (SELECT s.id, COALESCE(o.title, s.title) AS title, COALESCE(o.summary, s.summary) AS summary,
+                s.author, s.books_count
+           FROM lib_series s LEFT JOIN series_overrides o ON o.series_id = s.id
+          WHERE s.deleted_at IS NULL AND s.merged_into IS NULL) sv WHERE title ILIKE $1 ORDER BY title ASC LIMIT ${PAGE_SIZE}`,
       [`%${query}%`],
     );
     const entries = rows.map((s) =>
@@ -124,7 +130,10 @@ export default async function opdsRoutes(app: FastifyInstance) {
   // acquisition feed for one series: each chapter is a downloadable CBZ
   app.get('/opds/series/:id', async (req, reply) => {
     const { id } = req.params as { id: string };
-    const s = await one<{ title: string }>('SELECT title FROM lib_series WHERE id = $1', [id]);
+    const s = await one<{ title: string }>(`SELECT title FROM (SELECT s.id, COALESCE(o.title, s.title) AS title, COALESCE(o.summary, s.summary) AS summary,
+                s.author, s.books_count
+           FROM lib_series s LEFT JOIN series_overrides o ON o.series_id = s.id
+          WHERE s.deleted_at IS NULL AND s.merged_into IS NULL) sv WHERE id = $1`, [id]);
     if (!s) return reply.code(404).send('not found');
     const books = await q<{ id: string; title: string | null; number: number; pages: number }>(
       'SELECT id, title, number, pages FROM lib_books WHERE series_id = $1 ORDER BY number ASC, file ASC', [id]);

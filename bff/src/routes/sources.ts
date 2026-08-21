@@ -70,12 +70,20 @@ export async function addSeriesFromSource(opts: {
   const title = series?.title || 'Series';
   const folder = `${src.name}/${sanitize(title)}`;
 
-  if (await one<{ id: string }>('SELECT id FROM lib_series WHERE folder = $1', [folder])) {
+  // A deleted series does not count as present: re-adding it is how you undo a delete from the app side.
+  const existing = await one<{ id: string; deleted_at: string | null }>(
+    'SELECT id, deleted_at FROM lib_series WHERE folder = $1', [folder]);
+  if (existing?.deleted_at) {
+    await q('UPDATE lib_series SET deleted_at = NULL WHERE id = $1', [existing.id]).catch(() => {});
+  }
+  if (existing && !existing.deleted_at) {
     return { ok: true, status: 200, title, folder, chapters: 0, message: 'already in library' };
   }
   if (!force) {
     const dup = await one<{ title: string; source: string }>(
-      `SELECT title, source FROM lib_series WHERE lower(regexp_replace(title, '[^a-zA-Z0-9]', '', 'g')) = $1 AND folder <> $2 LIMIT 1`,
+      `SELECT title, source FROM lib_series
+        WHERE lower(regexp_replace(title, '[^a-zA-Z0-9]', '', 'g')) = $1 AND folder <> $2
+          AND deleted_at IS NULL AND merged_into IS NULL LIMIT 1`,
       [norm(title), folder]);
     if (dup) return { ok: false, status: 409, error: 'duplicate', existing: dup, message: `You already have "${dup.title}" from ${dup.source}. Add this copy anyway?` };
   }
@@ -164,7 +172,7 @@ export default async function sourceRoutes(app: FastifyInstance) {
     const seen = new Set<string>();
     const results = raw.filter((r) => !!r.sourceId && !seen.has(r.sourceId) && (seen.add(r.sourceId), true)).slice(0, 24);
     // flag titles already in the library so the UI can mark them instead of offering a duplicate add
-    const have = new Set((await q<{ title: string }>('SELECT title FROM lib_series')).map((r) => norm(r.title)));
+    const have = new Set((await q<{ title: string }>('SELECT title FROM lib_series WHERE deleted_at IS NULL AND merged_into IS NULL')).map((r) => norm(r.title)));
     return { content: results.map((r) => ({ ...r, inLibrary: have.has(norm(r.title)) })) };
   });
 
@@ -194,7 +202,7 @@ export default async function sourceRoutes(app: FastifyInstance) {
         g.providers.push({ source: r.source, name: r.name, sourceId: r.sourceId, coverUrl: r.coverUrl, title: r.title });
       }
     }
-    const have = new Set((await q<{ title: string }>('SELECT title FROM lib_series')).map((x) => norm(x.title)));
+    const have = new Set((await q<{ title: string }>('SELECT title FROM lib_series WHERE deleted_at IS NULL AND merged_into IS NULL')).map((x) => norm(x.title)));
     const out = [...groups.values()]
       .map((g) => ({ ...g, inLibrary: have.has(norm(g.title)) }))
       .sort((a, b) => b.providers.length - a.providers.length)
@@ -212,7 +220,7 @@ export default async function sourceRoutes(app: FastifyInstance) {
     const raw = await src.latest(p).catch(() => []);
     const seen = new Set<string>();
     const results = raw.filter((r) => !!r.sourceId && !seen.has(r.sourceId) && (seen.add(r.sourceId), true)).slice(0, 24);
-    const have = new Set((await q<{ title: string }>('SELECT title FROM lib_series')).map((r) => norm(r.title)));
+    const have = new Set((await q<{ title: string }>('SELECT title FROM lib_series WHERE deleted_at IS NULL AND merged_into IS NULL')).map((r) => norm(r.title)));
     return { content: results.map((r) => ({ ...r, inLibrary: have.has(norm(r.title)) })) };
   });
 
@@ -224,7 +232,7 @@ export default async function sourceRoutes(app: FastifyInstance) {
     if (!trendingCache || Date.now() - trendingCache.at > 6 * 3600_000) {
       try { trendingCache = { at: Date.now(), items: await fetchTrendingManhwa() }; } catch { if (!trendingCache) return { content: [] }; }
     }
-    const have = new Set((await q<{ title: string }>('SELECT title FROM lib_series')).map((r) => norm(r.title)));
+    const have = new Set((await q<{ title: string }>('SELECT title FROM lib_series WHERE deleted_at IS NULL AND merged_into IS NULL')).map((r) => norm(r.title)));
     return { content: trendingCache.items.filter((t) => !have.has(norm(t.title))).slice(0, 24) };
   });
 

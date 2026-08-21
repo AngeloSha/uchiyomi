@@ -198,6 +198,15 @@ CREATE INDEX IF NOT EXISTS lib_books_fp_idx ON lib_books (fingerprint) WHERE fin
 -- breadcrumb for a series that gets rematched to a new folder, so a wrong match can be reversed
 ALTER TABLE lib_series ADD COLUMN IF NOT EXISTS folder_prev text;
 
+-- Deleting a series HIDES it rather than erasing it. The id survives, so favourites, ratings, notes and --
+-- above all -- reading history stay attached to something real, and the delete is undoable. The scanner
+-- must not revive a hidden folder, or the next scan brings the series back under a brand-new id.
+ALTER TABLE lib_series ADD COLUMN IF NOT EXISTS deleted_at  timestamptz;
+-- Merging points the absorbed series at its survivor instead of deleting it, for the same reason: its
+-- folder still exists on disk, so without this the next scan would recreate it and pull the books back out.
+ALTER TABLE lib_series ADD COLUMN IF NOT EXISTS merged_into text;
+CREATE INDEX IF NOT EXISTS lib_series_live_idx ON lib_series (id) WHERE deleted_at IS NULL AND merged_into IS NULL;
+
 -- A book is unique per (root, file), not per file: the same relative path legitimately exists under both the
 -- read library and the download dir. Strictly weaker than the old constraint, so it cannot fail to apply.
 ALTER TABLE lib_books DROP CONSTRAINT IF EXISTS lib_books_file_key;

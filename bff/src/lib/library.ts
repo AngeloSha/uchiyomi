@@ -3,7 +3,7 @@
 import { readdir, stat, readFile } from 'fs/promises';
 import { join } from 'path';
 import sharp from 'sharp';
-import { q, tx } from './db';
+import { q, one, tx } from './db';
 import { newSeriesId, newBookId } from './ids';
 import { env } from '../env';
 import { fingerprintChapter } from './fingerprint';
@@ -269,6 +269,19 @@ export async function persistScan(): Promise<{ series: number; books: number; ms
         if (!files.length) continue;
 
         // One folder per transaction: a half-applied folder is a corrupt library, not a stale one.
+        // A folder can already be spoken for in ways the scanner must respect, or delete and merge both
+        // undo themselves on the next pass: this runs on every add, every updater sweep and every manual scan.
+        const known = await one<{ id: string; deleted_at: string | null; merged_into: string | null }>(
+          `SELECT id, deleted_at, merged_into FROM lib_series WHERE folder = $1`,
+          [folderRel],
+        );
+        // Deleted: leave it alone entirely. Reviving it would mint a new id and strand everything attached
+        // to the old one -- favourites, ratings, notes, reading history.
+        if (known?.deleted_at) continue;
+        // Merged away: its files belong to the survivor now. Without this the books get pulled back out by
+        // `ON CONFLICT (root, file) DO UPDATE SET series_id = EXCLUDED.series_id` and the merge silently undoes.
+        const mergeTarget = known?.merged_into || null;
+
         // Only a folder with no row of its own can be a move. Anything already known is the normal path.
         let rematched: { id: string; oldFolder: string } | null = null;
         if (env.LIBRARY_REMATCH !== 'off' && !seenFolders.has(folderRel)) {
@@ -276,7 +289,8 @@ export async function persistScan(): Promise<{ series: number; books: number; ms
         }
 
         const seriesId = await tx(async (qq) => {
-          let id = seenFolders.get(folderRel);
+          let id = seenFolders.get(folderRel) || mergeTarget || undefined;
+          if (mergeTarget) seenFolders.set(folderRel, mergeTarget);
           if (!id && rematched) {
             id = rematched.id;
             seenFolders.set(folderRel, id);
