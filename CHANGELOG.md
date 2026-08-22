@@ -1,5 +1,68 @@
 # Changelog
 
+## v0.7.0 — 2026-08-22
+
+**Library management.** The honest caveat in the README used to open by conceding that Komga and Kavita were
+further along here. This release is that gap, measured and closed.
+
+### Any folder layout
+
+The scanner read exactly two directories below your library root, so a series had to be at
+`<group>/<series>/<chapter>`. Anything else was invisible: no error, no log line, just an app that started
+fine and showed nothing. A folder is now a series when it directly contains chapters, at any depth, so
+`One Piece/Chapter 1.cbz`, `Manga/One Piece/…` and `Comics/Manga/Author/One Piece/…` are all read without
+rearranging anything.
+
+Existing libraries are untouched. This was verified against a copy of a real 210-series, 40,506-chapter
+install: zero series rows and zero chapter rows changed. Set `LIBRARY_MAX_DEPTH=2` to reproduce the old
+behaviour exactly; the default is 6.
+
+### Metadata you edit stays edited
+
+Only title and summary could be edited. Author, publication status and genres were read from ComicInfo and
+silently rewritten by every scan, and scans happen constantly. All of them are now editable and survive a
+rescan, and because genres drive Browse and the recommendation rails, editing one steers those too.
+
+Chapters can be corrected as well. Numbers are parsed from filenames by taking the first number found, so
+`Vol 2 Ch 5.cbz` was chapter 2: it sorted between 1 and 3, and 2 is what a tracker was told. Numbers and
+titles now have a per-chapter override.
+
+### Filters that actually filter
+
+The library had one filter, genre, and every other filter silently returned the entire library rather than
+erroring. Read state, publication status, author and multi-genre now work, filters live in the URL so the
+back button works and a view can be shared, and a filter the query cannot express says so instead of quietly
+widening. The "Most chapters" sort is now "Most unread" and sorts by your real unread count.
+
+### Bulk actions
+
+Select several series on the Library page and mark them read or unread, favourite them, or file them into a
+collection. Marking a backlog read deliberately does not write reading events, so it cannot inflate streaks,
+the household leaderboard or Wrapped.
+
+### Your tracker can no longer be walked backwards
+
+AniList accepts a lower progress and rewrites the entry, with no undo. Anything that reduced your highest
+completed chapter would quietly send the smaller number: merging two series, marking a batch unread, or
+correcting a chapter number. Progress is now monotonic per series, and lowering it takes a deliberate resync
+from the series page. This closed a hazard that already existed before any of the above.
+
+### Also
+
+The admin Art tab was broken in v0.6.0 by a query with its `WHERE` below its `ORDER BY`; fixed in v0.6.1 and
+now covered by a test. Next and previous chapter compared numbers alone, so two chapters sharing a number
+made "next" arbitrary and could return the chapter you were already reading.
+
+### Upgrading
+
+```bash
+docker compose pull
+docker compose up -d
+```
+
+The schema gains three tables and three columns on first boot, all additive. Nothing existing is rewritten,
+and no scan re-mints anything.
+
 ## v0.6.1 — 2026-08-22
 
 Two fixes for things a new install hits immediately.

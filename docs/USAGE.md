@@ -30,9 +30,9 @@ docker compose up -d         # no config needed — secrets are generated automa
 Open the app at your `PUBLIC_ORIGIN` (e.g. `http://localhost:3000`) and **create your admin account in the
 browser** on first run (the first account created becomes the server admin). To read an existing collection,
 point `LIBRARY_PATH` at it first (`cp .env.example .env`, set `LIBRARY_PATH=/path/to/your/manga`, then
-`docker compose up -d`). Your library on disk should be laid out as `<group>/<series>/<chapter>` — two levels below
-the library root — where each chapter is a `.cbz`, a `.cbr`, or a folder of images (an archive may carry a
-`ComicInfo.xml` for metadata). So `Manga/One Piece/Chapter 1.cbz` is found; `One Piece/Chapter 1.cbz` is not.
+`docker compose up -d`). Your library can be laid out however you already keep it: a folder counts as a series when it directly
+contains chapters, at any depth. Each chapter is a `.cbz`, a `.cbr`, or a folder of images (an archive may
+carry a `ComicInfo.xml` for metadata).
 
 Prefer a CLI-seeded admin? Run `bash scripts/setup.sh` instead — it generates the secrets, creates the admin from
 a password you type, fixes volume ownership, and starts the five containers (`yomi-web`, `yomi-bff`, `yomi-db`, `yomi-suwayomi`,
@@ -82,10 +82,25 @@ The series page shows the cover, an ambient backdrop, genres, description, and t
 
 Progress, favorites, and history are **per-user**, so each account has its own.
 
+**Filtering the library.** The Library page has a **Filters** button: read state (not started / reading /
+finished), publication status, and genres. Picking several genres means all of them. Active filters show as
+chips under the header with a count, and they live in the URL, so the back button works and you can share a
+filtered view.
+
+**Doing something to many series at once.** Hit **Select** on the Library page, tap the ones you want, and the
+bar at the bottom can mark them read or unread, favourite them, or file them into a collection. Marking a
+backlog read deliberately does not count towards streaks or the household leaderboard, since you did not
+read it this week.
+
 **If you are an admin**, the series page also carries the controls for that series:
 
-- **Edit** its title and summary, or its cover and banner art. A rename applies everywhere — search, sorting,
-  the reader header — and never touches the folder on disk.
+- **Edit** its title, author, publication status, genres, summary, cover and banner art. All of it applies
+  everywhere (search, sorting, Browse, the recommendation rails, the reader header) and none of it touches
+  your files. Anything you set here survives the next scan; anything you leave blank keeps following what
+  the files say.
+- **Edit a chapter** from its row menu, if its number came out wrong. Numbers are read from the filename by
+  taking the first number in it, so `Vol 2 Ch 5.cbz` is read as chapter 2. Correcting it fixes the reading
+  order and what gets reported to a connected tracker.
 - **Auto-update** toggles whether the updater keeps checking this one for new chapters, and **Check now**
   runs that check immediately instead of waiting for the next sweep.
 - **Delete** hides the series rather than erasing it. Chapters, ratings, favourites and everyone's reading
@@ -375,10 +390,10 @@ config archive, any admin-uploaded cover art will be missing even though the dat
 
 ## 13. Troubleshooting & FAQ
 
-**The app loads but my library is empty.** Point `LIBRARY_PATH` at your manga and restart: it mounts read-only at
-`/library` and must be laid out as `<group>/<series>/<chapter>`, two levels below the root. This is the usual
-cause: a library of series folders sitting directly at the root is scanned and silently found to be empty,
-because the scanner expects a grouping level above the series. Wrap it in one folder and rescan. New or changed files are picked up by the scheduled
+**The app loads but my library is empty.** Point `LIBRARY_PATH` at your manga and restart: it mounts read-only
+at `/library`, and any folder layout is read. If it is still empty, check that your chapters are `.cbz`,
+`.cbr` or folders of images, and that they sit no more than six directories below the library root (raise
+`LIBRARY_MAX_DEPTH` if your collection is nested deeper than that). New or changed files are picked up by the scheduled
 scan; you can also force a rescan from the admin panel, or restart the stack.
 
 **I never set an admin password / can't sign in.** If no users exist yet, just open the app and the first-run

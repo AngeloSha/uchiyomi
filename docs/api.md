@@ -3,7 +3,7 @@
 Everything the web app does, it does over this API, so anything you can do in the browser you can script.
 
 This page covers how to authenticate and the endpoints worth scripting. It is not an exhaustive dump of all
-150 routes; the full list is at the bottom for reference.
+155 routes; the full list is at the bottom for reference.
 
 ## Authenticating
 
@@ -182,6 +182,15 @@ GET    /api/sources/status        GET    /api/sources/jobs
 POST   /api/sources/add           GET    /api/discover/trending
 ```
 
+### Bulk actions
+```
+POST   /api/library/bulk/read     POST   /api/favorites/bulk
+POST   /api/collections/:id/items/bulk
+```
+Each takes `{ seriesIds: [...] }`, up to 500. An id that no longer exists is reported in `skipped` rather
+than failing the batch. Marking read deliberately writes no reading events, so importing a backlog does not
+inflate streaks or the leaderboard.
+
 ### Personal
 ```
 GET    /api/favorites             POST   /api/favorites
@@ -199,6 +208,7 @@ GET    /api/tokens                POST   /api/tokens
 DELETE /api/tokens/:id            POST   /api/opds/token
 GET    /api/trackers              POST   /api/trackers/anilist
 POST   /api/trackers/anilist/backfill
+POST   /api/trackers/:provider/resync/:seriesId
 DELETE /api/trackers/:provider
 GET    /api/push/key              POST   /api/push/subscribe
 POST   /api/push/unsubscribe
@@ -225,6 +235,7 @@ POST   /api/admin/sources/reload  GET    /api/admin/sources/custom
 POST   /api/admin/sources/custom  DELETE /api/admin/sources/custom/:id
 PUT    /api/admin/series/:id/art  PUT    /api/admin/series/:id/meta
 PATCH  /api/admin/series/:id      DELETE /api/admin/series/:id
+PUT    /api/admin/books/:id/meta
 POST   /api/admin/series/:id/restore
 POST   /api/admin/series/:id/merge
 GET    /api/admin/series/deleted

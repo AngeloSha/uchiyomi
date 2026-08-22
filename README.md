@@ -59,6 +59,10 @@ into a single image.** Point it at your library, add sources by URL, and it does
   everything across and deliberately keeps duplicate chapters rather than guessing which to drop, because
   folding two progress rows into one is how chapters silently become unread. Also: unfollow a single series,
   or check one for new chapters without waiting for the sweep.
+- **Library management:** filter by read state, publication status, author and genre; select many series at
+  once to mark read, favourite or file into a collection; edit a series' title, author, status, genres, cover
+  and background, and correct a chapter's number when the filename lied about it. Metadata you edit survives
+  every rescan.
 - **Command palette:** press **Ctrl+K** anywhere — instant series search, quick actions, recent items.
 - **Collections:** hand-curated reading lists with accent colors, reorderable, surfaced on Home.
 - **Discover:** one search across **every source at once** (one card per title; pick which provider to add
@@ -158,9 +162,10 @@ Suwayomi) fetches chapters but is Android-only or wraps them in a basic web UI. 
 daily — if a row is wrong or out of date, [open an issue](https://github.com/AngeloSha/uchiyomi/issues) and I
 will fix it.</sub>
 
-**Honest caveats.** Komga and Kavita are further along at managing a library. Uchiyomi edits titles and
-summaries, and can hide, restore and merge series, but it does all of that in its own database and **never
-writes back to your files** — it will not rename, move or delete anything on disk. It reads
+**Honest caveats.** Uchiyomi keeps every edit in its own database and **never writes back to your files**: it
+will not rename, move or delete anything on disk. That is deliberate, and for a lot of people it is the
+reason to run it, but if you want a tool that reorganises your files for you, Komga and Kavita do that and
+this does not. It also has one library rather than several, and no per-user content restrictions. It reads
 **CBZ, CBR and loose image folders**, and skips PDF/EPUB *on purpose* — those are ebook formats, and this is
 built for image-based manga. Extensions don't run natively either: they run in a second container
 ([Suwayomi](docs/extensions.md), and a JVM's worth of memory), and you paste a repository URL once, exactly as
@@ -185,11 +190,11 @@ household, with webtoons first-class.
 
 ## Install
 
-**Requirements:** Docker + Docker Compose, and a manga library on disk laid out as `<group>/<series>/<chapter>`,
-where each chapter is a `.cbz`, a `.cbr`, or a folder of images (an archive may carry a `ComicInfo.xml` for
-metadata). The top level is a grouping folder, so `Manga/One Piece/Chapter 1.cbz` works while
-`One Piece/Chapter 1.cbz` on its own does not: the scanner reads exactly two levels below the library root.
-If your collection is nested differently, move it or add a wrapping folder for now.
+**Requirements:** Docker + Docker Compose, and a manga library on disk, where each chapter is a `.cbz`, a
+`.cbr`, or a folder of images (an archive may carry a `ComicInfo.xml` for metadata). **Any folder layout
+works**: a directory is treated as a series when it directly contains chapters, at whatever depth. So
+`One Piece/Chapter 1.cbz`, `Manga/One Piece/Chapter 1.cbz` and `Comics/Manga/Author/One Piece/Chapter 1.cbz`
+are all read without rearranging anything.
 Everything else runs in containers: no Node, no database, nothing to install on the host.
 
 Grab one file and start it — this pulls prebuilt **multi-arch images (amd64 + arm64)**, so there's nothing to
@@ -346,8 +351,9 @@ Actively developed. On deck:
 
 - 🧭 **Per-source genre & popular browsing:** rounding out the newest-releases rails.
 
-Recently shipped: 🗂️ series delete / restore / merge, 🔎 content fingerprinting so renamed folders are
-recognised, 🔗 AniList progress sync, 🔔 push notifications, 📡 OPDS, browser-based first-run setup, and
+Recently shipped: 🔍 library filters and bulk actions, ✏️ editable series and chapter metadata that survives
+a rescan, 📁 any folder layout, 🗂️ series delete / restore / merge, 🔎 content fingerprinting so renamed
+folders are recognised, 🔗 AniList progress sync, 🔔 push notifications, 📡 OPDS, browser-based first-run setup, and
 cross-source search.
 
 ## Support
