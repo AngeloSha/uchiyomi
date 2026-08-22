@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { q, one } from '../lib/db';
 import { komgaImage } from '../lib/komga';
 import { content as komga, NATIVE_PROGRESS } from '../lib/backend';
+import { UnsupportedFilter } from '../lib/ownedCatalog';
 import { dominantHex } from '../lib/color';
 import { runtime } from '../lib/runtime';
 import { authenticate, roleOf, userIdOf } from '../lib/auth';
@@ -315,13 +316,22 @@ export default async function catalogRoutes(app: FastifyInstance) {
     };
   });
 
-  app.post('/api/series/search', async (req) => {
+  app.post('/api/series/search', async (req, reply) => {
     const { query, sort, page, size, condition } = searchBody.parse(req.body ?? {});
     const body: { condition?: unknown; fullTextSearch?: string } = {};
     if (condition) body.condition = condition;
     if (query) body.fullTextSearch = query;
-    const res = await komga.searchSeries(body, page, size, sort);
-    return { ...res, content: await enrichSeries(req, res.content) };
+    try {
+      // The user context enables the read-status filter and the real unread sort. Both have to be answered
+      // in SQL: enrichSeries runs after LIMIT/OFFSET, so filtering there would return short pages and a
+      // totalElements that disagrees with them.
+      const res = await (komga.searchSeries as any)(body, page, size, sort, { userId: userIdOf(req) });
+      return { ...res, content: await enrichSeries(req, res.content) };
+    } catch (e) {
+      // A filter the query cannot express used to silently widen to the whole library. Say so instead.
+      if (e instanceof UnsupportedFilter) return reply.code(400).send({ error: 'unsupported_filter', predicate: e.predicate });
+      throw e;
+    }
   });
 
   app.get('/api/series/:id', async (req) => {

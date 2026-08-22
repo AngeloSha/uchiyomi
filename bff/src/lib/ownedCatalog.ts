@@ -105,17 +105,63 @@ function mediaType(name: string): string {
 }
 
 // Translate the subset of Komga's condition tree the app actually builds into a SQL predicate.
-function condSql(cond: any, params: any[]): string {
+/** A filter the query cannot express. Surfaced as a 400 rather than silently widened. */
+export class UnsupportedFilter extends Error {
+  constructor(public predicate: string) {
+    super(`unsupported filter: ${predicate}`);
+  }
+}
+
+/**
+ * Translate a condition tree into SQL.
+ *
+ * Unknown predicates THROW rather than returning TRUE. Returning TRUE is what this did for everything except
+ * genre, which meant "show me only what I have not read" silently returned the entire library: no error, no
+ * empty result, nothing to debug against. A filter that appears to work and does nothing is worse than one
+ * that refuses.
+ *
+ * `hasUser` gates the per-user predicates. They read a `mine` CTE that is only joined in when the caller
+ * said who is asking.
+ */
+function condSql(cond: any, params: any[], hasUser = false): string {
   if (!cond || typeof cond !== 'object') return 'TRUE';
-  if (Array.isArray(cond.allOf)) return cond.allOf.length ? '(' + cond.allOf.map((c: any) => condSql(c, params)).join(' AND ') + ')' : 'TRUE';
-  if (Array.isArray(cond.anyOf)) return cond.anyOf.length ? '(' + cond.anyOf.map((c: any) => condSql(c, params)).join(' OR ') + ')' : 'TRUE';
+  if (Array.isArray(cond.allOf)) return cond.allOf.length ? '(' + cond.allOf.map((c: any) => condSql(c, params, hasUser)).join(' AND ') + ')' : 'TRUE';
+  if (Array.isArray(cond.anyOf)) return cond.anyOf.length ? '(' + cond.anyOf.map((c: any) => condSql(c, params, hasUser)).join(' OR ') + ')' : 'TRUE';
+
   if (cond.genre && cond.genre.value != null) {
     params.push(String(cond.genre.value));
     const ex = `EXISTS (SELECT 1 FROM unnest(genres) AS g WHERE lower(g) = lower($${params.length}))`;
     return cond.genre.operator === 'isNot' ? `NOT ${ex}` : ex;
   }
-  // readStatus / releaseDate / library / other per-user or unsupported predicates: match all
-  return 'TRUE';
+
+  if (cond.status && cond.status.value != null) {
+    params.push(String(cond.status.value));
+    const ex = `lower(status) = lower($${params.length})`;
+    return cond.status.operator === 'isNot' ? `NOT (${ex})` : `(${ex})`;
+  }
+
+  // A single free-text column that often holds several names, so contains rather than equals.
+  if (cond.author && cond.author.value != null) {
+    params.push(`%${String(cond.author.value)}%`);
+    const ex = `author ILIKE $${params.length}`;
+    return cond.author.operator === 'isNot' ? `NOT (${ex})` : `(${ex})`;
+  }
+
+  if (cond.readStatus && cond.readStatus.value != null) {
+    if (!hasUser) throw new UnsupportedFilter('readStatus (no user context)');
+    const done = 'COALESCE(m.done, 0)';
+    const started = 'COALESCE(m.started, 0)';
+    const v = String(cond.readStatus.value).toUpperCase();
+    const sql =
+      v === 'UNREAD' ? `${done} = 0 AND ${started} = 0`
+      : v === 'IN_PROGRESS' ? `(${started} > 0 OR (${done} > 0 AND ${done} < books_count))`
+      : v === 'READ' ? `books_count > 0 AND ${done} >= books_count`
+      : null;
+    if (!sql) throw new UnsupportedFilter(`readStatus:${v}`);
+    return cond.readStatus.operator === 'isNot' ? `NOT (${sql})` : `(${sql})`;
+  }
+
+  throw new UnsupportedFilter(Object.keys(cond).filter((k) => k !== 'operator')[0] || 'unknown');
 }
 
 function sortSql(sort?: string): string {
@@ -126,11 +172,31 @@ function sortSql(sort?: string): string {
   if (/title|name/i.test(field)) return `title ${dir}`;
   if (/created|added/i.test(field)) return `created_at ${dir}`;
   if (/updated|date|modified/i.test(field)) return `latest_mtime ${dir}`;
+  if (/author/i.test(field)) return `author ${dir} NULLS LAST`;
+  // real unread count, which needs the `mine` CTE; the library page used to sort by total chapters and
+  // label it "Most chapters" because this was not expressible
+  if (/unread/i.test(field)) return `(books_count - COALESCE(m.done, 0)) ${dir}`;
   return `title ${dir}`;
 }
 
-const total = async (where = 'TRUE', params: any[] = []) =>
-  (await one<{ c: number }>(`SELECT count(*)::int AS c FROM ${SERIES_SRC} WHERE ${where}`, params))?.c ?? 0;
+/**
+ * Per-user reading state, rolled up once.
+ *
+ * One indexed pass over read_progress for this user (idx_rp_series is (user_id, series_id)), joined once,
+ * rather than a correlated count re-run for every predicate on every candidate series. Only emitted when a
+ * per-user filter or sort is actually asked for, so the ordinary "everything, A to Z" query is unchanged.
+ *
+ * userId is always $1 when present, because condSql pushes its own parameters as it walks the tree.
+ */
+const MINE_CTE = `WITH mine AS (
+  SELECT series_id,
+         count(*) FILTER (WHERE completed)::int     AS done,
+         count(*) FILTER (WHERE NOT completed)::int AS started
+    FROM read_progress WHERE user_id = $1 GROUP BY series_id
+)`;
+
+const total = async (where = 'TRUE', params: any[] = [], cte = '', from = SERIES_SRC) =>
+  (await one<{ c: number }>(`${cte} SELECT count(*)::int AS c FROM ${from} WHERE ${where}`, params))?.c ?? 0;
 
 export const owned = {
   libraries: async () => [{ id: 'lib', name: 'Library' }],
@@ -155,16 +221,25 @@ export const owned = {
 
   booksOnDeck: async (_p = 0, size = 20) => page([] as any[], 0, 0, size), // owned: continue-reading is served from read_progress in catalog
 
-  searchSeries: async (body: any, p = 0, size = 40, sort?: string) => {
-    const params: any[] = [];
-    let where = body?.condition ? condSql(body.condition, params) : 'TRUE';
+  /**
+   * ctx.userId enables the per-user filters and sorts. It has to be answered in SQL rather than by filtering
+   * the page afterwards: enrichSeries runs after LIMIT/OFFSET, so post-filtering would return short pages, a
+   * totalElements that disagrees with them, and an infinite scroll that stops early.
+   */
+  searchSeries: async (body: any, p = 0, size = 40, sort?: string, ctx?: { userId?: string }) => {
+    const wantsUser = !!ctx?.userId && (JSON.stringify(body?.condition ?? {}).includes('readStatus') || /unread/i.test(sort || ''));
+    const params: any[] = wantsUser ? [ctx!.userId] : [];
+    const cte = wantsUser ? MINE_CTE : '';
+    const from = wantsUser ? `${SERIES_SRC} LEFT JOIN mine m ON m.series_id = sv.id` : SERIES_SRC;
+
+    let where = body?.condition ? condSql(body.condition, params, wantsUser) : 'TRUE';
     if (body?.fullTextSearch) {
       params.push(`%${body.fullTextSearch}%`);
       where = `(${where}) AND title ILIKE $${params.length}`;
     }
-    const t = await total(where, params);
+    const t = await total(where, params, cte, from);
     const rows = await q(
-      `SELECT ${SERIES_COLS} FROM ${SERIES_SRC} WHERE ${where} ORDER BY ${sortSql(sort)} LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
+      `${cte} SELECT ${SERIES_COLS} FROM ${from} WHERE ${where} ORDER BY ${sortSql(sort)} LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
       [...params, size, p * size],
     );
     return page(rows.map(seriesDto), t, p, size);
