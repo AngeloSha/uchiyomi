@@ -112,12 +112,27 @@ export function ContinueCard({ book, eager = false }: { book: Book; eager?: bool
 }
 
 /** Grid tile (library / search). */
-export function SeriesTile({ series, eager = false }: { series: Series; eager?: boolean }) {
+export function SeriesTile({ series, eager = false, selectable, selected, onToggle }: {
+  series: Series; eager?: boolean;
+  /** select mode: the tile stops navigating and toggles instead */
+  selectable?: boolean; selected?: boolean; onToggle?: () => void;
+}) {
   const unread = series.booksUnreadCount ?? 0;
+  const Wrap: any = selectable ? 'button' : Link;
+  const wrapProps = selectable
+    ? { type: 'button', onClick: onToggle, className: 'group w-full text-left' }
+    : { href: `/series/?id=${series.id}`, className: 'group' };
   return (
-    <Link href={`/series/?id=${series.id}`} className="group">
+    <Wrap {...wrapProps}>
       <div className="grad-border relative aspect-[2/3] overflow-hidden rounded-2xl border border-ink-700/60 transition-all duration-300 group-hover:-translate-y-1 group-hover:shadow-glow group-active:scale-[0.97]">
         <Img src={img.seriesThumb(series.id)} alt={series.metadata?.title || series.name} eager={eager} className="h-full w-full transition-transform duration-500 group-hover:scale-[1.07]" />
+        {selectable && (
+          <>
+            {selected && <span className="absolute inset-0 z-10 rounded-2xl border-2 border-accent bg-accent/20" />}
+            <span className={`absolute left-1.5 top-1.5 z-20 grid h-6 w-6 place-items-center rounded-full border text-[11px] font-bold ${
+              selected ? 'border-accent bg-accent text-black' : 'border-white/50 bg-black/50 text-transparent'}`}>✓</span>
+          </>
+        )}
         {series.yomi?.favorite && (
           <span className="absolute left-1.5 top-1.5 z-10 rounded-full bg-black/55 p-1 text-accent backdrop-blur">
             <IcHeart width={12} height={12} fill="currentColor" stroke="none" />
@@ -135,6 +150,6 @@ export function SeriesTile({ series, eager = false }: { series: Series; eager?: 
       <p className="mt-1.5 line-clamp-2 text-xs font-medium leading-tight text-fog-300 transition group-hover:text-fog-100">
         {series.metadata?.title || series.name}
       </p>
-    </Link>
+    </Wrap>
   );
 }

@@ -7,7 +7,7 @@ import { content as komga } from '../lib/backend';
 import { authenticate, userIdOf, roleOf, issueOpdsToken, issueApiToken, listApiTokens, revokeApiToken, API_SCOPES } from '../lib/auth';
 import { env } from '../env';
 import { pushEnabled, vapidPublicKey, saveSubscription, removeSubscription } from '../lib/push';
-import { statusFor, saveConnection, disconnect, whoAmI, pushSeriesProgress, clearTrackerFloor } from '../lib/trackers';
+import { statusFor, saveConnection, disconnect, whoAmI, pushSeriesProgress, pushSeriesProgressAsync, clearTrackerFloor } from '../lib/trackers';
 import { logAudit } from '../lib/audit';
 
 function computeStreaks(days: string[]): { current: number; longest: number } {
@@ -343,6 +343,93 @@ export default async function personalRoutes(app: FastifyInstance) {
   });
 
   // ---- settings ----
+  // ---- bulk actions on many series at once ----
+  //
+  // One request per logical operation rather than a client-side loop: 200 requests is slow, trips the rate
+  // limiter, and on partial failure leaves the user with no idea which half applied.
+  //
+  // An id that no longer exists does NOT fail the batch. A stale client list is the normal case (a series was
+  // deleted in another tab), and refusing 50 valid ids because one is stale is hostile. The response itemises
+  // what was skipped so the UI can say so.
+  const bulkBody = z.object({ seriesIds: z.array(z.string()).min(1).max(500) });
+
+  /** The subset of the requested ids that are real, visible series. */
+  const liveSeries = async (ids: string[]): Promise<string[]> =>
+    (await q<{ id: string }>(
+      `SELECT id FROM lib_series WHERE id = ANY($1) AND deleted_at IS NULL AND merged_into IS NULL`,
+      [ids],
+    )).map((r) => r.id);
+
+  const skippedOf = (asked: string[], live: string[]) =>
+    asked.filter((id) => !live.includes(id)).map((id) => ({ id, reason: 'not_found' }));
+
+  app.post('/api/library/bulk/read', async (req, reply) => {
+    const b = bulkBody.extend({ completed: z.boolean() }).safeParse(req.body);
+    if (!b.success) return reply.code(400).send({ error: 'bad_request' });
+    const uid = userIdOf(req);
+    const live = await liveSeries(b.data.seriesIds);
+
+    if (b.data.completed) {
+      // GREATEST on page so marking a series read never rewinds a chapter someone is part-way through.
+      // Deliberately no reading_events insert: that table records chapters actually read in the app, and
+      // bulk-marking a backlog must not inflate streaks, the leaderboard or Wrapped. Same rule as the
+      // `silent` flag in lib/progress.ts.
+      await q(
+        `INSERT INTO read_progress (user_id, book_id, series_id, page, completed)
+         SELECT $1, b.id, b.series_id, COALESCE(b.pages, 0), true
+           FROM lib_books b WHERE b.series_id = ANY($2)
+         ON CONFLICT (user_id, book_id) DO UPDATE
+           SET completed = true, page = GREATEST(read_progress.page, EXCLUDED.page), updated_at = now()`,
+        [uid, live],
+      );
+      // One tracker push per series, not per chapter, after the write and fire-and-forget. The existing
+      // per-user gate trickles them at one every 1.2s, so a big batch is a background drip, not a burst.
+      for (const id of live) pushSeriesProgressAsync(uid, id);
+    } else {
+      // DELETE rather than completed=false: leaving a page pointer behind makes an unread series show as
+      // in-progress. reading_events is untouched on purpose, for the same reason it is never cascaded.
+      // Nothing is pushed: this leaves the tracker ahead of the app, which is the safe direction, and the
+      // monotonic floor makes that explicit rather than accidental.
+      await q(`DELETE FROM read_progress WHERE user_id = $1 AND series_id = ANY($2)`, [uid, live]);
+    }
+    return { ok: true, applied: live.length, skipped: skippedOf(b.data.seriesIds, live) };
+  });
+
+  app.post('/api/favorites/bulk', async (req, reply) => {
+    const b = bulkBody.extend({ favorite: z.boolean() }).safeParse(req.body);
+    if (!b.success) return reply.code(400).send({ error: 'bad_request' });
+    const uid = userIdOf(req);
+    const live = await liveSeries(b.data.seriesIds);
+    if (b.data.favorite) {
+      await q(
+        `INSERT INTO favorites (user_id, series_id) SELECT $1, unnest($2::text[])
+         ON CONFLICT (user_id, series_id) DO NOTHING`,
+        [uid, live],
+      );
+    } else {
+      await q(`DELETE FROM favorites WHERE user_id = $1 AND series_id = ANY($2)`, [uid, live]);
+    }
+    return { ok: true, applied: live.length, skipped: skippedOf(b.data.seriesIds, live) };
+  });
+
+  app.post('/api/collections/:id/items/bulk', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const b = bulkBody.safeParse(req.body);
+    if (!b.success) return reply.code(400).send({ error: 'bad_request' });
+    const uid = userIdOf(req);
+    const owns = await one('SELECT id FROM collections WHERE id = $1 AND user_id = $2', [id, uid]);
+    if (!owns) return reply.code(404).send({ error: 'not_found' });
+    const live = await liveSeries(b.data.seriesIds);
+    await q(
+      `INSERT INTO collection_items (collection_id, series_id, position)
+       SELECT $1, s, COALESCE((SELECT max(position) + 1 FROM collection_items WHERE collection_id = $1), 0)
+         FROM unnest($2::text[]) s
+       ON CONFLICT (collection_id, series_id) DO NOTHING`,
+      [id, live],
+    );
+    return { ok: true, applied: live.length, skipped: skippedOf(b.data.seriesIds, live) };
+  });
+
   // ---- external progress trackers (AniList) ----
   app.get('/api/trackers', async (req) => ({ content: await statusFor(userIdOf(req)) }));
 

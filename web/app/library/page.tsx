@@ -10,6 +10,7 @@ import { SeriesTile } from '@/components/cards';
 import { IcSearch, IcSparkle, IcPlus } from '@/components/icons';
 import { PullToRefresh } from '@/components/PullToRefresh';
 import { triggerRefresh } from '@/lib/refresh';
+import { useToast } from '@/components/Toast';
 
 const SORTS = [
   { key: 'updated', label: 'Updated', sort: 'lastModified,desc' },
@@ -110,6 +111,14 @@ function LibraryInner() {
   const status = params.get('status') || '';
   const genres = (params.get('genres') || '').split(',').filter(Boolean);
   const [sheet, setSheet] = useState(false);
+  // Select mode. Cleared whenever the filters change, so a selection can never outlive the list it was
+  // made from and act on series the user can no longer see.
+  const [selecting, setSelecting] = useState(false);
+  const [picked, setPicked] = useState<Set<string>>(new Set());
+  const [acting, setActing] = useState(false);
+  useEffect(() => { setSelecting(false); setPicked(new Set()); }, [read, status, genres.join(','), sortKey]);
+  const togglePick = (id: string) =>
+    setPicked((p) => { const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n; });
   const activeCount = (read ? 1 : 0) + (status ? 1 : 0) + genres.length;
 
   const setParam = (k: string, v: string) => {
@@ -129,10 +138,27 @@ function LibraryInner() {
   });
 
   const qc = useQueryClient();
+  const toast = useToast();
   const onRefresh = async () => {
     await triggerRefresh();
     await new Promise((r) => setTimeout(r, 1500));
     qc.invalidateQueries({ queryKey: ['library'] });
+  };
+
+  const bulk = async (path: string, extra: Record<string, unknown>) => {
+    setActing(true);
+    try {
+      const r = await api<{ applied: number; skipped: { id: string }[] }>(path, {
+        json: { seriesIds: [...picked], ...extra },
+      });
+      // Say what was skipped rather than silently applying to fewer than were selected.
+      toast(r.skipped.length ? `${r.applied} updated, ${r.skipped.length} no longer exist` : `${r.applied} updated`, 'success');
+      setSelecting(false);
+      setPicked(new Set());
+      qc.invalidateQueries({ queryKey: ['library'] });
+      qc.invalidateQueries({ queryKey: ['home'] });
+    } catch { toast('Could not apply that', 'error'); }
+    setActing(false);
   };
 
   const sentinel = useRef<HTMLDivElement>(null);
@@ -188,6 +214,10 @@ function LibraryInner() {
           <button onClick={() => setSheet(true)} className={`chip whitespace-nowrap ${activeCount ? 'chip-active' : ''}`}>
             Filters{activeCount > 0 ? ` · ${activeCount}` : ''}
           </button>
+          <button onClick={() => { setSelecting((v) => !v); setPicked(new Set()); }}
+            className={`chip whitespace-nowrap ${selecting ? 'chip-active' : ''}`}>
+            {selecting ? 'Done' : 'Select'}
+          </button>
         </div>
         {/* Active filters are always visible, so a short library is never mysterious. */}
         {activeCount > 0 && (
@@ -220,7 +250,10 @@ function LibraryInner() {
       <div className="grid grid-cols-3 gap-x-3 gap-y-5 px-4 pt-4 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-7 lg:gap-x-4 lg:px-0 xl:grid-cols-8 2xl:grid-cols-9 min-[1800px]:grid-cols-10">
         {isLoading
           ? Array.from({ length: 14 }).map((_, i) => <div key={i} className="skeleton aspect-[2/3] rounded-2xl" />)
-          : items.map((s, i) => <SeriesTile key={s.id} series={s} eager={i < 12} />)}
+          : items.map((s, i) => (
+              <SeriesTile key={s.id} series={s} eager={i < 12}
+                selectable={selecting} selected={picked.has(s.id)} onToggle={() => togglePick(s.id)} />
+            ))}
       </div>
 
       <div ref={sentinel} className="h-16" />
@@ -229,6 +262,17 @@ function LibraryInner() {
         <p className="px-5 pb-10 text-center text-sm text-fog-500">
           {activeCount ? 'Nothing matches those filters.' : 'Your library is empty.'}
         </p>
+      )}
+      {selecting && picked.size > 0 && (
+        <div className="fixed inset-x-0 bottom-0 z-40 border-t border-ink-700 bg-ink-950/95 px-4 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3 backdrop-blur-xl">
+          <div className="mx-auto flex max-w-3xl flex-wrap items-center gap-2">
+            <span className="mr-auto text-sm font-medium text-fog-100">{picked.size} selected</span>
+            <button disabled={acting} onClick={() => bulk('/api/library/bulk/read', { completed: true })} className="chip text-xs disabled:opacity-50">Mark read</button>
+            <button disabled={acting} onClick={() => bulk('/api/library/bulk/read', { completed: false })} className="chip text-xs disabled:opacity-50">Mark unread</button>
+            <button disabled={acting} onClick={() => bulk('/api/favorites/bulk', { favorite: true })} className="chip text-xs disabled:opacity-50">Favourite</button>
+            <button onClick={() => { setSelecting(false); setPicked(new Set()); }} className="chip text-xs text-fog-500">Cancel</button>
+          </div>
+        </div>
       )}
       {sheet && (
         <FilterSheet
