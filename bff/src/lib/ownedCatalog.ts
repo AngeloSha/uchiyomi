@@ -2,6 +2,7 @@
 // the lib_* tables. enrichSeries/booksForUser in catalog.ts then add per-user state exactly as before.
 import { q, one } from './db';
 import { cbzPageDims, LIBRARY_ROOT, persistScan } from './library';
+import { ViewCtx, Params, visible } from './visibility';
 
 interface Page<T> { content: T[]; totalElements: number; totalPages: number; number: number; size: number; first: boolean; last: boolean }
 function page<T>(content: T[], total: number, p: number, size: number): Page<T> {
@@ -23,27 +24,32 @@ const SERIES_COLS = 'id, title, summary, status, genres, author, books_count, co
  * agree by construction. `GET /api/series/:id` still reads series_overrides directly afterwards, because it
  * additionally returns `overrides` and `artVersion` for the edit modal and thumbnail cache-busting.
  */
-const SERIES_SRC = `(
+const seriesSrc = (ctx: ViewCtx, p: Params, alias = 'sv') => `(
   SELECT s.id, COALESCE(o.title, s.title) AS title, COALESCE(o.summary, s.summary) AS summary,
          COALESCE(o.status, s.status) AS status, COALESCE(o.genres, s.genres) AS genres,
          COALESCE(o.author, s.author) AS author,
          s.books_count, s.cover_book_id, s.web, s.created_at, s.latest_mtime,
          s.auto_update
     FROM lib_series s LEFT JOIN series_overrides o ON o.series_id = s.id
-   WHERE s.deleted_at IS NULL AND s.merged_into IS NULL
-) sv`;
+   WHERE ${visible('s', ctx, p)}
+) ${alias}`;
 
 /**
  * The one place a chapter is read from, so an override applies everywhere at once: the chapter list, reading
  * order, next/previous, the OPDS feed and what the tracker is told. Mirrors SERIES_SRC.
  */
-const BOOKS_SRC = `(
+const booksSrc = (ctx: ViewCtx, p: Params, alias = 'bv') => `(
   SELECT b.id, b.series_id, b.source, b.file, b.root, b.pages, b.mtime, b.published_at, b.page_dims,
          b.updated_at, b.fingerprint,
          COALESCE(ov.number, b.number) AS number,
          COALESCE(ov.title,  b.title)  AS title
-    FROM lib_books b LEFT JOIN book_overrides ov ON ov.book_id = b.id
-) bv`;
+    FROM lib_books b
+    -- The join that was missing. This carried zero references to lib_series, so a book id alone opened a
+    -- chapter of a hidden series and next/previous then walked the whole thing. Every series-level rule --
+    -- soft delete, merge, and now library access -- reaches chapters only through here.
+    JOIN lib_series s ON s.id = b.series_id AND ${visible('s', ctx, p)}
+    LEFT JOIN book_overrides ov ON ov.book_id = b.id
+) ${alias}`;
 
 /** The overridden title for one series, for the book DTOs that carry seriesTitle. */
 const SERIES_TITLE_SQL = 'COALESCE(o.title, s.title)';
@@ -195,105 +201,171 @@ const MINE_CTE = `WITH mine AS (
     FROM read_progress WHERE user_id = $1 GROUP BY series_id
 )`;
 
-const total = async (where = 'TRUE', params: any[] = [], cte = '', from = SERIES_SRC) =>
-  (await one<{ c: number }>(`${cte} SELECT count(*)::int AS c FROM ${from} WHERE ${where}`, params))?.c ?? 0;
+/**
+ * The chapter before or after this one, within the same series.
+ *
+ * Both directions were byte-identical apart from two comparison operators, and both had to be kept in step
+ * with the (number, file) tuple ordering, so they share one body.
+ */
+async function adjacentBook(ctx: ViewCtx, id: string, dir: 'next' | 'prev') {
+  const pb = new Params();
+  const bsrc0 = booksSrc(ctx, pb);
+  const b = await one<{ series_id: string; number: number; file: string }>(
+    `SELECT series_id, number, file FROM ${bsrc0} WHERE id = ${pb.add(id)}`,
+    pb.values as any[],
+  );
+  if (!b) throw Object.assign(new Error('not found'), { statusCode: 404 });
+
+  const cmp = dir === 'next' ? '>' : '<';
+  const order = dir === 'next' ? 'ASC' : 'DESC';
+  const p = new Params();
+  const bsrc = booksSrc(ctx, p, 'bk');
+  const n = await one(
+    `SELECT bk.*, ${SERIES_TITLE_SQL} AS series_title FROM ${bsrc} ${SERIES_TITLE_JOIN.replace('%col%', 'bk.series_id')}
+      WHERE bk.series_id = ${p.add(b.series_id)} AND (bk.number, bk.file) ${cmp} (${p.add(b.number)}, ${p.add(b.file)})
+      ORDER BY bk.number ${order}, bk.file ${order} LIMIT 1`,
+    p.values as any[],
+  );
+  if (!n) throw Object.assign(new Error(dir === 'next' ? 'no next' : 'no previous'), { statusCode: 404 });
+  return bookDto(n);
+}
+
+/** A copy, so a count query and its page query can each own their parameter list without re-pushing. */
+const clone = (p: Params): Params => {
+  const c = new Params();
+  for (const v of p.values) c.add(v);
+  return c;
+};
+
+const total = async (ctx: ViewCtx, where = 'TRUE', p = new Params(), cte = '', from?: string) =>
+  (await one<{ c: number }>(
+    `${cte} SELECT count(*)::int AS c FROM ${from ?? seriesSrc(ctx, p)} WHERE ${where}`,
+    p.values as any[],
+  ))?.c ?? 0;
 
 export const owned = {
-  libraries: async () => [{ id: 'lib', name: 'Library' }],
+  libraries: async (_ctx: ViewCtx) => [{ id: 'lib', name: 'Library' }],
 
-  genres: async () => (await q<{ g: string }>(`SELECT DISTINCT g FROM ${SERIES_SRC}, unnest(genres) AS g ORDER BY g`)).map((r) => r.g),
+  genres: async (ctx: ViewCtx) => {
+    const p = new Params();
+    const src = seriesSrc(ctx, p);
+    return (await q<{ g: string }>(`SELECT DISTINCT g FROM ${src}, unnest(genres) AS g ORDER BY g`, p.values as any[]))
+      .map((r) => r.g);
+  },
 
-  series: async (id: string) => {
-    const r = await one(`SELECT ${SERIES_COLS} FROM ${SERIES_SRC} WHERE id = $1`, [id]);
+  series: async (ctx: ViewCtx, id: string) => {
+    const p = new Params();
+    const src = seriesSrc(ctx, p);
+    const r = await one(`SELECT ${SERIES_COLS} FROM ${src} WHERE id = ${p.add(id)}`, p.values as any[]);
     if (!r) throw Object.assign(new Error('series not found'), { statusCode: 404 });
     return seriesDto(r);
   },
 
-  seriesNew: async (p = 0, size = 20) => {
-    const rows = await q(`SELECT ${SERIES_COLS} FROM ${SERIES_SRC} ORDER BY created_at DESC, title ASC LIMIT $1 OFFSET $2`, [size, p * size]);
-    return page(rows.map(seriesDto), await total(), p, size);
+  seriesNew: async (ctx: ViewCtx, pg = 0, size = 20) => {
+    const p = new Params();
+    const src = seriesSrc(ctx, p);
+    const rows = await q(
+      `SELECT ${SERIES_COLS} FROM ${src} ORDER BY created_at DESC, title ASC LIMIT ${p.add(size)} OFFSET ${p.add(pg * size)}`,
+      p.values as any[],
+    );
+    return page(rows.map(seriesDto), await total(ctx), pg, size);
   },
 
-  seriesUpdated: async (p = 0, size = 20) => {
-    const rows = await q(`SELECT ${SERIES_COLS} FROM ${SERIES_SRC} ORDER BY latest_mtime DESC, title ASC LIMIT $1 OFFSET $2`, [size, p * size]);
-    return page(rows.map(seriesDto), await total(), p, size);
+  seriesUpdated: async (ctx: ViewCtx, pg = 0, size = 20) => {
+    const p = new Params();
+    const src = seriesSrc(ctx, p);
+    const rows = await q(
+      `SELECT ${SERIES_COLS} FROM ${src} ORDER BY latest_mtime DESC, title ASC LIMIT ${p.add(size)} OFFSET ${p.add(pg * size)}`,
+      p.values as any[],
+    );
+    return page(rows.map(seriesDto), await total(ctx), pg, size);
   },
 
-  booksOnDeck: async (_p = 0, size = 20) => page([] as any[], 0, 0, size), // owned: continue-reading is served from read_progress in catalog
+  booksOnDeck: async (_ctx: ViewCtx, _p = 0, size = 20) => page([] as any[], 0, 0, size), // owned: continue-reading is served from read_progress in catalog
 
   /**
-   * ctx.userId enables the per-user filters and sorts. It has to be answered in SQL rather than by filtering
-   * the page afterwards: enrichSeries runs after LIMIT/OFFSET, so post-filtering would return short pages, a
-   * totalElements that disagrees with them, and an infinite scroll that stops early.
+   * Per-user filters and sorts are answered in SQL rather than by filtering the page afterwards:
+   * enrichSeries runs after LIMIT/OFFSET, so post-filtering would return short pages, a totalElements that
+   * disagrees with them, and an infinite scroll that stops early.
+   *
+   * MINE_CTE needs the user id as $1, so it is pushed before anything else and the visibility predicate
+   * follows. Nothing here counts placeholders by hand.
    */
-  searchSeries: async (body: any, p = 0, size = 40, sort?: string, ctx?: { userId?: string }) => {
-    const wantsUser = !!ctx?.userId && (JSON.stringify(body?.condition ?? {}).includes('readStatus') || /unread/i.test(sort || ''));
-    const params: any[] = wantsUser ? [ctx!.userId] : [];
+  searchSeries: async (ctx: ViewCtx, body: any, pg = 0, size = 40, sort?: string) => {
+    const wantsUser = !!ctx.userId && (JSON.stringify(body?.condition ?? {}).includes('readStatus') || /unread/i.test(sort || ''));
+    const p = new Params();
     const cte = wantsUser ? MINE_CTE : '';
-    const from = wantsUser ? `${SERIES_SRC} LEFT JOIN mine m ON m.series_id = sv.id` : SERIES_SRC;
+    if (wantsUser) p.add(ctx.userId); // MINE_CTE reads $1
+    const src = seriesSrc(ctx, p);
+    const from = wantsUser ? `${src} LEFT JOIN mine m ON m.series_id = sv.id` : src;
 
-    let where = body?.condition ? condSql(body.condition, params, wantsUser) : 'TRUE';
+    let where = body?.condition ? condSql(body.condition, p.values as any[], wantsUser) : 'TRUE';
     if (body?.fullTextSearch) {
-      params.push(`%${body.fullTextSearch}%`);
-      where = `(${where}) AND title ILIKE $${params.length}`;
+      where = `(${where}) AND title ILIKE ${p.add(`%${body.fullTextSearch}%`)}`;
     }
-    const t = await total(where, params, cte, from);
+    const t = await total(ctx, where, clone(p), cte, from);
     const rows = await q(
-      `${cte} SELECT ${SERIES_COLS} FROM ${from} WHERE ${where} ORDER BY ${sortSql(sort)} LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
-      [...params, size, p * size],
+      `${cte} SELECT ${SERIES_COLS} FROM ${from} WHERE ${where} ORDER BY ${sortSql(sort)} LIMIT ${p.add(size)} OFFSET ${p.add(pg * size)}`,
+      p.values as any[],
     );
-    return page(rows.map(seriesDto), t, p, size);
+    return page(rows.map(seriesDto), t, pg, size);
   },
 
-  seriesBooks: async (id: string, p = 0, size = 100, sort = 'metadata.numberSort,asc') => {
+  seriesBooks: async (ctx: ViewCtx, id: string, pg = 0, size = 100, sort = 'metadata.numberSort,asc') => {
     const dir = /desc/i.test(sort) ? 'DESC' : 'ASC';
-    const st = (await one<{ title: string }>(`SELECT title FROM ${SERIES_SRC} WHERE id = $1`, [id]))?.title ?? '';
-    const t = (await one<{ c: number }>('SELECT count(*)::int AS c FROM lib_books WHERE series_id = $1', [id]))?.c ?? 0;
-    const rows = await q(`SELECT * FROM ${BOOKS_SRC} WHERE series_id = $1 ORDER BY number ${dir}, file ${dir} LIMIT $2 OFFSET $3`, [id, size, p * size]);
-    return page(rows.map((r) => bookDto({ ...r, series_title: st })), t, p, size);
+    const ps = new Params();
+    const ssrc = seriesSrc(ctx, ps);
+    const st = (await one<{ title: string }>(`SELECT title FROM ${ssrc} WHERE id = ${ps.add(id)}`, ps.values as any[]))?.title ?? '';
+
+    const pc = new Params();
+    const bsrcCount = booksSrc(ctx, pc);
+    const t = (await one<{ c: number }>(
+      `SELECT count(*)::int AS c FROM ${bsrcCount} WHERE series_id = ${pc.add(id)}`, pc.values as any[],
+    ))?.c ?? 0;
+
+    const p = new Params();
+    const bsrc = booksSrc(ctx, p);
+    const rows = await q(
+      `SELECT * FROM ${bsrc} WHERE series_id = ${p.add(id)} ORDER BY number ${dir}, file ${dir} LIMIT ${p.add(size)} OFFSET ${p.add(pg * size)}`,
+      p.values as any[],
+    );
+    return page(rows.map((r) => bookDto({ ...r, series_title: st })), t, pg, size);
   },
 
-  book: async (id: string) => {
-    const r = await one(`SELECT b.*, ${SERIES_TITLE_SQL} AS series_title FROM ${BOOKS_SRC.replace('bv', 'b')} ${SERIES_TITLE_JOIN.replace('%col%', 'b.series_id')} WHERE b.id = $1`, [id]);
+  book: async (ctx: ViewCtx, id: string) => {
+    const p = new Params();
+    const bsrc = booksSrc(ctx, p, 'b');
+    const r = await one(
+      `SELECT b.*, ${SERIES_TITLE_SQL} AS series_title FROM ${bsrc} ${SERIES_TITLE_JOIN.replace('%col%', 'b.series_id')} WHERE b.id = ${p.add(id)}`,
+      p.values as any[],
+    );
     if (!r) throw Object.assign(new Error('book not found'), { statusCode: 404 });
     return bookDto(r);
   },
 
-  bookPages: async (id: string) => {
+  bookPages: async (ctx: ViewCtx, id: string) => {
+    // Goes through booksSrc so page dimensions cannot enumerate a chapter of a hidden series.
+    const p = new Params();
+    const bsrc = booksSrc(ctx, p);
     const r = await one<{ file: string; root: string; page_dims: Array<{ name: string; width: number | null; height: number | null }> | null }>(
-      'SELECT file, root, page_dims FROM lib_books WHERE id = $1',
-      [id],
+      `SELECT file, root, page_dims FROM ${bsrc} WHERE id = ${p.add(id)}`,
+      p.values as any[],
     );
     if (!r) return [];
     if (Array.isArray(r.page_dims) && r.page_dims.length) {
-      return r.page_dims.map((p, i) => ({ number: i + 1, fileName: p.name, mediaType: mediaType(p.name), width: p.width ?? null, height: p.height ?? null, sizeBytes: null }));
+      return r.page_dims.map((pd, i) => ({ number: i + 1, fileName: pd.name, mediaType: mediaType(pd.name), width: pd.width ?? null, height: pd.height ?? null, sizeBytes: null }));
     }
     const dims = await cbzPageDims(`${r.root || LIBRARY_ROOT}/${r.file}`).catch(() => [] as Array<{ name: string; width: number | null; height: number | null }>);
     if (dims.length) q('UPDATE lib_books SET pages = $1, page_dims = $2 WHERE id = $3', [dims.length, JSON.stringify(dims), id]).catch(() => {});
-    return dims.map((p, i) => ({ number: i + 1, fileName: p.name, mediaType: mediaType(p.name), width: p.width, height: p.height, sizeBytes: null }));
+    return dims.map((pd, i) => ({ number: i + 1, fileName: pd.name, mediaType: mediaType(pd.name), width: pd.width, height: pd.height, sizeBytes: null }));
   },
 
   // Next/previous compare (number, file) rather than number alone. Two chapters legitimately share a
   // number -- a duplicate that merge deliberately keeps, or a manual renumber -- and comparing the number
   // by itself then makes "next" arbitrary, and can hand back the chapter you are already reading.
   // The tuple matches the ORDER BY number, file used everywhere else, so the reader walks one order.
-  bookNext: async (id: string) => {
-    const b = await one<{ series_id: string; number: number; file: string }>(
-      `SELECT series_id, number, file FROM ${BOOKS_SRC} WHERE id = $1`, [id]);
-    if (!b) throw Object.assign(new Error('not found'), { statusCode: 404 });
-    const n = await one(`SELECT bk.*, ${SERIES_TITLE_SQL} AS series_title FROM ${BOOKS_SRC.replace('bv', 'bk')} ${SERIES_TITLE_JOIN.replace('%col%', 'bk.series_id')} WHERE bk.series_id = $1 AND (bk.number, bk.file) > ($2, $3) ORDER BY bk.number ASC, bk.file ASC LIMIT 1`, [b.series_id, b.number, b.file]);
-    if (!n) throw Object.assign(new Error('no next'), { statusCode: 404 });
-    return bookDto(n);
-  },
-
-  bookPrevious: async (id: string) => {
-    const b = await one<{ series_id: string; number: number; file: string }>(
-      `SELECT series_id, number, file FROM ${BOOKS_SRC} WHERE id = $1`, [id]);
-    if (!b) throw Object.assign(new Error('not found'), { statusCode: 404 });
-    const n = await one(`SELECT bk.*, ${SERIES_TITLE_SQL} AS series_title FROM ${BOOKS_SRC.replace('bv', 'bk')} ${SERIES_TITLE_JOIN.replace('%col%', 'bk.series_id')} WHERE bk.series_id = $1 AND (bk.number, bk.file) < ($2, $3) ORDER BY bk.number DESC, bk.file DESC LIMIT 1`, [b.series_id, b.number, b.file]);
-    if (!n) throw Object.assign(new Error('no previous'), { statusCode: 404 });
-    return bookDto(n);
-  },
+  bookNext: async (ctx: ViewCtx, id: string) => adjacentBook(ctx, id, 'next'),
+  bookPrevious: async (ctx: ViewCtx, id: string) => adjacentBook(ctx, id, 'prev'),
 
   setReadProgress: async () => {}, // owned: read_progress is the source of truth (no native store to mirror to)
 

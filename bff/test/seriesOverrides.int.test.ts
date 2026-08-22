@@ -12,6 +12,10 @@
 // Skipped automatically unless TEST_DATABASE_URL is set (CI provides a throwaway Postgres service).
 import test, { before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
+// A viewer that sees every library. Written out rather than imported because importing from
+// src/lib pulls in env.ts, which validates the environment at module load, before the block below
+// has set DATABASE_URL. Note this still respects soft delete: it only bypasses library scoping.
+const SYSTEM_CTX = { userId: null, libraryIds: null } as const;
 
 const DSN = process.env.TEST_DATABASE_URL;
 if (DSN) {
@@ -70,7 +74,7 @@ after(async () => {
 });
 
 test('with no override, the scanned values are what you see', { skip }, async () => {
-  const dto = await owned.series(S);
+  const dto = await owned.series(SYSTEM_CTX, S);
   assert.equal(dto.metadata.author, 'Scanned Author');
   assert.equal(dto.metadata.status, 'ONGOING');
   assert.deepEqual(dto.metadata.genres, ['Action', 'Fantasy']);
@@ -79,31 +83,31 @@ test('with no override, the scanned values are what you see', { skip }, async ()
 test('THE BUG: an edited author survives a rescan', { skip }, async () => {
   await override({ author: 'Real Author' });
   await rescan(); // this used to put 'Scanned Author' back
-  assert.equal((await owned.series(S)).metadata.author, 'Real Author');
+  assert.equal((await owned.series(SYSTEM_CTX, S)).metadata.author, 'Real Author');
 });
 
 test('an edited status survives a rescan', { skip }, async () => {
   await override({ status: 'COMPLETED' });
   await rescan();
-  assert.equal((await owned.series(S)).metadata.status, 'COMPLETED');
+  assert.equal((await owned.series(SYSTEM_CTX, S)).metadata.status, 'COMPLETED');
 });
 
 test('edited genres survive a rescan', { skip }, async () => {
   await override({ genres: ['Romance', 'Slice of Life'] });
   await rescan();
-  assert.deepEqual((await owned.series(S)).metadata.genres, ['Romance', 'Slice of Life']);
+  assert.deepEqual((await owned.series(SYSTEM_CTX, S)).metadata.genres, ['Romance', 'Slice of Life']);
 });
 
 test('edited genres drive Browse and the genre filter, not just the detail page', { skip }, async () => {
   await override({ genres: ['Romance'] });
 
-  const byNew = await owned.searchSeries({ condition: { genre: { value: 'Romance' } } }, 0, 40);
+  const byNew = await owned.searchSeries(SYSTEM_CTX, { condition: { genre: { value: 'Romance' } } }, 0, 40);
   assert.ok(byNew.content.some((s: any) => s.id === S), 'the series is not findable by its new genre');
 
-  const byOld = await owned.searchSeries({ condition: { genre: { value: 'Action' } } }, 0, 40);
+  const byOld = await owned.searchSeries(SYSTEM_CTX, { condition: { genre: { value: 'Action' } } }, 0, 40);
   assert.ok(!byOld.content.some((s: any) => s.id === S), 'the series is still findable by the scanned genre');
 
-  const all = await owned.genres();
+  const all = await owned.genres(SYSTEM_CTX);
   assert.ok(all.includes('Romance'), 'the overridden genre is missing from the Browse tiles');
 });
 
@@ -112,19 +116,19 @@ test('an empty genre list means cleared, not "use what was scanned"', { skip }, 
   // "this series genuinely has no genres" that a rescan would not immediately undo.
   await override({ genres: [] });
   await rescan();
-  assert.deepEqual((await owned.series(S)).metadata.genres, [], 'clearing genres did not stick');
+  assert.deepEqual((await owned.series(SYSTEM_CTX, S)).metadata.genres, [], 'clearing genres did not stick');
 });
 
 test('clearing an override back to NULL restores the scanned value', { skip }, async () => {
   await override({ author: 'Real Author' });
-  assert.equal((await owned.series(S)).metadata.author, 'Real Author');
+  assert.equal((await owned.series(SYSTEM_CTX, S)).metadata.author, 'Real Author');
   await override({ author: null });
-  assert.equal((await owned.series(S)).metadata.author, 'Scanned Author', 'clearing did not fall back to the scan');
+  assert.equal((await owned.series(SYSTEM_CTX, S)).metadata.author, 'Scanned Author', 'clearing did not fall back to the scan');
 });
 
 test('overriding one field does not disturb the others', { skip }, async () => {
   await override({ author: 'Real Author' });
-  const dto = await owned.series(S);
+  const dto = await owned.series(SYSTEM_CTX, S);
   assert.equal(dto.metadata.status, 'ONGOING', 'status changed when only author was set');
   assert.deepEqual(dto.metadata.genres, ['Action', 'Fantasy'], 'genres changed when only author was set');
 });

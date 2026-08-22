@@ -11,6 +11,10 @@
 // Skipped automatically unless TEST_DATABASE_URL is set (CI provides a throwaway Postgres service).
 import test, { before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
+// A viewer that sees every library. Written out rather than imported because importing from
+// src/lib pulls in env.ts, which validates the environment at module load, before the block below
+// has set DATABASE_URL. Note this still respects soft delete: it only bypasses library scoping.
+const SYSTEM_CTX = { userId: null, libraryIds: null } as const;
 
 const DSN = process.env.TEST_DATABASE_URL;
 if (DSN) {
@@ -34,8 +38,10 @@ const ALL = SERIES.map((s) => s.id);
 let uidA: string, uidB: string;
 
 const ids = (r: any) => r.content.map((s: any) => s.id).filter((i: string) => ALL.includes(i));
+// ctx is the FIRST argument now, and required: a call site that forgets a viewer is a compile error
+// rather than a query that quietly sees everything.
 const search = (condition: any, ctx?: any, sort?: string) =>
-  owned.searchSeries(condition ? { condition } : {}, 0, 100, sort, ctx);
+  owned.searchSeries(ctx ?? SYSTEM_CTX, condition ? { condition } : {}, 0, 100, sort);
 
 before(async () => {
   if (!DSN) return;
@@ -108,22 +114,22 @@ test('allOf of two genres is AND, anyOf is OR', { skip }, async () => {
 });
 
 test('THE BUG: readStatus used to return the whole library; UNREAD now means unread', { skip }, async () => {
-  const r = await search({ readStatus: { operator: 'is', value: 'UNREAD' } }, { userId: uidA });
+  const r = await search({ readStatus: { operator: 'is', value: 'UNREAD' } }, { userId: uidA, libraryIds: null });
   assert.deepEqual(ids(r).sort(), ['s_fl_unread']);
 });
 
 test('IN_PROGRESS is started but not finished', { skip }, async () => {
-  const r = await search({ readStatus: { operator: 'is', value: 'IN_PROGRESS' } }, { userId: uidA });
+  const r = await search({ readStatus: { operator: 'is', value: 'IN_PROGRESS' } }, { userId: uidA, libraryIds: null });
   assert.deepEqual(ids(r).sort(), ['s_fl_partial']);
 });
 
 test('READ is every chapter done', { skip }, async () => {
-  const r = await search({ readStatus: { operator: 'is', value: 'READ' } }, { userId: uidA });
+  const r = await search({ readStatus: { operator: 'is', value: 'READ' } }, { userId: uidA, libraryIds: null });
   assert.deepEqual(ids(r).sort(), ['s_fl_done']);
 });
 
 test('read state is per user: B has read nothing', { skip }, async () => {
-  const r = await search({ readStatus: { operator: 'is', value: 'UNREAD' } }, { userId: uidB });
+  const r = await search({ readStatus: { operator: 'is', value: 'UNREAD' } }, { userId: uidB, libraryIds: null });
   assert.deepEqual(ids(r).sort(), ['s_fl_done', 's_fl_partial', 's_fl_unread']);
 });
 
@@ -131,7 +137,8 @@ test('totalElements agrees with the rows actually returned', { skip }, async () 
   // The assertion that catches filtering in the wrong layer. Post-filtering a page would leave
   // totalElements counting the unfiltered set.
   const r = await owned.searchSeries(
-    { condition: { readStatus: { operator: 'is', value: 'UNREAD' } } }, 0, 100, undefined, { userId: uidA });
+    { userId: uidA, libraryIds: null },
+    { condition: { readStatus: { operator: 'is', value: 'UNREAD' } } }, 0, 100);
   assert.equal(r.totalElements, r.content.length, 'the count disagrees with the page');
 });
 
@@ -150,12 +157,12 @@ test('readStatus without a user is refused rather than answered wrongly', { skip
 });
 
 test('the plain unfiltered query still works and needs no user', { skip }, async () => {
-  const r = await owned.searchSeries({}, 0, 100);
+  const r = await owned.searchSeries(SYSTEM_CTX, {}, 0, 100);
   assert.ok(ids(r).length === 3, 'the ordinary library query regressed');
 });
 
 test('sorting by unread uses the real per-user count', { skip }, async () => {
-  const r = await search(null, { userId: uidA }, 'unread,desc');
+  const r = await search(null, { userId: uidA, libraryIds: null }, 'unread,desc');
   const got = ids(r);
   assert.equal(got[0], 's_fl_unread', 'the series with the most unread should lead');
   assert.equal(got[got.length - 1], 's_fl_done', 'a finished series should be last');

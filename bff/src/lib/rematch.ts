@@ -18,6 +18,7 @@
 // can decline to help, it must never do harm.
 import { q } from './db';
 import { logAudit } from './audit';
+import { visibleToAll } from './visibility';
 
 export const MIN_BOOKS = 2;
 export const MIN_OVERLAP = 0.5;
@@ -56,7 +57,7 @@ export async function findRematch(
       WHERE b.fingerprint = ANY($1)
         AND NOT (s.folder = ANY($2))
         -- a deleted or merged-away series must never be re-adopted into a folder
-        AND s.deleted_at IS NULL AND s.merged_into IS NULL
+        AND ${visibleToAll('s')}
         -- a partially fingerprinted series would understate its own size and so overstate the overlap
         AND NOT EXISTS (SELECT 1 FROM lib_books u WHERE u.series_id = b.series_id AND u.fp_at IS NULL)
       GROUP BY b.series_id, s.folder, s.title`,

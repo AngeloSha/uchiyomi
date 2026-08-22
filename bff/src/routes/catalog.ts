@@ -4,6 +4,10 @@ import { q, one } from '../lib/db';
 import { komgaImage } from '../lib/komga';
 import { content as komga, NATIVE_PROGRESS } from '../lib/backend';
 import { UnsupportedFilter } from '../lib/ownedCatalog';
+import { viewCtxFor, SYSTEM_CTX, type ViewCtx } from '../lib/visibility';
+
+/** The viewer attached by the preHandler above. */
+const vc = (req: FastifyRequest): ViewCtx => (req as any).viewCtx as ViewCtx;
 import { dominantHex } from '../lib/color';
 import { runtime } from '../lib/runtime';
 import { authenticate, roleOf, userIdOf } from '../lib/auth';
@@ -116,16 +120,16 @@ async function tasteRecs(req: FastifyRequest): Promise<any[]> {
   const favIds = (await q<{ series_id: string }>('SELECT series_id FROM favorites WHERE user_id = $1', [uid])).map((r) => r.series_id);
   const doneIds = (await q<{ series_id: string }>('SELECT DISTINCT series_id FROM read_progress WHERE user_id = $1 AND completed = true', [uid])).map((r) => r.series_id);
   const sourceIds = Array.from(new Set([...favIds, ...doneIds])).slice(0, 30);
-  const sources = (await Promise.all(sourceIds.map((id) => komga.series(id).catch(() => null)))).filter(Boolean) as any[];
+  const sources = (await Promise.all(sourceIds.map((id) => komga.series(vc(req), id).catch(() => null)))).filter(Boolean) as any[];
   const counts = new Map<string, number>();
   for (const s of sources) for (const g of s.metadata?.genres ?? []) counts.set(g, (counts.get(g) ?? 0) + 1);
   const topGenres = [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 4).map((e) => e[0]);
   let pool: any[];
   if (topGenres.length) {
-    const res = await komga.searchSeries({ condition: { anyOf: topGenres.map((g) => ({ genre: { operator: 'is', value: g } })) } }, 0, 60);
+    const res = await komga.searchSeries(vc(req), { condition: { anyOf: topGenres.map((g) => ({ genre: { operator: 'is', value: g } })) } }, 0, 60);
     pool = res.content;
   } else {
-    pool = (((await komga.seriesUpdated(0, 40).catch(() => ({ content: [] }))) as any).content) ?? [];
+    pool = (((await komga.seriesUpdated(vc(req), 0, 40).catch(() => ({ content: [] }))) as any).content) ?? [];
   }
   const exclude = new Set([...favIds, ...doneIds]);
   pool = pool.filter((s) => !exclude.has(s.id));
@@ -138,10 +142,15 @@ const ON_DECK_LIMIT = 60;
 
 export default async function catalogRoutes(app: FastifyInstance) {
   app.addHook('preHandler', authenticate);
+  // Resolve the viewer once per request. Everything below reads it rather than deriving its own, so there
+  // is one decision about what this person may see instead of a predicate each handler has to remember.
+  app.addHook('preHandler', async (req) => {
+    (req as any).viewCtx = await viewCtxFor(userIdOf(req), roleOf(req));
+  });
 
-  app.get('/api/libraries', async () => komga.libraries());
+  app.get('/api/libraries', async (req) => komga.libraries(vc(req)));
 
-  app.get('/api/genres', async () => ({ content: (await komga.genres()).sort() }));
+  app.get('/api/genres', async (req) => ({ content: (await komga.genres(vc(req))).sort() }));
 
   // What everyone in the household is reading (cross-user, last 14 days).
   app.get('/api/trending', async (req) => {
@@ -149,7 +158,7 @@ export default async function catalogRoutes(app: FastifyInstance) {
       `SELECT series_id FROM reading_events WHERE created_at > now() - interval '14 days'
        GROUP BY series_id ORDER BY count(*) DESC LIMIT 12`,
     );
-    const series = (await Promise.all(rows.map((r) => komga.series(r.series_id).catch(() => null)))).filter(Boolean) as any[];
+    const series = (await Promise.all(rows.map((r) => komga.series(vc(req), r.series_id).catch(() => null)))).filter(Boolean) as any[];
     return { content: await enrichSeries(req, series) };
   });
 
@@ -166,12 +175,12 @@ export default async function catalogRoutes(app: FastifyInstance) {
   });
 
   // Random series (Surprise me).
-  app.get('/api/random', async () => {
-    const first = await komga.searchSeries({}, 0, 1);
+  app.get('/api/random', async (req) => {
+    const first = await komga.searchSeries(vc(req), {}, 0, 1);
     const total = first.totalElements ?? 0;
     if (!total) return { seriesId: null };
     const idx = Math.floor(Math.random() * total);
-    const page = await komga.searchSeries({}, idx, 1);
+    const page = await komga.searchSeries(vc(req), {}, idx, 1);
     return { seriesId: page.content?.[0]?.id ?? null };
   });
 
@@ -187,7 +196,7 @@ export default async function catalogRoutes(app: FastifyInstance) {
     const today = new Date().toISOString().slice(0, 10);
     const [taste, updated] = await Promise.all([
       tasteRecs(req),
-      komga.seriesUpdated(0, 20).catch(() => ({ content: [] as any[] })),
+      komga.seriesUpdated(vc(req), 0, 20).catch(() => ({ content: [] as any[] })),
     ]);
     const seen = new Set<string>();
     const merged: any[] = [];
@@ -204,8 +213,9 @@ export default async function catalogRoutes(app: FastifyInstance) {
     const now = Date.now();
     if (now - runtime.lastScan < 60_000) return { scanned: false, reason: 'rate_limited' };
     runtime.lastScan = now;
-    const libs = await komga.libraries().catch(() => [] as any[]);
-    await Promise.all(libs.map((l: any) => komga.scanLibrary(l.id).catch(() => {})));
+    // A rescan walks the disk on everyone's behalf, so it is deliberately not a per-viewer read.
+    const libs = await komga.libraries(SYSTEM_CTX).catch(() => [] as any[]);
+    await Promise.all(libs.map((l: any) => komga.scanLibrary(SYSTEM_CTX, l.id).catch(() => {})));
     return { scanned: true, libraries: libs.length };
   });
 
@@ -215,7 +225,7 @@ export default async function catalogRoutes(app: FastifyInstance) {
 
     let onDeckP: Promise<any[]>;
     if (admin) {
-      onDeckP = komga.booksOnDeck(0, 20).then((r: any) => r.content).catch(() => []);
+      onDeckP = komga.booksOnDeck(vc(req), 0, 20).then((r: any) => r.content).catch(() => []);
     } else {
       onDeckP = (async () => {
         // One row per series you have been reading lately: the chapter you are part-way through, or -- if you
@@ -258,15 +268,15 @@ export default async function catalogRoutes(app: FastifyInstance) {
             LIMIT $2`,
           [uid, ON_DECK_LIMIT],
         );
-        const books = (await Promise.all(rows.map((r) => komga.book(r.book_id).catch(() => null)))).filter(Boolean) as any[];
+        const books = (await Promise.all(rows.map((r) => komga.book(vc(req), r.book_id).catch(() => null)))).filter(Boolean) as any[];
         return overlay(books, await userProgress(uid, books.map((b) => b.id)));
       })();
     }
 
     const [onDeck, updated, fresh] = await Promise.all([
       onDeckP,
-      komga.seriesUpdated(0, 20).catch(() => ({ content: [] })),
-      komga.seriesNew(0, 20).catch(() => ({ content: [] })),
+      komga.seriesUpdated(vc(req), 0, 20).catch(() => ({ content: [] })),
+      komga.seriesNew(vc(req), 0, 20).catch(() => ({ content: [] })),
     ]);
 
     // Which device each in-progress book was last read on. Reading progress is already shared across devices;
@@ -294,7 +304,7 @@ export default async function catalogRoutes(app: FastifyInstance) {
     const favIds = (
       await q<{ series_id: string }>('SELECT series_id FROM favorites WHERE user_id = $1 ORDER BY created_at DESC LIMIT 20', [uid])
     ).map((r) => r.series_id);
-    const favorites = ((await Promise.all(favIds.map((id) => komga.series(id).catch(() => null)))).filter(Boolean)) as any[];
+    const favorites = ((await Promise.all(favIds.map((id) => komga.series(vc(req), id).catch(() => null)))).filter(Boolean)) as any[];
 
     // updates badge: favorites with new chapters since last seen (self-heal missing baselines)
     const seenMap = await seriesSeen(uid, favorites.map((s) => s.id));
@@ -336,7 +346,7 @@ export default async function catalogRoutes(app: FastifyInstance) {
 
   app.get('/api/series/:id', async (req) => {
     const { id } = req.params as { id: string };
-    const series = await komga.series(id);
+    const series = await komga.series(vc(req), id);
     // opening a series marks its new chapters as seen
     await q(
       `INSERT INTO series_seen (user_id, series_id, seen_books_count) VALUES ($1, $2, $3)
@@ -367,7 +377,7 @@ export default async function catalogRoutes(app: FastifyInstance) {
   app.get('/api/updates', async (req) => {
     const uid = userIdOf(req);
     const favIds = (await q<{ series_id: string }>('SELECT series_id FROM favorites WHERE user_id = $1', [uid])).map((r) => r.series_id);
-    const favSeries = ((await Promise.all(favIds.map((id) => komga.series(id).catch(() => null)))).filter(Boolean)) as any[];
+    const favSeries = ((await Promise.all(favIds.map((id) => komga.series(vc(req), id).catch(() => null)))).filter(Boolean)) as any[];
     const seenMap = await seriesSeen(uid, favSeries.map((s) => s.id));
     const out: { series: any; newCount: number }[] = [];
     for (const s of favSeries) {
@@ -395,7 +405,7 @@ export default async function catalogRoutes(app: FastifyInstance) {
   app.post('/api/updates/seen', async (req) => {
     const uid = userIdOf(req);
     const favIds = (await q<{ series_id: string }>('SELECT series_id FROM favorites WHERE user_id = $1', [uid])).map((r) => r.series_id);
-    const favSeries = ((await Promise.all(favIds.map((id) => komga.series(id).catch(() => null)))).filter(Boolean)) as any[];
+    const favSeries = ((await Promise.all(favIds.map((id) => komga.series(vc(req), id).catch(() => null)))).filter(Boolean)) as any[];
     for (const s of favSeries) {
       await q(
         `INSERT INTO series_seen (user_id, series_id, seen_books_count) VALUES ($1, $2, $3)
@@ -412,7 +422,7 @@ export default async function catalogRoutes(app: FastifyInstance) {
     const row = await one<{ color: string }>('SELECT color FROM series_colors WHERE series_id = $1', [id]);
     if (row?.color) return { color: row.color };
     if (NATIVE_PROGRESS) try {
-      const res = await komgaImage(komga.seriesThumbPath(id));
+      const res = await komgaImage(komga.seriesThumbPath!(id));
       if (res.statusCode < 400) {
         const buf = Buffer.from(await res.body.arrayBuffer());
         const hex = await dominantHex(buf);
@@ -430,10 +440,10 @@ export default async function catalogRoutes(app: FastifyInstance) {
   // "More like this" — series sharing genres with this one.
   app.get('/api/series/:id/similar', async (req) => {
     const { id } = req.params as { id: string };
-    const s = (await komga.series(id).catch(() => null)) as any;
+    const s = (await komga.series(vc(req), id).catch(() => null)) as any;
     const genres = (s?.metadata?.genres ?? []).slice(0, 3);
     if (!genres.length) return { content: [] };
-    const res = await komga.searchSeries({ condition: { anyOf: genres.map((g: string) => ({ genre: { operator: 'is', value: g } })) } }, 0, 24);
+    const res = await komga.searchSeries(vc(req), { condition: { anyOf: genres.map((g: string) => ({ genre: { operator: 'is', value: g } })) } }, 0, 24);
     const content = res.content.filter((x: any) => x.id !== id).slice(0, 18);
     return { content: await enrichSeries(req, content) };
   });
@@ -441,19 +451,19 @@ export default async function catalogRoutes(app: FastifyInstance) {
   app.get('/api/series/:id/books', async (req) => {
     const { id } = req.params as { id: string };
     const { page = '0', size = '200', sort } = req.query as Record<string, string>;
-    const res = await komga.seriesBooks(id, Number(page), Number(size), sort || undefined);
+    const res = await komga.seriesBooks(vc(req), id, Number(page), Number(size), sort || undefined);
     return { ...res, content: await booksForUser(req, res.content) };
   });
 
   app.get('/api/books/:id', async (req) => {
     const { id } = req.params as { id: string };
-    const b = await komga.book(id);
+    const b = await komga.book(vc(req), id);
     return (await booksForUser(req, [b]))[0];
   });
 
   app.get('/api/books/:id/pages', async (req) => {
     const { id } = req.params as { id: string };
-    return komga.bookPages(id);
+    return komga.bookPages(vc(req), id);
   });
 
   // Smart-offline plan: the next N unread chapters of each favorite the user should keep offline.
@@ -463,7 +473,7 @@ export default async function catalogRoutes(app: FastifyInstance) {
     const favIds = (await q<{ series_id: string }>('SELECT series_id FROM favorites WHERE user_id = $1', [uid])).map((r) => r.series_id);
     const out: { bookId: string; seriesId: string }[] = [];
     for (const sid of favIds) {
-      const raw = await komga.seriesBooks(sid, 0, 1000, 'metadata.numberSort,asc').catch(() => null);
+      const raw = await komga.seriesBooks(vc(req), sid, 0, 1000, 'metadata.numberSort,asc').catch(() => null);
       if (!raw) continue;
       const books = await booksForUser(req, raw.content);
       const unread = books.filter((b: any) => !b.readProgress?.completed).slice(0, n);
@@ -475,7 +485,7 @@ export default async function catalogRoutes(app: FastifyInstance) {
   app.get('/api/books/:id/next', async (req, reply) => {
     const { id } = req.params as { id: string };
     try {
-      return await komga.bookNext(id);
+      return await komga.bookNext(vc(req), id);
     } catch {
       return reply.code(404).send({ error: 'no_next' });
     }
@@ -493,7 +503,7 @@ export default async function catalogRoutes(app: FastifyInstance) {
     // explicit completed ping (fast scroll-past starved streaks/leaderboard).
     if (!sid || !done) {
       try {
-        const b = await komga.book(id);
+        const b = await komga.book(vc(req), id);
         if (!sid) sid = b.seriesId;
         if (!done && reachedEnd(page, b?.media?.pagesCount ?? 0)) done = true;
       } catch { if (!sid) sid = 'unknown'; }
@@ -501,7 +511,7 @@ export default async function catalogRoutes(app: FastifyInstance) {
 
     await writeProgress({ userId: uid, bookId: id, seriesId: sid!, page, completed: done, silent, deviceId });
 
-    if (NATIVE_PROGRESS && roleOf(req) === 'admin') komga.setReadProgress(id, page, done).catch(() => {});
+    if (NATIVE_PROGRESS && roleOf(req) === 'admin') komga.setReadProgress(vc(req), id, page, done).catch(() => {});
     return reply.send({ ok: true });
   });
 }

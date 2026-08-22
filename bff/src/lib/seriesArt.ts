@@ -4,6 +4,7 @@
 import { join } from 'path';
 import { env } from '../env';
 import { q } from './db';
+import { visibleToAll } from './visibility';
 
 export const ART_DIR = join(env.CONFIG_DIR, 'series-art');
 const safeId = (id: string) => id.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 64);
@@ -40,7 +41,7 @@ export const artOverview = () =>
        FROM lib_series s
        LEFT JOIN series_art a ON a.series_id = s.id
        LEFT JOIN series_overrides o ON o.series_id = s.id
-      WHERE s.deleted_at IS NULL AND s.merged_into IS NULL
+      WHERE ${visibleToAll('s')}
       ORDER BY (o.banner IS NOT NULL OR o.cover IS NOT NULL), (a.banner IS NOT NULL AND a.banner <> ''),
                (a.cover IS NOT NULL AND a.cover <> ''), s.title`,
   );

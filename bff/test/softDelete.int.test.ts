@@ -10,6 +10,10 @@
 // Skipped automatically unless TEST_DATABASE_URL is set (CI provides a throwaway Postgres service).
 import test, { before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
+// A viewer that sees every library. Written out rather than imported because importing from
+// src/lib pulls in env.ts, which validates the environment at module load, before the block below
+// has set DATABASE_URL. Note this still respects soft delete: it only bypasses library scoping.
+const SYSTEM_CTX = { userId: null, libraryIds: null } as const;
 import { mkdir, rm, writeFile } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
@@ -108,8 +112,8 @@ test('delete: a hidden series is invisible to the catalog but its rows survive',
 
   await q(`UPDATE lib_series SET deleted_at = now() WHERE id = $1`, [s.id]);
 
-  await assert.rejects(() => owned.series(s.id), /not found/i, 'a deleted series is still served');
-  const found = await owned.searchSeries({ fullTextSearch: 'Hidden' }, 0, 40);
+  await assert.rejects(() => owned.series(SYSTEM_CTX, s.id), /not found/i, 'a deleted series is still served');
+  const found = await owned.searchSeries(SYSTEM_CTX, { fullTextSearch: 'Hidden' }, 0, 40);
   assert.equal(found.content.length, 0, 'a deleted series still shows up in search');
 
   // but the rows the user cares about are untouched
@@ -128,7 +132,7 @@ test('delete: restoring brings it back exactly as it was', { skip }, async () =>
   await persistScan();
   await q(`UPDATE lib_series SET deleted_at = NULL WHERE id = $1`, [before1.id]);
 
-  const back = await owned.series(before1.id);
+  const back = await owned.series(SYSTEM_CTX, before1.id);
   assert.equal(back.id, before1.id);
   assert.equal(back.booksCount, 1);
 });
@@ -181,8 +185,8 @@ test('merge: the absorbed series is invisible to the catalog', { skip }, async (
   const absorb = await row('Absorb3');
   await q(`UPDATE lib_series SET merged_into = $1 WHERE id = $2`, [keep.id, absorb.id]);
 
-  await assert.rejects(() => owned.series(absorb.id), /not found/i);
-  const found = await owned.searchSeries({ fullTextSearch: 'Absorb3' }, 0, 40);
+  await assert.rejects(() => owned.series(SYSTEM_CTX, absorb.id), /not found/i);
+  const found = await owned.searchSeries(SYSTEM_CTX, { fullTextSearch: 'Absorb3' }, 0, 40);
   assert.equal(found.content.length, 0, 'the absorbed series still appears in search');
 });
 
@@ -199,18 +203,18 @@ test('overrides: a renamed series is findable and sorted by its NEW name everywh
     [s.id, 'Aaa Renamed', 'A better summary.'],
   );
 
-  const dto = await owned.series(s.id);
+  const dto = await owned.series(SYSTEM_CTX, s.id);
   assert.equal(dto.name, 'Aaa Renamed', 'the override is not applied by the catalog');
   assert.equal(dto.metadata.summary, 'A better summary.');
 
-  const byNew = await owned.searchSeries({ fullTextSearch: 'Aaa Renamed' }, 0, 40);
+  const byNew = await owned.searchSeries(SYSTEM_CTX, { fullTextSearch: 'Aaa Renamed' }, 0, 40);
   assert.equal(byNew.content.length, 1, 'the series is not findable by its new name');
 
-  const byOld = await owned.searchSeries({ fullTextSearch: 'Zzz Original' }, 0, 40);
+  const byOld = await owned.searchSeries(SYSTEM_CTX, { fullTextSearch: 'Zzz Original' }, 0, 40);
   assert.equal(byOld.content.length, 0, 'the series is still findable by its old name');
 
   // and the reader header follows
   const [book] = await booksOf(s.id);
-  const b = await owned.book(book.id);
+  const b = await owned.book(SYSTEM_CTX, book.id);
   assert.equal(b.seriesTitle, 'Aaa Renamed', 'the reader still shows the old series name');
 });

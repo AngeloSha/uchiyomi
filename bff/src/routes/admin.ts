@@ -19,6 +19,8 @@ import { readFile, writeFile, mkdir, rm } from 'fs/promises';
 import { dirname } from 'path';
 import sharp from 'sharp';
 import { ART_DIR, artFile, artOverview } from '../lib/seriesArt';
+// Admin stats report on the whole library by definition; this route is already behind requireAdmin.
+import { SYSTEM_CTX, visibleToAll } from '../lib/visibility';
 import { addSeriesFromSource, findBestMatch, norm } from './sources';
 import { titlesFromBackup } from '../lib/tachibk';
 import { linkSeries } from '../lib/trackers';
@@ -459,7 +461,7 @@ export default async function adminRoutes(app: FastifyInstance) {
       `SELECT s.id, s.title FROM lib_series s
        LEFT JOIN series_art a ON a.series_id = s.id
        LEFT JOIN series_overrides o ON o.series_id = s.id
-       WHERE s.deleted_at IS NULL AND s.merged_into IS NULL AND (a.banner IS NULL OR a.banner = '') AND o.banner IS NULL
+       WHERE ${visibleToAll('s')} AND (a.banner IS NULL OR a.banner = '') AND o.banner IS NULL
        ORDER BY s.title`,
     );
     const job: ArtJob = { running: true, total: targets.length, done: 0, banners: 0, covers: 0, misses: 0, startedAt: Date.now() };
@@ -763,7 +765,7 @@ export default async function adminRoutes(app: FastifyInstance) {
     const targets = await q<{ id: string; title: string }>(
       `SELECT s.id, s.title FROM lib_series s
          LEFT JOIN series_trackers t ON t.series_id = s.id AND t.provider = 'anilist'
-        WHERE s.deleted_at IS NULL AND s.merged_into IS NULL AND t.series_id IS NULL ORDER BY s.books_count DESC`,
+        WHERE ${visibleToAll('s')} AND t.series_id IS NULL ORDER BY s.books_count DESC`,
     );
     const job = { running: true, total: targets.length, done: 0, linked: 0, misses: 0 };
     relinkJob = job;
@@ -878,8 +880,8 @@ export default async function adminRoutes(app: FastifyInstance) {
 
   app.get('/api/admin/stats', async () => {
     const [libs, seriesPage, cb, members, activity] = await Promise.all([
-      komga.libraries().catch(() => [] as any[]),
-      komga.searchSeries({}, 0, 1).catch(() => ({ totalElements: 0 } as any)),
+      komga.libraries(SYSTEM_CTX).catch(() => [] as any[]),
+      komga.searchSeries(SYSTEM_CTX, {}, 0, 1).catch(() => ({ totalElements: 0 } as any)),
       cacheBytes().catch(() => 0),
       one<{ c: number }>('SELECT count(*)::int AS c FROM users'),
       q(

@@ -11,6 +11,10 @@
 // Skipped automatically unless TEST_DATABASE_URL is set (CI provides a throwaway Postgres service).
 import test, { before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
+// A viewer that sees every library. Written out rather than imported because importing from
+// src/lib pulls in env.ts, which validates the environment at module load, before the block below
+// has set DATABASE_URL. Note this still respects soft delete: it only bypasses library scoping.
+const SYSTEM_CTX = { userId: null, libraryIds: null } as const;
 
 const DSN = process.env.TEST_DATABASE_URL;
 if (DSN) {
@@ -87,7 +91,7 @@ after(async () => {
 });
 
 const numbers = async () =>
-  (await owned.seriesBooks(S, 0, 50)).content.map((b: any) => b.number);
+  (await owned.seriesBooks(SYSTEM_CTX, S, 0, 50)).content.map((b: any) => b.number);
 
 test('without an override, the filename wins and the order is wrong', { skip }, async () => {
   // Pinning the bug this feature exists for: "Vol 2 Ch 5" reads as 2.
@@ -101,7 +105,7 @@ test('THE FIX: an overridden number reorders the chapter list', { skip }, async 
 
 test('an overridden title is what the reader shows', { skip }, async () => {
   await override('b_bo_2', 5, 'Chapter 5');
-  const book = await owned.book('b_bo_2');
+  const book = await owned.book(SYSTEM_CTX, 'b_bo_2');
   assert.equal(book.name, 'Chapter 5');
   assert.equal(book.metadata.title, 'Chapter 5');
   assert.equal(book.number, 5);
@@ -127,15 +131,15 @@ test('the tracker is told the corrected number, not the filename one', { skip },
 
 test('next chapter follows the corrected order', { skip }, async () => {
   await override('b_bo_2', 5);
-  const next = await owned.bookNext('b_bo_1');
+  const next = await owned.bookNext(SYSTEM_CTX, 'b_bo_1');
   assert.equal(next.id, 'b_bo_2');
-  assert.equal((await owned.bookNext('b_bo_2')).id, 'b_bo_3');
+  assert.equal((await owned.bookNext(SYSTEM_CTX, 'b_bo_2')).id, 'b_bo_3');
 });
 
 test('two chapters sharing a number do not make next return the same book', { skip }, async () => {
   // Renumbering makes duplicates far more likely, and `number > n` alone used to be ambiguous here.
   await override('b_bo_2', 1);
-  const next = await owned.bookNext('b_bo_1');
+  const next = await owned.bookNext(SYSTEM_CTX, 'b_bo_1');
   assert.notEqual(next.id, 'b_bo_1', 'next chapter returned the book we are already on');
   assert.equal(next.id, 'b_bo_2', 'with equal numbers, file order should break the tie');
 });

@@ -13,6 +13,7 @@ import { suwayomiUrl, suwayomiImageHeaders } from '../lib/sources/suwayomi/clien
 import { join } from 'path';
 import { readFile } from 'fs/promises';
 import { q, one } from '../lib/db';
+import { viewCtxFor, visibleBookFile, seriesVisible, SYSTEM_CTX, type ViewCtx } from '../lib/visibility';
 import { artFile } from '../lib/seriesArt';
 import { HERO_FRAMES, heroFit, type HeroAr } from '../lib/heroFrame';
 
@@ -80,15 +81,15 @@ async function fetchCoverImage(u: string, source?: string): Promise<Buffer> {
 }
 
 // ---- series backdrop recipes (module-level so the pre-warmer can build them without a request) ----
-const bookFileAbs = async (id: string): Promise<string | null> => {
-  const r = await one<{ file: string; root: string }>('SELECT file, root FROM lib_books WHERE id = $1', [id]);
+const bookFileAbs = async (id: string, ctx: ViewCtx): Promise<string | null> => {
+  const r = await visibleBookFile(id, ctx);
   return r ? join(r.root || LIBRARY_ROOT, r.file) : null;
 };
 // Bytes of a series' first downloaded page — the universal fallback when a remote cover/backdrop URL can't be
 // fetched (hotlink-protected CDN, dead link, timeout, unparsed cover). Guarantees art for any downloaded series.
-const firstPageInput = async (id: string): Promise<Buffer> => {
+const firstPageInput = async (id: string, ctx: ViewCtx): Promise<Buffer> => {
   const s = await one<{ cover_book_id: string }>('SELECT cover_book_id FROM lib_series WHERE id = $1', [id]);
-  const abs = s?.cover_book_id ? await bookFileAbs(s.cover_book_id) : null;
+  const abs = s?.cover_book_id ? await bookFileAbs(s.cover_book_id, ctx) : null;
   if (!abs) throw Object.assign(new Error('no cover'), { statusCode: 404 });
   const first = await cbzPageAt(abs, 0);
   if (!first) throw Object.assign(new Error('empty'), { statusCode: 404 });
@@ -117,7 +118,7 @@ const heroSharp = async (input: Buffer, ar: HeroAr) => {
 };
 
 /** Resolve a backdrop's cache variant + producer for (series, style, frame) — shared by the route and warmer. */
-async function backdropRecipe(id: string, hero: boolean, ar: HeroAr): Promise<{ variant: string; producer: () => Promise<{ buffer: Buffer; contentType: string }> }> {
+async function backdropRecipe(id: string, hero: boolean, ar: HeroAr, ctx: ViewCtx): Promise<{ variant: string; producer: () => Promise<{ buffer: Buffer; contentType: string }> }> {
   // admin override wins (uploaded banner/cover or pasted URL)
   const ovr = await one<{ banner: string | null; v: string }>('SELECT banner, EXTRACT(EPOCH FROM updated_at) * 1000 AS v FROM series_overrides WHERE series_id = $1', [id]);
   if (ovr?.banner) {
@@ -126,7 +127,7 @@ async function backdropRecipe(id: string, hero: boolean, ar: HeroAr): Promise<{ 
       producer: async () => {
         let input: Buffer;
         if (ovr.banner === 'upload') input = await readFile(artFile(id, 'banner'));
-        else { try { input = await fetchCoverImage(ovr.banner!); } catch { input = await firstPageInput(id); } }
+        else { try { input = await fetchCoverImage(ovr.banner!); } catch { input = await firstPageInput(id, ctx); } }
         const buffer = hero ? await heroSharp(input, ar) : await ambientComposite(input);
         return { buffer, contentType: 'image/webp' };
       },
@@ -167,7 +168,7 @@ async function backdropRecipe(id: string, hero: boolean, ar: HeroAr): Promise<{ 
         if (!url) throw new Error('no remote art');
         input = await fetchCoverImage(url, srcRow?.source_id || undefined);
       } catch {
-        input = await firstPageInput(id);
+        input = await firstPageInput(id, ctx);
       }
       const buffer = sharpHero ? await heroSharp(input, ar) : await ambientComposite(input);
       return { buffer, contentType: 'image/webp' };
@@ -205,7 +206,7 @@ export async function warmHeroBackdrops(ids: string[]): Promise<void> {
     while (next < jobs.length) {
       const job = jobs[next++];
       try {
-        const r = await backdropRecipe(job.id, true, job.ar);
+        const r = await backdropRecipe(job.id, true, job.ar, SYSTEM_CTX);
         await getOrFetch(r.variant, r.producer);
       } catch {
         warmed.delete(job.tag); // best-effort, but let a later pass retry it
@@ -218,12 +219,27 @@ export async function warmHeroBackdrops(ids: string[]): Promise<void> {
 export default async function imageRoutes(app: FastifyInstance) {
   // Browser <img> tags can't set Authorization; authorize via the stateless yomi_img cookie.
   app.addHook('preHandler', async (req: FastifyRequest, reply: FastifyReply) => {
+    // BIND the subject, do not just verify it. This used to call app.jwt.verify(token) and return, so the
+    // decoded sub was thrown away and no image handler had any notion of who was asking. That made every
+    // series-level rule a no-op on the one route family that serves actual bytes: /img/lib/books/:id/page/:n
+    // resolved a file from a book id with no series join, so a hidden series' pages rendered for anyone
+    // holding the id.
     const token = req.cookies?.[IMG_COOKIE];
-    if (token) { try { app.jwt.verify(token); return; } catch { /* fall through to OPDS auth */ } }
+    if (token) {
+      try {
+        const claims = app.jwt.verify(token) as { sub?: string };
+        (req as any).viewCtx = await viewCtxFor(claims.sub ?? null);
+        return;
+      } catch { /* fall through to OPDS auth */ }
+    }
     // OPDS readers load covers/pages with the same HTTP Basic token as the feed
-    if (await resolveOpdsBasic(req.headers.authorization)) return;
+    const uid = await resolveOpdsBasic(req.headers.authorization);
+    if (uid) { (req as any).viewCtx = await viewCtxFor(uid); return; }
     return reply.code(401).send({ error: 'unauthorized' });
   });
+
+  /** The viewer bound above. */
+  const vc = (req: FastifyRequest): ViewCtx => (req as any).viewCtx as ViewCtx;
 
   // ---- owned library image helpers: serve thumbnails + pages straight from the CBZ files ----
   const libCt = (name: string): string => {
@@ -244,6 +260,10 @@ export default async function imageRoutes(app: FastifyInstance) {
   // Series cover: prefer the real cover art (AniList, cached in series_art.cover); fall back to the first
   // page of chapter 1. Distinct cache variants so it upgrades to the real cover once one is known.
   const serveLibSeriesThumb = async (req: FastifyRequest, reply: FastifyReply, id: string) => {
+    // The series-level art routes read lib_series and series_art by id, so they need the check that
+    // bookFileAbs now carries for chapters. Without it a hidden series' cover still renders, which is
+    // how a deleted series has always kept its thumbnail.
+    if (!(await seriesVisible(id, vc(req)))) return reply.code(404).send({ error: 'not_found' });
     const w = thumbWidth(req);
     const wk = w === 400 ? '' : `:w${w}`; // 400 keeps the legacy cache key so existing entries stay warm
     // admin override wins (uploaded file or pasted URL); variant carries updated_at so edits bust the cache
@@ -252,7 +272,7 @@ export default async function imageRoutes(app: FastifyInstance) {
       return serveImage(req, reply, `lib-sthumb:${id}:ov:${Math.floor(Number(ovr.v))}${wk}`, async () => {
         let input: Buffer;
         if (ovr.cover === 'upload') input = await readFile(artFile(id, 'cover'));
-        else { try { input = await fetchCoverImage(ovr.cover!); } catch { input = await firstPageInput(id); } }
+        else { try { input = await fetchCoverImage(ovr.cover!); } catch { input = await firstPageInput(id, vc(req)); } }
         storeColor(id, input);
         const buffer = await sharp(input).resize({ width: w, withoutEnlargement: true }).webp({ quality: 80 }).toBuffer();
         return { buffer, contentType: 'image/webp' };
@@ -265,14 +285,14 @@ export default async function imageRoutes(app: FastifyInstance) {
         // remote cover first; on ANY failure (hotlink CDN, dead link, timeout) fall back to the first page
         let input: Buffer;
         try { input = await fetchCoverImage(art.cover!, art.source_id || undefined); }
-        catch { input = await firstPageInput(id); }
+        catch { input = await firstPageInput(id, vc(req)); }
         storeColor(id, input);
         const buffer = await sharp(input).resize({ width: w, withoutEnlargement: true }).webp({ quality: 80 }).toBuffer();
         return { buffer, contentType: 'image/webp' };
       });
     }
     return serveImage(req, reply, `lib-sthumb:${id}:p${wk}`, async () => {
-      const input = await firstPageInput(id);
+      const input = await firstPageInput(id, vc(req));
       storeColor(id, input);
       const buffer = await sharp(input).resize({ width: w, withoutEnlargement: true }).webp({ quality: 72 }).toBuffer();
       return { buffer, contentType: 'image/webp' };
@@ -280,7 +300,7 @@ export default async function imageRoutes(app: FastifyInstance) {
   };
   const serveLibBookThumb = (req: FastifyRequest, reply: FastifyReply, id: string) =>
     serveImage(req, reply, `lib-bthumb:${id}`, async () => {
-      const abs = await bookFileAbs(id);
+      const abs = await bookFileAbs(id, vc(req));
       if (!abs) throw Object.assign(new Error('no book'), { statusCode: 404 });
       const first = await cbzPageAt(abs, 0);
       if (!first) throw Object.assign(new Error('empty'), { statusCode: 404 });
@@ -289,7 +309,7 @@ export default async function imageRoutes(app: FastifyInstance) {
       return { buffer, contentType: 'image/webp' };
     });
   const serveLibBookPage = async (req: FastifyRequest, reply: FastifyReply, id: string, pageNo: number, w: number) => {
-    const abs = await bookFileAbs(id);
+    const abs = await bookFileAbs(id, vc(req));
     if (!abs) return reply.code(404).send({ error: 'no_book' });
     if (w && Number.isInteger(w) && w >= 64 && w <= 2000) {
       return serveImage(req, reply, `lib-page:${id}:${pageNo}:w${w}`, async () => {
@@ -369,7 +389,7 @@ export default async function imageRoutes(app: FastifyInstance) {
     const { id } = req.params as { id: string };
     const hero = (req.query as Record<string, string>)?.style === 'hero';
     const ar: HeroAr = (req.query as Record<string, string>)?.ar === 'tall' ? 'tall' : 'wide';
-    const r = await backdropRecipe(id, hero, ar);
+    const r = await backdropRecipe(id, hero, ar, vc(req));
     return serveImage(req, reply, r.variant, r.producer);
   });
 

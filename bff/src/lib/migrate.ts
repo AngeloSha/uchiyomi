@@ -308,6 +308,19 @@ CREATE TABLE IF NOT EXISTS series_trackers (
 
 -- admin-editable per-series metadata + art overrides
 -- cover/banner: 'upload' = a file under <CONFIG_DIR>/series-art; an http(s) URL = pasted; null = use automatic art
+CREATE TABLE IF NOT EXISTS user_libraries (
+  user_id    uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  library_id text NOT NULL,
+  PRIMARY KEY (user_id, library_id)
+);
+-- Which libraries an account may see. NO ROWS MEANS EVERY LIBRARY, not none.
+--
+-- The alternative, seeding a row per user per library on migration, has a far worse failure mode: a seed
+-- that half-runs locks people out of everything, whereas this one's failure mode is "sees exactly what they
+-- saw yesterday". It is also why an empty list must never come from an "or empty array" fallback: an
+-- empty list is a real admin choice meaning "nothing", and conflating the two turns a lookup failure into a
+-- silent lockout.
+
 CREATE TABLE IF NOT EXISTS book_overrides (
   book_id    text PRIMARY KEY REFERENCES lib_books(id) ON DELETE CASCADE,
   number     real,

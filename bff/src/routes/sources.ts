@@ -9,6 +9,9 @@ import { fetchAniListArt, fetchTrendingManhwa, TrendingItem } from '../lib/anili
 import { q, one } from '../lib/db';
 import { healthAll, isDisabled } from '../lib/sourceHealth';
 import { logAudit } from '../lib/audit';
+// The "already in library" annotation is deliberately library-wide: it answers "would adding this be a
+// duplicate on this server", which is a property of the server, not of the person asking.
+import { visibleToAll } from '../lib/visibility';
 
 interface Job { title: string; total: number; done: number; status: 'downloading' | 'done' | 'error'; reason?: string }
 const jobs = new Map<string, Job>();
@@ -83,7 +86,7 @@ export async function addSeriesFromSource(opts: {
     const dup = await one<{ title: string; source: string }>(
       `SELECT title, source FROM lib_series
         WHERE lower(regexp_replace(title, '[^a-zA-Z0-9]', '', 'g')) = $1 AND folder <> $2
-          AND deleted_at IS NULL AND merged_into IS NULL LIMIT 1`,
+          AND ${visibleToAll('lib_series')} LIMIT 1`,
       [norm(title), folder]);
     if (dup) return { ok: false, status: 409, error: 'duplicate', existing: dup, message: `You already have "${dup.title}" from ${dup.source}. Add this copy anyway?` };
   }
@@ -172,7 +175,7 @@ export default async function sourceRoutes(app: FastifyInstance) {
     const seen = new Set<string>();
     const results = raw.filter((r) => !!r.sourceId && !seen.has(r.sourceId) && (seen.add(r.sourceId), true)).slice(0, 24);
     // flag titles already in the library so the UI can mark them instead of offering a duplicate add
-    const have = new Set((await q<{ title: string }>('SELECT title FROM lib_series WHERE deleted_at IS NULL AND merged_into IS NULL')).map((r) => norm(r.title)));
+    const have = new Set((await q<{ title: string }>(`SELECT s.title FROM lib_series s WHERE ${visibleToAll('s')}`)).map((r) => norm(r.title)));
     return { content: results.map((r) => ({ ...r, inLibrary: have.has(norm(r.title)) })) };
   });
 
@@ -202,7 +205,7 @@ export default async function sourceRoutes(app: FastifyInstance) {
         g.providers.push({ source: r.source, name: r.name, sourceId: r.sourceId, coverUrl: r.coverUrl, title: r.title });
       }
     }
-    const have = new Set((await q<{ title: string }>('SELECT title FROM lib_series WHERE deleted_at IS NULL AND merged_into IS NULL')).map((x) => norm(x.title)));
+    const have = new Set((await q<{ title: string }>(`SELECT s.title FROM lib_series s WHERE ${visibleToAll('s')}`)).map((x) => norm(x.title)));
     const out = [...groups.values()]
       .map((g) => ({ ...g, inLibrary: have.has(norm(g.title)) }))
       .sort((a, b) => b.providers.length - a.providers.length)
@@ -220,7 +223,7 @@ export default async function sourceRoutes(app: FastifyInstance) {
     const raw = await src.latest(p).catch(() => []);
     const seen = new Set<string>();
     const results = raw.filter((r) => !!r.sourceId && !seen.has(r.sourceId) && (seen.add(r.sourceId), true)).slice(0, 24);
-    const have = new Set((await q<{ title: string }>('SELECT title FROM lib_series WHERE deleted_at IS NULL AND merged_into IS NULL')).map((r) => norm(r.title)));
+    const have = new Set((await q<{ title: string }>(`SELECT s.title FROM lib_series s WHERE ${visibleToAll('s')}`)).map((r) => norm(r.title)));
     return { content: results.map((r) => ({ ...r, inLibrary: have.has(norm(r.title)) })) };
   });
 
@@ -232,7 +235,7 @@ export default async function sourceRoutes(app: FastifyInstance) {
     if (!trendingCache || Date.now() - trendingCache.at > 6 * 3600_000) {
       try { trendingCache = { at: Date.now(), items: await fetchTrendingManhwa() }; } catch { if (!trendingCache) return { content: [] }; }
     }
-    const have = new Set((await q<{ title: string }>('SELECT title FROM lib_series WHERE deleted_at IS NULL AND merged_into IS NULL')).map((r) => norm(r.title)));
+    const have = new Set((await q<{ title: string }>(`SELECT s.title FROM lib_series s WHERE ${visibleToAll('s')}`)).map((r) => norm(r.title)));
     return { content: trendingCache.items.filter((t) => !have.has(norm(t.title))).slice(0, 24) };
   });
 

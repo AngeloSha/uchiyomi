@@ -4,6 +4,7 @@ import { q, one } from '../lib/db';
 // backend-agnostic content client: the owned library in owned mode, Komga otherwise. The old direct
 // `lib/komga` import silently nulled every series lookup here after the owned-library cutover.
 import { content as komga } from '../lib/backend';
+import { viewCtxFor, visible, Params, type ViewCtx } from '../lib/visibility';
 import { authenticate, userIdOf, roleOf, issueOpdsToken, issueApiToken, listApiTokens, revokeApiToken, API_SCOPES } from '../lib/auth';
 import { env } from '../env';
 import { pushEnabled, vapidPublicKey, saveSubscription, removeSubscription } from '../lib/push';
@@ -31,6 +32,11 @@ function computeStreaks(days: string[]): { current: number; longest: number } {
 
 export default async function personalRoutes(app: FastifyInstance) {
   app.addHook('preHandler', authenticate);
+  app.addHook('preHandler', async (req) => {
+    (req as any).viewCtx = await viewCtxFor(userIdOf(req), roleOf(req));
+  });
+  /** The viewer attached above. */
+  const vc = (req: any): ViewCtx => req.viewCtx as ViewCtx;
 
   // issue/rotate the caller's OPDS token (shown once); used as the HTTP Basic password in an external reader
   app.post('/api/opds/token', async (req) => {
@@ -98,7 +104,7 @@ export default async function personalRoutes(app: FastifyInstance) {
         [uid],
       )
     ).map((r) => r.series_id);
-    const series = (await Promise.all(ids.map((id) => komga.series(id).catch(() => null)))).filter(Boolean);
+    const series = (await Promise.all(ids.map((id) => komga.series(vc(req), id).catch(() => null)))).filter(Boolean);
     return { content: series };
   });
 
@@ -107,7 +113,7 @@ export default async function personalRoutes(app: FastifyInstance) {
     const { seriesId } = z.object({ seriesId: z.string().min(1) }).parse(req.body);
     await q('INSERT INTO favorites (user_id, series_id) VALUES ($1, $2) ON CONFLICT DO NOTHING', [uid, seriesId]);
     // baseline the updates feed at the current chapter count so old chapters don't show as "new"
-    const s = await komga.series(seriesId).catch(() => null);
+    const s = await komga.series(vc(req), seriesId).catch(() => null);
     if (s) {
       await q(
         `INSERT INTO series_seen (user_id, series_id, seen_books_count) VALUES ($1, $2, $3) ON CONFLICT (user_id, series_id) DO NOTHING`,
@@ -172,7 +178,7 @@ export default async function personalRoutes(app: FastifyInstance) {
     const ids = (
       await q<{ series_id: string }>('SELECT series_id FROM collection_items WHERE collection_id = $1 ORDER BY position', [id])
     ).map((r) => r.series_id);
-    const series = (await Promise.all(ids.map((sid) => komga.series(sid).catch(() => null)))).filter(Boolean);
+    const series = (await Promise.all(ids.map((sid) => komga.series(vc(req), sid).catch(() => null)))).filter(Boolean);
     return { ...col, items: series };
   });
 
@@ -323,7 +329,7 @@ export default async function personalRoutes(app: FastifyInstance) {
     const topSeries = (
       await Promise.all(
         topIds.map(async (id) => {
-          const s = await komga.series(id).catch(() => null);
+          const s = await komga.series(vc(req), id).catch(() => null);
           return s ? { id, title: (s as any).metadata?.title || (s as any).name, count: seriesCounts[id], genres: (s as any).metadata?.genres ?? [] } : null;
         }),
       )
@@ -354,11 +360,16 @@ export default async function personalRoutes(app: FastifyInstance) {
   const bulkBody = z.object({ seriesIds: z.array(z.string()).min(1).max(500) });
 
   /** The subset of the requested ids that are real, visible series. */
-  const liveSeries = async (ids: string[]): Promise<string[]> =>
-    (await q<{ id: string }>(
-      `SELECT id FROM lib_series WHERE id = ANY($1) AND deleted_at IS NULL AND merged_into IS NULL`,
-      [ids],
+  const liveSeries = async (ids: string[], ctx: ViewCtx): Promise<string[]> => {
+    // Takes the requester's viewer, not a blanket one: this is what gates every bulk action, so a series
+    // the caller cannot see must not be actionable by id either.
+    const p = new Params();
+    const arr = p.add(ids);
+    return (await q<{ id: string }>(
+      `SELECT s.id FROM lib_series s WHERE s.id = ANY(${arr}) AND ${visible('s', ctx, p)}`,
+      p.values as any[],
     )).map((r) => r.id);
+  };
 
   const skippedOf = (asked: string[], live: string[]) =>
     asked.filter((id) => !live.includes(id)).map((id) => ({ id, reason: 'not_found' }));
@@ -367,7 +378,7 @@ export default async function personalRoutes(app: FastifyInstance) {
     const b = bulkBody.extend({ completed: z.boolean() }).safeParse(req.body);
     if (!b.success) return reply.code(400).send({ error: 'bad_request' });
     const uid = userIdOf(req);
-    const live = await liveSeries(b.data.seriesIds);
+    const live = await liveSeries(b.data.seriesIds, vc(req));
 
     if (b.data.completed) {
       // GREATEST on page so marking a series read never rewinds a chapter someone is part-way through.
@@ -399,7 +410,7 @@ export default async function personalRoutes(app: FastifyInstance) {
     const b = bulkBody.extend({ favorite: z.boolean() }).safeParse(req.body);
     if (!b.success) return reply.code(400).send({ error: 'bad_request' });
     const uid = userIdOf(req);
-    const live = await liveSeries(b.data.seriesIds);
+    const live = await liveSeries(b.data.seriesIds, vc(req));
     if (b.data.favorite) {
       await q(
         `INSERT INTO favorites (user_id, series_id) SELECT $1, unnest($2::text[])
@@ -419,7 +430,7 @@ export default async function personalRoutes(app: FastifyInstance) {
     const uid = userIdOf(req);
     const owns = await one('SELECT id FROM collections WHERE id = $1 AND user_id = $2', [id, uid]);
     if (!owns) return reply.code(404).send({ error: 'not_found' });
-    const live = await liveSeries(b.data.seriesIds);
+    const live = await liveSeries(b.data.seriesIds, vc(req));
     await q(
       `INSERT INTO collection_items (collection_id, series_id, position)
        SELECT $1, s, COALESCE((SELECT max(position) + 1 FROM collection_items WHERE collection_id = $1), 0)

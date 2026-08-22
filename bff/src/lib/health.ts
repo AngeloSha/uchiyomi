@@ -10,6 +10,7 @@
 //  * decimal chapters (12.5, 44.6) are overwhelmingly legitimate side-stories and "Notice!" pages, which are
 //    genuinely one image long. Only whole-numbered chapters are worth flagging as too short.
 import { q } from './db';
+import { visibleToAll } from './visibility';
 
 export type HealthStatus = 'ok' | 'warn' | 'problem';
 
@@ -60,7 +61,7 @@ async function chapterGaps(): Promise<HealthCheck> {
             sum(gap_hi - gap_lo + 1)::int AS missing,
             string_agg(CASE WHEN gap_lo = gap_hi THEN gap_lo::text ELSE gap_lo || '-' || gap_hi END,
                        ', ' ORDER BY gap_lo) AS ranges
-       FROM gaps g JOIN lib_series ls ON ls.id = g.series_id AND ls.deleted_at IS NULL AND ls.merged_into IS NULL
+       FROM gaps g JOIN lib_series ls ON ls.id = g.series_id AND ${visibleToAll('ls')}
       GROUP BY g.series_id, ls.title
       ORDER BY missing DESC`,
   );
@@ -89,7 +90,7 @@ async function shortChapters(): Promise<HealthCheck> {
   // Decimal chapters are excluded on purpose: ".5" entries are usually author notices, legitimately 1 page.
   const rows = await q<{ series_id: string; title: string; number: number; pages: number }>(
     `SELECT b.series_id, ls.title, b.number, b.pages
-       FROM lib_books b JOIN lib_series ls ON ls.id = b.series_id AND ls.deleted_at IS NULL AND ls.merged_into IS NULL
+       FROM lib_books b JOIN lib_series ls ON ls.id = b.series_id AND ${visibleToAll('ls')}
       WHERE b.pages BETWEEN 1 AND 2 AND b.number = floor(b.number)
       ORDER BY ls.title, b.number`,
   );
@@ -120,7 +121,7 @@ async function sourceTrouble(): Promise<HealthCheck> {
     blocked_until: string | null; last_error: string | null; series: number;
   }>(
     `SELECT sh.source_id, sh.status, sh.consecutive, sh.disabled, sh.blocked_until, sh.last_error,
-            (SELECT count(*) FROM lib_series ls WHERE ls.source = sh.source_id AND ls.deleted_at IS NULL AND ls.merged_into IS NULL)::int AS series
+            (SELECT count(*) FROM lib_series ls WHERE ls.source = sh.source_id AND ${visibleToAll('ls')})::int AS series
        FROM source_health sh
       WHERE sh.status <> 'ok' OR sh.disabled = true
       ORDER BY sh.disabled DESC, sh.consecutive DESC`,
@@ -159,7 +160,7 @@ async function duplicateSeries(): Promise<HealthCheck> {
   const rows = await q<{ external_id: string; titles: string; ids: string[] }>(
     `SELECT t.external_id, string_agg(ls.title, ' + ' ORDER BY ls.title) AS titles,
             array_agg(ls.id ORDER BY ls.title) AS ids
-       FROM series_trackers t JOIN lib_series ls ON ls.id = t.series_id AND ls.deleted_at IS NULL AND ls.merged_into IS NULL
+       FROM series_trackers t JOIN lib_series ls ON ls.id = t.series_id AND ${visibleToAll('ls')}
       WHERE t.provider = 'anilist'
       GROUP BY t.external_id HAVING count(*) > 1
       ORDER BY count(*) DESC`,
@@ -194,7 +195,7 @@ async function outlierChapters(): Promise<HealthCheck> {
      SELECT s.series_id, ls.title, s.med, s.hi,
             (SELECT count(*) FROM lib_books b
               WHERE b.series_id = s.series_id AND b.number > GREATEST(s.med * 4, s.med + 500))::int AS n
-       FROM s JOIN lib_series ls ON ls.id = s.series_id AND ls.deleted_at IS NULL AND ls.merged_into IS NULL
+       FROM s JOIN lib_series ls ON ls.id = s.series_id AND ${visibleToAll('ls')}
       WHERE s.hi > GREATEST(s.med * 4, s.med + 500)
       ORDER BY s.hi DESC`,
   );

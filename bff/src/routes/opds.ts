@@ -7,6 +7,7 @@ import { stat, readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { q, one } from '../lib/db';
 import { resolveOpdsBasic } from '../lib/auth';
+import { viewCtxFor, visibleBookFile, Params, visible, type ViewCtx } from '../lib/visibility';
 import { LIBRARY_ROOT } from '../lib/library';
 const AdmZip = require('adm-zip');
 
@@ -48,11 +49,26 @@ const sendXml = (reply: FastifyReply, kind: 'nav' | 'acq', xml: string) =>
   reply.header('Content-Type', `${kind === 'nav' ? NAV : ACQ};charset=utf-8`).send(xml);
 
 export default async function opdsRoutes(app: FastifyInstance) {
+  /** The viewer bound by the preHandler below. */
+  const vc = (req: FastifyRequest): ViewCtx => (req as any).viewCtx as ViewCtx;
+
+  /**
+   * The series source, once. This body was hand-copied into three separate queries here, none of which
+   * would have inherited a change made to the real one in ownedCatalog.
+   */
+  const seriesSrc = (ctx: ViewCtx, p: Params) => `(SELECT s.id, COALESCE(o.title, s.title) AS title,
+          COALESCE(o.summary, s.summary) AS summary, COALESCE(o.author, s.author) AS author, s.books_count
+     FROM lib_series s LEFT JOIN series_overrides o ON o.series_id = s.id
+    WHERE ${visible('s', ctx, p)}) sv`;
   // HTTP Basic auth: password = a per-user OPDS token. Prompts the client when missing/invalid.
   app.addHook('preHandler', async (req: FastifyRequest, reply: FastifyReply) => {
     const uid = await resolveOpdsBasic(req.headers.authorization);
     if (!uid) { reply.header('WWW-Authenticate', 'Basic realm="Uchiyomi OPDS"'); return reply.code(401).send('Unauthorized'); }
     (req as { opdsUser?: string }).opdsUser = uid;
+    // The uid was resolved here and then never used by any handler, so OPDS served the whole library
+    // regardless of who asked. It is a full parallel read path (feed, chapter list, raw CBZ download),
+    // so a rule enforced only in the app is not enforced at all.
+    (req as any).viewCtx = await viewCtxFor(uid);
   });
 
   // root navigation feed
@@ -80,15 +96,14 @@ export default async function opdsRoutes(app: FastifyInstance) {
     const { sort, page, q: query } = req.query as { sort?: string; page?: string; q?: string };
     const p = Math.max(0, parseInt(page || '0', 10) || 0);
     const order = sort === 'title' ? 'title ASC' : sort === 'added' ? 'created_at DESC, title ASC' : 'latest_mtime DESC, title ASC';
-    const params: unknown[] = [];
+    const pp = new Params();
+    const src = seriesSrc(vc(req), pp);
     let where = 'TRUE';
-    if (query?.trim()) { params.push(`%${query.trim()}%`); where = `title ILIKE $${params.length}`; }
+    if (query?.trim()) where = `title ILIKE ${pp.add(`%${query.trim()}%`)}`;
     const rows = await q<{ id: string; title: string; summary: string | null; author: string | null; books_count: number }>(
-      `SELECT id, title, summary, author, books_count FROM (SELECT s.id, COALESCE(o.title, s.title) AS title, COALESCE(o.summary, s.summary) AS summary,
-                COALESCE(o.author, s.author) AS author, s.books_count
-           FROM lib_series s LEFT JOIN series_overrides o ON o.series_id = s.id
-          WHERE s.deleted_at IS NULL AND s.merged_into IS NULL) sv WHERE ${where} ORDER BY ${order} LIMIT ${PAGE_SIZE} OFFSET ${p * PAGE_SIZE}`,
-      params,
+        `SELECT id, title, summary, author, books_count FROM ${src}
+          WHERE ${where} ORDER BY ${order} LIMIT ${PAGE_SIZE} OFFSET ${p * PAGE_SIZE}`,
+      pp.values as any[],
     );
     const entries = rows.map((s) =>
       `<entry>
@@ -111,13 +126,13 @@ export default async function opdsRoutes(app: FastifyInstance) {
     return opdsSeriesSearch(req, reply, query);
   });
 
-  async function opdsSeriesSearch(_req: FastifyRequest, reply: FastifyReply, query: string) {
+  async function opdsSeriesSearch(req: FastifyRequest, reply: FastifyReply, query: string) {
+    const pp = new Params();
+    const src = seriesSrc(vc(req), pp);
     const rows = await q<{ id: string; title: string; summary: string | null; books_count: number }>(
-      `SELECT id, title, summary, books_count FROM (SELECT s.id, COALESCE(o.title, s.title) AS title, COALESCE(o.summary, s.summary) AS summary,
-                s.author, s.books_count
-           FROM lib_series s LEFT JOIN series_overrides o ON o.series_id = s.id
-          WHERE s.deleted_at IS NULL AND s.merged_into IS NULL) sv WHERE title ILIKE $1 ORDER BY title ASC LIMIT ${PAGE_SIZE}`,
-      [`%${query}%`],
+        `SELECT id, title, summary, books_count FROM ${src}
+          WHERE title ILIKE ${pp.add(`%${query}%`)} ORDER BY title ASC LIMIT ${PAGE_SIZE}`,
+      pp.values as any[],
     );
     const entries = rows.map((s) =>
       `<entry><id>yomi:series:${esc(s.id)}</id><title>${esc(s.title)}</title><updated>${new Date().toISOString()}</updated>` +
@@ -130,13 +145,16 @@ export default async function opdsRoutes(app: FastifyInstance) {
   // acquisition feed for one series: each chapter is a downloadable CBZ
   app.get('/opds/series/:id', async (req, reply) => {
     const { id } = req.params as { id: string };
-    const s = await one<{ title: string }>(`SELECT title FROM (SELECT s.id, COALESCE(o.title, s.title) AS title, COALESCE(o.summary, s.summary) AS summary,
-                s.author, s.books_count
-           FROM lib_series s LEFT JOIN series_overrides o ON o.series_id = s.id
-          WHERE s.deleted_at IS NULL AND s.merged_into IS NULL) sv WHERE id = $1`, [id]);
+      const pp = new Params();
+      const s = await one<{ title: string }>(
+        `SELECT title FROM ${seriesSrc(vc(req), pp)} WHERE id = ${pp.add(id)}`, pp.values as any[]);
     if (!s) return reply.code(404).send('not found');
     const books = await q<{ id: string; title: string | null; number: number; pages: number }>(
-      'SELECT id, title, number, pages FROM lib_books WHERE series_id = $1 ORDER BY number ASC, file ASC', [id]);
+      // This had no visibility predicate whatsoever: the chapter list of a hidden series was served in
+      // full. The join is what carries the rule down from the series.
+      `SELECT b.id, b.title, b.number, b.pages FROM lib_books b
+         JOIN lib_series s ON s.id = b.series_id AND ${visible('s', vc(req), pp)}
+        WHERE b.series_id = ${pp.add(id)} ORDER BY b.number ASC, b.file ASC`, pp.values as any[]);
     const entries = books.map((b) => {
       const label = b.title || `Chapter ${b.number}`;
       return `<entry>
@@ -154,7 +172,9 @@ export default async function opdsRoutes(app: FastifyInstance) {
   // download one chapter as a CBZ (streams the file; zips a loose-image folder on the fly)
   app.get('/opds/book/:id/file', async (req, reply) => {
     const { id } = req.params as { id: string };
-    const row = await one<{ file: string; root: string }>('SELECT file, root FROM lib_books WHERE id = $1', [id]);
+    // Streams raw bytes off disk, so it is the same hole the image server had: resolve through the
+    // shared checker rather than a bare id lookup.
+    const row = await visibleBookFile(id, vc(req));
     if (!row) return reply.code(404).send('not found');
     const abs = join(row.root || LIBRARY_ROOT, row.file);
     const st = await stat(abs).catch(() => null);
