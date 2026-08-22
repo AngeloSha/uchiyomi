@@ -175,6 +175,24 @@ export async function pushSeriesProgress(userId: string, seriesId: string): Prom
   const { chapters, finished } = await seriesProgressFor(userId, seriesId);
   if (chapters <= 0) return;
 
+  // Never push a number lower than the last one we sent. AniList takes a lower progress and rewrites the
+  // entry, so a merge, a renumbered chapter or a bulk mark-unread would quietly walk someone's real reading
+  // history backwards on an account this app does not own and cannot repair. Going forward is always safe;
+  // going backwards needs a person to ask for it, which is what the resync endpoint is for.
+  const floor = await one<{ chapters: number }>(
+    `SELECT chapters FROM tracker_progress WHERE user_id = $1 AND series_id = $2 AND provider = 'anilist'`,
+    [userId, seriesId],
+  );
+  if (floor && chapters < floor.chapters) {
+    await markError(
+      userId,
+      'anilist',
+      `not syncing: this series now works out to chapter ${chapters}, below the ${floor.chapters} already sent. ` +
+        'Resync from the series page if the lower number is the correct one.',
+    );
+    return;
+  }
+
   // one lane per user: a burst of completions (a binge, or the backfill) trickles out politely
   await withGate(`tracker:${userId}`, async () => {
     try {
@@ -184,6 +202,14 @@ export async function pushSeriesProgress(userId: string, seriesId: string): Prom
         status: finished ? 'COMPLETED' : 'CURRENT',
       });
       await q(`UPDATE user_trackers SET last_sync_at = now(), last_error = NULL WHERE user_id=$1 AND provider='anilist'`, [userId]);
+      // raise the floor only after the tracker actually accepted it
+      await q(
+        `INSERT INTO tracker_progress (user_id, series_id, provider, chapters, pushed_at)
+         VALUES ($1, $2, 'anilist', $3, now())
+         ON CONFLICT (user_id, series_id, provider)
+           DO UPDATE SET chapters = GREATEST(tracker_progress.chapters, EXCLUDED.chapters), pushed_at = now()`,
+        [userId, seriesId, chapters],
+      );
     } catch (e) {
       const err = e as Error & { authFailed?: boolean };
       // a bad token will fail on every future chapter too — disable it rather than retry forever
@@ -204,4 +230,16 @@ async function markError(userId: string, provider: Provider, msg: string): Promi
 /** Fire-and-forget wrapper used from the reading path — must never delay or fail a page turn. */
 export function pushSeriesProgressAsync(userId: string, seriesId: string): void {
   void pushSeriesProgress(userId, seriesId).catch(() => {});
+}
+
+/**
+ * Forget the high-water mark for one series, so the next push is allowed to go backwards.
+ *
+ * The escape hatch for the case the floor exists to prevent: the tracker is ahead because the old number was
+ * wrong, and the correction is the lower one. Deliberately a separate, explicit action rather than something
+ * that happens automatically, because it is the only way to lower a number on someone's real account.
+ */
+export async function clearTrackerFloor(userId: string, seriesId: string, provider: Provider = 'anilist'): Promise<void> {
+  await q(`DELETE FROM tracker_progress WHERE user_id = $1 AND series_id = $2 AND provider = $3`,
+    [userId, seriesId, provider]);
 }

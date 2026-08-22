@@ -7,7 +7,7 @@ import { content as komga } from '../lib/backend';
 import { authenticate, userIdOf, roleOf, issueOpdsToken, issueApiToken, listApiTokens, revokeApiToken, API_SCOPES } from '../lib/auth';
 import { env } from '../env';
 import { pushEnabled, vapidPublicKey, saveSubscription, removeSubscription } from '../lib/push';
-import { statusFor, saveConnection, disconnect, whoAmI, pushSeriesProgress } from '../lib/trackers';
+import { statusFor, saveConnection, disconnect, whoAmI, pushSeriesProgress, clearTrackerFloor } from '../lib/trackers';
 import { logAudit } from '../lib/audit';
 
 function computeStreaks(days: string[]): { current: number; longest: number } {
@@ -383,6 +383,21 @@ export default async function personalRoutes(app: FastifyInstance) {
     );
     void (async () => { for (const r of rows) await pushSeriesProgress(uid, r.series_id).catch(() => {}); })();
     return { ok: true, series: rows.length };
+  });
+
+  // Allow the next push for one series to go DOWN.
+  //
+  // Progress is otherwise monotonic, because AniList accepts a lower number and rewrites the entry with no
+  // undo. That is the right default, but it is wrong in one case: the tracker is ahead because the old
+  // chapter number was wrong and the correction is the smaller one. Lowering a number on someone's real
+  // account should be a deliberate act, so it is this route and not a side effect of anything else.
+  app.post('/api/trackers/:provider/resync/:seriesId', async (req, reply) => {
+    const { provider, seriesId } = req.params as { provider: string; seriesId: string };
+    if (provider !== 'anilist') return reply.code(400).send({ error: 'unknown_provider' });
+    const uid = userIdOf(req);
+    await clearTrackerFloor(uid, seriesId);
+    await pushSeriesProgress(uid, seriesId).catch(() => {});
+    return { ok: true };
   });
 
   app.get('/api/settings', async (req) => {

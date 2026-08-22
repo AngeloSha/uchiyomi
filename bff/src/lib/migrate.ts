@@ -308,6 +308,25 @@ CREATE TABLE IF NOT EXISTS series_trackers (
 
 -- admin-editable per-series metadata + art overrides
 -- cover/banner: 'upload' = a file under <CONFIG_DIR>/series-art; an http(s) URL = pasted; null = use automatic art
+CREATE TABLE IF NOT EXISTS tracker_progress (
+  user_id   uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  series_id text NOT NULL,
+  provider  text NOT NULL,
+  chapters  int  NOT NULL,
+  pushed_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (user_id, series_id, provider)
+);
+-- The high-water mark we have already told a tracker about, per user and series.
+--
+-- AniList accepts a LOWER progress and rewrites the entry, and there is no undo from here. So anything that
+-- reduces MAX(number) FILTER (completed) silently rewinds someone's real account: merging two series,
+-- renumbering a chapter, a bulk mark-unread. seriesProgressFor already refuses to go backwards *within* one
+-- reading session, but nothing stopped the underlying number from dropping.
+--
+-- Progress therefore only ever moves forward unless a human explicitly asks for a resync. The FK is declared
+-- inline and VALID from birth rather than NOT VALID like its neighbours, because a table created empty
+-- cannot have orphans to quarantine.
+
 CREATE TABLE IF NOT EXISTS series_overrides (
   series_id  text PRIMARY KEY,
   title      text,
