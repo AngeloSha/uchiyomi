@@ -20,7 +20,13 @@
 #   DB_PASSWORD=...                  only used inside the private network; the DB has no published port
 #   PUBLIC_ORIGIN=https://manga.example.com   set this if you put it behind a reverse proxy
 #   BACKUP_PATH=/mnt/backups/uchiyomi   where nightly backups go — ideally a different disk than your Docker
-#                                       volumes, so a dead drive doesn't take the backups with it
+#                                       volumes, so a dead drive doesn't take the backups with it.
+#                                       IF YOU SET THIS to a host path, create it and give it to uid 10002
+#                                       first, or backups fail silently — Docker makes a bind mount
+#                                       root-owned and the app does not run as root:
+#                                         sudo mkdir -p /mnt/backups/uchiyomi
+#                                         sudo chown 10002:10002 /mnt/backups/uchiyomi
+#                                       (named volumes, the default, need none of this)
 #   SOURCES_PATH=/path/to/sources/dist  a built source pack, mounted read-only (optional; none by default)
 #   VAPID_PUBLIC_KEY= / VAPID_PRIVATE_KEY= / VAPID_SUBJECT=   enable web push (see docs/USAGE.md)
 

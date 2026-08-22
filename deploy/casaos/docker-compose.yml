@@ -96,7 +96,7 @@ x-casaos:
   title:
     en_US: Uchiyomi
   tagline:
-    en_US: The all-in-one *arr stack for manga
+    en_US: A self-hosted manga and manhwa reader that also keeps up with new chapters
   description:
     en_US: |
       Uchiyomi is a self-hosted manga and manhwa reader that also fetches new chapters — the whole pipeline

@@ -21,13 +21,15 @@ SHOT_USER=shotbot
 OUT_PNG=$(mktemp -d)
 OUT_WEBP="$REPO/docs/shots"
 ONLY=""; YES=0; SITE=""; RECORD=0
-SITE_DIR=${SITE_DIR:-/opt/compose/koryomi/site/assets/shots}
+SITE_DIR=${SITE_DIR:-}     # only for --site: where to ALSO publish shots (a marketing site checkout)
 
 while [ $# -gt 0 ]; do
   case "$1" in
     --only) ONLY="$2"; shift 2 ;;
     --yes|-y) YES=1; shift ;;
-    --site) SITE="$SITE_DIR"; shift ;;
+    --site)
+      [ -n "$SITE_DIR" ] || { echo "--site needs SITE_DIR=<path> (or use --site-dir <path>)" >&2; exit 1; }
+      SITE="$SITE_DIR"; shift ;;
     --record) RECORD=1; shift ;;
     --site-dir) SITE="$2"; shift 2 ;;
     *) echo "unknown option: $1" >&2; exit 2 ;;
@@ -89,7 +91,7 @@ if [ "$RECORD" = "1" ]; then
     -v "$OUT_PNG":/out -v "$REPO/scripts/shots":/home/pptruser/shots:ro \
     ghcr.io/puppeteer/puppeteer:latest node /home/pptruser/shots/record.mjs
 
-  DEMO="${DEMO_DIR:-/opt/compose/koryomi/site/assets/demo}"
+  DEMO="${DEMO_DIR:-"$REPO/docs/shots"}"   # set DEMO_DIR= to also drop the video on a marketing site
   mkdir -p "$DEMO"
   F="$OUT_PNG/frames"
   echo "· encoding"

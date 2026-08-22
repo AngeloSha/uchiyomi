@@ -1,6 +1,6 @@
 # Uchiyomi
 
-*The all-in-one **\*arr stack** for manga: discover, grab, monitor, and read, self-hosted in one PWA.*
+*A self-hosted manga and manhwa reader that also keeps up with new chapters: one installable PWA, true-black OLED, webtoon-first.*
 
 [![CI](https://github.com/AngeloSha/uchiyomi/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/AngeloSha/uchiyomi/actions/workflows/ci.yml)
 [![Latest release](https://img.shields.io/github/v/release/AngeloSha/uchiyomi?label=release&color=7c5cff)](https://github.com/AngeloSha/uchiyomi/releases/latest)
@@ -142,10 +142,10 @@ Suwayomi) fetches chapters but is Android-only or wraps them in a basic web UI. 
 | --- | :---: | :---: | :---: | :---: |
 | Self-hosted, multi-user server | ✅ | ✅ | ❌ *(Android app)* | ✅ |
 | Fetches new chapters from sources | ✅ | ❌ *(you supply files)* | ✅ | ✅ |
-| OLED design + webtoon-first reader | ✅ | basic | mobile | basic |
+| Webtoon-first reader (continuous vertical scroll) | ✅ | paged-first | ✅ *(Android)* | paged-first |
 | Installable PWA + offline, any device | ✅ | partial | Android only | partial |
 | Per-user progress + household | ✅ | ✅ | ❌ | limited |
-| 2FA · lockout · audit · sessions | ✅ | basic | ❌ | ❌ |
+| 2FA · lockout · audit log · session management | ✅ | partial | ❌ | ❌ |
 | Add a source by pasting a URL | ✅ | — | extensions | extension repos |
 | Syncs progress to AniList | ✅ | Kavita+, paid | ✅ | ✅ |
 | Automatic nightly backups | ✅ | ❌ | ❌ | ❌ |
@@ -154,8 +154,13 @@ Suwayomi) fetches chapters but is Android-only or wraps them in a basic web UI. 
 | Single sign-on (OIDC) | ✅ | ✅ | ❌ | ❌ |
 | Reaches Mihon's extensions | ✅ | ❌ | ✅ | ✅ |
 
-**Honest caveats.** Komga and Kavita are further along at managing a library: Uchiyomi edits two metadata fields
-(title and summary), never writes back to your files, and can't delete, rename or merge anything. It reads
+<sub>Compiled 2026-08-22 from each project's own docs. These projects move fast and I do not run all of them
+daily — if a row is wrong or out of date, [open an issue](https://github.com/AngeloSha/uchiyomi/issues) and I
+will fix it.</sub>
+
+**Honest caveats.** Komga and Kavita are further along at managing a library. Uchiyomi edits titles and
+summaries, and can hide, restore and merge series, but it does all of that in its own database and **never
+writes back to your files** — it will not rename, move or delete anything on disk. It reads
 **CBZ, CBR and loose image folders**, and skips PDF/EPUB *on purpose* — those are ebook formats, and this is
 built for image-based manga. Extensions don't run natively either: they run in a second container
 ([Suwayomi](docs/extensions.md), and a JVM's worth of memory), and you paste a repository URL once, exactly as
@@ -252,8 +257,12 @@ database migrates itself on boot.
 >
 > ```bash
 > docker compose down
-> docker volume ls | grep uchiyomi        # confirm the names, they are prefixed by your folder
-> docker run --rm -v uchiyomi_config:/a -v uchiyomi_downloads:/b alpine chown -R 10002:10002 /a /b
+> # derive the real volume names -- they are prefixed with your folder, and naming them by hand is
+> # how you end up chowning a brand new empty volume while the real one stays broken
+> CFG=$(docker volume ls -q | grep -E '_?uchiyomi_config$')
+> DL=$(docker volume ls -q | grep -E '_?uchiyomi_downloads$')
+> echo "fixing: $CFG $DL"          # both must be non-empty before you run the next line
+> docker run --rm -v "$CFG":/a -v "$DL":/b alpine chown -R 10002:10002 /a /b
 > docker compose up -d
 > ```
 
