@@ -218,16 +218,86 @@ export const DL_ROOT = process.env.DL_ROOT || '/library-dl';
  * lib_books. Each book records the root it lives in so the image server can resolve it. Page counts fill
  * lazily on first read. books_count + latest_mtime are recomputed across roots at the end.
  */
-/** Every `<source>/<series>` folder that exists under either root right now. */
+// How deep below a root we walk. Two levels is what shipped, and is what every existing lib_series.folder
+// was minted from, so the walk has to reach at least that far. Six covers the layouts people actually have
+// (Comics/Manga/Author/Series is four) without turning a LIBRARY_PATH accidentally pointed at / into an
+// all-night crawl. Set LIBRARY_MAX_DEPTH=2 to reproduce the old behaviour exactly.
+const MAX_DEPTH = Number(process.env.LIBRARY_MAX_DEPTH) || 6;
+const MAX_DIRS = 200_000; // a pathological mount stops the scan rather than the process
+
+// Never library content. @eaDir is the one that matters: Synology fills it with generated thumbnails, and
+// listChapters() already counts it as a chapter folder, so today every series on a Synology has a phantom
+// "@eaDir" chapter. Recursing would promote that from one bad chapter to one bad series.
+const SKIP_DIR = /^(?:\.|@eaDir$|#recycle$|lost\+found$|__MACOSX$|\$RECYCLE\.BIN$|System Volume Information$)/i;
+
+export interface FoundSeries {
+  /** posix, relative to the root, no leading or trailing slash */
+  folderRel: string;
+  folderAbs: string;
+  /** the segment directly ABOVE the series folder; 'Library' when the series sits at the root */
+  source: string;
+  /** basenames, exactly what listChapters returned */
+  chapters: string[];
+}
+
+/**
+ * Every directory under `root` that IS a series.
+ *
+ * A directory is a series when it DIRECTLY contains chapters. Depth is irrelevant, which is the whole point:
+ * Comics/Manga/Author/Series/ch1.cbz works, and so does the Series/ch1.cbz layout the docs described for two
+ * releases while the scanner silently required a grouping level above it.
+ *
+ * Two invariants keep this byte-compatible with the two-level walk it replaces. `folder` is the natural key
+ * a series id hangs off, so breaking either would re-mint every id on every install and strand everyone's
+ * reading progress on rows nothing points at:
+ *
+ *   1. folderRel is the path relative to the root, '/'-joined. At depth 2 that is character for character
+ *      the old two-level `<level 1>/<level 2>`.
+ *   2. source is the segment directly above the series folder, which at depth 2 IS the level-1 directory,
+ *      i.e. exactly the level-1 directory the old walk used as `source`.
+ *
+ * A directory already claimed as a chapter is never descended into: an "extras" folder nested inside a
+ * loose-image chapter would otherwise become a series and count those pages twice.
+ */
+async function findSeriesDirs(root: string): Promise<FoundSeries[]> {
+  const out: FoundSeries[] = [];
+  const seenInode = new Set<string>(); // symlink loop guard: `ln -s .. current` is not hypothetical on a NAS
+  let visited = 0;
+
+  const walk = async (abs: string, rel: string, depth: number): Promise<void> => {
+    if (depth > MAX_DEPTH || visited >= MAX_DIRS) return;
+    visited++;
+
+    // stat, not lstat: a symlinked library directory should still work. We follow it once, then decline.
+    const st = await stat(abs).catch(() => null);
+    if (!st) return;
+    const key = `${st.dev}:${st.ino}`;
+    if (seenInode.has(key)) return;
+    seenInode.add(key);
+
+    const chapters = await listChapters(abs);
+    if (chapters.length) {
+      // Chapters win: this directory is a series, and we do not descend. Its chapter subfolders are
+      // chapters, not series.
+      if (rel) out.push({ folderRel: rel, folderAbs: abs, source: rel.split('/').slice(-2, -1)[0] || 'Library', chapters });
+      return;
+    }
+
+    for (const e of await readdir(abs, { withFileTypes: true }).catch(() => [])) {
+      if (!e.isDirectory() || SKIP_DIR.test(e.name)) continue;
+      await walk(join(abs, e.name), rel ? `${rel}/${e.name}` : e.name, depth + 1);
+    }
+  };
+
+  await walk(root, '', 0);
+  return out;
+}
+
+/** Every series folder that exists under either root right now, at any depth. */
 async function foldersOnDisk(): Promise<string[]> {
   const out: string[] = [];
   for (const root of [LIBRARY_ROOT, DL_ROOT]) {
-    for (const src of await readdir(root, { withFileTypes: true }).catch(() => [])) {
-      if (!src.isDirectory()) continue;
-      for (const sd of await readdir(join(root, src.name), { withFileTypes: true }).catch(() => [])) {
-        if (sd.isDirectory()) out.push(`${src.name}/${sd.name}`);
-      }
-    }
+    for (const f of await findSeriesDirs(root)) out.push(f.folderRel);
   }
   return out;
 }
@@ -293,16 +363,8 @@ export async function persistScan(): Promise<{ series: number; books: number; ms
   // must never be offered as the answer for a different folder.
   const onDisk = await foldersOnDisk();
   for (const root of [LIBRARY_ROOT, DL_ROOT]) {
-    const sources = await readdir(root, { withFileTypes: true }).catch(() => []);
-    for (const src of sources) {
-      if (!src.isDirectory()) continue;
-      const seriesDirs = await readdir(join(root, src.name), { withFileTypes: true }).catch(() => []);
-      for (const sd of seriesDirs) {
-        if (!sd.isDirectory()) continue;
-        const folderRel = `${src.name}/${sd.name}`;
-        const folderAbs = join(root, src.name, sd.name);
-        const files = await listChapters(folderAbs); // .cbz/.cbr files + loose image folders
-        if (!files.length) continue;
+    for (const found of await findSeriesDirs(root)) {
+      const { folderRel, folderAbs, source: srcName, chapters: files } = found;
 
         // One folder per transaction: a half-applied folder is a corrupt library, not a stale one.
         // A folder can already be spoken for in ways the scanner must respect, or delete and merge both
@@ -343,7 +405,7 @@ export async function persistScan(): Promise<{ series: number; books: number; ms
                  scanned_at=now()
                RETURNING id`,
               [
-                newSeriesId(), src.name, field(firstXml, 'Series') || sd.name, cleanSummary(field(firstXml, 'Summary')),
+                newSeriesId(), srcName, field(firstXml, 'Series') || folderRel.split('/').pop()!, cleanSummary(field(firstXml, 'Summary')),
                 field(firstXml, 'Writer'), cleanStatus(field(firstXml, 'PublishingStatusTachiyomi') || field(firstXml, 'PublishingStatus')),
                 (field(firstXml, 'Genre') || '').split(',').map((s) => s.trim()).filter(Boolean),
                 field(firstXml, 'Web'), folderRel, files.length,
@@ -360,7 +422,7 @@ export async function persistScan(): Promise<{ series: number; books: number; ms
             const st = await stat(join(folderAbs, f)).catch(() => null);
             const b = params.length;
             tuples.push(`($${b + 1},$${b + 2},$${b + 3},$${b + 4},$${b + 5},$${b + 6},$${b + 7},$${b + 8})`);
-            params.push(newBookId(), id, src.name, rel, numFromName(f), f.replace(/\.(cbz|cbr|zip|rar)$/i, ''), st ? Math.floor(st.mtimeMs) : 0, root);
+            params.push(newBookId(), id, srcName, rel, numFromName(f), f.replace(/\.(cbz|cbr|zip|rar)$/i, ''), st ? Math.floor(st.mtimeMs) : 0, root);
             nBooks++;
           }
           // Conflict on (root, file) for the same reason: an existing book keeps its id, and the same
@@ -384,7 +446,6 @@ export async function persistScan(): Promise<{ series: number; books: number; ms
           return id;
         });
         void seriesId;
-      }
     }
   }
   await q(`UPDATE lib_series s SET books_count = c.n, latest_mtime = COALESCE(c.mt, 0)
