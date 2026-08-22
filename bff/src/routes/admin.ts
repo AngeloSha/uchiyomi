@@ -327,6 +327,50 @@ export default async function adminRoutes(app: FastifyInstance) {
     return { ok: true };
   });
 
+  /**
+   * Correct one chapter's number or title.
+   *
+   * Chapter numbers are parsed out of filenames by numFromName(), which takes the first number it finds, so
+   * "Vol 2 Ch 5.cbz" is chapter 2. That misorders the reader and is what gets reported to a tracker.
+   *
+   * Deliberately one chapter at a time. A bulk re-parse with a smarter rule would renumber hundreds at once,
+   * and every renumbered chapter that is already COMPLETED changes what AniList is told. The response
+   * reports how many people have finished this chapter so the UI can say so before the change is made
+   * rather than after.
+   */
+  app.put('/api/admin/books/:id/meta', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const b = z.object({
+      number: z.number().min(0).max(100000).nullish(),
+      title: z.string().max(300).nullish(),
+    }).safeParse(req.body);
+    if (!b.success) return reply.code(400).send({ error: 'bad_request' });
+
+    const book = await one<{ number: number }>('SELECT number FROM lib_books WHERE id = $1', [id]);
+    if (!book) return reply.code(404).send({ error: 'not_found' });
+
+    const title = (b.data.title ?? '').trim() || null;
+    const number = b.data.number ?? null;
+    if (number == null && title == null) {
+      await q('DELETE FROM book_overrides WHERE book_id = $1', [id]);
+    } else {
+      await q(
+        `INSERT INTO book_overrides (book_id, number, title, updated_at) VALUES ($1, $2, $3, now())
+         ON CONFLICT (book_id) DO UPDATE SET number = $2, title = $3, updated_at = now()`,
+        [id, number, title],
+      );
+    }
+    const affected = await one<{ n: number }>(
+      'SELECT count(*)::int n FROM read_progress WHERE book_id = $1 AND completed', [id],
+    );
+    await logAudit('book.meta_override', {
+      userId: userIdOf(req),
+      detail: { id, from: book.number, to: number, title },
+      req,
+    });
+    return { ok: true, affectedUsers: affected?.n ?? 0 };
+  });
+
   // Set/replace a cover or background: paste a URL, upload an image (base64 data URL), or reset to automatic.
   app.put('/api/admin/series/:id/art', { bodyLimit: 12 * 1024 * 1024 }, async (req, reply) => {
     const { id } = req.params as { id: string };

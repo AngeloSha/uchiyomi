@@ -241,12 +241,13 @@ export default async function catalogRoutes(app: FastifyInstance) {
                          ORDER BY p.updated_at DESC LIMIT 1),
                       -- otherwise the lowest-numbered chapter you have not finished
                       (SELECT b.id FROM lib_books b
+                         LEFT JOIN book_overrides bo ON bo.book_id = b.id
                          WHERE b.series_id = r.series_id
                            AND NOT EXISTS (
                              SELECT 1 FROM read_progress p2
                               WHERE p2.user_id = $1 AND p2.book_id = b.id AND p2.completed
                            )
-                         ORDER BY b.number ASC, b.file ASC LIMIT 1)
+                         ORDER BY COALESCE(bo.number, b.number) ASC, b.file ASC LIMIT 1)
                     ) AS book_id
                FROM recent r
            )

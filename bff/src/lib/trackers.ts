@@ -131,10 +131,13 @@ const SAVE = `mutation($mediaId:Int,$progress:Int,$status:MediaListStatus){
  */
 export async function seriesProgressFor(userId: string, seriesId: string): Promise<{ chapters: number; finished: boolean }> {
   const prog = await one<{ chapters: number; total: number; done: number }>(
-    `SELECT COALESCE(MAX(b.number) FILTER (WHERE rp.completed), 0)::int AS chapters,
+    // COALESCE the override: if an admin corrected "Vol 2 Ch 5" from chapter 2 to chapter 5, the tracker
+    // has to be told 5, or it disagrees with the number the reader is showing the user.
+    `SELECT COALESCE(MAX(COALESCE(ov.number, b.number)) FILTER (WHERE rp.completed), 0)::int AS chapters,
             count(*)::int AS total,
             count(*) FILTER (WHERE rp.completed)::int AS done
        FROM lib_books b
+       LEFT JOIN book_overrides ov ON ov.book_id = b.id
        LEFT JOIN read_progress rp ON rp.book_id = b.id AND rp.user_id = $2
       WHERE b.series_id = $1`,
     [seriesId, userId],

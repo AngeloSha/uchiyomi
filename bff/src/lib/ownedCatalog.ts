@@ -33,6 +33,18 @@ const SERIES_SRC = `(
    WHERE s.deleted_at IS NULL AND s.merged_into IS NULL
 ) sv`;
 
+/**
+ * The one place a chapter is read from, so an override applies everywhere at once: the chapter list, reading
+ * order, next/previous, the OPDS feed and what the tracker is told. Mirrors SERIES_SRC.
+ */
+const BOOKS_SRC = `(
+  SELECT b.id, b.series_id, b.source, b.file, b.root, b.pages, b.mtime, b.published_at, b.page_dims,
+         b.updated_at, b.fingerprint,
+         COALESCE(ov.number, b.number) AS number,
+         COALESCE(ov.title,  b.title)  AS title
+    FROM lib_books b LEFT JOIN book_overrides ov ON ov.book_id = b.id
+) bv`;
+
 /** The overridden title for one series, for the book DTOs that carry seriesTitle. */
 const SERIES_TITLE_SQL = 'COALESCE(o.title, s.title)';
 const SERIES_TITLE_JOIN = 'JOIN lib_series s ON s.id = %col% LEFT JOIN series_overrides o ON o.series_id = s.id';
@@ -162,12 +174,12 @@ export const owned = {
     const dir = /desc/i.test(sort) ? 'DESC' : 'ASC';
     const st = (await one<{ title: string }>(`SELECT title FROM ${SERIES_SRC} WHERE id = $1`, [id]))?.title ?? '';
     const t = (await one<{ c: number }>('SELECT count(*)::int AS c FROM lib_books WHERE series_id = $1', [id]))?.c ?? 0;
-    const rows = await q(`SELECT * FROM lib_books WHERE series_id = $1 ORDER BY number ${dir}, file ${dir} LIMIT $2 OFFSET $3`, [id, size, p * size]);
+    const rows = await q(`SELECT * FROM ${BOOKS_SRC} WHERE series_id = $1 ORDER BY number ${dir}, file ${dir} LIMIT $2 OFFSET $3`, [id, size, p * size]);
     return page(rows.map((r) => bookDto({ ...r, series_title: st })), t, p, size);
   },
 
   book: async (id: string) => {
-    const r = await one(`SELECT b.*, ${SERIES_TITLE_SQL} AS series_title FROM lib_books b ${SERIES_TITLE_JOIN.replace('%col%', 'b.series_id')} WHERE b.id = $1`, [id]);
+    const r = await one(`SELECT b.*, ${SERIES_TITLE_SQL} AS series_title FROM ${BOOKS_SRC.replace('bv', 'b')} ${SERIES_TITLE_JOIN.replace('%col%', 'b.series_id')} WHERE b.id = $1`, [id]);
     if (!r) throw Object.assign(new Error('book not found'), { statusCode: 404 });
     return bookDto(r);
   },
@@ -186,18 +198,24 @@ export const owned = {
     return dims.map((p, i) => ({ number: i + 1, fileName: p.name, mediaType: mediaType(p.name), width: p.width, height: p.height, sizeBytes: null }));
   },
 
+  // Next/previous compare (number, file) rather than number alone. Two chapters legitimately share a
+  // number -- a duplicate that merge deliberately keeps, or a manual renumber -- and comparing the number
+  // by itself then makes "next" arbitrary, and can hand back the chapter you are already reading.
+  // The tuple matches the ORDER BY number, file used everywhere else, so the reader walks one order.
   bookNext: async (id: string) => {
-    const b = await one<{ series_id: string; number: number }>('SELECT series_id, number FROM lib_books WHERE id = $1', [id]);
+    const b = await one<{ series_id: string; number: number; file: string }>(
+      `SELECT series_id, number, file FROM ${BOOKS_SRC} WHERE id = $1`, [id]);
     if (!b) throw Object.assign(new Error('not found'), { statusCode: 404 });
-    const n = await one(`SELECT bk.*, ${SERIES_TITLE_SQL} AS series_title FROM lib_books bk ${SERIES_TITLE_JOIN.replace('%col%', 'bk.series_id')} WHERE bk.series_id = $1 AND bk.number > $2 ORDER BY bk.number ASC LIMIT 1`, [b.series_id, b.number]);
+    const n = await one(`SELECT bk.*, ${SERIES_TITLE_SQL} AS series_title FROM ${BOOKS_SRC.replace('bv', 'bk')} ${SERIES_TITLE_JOIN.replace('%col%', 'bk.series_id')} WHERE bk.series_id = $1 AND (bk.number, bk.file) > ($2, $3) ORDER BY bk.number ASC, bk.file ASC LIMIT 1`, [b.series_id, b.number, b.file]);
     if (!n) throw Object.assign(new Error('no next'), { statusCode: 404 });
     return bookDto(n);
   },
 
   bookPrevious: async (id: string) => {
-    const b = await one<{ series_id: string; number: number }>('SELECT series_id, number FROM lib_books WHERE id = $1', [id]);
+    const b = await one<{ series_id: string; number: number; file: string }>(
+      `SELECT series_id, number, file FROM ${BOOKS_SRC} WHERE id = $1`, [id]);
     if (!b) throw Object.assign(new Error('not found'), { statusCode: 404 });
-    const n = await one(`SELECT bk.*, ${SERIES_TITLE_SQL} AS series_title FROM lib_books bk ${SERIES_TITLE_JOIN.replace('%col%', 'bk.series_id')} WHERE bk.series_id = $1 AND bk.number < $2 ORDER BY bk.number DESC LIMIT 1`, [b.series_id, b.number]);
+    const n = await one(`SELECT bk.*, ${SERIES_TITLE_SQL} AS series_title FROM ${BOOKS_SRC.replace('bv', 'bk')} ${SERIES_TITLE_JOIN.replace('%col%', 'bk.series_id')} WHERE bk.series_id = $1 AND (bk.number, bk.file) < ($2, $3) ORDER BY bk.number DESC, bk.file DESC LIMIT 1`, [b.series_id, b.number, b.file]);
     if (!n) throw Object.assign(new Error('no previous'), { statusCode: 404 });
     return bookDto(n);
   },

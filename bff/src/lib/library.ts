@@ -405,6 +405,10 @@ export async function setBookDates(folder: string, chapters: { number: number; p
     params.push(c.number, c.publishedAt);
     values.push(`($${params.length - 1}::real, $${params.length}::timestamptz)`);
   }
+  // Matches the RAW lib_books.number on purpose, never the override. These numbers came from the source's
+  // own chapter list and line up with what was parsed out of the filename it gave us. A manual correction
+  // is about how a chapter is presented to the reader, not about which remote chapter this file is, so
+  // honouring it here would stop release dates matching at all.
   await q(
     `UPDATE lib_books b SET published_at = v.p
      FROM (VALUES ${values.join(',')}) AS v(n, p), lib_series s

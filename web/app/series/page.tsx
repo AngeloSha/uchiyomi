@@ -242,12 +242,72 @@ function StarRating({ value, onSet }: { value: number | null; onSet: (n: number)
   );
 }
 
-function ChapterRow({ book, downloaded, onReader, onToggleDownload, onMark }: {
+/**
+ * Correct one chapter's number or title.
+ *
+ * Numbers come from the filename via the first number found in it, so "Vol 2 Ch 5.cbz" reads as chapter 2:
+ * it sorts between 1 and 3, and 2 is what gets reported to a connected tracker. This is the escape hatch.
+ * The affected-users warning matters because renumbering a chapter someone has finished changes the number
+ * their AniList account gets told.
+ */
+function ChapterEditModal({ book, onClose, onSaved }: { book: Book; onClose: () => void; onSaved: () => void }) {
+  const toast = useToast();
+  const [number, setNumber] = useState(String(book.number ?? ''));
+  const [title, setTitle] = useState(book.metadata?.title || book.name || '');
+  const [busy, setBusy] = useState(false);
+  const completed = !!book.readProgress?.completed;
+
+  const save = async (reset = false) => {
+    const n = reset ? null : Number(number);
+    if (!reset && !Number.isFinite(n)) { toast('Chapter number must be a number', 'error'); return; }
+    setBusy(true);
+    try {
+      const r = await api<{ affectedUsers: number }>(`/api/admin/books/${book.id}/meta`, {
+        method: 'PUT',
+        json: reset ? { number: null, title: null } : { number: n, title },
+      });
+      toast(r.affectedUsers > 0 ? `Saved. ${r.affectedUsers} reader(s) had finished this chapter.` : 'Saved', 'success');
+      onSaved();
+      onClose();
+    } catch (e) { toast(msgOf(e, 'Could not save'), 'error'); }
+    setBusy(false);
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-ink-950/70 p-4 backdrop-blur-sm" onClick={onClose}>
+      <div className="glass w-full max-w-sm rounded-2xl border border-ink-700 p-5" onClick={(e) => e.stopPropagation()}>
+        <div className="mb-3 flex items-start justify-between gap-3">
+          <h3 className="font-display text-lg font-semibold leading-tight">Edit chapter</h3>
+          <button onClick={onClose} className="shrink-0 text-fog-500 hover:text-fog-200">✕</button>
+        </div>
+        <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-fog-500">Chapter number</label>
+        <input value={number} onChange={(e) => setNumber(e.target.value)} inputMode="decimal" className={fld} />
+        <label className="mb-1 mt-3 block text-xs font-semibold uppercase tracking-wider text-fog-500">Title</label>
+        <input value={title} onChange={(e) => setTitle(e.target.value)} className={fld} />
+        {completed && (
+          <p className="mt-3 rounded-lg border border-amber-500/30 bg-amber-500/10 p-2.5 text-[11px] leading-relaxed text-amber-200">
+            You have finished this chapter. Changing its number changes what gets reported to a connected
+            tracker. Progress never moves backwards on its own, so if the new number is lower you will need
+            to resync that series deliberately.
+          </p>
+        )}
+        <div className="mt-4 flex gap-2">
+          <button onClick={() => save(true)} disabled={busy} className="btn-ghost flex-1 py-2 text-sm disabled:opacity-50">Reset to file</button>
+          <button onClick={() => save()} disabled={busy} className="btn-accent flex-1 py-2 text-sm disabled:opacity-50">Save</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ChapterRow({ book, downloaded, onReader, onToggleDownload, onMark, onEdit }: {
   book: Book;
   downloaded: boolean;
   onReader: () => void;
   onToggleDownload: () => Promise<void>;
   onMark: (mode: 'read' | 'unread' | 'previous') => void;
+  /** admin only: opens the number/title editor. Absent for everyone else. */
+  onEdit?: () => void;
 }) {
   const [busy, setBusy] = useState(false);
   const [menu, setMenu] = useState(false);
@@ -301,6 +361,12 @@ function ChapterRow({ book, downloaded, onReader, onToggleDownload, onMark }: {
                 className="block w-full px-3.5 py-2.5 text-left text-xs text-fog-200 hover:bg-ink-800">
                 Mark previous as read
               </button>
+              {onEdit && (
+                <button onClick={() => { setMenu(false); onEdit(); }}
+                  className="block w-full border-t border-ink-800 px-3.5 py-2.5 text-left text-xs text-fog-200 hover:bg-ink-800">
+                  Edit number &amp; title
+                </button>
+              )}
             </div>
           </>
         )}
@@ -315,6 +381,7 @@ function SeriesInner() {
   const qc = useQueryClient();
   const toast = useToast();
   const { isAdmin } = useAuth();
+  const [editChapter, setEditChapter] = useState<Book | null>(null);
   const [editing, setEditing] = useState(false);
   const [collecting, setCollecting] = useState(false);
   const [asc, setAsc] = useState(true);
@@ -558,7 +625,8 @@ function SeriesInner() {
         {chapters.map((b) => (
           <ChapterRow key={b.id} book={b} downloaded={downloaded.has(b.id)}
             onReader={() => router.push(`/reader/?book=${b.id}`)} onToggleDownload={() => toggleDownload(b.id)}
-            onMark={(mode) => markChapter(b, mode)} />
+            onMark={(mode) => markChapter(b, mode)}
+            onEdit={isAdmin ? () => setEditChapter(b) : undefined} />
         ))}
         {!books && Array.from({ length: 8 }).map((_, i) => <div key={i} className="skeleton my-3 h-6 rounded" />)}
       </div>
@@ -638,6 +706,10 @@ function SeriesInner() {
         />
       )}
       {editing && series && <SeriesEditModal id={id} series={series} onClose={() => setEditing(false)} onSaved={() => { for (const k of [['series', id], ['series-books', id], ['home'], ['library']]) qc.invalidateQueries({ queryKey: k }); }} />}
+      {editChapter && (
+        <ChapterEditModal book={editChapter} onClose={() => setEditChapter(null)}
+          onSaved={() => { for (const k of [['series-books', id], ['series', id], ['home']]) qc.invalidateQueries({ queryKey: k }); }} />
+      )}
       {collecting && <CollectionSheet seriesId={id} onClose={() => setCollecting(false)} />}
 
       {(similar?.content?.length ?? 0) > 0 && (

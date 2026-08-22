@@ -308,6 +308,25 @@ CREATE TABLE IF NOT EXISTS series_trackers (
 
 -- admin-editable per-series metadata + art overrides
 -- cover/banner: 'upload' = a file under <CONFIG_DIR>/series-art; an http(s) URL = pasted; null = use automatic art
+CREATE TABLE IF NOT EXISTS book_overrides (
+  book_id    text PRIMARY KEY REFERENCES lib_books(id) ON DELETE CASCADE,
+  number     real,
+  title      text,
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+-- Chapter number and title are DERIVED, not stored. Title is the filename minus its extension, and number
+-- is numFromName(), which takes the FIRST number it finds. So "Vol 2 Ch 5.cbz" is chapter 2: it sorts
+-- between 1 and 3 in the reader, and 2 is what gets reported to AniList. There is no filename parser that
+-- is right for every collection, so the escape hatch is a manual, per-chapter override.
+--
+-- Deliberately manual. Re-parsing every filename with a smarter rule would silently renumber hundreds of
+-- chapters at once, and a renumbered COMPLETED chapter changes what a tracker is told (see
+-- tracker_progress above for why that direction is dangerous).
+--
+-- Keyed on book id, which is minted per (root, file), so deleting a file and re-adding it elsewhere loses
+-- the override -- exactly as series_overrides loses a series' art. The FK is inline and VALID from birth
+-- rather than NOT VALID like its neighbours, because a table created empty cannot have orphans.
+
 CREATE TABLE IF NOT EXISTS tracker_progress (
   user_id   uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   series_id text NOT NULL,
