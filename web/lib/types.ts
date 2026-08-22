@@ -36,7 +36,10 @@ export interface Series {
   color?: string | null;
   yomi?: UchiyomiFlags;
   artVersion?: number; // bumps when an admin edits the cover/banner → cache-busts the image URLs
-  overrides?: { title: string | null; summary: string | null; cover: string | null; banner: string | null };
+  overrides?: {
+    title: string | null; summary: string | null; cover: string | null; banner: string | null;
+    author: string | null; status: string | null; genres: string[] | null;
+  };
 }
 
 export interface ReadProgress {

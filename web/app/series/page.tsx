@@ -15,6 +15,9 @@ import { ConfirmDialog, msgOf } from '@/components/ConfirmDialog';
 import { useAuth } from '@/lib/auth';
 import { IcChevronLeft, IcHeart, IcStar, IcPlay, IcDownload, IcCheck, IcTrash, IcSliders } from '@/components/icons';
 
+// The four the scanner itself writes from ComicInfo's PublishingStatus. Kept as a suggestion list rather
+// than a hard enum, because a file can carry anything and rejecting it would reject Uchiyomi's own data.
+const STATUSES = ['ONGOING', 'COMPLETED', 'HIATUS', 'CANCELLED'];
 const fld = 'w-full rounded-lg border border-ink-700 bg-ink-900/60 px-3 py-2 text-sm text-fog-100 outline-none transition focus:border-accent/60';
 
 function ArtEditor({ label, kind, busy, onUpload, onSetUrl, onReset }: { label: string; kind: 'cover' | 'banner'; busy: boolean; onUpload: (k: 'cover' | 'banner', f: File) => void; onSetUrl: (k: 'cover' | 'banner', url: string) => void; onReset: (k: 'cover' | 'banner') => void }) {
@@ -40,7 +43,20 @@ function SeriesEditModal({ id, series, onClose, onSaved }: { id: string; series:
   const toast = useToast();
   const [title, setTitle] = useState(series.metadata?.title || series.name || '');
   const [summary, setSummary] = useState(series.metadata?.summary || series.booksMetadata?.summary || '');
+  // Seed from the OVERRIDE where one exists, falling back to the scanned value. Seeding from the scan alone
+  // would show the scanned author while an override was active, and saving would then overwrite the override
+  // with the very value it was created to replace.
+  const [author, setAuthor] = useState(series.overrides?.author ?? series.metadata?.author ?? '');
+  const [status, setStatus] = useState(series.overrides?.status ?? series.metadata?.status ?? '');
+  const [genres, setGenres] = useState<string[]>(series.overrides?.genres ?? series.metadata?.genres ?? []);
+  const [genreDraft, setGenreDraft] = useState('');
   const [busy, setBusy] = useState(false);
+  const addGenre = (raw: string) => {
+    const t = raw.trim().replace(/,$/, '').trim();
+    if (!t || genres.some((g) => g.toLowerCase() === t.toLowerCase())) { setGenreDraft(''); return; }
+    setGenres([...genres, t]);
+    setGenreDraft('');
+  };
   const dataUrlOf = (f: File) => new Promise<string>((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result)); r.onerror = () => rej(new Error('read')); r.readAsDataURL(f); });
   const putArt = async (kind: 'cover' | 'banner', body: Record<string, unknown>) => { await api(`/api/admin/series/${id}/art`, { method: 'PUT', json: { kind, ...body } }); onSaved(); };
   const onUpload = async (kind: 'cover' | 'banner', f: File) => {
@@ -52,7 +68,17 @@ function SeriesEditModal({ id, series, onClose, onSaved }: { id: string; series:
   };
   const onSetUrl = async (kind: 'cover' | 'banner', url: string) => { if (!url.trim()) return; setBusy(true); try { await putArt(kind, { mode: 'url', url: url.trim() }); toast('Updated', 'success'); } catch { toast('Failed — check the URL', 'error'); } setBusy(false); };
   const onReset = async (kind: 'cover' | 'banner') => { setBusy(true); try { await putArt(kind, { mode: 'reset' }); toast('Reset to automatic', 'success'); } catch { toast('Failed', 'error'); } setBusy(false); };
-  const saveText = async () => { setBusy(true); try { await api(`/api/admin/series/${id}/meta`, { method: 'PUT', json: { title, summary } }); toast('Saved', 'success'); onSaved(); } catch (e) { toast(msgOf(e, 'Could not save'), 'error'); } setBusy(false); };
+  // Every field goes on every save. The route writes all five columns, so omitting one would silently
+  // clear its override rather than leave it alone.
+  const saveText = async () => {
+    setBusy(true);
+    try {
+      await api(`/api/admin/series/${id}/meta`, { method: 'PUT', json: { title, summary, author, status, genres } });
+      toast('Saved', 'success');
+      onSaved();
+    } catch (e) { toast(msgOf(e, 'Could not save'), 'error'); }
+    setBusy(false);
+  };
 
   const [autoUpdate, setAutoUpdate] = useState(series.autoUpdate !== false);
   const toggleAuto = async (next: boolean) => {
@@ -94,7 +120,39 @@ function SeriesEditModal({ id, series, onClose, onSaved }: { id: string; series:
         <input value={title} onChange={(e) => setTitle(e.target.value)} className={fld} />
         <label className="mb-1 mt-3 block text-xs font-semibold uppercase tracking-wider text-fog-500">Description</label>
         <textarea value={summary} onChange={(e) => setSummary(e.target.value)} rows={5} className={`${fld} resize-y`} />
-        <button onClick={saveText} disabled={busy} className="btn-accent mt-2 w-full py-2 text-sm disabled:opacity-50">Save title &amp; description</button>
+        <label className="mb-1 mt-3 block text-xs font-semibold uppercase tracking-wider text-fog-500">Author</label>
+        <input value={author} onChange={(e) => setAuthor(e.target.value)} className={fld} placeholder="Leave blank to use what the files say" />
+        <label className="mb-1 mt-3 block text-xs font-semibold uppercase tracking-wider text-fog-500">Status</label>
+        <select value={STATUSES.includes(status.toUpperCase()) ? status.toUpperCase() : (status ? '__other' : '')}
+          onChange={(e) => setStatus(e.target.value === '__other' ? status : e.target.value)} className={fld}>
+          <option value="">Use what the files say</option>
+          {STATUSES.map((v) => <option key={v} value={v}>{v.charAt(0) + v.slice(1).toLowerCase()}</option>)}
+          <option value="__other">Something else…</option>
+        </select>
+        {!!status && !STATUSES.includes(status.toUpperCase()) && (
+          <input value={status} onChange={(e) => setStatus(e.target.value)} className={`${fld} mt-2`} placeholder="Status" />
+        )}
+        <label className="mb-1 mt-3 block text-xs font-semibold uppercase tracking-wider text-fog-500">Genres</label>
+        <div className="flex flex-wrap gap-1.5 rounded-lg border border-ink-700 bg-ink-900/60 p-2">
+          {genres.map((g) => (
+            <span key={g} className="inline-flex items-center gap-1 rounded-full bg-ink-800 px-2.5 py-1 text-xs text-fog-200">
+              {g}
+              <button type="button" onClick={() => setGenres(genres.filter((x) => x !== g))}
+                aria-label={`Remove ${g}`} className="text-fog-500 hover:text-rose-400">×</button>
+            </span>
+          ))}
+          <input
+            value={genreDraft}
+            onChange={(e) => (e.target.value.endsWith(',') ? addGenre(e.target.value) : setGenreDraft(e.target.value))}
+            onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addGenre(genreDraft); }
+                                else if (e.key === 'Backspace' && !genreDraft && genres.length) setGenres(genres.slice(0, -1)); }}
+            onBlur={() => addGenre(genreDraft)}
+            placeholder={genres.length ? 'Add…' : 'Action, Fantasy…'}
+            className="min-w-[8rem] flex-1 bg-transparent px-1 py-1 text-sm text-fog-50 outline-none"
+          />
+        </div>
+        <p className="mt-1 text-[11px] text-fog-500">Genres drive Browse and the recommendation rails. Clearing them all means this series genuinely has none.</p>
+        <button onClick={saveText} disabled={busy} className="btn-accent mt-3 w-full py-2 text-sm disabled:opacity-50">Save details</button>
         <div className="mt-4 rounded-xl border border-ink-700 p-3">
           <label className="flex cursor-pointer items-center justify-between gap-3 text-sm">
             <span>

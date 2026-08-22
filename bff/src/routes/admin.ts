@@ -287,13 +287,41 @@ export default async function adminRoutes(app: FastifyInstance) {
 
   app.put('/api/admin/series/:id/meta', async (req, reply) => {
     const { id } = req.params as { id: string };
-    const b = z.object({ title: z.string().max(300).nullish(), summary: z.string().max(8000).nullish() }).safeParse(req.body);
+    // Status is free text with a generous cap rather than an enum: the scanner writes whatever ComicInfo's
+    // PublishingStatus said, so validating against a fixed list here would reject values Uchiyomi itself
+    // produced. The UI offers the four common ones plus an escape hatch.
+    const b = z.object({
+      title: z.string().max(300).nullish(),
+      summary: z.string().max(8000).nullish(),
+      author: z.string().max(300).nullish(),
+      status: z.string().max(60).nullish(),
+      genres: z.array(z.string().min(1).max(60)).max(50).nullish(),
+    }).safeParse(req.body);
     if (!b.success) return reply.code(400).send({ error: 'bad_request' });
     const norm = (v: string | null | undefined) => { const s = (v ?? '').trim(); return s ? s : null; };
+    // Genres are a set, not a string: trim, drop blanks, de-duplicate case-insensitively keeping the first
+    // spelling, preserve order. null means "inherit what was scanned"; [] means "cleared on purpose", and
+    // COALESCE in SERIES_SRC treats those two differently, which is the whole point of the distinction.
+    const normGenres = (v: string[] | null | undefined): string[] | null => {
+      if (v == null) return null;
+      const seen = new Set<string>();
+      const out: string[] = [];
+      for (const g of v) {
+        const t = g.trim();
+        if (!t || seen.has(t.toLowerCase())) continue;
+        seen.add(t.toLowerCase());
+        out.push(t);
+      }
+      return out;
+    };
+    // Every column is written on every call, so the client must send the whole object. The edit modal
+    // already holds all five fields; a partial PUT would silently clear the ones it omitted.
     await q(
-      `INSERT INTO series_overrides (series_id, title, summary, updated_at) VALUES ($1, $2, $3, now())
-       ON CONFLICT (series_id) DO UPDATE SET title = $2, summary = $3, updated_at = now()`,
-      [id, norm(b.data.title), norm(b.data.summary)],
+      `INSERT INTO series_overrides (series_id, title, summary, author, status, genres, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, now())
+       ON CONFLICT (series_id) DO UPDATE SET title = $2, summary = $3, author = $4, status = $5,
+         genres = $6, updated_at = now()`,
+      [id, norm(b.data.title), norm(b.data.summary), norm(b.data.author), norm(b.data.status), normGenres(b.data.genres)],
     );
     await logAudit('series.meta_override', { userId: userIdOf(req), detail: { id }, req });
     return { ok: true };

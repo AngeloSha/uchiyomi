@@ -85,7 +85,7 @@ export default async function opdsRoutes(app: FastifyInstance) {
     if (query?.trim()) { params.push(`%${query.trim()}%`); where = `title ILIKE $${params.length}`; }
     const rows = await q<{ id: string; title: string; summary: string | null; author: string | null; books_count: number }>(
       `SELECT id, title, summary, author, books_count FROM (SELECT s.id, COALESCE(o.title, s.title) AS title, COALESCE(o.summary, s.summary) AS summary,
-                s.author, s.books_count
+                COALESCE(o.author, s.author) AS author, s.books_count
            FROM lib_series s LEFT JOIN series_overrides o ON o.series_id = s.id
           WHERE s.deleted_at IS NULL AND s.merged_into IS NULL) sv WHERE ${where} ORDER BY ${order} LIMIT ${PAGE_SIZE} OFFSET ${p * PAGE_SIZE}`,
       params,

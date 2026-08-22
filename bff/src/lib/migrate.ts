@@ -317,6 +317,16 @@ CREATE TABLE IF NOT EXISTS series_overrides (
   updated_at timestamptz NOT NULL DEFAULT now()
 );
 
+-- Author, status and genres are re-read from ComicInfo and overwritten on EVERY scan by persistScan's
+-- ON CONFLICT (folder) DO UPDATE. There is nowhere in lib_series that a manual edit can survive, so the
+-- override table is the only durable home for one. Title and summary already proved the pattern.
+--
+-- NULL means "no override, use what was scanned". For genres that is deliberately distinct from '{}',
+-- which means "the admin cleared them on purpose" -- COALESCE gives us that distinction for free.
+ALTER TABLE series_overrides ADD COLUMN IF NOT EXISTS author text;
+ALTER TABLE series_overrides ADD COLUMN IF NOT EXISTS status text;
+ALTER TABLE series_overrides ADD COLUMN IF NOT EXISTS genres text[];
+
 -- per-user token for OPDS clients (used as the HTTP Basic password); one token per user, regenerate overwrites
 CREATE TABLE IF NOT EXISTS opds_tokens (
   user_id    uuid PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,

@@ -334,15 +334,20 @@ export default async function catalogRoutes(app: FastifyInstance) {
     );
     const out: any = (await enrichSeries(req, [series]))[0];
     // apply admin metadata overrides (title/summary shown here; cover/banner are handled by the image server)
-    const ov = await one<{ title: string | null; summary: string | null; cover: string | null; banner: string | null; v: string }>(
-      'SELECT title, summary, cover, banner, EXTRACT(EPOCH FROM updated_at) * 1000 AS v FROM series_overrides WHERE series_id = $1',
+    const ov = await one<{ title: string | null; summary: string | null; cover: string | null; banner: string | null;
+                          author: string | null; status: string | null; genres: string[] | null; v: string }>(
+      `SELECT title, summary, cover, banner, author, status, genres,
+              EXTRACT(EPOCH FROM updated_at) * 1000 AS v FROM series_overrides WHERE series_id = $1`,
       [id],
     );
     if (ov) {
       if (ov.title) { out.name = ov.title; if (out.metadata) out.metadata.title = ov.title; }
       if (ov.summary != null) { if (out.metadata) out.metadata.summary = ov.summary; if (out.booksMetadata) out.booksMetadata.summary = ov.summary; }
       out.artVersion = Math.floor(Number(ov.v)) || 0;
-      out.overrides = { title: ov.title, summary: ov.summary, cover: ov.cover, banner: ov.banner };
+      // the edit modal seeds from these, so every overridable field has to come back or a save would
+      // write back a blank and clear the very override the user opened the modal to keep
+      out.overrides = { title: ov.title, summary: ov.summary, cover: ov.cover, banner: ov.banner,
+                        author: ov.author, status: ov.status, genres: ov.genres };
     }
     return out;
   });
