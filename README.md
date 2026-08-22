@@ -250,10 +250,24 @@ you first installed, indefinitely, with nothing to tell you. Watch
 Upgrading in place is safe: accounts, reading progress, downloads and settings live in named volumes, and the
 database migrates itself on boot.
 
-> **Installed before v0.5.1?** Those builds left the `config` and `downloads` volumes owned by root, while the
-> app runs as uid 10002 — so chapter downloads failed, adding a site returned an error, and because the JWT
-> secret could not be saved, **everyone was signed out on every restart**. Newer images create those
-> directories correctly, but Docker never re-seeds a volume that already exists, so fix yours once:
+> **First installed before v0.5.1? Upgrading will not fix this — it needs one manual step.**
+>
+> Docker sets a volume up only at the moment it first creates it. A volume made by an old image keeps the
+> ownership it was born with forever, no matter how many newer images you pull on top. So this is not
+> something v0.6.0 can repair for you.
+>
+> Those old builds left the `config` and `downloads` volumes owned by root while the app runs as uid 10002,
+> so chapter downloads failed, adding a site returned an error, and because the JWT secret could not be
+> saved, **everyone was signed out on every restart**.
+>
+> Installed at v0.5.1 or later? None of this applies — your volumes were created correctly. To check either
+> way, ask the app whether it can write:
+>
+> ```bash
+> docker compose exec uchiyomi-bff sh -c 'touch /config/.probe && echo OK && rm /config/.probe'
+> ```
+>
+> If that prints `OK`, you are fine and can skip the rest. If it errors, fix it once:
 >
 > ```bash
 > docker compose down
