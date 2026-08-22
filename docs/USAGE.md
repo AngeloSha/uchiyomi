@@ -30,8 +30,9 @@ docker compose up -d         # no config needed — secrets are generated automa
 Open the app at your `PUBLIC_ORIGIN` (e.g. `http://localhost:3000`) and **create your admin account in the
 browser** on first run (the first account created becomes the server admin). To read an existing collection,
 point `LIBRARY_PATH` at it first (`cp .env.example .env`, set `LIBRARY_PATH=/path/to/your/manga`, then
-`docker compose up -d`). Your library on disk should be laid out as `<series>/<chapter>`, where each chapter is a
-`.cbz`, a `.cbr`, or a folder of images (an archive may carry a `ComicInfo.xml` for metadata).
+`docker compose up -d`). Your library on disk should be laid out as `<group>/<series>/<chapter>` — two levels below
+the library root — where each chapter is a `.cbz`, a `.cbr`, or a folder of images (an archive may carry a
+`ComicInfo.xml` for metadata). So `Manga/One Piece/Chapter 1.cbz` is found; `One Piece/Chapter 1.cbz` is not.
 
 Prefer a CLI-seeded admin? Run `bash scripts/setup.sh` instead — it generates the secrets, creates the admin from
 a password you type, fixes volume ownership, and starts the five containers (`yomi-web`, `yomi-bff`, `yomi-db`, `yomi-suwayomi`,
@@ -375,7 +376,9 @@ config archive, any admin-uploaded cover art will be missing even though the dat
 ## 13. Troubleshooting & FAQ
 
 **The app loads but my library is empty.** Point `LIBRARY_PATH` at your manga and restart: it mounts read-only at
-`/library` and should be laid out as `<series>/<chapter>`. New or changed files are picked up by the scheduled
+`/library` and must be laid out as `<group>/<series>/<chapter>`, two levels below the root. This is the usual
+cause: a library of series folders sitting directly at the root is scanned and silently found to be empty,
+because the scanner expects a grouping level above the series. Wrap it in one folder and rescan. New or changed files are picked up by the scheduled
 scan; you can also force a rescan from the admin panel, or restart the stack.
 
 **I never set an admin password / can't sign in.** If no users exist yet, just open the app and the first-run

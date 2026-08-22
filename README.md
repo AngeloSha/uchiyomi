@@ -185,8 +185,11 @@ household, with webtoons first-class.
 
 ## Install
 
-**Requirements:** Docker + Docker Compose, and a manga library on disk laid out as `<series>/<chapter>`, where
-each chapter is a `.cbz`, a `.cbr`, or a folder of images (an archive may carry a `ComicInfo.xml` for metadata).
+**Requirements:** Docker + Docker Compose, and a manga library on disk laid out as `<group>/<series>/<chapter>`,
+where each chapter is a `.cbz`, a `.cbr`, or a folder of images (an archive may carry a `ComicInfo.xml` for
+metadata). The top level is a grouping folder, so `Manga/One Piece/Chapter 1.cbz` works while
+`One Piece/Chapter 1.cbz` on its own does not: the scanner reads exactly two levels below the library root.
+If your collection is nested differently, move it or add a wrapping folder for now.
 Everything else runs in containers: no Node, no database, nothing to install on the host.
 
 Grab one file and start it — this pulls prebuilt **multi-arch images (amd64 + arm64)**, so there's nothing to

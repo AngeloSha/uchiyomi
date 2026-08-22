@@ -18,7 +18,7 @@ import { listExtensions, refreshExtensions, setExtensionState, sourcesOfExtensio
 import { readFile, writeFile, mkdir, rm } from 'fs/promises';
 import { dirname } from 'path';
 import sharp from 'sharp';
-import { ART_DIR, artFile } from '../lib/seriesArt';
+import { ART_DIR, artFile, artOverview } from '../lib/seriesArt';
 import { addSeriesFromSource, findBestMatch, norm } from './sources';
 import { titlesFromBackup } from '../lib/tachibk';
 import { linkSeries } from '../lib/trackers';
@@ -343,24 +343,8 @@ export default async function adminRoutes(app: FastifyInstance) {
   // ---- art review: per-series art status + candidates + bulk backfill ----
 
   // Every series with its art status, worst-first — feeds the admin Art Review gallery.
-  app.get('/api/admin/art/overview', async () => {
-    const rows = await q<any>(
-      `SELECT s.id, s.title, s.books_count,
-              (a.banner IS NOT NULL AND a.banner <> '') AS has_banner,
-              (a.cover  IS NOT NULL AND a.cover  <> '') AS has_cover,
-              (o.banner IS NOT NULL) AS override_banner,
-              (o.cover  IS NOT NULL) AS override_cover,
-              EXTRACT(EPOCH FROM o.updated_at) * 1000 AS override_v
-       FROM lib_series s
-       LEFT JOIN series_art a ON a.series_id = s.id
-       LEFT JOIN series_overrides o ON o.series_id = s.id
-       ORDER BY (o.banner IS NOT NULL OR o.cover IS NOT NULL), (a.banner IS NOT NULL AND a.banner <> ''),
-                (a.cover IS NOT NULL AND a.cover <> ''), s.title
-        WHERE s.deleted_at IS NULL AND s.merged_into IS NULL
-      `,
-    );
-    return { content: rows };
-  });
+  // The query lives in lib/seriesArt so a test can execute it; see the note there.
+  app.get('/api/admin/art/overview', async () => ({ content: await artOverview() }));
 
   // Art options for one series: AniList matches (banner + cover) and MangaDex covers — the admin picks one.
   app.get('/api/admin/art/candidates/:id', async (req, reply) => {
