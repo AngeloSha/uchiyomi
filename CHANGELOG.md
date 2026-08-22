@@ -1,5 +1,26 @@
 # Changelog
 
+## v0.6.1 — 2026-08-22
+
+Two fixes for things a new install hits immediately.
+
+**The admin Art tab was broken in v0.6.0.** The art overview query shipped with its `WHERE` written below
+its `ORDER BY`, which Postgres rejects, so the endpoint returned a 500 and the whole Art Review gallery was
+dead. It slipped out because the query lived inside a route handler and nothing in the test suite ever ran
+it; it now lives in `lib/seriesArt` with a test that fails if the clause order is ever broken again.
+
+**The documented library layout was wrong.** The README and USAGE told you to lay your library out as
+`<series>/<chapter>`, but the scanner reads `<group>/<series>/<chapter>` — two levels below the library
+root. Following the documentation gave you an app that started perfectly and showed an empty library, with
+nothing to explain why. The docs now describe the layout the scanner actually reads, and the troubleshooting
+section names this as the usual cause of an empty library.
+
+So: `Manga/One Piece/Chapter 1.cbz` is found. `One Piece/Chapter 1.cbz` on its own is not. If your
+collection is laid out the second way, wrapping it in a single folder is enough. A future release will read
+any depth.
+
+Nothing in this release changes the database.
+
 ## v0.6.0 — 2026-08-22
 
 **Your library stops being a list of folders and starts being a list of series.** Until now a series was
