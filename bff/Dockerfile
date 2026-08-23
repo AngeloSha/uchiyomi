@@ -25,14 +25,26 @@ RUN if [ -f package-lock.json ]; then npm ci --omit=dev --no-audit --no-fund; \
 COPY --from=build /app/dist ./dist
 # postgresql-client supplies pg_dump/pg_restore for the built-in backup task (it reaches the DB over the
 # network via DATABASE_URL — the container has no docker socket, so it can't shell out to the db container).
-RUN apk add --no-cache postgresql16-client tar gzip
+# su-exec drops privileges in the entrypoint; shadow supplies usermod/groupmod for PUID/PGID.
+RUN apk add --no-cache postgresql16-client tar gzip su-exec shadow
 # Every path the app writes to must exist here and be owned by the app user. Docker seeds a NEW named
 # volume from the image directory it covers, so a directory missing here becomes a root:root mountpoint
 # the non-root process cannot write -- which silently costs you downloads, custom sources, and a
 # persisted JWT secret (sessions then die on every restart).
 RUN mkdir -p /cache /backups /config /library-dl && addgroup -g 10002 -S yomi && adduser -u 10002 -S -G yomi yomi \
  && chown -R yomi:yomi /cache /backups /config /library-dl /app
-USER yomi
+COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+# `USER yomi` is gone, and that is a real trade worth naming rather than glossing.
+#
+# The container now STARTS as root and the entrypoint drops to uid 10002 (or PUID) via su-exec before the app
+# ever runs. Previously it never ran anything as root at all. That property is given up because a process
+# cannot change to the uid that owns your library without starting privileged, and the alternative was
+# telling people to chown their own media collection to 10002.
+#
+# What is preserved: the app itself never runs as root (PUID=0 is refused), no capabilities are needed, and
+# `user:` in compose still works and bypasses the root phase entirely for anyone who prefers that.
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
 EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
   CMD wget -qO- http://127.0.0.1:3000/healthz >/dev/null 2>&1 || exit 1

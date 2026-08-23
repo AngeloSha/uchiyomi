@@ -3,7 +3,7 @@
 Everything the web app does, it does over this API, so anything you can do in the browser you can script.
 
 This page covers how to authenticate and the endpoints worth scripting. It is not an exhaustive dump of all
-155 routes; the full list is at the bottom for reference.
+163 routes; the full list is at the bottom for reference.
 
 ## Authenticating
 
@@ -235,6 +235,12 @@ POST   /api/admin/sources/reload  GET    /api/admin/sources/custom
 POST   /api/admin/sources/custom  DELETE /api/admin/sources/custom/:id
 PUT    /api/admin/series/:id/art  PUT    /api/admin/series/:id/meta
 PATCH  /api/admin/series/:id      DELETE /api/admin/series/:id
+GET    /api/admin/libraries       POST   /api/admin/libraries
+GET    /api/admin/libraries/preview
+PATCH  /api/admin/libraries/:id   DELETE /api/admin/libraries/:id
+GET    /api/admin/library/writable
+POST   /api/admin/series/:id/delete-files
+POST   /api/admin/series/:id/rename-folder
 PUT    /api/admin/books/:id/meta
 POST   /api/admin/series/:id/restore
 POST   /api/admin/series/:id/merge

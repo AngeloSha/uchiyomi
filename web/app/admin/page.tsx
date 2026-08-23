@@ -847,6 +847,25 @@ function LibrariesSection() {
 
 function LibraryPanel() {
   const qc = useQueryClient();
+  const [purge, setPurge] = useState<DeletedRow | null>(null);
+  const [purging, setPurging] = useState(false);
+
+  const deleteFiles = async (r: DeletedRow) => {
+    setPurging(true);
+    try {
+      const res = await api<{ files: number; bytes: number }>(`/api/admin/series/${r.id}/delete-files`,
+        { method: 'POST', json: { confirm: r.title } });
+      toast(`Deleted ${res.files} file(s), ${(res.bytes / 1048576).toFixed(1)} MB`, 'success');
+      setPurge(null);
+      qc.invalidateQueries({ queryKey: ['admin-deleted'] });
+    } catch (e: any) {
+      // A refusal carries the actual reason and, for a permissions problem, the exact fix.
+      let msg = msgOf(e, 'Could not delete the files');
+      try { const b = JSON.parse(e?.body || '{}'); if (b.fix) msg = `${b.message} ${b.fix}`; } catch {}
+      toast(msg, 'error');
+    }
+    setPurging(false);
+  };
   const toast = useToast();
   const [busy, setBusy] = useState<string | null>(null);
   const { data, isLoading } = useQuery({
@@ -868,6 +887,26 @@ function LibraryPanel() {
   return (
     <>
       <LibrariesSection />
+      {purge && (
+        <ConfirmDialog
+          title={`Delete the files for "${purge.title}"?`}
+          body={
+            <>
+              <p><strong className="text-fog-100">This deletes {purge.books_count} chapter file(s) from your
+                disk.</strong> It cannot be undone from here.</p>
+              <p className="mt-2">Everyone&rsquo;s reading progress and history are kept, so the record of
+                having read it survives even though the files do not.</p>
+              <p className="mt-2 text-fog-500">Folder: {purge.folder}</p>
+            </>
+          }
+          confirmLabel="Delete files"
+          confirmText={purge.title}
+          danger
+          busy={purging}
+          onConfirm={() => deleteFiles(purge)}
+          onClose={() => setPurge(null)}
+        />
+      )}
     <div className="space-y-3">
       <p className="text-xs text-fog-500">
         Removing a series hides it from the library, search and the updater. Its files are left exactly where
@@ -889,6 +928,10 @@ function LibraryPanel() {
               </div>
               <button onClick={() => restore(r)} disabled={busy === r.id} className="chip shrink-0 text-xs disabled:opacity-50">
                 {busy === r.id ? 'Restoring\u2026' : 'Put back'}
+              </button>
+              {/* The escalation, and only ever after the reversible step. Hiding is undoable; this is not. */}
+              <button onClick={() => setPurge(r)} className="chip shrink-0 text-xs hover:border-rose-500/50 hover:text-rose-400">
+                Delete files
               </button>
             </div>
           ))}

@@ -1,5 +1,74 @@
 # Changelog
 
+## v0.8.0 — 2026-08-23
+
+**Read this one before upgrading.** The library mount changed, and a security fix closed three ways to read a
+series you were not meant to see.
+
+### Three ways to read a hidden series, closed
+
+All three predate this release, and all three needed nothing but an id.
+
+`/img/lib/books/:id/page/:n` resolved a file path from a book id with no join to the series at all, so a book
+id alone returned **raw page bytes off disk**, including for a series that had been deleted. The OPDS
+download resolved the same way. The image server verified your token and then discarded who you were, so no
+image route could filter by anything. And the chapter query never referenced the series table, so a chapter
+inherited no series-level rule and next/previous walked the rest of it.
+
+The visibility rule now lives in exactly one place instead of the twenty-three hand-written copies it had
+spread into, and three tests hold that line: one fails if a twenty-fourth appears, one fails if a call site
+invents an all-seeing viewer, and one requires every image and OPDS route to state how it is gated.
+
+### Several libraries, and who can see them
+
+Split your collection into separate libraries, then choose per member which ones they can open. Libraries are
+**declared, not guessed**: the obvious rule, "each top-level folder is a library", would have renamed a lot of
+existing installs into libraries named after their download sources.
+
+Nothing changes on upgrade. Everything starts in one library, no reading progress moves, and an account with
+no restriction set keeps seeing everything, including libraries created later.
+
+### It can now rename folders and delete files, if you let it
+
+Uchiyomi can rename a series' folder and delete its chapter files. **It cannot do either unless you run it as
+the user who owns your library**, which is opt-in:
+
+```
+PUID=1000    # id -u
+PGID=1000    # id -g
+```
+
+Leave both unset and nothing changes: the app runs as its own uid, your library is effectively read-only, and
+the startup log says so plainly along with the exact command to change it.
+
+Deleting a series' files requires hiding the series first, so the reversible step always happens before the
+irreversible one, and it keeps every chapter row and everyone's reading progress. Renaming refuses outright
+unless every folder the series occupies is writable: renaming only half of a series that spans your library
+and your downloads folder would split it in two on the next scan.
+
+### Upgrading
+
+```bash
+docker compose pull
+docker compose up -d
+```
+
+**The library mount is no longer `:ro`.** That alone grants nothing, because the app still runs as a uid that
+cannot write your files, but if you relied on the read-only flag as a guarantee, add it back:
+
+```yaml
+      - ${LIBRARY_PATH:-./library}:/library:ro
+```
+
+**The container now starts as root and immediately drops privileges** to its own uid (or `PUID`). Previously
+it never ran as root at all. That is the cost of being able to run as the owner of your library; the
+alternative was asking you to hand your media collection over to uid 10002. The app itself never runs as
+root, and `PUID=0` is refused.
+
+One thing worth being straight about: restricting someone's library access applies immediately on the server,
+but images and chapters they already viewed or downloaded may stay in their own browser's offline storage
+until they clear it. The server cannot reach into a device it does not control.
+
 ## v0.7.0 — 2026-08-22
 
 **Library management.** The honest caveat in the README used to open by conceding that Komga and Kavita were

@@ -59,10 +59,11 @@ into a single image.** Point it at your library, add sources by URL, and it does
   everything across and deliberately keeps duplicate chapters rather than guessing which to drop, because
   folding two progress rows into one is how chapters silently become unread. Also: unfollow a single series,
   or check one for new chapters without waiting for the sweep.
-- **Library management:** filter by read state, publication status, author and genre; select many series at
-  once to mark read, favourite or file into a collection; edit a series' title, author, status, genres, cover
-  and background, and correct a chapter's number when the filename lied about it. Metadata you edit survives
-  every rescan.
+- **Library management:** split your collection into **several libraries** and choose who can see each one;
+  filter by read state, publication status, author and genre; select many series at once to mark read,
+  favourite or file into a collection; edit a series' title, author, status, genres, cover and background, and
+  correct a chapter's number when the filename lied about it. Metadata you edit survives every rescan. If you
+  run it as the owner of your library (`PUID`), it can also rename folders and delete chapter files.
 - **Command palette:** press **Ctrl+K** anywhere — instant series search, quick actions, recent items.
 - **Collections:** hand-curated reading lists with accent colors, reorderable, surfaced on Home.
 - **Discover:** one search across **every source at once** (one card per title; pick which provider to add
@@ -162,10 +163,10 @@ Suwayomi) fetches chapters but is Android-only or wraps them in a basic web UI. 
 daily — if a row is wrong or out of date, [open an issue](https://github.com/AngeloSha/uchiyomi/issues) and I
 will fix it.</sub>
 
-**Honest caveats.** Uchiyomi keeps every edit in its own database and **never writes back to your files**: it
-will not rename, move or delete anything on disk. That is deliberate, and for a lot of people it is the
-reason to run it, but if you want a tool that reorganises your files for you, Komga and Kavita do that and
-this does not. It also has one library rather than several, and no per-user content restrictions. It reads
+**Honest caveats.** Uchiyomi **does not touch your files unless you ask it to, and by default it cannot.**
+Renaming a folder and deleting chapter files exist, but only when you run the container as the user who owns
+your library (`PUID`/`PGID`); leave those unset and your collection is read-only exactly as before. Every
+metadata edit stays in Uchiyomi's own database either way. It reads
 **CBZ, CBR and loose image folders**, and skips PDF/EPUB *on purpose* — those are ebook formats, and this is
 built for image-based manga. Extensions don't run natively either: they run in a second container
 ([Suwayomi](docs/extensions.md), and a JVM's worth of memory), and you paste a repository URL once, exactly as
@@ -211,8 +212,9 @@ docker compose up -d
 Then open **http://localhost:8080** and **create your admin account right in the browser**. There are no
 secrets to generate and no config file to edit.
 
-To read a library you already have, point `LIBRARY_PATH` at it (it's mounted **read-only** — Uchiyomi never
-writes to your existing files):
+To read a library you already have, point `LIBRARY_PATH` at it. By default Uchiyomi runs as its own user and
+**cannot write to your files at all**; set `PUID`/`PGID` to your own ids (`id -u`, `id -g`) if you want it to
+be able to rename folders and delete chapters:
 
 ```bash
 echo "LIBRARY_PATH=/path/to/your/manga" > .env
@@ -339,7 +341,9 @@ added and no pack mounted, Uchiyomi is just a clean reader for the library you a
 Everything is in `.env` (see `.env.example`). Notably:
 
 - `LIBRARY_BACKEND`: `owned` (read your CBZ library, default) or `komga` (read from a Komga server).
-- `LIBRARY_PATH`: host path to your CBZ library (read-only mount at `/library`).
+- `LIBRARY_PATH`: host path to your CBZ library (mounted at `/library`).
+- `PUID` / `PGID`: run as the user that owns your library, so file operations work. Unset means the app runs
+  as its own uid and treats your library as read-only.
 - `SOURCES_PATH`: host path to a built source pack (empty by default = no sources).
 - `WEB_PORT`: host port the app is published on — `8080` with `deploy/docker-compose.yml`, `3000` in the
   development stack.
@@ -351,8 +355,8 @@ Actively developed. On deck:
 
 - 🧭 **Per-source genre & popular browsing:** rounding out the newest-releases rails.
 
-Recently shipped: 🔍 library filters and bulk actions, ✏️ editable series and chapter metadata that survives
-a rescan, 📁 any folder layout, 🗂️ series delete / restore / merge, 🔎 content fingerprinting so renamed
+Recently shipped: 📚 multiple libraries with per-member access, 🔍 library filters and bulk actions,
+✏️ editable series and chapter metadata that survives a rescan, 📁 any folder layout, 🗂️ series delete / restore / merge, 🔎 content fingerprinting so renamed
 folders are recognised, 🔗 AniList progress sync, 🔔 push notifications, 📡 OPDS, browser-based first-run setup, and
 cross-source search.
 

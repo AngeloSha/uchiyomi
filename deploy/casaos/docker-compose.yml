@@ -25,6 +25,9 @@ services:
     hostname: uchiyomi-bff
     image: ghcr.io/angelosha/uchiyomi-bff:latest
     environment:
+      # Run as the owner of your library so file operations work. Unset = uid 10002, library read-only.
+      PUID: ${PUID:-}
+      PGID: ${PGID:-}
       NODE_ENV: production
       PORT: "3000"
       DATABASE_URL: postgres://yomi:uchiyomi@uchiyomi-db:5432/yomi
@@ -35,7 +38,7 @@ services:
       CUSTOM_SITES_FILE: /config/sites.json
     volumes:
       # your existing comics, read-only — point this at wherever you keep them
-      - /DATA/Media/Comics:/library:ro
+      - /DATA/Media/Comics:/library
       - /DATA/AppData/uchiyomi/downloads:/library-dl
       - /DATA/AppData/uchiyomi/config:/config
       - /DATA/AppData/uchiyomi/cache:/cache

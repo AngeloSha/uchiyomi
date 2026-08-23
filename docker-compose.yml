@@ -36,6 +36,9 @@ services:
     restart: unless-stopped
     env_file: .env
     environment:
+      # Run as the owner of your library so file operations work. Unset = uid 10002, library read-only.
+      PUID: ${PUID:-}
+      PGID: ${PGID:-}
       NODE_ENV: production
       PORT: "3000"
       DATABASE_URL: postgres://yomi:${DB_PASSWORD:-uchiyomi}@yomi-db:5432/yomi
@@ -60,7 +63,7 @@ services:
       SUWAYOMI_MAX_SOURCES: ${SUWAYOMI_MAX_SOURCES:-25}
     volumes:
       - yomi_imgcache:/cache
-      - ${LIBRARY_PATH:-./library}:/library:ro                # your existing CBZ library (bring-your-own), read-only
+      - ${LIBRARY_PATH:-./library}:/library                   # your existing CBZ library (bring-your-own)
       - yomi_library:/library-dl                             # owned, writable download dir
       - ${SOURCES_PATH:-./sources}:/sources:ro               # user-supplied source plugins (compiled .js)
       - yomi_config:/config                                  # writable app config (custom sites list)

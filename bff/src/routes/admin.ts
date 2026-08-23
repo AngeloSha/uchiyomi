@@ -6,7 +6,7 @@ import { content as komga } from '../lib/backend';
 import { cacheBytes } from '../lib/imageCache';
 import { runtime } from '../lib/runtime';
 import { persistScan } from '../lib/library';
-import { deleteSeries, restoreSeries, mergeSeries, getSeriesRow } from '../lib/libraryAdmin';
+import { deleteSeries, restoreSeries, mergeSeries, getSeriesRow, deleteSeriesFiles, renameSeriesFolder } from '../lib/libraryAdmin';
 import { runFingerprintBackfill, fingerprintRemaining, fpState } from '../lib/fingerprintJob';
 import { runBackup } from '../lib/backup';
 import { runUpdateAll, updateSeries } from '../lib/updater';
@@ -19,6 +19,7 @@ import { readFile, writeFile, mkdir, rm } from 'fs/promises';
 import { dirname } from 'path';
 import sharp from 'sharp';
 import { ART_DIR, artFile, artOverview } from '../lib/seriesArt';
+import { writePreflight } from '../lib/fsGuard';
 // Admin stats report on the whole library by definition; this route is already behind requireAdmin.
 import { SYSTEM_CTX, visibleToAll } from '../lib/visibility';
 import { addSeriesFromSource, findBestMatch, norm } from './sources';
@@ -375,6 +376,43 @@ export default async function adminRoutes(app: FastifyInstance) {
       req,
     });
     return { ok: true, affectedUsers: affected?.n ?? 0 };
+  });
+
+  // ---- file operations on the user's own library ----
+  //
+  // The only routes in the app that write to a collection the user owns. Both take one series, both are
+  // explicitly confirmed by the client, and both refuse rather than half-apply.
+
+  /** Is the library writable at all, so the UI can say so before anyone clicks. */
+  app.get('/api/admin/library/writable', async () => {
+    const roots = (await q<{ root: string }>('SELECT DISTINCT root FROM lib_books WHERE root IS NOT NULL')).map((r) => r.root);
+    const checks = await Promise.all(roots.map(async (root) => ({ root, ...(await writePreflight(root)) })));
+    return { content: checks, ok: checks.every((c) => c.ok) };
+  });
+
+  app.post('/api/admin/series/:id/delete-files', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const b = z.object({ confirm: z.string() }).safeParse(req.body);
+    if (!b.success) return reply.code(400).send({ error: 'bad_request' });
+    const row = await getSeriesRow(id);
+    if (!row) return reply.code(404).send({ error: 'not_found' });
+    if (b.data.confirm.trim() !== row.title.trim()) {
+      return reply.code(400).send({ error: 'confirm_mismatch', message: 'Type the series title exactly to confirm.' });
+    }
+    const r = await deleteSeriesFiles(id);
+    if (!r.ok) return reply.code(409).send({ error: 'refused', message: r.reason, fix: r.fix });
+    await logAudit('series.delete_files', { userId: userIdOf(req), detail: { id, files: r.files, bytes: r.bytes }, req });
+    return r;
+  });
+
+  app.post('/api/admin/series/:id/rename-folder', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const b = z.object({ folder: z.string().min(1).max(400) }).safeParse(req.body);
+    if (!b.success) return reply.code(400).send({ error: 'bad_request' });
+    const r = await renameSeriesFolder(id, b.data.folder);
+    if (!r.ok) return reply.code(409).send({ error: 'refused', message: r.reason, fix: r.fix });
+    await logAudit('series.rename_folder', { userId: userIdOf(req), detail: { id, folder: b.data.folder }, req });
+    return r;
   });
 
   // ---- libraries ----

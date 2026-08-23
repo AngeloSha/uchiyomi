@@ -9,7 +9,6 @@
 //
 // That duplication is the measure of the risk. Per-library access does not get to become a 24th copy: it is
 // one more clause on `visible()`, and every caller inherits it because they all go through here.
-import { sep, resolve } from 'path';
 import { q, one } from './db';
 
 export interface ViewCtx {
@@ -64,22 +63,6 @@ export const SYSTEM_CTX: ViewCtx = { userId: null, libraryIds: null };
  */
 export const visibleToAll = (alias: string): string => visible(alias, SYSTEM_CTX, new Params());
 
-/**
- * Resolve `rel` under `root` and refuse anything that escapes it.
- *
- * There is no path-containment check anywhere in this codebase today, and sanitize() in the downloader
- * strips path separators but lets `..` through as a whole segment -- sanitize.test.ts records that as an
- * asserted behaviour. Every filesystem write added from here on goes through this.
- *
- * Returns the resolved absolute path, or null if it escapes. Callers treat null as a refusal, never as a
- * reason to fall back to the raw input.
- */
-export function containedPath(root: string, rel: string): string | null {
-  if (!rel || rel.startsWith('/') || rel.includes('\0')) return null;
-  const base = resolve(root);
-  const full = resolve(base, rel);
-  return full === base || full.startsWith(base + sep) ? full : null;
-}
 
 /**
  * The viewer for one request.

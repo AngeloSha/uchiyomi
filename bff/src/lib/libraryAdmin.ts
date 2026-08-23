@@ -11,9 +11,11 @@
 // read_progress rows into one, and getting that wrong silently marks chapters unread -- which then syncs
 // outward to the user's AniList account and cannot be undone. Duplicate chapter numbers are a tidiness
 // problem the health page can surface; lost reading progress is not recoverable.
-import { rm } from 'fs/promises';
+import { rm, rename, realpath, stat } from 'fs/promises';
 import { q, one, tx } from './db';
 import { artFile } from './seriesArt';
+import { allWritable, containedPath } from './fsGuard';
+import { join, dirname } from 'path';
 
 export interface SeriesRow {
   id: string;
@@ -149,4 +151,151 @@ export async function mergeSeries(fromId: string, intoId: string): Promise<Merge
     await dropArt(fromId);
     return r;
   });
+}
+
+
+// ---- file operations ----
+//
+// These are the only code paths in the app that write to the user's own library, and they are why the
+// mount is no longer read-only. Both are deliberately narrow: one series at a time, explicitly confirmed,
+// and refusing outright rather than half-applying.
+
+/** Every distinct root a series' chapters live under. Usually two: the read library and the download dir. */
+async function rootsOf(seriesId: string): Promise<string[]> {
+  const rows = await q<{ root: string }>(
+    'SELECT DISTINCT root FROM lib_books WHERE series_id = $1 AND root IS NOT NULL', [seriesId],
+  );
+  return rows.map((r) => r.root).filter(Boolean);
+}
+
+export interface FileOpRefusal { ok: false; reason: string; fix?: string }
+
+/**
+ * Delete a hidden series' files from disk.
+ *
+ * Requires the series to be hidden already, so the reversible step always happens first: "Remove" hides,
+ * and only then can you also delete the files. It is an escalation, never a shortcut past the undo.
+ *
+ * The chapter ROWS and everyone's read_progress stay. read_progress.book_id is ON DELETE RESTRICT precisely
+ * so that removing a chapter cannot silently delete what someone read of it, which is the one loss with no
+ * undo and which syncs outward to AniList. A later scan neither resurrects them (the folder is gone) nor
+ * prunes them (there is no prune path).
+ */
+export async function deleteSeriesFiles(id: string): Promise<{ ok: true; files: number; bytes: number } | FileOpRefusal> {
+  const row = await one<{ folder: string; deleted_at: string | null }>(
+    'SELECT folder, deleted_at FROM lib_series WHERE id = $1', [id],
+  );
+  if (!row) return { ok: false, reason: 'That series no longer exists.' };
+  if (!row.deleted_at) {
+    return { ok: false, reason: 'Remove the series first. Deleting its files is a second, separate step.' };
+  }
+
+  const roots = await rootsOf(id);
+  if (!roots.length) return { ok: false, reason: 'That series has no files on disk.' };
+
+  const w = await allWritable(roots);
+  if (!w.ok) return { ok: false, reason: w.reason, fix: w.fix };
+
+  let files = 0;
+  let bytes = 0;
+  for (const root of roots) {
+    // Containment, then realpath, then compare again: a symlinked folder inside a library is not
+    // hypothetical on a NAS, and a lexical check alone would follow it out of the tree.
+    const target = containedPath(root, row.folder);
+    if (!target) return { ok: false, reason: 'That folder path is not inside the library.' };
+    const real = await realpath(target).catch(() => null);
+    if (!real || !containedPath(root, real.slice(root.length + 1) || '.')) {
+      if (real && real !== target) return { ok: false, reason: 'That folder resolves outside the library.' };
+    }
+    for (const b of await q<{ file: string }>('SELECT file FROM lib_books WHERE series_id = $1 AND root = $2', [id, root])) {
+      const abs = containedPath(root, b.file);
+      if (!abs) continue;
+      const st = await stat(abs).catch(() => null);
+      if (st) bytes += st.size;
+      await rm(abs, { recursive: true, force: true }).catch(() => {});
+      files++;
+    }
+    await rm(target, { recursive: true, force: true }).catch(() => {});
+  }
+  return { ok: true, files, bytes };
+}
+
+/**
+ * Rename a series' folder on disk, in every root it occupies.
+ *
+ * The failure this guards against: renaming only the writable half. persistScan merges identical folderRel
+ * across roots, so the old name stays live under the untouched root and the next scan splits the series in
+ * two, stranding half of everyone's progress on a row they cannot find. There is no scan-free window --
+ * scans run on every add, every updater sweep and the admin button -- so the rule is all roots or none.
+ *
+ * The database is updated directly rather than left to fingerprint rematch. LIBRARY_REMATCH is off by
+ * default and is a deliberate-refusal guesser (two chapters minimum, ambiguity refuses); when Uchiyomi
+ * performs the rename it knows the mapping exactly, so guessing it back would be strictly worse.
+ */
+export async function renameSeriesFolder(id: string, newFolder: string): Promise<{ ok: true } | FileOpRefusal> {
+  const row = await one<{ folder: string; library_id: string }>(
+    'SELECT folder, library_id FROM lib_series WHERE id = $1', [id],
+  );
+  if (!row) return { ok: false, reason: 'That series no longer exists.' };
+
+  const dest = newFolder.replace(/^\/+|\/+$/g, '').trim();
+  if (!dest || dest === row.folder) return { ok: false, reason: 'Choose a different folder name.' };
+
+  const roots = await rootsOf(id);
+  if (!roots.length) return { ok: false, reason: 'That series has no files on disk.' };
+
+  const w = await allWritable(roots);
+  if (!w.ok) return { ok: false, reason: w.reason, fix: w.fix };
+
+  // Verify the destination is free in EVERY root first. rename() into an existing directory merges under
+  // one filesystem and fails under another, so checking as we go would leave a half-applied move.
+  for (const root of roots) {
+    const to = containedPath(root, dest);
+    const from = containedPath(root, row.folder);
+    if (!to || !from) return { ok: false, reason: 'That folder path is not inside the library.' };
+    if (await stat(to).then(() => true).catch(() => false)) {
+      return { ok: false, reason: `Something already exists at "${dest}".` };
+    }
+  }
+
+  const done: Array<{ root: string; from: string; to: string }> = [];
+  for (const root of roots) {
+    const from = containedPath(root, row.folder)!;
+    const to = containedPath(root, dest)!;
+    try {
+      await mkdirp(dirname(to));
+      await rename(from, to);
+      done.push({ root, from, to });
+    } catch (e) {
+      // Roll back what already moved. Two renames on two filesystems cannot be made atomic, so the honest
+      // design is: verify hard, roll back, and if the rollback itself fails, say exactly what is now
+      // inconsistent rather than pretending otherwise.
+      for (const d of done.reverse()) {
+        try { await rename(d.to, d.from); } catch {
+          return {
+            ok: false,
+            reason: `The rename failed partway and could not be undone. "${d.to}" should be "${d.from}". ` +
+                    'Nothing in the database was changed, so fix the folder names on disk and rescan.',
+          };
+        }
+      }
+      return { ok: false, reason: `Could not rename the folder: ${(e as Error).message}` };
+    }
+  }
+
+  await tx(async (qq) => {
+    await qq('UPDATE lib_series SET folder_prev = folder, folder = $2 WHERE id = $1', [id, dest]);
+    await qq(
+      `UPDATE lib_books SET file = $2 || substring(file from length($3) + 1), updated_at = now()
+        WHERE series_id = $1 AND file LIKE $3 || '/%'`,
+      [id, dest, row.folder],
+    );
+  });
+  return { ok: true };
+}
+
+/** mkdir -p without pulling in another import at the top of this file. */
+async function mkdirp(dir: string): Promise<void> {
+  const { mkdir } = await import('fs/promises');
+  await mkdir(dir, { recursive: true }).catch(() => {});
 }

@@ -15,7 +15,12 @@
 #   docker compose up -d
 #
 # Optional overrides (put them in a .env file next to this one — it is picked up automatically):
-#   LIBRARY_PATH=/mnt/media/comics   your existing CBZ/CBR library (mounted read-only; default: ./library)
+#   LIBRARY_PATH=/mnt/media/comics   your existing CBZ/CBR library (default: ./library)
+#   PUID= / PGID=                    run as the user that OWNS your library, so Uchiyomi can rename and
+#                                    delete files in it. Find them with `id -u` / `id -g`. Leave both unset
+#                                    and nothing changes: the app runs as uid 10002 and treats your library
+#                                    as read-only, exactly as before. Removing :ro from the mount alone does
+#                                    NOT grant write access; the uid has to match.
 #   WEB_PORT=8080                    host port to serve on
 #   DB_PASSWORD=...                  only used inside the private network; the DB has no published port
 #   PUBLIC_ORIGIN=https://manga.example.com   set this if you put it behind a reverse proxy
@@ -53,6 +58,9 @@ services:
     container_name: uchiyomi-bff
     restart: unless-stopped
     environment:
+      # Run as the owner of your library so file operations work. Unset = uid 10002, library read-only.
+      PUID: ${PUID:-}
+      PGID: ${PGID:-}
       NODE_ENV: production
       PORT: "3000"
       DATABASE_URL: postgres://yomi:${DB_PASSWORD:-uchiyomi}@uchiyomi-db:5432/yomi
@@ -84,7 +92,7 @@ services:
       SUWAYOMI_PASSWORD: ${SUWAYOMI_PASSWORD:-}
       SUWAYOMI_MAX_SOURCES: ${SUWAYOMI_MAX_SOURCES:-25}
     volumes:
-      - ${LIBRARY_PATH:-./library}:/library:ro   # your existing comics — never written to
+      - ${LIBRARY_PATH:-./library}:/library     # your existing comics (see PUID below)
       - ${SOURCES_PATH:-./sources}:/sources:ro   # optional built source pack
       - uchiyomi_downloads:/library-dl           # chapters Uchiyomi downloads
       - uchiyomi_config:/config                  # secrets, custom sites, art overrides
