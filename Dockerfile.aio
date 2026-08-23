@@ -1,0 +1,63 @@
+# All-in-one: the API and the web app in a single container.
+#
+# The two-image layout (bff + an nginx serving the static export) still works and is still built; this is the
+# other option, and the one every comparable project ships. Komga serves its own Angular build from Spring,
+# Kavita from ASP.NET, Jellyfin and the *arr apps likewise. A dedicated nginx container purely for static
+# files is unusual here, and it is what produced the redirect that dropped the port on every deep link.
+#
+# What this removes: one image to build, publish, pull and update; one hop on every request; and one config
+# file whose behaviour had to be reproduced anyway. What it keeps: Postgres stays its own container, because
+# a database is a database.
+#
+#   docker build -f Dockerfile.aio -t uchiyomi:aio .
+
+# ---------- web: the static export ----------
+FROM node:22-alpine AS web
+WORKDIR /w
+COPY web/package.json web/package-lock.json* ./
+RUN npm ci --no-audit --no-fund 2>/dev/null || npm install --no-audit --no-fund
+COPY web/ ./
+RUN npm run build
+
+# ---------- api: compile ----------
+FROM node:22-alpine AS api
+WORKDIR /app
+COPY bff/package.json bff/package-lock.json* ./
+RUN npm ci --no-audit --no-fund 2>/dev/null || npm install --no-audit --no-fund
+COPY bff/ ./
+RUN npm run build
+
+# ---------- runtime ----------
+FROM node:22-alpine AS runtime
+WORKDIR /app
+ENV NODE_ENV=production
+
+# su-exec so the entrypoint can drop to PUID without renumbering the app user; see docker-entrypoint.sh.
+# The app's own volumes have to EXIST and be owned before the entrypoint drops privileges. Without this the
+# image runs fine until the first page is served, then fails with EACCES on mkdir /cache -- the reader shows
+# blank pages and nothing else looks wrong. The entrypoint only chowns directories that are already there.
+RUN apk add --no-cache su-exec tini \
+ && addgroup -g 10002 -S yomi \
+ && adduser -u 10002 -S -G yomi yomi \
+ && mkdir -p /cache /backups /config /library-dl /library /sources \
+ && chown -R yomi:yomi /cache /backups /config /library-dl /app
+
+COPY bff/package.json bff/package-lock.json* ./
+RUN npm ci --omit=dev --no-audit --no-fund 2>/dev/null || npm install --omit=dev --no-audit --no-fund \
+ && npm cache clean --force
+
+COPY --from=api /app/dist ./dist
+COPY --from=web /w/out ./web
+COPY bff/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+
+# This is what turns the static serving on. Unset it and the same image is API-only.
+ENV WEB_ROOT=/app/web
+ENV PORT=3000
+EXPOSE 3000
+
+# No USER: the entrypoint starts as root only to drop to PUID, and refuses to run the app as root.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+  CMD wget -qO- http://127.0.0.1:3000/healthz >/dev/null 2>&1 || exit 1
+ENTRYPOINT ["/sbin/tini", "--", "/usr/local/bin/docker-entrypoint.sh"]
+CMD ["node", "dist/server.js"]

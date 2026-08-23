@@ -33,8 +33,11 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { service: bff, image: ghcr.io/angelosha/uchiyomi-bff }
-          - { service: web, image: ghcr.io/angelosha/uchiyomi-web }
+          - { service: bff, image: ghcr.io/angelosha/uchiyomi-bff, context: ./bff,  file: ./bff/Dockerfile }
+          - { service: web, image: ghcr.io/angelosha/uchiyomi-web, context: ./web,  file: ./web/Dockerfile }
+          # The single-container build: the same API serving the web app itself. Its context is the repo
+          # root because it builds both halves.
+          - { service: aio, image: ghcr.io/angelosha/uchiyomi,     context: .,      file: ./Dockerfile.aio }
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-qemu-action@v3
@@ -48,7 +51,8 @@ jobs:
       - name: Build and push ${{ matrix.service }}
         uses: docker/build-push-action@v6
         with:
-          context: ./${{ matrix.service }}
+          context: ${{ matrix.context }}
+          file: ${{ matrix.file }}
           platforms: linux/amd64,linux/arm64
           push: true
           # version tag only. See the note at the top about why `latest` is not set here.
@@ -70,14 +74,14 @@ jobs:
       - name: Point latest at ${{ github.ref_name }}
         run: |
           set -euo pipefail
-          for img in ghcr.io/angelosha/uchiyomi-bff ghcr.io/angelosha/uchiyomi-web; do
+          for img in ghcr.io/angelosha/uchiyomi-bff ghcr.io/angelosha/uchiyomi-web ghcr.io/angelosha/uchiyomi; do
             echo "retagging $img:${GITHUB_REF_NAME} -> :latest"
             docker buildx imagetools create -t "$img:latest" "$img:${GITHUB_REF_NAME}"
           done
       - name: Verify both images resolve to the same digest under both tags
         run: |
           set -euo pipefail
-          for img in ghcr.io/angelosha/uchiyomi-bff ghcr.io/angelosha/uchiyomi-web; do
+          for img in ghcr.io/angelosha/uchiyomi-bff ghcr.io/angelosha/uchiyomi-web ghcr.io/angelosha/uchiyomi; do
             v=$(docker buildx imagetools inspect "$img:${GITHUB_REF_NAME}" --format '{{.Manifest.Digest}}')
             l=$(docker buildx imagetools inspect "$img:latest" --format '{{.Manifest.Digest}}')
             echo "$img  version=$v  latest=$l"

@@ -15,6 +15,7 @@ import { startSweeper } from './lib/imageCache';
 import { runBackup, msUntilHour } from './lib/backup';
 import { KomgaError } from './lib/komga';
 import { ZodError } from 'zod';
+import { registerWebRoot, webRootConfigured } from './lib/webRoot';
 import authRoutes from './routes/auth';
 import adminRoutes from './routes/admin';
 import catalogRoutes from './routes/catalog';
@@ -91,6 +92,10 @@ async function main() {
   await app.register(sourceRoutes);
   await app.register(opdsRoutes);
 
+  // The web app, when it is packaged into this image. Registered after every API route so a path collision
+  // can only ever go the safe way. Unset WEB_ROOT and this is a no-op: nginx keeps serving it as before.
+  await registerWebRoot(app);
+
   startSweeper();
 
   // Periodic new-chapter check (owned mode), self-rescheduling so the admin can change the interval live.
@@ -152,6 +157,11 @@ async function main() {
   }
 
   await app.listen({ host: '0.0.0.0', port: env.PORT });
+
+  // Says which topology is running, so "why is / a 404" is answerable from `docker compose logs`.
+  console.log(webRootConfigured()
+    ? `[web] serving the app from ${process.env.WEB_ROOT} (single container)`
+    : '[web] API only; the web app is served separately');
 
   // Content fingerprints for the library, filled in behind the server rather than during boot: it reads
   // every archive on disk, so putting it on the boot path would make start-up time grow with the size of
