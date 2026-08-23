@@ -2,6 +2,43 @@
 
 ## Unreleased
 
+### Age ratings, so a household can include children
+
+Mark a series with a minimum age and cap what a member's account may open. Ratings come from ComicInfo's
+`AgeRating` during a scan and can be set or corrected on any series page.
+
+**Series with no rating stay visible.** Almost nothing in a real library carries one, so hiding unrated
+content would empty an account the first time you set a limit. Setting a rating opts one title *in* to being
+filtered; it never opts the rest of your library out. An install with no ratings and no limits behaves
+exactly as before.
+
+### MyAnimeList and Kitsu
+
+Alongside AniList, and you can connect more than one at a time — each syncs independently, with its own
+errors and its own progress, so one service being down cannot stop another.
+
+### Nine languages, and right-to-left
+
+English, Spanish, French, German, Portuguese (Brazil), Russian, Japanese, Chinese and Arabic, chosen under
+**Profile → Language** and remembered across your devices. Arabic mirrors the whole layout, not just the text.
+
+Everything except English is machine-assisted and says so, in that language. Each is one JSON file with
+English strings as the keys, so a correction is a one-line pull request and a missing entry falls back to
+English rather than showing a placeholder.
+
+### Bookmark a page
+
+A star in the reader marks where you are, with a per-series list. Bookmarks are kept when a series is
+hidden, the same way reading progress is: a bookmark records having read something, not where the bytes are.
+
+### OPDS links expire
+
+They never did. One token per account, valid forever unless you happened to regenerate it — and it is the
+one credential that lives in a reader app on a phone and gets forgotten. They now last a year, the profile
+page shows when one was last used, and you can revoke it.
+
+**Existing links are not cut off.** They get a year from now, not from when they were issued.
+
 ### PDF and image EPUB
 
 Both are read now, and both are treated as what they are: an ordered run of page images in a container, the

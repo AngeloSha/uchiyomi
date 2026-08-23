@@ -315,6 +315,19 @@ rather than inferred.
 **Members:** create accounts (user or admin), reset passwords, and per-user controls: make admin/member,
 disable, or allow/deny downloads. Each row shows whether the member has 2FA on.
 
+Each member also has an **age limit**, next to their library access. Set one and anything rated above it
+disappears from that account entirely: the library page, search, the reader, the offline downloads and any
+external OPDS app. Admins are never limited.
+
+Ratings themselves come from `ComicInfo.xml` when a chapter carries one, and you can set or correct any
+series from its own page under **Edit details**. Your correction survives a rescan.
+
+**A series with no rating stays visible to everyone.** That is deliberate: almost nothing in a real library
+is rated, so hiding unrated content would empty a child's account rather than filter it, and would read as
+the app losing the library. Rating a series opts *that title* in to being filtered — it never opts the rest
+of the library out. This means an age limit is only as good as the ratings you have set, which is the honest
+trade for not breaking every existing install.
+
 Each member also has **library access**. The default is *all libraries*, which is the **absence** of any
 restriction rather than a list of every library -- so a member set to "all" also sees libraries you create
 later, without you having to remember to grant them. Restrict someone to a subset and the libraries they were
