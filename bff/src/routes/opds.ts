@@ -57,7 +57,8 @@ export default async function opdsRoutes(app: FastifyInstance) {
    * would have inherited a change made to the real one in ownedCatalog.
    */
   const seriesSrc = (ctx: ViewCtx, p: Params) => `(SELECT s.id, COALESCE(o.title, s.title) AS title,
-          COALESCE(o.summary, s.summary) AS summary, COALESCE(o.author, s.author) AS author, s.books_count
+          COALESCE(o.summary, s.summary) AS summary, COALESCE(o.author, s.author) AS author, s.books_count,
+          s.latest_mtime, s.created_at
      FROM lib_series s LEFT JOIN series_overrides o ON o.series_id = s.id
     WHERE ${visible('s', ctx, p)}) sv`;
   // HTTP Basic auth: password = a per-user OPDS token. Prompts the client when missing/invalid.

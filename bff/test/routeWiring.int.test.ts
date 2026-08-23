@@ -41,6 +41,7 @@ async function setup() {
   const jwt = (await import('@fastify/jwt')).default;
   const catalogRoutes = (await import('../src/routes/catalog')).default;
   const downloadRoutes = (await import('../src/routes/downloads')).default;
+  const opdsRoutes = (await import('../src/routes/opds')).default;
 
   await migrate();
   await q(`DELETE FROM lib_books WHERE series_id = ANY($1)`, [[S1, S2]]);
@@ -67,10 +68,19 @@ async function setup() {
   await app.register(jwt, { secret: process.env.JWT_SECRET! });
   await app.register(catalogRoutes);
   await app.register(downloadRoutes);
+  await app.register(opdsRoutes);
   await app.ready();
 
   const token = app.jwt.sign({ sub: u[0].id, role: 'user' });
-  return { app, q, token, userId: u[0].id };
+
+  // OPDS authenticates with HTTP Basic where the password is a per-user token, so the feed needs its own
+  // credential rather than the JWT.
+  const { issueOpdsToken } = await import('../src/lib/auth');
+  const opds = await issueOpdsToken(u[0].id);
+  const opdsBasic =
+    'Basic ' + Buffer.from(`rw-user:${typeof opds === 'string' ? opds : (opds as any).token}`).toString('base64');
+
+  return { app, q, token, opdsBasic, userId: u[0].id };
 }
 
 async function teardown(app: any, q: any) {
@@ -81,7 +91,7 @@ async function teardown(app: any, q: any) {
 }
 
 test('the catalog routes are wired to the backend they claim', { skip }, async (t) => {
-  const { app, q, token } = await setup();
+  const { app, q, token, opdsBasic } = await setup();
   const auth = { authorization: `Bearer ${token}` };
 
   try {
@@ -161,6 +171,18 @@ test('the catalog routes are wired to the backend they claim', { skip }, async (
         assert.equal(r.statusCode, 404, 'a hidden series must not be downloadable for offline reading');
       } finally {
         await q(`UPDATE lib_series SET deleted_at = NULL WHERE id = $1`, [S1]);
+      }
+    });
+    await t.test('THE THIRD ONE: every sort the OPDS root offers actually works', async () => {
+      // /opds links to three feeds: recently updated (the default), A-Z, and recently added. Two of them
+      // order by columns -- latest_mtime, created_at -- that the visibility-aware subquery introduced in
+      // v0.8.0 stopped selecting, so both were a hard 500 for everyone, admin included. Only ?sort=title
+      // worked, and nothing pointed at it first.
+      for (const url of ['/opds/series', '/opds/series?sort=updated', '/opds/series?sort=title',
+                         '/opds/series?sort=added']) {
+        const r = await app.inject({ method: 'GET', url, headers: { authorization: opdsBasic } });
+        assert.equal(r.statusCode, 200, `${url} answered ${r.statusCode}; an OPDS reader sees a dead feed`);
+        assert.ok(r.body.includes('<feed'), `${url} did not return an OPDS feed`);
       }
     });
   } finally {
