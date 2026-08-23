@@ -216,6 +216,9 @@ async function main() {
     if (want('admin-extensions')) await adminShot('admin-extensions', 'Extensions');
   }
   if (want('admin-providers')) { await adminTab('Providers'); await adminShot('admin-providers', 'Add a site'); }
+  // Libraries sit at the top of the Library tab, above the removed-series list. v0.8.0 added the section
+  // and nothing pictured it.
+  if (want('admin-libraries')) { await adminTab('Library'); await adminShot('admin-libraries', 'Libraries'); }
   if (want('admin-members')) { await adminTab('Members'); await adminShot('admin-members'); }
   if (want('admin-settings')) { await adminTab('Settings'); await adminShot('admin-settings'); }
 

@@ -287,6 +287,12 @@ Nothing changes until you declare something. A fresh install and an upgraded one
 library covering the whole root, no reading progress moves, and removing a library returns its series to the
 default one without touching a file.
 
+![Libraries](shots/admin-libraries.webp)
+
+The candidates above are flagged `source?` for a reason: on most installs the top level of the library root
+holds the names the downloader wrote, not shelves you chose. That is exactly why libraries are declared
+rather than inferred.
+
 **Members:** create accounts (user or admin), reset passwords, and per-user controls: make admin/member,
 disable, or allow/deny downloads. Each row shows whether the member has 2FA on.
 

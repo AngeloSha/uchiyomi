@@ -59,7 +59,7 @@ The rig signs in as a freshly created account, so anything scoped to one user re
 `profile-stats` shows zero chapters and no streak, `crop-tokens` shows "No tokens yet". For documenting a
 feature that is honest and fine. For marketing it usually is not, so don't reach for `profile-stats` or
 `wrapped` to illustrate a claim about a busy library. Use a screen that is server-wide instead, like
-`library`, `admin-members` or `admin-health`.
+`library`, `admin-members`, `admin-libraries` or `admin-health`.
 
 Capturing a populated stats page would mean signing in as a real reader, which the rig deliberately cannot
 do: the real accounts have 2FA, and working around that is worse than the screenshot is worth.
