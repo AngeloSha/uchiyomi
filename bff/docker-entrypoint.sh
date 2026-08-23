@@ -28,18 +28,12 @@ if [ "$APP_UID" = "0" ]; then
   exit 1
 fi
 
-CUR_UID="$(id -u yomi)"
-CUR_GID="$(id -g yomi)"
-
-if [ "$APP_GID" != "$CUR_GID" ]; then
-  # A group with this gid may already exist under another name; reuse it rather than failing.
-  if getent group "$APP_GID" >/dev/null 2>&1; then
-    usermod -g "$APP_GID" yomi 2>/dev/null || deluser yomi >/dev/null 2>&1
-  else
-    groupmod -g "$APP_GID" yomi
-  fi
-fi
-[ "$APP_UID" != "$CUR_UID" ] && usermod -u "$APP_UID" yomi
+# Deliberately NO usermod/groupmod. The base image already ships a user at uid 1000 (node), so renumbering
+# the app user collides with it and the container crash-loops on "UID '1000' already exists" -- which is
+# exactly what happened the first time this ran against a real library owned by uid 1000.
+#
+# su-exec takes numeric ids, and nothing in the app resolves its own username, so the app user simply does
+# not need to own the number. Dropping this also drops the shadow dependency.
 
 # Only the volumes the app owns. NEVER /library: that is the user's collection, and taking ownership of it is
 # the exact thing PUID exists to avoid.

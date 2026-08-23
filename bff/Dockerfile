@@ -26,7 +26,7 @@ COPY --from=build /app/dist ./dist
 # postgresql-client supplies pg_dump/pg_restore for the built-in backup task (it reaches the DB over the
 # network via DATABASE_URL — the container has no docker socket, so it can't shell out to the db container).
 # su-exec drops privileges in the entrypoint; shadow supplies usermod/groupmod for PUID/PGID.
-RUN apk add --no-cache postgresql16-client tar gzip su-exec shadow
+RUN apk add --no-cache postgresql16-client tar gzip su-exec
 # Every path the app writes to must exist here and be owned by the app user. Docker seeds a NEW named
 # volume from the image directory it covers, so a directory missing here becomes a root:root mountpoint
 # the non-root process cannot write -- which silently costs you downloads, custom sources, and a
@@ -42,8 +42,10 @@ RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 # cannot change to the uid that owns your library without starting privileged, and the alternative was
 # telling people to chown their own media collection to 10002.
 #
-# What is preserved: the app itself never runs as root (PUID=0 is refused), no capabilities are needed, and
-# `user:` in compose still works and bypasses the root phase entirely for anyone who prefers that.
+# What is preserved: the app itself never runs as root (PUID=0 is refused, and PID 1 is the app running as
+# 10002 or PUID), no capabilities are needed, and `user:` in compose still works and bypasses the root phase
+# entirely for anyone who prefers that. One side effect worth knowing: `docker exec` without -u now lands as
+# root rather than the app user, because the image no longer declares one.
 ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
 EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
