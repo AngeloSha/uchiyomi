@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "test": "node --import tsx --test \"test/*.test.ts\"",
-    "test:e2e": "bash test/e2e/up.sh"
+    "test:e2e": "bash test/e2e/up.sh",
+    "test:i18n": "node test/e2e/i18n.mjs"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.59.0",

@@ -10,6 +10,7 @@ import { triggerRefresh } from '@/lib/refresh';
 import { useToast } from './Toast';
 import { Img } from './ui';
 import { IcSearch, IcSparkle, IcRefresh, IcBell, IcDownload, IcGrid } from './icons';
+import { t as tr } from '@/lib/i18n';
 
 interface Action { key: string; label: string; hint?: string; icon: React.ReactNode; run: () => void | Promise<void> }
 
@@ -111,18 +112,18 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
                 value={q}
                 onChange={(e) => { setQ(e.target.value); setSel(0); }}
                 onKeyDown={onKey}
-                placeholder="Search series or type a command…"
+                placeholder={tr('Search series or type a command…')}
                 autoCapitalize="none" autoCorrect="off" spellCheck={false}
                 className="w-full bg-transparent py-3.5 text-sm text-fog-50 outline-none placeholder:text-fog-500"
               />
               <kbd className="hidden shrink-0 rounded-md border border-ink-700 px-1.5 py-0.5 text-[10px] text-fog-500 lg:block">esc</kbd>
             </div>
             <div className="max-h-[52vh] overflow-y-auto py-1.5" data-lenis-prevent>
-              {searching && <p className="px-4 py-3 text-xs text-fog-500">Searching…</p>}
+              {searching && <p className="px-4 py-3 text-xs text-fog-500">{tr('Searching…')}</p>}
               {!searching && query.length >= 2 && results.length === 0 && (
                 <p className="px-4 py-3 text-xs text-fog-500">No series match “{q.trim()}”.</p>
               )}
-              {results.length > 0 && <p className="px-4 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-widest text-fog-600">Series</p>}
+              {results.length > 0 && <p className="px-4 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-widest text-fog-600">{tr('Series')}</p>}
               {rows.map((r, i) =>
                 r.kind === 'series' ? (
                   <button key={`s:${r.series.id}`} onClick={() => activate(i)} onMouseEnter={() => setSel(i)}
@@ -137,12 +138,12 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
                   </button>
                 ) : (
                   <div key={`a:${r.action.key}`}>
-                    {i === results.length && <p className="px-4 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-widest text-fog-600">Actions</p>}
+                    {i === results.length && <p className="px-4 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-widest text-fog-600">{tr('Actions')}</p>}
                     <button onClick={() => activate(i)} onMouseEnter={() => setSel(i)}
                       className={`flex w-full items-center gap-3 px-4 py-2.5 text-left ${sel === i ? 'bg-accent-soft' : ''}`}>
                       <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-ink-700 text-fog-400">{r.action.icon}</span>
                       <span className="text-sm text-fog-100">{r.action.label}</span>
-                      {r.action.hint && <span className="ml-auto text-[11px] text-fog-500">{r.action.hint}</span>}
+                      {r.action.hint && <span className="ms-auto text-[11px] text-fog-500">{r.action.hint}</span>}
                     </button>
                   </div>
                 ),

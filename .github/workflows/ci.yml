@@ -65,13 +65,23 @@ jobs:
         run: npm install --no-audit --no-fund
       - name: Bring it up and drive it
         working-directory: ./web
-        run: npm run test:e2e
+        run: KEEP=1 npm run test:e2e
+      # Machine-assisted translation fails in two ways a unit test cannot see: a string longer than its
+      # container, and a right-to-left language rendered inside a left-to-right frame. Both need a browser.
+      - name: Every language renders, and Arabic mirrors
+        working-directory: ./web
+        run: npm run test:i18n
+      - name: Tear it down
+        if: always()
+        run: docker rm -f uchiyomi-e2e uchiyomi-e2e-db || true
       - name: Keep the screenshots when it fails
         if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: e2e-screenshots
-          path: web/test/e2e/shots/
+          path: |
+            web/test/e2e/shots/
+            web/test/e2e/shots-i18n/
           retention-days: 7
 
   test:

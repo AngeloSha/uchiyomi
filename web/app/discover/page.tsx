@@ -5,6 +5,7 @@ import { api } from '@/lib/api';
 import { relativeTime } from '@/lib/format';
 import { useToast } from '@/components/Toast';
 import { IcSearch, IcSparkle } from '@/components/icons';
+import { t as tr } from '@/lib/i18n';
 
 interface SourceResult { sourceId: string; source: string; title: string; coverUrl?: string; inLibrary?: boolean; updatedAt?: string }
 interface Job { folder: string; title: string; total: number; done: number; status: string }
@@ -135,14 +136,14 @@ export default function DiscoverPage() {
   return (
     <div className="min-h-screen-d">
       <header className="safe-top px-5 pb-3 lg:static lg:px-0 lg:pt-4">
-        <h1 className="font-display text-2xl font-bold lg:text-3xl">Discover</h1>
-        <p className="text-sm text-fog-400">Search your sources and add new series to the library.</p>
+        <h1 className="font-display text-2xl font-bold lg:text-3xl">{tr('Discover')}</h1>
+        <p className="text-sm text-fog-400">{tr('Search your sources and add new series to the library.')}</p>
       </header>
 
       <div className="px-4 lg:px-0">
         {sources && sources.content.length === 0 ? (
           <div className="glass rounded-2xl p-6 text-center">
-            <p className="font-display text-lg font-semibold text-fog-100">No sources installed</p>
+            <p className="font-display text-lg font-semibold text-fog-100">{tr('No sources installed')}</p>
             <p className="mx-auto mt-1 max-w-md text-sm text-fog-400">
               Uchiyomi reads the library you already own. To search and add new series, mount a source pack at{' '}
               <code className="rounded bg-ink-800 px-1.5 py-0.5 text-[12px]">SOURCES_DIR</code> and reload it from Admin → Providers.
@@ -153,12 +154,12 @@ export default function DiscoverPage() {
             <form onSubmit={search} className="flex gap-2">
               <div className="flex min-w-[180px] flex-1 items-center gap-2 rounded-xl border border-ink-700 bg-ink-850 px-3 focus-within:border-accent">
                 <IcSearch width={18} height={18} className="text-fog-500" />
-                <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search all sources…" className="w-full bg-transparent py-2.5 text-sm text-fog-50 outline-none placeholder:text-fog-500" />
+                <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={tr('Search all sources…')} className="w-full bg-transparent py-2.5 text-sm text-fog-50 outline-none placeholder:text-fog-500" />
               </div>
-              <button className="btn-accent px-6">Search</button>
+              <button className="btn-accent px-6">{tr('Search')}</button>
             </form>
             <div className="flex flex-wrap items-center gap-2">
-              <span className="text-xs text-fog-500">Browse newest from</span>
+              <span className="text-xs text-fog-500">{tr('Browse newest from')}</span>
               <select value={source} onChange={(e) => setSource(e.target.value)} className="rounded-xl border border-ink-700 bg-ink-850 px-3 py-2 text-sm text-fog-100 outline-none focus:border-accent">
                 {(sources?.content || []).map((s) => <option key={s.id} value={s.id}>{s.name}{s.status === 'blocked' ? ' ⛔ blocked' : s.status === 'rate_limited' ? ' ⚠ rate-limited' : s.status === 'disabled' ? ' (off)' : ''}</option>)}
               </select>
@@ -173,12 +174,12 @@ export default function DiscoverPage() {
 
         {activeJobs.length > 0 && (
           <div className="mt-4 space-y-2">
-            <p className="text-xs font-semibold uppercase tracking-wider text-fog-500">Downloading</p>
+            <p className="text-xs font-semibold uppercase tracking-wider text-fog-500">{tr('Downloading')}</p>
             {activeJobs.map((j) => (
               <div key={j.folder} className="glass rounded-xl px-4 py-2.5">
                 <div className="flex items-center justify-between text-sm">
                   <span className="truncate text-fog-100">{j.title}</span>
-                  <span className="shrink-0 pl-3 text-fog-400">{j.done}/{j.total}</span>
+                  <span className="shrink-0 ps-3 text-fog-400">{j.done}/{j.total}</span>
                 </div>
                 <div className="mt-1.5 h-1 overflow-hidden rounded-full bg-ink-700">
                   <div className="h-full rounded-full bg-accent transition-all" style={{ width: `${Math.round((j.done / Math.max(1, j.total)) * 100)}%` }} />
@@ -193,12 +194,12 @@ export default function DiscoverPage() {
           <section className="mt-6">
             <div className="mb-3 flex items-center gap-2">
               <IcSparkle width={18} height={18} className="text-accent" />
-              <h2 className="font-display text-lg font-semibold">Trending manhwa</h2>
+              <h2 className="font-display text-lg font-semibold">{tr('Trending manhwa')}</h2>
               <span className="text-xs text-fog-500">not in your library</span>
             </div>
             <div className="-mx-4 flex snap-x gap-3 overflow-x-auto px-4 pb-2 lg:mx-0 lg:px-0 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
               {recs.map((t) => (
-                <button key={t.title} onClick={() => openTrending(t)} className="group w-36 shrink-0 snap-start text-left">
+                <button key={t.title} onClick={() => openTrending(t)} className="group w-36 shrink-0 snap-start text-start">
                   <div className="relative aspect-[2/3] overflow-hidden rounded-2xl border border-ink-700/60 bg-ink-800">
                     {t.cover ? (
                       // Serve SAME-ORIGIN (proxy) — reliable in standalone iOS PWA where cross-origin imgs are flaky;
@@ -239,7 +240,7 @@ export default function DiscoverPage() {
         {mode === 'search' && (searching || searchGroups.length > 0) && (
           <div className="mb-1 mt-6 flex items-center gap-2">
             <IcSearch width={18} height={18} className="text-accent" />
-            <h2 className="font-display text-lg font-semibold">Results across your sources</h2>
+            <h2 className="font-display text-lg font-semibold">{tr('Results across your sources')}</h2>
           </div>
         )}
         <div className="mt-5 grid grid-cols-3 gap-x-3 gap-y-5 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-7 xl:grid-cols-8 2xl:grid-cols-9">
@@ -284,10 +285,10 @@ export default function DiscoverPage() {
         </div>
 
         {!searching && mode === 'search' && searchGroups.length === 0 && q && (
-          <p className="py-16 text-center text-sm text-fog-500">No results across your sources — try another title.</p>
+          <p className="py-16 text-center text-sm text-fog-500">{tr('No results across your sources — try another title.')}</p>
         )}
         {!searching && mode === 'latest' && results.length === 0 && (
-          <p className="py-16 text-center text-sm text-fog-500">Could not load the newest list for this source.</p>
+          <p className="py-16 text-center text-sm text-fog-500">{tr('Could not load the newest list for this source.')}</p>
         )}
       </div>
 
@@ -316,7 +317,7 @@ function ProviderRail({ s, onOpen }: { s: { id: string; name: string }; onOpen: 
       <div className="-mx-4 flex snap-x gap-3 overflow-x-auto px-4 pb-2 lg:mx-0 lg:px-0 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         {isLoading && Array.from({ length: 8 }).map((_, i) => <div key={i} className="skeleton aspect-[2/3] w-36 shrink-0 rounded-2xl" />)}
         {items.map((r) => (
-          <button key={r.sourceId} onClick={() => !r.inLibrary && onOpen(r)} className="group w-36 shrink-0 snap-start text-left">
+          <button key={r.sourceId} onClick={() => !r.inLibrary && onOpen(r)} className="group w-36 shrink-0 snap-start text-start">
             <div className={`relative aspect-[2/3] overflow-hidden rounded-2xl border border-ink-700/60 bg-ink-800 ${r.inLibrary ? 'opacity-55' : ''}`}>
               {r.coverUrl ? (
                 // eslint-disable-next-line @next/next/no-img-element
@@ -364,19 +365,19 @@ function AddDialog({ modal, patch, close, pickProvider, doAdd, presets }: {
         {/* Step 1: choose a provider (trending flow) */}
         {!modal.loading && chooseProvider && (
           modal.providers!.length === 0 ? (
-            <p className="py-8 text-center text-sm text-fog-500">Not found on any source yet — try searching manually.</p>
+            <p className="py-8 text-center text-sm text-fog-500">{tr('Not found on any source yet — try searching manually.')}</p>
           ) : (
             <div className="mt-4">
-              <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-fog-500">Available on — pick a source</p>
+              <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-fog-500">{tr('Available on — pick a source')}</p>
               <div className="space-y-2">
                 {modal.providers!.map((p, i) => (
-                  <button key={p.source} onClick={() => pickProvider(p)} className="flex w-full items-center gap-3 rounded-xl border border-ink-700 bg-ink-850/60 p-2 text-left transition hover:border-accent">
+                  <button key={p.source} onClick={() => pickProvider(p)} className="flex w-full items-center gap-3 rounded-xl border border-ink-700 bg-ink-850/60 p-2 text-start transition hover:border-accent">
                     {p.coverUrl ? (
                       // eslint-disable-next-line @next/next/no-img-element
                       <img src={cover(p.source, p.coverUrl)} alt="" className="h-12 w-9 shrink-0 rounded-md object-cover" />
                     ) : <div className="h-12 w-9 shrink-0 rounded-md bg-ink-800" />}
                     <div className="min-w-0 flex-1">
-                      <p className="text-sm font-medium text-fog-100">{p.name}{i === 0 && <span className="ml-2 rounded bg-accent/20 px-1.5 py-0.5 text-[10px] font-semibold text-accent">preferred</span>}</p>
+                      <p className="text-sm font-medium text-fog-100">{p.name}{i === 0 && <span className="ms-2 rounded bg-accent/20 px-1.5 py-0.5 text-[10px] font-semibold text-accent">preferred</span>}</p>
                       <p className="truncate text-xs text-fog-500">{p.title}</p>
                     </div>
                     <span className="shrink-0 text-fog-500">›</span>
@@ -404,10 +405,10 @@ function AddDialog({ modal, patch, close, pickProvider, doAdd, presets }: {
                 {d.genres?.length > 0 && <p className="mt-0.5 line-clamp-1 text-fog-500">{d.genres.slice(0, 4).join(' · ')}</p>}
               </div>
             </div>
-            {desc && <p className="max-h-20 overflow-y-auto pr-1 text-[13px] leading-relaxed text-fog-300">{desc}</p>}
+            {desc && <p className="max-h-20 overflow-y-auto pe-1 text-[13px] leading-relaxed text-fog-300">{desc}</p>}
 
             <label className="block">
-              <span className="mb-1 block text-xs font-semibold uppercase tracking-wider text-fog-500">Chapters to download</span>
+              <span className="mb-1 block text-xs font-semibold uppercase tracking-wider text-fog-500">{tr('Chapters to download')}</span>
               <select value={modal.count} onChange={(e) => patch({ count: Number(e.target.value) })} className="w-full rounded-xl border border-ink-700 bg-ink-850 px-3 py-2.5 text-sm text-fog-100 outline-none focus:border-accent">
                 <option value={0}>All ({d.count})</option>
                 {presets(d.count).map((n) => <option key={n} value={n}>First {n}</option>)}
@@ -418,8 +419,8 @@ function AddDialog({ modal, patch, close, pickProvider, doAdd, presets }: {
               <p className="rounded-lg bg-amber-500/10 px-3 py-2 text-[11px] leading-snug text-amber-300">⚠ Grabbing many chapters quickly can get you temporarily rate-limited by this source. It pauses automatically if that happens — you can resume later, or download fewer to start.</p>
             )}
 
-            <button onClick={() => patch({ autoUpdate: !modal.autoUpdate })} className="flex w-full items-center justify-between rounded-xl border border-ink-700 bg-ink-850/60 px-3 py-2.5 text-left">
-              <span className="text-sm text-fog-100">Auto-update new chapters</span>
+            <button onClick={() => patch({ autoUpdate: !modal.autoUpdate })} className="flex w-full items-center justify-between rounded-xl border border-ink-700 bg-ink-850/60 px-3 py-2.5 text-start">
+              <span className="text-sm text-fog-100">{tr('Auto-update new chapters')}</span>
               <span className={`relative h-6 w-11 rounded-full transition ${modal.autoUpdate ? 'bg-accent' : 'bg-ink-700'}`}>
                 <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white transition-all ${modal.autoUpdate ? 'left-[1.375rem]' : 'left-0.5'}`} />
               </span>

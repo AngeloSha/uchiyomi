@@ -10,6 +10,7 @@ import { useToast } from '@/components/Toast';
 import { ConfirmDialog, Modal } from '@/components/ConfirmDialog';
 import { Avatar } from '@/components/Avatar';
 import { IcChevronLeft, IcTrash, IcPlus, IcRefresh } from '@/components/icons';
+import { t as tr } from '@/lib/i18n';
 
 const TABS = ['Overview', 'Members', 'Providers', 'Art', 'Health', 'Library', 'Tasks', 'Activity', 'Sessions', 'Settings'] as const;
 type Tab = (typeof TABS)[number];
@@ -24,12 +25,12 @@ export default function AdminPage() {
   const { isAdmin } = useAuth();
   const router = useRouter();
   const [tab, setTab] = useState<Tab>('Overview');
-  if (!isAdmin) return <div className="flex min-h-screen-d items-center justify-center text-fog-400">Admins only.</div>;
+  if (!isAdmin) return <div className="flex min-h-screen-d items-center justify-center text-fog-400">{tr('Admins only.')}</div>;
   return (
     <div className="min-h-screen-d">
       <header className="safe-top flex items-center gap-2 px-4 pb-2 lg:px-0">
         <button onClick={() => router.back()} className="grid h-10 w-10 place-items-center rounded-full bg-ink-800/70 text-fog-100"><IcChevronLeft width={22} height={22} /></button>
-        <h1 className="font-display text-2xl font-bold">Admin</h1>
+        <h1 className="font-display text-2xl font-bold">{tr('Admin')}</h1>
       </header>
       <div className="px-4 lg:mx-auto lg:max-w-3xl lg:px-0">
         <div className="-mx-4 mb-4 flex gap-1.5 overflow-x-auto px-4 pb-1 lg:mx-0 lg:px-0 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
@@ -66,10 +67,10 @@ function Overview() {
           { label: 'Last scan', value: stats?.lastScan ? relativeTime(new Date(stats.lastScan).toISOString()) : '—' },
         ].map((s) => <div key={s.label} className="card p-4 text-center"><p className="font-display text-xl font-bold text-fog-50">{s.value}</p><p className="text-[11px] text-fog-500">{s.label}</p></div>)}
       </div>
-      <button onClick={rescan} className="btn-ghost mb-6 w-full text-sm"><IcRefresh width={16} height={16} /> Scan library now</button>
+      <button onClick={rescan} className="btn-ghost mb-6 w-full text-sm"><IcRefresh width={16} height={16} />{tr('Scan library now')}</button>
       {stats?.activity?.length > 0 && (
         <div>
-          <h2 className="mb-2 font-display text-base font-semibold">Member activity</h2>
+          <h2 className="mb-2 font-display text-base font-semibold">{tr('Member activity')}</h2>
           <div className="card divide-y divide-ink-800/70 overflow-hidden">
             {stats.activity.map((a: any) => (
               <div key={a.id} className="flex items-center gap-3 px-4 py-3">
@@ -112,11 +113,11 @@ function Members() {
   return (
     <div>
       <form onSubmit={create} className="card mb-5 p-4">
-        <h2 className="mb-3 font-display text-base font-semibold">New account</h2>
+        <h2 className="mb-3 font-display text-base font-semibold">{tr('New account')}</h2>
         <div className="space-y-2">
-          <input value={username} onChange={(e) => setUsername(e.target.value)} placeholder="username" autoCapitalize="none" autoCorrect="off" className={fld} />
-          <input value={displayName} onChange={(e) => setDisplayName(e.target.value)} placeholder="display name (optional)" className={fld} />
-          <input value={password} onChange={(e) => setPassword(e.target.value)} type="password" placeholder="password (min 8)" className={fld} />
+          <input value={username} onChange={(e) => setUsername(e.target.value)} placeholder={tr('username')} autoCapitalize="none" autoCorrect="off" className={fld} />
+          <input value={displayName} onChange={(e) => setDisplayName(e.target.value)} placeholder={tr('display name (optional)')} className={fld} />
+          <input value={password} onChange={(e) => setPassword(e.target.value)} type="password" placeholder={tr('password (min 8)')} className={fld} />
           <div className="flex gap-2">{(['user', 'admin'] as const).map((r) => <button key={r} type="button" onClick={() => setRole(r)} className={`flex-1 rounded-xl border py-2 text-sm capitalize ${role === r ? 'border-accent bg-accent-soft text-accent' : 'border-ink-700 text-fog-300'}`}>{r}</button>)}</div>
         </div>
         <button type="submit" disabled={busy || !username.trim() || password.length < 8} className="btn-accent mt-3 w-full disabled:opacity-50"><IcPlus width={18} height={18} /> {busy ? 'Creating…' : 'Create account'}</button>
@@ -133,11 +134,11 @@ function Members() {
                   <p className="truncate text-sm text-fog-100">{u.display_name} <span className="text-fog-500">@{u.username}</span></p>
                   <p className="text-[11px] text-fog-500">{u.role === 'admin' ? 'Admin' : 'Member'}{self ? ' · you' : ''}{u.disabled ? ' · disabled' : ''}{u.totp_enabled ? ' · 2FA' : ''}</p>
                 </div>
-                <button onClick={() => reset(u)} className="chip text-xs">Reset</button>
+                <button onClick={() => reset(u)} className="chip text-xs">{tr('Reset')}</button>
                 {!self && <button onClick={() => del(u)} className="grid h-9 w-9 place-items-center rounded-full border border-ink-700 text-red-300"><IcTrash width={16} height={16} /></button>}
               </div>
               {!self && (
-                <div className="mt-2 flex flex-wrap gap-1.5 pl-12">
+                <div className="mt-2 flex flex-wrap gap-1.5 ps-12">
                   <button onClick={() => patch(u, { role: u.role === 'admin' ? 'user' : 'admin' }, 'Role updated')} className="chip text-xs">{u.role === 'admin' ? 'Make member' : 'Make admin'}</button>
                   <button onClick={() => patch(u, { disabled: !u.disabled }, u.disabled ? 'Enabled' : 'Disabled')} className="chip text-xs">{u.disabled ? 'Enable' : 'Disable'}</button>
                   <button onClick={() => patch(u, { perms: { ...u.perms, canDownload: !canDl } }, 'Permission updated')} className="chip text-xs">{canDl ? 'Deny downloads' : 'Allow downloads'}</button>
@@ -252,15 +253,15 @@ function Providers() {
 
       {/* Add a site (Madara / Manganato engines — most manga aggregators) */}
       <div className="card mb-3 p-3">
-        <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-fog-500">Add a site</p>
+        <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-fog-500">{tr('Add a site')}</p>
         <div className="flex flex-wrap gap-2">
           <select value={eng} onChange={(e) => setEng(e.target.value as any)} className={`${fld} w-auto`}>
-            <option value="auto">Auto-detect</option>
-            <option value="madara">Madara (WordPress)</option>
-            <option value="mangathemesia">MangaThemesia</option>
-            <option value="manganato">Manganato</option>
+            <option value="auto">{tr('Auto-detect')}</option>
+            <option value="madara">{tr('Madara (WordPress)')}</option>
+            <option value="mangathemesia">{tr('MangaThemesia')}</option>
+            <option value="manganato">{tr('Manganato')}</option>
           </select>
-          <input value={sname} onChange={(e) => setSname(e.target.value)} placeholder="Name" className={`${fld} min-w-[110px] flex-1`} />
+          <input value={sname} onChange={(e) => setSname(e.target.value)} placeholder={tr('Name')} className={`${fld} min-w-[110px] flex-1`} />
           <input value={sbase} onChange={(e) => setSbase(e.target.value)} placeholder="https://site.com" autoCapitalize="none" className={`${fld} min-w-[170px] flex-[2]`} />
           <button onClick={addSite} disabled={adding || !sname.trim() || !sbase.trim()} className="btn-accent px-4 text-sm disabled:opacity-50">{adding ? 'Adding…' : 'Add'}</button>
         </div>
@@ -290,7 +291,7 @@ function Providers() {
 
       {/* Import a list of titles */}
       <div className="card mb-3 p-3">
-        <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-fog-500">Import a list</p>
+        <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-fog-500">{tr('Import a list')}</p>
         <p className="mb-2 text-[11px] text-fog-500">Bring your library over from another app. Uchiyomi searches your sources for each title and adds the best match.</p>
 
         {/* file / MangaDex intake — parsed into a reviewable list before anything is added */}
@@ -301,20 +302,19 @@ function Providers() {
             {parsing ? 'Reading…' : 'Mihon / Tachiyomi backup'}
           </button>
           <span className="text-[11px] text-fog-600">or</span>
-          <input value={mdUrl} onChange={(e) => setMdUrl(e.target.value)} placeholder="public MangaDex list link" autoCapitalize="none" className={`${fld} min-w-0 flex-1`} />
-          <button onClick={() => parseMangadex()} disabled={parsing || !mdUrl.trim()} className="chip text-xs disabled:opacity-50">Load</button>
+          <input value={mdUrl} onChange={(e) => setMdUrl(e.target.value)} placeholder={tr('public MangaDex list link')} autoCapitalize="none" className={`${fld} min-w-0 flex-1`} />
+          <button onClick={() => parseMangadex()} disabled={parsing || !mdUrl.trim()} className="chip text-xs disabled:opacity-50">{tr('Load')}</button>
         </div>
         <p className="mb-2 text-[10px] text-fog-600">A .tachibk backup stays on your server — only the titles are read. MangaDex lists must be public; private follows need a MangaDex login, which Uchiyomi doesn&apos;t ask for.</p>
 
         <textarea value={imp} onChange={(e) => setImp(e.target.value)} rows={4} placeholder={'…or paste titles, one per line'} className={`${fld} resize-y`} />
         {parsed && (
           <div className="mt-2 rounded-xl border border-ink-700 bg-ink-900/50 p-2.5 text-xs">
-            <p className="text-fog-300">
-              Found <strong className="text-fog-100">{parsed.total}</strong> titles
+            <p className="text-fog-300">{tr('Found')}<strong className="text-fog-100">{parsed.total}</strong> titles
               {parsed.already > 0 && <> · <span className="text-fog-500">{parsed.already} already in your library (skipped)</span></>}
               {parsed.truncated && <> · <span className="text-amber-400">capped at 500</span></>}
             </p>
-            <p className="mt-1 text-[11px] text-fog-500">Loaded into the box above — edit or delete lines before importing.</p>
+            <p className="mt-1 text-[11px] text-fog-500">{tr('Loaded into the box above — edit or delete lines before importing.')}</p>
           </div>
         )}
         <button onClick={runImport} disabled={importing || job?.running || !imp.trim()} className="btn-accent mt-2 w-full py-2 text-sm disabled:opacity-50">
@@ -341,7 +341,7 @@ function Providers() {
 
       {list.length === 0 ? (
         <div className="card p-6 text-center">
-          <p className="text-sm font-semibold text-fog-100">No sources installed</p>
+          <p className="text-sm font-semibold text-fog-100">{tr('No sources installed')}</p>
           <p className="mx-auto mt-1 max-w-md text-xs text-fog-500">Mount a compiled source pack at the server&apos;s <code className="rounded bg-ink-800 px-1 py-0.5">SOURCES_DIR</code>, then hit Reload. With none installed, Uchiyomi reads only the library you already own.</p>
         </div>
       ) : (
@@ -352,14 +352,14 @@ function Providers() {
             return (
               <div key={s.id} className="px-4 py-3">
                 <div className="flex items-center gap-2">
-                  <span className="flex-1 text-sm text-fog-100">{s.name}{customIds.has(s.id) && <span className="ml-2 rounded bg-ink-700 px-1.5 py-0.5 text-[10px] text-fog-400">custom</span>}</span>
+                  <span className="flex-1 text-sm text-fog-100">{s.name}{customIds.has(s.id) && <span className="ms-2 rounded bg-ink-700 px-1.5 py-0.5 text-[10px] text-fog-400">custom</span>}</span>
                   <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${STATUS_STYLE[st] || STATUS_STYLE.ok}`}>{st === 'rate_limited' ? 'rate-limited' : st}</span>
                 </div>
                 {h?.last_error && (st === 'blocked' || st === 'rate_limited' || st === 'down') && <p className="mt-1 truncate text-[11px] text-fog-500">{h.consecutive}× · {h.last_error}</p>}
                 <div className="mt-2 flex gap-1.5">
-                  {(st === 'blocked' || st === 'rate_limited' || st === 'down') && <button onClick={() => act(s.id, 'unblock', 'Cleared')} className="chip text-xs">Clear block</button>}
+                  {(st === 'blocked' || st === 'rate_limited' || st === 'down') && <button onClick={() => act(s.id, 'unblock', 'Cleared')} className="chip text-xs">{tr('Clear block')}</button>}
                   <button onClick={() => act(s.id, st === 'disabled' ? 'enable' : 'disable', st === 'disabled' ? 'Enabled' : 'Disabled')} className="chip text-xs">{st === 'disabled' ? 'Enable' : 'Disable'}</button>
-                  {customIds.has(s.id) && <button onClick={() => removeSite(s.id)} className="ml-auto text-xs text-red-300 hover:underline">Remove</button>}
+                  {customIds.has(s.id) && <button onClick={() => removeSite(s.id)} className="ms-auto text-xs text-red-300 hover:underline">{tr('Remove')}</button>}
                 </div>
               </div>
             );
@@ -425,7 +425,7 @@ function ArtReview() {
       </div>
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
         {rows.map((r) => (
-          <button key={r.id} onClick={() => setOpen(r)} className="card overflow-hidden p-0 text-left transition hover:border-accent/40">
+          <button key={r.id} onClick={() => setOpen(r)} className="card overflow-hidden p-0 text-start transition hover:border-accent/40">
             <div className="relative h-16 w-full overflow-hidden bg-ink-900">
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src={`/img/series/${encodeURIComponent(r.id)}/backdrop?rv=${bust[r.id] || 0}`} alt="" className="h-full w-full object-cover" loading="lazy" />
@@ -483,14 +483,14 @@ function ArtPicker({ row, onClose, onApplied }: { row: ArtRow; onClose: () => vo
         </div>
         {(row.override_banner || row.override_cover) && (
           <div className="mb-3 flex gap-2">
-            {row.override_cover && <button onClick={() => reset('cover')} disabled={busy} className="chip text-xs">Reset cover to auto</button>}
-            {row.override_banner && <button onClick={() => reset('banner')} disabled={busy} className="chip text-xs">Reset banner to auto</button>}
+            {row.override_cover && <button onClick={() => reset('cover')} disabled={busy} className="chip text-xs">{tr('Reset cover to auto')}</button>}
+            {row.override_banner && <button onClick={() => reset('banner')} disabled={busy} className="chip text-xs">{tr('Reset banner to auto')}</button>}
           </div>
         )}
         {isLoading ? (
-          <p className="py-8 text-center text-sm text-fog-500">Searching AniList + MangaDex…</p>
+          <p className="py-8 text-center text-sm text-fog-500">{tr('Searching AniList + MangaDex…')}</p>
         ) : !(data?.content?.length) ? (
-          <p className="py-8 text-center text-sm text-fog-500">No candidates found — use Edit details on the series page to paste a URL.</p>
+          <p className="py-8 text-center text-sm text-fog-500">{tr('No candidates found — use Edit details on the series page to paste a URL.')}</p>
         ) : (
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
             {data!.content.map((c, i) => (
@@ -501,8 +501,8 @@ function ArtPicker({ row, onClose, onApplied }: { row: ArtRow; onClose: () => vo
                   <p className="truncate text-[11px] text-fog-300">{c.title}</p>
                   <p className="text-[10px] uppercase tracking-wide text-fog-500">{c.origin}</p>
                   <div className="mt-1.5 flex gap-1.5">
-                    {c.banner && <button onClick={() => apply('banner', c.banner!)} disabled={busy} className="btn-accent flex-1 px-2 py-1 text-[11px] disabled:opacity-50">Use as banner</button>}
-                    {c.cover && <button onClick={() => apply('cover', c.cover!)} disabled={busy} className="btn-ghost flex-1 px-2 py-1 text-[11px] disabled:opacity-50">Use as cover</button>}
+                    {c.banner && <button onClick={() => apply('banner', c.banner!)} disabled={busy} className="btn-accent flex-1 px-2 py-1 text-[11px] disabled:opacity-50">{tr('Use as banner')}</button>}
+                    {c.cover && <button onClick={() => apply('cover', c.cover!)} disabled={busy} className="btn-ghost flex-1 px-2 py-1 text-[11px] disabled:opacity-50">{tr('Use as cover')}</button>}
                   </div>
                 </div>
               </div>
@@ -556,7 +556,7 @@ function Activity() {
           </div>
         </div>
       ))}
-      {!data?.content?.length && <p className="px-4 py-8 text-center text-sm text-fog-500">No activity yet.</p>}
+      {!data?.content?.length && <p className="px-4 py-8 text-center text-sm text-fog-500">{tr('No activity yet.')}</p>}
     </div>
   );
 }
@@ -574,10 +574,10 @@ function Sessions() {
             <p className="truncate text-sm text-fog-100">{s.display_name || s.username} <span className="text-fog-500">· {s.device_name || 'Device'}</span></p>
             <p className="truncate text-[11px] text-fog-500">{s.ip || 'unknown'} · active {relativeTime(s.last_seen)}</p>
           </div>
-          <button onClick={() => revoke(s.id)} className="text-xs text-red-300 hover:underline">Revoke</button>
+          <button onClick={() => revoke(s.id)} className="text-xs text-red-300 hover:underline">{tr('Revoke')}</button>
         </div>
       ))}
-      {!data?.content?.length && <p className="px-4 py-8 text-center text-sm text-fog-500">No active sessions.</p>}
+      {!data?.content?.length && <p className="px-4 py-8 text-center text-sm text-fog-500">{tr('No active sessions.')}</p>}
     </div>
   );
 }
@@ -589,27 +589,27 @@ function Settings() {
   const [name, setName] = useState<string | null>(null);
   const [hours, setHours] = useState<number | null>(null);
   const save = async (body: any, ok: string) => { try { await api('/api/admin/settings', { method: 'PATCH', json: body }); toast(ok, 'success'); qc.invalidateQueries({ queryKey: ['admin-settings'] }); } catch { toast('Failed', 'error'); } };
-  if (!data) return <div className="card p-6 text-center text-sm text-fog-500">Loading…</div>;
+  if (!data) return <div className="card p-6 text-center text-sm text-fog-500">{tr('Loading…')}</div>;
   return (
     <div className="space-y-4">
       <div className="card p-4">
-        <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-fog-500">Server name</label>
+        <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-fog-500">{tr('Server name')}</label>
         <input value={name ?? data.server_name} onChange={(e) => setName(e.target.value)} className={fld} />
-        <button onClick={() => save({ serverName: name ?? data.server_name }, 'Saved')} className="btn-accent mt-2 w-full py-2 text-sm">Save name</button>
+        <button onClick={() => save({ serverName: name ?? data.server_name }, 'Saved')} className="btn-accent mt-2 w-full py-2 text-sm">{tr('Save name')}</button>
       </div>
       <div className="card flex items-center justify-between p-4">
-        <div><p className="text-sm text-fog-100">Open registration</p><p className="text-[11px] text-fog-500">Let anyone create their own account</p></div>
+        <div><p className="text-sm text-fog-100">{tr('Open registration')}</p><p className="text-[11px] text-fog-500">{tr('Let anyone create their own account')}</p></div>
         <button onClick={() => save({ allowRegistration: !data.allow_registration }, data.allow_registration ? 'Registration closed' : 'Registration open')} className={`relative h-6 w-11 rounded-full transition ${data.allow_registration ? 'bg-accent' : 'bg-ink-700'}`}>
           <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white transition-all ${data.allow_registration ? 'left-[1.375rem]' : 'left-0.5'}`} />
         </button>
       </div>
       <div className="card p-4">
-        <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-fog-500">Auto-update interval (hours)</label>
+        <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-fog-500">{tr('Auto-update interval (hours)')}</label>
         <input type="number" min={1} max={168} value={hours ?? data.updater_hours} onChange={(e) => setHours(Number(e.target.value))} className={fld} />
-        <button onClick={() => save({ updaterHours: hours ?? data.updater_hours }, 'Saved')} className="btn-accent mt-2 w-full py-2 text-sm">Save interval</button>
+        <button onClick={() => save({ updaterHours: hours ?? data.updater_hours }, 'Saved')} className="btn-accent mt-2 w-full py-2 text-sm">{tr('Save interval')}</button>
       </div>
       <div className="card p-4">
-        <h3 className="mb-1 font-display text-base font-semibold">Support Uchiyomi</h3>
+        <h3 className="mb-1 font-display text-base font-semibold">{tr('Support Uchiyomi')}</h3>
         <p className="mb-3 text-sm text-fog-400">Uchiyomi is free &amp; open-source. If you find it useful, you can help fund development.</p>
         <a href="https://ko-fi.com/angeloshaheen" target="_blank" rel="noopener noreferrer" className="btn-accent flex w-full items-center justify-center gap-2 py-2 text-sm">☕ Buy me a coffee</a>
       </div>
@@ -687,7 +687,7 @@ function AgeCap({ user, onSaved }: { user: any; onSaved: () => void }) {
       {open && (
         <div className="mt-1.5 w-full rounded-xl border border-ink-700 p-2.5">
           <label className="flex cursor-pointer items-center justify-between gap-3 text-xs">
-            <span className="text-fog-200">No age limit</span>
+            <span className="text-fog-200">{tr('No age limit')}</span>
             <input type="checkbox" checked={cap === null} disabled={busy}
               onChange={(e) => save(e.target.checked ? null : 13)}
               className="size-4 shrink-0 accent-accent" />
@@ -702,8 +702,7 @@ function AgeCap({ user, onSaved }: { user: any; onSaved: () => void }) {
               ))}
             </div>
           )}
-          <p className="mt-2 text-[11px] text-fog-500">
-            Series with <strong className="text-fog-300">no rating stay visible</strong>. Most libraries carry
+          <p className="mt-2 text-[11px] text-fog-500">{tr('Series with')}<strong className="text-fog-300">no rating stay visible</strong>. Most libraries carry
             no ratings at all, so hiding them would empty this account rather than filter it. Rate a series
             from its own page to have a limit apply to it.
           </p>
@@ -749,7 +748,7 @@ function LibraryAccess({ user, onSaved }: { user: any; onSaved: () => void }) {
       {open && (
         <div className="mt-1.5 w-full rounded-xl border border-ink-700 p-2.5">
           <label className="flex cursor-pointer items-center justify-between gap-3 text-xs">
-            <span className="text-fog-200">All libraries<span className="ml-1 text-fog-500">(including any added later)</span></span>
+            <span className="text-fog-200">{tr('All libraries')}<span className="ms-1 text-fog-500">(including any added later)</span></span>
             <input type="checkbox" checked={!granted} disabled={busy}
               onChange={(e) => save(e.target.checked ? null : libs.map((l) => l.id))}
               className="size-4 shrink-0 accent-accent" />
@@ -762,7 +761,7 @@ function LibraryAccess({ user, onSaved }: { user: any; onSaved: () => void }) {
                   {l.name}
                 </button>
               ))}
-              {!granted.length && <p className="text-[11px] text-amber-300">This member currently sees nothing.</p>}
+              {!granted.length && <p className="text-[11px] text-amber-300">{tr('This member currently sees nothing.')}</p>}
             </div>
           )}
         </div>
@@ -823,7 +822,7 @@ function LibrariesSection() {
 
   return (
     <section className="mb-8">
-      <h3 className="mb-1 font-display text-base font-semibold">Libraries</h3>
+      <h3 className="mb-1 font-display text-base font-semibold">{tr('Libraries')}</h3>
       <p className="mb-3 text-xs leading-relaxed text-fog-500">
         Split your collection into separate libraries, then choose who can see each one under Members.
         Everything starts in one library, and nothing moves unless you say so.
@@ -839,9 +838,7 @@ function LibrariesSection() {
               </p>
             </div>
             {l.id !== 'lib' && (
-              <button onClick={() => setConfirmDel(l)} className="chip shrink-0 text-xs hover:border-rose-500/50 hover:text-rose-400">
-                Remove
-              </button>
+              <button onClick={() => setConfirmDel(l)} className="chip shrink-0 text-xs hover:border-rose-500/50 hover:text-rose-400">{tr('Remove')}</button>
             )}
           </div>
         ))}
@@ -849,14 +846,14 @@ function LibrariesSection() {
 
       {candidates.length > 0 && (
         <>
-          <p className="mb-1.5 mt-4 text-xs font-semibold uppercase tracking-wider text-fog-500">Folders you could split out</p>
+          <p className="mb-1.5 mt-4 text-xs font-semibold uppercase tracking-wider text-fog-500">{tr('Folders you could split out')}</p>
           <div className="flex flex-wrap gap-1.5">
             {candidates.slice(0, 12).map((c) => (
               <button key={c.path} onClick={() => openAdd(c)}
                 className={`chip text-xs ${c.looksLikeSource ? 'opacity-60' : ''}`}
                 title={c.looksLikeSource ? 'This looks like a source folder created by the downloader' : undefined}>
                 {c.path} <span className="text-fog-500">· {c.series}</span>
-                {c.looksLikeSource && <span className="ml-1 text-amber-400">source?</span>}
+                {c.looksLikeSource && <span className="ms-1 text-amber-400">source?</span>}
               </button>
             ))}
           </div>
@@ -864,9 +861,8 @@ function LibrariesSection() {
       )}
 
       {adding && (
-        <Modal title="New library" onClose={() => setAdding(null)}>
-          <p className="text-sm text-fog-300">
-            Everything under <span className="text-fog-100">{adding.path}</span> becomes its own library.
+        <Modal title={tr('New library')} onClose={() => setAdding(null)}>
+          <p className="text-sm text-fog-300">{tr('Everything under')}<span className="text-fog-100">{adding.path}</span> becomes its own library.
           </p>
           {adding.looksLikeSource && (
             <p className="mt-2 rounded-lg border border-amber-500/30 bg-amber-500/10 p-2.5 text-[11px] leading-relaxed text-amber-200">
@@ -874,7 +870,7 @@ function LibrariesSection() {
               downloader rather than by you. Libraries are usually collections like Manga or Comics.
             </p>
           )}
-          <label className="mb-1 mt-3 block text-xs font-semibold uppercase tracking-wider text-fog-500">Name</label>
+          <label className="mb-1 mt-3 block text-xs font-semibold uppercase tracking-wider text-fog-500">{tr('Name')}</label>
           <input value={name} onChange={(e) => setName(e.target.value)}
             className="w-full rounded-lg border border-ink-700 bg-ink-900/60 px-3 py-2 text-sm text-fog-50 outline-none focus:border-accent" />
           {preview && (
@@ -884,7 +880,7 @@ function LibrariesSection() {
             </p>
           )}
           <div className="mt-4 flex gap-2">
-            <button onClick={() => setAdding(null)} className="btn-ghost flex-1 py-2 text-sm">Cancel</button>
+            <button onClick={() => setAdding(null)} className="btn-ghost flex-1 py-2 text-sm">{tr('Cancel')}</button>
             <button onClick={create} disabled={busy || !name.trim()} className="btn-accent flex-1 py-2 text-sm disabled:opacity-50">
               {busy ? 'Working…' : 'Create'}
             </button>
@@ -956,7 +952,7 @@ function LibraryPanel() {
           body={
             <>
               <p><strong className="text-fog-100">This deletes {purge.books_count} chapter file(s) from your
-                disk.</strong> It cannot be undone from here.</p>
+                disk.</strong>{tr('It cannot be undone from here.')}</p>
               <p className="mt-2">Everyone&rsquo;s reading progress and history are kept, so the record of
                 having read it survives even though the files do not.</p>
               <p className="mt-2 text-fog-500">Folder: {purge.folder}</p>
@@ -976,9 +972,9 @@ function LibraryPanel() {
         they are, and everyone&rsquo;s reading progress is kept, so putting it back changes nothing else.
       </p>
       {isLoading ? (
-        <div className="card p-4 text-sm text-fog-500">Loading\u2026</div>
+        <div className="card p-4 text-sm text-fog-500">{tr('Loading…')}</div>
       ) : !rows.length ? (
-        <div className="card p-6 text-center text-sm text-fog-500">Nothing has been removed.</div>
+        <div className="card p-6 text-center text-sm text-fog-500">{tr('Nothing has been removed.')}</div>
       ) : (
         <div className="card divide-y divide-ink-800/70">
           {rows.map((r) => (
@@ -993,9 +989,7 @@ function LibraryPanel() {
                 {busy === r.id ? 'Restoring\u2026' : 'Put back'}
               </button>
               {/* The escalation, and only ever after the reversible step. Hiding is undoable; this is not. */}
-              <button onClick={() => setPurge(r)} className="chip shrink-0 text-xs hover:border-rose-500/50 hover:text-rose-400">
-                Delete files
-              </button>
+              <button onClick={() => setPurge(r)} className="chip shrink-0 text-xs hover:border-rose-500/50 hover:text-rose-400">{tr('Delete files')}</button>
             </div>
           ))}
         </div>
@@ -1034,17 +1028,17 @@ function Health() {
 
       {merge && merge.seriesIds && (
         <ConfirmDialog
-          title="Merge these two?"
+          title={tr('Merge these two?')}
           confirmLabel="Merge"
           busy={busy}
           body={
             <>
-              <p>Every chapter, and everyone&rsquo;s reading progress, favourites and ratings, move onto the copy you keep. <strong className="text-fog-100">Nothing is deleted</strong> &mdash; no chapter is dropped even if both copies have it, and no files are touched.</p>
+              <p>Every chapter, and everyone&rsquo;s reading progress, favourites and ratings, move onto the copy you keep. <strong className="text-fog-100">{tr('Nothing is deleted')}</strong> &mdash; no chapter is dropped even if both copies have it, and no files are touched.</p>
               <div className="mt-3 space-y-2">
                 {(merge.titles || []).map((t, i) => (
                   <label key={i} className="flex cursor-pointer items-center gap-2 rounded-lg border border-ink-700 px-3 py-2 text-sm">
                     <input type="radio" checked={keepFirst === (i === 0)} onChange={() => setKeepFirst(i === 0)} />
-                    <span className="truncate">Keep <strong className="text-fog-100">{t}</strong></span>
+                    <span className="truncate">{tr('Keep')}<strong className="text-fog-100">{t}</strong></span>
                   </label>
                 ))}
               </div>
@@ -1073,7 +1067,7 @@ function Health() {
             <button
               onClick={() => setOpen(isOpen ? null : c.id)}
               disabled={!c.items.length}
-              className="flex w-full items-center gap-3 px-4 py-3.5 text-left disabled:cursor-default"
+              className="flex w-full items-center gap-3 px-4 py-3.5 text-start disabled:cursor-default"
             >
               <span className={`shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-medium ${HEALTH_TONE[c.status]}`}>
                 {HEALTH_LABEL[c.status]}
@@ -1098,10 +1092,10 @@ function Health() {
                         <p className="text-[11px] text-fog-500">{it.detail}</p>
                       </div>
                       {c.id === 'duplicates' && it.seriesIds && it.seriesIds.length === 2 && (
-                        <button onClick={() => setMerge(it)} className="chip shrink-0 text-xs hover:border-accent/50 hover:text-accent">Merge</button>
+                        <button onClick={() => setMerge(it)} className="chip shrink-0 text-xs hover:border-accent/50 hover:text-accent">{tr('Merge')}</button>
                       )}
                       {it.seriesId && (
-                        <a href={`/series/${it.seriesId}`} className="chip shrink-0 text-xs">Open</a>
+                        <a href={`/series/${it.seriesId}`} className="chip shrink-0 text-xs">{tr('Open')}</a>
                       )}
                     </div>
                   ))}
@@ -1155,7 +1149,7 @@ function Extensions() {
   if (!status.configured) {
     return (
       <div className="card mb-3 p-3">
-        <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-fog-500">Extensions</p>
+        <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-fog-500">{tr('Extensions')}</p>
         <p className="text-[11px] leading-relaxed text-fog-500">
           The extension engine isn&apos;t running. It normally starts with the rest of Uchiyomi — if you turned it
           off, bring it back with <code className="text-fog-300">docker compose up -d yomi-suwayomi</code>.
@@ -1219,7 +1213,7 @@ function Extensions() {
   return (
     <div className="card mb-3 p-3">
       <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-        <p className="text-xs font-semibold uppercase tracking-wider text-fog-500">Extensions</p>
+        <p className="text-xs font-semibold uppercase tracking-wider text-fog-500">{tr('Extensions')}</p>
         <div className="flex items-center gap-2">
           <span className={`rounded-full border px-2 py-0.5 text-[10px] ${status.reachable ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300' : 'border-red-500/40 bg-red-500/10 text-red-300'}`}>
             {status.reachable ? `ready${status.version ? ` · ${status.version}` : ''}` : 'engine unreachable'}
@@ -1246,7 +1240,7 @@ function Extensions() {
 
           {/* repositories — where the catalogue comes from */}
           <div className="mb-2 rounded-lg border border-ink-700/60 bg-ink-850/40 p-2">
-            <button onClick={() => setShowRepos(!showRepos)} className="flex w-full items-center justify-between text-left">
+            <button onClick={() => setShowRepos(!showRepos)} className="flex w-full items-center justify-between text-start">
               <span className="text-[11px] text-fog-300">
                 {repos?.content.length
                   ? `${repos.content.length} extension ${repos.content.length === 1 ? 'repository' : 'repositories'} · ${cat?.total ?? 0} extensions available`
@@ -1259,7 +1253,7 @@ function Extensions() {
                 {(repos?.content || []).map((u) => (
                   <div key={u} className="flex items-center gap-2">
                     <span className="min-w-0 flex-1 truncate font-mono text-[10px] text-fog-400">{u}</span>
-                    <button onClick={() => removeRepo(u)} className="shrink-0 text-[11px] text-red-300 hover:underline">Remove</button>
+                    <button onClick={() => removeRepo(u)} className="shrink-0 text-[11px] text-red-300 hover:underline">{tr('Remove')}</button>
                   </div>
                 ))}
                 <div className="flex gap-2 pt-1">
@@ -1281,11 +1275,11 @@ function Extensions() {
 
           {/* search + filters */}
           <div className="mb-2 flex flex-wrap items-center gap-2">
-            <input value={q2} onChange={(e) => setQ2(e.target.value)} placeholder="Search extensions…"
+            <input value={q2} onChange={(e) => setQ2(e.target.value)} placeholder={tr('Search extensions…')}
               className="min-w-[150px] flex-1 rounded-lg border border-ink-700 bg-ink-850 px-2.5 py-1.5 text-xs text-fog-100 outline-none focus:border-accent" />
             <select value={lang} onChange={(e) => setLang(e.target.value)}
               className="rounded-lg border border-ink-700 bg-ink-850 px-2 py-1.5 text-xs text-fog-100 outline-none focus:border-accent">
-              <option value="">All languages</option>
+              <option value="">{tr('All languages')}</option>
               {(cat?.langs || []).map((l) => <option key={l} value={l}>{l}</option>)}
             </select>
             <button onClick={() => setShowAdult(!showAdult)}
@@ -1311,8 +1305,8 @@ function Extensions() {
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-xs text-fog-100">
                     {e.name}
-                    {e.nsfw && <span className="ml-1.5 rounded bg-red-500/15 px-1 py-0.5 text-[9px] text-red-300">18+</span>}
-                    {e.obsolete && <span className="ml-1.5 rounded bg-amber-500/15 px-1 py-0.5 text-[9px] text-amber-300">obsolete</span>}
+                    {e.nsfw && <span className="ms-1.5 rounded bg-red-500/15 px-1 py-0.5 text-[9px] text-red-300">18+</span>}
+                    {e.obsolete && <span className="ms-1.5 rounded bg-amber-500/15 px-1 py-0.5 text-[9px] text-amber-300">obsolete</span>}
                   </p>
                   <p className="text-[10px] text-fog-600">{e.lang || 'all'}{e.versionName ? ` · v${e.versionName}` : ''}</p>
                 </div>
@@ -1333,7 +1327,7 @@ function Extensions() {
                 {cat?.total ? 'Nothing matches that search.' : 'No extensions yet — add a repository above to see what’s available.'}
               </p>
             )}
-            {isFetching && !list.length && <p className="py-2 text-[11px] text-fog-600">Loading…</p>}
+            {isFetching && !list.length && <p className="py-2 text-[11px] text-fog-600">{tr('Loading…')}</p>}
           </div>
         </>
       )}

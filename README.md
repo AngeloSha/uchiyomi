@@ -152,7 +152,6 @@ Suwayomi) fetches chapters but is Android-only or wraps them in a basic web UI. 
 | Per-user progress + household | ✅ | ✅ | ❌ | limited |
 | 2FA · lockout · audit log · session management | ✅ | partial | ❌ | ❌ |
 | Add a source by pasting a URL | ✅ | — | extensions | extension repos |
-| Syncs progress to AniList | ✅ | Kavita+, paid | ✅ | ✅ |
 | Automatic nightly backups | ✅ | ❌ | ❌ | ❌ |
 | Finds chapter gaps & bad downloads | ✅ | partial | ❌ | ❌ |
 | API tokens, scoped read / write / admin | ✅ | keys, unscoped | ❌ | ❌ |
@@ -160,6 +159,9 @@ Suwayomi) fetches chapters but is Android-only or wraps them in a basic web UI. 
 | Reaches Mihon's extensions | ✅ | ❌ | ✅ | ✅ |
 | Reads CBZ / CBR / PDF / image EPUB | ✅ | ✅ | ✅ | ✅ |
 | Runs in one container (+ a database) | ✅ | ✅ | ✅ *(an app)* | ✅ |
+| Interface in 9 languages | ✅ | ✅ | ✅ | limited |
+| Age ratings + per-member limit | ✅ | ✅ | ❌ | ❌ |
+| Syncs to AniList / MAL / Kitsu | ✅ | Kavita+, paid | ✅ | ✅ |
 | Reads text ebooks (reflowable EPUB) | ❌ *(on purpose)* | Kavita ✅ | ❌ | ❌ |
 | Kobo device sync | ❌ | Komga ✅ | ❌ | ❌ |
 
@@ -171,6 +173,20 @@ The three built-in engines each cover a whole *family* of sites (most aggregator
 or Manganato), so "add a source by URL" reaches far more than the engine count suggests. And the real edge is
 the combination nobody else offers: one app that finds, fetches, tracks and reads, for a whole household,
 with webtoons first-class.
+
+## Translations
+
+The interface ships in **English, Spanish, French, German, Portuguese (Brazil), Russian, Japanese, Chinese
+and Arabic**, with right-to-left layout for Arabic. Pick one under **Profile → Language**; the choice follows
+your account to other devices.
+
+**Everything except English is machine-assisted and has not been checked by a native speaker.** If something
+reads wrong, it is one JSON file per language in [`web/public/locales/`](web/public/locales) and the keys are
+the English source strings — edit a value, open a pull request, done. A missing key falls back to English
+rather than showing a blank or a placeholder, so a partial translation is always safe to ship.
+
+Adding a language: copy `en` semantics into `web/public/locales/<code>.json`, add the code to `LOCALES` in
+`web/lib/i18n.ts`, and set `dir` if it is right-to-left.
 
 ## Architecture
 

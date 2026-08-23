@@ -15,6 +15,7 @@ import { ReaderSettings } from '@/components/ReaderSettings';
 import { Rail, SectionTitle } from '@/components/ui';
 import { SeriesCard } from '@/components/cards';
 import { IcChevronLeft, IcChevronRight, IcSliders } from '@/components/icons';
+import { t as tr } from '@/lib/i18n';
 
 interface PageDim { number: number; width: number | null; height: number | null }
 interface Chapter { id: string; seriesId: string; seriesTitle: string; title: string; pages: PageDim[]; offline: boolean }
@@ -534,17 +535,17 @@ function ReaderInner() {
   const upNextCard = (
     <motion.div initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5 }}
       className="mx-auto w-full max-w-3xl px-6 py-16 text-center">
-      <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-fog-500">You finished</p>
+      <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-fog-500">{tr('You finished')}</p>
       <h2 className="mt-1.5 font-display text-2xl font-bold text-white">{activeChapter?.seriesTitle || 'this series'}</h2>
       <div className="mt-6 flex justify-center gap-2">
         {/* labelled "Back to series", so go to the series -- `back` is history-first and from the home
             Continue rail would land on home instead */}
-        <button onClick={() => (seriesHref ? router.push(seriesHref) : back())} className="btn-ghost text-sm">Back to series</button>
-        <button onClick={() => router.push('/')} className="btn-accent text-sm">Home</button>
+        <button onClick={() => (seriesHref ? router.push(seriesHref) : back())} className="btn-ghost text-sm">{tr('Back to series')}</button>
+        <button onClick={() => router.push('/')} className="btn-accent text-sm">{tr('Home')}</button>
       </div>
       {!!upNext?.content?.length && (
-        <div className="mt-12 text-left">
-          <SectionTitle>Because you finished this</SectionTitle>
+        <div className="mt-12 text-start">
+          <SectionTitle>{tr('Because you finished this')}</SectionTitle>
           <Rail>{upNext.content.map((s) => <SeriesCard key={s.id} series={s} />)}</Rail>
         </div>
       )}
@@ -569,7 +570,7 @@ function ReaderInner() {
                 {p.firstOfChapter && p.ci > 0 && (
                   <div style={{ height: DIVIDER_H }} className="flex items-center justify-center gap-3 text-xs text-fog-500">
                     <span className="h-px w-8 bg-ink-700" />
-                    <span className="text-[10px] font-semibold uppercase tracking-[0.16em] text-fog-600">Up Next</span>
+                    <span className="text-[10px] font-semibold uppercase tracking-[0.16em] text-fog-600">{tr('Up Next')}</span>
                     <span className="text-fog-400">{chapters[p.ci]?.title || 'Next chapter'}</span>
                     <span className="h-px w-8 bg-ink-700" />
                   </div>
@@ -711,7 +712,7 @@ function ReaderInner() {
 
       {!ready && (
         <div className="absolute inset-0 z-50 flex items-center justify-center bg-ink-950">
-          <div className="animate-pulse-soft text-fog-500">Loading chapter…</div>
+          <div className="animate-pulse-soft text-fog-500">{tr('Loading chapter…')}</div>
         </div>
       )}
     </div>

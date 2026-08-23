@@ -7,6 +7,7 @@ import { Page, Series } from '@/lib/types';
 import { SeriesTile } from '@/components/cards';
 import { GenreTile } from '@/components/GenreTile';
 import { IcSparkle } from '@/components/icons';
+import { t as tr } from '@/lib/i18n';
 
 function BrowseInner() {
   const params = useSearchParams();
@@ -46,8 +47,8 @@ function BrowseInner() {
     <div className="min-h-screen-d">
       <header className="safe-top sticky top-0 z-30 bg-ink-950/85 px-5 pb-3 backdrop-blur-xl lg:static lg:bg-transparent lg:px-0 lg:pt-6 lg:backdrop-blur-none">
         <div className="flex items-center justify-between">
-          <h1 className="font-display text-2xl font-bold tracking-tight lg:text-3xl">Browse</h1>
-          <button onClick={surprise} className="btn-accent px-4 py-2 text-sm"><IcSparkle width={16} height={16} /> Surprise me</button>
+          <h1 className="font-display text-2xl font-bold tracking-tight lg:text-3xl">{tr('Browse')}</h1>
+          <button onClick={surprise} className="btn-accent px-4 py-2 text-sm"><IcSparkle width={16} height={16} />{tr('Surprise me')}</button>
         </div>
         {genre && (
           <button onClick={() => router.replace('/browse')} className="chip mt-3 text-xs">← All genres</button>

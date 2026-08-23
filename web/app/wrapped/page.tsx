@@ -7,6 +7,7 @@ import { api } from '@/lib/api';
 import { ART } from '@/lib/art';
 import { Wordmark } from '@/components/Brand';
 import { IcChevronLeft } from '@/components/icons';
+import { t as tr } from '@/lib/i18n';
 
 function CountUp({ to }: { to: number }) {
   const [n, setN] = useState(0);
@@ -57,17 +58,17 @@ export default function WrappedPage() {
         <div className="absolute inset-0 bg-gradient-to-t from-ink-950 via-ink-950/72 to-ink-950/30" />
         <div className="relative">
           <Wordmark className="text-xl" />
-          <p className="mt-6 text-sm text-fog-300">This year you read</p>
+          <p className="mt-6 text-sm text-fog-300">{tr('This year you read')}</p>
           <p className="font-brand text-7xl font-bold text-accent drop-shadow-[0_2px_24px_rgba(124,92,255,0.4)]"><CountUp to={data?.chapters ?? 0} /></p>
           <p className="text-lg text-fog-100">chapters across {data?.series ?? 0} series</p>
           {data != null && data.chapters > 0 && (
-            <p className="mt-4 text-sm text-fog-300">Your power day was <span className="text-fog-100">{DOW[data.busiestDow]}</span></p>
+            <p className="mt-4 text-sm text-fog-300">{tr('Your power day was')}<span className="text-fog-100">{DOW[data.busiestDow]}</span></p>
           )}
         </div>
       </div>
 
       <div className="px-5 pt-6 lg:mx-auto lg:max-w-2xl lg:px-0">
-        <p className="mb-2 text-xs font-medium text-fog-400">By month</p>
+        <p className="mb-2 text-xs font-medium text-fog-400">{tr('By month')}</p>
         <div className="flex h-24 items-end gap-1.5">
           {(data?.byMonth ?? Array(12).fill(0)).map((v, i) => (
             <div key={i} className="flex flex-1 flex-col items-center gap-1">
@@ -80,7 +81,7 @@ export default function WrappedPage() {
 
       {(data?.topSeries?.length ?? 0) > 0 && (
         <div className="px-5 pt-6 lg:mx-auto lg:max-w-2xl lg:px-0">
-          <p className="mb-2 text-xs font-medium text-fog-400">Top series</p>
+          <p className="mb-2 text-xs font-medium text-fog-400">{tr('Top series')}</p>
           <div className="card divide-y divide-ink-800/70 overflow-hidden">
             {data!.topSeries.map((s, i) => (
               <Link key={s.id} href={`/series/?id=${s.id}`} className="flex items-center gap-3 px-4 py-3">
@@ -95,7 +96,7 @@ export default function WrappedPage() {
 
       {(data?.topGenres?.length ?? 0) > 0 && (
         <div className="px-5 pb-12 pt-6 lg:mx-auto lg:max-w-2xl lg:px-0">
-          <p className="mb-2 text-xs font-medium text-fog-400">Your genres</p>
+          <p className="mb-2 text-xs font-medium text-fog-400">{tr('Your genres')}</p>
           <div className="flex flex-wrap gap-2">{data!.topGenres.map((g) => <span key={g} className="chip capitalize">{g}</span>)}</div>
         </div>
       )}

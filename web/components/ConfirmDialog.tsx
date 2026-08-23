@@ -8,6 +8,7 @@
 // `confirmText` asks the user to type the name of what they are about to change. Worth the friction only
 // where the action moves other people's data — deleting a series a household is reading, merging two.
 import { useEffect, useRef, useState } from 'react';
+import { t as tr } from '@/lib/i18n';
 
 export function Modal({
   title,
@@ -42,7 +43,7 @@ export function Modal({
       >
         <div className="mb-3 flex items-start justify-between gap-3">
           <h3 className="font-display text-lg font-semibold leading-tight">{title}</h3>
-          <button onClick={onClose} aria-label="Close" className="shrink-0 text-fog-500 hover:text-fog-200">✕</button>
+          <button onClick={onClose} aria-label={tr('Close')} className="shrink-0 text-fog-500 hover:text-fog-200">✕</button>
         </div>
         {children}
       </div>
@@ -78,8 +79,7 @@ export function ConfirmDialog({
       <div className="text-sm leading-relaxed text-fog-300">{body}</div>
       {confirmText && (
         <>
-          <label className="mb-1 mt-4 block text-xs font-semibold uppercase tracking-wider text-fog-500">
-            Type <span className="text-fog-200">{confirmText}</span> to confirm
+          <label className="mb-1 mt-4 block text-xs font-semibold uppercase tracking-wider text-fog-500">{tr('Type')}<span className="text-fog-200">{confirmText}</span> to confirm
           </label>
           <input
             value={typed}
@@ -90,7 +90,7 @@ export function ConfirmDialog({
         </>
       )}
       <div className="mt-4 flex gap-2">
-        <button onClick={onClose} className="btn-ghost flex-1 py-2 text-sm">Cancel</button>
+        <button onClick={onClose} className="btn-ghost flex-1 py-2 text-sm">{tr('Cancel')}</button>
         <button
           onClick={onConfirm}
           disabled={!ready || busy}

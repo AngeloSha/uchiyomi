@@ -3,6 +3,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { motion } from 'framer-motion';
 import { IcHome, IcGrid, IcSearch, IcDownload, IcUser } from './icons';
+import { t as tr } from '@/lib/i18n';
 
 const items = [
   { href: '/', label: 'Home', Icon: IcHome, match: (p: string) => p === '/' },
@@ -28,7 +29,7 @@ export function BottomNav() {
                 <span className={`relative z-10 transition ${active ? 'text-accent' : 'text-fog-500 group-active:text-fog-300'}`}>
                   <Icon width={22} height={22} />
                 </span>
-                <span className={`relative z-10 text-[10px] font-medium ${active ? 'text-accent' : 'text-fog-500'}`}>{label}</span>
+                <span className={`relative z-10 whitespace-nowrap text-[10px] font-medium ${active ? 'text-accent' : 'text-fog-500'}`}>{tr(label)}</span>
               </Link>
             );
           })}

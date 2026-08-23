@@ -14,6 +14,7 @@ import { useToast } from '@/components/Toast';
 import { ConfirmDialog, Modal, msgOf } from '@/components/ConfirmDialog';
 import { useAuth } from '@/lib/auth';
 import { IcChevronLeft, IcHeart, IcStar, IcPlay, IcDownload, IcCheck, IcTrash, IcSliders } from '@/components/icons';
+import { t as tr } from '@/lib/i18n';
 
 // The four the scanner itself writes from ComicInfo's PublishingStatus. Kept as a suggestion list rather
 // than a hard enum, because a file can carry anything and rejecting it would reject Uchiyomi's own data.
@@ -28,11 +29,11 @@ function ArtEditor({ label, kind, busy, onUpload, onSetUrl, onReset }: { label: 
       <p className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-fog-500">{label}</p>
       <div className="flex flex-wrap items-center gap-2">
         <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) onUpload(kind, f); e.currentTarget.value = ''; }} />
-        <button onClick={() => fileRef.current?.click()} disabled={busy} className="btn-ghost px-3 py-1.5 text-xs disabled:opacity-50">Upload image</button>
-        <button onClick={() => onReset(kind)} disabled={busy} className="chip text-xs disabled:opacity-50">Reset to auto</button>
+        <button onClick={() => fileRef.current?.click()} disabled={busy} className="btn-ghost px-3 py-1.5 text-xs disabled:opacity-50">{tr('Upload image')}</button>
+        <button onClick={() => onReset(kind)} disabled={busy} className="chip text-xs disabled:opacity-50">{tr('Reset to auto')}</button>
       </div>
       <div className="mt-2 flex gap-2">
-        <input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="…or paste an image URL" autoCapitalize="none" className={`${fld} flex-1`} />
+        <input value={url} onChange={(e) => setUrl(e.target.value)} placeholder={tr('…or paste an image URL')} autoCapitalize="none" className={`${fld} flex-1`} />
         <button onClick={() => { onSetUrl(kind, url); setUrl(''); }} disabled={busy || !url.trim()} className="btn-accent px-3 text-xs disabled:opacity-50">Set</button>
       </div>
     </div>
@@ -120,35 +121,35 @@ function SeriesEditModal({ id, series, onClose, onSaved }: { id: string; series:
     <div className="fixed inset-0 z-50 grid place-items-center bg-ink-950/70 p-4 backdrop-blur-sm" onClick={onClose}>
       <div className="glass max-h-[88vh] w-full max-w-md overflow-y-auto rounded-2xl border border-ink-700 p-5" onClick={(e) => e.stopPropagation()}>
         <div className="mb-3 flex items-start justify-between gap-3">
-          <h3 className="font-display text-lg font-semibold leading-tight">Edit series</h3>
+          <h3 className="font-display text-lg font-semibold leading-tight">{tr('Edit series')}</h3>
           <button onClick={onClose} className="shrink-0 text-fog-500 hover:text-fog-200">✕</button>
         </div>
-        <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-fog-500">Title</label>
+        <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-fog-500">{tr('Title')}</label>
         <input value={title} onChange={(e) => setTitle(e.target.value)} className={fld} />
-        <label className="mb-1 mt-3 block text-xs font-semibold uppercase tracking-wider text-fog-500">Description</label>
+        <label className="mb-1 mt-3 block text-xs font-semibold uppercase tracking-wider text-fog-500">{tr('Description')}</label>
         <textarea value={summary} onChange={(e) => setSummary(e.target.value)} rows={5} className={`${fld} resize-y`} />
-        <label className="mb-1 mt-3 block text-xs font-semibold uppercase tracking-wider text-fog-500">Author</label>
-        <input value={author} onChange={(e) => setAuthor(e.target.value)} className={fld} placeholder="Leave blank to use what the files say" />
-        <label className="mb-1 mt-3 block text-xs font-semibold uppercase tracking-wider text-fog-500">Status</label>
+        <label className="mb-1 mt-3 block text-xs font-semibold uppercase tracking-wider text-fog-500">{tr('Author')}</label>
+        <input value={author} onChange={(e) => setAuthor(e.target.value)} className={fld} placeholder={tr('Leave blank to use what the files say')} />
+        <label className="mb-1 mt-3 block text-xs font-semibold uppercase tracking-wider text-fog-500">{tr('Status')}</label>
         <select value={STATUSES.includes(status.toUpperCase()) ? status.toUpperCase() : (status ? '__other' : '')}
           onChange={(e) => setStatus(e.target.value === '__other' ? status : e.target.value)} className={fld}>
-          <option value="">Use what the files say</option>
+          <option value="">{tr('Use what the files say')}</option>
           {STATUSES.map((v) => <option key={v} value={v}>{v.charAt(0) + v.slice(1).toLowerCase()}</option>)}
-          <option value="__other">Something else…</option>
+          <option value="__other">{tr('Something else…')}</option>
         </select>
         {!!status && !STATUSES.includes(status.toUpperCase()) && (
-          <input value={status} onChange={(e) => setStatus(e.target.value)} className={`${fld} mt-2`} placeholder="Status" />
+          <input value={status} onChange={(e) => setStatus(e.target.value)} className={`${fld} mt-2`} placeholder={tr('Status')} />
         )}
-        <label className="mb-1 mt-3 block text-xs font-semibold uppercase tracking-wider text-fog-500">Age rating</label>
+        <label className="mb-1 mt-3 block text-xs font-semibold uppercase tracking-wider text-fog-500">{tr('Age rating')}</label>
         <select value={ageRating} onChange={(e) => setAgeRating(e.target.value)} className={fld}>
-          <option value="">Not rated — visible to everyone</option>
+          <option value="">{tr('Not rated — visible to everyone')}</option>
           {[6, 10, 13, 15, 17, 18].map((v) => <option key={v} value={String(v)}>{v}+</option>)}
         </select>
         <p className="mt-1 text-[11px] text-fog-500">
           Members with an age limit below this will not see the series anywhere: not in the library, search,
           the reader, or an external OPDS app.
         </p>
-        <label className="mb-1 mt-3 block text-xs font-semibold uppercase tracking-wider text-fog-500">Genres</label>
+        <label className="mb-1 mt-3 block text-xs font-semibold uppercase tracking-wider text-fog-500">{tr('Genres')}</label>
         <div className="flex flex-wrap gap-1.5 rounded-lg border border-ink-700 bg-ink-900/60 p-2">
           {genres.map((g) => (
             <span key={g} className="inline-flex items-center gap-1 rounded-full bg-ink-800 px-2.5 py-1 text-xs text-fog-200">
@@ -168,12 +169,12 @@ function SeriesEditModal({ id, series, onClose, onSaved }: { id: string; series:
           />
         </div>
         <p className="mt-1 text-[11px] text-fog-500">Genres drive Browse and the recommendation rails. Clearing them all means this series genuinely has none.</p>
-        <button onClick={saveText} disabled={busy} className="btn-accent mt-3 w-full py-2 text-sm disabled:opacity-50">Save details</button>
+        <button onClick={saveText} disabled={busy} className="btn-accent mt-3 w-full py-2 text-sm disabled:opacity-50">{tr('Save details')}</button>
         <div className="mt-4 rounded-xl border border-ink-700 p-3">
           <label className="flex cursor-pointer items-center justify-between gap-3 text-sm">
             <span>
-              <span className="text-fog-100">Follow new chapters</span>
-              <span className="mt-0.5 block text-[11px] leading-relaxed text-fog-500">The scheduled check fetches new chapters for this series.</span>
+              <span className="text-fog-100">{tr('Follow new chapters')}</span>
+              <span className="mt-0.5 block text-[11px] leading-relaxed text-fog-500">{tr('The scheduled check fetches new chapters for this series.')}</span>
             </span>
             <input type="checkbox" checked={autoUpdate} onChange={(e) => toggleAuto(e.target.checked)} className="size-4 shrink-0 accent-accent" />
           </label>
@@ -218,7 +219,7 @@ function CollectionSheet({ seriesId, onClose }: { seriesId: string; onClose: () 
     <div className="fixed inset-0 z-50 grid place-items-center bg-ink-950/70 p-4 backdrop-blur-sm" onClick={onClose}>
       <div className="glass w-full max-w-sm rounded-2xl border border-ink-700 p-5" onClick={(e) => e.stopPropagation()}>
         <div className="mb-3 flex items-start justify-between gap-3">
-          <h3 className="font-display text-lg font-semibold">Add to collection</h3>
+          <h3 className="font-display text-lg font-semibold">{tr('Add to collection')}</h3>
           <button onClick={onClose} className="shrink-0 text-fog-500 hover:text-fog-200">✕</button>
         </div>
         {isLoading ? (
@@ -227,19 +228,19 @@ function CollectionSheet({ seriesId, onClose }: { seriesId: string; onClose: () 
           <div className="max-h-64 space-y-1.5 overflow-y-auto">
             {(data?.content ?? []).map((c) => (
               <button key={c.id} onClick={() => add(c)}
-                className="flex w-full items-center gap-2.5 rounded-xl border border-ink-700 px-3 py-2.5 text-left transition hover:border-accent/50">
+                className="flex w-full items-center gap-2.5 rounded-xl border border-ink-700 px-3 py-2.5 text-start transition hover:border-accent/50">
                 <span aria-hidden className="h-4 w-1.5 shrink-0 rounded-full" style={{ background: c.accent || 'rgb(var(--accent))' }} />
                 <span className="min-w-0 truncate text-sm text-fog-100">{c.name}</span>
-                <span className="ml-auto shrink-0 text-[11px] text-fog-500">{c.item_count}</span>
+                <span className="ms-auto shrink-0 text-[11px] text-fog-500">{c.item_count}</span>
               </button>
             ))}
-            {!(data?.content ?? []).length && <p className="py-2 text-center text-xs text-fog-500">No collections yet — create one below.</p>}
+            {!(data?.content ?? []).length && <p className="py-2 text-center text-xs text-fog-500">{tr('No collections yet — create one below.')}</p>}
           </div>
         )}
         <div className="mt-3 flex gap-2 border-t border-ink-800 pt-3">
           <input value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && createAndAdd()}
-            placeholder="New collection…" className={`${fld} flex-1`} />
-          <button onClick={createAndAdd} disabled={!name.trim()} className="btn-accent px-3 text-xs disabled:opacity-50">Create</button>
+            placeholder={tr('New collection…')} className={`${fld} flex-1`} />
+          <button onClick={createAndAdd} disabled={!name.trim()} className="btn-accent px-3 text-xs disabled:opacity-50">{tr('Create')}</button>
         </div>
       </div>
     </div>
@@ -312,7 +313,7 @@ function RenameFolderModal({ id, folder, title, onClose, onSaved }: {
           they are, so nothing is marked unread and nothing is re-downloaded.
         </p>
         <label className="block">
-          <span className="mb-1 block text-xs text-fog-500">Folder, relative to your library root</span>
+          <span className="mb-1 block text-xs text-fog-500">{tr('Folder, relative to your library root')}</span>
           <input
             value={next}
             onChange={(e) => setNext(e.target.value)}
@@ -320,7 +321,7 @@ function RenameFolderModal({ id, folder, title, onClose, onSaved }: {
             className="w-full rounded-lg border border-ink-700 bg-ink-900/60 px-3 py-2 font-mono text-sm text-fog-100 outline-none focus:border-accent/60"
           />
         </label>
-        <p className="text-[11px] text-fog-600">Currently <span className="font-mono">{folder}</span></p>
+        <p className="text-[11px] text-fog-600">{tr('Currently')}<span className="font-mono">{folder}</span></p>
 
         {refusal && (
           <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-xs text-amber-200">
@@ -330,7 +331,7 @@ function RenameFolderModal({ id, folder, title, onClose, onSaved }: {
         )}
 
         <div className="flex justify-end gap-2 pt-1">
-          <button onClick={onClose} className="chip text-xs">Cancel</button>
+          <button onClick={onClose} className="chip text-xs">{tr('Cancel')}</button>
           <button onClick={save} disabled={busy || !changed} className="btn-accent px-4 py-2 text-sm disabled:opacity-50">
             {busy ? 'Renaming\u2026' : 'Rename folder'}
           </button>
@@ -367,12 +368,12 @@ function ChapterEditModal({ book, onClose, onSaved }: { book: Book; onClose: () 
     <div className="fixed inset-0 z-50 grid place-items-center bg-ink-950/70 p-4 backdrop-blur-sm" onClick={onClose}>
       <div className="glass w-full max-w-sm rounded-2xl border border-ink-700 p-5" onClick={(e) => e.stopPropagation()}>
         <div className="mb-3 flex items-start justify-between gap-3">
-          <h3 className="font-display text-lg font-semibold leading-tight">Edit chapter</h3>
+          <h3 className="font-display text-lg font-semibold leading-tight">{tr('Edit chapter')}</h3>
           <button onClick={onClose} className="shrink-0 text-fog-500 hover:text-fog-200">✕</button>
         </div>
-        <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-fog-500">Chapter number</label>
+        <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-fog-500">{tr('Chapter number')}</label>
         <input value={number} onChange={(e) => setNumber(e.target.value)} inputMode="decimal" className={fld} />
-        <label className="mb-1 mt-3 block text-xs font-semibold uppercase tracking-wider text-fog-500">Title</label>
+        <label className="mb-1 mt-3 block text-xs font-semibold uppercase tracking-wider text-fog-500">{tr('Title')}</label>
         <input value={title} onChange={(e) => setTitle(e.target.value)} className={fld} />
         {completed && (
           <p className="mt-3 rounded-lg border border-amber-500/30 bg-amber-500/10 p-2.5 text-[11px] leading-relaxed text-amber-200">
@@ -382,8 +383,8 @@ function ChapterEditModal({ book, onClose, onSaved }: { book: Book; onClose: () 
           </p>
         )}
         <div className="mt-4 flex gap-2">
-          <button onClick={() => save(true)} disabled={busy} className="btn-ghost flex-1 py-2 text-sm disabled:opacity-50">Reset to file</button>
-          <button onClick={() => save()} disabled={busy} className="btn-accent flex-1 py-2 text-sm disabled:opacity-50">Save</button>
+          <button onClick={() => save(true)} disabled={busy} className="btn-ghost flex-1 py-2 text-sm disabled:opacity-50">{tr('Reset to file')}</button>
+          <button onClick={() => save()} disabled={busy} className="btn-accent flex-1 py-2 text-sm disabled:opacity-50">{tr('Save')}</button>
         </div>
       </div>
     </div>
@@ -406,7 +407,7 @@ function ChapterRow({ book, downloaded, onReader, onToggleDownload, onMark, onEd
 
   return (
     <div className="flex items-center gap-3 border-b border-ink-800/70 py-2.5">
-      <button onClick={onReader} className="flex min-w-0 flex-1 items-center gap-3 text-left">
+      <button onClick={onReader} className="flex min-w-0 flex-1 items-center gap-3 text-start">
         <div className={`relative h-14 w-10 shrink-0 overflow-hidden rounded-lg border ${state === 'read' ? 'border-ink-800 opacity-45' : 'border-ink-700'}`}>
           <Img src={img.bookThumb(book.id)} alt="" className="h-full w-full" />
           {state === 'reading' && <span className="absolute inset-x-0 bottom-0 h-0.5 bg-accent" />}
@@ -435,7 +436,7 @@ function ChapterRow({ book, downloaded, onReader, onToggleDownload, onMark, onEd
         {busy ? <span className="text-[10px] font-semibold text-accent">…</span> : downloaded ? <IcCheck width={16} height={16} /> : <IcDownload width={16} height={16} />}
       </button>
       <div className="relative shrink-0">
-        <button onClick={() => setMenu((m) => !m)} aria-label="Chapter actions"
+        <button onClick={() => setMenu((m) => !m)} aria-label={tr('Chapter actions')}
           className="grid h-9 w-9 place-items-center rounded-full border border-ink-700 text-fog-500">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.8" /><circle cx="12" cy="12" r="1.8" /><circle cx="19" cy="12" r="1.8" /></svg>
         </button>
@@ -444,16 +445,14 @@ function ChapterRow({ book, downloaded, onReader, onToggleDownload, onMark, onEd
             <div className="fixed inset-0 z-20" onClick={() => setMenu(false)} />
             <div className="absolute right-0 top-10 z-30 w-48 overflow-hidden rounded-xl border border-ink-700 bg-ink-900 shadow-lift">
               <button onClick={() => { setMenu(false); onMark(rp?.completed ? 'unread' : 'read'); }}
-                className="block w-full px-3.5 py-2.5 text-left text-xs text-fog-200 hover:bg-ink-800">
+                className="block w-full px-3.5 py-2.5 text-start text-xs text-fog-200 hover:bg-ink-800">
                 {rp?.completed ? 'Mark unread' : 'Mark read'}
               </button>
               <button onClick={() => { setMenu(false); onMark('previous'); }}
-                className="block w-full px-3.5 py-2.5 text-left text-xs text-fog-200 hover:bg-ink-800">
-                Mark previous as read
-              </button>
+                className="block w-full px-3.5 py-2.5 text-start text-xs text-fog-200 hover:bg-ink-800">{tr('Mark previous as read')}</button>
               {onEdit && (
                 <button onClick={() => { setMenu(false); onEdit(); }}
-                  className="block w-full border-t border-ink-800 px-3.5 py-2.5 text-left text-xs text-fog-200 hover:bg-ink-800">
+                  className="block w-full border-t border-ink-800 px-3.5 py-2.5 text-start text-xs text-fog-200 hover:bg-ink-800">
                   Edit number &amp; title
                 </button>
               )}
@@ -648,9 +647,7 @@ function SeriesInner() {
         </button>
       </div>
       <button onClick={() => setCollecting(true)} className="flex items-center justify-center gap-2 rounded-full border border-ink-700 py-2.5 text-sm text-fog-300">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><path d="M4 6h16M4 12h16M4 18h10" /><path d="M19 15v6M16 18h6" /></svg>
-        Add to collection
-      </button>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><path d="M4 6h16M4 12h16M4 18h10" /><path d="M19 15v6M16 18h6" /></svg>{tr('Add to collection')}</button>
       <div className="mt-1 flex items-center justify-between">
         <StarRating value={rating} onSet={setStars} />
         <span className="text-xs text-fog-500">{rating ? `${rating}/5` : 'Rate this'}</span>
@@ -658,19 +655,13 @@ function SeriesInner() {
       {isAdmin && (
         <>
           <button onClick={() => setEditing(true)} className="mt-1 flex items-center justify-center gap-2 rounded-full border border-ink-700 py-2.5 text-sm text-fog-300">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9" /><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" /></svg>
-            Edit details
-          </button>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9" /><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" /></svg>{tr('Edit details')}</button>
           {series?.folder && (
             <button onClick={() => setRenaming(true)} className="flex items-center justify-center gap-2 rounded-full border border-ink-700 py-2.5 text-sm text-fog-300">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M3 7V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9L11.7 5H19a2 2 0 0 1 2 2v2" /><path d="M3 9h18l-1.5 9a2 2 0 0 1-2 1.8H6.5a2 2 0 0 1-2-1.8Z" /></svg>
-              Rename folder
-            </button>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M3 7V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9L11.7 5H19a2 2 0 0 1 2 2v2" /><path d="M3 9h18l-1.5 9a2 2 0 0 1-2 1.8H6.5a2 2 0 0 1-2-1.8Z" /></svg>{tr('Rename folder')}</button>
           )}
           <button onClick={() => setDeleting(true)} className="flex items-center justify-center gap-2 rounded-full border border-ink-700 py-2.5 text-sm text-fog-500 hover:border-rose-500/40 hover:text-rose-300">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14" /></svg>
-            Remove from library
-          </button>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14" /></svg>{tr('Remove from library')}</button>
         </>
       )}
     </div>
@@ -710,9 +701,9 @@ function SeriesInner() {
   const Chapters = (
     <div>
       <div className="mb-1 flex items-center justify-between gap-2">
-        <h2 className="font-display text-lg font-semibold">Chapters</h2>
+        <h2 className="font-display text-lg font-semibold">{tr('Chapters')}</h2>
         <div className="flex items-center gap-1.5">
-          <button onClick={markAllRead} className="chip text-xs"><IcCheck width={14} height={14} /> Mark all read</button>
+          <button onClick={markAllRead} className="chip text-xs"><IcCheck width={14} height={14} />{tr('Mark all read')}</button>
           <button onClick={() => setAsc((a) => !a)} className="chip text-xs">
             <IcSliders width={14} height={14} /> {asc ? 'Oldest' : 'Newest'}
           </button>
@@ -747,7 +738,7 @@ function SeriesInner() {
         <div className="pointer-events-none absolute inset-0" style={{ background: 'radial-gradient(85% 95% at 22% 0%, rgb(var(--cover, 124 92 255) / 0.32), transparent 62%)' }} />
         {/* desktop title-over-art (Jellyfin style) — offset to the right of the floating poster */}
         <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.55, delay: 0.08, ease: [0.22, 0.61, 0.36, 1] }}
-          className="pointer-events-none absolute inset-x-0 bottom-0 hidden flex-col justify-end p-8 lg:flex lg:pl-[288px]">
+          className="pointer-events-none absolute inset-x-0 bottom-0 hidden flex-col justify-end p-8 lg:flex lg:ps-[288px]">
           {(meta?.status || rating) && (
             <div className="mb-2 flex items-center gap-2">
               {meta?.status && <span className="chip text-[11px] capitalize">{meta.status.toLowerCase()}</span>}
@@ -787,14 +778,14 @@ function SeriesInner() {
 
       {deleting && series && (
         <ConfirmDialog
-          title="Remove from library?"
+          title={tr('Remove from library?')}
           danger
           busy={busyAdmin}
           confirmLabel="Remove"
           confirmText={series.name}
           body={
             <>
-              <p><strong className="text-fog-100">No files are deleted.</strong> The chapters stay exactly where they are on disk, and nothing in your library folder is touched.</p>
+              <p><strong className="text-fog-100">{tr('No files are deleted.')}</strong> The chapters stay exactly where they are on disk, and nothing in your library folder is touched.</p>
               <p className="mt-2">Everyone&rsquo;s reading progress, history, favourites and ratings are kept, so you can put it back at any time from Admin &rarr; Library, or just add it again.</p>
             </>
           }
@@ -820,7 +811,7 @@ function SeriesInner() {
 
       {(similar?.content?.length ?? 0) > 0 && (
         <section className="mt-10">
-          <SectionTitle>More like this</SectionTitle>
+          <SectionTitle>{tr('More like this')}</SectionTitle>
           <Rail>{similar!.content.map((s) => <SeriesCard key={s.id} series={s} />)}</Rail>
         </section>
       )}

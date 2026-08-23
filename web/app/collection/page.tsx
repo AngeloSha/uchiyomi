@@ -7,6 +7,7 @@ import { Series } from '@/lib/types';
 import { Img } from '@/components/ui';
 import { useToast } from '@/components/Toast';
 import { IcChevronLeft, IcTrash } from '@/components/icons';
+import { t as tr } from '@/lib/i18n';
 
 interface CollectionDetail { id: string; name: string; accent: string | null; items: Series[] }
 
@@ -64,14 +65,12 @@ function CollectionInner() {
           {Array.from({ length: 8 }).map((_, i) => <div key={i} className="skeleton aspect-[2/3] rounded-2xl" />)}
         </div>
       ) : items.length === 0 ? (
-        <p className="px-4 pt-10 text-center text-sm text-fog-500 lg:px-0">
-          Empty so far — open any series and use “Add to collection”.
-        </p>
+        <p className="px-4 pt-10 text-center text-sm text-fog-500 lg:px-0">{tr('Empty so far — open any series and use “Add to collection”.')}</p>
       ) : (
         <div className="grid grid-cols-3 gap-3 px-4 pt-3 sm:grid-cols-4 lg:grid-cols-6 lg:px-0 2xl:grid-cols-8">
           {items.map((s, i) => (
             <div key={s.id} className="group relative">
-              <button onClick={() => !reordering && router.push(`/series/?id=${s.id}`)} className="block w-full text-left">
+              <button onClick={() => !reordering && router.push(`/series/?id=${s.id}`)} className="block w-full text-start">
                 <div className="grad-border relative aspect-[2/3] overflow-hidden rounded-2xl border border-ink-700/60">
                   <Img src={img.seriesThumb(s.id)} alt={s.metadata?.title || s.name} className="h-full w-full" />
                 </div>
@@ -85,7 +84,7 @@ function CollectionInner() {
                     className="grid h-8 w-8 place-items-center rounded-full bg-black/70 text-white backdrop-blur disabled:opacity-30">→</button>
                 </div>
               ) : (
-                <button onClick={() => removeItem(s)} aria-label="Remove from collection"
+                <button onClick={() => removeItem(s)} aria-label={tr('Remove from collection')}
                   className="absolute right-1.5 top-1.5 grid h-8 w-8 place-items-center rounded-full bg-black/60 text-fog-300 opacity-0 backdrop-blur transition group-hover:opacity-100">
                   <IcTrash width={14} height={14} />
                 </button>

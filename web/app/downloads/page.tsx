@@ -8,6 +8,7 @@ import { useToast } from '@/components/Toast';
 import { EmptyState } from '@/components/EmptyState';
 import { ART } from '@/lib/art';
 import { IcTrash, IcPlay, IcDownload, IcWifiOff, IcRefresh } from '@/components/icons';
+import { t as tr } from '@/lib/i18n';
 
 export default function DownloadsPage() {
   const [items, setItems] = useState<OfflineChapter[]>([]);
@@ -72,7 +73,7 @@ export default function DownloadsPage() {
     <div className="min-h-screen-d">
       <header className="safe-top sticky top-0 z-30 bg-ink-950/85 px-5 pb-3 backdrop-blur-xl lg:static lg:bg-transparent lg:px-0 lg:pt-6 lg:backdrop-blur-none">
         <div className="flex items-center justify-between">
-          <h1 className="font-display text-2xl font-bold tracking-tight lg:text-3xl">Offline</h1>
+          <h1 className="font-display text-2xl font-bold tracking-tight lg:text-3xl">{tr('Offline')}</h1>
           <button onClick={sync} disabled={syncing || !online}
             className="flex items-center gap-1.5 rounded-full border border-ink-700 bg-ink-850/70 px-3.5 py-2 text-xs text-fog-200 disabled:opacity-50">
             <IcRefresh width={15} height={15} className={syncing ? 'animate-spin text-accent' : ''} /> {syncing ? 'Syncing…' : 'Sync now'}
@@ -82,9 +83,8 @@ export default function DownloadsPage() {
           <span>{items.length} chapters · {bytes(totalBytes)}</span>
           {!online && <span className="inline-flex items-center gap-1 text-accent"><IcWifiOff width={13} height={13} /> offline</span>}
           {items.length > 0 && (
-            <button onClick={removeAll} className="ml-auto inline-flex items-center gap-1 text-fog-500 transition hover:text-red-400">
-              <IcTrash width={13} height={13} /> Delete all
-            </button>
+            <button onClick={removeAll} className="ms-auto inline-flex items-center gap-1 text-fog-500 transition hover:text-red-400">
+              <IcTrash width={13} height={13} />{tr('Delete all')}</button>
           )}
         </div>
         {usage.quota > 0 && (
@@ -98,7 +98,7 @@ export default function DownloadsPage() {
       </header>
 
       {loaded && items.length === 0 ? (
-        <EmptyState art={ART.emptyDownloads} title="No downloads yet"
+        <EmptyState art={ART.emptyDownloads} title={tr('No downloads yet')}
           sub="Tap the download icon on any chapter — or turn on Smart downloads — to read offline. Perfect for flights and commutes."
           cta={{ href: '/library', label: 'Browse library' }} />
       ) : (

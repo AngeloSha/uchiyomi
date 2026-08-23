@@ -11,6 +11,8 @@ import { Avatar, AVATAR_EMOJIS, AVATAR_COLORS } from '@/components/Avatar';
 import { SecurityPanel } from '@/components/SecurityPanel';
 import { useToast } from '@/components/Toast';
 import { IcDownload, IcSparkle, IcCheck, IcUser, IcChevronRight, IcRefresh } from '@/components/icons';
+import { t as tr, LOCALES } from '@/lib/i18n';
+import { useT } from '@/lib/I18nProvider';
 
 const msgOf = (e: any, fb: string) => { try { return JSON.parse(e?.body || '{}').message || fb; } catch { return fb; } };
 const fld = 'w-full rounded-xl border border-ink-700 bg-ink-850 px-3 py-2.5 text-sm text-fog-100 outline-none focus:border-accent';
@@ -203,15 +205,15 @@ export default function ProfilePage() {
             { label: 'Series', value: stats?.series_touched ?? 0 },
             { label: 'Sessions', value: stats?.total_events ?? 0 },
           ].map((s) => (
-            <div key={s.label} className="card p-4 text-center">
+            <div key={tr(s.label)} className="card p-4 text-center">
               <p className="font-display text-2xl font-bold text-accent">{s.value}</p>
-              <p className="text-[11px] text-fog-500">{s.label}</p>
+              <p className="text-[11px] text-fog-500">{tr(s.label)}</p>
             </div>
           ))}
         </div>
         {!!stats?.byDay?.length && (
           <div className="card mt-3 p-4">
-            <p className="mb-2 text-xs font-medium text-fog-400">Last 90 days</p>
+            <p className="mb-2 text-xs font-medium text-fog-400">{tr('Last 90 days')}</p>
             <div className="flex h-16 items-end gap-[2px]">
               {stats.byDay.map((d) => (
                 <div key={d.day} className="flex-1 rounded-t bg-accent/70" style={{ height: `${(d.chapters / maxDay) * 100}%`, minHeight: 2 }} title={`${d.day}: ${d.chapters}`} />
@@ -236,7 +238,7 @@ export default function ProfilePage() {
           <div className="card flex items-center gap-3 p-4">
             <GoalRing value={stats?.weekChapters ?? 0} goal={stats?.weeklyGoal ?? 0} />
             <div className="min-w-0">
-              <p className="text-xs text-fog-400">Weekly goal</p>
+              <p className="text-xs text-fog-400">{tr('Weekly goal')}</p>
               {(stats?.weeklyGoal ?? 0) > 0 ? (
                 <button onClick={() => setGoal()} className="text-sm text-accent">{stats?.weekChapters ?? 0}/{stats?.weeklyGoal} · edit</button>
               ) : (
@@ -248,13 +250,13 @@ export default function ProfilePage() {
 
         {stats && (
           <div className="card mt-3 p-4">
-            <p className="mb-2 text-xs font-medium text-fog-400">Badges</p>
+            <p className="mb-2 text-xs font-medium text-fog-400">{tr('Badges')}</p>
             <div className="flex flex-wrap gap-2">
               {BADGES.map((b) => {
                 const earned = b.test(stats);
                 return (
-                  <span key={b.label} className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs ${earned ? 'border-accent/40 bg-accent-soft text-fog-100' : 'border-ink-700 text-ink-500 opacity-50'}`}>
-                    <span>{b.emoji}</span> {b.label}
+                  <span key={tr(b.label)} className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs ${earned ? 'border-accent/40 bg-accent-soft text-fog-100' : 'border-ink-700 text-ink-500 opacity-50'}`}>
+                    <span>{b.emoji}</span> {tr(b.label)}
                   </span>
                 );
               })}
@@ -263,18 +265,18 @@ export default function ProfilePage() {
         )}
 
         <Link href="/history" className="card mt-3 flex items-center justify-between p-4">
-          <span className="flex items-center gap-3 text-sm text-fog-200"><IcRefresh className="text-accent" width={20} height={20} /> Reading history</span>
+          <span className="flex items-center gap-3 text-sm text-fog-200"><IcRefresh className="text-accent" width={20} height={20} />{tr('Reading history')}</span>
           <IcChevronRight className="text-fog-500" width={18} height={18} />
         </Link>
         <Link href="/wrapped" className="card mt-3 flex items-center justify-between p-4">
-          <span className="flex items-center gap-3 text-sm text-fog-200"><IcSparkle className="text-accent" width={20} height={20} /> Your Uchiyomi Wrapped</span>
+          <span className="flex items-center gap-3 text-sm text-fog-200"><IcSparkle className="text-accent" width={20} height={20} />{tr('Your Uchiyomi Wrapped')}</span>
           <IcChevronRight className="text-fog-500" width={18} height={18} />
         </Link>
       </section>
 
       {/* avatar picker */}
       <section className="px-5 pt-6 lg:px-0">
-        <h2 className="mb-3 font-display text-base font-semibold">Your avatar</h2>
+        <h2 className="mb-3 font-display text-base font-semibold">{tr('Your avatar')}</h2>
         <div className="card p-4">
           <div className="flex items-center gap-4">
             <Avatar avatar={av} size={56} />
@@ -298,7 +300,7 @@ export default function ProfilePage() {
       {/* household leaderboard */}
       {(lb?.content?.length ?? 0) > 1 && (
         <section className="px-5 pt-6 lg:px-0">
-          <h2 className="mb-3 font-display text-base font-semibold">This week in your library</h2>
+          <h2 className="mb-3 font-display text-base font-semibold">{tr('This week in your library')}</h2>
           <div className="card divide-y divide-ink-800/70 overflow-hidden">
             {lb!.content.map((m: any, i: number) => (
               <div key={m.id} className="flex items-center gap-3 px-4 py-3">
@@ -314,7 +316,7 @@ export default function ProfilePage() {
 
       {/* security */}
       <section className="px-5 pt-6 lg:px-0">
-        <h2 className="mb-3 font-display text-base font-semibold">Security</h2>
+        <h2 className="mb-3 font-display text-base font-semibold">{tr('Security')}</h2>
         <SecurityPanel />
       </section>
 
@@ -330,7 +332,7 @@ export default function ProfilePage() {
 
       {/* accent */}
       <section className="px-5 pt-6 lg:px-0">
-        <h2 className="mb-3 font-display text-base font-semibold">Accent</h2>
+        <h2 className="mb-3 font-display text-base font-semibold">{tr('Accent')}</h2>
         <div className="flex flex-wrap gap-3">
           {ACCENTS.map((a) => (
             <button key={a.hex} onClick={() => pickAccent(a.hex)} className="relative h-11 w-11 rounded-full" style={{ background: a.hex }} aria-label={a.name}>
@@ -344,45 +346,40 @@ export default function ProfilePage() {
 
       {/* install */}
       <section className="px-5 pt-6">
-        <h2 className="mb-3 font-display text-base font-semibold">Install Uchiyomi</h2>
+        <h2 className="mb-3 font-display text-base font-semibold">{tr('Install Uchiyomi')}</h2>
         {standalone ? (
           <div className="card flex items-center gap-3 p-4 text-sm text-fog-300">
-            <IcCheck className="text-accent" /> Installed — running as an app.
-          </div>
+            <IcCheck className="text-accent" />{tr('Installed — running as an app.')}</div>
         ) : canInstall ? (
           <button onClick={install} className="btn-accent w-full">
-            <IcDownload width={18} height={18} /> Add to home screen
-          </button>
+            <IcDownload width={18} height={18} />{tr('Add to home screen')}</button>
         ) : isIOS ? (
           <div className="card p-4 text-sm text-fog-300">
-            <p className="mb-1 font-medium text-fog-100">Add to your iPhone</p>
-            Tap the <span className="text-accent">Share</span> button in Safari, then <span className="text-accent">“Add to Home Screen.”</span>
-            <p className="mt-2 text-xs text-fog-500">On iOS, offline downloads may be cleared by the system under storage pressure.</p>
+            <p className="mb-1 font-medium text-fog-100">{tr('Add to your iPhone')}</p>{tr('Tap the')}<span className="text-accent">{tr('Share')}</span> button in Safari, then <span className="text-accent">“Add to Home Screen.”</span>
+            <p className="mt-2 text-xs text-fog-500">{tr('On iOS, offline downloads may be cleared by the system under storage pressure.')}</p>
           </div>
         ) : (
-          <div className="card p-4 text-sm text-fog-400">Open in Chrome/Edge and use “Install app” from the menu.</div>
+          <div className="card p-4 text-sm text-fog-400">{tr('Open in Chrome/Edge and use “Install app” from the menu.')}</div>
         )}
       </section>
 
       {/* storage + offline */}
       <section className="px-5 pt-6">
         <Link href="/downloads" className="card flex items-center justify-between p-4">
-          <span className="flex items-center gap-3 text-sm text-fog-200"><IcDownload className="text-accent" width={20} height={20} /> Offline downloads</span>
+          <span className="flex items-center gap-3 text-sm text-fog-200"><IcDownload className="text-accent" width={20} height={20} />{tr('Offline downloads')}</span>
           <span className="text-xs text-fog-500">{bytes(usage.usage)}</span>
         </Link>
-        <button onClick={() => requestPersist()} className="mt-2 w-full text-left text-xs text-fog-500">
-          Tap to ask the browser to protect your downloads from eviction.
-        </button>
+        <button onClick={() => requestPersist()} className="mt-2 w-full text-start text-xs text-fog-500">{tr('Tap to ask the browser to protect your downloads from eviction.')}</button>
       </section>
 
       {/* smart downloads */}
       <section className="px-5 pt-6 lg:px-0">
-        <h2 className="mb-3 font-display text-base font-semibold">Smart downloads</h2>
+        <h2 className="mb-3 font-display text-base font-semibold">{tr('Smart downloads')}</h2>
         <div className="card p-4">
           <div className="flex items-center justify-between gap-3">
             <div className="min-w-0">
-              <p className="text-sm text-fog-100">Keep favorites offline</p>
-              <p className="text-xs text-fog-500">Auto-download the latest unread chapters of your favorites.</p>
+              <p className="text-sm text-fog-100">{tr('Keep favorites offline')}</p>
+              <p className="text-xs text-fog-500">{tr('Auto-download the latest unread chapters of your favorites.')}</p>
             </div>
             <button onClick={() => setSmart({ enabled: !so.enabled })} className={`relative h-7 w-12 shrink-0 rounded-full transition ${so.enabled ? 'bg-accent' : 'bg-ink-600'}`}>
               <span className={`absolute top-0.5 h-6 w-6 rounded-full bg-white transition-all ${so.enabled ? 'left-[22px]' : 'left-0.5'}`} />
@@ -390,7 +387,7 @@ export default function ProfilePage() {
           </div>
           {so.enabled && (
             <div className="mt-3 flex items-center gap-2">
-              <span className="text-xs text-fog-400">Per series:</span>
+              <span className="text-xs text-fog-400">{tr('Per series:')}</span>
               {[3, 5, 10].map((n) => (
                 <button key={n} onClick={() => setSmart({ perSeries: n })} className={`chip text-xs ${(so.perSeries || 3) === n ? 'chip-active' : ''}`}>{n}</button>
               ))}
@@ -402,10 +399,10 @@ export default function ProfilePage() {
       {/* new-chapter notifications */}
       {pushEnabledSrv && (
         <section className="px-5 pt-6 lg:px-0">
-          <h2 className="mb-3 font-display text-base font-semibold">Notifications</h2>
+          <h2 className="mb-3 font-display text-base font-semibold">{tr('Notifications')}</h2>
           <div className="card flex items-center justify-between gap-3 p-4">
             <div className="min-w-0">
-              <p className="text-sm text-fog-100">New-chapter alerts</p>
+              <p className="text-sm text-fog-100">{tr('New-chapter alerts')}</p>
               <p className="text-xs text-fog-500">{pushSupported ? 'Get a push notification when one of your favorites gets a new chapter.' : 'Not supported on this browser.'}</p>
             </div>
             <button onClick={togglePush} disabled={!pushSupported || pushBusy} className={`relative h-7 w-12 shrink-0 rounded-full transition disabled:opacity-40 ${pushOn ? 'bg-accent' : 'bg-ink-600'}`}>
@@ -417,15 +414,23 @@ export default function ProfilePage() {
 
       {/* progress tracking */}
       <section className="px-5 pt-6 lg:px-0">
-        <h2 className="mb-3 font-display text-base font-semibold">Progress tracking</h2>
+        <h2 className="mb-3 font-display text-base font-semibold">{tr('Progress tracking')}</h2>
         <TrackerPanel />
+      </section>
+
+      {/* language */}
+      <section className="px-5 pt-6 lg:px-0">
+        <h2 className="mb-3 font-display text-base font-semibold">{tr('Language')}</h2>
+        <div className="card p-4">
+          <LanguagePicker />
+        </div>
       </section>
 
       {/* external readers (OPDS) */}
       <section className="px-5 pt-6 lg:px-0">
-        <h2 className="mb-3 font-display text-base font-semibold">External readers (OPDS)</h2>
+        <h2 className="mb-3 font-display text-base font-semibold">{tr('External readers (OPDS)')}</h2>
         <div className="card p-4">
-          <p className="text-sm text-fog-100">Read Uchiyomi in another app</p>
+          <p className="text-sm text-fog-100">{tr('Read Uchiyomi in another app')}</p>
           <p className="mt-1 text-xs text-fog-500">Add Uchiyomi as an OPDS catalog in readers like Panels, Chunky, KOReader, or Moon+. Generate a personal link, then enter the URL + credentials below in your reader.</p>
           {opdsSt?.exists && !opds && (
             <div className="mt-3 rounded-lg border border-ink-700 bg-ink-900/40 p-3 text-xs">
@@ -434,9 +439,7 @@ export default function ProfilePage() {
                   {opdsSt.expired ? 'Your link has expired' : 'A link is active'}
                 </span>
                 <button onClick={revokeOpds} disabled={opdsBusy}
-                        className="chip shrink-0 text-[11px] hover:border-rose-500/50 hover:text-rose-400 disabled:opacity-50">
-                  Revoke
-                </button>
+                        className="chip shrink-0 text-[11px] hover:border-rose-500/50 hover:text-rose-400 disabled:opacity-50">{tr('Revoke')}</button>
               </div>
               <p className="mt-1 text-fog-500">
                 {opdsSt.lastSeen ? `Last used ${relativeTime(opdsSt.lastSeen)}` : 'Never used yet'}
@@ -450,9 +453,9 @@ export default function ProfilePage() {
             </button>
           ) : (
             <div className="mt-3 space-y-2 text-xs">
-              <div><span className="text-fog-500">Catalog URL</span><div className="mt-0.5 break-all rounded-lg border border-ink-700 bg-ink-900/60 px-2 py-1.5 font-mono text-fog-100">{opds.url}</div></div>
-              <div><span className="text-fog-500">Username</span><div className="mt-0.5 rounded-lg border border-ink-700 bg-ink-900/60 px-2 py-1.5 font-mono text-fog-100">{user?.username || 'me'}</div></div>
-              <div><span className="text-fog-500">Password — copy now, shown once</span><div className="mt-0.5 break-all rounded-lg border border-ink-700 bg-ink-900/60 px-2 py-1.5 font-mono text-accent">{opds.token}</div></div>
+              <div><span className="text-fog-500">{tr('Catalog URL')}</span><div className="mt-0.5 break-all rounded-lg border border-ink-700 bg-ink-900/60 px-2 py-1.5 font-mono text-fog-100">{opds.url}</div></div>
+              <div><span className="text-fog-500">{tr('Username')}</span><div className="mt-0.5 rounded-lg border border-ink-700 bg-ink-900/60 px-2 py-1.5 font-mono text-fog-100">{user?.username || 'me'}</div></div>
+              <div><span className="text-fog-500">{tr('Password — copy now, shown once')}</span><div className="mt-0.5 break-all rounded-lg border border-ink-700 bg-ink-900/60 px-2 py-1.5 font-mono text-accent">{opds.token}</div></div>
               <p className="text-[11px] text-fog-500">
                 Generating again replaces the previous token.
                 {opds.expiresInDays && <> This one stops working in {opds.expiresInDays} days; you can revoke it sooner.</>}
@@ -473,7 +476,7 @@ export default function ProfilePage() {
           <span className="flex items-center gap-3">
             <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-accent-soft text-lg">☕</span>
             <span className="flex flex-col">
-              <span className="font-display text-sm font-semibold text-fog-100">Support Uchiyomi</span>
+              <span className="font-display text-sm font-semibold text-fog-100">{tr('Support Uchiyomi')}</span>
               <span className="text-[12px] text-fog-400">Free &amp; open-source — buy me a coffee on Ko-fi</span>
             </span>
           </span>
@@ -483,10 +486,9 @@ export default function ProfilePage() {
 
       {/* logout */}
       <section className="px-5 pb-10 pt-8">
-        <button onClick={logout} className="btn-ghost w-full text-red-300">Sign out</button>
+        <button onClick={logout} className="btn-ghost w-full text-red-300">{tr('Sign out')}</button>
         <p className="mt-4 flex items-center justify-center gap-1 text-center text-[11px] text-fog-600">
-          <IcSparkle width={12} height={12} /> Uchiyomi · personal reader for your Komga library
-        </p>
+          <IcSparkle width={12} height={12} />{tr('Uchiyomi · personal reader for your Komga library')}</p>
       </section>
     </div>
   );
@@ -498,6 +500,35 @@ interface TrackerStatus {
   tokenHelp?: string;
   provider: string; connected: boolean; accountName: string | null;
   expiresAt: string | null; expiringSoon: boolean; lastSyncAt: string | null; lastError: string | null;
+}
+
+/**
+ * Choose a language.
+ *
+ * Written to the server so it follows you to another device, and mirrored to localStorage so the login
+ * screen -- which nobody is signed in to -- is already translated.
+ *
+ * The note about machine assistance is shown rather than buried in a commit message: someone reading their
+ * own language deserves to know how it got there, and it is what makes "this is wrong" an invitation
+ * instead of a complaint.
+ */
+function LanguagePicker() {
+  const { lang, setLang } = useT();
+  return (
+    <>
+      <div className="flex flex-wrap gap-1.5">
+        {LOCALES.map((l) => (
+          <button key={l.code} onClick={() => setLang(l.code)}
+            className={`chip text-xs ${lang === l.code ? 'chip-active' : ''}`}>
+            {l.name}
+          </button>
+        ))}
+      </div>
+      <p className="mt-3 text-[11px] text-fog-500">
+        {tr('Translations other than English are machine-assisted and have not been checked by a native speaker. If something reads wrong, the language files are one JSON each — corrections are welcome.')}
+      </p>
+    </>
+  );
 }
 
 /**
@@ -533,7 +564,7 @@ function TrackerRow({ t, refetch }: { t: TrackerStatus; refetch: () => void }) {
     setBusy(true);
     try {
       const r = await api<{ account: string }>(`/api/trackers/${t.provider}/connect`, { json: { token: token.trim() } });
-      toast(`Connected to ${label} as ${r.account}`, 'success');
+      toast(`Connected to ${tr(label)} as ${r.account}`, 'success');
       setToken('');
       setOpen(false);
       refetch();
@@ -542,7 +573,7 @@ function TrackerRow({ t, refetch }: { t: TrackerStatus; refetch: () => void }) {
         const b = await api<{ series: number }>('/api/trackers/anilist/backfill', { json: {} });
         if (b.series) toast(`Syncing ${b.series} series you've already finished…`);
       }
-    } catch (e: any) { toast(msgOf(e, `${label} did not accept that token`), 'error'); }
+    } catch (e: any) { toast(msgOf(e, `${tr(label)} did not accept that token`), 'error'); }
     setBusy(false);
   };
 
@@ -556,17 +587,17 @@ function TrackerRow({ t, refetch }: { t: TrackerStatus; refetch: () => void }) {
       <div className="card p-4">
         <div className="flex items-center justify-between gap-3">
           <div className="min-w-0">
-            <p className="text-sm text-fog-100">{label} — <span className="text-accent">{t.accountName}</span></p>
+            <p className="text-sm text-fog-100">{tr(label)} — <span className="text-accent">{t.accountName}</span></p>
             <p className="mt-0.5 text-xs text-fog-500">
               Finished chapters sync automatically
               {t.lastSyncAt && <> · last synced {relativeTime(t.lastSyncAt)}</>}
             </p>
           </div>
-          <button onClick={disconnect} className="chip shrink-0 text-xs">Disconnect</button>
+          <button onClick={disconnect} className="chip shrink-0 text-xs">{tr('Disconnect')}</button>
         </div>
         {t.expiringSoon && (
           <p className="mt-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-2.5 py-1.5 text-xs text-amber-300">
-            This {label} token expires {t.expiresAt ? relativeTime(t.expiresAt) : 'soon'}. None of these services can
+            This {tr(label)} token expires {t.expiresAt ? relativeTime(t.expiresAt) : 'soon'}. None of these services can
             refresh a token silently, so reconnect before then to keep syncing.
           </p>
         )}
@@ -580,19 +611,19 @@ function TrackerRow({ t, refetch }: { t: TrackerStatus; refetch: () => void }) {
   return (
     <div className="card p-4">
       <div className="flex items-center justify-between gap-3">
-        <p className="text-sm text-fog-100">Sync your reading to {label}</p>
+        <p className="text-sm text-fog-100">Sync your reading to {tr(label)}</p>
         <button onClick={() => setOpen((v) => !v)} className="chip shrink-0 text-xs">{open ? 'Cancel' : 'Connect'}</button>
       </div>
       {open && (
         <>
           <p className="mt-2 text-xs text-fog-500">{t.tokenHelp}</p>
           <p className="mt-1 text-[11px] text-fog-600">
-            The token carries access to your {label} account and can&apos;t be scoped — it&apos;s stored encrypted
+            The token carries access to your {tr(label)} account and can&apos;t be scoped — it&apos;s stored encrypted
             here, and you can disconnect at any time.
           </p>
           <div className="mt-3 flex gap-2">
             <input value={token} onChange={(e) => setToken(e.target.value)} type="password"
-              placeholder={`${label} access token`} autoCapitalize="none" autoCorrect="off" className={`${fld} flex-1`} />
+              placeholder={`${tr(label)} access token`} autoCapitalize="none" autoCorrect="off" className={`${fld} flex-1`} />
             <button onClick={connect} disabled={busy || !token.trim()} className="btn-accent px-4 text-sm disabled:opacity-50">
               {busy ? 'Checking…' : 'Connect'}
             </button>

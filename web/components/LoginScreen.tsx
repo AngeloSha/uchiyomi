@@ -5,6 +5,7 @@ import { useAuth } from '@/lib/auth';
 import { api } from '@/lib/api';
 import { ART } from '@/lib/art';
 import { Mark, Wordmark } from './Brand';
+import { t as tr } from '@/lib/i18n';
 
 const SSO_ERRORS: Record<string, string> = {
   no_account: "You signed in successfully, but there's no account here for you yet. Ask the admin to create one.",
@@ -121,19 +122,19 @@ export function LoginScreen() {
         {/* First-run: create the admin account */}
         {mode === 'setup' && (
           <form onSubmit={submitSetup} className="glass grad-border rounded-3xl p-5 shadow-lift">
-            <label className={labelCls}>Admin username</label>
+            <label className={labelCls}>{tr('Admin username')}</label>
             <input
               type="text" autoCapitalize="none" autoCorrect="off" autoFocus
-              value={username} onChange={(e) => setUsername(e.target.value)} placeholder="admin"
+              value={username} onChange={(e) => setUsername(e.target.value)} placeholder={tr('admin')}
               className={`mb-4 ${inputCls}`}
             />
-            <label className={labelCls}>Password</label>
+            <label className={labelCls}>{tr('Password')}</label>
             <input
               type="password"
-              value={pw} onChange={(e) => setPw(e.target.value)} placeholder="At least 8 characters"
+              value={pw} onChange={(e) => setPw(e.target.value)} placeholder={tr('At least 8 characters')}
               className={`mb-4 ${inputCls}`}
             />
-            <label className={labelCls}>Confirm password</label>
+            <label className={labelCls}>{tr('Confirm password')}</label>
             <input
               type="password"
               value={confirm} onChange={(e) => setConfirm(e.target.value)} placeholder="••••••••"
@@ -143,7 +144,7 @@ export function LoginScreen() {
             <button type="submit" disabled={busy} className="btn-accent mt-4 w-full disabled:opacity-50">
               {busy ? 'Creating…' : 'Create admin & open Uchiyomi'}
             </button>
-            <p className="mt-3 text-center text-xs text-fog-500">This first account becomes the server admin.</p>
+            <p className="mt-3 text-center text-xs text-fog-500">{tr('This first account becomes the server admin.')}</p>
           </form>
         )}
 
@@ -152,13 +153,13 @@ export function LoginScreen() {
           <form onSubmit={submit} className="glass grad-border rounded-3xl p-5 shadow-lift">
             {!needTotp ? (
               <>
-                <label className={labelCls}>Username</label>
+                <label className={labelCls}>{tr('Username')}</label>
                 <input
                   type="text" autoCapitalize="none" autoCorrect="off" autoFocus
-                  value={username} onChange={(e) => setUsername(e.target.value)} placeholder="admin"
+                  value={username} onChange={(e) => setUsername(e.target.value)} placeholder={tr('admin')}
                   className={`mb-4 ${inputCls}`}
                 />
-                <label className={labelCls}>Passcode</label>
+                <label className={labelCls}>{tr('Passcode')}</label>
                 <input
                   type="password" inputMode="text"
                   value={pw} onChange={(e) => setPw(e.target.value)} placeholder="••••••••"
@@ -167,13 +168,13 @@ export function LoginScreen() {
               </>
             ) : (
               <>
-                <label className={labelCls}>Authentication code</label>
+                <label className={labelCls}>{tr('Authentication code')}</label>
                 <input
                   type="text" inputMode="numeric" autoComplete="one-time-code" autoFocus
                   value={code} onChange={(e) => setCode(e.target.value)} placeholder="123456"
                   className={`text-center text-2xl tracking-[0.3em] ${inputCls}`}
                 />
-                <p className="mt-2 text-xs text-fog-500">Enter the 6-digit code from your authenticator app, or a recovery code.</p>
+                <p className="mt-2 text-xs text-fog-500">{tr('Enter the 6-digit code from your authenticator app, or a recovery code.')}</p>
               </>
             )}
             {errMsg && <p className="mt-2 text-sm text-red-400">{errMsg}</p>}

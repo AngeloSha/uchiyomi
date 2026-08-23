@@ -16,6 +16,7 @@ import { IcPlay, IcSparkle, IcRefresh, IcBell } from '@/components/icons';
 import { PullToRefresh } from '@/components/PullToRefresh';
 import { Avatar } from '@/components/Avatar';
 import { Lockup } from '@/components/Brand';
+import { t as tr } from '@/lib/i18n';
 
 interface CollectionRow { id: string; name: string; accent: string | null; item_count: number }
 
@@ -41,7 +42,7 @@ function CollectionRail({ col }: { col: CollectionRow }) {
   if (!items.length) return null;
   return (
     <section className="pt-8">
-      <SectionTitle action={<Link href={`/collection/?id=${col.id}`} className="text-xs text-accent">See all</Link>}>
+      <SectionTitle action={<Link href={`/collection/?id=${col.id}`} className="text-xs text-accent">{tr('See all')}</Link>}>
         <span className="inline-flex items-center gap-2">
           <span aria-hidden className="h-4 w-1.5 rounded-full" style={{ background: col.accent || 'rgb(var(--accent))' }} />
           {col.name}
@@ -123,10 +124,10 @@ export default function HomePage() {
           <img src={ART.hero} alt="" className="absolute inset-0 h-full w-full object-cover" />
           <div className="absolute inset-0 bg-gradient-to-t from-ink-950 via-ink-950/55 to-ink-950/15" />
           <div className="absolute inset-x-0 bottom-0 px-5 pb-12 lg:px-14">
-            <span className="mb-2 inline-flex items-center gap-1.5 rounded-full bg-black/45 px-3 py-1.5 text-xs font-medium text-accent backdrop-blur"><IcSparkle width={13} height={13} /> Welcome</span>
-            <h1 className="font-brand text-4xl font-bold leading-tight text-white drop-shadow lg:text-6xl">Welcome to Uchiyomi</h1>
-            <p className="mb-4 mt-1 text-sm text-fog-300">Your cinematic library awaits.</p>
-            <Link href="/library" className="btn-accent">Browse library</Link>
+            <span className="mb-2 inline-flex items-center gap-1.5 rounded-full bg-black/45 px-3 py-1.5 text-xs font-medium text-accent backdrop-blur"><IcSparkle width={13} height={13} />{tr('Welcome')}</span>
+            <h1 className="font-brand text-4xl font-bold leading-tight text-white drop-shadow lg:text-6xl">{tr('Welcome to Uchiyomi')}</h1>
+            <p className="mb-4 mt-1 text-sm text-fog-300">{tr('Your cinematic library awaits.')}</p>
+            <Link href="/library" className="btn-accent">{tr('Browse library')}</Link>
           </div>
         </div>
       )}
@@ -138,7 +139,7 @@ export default function HomePage() {
       {/* Keep reading */}
       {(data?.onDeck?.length ?? 0) > 0 && (
         <section className="pt-4">
-          <SectionTitle>Keep reading</SectionTitle>
+          <SectionTitle>{tr('Keep reading')}</SectionTitle>
           <Rail>
             {data!.onDeck.map((b, i) => <ContinueCard key={b.id} book={b} eager={i < 4} />)}
           </Rail>
@@ -148,7 +149,7 @@ export default function HomePage() {
       {/* For you */}
       {(foryou?.content?.length ?? 0) > 0 && (
         <section className="pt-8">
-          <SectionTitle action={<Link href="/browse" className="text-xs text-accent">Browse</Link>}>For you</SectionTitle>
+          <SectionTitle action={<Link href="/browse" className="text-xs text-accent">{tr('Browse')}</Link>}>{tr('For you')}</SectionTitle>
           <Rail>
             {foryou!.content.map((s) => <SeriesCard key={s.id} series={s} />)}
           </Rail>
@@ -167,9 +168,7 @@ export default function HomePage() {
 
       {/* New episodes */}
       <section className="pt-8">
-        <SectionTitle action={<Link href="/library?sort=updated" className="text-xs text-accent">See all</Link>}>
-          New episodes
-        </SectionTitle>
+        <SectionTitle action={<Link href="/library?sort=updated" className="text-xs text-accent">{tr('See all')}</Link>}>{tr('New episodes')}</SectionTitle>
         {isLoading ? <RailSkeleton /> : (
           <Rail>
             {(data?.updated ?? []).map((s, i) => <SeriesCard key={s.id} series={s} eager={i < 8} />)}
@@ -180,9 +179,7 @@ export default function HomePage() {
       {/* Favorites */}
       {(data?.favorites?.length ?? 0) > 0 && (
         <section className="pt-8">
-          <SectionTitle action={<Link href="/profile" className="text-xs text-accent">Manage</Link>}>
-            Your favorites
-          </SectionTitle>
+          <SectionTitle action={<Link href="/profile" className="text-xs text-accent">{tr('Manage')}</Link>}>{tr('Your favorites')}</SectionTitle>
           <Rail>
             {data!.favorites.map((s) => <SeriesCard key={s.id} series={s} />)}
           </Rail>
@@ -194,9 +191,7 @@ export default function HomePage() {
 
       {/* Recently added */}
       <section className="pt-8">
-        <SectionTitle action={<Link href="/library?sort=new" className="text-xs text-accent">See all</Link>}>
-          Recently added
-        </SectionTitle>
+        <SectionTitle action={<Link href="/library?sort=new" className="text-xs text-accent">{tr('See all')}</Link>}>{tr('Recently added')}</SectionTitle>
         {isLoading ? <RailSkeleton /> : (
           <Rail>
             {(data?.new ?? []).map((s) => <SeriesCard key={s.id} series={s} />)}
@@ -207,11 +202,11 @@ export default function HomePage() {
       {/* Trending across accounts — Netflix-style Top 10 with big rank numerals */}
       {(trending?.content?.length ?? 0) > 0 && (
         <section className="pt-8">
-          <SectionTitle>Top 10 in your library</SectionTitle>
+          <SectionTitle>{tr('Top 10 in your library')}</SectionTitle>
           <Rail>
             {trending!.content.slice(0, 10).map((s, i) => (
               <div key={s.id} className="flex shrink-0 items-end [scroll-snap-align:start]">
-                <span aria-hidden className="rank-numeral -mr-5 mb-6 select-none font-display text-[88px] font-black leading-[0.78]">
+                <span aria-hidden className="rank-numeral -me-5 mb-6 select-none font-display text-[88px] font-black leading-[0.78]">
                   {i + 1}
                 </span>
                 <SeriesCard series={s} />

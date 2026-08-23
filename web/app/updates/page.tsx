@@ -10,6 +10,7 @@ import { useToast } from '@/components/Toast';
 import { EmptyState } from '@/components/EmptyState';
 import { ART } from '@/lib/art';
 import { IcChevronLeft, IcBell, IcCheck } from '@/components/icons';
+import { t as tr } from '@/lib/i18n';
 
 interface UpdateItem { series: Series; newCount: number; latestAt?: string | null }
 
@@ -33,11 +34,10 @@ export default function UpdatesPage() {
         <button onClick={() => router.back()} className="grid h-10 w-10 place-items-center rounded-full bg-ink-800/70 text-fog-100 lg:hidden">
           <IcChevronLeft width={22} height={22} />
         </button>
-        <h1 className="font-display text-2xl font-bold lg:text-3xl">Updates</h1>
+        <h1 className="font-display text-2xl font-bold lg:text-3xl">{tr('Updates')}</h1>
         {items.length > 0 && (
-          <button onClick={markAll} className="ml-auto chip text-xs">
-            <IcCheck width={14} height={14} /> Mark all read
-          </button>
+          <button onClick={markAll} className="ms-auto chip text-xs">
+            <IcCheck width={14} height={14} />{tr('Mark all read')}</button>
         )}
       </header>
 

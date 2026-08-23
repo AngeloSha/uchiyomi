@@ -8,6 +8,7 @@ import { useToast } from '@/components/Toast';
 import { EmptyState } from '@/components/EmptyState';
 import { ART } from '@/lib/art';
 import { IcChevronLeft, IcPlus, IcTrash } from '@/components/icons';
+import { t as tr } from '@/lib/i18n';
 
 export interface CollectionRow { id: string; name: string; accent: string | null; sort_order: number; item_count: number }
 
@@ -51,8 +52,8 @@ export default function CollectionsPage() {
         <button onClick={() => router.back()} className="grid h-10 w-10 place-items-center rounded-full bg-ink-800/70 text-fog-100 lg:hidden">
           <IcChevronLeft width={22} height={22} />
         </button>
-        <h1 className="font-display text-2xl font-bold lg:text-3xl">Collections</h1>
-        <button onClick={() => setCreating(true)} className="btn-accent ml-auto px-3.5 py-2 text-sm">
+        <h1 className="font-display text-2xl font-bold lg:text-3xl">{tr('Collections')}</h1>
+        <button onClick={() => setCreating(true)} className="btn-accent ms-auto px-3.5 py-2 text-sm">
           <IcPlus width={16} height={16} /> New
         </button>
       </header>
@@ -62,7 +63,7 @@ export default function CollectionsPage() {
           {Array.from({ length: 4 }).map((_, i) => <div key={i} className="skeleton h-24 rounded-2xl" />)}
         </div>
       ) : items.length === 0 ? (
-        <EmptyState art={ART.emptyLibrary} title="No collections yet"
+        <EmptyState art={ART.emptyLibrary} title={tr('No collections yet')}
           sub="Group series into reading lists — “Plan to read”, “Finished favorites”, anything. Create one and add series from any series page."
           cta={undefined} />
       ) : (
@@ -70,7 +71,7 @@ export default function CollectionsPage() {
           {items.map((c) => (
             <div key={c.id} className="card group relative overflow-hidden p-4">
               <span aria-hidden className="absolute inset-y-0 left-0 w-1.5" style={{ background: c.accent || 'rgb(var(--accent))' }} />
-              <Link href={`/collection/?id=${c.id}`} className="block pl-2">
+              <Link href={`/collection/?id=${c.id}`} className="block ps-2">
                 <p className="font-display text-lg font-semibold text-fog-50">{c.name}</p>
                 <p className="text-xs text-fog-500">{c.item_count} series</p>
               </Link>
@@ -86,9 +87,9 @@ export default function CollectionsPage() {
       {creating && (
         <div className="fixed inset-0 z-50 grid place-items-center bg-ink-950/70 p-4 backdrop-blur-sm" onClick={() => setCreating(false)}>
           <div className="glass w-full max-w-sm rounded-2xl border border-ink-700 p-5" onClick={(e) => e.stopPropagation()}>
-            <h3 className="mb-3 font-display text-lg font-semibold">New collection</h3>
+            <h3 className="mb-3 font-display text-lg font-semibold">{tr('New collection')}</h3>
             <input value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && create()}
-              placeholder="e.g. Plan to read" autoFocus
+              placeholder={tr('e.g. Plan to read')} autoFocus
               className="w-full rounded-xl border border-ink-700 bg-ink-900 px-3 py-2.5 text-sm text-fog-50 outline-none focus:border-accent" />
             <div className="mt-3 flex items-center gap-2">
               {ACCENTS.map((a) => (
@@ -97,7 +98,7 @@ export default function CollectionsPage() {
                   style={{ background: a }} />
               ))}
             </div>
-            <button onClick={create} disabled={!name.trim()} className="btn-accent mt-4 w-full py-2.5 text-sm disabled:opacity-50">Create</button>
+            <button onClick={create} disabled={!name.trim()} className="btn-accent mt-4 w-full py-2.5 text-sm disabled:opacity-50">{tr('Create')}</button>
           </div>
         </div>
       )}

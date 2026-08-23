@@ -6,6 +6,7 @@ import { api } from '@/lib/api';
 import { Page, Series } from '@/lib/types';
 import { SeriesTile } from '@/components/cards';
 import { IcSearch, IcX } from '@/components/icons';
+import { t as tr } from '@/lib/i18n';
 
 function useDebounced<T>(value: T, ms: number) {
   const [v, setV] = useState(value);
@@ -53,7 +54,7 @@ function SearchInner() {
             value={q}
             onChange={(e) => setQ(e.target.value)}
             onBlur={() => remember(debounced)}
-            placeholder="Search your library…"
+            placeholder={tr('Search your library…')}
             className="w-full bg-transparent text-base text-fog-50 outline-none placeholder:text-fog-500"
           />
           {q && (
@@ -66,7 +67,7 @@ function SearchInner() {
 
       {debounced.length < 2 && recent.length > 0 && (
         <div className="px-5 pt-5 lg:px-0">
-          <p className="mb-2 text-xs font-medium uppercase tracking-wider text-fog-500">Recent</p>
+          <p className="mb-2 text-xs font-medium uppercase tracking-wider text-fog-500">{tr('Recent')}</p>
           <div className="flex flex-wrap gap-2">
             {recent.map((r) => (
               <button key={r} onClick={() => setQ(r)} className="chip">

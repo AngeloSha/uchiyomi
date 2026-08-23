@@ -17,3 +17,4 @@ sources/*
 docker-compose.override.yml
 # browser end-to-end screenshots: evidence for a failing run, not source
 web/test/e2e/shots/
+web/test/e2e/shots-i18n/

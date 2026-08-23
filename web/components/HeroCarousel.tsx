@@ -8,6 +8,7 @@ import { Series } from '@/lib/types';
 import { Backdrop, backdropUrl, useWideViewport } from './ui';
 import { applyCover } from '@/lib/theme';
 import { IcPlay, IcHeart, IcChevronLeft, IcChevronRight } from './icons';
+import { t as tr } from '@/lib/i18n';
 
 function FavButton({ series }: { series: Series }) {
   const qc = useQueryClient();
@@ -92,7 +93,7 @@ export function HeroCarousel({ slides }: { slides: Series[] }) {
             </div>
             {summary && <p className="mt-3 line-clamp-2 max-w-lg text-sm text-fog-300 lg:line-clamp-3">{summary}</p>}
             <div className="mt-5 flex items-center gap-3">
-              <Link href={`/series/?id=${cur.id}`} className="btn-accent px-7 py-3.5"><IcPlay width={18} height={18} /> Read</Link>
+              <Link href={`/series/?id=${cur.id}`} className="btn-accent px-7 py-3.5"><IcPlay width={18} height={18} />{tr('Read')}</Link>
               <FavButton series={cur} />
             </div>
           </div>
@@ -108,8 +109,8 @@ export function HeroCarousel({ slides }: { slides: Series[] }) {
         ))}
       </div>
       {/* arrows (phone + desktop) */}
-      <button onClick={() => go(-1)} aria-label="Previous" className="absolute left-2 top-1/2 z-10 grid h-9 w-9 -translate-y-1/2 place-items-center rounded-full bg-black/45 text-white backdrop-blur transition hover:bg-black/60 active:scale-90 lg:left-4 lg:h-11 lg:w-11"><IcChevronLeft width={20} height={20} /></button>
-      <button onClick={() => go(1)} aria-label="Next" className="absolute right-2 top-1/2 z-10 grid h-9 w-9 -translate-y-1/2 place-items-center rounded-full bg-black/45 text-white backdrop-blur transition hover:bg-black/60 active:scale-90 lg:right-4 lg:h-11 lg:w-11"><IcChevronRight width={20} height={20} /></button>
+      <button onClick={() => go(-1)} aria-label={tr('Previous')} className="absolute left-2 top-1/2 z-10 grid h-9 w-9 -translate-y-1/2 place-items-center rounded-full bg-black/45 text-white backdrop-blur transition hover:bg-black/60 active:scale-90 lg:left-4 lg:h-11 lg:w-11"><IcChevronLeft width={20} height={20} /></button>
+      <button onClick={() => go(1)} aria-label={tr('Next')} className="absolute right-2 top-1/2 z-10 grid h-9 w-9 -translate-y-1/2 place-items-center rounded-full bg-black/45 text-white backdrop-blur transition hover:bg-black/60 active:scale-90 lg:right-4 lg:h-11 lg:w-11"><IcChevronRight width={20} height={20} /></button>
     </div>
   );
 }

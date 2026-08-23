@@ -11,6 +11,7 @@ import { IcSearch, IcSparkle, IcPlus } from '@/components/icons';
 import { PullToRefresh } from '@/components/PullToRefresh';
 import { triggerRefresh } from '@/lib/refresh';
 import { useToast } from '@/components/Toast';
+import { t as tr } from '@/lib/i18n';
 
 const SORTS = [
   { key: 'updated', label: 'Updated', sort: 'lastModified,desc' },
@@ -62,19 +63,19 @@ function FilterSheet({ read, status, genres, onSet, onClose }: {
         onClick={(e) => e.stopPropagation()}
       >
         <div className="mb-4 flex items-start justify-between gap-3">
-          <h3 className="font-display text-lg font-semibold leading-tight">Filters</h3>
+          <h3 className="font-display text-lg font-semibold leading-tight">{tr('Filters')}</h3>
           <button onClick={onClose} className="shrink-0 text-fog-500 hover:text-fog-200">✕</button>
         </div>
 
-        <p className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-fog-500">Read state</p>
+        <p className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-fog-500">{tr('Read state')}</p>
         <div className="mb-4 flex flex-wrap gap-1.5">
           {READ_STATES.map((r) => (
             <button key={r.key} onClick={() => onSet('read', read === r.key ? '' : r.key)}
-              className={`chip text-xs ${read === r.key ? 'chip-active' : ''}`}>{r.label}</button>
+              className={`chip text-xs ${read === r.key ? 'chip-active' : ''}`}>{tr(r.label)}</button>
           ))}
         </div>
 
-        <p className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-fog-500">Status</p>
+        <p className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-fog-500">{tr('Status')}</p>
         <div className="mb-4 flex flex-wrap gap-1.5">
           {STATUSES.map((v) => (
             <button key={v} onClick={() => onSet('status', status === v ? '' : v)}
@@ -83,17 +84,17 @@ function FilterSheet({ read, status, genres, onSet, onClose }: {
         </div>
 
         <p className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-fog-500">
-          Genres{genres.length > 1 && <span className="ml-1 normal-case tracking-normal text-fog-500">(all of them)</span>}
+          Genres{genres.length > 1 && <span className="ms-1 normal-case tracking-normal text-fog-500">(all of them)</span>}
         </p>
         <div className="flex flex-wrap gap-1.5">
           {(all ?? []).map((g) => (
             <button key={g} onClick={() => toggleGenre(g)}
               className={`chip text-xs ${genres.includes(g) ? 'chip-active' : ''}`}>{g}</button>
           ))}
-          {!all && <p className="text-xs text-fog-500">Loading…</p>}
+          {!all && <p className="text-xs text-fog-500">{tr('Loading…')}</p>}
         </div>
 
-        <button onClick={onClose} className="btn-accent mt-5 w-full py-2 text-sm">Done</button>
+        <button onClick={onClose} className="btn-accent mt-5 w-full py-2 text-sm">{tr('Done')}</button>
       </div>
     </div>
   );
@@ -183,7 +184,7 @@ function LibraryInner() {
     <div className="min-h-screen-d">
       <header className="safe-top sticky top-0 z-30 bg-ink-950/85 px-5 pb-3 backdrop-blur-xl lg:static lg:bg-transparent lg:px-0 lg:pt-6 lg:backdrop-blur-none">
         <div className="flex items-center justify-between">
-          <h1 className="font-display text-2xl font-bold tracking-tight lg:text-3xl">Library</h1>
+          <h1 className="font-display text-2xl font-bold tracking-tight lg:text-3xl">{tr('Library')}</h1>
           <div className="flex items-center gap-2 lg:hidden">
             <Link href="/browse" className="grid h-10 w-10 place-items-center rounded-full border border-ink-700 bg-ink-850/70 text-fog-300">
               <IcSparkle width={19} height={19} />
@@ -191,7 +192,7 @@ function LibraryInner() {
             <Link href="/search" className="grid h-10 w-10 place-items-center rounded-full border border-ink-700 bg-ink-850/70 text-fog-300">
               <IcSearch width={20} height={20} />
             </Link>
-            <Link href="/discover" className="grid h-10 w-10 place-items-center rounded-full border border-accent/40 bg-accent-soft text-accent" title="Add new series">
+            <Link href="/discover" className="grid h-10 w-10 place-items-center rounded-full border border-accent/40 bg-accent-soft text-accent" title={tr('Add new series')}>
               <IcPlus width={20} height={20} />
             </Link>
           </div>
@@ -208,15 +209,15 @@ function LibraryInner() {
               onClick={() => setParam('sort', s.key)}
               className={`chip whitespace-nowrap ${s.key === active.key ? 'chip-active' : ''}`}
             >
-              {s.label}
+              {tr(s.label)}
             </button>
           ))}
           <button onClick={() => setSheet(true)} className={`chip whitespace-nowrap ${activeCount ? 'chip-active' : ''}`}>
-            Filters{activeCount > 0 ? ` · ${activeCount}` : ''}
+            {tr('Filters')}{activeCount > 0 ? ` · ${activeCount}` : ''}
           </button>
           <button onClick={() => { setSelecting((v) => !v); setPicked(new Set()); }}
             className={`chip whitespace-nowrap ${selecting ? 'chip-active' : ''}`}>
-            {selecting ? 'Done' : 'Select'}
+            {selecting ? tr('Done') : tr('Select')}
           </button>
         </div>
         {/* Active filters are always visible, so a short library is never mysterious. */}
@@ -240,9 +241,7 @@ function LibraryInner() {
             <button
               onClick={() => { const n = new URLSearchParams(); if (sortKey) n.set('sort', sortKey); router.replace(`/library?${n.toString()}`); }}
               className="chip text-xs text-fog-500"
-            >
-              Clear all
-            </button>
+            >{tr('Clear all')}</button>
           </div>
         )}
       </header>
@@ -257,7 +256,7 @@ function LibraryInner() {
       </div>
 
       <div ref={sentinel} className="h-16" />
-      {isFetchingNextPage && <p className="pb-6 text-center text-xs text-fog-500">Loading more…</p>}
+      {isFetchingNextPage && <p className="pb-6 text-center text-xs text-fog-500">{tr('Loading more…')}</p>}
       {!isLoading && !items.length && (
         <p className="px-5 pb-10 text-center text-sm text-fog-500">
           {activeCount ? 'Nothing matches those filters.' : 'Your library is empty.'}
@@ -266,11 +265,11 @@ function LibraryInner() {
       {selecting && picked.size > 0 && (
         <div className="fixed inset-x-0 bottom-0 z-40 border-t border-ink-700 bg-ink-950/95 px-4 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3 backdrop-blur-xl">
           <div className="mx-auto flex max-w-3xl flex-wrap items-center gap-2">
-            <span className="mr-auto text-sm font-medium text-fog-100">{picked.size} selected</span>
-            <button disabled={acting} onClick={() => bulk('/api/library/bulk/read', { completed: true })} className="chip text-xs disabled:opacity-50">Mark read</button>
-            <button disabled={acting} onClick={() => bulk('/api/library/bulk/read', { completed: false })} className="chip text-xs disabled:opacity-50">Mark unread</button>
-            <button disabled={acting} onClick={() => bulk('/api/favorites/bulk', { favorite: true })} className="chip text-xs disabled:opacity-50">Favourite</button>
-            <button onClick={() => { setSelecting(false); setPicked(new Set()); }} className="chip text-xs text-fog-500">Cancel</button>
+            <span className="me-auto text-sm font-medium text-fog-100">{picked.size} selected</span>
+            <button disabled={acting} onClick={() => bulk('/api/library/bulk/read', { completed: true })} className="chip text-xs disabled:opacity-50">{tr('Mark read')}</button>
+            <button disabled={acting} onClick={() => bulk('/api/library/bulk/read', { completed: false })} className="chip text-xs disabled:opacity-50">{tr('Mark unread')}</button>
+            <button disabled={acting} onClick={() => bulk('/api/favorites/bulk', { favorite: true })} className="chip text-xs disabled:opacity-50">{tr('Favourite')}</button>
+            <button onClick={() => { setSelecting(false); setPicked(new Set()); }} className="chip text-xs text-fog-500">{tr('Cancel')}</button>
           </div>
         </div>
       )}

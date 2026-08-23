@@ -4,6 +4,7 @@ import { useEffect, useState, ReactNode } from 'react';
 import Lenis from 'lenis';
 import { AuthProvider } from '@/lib/auth';
 import { ToastProvider } from '@/components/Toast';
+import { I18nProvider } from '@/lib/I18nProvider';
 import { flushOutbox } from '@/lib/downloads';
 
 export function Providers({ children }: { children: ReactNode }) {
@@ -84,9 +85,11 @@ export function Providers({ children }: { children: ReactNode }) {
 
   return (
     <QueryClientProvider client={qc}>
-      <ToastProvider>
-        <AuthProvider>{children}</AuthProvider>
-      </ToastProvider>
+      <I18nProvider>
+        <ToastProvider>
+          <AuthProvider>{children}</AuthProvider>
+        </ToastProvider>
+      </I18nProvider>
     </QueryClientProvider>
   );
 }
