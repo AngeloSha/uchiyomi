@@ -1,24 +1,42 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { q } from '../lib/db';
-import { komga } from '../lib/komga';
-import { authenticate, userIdOf } from '../lib/auth';
+import { content } from '../lib/backend';
+import { viewCtxFor, type ViewCtx } from '../lib/visibility';
+import { authenticate, userIdOf, roleOf } from '../lib/auth';
 
 export default async function downloadRoutes(app: FastifyInstance) {
   app.addHook('preHandler', authenticate);
+  // Same shape as catalog.ts: resolve the viewer once, and let the handlers read it. Without this the
+  // manifest reached the raw Komga client, which is not the backend anyone runs -- see below.
+  app.addHook('preHandler', async (req) => {
+    (req as any).viewCtx = await viewCtxFor(userIdOf(req), roleOf(req));
+  });
+
+  const vc = (req: any): ViewCtx => req.viewCtx as ViewCtx;
 
   // Everything the service worker needs to fetch + store a chapter for offline reading.
+  //
+  // This called the raw Komga HTTP client (`lib/komga`) rather than the configured backend, and had done
+  // since the first commit. In owned mode -- the default, and what every self-hosted install runs -- there
+  // is no Komga to call, so every request threw, hit the catch, and returned 404. Offline downloads have
+  // been unavailable for the entire life of the project; `web/lib/downloads.ts` asks for this manifest
+  // first and gives up when it 404s.
+  //
+  // Going through `content` also means the manifest is subject to the same visibility rule as everything
+  // else, which the old call had no notion of: it resolved a book id with no viewer at all.
   app.get('/api/books/:id/download-manifest', async (req, reply) => {
     const { id } = req.params as { id: string };
     let book: any;
     try {
-      book = await komga.book(id);
+      book = await content.book(vc(req), id);
     } catch {
-      return reply.code(404).send({ error: 'not_found' });
+      book = null;
     }
+    if (!book) return reply.code(404).send({ error: 'not_found' });
     const [pages, series] = await Promise.all([
-      komga.bookPages(id),
-      komga.series(book.seriesId).catch(() => null),
+      content.bookPages(vc(req), id),
+      book.seriesId ? content.series(vc(req), book.seriesId).catch(() => null) : Promise.resolve(null),
     ]);
     const readingDirection = series?.metadata?.readingDirection ?? 'WEBTOON';
 

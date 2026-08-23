@@ -40,6 +40,7 @@ async function setup() {
   const Fastify = (await import('fastify')).default;
   const jwt = (await import('@fastify/jwt')).default;
   const catalogRoutes = (await import('../src/routes/catalog')).default;
+  const downloadRoutes = (await import('../src/routes/downloads')).default;
 
   await migrate();
   await q(`DELETE FROM lib_books WHERE series_id = ANY($1)`, [[S1, S2]]);
@@ -65,6 +66,7 @@ async function setup() {
   const app = Fastify();
   await app.register(jwt, { secret: process.env.JWT_SECRET! });
   await app.register(catalogRoutes);
+  await app.register(downloadRoutes);
   await app.ready();
 
   const token = app.jwt.sign({ sub: u[0].id, role: 'user' });
@@ -133,6 +135,33 @@ test('the catalog routes are wired to the backend they claim', { skip }, async (
       const titles = r.json().content.map((s: any) => s.metadata?.title ?? s.title);
       assert.equal(titles.length, 1, `full-text search should narrow to one, got ${JSON.stringify(titles)}`);
       assert.ok(titles.includes('Route Wiring One'), `search for a known title found ${JSON.stringify(titles)}`);
+    });
+    await t.test('THE OTHER ONE: the offline manifest reaches the configured backend', async () => {
+      // download-manifest called the raw Komga HTTP client rather than `content`, from the first commit
+      // onwards. In owned mode there is no Komga to answer, so it threw, hit its own catch, and returned
+      // 404 for every chapter that exists. The PWA asks for this before it can store anything offline.
+      const r = await app.inject({
+        method: 'GET', url: `/api/books/b_${S1}/download-manifest`, headers: auth,
+      });
+      assert.equal(r.statusCode, 200, 'a real chapter must not 404 -- offline downloads depend on this');
+      const m = r.json();
+      assert.equal(m.bookId, `b_${S1}`);
+      assert.ok(m.coverUrl.includes(`b_${S1}`), 'the cover url should address the book');
+      assert.ok(Array.isArray(m.pages), 'pages must be a list');
+    });
+
+    await t.test('and the manifest is subject to the visibility rule', async () => {
+      // The old call resolved a book id with no viewer at all. Now that it returns something, it has to
+      // refuse a hidden series like every other read path.
+      await q(`UPDATE lib_series SET deleted_at = now() WHERE id = $1`, [S1]);
+      try {
+        const r = await app.inject({
+          method: 'GET', url: `/api/books/b_${S1}/download-manifest`, headers: auth,
+        });
+        assert.equal(r.statusCode, 404, 'a hidden series must not be downloadable for offline reading');
+      } finally {
+        await q(`UPDATE lib_series SET deleted_at = NULL WHERE id = $1`, [S1]);
+      }
     });
   } finally {
     await teardown(app, q);
