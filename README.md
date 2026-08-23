@@ -163,19 +163,10 @@ Suwayomi) fetches chapters but is Android-only or wraps them in a basic web UI. 
 daily — if a row is wrong or out of date, [open an issue](https://github.com/AngeloSha/uchiyomi/issues) and I
 will fix it.</sub>
 
-**Honest caveats.** Uchiyomi **does not touch your files unless you ask it to, and by default it cannot.**
-Renaming a folder and deleting chapter files exist, but only when you run the container as the user who owns
-your library (`PUID`/`PGID`); leave those unset and your collection is read-only exactly as before. Every
-metadata edit stays in Uchiyomi's own database either way. It reads
-**CBZ, CBR and loose image folders**, and skips PDF/EPUB *on purpose* — those are ebook formats, and this is
-built for image-based manga. Extensions don't run natively either: they run in a second container
-([Suwayomi](docs/extensions.md), and a JVM's worth of memory), and you paste a repository URL once, exactly as
-you would in Mihon.
-
-Against that, the three built-in engines each cover a whole *family* of sites (most aggregators run Madara,
-MangaThemesia or Manganato), so "add a source by URL" reaches far more than the engine count suggests. And the
-real edge is the combination nobody else offers: one app that finds, fetches, tracks and reads, for a whole
-household, with webtoons first-class.
+The three built-in engines each cover a whole *family* of sites (most aggregators run Madara, MangaThemesia
+or Manganato), so "add a source by URL" reaches far more than the engine count suggests. And the real edge is
+the combination nobody else offers: one app that finds, fetches, tracks and reads, for a whole household,
+with webtoons first-class.
 
 ## Architecture
 
