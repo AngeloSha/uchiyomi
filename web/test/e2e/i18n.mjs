@@ -49,6 +49,21 @@ for (const code of LOCALES) {
     problems.push('the navigation is still in English — nothing was translated');
   }
 
+  // The admin sidebar renders `tr(variable)`, which a literal scan of the source cannot see. That blind spot
+  // has now shipped untranslated labels twice -- once for the main nav, once for the admin panel -- so it is
+  // checked here instead, where a variable and a literal look the same.
+  if (code !== 'en') {
+    await p.goto(`${BASE}/admin`, { waitUntil: 'networkidle2', timeout: 60000 });
+    await new Promise((r) => setTimeout(r, 2200));
+    const admin = await p.evaluate(() => document.body.innerText || '');
+    const english = ['Overview', 'Members', 'Settings', 'Providers', 'Server', 'People', 'Content', 'Sources']
+      .filter((w) => new RegExp(`\\b${w}\\b`).test(admin));
+    if (english.length >= 3) problems.push(`admin sidebar still in English: ${english.join(', ')}`);
+    const aOver = await p.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+    if (aOver > 4) problems.push(`admin: ${aOver}px of horizontal overflow`);
+    await p.screenshot({ path: `${OUT}/${code}-admin.png` });
+  }
+
   await p.screenshot({ path: `${OUT}/${code}.png` });
   if (problems.length) { fails.push(`${code}: ${problems.join('; ')}`); console.log(`  [FAIL] ${code}: ${problems.join('; ')}`); }
   else console.log(`  [ ok ] ${code}  dir=${info.dir}`);
