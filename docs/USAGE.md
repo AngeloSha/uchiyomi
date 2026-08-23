@@ -244,14 +244,61 @@ it cannot see. Hit **Re-check** to run them again.
 **Library:** every series you have deleted, with **Restore** to put one back exactly as it was. Deleting
 happens on the series page itself (section 4); this tab is where hidden series go and how you get them back.
 
+### Renaming folders and deleting files
+
+By default Uchiyomi never writes to your library: every edit you make -- titles, covers, chapter numbers --
+is stored in its own database, and your files are left exactly as they are. Turning that off is deliberate
+and takes one step, because it means handing the app write access to your collection:
+
+```
+PUID=1000    # id -u
+PGID=1000    # id -g
+```
+
+Set those to the user that owns your library and restart. The startup log says which way it went, so
+`docker compose logs uchiyomi-bff` answers "why is the button missing" without you having to guess.
+
+**Rename folder** is on the series page, under the admin actions next to *Edit details*. It moves the folder
+on disk and rewrites the chapter paths, and it keeps chapter ids and everyone's reading progress, so nothing
+is marked unread and nothing is re-downloaded. It refuses outright unless *every* folder the series occupies
+is writable: a series often spans your library and Uchiyomi's own downloads folder, and renaming only one of
+them would leave the old name in place for the next scan to pick up as a second, half-read copy.
+
+**Delete files** is on the **Library** tab, and only for a series you have already removed. The reversible
+step always comes first, and the irreversible one asks you to type the title. It deletes the chapter files
+and keeps every chapter row and every progress row, so the record of having read something survives the
+files.
+
 **Merging duplicates** is on the **Health** tab, attached to the duplicate check that finds them: where it
 reports the same title sitting in your library twice, **Merge** folds one into the other. Every chapter and
 every progress row moves to the survivor. Chapters that look like duplicates are **kept**, not removed --
 dropping one would mean folding two progress rows into one, and getting that wrong marks chapters unread and
 then pushes that to your AniList account, where it cannot be undone.
 
+**Libraries:** split one collection into several, then choose per member which ones they can open. This lives
+on the **Overview** tab.
+
+Libraries are *declared*, not guessed. You name a subdirectory of your library root and it becomes its own
+library; Uchiyomi will suggest candidates it can see, and **Preview** shows how many series a folder holds
+before you commit. The obvious alternative -- treating every top-level folder as a library -- would be wrong
+on most existing installs, because that level usually holds the source names the downloader wrote.
+
+Nothing changes until you declare something. A fresh install and an upgraded one both start with a single
+library covering the whole root, no reading progress moves, and removing a library returns its series to the
+default one without touching a file.
+
 **Members:** create accounts (user or admin), reset passwords, and per-user controls: make admin/member,
 disable, or allow/deny downloads. Each row shows whether the member has 2FA on.
+
+Each member also has **library access**. The default is *all libraries*, which is the **absence** of any
+restriction rather than a list of every library -- so a member set to "all" also sees libraries you create
+later, without you having to remember to grant them. Restrict someone to a subset and the libraries they were
+not granted disappear from their library page, search, the updater feed, OPDS, and the image server. There is
+no route that answers for a library a member cannot open.
+
+One limit worth knowing: restricting access applies immediately on the server, but chapters and images a
+member already opened or downloaded may remain in that browser's own offline storage until they clear it.
+The server cannot reach into a device it does not control.
 
 **Providers:** the source health + Add-a-site controls from section 7. This tab also holds **Import a list**,
 for moving a library over from another app:
