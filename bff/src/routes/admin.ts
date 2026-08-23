@@ -52,6 +52,7 @@ export default async function adminRoutes(app: FastifyInstance) {
 
   app.get('/api/admin/users', async () => ({
     content: await q(`SELECT u.id, u.username, u.display_name, u.role, u.avatar, u.created_at, u.disabled, u.perms, u.totp_enabled,
+        u.max_age_rating,
         (SELECT max(created_at) FROM reading_events e WHERE e.user_id = u.id) AS last_active,
         -- NULL, not an empty array, when unrestricted: the UI must tell "every library, including ones
         -- added later" apart from "exactly these", and an empty array is a real setting meaning nothing.
@@ -303,6 +304,8 @@ export default async function adminRoutes(app: FastifyInstance) {
       author: z.string().max(300).nullish(),
       status: z.string().max(60).nullish(),
       genres: z.array(z.string().min(1).max(60)).max(50).nullish(),
+      // A minimum age, or null to fall back to whatever ComicInfo said. See lib/ageRating.ts.
+      ageRating: z.number().int().min(0).max(18).nullish(),
     }).safeParse(req.body);
     if (!b.success) return reply.code(400).send({ error: 'bad_request' });
     const norm = (v: string | null | undefined) => { const s = (v ?? '').trim(); return s ? s : null; };
@@ -324,10 +327,10 @@ export default async function adminRoutes(app: FastifyInstance) {
     // Every column is written on every call, so the client must send the whole object. The edit modal
     // already holds all five fields; a partial PUT would silently clear the ones it omitted.
     await q(
-      `INSERT INTO series_overrides (series_id, title, summary, author, status, genres, updated_at)
-       VALUES ($1, $2, $3, $4, $5, $6, now())
+      `INSERT INTO series_overrides (series_id, title, summary, author, status, genres, age_rating, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, now())
        ON CONFLICT (series_id) DO UPDATE SET title = $2, summary = $3, author = $4, status = $5,
-         genres = $6, updated_at = now()`,
+         genres = $6, age_rating = $7, updated_at = now()`,
       [id, norm(b.data.title), norm(b.data.summary), norm(b.data.author), norm(b.data.status), normGenres(b.data.genres)],
     );
     await logAudit('series.meta_override', { userId: userIdOf(req), detail: { id }, req });
@@ -1099,6 +1102,8 @@ export default async function adminRoutes(app: FastifyInstance) {
         // null means every library, including ones created later. A list means exactly these.
         // Absent means leave the current setting alone.
         libraries: z.array(z.string()).nullable().optional(),
+        // The highest age rating this member may see. null means no cap, matching `libraries`.
+        maxAgeRating: z.number().int().min(0).max(18).nullable().optional(),
       })
       .parse(req.body);
     // safety: never lock yourself out, never remove the last active admin
@@ -1117,6 +1122,10 @@ export default async function adminRoutes(app: FastifyInstance) {
       await revokeAllSessions(id); // force re-login after an admin password reset
     }
     if (b.displayName) await q('UPDATE users SET display_name = $2 WHERE id = $1', [id, b.displayName]);
+    if (b.maxAgeRating !== undefined) {
+      await q('UPDATE users SET max_age_rating = $2 WHERE id = $1', [id, b.maxAgeRating]);
+      await logAudit('user.age_cap', { userId: userIdOf(req), detail: { id, maxAgeRating: b.maxAgeRating }, req });
+    }
     if (b.libraries !== undefined) {
       // No rows means every library. Writing rows means exactly those, so clearing first is how you say
       // "back to unrestricted". An empty array is a deliberate "nothing", which is why it is never

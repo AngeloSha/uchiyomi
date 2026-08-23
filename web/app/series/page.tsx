@@ -48,6 +48,13 @@ function SeriesEditModal({ id, series, onClose, onSaved }: { id: string; series:
   // with the very value it was created to replace.
   const [author, setAuthor] = useState(series.overrides?.author ?? series.metadata?.author ?? '');
   const [status, setStatus] = useState(series.overrides?.status ?? series.metadata?.status ?? '');
+  // A minimum age, or '' meaning "whatever the files said". Age caps on member accounts compare against
+  // this, and an unrated series stays visible to everyone -- so setting one is opting a title IN to being
+  // filtered, never opting the rest of the library out.
+  const [ageRating, setAgeRating] = useState<string>(
+    series.overrides?.ageRating != null ? String(series.overrides.ageRating)
+      : series.metadata?.ageRating != null ? String(series.metadata.ageRating) : '',
+  );
   const [genres, setGenres] = useState<string[]>(series.overrides?.genres ?? series.metadata?.genres ?? []);
   const [genreDraft, setGenreDraft] = useState('');
   const [busy, setBusy] = useState(false);
@@ -73,7 +80,7 @@ function SeriesEditModal({ id, series, onClose, onSaved }: { id: string; series:
   const saveText = async () => {
     setBusy(true);
     try {
-      await api(`/api/admin/series/${id}/meta`, { method: 'PUT', json: { title, summary, author, status, genres } });
+      await api(`/api/admin/series/${id}/meta`, { method: 'PUT', json: { title, summary, author, status, genres, ageRating: ageRating === '' ? null : Number(ageRating) } });
       toast('Saved', 'success');
       onSaved();
     } catch (e) { toast(msgOf(e, 'Could not save'), 'error'); }
@@ -132,6 +139,15 @@ function SeriesEditModal({ id, series, onClose, onSaved }: { id: string; series:
         {!!status && !STATUSES.includes(status.toUpperCase()) && (
           <input value={status} onChange={(e) => setStatus(e.target.value)} className={`${fld} mt-2`} placeholder="Status" />
         )}
+        <label className="mb-1 mt-3 block text-xs font-semibold uppercase tracking-wider text-fog-500">Age rating</label>
+        <select value={ageRating} onChange={(e) => setAgeRating(e.target.value)} className={fld}>
+          <option value="">Not rated — visible to everyone</option>
+          {[6, 10, 13, 15, 17, 18].map((v) => <option key={v} value={String(v)}>{v}+</option>)}
+        </select>
+        <p className="mt-1 text-[11px] text-fog-500">
+          Members with an age limit below this will not see the series anywhere: not in the library, search,
+          the reader, or an external OPDS app.
+        </p>
         <label className="mb-1 mt-3 block text-xs font-semibold uppercase tracking-wider text-fog-500">Genres</label>
         <div className="flex flex-wrap gap-1.5 rounded-lg border border-ink-700 bg-ink-900/60 p-2">
           {genres.map((g) => (

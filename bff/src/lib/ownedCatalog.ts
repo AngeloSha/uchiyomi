@@ -10,7 +10,7 @@ function page<T>(content: T[], total: number, p: number, size: number): Page<T> 
   return { content, totalElements: total, totalPages, number: p, size, first: p <= 0, last: p >= totalPages - 1 };
 }
 
-const SERIES_COLS = 'id, title, summary, status, genres, author, books_count, cover_book_id, web, created_at, latest_mtime, auto_update, library_id';
+const SERIES_COLS = 'id, title, summary, status, genres, author, age_rating, books_count, cover_book_id, web, created_at, latest_mtime, auto_update, library_id';
 
 /**
  * The one place a series is read from.
@@ -28,6 +28,7 @@ const seriesSrc = (ctx: ViewCtx, p: Params, alias = 'sv') => `(
   SELECT s.id, COALESCE(o.title, s.title) AS title, COALESCE(o.summary, s.summary) AS summary,
          COALESCE(o.status, s.status) AS status, COALESCE(o.genres, s.genres) AS genres,
          COALESCE(o.author, s.author) AS author,
+         COALESCE(o.age_rating, s.age_rating) AS age_rating,
          s.books_count, s.cover_book_id, s.web, s.created_at, s.latest_mtime,
          s.auto_update, s.library_id
     FROM lib_series s LEFT JOIN series_overrides o ON o.series_id = s.id
@@ -77,7 +78,7 @@ function seriesDto(r: any) {
       publisher: r.author ?? '',
       genres,
       tags: [],
-      ageRating: null,
+      ageRating: r.age_rating ?? null,
       language: 'en',
     },
     booksMetadata: { summary, genres, tags: [] },

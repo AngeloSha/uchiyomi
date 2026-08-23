@@ -14,7 +14,7 @@ import assert from 'node:assert/strict';
 // A viewer that sees every library. Written out rather than imported because importing from
 // src/lib pulls in env.ts, which validates the environment at module load, before the block below
 // has set DATABASE_URL. Note this still respects soft delete: it only bypasses library scoping.
-const SYSTEM_CTX = { userId: null, libraryIds: null } as const;
+const SYSTEM_CTX = { userId: null, libraryIds: null, maxAgeRating: null } as const;
 
 const DSN = process.env.TEST_DATABASE_URL;
 if (DSN) {
@@ -114,22 +114,22 @@ test('allOf of two genres is AND, anyOf is OR', { skip }, async () => {
 });
 
 test('THE BUG: readStatus used to return the whole library; UNREAD now means unread', { skip }, async () => {
-  const r = await search({ readStatus: { operator: 'is', value: 'UNREAD' } }, { userId: uidA, libraryIds: null });
+  const r = await search({ readStatus: { operator: 'is', value: 'UNREAD' } }, { userId: uidA, libraryIds: null, maxAgeRating: null });
   assert.deepEqual(ids(r).sort(), ['s_fl_unread']);
 });
 
 test('IN_PROGRESS is started but not finished', { skip }, async () => {
-  const r = await search({ readStatus: { operator: 'is', value: 'IN_PROGRESS' } }, { userId: uidA, libraryIds: null });
+  const r = await search({ readStatus: { operator: 'is', value: 'IN_PROGRESS' } }, { userId: uidA, libraryIds: null, maxAgeRating: null });
   assert.deepEqual(ids(r).sort(), ['s_fl_partial']);
 });
 
 test('READ is every chapter done', { skip }, async () => {
-  const r = await search({ readStatus: { operator: 'is', value: 'READ' } }, { userId: uidA, libraryIds: null });
+  const r = await search({ readStatus: { operator: 'is', value: 'READ' } }, { userId: uidA, libraryIds: null, maxAgeRating: null });
   assert.deepEqual(ids(r).sort(), ['s_fl_done']);
 });
 
 test('read state is per user: B has read nothing', { skip }, async () => {
-  const r = await search({ readStatus: { operator: 'is', value: 'UNREAD' } }, { userId: uidB, libraryIds: null });
+  const r = await search({ readStatus: { operator: 'is', value: 'UNREAD' } }, { userId: uidB, libraryIds: null, maxAgeRating: null });
   assert.deepEqual(ids(r).sort(), ['s_fl_done', 's_fl_partial', 's_fl_unread']);
 });
 
@@ -137,7 +137,7 @@ test('totalElements agrees with the rows actually returned', { skip }, async () 
   // The assertion that catches filtering in the wrong layer. Post-filtering a page would leave
   // totalElements counting the unfiltered set.
   const r = await owned.searchSeries(
-    { userId: uidA, libraryIds: null },
+    { userId: uidA, libraryIds: null, maxAgeRating: null },
     { condition: { readStatus: { operator: 'is', value: 'UNREAD' } } }, 0, 100);
   assert.equal(r.totalElements, r.content.length, 'the count disagrees with the page');
 });
@@ -162,7 +162,7 @@ test('the plain unfiltered query still works and needs no user', { skip }, async
 });
 
 test('sorting by unread uses the real per-user count', { skip }, async () => {
-  const r = await search(null, { userId: uidA, libraryIds: null }, 'unread,desc');
+  const r = await search(null, { userId: uidA, libraryIds: null, maxAgeRating: null }, 'unread,desc');
   const got = ids(r);
   assert.equal(got[0], 's_fl_unread', 'the series with the most unread should lead');
   assert.equal(got[got.length - 1], 's_fl_done', 'a finished series should be last');

@@ -40,7 +40,7 @@ export interface Series {
   artVersion?: number; // bumps when an admin edits the cover/banner → cache-busts the image URLs
   overrides?: {
     title: string | null; summary: string | null; cover: string | null; banner: string | null;
-    author: string | null; status: string | null; genres: string[] | null;
+    author: string | null; status: string | null; genres: string[] | null; ageRating: number | null;
   };
 }
 

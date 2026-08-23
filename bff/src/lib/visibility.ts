@@ -21,6 +21,13 @@ export interface ViewCtx {
    * `|| []` fallback -- that would turn a lookup failure into a silent lockout instead of an error.
    */
   readonly libraryIds: readonly string[] | null;
+  /**
+   * The highest age rating this viewer may see, or null for no cap.
+   *
+   * null means unrestricted, exactly as `libraryIds: null` means every library, so the two restrictions read
+   * the same way and an account with neither set behaves as it always did.
+   */
+  readonly maxAgeRating: number | null;
 }
 
 /**
@@ -42,6 +49,16 @@ export class Params {
 export function visible(alias: string, ctx: ViewCtx, p: Params): string {
   const parts = [`${alias}.deleted_at IS NULL`, `${alias}.merged_into IS NULL`];
   if (ctx.libraryIds) parts.push(`${alias}.library_id = ANY(${p.add([...ctx.libraryIds])})`);
+  if (ctx.maxAgeRating !== null) {
+    // The admin's override wins over what the scan read, like every other piece of series metadata. This is
+    // a correlated subquery rather than a join because `visible()` is applied wherever `lib_series` appears
+    // -- including booksSrc, which joins it with no access to series_overrides. Only a capped account pays
+    // for it, and an unrestricted one adds no clause at all.
+    const eff = `COALESCE((SELECT o2.age_rating FROM series_overrides o2 WHERE o2.series_id = ${alias}.id), ${alias}.age_rating)`;
+    // Unrated stays visible on purpose. Treating NULL as adults-only would empty most libraries the first
+    // time anyone set a cap, and a parent would reasonably read that as the app being broken.
+    parts.push(`(${eff} IS NULL OR ${eff} <= ${p.add(ctx.maxAgeRating)})`);
+  }
   return parts.join(' AND ');
 }
 
@@ -52,7 +69,7 @@ export function visible(alias: string, ctx: ViewCtx, p: Params): string {
  * pre-warmer (whose id list already came from a user-filtered endpoint), and health checks that are
  * reporting on the library as a whole. It must never be reachable from a request handler.
  */
-export const SYSTEM_CTX: ViewCtx = { userId: null, libraryIds: null };
+export const SYSTEM_CTX: ViewCtx = { userId: null, libraryIds: null, maxAgeRating: null };
 
 /**
  * The predicate for queries that legitimately span every library: the scanner, the updater sweep, health
@@ -81,12 +98,19 @@ export const visibleToAll = (alias: string): string => visible(alias, SYSTEM_CTX
 export async function viewCtxFor(userId: string | null, role?: string): Promise<ViewCtx> {
   // Komga mode has its own libraries and its own restrictions, enforced by Komga. Do not pretend to enforce
   // a model this backend does not have.
-  if (process.env.LIBRARY_BACKEND !== 'owned') return { userId, libraryIds: null };
-  if (!userId || role === 'admin') return { userId, libraryIds: null };
-  const rows = await q<{ library_id: string }>(
-    'SELECT library_id FROM user_libraries WHERE user_id = $1', [userId],
-  ).catch(() => [] as Array<{ library_id: string }>);
-  return { userId, libraryIds: rows.length ? rows.map((r) => r.library_id) : null };
+  if (process.env.LIBRARY_BACKEND !== 'owned') return { userId, libraryIds: null, maxAgeRating: null };
+  if (!userId || role === 'admin') return { userId, libraryIds: null, maxAgeRating: null };
+  const [rows, cap] = await Promise.all([
+    q<{ library_id: string }>('SELECT library_id FROM user_libraries WHERE user_id = $1', [userId])
+      .catch(() => [] as Array<{ library_id: string }>),
+    one<{ max_age_rating: number | null }>('SELECT max_age_rating FROM users WHERE id = $1', [userId])
+      .catch(() => null),
+  ]);
+  return {
+    userId,
+    libraryIds: rows.length ? rows.map((r) => r.library_id) : null,
+    maxAgeRating: cap?.max_age_rating ?? null,
+  };
 }
 
 /**

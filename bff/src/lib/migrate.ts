@@ -417,6 +417,21 @@ CREATE TABLE IF NOT EXISTS opds_tokens (
   created_at timestamptz NOT NULL DEFAULT now(),
   last_seen  timestamptz
 );
+-- OPDS tokens used to be valid forever. They are the one credential that lives in a third-party reader's
+-- settings on someone's phone, so a leak stayed useful until the owner happened to notice and regenerate.
+-- Existing tokens get a year from NOW rather than from when they were issued, so upgrading does not sign
+-- anyone's e-reader out on the spot.
+-- Age ratings, stored as a minimum age so a cap can be a comparison. NULL means unrated, which is a third
+-- state and NOT the same as 0: an unrated series stays visible to everyone, because the alternative hides
+-- most of an existing library the moment someone sets a cap.
+ALTER TABLE lib_series       ADD COLUMN IF NOT EXISTS age_rating int;
+ALTER TABLE series_overrides ADD COLUMN IF NOT EXISTS age_rating int;
+-- NULL means no cap, matching how user_libraries having no rows means "every library".
+ALTER TABLE users            ADD COLUMN IF NOT EXISTS max_age_rating int;
+CREATE INDEX IF NOT EXISTS lib_series_age_idx ON lib_series (age_rating) WHERE age_rating IS NOT NULL;
+
+ALTER TABLE opds_tokens ADD COLUMN IF NOT EXISTS expires_at timestamptz;
+UPDATE opds_tokens SET expires_at = now() + interval '1 year' WHERE expires_at IS NULL;
 
 -- Suwayomi-provided sources (one per source in an installed Mihon/Tachiyomi extension) that the operator
 -- has switched on. Suwayomi may expose hundreds of them; only the enabled ones are registered as Uchiyomi

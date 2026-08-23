@@ -31,7 +31,7 @@ let seriesVisible: any;
 
 // Written out rather than imported: importing from src/lib at the top level pulls in env.ts, which
 // validates the environment at module load, before the block above has set DATABASE_URL.
-const ANY_VIEWER = { userId: null, libraryIds: null } as const;
+const ANY_VIEWER = { userId: null, libraryIds: null, maxAgeRating: null } as const;
 
 const OPEN = 's_vis_open', HIDDEN = 's_vis_hidden';
 const ALL = [OPEN, HIDDEN];

@@ -356,8 +356,9 @@ export default async function catalogRoutes(app: FastifyInstance) {
     const out: any = (await enrichSeries(req, [series]))[0];
     // apply admin metadata overrides (title/summary shown here; cover/banner are handled by the image server)
     const ov = await one<{ title: string | null; summary: string | null; cover: string | null; banner: string | null;
-                          author: string | null; status: string | null; genres: string[] | null; v: string }>(
-      `SELECT title, summary, cover, banner, author, status, genres,
+                          author: string | null; status: string | null; genres: string[] | null;
+                          age_rating: number | null; v: string }>(
+      `SELECT title, summary, cover, banner, author, status, genres, age_rating,
               EXTRACT(EPOCH FROM updated_at) * 1000 AS v FROM series_overrides WHERE series_id = $1`,
       [id],
     );
@@ -368,7 +369,10 @@ export default async function catalogRoutes(app: FastifyInstance) {
       // the edit modal seeds from these, so every overridable field has to come back or a save would
       // write back a blank and clear the very override the user opened the modal to keep
       out.overrides = { title: ov.title, summary: ov.summary, cover: ov.cover, banner: ov.banner,
-                        author: ov.author, status: ov.status, genres: ov.genres };
+                        author: ov.author, status: ov.status, genres: ov.genres, ageRating: ov.age_rating };
+      // The edit modal seeds from the override where one exists, so the effective rating has to reflect it
+      // or reopening the modal would show the scanned value and saving would undo the correction.
+      if (ov.age_rating != null && out.metadata) out.metadata.ageRating = ov.age_rating;
     }
     // Admins get the on-disk folder, because the rename control needs something to seed from and to show
     // what is about to move. Members do not: it is the one field here that describes the host filesystem.

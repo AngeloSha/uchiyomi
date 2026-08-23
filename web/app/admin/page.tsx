@@ -144,6 +144,7 @@ function Members() {
                   {/* Library access. "All libraries" is the ABSENCE of grant rows, not a full set of them, so a
                       library added next month is visible to unrestricted accounts without editing anyone. */}
                   {u.role !== 'admin' && <LibraryAccess user={u} onSaved={inval} />}
+                  {u.role !== 'admin' && <AgeCap user={u} onSaved={inval} />}
                 </div>
               )}
             </div>
@@ -650,6 +651,68 @@ interface LibraryCandidate { path: string; series: number; looksLikeSource: bool
  *
  * Admins are unrestricted by definition and never get this control.
  */
+/**
+ * The highest age rating one member may see.
+ *
+ * Mirrors LibraryAccess deliberately: null means no cap, the same way no grant rows means every library, so
+ * an account with neither restriction behaves exactly as it did before either existed.
+ *
+ * The wording says "and below" because a cap is a ceiling, not a band -- and the note about unrated content
+ * is there because it is the first thing a parent will ask, and finding out by discovering an unrated title
+ * on a child's account would be a bad way to learn it.
+ */
+const AGE_CAPS = [6, 10, 13, 15, 17, 18];
+
+function AgeCap({ user, onSaved }: { user: any; onSaved: () => void }) {
+  const toast = useToast();
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const cap: number | null = user.max_age_rating ?? null;
+
+  const save = async (next: number | null) => {
+    setBusy(true);
+    try {
+      await api(`/api/admin/users/${user.id}`, { method: 'PATCH', json: { maxAgeRating: next } });
+      toast(next === null ? 'No age limit' : `Limited to ${next}+ and below`, 'success');
+      onSaved();
+    } catch (e) { toast(msgOf(e, 'Could not change that'), 'error'); }
+    setBusy(false);
+  };
+
+  return (
+    <>
+      <button onClick={() => setOpen((v) => !v)} className={`chip text-xs ${cap !== null ? 'chip-active' : ''}`}>
+        {cap === null ? 'Any age rating' : `${cap}+ and below`}
+      </button>
+      {open && (
+        <div className="mt-1.5 w-full rounded-xl border border-ink-700 p-2.5">
+          <label className="flex cursor-pointer items-center justify-between gap-3 text-xs">
+            <span className="text-fog-200">No age limit</span>
+            <input type="checkbox" checked={cap === null} disabled={busy}
+              onChange={(e) => save(e.target.checked ? null : 13)}
+              className="size-4 shrink-0 accent-accent" />
+          </label>
+          {cap !== null && (
+            <div className="mt-2 flex flex-wrap gap-1.5 border-t border-ink-800 pt-2">
+              {AGE_CAPS.map((v) => (
+                <button key={v} disabled={busy} onClick={() => save(v)}
+                  className={`chip text-xs disabled:opacity-50 ${cap === v ? 'chip-active' : ''}`}>
+                  {v}+
+                </button>
+              ))}
+            </div>
+          )}
+          <p className="mt-2 text-[11px] text-fog-500">
+            Series with <strong className="text-fog-300">no rating stay visible</strong>. Most libraries carry
+            no ratings at all, so hiding them would empty this account rather than filter it. Rate a series
+            from its own page to have a limit apply to it.
+          </p>
+        </div>
+      )}
+    </>
+  );
+}
+
 function LibraryAccess({ user, onSaved }: { user: any; onSaved: () => void }) {
   const toast = useToast();
   const [open, setOpen] = useState(false);

@@ -15,7 +15,7 @@ import assert from 'node:assert/strict';
 // A viewer that sees every library. Written out rather than imported because importing from
 // src/lib pulls in env.ts, which validates the environment at module load, before the block below
 // has set DATABASE_URL. Note this still respects soft delete: it only bypasses library scoping.
-const SYSTEM_CTX = { userId: null, libraryIds: null } as const;
+const SYSTEM_CTX = { userId: null, libraryIds: null, maxAgeRating: null } as const;
 
 const DSN = process.env.TEST_DATABASE_URL;
 if (DSN) {

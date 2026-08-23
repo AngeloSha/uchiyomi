@@ -9,6 +9,7 @@ import { env } from '../env';
 import { fingerprintChapter } from './fingerprint';
 import { findRematch, applyRematch, logRematch, MIN_BOOKS } from './rematch';
 import { numFromName, naturalCmp } from './naming';
+import { parseComicInfoAgeRating } from './ageRating';
 
 // node-stream-zip reads the central directory only (cheap) and can stream a single entry.
 // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -463,10 +464,13 @@ export async function persistScan(): Promise<{ series: number; books: number; ms
               // one. Recomputing on every scan would mean that declaring a library, before its series were
               // reassigned, made the conflict target miss and mint a second row with a new id -- which is
               // the one thing that strands everyone's reading progress. Reassignment is a deliberate UPDATE.
-              `INSERT INTO lib_series (id, source, title, summary, author, status, genres, web, folder, books_count, library_id, scanned_at)
-               VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11, now())
+              `INSERT INTO lib_series (id, source, title, summary, author, status, genres, web, folder, books_count, library_id, age_rating, scanned_at)
+               VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12, now())
                ON CONFLICT (library_id, folder) DO UPDATE SET source=EXCLUDED.source, title=EXCLUDED.title, summary=EXCLUDED.summary,
                  author=EXCLUDED.author, status=EXCLUDED.status, genres=EXCLUDED.genres, web=EXCLUDED.web,
+                 -- Never overwrite a rating we have with one we do not: a chapter whose ComicInfo omits
+                 -- AgeRating must not silently un-rate a series a previous scan or an admin rated.
+                 age_rating=COALESCE(EXCLUDED.age_rating, lib_series.age_rating),
                  scanned_at=now()
                RETURNING id`,
               [
@@ -475,6 +479,7 @@ export async function persistScan(): Promise<{ series: number; books: number; ms
                 (field(firstXml, 'Genre') || '').split(',').map((s) => s.trim()).filter(Boolean),
                 field(firstXml, 'Web'), folderRel, files.length,
                 known?.library_id ?? libraryIdFor(folderRel, libs),
+                parseComicInfoAgeRating(field(firstXml, 'AgeRating')),
               ],
             );
             id = rows[0].id;
