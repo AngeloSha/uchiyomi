@@ -10,10 +10,28 @@ import { useToast } from '@/components/Toast';
 import { ConfirmDialog, Modal } from '@/components/ConfirmDialog';
 import { Avatar } from '@/components/Avatar';
 import { IcChevronLeft, IcTrash, IcPlus, IcRefresh } from '@/components/icons';
+import { Backdrop } from '@/components/ui';
+import { motion } from 'framer-motion';
 import { t as tr } from '@/lib/i18n';
 
-const TABS = ['Overview', 'Members', 'Providers', 'Art', 'Health', 'Library', 'Tasks', 'Activity', 'Sessions', 'Settings'] as const;
+/**
+ * Ten panels, grouped by what an admin is actually doing rather than by what the code is called.
+ *
+ * The previous shell put all ten in one horizontally scrolling pill row, which is a list rather than an
+ * information architecture: "Overview" and "Sessions" were peers, and on a laptop the last three scrolled off
+ * the edge where nobody found them. Extensions had no entry at all -- it rendered inside Providers, which is
+ * why nobody found that either.
+ */
+const GROUPS = [
+  { id: 'server',  label: 'Server',  tabs: ['Overview', 'Tasks', 'Settings'] },
+  { id: 'people',  label: 'People',  tabs: ['Members', 'Sessions', 'Activity'] },
+  { id: 'content', label: 'Content', tabs: ['Library', 'Health', 'Art'] },
+  { id: 'sources', label: 'Sources', tabs: ['Providers', 'Extensions'] },
+] as const;
+
+const TABS = GROUPS.flatMap((g) => g.tabs);
 type Tab = (typeof TABS)[number];
+const groupOf = (t: Tab) => GROUPS.find((g) => (g.tabs as readonly string[]).includes(t))!;
 const msgOf = (e: any, fb: string) => { try { return JSON.parse(e?.body || '{}').message || fb; } catch { return fb; } };
 const fld = 'w-full rounded-xl border border-ink-700 bg-ink-900 px-3 py-2.5 text-sm text-fog-50 outline-none focus:border-accent';
 const STATUS_STYLE: Record<string, string> = {
@@ -25,63 +43,269 @@ export default function AdminPage() {
   const { isAdmin } = useAuth();
   const router = useRouter();
   const [tab, setTab] = useState<Tab>('Overview');
+  const [sheet, setSheet] = useState(false);
+  const group = groupOf(tab);
+
   if (!isAdmin) return <div className="flex min-h-screen-d items-center justify-center text-fog-400">{tr('Admins only.')}</div>;
+
+  const panel = (
+    <>
+      {tab === 'Overview' && <Overview />}
+      {tab === 'Members' && <Members />}
+      {tab === 'Providers' && <Providers />}
+      {tab === 'Extensions' && <Extensions />}
+      {tab === 'Art' && <ArtReview />}
+      {tab === 'Health' && <Health />}
+      {tab === 'Library' && <LibraryPanel />}
+      {tab === 'Tasks' && <Tasks />}
+      {tab === 'Activity' && <Activity />}
+      {tab === 'Sessions' && <Sessions />}
+      {tab === 'Settings' && <Settings />}
+    </>
+  );
+
   return (
     <div className="min-h-screen-d">
-      <header className="safe-top flex items-center gap-2 px-4 pb-2 lg:px-0">
-        <button onClick={() => router.back()} className="grid h-10 w-10 place-items-center rounded-full bg-ink-800/70 text-fog-100"><IcChevronLeft width={22} height={22} /></button>
-        <h1 className="font-display text-2xl font-bold">{tr('Admin')}</h1>
-      </header>
-      <div className="px-4 lg:mx-auto lg:max-w-3xl lg:px-0">
-        <div className="-mx-4 mb-4 flex gap-1.5 overflow-x-auto px-4 pb-1 lg:mx-0 lg:px-0 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-          {TABS.map((t) => (
-            <button key={t} onClick={() => setTab(t)} className={`shrink-0 rounded-full px-3.5 py-1.5 text-sm font-medium transition ${tab === t ? 'bg-accent text-white' : 'bg-ink-800 text-fog-300 hover:text-fog-100'}`}>{t}</button>
+      <AdminHero onBack={() => router.back()} />
+
+      <div className="px-4 lg:mx-auto lg:max-w-6xl lg:px-6">
+        <div className="lg:flex lg:gap-8">
+          {/* ---- desktop: a sticky sidebar, grouped ---- */}
+          <nav className="hidden shrink-0 lg:block lg:w-52" aria-label={tr('Admin')}>
+            <div className="sticky top-6 space-y-5">
+              {GROUPS.map((g) => (
+                <div key={g.id}>
+                  <p className="mb-1.5 px-3 text-[11px] font-semibold uppercase tracking-wider text-fog-600">{tr(g.label)}</p>
+                  <div className="space-y-0.5">
+                    {g.tabs.map((t) => (
+                      <button key={t} onClick={() => setTab(t)}
+                        aria-current={tab === t ? 'page' : undefined}
+                        className={`relative flex w-full items-center rounded-lg px-3 py-1.5 text-start text-sm transition ${
+                          tab === t ? 'bg-accent-soft font-medium text-accent' : 'text-fog-400 hover:bg-ink-800/60 hover:text-fog-100'
+                        }`}>
+                        {/* the accent rail the rest of the app marks "you are here" with */}
+                        {tab === t && <span aria-hidden className="absolute inset-y-1.5 start-0 w-0.5 rounded-full bg-accent" />}
+                        {tr(t)}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </nav>
+
+          {/* ---- phone: the group is a sheet, its panels stay a pill row ---- */}
+          <div className="min-w-0 flex-1">
+            <div className="mb-4 flex items-center gap-2 lg:hidden">
+              <button onClick={() => setSheet(true)}
+                className="chip shrink-0 gap-1 text-xs" aria-haspopup="dialog">
+                {tr(group.label)}
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="m6 9 6 6 6-6" /></svg>
+              </button>
+              <div className="-me-4 flex gap-1.5 overflow-x-auto pe-4 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                {group.tabs.map((t) => (
+                  <button key={t} onClick={() => setTab(t)}
+                    className={`shrink-0 rounded-full px-3.5 py-1.5 text-sm font-medium transition ${
+                      tab === t ? 'bg-accent text-white' : 'bg-ink-800 text-fog-300'
+                    }`}>{tr(t)}</button>
+                ))}
+              </div>
+            </div>
+
+            {/* Keyed on the tab so each panel animates in rather than snapping. */}
+            <motion.div key={tab} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.28, ease: [0.22, 0.61, 0.36, 1] }} className="pb-10">
+              {panel}
+            </motion.div>
+          </div>
+        </div>
+      </div>
+
+      {sheet && (
+        <GroupSheet current={tab} onPick={(t) => { setTab(t); setSheet(false); }} onClose={() => setSheet(false)} />
+      )}
+    </div>
+  );
+}
+
+/**
+ * The header.
+ *
+ * Two things it is trying to fix. The panel had no visual identity at all -- flat cards on flat black, in an
+ * app whose every other surface is composed over ambient art -- and the health of the server, which is the
+ * question an admin arrives with, was reachable only by opening a tab and waiting for it to load.
+ *
+ * So the backdrop is real art from THIS library (a random series, the same `Backdrop` the series page uses,
+ * blurred and drowned under a gradient), and the headline is the verdict rather than a row of numbers. The
+ * counts are still there, just demoted to the line that supports it.
+ */
+function AdminHero({ onBack }: { onBack: () => void; onScan?: undefined }) {
+  const toast = useToast();
+  const qc = useQueryClient();
+  const { data: stats } = useQuery({ queryKey: ['admin-stats'], queryFn: () => api<any>('/api/admin/stats') });
+  const { data: health } = useQuery({
+    queryKey: ['admin-health'],
+    queryFn: () => api<{ generatedAt: string; checks: Array<{ status: string }> }>('/api/admin/health'),
+  });
+  // One random series for the wash. `keepPreviousData` is deliberately off: a different backdrop on each
+  // visit is the point, and it is the cheapest way to make the panel feel like part of the library.
+  const { data: rnd } = useQuery({
+    queryKey: ['admin-hero-art'],
+    queryFn: () => api<{ seriesId: string | null }>('/api/random'),
+    staleTime: 5 * 60_000,
+  });
+
+  const bad = health ? health.checks.filter((c) => c.status !== 'ok').length : null;
+  const verdict = !health ? tr('Checking your library…')
+    : bad === 1 ? tr('1 check found something')
+    : bad ? tr('{n} checks found something', { n: bad })
+    : tr('Everything looks healthy');
+
+  const scan = async () => {
+    toast(tr('Scanning library…'));
+    await triggerRefresh();
+    setTimeout(() => qc.invalidateQueries({ queryKey: ['admin-stats'] }), 2500);
+  };
+
+  // Separate singular keys rather than a plural library. Nine languages with one count each does not justify
+  // Intl.PluralRules and a rules table; "1 members" does need fixing, and every language here can express
+  // both forms as two strings.
+  const facts = [
+    stats ? tr('{n} series', { n: stats.seriesTotal }) : null,
+    stats ? (stats.members === 1 ? tr('1 member') : tr('{n} members', { n: stats.members })) : null,
+    stats ? tr('{size} cached', { size: bytes(stats.cacheBytes) }) : null,
+    stats?.lastScan ? tr('scanned {when}', { when: relativeTime(new Date(stats.lastScan).toISOString()) }) : null,
+  ].filter(Boolean) as string[];
+
+  return (
+    <div className="relative mb-6 overflow-hidden lg:mx-auto lg:mt-4 lg:max-w-6xl lg:rounded-3xl">
+      {rnd?.seriesId && <Backdrop seriesId={rnd.seriesId} className="absolute inset-0" />}
+      {/* Drowned deliberately: this is a wash to sit text on, not a picture to look at. */}
+      <div className="absolute inset-0 bg-gradient-to-t from-ink-950 via-ink-950/90 to-ink-950/70" />
+      <div className="pointer-events-none absolute inset-0"
+        style={{ background: 'radial-gradient(75% 120% at 12% 0%, rgb(var(--accent) / 0.22), transparent 60%)' }} />
+
+      <div className="relative px-4 pb-6 pt-[max(0.9rem,calc(env(safe-area-inset-top)+0.5rem))] lg:px-8 lg:pb-8 lg:pt-8">
+        <div className="mb-5 flex items-center gap-2">
+          <button onClick={onBack} aria-label={tr('Back')}
+            className="grid h-10 w-10 place-items-center rounded-full bg-black/40 text-fog-100 backdrop-blur">
+            <IcChevronLeft width={22} height={22} />
+          </button>
+          <span className="text-xs font-semibold uppercase tracking-wider text-fog-500">{tr('Admin')}</span>
+        </div>
+
+        <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.5, ease: [0.22, 0.61, 0.36, 1] }}>
+          <div className="flex items-center gap-2.5">
+            <span aria-hidden className={`size-2.5 shrink-0 rounded-full ${
+              !health ? 'bg-fog-600' : bad ? 'bg-amber-400' : 'bg-emerald-400'
+            } ${!health ? 'animate-pulse' : ''}`} />
+            <h1 className="font-display text-2xl font-bold leading-tight text-fog-50 lg:text-4xl">{verdict}</h1>
+          </div>
+          {facts.length > 0 && (
+            <p className="mt-2 text-sm text-fog-400">{facts.join(' · ')}</p>
+          )}
+        </motion.div>
+
+        <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.5, delay: 0.08, ease: [0.22, 0.61, 0.36, 1] }} className="mt-5">
+          <button onClick={scan} className="btn-accent px-5 py-2.5 text-sm">
+            <IcRefresh width={16} height={16} />{tr('Scan library now')}
+          </button>
+        </motion.div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * The group switcher on a phone.
+ *
+ * A bottom sheet rather than a dropdown, matching the library's Filters drawer -- an idiom this app already
+ * has, so it is one pattern rather than two.
+ */
+function GroupSheet({ current, onPick, onClose }: { current: Tab; onPick: (t: Tab) => void; onClose: () => void }) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-ink-950/70 backdrop-blur-sm sm:items-center" onClick={onClose}>
+      <div className="glass max-h-[80vh] w-full overflow-y-auto rounded-t-2xl border border-ink-700 p-5 pb-[calc(5.5rem+env(safe-area-inset-bottom))] sm:pb-[max(1.25rem,env(safe-area-inset-bottom))] sm:max-w-md sm:rounded-2xl"
+        role="dialog" aria-modal="true" aria-label={tr('Admin')} onClick={(e) => e.stopPropagation()}>
+        <div className="mb-4 flex items-start justify-between gap-3">
+          <h3 className="font-display text-lg font-semibold leading-tight">{tr('Admin')}</h3>
+          <button onClick={onClose} aria-label={tr('Close')} className="shrink-0 text-fog-500 hover:text-fog-200">✕</button>
+        </div>
+        <div className="space-y-4">
+          {GROUPS.map((g) => (
+            <div key={g.id}>
+              <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-fog-600">{tr(g.label)}</p>
+              <div className="flex flex-wrap gap-1.5">
+                {g.tabs.map((t) => (
+                  <button key={t} onClick={() => onPick(t)}
+                    className={`chip text-xs ${current === t ? 'chip-active' : ''}`}>{tr(t)}</button>
+                ))}
+              </div>
+            </div>
           ))}
         </div>
-        {tab === 'Overview' && <Overview />}
-        {tab === 'Members' && <Members />}
-        {tab === 'Providers' && <Providers />}
-        {tab === 'Art' && <ArtReview />}
-        {tab === 'Health' && <Health />}
-      {tab === 'Library' && <LibraryPanel />}
-        {tab === 'Tasks' && <Tasks />}
-        {tab === 'Activity' && <Activity />}
-        {tab === 'Sessions' && <Sessions />}
-        {tab === 'Settings' && <Settings />}
       </div>
     </div>
   );
 }
 
 function Overview() {
-  const toast = useToast();
-  const { data: stats, refetch } = useQuery({ queryKey: ['admin-stats'], queryFn: () => api<any>('/api/admin/stats') });
-  const rescan = async () => { toast('Scanning library…'); await triggerRefresh(); setTimeout(refetch, 2500); };
+  const { data: stats } = useQuery({ queryKey: ['admin-stats'], queryFn: () => api<any>('/api/admin/stats') });
+  const { data: health } = useQuery({
+    queryKey: ['admin-health'],
+    queryFn: () => api<{ generatedAt: string; checks: HealthCheck[] }>('/api/admin/health'),
+  });
+  // The four stat tiles and the scan button that used to lead this panel now live in the hero, where they
+  // are read before anything is clicked. Repeating them here would be the same numbers twice on one screen.
+  const failing = (health?.checks ?? []).filter((c) => c.status !== 'ok');
+
   return (
-    <div>
-      <div className="mb-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
-        {[
-          { label: 'Series', value: stats ? String(stats.seriesTotal) : '—' },
-          { label: 'Members', value: stats ? String(stats.members) : '—' },
-          { label: 'Image cache', value: stats ? bytes(stats.cacheBytes) : '—' },
-          { label: 'Last scan', value: stats?.lastScan ? relativeTime(new Date(stats.lastScan).toISOString()) : '—' },
-        ].map((s) => <div key={s.label} className="card p-4 text-center"><p className="font-display text-xl font-bold text-fog-50">{s.value}</p><p className="text-[11px] text-fog-500">{s.label}</p></div>)}
-      </div>
-      <button onClick={rescan} className="btn-ghost mb-6 w-full text-sm"><IcRefresh width={16} height={16} />{tr('Scan library now')}</button>
-      {stats?.activity?.length > 0 && (
-        <div>
-          <h2 className="mb-2 font-display text-base font-semibold">{tr('Member activity')}</h2>
+    <div className="space-y-6 lg:grid lg:grid-cols-5 lg:items-start lg:gap-6 lg:space-y-0">
+      <div className="lg:col-span-3">
+        <h2 className="mb-2 font-display text-base font-semibold">{tr('Member activity')}</h2>
+        {!stats?.activity?.length ? (
+          <div className="card p-6 text-center text-sm text-fog-500">{tr('No activity yet.')}</div>
+        ) : (
           <div className="card divide-y divide-ink-800/70 overflow-hidden">
             {stats.activity.map((a: any) => (
               <div key={a.id} className="flex items-center gap-3 px-4 py-3">
                 <Avatar avatar={a.avatar} size={32} />
-                <div className="min-w-0 flex-1"><p className="truncate text-sm text-fog-100">{a.display_name}</p><p className="text-[11px] text-fog-500">{a.last_active ? `active ${relativeTime(a.last_active)}` : 'no activity yet'}</p></div>
-                <span className="text-xs text-fog-400">{a.total} ch · <span className="text-accent">{a.week} wk</span></span>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm text-fog-100">{a.display_name}</p>
+                  <p className="text-[11px] text-fog-500">
+                    {a.last_active ? tr('active {when}', { when: relativeTime(a.last_active) }) : tr('No activity yet.')}
+                  </p>
+                </div>
+                <span className="shrink-0 text-xs text-fog-400">{a.total} ch · <span className="text-accent">{a.week} wk</span></span>
               </div>
             ))}
           </div>
-        </div>
-      )}
+        )}
+      </div>
+
+      {/* What needs attention, so the answer is on the first screen rather than a tab away. */}
+      <div className="lg:col-span-2">
+        <h2 className="mb-2 font-display text-base font-semibold">{tr('Needs attention')}</h2>
+        {!health ? (
+          <div className="card p-6 text-center text-sm text-fog-500">{tr('Checking your library…')}</div>
+        ) : !failing.length ? (
+          <div className="card p-6 text-center">
+            <p className="text-sm text-fog-200">{tr('Everything looks healthy')}</p>
+            <p className="mt-1 text-[11px] text-fog-500">{tr('checked {when}', { when: relativeTime(health.generatedAt) })}</p>
+          </div>
+        ) : (
+          <div className="card divide-y divide-ink-800/70 overflow-hidden">
+            {failing.map((c) => (
+              <div key={c.id} className="px-4 py-3">
+                <p className="text-sm text-fog-100">{c.title}</p>
+                <p className="mt-0.5 text-[11px] text-fog-500">{c.summary}</p>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
