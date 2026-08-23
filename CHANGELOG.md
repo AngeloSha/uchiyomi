@@ -1,5 +1,52 @@
 # Changelog
 
+## v0.8.1 — 2026-08-23
+
+**Upgrade if you are on v0.8.0.** Its library page listed nothing.
+
+### The library, search and browse pages were empty
+
+v0.8.0 made the view context the first argument of every backend method, so that a call site which forgets
+it fails to compile. One call site was cast to `any` and kept the old argument order, which is the one thing
+that turns that guarantee off. The arguments shifted by one, the page offset landed past the end of the
+library, and the result came back empty while the total count stayed correct.
+
+Nothing was lost and nothing needs re-scanning: the rows were always there, the query simply asked for a
+page beyond them. The library, search and browse pages and the command palette all read from that one
+endpoint, so all four listed nothing.
+
+### Offline downloads, which had never worked
+
+Downloading a chapter to read offline asks the server for a manifest first, and that route talked to Komga's
+HTTP API rather than to your own library. There is no Komga in a self-hosted install, so it answered "not
+found" for every chapter, from the first release onwards. It now reads your library, and refuses a series
+the viewer is not allowed to see.
+
+### Two of the three OPDS feeds
+
+`/opds` offers "recently updated", "A–Z" and "recently added". The first and third sorted by columns the
+v0.8.0 rewrite stopped selecting, so both answered a server error for everyone, admins included, and the
+broken one was listed first. Only A–Z worked.
+
+### Deep links on any port other than 80
+
+nginx listens on port 80 inside the container, and built its own redirects from that, so visiting
+`http://localhost:8080/library` was redirected to `http://localhost/library/` with the port dropped. 8080 is
+the documented default. Moving around the app never noticed, because that happens in the browser, but a
+bookmark, a shared link or a reload on any path landed nowhere. Redirects are now relative.
+
+### Renaming a folder had no button
+
+v0.8.0 added the ability to rename a series' folder on disk, documented it, and shipped no way to reach it
+outside of `curl`. There is now a **Rename folder** action on the series page for admins, which shows the
+server's own refusal when a folder cannot be moved, since that message names the fix.
+
+### Also
+
+A malformed request body returned 500 with the whole validation error, schema field names included, rather
+than 400. The handler meant to prevent that was registered after the routes it was meant to cover, so it had
+never applied to any of them; internal error messages were reaching clients the same way.
+
 ## v0.8.0 — 2026-08-23
 
 **Read this one before upgrading.** The library mount changed, and a security fix closed three ways to read a
