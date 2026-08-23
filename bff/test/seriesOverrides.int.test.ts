@@ -1,6 +1,6 @@
 // Series metadata edits have to survive the next scan.
 //
-// persistScan rewrites lib_series on every pass (`ON CONFLICT (folder) DO UPDATE SET ... author, status,
+// persistScan rewrites lib_series on every pass (`ON CONFLICT (library_id, folder) DO UPDATE SET ... author, status,
 // genres`), and scans happen constantly: the admin button, every series added, every updater sweep. So there
 // is nowhere in lib_series an edit can live. Title and summary already solved this by living in
 // series_overrides and being COALESCEd at read time; author, status and genres were read from ComicInfo and
@@ -36,7 +36,7 @@ const rescan = () =>
     `INSERT INTO lib_series (id, source, title, summary, author, status, genres, folder, books_count)
      VALUES ($1,'T!ov','Scanned Title','Scanned summary.','Scanned Author','ONGOING',
              ARRAY['Action','Fantasy'],$1,2)
-     ON CONFLICT (folder) DO UPDATE SET title=EXCLUDED.title, summary=EXCLUDED.summary,
+     ON CONFLICT (library_id, folder) DO UPDATE SET title=EXCLUDED.title, summary=EXCLUDED.summary,
        author=EXCLUDED.author, status=EXCLUDED.status, genres=EXCLUDED.genres`,
     [S],
   );

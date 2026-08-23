@@ -293,6 +293,28 @@ async function findSeriesDirs(root: string): Promise<FoundSeries[]> {
   return out;
 }
 
+export interface LibraryRow { id: string; path: string }
+
+/**
+ * Which declared library owns this folder, by longest path prefix.
+ *
+ * Membership is a property of folderRel, never of which root the file happens to sit under. That is what
+ * keeps DL_ROOT a writable OVERLAY of the same namespace rather than a library of its own: persistScan
+ * merges identical folderRel across both roots on purpose, so a series part-fetched by the engine and
+ * part-downloaded here is one shelf, and both copies land in the same library by construction.
+ *
+ * Library zero has path '' and therefore prefixes everything, which is why an install that has never
+ * declared a library behaves exactly as it did before this existed.
+ */
+export function libraryIdFor(folderRel: string, libs: LibraryRow[]): string {
+  let best: LibraryRow | null = null;
+  for (const l of libs) {
+    if (l.path && !(folderRel === l.path || folderRel.startsWith(l.path + '/'))) continue;
+    if (!best || l.path.length > best.path.length) best = l;
+  }
+  return best?.id ?? 'lib';
+}
+
 /** Every series folder that exists under either root right now, at any depth. */
 async function foldersOnDisk(): Promise<string[]> {
   const out: string[] = [];
@@ -312,6 +334,7 @@ async function tryRematch(
   files: string[],
   root: string,
   onDisk: string[],
+  libraryId: string,
 ): Promise<{ id: string; oldFolder: string } | null> {
   if (files.length < MIN_BOOKS) return null;
 
@@ -326,7 +349,7 @@ async function tryRematch(
   );
   const list = fps.map((f) => f.fingerprint).filter((x): x is string => !!x);
 
-  const { match, reason, candidates } = await findRematch(list, onDisk);
+  const { match, reason, candidates } = await findRematch(list, onDisk, libraryId);
   if (!match) {
     if (candidates.length) {
       await logRematch(env.LIBRARY_REMATCH === 'apply' ? 'apply' : 'report', {
@@ -362,6 +385,8 @@ export async function persistScan(): Promise<{ series: number; books: number; ms
   // Every folder that exists on disk this pass. A series still sitting at its own path has not moved, so it
   // must never be offered as the answer for a different folder.
   const onDisk = await foldersOnDisk();
+  // Loaded once per scan. Longest prefix wins, so a declared subdirectory beats library zero.
+  const libs = await q<LibraryRow>('SELECT id, path FROM libraries ORDER BY length(path) DESC');
   for (const root of [LIBRARY_ROOT, DL_ROOT]) {
     for (const found of await findSeriesDirs(root)) {
       const { folderRel, folderAbs, source: srcName, chapters: files } = found;
@@ -369,8 +394,8 @@ export async function persistScan(): Promise<{ series: number; books: number; ms
         // One folder per transaction: a half-applied folder is a corrupt library, not a stale one.
         // A folder can already be spoken for in ways the scanner must respect, or delete and merge both
         // undo themselves on the next pass: this runs on every add, every updater sweep and every manual scan.
-        const known = await one<{ id: string; deleted_at: string | null; merged_into: string | null }>(
-          `SELECT id, deleted_at, merged_into FROM lib_series WHERE folder = $1`,
+        const known = await one<{ id: string; deleted_at: string | null; merged_into: string | null; library_id: string }>(
+          `SELECT id, deleted_at, merged_into, library_id FROM lib_series WHERE folder = $1`,
           [folderRel],
         );
         // Deleted: leave it alone entirely. Reviving it would mint a new id and strand everything attached
@@ -383,7 +408,7 @@ export async function persistScan(): Promise<{ series: number; books: number; ms
         // Only a folder with no row of its own can be a move. Anything already known is the normal path.
         let rematched: { id: string; oldFolder: string } | null = null;
         if (env.LIBRARY_REMATCH !== 'off' && !seenFolders.has(folderRel)) {
-          rematched = await tryRematch(folderRel, folderAbs, files, root, onDisk);
+          rematched = await tryRematch(folderRel, folderAbs, files, root, onDisk, libraryIdFor(folderRel, libs));
         }
 
         const seriesId = await tx(async (qq) => {
@@ -398,9 +423,13 @@ export async function persistScan(): Promise<{ series: number; books: number; ms
             // Conflict on FOLDER, not id: the row keeps whatever id it already had, so ids survive a rescan
             // without being derived from the path. A brand-new folder mints one.
             const rows = await qq<{ id: string }>(
-              `INSERT INTO lib_series (id, source, title, summary, author, status, genres, web, folder, books_count, scanned_at)
-               VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10, now())
-               ON CONFLICT (folder) DO UPDATE SET source=EXCLUDED.source, title=EXCLUDED.title, summary=EXCLUDED.summary,
+              // An EXISTING folder keeps the library it is already in: only a brand-new folder is assigned
+              // one. Recomputing on every scan would mean that declaring a library, before its series were
+              // reassigned, made the conflict target miss and mint a second row with a new id -- which is
+              // the one thing that strands everyone's reading progress. Reassignment is a deliberate UPDATE.
+              `INSERT INTO lib_series (id, source, title, summary, author, status, genres, web, folder, books_count, library_id, scanned_at)
+               VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11, now())
+               ON CONFLICT (library_id, folder) DO UPDATE SET source=EXCLUDED.source, title=EXCLUDED.title, summary=EXCLUDED.summary,
                  author=EXCLUDED.author, status=EXCLUDED.status, genres=EXCLUDED.genres, web=EXCLUDED.web,
                  scanned_at=now()
                RETURNING id`,
@@ -409,6 +438,7 @@ export async function persistScan(): Promise<{ series: number; books: number; ms
                 field(firstXml, 'Writer'), cleanStatus(field(firstXml, 'PublishingStatusTachiyomi') || field(firstXml, 'PublishingStatus')),
                 (field(firstXml, 'Genre') || '').split(',').map((s) => s.trim()).filter(Boolean),
                 field(firstXml, 'Web'), folderRel, files.length,
+                known?.library_id ?? libraryIdFor(folderRel, libs),
               ],
             );
             id = rows[0].id;

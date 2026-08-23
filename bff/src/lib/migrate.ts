@@ -308,6 +308,38 @@ CREATE TABLE IF NOT EXISTS series_trackers (
 
 -- admin-editable per-series metadata + art overrides
 -- cover/banner: 'upload' = a file under <CONFIG_DIR>/series-art; an http(s) URL = pasted; null = use automatic art
+CREATE TABLE IF NOT EXISTS libraries (
+  id         text PRIMARY KEY,
+  name       text NOT NULL,
+  path       text NOT NULL DEFAULT '',
+  sort_order int  NOT NULL DEFAULT 0,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+-- Libraries are DECLARED, never inferred from the filesystem.
+--
+-- The obvious rule, "each top-level folder under the library root is a library", is wrong on a real install.
+-- The top level holds SOURCE names written by the downloader (Aqua Manga (EN), Mangafreak (EN), ...), and
+-- lib_series.source is literally that first path segment, so inferring would rename someone's single library
+-- into three libraries named after its scrapers, on upgrade, with nobody asking for it.
+--
+-- So library zero covers the whole root, which is exactly what every existing install already is, and an
+-- admin may then declare that a subdirectory is a library of its own. The id is the literal 'lib' that
+-- ownedCatalog has always minted and stamped into every series DTO, so GET /api/libraries and every DTO
+-- keep the bytes they return today.
+CREATE UNIQUE INDEX IF NOT EXISTS uq_libraries_path ON libraries (path);
+INSERT INTO libraries (id, name, path) VALUES ('lib', 'Library', '') ON CONFLICT (id) DO NOTHING;
+
+ALTER TABLE lib_series ADD COLUMN IF NOT EXISTS library_id text NOT NULL DEFAULT 'lib';
+
+-- Strictly weaker than the constraint it replaces, so it cannot fail to apply on any existing install: with
+-- every row at library_id='lib', (library_id, folder) is unique exactly when folder was.
+--
+-- Not load-bearing today. folder stays relative to the ROOT, so two libraries are disjoint subtrees of it
+-- and Manga/Berserk and Comics/Berserk are already different strings. It becomes load-bearing the day a
+-- library is a separate mount. lib_books went through this same widening for the same reason.
+ALTER TABLE lib_series DROP CONSTRAINT IF EXISTS lib_series_folder_key;
+CREATE UNIQUE INDEX IF NOT EXISTS lib_series_library_folder_idx ON lib_series (library_id, folder);
+
 CREATE TABLE IF NOT EXISTS user_libraries (
   user_id    uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   library_id text NOT NULL,
@@ -369,7 +401,7 @@ CREATE TABLE IF NOT EXISTS series_overrides (
 );
 
 -- Author, status and genres are re-read from ComicInfo and overwritten on EVERY scan by persistScan's
--- ON CONFLICT (folder) DO UPDATE. There is nowhere in lib_series that a manual edit can survive, so the
+-- ON CONFLICT (library_id, folder) DO UPDATE. There is nowhere in lib_series a manual edit survives, so the
 -- override table is the only durable home for one. Title and summary already proved the pattern.
 --
 -- NULL means "no override, use what was scanned". For genres that is deliberately distinct from '{}',
@@ -477,7 +509,11 @@ DECLARE
     ARRAY['notes',            'book_id',   'lib_books',  'SET NULL'],
     -- the cover pointer should blank rather than dangle
     ARRAY['lib_series',       'cover_book_id', 'lib_books', 'SET NULL'],
-    ARRAY['lib_series',       'merged_into',   'lib_series', 'SET NULL']
+    ARRAY['lib_series',       'merged_into',   'lib_series', 'SET NULL'],
+    -- RESTRICT, not CASCADE. read_progress.series_id cascades from lib_series, so a library delete that
+    -- cascaded to its series would destroy reading progress two hops away, as a side effect of an admin
+    -- tidying their shelves. Deleting a library reassigns its series first, deliberately.
+    ARRAY['lib_series',       'library_id',    'libraries',  'RESTRICT']
   ];
   nm text;
 BEGIN

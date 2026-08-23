@@ -1,7 +1,7 @@
 import { hash } from '@node-rs/argon2';
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import { z } from 'zod';
-import { q, one } from '../lib/db';
+import { q, one, tx } from '../lib/db';
 import { content as komga } from '../lib/backend';
 import { cacheBytes } from '../lib/imageCache';
 import { runtime } from '../lib/runtime';
@@ -28,6 +28,7 @@ import { runHealthChecks } from '../lib/health';
 import { titlesFromMangadexList } from '../lib/mangadexList';
 import { fetchAniListArt, fetchAniListCandidates, fetchAnimeBanner } from '../lib/anilist';
 import { fetchKitsuBanner } from '../lib/kitsu';
+import { randomBytes } from 'crypto';
 
 type ImportJob = { running: boolean; total: number; done: number; added: number; already: number; notFound: number; failed: number; startedAt: number; details: Array<{ title: string; status: string; source?: string }> };
 let importJob: ImportJob | null = null;
@@ -50,7 +51,10 @@ export default async function adminRoutes(app: FastifyInstance) {
 
   app.get('/api/admin/users', async () => ({
     content: await q(`SELECT u.id, u.username, u.display_name, u.role, u.avatar, u.created_at, u.disabled, u.perms, u.totp_enabled,
-        (SELECT max(created_at) FROM reading_events e WHERE e.user_id = u.id) AS last_active
+        (SELECT max(created_at) FROM reading_events e WHERE e.user_id = u.id) AS last_active,
+        -- NULL, not an empty array, when unrestricted: the UI must tell "every library, including ones
+        -- added later" apart from "exactly these", and an empty array is a real setting meaning nothing.
+        (SELECT array_agg(ul.library_id) FROM user_libraries ul WHERE ul.user_id = u.id) AS libraries
       FROM users u ORDER BY u.created_at`),
   }));
 
@@ -371,6 +375,114 @@ export default async function adminRoutes(app: FastifyInstance) {
       req,
     });
     return { ok: true, affectedUsers: affected?.n ?? 0 };
+  });
+
+  // ---- libraries ----
+  //
+  // Declared, never inferred from disk. The obvious rule (each top-level folder is a library) is wrong on a
+  // real install: that level holds source names written by the downloader, so inferring would rename one
+  // library into several named after scrapers. Library zero covers the whole root and always exists.
+
+  app.get('/api/admin/libraries', async () => {
+    const rows = await q<{ id: string; name: string; path: string; n: number }>(
+      `SELECT l.id, l.name, l.path,
+              (SELECT count(*)::int FROM lib_series s WHERE s.library_id = l.id AND ${visibleToAll('s')}) AS n
+         FROM libraries l ORDER BY l.sort_order, l.name`,
+    );
+    // Candidate subdirectories: folders that hold series but are not yet a library. Annotated where the name
+    // matches a known source, because that is the case an admin should NOT usually promote.
+    const sources = new Set((await q<{ source: string }>('SELECT DISTINCT source FROM lib_series')).map((r) => r.source));
+    const taken = new Set(rows.map((r) => r.path).filter(Boolean));
+    const seen = new Map<string, number>();
+    for (const r of await q<{ folder: string }>(`SELECT folder FROM lib_series s WHERE ${visibleToAll('s')}`)) {
+      const top = r.folder.split('/')[0];
+      if (!top || taken.has(top)) continue;
+      seen.set(top, (seen.get(top) ?? 0) + 1);
+    }
+    const candidates = [...seen.entries()].map(([path, n]) => ({
+      path, series: n,
+      looksLikeSource: sources.has(path),
+    })).sort((a, b) => b.series - a.series);
+    return { content: rows, candidates };
+  });
+
+  /** What promoting a path WOULD do, without doing it. Same habit as the chapter-override route. */
+  app.get('/api/admin/libraries/preview', async (req, reply) => {
+    const path = String((req.query as { path?: string }).path ?? '').trim();
+    if (!path) return reply.code(400).send({ error: 'bad_request' });
+    const rows = await q<{ id: string; title: string }>(
+      `SELECT id, title FROM lib_series s
+        WHERE s.library_id = 'lib' AND (folder = $1 OR folder LIKE $1 || '/%') AND ${visibleToAll('s')}
+        ORDER BY title LIMIT 20`,
+      [path],
+    );
+    const total = await one<{ n: number }>(
+      `SELECT count(*)::int n FROM lib_series s
+        WHERE s.library_id = 'lib' AND (folder = $1 OR folder LIKE $1 || '/%')`, [path],
+    );
+    return { path, series: total?.n ?? 0, sample: rows.map((r) => r.title) };
+  });
+
+  app.post('/api/admin/libraries', async (req, reply) => {
+    const b = z.object({
+      name: z.string().min(1).max(80),
+      // relative, posix, no escaping the root. Containment is checked again at the filesystem layer.
+      path: z.string().min(1).max(300),
+    }).safeParse(req.body);
+    if (!b.success) return reply.code(400).send({ error: 'bad_request' });
+    const path = b.data.path.replace(/^\/+|\/+$/g, '').trim();
+    if (!path || path.includes('..') || path.startsWith('/')) {
+      return reply.code(400).send({ error: 'bad_path', message: 'Use a folder path relative to your library root.' });
+    }
+    // Nesting makes "longest prefix wins" surprising and makes access rules ambiguous, so refuse both
+    // directions rather than pick a winner.
+    const clash = await one<{ path: string }>(
+      `SELECT path FROM libraries WHERE path <> '' AND ($1 = path OR $1 LIKE path || '/%' OR path LIKE $1 || '/%')`,
+      [path],
+    );
+    if (clash) {
+      return reply.code(409).send({ error: 'nested', message: `That overlaps the existing library at "${clash.path}".` });
+    }
+    const id = `lib_${randomBytes(8).toString('hex')}`;
+    await tx(async (qq) => {
+      await qq(`INSERT INTO libraries (id, name, path) VALUES ($1,$2,$3)`, [id, b.data.name.trim(), path]);
+      // Reassignment is deliberate and happens here, not in a scan: the scanner keeps an existing folder in
+      // the library it is already in, precisely so it can never re-mint an id by recomputing.
+      await qq(
+        `UPDATE lib_series SET library_id = $1
+          WHERE library_id = 'lib' AND (folder = $2 OR folder LIKE $2 || '/%')`,
+        [id, path],
+      );
+    });
+    await logAudit('library.create', { userId: userIdOf(req), detail: { id, path }, req });
+    return { ok: true, id };
+  });
+
+  app.patch('/api/admin/libraries/:id', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const b = z.object({ name: z.string().min(1).max(80) }).safeParse(req.body);
+    if (!b.success) return reply.code(400).send({ error: 'bad_request' });
+    // Rename only. Changing the path is a reassignment of every series in it, so it is delete-and-recreate,
+    // which forces the preview and the audit entry rather than doing it silently under an edit.
+    await q('UPDATE libraries SET name = $2 WHERE id = $1', [id, b.data.name.trim()]);
+    await logAudit('library.rename', { userId: userIdOf(req), detail: { id, name: b.data.name }, req });
+    return { ok: true };
+  });
+
+  app.delete('/api/admin/libraries/:id', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    if (id === 'lib') {
+      return reply.code(400).send({ error: 'cannot_delete', message: 'The default library cannot be removed.' });
+    }
+    await tx(async (qq) => {
+      // Back to library zero first. The FK is RESTRICT on purpose: read_progress cascades from lib_series,
+      // so a cascading library delete would destroy reading history two hops away.
+      await qq(`UPDATE lib_series SET library_id = 'lib' WHERE library_id = $1`, [id]);
+      await qq('DELETE FROM user_libraries WHERE library_id = $1', [id]);
+      await qq('DELETE FROM libraries WHERE id = $1', [id]);
+    });
+    await logAudit('library.delete', { userId: userIdOf(req), detail: { id }, req });
+    return { ok: true };
   });
 
   // Set/replace a cover or background: paste a URL, upload an image (base64 data URL), or reset to automatic.
@@ -946,6 +1058,9 @@ export default async function adminRoutes(app: FastifyInstance) {
         role: z.enum(['admin', 'user']).optional(),
         disabled: z.boolean().optional(),
         perms: permsShape.optional(),
+        // null means every library, including ones created later. A list means exactly these.
+        // Absent means leave the current setting alone.
+        libraries: z.array(z.string()).nullable().optional(),
       })
       .parse(req.body);
     // safety: never lock yourself out, never remove the last active admin
@@ -964,6 +1079,22 @@ export default async function adminRoutes(app: FastifyInstance) {
       await revokeAllSessions(id); // force re-login after an admin password reset
     }
     if (b.displayName) await q('UPDATE users SET display_name = $2 WHERE id = $1', [id, b.displayName]);
+    if (b.libraries !== undefined) {
+      // No rows means every library. Writing rows means exactly those, so clearing first is how you say
+      // "back to unrestricted". An empty array is a deliberate "nothing", which is why it is never
+      // conflated with null.
+      await tx(async (qq) => {
+        await qq('DELETE FROM user_libraries WHERE user_id = $1', [id]);
+        for (const lid of b.libraries ?? []) {
+          await qq(
+            `INSERT INTO user_libraries (user_id, library_id) SELECT $1, id FROM libraries WHERE id = $2
+             ON CONFLICT DO NOTHING`,
+            [id, lid],
+          );
+        }
+      });
+      await logAudit('user.libraries', { userId: userIdOf(req), detail: { id, libraries: b.libraries }, req });
+    }
     if (b.role) await q('UPDATE users SET role = $2 WHERE id = $1', [id, b.role]);
     if (b.perms) await q('UPDATE users SET perms = $2 WHERE id = $1', [id, JSON.stringify(b.perms)]);
     if (b.disabled !== undefined) {

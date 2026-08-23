@@ -10,7 +10,7 @@ function page<T>(content: T[], total: number, p: number, size: number): Page<T> 
   return { content, totalElements: total, totalPages, number: p, size, first: p <= 0, last: p >= totalPages - 1 };
 }
 
-const SERIES_COLS = 'id, title, summary, status, genres, author, books_count, cover_book_id, web, created_at, latest_mtime, auto_update';
+const SERIES_COLS = 'id, title, summary, status, genres, author, books_count, cover_book_id, web, created_at, latest_mtime, auto_update, library_id';
 
 /**
  * The one place a series is read from.
@@ -29,7 +29,7 @@ const seriesSrc = (ctx: ViewCtx, p: Params, alias = 'sv') => `(
          COALESCE(o.status, s.status) AS status, COALESCE(o.genres, s.genres) AS genres,
          COALESCE(o.author, s.author) AS author,
          s.books_count, s.cover_book_id, s.web, s.created_at, s.latest_mtime,
-         s.auto_update
+         s.auto_update, s.library_id
     FROM lib_series s LEFT JOIN series_overrides o ON o.series_id = s.id
    WHERE ${visible('s', ctx, p)}
 ) ${alias}`;
@@ -61,7 +61,7 @@ function seriesDto(r: any) {
   const count: number = r.books_count ?? 0;
   return {
     id: r.id,
-    libraryId: 'lib',
+    libraryId: r.library_id ?? 'lib',
     name: r.title,
     created: r.created_at ? new Date(r.created_at).toISOString() : null, // when the series entered the library
     booksCount: count,
@@ -244,7 +244,14 @@ const total = async (ctx: ViewCtx, where = 'TRUE', p = new Params(), cte = '', f
   ))?.c ?? 0;
 
 export const owned = {
-  libraries: async (_ctx: ViewCtx) => [{ id: 'lib', name: 'Library' }],
+  libraries: async (ctx: ViewCtx) => {
+    const rows = await q<{ id: string; name: string }>(
+      'SELECT id, name FROM libraries ORDER BY sort_order, name',
+    );
+    // A restricted viewer is told about the libraries they hold, not all of them: the list itself would
+    // otherwise leak the existence and names of everything they cannot open.
+    return ctx.libraryIds ? rows.filter((r) => ctx.libraryIds!.includes(r.id)) : rows;
+  },
 
   genres: async (ctx: ViewCtx) => {
     const p = new Params();

@@ -42,6 +42,7 @@ export interface RematchCandidate {
 export async function findRematch(
   fingerprints: string[],
   excludeFolders: string[],
+  libraryId: string,
 ): Promise<{ match: RematchCandidate | null; reason: string; candidates: RematchCandidate[] }> {
   const fps = fingerprints.filter(Boolean);
   if (fps.length < MIN_BOOKS) {
@@ -56,12 +57,17 @@ export async function findRematch(
        JOIN lib_series s ON s.id = b.series_id
       WHERE b.fingerprint = ANY($1)
         AND NOT (s.folder = ANY($2))
+        -- Never across a library. Moving a series between libraries changes who can see it, and doing
+        -- that from a background scan because some chapters matched is a permission change nobody
+        -- asked for. Every other rule in this file refuses on thin evidence; "these chapters are in a
+        -- different library" is thinner than "in the same one", and the consequence is worse.
+        AND s.library_id = $3
         -- a deleted or merged-away series must never be re-adopted into a folder
         AND ${visibleToAll('s')}
         -- a partially fingerprinted series would understate its own size and so overstate the overlap
         AND NOT EXISTS (SELECT 1 FROM lib_books u WHERE u.series_id = b.series_id AND u.fp_at IS NULL)
       GROUP BY b.series_id, s.folder, s.title`,
-    [fps, excludeFolders],
+    [fps, excludeFolders, libraryId],
   );
 
   const candidates: RematchCandidate[] = rows.map((r) => {

@@ -7,7 +7,7 @@ import { useAuth } from '@/lib/auth';
 import { triggerRefresh } from '@/lib/refresh';
 import { bytes, relativeTime } from '@/lib/format';
 import { useToast } from '@/components/Toast';
-import { ConfirmDialog } from '@/components/ConfirmDialog';
+import { ConfirmDialog, Modal } from '@/components/ConfirmDialog';
 import { Avatar } from '@/components/Avatar';
 import { IcChevronLeft, IcTrash, IcPlus, IcRefresh } from '@/components/icons';
 
@@ -141,6 +141,9 @@ function Members() {
                   <button onClick={() => patch(u, { role: u.role === 'admin' ? 'user' : 'admin' }, 'Role updated')} className="chip text-xs">{u.role === 'admin' ? 'Make member' : 'Make admin'}</button>
                   <button onClick={() => patch(u, { disabled: !u.disabled }, u.disabled ? 'Enabled' : 'Disabled')} className="chip text-xs">{u.disabled ? 'Enable' : 'Disable'}</button>
                   <button onClick={() => patch(u, { perms: { ...u.perms, canDownload: !canDl } }, 'Permission updated')} className="chip text-xs">{canDl ? 'Deny downloads' : 'Allow downloads'}</button>
+                  {/* Library access. "All libraries" is the ABSENCE of grant rows, not a full set of them, so a
+                      library added next month is visible to unrestricted accounts without editing anyone. */}
+                  {u.role !== 'admin' && <LibraryAccess user={u} onSaved={inval} />}
                 </div>
               )}
             </div>
@@ -628,6 +631,220 @@ interface DeletedRow { id: string; title: string; folder: string; books_count: n
 
 /** What has been removed from the library, and the way back. Removing never touches files, so this is
  *  always reversible -- the series keeps its id, and with it everyone's progress, favourites and ratings. */
+interface LibraryRow { id: string; name: string; path: string; n: number }
+interface LibraryCandidate { path: string; series: number; looksLikeSource: boolean }
+
+/**
+ * Libraries are declared here, never inferred from the filesystem.
+ *
+ * The candidate list is offered rather than a free-text box because the obvious guess is wrong on a real
+ * install: the top level of a library root usually holds SOURCE folders written by the downloader, and
+ * promoting one of those makes a "library" named after a scraper. Those candidates are flagged as such.
+ */
+/**
+ * Which libraries one member may see.
+ *
+ * "All libraries" is the absence of grant rows, not a full set of them. That distinction matters on upgrade
+ * (nobody's access changes) and later (a library created next month is visible to unrestricted accounts
+ * without touching a single user row), so the toggle writes null rather than every id.
+ *
+ * Admins are unrestricted by definition and never get this control.
+ */
+function LibraryAccess({ user, onSaved }: { user: any; onSaved: () => void }) {
+  const toast = useToast();
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const { data } = useQuery({
+    queryKey: ['admin-libraries'],
+    queryFn: () => api<{ content: LibraryRow[] }>('/api/admin/libraries'),
+    enabled: open,
+  });
+  const libs = data?.content ?? [];
+  const granted: string[] | null = user.libraries ?? null;
+
+  const save = async (next: string[] | null) => {
+    setBusy(true);
+    try {
+      await api(`/api/admin/users/${user.id}`, { method: 'PATCH', json: { libraries: next } });
+      toast(next ? `Limited to ${next.length} librar${next.length === 1 ? 'y' : 'ies'}` : 'All libraries', 'success');
+      onSaved();
+    } catch (e) { toast(msgOf(e, 'Could not change that'), 'error'); }
+    setBusy(false);
+  };
+
+  const toggle = (id: string) => {
+    const base = granted ?? libs.map((l) => l.id);
+    save(base.includes(id) ? base.filter((x) => x !== id) : [...base, id]);
+  };
+
+  // Only worth showing once there is more than one library to choose between.
+  return (
+    <>
+      <button onClick={() => setOpen((v) => !v)} className={`chip text-xs ${granted ? 'chip-active' : ''}`}>
+        {granted ? `${granted.length} librar${granted.length === 1 ? 'y' : 'ies'}` : 'All libraries'}
+      </button>
+      {open && (
+        <div className="mt-1.5 w-full rounded-xl border border-ink-700 p-2.5">
+          <label className="flex cursor-pointer items-center justify-between gap-3 text-xs">
+            <span className="text-fog-200">All libraries<span className="ml-1 text-fog-500">(including any added later)</span></span>
+            <input type="checkbox" checked={!granted} disabled={busy}
+              onChange={(e) => save(e.target.checked ? null : libs.map((l) => l.id))}
+              className="size-4 shrink-0 accent-accent" />
+          </label>
+          {granted && (
+            <div className="mt-2 flex flex-wrap gap-1.5 border-t border-ink-800 pt-2">
+              {libs.map((l) => (
+                <button key={l.id} disabled={busy} onClick={() => toggle(l.id)}
+                  className={`chip text-xs disabled:opacity-50 ${granted.includes(l.id) ? 'chip-active' : ''}`}>
+                  {l.name}
+                </button>
+              ))}
+              {!granted.length && <p className="text-[11px] text-amber-300">This member currently sees nothing.</p>}
+            </div>
+          )}
+        </div>
+      )}
+    </>
+  );
+}
+
+function LibrariesSection() {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const [adding, setAdding] = useState<LibraryCandidate | null>(null);
+  const [name, setName] = useState('');
+  const [preview, setPreview] = useState<{ series: number; sample: string[] } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [confirmDel, setConfirmDel] = useState<LibraryRow | null>(null);
+
+  const { data } = useQuery({
+    queryKey: ['admin-libraries'],
+    queryFn: () => api<{ content: LibraryRow[]; candidates: LibraryCandidate[] }>('/api/admin/libraries'),
+  });
+  const libs = data?.content ?? [];
+  const candidates = data?.candidates ?? [];
+  const refresh = () => { for (const k of [['admin-libraries'], ['library'], ['home']]) qc.invalidateQueries({ queryKey: k }); };
+
+  const openAdd = async (c: LibraryCandidate) => {
+    setAdding(c);
+    setName(c.path.split('/').pop() || c.path);
+    setPreview(null);
+    try {
+      const r = await api<{ series: number; sample: string[] }>(`/api/admin/libraries/preview?path=${encodeURIComponent(c.path)}`);
+      setPreview(r);
+    } catch { /* the count is a courtesy; the create still works without it */ }
+  };
+
+  const create = async () => {
+    if (!adding) return;
+    setBusy(true);
+    try {
+      await api('/api/admin/libraries', { method: 'POST', json: { name: name.trim(), path: adding.path } });
+      toast(`"${name.trim()}" created`, 'success');
+      setAdding(null);
+      refresh();
+    } catch (e) { toast(msgOf(e, 'Could not create that library'), 'error'); }
+    setBusy(false);
+  };
+
+  const remove = async (l: LibraryRow) => {
+    setBusy(true);
+    try {
+      await api(`/api/admin/libraries/${l.id}`, { method: 'DELETE' });
+      toast(`"${l.name}" removed. Its series went back to the default library.`, 'success');
+      setConfirmDel(null);
+      refresh();
+    } catch (e) { toast(msgOf(e, 'Could not remove that library'), 'error'); }
+    setBusy(false);
+  };
+
+  return (
+    <section className="mb-8">
+      <h3 className="mb-1 font-display text-base font-semibold">Libraries</h3>
+      <p className="mb-3 text-xs leading-relaxed text-fog-500">
+        Split your collection into separate libraries, then choose who can see each one under Members.
+        Everything starts in one library, and nothing moves unless you say so.
+      </p>
+
+      <div className="divide-y divide-ink-800 rounded-xl border border-ink-700">
+        {libs.map((l) => (
+          <div key={l.id} className="flex items-center gap-3 px-3 py-2.5">
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-sm text-fog-100">{l.name}</p>
+              <p className="truncate text-[11px] text-fog-500">
+                {l.path ? l.path : 'everything not in another library'} · {l.n} series
+              </p>
+            </div>
+            {l.id !== 'lib' && (
+              <button onClick={() => setConfirmDel(l)} className="chip shrink-0 text-xs hover:border-rose-500/50 hover:text-rose-400">
+                Remove
+              </button>
+            )}
+          </div>
+        ))}
+      </div>
+
+      {candidates.length > 0 && (
+        <>
+          <p className="mb-1.5 mt-4 text-xs font-semibold uppercase tracking-wider text-fog-500">Folders you could split out</p>
+          <div className="flex flex-wrap gap-1.5">
+            {candidates.slice(0, 12).map((c) => (
+              <button key={c.path} onClick={() => openAdd(c)}
+                className={`chip text-xs ${c.looksLikeSource ? 'opacity-60' : ''}`}
+                title={c.looksLikeSource ? 'This looks like a source folder created by the downloader' : undefined}>
+                {c.path} <span className="text-fog-500">· {c.series}</span>
+                {c.looksLikeSource && <span className="ml-1 text-amber-400">source?</span>}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+
+      {adding && (
+        <Modal title="New library" onClose={() => setAdding(null)}>
+          <p className="text-sm text-fog-300">
+            Everything under <span className="text-fog-100">{adding.path}</span> becomes its own library.
+          </p>
+          {adding.looksLikeSource && (
+            <p className="mt-2 rounded-lg border border-amber-500/30 bg-amber-500/10 p-2.5 text-[11px] leading-relaxed text-amber-200">
+              This folder name matches one of your sources, so it was probably created by Uchiyomi&rsquo;s
+              downloader rather than by you. Libraries are usually collections like Manga or Comics.
+            </p>
+          )}
+          <label className="mb-1 mt-3 block text-xs font-semibold uppercase tracking-wider text-fog-500">Name</label>
+          <input value={name} onChange={(e) => setName(e.target.value)}
+            className="w-full rounded-lg border border-ink-700 bg-ink-900/60 px-3 py-2 text-sm text-fog-50 outline-none focus:border-accent" />
+          {preview && (
+            <p className="mt-2 text-[11px] leading-relaxed text-fog-500">
+              {preview.series} series would move, including {preview.sample.slice(0, 3).join(', ')}
+              {preview.sample.length > 3 ? '…' : ''}. Nothing is deleted and no reading progress changes.
+            </p>
+          )}
+          <div className="mt-4 flex gap-2">
+            <button onClick={() => setAdding(null)} className="btn-ghost flex-1 py-2 text-sm">Cancel</button>
+            <button onClick={create} disabled={busy || !name.trim()} className="btn-accent flex-1 py-2 text-sm disabled:opacity-50">
+              {busy ? 'Working…' : 'Create'}
+            </button>
+          </div>
+        </Modal>
+      )}
+
+      {confirmDel && (
+        <ConfirmDialog
+          title={`Remove "${confirmDel.name}"?`}
+          body={<>Its {confirmDel.n} series go back to the default library. Nothing is deleted, no files are
+            touched, and no reading progress changes. Anyone restricted to this library will lose access to it.</>}
+          confirmLabel="Remove library"
+          danger
+          busy={busy}
+          onConfirm={() => remove(confirmDel)}
+          onClose={() => setConfirmDel(null)}
+        />
+      )}
+    </section>
+  );
+}
+
 function LibraryPanel() {
   const qc = useQueryClient();
   const toast = useToast();
@@ -649,6 +866,8 @@ function LibraryPanel() {
   };
 
   return (
+    <>
+      <LibrariesSection />
     <div className="space-y-3">
       <p className="text-xs text-fog-500">
         Removing a series hides it from the library, search and the updater. Its files are left exactly where
@@ -676,6 +895,7 @@ function LibraryPanel() {
         </div>
       )}
     </div>
+    </>
   );
 }
 
