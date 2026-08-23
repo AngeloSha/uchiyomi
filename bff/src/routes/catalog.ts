@@ -335,7 +335,7 @@ export default async function catalogRoutes(app: FastifyInstance) {
       // The user context enables the read-status filter and the real unread sort. Both have to be answered
       // in SQL: enrichSeries runs after LIMIT/OFFSET, so filtering there would return short pages and a
       // totalElements that disagrees with them.
-      const res = await (komga.searchSeries as any)(body, page, size, sort, { userId: userIdOf(req) });
+      const res = await komga.searchSeries(vc(req), body, page, size, sort);
       return { ...res, content: await enrichSeries(req, res.content) };
     } catch (e) {
       // A filter the query cannot express used to silently widen to the whole library. Say so instead.
