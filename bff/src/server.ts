@@ -14,6 +14,7 @@ import { runUpdateAll } from './lib/updater';
 import { startSweeper } from './lib/imageCache';
 import { runBackup, msUntilHour } from './lib/backup';
 import { KomgaError } from './lib/komga';
+import { ZodError } from 'zod';
 import authRoutes from './routes/auth';
 import adminRoutes from './routes/admin';
 import catalogRoutes from './routes/catalog';
@@ -57,6 +58,30 @@ async function main() {
     return { ok: true };
   });
 
+  // BEFORE the routes, not after. Fastify resolves a route's error handler from the encapsulation context
+  // that existed when the route was registered, and every `await app.register(...)` below loads immediately.
+  // Set afterwards, this whole function was dead: routes fell through to Fastify's default handler, which
+  // replies with the raw `err.message`. So the sanitising branch never sanitised anything, and a failed
+  // `schema.parse()` returned 500 with the entire ZodError -- field names, expected types and all -- to any
+  // client that sent a malformed body.
+  app.setErrorHandler((err, req, reply) => {
+    if (err instanceof KomgaError) {
+      const code = err.status >= 400 && err.status < 600 ? err.status : 502;
+      return reply.code(code).send({ error: 'komga', status: err.status });
+    }
+    // A schema rejection is the client's mistake, not the server's. Most routes use safeParse and answer
+    // 400 themselves; the ones that call .parse() throw, and without this they answered 500.
+    if (err instanceof ZodError) {
+      return reply.code(400).send({
+        error: 'bad_request',
+        fields: err.issues.map((i) => i.path.join('.')).filter(Boolean),
+      });
+    }
+    const status = (err as any).statusCode || 500;
+    if (status >= 500) req.log.error(err);
+    return reply.code(status).send({ error: status >= 500 ? 'internal' : err.message || 'error' });
+  });
+
   await app.register(authRoutes);
   await app.register(adminRoutes);
   await app.register(catalogRoutes);
@@ -65,16 +90,6 @@ async function main() {
   await app.register(downloadRoutes);
   await app.register(sourceRoutes);
   await app.register(opdsRoutes);
-
-  app.setErrorHandler((err, req, reply) => {
-    if (err instanceof KomgaError) {
-      const code = err.status >= 400 && err.status < 600 ? err.status : 502;
-      return reply.code(code).send({ error: 'komga', status: err.status });
-    }
-    const status = (err as any).statusCode || 500;
-    if (status >= 500) req.log.error(err);
-    return reply.code(status).send({ error: status >= 500 ? 'internal' : err.message || 'error' });
-  });
 
   startSweeper();
 
