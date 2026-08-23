@@ -44,16 +44,18 @@ async function buildExport(): Promise<string> {
 }
 
 async function makeApp(root: string) {
+  // WEB_ROOT is read when registerWebRoot runs, not when the module loads, so one plain import serves both
+  // the configured and the unset case. The previous cache-busting import worked on Node 18 and returned a
+  // module with no exports on Node 22, which CI caught and a local run did not.
   process.env.WEB_ROOT = root;
-  // Imported fresh so WEB_ROOT is read after it is set.
-  const mod = await import(`../src/lib/webRoot?${Date.now()}`).catch(() => import('../src/lib/webRoot'));
+  const mod = await import('../src/lib/webRoot');
   const Fastify = (await import('fastify')).default;
   const app = Fastify();
   // Stand in for the real routes: same shape, same registration order (API first, web root last).
   app.get('/api/setup/status', async () => ({ needsSetup: true }));
   app.post('/api/setup', async () => ({ ok: true }));
   app.get('/healthz', async () => ({ ok: true }));
-  await (mod as any).registerWebRoot(app);
+  await mod.registerWebRoot(app);
   await app.ready();
   return app;
 }

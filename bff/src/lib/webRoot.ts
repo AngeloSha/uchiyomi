@@ -14,8 +14,15 @@ import type { FastifyInstance } from 'fastify';
 import { existsSync } from 'fs';
 import { join } from 'path';
 
-/** Where the built web export lives, when it is bundled. Unset means "not bundled": serve nothing. */
-export const WEB_ROOT = process.env.WEB_ROOT || '';
+/**
+ * Where the built web export lives, when it is bundled. Unset means "not bundled": serve nothing.
+ *
+ * Read on each call rather than captured at module load. Load-time capture is what makes LIBRARY_ROOT
+ * awkward to test -- scan.int.test.ts has to set it before the first import of library.ts and says so -- and
+ * it made this module's own tests need a cache-busting import that behaved differently across Node versions.
+ * Nothing here is hot enough for an env read to matter.
+ */
+export const webRoot = (): string => process.env.WEB_ROOT || '';
 
 const YEAR = 60 * 60 * 24 * 365;
 const WEEK = 60 * 60 * 24 * 7;
@@ -36,7 +43,8 @@ function cacheControl(urlPath: string): string {
 }
 
 export function webRootConfigured(): boolean {
-  return !!WEB_ROOT && existsSync(join(WEB_ROOT, 'index.html'));
+  const root = webRoot();
+  return !!root && existsSync(join(root, 'index.html'));
 }
 
 /**
@@ -47,18 +55,19 @@ export function webRootConfigured(): boolean {
  */
 export async function registerWebRoot(app: FastifyInstance): Promise<void> {
   if (!webRootConfigured()) return;
+  const root = webRoot();
 
   const fastifyStatic = (await import('@fastify/static')).default;
 
   await app.register(fastifyStatic, {
-    root: WEB_ROOT,
+    root,
     // nginx sent `Location: /path/` relative (absolute_redirect off). @fastify/static's own redirect builds
     // an absolute URL the same way nginx did, so it is turned off and handled below instead.
     redirect: false,
     index: false,
     wildcard: false,
     setHeaders(res: any, filePath: string) {
-      const rel = '/' + filePath.slice(WEB_ROOT.length).replace(/^\/+/, '');
+      const rel = '/' + filePath.slice(root.length).replace(/^\/+/, '');
       res.setHeader('Cache-Control', cacheControl(rel));
       if (rel.endsWith('.webmanifest')) res.setHeader('Content-Type', 'application/manifest+json');
     },
@@ -84,7 +93,7 @@ export async function registerWebRoot(app: FastifyInstance): Promise<void> {
     const clean = p.replace(/\/+$/, '');
     for (const candidate of [`${clean}/index.html`, `${clean}.html`]) {
       const rel = candidate.replace(/^\/+/, '');
-      if (rel && existsSync(join(WEB_ROOT, rel))) {
+      if (rel && existsSync(join(root, rel))) {
         reply.header('Cache-Control', 'no-cache');
         return reply.sendFile(rel);
       }
