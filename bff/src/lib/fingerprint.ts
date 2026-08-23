@@ -13,7 +13,7 @@
 // Deliberately NOT a hash of the first N bytes: same cost, but the head of a CBZ is one local header plus
 // the start of page one, so two chapters sharing a cover page would collide. The central directory sees
 // every page.
-import { readdir, stat } from 'fs/promises';
+import { readdir, stat, readFile } from 'fs/promises';
 import { join } from 'path';
 import { createHash } from 'crypto';
 
@@ -45,9 +45,12 @@ function digest(lines: string[]): string | null {
   return h.digest('hex');
 }
 
-function kindOf(path: string): 'zip' | 'rar' | 'dir' {
-  if (/\.(cbz|zip)$/i.test(path)) return 'zip';
+function kindOf(path: string): 'zip' | 'rar' | 'dir' | 'pdf' {
+  // An EPUB is a zip, and its entry table fingerprints exactly as well as a CBZ's does.
+  if (/\.(cbz|zip|epub)$/i.test(path)) return 'zip';
   if (/\.(cbr|rar)$/i.test(path)) return 'rar';
+  // A PDF has no entry table to hash, so it is identified by its own bytes instead.
+  if (/\.pdf$/i.test(path)) return 'pdf';
   return 'dir';
 }
 
@@ -105,6 +108,12 @@ export async function fingerprintChapter(abs: string): Promise<ChapterFingerprin
       return fp ? { fingerprint: fp, kind, size } : { fingerprint: null, kind: 'error', size };
     }
     const size = await stat(abs).then((s) => s.size).catch(() => null);
+    if (kind === 'pdf') {
+      // Whole-file hash. Stronger than the entry-list digest, not weaker: two PDFs collide only if they are
+      // byte-identical, which is exactly what a duplicate chapter is.
+      const fp = createHash('sha1').update(await readFile(abs)).digest('hex');
+      return { fingerprint: fp, kind: 'zip', size };
+    }
     const lines = kind === 'zip' ? await zipLines(abs) : await rarLines(abs);
     const fp = digest(lines);
     return fp ? { fingerprint: fp, kind, size } : { fingerprint: null, kind: 'error', size };

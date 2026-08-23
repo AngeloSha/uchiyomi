@@ -16,6 +16,10 @@ const StreamZip = require('node-stream-zip');
 // node-unrar-js: pure-wasm RAR reader (no native build) for .cbr comic archives.
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { createExtractorFromData } = require('node-unrar-js');
+// PDF and image-EPUB chapters. Both live in their own modules: EPUB is a zip and reuses this file's zip
+// reader, needing only its own page ORDER, while PDF is genuinely different and reads nothing from here.
+import { pdfPages, pdfPageBytes, pdfPageCount, pdfPageDims, pdfPageIndex, pdfPageName } from './readers/pdf';
+import { epubPages } from './readers/epub';
 
 export const LIBRARY_ROOT = process.env.LIBRARY_ROOT || '/library';
 const IMG = /\.(jpe?g|png|webp|gif|avif)$/i;
@@ -61,18 +65,26 @@ function cleanStatus(s: string | null): string | null {
 
 // A "chapter" can be a CBZ (zip), a CBR (rar), or a loose folder of images. These helpers read all three so
 // the scanner + page server are format-agnostic. (The downloader still WRITES CBZ; this is read-side only.)
-type ChapterKind = 'zip' | 'rar' | 'dir';
+type ChapterKind = 'zip' | 'rar' | 'dir' | 'pdf' | 'epub';
 function chapterKind(path: string): ChapterKind {
   if (/\.(cbz|zip)$/i.test(path)) return 'zip';
   if (/\.(cbr|rar)$/i.test(path)) return 'rar';
+  if (/\.pdf$/i.test(path)) return 'pdf';
+  // An EPUB is a zip, but its pages come in spine order rather than filename order, so it is its own kind.
+  if (/\.epub$/i.test(path)) return 'epub';
   return 'dir';
 }
 
-/** Chapter entries inside a series folder: .cbz/.cbr/.zip/.rar files + subfolders that contain images. */
+/** Chapter entries in a series folder: cbz/cbr/zip/rar/pdf files, image EPUBs, + subfolders of images. */
 export async function listChapters(folderAbs: string): Promise<string[]> {
   const out: string[] = [];
   for (const e of await readdir(folderAbs, { withFileTypes: true }).catch(() => [])) {
-    if (e.isFile() && /\.(cbz|cbr|zip|rar)$/i.test(e.name)) out.push(e.name);
+    if (e.isFile() && /\.(cbz|cbr|zip|rar|pdf)$/i.test(e.name)) out.push(e.name);
+    // An EPUB counts only if it actually holds pages. A reflowable novel has none, so it is skipped here
+    // rather than becoming a chapter that opens to nothing -- which is what "skips ebooks" really meant.
+    else if (e.isFile() && /\.epub$/i.test(e.name)) {
+      if ((await epubPages(join(folderAbs, e.name))).length) out.push(e.name);
+    }
     else if (e.isDirectory() && (await readdir(join(folderAbs, e.name)).catch(() => [])).some((n) => IMG.test(n))) out.push(e.name);
   }
   return out.sort(naturalCmp);
@@ -97,6 +109,9 @@ async function rarExtract(ex: any, name: string): Promise<Buffer> {
 /** Open one chapter (CBZ/CBR/folder); return its ComicInfo.xml (if any) + image page count. */
 async function readArchive(path: string): Promise<{ xml: string; pages: number }> {
   const k = chapterKind(path);
+  // Neither format carries ComicInfo.xml; an EPUB has its own metadata and a PDF has none worth trusting.
+  if (k === 'pdf') return { xml: '', pages: await pdfPageCount(path) };
+  if (k === 'epub') return { xml: '', pages: (await epubPages(path)).length };
   if (k === 'dir') {
     const names = await readdir(path).catch(() => []);
     const xmlName = names.find((n) => /comicinfo\.xml$/i.test(n));
@@ -129,6 +144,8 @@ async function readArchive(path: string): Promise<{ xml: string; pages: number }
 /** Sorted image page names inside a chapter (CBZ/CBR/folder) — used by the page server. */
 export async function cbzPages(path: string): Promise<string[]> {
   const k = chapterKind(path);
+  if (k === 'pdf') return pdfPages(path);
+  if (k === 'epub') return epubPages(path);   // already in spine order; do NOT re-sort
   if (k === 'dir') return (await readdir(path).catch(() => [])).filter((n) => IMG.test(n)).sort(naturalCmp);
   if (k === 'rar') return (await rarHeaders(await rarExtractor(path))).map((h) => h.name).filter((n) => IMG.test(n)).sort(naturalCmp);
   const zip = new StreamZip.async({ file: path });
@@ -143,6 +160,7 @@ export async function cbzPages(path: string): Promise<string[]> {
 /** Raw bytes of a single page (CBZ/CBR/folder) — used by the page server. */
 export async function cbzEntry(path: string, name: string): Promise<Buffer> {
   const k = chapterKind(path);
+  if (k === 'pdf') return pdfPageBytes(path, pdfPageIndex(name));
   if (k === 'dir') return readFile(join(path, name));
   if (k === 'rar') return rarExtract(await rarExtractor(path), name);
   const zip = new StreamZip.async({ file: path });
@@ -167,6 +185,20 @@ export async function cbzPageAt(
   index: number,
 ): Promise<{ name: string; bytes: Buffer; total: number } | null> {
   const k = chapterKind(path);
+  if (k === 'pdf') {
+    const total = await pdfPageCount(path);
+    if (index < 0 || index >= total) return null;
+    return { name: pdfPageName(index), bytes: await pdfPageBytes(path, index), total };
+  }
+  if (k === 'epub') {
+    // Spine order, so this cannot go through the zip branch below and its filename sort.
+    const names = await epubPages(path);
+    const name = names[index];
+    if (!name) return null;
+    const zip = new StreamZip.async({ file: path });
+    try { return { name, bytes: await zip.entryData(name), total: names.length }; }
+    finally { await zip.close(); }
+  }
   if (k === 'dir') {
     const names = (await readdir(path).catch(() => [])).filter((n) => IMG.test(n)).sort(naturalCmp);
     const name = names[index];
@@ -197,7 +229,11 @@ export async function cbzPageDims(path: string): Promise<Array<{ name: string; w
     try { const m = await sharp(bytes).metadata(); out.push({ name, width: m.width ?? null, height: m.height ?? null }); }
     catch { out.push({ name, width: null, height: null }); }
   };
-  if (chapterKind(path) === 'zip') {
+  const kind = chapterKind(path);
+  // Measured from the page box rather than by rendering: this runs over every page of a chapter, and
+  // rasterising a whole volume to find out how tall it is would be absurd.
+  if (kind === 'pdf') return pdfPageDims(path);
+  if (kind === 'zip') {
     // CBZ fast path: open the archive once for all pages
     const zip = new StreamZip.async({ file: path });
     try {
@@ -452,7 +488,7 @@ export async function persistScan(): Promise<{ series: number; books: number; ms
             const st = await stat(join(folderAbs, f)).catch(() => null);
             const b = params.length;
             tuples.push(`($${b + 1},$${b + 2},$${b + 3},$${b + 4},$${b + 5},$${b + 6},$${b + 7},$${b + 8})`);
-            params.push(newBookId(), id, srcName, rel, numFromName(f), f.replace(/\.(cbz|cbr|zip|rar)$/i, ''), st ? Math.floor(st.mtimeMs) : 0, root);
+            params.push(newBookId(), id, srcName, rel, numFromName(f), f.replace(/\.(cbz|cbr|zip|rar|pdf|epub)$/i, ''), st ? Math.floor(st.mtimeMs) : 0, root);
             nBooks++;
           }
           // Conflict on (root, file) for the same reason: an existing book keeps its id, and the same

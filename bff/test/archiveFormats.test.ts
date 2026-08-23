@@ -1,4 +1,8 @@
-// The three container formats the README promises: CBZ, CBR, and a plain folder of images.
+// CBZ, CBR, and a plain folder of images.
+//
+// PDF and image-EPUB are the other two the README now promises; they live in pdfEpub.test.ts because both
+// need their own fixture builders. What this file still owns is CBR, and the boundary: which extensions
+// listChapters accepts and which it must keep ignoring.
 //
 // CBZ is exercised everywhere. CBR had no test at all, in any file, despite being one of three formats the
 // README names -- and it is the only one that goes through a completely separate reader (node-unrar-js,
@@ -211,16 +215,16 @@ test('listChapters accepts all three formats, and nothing else', async () => {
     await mkdir(loose, { recursive: true });
     for (const [n, b] of PAGES) await writeFile(join(loose, n), b);
 
-    // and the things that must NOT become chapters
+    // and the things that must NOT become chapters. PDF and image-EPUB used to sit in this list and are
+    // now supported -- see pdfEpub.test.ts. What remains is everything with no pages in it at all.
     await mkdir(join(root, 'empty folder'), { recursive: true });
     await writeFile(join(root, 'cover.jpg'), PAGES[0][1]);
     await writeFile(join(root, 'notes.txt'), 'not a chapter');
-    await writeFile(join(root, 'Volume 1.pdf'), '%PDF-1.4 not supported on purpose');
-    await writeFile(join(root, 'Volume 1.epub'), 'PK not supported on purpose');
+    await writeFile(join(root, 'ComicInfo.xml'), '<ComicInfo/>');
 
     const found = await listChapters(root);
     assert.deepEqual(found, ['Chapter 001.cbz', 'Chapter 002.cbr', 'Chapter 003'],
-      `expected exactly the three supported chapters, got ${JSON.stringify(found)}`);
+      `expected exactly the three chapters seeded here, got ${JSON.stringify(found)}`);
 
     // and each one is genuinely readable, not merely listed
     for (const name of found) {
@@ -231,13 +235,12 @@ test('listChapters accepts all three formats, and nothing else', async () => {
   });
 });
 
-test('the format list in the README is the format list in the code', async () => {
-  // README: "It reads CBZ, CBR and folders of images, and skips PDF and EPUB on purpose."
+test('every format the README claims is one the scanner recognises', async () => {
+  // The claim and the code have to move together. This used to assert the opposite for PDF and EPUB, which
+  // was correct until they were implemented -- the failure was the point at which someone chose to change it.
   const { readFileSync } = require('fs');
   const src = readFileSync(join(__dirname, '..', 'src', 'lib', 'library.ts'), 'utf8');
-  for (const ext of ['cbz', 'cbr', 'zip', 'rar']) {
+  for (const ext of ['cbz', 'cbr', 'zip', 'rar', 'pdf', 'epub']) {
     assert.ok(new RegExp(`\\b${ext}\\b`, 'i').test(src), `${ext} is no longer recognised by the scanner`);
   }
-  assert.ok(!/\bepub\b/i.test(src) && !/\.pdf\b/i.test(src),
-    'PDF or EPUB handling appeared in the scanner; the README says both are skipped on purpose');
 });
