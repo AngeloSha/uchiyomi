@@ -15,3 +15,5 @@ sources/*
 !sources/.gitkeep
 # server-specific compose override (reverse-proxy networks) — the committed compose runs standalone
 docker-compose.override.yml
+# browser end-to-end screenshots: evidence for a failing run, not source
+web/test/e2e/shots/

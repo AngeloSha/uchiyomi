@@ -48,6 +48,32 @@ jobs:
       - name: Build the single-container image
         run: docker build -f Dockerfile.aio -t uchiyomi:ci .
 
+  # The web tier had one test file and CI proved only that it compiles, which is how four user-facing bugs
+  # shipped in v0.8.0 -- all of them routes wired to the wrong thing, none of them visible to a test that
+  # imports a function and calls it. This brings the app up for real and drives it in a browser.
+  e2e:
+    name: Browser end-to-end
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install browser tooling
+        working-directory: ./web
+        run: npm install --no-audit --no-fund
+      - name: Bring it up and drive it
+        working-directory: ./web
+        run: npm run test:e2e
+      - name: Keep the screenshots when it fails
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-screenshots
+          path: web/test/e2e/shots/
+          retention-days: 7
+
   test:
     name: Tests
     runs-on: ubuntu-latest
