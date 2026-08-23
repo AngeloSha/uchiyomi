@@ -29,14 +29,45 @@ function sha256(s: string): string {
 }
 
 /** Issue (or rotate) a user's OPDS token. The raw token is shown once; only its hash is stored. */
+/** How long a newly issued OPDS token lasts. Long, because it lives in a reader app nobody opens often. */
+export const OPDS_TOKEN_DAYS = 365;
+
 export async function issueOpdsToken(userId: string): Promise<string> {
   const token = randomBytes(24).toString('base64url');
   await q(
-    `INSERT INTO opds_tokens (user_id, token_hash, created_at) VALUES ($1, $2, now())
-     ON CONFLICT (user_id) DO UPDATE SET token_hash = EXCLUDED.token_hash, created_at = now()`,
-    [userId, sha256(token)],
+    `INSERT INTO opds_tokens (user_id, token_hash, created_at, expires_at, last_seen)
+     VALUES ($1, $2, now(), now() + ($3 || ' days')::interval, NULL)
+     ON CONFLICT (user_id) DO UPDATE
+       SET token_hash = EXCLUDED.token_hash, created_at = now(),
+           expires_at = EXCLUDED.expires_at, last_seen = NULL`,
+    [userId, sha256(token), String(OPDS_TOKEN_DAYS)],
   );
   return token;
+}
+
+/** Drop a user's OPDS token. Their readers stop working immediately, which is the point. */
+export async function revokeOpdsToken(userId: string): Promise<void> {
+  await q('DELETE FROM opds_tokens WHERE user_id = $1', [userId]);
+}
+
+/** What the profile page shows: whether a token exists, when it expires, when a reader last used it. */
+export async function opdsTokenStatus(userId: string): Promise<
+  { exists: boolean; createdAt?: string; expiresAt?: string; lastSeen?: string | null; expired?: boolean }
+> {
+  const row = await one<{ created_at: string; expires_at: string | null; last_seen: string | null; expired: boolean }>(
+    `SELECT created_at, expires_at, last_seen,
+            (expires_at IS NOT NULL AND expires_at <= now()) AS expired
+       FROM opds_tokens WHERE user_id = $1`,
+    [userId],
+  );
+  if (!row) return { exists: false };
+  return {
+    exists: true,
+    createdAt: row.created_at,
+    expiresAt: row.expires_at ?? undefined,
+    lastSeen: row.last_seen,
+    expired: row.expired,
+  };
 }
 
 /** Resolve an HTTP Basic `Authorization` header (password = the OPDS token) to a user id, or null. */
@@ -46,7 +77,13 @@ export async function resolveOpdsBasic(authHeader?: string): Promise<string | nu
   try { decoded = Buffer.from(authHeader.slice(6).trim(), 'base64').toString('utf8'); } catch { return null; }
   const pass = decoded.slice(decoded.indexOf(':') + 1);
   if (!pass) return null;
-  const row = await one<{ user_id: string }>('SELECT user_id FROM opds_tokens WHERE token_hash = $1', [sha256(pass)]);
+  // The expiry is checked in SQL rather than in JS so there is no window where a token that has just
+  // expired still resolves because two clocks disagree about which one is authoritative.
+  const row = await one<{ user_id: string }>(
+    `SELECT user_id FROM opds_tokens
+      WHERE token_hash = $1 AND (expires_at IS NULL OR expires_at > now())`,
+    [sha256(pass)],
+  );
   if (row) q('UPDATE opds_tokens SET last_seen = now() WHERE user_id = $1', [row.user_id]).catch(() => {});
   return row?.user_id ?? null;
 }

@@ -86,11 +86,25 @@ export default function ProfilePage() {
     try { await api('/api/settings', { method: 'PUT', json: { smartOffline: next } }); } catch {}
   };
 
-  const [opds, setOpds] = useState<{ token: string; url: string } | null>(null);
+  const [opds, setOpds] = useState<{ token: string; url: string; expiresInDays?: number } | null>(null);
   const [opdsBusy, setOpdsBusy] = useState(false);
+  // Status of the token that already exists, if any. The raw token is shown once and never again, so this
+  // is the only way to see whether one is out there, when it expires, and whether a reader is still using it.
+  type OpdsStatus = { exists: boolean; createdAt?: string; expiresAt?: string; lastSeen?: string | null; expired?: boolean };
+  const [opdsSt, setOpdsSt] = useState<OpdsStatus | null>(null);
+  const loadOpds = () => api<OpdsStatus>('/api/opds/token').then(setOpdsSt).catch(() => {});
+  useEffect(() => { loadOpds(); }, []);
   const genOpds = async () => {
     setOpdsBusy(true);
-    try { setOpds(await api<{ token: string; url: string }>('/api/opds/token', { method: 'POST' })); } catch {}
+    try {
+      setOpds(await api<{ token: string; url: string; expiresInDays?: number }>('/api/opds/token', { method: 'POST' }));
+      await loadOpds();
+    } catch {}
+    setOpdsBusy(false);
+  };
+  const revokeOpds = async () => {
+    setOpdsBusy(true);
+    try { await api('/api/opds/token', { method: 'DELETE' }); setOpds(null); await loadOpds(); } catch {}
     setOpdsBusy(false);
   };
 
@@ -413,14 +427,36 @@ export default function ProfilePage() {
         <div className="card p-4">
           <p className="text-sm text-fog-100">Read Uchiyomi in another app</p>
           <p className="mt-1 text-xs text-fog-500">Add Uchiyomi as an OPDS catalog in readers like Panels, Chunky, KOReader, or Moon+. Generate a personal link, then enter the URL + credentials below in your reader.</p>
+          {opdsSt?.exists && !opds && (
+            <div className="mt-3 rounded-lg border border-ink-700 bg-ink-900/40 p-3 text-xs">
+              <div className="flex items-center justify-between gap-3">
+                <span className={opdsSt.expired ? 'text-rose-300' : 'text-fog-200'}>
+                  {opdsSt.expired ? 'Your link has expired' : 'A link is active'}
+                </span>
+                <button onClick={revokeOpds} disabled={opdsBusy}
+                        className="chip shrink-0 text-[11px] hover:border-rose-500/50 hover:text-rose-400 disabled:opacity-50">
+                  Revoke
+                </button>
+              </div>
+              <p className="mt-1 text-fog-500">
+                {opdsSt.lastSeen ? `Last used ${relativeTime(opdsSt.lastSeen)}` : 'Never used yet'}
+                {opdsSt.expiresAt && <> &middot; {opdsSt.expired ? 'expired' : 'expires'} {relativeTime(opdsSt.expiresAt)}</>}
+              </p>
+            </div>
+          )}
           {!opds ? (
-            <button onClick={genOpds} disabled={opdsBusy} className="btn-accent mt-3 w-full py-2 text-sm disabled:opacity-50">{opdsBusy ? 'Generating…' : 'Generate OPDS link'}</button>
+            <button onClick={genOpds} disabled={opdsBusy} className="btn-accent mt-3 w-full py-2 text-sm disabled:opacity-50">
+              {opdsBusy ? 'Generating…' : opdsSt?.exists ? 'Generate a new link' : 'Generate OPDS link'}
+            </button>
           ) : (
             <div className="mt-3 space-y-2 text-xs">
               <div><span className="text-fog-500">Catalog URL</span><div className="mt-0.5 break-all rounded-lg border border-ink-700 bg-ink-900/60 px-2 py-1.5 font-mono text-fog-100">{opds.url}</div></div>
               <div><span className="text-fog-500">Username</span><div className="mt-0.5 rounded-lg border border-ink-700 bg-ink-900/60 px-2 py-1.5 font-mono text-fog-100">{user?.username || 'me'}</div></div>
               <div><span className="text-fog-500">Password — copy now, shown once</span><div className="mt-0.5 break-all rounded-lg border border-ink-700 bg-ink-900/60 px-2 py-1.5 font-mono text-accent">{opds.token}</div></div>
-              <p className="text-[11px] text-fog-500">Generating again replaces the previous token.</p>
+              <p className="text-[11px] text-fog-500">
+                Generating again replaces the previous token.
+                {opds.expiresInDays && <> This one stops working in {opds.expiresInDays} days; you can revoke it sooner.</>}
+              </p>
             </div>
           )}
         </div>
@@ -457,58 +493,85 @@ export default function ProfilePage() {
 }
 
 interface TrackerStatus {
+  /** Sent by the server so the UI never hardcodes the provider list. */
+  label?: string;
+  tokenHelp?: string;
   provider: string; connected: boolean; accountName: string | null;
   expiresAt: string | null; expiringSoon: boolean; lastSyncAt: string | null; lastError: string | null;
 }
 
-/** Connect an AniList account so finished chapters push automatically. Token-paste rather than an OAuth
- *  round-trip: AniList tokens are scopeless and long-lived, so this needs nothing configured server-side. */
+/**
+ * Connect one or more trackers so finished chapters push automatically.
+ *
+ * The provider list comes from the server rather than being written here: each one reports its own name and
+ * where a token comes from, so adding a fourth service is a backend change alone.
+ *
+ * Token-paste rather than an OAuth round-trip, for all of them. A real OAuth flow would need every
+ * self-hoster to register an application with each service and keep its secret in their compose file, which
+ * is a worse trade for a household app than copying a token once.
+ */
 function TrackerPanel() {
+  const { data, refetch } = useQuery({ queryKey: ['trackers'], queryFn: () => api<{ content: TrackerStatus[] }>('/api/trackers') });
+  const all = data?.content || [];
+  if (!all.length) return null;
+  return (
+    <div className="space-y-3">
+      {all.map((t) => <TrackerRow key={t.provider} t={t} refetch={refetch} />)}
+    </div>
+  );
+}
+
+function TrackerRow({ t, refetch }: { t: TrackerStatus; refetch: () => void }) {
   const toast = useToast();
   const [token, setToken] = useState('');
   const [busy, setBusy] = useState(false);
-  const { data, refetch } = useQuery({ queryKey: ['trackers'], queryFn: () => api<{ content: TrackerStatus[] }>('/api/trackers') });
-  const anilist = (data?.content || []).find((t) => t.provider === 'anilist');
+  const [open, setOpen] = useState(false);
+  const label = t.label || t.provider;
 
   const connect = async () => {
     if (!token.trim()) return;
     setBusy(true);
     try {
-      const r = await api<{ account: string }>('/api/trackers/anilist', { json: { token: token.trim() } });
-      toast(`Connected to AniList as ${r.account}`, 'success');
+      const r = await api<{ account: string }>(`/api/trackers/${t.provider}/connect`, { json: { token: token.trim() } });
+      toast(`Connected to ${label} as ${r.account}`, 'success');
       setToken('');
+      setOpen(false);
       refetch();
-      const b = await api<{ series: number }>('/api/trackers/anilist/backfill', { json: {} });
-      if (b.series) toast(`Syncing ${b.series} series you've already finished…`);
-    } catch (e: any) { toast(msgOf(e, 'AniList did not accept that token'), 'error'); }
+      // Only AniList has a backfill endpoint today; the others start syncing from the next chapter read.
+      if (t.provider === 'anilist') {
+        const b = await api<{ series: number }>('/api/trackers/anilist/backfill', { json: {} });
+        if (b.series) toast(`Syncing ${b.series} series you've already finished…`);
+      }
+    } catch (e: any) { toast(msgOf(e, `${label} did not accept that token`), 'error'); }
     setBusy(false);
   };
+
   const disconnect = async () => {
-    try { await api('/api/trackers/anilist', { method: 'DELETE' }); toast('Disconnected', 'success'); refetch(); }
+    try { await api(`/api/trackers/${t.provider}`, { method: 'DELETE' }); toast('Disconnected', 'success'); refetch(); }
     catch { toast('Could not disconnect', 'error'); }
   };
 
-  if (anilist?.connected) {
+  if (t.connected) {
     return (
       <div className="card p-4">
         <div className="flex items-center justify-between gap-3">
           <div className="min-w-0">
-            <p className="text-sm text-fog-100">AniList — <span className="text-accent">{anilist.accountName}</span></p>
+            <p className="text-sm text-fog-100">{label} — <span className="text-accent">{t.accountName}</span></p>
             <p className="mt-0.5 text-xs text-fog-500">
               Finished chapters sync automatically
-              {anilist.lastSyncAt && <> · last synced {relativeTime(anilist.lastSyncAt)}</>}
+              {t.lastSyncAt && <> · last synced {relativeTime(t.lastSyncAt)}</>}
             </p>
           </div>
           <button onClick={disconnect} className="chip shrink-0 text-xs">Disconnect</button>
         </div>
-        {anilist.expiringSoon && (
+        {t.expiringSoon && (
           <p className="mt-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-2.5 py-1.5 text-xs text-amber-300">
-            This AniList token expires {anilist.expiresAt ? relativeTime(anilist.expiresAt) : 'soon'}. AniList can&apos;t refresh tokens,
-            so reconnect before then to keep syncing.
+            This {label} token expires {t.expiresAt ? relativeTime(t.expiresAt) : 'soon'}. None of these services can
+            refresh a token silently, so reconnect before then to keep syncing.
           </p>
         )}
-        {anilist.lastError && (
-          <p className="mt-2 rounded-lg border border-red-500/30 bg-red-500/10 px-2.5 py-1.5 text-xs text-red-300">{anilist.lastError}</p>
+        {t.lastError && (
+          <p className="mt-2 rounded-lg border border-red-500/30 bg-red-500/10 px-2.5 py-1.5 text-xs text-red-300">{t.lastError}</p>
         )}
       </div>
     );
@@ -516,24 +579,27 @@ function TrackerPanel() {
 
   return (
     <div className="card p-4">
-      <p className="text-sm text-fog-100">Sync your reading to AniList</p>
-      <p className="mt-1 text-xs text-fog-500">
-        Finish a chapter here and your AniList list updates on its own. Paste an access token from
-        {' '}<a href="https://anilist.co/settings/developer" target="_blank" rel="noreferrer" className="text-accent underline">AniList → Developer</a>
-        {' '}(create a client, then authorise it to get a token).
-      </p>
-      <p className="mt-1 text-[11px] text-fog-600">
-        AniList tokens carry full access to your AniList account and can&apos;t be scoped — it&apos;s stored encrypted here, and
-        you can disconnect at any time.
-      </p>
-      <div className="mt-3 flex gap-2">
-        <input value={token} onChange={(e) => setToken(e.target.value)} type="password" placeholder="AniList access token"
-          autoCapitalize="none" autoCorrect="off" className={`${fld} flex-1`} />
-        <button onClick={connect} disabled={busy || !token.trim()} className="btn-accent px-4 text-sm disabled:opacity-50">
-          {busy ? 'Checking…' : 'Connect'}
-        </button>
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-sm text-fog-100">Sync your reading to {label}</p>
+        <button onClick={() => setOpen((v) => !v)} className="chip shrink-0 text-xs">{open ? 'Cancel' : 'Connect'}</button>
       </div>
-      {anilist?.lastError && <p className="mt-2 text-xs text-red-300">{anilist.lastError}</p>}
+      {open && (
+        <>
+          <p className="mt-2 text-xs text-fog-500">{t.tokenHelp}</p>
+          <p className="mt-1 text-[11px] text-fog-600">
+            The token carries access to your {label} account and can&apos;t be scoped — it&apos;s stored encrypted
+            here, and you can disconnect at any time.
+          </p>
+          <div className="mt-3 flex gap-2">
+            <input value={token} onChange={(e) => setToken(e.target.value)} type="password"
+              placeholder={`${label} access token`} autoCapitalize="none" autoCorrect="off" className={`${fld} flex-1`} />
+            <button onClick={connect} disabled={busy || !token.trim()} className="btn-accent px-4 text-sm disabled:opacity-50">
+              {busy ? 'Checking…' : 'Connect'}
+            </button>
+          </div>
+        </>
+      )}
+      {t.lastError && <p className="mt-2 text-xs text-red-300">{t.lastError}</p>}
     </div>
   );
 }

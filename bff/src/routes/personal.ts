@@ -5,10 +5,11 @@ import { q, one } from '../lib/db';
 // `lib/komga` import silently nulled every series lookup here after the owned-library cutover.
 import { content as komga } from '../lib/backend';
 import { viewCtxFor, visible, Params, type ViewCtx } from '../lib/visibility';
-import { authenticate, userIdOf, roleOf, issueOpdsToken, issueApiToken, listApiTokens, revokeApiToken, API_SCOPES } from '../lib/auth';
+import { authenticate, userIdOf, roleOf, issueOpdsToken, issueApiToken, listApiTokens, revokeApiToken, API_SCOPES, revokeOpdsToken, opdsTokenStatus, OPDS_TOKEN_DAYS } from '../lib/auth';
 import { env } from '../env';
 import { pushEnabled, vapidPublicKey, saveSubscription, removeSubscription } from '../lib/push';
 import { statusFor, saveConnection, disconnect, whoAmI, pushSeriesProgress, pushSeriesProgressAsync, clearTrackerFloor } from '../lib/trackers';
+import { ADAPTERS, isProvider, type Provider } from '../lib/trackerProviders';
 import { logAudit } from '../lib/audit';
 
 function computeStreaks(days: string[]): { current: number; longest: number } {
@@ -41,7 +42,16 @@ export default async function personalRoutes(app: FastifyInstance) {
   // issue/rotate the caller's OPDS token (shown once); used as the HTTP Basic password in an external reader
   app.post('/api/opds/token', async (req) => {
     const token = await issueOpdsToken(userIdOf(req));
-    return { token, url: `${env.PUBLIC_ORIGIN.replace(/\/$/, '')}/opds` };
+    return { token, url: `${env.PUBLIC_ORIGIN.replace(/\/$/, '')}/opds`, expiresInDays: OPDS_TOKEN_DAYS };
+  });
+
+  // Whether a token exists, when it expires, and when a reader last used it. The last-used date is the
+  // useful one: it is how someone notices a token they forgot about is still being used by something.
+  app.get('/api/opds/token', async (req) => opdsTokenStatus(userIdOf(req)));
+
+  app.delete('/api/opds/token', async (req) => {
+    await revokeOpdsToken(userIdOf(req));
+    return { ok: true };
   });
 
   // ---- personal API tokens ----
@@ -444,28 +454,43 @@ export default async function personalRoutes(app: FastifyInstance) {
   // ---- external progress trackers (AniList) ----
   app.get('/api/trackers', async (req) => ({ content: await statusFor(userIdOf(req)) }));
 
-  // Connect by pasting a token. AniList tokens are scopeless and long-lived, so this is the honest,
-  // dependency-free path: no client registration, nothing to configure server-side.
-  app.post('/api/trackers/anilist', async (req, reply) => {
-    const b = z.object({ token: z.string().min(20).max(4000) }).safeParse(req.body);
-    if (!b.success) return reply.code(400).send({ error: 'bad_request', message: 'Paste your AniList token.' });
+  // Connect by pasting a token, for any provider. This is the honest, dependency-free path: a full OAuth
+  // dance would make every self-hoster register an application with each service and keep its secret in
+  // their compose file, which is a worse trade for a household app than copying a token once.
+  //
+  // The token is verified against the service before it is stored, so a typo fails here with the service's
+  // own answer rather than silently at 3am when the first chapter tries to sync.
+  const connectTracker = async (provider: Provider, req: any, reply: any) => {
+    const b = z.object({ token: z.string().min(10).max(4000) }).safeParse(req.body);
+    const adapter = ADAPTERS[provider];
+    if (!b.success) return reply.code(400).send({ error: 'bad_request', message: `Paste your ${adapter.label} token.` });
     let who;
     try {
-      who = await whoAmI(b.data.token.trim());
+      who = await whoAmI(b.data.token.trim(), provider);
     } catch {
-      return reply.code(400).send({ error: 'rejected', message: 'AniList did not accept that token.' });
+      return reply.code(400).send({ error: 'rejected', message: `${adapter.label} did not accept that token.` });
     }
-    if (!who) return reply.code(400).send({ error: 'rejected', message: 'AniList did not accept that token.' });
-    // AniList tokens last a year and cannot be refreshed; record the expiry so we can warn before it lapses.
-    const expires = new Date(Date.now() + 365 * 86400000);
-    await saveConnection(userIdOf(req), 'anilist', b.data.token.trim(), who.name, expires);
-    await logAudit('tracker.connect', { userId: userIdOf(req), detail: { provider: 'anilist', account: who.name }, req });
+    if (!who) return reply.code(400).send({ error: 'rejected', message: `${adapter.label} did not accept that token.` });
+    // Record the expiry so the UI can warn before it lapses; none of these services can refresh silently.
+    const expires = adapter.tokenDays ? new Date(Date.now() + adapter.tokenDays * 86400000) : null;
+    await saveConnection(userIdOf(req), provider, b.data.token.trim(), who.name, expires);
+    await logAudit('tracker.connect', { userId: userIdOf(req), detail: { provider, account: who.name }, req });
     return { ok: true, account: who.name };
+  };
+
+  // Kept as its own path for the clients and docs that already reference it.
+  app.post('/api/trackers/anilist', async (req, reply) => connectTracker('anilist', req, reply));
+
+  app.post('/api/trackers/:provider/connect', async (req, reply) => {
+    const { provider } = req.params as { provider: string };
+    if (!isProvider(provider)) return reply.code(404).send({ error: 'unknown_provider' });
+    return connectTracker(provider, req, reply);
   });
 
   app.delete('/api/trackers/:provider', async (req) => {
     const { provider } = req.params as { provider: string };
-    await disconnect(userIdOf(req), provider as any);
+    if (!isProvider(provider)) return { ok: true };   // nothing to disconnect from a name we do not have
+    await disconnect(userIdOf(req), provider);
     await logAudit('tracker.disconnect', { userId: userIdOf(req), detail: { provider }, req });
     return { ok: true };
   });
