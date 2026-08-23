@@ -488,6 +488,35 @@ function ReaderInner() {
 
   const total = flat.length;
   const pageInChapter = activeChapter ? (flat[current]?.number ?? 0) : 0;
+
+  // ---- bookmarks ----
+  // A bookmark is a note about a page, not a pointer to bytes, so it is keyed on (book, page) and survives
+  // anything that happens to the file -- the same reasoning that keeps reading progress when a series' files
+  // are deleted. Loaded per chapter so the star reflects the page you are actually on.
+  const [marks, setMarks] = useState<Set<string>>(new Set());
+  const markKey = (bookId: string, page: number) => `${bookId}:${page}`;
+  const bookmarked = activeChapter ? marks.has(markKey(activeChapter.id, pageInChapter)) : false;
+  useEffect(() => {
+    if (!seriesId) return;
+    api<{ content: Array<{ book_id: string; page: number }> }>(`/api/bookmarks?seriesId=${encodeURIComponent(seriesId)}`)
+      .then((r) => setMarks(new Set(r.content.map((b) => markKey(b.book_id, b.page)))))
+      .catch(() => {});
+  }, [seriesId]);
+
+  const toggleBookmark = async () => {
+    if (!activeChapter || !pageInChapter) return;
+    const k = markKey(activeChapter.id, pageInChapter);
+    const on = marks.has(k);
+    // Optimistic: the star is a one-tap control in a reader, and waiting on a round-trip to redraw it makes
+    // it feel broken. Reverted if the write fails.
+    setMarks((prev) => { const n = new Set(prev); on ? n.delete(k) : n.add(k); return n; });
+    try {
+      await api(`/api/bookmarks/${encodeURIComponent(activeChapter.id)}/${pageInChapter}`,
+        { method: on ? 'DELETE' : 'PUT', json: on ? undefined : {} });
+    } catch {
+      setMarks((prev) => { const n = new Set(prev); on ? n.add(k) : n.delete(k); return n; });
+    }
+  };
   const chapterPageCount = activeChapter?.pages.length ?? 0;
 
   // the header's two-line "what you are reading" block, wrapped in a link to the series when we know its id
@@ -616,6 +645,14 @@ function ReaderInner() {
                   {chapterRefs.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
                 </select>
               )}
+              <button onClick={toggleBookmark} aria-label={bookmarked ? 'Remove bookmark' : 'Bookmark this page'}
+                aria-pressed={bookmarked}
+                className={`grid h-10 w-10 shrink-0 place-items-center rounded-full bg-black/45 backdrop-blur ${bookmarked ? 'text-accent' : 'text-white'}`}>
+                <svg width="20" height="20" viewBox="0 0 24 24" fill={bookmarked ? 'currentColor' : 'none'}
+                     stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round">
+                  <path d="M6 3h12a1 1 0 0 1 1 1v17l-7-4-7 4V4a1 1 0 0 1 1-1Z" />
+                </svg>
+              </button>
               <button onClick={() => setShowSettings(true)} className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-black/45 text-white backdrop-blur">
                 <IcSliders width={20} height={20} />
               </button>

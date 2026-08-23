@@ -244,6 +244,60 @@ export default async function personalRoutes(app: FastifyInstance) {
   });
 
   // ---- notes ----
+  // ---- page bookmarks ----
+  //
+  // Kept behind the visibility rule like every other read: a bookmark names a book id, and listing them has
+  // to go through the same predicate or it becomes a way to learn that a series you cannot see exists.
+  app.get('/api/bookmarks', async (req) => {
+    const { seriesId } = req.query as { seriesId?: string };
+    const p = new Params();
+    const ctx = vc(req);
+    const uid = p.add(userIdOf(req));
+    const extra = seriesId ? ` AND bm.series_id = ${p.add(seriesId)}` : '';
+    // The join to lib_series is what carries every series-level rule -- soft delete, merge, library access
+    // and the age cap -- through to a bookmark. Listing them without it would let someone learn that a
+    // series they cannot see exists, and what they once read of it.
+    return {
+      content: await q(
+        `SELECT bm.book_id, bm.series_id, bm.page, bm.note, bm.created_at,
+                b.title AS book_title, b.number, COALESCE(so.title, s.title) AS series_title
+           FROM bookmarks bm
+           JOIN lib_books b   ON b.id = bm.book_id
+           JOIN lib_series s  ON s.id = b.series_id AND ${visible('s', ctx, p)}
+           LEFT JOIN series_overrides so ON so.series_id = s.id
+          WHERE bm.user_id = ${uid}${extra}
+          ORDER BY bm.created_at DESC LIMIT 500`,
+        p.values as any[],
+      ),
+    };
+  });
+
+  app.put('/api/bookmarks/:bookId/:page', async (req, reply) => {
+    const { bookId, page } = req.params as { bookId: string; page: string };
+    const n = Number(page);
+    if (!Number.isInteger(n) || n < 1) return reply.code(400).send({ error: 'bad_page' });
+    const b = z.object({ note: z.string().max(500).nullish() }).safeParse(req.body ?? {});
+    if (!b.success) return reply.code(400).send({ error: 'bad_request' });
+    // Resolve the book through the backend so a bookmark cannot be created against a series the viewer
+    // cannot see -- which would otherwise be a write that confirms the id exists.
+    const book = await komga.book(vc(req), bookId).catch(() => null);
+    if (!book) return reply.code(404).send({ error: 'not_found' });
+    await q(
+      `INSERT INTO bookmarks (user_id, book_id, series_id, page, note)
+       VALUES ($1,$2,$3,$4,$5)
+       ON CONFLICT (user_id, book_id, page) DO UPDATE SET note = EXCLUDED.note, created_at = now()`,
+      [userIdOf(req), bookId, book.seriesId, n, b.data.note ?? null],
+    );
+    return { ok: true };
+  });
+
+  app.delete('/api/bookmarks/:bookId/:page', async (req) => {
+    const { bookId, page } = req.params as { bookId: string; page: string };
+    await q('DELETE FROM bookmarks WHERE user_id = $1 AND book_id = $2 AND page = $3',
+      [userIdOf(req), bookId, Number(page)]);
+    return { ok: true };
+  });
+
   app.get('/api/notes/:seriesId', async (req) => {
     const uid = userIdOf(req);
     const { seriesId } = req.params as { seriesId: string };

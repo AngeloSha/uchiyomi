@@ -421,6 +421,20 @@ CREATE TABLE IF NOT EXISTS opds_tokens (
 -- settings on someone's phone, so a leak stayed useful until the owner happened to notice and regenerate.
 -- Existing tokens get a year from NOW rather than from when they were issued, so upgrading does not sign
 -- anyone's e-reader out on the spot.
+-- Page bookmarks. Keyed like read_progress, and like it these outlive the file: deleting a series' chapter
+-- files keeps every progress row on purpose, and a bookmark is the same kind of record -- a note about
+-- having read something, not a pointer to bytes.
+CREATE TABLE IF NOT EXISTS bookmarks (
+  user_id    uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  book_id    text NOT NULL,
+  series_id  text NOT NULL,
+  page       int  NOT NULL,
+  note       text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (user_id, book_id, page)
+);
+CREATE INDEX IF NOT EXISTS bookmarks_series_idx ON bookmarks (user_id, series_id);
+
 -- Age ratings, stored as a minimum age so a cap can be a comparison. NULL means unrated, which is a third
 -- state and NOT the same as 0: an unrated series stays visible to everyone, because the alternative hides
 -- most of an existing library the moment someone sets a cap.
