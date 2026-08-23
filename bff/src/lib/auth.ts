@@ -84,7 +84,20 @@ export async function resolveOpdsBasic(authHeader?: string): Promise<string | nu
       WHERE token_hash = $1 AND (expires_at IS NULL OR expires_at > now())`,
     [sha256(pass)],
   );
-  if (row) q('UPDATE opds_tokens SET last_seen = now() WHERE user_id = $1', [row.user_id]).catch(() => {});
+  // Stamped fire-and-forget, so authenticating a reader never waits on bookkeeping -- but scoped to the
+  // token hash that was actually presented. Without that condition the write can land AFTER the user has
+  // regenerated their token, marking a brand-new token as already used by a request that authenticated the
+  // old one.
+  //
+  // NOT COVERED BY A TEST, deliberately. The failure needs the stamp to land in the window between a
+  // regeneration and the check, and a test that arranges that is a test that asserts on a sleep -- it would
+  // pass on a fast machine and fail on a loaded one, which is how the surrounding test behaved before it was
+  // rewritten. The WHERE clause costs nothing and is obviously correct; a flaky guard would cost more than
+  // it proves.
+  if (row) {
+    q('UPDATE opds_tokens SET last_seen = now() WHERE user_id = $1 AND token_hash = $2',
+      [row.user_id, sha256(pass)]).catch(() => {});
+  }
   return row?.user_id ?? null;
 }
 

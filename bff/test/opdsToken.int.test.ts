@@ -59,14 +59,23 @@ test('OPDS tokens', { skip }, async (t) => {
     await t.test('issuing a new one replaces the old, and clears its last-used', async () => {
       const first = await auth.issueOpdsToken(userId);
       await auth.resolveOpdsBasic(basic(USER, first));
+      // Wait for the fire-and-forget stamp to land before replacing the token. Without this the test is
+      // racing the very ordering it is checking, and it passed locally while failing on CI.
+      for (let i = 0; i < 40 && !(await auth.opdsTokenStatus(userId)).lastSeen; i++) {
+        await new Promise((r) => setTimeout(r, 25));
+      }
       const second = await auth.issueOpdsToken(userId);
-
       assert.notEqual(first, second);
+
+      // Checked BEFORE the new token is used, because using it legitimately stamps it. The first version of
+      // this test asserted afterwards and was simply wrong -- it passed locally only because the write had
+      // not landed yet, which is a race, not a pass.
+      await new Promise((r) => setTimeout(r, 150));
+      assert.equal((await auth.opdsTokenStatus(userId)).lastSeen, null,
+        'a freshly issued token must not inherit the last-used date of the one it replaced');
+
       assert.equal(await auth.resolveOpdsBasic(basic(USER, first)), null, 'the replaced token must stop working');
       assert.equal(await auth.resolveOpdsBasic(basic(USER, second)), userId);
-
-      const st = await auth.opdsTokenStatus(userId);
-      assert.equal(st.lastSeen, null, 'a new token has not been used yet, even though the old one had');
     });
 
     await t.test('revoking works immediately', async () => {
