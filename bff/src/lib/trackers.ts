@@ -1,19 +1,27 @@
-// Push reading progress to an external tracker (AniList today).
+// Push reading progress to external trackers (AniList, MyAnimeList, Kitsu).
 //
 // Design constraints that shaped this:
 //  * Reading must never wait on, or fail because of, a tracker. Every push is fire-and-forget, rate-limited,
 //    and swallows its errors into `user_trackers.last_error` for the UI to show.
 //  * AniList tokens last a year and there are NO refresh tokens. Silent expiry is the failure mode users
 //    hate most, so expiry is stored and surfaced, and an auth failure disables the connection loudly.
-//  * `provider` is carried everywhere so MAL/Kitsu can be added without a migration.
+//  * `provider` is carried everywhere so MAL/Kitsu could be added without a migration. They since were, and
+//    that held: no schema changed. What was NOT abstracted was the two calls that talk to a service, which
+//    now live in trackerProviders.ts behind one adapter each.
+//  * A user may connect SEVERAL trackers at once, so every push fans out over their enabled connections.
+//    One failing service must not stop the others, and each keeps its own error and its own high-water mark.
 import { q, one } from './db';
 import { seal, open as unseal } from './secretbox';
 import { withGate } from './gate';
+import { ADAPTERS, PROVIDERS, type Provider } from './trackerProviders';
+export type { Provider } from './trackerProviders';
 
-export type Provider = 'anilist';
 
 export interface TrackerStatus {
   provider: Provider;
+  /** Display name and where to get a token, so the UI does not hardcode the provider list. */
+  label: string;
+  tokenHelp: string;
   connected: boolean;
   accountName: string | null;
   expiresAt: string | null;
@@ -23,7 +31,6 @@ export interface TrackerStatus {
   lastError: string | null;
 }
 
-const ANILIST_API = 'https://graphql.anilist.co';
 const EXPIRY_WARN_DAYS = 30;
 
 // ---- connection management -------------------------------------------------
@@ -58,7 +65,22 @@ export async function statusFor(userId: string): Promise<TrackerStatus[]> {
        FROM user_trackers WHERE user_id = $1`,
     [userId],
   );
-  return rows.map((r) => ({
+  // Every provider is listed, connected or not, so the UI can offer the ones a user has not set up without
+  // knowing the list itself. A row that exists but is disabled is a connection whose token was rejected --
+  // meaningfully different from never having connected, and the error explains which.
+  const byProvider = new Map(rows.map((r) => [r.provider, r]));
+  return PROVIDERS.map((p) => {
+    const r = byProvider.get(p);
+    if (!r) {
+      return {
+        provider: p, connected: false, accountName: null, expiresAt: null,
+        expiringSoon: false, lastSyncAt: null, lastError: null,
+        label: ADAPTERS[p].label, tokenHelp: ADAPTERS[p].tokenHelp,
+      };
+    }
+    return {
+    label: ADAPTERS[p].label,
+    tokenHelp: ADAPTERS[p].tokenHelp,
     provider: r.provider,
     connected: r.enabled,
     accountName: r.account_name,
@@ -66,7 +88,8 @@ export async function statusFor(userId: string): Promise<TrackerStatus[]> {
     expiringSoon: !!r.expires_at && new Date(r.expires_at).getTime() - Date.now() < EXPIRY_WARN_DAYS * 86_400_000,
     lastSyncAt: r.last_sync_at ? new Date(r.last_sync_at).toISOString() : null,
     lastError: r.last_error,
-  }));
+    };
+  });
 }
 
 /** Record which external entry a series maps to. Called wherever an AniList match is resolved (art lookup,
@@ -77,49 +100,34 @@ export async function linkSeries(
   externalId: string | number,
   title: string | null,
   linkedBy: string | null = null,
+  // Was hardcoded to 'anilist' in the INSERT below despite the table keying on provider, so every link a
+  // second tracker made would have been written as an AniList one and then read back as the wrong id.
+  provider: Provider = 'anilist',
 ): Promise<void> {
   await q(
     `INSERT INTO series_trackers (series_id, provider, external_id, title, linked_by)
-     VALUES ($1,'anilist',$2,$3,$4)
+     VALUES ($1,$5,$2,$3,$4)
      ON CONFLICT (series_id, provider) DO UPDATE
        SET external_id = EXCLUDED.external_id, title = EXCLUDED.title,
            linked_by = COALESCE(EXCLUDED.linked_by, series_trackers.linked_by),
            updated_at = now()
      WHERE series_trackers.linked_by IS NULL OR EXCLUDED.linked_by IS NOT NULL`,
-    [seriesId, String(externalId), title, linkedBy],
+    [seriesId, String(externalId), title, linkedBy, provider],
   ).catch(() => {});
 }
 
 // ---- AniList calls ---------------------------------------------------------
 
-async function anilist(token: string, query: string, variables: Record<string, unknown>): Promise<any> {
-  const r = await fetch(ANILIST_API, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', accept: 'application/json', authorization: `Bearer ${token}` },
-    body: JSON.stringify({ query, variables }),
-    signal: AbortSignal.timeout(15000),
-  });
-  if (r.status === 401 || r.status === 400) throw Object.assign(new Error('tracker rejected the token'), { authFailed: true });
-  if (!r.ok) throw new Error(`anilist ${r.status}`);
-  const j: any = await r.json();
-  if (j?.errors?.length) {
-    const msg = j.errors[0]?.message || 'anilist error';
-    throw Object.assign(new Error(msg), { authFailed: /invalid token|unauthorized/i.test(msg) });
-  }
-  return j.data;
-}
 
 /** Who the token belongs to — used at connect time to show the account name and prove the token works. */
-export async function whoAmI(token: string): Promise<{ id: number; name: string } | null> {
-  const d = await anilist(token, 'query{Viewer{id name}}', {});
-  return d?.Viewer ? { id: d.Viewer.id, name: d.Viewer.name } : null;
+export async function whoAmI(token: string, provider: Provider = 'anilist'): Promise<{ id: string; name: string } | null> {
+  const adapter = ADAPTERS[provider];
+  if (!adapter) return null;
+  return adapter.whoAmI(token);
 }
 
 // ---- progress push ---------------------------------------------------------
 
-const SAVE = `mutation($mediaId:Int,$progress:Int,$status:MediaListStatus){
-  SaveMediaListEntry(mediaId:$mediaId,progress:$progress,status:$status){ id progress status }
-}`;
 
 /**
  * What we would tell a tracker about this series: the highest chapter number the user has *completed*,
@@ -152,75 +160,94 @@ export async function seriesProgressFor(userId: string, seriesId: string): Promi
  * Push a series' progress for one user. Resolves the highest completed chapter rather than the chapter
  * just finished, so reading out of order (or backfilling) can't move a tracker backwards.
  */
+/**
+ * Push one series to every tracker this user has connected.
+ *
+ * Fans out because a user may have AniList and MyAnimeList on at once, and one service being down or having
+ * rejected its token must not stop the other from receiving progress. Each connection keeps its own error,
+ * its own high-water mark, and its own gate lane.
+ */
 export async function pushSeriesProgress(userId: string, seriesId: string): Promise<void> {
-  const link = await one<{ external_id: string }>(
-    `SELECT external_id FROM series_trackers WHERE series_id = $1 AND provider = 'anilist'`,
-    [seriesId],
-  );
-  if (!link) return; // series was never matched to an AniList entry
-
-  const conn = await one<{ access_token: string; expires_at: string | null }>(
-    `SELECT access_token, expires_at FROM user_trackers
-      WHERE user_id = $1 AND provider = 'anilist' AND enabled = true`,
+  const conns = await q<{ provider: Provider; access_token: string; expires_at: string | null }>(
+    `SELECT provider, access_token, expires_at FROM user_trackers
+      WHERE user_id = $1 AND enabled = true`,
     [userId],
   );
-  if (!conn) return;
-  if (conn.expires_at && new Date(conn.expires_at).getTime() < Date.now()) {
-    await markError(userId, 'anilist', 'the access token has expired — reconnect to resume syncing');
-    return;
-  }
-  const token = unseal(conn.access_token);
-  if (!token) {
-    await markError(userId, 'anilist', 'stored token could not be read — reconnect to resume syncing');
-    return;
-  }
+  if (!conns.length) return;
 
   const { chapters, finished } = await seriesProgressFor(userId, seriesId);
   if (chapters <= 0) return;
 
-  // Never push a number lower than the last one we sent. AniList takes a lower progress and rewrites the
+  await Promise.all(conns.map((conn) => pushOne(userId, seriesId, conn, chapters, finished)));
+}
+
+async function pushOne(
+  userId: string,
+  seriesId: string,
+  conn: { provider: Provider; access_token: string; expires_at: string | null },
+  chapters: number,
+  finished: boolean,
+): Promise<void> {
+  const adapter = ADAPTERS[conn.provider];
+  if (!adapter) return;
+
+  const link = await one<{ external_id: string }>(
+    `SELECT external_id FROM series_trackers WHERE series_id = $1 AND provider = $2`,
+    [seriesId, conn.provider],
+  );
+  if (!link) return; // this series was never matched on this service
+
+  if (conn.expires_at && new Date(conn.expires_at).getTime() < Date.now()) {
+    await markError(userId, conn.provider, 'the access token has expired -- reconnect to resume syncing');
+    return;
+  }
+  const token = unseal(conn.access_token);
+  if (!token) {
+    await markError(userId, conn.provider, 'stored token could not be read -- reconnect to resume syncing');
+    return;
+  }
+
+  // Never push a number lower than the last one we sent. A tracker takes a lower progress and rewrites the
   // entry, so a merge, a renumbered chapter or a bulk mark-unread would quietly walk someone's real reading
   // history backwards on an account this app does not own and cannot repair. Going forward is always safe;
   // going backwards needs a person to ask for it, which is what the resync endpoint is for.
   const floor = await one<{ chapters: number }>(
-    `SELECT chapters FROM tracker_progress WHERE user_id = $1 AND series_id = $2 AND provider = 'anilist'`,
-    [userId, seriesId],
+    `SELECT chapters FROM tracker_progress WHERE user_id = $1 AND series_id = $2 AND provider = $3`,
+    [userId, seriesId, conn.provider],
   );
   if (floor && chapters < floor.chapters) {
     await markError(
       userId,
-      'anilist',
+      conn.provider,
       `not syncing: this series now works out to chapter ${chapters}, below the ${floor.chapters} already sent. ` +
         'Resync from the series page if the lower number is the correct one.',
     );
     return;
   }
 
-  // one lane per user: a burst of completions (a binge, or the backfill) trickles out politely
-  await withGate(`tracker:${userId}`, async () => {
+  // one lane per user AND provider: a burst of completions trickles out politely to each service, and a slow
+  // one cannot hold up a fast one.
+  await withGate(`tracker:${userId}:${conn.provider}`, async () => {
     try {
-      await anilist(token, SAVE, {
-        mediaId: Number(link.external_id),
-        progress: chapters,
-        status: finished ? 'COMPLETED' : 'CURRENT',
-      });
-      await q(`UPDATE user_trackers SET last_sync_at = now(), last_error = NULL WHERE user_id=$1 AND provider='anilist'`, [userId]);
+      await adapter.setProgress(token, link.external_id, chapters, finished);
+      await q('UPDATE user_trackers SET last_sync_at = now(), last_error = NULL WHERE user_id=$1 AND provider=$2',
+        [userId, conn.provider]);
       // raise the floor only after the tracker actually accepted it
       await q(
         `INSERT INTO tracker_progress (user_id, series_id, provider, chapters, pushed_at)
-         VALUES ($1, $2, 'anilist', $3, now())
+         VALUES ($1, $2, $3, $4, now())
          ON CONFLICT (user_id, series_id, provider)
            DO UPDATE SET chapters = GREATEST(tracker_progress.chapters, EXCLUDED.chapters), pushed_at = now()`,
-        [userId, seriesId, chapters],
+        [userId, seriesId, conn.provider, chapters],
       );
     } catch (e) {
       const err = e as Error & { authFailed?: boolean };
-      // a bad token will fail on every future chapter too — disable it rather than retry forever
+      // a bad token will fail on every future chapter too -- disable it rather than retry forever
       if (err.authFailed) {
-        await q(`UPDATE user_trackers SET enabled=false, last_error=$2 WHERE user_id=$1 AND provider='anilist'`,
-          [userId, 'the tracker rejected the saved token — reconnect to resume syncing']);
+        await q('UPDATE user_trackers SET enabled=false, last_error=$3 WHERE user_id=$1 AND provider=$2',
+          [userId, conn.provider, 'the tracker rejected the saved token -- reconnect to resume syncing']);
       } else {
-        await markError(userId, 'anilist', err.message?.slice(0, 200) || 'sync failed');
+        await markError(userId, conn.provider, err.message?.slice(0, 200) || 'sync failed');
       }
     }
   }, { concurrency: 1, minGapMs: 1200 });

@@ -3,7 +3,7 @@
 Everything the web app does, it does over this API, so anything you can do in the browser you can script.
 
 This page covers how to authenticate and the endpoints worth scripting. It is not an exhaustive dump of all
-163 routes; the full list is at the bottom for reference.
+166 routes; the full list is at the bottom for reference.
 
 ## Authenticating
 
@@ -206,7 +206,9 @@ PATCH  /api/notes/:id             DELETE /api/notes/:id
 PUT    /api/ratings/:seriesId     DELETE /api/ratings/:seriesId
 GET    /api/tokens                POST   /api/tokens
 DELETE /api/tokens/:id            POST   /api/opds/token
+GET    /api/opds/token            DELETE /api/opds/token
 GET    /api/trackers              POST   /api/trackers/anilist
+POST   /api/trackers/:provider/connect
 POST   /api/trackers/anilist/backfill
 POST   /api/trackers/:provider/resync/:seriesId
 DELETE /api/trackers/:provider
