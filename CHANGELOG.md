@@ -41,6 +41,9 @@ PGID=1000    # id -g
 Leave both unset and nothing changes: the app runs as its own uid, your library is effectively read-only, and
 the startup log says so plainly along with the exact command to change it.
 
+`PUID=1000` is the common case and works: the app does not renumber its own user, so it will not collide with
+the uid the base image already uses.
+
 Deleting a series' files requires hiding the series first, so the reversible step always happens before the
 irreversible one, and it keeps every chapter row and everyone's reading progress. Renaming refuses outright
 unless every folder the series occupies is writable: renaming only half of a series that spans your library
