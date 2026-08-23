@@ -1,5 +1,41 @@
 # Changelog
 
+## Unreleased
+
+### PDF and image EPUB
+
+Both are read now, and both are treated as what they are: an ordered run of page images in a container, the
+same as a CBZ. A PDF's pages are rendered at reading resolution, so it behaves exactly like any other
+chapter -- thumbnails, the reader, offline downloads and OPDS all work without knowing the difference.
+
+EPUB pages come out in **spine order** rather than filename order, because manga bought from a store names
+its image files by an internal id that sorts wrong.
+
+**A text ebook is still not a chapter**, and that now falls out rather than being a rule: a reflowable novel
+has no images in its spine, so it yields no pages and the scanner skips it. Dropping one into your library
+does nothing instead of adding something that opens to a blank screen. Uchiyomi is a manga reader, not an
+ebook library, and Kavita is the better answer if you want one.
+
+### One container
+
+`deploy/docker-compose.aio.yml` runs Uchiyomi as a single container: the API serves the web app itself
+instead of a second nginx doing it. It is now the install the README leads with.
+
+Measured against the split layout on the same host: **238 MB instead of 385 MB**, **33 MiB of memory instead
+of 41**, one less network hop on every API call, and no redirect at all on deep links -- nginx answered
+`/library` with a 301 and this answers it with the page. nginx serves a static file about 0.9 ms faster,
+which is the only thing it wins.
+
+**Nothing breaks if you are already running the split layout.** It is still built, still published, still
+documented, and `deploy/docker-compose.yml` is unchanged. The single-container build is additive: the same
+API image serves the web app only when `WEB_ROOT` points at it.
+
+### Also
+
+The comparison table gained the two rows where something else does more: **reflowable EPUB**, which Kavita
+reads and this deliberately does not, and **Kobo device sync**, which Komga has and this has no answer for.
+An unlisted gap is worse than a listed one.
+
 ## v0.8.1 — 2026-08-23
 
 **Upgrade if you are on v0.8.0.** Its library page listed nothing.

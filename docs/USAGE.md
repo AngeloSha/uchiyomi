@@ -66,6 +66,25 @@ read**. Each cover shows a **NEW** ribbon when there are unread chapters. Click 
 The top bar has **Home** (a daily-pick hero + "For you" rails), **Library**, **Browse** (by genre), and
 **Discover**, plus search, the updates bell, a refresh button, and your profile.
 
+### What counts as a chapter
+
+Point `LIBRARY_PATH` at what you already have. A chapter can be any of:
+
+| | |
+|---|---|
+| `.cbz` / `.zip` | the usual comic archive |
+| `.cbr` / `.rar` | read with a pure-wasm unrar, no extra install |
+| `.pdf` | pages are rendered at reading resolution, so a PDF behaves exactly like a CBZ |
+| `.epub` | **image** EPUBs only, which is what manga bought from a store ships as |
+| a folder of images | loose `.png` / `.jpg` / `.webp` / `.avif`, sorted naturally |
+
+Two things worth knowing. **EPUB pages come out in spine order**, not filename order, because store-bought
+manga routinely names its image files by an internal id that sorts wrong. And **a text ebook is not a
+chapter**: a reflowable novel has no images in its spine, so it yields no pages and the scanner skips it
+rather than adding something that opens to nothing. Uchiyomi is a manga reader, not an ebook library.
+
+Any folder depth works, and `ComicInfo.xml` is read when an archive carries one.
+
 ---
 
 ## 4. A series & its chapters
@@ -433,8 +452,10 @@ docker exec -i uchiyomi-bff sh -c 'tar -xzf - -C /config' < config.tar.gz
 Restart the app afterwards (`docker compose restart uchiyomi-bff`). If you restore the database *without* the
 config archive, any admin-uploaded cover art will be missing even though the database still references it.
 
-> Container names above match `deploy/docker-compose.yml`, the recommended install. If you cloned the repo and
-> run the development stack instead, the containers are `yomi-bff` / `yomi-db` — substitute accordingly.
+> Container names above match the split layout in `deploy/docker-compose.yml`. On the single-container
+> install (`deploy/docker-compose.aio.yml`, the one the README leads with) the app is one container named
+> `uchiyomi`, so use that wherever these say `uchiyomi-bff`. If you cloned the repo and run the development
+> stack instead, the containers are `yomi-bff` / `yomi-db` — substitute accordingly.
 > (The development stack also runs Postgres 15 rather than 16; the dumps are plain SQL, so they restore either
 > way, but don't expect the two data directories to be interchangeable.)
 

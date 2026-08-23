@@ -48,7 +48,7 @@ into a single image.** Point it at your library, add sources by URL, and it does
 - **Cinematic art everywhere:** real banner + cover art pulled from AniList / Kitsu / MangaDex with a one-click
   **backfill** and an admin **Art Review** picker; the home hero shows each series' actual art sharp,
   aspect-aware for phone and desktop, pre-warmed so it loads instantly.
-- **Library:** fast scanner for **CBZ, CBR, and loose image folders** (reads `ComicInfo.xml`), cover-art
+- **Library:** fast scanner for **CBZ, CBR, PDF, image EPUB and loose image folders** (reads `ComicInfo.xml`), cover-art
   ambient theming, genres, an Updates feed with new-chapter badges, and discovery rails (For You / trending /
   similar / "because you read …").
 - **Your library survives files moving:** chapters carry a content fingerprint taken from the archive itself
@@ -158,8 +158,12 @@ Suwayomi) fetches chapters but is Android-only or wraps them in a basic web UI. 
 | API tokens, scoped read / write / admin | ✅ | keys, unscoped | ❌ | ❌ |
 | Single sign-on (OIDC) | ✅ | ✅ | ❌ | ❌ |
 | Reaches Mihon's extensions | ✅ | ❌ | ✅ | ✅ |
+| Reads CBZ / CBR / PDF / image EPUB | ✅ | ✅ | ✅ | ✅ |
+| Runs in one container (+ a database) | ✅ | ✅ | ✅ *(an app)* | ✅ |
+| Reads text ebooks (reflowable EPUB) | ❌ *(on purpose)* | Kavita ✅ | ❌ | ❌ |
+| Kobo device sync | ❌ | Komga ✅ | ❌ | ❌ |
 
-<sub>Compiled 2026-08-22 from each project's own docs. These projects move fast and I do not run all of them
+<sub>Compiled 2026-08-23 from each project's own docs. These projects move fast and I do not run all of them
 daily — if a row is wrong or out of date, [open an issue](https://github.com/AngeloSha/uchiyomi/issues) and I
 will fix it.</sub>
 
@@ -196,12 +200,33 @@ compile and it comes up in seconds even on a NAS or a Raspberry Pi.
 > *development* stack. The one command below is the whole install.
 
 ```bash
-curl -O https://raw.githubusercontent.com/AngeloSha/uchiyomi/main/deploy/docker-compose.yml
-docker compose up -d
+curl -O https://raw.githubusercontent.com/AngeloSha/uchiyomi/main/deploy/docker-compose.aio.yml
+docker compose -f docker-compose.aio.yml up -d
 ```
 
 Then open **http://localhost:8080** and **create your admin account right in the browser**. There are no
 secrets to generate and no config file to edit.
+
+That is **Uchiyomi in one container**, plus Postgres. Two more are optional: a Cloudflare solver, which the
+fetching half needs for most aggregators, and the extension engine, which is a JVM and costs about 800 MB.
+Leave the extension engine out and it is three containers; only the first two are Uchiyomi itself.
+
+<details>
+<summary>There is also a split layout, where a separate nginx serves the web app</summary>
+
+`deploy/docker-compose.yml` runs the API and the web app as two containers. It is the original layout, it is
+still built and published, and it still works — if you are already running it, nothing needs to change.
+
+The single-container build is what the install above uses because it measured better on the same host:
+**238 MB instead of 385 MB**, **33 MiB of memory instead of 41**, one less network hop on every API call, and
+no redirect on deep links. nginx serves a static file about 0.9 ms faster, which is the only thing it wins
+and it disappears behind any network at all.
+
+```bash
+curl -O https://raw.githubusercontent.com/AngeloSha/uchiyomi/main/deploy/docker-compose.yml
+docker compose up -d
+```
+</details>
 
 To read a library you already have, point `LIBRARY_PATH` at it. By default Uchiyomi runs as its own user and
 **cannot write to your files at all**; set `PUID`/`PGID` to your own ids (`id -u`, `id -g`) if you want it to
@@ -217,7 +242,7 @@ as a custom app and it appears with an icon like any store app. That manifest sh
 than five — it leaves out the extension engine, so Mihon/Tachiyomi extensions are off there; add
 `uchiyomi-suwayomi` from `deploy/docker-compose.yml` and set `SUWAYOMI_URL` if you want them.
 
-It runs five containers:
+The split layout runs five containers:
 
 | Container | Role |
 |---|---|
