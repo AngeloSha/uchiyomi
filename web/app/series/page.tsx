@@ -11,7 +11,7 @@ import { applyCover, clearCover } from '@/lib/theme';
 import { Img, Backdrop, Rail, SectionTitle } from '@/components/ui';
 import { SeriesCard } from '@/components/cards';
 import { useToast } from '@/components/Toast';
-import { ConfirmDialog, msgOf } from '@/components/ConfirmDialog';
+import { ConfirmDialog, Modal, msgOf } from '@/components/ConfirmDialog';
 import { useAuth } from '@/lib/auth';
 import { IcChevronLeft, IcHeart, IcStar, IcPlay, IcDownload, IcCheck, IcTrash, IcSliders } from '@/components/icons';
 
@@ -250,6 +250,80 @@ function StarRating({ value, onSet }: { value: number | null; onSet: (n: number)
  * The affected-users warning matters because renumbering a chapter someone has finished changes the number
  * their AniList account gets told.
  */
+/**
+ * Rename the folder a series lives in, on disk.
+ *
+ * The backend refuses unless EVERY root the series occupies is writable, because a series routinely spans
+ * the read library and the downloads folder, and renaming only the writable half leaves the old name live
+ * under the other one -- which the next scan re-reads as a second series, with half of everyone's progress
+ * stranded on it. The refusal carries both a reason and the exact fix (usually a PUID), so this shows what
+ * the server said rather than a generic failure: "could not rename" would hide the one useful sentence.
+ */
+function RenameFolderModal({ id, folder, title, onClose, onSaved }: {
+  id: string; folder: string; title: string; onClose: () => void; onSaved: () => void;
+}) {
+  const [next, setNext] = useState(folder);
+  const [busy, setBusy] = useState(false);
+  const [refusal, setRefusal] = useState<{ message?: string; fix?: string } | null>(null);
+  const toast = useToast();
+
+  const save = async () => {
+    setBusy(true);
+    setRefusal(null);
+    try {
+      await api(`/api/admin/series/${id}/rename-folder`, { method: 'POST', json: { folder: next.trim() } });
+      toast('Folder renamed', 'success');
+      onSaved();
+      onClose();
+    } catch (e: any) {
+      let shown = false;
+      try {
+        const b = JSON.parse(e?.body || '{}');
+        if (b.message || b.fix) { setRefusal({ message: b.message, fix: b.fix }); shown = true; }
+      } catch {}
+      if (!shown) toast(msgOf(e, 'Could not rename the folder'), 'error');
+    }
+    setBusy(false);
+  };
+
+  const changed = next.trim() !== folder.trim() && next.trim().length > 0;
+
+  return (
+    <Modal title={`Rename the folder for \u201c${title}\u201d`} onClose={onClose}>
+      <div className="space-y-3">
+        <p className="text-xs text-fog-500">
+          This moves the folder on disk. Chapter ids and everyone&rsquo;s reading progress stay exactly as
+          they are, so nothing is marked unread and nothing is re-downloaded.
+        </p>
+        <label className="block">
+          <span className="mb-1 block text-xs text-fog-500">Folder, relative to your library root</span>
+          <input
+            value={next}
+            onChange={(e) => setNext(e.target.value)}
+            spellCheck={false}
+            className="w-full rounded-lg border border-ink-700 bg-ink-900/60 px-3 py-2 font-mono text-sm text-fog-100 outline-none focus:border-accent/60"
+          />
+        </label>
+        <p className="text-[11px] text-fog-600">Currently <span className="font-mono">{folder}</span></p>
+
+        {refusal && (
+          <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-xs text-amber-200">
+            <p>{refusal.message}</p>
+            {refusal.fix && <p className="mt-1 text-amber-300/90">{refusal.fix}</p>}
+          </div>
+        )}
+
+        <div className="flex justify-end gap-2 pt-1">
+          <button onClick={onClose} className="chip text-xs">Cancel</button>
+          <button onClick={save} disabled={busy || !changed} className="btn-accent px-4 py-2 text-sm disabled:opacity-50">
+            {busy ? 'Renaming\u2026' : 'Rename folder'}
+          </button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
 function ChapterEditModal({ book, onClose, onSaved }: { book: Book; onClose: () => void; onSaved: () => void }) {
   const toast = useToast();
   const [number, setNumber] = useState(String(book.number ?? ''));
@@ -529,6 +603,7 @@ function SeriesInner() {
 
   // shared blocks (rendered once)
   const [deleting, setDeleting] = useState(false);
+  const [renaming, setRenaming] = useState(false);
   const [busyAdmin, setBusyAdmin] = useState(false);
 
   const doDelete = async () => {
@@ -570,6 +645,12 @@ function SeriesInner() {
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9" /><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" /></svg>
             Edit details
           </button>
+          {series?.folder && (
+            <button onClick={() => setRenaming(true)} className="flex items-center justify-center gap-2 rounded-full border border-ink-700 py-2.5 text-sm text-fog-300">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M3 7V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9L11.7 5H19a2 2 0 0 1 2 2v2" /><path d="M3 9h18l-1.5 9a2 2 0 0 1-2 1.8H6.5a2 2 0 0 1-2-1.8Z" /></svg>
+              Rename folder
+            </button>
+          )}
           <button onClick={() => setDeleting(true)} className="flex items-center justify-center gap-2 rounded-full border border-ink-700 py-2.5 text-sm text-fog-500 hover:border-rose-500/40 hover:text-rose-300">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14" /></svg>
             Remove from library
@@ -703,6 +784,15 @@ function SeriesInner() {
           }
           onConfirm={doDelete}
           onClose={() => setDeleting(false)}
+        />
+      )}
+      {renaming && series?.folder && (
+        <RenameFolderModal
+          id={id}
+          folder={series.folder}
+          title={series.metadata?.title || series.name}
+          onClose={() => setRenaming(false)}
+          onSaved={() => { for (const k of [['series', id], ['series-books', id], ['library'], ['home']]) qc.invalidateQueries({ queryKey: k }); }}
         />
       )}
       {editing && series && <SeriesEditModal id={id} series={series} onClose={() => setEditing(false)} onSaved={() => { for (const k of [['series', id], ['series-books', id], ['home'], ['library']]) qc.invalidateQueries({ queryKey: k }); }} />}

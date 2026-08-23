@@ -370,6 +370,12 @@ export default async function catalogRoutes(app: FastifyInstance) {
       out.overrides = { title: ov.title, summary: ov.summary, cover: ov.cover, banner: ov.banner,
                         author: ov.author, status: ov.status, genres: ov.genres };
     }
+    // Admins get the on-disk folder, because the rename control needs something to seed from and to show
+    // what is about to move. Members do not: it is the one field here that describes the host filesystem.
+    if (roleOf(req) === 'admin') {
+      const f = await one<{ folder: string }>('SELECT folder FROM lib_series WHERE id = $1', [id]);
+      if (f) out.folder = f.folder;
+    }
     return out;
   });
 

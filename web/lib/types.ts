@@ -23,6 +23,8 @@ export interface SeriesMetadata {
 export interface Series {
   /** Whether the scheduled updater fetches new chapters for this series. */
   autoUpdate?: boolean;
+  /** The folder on disk, relative to the library root. Only sent to admins, for the rename control. */
+  folder?: string;
   id: string;
   libraryId: string;
   name: string;
