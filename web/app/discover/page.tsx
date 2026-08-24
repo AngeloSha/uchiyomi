@@ -1,439 +1,326 @@
 'use client';
-import { useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
+import { ART } from '@/lib/art';
 import { relativeTime } from '@/lib/format';
+import { useAuth } from '@/lib/auth';
+import { loadDiscoverPrefs, saveDiscoverPrefs } from '@/lib/discoverPrefs';
+import { storedLocale, detectLocale, t as tr } from '@/lib/i18n';
 import { useToast } from '@/components/Toast';
-import { IcSearch, IcSparkle } from '@/components/icons';
-import { Switch } from '@/components/Switch';
-import { t as tr } from '@/lib/i18n';
+import { EmptyState } from '@/components/EmptyState';
+import { ProgressBar, Reveal } from '@/components/ui';
+import { SourceCard, SourceItem } from '@/components/cards';
+import { DiscoverHero, TrendingCard, Trending } from '@/components/DiscoverHero';
+import { SourcePicker, SourceLatest, Src, SrcState, budgetFor, languagesOf } from '@/components/SourcePicker';
+import { AddSeriesDialog, AddSeed } from '@/components/AddSeriesDialog';
+import { IcChevronLeft, IcSearch, IcSparkle, IcX } from '@/components/icons';
 
-interface SourceResult { sourceId: string; source: string; title: string; coverUrl?: string; inLibrary?: boolean; updatedAt?: string }
-interface Job { folder: string; title: string; total: number; done: number; status: string }
-interface Trending { title: string; cover: string | null; description: string; genres: string[]; score: number | null; chapters: number | null; status: string | null }
-interface Provider { source: string; name: string; sourceId: string; title: string; coverUrl?: string }
-interface SearchGroup { title: string; coverUrl?: string; inLibrary?: boolean; updatedAt?: string; providers: Provider[] }
-interface Detail { source: string; sourceId: string; title: string; summary: string; coverUrl: string | null; genres: string[]; status: string; count: number; first: number | null; last: number | null }
-interface AddModal { title: string; fallbackDesc?: string; providers?: Provider[]; picked?: Provider; detail?: Detail; loading: boolean; count: number; autoUpdate: boolean; adding: boolean; dup?: string }
+interface Job { folder: string; title: string; total: number; done: number; status: string; reason?: string }
+interface SearchGroup { title: string; coverUrl?: string; inLibrary?: boolean; updatedAt?: string; providers: { source: string; name: string; sourceId: string; title: string; coverUrl?: string }[] }
 
-const cover = (source: string | undefined, u?: string | null) => (u ? `/img/sources/cover?${source ? `source=${source}&` : ''}u=${encodeURIComponent(u)}` : '');
-// never render a swept-up <style>/<script> block as a description (defensive — the BFF also guards this)
-const looksCss = (s: string) => s.length > 2500 || /<\/?(?:style|script)\b|\.[a-z][\w-]*\s*[{,]|@import|gtag\(|wp-manga|woocommerce|settings-page|datalayer/i.test(s);
+/** Titles compare the way the server compares them, so a card can flip to "in library" with no refetch. */
+const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, '');
 
+/**
+ * Discover, rebuilt around what people actually do here.
+ *
+ * This is the only page that adds new series from the internet, and it was a bare search box on black with a
+ * ragged grid hanging off it. Production said something the design did not: in 48 hours there were 32 calls
+ * to "newest from a source" and ZERO searches. The thing buried behind a label, a 45-option dropdown and a
+ * separate button was the entire point of the page, and the search box that dominated it was unused.
+ *
+ * So: a wall of what your sources published, led by a full-bleed hero built from AniList key art that
+ * `/api/discover/trending` has been returning all along and this page rendered as a 144px thumbnail. The 45
+ * sources across 30 languages collapse to one remembered language chip. Search survives as a field, with a
+ * way back out that it never had.
+ *
+ * `/api/sources/latest` takes up to fifteen seconds, so the six sources are fetched independently and the
+ * wall fills in as each lands, in arrival order. Nothing already on screen ever moves: only mangadex
+ * populates `updatedAt`, so "newest across six sources" is not a sortable quantity and pretending otherwise
+ * would reflow tiles under a reading thumb.
+ */
 export default function DiscoverPage() {
   const toast = useToast();
   const qc = useQueryClient();
-  const { data: sources } = useQuery({ queryKey: ['sources'], queryFn: () => api<{ content: { id: string; name: string; status?: string; latest?: boolean }[] }>('/api/sources'), refetchInterval: 30000 });
-  // Always pull fresh trending when Discover is opened or refocused (installed PWAs have no manual refresh,
-  // and a stale/empty cached result must never get pinned for the session).
+  const { user } = useAuth();
+
+  const { data: sourcesData } = useQuery({
+    queryKey: ['sources'],
+    queryFn: () => api<{ content: Src[] }>('/api/sources'),
+    staleTime: 30_000,
+    refetchInterval: 60_000,
+  });
+  const sources = useMemo(() => sourcesData?.content ?? [], [sourcesData]);
+
   const { data: trending } = useQuery({
     queryKey: ['trending'],
     queryFn: () => api<{ content: Trending[] }>('/api/discover/trending'),
     staleTime: 0,
     refetchOnMount: 'always',
-    refetchOnWindowFocus: true,
-    refetchOnReconnect: true,
   });
-  const [source, setSource] = useState('mangadex');
+
+  // ---------------------------------------------------------------- the language
+  const [lang, setLang] = useState('');
+  const resolved = useRef(false);
+  useEffect(() => {
+    if (resolved.current || !sources.length) return;
+    resolved.current = true;
+    const avail = new Set(languagesOf(sources).map((l) => l.code));
+    const stored = loadDiscoverPrefs().lang ?? (user?.settings as any)?.discover?.lang;
+    const ui = storedLocale() ?? detectLocale();
+    // Their own UI language is the right first guess and needs no request to know.
+    setLang(
+      stored && avail.has(stored) ? stored
+      : avail.has(ui) ? ui
+      : avail.has('en') ? 'en'
+      : (languagesOf(sources)[0]?.code ?? ''),
+    );
+  }, [sources, user]);
+  const pickLang = (code: string) => { setLang(code); saveDiscoverPrefs({ lang: code }); };
+
+  // ---------------------------------------------------------------- the wall
+  const [mode, setMode] = useState<'newest' | 'search'>('newest');
   const [q, setQ] = useState('');
-  const [results, setResults] = useState<SourceResult[]>([]);
-  const [searchGroups, setSearchGroups] = useState<SearchGroup[]>([]);
+  const [page, setPage] = useState(1);
+  const [byId, setById] = useState<Record<string, SourceItem[]>>({});
+  const [order, setOrder] = useState<string[]>([]);
+  const [states, setStates] = useState<Record<string, SrcState>>({});
+  const [searchHits, setSearchHits] = useState<SourceItem[]>([]);
   const [searching, setSearching] = useState(false);
-  const [mode, setMode] = useState<'search' | 'latest' | null>(null);
-  const [modal, setModal] = useState<AddModal | null>(null);
-  const { data: jobs } = useQuery({ queryKey: ['source-jobs'], queryFn: () => api<{ content: Job[] }>('/api/sources/jobs'), refetchInterval: 4000 });
+  const [seed, setSeed] = useState<AddSeed | null>(null);
+  const [added, setAdded] = useState<Set<string>>(new Set());
 
-  const search = async (e?: React.FormEvent, query?: string) => {
+  const budget = useMemo(() => budgetFor(sources, lang), [sources, lang]);
+
+  // Changing language starts a new wall. Keeping the old one would show Korean sources under an English chip.
+  useEffect(() => { setById({}); setOrder([]); setStates({}); setPage(1); }, [lang]);
+
+  const onSettled = useCallback((id: string, items: SourceItem[], ok: boolean) => {
+    setById((prev) => (prev[id]?.length && !items.length ? prev : { ...prev, [id]: [...(prev[id] ?? []), ...items] }));
+    setOrder((prev) => (prev.includes(id) ? prev : [...prev, id]));
+    setStates((prev) => ({ ...prev, [id]: !ok ? 'blocked' : items.length ? 'ok' : 'empty' }));
+  }, []);
+
+  // The concurrency gate. Four at a time; each settle releases the next.
+  const settled = order.length;
+  const gate = 4 + settled;
+
+  const wall = useMemo(() => {
+    if (mode === 'search') return searchHits;
+    const seen = new Set<string>();
+    const out: SourceItem[] = [];
+    // Strict arrival order. Interleaving by rank would push already-read tiles down as a slow source lands.
+    for (const id of order) {
+      for (const it of byId[id] ?? []) {
+        const k = `${it.source}:${it.sourceId}`;
+        if (seen.has(k)) continue;
+        seen.add(k);
+        out.push(it);
+      }
+    }
+    return out;
+  }, [mode, searchHits, order, byId]);
+
+  const nameOf = useCallback((id: string) => sources.find((s) => s.id === id)?.name, [sources]);
+  const pending = mode === 'newest' ? Math.max(0, budget.length - settled) : (searching ? 3 : 0);
+
+  const search = async (e?: React.FormEvent) => {
     e?.preventDefault();
-    const term = (query ?? q).trim();
+    const term = q.trim();
     if (!term) return;
-    setSearching(true);
-    setResults([]);
-    setSearchGroups([]);
-    setMode('search');
+    setMode('search'); setSearching(true); setSearchHits([]);
     try {
-      // search every source at once; each card carries all providers that have the title
       const r = await api<{ content: SearchGroup[] }>(`/api/sources/search-all?q=${encodeURIComponent(term)}`);
-      setSearchGroups(r.content);
-    } catch { toast('Search failed', 'error'); } finally { setSearching(false); }
+      setSearchHits((r.content ?? []).map((g) => ({
+        source: g.providers[0]?.source ?? '', sourceId: g.providers[0]?.sourceId ?? g.title,
+        title: g.title, coverUrl: g.coverUrl, updatedAt: g.updatedAt,
+        inLibrary: g.inLibrary, providerCount: g.providers.length,
+      })));
+      (r.content ?? []).forEach((g) => { (groupsRef.current as any)[norm(g.title)] = g.providers; });
+    } catch { toast(tr('Search failed'), 'error'); }
+    setSearching(false);
+  };
+  const groupsRef = useRef<Record<string, SearchGroup['providers']>>({});
+  const backToNewest = () => { setQ(''); setMode('newest'); setSearchHits([]); };
+
+  const open = (it: SourceItem) => {
+    if (it.inLibrary || added.has(norm(it.title))) return;
+    const providers = groupsRef.current[norm(it.title)];
+    if (providers?.length) setSeed({ kind: 'group', title: it.title, providers });
+    else setSeed({ kind: 'result', provider: { source: it.source, name: nameOf(it.source) ?? it.source, sourceId: it.sourceId, title: it.title, coverUrl: it.coverUrl } });
   };
 
-  // Browse a source's newest releases (no query) — the "Newest" button.
-  const browseLatest = async () => {
-    setSearching(true);
-    setResults([]);
-    setSearchGroups([]);
-    setMode('latest');
-    setQ('');
-    try {
-      const r = await api<{ content: SourceResult[] }>(`/api/sources/latest?source=${source}`);
-      setResults(r.content);
-    } catch { toast('Could not load newest', 'error'); } finally { setSearching(false); }
-  };
+  // ---------------------------------------------------------------- more
+  const sentinel = useRef<HTMLDivElement>(null);
+  const canPage = mode === 'newest' && settled >= budget.length && budget.length > 0 && page < 5;
+  useEffect(() => {
+    const el = sentinel.current;
+    if (!el || !canPage) return;
+    const io = new IntersectionObserver((e) => { if (e[0].isIntersecting) setPage((p) => Math.min(5, p + 1)); }, { rootMargin: '800px' });
+    io.observe(el);
+    return () => io.disconnect();
+  }, [canPage]);
 
-  const patch = (p: Partial<AddModal>) => setModal((m) => (m ? { ...m, ...p } : m));
+  // ---------------------------------------------------------------- jobs
+  const { data: jobsData } = useQuery({
+    queryKey: ['source-jobs'],
+    queryFn: () => api<{ content: Job[] }>('/api/sources/jobs'),
+    // Polled hard only while something is actually downloading. It used to poll every four seconds forever.
+    refetchInterval: (qy) => ((qy.state.data?.content ?? []).some((j) => j.status === 'downloading') ? 2500 : 30_000),
+  });
+  const jobs = jobsData?.content ?? [];
 
-  const loadDetail = async (pk: Provider) => {
-    try {
-      const d = await api<Detail>(`/api/sources/detail?source=${pk.source}&sourceId=${encodeURIComponent(pk.sourceId)}`);
-      setModal((m) => (m ? { ...m, detail: d, loading: false } : m));
-    } catch { setModal((m) => (m ? { ...m, loading: false } : m)); }
-  };
+  const heroSlides = useMemo(() => {
+    const all = trending?.content ?? [];
+    const withArt = all.filter((t) => t.banner);
+    return (withArt.length ? withArt : all).slice(0, 5);
+  }, [trending]);
+  const rail = useMemo(() => {
+    const lead = new Set(heroSlides.map((s) => s.title));
+    return (trending?.content ?? []).filter((t) => !lead.has(t.title));
+  }, [trending, heroSlides]);
 
-  // Trending → find across providers (Aqua first), then choose one
-  const openTrending = async (t: Trending) => {
-    setModal({ title: t.title, fallbackDesc: t.description, loading: true, count: 0, autoUpdate: true, adding: false });
-    try {
-      const r = await api<{ content: Provider[] }>(`/api/sources/find?q=${encodeURIComponent(t.title)}`);
-      setModal((m) => (m && m.title === t.title ? { ...m, providers: r.content, loading: false } : m));
-    } catch { setModal((m) => (m ? { ...m, providers: [], loading: false } : m)); }
-  };
-
-  // Single-provider result (a rail / the Newest grid) → straight to the detail/options step.
-  const openResult = (r: SourceResult) => {
-    const pk: Provider = { source: r.source, name: '', sourceId: r.sourceId, title: r.title, coverUrl: r.coverUrl };
-    setModal({ title: r.title, picked: pk, loading: true, count: 0, autoUpdate: true, adding: false });
-    loadDetail(pk);
-  };
-
-  // Cross-source search hit → choose which source to add from (or skip the chooser if only one has it).
-  const openSearchGroup = (g: SearchGroup) => {
-    if (g.inLibrary) return;
-    if (g.providers.length === 1) {
-      const pk = g.providers[0];
-      setModal({ title: g.title, picked: pk, loading: true, count: 0, autoUpdate: true, adding: false });
-      loadDetail(pk);
-    } else {
-      setModal({ title: g.title, providers: g.providers, loading: false, count: 0, autoUpdate: true, adding: false });
-    }
-  };
-
-  const pickProvider = (p: Provider) => { setModal((m) => (m ? { ...m, picked: p, loading: true } : m)); loadDetail(p); };
-
-  const doAdd = async (force = false) => {
-    if (!modal?.picked) return;
-    patch({ adding: true, dup: undefined });
-    try {
-      const res = await api<{ title: string; chapters: number }>('/api/sources/add', {
-        json: { source: modal.picked.source, sourceId: modal.picked.sourceId, chapterCount: modal.count || undefined, autoUpdate: modal.autoUpdate, force },
-      });
-      toast(`Adding “${res.title}” — downloading ${res.chapters} chapter${res.chapters === 1 ? '' : 's'}`, 'success');
-      qc.invalidateQueries({ queryKey: ['source-jobs'] });
-      setModal(null);
-    } catch (e: any) {
-      let parsed: any = {};
-      try { parsed = JSON.parse(e?.body || '{}'); } catch {}
-      if (parsed.error === 'duplicate') patch({ adding: false, dup: parsed.message || 'You already have this title.' });
-      else { toast(parsed.message || 'Add failed — try another source', 'error'); patch({ adding: false }); }
-    }
-  };
-
-  const activeJobs = (jobs?.content || []).filter((j) => j.status === 'downloading');
-  const recs = (trending?.content || []).slice(0, 18);
-  const presets = (n: number) => [10, 25, 50, 100, 200].filter((x) => x < n);
-  const selectedSource = (sources?.content || []).find((s) => s.id === source);
-  const sourceName = selectedSource?.name || '';
+  // ---------------------------------------------------------------- zero sources
+  if (sourcesData && sources.length === 0) {
+    return (
+      <div className="min-h-screen-d px-4 lg:px-0">
+        <EmptyState art={ART.emptyLibrary} title={tr('No sources installed')}
+          sub={tr('Mount a source pack at SOURCES_DIR, or switch on an extension source, then reload from the Providers tab.')} />
+      </div>
+    );
+  }
 
   return (
-    <div className="min-h-screen-d">
-      <header className="safe-top px-5 pb-3 lg:static lg:px-0 lg:pt-4">
-        <h1 className="font-display text-2xl font-bold lg:text-3xl">{tr('Discover')}</h1>
-        <p className="text-sm text-fog-400">{tr('Search your sources and add new series to the library.')}</p>
+    <div className="min-h-screen-d px-4 lg:px-0">
+      {heroSlides.length > 0 && mode === 'newest' && (
+        <DiscoverHero slides={heroSlides} onPick={(t) => setSeed({ kind: 'trending', title: t.title })} />
+      )}
+
+      <header className="pt-5 lg:pt-7">
+        <div className="flex flex-wrap items-end justify-between gap-x-4 gap-y-3">
+          <div className="min-w-0">
+            <h1 className="font-display text-2xl font-bold tracking-tight lg:text-3xl">{tr('Discover')}</h1>
+            <p className="mt-0.5 text-sm text-fog-400">{tr('Newest from your sources')}</p>
+          </div>
+          <form onSubmit={search} className="flex w-full items-center gap-2 sm:w-auto">
+            <div className="field flex min-w-0 flex-1 items-center gap-2 py-0 sm:w-72 lg:w-80">
+              <IcSearch width={17} height={17} className="shrink-0 text-fog-500" />
+              <input value={q} onChange={(e) => setQ(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Escape') backToNewest(); }}
+                placeholder={tr('Search all sources…')} aria-label={tr('Search all sources…')}
+                className="w-full bg-transparent py-2.5 text-sm text-fog-50 outline-none placeholder:text-fog-500" />
+              {q && (
+                <button type="button" onClick={backToNewest} aria-label={tr('Close')} className="shrink-0 text-fog-500 hover:text-fog-200">
+                  <IcX width={15} height={15} />
+                </button>
+              )}
+            </div>
+            <button className="btn-accent shrink-0 px-5 py-2.5 text-sm">{tr('Search')}</button>
+          </form>
+        </div>
       </header>
 
-      <div className="px-4 lg:px-0">
-        {sources && sources.content.length === 0 ? (
-          <div className="glass rounded-2xl p-6 text-center">
-            <p className="font-display text-lg font-semibold text-fog-100">{tr('No sources installed')}</p>
-            <p className="mx-auto mt-1 max-w-md text-sm text-fog-400">
-              Uchiyomi reads the library you already own. To search and add new series, mount a source pack at{' '}
-              <code className="rounded bg-ink-800 px-1.5 py-0.5 text-[12px]">SOURCES_DIR</code> and reload it from Admin → Providers.
-            </p>
-          </div>
-        ) : (
-          <div className="space-y-2.5">
-            <form onSubmit={search} className="flex gap-2">
-              <div className="flex min-w-[180px] flex-1 items-center gap-2 rounded-xl border border-ink-700 bg-ink-850 px-3 focus-within:border-accent">
-                <IcSearch width={18} height={18} className="text-fog-500" />
-                <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={tr('Search all sources…')} className="w-full bg-transparent py-2.5 text-sm text-fog-50 outline-none placeholder:text-fog-500" />
-              </div>
-              <button className="btn-accent px-6">{tr('Search')}</button>
-            </form>
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="text-xs text-fog-500">{tr('Browse newest from')}</span>
-              <select value={source} onChange={(e) => setSource(e.target.value)} className="rounded-xl border border-ink-700 bg-ink-850 px-3 py-2 text-sm text-fog-100 outline-none focus:border-accent">
-                {(sources?.content || []).map((s) => <option key={s.id} value={s.id}>{s.name}{s.status === 'blocked' ? ' ⛔ blocked' : s.status === 'rate_limited' ? ' ⚠ rate-limited' : s.status === 'disabled' ? ' (off)' : ''}</option>)}
-              </select>
-              {selectedSource?.latest && (
-                <button type="button" onClick={browseLatest} className="rounded-xl border border-ink-700 bg-ink-850 px-4 py-2 text-sm font-medium text-fog-100 transition hover:border-accent">
-                  ✦ Newest
-                </button>
+      {mode === 'newest' && (
+        <SourcePicker sources={sources} lang={lang} onLang={pickLang} states={states}
+          settled={settled} total={budget.length} />
+      )}
+
+      {/* One mounted child per budgeted source. Renders nothing; owns one request. */}
+      {mode === 'newest' && budget.map((s, i) => (
+        <SourceLatest key={`${s.id}:${page}`} source={s} page={page} enabled={i < gate} onSettled={onSettled} />
+      ))}
+
+      {jobs.length > 0 && (
+        <div className="board mt-5">
+          {jobs.map((j) => (
+            <div key={j.folder} className={`card p-3 ${j.status === 'error' ? 'border-amber-500/40' : ''}`}>
+              <p className="truncate text-xs font-medium text-fog-100">{j.title}</p>
+              {j.status === 'downloading' ? (
+                <>
+                  <div className="mt-2"><ProgressBar value={j.total ? j.done / j.total : 0.02} /></div>
+                  <p className="mt-1 text-[11px] tabular-nums text-fog-500">{j.done}/{j.total}</p>
+                </>
+              ) : j.status === 'error' ? (
+                // A download killed by a rate-limit used to vanish from this strip entirely, taking its
+                // reason with it: the row was filtered to `downloading` and `reason` was never declared.
+                <p className="mt-1 text-[11px] text-amber-300">{tr('Download stopped. Try another source or wait.')}</p>
+              ) : (
+                <p className="mt-1 text-[11px] text-emerald-400">{tr('Downloaded')}</p>
               )}
-            </div>
-          </div>
-        )}
-
-        {activeJobs.length > 0 && (
-          <div className="mt-4 space-y-2">
-            <p className="text-xs font-semibold uppercase tracking-wider text-fog-500">{tr('Downloading')}</p>
-            {activeJobs.map((j) => (
-              <div key={j.folder} className="glass rounded-xl px-4 py-2.5">
-                <div className="flex items-center justify-between text-sm">
-                  <span className="truncate text-fog-100">{j.title}</span>
-                  <span className="shrink-0 ps-3 text-fog-400">{j.done}/{j.total}</span>
-                </div>
-                <div className="mt-1.5 h-1 overflow-hidden rounded-full bg-ink-700">
-                  <div className="h-full rounded-full bg-accent transition-all" style={{ width: `${Math.round((j.done / Math.max(1, j.total)) * 100)}%` }} />
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {/* Trending recommendations — shown on the Discover landing (before any search / newest browse) */}
-        {mode === null && !searching && recs.length > 0 && (
-          <section className="mt-6">
-            <div className="mb-3 flex items-center gap-2">
-              <IcSparkle width={18} height={18} className="text-accent" />
-              <h2 className="font-display text-lg font-semibold">{tr('Trending manhwa')}</h2>
-              <span className="text-xs text-fog-500">not in your library</span>
-            </div>
-            <div className="-mx-4 flex snap-x gap-3 overflow-x-auto px-4 pb-2 lg:mx-0 lg:px-0 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-              {recs.map((t) => (
-                <button key={t.title} onClick={() => openTrending(t)} className="group w-36 shrink-0 snap-start text-start">
-                  <div className="relative aspect-[2/3] overflow-hidden rounded-2xl border border-ink-700/60 bg-ink-800">
-                    {t.cover ? (
-                      // Serve SAME-ORIGIN (proxy) — reliable in standalone iOS PWA where cross-origin imgs are flaky;
-                      // fall back to AniList's CDN directly only if the proxy errors.
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img
-                        src={cover(undefined, t.cover)}
-                        alt={t.title}
-                        referrerPolicy="no-referrer"
-                        onError={(e) => { const el = e.currentTarget; if (el.dataset.fb !== '1' && t.cover) { el.dataset.fb = '1'; el.src = t.cover; } }}
-                        className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-[1.06]"
-                      />
-                    ) : <div className="grid h-full place-items-center text-ink-500"><IcSparkle width={24} height={24} /></div>}
-                    {t.score != null && <span className="absolute right-1.5 top-1.5 rounded-md bg-ink-950/80 px-1.5 py-0.5 text-[10px] font-semibold text-accent backdrop-blur">{t.score}%</span>}
-                    {t.chapters != null && <span className="absolute left-1.5 top-1.5 rounded-md bg-ink-950/80 px-1.5 py-0.5 text-[10px] font-medium text-fog-200 backdrop-blur">{t.chapters} ch</span>}
-                    <span className="absolute inset-x-0 bottom-0 bg-accent/90 py-1.5 text-center text-[11px] font-semibold text-white opacity-0 backdrop-blur transition group-hover:opacity-100">Find &amp; add</span>
-                  </div>
-                  <p className="mt-1.5 line-clamp-1 text-xs font-medium text-fog-100">{t.title}</p>
-                  {t.description && <p className="mt-0.5 line-clamp-2 text-[11px] leading-snug text-fog-400">{t.description}</p>}
-                </button>
-              ))}
-            </div>
-          </section>
-        )}
-
-        {/* Per-provider "latest" rails — browse each source's newest releases (like a Tachiyomi extension) */}
-        {mode === null && !searching &&
-          (sources?.content || []).filter((s) => s.latest && s.status !== 'disabled').map((s) => (
-            <ProviderRail key={s.id} s={s} onOpen={openResult} />
-          ))}
-
-        {mode === 'latest' && (searching || results.length > 0) && (
-          <div className="mb-1 mt-6 flex items-center gap-2">
-            <IcSparkle width={18} height={18} className="text-accent" />
-            <h2 className="font-display text-lg font-semibold">Newest on {sourceName}</h2>
-          </div>
-        )}
-        {mode === 'search' && (searching || searchGroups.length > 0) && (
-          <div className="mb-1 mt-6 flex items-center gap-2">
-            <IcSearch width={18} height={18} className="text-accent" />
-            <h2 className="font-display text-lg font-semibold">{tr('Results across your sources')}</h2>
-          </div>
-        )}
-        <div className="mt-5 grid grid-cols-3 gap-x-3 gap-y-5 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-7 xl:grid-cols-8 2xl:grid-cols-9">
-          {searching && Array.from({ length: 12 }).map((_, i) => <div key={i} className="skeleton aspect-[2/3] rounded-2xl" />)}
-          {!searching && mode === 'latest' && results.map((r) => (
-            <div key={r.sourceId} className="group">
-              <div className={`relative aspect-[2/3] overflow-hidden rounded-2xl border border-ink-700/60 bg-ink-800 ${r.inLibrary ? 'opacity-55' : ''}`}>
-                {r.coverUrl ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={cover(r.source, r.coverUrl)} alt={r.title} loading="lazy" className="h-full w-full object-cover" />
-                ) : <div className="grid h-full place-items-center text-ink-500"><IcSparkle width={28} height={28} /></div>}
-                {r.inLibrary ? (
-                  <span className="absolute inset-x-0 bottom-0 bg-emerald-600/85 py-2 text-center text-xs font-semibold text-white backdrop-blur">✓ In library</span>
-                ) : (
-                  <button onClick={() => openResult(r)} className="absolute inset-x-0 bottom-0 bg-accent/90 py-2 text-xs font-semibold text-white opacity-0 backdrop-blur transition group-hover:opacity-100">+ Add to library</button>
-                )}
-              </div>
-              <p className="mt-1.5 line-clamp-2 text-xs text-fog-200">{r.title}</p>
-              {r.updatedAt && <p className="mt-0.5 text-[10px] text-fog-500">updated {relativeTime(r.updatedAt)}</p>}
-            </div>
-          ))}
-          {!searching && mode === 'search' && searchGroups.map((g) => (
-            <div key={g.title} className="group">
-              <div className={`relative aspect-[2/3] overflow-hidden rounded-2xl border border-ink-700/60 bg-ink-800 ${g.inLibrary ? 'opacity-55' : ''}`}>
-                {g.coverUrl ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={cover(g.providers[0]?.source, g.coverUrl)} alt={g.title} loading="lazy" className="h-full w-full object-cover" />
-                ) : <div className="grid h-full place-items-center text-ink-500"><IcSparkle width={28} height={28} /></div>}
-                {g.providers.length > 1 && !g.inLibrary && (
-                  <span className="absolute right-1.5 top-1.5 rounded-md bg-ink-950/80 px-1.5 py-0.5 text-[10px] font-semibold text-fog-200 backdrop-blur">{g.providers.length} sources</span>
-                )}
-                {g.inLibrary ? (
-                  <span className="absolute inset-x-0 bottom-0 bg-emerald-600/85 py-2 text-center text-xs font-semibold text-white backdrop-blur">✓ In library</span>
-                ) : (
-                  <button onClick={() => openSearchGroup(g)} className="absolute inset-x-0 bottom-0 bg-accent/90 py-2 text-xs font-semibold text-white opacity-0 backdrop-blur transition group-hover:opacity-100">+ Add to library</button>
-                )}
-              </div>
-              <p className="mt-1.5 line-clamp-2 text-xs text-fog-200">{g.title}</p>
-              {g.updatedAt && <p className="mt-0.5 text-[10px] text-fog-500">updated {relativeTime(g.updatedAt)}</p>}
             </div>
           ))}
         </div>
+      )}
 
-        {!searching && mode === 'search' && searchGroups.length === 0 && q && (
-          <p className="py-16 text-center text-sm text-fog-500">{tr('No results across your sources — try another title.')}</p>
-        )}
-        {!searching && mode === 'latest' && results.length === 0 && (
-          <p className="py-16 text-center text-sm text-fog-500">{tr('Could not load the newest list for this source.')}</p>
-        )}
-      </div>
-
-      {modal && <AddDialog modal={modal} patch={patch} close={() => setModal(null)} pickProvider={pickProvider} doAdd={doAdd} presets={presets} />}
-    </div>
-  );
-}
-
-// One horizontal rail of a single source's newest releases. Self-hides if the source returns nothing
-// (e.g. a generic engine that couldn't parse its latest page), so failed providers don't clutter Discover.
-function ProviderRail({ s, onOpen }: { s: { id: string; name: string }; onOpen: (r: SourceResult) => void }) {
-  const { data, isLoading } = useQuery({
-    queryKey: ['latest', s.id],
-    queryFn: () => api<{ content: SourceResult[] }>(`/api/sources/latest?source=${s.id}`),
-    staleTime: 5 * 60_000,
-  });
-  const items = (data?.content || []).slice(0, 18);
-  if (!isLoading && items.length === 0) return null;
-  return (
-    <section className="mt-6">
-      <div className="mb-3 flex items-center gap-2">
-        <IcSparkle width={18} height={18} className="text-accent" />
-        <h2 className="font-display text-lg font-semibold">Latest on {s.name}</h2>
-        <span className="text-xs text-fog-500">newest releases</span>
-      </div>
-      <div className="-mx-4 flex snap-x gap-3 overflow-x-auto px-4 pb-2 lg:mx-0 lg:px-0 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-        {isLoading && Array.from({ length: 8 }).map((_, i) => <div key={i} className="skeleton aspect-[2/3] w-36 shrink-0 rounded-2xl" />)}
-        {items.map((r) => (
-          <button key={r.sourceId} onClick={() => !r.inLibrary && onOpen(r)} className="group w-36 shrink-0 snap-start text-start">
-            <div className={`relative aspect-[2/3] overflow-hidden rounded-2xl border border-ink-700/60 bg-ink-800 ${r.inLibrary ? 'opacity-55' : ''}`}>
-              {r.coverUrl ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={cover(r.source, r.coverUrl)} alt={r.title} loading="lazy" className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-[1.06]" />
-              ) : <div className="grid h-full place-items-center text-ink-500"><IcSparkle width={24} height={24} /></div>}
-              {r.inLibrary ? (
-                <span className="absolute inset-x-0 bottom-0 bg-emerald-600/85 py-1.5 text-center text-[11px] font-semibold text-white backdrop-blur">✓ In library</span>
-              ) : (
-                <span className="absolute inset-x-0 bottom-0 bg-accent/90 py-1.5 text-center text-[11px] font-semibold text-white opacity-0 backdrop-blur transition group-hover:opacity-100">+ Add</span>
-              )}
-            </div>
-            <p className="mt-1.5 line-clamp-1 text-xs font-medium text-fog-100">{r.title}</p>
-            {r.updatedAt && <p className="mt-0.5 text-[10px] text-fog-500">updated {relativeTime(r.updatedAt)}</p>}
+      <div className="mb-3 mt-6 flex items-baseline justify-between gap-3">
+        <h2 className="font-display text-lg font-semibold tracking-tight text-fog-50 lg:text-xl">
+          {mode === 'search' ? tr('Results across your sources') : tr('Newest from your sources')}
+        </h2>
+        {mode === 'search' ? (
+          <button onClick={backToNewest} className="chip shrink-0 text-xs">
+            <IcChevronLeft width={13} height={13} />{tr('Newest')}
           </button>
+        ) : budget.length > 0 && settled < budget.length ? (
+          <span className="shrink-0 text-xs tabular-nums text-fog-500">
+            {tr('{done} of {total} sources', { done: settled, total: budget.length })}
+          </span>
+        ) : null}
+      </div>
+
+      <div className="grid grid-cols-3 gap-x-3 gap-y-5 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-7 lg:gap-x-4 xl:grid-cols-8 2xl:grid-cols-9 min-[1800px]:grid-cols-10">
+        {wall.map((it, i) => (
+          <SourceCard key={`${it.source}:${it.sourceId}`} item={{ ...it, inLibrary: it.inLibrary || added.has(norm(it.title)) }}
+            sourceName={mode === 'newest' && order.length > 1 ? nameOf(it.source) : undefined}
+            onAdd={() => open(it)} eager={i < 12} />
+        ))}
+        {Array.from({ length: Math.min(18, pending * 6) }).map((_, i) => (
+          <div key={`sk${i}`} className="skeleton aspect-[2/3] rounded-2xl" />
         ))}
       </div>
-    </section>
-  );
-}
 
-function AddDialog({ modal, patch, close, pickProvider, doAdd, presets }: {
-  modal: AddModal; patch: (p: Partial<AddModal>) => void; close: () => void;
-  pickProvider: (p: Provider) => void; doAdd: (force?: boolean) => void; presets: (n: number) => number[];
-}) {
-  const d = modal.detail;
-  const srcSum = d?.summary && !looksCss(d.summary) ? d.summary : '';
-  const desc = (srcSum.length > 30 ? srcSum : '') || modal.fallbackDesc || srcSum || '';
-  const chooseProvider = modal.providers && !modal.picked;
-
-  return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-ink-950/70 p-4 backdrop-blur-sm" onClick={close}>
-      <div className="glass max-h-[88vh] w-full max-w-md overflow-y-auto rounded-2xl border border-ink-700 p-5" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-start justify-between gap-3">
-          <h3 className="font-display text-lg font-semibold leading-tight">{modal.title}</h3>
-          <button onClick={close} className="shrink-0 text-fog-500 hover:text-fog-200">✕</button>
-        </div>
-
-        {modal.loading && (
-          <div className="flex items-center gap-3 py-8 text-sm text-fog-400">
-            <span className="h-4 w-4 animate-spin rounded-full border-2 border-ink-600 border-t-accent" />
-            {chooseProvider ? 'Searching providers…' : modal.providers ? 'Loading chapters…' : 'Finding sources…'}
-          </div>
-        )}
-
-        {/* Step 1: choose a provider (trending flow) */}
-        {!modal.loading && chooseProvider && (
-          modal.providers!.length === 0 ? (
-            <p className="py-8 text-center text-sm text-fog-500">{tr('Not found on any source yet — try searching manually.')}</p>
-          ) : (
-            <div className="mt-4">
-              <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-fog-500">{tr('Available on — pick a source')}</p>
-              <div className="space-y-2">
-                {modal.providers!.map((p, i) => (
-                  <button key={p.source} onClick={() => pickProvider(p)} className="flex w-full items-center gap-3 rounded-xl border border-ink-700 bg-ink-850/60 p-2 text-start transition hover:border-accent">
-                    {p.coverUrl ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img src={cover(p.source, p.coverUrl)} alt="" className="h-12 w-9 shrink-0 rounded-md object-cover" />
-                    ) : <div className="h-12 w-9 shrink-0 rounded-md bg-ink-800" />}
-                    <div className="min-w-0 flex-1">
-                      <p className="text-sm font-medium text-fog-100">{p.name}{i === 0 && <span className="ms-2 rounded bg-accent/20 px-1.5 py-0.5 text-[10px] font-semibold text-accent">preferred</span>}</p>
-                      <p className="truncate text-xs text-fog-500">{p.title}</p>
-                    </div>
-                    <span className="shrink-0 text-fog-500">›</span>
-                  </button>
-                ))}
-              </div>
-            </div>
-          )
-        )}
-
-        {/* Step 2: options */}
-        {!modal.loading && d && (
-          <div className="mt-4 space-y-4">
-            {modal.providers && (
-              <button onClick={() => patch({ picked: undefined, detail: undefined })} className="text-xs text-accent hover:underline">‹ change source ({modal.picked?.name})</button>
-            )}
-            <div className="flex gap-3">
-              {d.coverUrl && (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={cover(d.source, d.coverUrl)} alt="" className="h-28 w-20 shrink-0 rounded-lg border border-ink-700 object-cover" />
-              )}
-              <div className="min-w-0 text-xs text-fog-300">
-                <p className="font-semibold text-fog-100">{d.count} chapter{d.count === 1 ? '' : 's'}{d.first != null && d.last != null ? ` · ${d.first}–${d.last}` : ''}</p>
-                {d.status && !looksCss(d.status) && <p className="mt-0.5 text-fog-500">{d.status}</p>}
-                {d.genres?.length > 0 && <p className="mt-0.5 line-clamp-1 text-fog-500">{d.genres.slice(0, 4).join(' · ')}</p>}
-              </div>
-            </div>
-            {desc && <p className="max-h-20 overflow-y-auto pe-1 text-[13px] leading-relaxed text-fog-300">{desc}</p>}
-
-            <label className="block">
-              <span className="mb-1 block text-xs font-semibold uppercase tracking-wider text-fog-500">{tr('Chapters to download')}</span>
-              <select value={modal.count} onChange={(e) => patch({ count: Number(e.target.value) })} className="w-full rounded-xl border border-ink-700 bg-ink-850 px-3 py-2.5 text-sm text-fog-100 outline-none focus:border-accent">
-                <option value={0}>All ({d.count})</option>
-                {presets(d.count).map((n) => <option key={n} value={n}>First {n}</option>)}
-              </select>
-            </label>
-
-            {(modal.count === 0 ? d.count : modal.count) > 40 && (
-              <p className="rounded-lg bg-amber-500/10 px-3 py-2 text-[11px] leading-snug text-amber-300">⚠ Grabbing many chapters quickly can get you temporarily rate-limited by this source. It pauses automatically if that happens — you can resume later, or download fewer to start.</p>
-            )}
-
-            {/* The row was one big <button> with a fake toggle inside it; a real <button role="switch"> cannot
-                nest in another button, so the row is now a plain row and the switch is the control. */}
-            <div className="flex w-full items-center justify-between gap-3 rounded-xl border border-ink-700 bg-ink-850/60 px-3 py-2.5">
-              <span className="text-sm text-fog-100">{tr('Auto-update new chapters')}</span>
-              <Switch on={!!modal.autoUpdate} onChange={(next) => patch({ autoUpdate: next })} label={tr('Auto-update new chapters')} />
-            </div>
-
-            {modal.dup && <p className="rounded-lg bg-amber-500/10 px-3 py-2 text-xs text-amber-300">{modal.dup}</p>}
-            <button onClick={() => doAdd(!!modal.dup)} disabled={modal.adding} className="btn-accent w-full py-2.5 text-sm disabled:opacity-60">
-              {modal.adding ? 'Adding…' : modal.dup ? 'Add anyway' : `Add to library${modal.count ? ` (${modal.count})` : ''}`}
+      {!wall.length && !pending && (
+        <div className="card col-span-full mt-2 p-8 text-center">
+          <p className="text-sm text-fog-400">
+            {mode === 'search' ? tr('No results across your sources — try another title.')
+              : Object.values(states).every((s) => s === 'blocked')
+                ? tr('No source in this language could be reached.')
+                : tr('Nothing new from these sources right now.')}
+          </p>
+          {mode === 'newest' && (
+            <button onClick={() => qc.invalidateQueries({ queryKey: ['src-latest'] })} className="btn-ghost mt-4 px-5 py-2 text-sm">
+              {tr('Try again')}
             </button>
+          )}
+        </div>
+      )}
+
+      <div ref={sentinel} className="h-16" />
+
+      {mode === 'newest' && rail.length > 0 && (
+        <section className="pb-6">
+          <h2 className="mb-3 font-display text-lg font-semibold tracking-tight text-fog-50 lg:text-xl">{tr('Trending manhwa')}</h2>
+          <div className="bleed hide-scrollbar flex gap-3 overflow-x-auto px-4 pb-1 lg:px-8 [scroll-snap-type:x_mandatory]" data-lenis-prevent>
+            {rail.map((t, i) => (
+              <Reveal key={t.title} delay={Math.min(i, 12) * 28}>
+                <TrendingCard t={t} onPick={(x) => setSeed({ kind: 'trending', title: x.title })} />
+              </Reveal>
+            ))}
           </div>
-        )}
-      </div>
+        </section>
+      )}
+
+      {seed && (
+        <AddSeriesDialog
+          seed={seed}
+          sources={budget.map((s) => s.id)}
+          onClose={() => setSeed(null)}
+          onAdded={(r) => {
+            setAdded((prev) => new Set(prev).add(norm(r.title)));
+            qc.invalidateQueries({ queryKey: ['source-jobs'] });
+          }}
+        />
+      )}
     </div>
   );
 }

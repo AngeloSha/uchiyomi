@@ -14,7 +14,7 @@ import puppeteer from 'puppeteer';
 const BASE = process.env.BASE || 'http://127.0.0.1:18140';
 const USER = process.env.E2E_USER || 'e2e';
 const PASS = process.env.E2E_PASS || 'e2e-passw0rd-123';
-const PAGES = (process.env.PAGES || '/,/library,/browse,/profile,/admin').split(',');
+const PAGES = (process.env.PAGES || '/,/library,/browse,/discover,/profile,/admin').split(',');
 
 // How much of a wide viewport the content must actually occupy. Not 100%: a settings form SHOULD have
 // margins, and prose that runs 1900px wide is unreadable. But a page using less than this is a column

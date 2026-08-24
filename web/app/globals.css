@@ -82,6 +82,13 @@
     background-image: linear-gradient(to right, rgb(0 0 0 / 0.85), rgb(0 0 0 / 0.28) 46%, transparent 76%);
   }
 
+  /* The lighter cousin of .scrim-inline, for art that should still read as a picture. Same reason for the
+     dir= selector: a gradient has no logical direction keyword, and darkening the wrong side puts the scrim
+     opposite the text in Arabic. */
+  .scrim-soft {
+    background-image: linear-gradient(to right, rgb(0 0 0 / 0.65), rgb(0 0 0 / 0.20) 45%, transparent 72%);
+  }
+
   /* A board of cards that answers extra width with MORE COLUMNS rather than wider columns. This is the
      whole trick: a settings form stretched to 2000px is unreadable, so nothing here ever stretches. */
   .board {
@@ -207,4 +214,8 @@ html.lenis, html.lenis body { height: auto; }
 
 [dir='rtl'] .scrim-inline {
   background-image: linear-gradient(to left, rgb(0 0 0 / 0.85), rgb(0 0 0 / 0.28) 46%, transparent 76%);
+}
+
+[dir='rtl'] .scrim-soft {
+  background-image: linear-gradient(to left, rgb(0 0 0 / 0.65), rgb(0 0 0 / 0.20) 45%, transparent 72%);
 }

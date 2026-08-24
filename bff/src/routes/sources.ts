@@ -2,7 +2,7 @@
 // adapters + the downloader. The cover proxy lives under /img (cookie auth) so <img> tags can load it.
 import type { FastifyInstance } from 'fastify';
 import { authenticate } from '../lib/auth';
-import { getSource, listSources } from '../lib/sources';
+import { getSource, listSources, isSwAdapterId, SW_PREFIX } from '../lib/sources';
 import { downloadChapter, sanitize } from '../lib/downloader';
 import { persistScan, setBookDates } from '../lib/library';
 import { fetchAniListArt, fetchTrendingManhwa, TrendingItem } from '../lib/anilist';
@@ -153,12 +153,30 @@ export default async function sourceRoutes(app: FastifyInstance) {
 
   app.get('/api/sources', async () => {
     const health = new Map((await healthAll()).map((h) => [h.source_id, h]));
+    // Which language a source serves is an operator's choice recorded per source, not a property of the
+    // adapter (adapters are code), so it lives only in suwayomi_sources. Discover groups by it: forty-five
+    // sources across thirty languages is a list nobody can use, and most of them are the same site repeated.
+    // A 45-row read on a route the client already polls.
+    const langs = new Map(
+      (await q<{ source_id: string; lang: string | null }>(
+        'SELECT source_id, lang FROM suwayomi_sources WHERE enabled = true',
+      ).catch(() => [])).map((r) => [r.source_id, r.lang]),
+    );
     const now = Date.now();
     return {
       content: listSources().map((s) => {
         const h = health.get(s.id);
         const blocked = !!(h?.blocked_until && new Date(h.blocked_until).getTime() > now);
-        return { id: s.id, name: s.name, latest: typeof s.latest === 'function', status: h?.disabled ? 'disabled' : blocked ? h!.status : 'ok', blockedUntil: blocked ? h!.blocked_until : null };
+        return {
+          id: s.id,
+          name: s.name,
+          // null means "declares no single language", which is not the same as "serves none": a source
+          // like MangaDex belongs in every group rather than in an orphan bucket.
+          lang: isSwAdapterId(s.id) ? (langs.get(s.id.slice(SW_PREFIX.length)) ?? null) : null,
+          latest: typeof s.latest === 'function',
+          status: h?.disabled ? 'disabled' : blocked ? h!.status : 'ok',
+          blockedUntil: blocked ? h!.blocked_until : null,
+        };
       }),
     };
   });
@@ -241,12 +259,19 @@ export default async function sourceRoutes(app: FastifyInstance) {
 
   // Find a title across all providers (Aqua first) → the best match per provider that carries it.
   app.get('/api/sources/find', async (req) => {
-    const term = ((req.query as { q?: string }).q || '').trim();
+    const { q: raw, sources } = req.query as { q?: string; sources?: string };
+    const term = (raw || '').trim();
     if (!term) return { content: [] };
+    // Scoped, because unscoped this is one outbound request per registered source: forty-five sites hit for
+    // one tap. The client already knows which sources the reader is browsing and passes them.
+    const wanted = sources ? new Set(sources.split(',').map((x) => x.trim()).filter(Boolean)) : null;
     const found = await Promise.all(
-      findOrder().map(async (id) => {
+      findOrder().filter((id) => !wanted || wanted.has(id)).map(async (id) => {
         const src = getSource(id);
         if (!src) return null;
+        // search-all and latest both skip disabled sources and this did not, so it offered a provider an
+        // admin had switched off and the add then failed with "disabled by the admin".
+        if (await isDisabled(id).catch(() => false)) return null;
         try {
           const best = pickBest(await withTimeout(src.search(term), 25000), term);
           return best ? { source: id, name: src.name, sourceId: best.sourceId, title: best.title, coverUrl: best.coverUrl } : null;

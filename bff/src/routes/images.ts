@@ -426,11 +426,17 @@ export default async function imageRoutes(app: FastifyInstance) {
   });
 
   app.get('/img/sources/cover', async (req, reply) => {
-    const { u, source } = req.query as { u?: string; source?: string };
+    const { u, source, w } = req.query as { u?: string; source?: string; w?: string };
     if (!u) return reply.code(400).send({ error: 'bad' });
-    return serveImage(req, reply, `srccover:${u}`, async () => {
+    // 400px is right for a cover tile and wrong for a wide banner: an AniList key-art strip is ~1900px, and
+    // squeezing it to 400 gave the discover hero a 400x84 image stretched across a 1920px box, which reads
+    // as no art at all rather than as a low-quality one. Whitelisted rather than free-form so this cannot
+    // become a request to render someone's 8000px file.
+    const width = w === '1600' ? 1600 : w === '800' ? 800 : 400;
+    // The width is part of the cache key, or the first variant fetched would be served for every size.
+    return serveImage(req, reply, `srccover:${width}:${u}`, async () => {
       const input = await fetchCoverImage(u, source);
-      const buffer = await sharp(input).resize({ width: 400, withoutEnlargement: true }).webp({ quality: 72 }).toBuffer();
+      const buffer = await sharp(input).resize({ width, withoutEnlargement: true }).webp({ quality: 72 }).toBuffer();
       return { buffer, contentType: 'image/webp' };
     });
   });

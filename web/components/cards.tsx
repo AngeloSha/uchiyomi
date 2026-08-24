@@ -6,7 +6,8 @@ import { Book, Series } from '@/lib/types';
 import { chapterLabel, progressOf, relativeTime } from '@/lib/format';
 import { deviceId } from '@/lib/device';
 import { Img, ProgressBar } from './ui';
-import { IcHeart, IcPlay } from './icons';
+import { IcHeart, IcPlay, IcPlus } from './icons';
+import { t as tr } from '@/lib/i18n';
 
 /** Pointer-tracked 3D tilt + moving glare for cover cards. Desktop-only (hover+fine pointer),
  *  disabled under prefers-reduced-motion; on touch the handlers never fire so nothing changes. */
@@ -151,5 +152,91 @@ export function SeriesTile({ series, eager = false, selectable, selected, onTogg
         {series.metadata?.title || series.name}
       </p>
     </Wrap>
+  );
+}
+
+/**
+ * A cover from an external source, through this server.
+ *
+ * Same-origin on purpose: a cross-origin `<img>` is unreliable in a standalone iOS PWA, which is the app's
+ * primary target. `Img`'s `fallbackSrc` carries the direct URL for the case where the proxy itself fails.
+ */
+export const sourceCover = (source: string | undefined, u?: string | null, w?: 800 | 1600) =>
+  (u
+    ? `/img/sources/cover?${source ? `source=${encodeURIComponent(source)}&` : ''}u=${encodeURIComponent(u)}${w ? `&w=${w}` : ''}`
+    : '');
+
+/** One row from a source: a `latest` item, or a grouped search hit with several providers behind it. */
+export interface SourceItem {
+  source: string;
+  sourceId: string;
+  title: string;
+  coverUrl?: string;
+  updatedAt?: string;
+  inLibrary?: boolean;
+  /** >1 when the same title was found on several sources. */
+  providerCount?: number;
+}
+
+/**
+ * A series you do not own yet, on a wall of things you could.
+ *
+ * The whole card is the button. It used to be a plain `<div>` with an `opacity-0 group-hover:opacity-100`
+ * strip as the only add affordance, which on a touch device is not a subtle problem: there is no hover, so
+ * the primary action of the page was invisible AND unreachable, and tapping the cover did nothing at all.
+ *
+ * Chrome is `SeriesTile`'s, deliberately, so the things you own and the things you could own read as one
+ * system rather than as two grids that happen to be adjacent.
+ */
+export function SourceCard({ item, sourceName, onAdd, eager }: {
+  item: SourceItem;
+  /** shown as a corner chip, because a wall merged from several sources otherwise hides where a title came from */
+  sourceName?: string;
+  onAdd: () => void;
+  eager?: boolean;
+}) {
+  const owned = !!item.inLibrary;
+  return (
+    <button
+      type="button"
+      onClick={onAdd}
+      disabled={owned}
+      aria-label={owned ? item.title : tr('Add to library')}
+      className="group block w-full text-start disabled:cursor-default"
+    >
+      <div className={`grad-border relative aspect-[2/3] overflow-hidden rounded-2xl border border-ink-700/60 transition-all duration-300
+                       ${owned ? 'opacity-55' : 'group-hover:-translate-y-1 group-hover:shadow-glow group-active:scale-[0.97]'}`}>
+        <Img src={sourceCover(item.source, item.coverUrl)} alt={item.title} eager={eager}
+          fallbackSrc={item.coverUrl || undefined}
+          className="h-full w-full" imgClassName="transition-transform duration-500 group-hover:scale-[1.07]" />
+
+        {sourceName && (
+          <span className="absolute end-1.5 top-1.5 z-10 max-w-[85%] truncate rounded-md bg-ink-950/80 px-1.5 py-0.5 text-[10px] font-medium text-fog-200 backdrop-blur">
+            {sourceName}
+          </span>
+        )}
+        {(item.providerCount ?? 0) > 1 && !owned && (
+          <span className="absolute start-1.5 top-1.5 z-10 rounded-md bg-ink-950/80 px-1.5 py-0.5 text-[10px] font-semibold text-accent backdrop-blur">
+            {item.providerCount}
+          </span>
+        )}
+
+        {owned ? (
+          // Accent, not emerald: emerald is a health colour everywhere else in this app, and a large solid
+          // fill of it over artwork reads as a system status chip pasted onto a cover.
+          <span className="absolute inset-x-0 bottom-0 z-10 bg-accent/85 py-1.5 text-center text-[11px] font-semibold text-black backdrop-blur">
+            {tr('In library')}
+          </span>
+        ) : (
+          // Always visible. Not a hover reveal.
+          <span aria-hidden className="absolute bottom-1.5 end-1.5 z-10 grid size-7 place-items-center rounded-full bg-accent text-black shadow-glow transition group-hover:scale-110">
+            <IcPlus width={15} height={15} />
+          </span>
+        )}
+      </div>
+      <p className="mt-1.5 line-clamp-2 text-xs font-medium leading-tight text-fog-300 transition group-hover:text-fog-100">
+        {item.title}
+      </p>
+    </button>
   );
 }

@@ -46,6 +46,7 @@ export function Img({
   alt,
   className = '',
   imgClassName = '',
+  fallbackSrc,
   eager = false,
 }: {
   src: string;
@@ -57,12 +58,26 @@ export function Img({
    * the middle of the artwork, which on a manga cover is reliably the part with no face and no title.
    */
   imgClassName?: string;
+  /**
+   * One retry before the broken-image glyph.
+   *
+   * Discover serves external covers through a same-origin proxy, because a cross-origin `<img>` is flaky in
+   * a standalone iOS PWA -- but the proxy can 502 where the origin is fine. Without a second chance every
+   * such cover is a grey box, which is why that page had four raw `<img onError>` blocks instead of using
+   * this component at all.
+   */
+  fallbackSrc?: string;
   eager?: boolean;
 }) {
   const [loaded, setLoaded] = useState(false);
   const [failed, setFailed] = useState(false);
+  const [fellBack, setFellBack] = useState(false);
   const error = failed || !src; // no src at all is the same broken tile as a src that 404s
-  const setError = setFailed;
+  const shown = fellBack && fallbackSrc ? fallbackSrc : src;
+  const setError = () => {
+    if (fallbackSrc && !fellBack && fallbackSrc !== src) { setFellBack(true); return; }
+    setFailed(true);
+  };
   // `relative` is only applied when the caller has not chosen a position of their own.
   //
   // Tailwind emits `.absolute` BEFORE `.relative`, and CSS resolves by stylesheet order, not by the order
@@ -84,12 +99,12 @@ export function Img({
       ) : (
         // eslint-disable-next-line @next/next/no-img-element
         <img
-          src={src}
+          src={shown}
           alt={alt}
           loading={eager ? 'eager' : 'lazy'}
           decoding="async"
           onLoad={() => setLoaded(true)}
-          onError={() => setError(true)}
+          onError={setError}
           className={`h-full w-full object-cover ${imgClassName} transition-all duration-700 ease-out ${loaded ? 'scale-100 opacity-100 blur-0' : 'scale-105 opacity-0 blur-md'}`}
         />
       )}
