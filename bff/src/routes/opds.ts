@@ -7,7 +7,7 @@ import { stat, readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { q, one } from '../lib/db';
 import { resolveOpdsBasic } from '../lib/auth';
-import { viewCtxFor, visibleBookFile, Params, visible, type ViewCtx } from '../lib/visibility';
+import { viewCtxFor, visibleBookFile, Params, visible, browsable, type ViewCtx } from '../lib/visibility';
 import { LIBRARY_ROOT } from '../lib/library';
 const AdmZip = require('adm-zip');
 
@@ -56,11 +56,15 @@ export default async function opdsRoutes(app: FastifyInstance) {
    * The series source, once. This body was hand-copied into three separate queries here, none of which
    * would have inherited a change made to the real one in ownedCatalog.
    */
-  const seriesSrc = (ctx: ViewCtx, p: Params) => `(SELECT s.id, COALESCE(o.title, s.title) AS title,
+  const seriesSrcWith = (gate: typeof visible, ctx: ViewCtx, p: Params) => `(SELECT s.id, COALESCE(o.title, s.title) AS title,
           COALESCE(o.summary, s.summary) AS summary, COALESCE(o.author, s.author) AS author, s.books_count,
           s.latest_mtime, s.created_at
      FROM lib_series s LEFT JOIN series_overrides o ON o.series_id = s.id
-    WHERE ${visible('s', ctx, p)}) sv`;
+    WHERE ${gate('s', ctx, p)}) sv`;
+  /** The browsing feeds. An OPDS reader has no button to press, so it gets the default: 18+ hidden. */
+  const seriesSrc = (ctx: ViewCtx, p: Params) => seriesSrcWith(browsable, ctx, p);
+  /** One series the client already navigated to, and the chapter list under it. */
+  const seriesSrcById = (ctx: ViewCtx, p: Params) => seriesSrcWith(visible, ctx, p);
   // HTTP Basic auth: password = a per-user OPDS token. Prompts the client when missing/invalid.
   app.addHook('preHandler', async (req: FastifyRequest, reply: FastifyReply) => {
     const uid = await resolveOpdsBasic(req.headers.authorization);
@@ -69,7 +73,11 @@ export default async function opdsRoutes(app: FastifyInstance) {
     // The uid was resolved here and then never used by any handler, so OPDS served the whole library
     // regardless of who asked. It is a full parallel read path (feed, chapter list, raw CBZ download),
     // so a rule enforced only in the app is not enforced at all.
-    (req as any).viewCtx = await viewCtxFor(uid);
+    // No query parameter to read and no session: an OPDS reader is a client that cannot ask, so it gets the
+    // default. Hiding is the right default there -- a feed nobody can filter should not be the way adult
+    // titles get onto a device. `/opds/book/:id/file` still works, because downloads go through
+    // `visibleBookFile`, which is `visible()` and not `browsable()`.
+    (req as any).viewCtx = await viewCtxFor(uid, undefined, { hideAdult: true });
   });
 
   // root navigation feed
@@ -148,7 +156,7 @@ export default async function opdsRoutes(app: FastifyInstance) {
     const { id } = req.params as { id: string };
       const pp = new Params();
       const s = await one<{ title: string }>(
-        `SELECT title FROM ${seriesSrc(vc(req), pp)} WHERE id = ${pp.add(id)}`, pp.values as any[]);
+        `SELECT title FROM ${seriesSrcById(vc(req), pp)} WHERE id = ${pp.add(id)}`, pp.values as any[]);
     if (!s) return reply.code(404).send('not found');
     const books = await q<{ id: string; title: string | null; number: number; pages: number }>(
       // This had no visibility predicate whatsoever: the chapter list of a hidden series was served in

@@ -28,6 +28,18 @@ export interface ViewCtx {
    * the same way and an account with neither set behaves as it always did.
    */
   readonly maxAgeRating: number | null;
+  /**
+   * Keep libraries rated 18+ off browsing surfaces for this request.
+   *
+   * A SURFACING filter, not a permission -- `maxAgeRating` is the permission and is unaffected. It answers
+   * "do not put this on my home screen unasked", so it is applied by `browsable()` to things that LIST
+   * series and never by `visible()`, which also gates page bytes, chapter navigation, the offline manifest
+   * and reading-progress writes. Hiding those would lose data rather than tidy a screen.
+   *
+   * `false` emits no clause at all, which matters twice over: it is what `SYSTEM_CTX` uses, and it is what
+   * an older ViewCtx literal degrades to, so nothing silently starts filtering.
+   */
+  readonly hideAdultLibraries: boolean;
 }
 
 /**
@@ -89,7 +101,67 @@ export function visible(alias: string, ctx: ViewCtx, p: Params): string {
  */
 export const NO_LIBRARIES = '';
 
-export const SYSTEM_CTX: ViewCtx = { userId: null, libraryIds: null, maxAgeRating: null };
+export const SYSTEM_CTX: ViewCtx = {
+  userId: null, libraryIds: null, maxAgeRating: null,
+  // Background work and admin reporting count what is there, not what someone wants on screen.
+  hideAdultLibraries: false,
+};
+
+/**
+ * The predicate for anything that LISTS series: `visible()`, plus the 18+ hide.
+ *
+ * Deliberately separate from `visible()` rather than folded into it. `visible()` is also the gate on page
+ * bytes, the chapter list, next/previous, the offline download manifest, OPDS file downloads and the
+ * progress write path -- and none of those can see a browser session. The service worker flushes reading
+ * progress with the app closed; an `<img>` cannot carry the signal; an OPDS reader has no button to press.
+ * Hiding a series from a home rail is tidying. Refusing to record that someone read it is data loss.
+ *
+ * So: listings call this, by-id resolvers call `visible()`, and the split is the whole design.
+ */
+export function browsable(alias: string, ctx: ViewCtx, p: Params): string {
+  const base = visible(alias, ctx, p);
+  if (!ctx.hideAdultLibraries) return base;
+  // NO p.add() here, on purpose. `visibleToAll()` throws its Params away (see below) and 25 call sites
+  // interpolate the result into queries whose parameter arrays are hand-written, so a bound parameter would
+  // emit a `$N` nothing ever binds -- and `q()` would either throw or, worse, collide with the caller's own
+  // $1. ADULT_RATING is a code constant, never user input, so interpolating it is safe.
+  return `${base} AND NOT EXISTS (
+    SELECT 1 FROM libraries l_ad WHERE l_ad.id = ${alias}.library_id AND l_ad.age_rating >= ${ADULT_RATING})`;
+}
+
+/**
+ * Does this request want 18+ libraries kept off its listings?
+ *
+ * Carried as a query parameter rather than a header or a cookie, for one concrete reason: the service
+ * worker caches `/api/` responses with `networkFirst`, and the Cache API keys by URL with NO `Vary`. A
+ * header would leave a revealed `/api/home` stored under the same URL as an unrevealed one and replayed to
+ * it the first time the network hiccups. A different URL is a different cache entry, for free.
+ *
+ * Absent means hidden. That is the default for anything that cannot ask -- an OPDS reader, a bare curl --
+ * and it is the right default: a client that does not know about the filter should not defeat it.
+ */
+export const hideAdult = (req: { query?: unknown }): boolean =>
+  (req.query as { adult?: string } | undefined)?.adult !== '1';
+
+/**
+ * Which of these series ids may be listed to this viewer.
+ *
+ * Several rails do not build one query over `lib_series` -- they collect ids from somewhere else (reading
+ * history, favourites, a collection, AniList) and then resolve each one. Those cannot inherit `browsable()`,
+ * and resolving-then-filtering is also why some rails silently came back short: the LIMIT ran before the
+ * filter did. One round trip, applied to the id list BEFORE the limit.
+ */
+export async function browsableIds(ids: readonly string[], ctx: ViewCtx): Promise<Set<string>> {
+  const list = [...new Set(ids.filter(Boolean))];
+  if (!list.length) return new Set();
+  const p = new Params();
+  const arr = p.add(list);
+  const rows = await q<{ id: string }>(
+    `SELECT s.id FROM lib_series s WHERE s.id = ANY(${arr}) AND ${browsable('s', ctx, p)}`,
+    p.values as any[],
+  ).catch(() => [] as Array<{ id: string }>);
+  return new Set(rows.map((r) => r.id));
+}
 
 /**
  * The predicate for queries that legitimately span every library: the scanner, the updater sweep, health
@@ -141,11 +213,21 @@ export function sourceAllowedFor(src: { isNsfw?: boolean } | null | undefined, m
  * failure mode: a seed that half-runs locks people out of everything, whereas this one's failure mode is
  * "sees exactly what they saw yesterday". It is also why the empty list must never come from a `|| []`.
  */
-export async function viewCtxFor(userId: string | null, role?: string): Promise<ViewCtx> {
+export async function viewCtxFor(
+  userId: string | null,
+  role?: string,
+  /**
+   * Per-request browsing options. `hideAdult` is the 18+ surfacing filter and is deliberately OUTSIDE the
+   * admin short-circuit below: an admin is exempt from the age CAP because that is a permission, but they
+   * asked for a tidy home screen like everyone else.
+   */
+  opts?: { hideAdult?: boolean },
+): Promise<ViewCtx> {
+  const hideAdultLibraries = !!opts?.hideAdult;
   // Komga mode has its own libraries and its own restrictions, enforced by Komga. Do not pretend to enforce
   // a model this backend does not have.
-  if (process.env.LIBRARY_BACKEND !== 'owned') return { userId, libraryIds: null, maxAgeRating: null };
-  if (!userId || role === 'admin') return { userId, libraryIds: null, maxAgeRating: null };
+  if (process.env.LIBRARY_BACKEND !== 'owned') return { userId, libraryIds: null, maxAgeRating: null, hideAdultLibraries: false };
+  if (!userId || role === 'admin') return { userId, libraryIds: null, maxAgeRating: null, hideAdultLibraries };
   const [rows, cap] = await Promise.all([
     q<{ library_id: string }>('SELECT library_id FROM user_libraries WHERE user_id = $1', [userId])
       .catch(() => [] as Array<{ library_id: string }>),
@@ -156,6 +238,7 @@ export async function viewCtxFor(userId: string | null, role?: string): Promise<
     userId,
     libraryIds: rows.length ? rows.map((r) => r.library_id) : null,
     maxAgeRating: cap?.max_age_rating ?? null,
+    hideAdultLibraries,
   };
 }
 

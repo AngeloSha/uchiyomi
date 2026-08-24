@@ -4,7 +4,7 @@ import { q, one } from '../lib/db';
 import { komgaImage } from '../lib/komga';
 import { content as komga, NATIVE_PROGRESS } from '../lib/backend';
 import { UnsupportedFilter } from '../lib/ownedCatalog';
-import { viewCtxFor, SYSTEM_CTX, type ViewCtx } from '../lib/visibility';
+import { viewCtxFor, SYSTEM_CTX, type ViewCtx, hideAdult, browsableIds, browsable, Params } from '../lib/visibility';
 
 /** The viewer attached by the preHandler above. */
 const vc = (req: FastifyRequest): ViewCtx => (req as any).viewCtx as ViewCtx;
@@ -115,7 +115,10 @@ const forYouCache = new Map<string, { ts: number; pool: any[] }>();
 /** Raw recommendation pool from the genres of what the user favorites + finishes (cached 10m). */
 async function tasteRecs(req: FastifyRequest): Promise<any[]> {
   const uid = userIdOf(req);
-  const cached = forYouCache.get(uid);
+  // Keyed by the reveal state as well as the user: the pool is built from filtered queries, so a pool built
+  // while 18+ was revealed would otherwise be handed straight back after it was hidden again.
+  const key = `${uid}:${vc(req).hideAdultLibraries ? 'safe' : 'all'}`;
+  const cached = forYouCache.get(key);
   if (cached && Date.now() - cached.ts < 10 * 60 * 1000) return cached.pool;
   const favIds = (await q<{ series_id: string }>('SELECT series_id FROM favorites WHERE user_id = $1', [uid])).map((r) => r.series_id);
   const doneIds = (await q<{ series_id: string }>('SELECT DISTINCT series_id FROM read_progress WHERE user_id = $1 AND completed = true', [uid])).map((r) => r.series_id);
@@ -133,7 +136,7 @@ async function tasteRecs(req: FastifyRequest): Promise<any[]> {
   }
   const exclude = new Set([...favIds, ...doneIds]);
   pool = pool.filter((s) => !exclude.has(s.id));
-  forYouCache.set(uid, { ts: Date.now(), pool });
+  forYouCache.set(key, { ts: Date.now(), pool });
   return pool;
 }
 
@@ -145,7 +148,7 @@ export default async function catalogRoutes(app: FastifyInstance) {
   // Resolve the viewer once per request. Everything below reads it rather than deriving its own, so there
   // is one decision about what this person may see instead of a predicate each handler has to remember.
   app.addHook('preHandler', async (req) => {
-    (req as any).viewCtx = await viewCtxFor(userIdOf(req), roleOf(req));
+    (req as any).viewCtx = await viewCtxFor(userIdOf(req), roleOf(req), { hideAdult: hideAdult(req) });
   });
 
   app.get('/api/libraries', async (req) => komga.libraries(vc(req)));
@@ -168,11 +171,16 @@ export default async function catalogRoutes(app: FastifyInstance) {
 
   // What everyone in the household is reading (cross-user, last 14 days).
   app.get('/api/trending', async (req) => {
+    // Over-fetch, then filter, then take twelve. The LIMIT used to run BEFORE the per-id visibility check,
+    // so the rail quietly came back short for anyone who could not see one of the twelve -- and now also for
+    // anyone hiding 18+.
     const rows = await q<{ series_id: string }>(
       `SELECT series_id FROM reading_events WHERE created_at > now() - interval '14 days'
-       GROUP BY series_id ORDER BY count(*) DESC LIMIT 12`,
+       GROUP BY series_id ORDER BY count(*) DESC LIMIT 60`,
     );
-    const series = (await Promise.all(rows.map((r) => komga.series(vc(req), r.series_id).catch(() => null)))).filter(Boolean) as any[];
+    const ok = await browsableIds(rows.map((r) => r.series_id), vc(req));
+    const ids = rows.map((r) => r.series_id).filter((id) => ok.has(id)).slice(0, 12);
+    const series = (await Promise.all(ids.map((id) => komga.series(vc(req), id).catch(() => null)))).filter(Boolean) as any[];
     return { content: await enrichSeries(req, series) };
   });
 
@@ -250,11 +258,18 @@ export default async function catalogRoutes(app: FastifyInstance) {
         // reading and go find it, which is precisely the job this rail exists to do.
         //
         // Scoped to series touched in the last 90 days so the list stays short, ordered by when you last read.
+        // The 18+ filter is applied HERE rather than after the fact, for the same reason the LIMIT is: this
+        // resolves each pick through komga.book(), which is a by-id read and deliberately does not filter,
+        // so a series hidden from browsing would otherwise stay in Continue Reading. Params is used rather
+        // than hand-written $1/$2 because `browsable()` pushes its own for a restricted viewer.
+        const p = new Params();
+        const uidP = p.add(uid);
         const rows = await q<{ book_id: string }>(
           `WITH recent AS (
              SELECT series_id, max(updated_at) AS last_read
-               FROM read_progress
-              WHERE user_id = $1 AND updated_at > now() - interval '90 days'
+               FROM read_progress rp
+              WHERE rp.user_id = ${uidP} AND rp.updated_at > now() - interval '90 days'
+                AND EXISTS (SELECT 1 FROM lib_series s WHERE s.id = rp.series_id AND ${browsable('s', vc(req), p)})
               GROUP BY series_id
            ),
            pick AS (
@@ -262,7 +277,7 @@ export default async function catalogRoutes(app: FastifyInstance) {
                     COALESCE(
                       -- the chapter you are part-way through wins
                       (SELECT p.book_id FROM read_progress p
-                         WHERE p.user_id = $1 AND p.series_id = r.series_id AND p.completed = false
+                         WHERE p.user_id = ${uidP} AND p.series_id = r.series_id AND p.completed = false
                          ORDER BY p.updated_at DESC LIMIT 1),
                       -- otherwise the lowest-numbered chapter you have not finished
                       (SELECT b.id FROM lib_books b
@@ -270,7 +285,7 @@ export default async function catalogRoutes(app: FastifyInstance) {
                          WHERE b.series_id = r.series_id
                            AND NOT EXISTS (
                              SELECT 1 FROM read_progress p2
-                              WHERE p2.user_id = $1 AND p2.book_id = b.id AND p2.completed
+                              WHERE p2.user_id = ${uidP} AND p2.book_id = b.id AND p2.completed
                            )
                          ORDER BY COALESCE(bo.number, b.number) ASC, b.file ASC LIMIT 1)
                     ) AS book_id
@@ -279,8 +294,8 @@ export default async function catalogRoutes(app: FastifyInstance) {
            SELECT book_id FROM pick
             WHERE book_id IS NOT NULL      -- a series you have finished entirely drops out, correctly
             ORDER BY last_read DESC
-            LIMIT $2`,
-          [uid, ON_DECK_LIMIT],
+            LIMIT ${p.add(ON_DECK_LIMIT)}`,
+          p.values as any[],
         );
         const books = (await Promise.all(rows.map((r) => komga.book(vc(req), r.book_id).catch(() => null)))).filter(Boolean) as any[];
         return overlay(books, await userProgress(uid, books.map((b) => b.id)));
@@ -315,9 +330,13 @@ export default async function catalogRoutes(app: FastifyInstance) {
       }
     }
 
-    const favIds = (
-      await q<{ series_id: string }>('SELECT series_id FROM favorites WHERE user_id = $1 ORDER BY created_at DESC LIMIT 20', [uid])
+    // Home's own favourites rail. Ids from another table again, so it inherits nothing and needs the same
+    // filter as every other id-gathering surface -- and the same over-fetch, because the LIMIT ran first.
+    const favAll = (
+      await q<{ series_id: string }>('SELECT series_id FROM favorites WHERE user_id = $1 ORDER BY created_at DESC LIMIT 60', [uid])
     ).map((r) => r.series_id);
+    const favShown = await browsableIds(favAll, vc(req));
+    const favIds = favAll.filter((id) => favShown.has(id)).slice(0, 20);
     const favorites = ((await Promise.all(favIds.map((id) => komga.series(vc(req), id).catch(() => null)))).filter(Boolean)) as any[];
 
     // updates badge: favorites with new chapters since last seen (self-heal missing baselines)
@@ -400,7 +419,10 @@ export default async function catalogRoutes(app: FastifyInstance) {
   // Updates feed: favorited series that gained chapters since you last opened them.
   app.get('/api/updates', async (req) => {
     const uid = userIdOf(req);
-    const favIds = (await q<{ series_id: string }>('SELECT series_id FROM favorites WHERE user_id = $1', [uid])).map((r) => r.series_id);
+    const favRows = (await q<{ series_id: string }>('SELECT series_id FROM favorites WHERE user_id = $1', [uid])).map((r) => r.series_id);
+    // Favourites are ids from another table, so they inherit nothing: filter them before resolving.
+    const shown = await browsableIds(favRows, vc(req));
+    const favIds = favRows.filter((id) => shown.has(id));
     const favSeries = ((await Promise.all(favIds.map((id) => komga.series(vc(req), id).catch(() => null)))).filter(Boolean)) as any[];
     const seenMap = await seriesSeen(uid, favSeries.map((s) => s.id));
     const out: { series: any; newCount: number }[] = [];
@@ -494,7 +516,11 @@ export default async function catalogRoutes(app: FastifyInstance) {
   app.get('/api/offline/plan', async (req) => {
     const uid = userIdOf(req);
     const n = Math.min(10, Math.max(1, Number((req.query as Record<string, string>).perSeries) || 3));
-    const favIds = (await q<{ series_id: string }>('SELECT series_id FROM favorites WHERE user_id = $1', [uid])).map((r) => r.series_id);
+    const favAll = (await q<{ series_id: string }>('SELECT series_id FROM favorites WHERE user_id = $1', [uid])).map((r) => r.series_id);
+    // Filtered too: while 18+ is hidden, the smart-offline planner should not be quietly pulling adult
+    // chapters onto the device and parking them in Downloads.
+    const planShown = await browsableIds(favAll, vc(req));
+    const favIds = favAll.filter((id) => planShown.has(id));
     const out: { bookId: string; seriesId: string }[] = [];
     for (const sid of favIds) {
       const raw = await komga.seriesBooks(vc(req), sid, 0, 1000, 'metadata.numberSort,asc').catch(() => null);

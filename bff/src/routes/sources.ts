@@ -16,7 +16,7 @@ import { env } from '../env';
 //
 // Which SOURCES you may reach is the opposite: entirely about who is asking, which is what `viewCtxFor` and
 // `sourceAllowedFor` answer.
-import { visibleToAll, viewCtxFor, sourceAllowedFor, type ViewCtx } from '../lib/visibility';
+import { visibleToAll, viewCtxFor, sourceAllowedFor, browsable, Params, type ViewCtx, hideAdult } from '../lib/visibility';
 
 interface Job { title: string; total: number; done: number; status: 'downloading' | 'done' | 'error'; reason?: string }
 const jobs = new Map<string, Job>();
@@ -268,7 +268,7 @@ export default async function sourceRoutes(app: FastifyInstance) {
     }
     // Resolved once per request, as in catalog.ts. Only `maxAgeRating` is read here, but taking the whole
     // context means this file cannot drift from everyone else's idea of who the viewer is.
-    (req as any).viewCtx = await viewCtxFor(userIdOf(req), roleOf(req));
+    (req as any).viewCtx = await viewCtxFor(userIdOf(req), roleOf(req), { hideAdult: hideAdult(req) });
   });
 
   const vc = (req: FastifyRequest): ViewCtx => (req as any).viewCtx as ViewCtx;
@@ -407,7 +407,20 @@ export default async function sourceRoutes(app: FastifyInstance) {
     return { content: results.map((r) => ({ ...r, inLibrary: have.has(norm(r.title)) })) };
   });
 
-  app.get('/api/sources/jobs', async () => ({ content: [...jobs.entries()].map(([folder, j]) => ({ folder, ...j })) }));
+  app.get('/api/sources/jobs', async (req) => {
+    const all = [...jobs.entries()].map(([folder, j]) => ({ folder, ...j }));
+    if (!vc(req).hideAdultLibraries) return { content: all };
+    // A download job carries the series title, so the strip on Discover is a listing like any other. Jobs
+    // are keyed by folder, which is exactly what lib_series.folder holds, so the filter is one lookup. A
+    // job for a series not yet scanned in has no row and stays visible: it cannot be in a library yet.
+    const p = new Params();
+    const arr = p.add(all.map((j) => j.folder));
+    const hidden = new Set((await q<{ folder: string }>(
+      `SELECT s.folder FROM lib_series s WHERE s.folder = ANY(${arr}) AND NOT (${browsable('s', vc(req), p)})`,
+      p.values as any[],
+    ).catch(() => [])).map((r) => r.folder));
+    return { content: all.filter((j) => !hidden.has(j.folder)) };
+  });
 
   // Globally trending manhwa you don't already have, for the Discover recommendations rail.
   app.get('/api/discover/trending', async (_req, reply) => {

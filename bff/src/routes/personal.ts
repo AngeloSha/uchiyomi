@@ -4,7 +4,7 @@ import { q, one } from '../lib/db';
 // backend-agnostic content client: the owned library in owned mode, Komga otherwise. The old direct
 // `lib/komga` import silently nulled every series lookup here after the owned-library cutover.
 import { content as komga } from '../lib/backend';
-import { viewCtxFor, visible, Params, type ViewCtx } from '../lib/visibility';
+import { viewCtxFor, visible, browsable, browsableIds, Params, type ViewCtx, hideAdult } from '../lib/visibility';
 import { authenticate, userIdOf, roleOf, issueOpdsToken, issueApiToken, listApiTokens, revokeApiToken, API_SCOPES, revokeOpdsToken, opdsTokenStatus, OPDS_TOKEN_DAYS } from '../lib/auth';
 import { env } from '../env';
 import { pushEnabled, vapidPublicKey, saveSubscription, removeSubscription } from '../lib/push';
@@ -34,7 +34,7 @@ function computeStreaks(days: string[]): { current: number; longest: number } {
 export default async function personalRoutes(app: FastifyInstance) {
   app.addHook('preHandler', authenticate);
   app.addHook('preHandler', async (req) => {
-    (req as any).viewCtx = await viewCtxFor(userIdOf(req), roleOf(req));
+    (req as any).viewCtx = await viewCtxFor(userIdOf(req), roleOf(req), { hideAdult: hideAdult(req) });
   });
   /** The viewer attached above. */
   const vc = (req: any): ViewCtx => req.viewCtx as ViewCtx;
@@ -114,7 +114,9 @@ export default async function personalRoutes(app: FastifyInstance) {
         [uid],
       )
     ).map((r) => r.series_id);
-    const series = (await Promise.all(ids.map((id) => komga.series(vc(req), id).catch(() => null)))).filter(Boolean);
+    // Favourite ids come from another table, so they inherit no predicate: filter before resolving.
+    const shown = await browsableIds(ids, vc(req));
+    const series = (await Promise.all(ids.filter((id) => shown.has(id)).map((id) => komga.series(vc(req), id).catch(() => null)))).filter(Boolean);
     return { content: series };
   });
 
@@ -188,7 +190,10 @@ export default async function personalRoutes(app: FastifyInstance) {
     const ids = (
       await q<{ series_id: string }>('SELECT series_id FROM collection_items WHERE collection_id = $1 ORDER BY position', [id])
     ).map((r) => r.series_id);
-    const series = (await Promise.all(ids.map((sid) => komga.series(vc(req), sid).catch(() => null)))).filter(Boolean);
+    // A collection is a listing like any other, so a title in an 18+ library stays out of it while hidden.
+    // Nothing is removed from the collection itself -- reordering and membership are untouched.
+    const shown = await browsableIds(ids, vc(req));
+    const series = (await Promise.all(ids.filter((sid) => shown.has(sid)).map((sid) => komga.series(vc(req), sid).catch(() => null)))).filter(Boolean);
     return { ...col, items: series };
   });
 
@@ -263,7 +268,7 @@ export default async function personalRoutes(app: FastifyInstance) {
                 b.title AS book_title, b.number, COALESCE(so.title, s.title) AS series_title
            FROM bookmarks bm
            JOIN lib_books b   ON b.id = bm.book_id
-           JOIN lib_series s  ON s.id = b.series_id AND ${visible('s', ctx, p)}
+           JOIN lib_series s  ON s.id = b.series_id AND ${browsable('s', ctx, p)}
            LEFT JOIN series_overrides so ON so.series_id = s.id
           WHERE bm.user_id = ${uid}${extra}
           ORDER BY bm.created_at DESC LIMIT 500`,
@@ -326,8 +331,10 @@ export default async function personalRoutes(app: FastifyInstance) {
 
   // ---- history & stats ----
   app.get('/api/history', async (req) => {
-    const uid = userIdOf(req);
     const limit = Math.min(Number((req.query as Record<string, string>).limit) || 50, 200);
+    const hp = new Params();
+    const hctx = vc(req);
+    const uid = hp.add(userIdOf(req));
     // most-recent event per book, newest first, with display titles for the history timeline
     return {
       content: await q(
@@ -335,14 +342,17 @@ export default async function personalRoutes(app: FastifyInstance) {
                 COALESCE(b.title, '') AS book_title, COALESCE(s.title, '') AS series_title
          FROM (
            SELECT DISTINCT ON (book_id) book_id, series_id, page, completed, created_at
-           FROM reading_events WHERE user_id = $1
+           FROM reading_events WHERE user_id = ${uid}
            ORDER BY book_id, created_at DESC
          ) e
-         LEFT JOIN lib_books b ON b.id = e.book_id
-         LEFT JOIN lib_series s ON s.id = e.series_id
+         -- These were LEFT JOINs with no predicate at all, so history listed the titles of series that had
+         -- been deleted, merged away, or moved into a library the reader no longer holds. Inner joins
+         -- through browsable() make history obey the same rule as every other listing, 18+ included.
+         JOIN lib_books b ON b.id = e.book_id
+         JOIN lib_series s ON s.id = e.series_id AND ${browsable('s', hctx, hp)}
          ORDER BY e.created_at DESC
-         LIMIT $2`,
-        [uid, limit],
+         LIMIT ${hp.add(limit)}`,
+        hp.values as any[],
       ),
     };
   });
@@ -412,7 +422,11 @@ export default async function personalRoutes(app: FastifyInstance) {
       byMonth[d.getMonth()]++;
       dow[d.getDay()]++;
     }
-    const topIds = Object.entries(seriesCounts).sort((a, b) => b[1] - a[1]).slice(0, 5).map((e) => e[0]);
+    // Over-take, then filter, then take five: the top series are resolved by id, so an 18+ title would
+    // otherwise both appear here and, once hidden, leave the rail with four entries instead of five.
+    const ranked = Object.entries(seriesCounts).sort((a, b) => b[1] - a[1]).map((e) => e[0]);
+    const shownTop = await browsableIds(ranked.slice(0, 40), vc(req));
+    const topIds = ranked.filter((id) => shownTop.has(id)).slice(0, 5);
     const topSeries = (
       await Promise.all(
         topIds.map(async (id) => {

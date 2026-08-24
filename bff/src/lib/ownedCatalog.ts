@@ -2,7 +2,7 @@
 // the lib_* tables. enrichSeries/booksForUser in catalog.ts then add per-user state exactly as before.
 import { q, one } from './db';
 import { cbzPageDims, LIBRARY_ROOT, persistScan } from './library';
-import { ViewCtx, Params, visible } from './visibility';
+import { ViewCtx, Params, visible, browsable, ADULT_RATING } from './visibility';
 
 interface Page<T> { content: T[]; totalElements: number; totalPages: number; number: number; size: number; first: boolean; last: boolean }
 function page<T>(content: T[], total: number, p: number, size: number): Page<T> {
@@ -24,7 +24,9 @@ const SERIES_COLS = 'id, title, summary, status, genres, author, age_rating, boo
  * agree by construction. `GET /api/series/:id` still reads series_overrides directly afterwards, because it
  * additionally returns `overrides` and `artVersion` for the edit modal and thumbnail cache-busting.
  */
-const seriesSrc = (ctx: ViewCtx, p: Params, alias = 'sv') => `(
+type Gate = (alias: string, ctx: ViewCtx, p: Params) => string;
+
+const seriesSrcWith = (gate: Gate, ctx: ViewCtx, p: Params, alias: string) => `(
   SELECT s.id, COALESCE(o.title, s.title) AS title, COALESCE(o.summary, s.summary) AS summary,
          COALESCE(o.status, s.status) AS status, COALESCE(o.genres, s.genres) AS genres,
          COALESCE(o.author, s.author) AS author,
@@ -32,8 +34,24 @@ const seriesSrc = (ctx: ViewCtx, p: Params, alias = 'sv') => `(
          s.books_count, s.cover_book_id, s.web, s.created_at, s.latest_mtime,
          s.auto_update, s.library_id, s.library_pinned
     FROM lib_series s LEFT JOIN series_overrides o ON o.series_id = s.id
-   WHERE ${visible('s', ctx, p)}
+   WHERE ${gate('s', ctx, p)}
 ) ${alias}`;
+
+/**
+ * For resolving ONE series the viewer already has the id of: the series page, its chapter list, the reader.
+ * No 18+ surfacing filter, because that filter is about what appears unasked and this is asked for.
+ */
+const seriesSrc = (ctx: ViewCtx, p: Params, alias = 'sv') => seriesSrcWith(visible, ctx, p, alias);
+
+/**
+ * For anything that LISTS series: the library grid, search, the home rails, genres, OPDS feeds.
+ *
+ * The split is deliberate and is the whole design of the 18+ hide -- see `browsable()` in lib/visibility.
+ * A listing that calls `seriesSrc` by mistake shows adult titles it should not; a by-id resolver that calls
+ * `browseSrc` by mistake 404s a page the reader deliberately opened. Both are one word, and the second is
+ * much the worse, which is why `seriesSrc` keeps the plain name and the default.
+ */
+const browseSrc = (ctx: ViewCtx, p: Params, alias = 'sv') => seriesSrcWith(browsable, ctx, p, alias);
 
 /**
  * The one place a chapter is read from, so an override applies everywhere at once: the chapter list, reading
@@ -251,18 +269,28 @@ const clone = (p: Params): Params => {
 
 const total = async (ctx: ViewCtx, where = 'TRUE', p = new Params(), cte = '', from?: string) =>
   (await one<{ c: number }>(
-    `${cte} SELECT count(*)::int AS c FROM ${from ?? seriesSrc(ctx, p)} WHERE ${where}`,
+    `${cte} SELECT count(*)::int AS c FROM ${from ?? browseSrc(ctx, p)} WHERE ${where}`,
     p.values as any[],
   ))?.c ?? 0;
 
 export const owned = {
   libraries: async (ctx: ViewCtx) => {
-    const rows = await q<{ id: string; name: string }>(
-      'SELECT id, name FROM libraries ORDER BY sort_order, name',
+    const rows = await q<{ id: string; name: string; age_rating: number | null }>(
+      'SELECT id, name, age_rating FROM libraries ORDER BY sort_order, name',
     );
     // A restricted viewer is told about the libraries they hold, not all of them: the list itself would
     // otherwise leak the existence and names of everything they cannot open.
-    return ctx.libraryIds ? rows.filter((r) => ctx.libraryIds!.includes(r.id)) : rows;
+    const held = ctx.libraryIds ? rows.filter((r) => ctx.libraryIds!.includes(r.id)) : rows;
+    // A library rated above this viewer's cap is one they can never open, so naming it is the same leak in
+    // a different shape. This list had no notion of the age cap at all, which meant a 13+ account was shown
+    // the name of the 18+ shelf and a tab that could only ever be empty.
+    const allowed = ctx.maxAgeRating === null
+      ? held
+      : held.filter((r) => r.age_rating === null || r.age_rating <= ctx.maxAgeRating!);
+    // `adult` rides along rather than being filtered out here: the web app needs to know an 18+ library
+    // EXISTS in order to offer the button that reveals it, and it hides those tabs itself while the filter
+    // is on. What must not leak is the CONTENT, and that is `browsable()`'s job, not this list's.
+    return allowed.map((r) => ({ id: r.id, name: r.name, adult: (r.age_rating ?? 0) >= ADULT_RATING }));
   },
 
   /**
@@ -287,7 +315,7 @@ export const owned = {
    */
   genreOverview: async (ctx: ViewCtx, covers = 4) => {
     const p = new Params();
-    const src = seriesSrc(ctx, p);
+    const src = browseSrc(ctx, p);
     // Bounded here rather than interpolated blindly: it reaches SQL as an identifier position in the slice.
     const n = Math.max(1, Math.min(12, Math.trunc(covers) || 4));
     return q<{ key: string; label: string; series: number; covers: string[] }>(
@@ -324,7 +352,7 @@ export const owned = {
 
   genres: async (ctx: ViewCtx) => {
     const p = new Params();
-    const src = seriesSrc(ctx, p);
+    const src = browseSrc(ctx, p);
     return (await q<{ g: string }>(`SELECT DISTINCT g FROM ${src}, unnest(genres) AS g ORDER BY g`, p.values as any[]))
       .map((r) => r.g);
   },
@@ -339,7 +367,7 @@ export const owned = {
 
   seriesNew: async (ctx: ViewCtx, pg = 0, size = 20) => {
     const p = new Params();
-    const src = seriesSrc(ctx, p);
+    const src = browseSrc(ctx, p);
     const rows = await q(
       `SELECT ${SERIES_COLS} FROM ${src} ORDER BY created_at DESC, title ASC LIMIT ${p.add(size)} OFFSET ${p.add(pg * size)}`,
       p.values as any[],
@@ -349,7 +377,7 @@ export const owned = {
 
   seriesUpdated: async (ctx: ViewCtx, pg = 0, size = 20) => {
     const p = new Params();
-    const src = seriesSrc(ctx, p);
+    const src = browseSrc(ctx, p);
     const rows = await q(
       `SELECT ${SERIES_COLS} FROM ${src} ORDER BY latest_mtime DESC, title ASC LIMIT ${p.add(size)} OFFSET ${p.add(pg * size)}`,
       p.values as any[],
@@ -372,7 +400,7 @@ export const owned = {
     const p = new Params();
     const cte = wantsUser ? MINE_CTE : '';
     if (wantsUser) p.add(ctx.userId); // MINE_CTE reads $1
-    const src = seriesSrc(ctx, p);
+    const src = browseSrc(ctx, p);
     const from = wantsUser ? `${src} LEFT JOIN mine m ON m.series_id = sv.id` : src;
 
     let where = body?.condition ? condSql(body.condition, p.values as any[], wantsUser) : 'TRUE';

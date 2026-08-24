@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { q } from '../lib/db';
 import { content } from '../lib/backend';
-import { viewCtxFor, type ViewCtx } from '../lib/visibility';
+import { viewCtxFor, type ViewCtx, hideAdult } from '../lib/visibility';
 import { authenticate, userIdOf, roleOf } from '../lib/auth';
 
 export default async function downloadRoutes(app: FastifyInstance) {
@@ -10,7 +10,7 @@ export default async function downloadRoutes(app: FastifyInstance) {
   // Same shape as catalog.ts: resolve the viewer once, and let the handlers read it. Without this the
   // manifest reached the raw Komga client, which is not the backend anyone runs -- see below.
   app.addHook('preHandler', async (req) => {
-    (req as any).viewCtx = await viewCtxFor(userIdOf(req), roleOf(req));
+    (req as any).viewCtx = await viewCtxFor(userIdOf(req), roleOf(req), { hideAdult: hideAdult(req) });
   });
 
   const vc = (req: any): ViewCtx => req.viewCtx as ViewCtx;
