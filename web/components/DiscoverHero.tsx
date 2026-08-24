@@ -88,7 +88,7 @@ export function DiscoverHero({ slides, onPick }: { slides: Trending[]; onPick: (
         <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-fog-300 lg:text-sm">
           {cur.score != null && <span className="font-semibold text-accent">{cur.score}%</span>}
           {cur.chapters != null && <span>· {tr('{n} ch', { n: cur.chapters })}</span>}
-          {cur.genres.slice(0, 3).map((g) => <span key={g}>· {g}</span>)}
+          {(cur.genres ?? []).slice(0, 3).map((g) => <span key={g}>· {g}</span>)}
         </div>
         {cur.description && (
           <p className="mt-2.5 hidden max-w-xl text-sm leading-relaxed text-fog-300 lg:line-clamp-2">{cur.description}</p>

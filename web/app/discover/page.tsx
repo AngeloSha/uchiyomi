@@ -60,7 +60,11 @@ export default function DiscoverPage() {
   const sources = useMemo(() => sourcesData?.content ?? [], [sourcesData]);
 
   const { data: trending } = useQuery({
-    queryKey: ['trending'],
+    // NOT ['trending'] -- that key belongs to /api/trending, which is what the household is reading and is a
+    // Series[]. This is /api/discover/trending, which is AniList and carries genres, banner and score. They
+    // shared a key, so arriving here from the home page handed this the wrong shape out of the cache and the
+    // hero threw on `genres.slice`. A direct page load was fine, which is why it looked intermittent.
+    queryKey: ['discover-trending'],
     queryFn: () => api<{ content: Trending[] }>('/api/discover/trending'),
     enabled: mayAdd,
     staleTime: 0,
