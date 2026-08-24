@@ -10,7 +10,7 @@ function page<T>(content: T[], total: number, p: number, size: number): Page<T> 
   return { content, totalElements: total, totalPages, number: p, size, first: p <= 0, last: p >= totalPages - 1 };
 }
 
-const SERIES_COLS = 'id, title, summary, status, genres, author, age_rating, books_count, cover_book_id, web, created_at, latest_mtime, auto_update, library_id';
+const SERIES_COLS = 'id, title, summary, status, genres, author, age_rating, books_count, cover_book_id, web, created_at, latest_mtime, auto_update, library_id, library_pinned';
 
 /**
  * The one place a series is read from.
@@ -30,7 +30,7 @@ const seriesSrc = (ctx: ViewCtx, p: Params, alias = 'sv') => `(
          COALESCE(o.author, s.author) AS author,
          COALESCE(o.age_rating, s.age_rating) AS age_rating,
          s.books_count, s.cover_book_id, s.web, s.created_at, s.latest_mtime,
-         s.auto_update, s.library_id
+         s.auto_update, s.library_id, s.library_pinned
     FROM lib_series s LEFT JOIN series_overrides o ON o.series_id = s.id
    WHERE ${visible('s', ctx, p)}
 ) ${alias}`;
@@ -63,6 +63,9 @@ function seriesDto(r: any) {
   return {
     id: r.id,
     libraryId: r.library_id ?? 'lib',
+    // Whether an admin filed this series into that library by hand. Shown so the edit modal can say
+    // "automatic" honestly rather than implying every placement was a decision someone made.
+    libraryPinned: r.library_pinned === true,
     name: r.title,
     created: r.created_at ? new Date(r.created_at).toISOString() : null, // when the series entered the library
     booksCount: count,
@@ -139,6 +142,14 @@ function condSql(cond: any, params: any[], hasUser = false): string {
     params.push(String(cond.genre.value));
     const ex = `EXISTS (SELECT 1 FROM unnest(genres) AS g WHERE lower(g) = lower($${params.length}))`;
     return cond.genre.operator === 'isNot' ? `NOT ${ex}` : ex;
+  }
+
+  // Which library. `visible()` has already narrowed the source to what this viewer may open, so naming a
+  // library they cannot see returns nothing rather than an error that would confirm it exists.
+  if (cond.libraryId && cond.libraryId.value != null) {
+    params.push(String(cond.libraryId.value));
+    const ex = `library_id = $${params.length}`;
+    return cond.libraryId.operator === 'isNot' ? `NOT (${ex})` : `(${ex})`;
   }
 
   if (cond.status && cond.status.value != null) {
@@ -252,6 +263,63 @@ export const owned = {
     // A restricted viewer is told about the libraries they hold, not all of them: the list itself would
     // otherwise leak the existence and names of everything they cannot open.
     return ctx.libraryIds ? rows.filter((r) => ctx.libraryIds!.includes(r.id)) : rows;
+  },
+
+  /**
+   * Every genre with how much of THIS viewer's library sits in it, plus the covers to build a tile from.
+   *
+   * The browse page had genre NAMES and nothing else, so it painted them with six stock images shared
+   * between forty genre names: on the real library the same night-market photo appears under Comedy,
+   * Cooking, Historical, Music, School Life, Slice of Life and Sports, and fifty-six genres including the
+   * second-largest one get no image at all and render as a near-black rectangle. Covers from the viewer's
+   * own library cannot repeat like that and cannot be wrong, because they ARE the thing behind the label.
+   *
+   * Everything comes from seriesSrc, so the override-aware genre list, the soft-delete rule, per-library
+   * access and the age cap all apply by construction: a viewer restricted to one library sees counts for
+   * that library alone, and a genre that exists only in what they cannot open does not appear at all. A
+   * count is a disclosure -- "Horror (12)" says twelve horror series exist somewhere -- so this mattering
+   * is the reason it is not a separate query.
+   *
+   * GROUPED CASE-INSENSITIVELY, because `condSql` already filters genres with `lower(g) = lower($n)`.
+   * "Slice of life" and "Slice of Life" are one filter, so they must be one tile, or the tile promises a
+   * number the grid behind it does not deliver. For the same reason the count is over distinct series
+   * rather than over rows: a series carrying both spellings would otherwise be counted twice.
+   */
+  genreOverview: async (ctx: ViewCtx, covers = 4) => {
+    const p = new Params();
+    const src = seriesSrc(ctx, p);
+    // Bounded here rather than interpolated blindly: it reaches SQL as an identifier position in the slice.
+    const n = Math.max(1, Math.min(12, Math.trunc(covers) || 4));
+    return q<{ key: string; label: string; series: number; covers: string[] }>(
+      `WITH tagged AS (
+         SELECT sv.id, sv.title, sv.books_count, sv.latest_mtime, sv.created_at,
+                lower(btrim(g)) AS key, btrim(g) AS label
+           FROM ${src}, unnest(sv.genres) AS g
+          WHERE btrim(g) <> ''
+       ),
+       one_per_series AS (
+         SELECT DISTINCT ON (key, id) key, id, label, title, books_count, latest_mtime, created_at
+           FROM tagged ORDER BY key, id, label
+       ),
+       ranked AS (
+         -- Biggest and most recently touched first, so a mosaic shows what is alive in a genre rather
+         -- than whatever happens to sort first alphabetically.
+         SELECT o.*, row_number() OVER (
+                  PARTITION BY key
+                  ORDER BY books_count DESC, latest_mtime DESC NULLS LAST, created_at DESC NULLS LAST, title ASC
+                ) AS rn
+           FROM one_per_series o
+       )
+       SELECT key,
+              -- The spelling the library actually uses most, so the tile is labelled the way its series are.
+              mode() WITHIN GROUP (ORDER BY label) AS label,
+              count(*)::int AS series,
+              coalesce(array_agg(id ORDER BY rn) FILTER (WHERE rn <= ${n}), '{}') AS covers
+         FROM ranked
+        GROUP BY key
+        ORDER BY count(*) DESC, key ASC`,
+      p.values as any[],
+    );
   },
 
   genres: async (ctx: ViewCtx) => {

@@ -150,7 +150,21 @@ export default async function catalogRoutes(app: FastifyInstance) {
 
   app.get('/api/libraries', async (req) => komga.libraries(vc(req)));
 
-  app.get('/api/genres', async (req) => ({ content: (await komga.genres(vc(req))).sort() }));
+  // No re-sort. SQL already ordered these by the database collation; sorting again in JS is byte order, so
+  // every lowercase genre jumped to the end of the grid after every uppercase one.
+  app.get('/api/genres', async (req) => ({ content: await komga.genres(vc(req)) }));
+
+  // The same list, with the numbers and the cover ids the browse page needs to be worth looking at.
+  //
+  // Deliberately not cached. The obvious cache key is the user id, which is what the recommendation pool
+  // above uses -- but this result depends on the whole ViewCtx (which libraries they hold, what age cap
+  // they carry), so a key that omits those serves one member's genre list to another the moment either
+  // changes. It is a single aggregate over lib_series that never touches lib_books, so the query is cheap
+  // enough that the correct cache is no cache.
+  app.get('/api/genres/overview', async (req) => {
+    const n = Math.max(1, Math.min(8, Number((req.query as { covers?: string }).covers) || 4));
+    return { content: await komga.genreOverview(vc(req), n) };
+  });
 
   // What everyone in the household is reading (cross-user, last 14 days).
   app.get('/api/trending', async (req) => {

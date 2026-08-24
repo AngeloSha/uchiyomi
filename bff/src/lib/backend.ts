@@ -25,6 +25,11 @@ export const NATIVE_PROGRESS = !OWNED;
 export interface ContentBackend {
   libraries(ctx: ViewCtx): Promise<Array<{ id: string; name: string }>>;
   genres(ctx: ViewCtx): Promise<string[]>;
+  /**
+   * Genres with a count and a few series ids each, for the browse page's cover mosaics. `series` is null
+   * when the backend cannot count (Komga mode), so the UI can omit the number instead of printing zero.
+   */
+  genreOverview(ctx: ViewCtx, covers?: number): Promise<Array<{ key: string; label: string; series: number | null; covers: string[] }>>;
   series(ctx: ViewCtx, id: string): Promise<any>;
   seriesNew(ctx: ViewCtx, page?: number, size?: number): Promise<any>;
   seriesUpdated(ctx: ViewCtx, page?: number, size?: number): Promise<any>;
@@ -48,6 +53,9 @@ export interface ContentBackend {
 const komgaAdapter = (k: any): ContentBackend => ({
   libraries: (_c) => k.libraries(),
   genres: (_c) => k.genres(),
+  // Komga owns its own catalogue and exposes no per-genre aggregate, so the names come back with no count
+  // and no covers rather than with a fabricated zero.
+  genreOverview: async (_c) => (await k.genres()).map((label: string) => ({ key: label.trim().toLowerCase(), label, series: null, covers: [] })),
   series: (_c, id) => k.series(id),
   seriesNew: (_c, p, s) => k.seriesNew(p, s),
   seriesUpdated: (_c, p, s) => k.seriesUpdated(p, s),

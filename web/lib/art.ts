@@ -10,19 +10,14 @@ export const ART = {
   emptyUpdates: '/art/empty-updates.webp',
 };
 
-const GENRE: Record<string, string> = {
-  action: 'action', adventure: 'action', 'martial arts': 'action', superhero: 'action', war: 'action', military: 'action',
-  fantasy: 'fantasy', magic: 'fantasy', cultivation: 'fantasy', supernatural: 'fantasy', demons: 'fantasy', reincarnation: 'fantasy', isekai: 'fantasy', dungeons: 'fantasy', monsters: 'fantasy',
-  romance: 'romance', drama: 'romance', josei: 'romance', shoujo: 'romance', harem: 'romance', ecchi: 'romance',
-  horror: 'horror', thriller: 'horror', mystery: 'horror', psychological: 'horror', tragedy: 'horror', crime: 'horror', gore: 'horror',
-  'sci-fi': 'scifi', 'science fiction': 'scifi', mecha: 'scifi', game: 'scifi', system: 'scifi', apocalypse: 'scifi', cyberpunk: 'scifi', 'video games': 'scifi',
-  comedy: 'comedy', 'slice of life': 'comedy', cooking: 'comedy', school: 'comedy', 'school life': 'comedy', sports: 'comedy', historical: 'comedy', 'gender bender': 'comedy', music: 'comedy',
-};
-
-export function genreArt(genre: string): string | null {
-  const m = GENRE[genre.toLowerCase().trim()];
-  return m ? `/art/genre-${m}.webp` : null;
-}
+// NOTE: `GENRE`, `genreArt()` and `genreGradient()` used to live here, with six generated key-art files
+// mapped from about forty genre names. On a real library that is ninety-nine genres, so the same picture
+// appeared under seven of them at once and fifty-six got a near-black gradient rectangle instead. /browse
+// now builds every tile from the covers the library actually holds (`GET /api/genres/overview`), which
+// cannot repeat and cannot be wrong, so the map, both functions and the six `genre-*.webp` files are gone.
+//
+// `genreBackdrop` below is a DIFFERENT and larger set (twelve wide banners) and is very much alive: it is
+// <Backdrop>'s onError fallback on the series page, the home hero and both admin/profile heroes.
 
 // Wide cinematic backdrop banners (clean, dark, no text) matched to a series' genre.
 const BG: Record<string, string> = {
