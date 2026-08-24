@@ -227,7 +227,6 @@ export default function ProfilePage() {
       <TokensCard />
       <OpdsCard link={opdsLink} setLink={setOpdsLink} />
       {isAdmin && <AdminCard seriesId={rnd?.seriesId ?? undefined} />}
-      <SupportCard />
       <SignOutCard />
     </>
   );
@@ -391,6 +390,15 @@ function RailActions({ isAdmin }: { isAdmin: boolean }) {
           <IcChevronRight width={15} height={15} className="ms-auto shrink-0 opacity-60" />
         </Link>
       )}
+      {/* Promoted out of the bottom of the Account tab, where it sat behind eight cards and a scroll. It is
+          asking for something rather than offering something, so it stays quiet: the same row as its
+          neighbours, no accent fill, and the cup carries the colour on its own. */}
+      <a href="https://ko-fi.com/angeloshaheen" target="_blank" rel="noopener noreferrer"
+        className={`${row} text-fog-400 hover:bg-ink-800/60 hover:text-fog-100`}>
+        <span aria-hidden className="shrink-0 text-base leading-none">☕</span>
+        <span className="min-w-0 truncate">{tr('Support Uchiyomi')}</span>
+        <IcChevronRight width={15} height={15} className="ms-auto shrink-0 opacity-60" />
+      </a>
       <button onClick={logout} className={`${row} text-red-300/90 hover:bg-red-500/10 hover:text-red-300`}>
         <IcLogOut width={16} height={16} className="shrink-0" />
         <span className="min-w-0 truncate">{tr('Sign out')}</span>
@@ -1004,22 +1012,6 @@ function AdminCard({ seriesId, span = '' }: { seriesId?: string; span?: string }
         </div>
       </div>
     </Link>
-  );
-}
-
-function SupportCard({ span = '' }: { span?: string }) {
-  return (
-    <a href="https://ko-fi.com/angeloshaheen" target="_blank" rel="noopener noreferrer"
-      className={`${CARD} flex items-center justify-between gap-3 transition active:scale-[0.99] ${span}`}>
-      <span className="flex min-w-0 items-center gap-3">
-        <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-accent-soft text-lg">☕</span>
-        <span className="flex min-w-0 flex-col">
-          <span className="font-display text-sm font-semibold text-fog-100">{tr('Support Uchiyomi')}</span>
-          <span className="text-[12px] text-fog-400">{tr('Free and open-source. Buy me a coffee on Ko-fi.')}</span>
-        </span>
-      </span>
-      <IcChevronRight className="shrink-0 text-fog-500" width={18} height={18} />
-    </a>
   );
 }
 
