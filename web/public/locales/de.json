@@ -2,7 +2,7 @@
  "_meta": {
   "language": "de",
   "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-  "strings": 423
+  "strings": 428
  },
  "1 check found something": "1 Prüfung hat etwas gefunden",
  "1 member": "1 Mitglied",
@@ -29,6 +29,7 @@
  "Add to library": "Zur Bibliothek hinzufügen",
  "Add to your iPhone": "Zu deinem iPhone hinzufügen",
  "Added to your library": "Zur Bibliothek hinzugefügt",
+ "Adding series is turned off for your account": "Das Hinzufügen von Serien ist für dein Konto deaktiviert",
  "Admin": "Verwaltung",
  "Admin and server settings": "Verwaltung und Servereinstellungen",
  "Admin username": "Administrator-Benutzername",
@@ -45,6 +46,7 @@
  "Amber": "Bernstein",
  "An admin token never expires and can change server settings and other accounts. Treat it like your password.": "Ein Admin-Token läuft nie ab und kann Servereinstellungen und andere Konten ändern. Behandle ihn wie dein Passwort.",
  "Art": "Artwork",
+ "Ask whoever runs this server if you need it. Everything already in the library is still yours to read.": "Frag die Person, die diesen Server betreibt, wenn du es brauchst. Alles, was schon in der Bibliothek ist, kannst du weiterhin lesen.",
  "At least 8 characters": "Mindestens 8 Zeichen",
  "Authentication code": "Authentifizierungscode",
  "Author": "Autor",
@@ -221,6 +223,8 @@
  "No members yet.": "Noch keine Mitglieder.",
  "No results across your sources — try another title.": "Keine Treffer in deinen Quellen — versuche einen anderen Titel.",
  "No source in this language could be reached.": "Keine Quelle in dieser Sprache war erreichbar.",
+ "No sources available": "Keine Quellen verfügbar",
+ "No sources available in this language. Try another one above.": "Keine Quellen in dieser Sprache verfügbar. Probier oben eine andere.",
  "No sources installed": "Keine Quellen installiert",
  "No tokens yet.": "Noch keine Tokens.",
  "Not found on any source yet — try searching manually.": "Bisher in keiner Quelle gefunden — versuche es mit einer manuellen Suche.",
@@ -329,6 +333,7 @@
  "The scheduled check fetches new chapters for this series.": "Die geplante Prüfung holt neue Kapitel dieser Serie.",
  "The token carries access to your {name} account and cannot be scoped. It is stored encrypted here, and you can disconnect at any time.": "Der Token gibt Zugriff auf dein {name}-Konto und lässt sich nicht einschränken. Er wird hier verschlüsselt gespeichert, und du kannst jederzeit trennen.",
  "Their reading history, favourites and sessions go with the account. Nothing in the library is touched and no files are deleted.": "Leseverlauf, Favoriten und Sitzungen gehen mit dem Konto. In der Bibliothek wird nichts angefasst und keine Datei gelöscht.",
+ "There is nothing set up for your account to browse yet. Ask whoever runs this server.": "Für dein Konto ist noch nichts zum Stöbern eingerichtet. Frag die Person, die diesen Server betreibt.",
  "This device": "Dieses Gerät",
  "This first account becomes the server admin.": "Dieses erste Konto wird zum Administrator des Servers.",
  "This member currently sees nothing.": "Dieses Mitglied sieht derzeit nichts.",

@@ -31,6 +31,21 @@ interface AuthCtx {
 const Ctx = createContext<AuthCtx>(null as any);
 export const useAuth = () => useContext(Ctx);
 
+/**
+ * May this account add series from a source?
+ *
+ * One definition, because three places ask: both navs (whether to show Discover at all) and the page itself
+ * (what to render if someone types the URL). Only the literal `false` denies and admins are exempt, matching
+ * the server's rule exactly -- a UI that hid the tab on a looser rule would hide a working page.
+ *
+ * Loading counts as allowed so the tab does not flicker in on every navigation before /auth/me answers. The
+ * server is the enforcement point; this only decides what is worth showing.
+ */
+export function canDownload(user: { role?: string; perms?: Record<string, boolean> } | null | undefined): boolean {
+  if (!user) return true;
+  return user.role === 'admin' || user.perms?.canDownload !== false;
+}
+
 function applyAccent(settings?: Record<string, any>) {
   const hex: string | undefined = settings?.accent;
   if (hex && /^#?[0-9a-fA-F]{6}$/.test(hex)) {

@@ -7,7 +7,7 @@ import { Lockup } from './Brand';
 import { IcHome, IcGrid, IcSearch, IcRefresh, IcBell, IcSparkle, IcPlus, IcBookmark } from './icons';
 import { triggerRefresh } from '@/lib/refresh';
 import { api } from '@/lib/api';
-import { useAuth } from '@/lib/auth';
+import { useAuth, canDownload } from '@/lib/auth';
 import { Avatar } from './Avatar';
 import { useToast } from './Toast';
 import { keys, t as tr } from '@/lib/i18n';
@@ -51,7 +51,7 @@ export function TopNav({ onSearchFocus }: { onSearchFocus?: () => void }) {
       <div className="shell flex items-center gap-6 py-3">
         <Link href="/"><Lockup className="text-2xl" markSize={38} /></Link>
         <nav className="flex items-center gap-1">
-          {links.map(({ href, label, Icon, match }) => {
+          {(canDownload(user) ? links : links.filter((l) => l.href !== '/discover')).map(({ href, label, Icon, match }) => {
             const active = match(path);
             return (
               <Link key={href} href={href}

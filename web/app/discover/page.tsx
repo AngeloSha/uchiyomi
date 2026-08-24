@@ -4,13 +4,14 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { ART } from '@/lib/art';
 import { relativeTime } from '@/lib/format';
-import { useAuth } from '@/lib/auth';
+import { useAuth, canDownload } from '@/lib/auth';
 import { loadDiscoverPrefs, saveDiscoverPrefs } from '@/lib/discoverPrefs';
 import { storedLocale, detectLocale, t as tr } from '@/lib/i18n';
 import { useToast } from '@/components/Toast';
 import { EmptyState } from '@/components/EmptyState';
 import { ProgressBar, Reveal } from '@/components/ui';
 import { SourceCard, SourceItem } from '@/components/cards';
+import { ScrollRail } from '@/components/ScrollRail';
 import { DiscoverHero, TrendingCard, Trending } from '@/components/DiscoverHero';
 import { SourcePicker, SourceLatest, Src, SrcState, budgetFor, languagesOf } from '@/components/SourcePicker';
 import { AddSeriesDialog, AddSeed } from '@/components/AddSeriesDialog';
@@ -43,11 +44,16 @@ const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, '');
 export default function DiscoverPage() {
   const toast = useToast();
   const qc = useQueryClient();
-  const { user } = useAuth();
+  const { user, isAdmin } = useAuth();
+
+  // Not fired at all for an account that may not add series: every route behind this page answers 403 for
+  // them, and a query whose only possible outcome is a refusal is noise in the console and in the log.
+  const mayAdd = canDownload(user);
 
   const { data: sourcesData } = useQuery({
     queryKey: ['sources'],
     queryFn: () => api<{ content: Src[] }>('/api/sources'),
+    enabled: mayAdd,
     staleTime: 30_000,
     refetchInterval: 60_000,
   });
@@ -56,6 +62,7 @@ export default function DiscoverPage() {
   const { data: trending } = useQuery({
     queryKey: ['trending'],
     queryFn: () => api<{ content: Trending[] }>('/api/discover/trending'),
+    enabled: mayAdd,
     staleTime: 0,
     refetchOnMount: 'always',
   });
@@ -166,6 +173,7 @@ export default function DiscoverPage() {
   const { data: jobsData } = useQuery({
     queryKey: ['source-jobs'],
     queryFn: () => api<{ content: Job[] }>('/api/sources/jobs'),
+    enabled: mayAdd,
     // Polled hard only while something is actually downloading. It used to poll every four seconds forever.
     refetchInterval: (qy) => ((qy.state.data?.content ?? []).some((j) => j.status === 'downloading') ? 2500 : 30_000),
   });
@@ -181,12 +189,31 @@ export default function DiscoverPage() {
     return (trending?.content ?? []).filter((t) => !lead.has(t.title));
   }, [trending, heroSlides]);
 
+  // ---------------------------------------------------------------- may they be here at all
+  // The tab is hidden for this account and every route this page calls now refuses it, so a typed URL would
+  // otherwise render a wall of empty skeletons and a "try again" button that never works. Say it plainly.
+  if (!mayAdd) {
+    return (
+      <div className="min-h-screen-d px-4 lg:px-0">
+        <EmptyState art={ART.emptyLibrary} title={tr('Adding series is turned off for your account')}
+          sub={tr('Ask whoever runs this server if you need it. Everything already in the library is still yours to read.')} />
+      </div>
+    );
+  }
+
   // ---------------------------------------------------------------- zero sources
   if (sourcesData && sources.length === 0) {
     return (
       <div className="min-h-screen-d px-4 lg:px-0">
-        <EmptyState art={ART.emptyLibrary} title={tr('No sources installed')}
-          sub={tr('Mount a source pack at SOURCES_DIR, or switch on an extension source, then reload from the Providers tab.')} />
+        {/* An age-limited account is served a filtered list, so "none" here can mean "none you may use"
+            rather than "none installed" — and telling a reader to mount SOURCES_DIR would be nonsense. */}
+        {isAdmin ? (
+          <EmptyState art={ART.emptyLibrary} title={tr('No sources installed')}
+            sub={tr('Mount a source pack at SOURCES_DIR, or switch on an extension source, then reload from the Providers tab.')} />
+        ) : (
+          <EmptyState art={ART.emptyLibrary} title={tr('No sources available')}
+            sub={tr('There is nothing set up for your account to browse yet. Ask whoever runs this server.')} />
+        )}
       </div>
     );
   }
@@ -283,6 +310,7 @@ export default function DiscoverPage() {
         <div className="card col-span-full mt-2 p-8 text-center">
           <p className="text-sm text-fog-400">
             {mode === 'search' ? tr('No results across your sources — try another title.')
+              : budget.length === 0 ? tr('No sources available in this language. Try another one above.')
               : Object.values(states).every((s) => s === 'blocked')
                 ? tr('No source in this language could be reached.')
                 : tr('Nothing new from these sources right now.')}
@@ -300,13 +328,16 @@ export default function DiscoverPage() {
       {mode === 'newest' && rail.length > 0 && (
         <section className="pb-6">
           <h2 className="mb-3 font-display text-lg font-semibold tracking-tight text-fog-50 lg:text-xl">{tr('Trending manhwa')}</h2>
-          <div className="bleed hide-scrollbar flex gap-3 overflow-x-auto px-4 pb-1 lg:px-8 [scroll-snap-type:x_mandatory]" data-lenis-prevent>
+          {/* pb-3 rather than pb-1: the global scrollbar is 8px and used to be hidden, so the rail had no
+              room for it and it would have sat on the card captions. */}
+          <ScrollRail label={tr('Trending manhwa')}
+            className="bleed flex gap-3 px-4 pb-3 lg:px-8 [scroll-snap-type:x_mandatory]">
             {rail.map((t, i) => (
               <Reveal key={t.title} delay={Math.min(i, 12) * 28}>
                 <TrendingCard t={t} onPick={(x) => setSeed({ kind: 'trending', title: x.title })} />
               </Reveal>
             ))}
-          </div>
+          </ScrollRail>
         </section>
       )}
 

@@ -2,7 +2,7 @@
  "_meta": {
   "language": "ja",
   "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-  "strings": 423
+  "strings": 428
  },
  "1 check found something": "1 件のチェックで問題を検出",
  "1 member": "メンバー 1 人",
@@ -29,6 +29,7 @@
  "Add to library": "ライブラリに追加",
  "Add to your iPhone": "iPhone に追加",
  "Added to your library": "ライブラリに追加しました",
+ "Adding series is turned off for your account": "このアカウントでは作品の追加が無効になっています",
  "Admin": "管理",
  "Admin and server settings": "管理とサーバー設定",
  "Admin username": "管理者ユーザー名",
@@ -45,6 +46,7 @@
  "Amber": "アンバー",
  "An admin token never expires and can change server settings and other accounts. Treat it like your password.": "管理者トークンは期限切れにならず、サーバー設定や他のアカウントを変更できます。パスワードと同じように扱ってください。",
  "Art": "アートワーク",
+ "Ask whoever runs this server if you need it. Everything already in the library is still yours to read.": "必要な場合は、このサーバーの管理者に相談してください。ライブラリにあるものはこれまでどおり読めます。",
  "At least 8 characters": "8文字以上",
  "Authentication code": "認証コード",
  "Author": "作者",
@@ -221,6 +223,8 @@
  "No members yet.": "メンバーはまだいません。",
  "No results across your sources — try another title.": "どのソースにも見つかりません — 別のタイトルでお試しください。",
  "No source in this language could be reached.": "この言語のソースにはどれも接続できませんでした。",
+ "No sources available": "利用できるソースがありません",
+ "No sources available in this language. Try another one above.": "この言語で利用できるソースがありません。上から別の言語を選んでください。",
  "No sources installed": "ソースが未インストール",
  "No tokens yet.": "トークンはまだありません。",
  "Not found on any source yet — try searching manually.": "まだどのソースにもありません — 手動で検索してみてください。",
@@ -329,6 +333,7 @@
  "The scheduled check fetches new chapters for this series.": "定期チェックでこのシリーズの新しい話を取得します。",
  "The token carries access to your {name} account and cannot be scoped. It is stored encrypted here, and you can disconnect at any time.": "このトークンは {name} アカウントへのアクセスを持ち、範囲を絞れません。ここでは暗号化して保存され、いつでも切断できます。",
  "Their reading history, favourites and sessions go with the account. Nothing in the library is touched and no files are deleted.": "読書履歴、お気に入り、セッションはアカウントと一緒になくなります。ライブラリには手を触れず、ファイルも削除されません。",
+ "There is nothing set up for your account to browse yet. Ask whoever runs this server.": "このアカウントで見られるものはまだ設定されていません。このサーバーの管理者に相談してください。",
  "This device": "この端末",
  "This first account becomes the server admin.": "最初のアカウントがサーバーの管理者になります。",
  "This member currently sees nothing.": "このメンバーは現在何も見えません。",

@@ -3,6 +3,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { motion } from 'framer-motion';
 import { IcHome, IcGrid, IcSearch, IcDownload, IcUser, IcPlus } from './icons';
+import { useAuth, canDownload } from '@/lib/auth';
 import { keys, t as tr } from '@/lib/i18n';
 
 // `keys()` is the identity function; it exists so these reach the translation extractor, which
@@ -22,11 +23,15 @@ const items = [
 
 export function BottomNav() {
   const path = usePathname();
+  const { user } = useAuth();
+  // An account that may not add series has nothing to do on Discover -- every route the page calls is now
+  // refused for it -- so the tab is a promise the app cannot keep. The page itself says so if you type it.
+  const shown = canDownload(user) ? items : items.filter((i) => i.href !== '/discover');
   return (
     <nav className="safe-bottom fixed inset-x-0 bottom-0 z-40 lg:hidden">
       <div className="mx-auto max-w-2xl px-4 pb-2">
         <div className="glass grad-border flex items-center justify-around rounded-3xl px-2 py-1.5 shadow-lift">
-          {items.map(({ href, label, Icon, match }) => {
+          {shown.map(({ href, label, Icon, match }) => {
             const active = match(path);
             return (
               <Link key={href} href={href} className="group relative flex flex-1 flex-col items-center gap-1 py-2">

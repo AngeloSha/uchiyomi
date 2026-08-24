@@ -204,6 +204,144 @@ try {
     overflow > 4 ? bad(`phone ${path}: ${overflow}px of horizontal overflow`) : ok(`phone ${path}: no overflow`);
   }
 
+  // ---------------------------------------------------------------- the rails move
+  //
+  // Discover's rails were `hide-scrollbar … overflow-x-auto`: the bar was deleted, Lenis's smooth wheel
+  // swallows a vertical wheel over a horizontal-only scroller, and there were no arrows — so on a desktop
+  // mouse there was no way to move them at all. This needs trending to have loaded, which needs AniList, so
+  // it reports rather than fails when the rail is not there.
+  console.log('\n  discover rails');
+  await page.goto(`${BASE}/discover/`, { waitUntil: 'networkidle2', timeout: 60000 }).catch(() => {});
+  await sleep(3500);
+  await shot('discover');
+  const rail = await page.evaluate(() => {
+    const el = [...document.querySelectorAll('div')].find(
+      (d) => d.scrollWidth - d.clientWidth > 40 && getComputedStyle(d).overflowX === 'auto',
+    );
+    if (!el) return null;
+    el.dataset.e2eRail = '1';
+    return { hidden: getComputedStyle(el).scrollbarWidth === 'none', at: el.scrollLeft };
+  });
+  if (!rail) console.log('    [ -- ] no horizontal rail on Discover (nothing to browse on this instance)');
+  else {
+    rail.hidden ? bad('a Discover rail still hides its own scrollbar') : ok('the rail shows a scrollbar');
+    const moved = await page.evaluate(async () => {
+      const el = document.querySelector('[data-e2e-rail]');
+      const before = Math.abs(el.scrollLeft);
+      const next = [...document.querySelectorAll('button[aria-label]')]
+        .filter((b) => !b.disabled && b.closest('div')?.querySelector('[data-e2e-rail]'));
+      if (!next.length) return { arrows: 0, before, after: before };
+      next[next.length - 1].click();
+      await new Promise((r) => setTimeout(r, 900));
+      return { arrows: next.length, before, after: Math.abs(el.scrollLeft) };
+    });
+    if (!moved.arrows) bad('the rail has no enabled arrow to click');
+    else if (moved.after <= moved.before) bad(`clicking the rail arrow moved nothing (${moved.before} -> ${moved.after})`);
+    else ok(`the arrow scrolls the rail (${moved.before} -> ${moved.after})`);
+  }
+
+  // ---------------------------------------------------------------- who may add series
+  //
+  // `canDownload: false` used to be enforced on exactly one route -- the final POST. A denied account still
+  // saw the Discover tab, could browse every source and read full series detail, and only met a wall on the
+  // last button. The tab is now hidden, the page says so, and every route behind it refuses.
+  //
+  // The setup runs over plain HTTP from here rather than inside the page: `/auth/refresh` ROTATES the
+  // refresh cookie, so minting a token from the browser fights the app's own session for it.
+  console.log('\n  a member who may not add series');
+  await page.setViewport({ width: 1440, height: 900 });
+  const NODL = { username: 'e2e-nodl', password: 'e2e-nodl-passw0rd-1' };
+
+  /** A real sign-out: the refresh cookie is HttpOnly, so only /auth/logout can drop it. */
+  const signOut = async () => {
+    await page.evaluate(() => fetch('/auth/logout', { method: 'POST', credentials: 'include' }).catch(() => {}));
+    await page.evaluate(() => { localStorage.clear(); sessionStorage.clear(); });
+    await page.deleteCookie(...(await page.cookies()));
+  };
+
+  const login = async (u, p) => {
+    const r = await fetch(`${BASE}/auth/login`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ username: u, password: p }),
+    });
+    return r.ok ? (await r.json()).accessToken : null;
+  };
+
+  const adminTok = await login(USER, PASS);
+  if (!adminTok) bad('could not sign in over HTTP to set up the permission test');
+  else {
+    const made = await fetch(`${BASE}/api/admin/users`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${adminTok}` },
+      body: JSON.stringify({ ...NODL, role: 'user', perms: { canDownload: false } }),
+    });
+    if (![200, 201, 409].includes(made.status)) {
+      bad(`could not create the no-download member (${made.status} ${(await made.text()).slice(0, 120)})`);
+    } else {
+      ok('created a member with canDownload off');
+
+      // The wall, not the door: the web app is a static export, so the server has to be the one refusing.
+      const nodlTok = await login(NODL.username, NODL.password);
+      if (!nodlTok) bad('could not sign in as the no-download member');
+      else {
+        const codes = {};
+        for (const u of ['/api/sources', '/api/sources/latest?source=mangadex', '/api/sources/search-all?q=x',
+                         '/api/sources/jobs', '/api/discover/trending']) {
+          codes[u] = (await fetch(BASE + u, { headers: { authorization: `Bearer ${nodlTok}` } })).status;
+        }
+        const open = Object.entries(codes).filter(([, c]) => c !== 403);
+        open.length
+          ? bad(`the server still answers source routes for a denied account: ${JSON.stringify(Object.fromEntries(open))}`)
+          : ok('every source route refuses it server-side');
+
+        // …and the app does not offer a door it knows is locked.
+        //
+        // Clearing storage is NOT signing out: the refresh token is an HttpOnly cookie, so the app refreshes
+        // straight back into the same session and every assertion below then runs as the admin and passes
+        // for the wrong reason. That is exactly what happened the first time this was written.
+        await signOut();
+        await page.goto(BASE, { waitUntil: 'networkidle2', timeout: 60000 });
+        await sleep(1500);
+        const fields = await page.$$('input');
+        if (!fields.length) bad('no login form after signing out -- the session survived');
+        else {
+          await fields[0].type(NODL.username);
+          await page.type('input[type=password]', NODL.password);
+          await page.keyboard.press('Enter');
+          await sleep(4000);
+        }
+
+        if (await page.$('input[type=password]')) bad('could not sign in as the no-download member in the browser');
+        else {
+          ok('signed in as the no-download member');
+          const navHasDiscover = await page.evaluate(() =>
+            [...document.querySelectorAll('nav a')].some((a) => (a.getAttribute('href') || '').startsWith('/discover')));
+          navHasDiscover ? bad('the Discover tab is still offered to an account that may not add series') : ok('no Discover tab');
+
+          await page.goto(`${BASE}/discover/`, { waitUntil: 'networkidle2', timeout: 60000 }).catch(() => {});
+          await sleep(2500);
+          await shot('nodl-discover');
+          const t = await page.evaluate(() => document.body.innerText || '');
+          /turned off for your account/i.test(t)
+            ? ok('typing the URL says so plainly')
+            : bad(`/discover/ did not explain itself to a denied account: ${t.slice(0, 120).replace(/\s+/g, ' ')}`);
+        }
+
+        // Back to the admin account so anything after this behaves.
+        await signOut();
+        await page.goto(BASE, { waitUntil: 'networkidle2', timeout: 60000 });
+        await sleep(1500);
+        const back = await page.$$('input');
+        if (back.length) {
+          await back[0].type(USER);
+          await page.type('input[type=password]', PASS);
+          await page.keyboard.press('Enter');
+          await sleep(3500);
+        }
+      }
+    }
+  }
+
   // ---------------------------------------------------------------- installable
   console.log('\n  pwa');
   const mf = await page.evaluate(async () => {

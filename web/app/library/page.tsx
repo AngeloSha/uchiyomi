@@ -12,7 +12,7 @@ import { PullToRefresh } from '@/components/PullToRefresh';
 import { triggerRefresh } from '@/lib/refresh';
 import { useToast } from '@/components/Toast';
 import { Modal } from '@/components/ConfirmDialog';
-import { useAuth } from '@/lib/auth';
+import { useAuth, canDownload } from '@/lib/auth';
 import { keys, t as tr } from '@/lib/i18n';
 
 // `keys()` is the identity function; it exists so these reach the translation extractor, which cannot see
@@ -133,7 +133,7 @@ function LibraryInner() {
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [acting, setActing] = useState(false);
   const [moving, setMoving] = useState(false);
-  const { isAdmin } = useAuth();
+  const { isAdmin, user } = useAuth();
   useEffect(() => { setSelecting(false); setPicked(new Set()); }, [read, status, genres.join(','), sortKey, lib]);
   const togglePick = (id: string) =>
     setPicked((p) => { const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n; });
@@ -209,9 +209,11 @@ function LibraryInner() {
             <Link href="/search" className="grid h-10 w-10 place-items-center rounded-full border border-ink-700 bg-ink-850/70 text-fog-300">
               <IcSearch width={20} height={20} />
             </Link>
-            <Link href="/discover" className="grid h-10 w-10 place-items-center rounded-full border border-accent/40 bg-accent-soft text-accent" title={tr('Add new series')}>
-              <IcPlus width={20} height={20} />
-            </Link>
+            {canDownload(user) && (
+              <Link href="/discover" className="grid h-10 w-10 place-items-center rounded-full border border-accent/40 bg-accent-soft text-accent" title={tr('Add new series')}>
+                <IcPlus width={20} height={20} />
+              </Link>
+            )}
           </div>
         </div>
         {total != null && (

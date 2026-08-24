@@ -2,7 +2,7 @@
  "_meta": {
   "language": "ar",
   "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-  "strings": 423
+  "strings": 428
  },
  "1 check found something": "فحص واحد وجد شيئًا",
  "1 member": "عضو واحد",
@@ -29,6 +29,7 @@
  "Add to library": "أضِف إلى المكتبة",
  "Add to your iPhone": "أضِفه إلى iPhone",
  "Added to your library": "أُضيف إلى مكتبتك",
+ "Adding series is turned off for your account": "إضافة السلاسل معطّلة في حسابك",
  "Admin": "الإدارة",
  "Admin and server settings": "الإدارة وإعدادات الخادم",
  "Admin username": "اسم مستخدم المدير",
@@ -45,6 +46,7 @@
  "Amber": "كهرماني",
  "An admin token never expires and can change server settings and other accounts. Treat it like your password.": "رمز المشرف لا تنتهي صلاحيته ويمكنه تغيير إعدادات الخادم والحسابات الأخرى. تعامل معه ككلمة مرورك.",
  "Art": "الأغلفة",
+ "Ask whoever runs this server if you need it. Everything already in the library is still yours to read.": "اطلب ذلك ممّن يدير هذا الخادم إن كنت بحاجة إليه. كل ما هو موجود في المكتبة ما زال متاحًا لك للقراءة.",
  "At least 8 characters": "8 أحرف على الأقل",
  "Authentication code": "رمز المصادقة",
  "Author": "المؤلف",
@@ -221,6 +223,8 @@
  "No members yet.": "لا يوجد أعضاء بعد.",
  "No results across your sources — try another title.": "لا نتائج في مصادرك — جرّب عنوانًا آخر.",
  "No source in this language could be reached.": "تعذّر الوصول إلى أي مصدر بهذه اللغة.",
+ "No sources available": "لا توجد مصادر متاحة",
+ "No sources available in this language. Try another one above.": "لا توجد مصادر متاحة بهذه اللغة. جرّب لغة أخرى في الأعلى.",
  "No sources installed": "لا توجد مصادر مثبَّتة",
  "No tokens yet.": "لا توجد رموز بعد.",
  "Not found on any source yet — try searching manually.": "لم يُعثر عليه في أي مصدر بعد — جرّب البحث يدويًا.",
@@ -329,6 +333,7 @@
  "The scheduled check fetches new chapters for this series.": "الفحص المجدول يجلب الفصول الجديدة لهذه السلسلة.",
  "The token carries access to your {name} account and cannot be scoped. It is stored encrypted here, and you can disconnect at any time.": "يمنح هذا الرمز وصولًا إلى حسابك على {name} ولا يمكن تقييده. يُخزَّن هنا مشفَّرًا، ويمكنك قطع الاتصال في أي وقت.",
  "Their reading history, favourites and sessions go with the account. Nothing in the library is touched and no files are deleted.": "سجل القراءة والمفضلات والجلسات تذهب مع الحساب. لا يُمسّ شيء في المكتبة ولا يُحذف أي ملف.",
+ "There is nothing set up for your account to browse yet. Ask whoever runs this server.": "لم يُجهَّز بعد أي شيء لتتصفّحه بحسابك. اسأل من يدير هذا الخادم.",
  "This device": "هذا الجهاز",
  "This first account becomes the server admin.": "يصبح هذا الحساب الأول مديرًا للخادم.",
  "This member currently sees nothing.": "لا يرى هذا العضو أي شيء حاليًا.",

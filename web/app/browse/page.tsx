@@ -12,6 +12,7 @@ import { GenreTile } from '@/components/GenreTile';
 import { EmptyState } from '@/components/EmptyState';
 import { Img, Reveal } from '@/components/ui';
 import { IcChevronLeft, IcSparkle } from '@/components/icons';
+import { useAuth, canDownload } from '@/lib/auth';
 import { t as tr } from '@/lib/i18n';
 
 /**
@@ -33,6 +34,7 @@ import { t as tr } from '@/lib/i18n';
 function BrowseInner() {
   const params = useSearchParams();
   const router = useRouter();
+  const { user } = useAuth();
   const genre = params.get('genre') || '';
   const [q, setQ] = useState('');
   const [showAll, setShowAll] = useState(false);
@@ -167,7 +169,7 @@ function BrowseInner() {
       ) : !all.length ? (
         <EmptyState art={ART.emptyLibrary} title={tr('Nothing here yet')}
           sub={tr('Once your series carry genres, this is where they gather.')}
-          cta={{ href: '/discover/', label: tr('Add new series') }} />
+          cta={canDownload(user) ? { href: '/discover/', label: tr('Add new series') } : undefined} />
       ) : (
         <>
           {bands.formats.length > 0 && (

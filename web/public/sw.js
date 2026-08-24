@@ -3,7 +3,7 @@
    this SW handles the shell, static assets, and casual image/API re-reads. */
 // Bump on any change to cached assets. /icons is served cache-first, so the rebrand's new icons only reach
 // existing visitors once this changes — the activate handler evicts every cache whose name doesn't end in it.
-const VERSION = 'v5';
+const VERSION = 'v6';
 const SHELL = `yomi-shell-${VERSION}`;
 const STATIC = `yomi-static-${VERSION}`;
 const IMG = `yomi-img-${VERSION}`;
@@ -114,6 +114,15 @@ self.addEventListener('fetch', (e) => {
   }
 
   if (url.pathname.startsWith('/api/')) {
+    // Source browsing is never cached here. The Cache API keys by URL with no `Vary` and this cache is
+    // origin-scoped and only ever evicted on a VERSION bump -- not on logout. These responses are now
+    // per-account (an age-limited account is served a filtered source list, and an account that may not
+    // download is refused outright), so a stored copy is one account's answer waiting to be replayed to the
+    // next person on a shared household device. VERSION went to v6 to drop copies stored before this.
+    if (url.pathname.startsWith('/api/sources')) {
+      e.respondWith(fetch(req));
+      return;
+    }
     e.respondWith(networkFirst(req, API));
     return;
   }
