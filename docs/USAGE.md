@@ -245,23 +245,26 @@ is in [docs/extensions.md](extensions.md).
 
 ## 8. The admin panel
 
-Reachable from **Profile → Admin & server settings** (admins only). It's a tabbed, Jellyfin-style panel.
+Reachable from **Profile → Admin & server settings** (admins only). Panels are grouped by what you are
+doing rather than by what the code is called: **Server** (Overview, Tasks, Settings), **People** (Members,
+Sessions, Activity), **Content** (Library, Health, Art) and **Sources** (Providers, Extensions).
 
-**Overview:** library stats + recent member activity.
+**Server → Overview:** library stats + recent member activity.
 
 ![Members](shots/admin-members.webp)
 
 ### Health
 
-The **Health** tab audits your library and tells you what is wrong before you run into it: series with missing
+**Content → Health** audits your library and tells you what is wrong before you run into it: series with missing
 chapters, chapters that downloaded as one or two images, the same title sitting in the library twice, chapter
 numbers that can't be real, and any source that is failing or blocked. Each check says what it found and what
 it cannot see. Hit **Re-check** to run them again.
 
 ![Library health](shots/admin-health.webp)
 
-**Library:** every series you have deleted, with **Restore** to put one back exactly as it was. Deleting
-happens on the series page itself (section 4); this tab is where hidden series go and how you get them back.
+**Content → Library** also lists every series you have deleted, with **Restore** to put one back exactly as
+it was. Deleting happens on the series page itself (section 4); this is where hidden series go and how you
+get them back.
 
 ### Renaming folders and deleting files
 
@@ -283,34 +286,52 @@ is marked unread and nothing is re-downloaded. It refuses outright unless *every
 is writable: a series often spans your library and Uchiyomi's own downloads folder, and renaming only one of
 them would leave the old name in place for the next scan to pick up as a second, half-read copy.
 
-**Delete files** is on the **Library** tab, and only for a series you have already removed. The reversible
+**Delete files** is on **Content → Library**, and only for a series you have already removed. The reversible
 step always comes first, and the irreversible one asks you to type the title. It deletes the chapter files
 and keeps every chapter row and every progress row, so the record of having read something survives the
 files.
 
-**Merging duplicates** is on the **Health** tab, attached to the duplicate check that finds them: where it
+**Merging duplicates** is on **Content → Health**, attached to the duplicate check that finds them: where it
 reports the same title sitting in your library twice, **Merge** folds one into the other. Every chapter and
 every progress row moves to the survivor. Chapters that look like duplicates are **kept**, not removed --
 dropping one would mean folding two progress rows into one, and getting that wrong marks chapters unread and
 then pushes that to your AniList account, where it cannot be undone.
 
 **Libraries:** split one collection into several, then choose per member which ones they can open. This lives
-on the **Overview** tab.
+on **Content → Library**.
 
-Libraries are *declared*, not guessed. You name a subdirectory of your library root and it becomes its own
-library; Uchiyomi will suggest candidates it can see, and **Preview** shows how many series a folder holds
-before you commit. The obvious alternative -- treating every top-level folder as a library -- would be wrong
-on most existing installs, because that level usually holds the source names the downloader wrote.
+A library is **a folder, plus any series you file into it by hand**. Give it a folder by browsing your
+library root or typing the path, and the count of what it would hold appears before you commit.
+
+Libraries are *declared*, not guessed. The obvious alternative -- treating every top-level folder as a
+library -- would be wrong on most existing installs, because that level usually holds the source names the
+downloader wrote. Uchiyomi still suggests folders it can see, at any depth, with the ones that look like
+source names sorted last and flagged `source?`.
+
+**Libraries may sit inside one another.** With `Manga` and `Manga/Seinen` both declared, a series under
+`Manga/Seinen` belongs to the inner one: the most specific library wins. Removing the inner one hands its
+series back to `Manga`, not to the default.
+
+**Age rating.** A library can carry one, and everything in it inherits it, so marking a shelf 18+ is one
+action rather than two hundred. A single title can still be rated differently from its own page, which is
+what makes an exception possible. Unrated stays visible to everyone on purpose.
+
+**Access.** **Access** on a library row lists who can open it. One thing worth knowing: a member with no
+limits set can open every library, including ones you add later. Unticking them here is what turns that into
+an explicit list -- so granting a library to an unrestricted member changes nothing, and revoking one is what
+narrows them.
+
+**Filing a series by hand.** Edit any series and set **Library**, or select several on the Library page and
+use **Move to library**. A series filed by hand stays put: rescans, newly created libraries and re-pathing an
+existing one all leave it alone. Set it back to **Automatic** to hand it to the folder rule again.
 
 Nothing changes until you declare something. A fresh install and an upgraded one both start with a single
-library covering the whole root, no reading progress moves, and removing a library returns its series to the
-default one without touching a file.
+library covering the whole root, no reading progress moves, no files are touched, and removing a library
+returns its series to whichever library still covers their folder.
 
 ![Libraries](shots/admin-libraries.webp)
 
-The candidates above are flagged `source?` for a reason: on most installs the top level of the library root
-holds the names the downloader wrote, not shelves you chose. That is exactly why libraries are declared
-rather than inferred.
+Once you have more than one, the Library page grows a row of tabs to switch between them.
 
 **Members:** create accounts (user or admin), reset passwords, and per-user controls: make admin/member,
 disable, or allow/deny downloads. Each row shows whether the member has 2FA on.

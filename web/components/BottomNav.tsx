@@ -3,14 +3,18 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { motion } from 'framer-motion';
 import { IcHome, IcGrid, IcSearch, IcDownload, IcUser } from './icons';
-import { t as tr } from '@/lib/i18n';
+import { keys, t as tr } from '@/lib/i18n';
 
+// `keys()` is the identity function; it exists so these reach the translation extractor, which
+// cannot see a label rendered as `tr(label)`. This nav shipped untranslated once already.
+// See lib/i18n.ts.
+const NAV_LABELS = keys('Home', 'Library', 'Search', 'Offline', 'You');
 const items = [
-  { href: '/', label: 'Home', Icon: IcHome, match: (p: string) => p === '/' },
-  { href: '/library', label: 'Library', Icon: IcGrid, match: (p: string) => p.startsWith('/library') || p.startsWith('/series') },
-  { href: '/search', label: 'Search', Icon: IcSearch, match: (p: string) => p.startsWith('/search') || p.startsWith('/browse') },
-  { href: '/downloads', label: 'Offline', Icon: IcDownload, match: (p: string) => p.startsWith('/downloads') },
-  { href: '/profile', label: 'You', Icon: IcUser, match: (p: string) => p.startsWith('/profile') || p.startsWith('/settings') || p.startsWith('/admin') },
+  { href: '/', label: NAV_LABELS[0], Icon: IcHome, match: (p: string) => p === '/' },
+  { href: '/library', label: NAV_LABELS[1], Icon: IcGrid, match: (p: string) => p.startsWith('/library') || p.startsWith('/series') },
+  { href: '/search', label: NAV_LABELS[2], Icon: IcSearch, match: (p: string) => p.startsWith('/search') || p.startsWith('/browse') },
+  { href: '/downloads', label: NAV_LABELS[3], Icon: IcDownload, match: (p: string) => p.startsWith('/downloads') },
+  { href: '/profile', label: NAV_LABELS[4], Icon: IcUser, match: (p: string) => p.startsWith('/profile') || p.startsWith('/settings') || p.startsWith('/admin') },
 ];
 
 export function BottomNav() {

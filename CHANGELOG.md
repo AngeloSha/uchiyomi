@@ -2,6 +2,35 @@
 
 ## Unreleased
 
+### Libraries you can actually build
+
+A library is now **a folder, plus any series you file into it by hand**, and there is a way to pick that
+folder: browse your library root at any depth, or type the path. Before, the only option was a list of
+suggestions computed from the top level of the root — which on most installs holds the source names the
+downloader wrote, so the only folders offered were the ones not to pick, and the one you wanted could not be
+reached at all.
+
+**Libraries may sit inside one another.** With `Manga` and `Manga/Seinen` both declared, the most specific
+one wins. Removing the inner one hands its series back to `Manga`, not to the default library.
+
+**An age rating on the library**, inherited by everything in it, so marking a shelf 18+ is one action rather
+than two hundred. A single title can still be rated differently from its own page. Unrated stays visible to
+everyone.
+
+**Access from the library's side**: each row lists who can open it. Worth knowing, because it is the one way
+to lock someone out by accident — a member with no limits set can open every library, including ones added
+later, so granting them one changes nothing and unticking them is what narrows them to an explicit list.
+
+**File a series by hand** from its own page, or select several on the Library page and use **Move to
+library**. A series filed by hand stays put across rescans, across creating a library whose path contains it,
+and across re-pathing that library. Set it back to **Automatic** to hand it to the folder rule again.
+
+**A library's path can be edited** instead of only its name, and the Library page grows a row of tabs once
+you have more than one.
+
+No files move, nothing is deleted, and no reading progress changes. An install with one library behaves
+exactly as before.
+
 ### Age ratings, so a household can include children
 
 Mark a series with a minimum age and cap what a member's account may open. Ratings come from ComicInfo's

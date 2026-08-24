@@ -120,6 +120,25 @@ export function setActiveDict(d: Dict): void {
   current = d;
 }
 
+/**
+ * Declare translatable strings that reach `tr()` through a variable.
+ *
+ * `t` is discovered by scanning source for inline `tr(` calls with a string literal. That works for the ninety-odd percent of strings
+ * written inline and is blind to the rest: a tab label held in a `GROUPS` array and rendered as `tr(tab)`,
+ * an accent name rendered as `tr(a.name)`, an achievement label rendered as `tr(b.label)`. Those keys are
+ * real, they are missing from every locale file, and nothing fails -- the string simply renders in English
+ * forever, in an app that otherwise translates. That has now shipped three times: the main nav, the admin
+ * sidebar, and the profile tabs.
+ *
+ * So the definition site declares them. This is the identity function; its entire job is to be greppable,
+ * which is what puts these strings in front of the extractor alongside every inline call.
+ *
+ *   const TABS = keys('You', 'Reading', 'Settings', 'Account');
+ *   ...
+ *   {TABS.map((t) => <button key={t}>{tr(t)}</button>)}
+ */
+export const keys = <T extends readonly string[]>(...s: T): T => s;
+
 /** Translate. The key IS the English string, so an untranslated entry renders as good English. */
 export function t(key: string, vars?: Record<string, string | number>): string {
   return translate(current, key, vars);

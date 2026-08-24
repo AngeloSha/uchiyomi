@@ -11,26 +11,33 @@ import { IcSearch, IcSparkle, IcPlus } from '@/components/icons';
 import { PullToRefresh } from '@/components/PullToRefresh';
 import { triggerRefresh } from '@/lib/refresh';
 import { useToast } from '@/components/Toast';
-import { t as tr } from '@/lib/i18n';
+import { Modal } from '@/components/ConfirmDialog';
+import { useAuth } from '@/lib/auth';
+import { keys, t as tr } from '@/lib/i18n';
 
+// `keys()` is the identity function; it exists so these reach the translation extractor, which cannot see
+// a label rendered as `tr(s.label)`. See lib/i18n.ts.
+const SORT_LABELS = keys('Updated', 'Newest', 'A–Z', 'Most unread');
 const SORTS = [
-  { key: 'updated', label: 'Updated', sort: 'lastModified,desc' },
-  { key: 'new', label: 'Newest', sort: 'createdDate,desc' },
-  { key: 'az', label: 'A–Z', sort: 'metadata.titleSort,asc' },
+  { key: 'updated', label: SORT_LABELS[0], sort: 'lastModified,desc' },
+  { key: 'new', label: SORT_LABELS[1], sort: 'createdDate,desc' },
+  { key: 'az', label: SORT_LABELS[2], sort: 'metadata.titleSort,asc' },
   // per-user unread is now expressible server-side, so the label can say what it does
-  { key: 'unread', label: 'Most unread', sort: 'unread,desc' },
+  { key: 'unread', label: SORT_LABELS[3], sort: 'unread,desc' },
 ];
 
+const READ_LABELS = keys('Not started', 'Reading', 'Finished');
 const READ_STATES = [
-  { key: 'UNREAD', label: 'Not started' },
-  { key: 'IN_PROGRESS', label: 'Reading' },
-  { key: 'READ', label: 'Finished' },
+  { key: 'UNREAD', label: READ_LABELS[0] },
+  { key: 'IN_PROGRESS', label: READ_LABELS[1] },
+  { key: 'READ', label: READ_LABELS[2] },
 ];
 const STATUSES = ['ONGOING', 'COMPLETED', 'HIATUS', 'CANCELLED'];
 
 /** Build the condition tree from the URL. Empty means no condition at all, which needs no user context. */
-function conditionFrom(read: string, status: string, genres: string[]) {
+function conditionFrom(read: string, status: string, genres: string[], lib: string) {
   const all: any[] = [];
+  if (lib) all.push({ libraryId: { operator: 'is', value: lib } });
   if (read) all.push({ readStatus: { operator: 'is', value: read } });
   if (status) all.push({ status: { operator: 'is', value: status } });
   for (const g of genres) all.push({ genre: { operator: 'is', value: g } });
@@ -111,13 +118,23 @@ function LibraryInner() {
   const read = params.get('read') || '';
   const status = params.get('status') || '';
   const genres = (params.get('genres') || '').split(',').filter(Boolean);
+  // Which library, or '' for all of them. This lists only what the viewer may open -- the endpoint filters
+  // by their grants -- so the tab row doubles as an honest answer to "what do I actually have access to".
+  const lib = params.get('lib') || '';
+  const { data: libs } = useQuery({
+    queryKey: ['libraries'],
+    queryFn: () => api<{ id: string; name: string }[]>('/api/libraries'),
+    staleTime: 5 * 60 * 1000,
+  });
   const [sheet, setSheet] = useState(false);
   // Select mode. Cleared whenever the filters change, so a selection can never outlive the list it was
   // made from and act on series the user can no longer see.
   const [selecting, setSelecting] = useState(false);
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [acting, setActing] = useState(false);
-  useEffect(() => { setSelecting(false); setPicked(new Set()); }, [read, status, genres.join(','), sortKey]);
+  const [moving, setMoving] = useState(false);
+  const { isAdmin } = useAuth();
+  useEffect(() => { setSelecting(false); setPicked(new Set()); }, [read, status, genres.join(','), sortKey, lib]);
   const togglePick = (id: string) =>
     setPicked((p) => { const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n; });
   const activeCount = (read ? 1 : 0) + (status ? 1 : 0) + genres.length;
@@ -128,10 +145,10 @@ function LibraryInner() {
     router.replace(`/library?${next.toString()}`);
   };
 
-  const condition = useMemo(() => conditionFrom(read, status, genres), [read, status, genres.join(',')]);
+  const condition = useMemo(() => conditionFrom(read, status, genres, lib), [read, status, genres.join(','), lib]);
 
   const { data, fetchNextPage, hasNextPage, isFetchingNextPage, isLoading } = useInfiniteQuery({
-    queryKey: ['library', active.key, read, status, genres.join(',')],
+    queryKey: ['library', active.key, read, status, genres.join(','), lib],
     initialPageParam: 0,
     queryFn: ({ pageParam }) =>
       api<Page<Series>>('/api/series/search', { json: { page: pageParam, size: 40, sort: active.sort, condition } }),
@@ -202,6 +219,19 @@ function LibraryInner() {
             {total} series{activeCount > 0 && <span className="text-accent"> · filtered</span>}
           </p>
         )}
+        {(libs?.length ?? 0) > 1 && (
+          <div className="hide-scrollbar -mx-5 mt-3 flex gap-2 overflow-x-auto px-5 lg:mx-0 lg:px-0">
+            <button onClick={() => setParam('lib', '')} className={`chip whitespace-nowrap ${lib ? '' : 'chip-active'}`}>
+              {tr('All')}
+            </button>
+            {libs!.map((l) => (
+              <button key={l.id} onClick={() => setParam('lib', l.id)}
+                className={`chip whitespace-nowrap ${lib === l.id ? 'chip-active' : ''}`}>
+                {l.name}
+              </button>
+            ))}
+          </div>
+        )}
         <div className="hide-scrollbar -mx-5 mt-3 flex gap-2 overflow-x-auto px-5 lg:mx-0 lg:px-0">
           {SORTS.map((s) => (
             <button
@@ -239,7 +269,7 @@ function LibraryInner() {
               </button>
             ))}
             <button
-              onClick={() => { const n = new URLSearchParams(); if (sortKey) n.set('sort', sortKey); router.replace(`/library?${n.toString()}`); }}
+              onClick={() => { const n = new URLSearchParams(); if (sortKey) n.set('sort', sortKey); if (lib) n.set('lib', lib); router.replace(`/library?${n.toString()}`); }}
               className="chip text-xs text-fog-500"
             >{tr('Clear all')}</button>
           </div>
@@ -269,9 +299,21 @@ function LibraryInner() {
             <button disabled={acting} onClick={() => bulk('/api/library/bulk/read', { completed: true })} className="chip text-xs disabled:opacity-50">{tr('Mark read')}</button>
             <button disabled={acting} onClick={() => bulk('/api/library/bulk/read', { completed: false })} className="chip text-xs disabled:opacity-50">{tr('Mark unread')}</button>
             <button disabled={acting} onClick={() => bulk('/api/favorites/bulk', { favorite: true })} className="chip text-xs disabled:opacity-50">{tr('Favourite')}</button>
+            {isAdmin && <button disabled={acting} onClick={() => setMoving(true)} className="chip text-xs disabled:opacity-50">{tr('Move to library')}</button>}
             <button onClick={() => { setSelecting(false); setPicked(new Set()); }} className="chip text-xs text-fog-500">{tr('Cancel')}</button>
           </div>
         </div>
+      )}
+      {moving && (
+        <MoveToLibrary
+          n={picked.size}
+          busy={acting}
+          onClose={() => setMoving(false)}
+          onPick={async (libraryId) => {
+            setMoving(false);
+            await bulk('/api/admin/series/library', { libraryId });
+          }}
+        />
       )}
       {sheet && (
         <FilterSheet
@@ -282,6 +324,43 @@ function LibraryInner() {
       )}
     </div>
     </PullToRefresh>
+  );
+}
+
+/**
+ * Move a selection into a library, or hand it back to the folder rule.
+ *
+ * Admin-only, and deliberately phrased as filing rather than moving: nothing on disk changes, and the series
+ * stays where the scanner found it. Picking a library pins the choice, so a rescan or a newly created library
+ * whose path contains these folders will not quietly undo it.
+ */
+function MoveToLibrary({ n, busy, onClose, onPick }: {
+  n: number; busy: boolean; onClose: () => void; onPick: (libraryId: string | null) => void;
+}) {
+  const { data } = useQuery({
+    queryKey: ['admin-libraries'],
+    queryFn: () => api<{ content: { id: string; name: string; path: string; age_rating: number | null }[] }>('/api/admin/libraries'),
+  });
+  return (
+    <Modal title={tr('File {n} series', { n })} onClose={onClose}>
+      <div className="space-y-1">
+        {(data?.content ?? []).map((l) => (
+          <button key={l.id} disabled={busy} onClick={() => onPick(l.id)}
+            className="flex w-full items-center justify-between gap-3 rounded-lg px-2.5 py-2 text-start hover:bg-ink-800/60 disabled:opacity-50">
+            <span className="min-w-0">
+              <span className="block truncate text-sm text-fog-100">{l.name}</span>
+              <span className="block truncate font-mono text-[11px] text-fog-500">{l.path || tr('everything not in another library')}</span>
+            </span>
+            {l.age_rating != null && <span className="shrink-0 rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium text-amber-300">{l.age_rating}+</span>}
+          </button>
+        ))}
+        <button disabled={busy} onClick={() => onPick(null)}
+          className="mt-2 w-full rounded-lg border border-ink-700 px-2.5 py-2 text-sm text-fog-400 hover:text-fog-200 disabled:opacity-50">
+          {tr('Automatic — follow the folder')}
+        </button>
+      </div>
+      <p className="mt-3 text-[11px] leading-relaxed text-fog-600">{tr('No files move. This only changes which library these series appear in, and it survives the next scan.')}</p>
+    </Modal>
   );
 }
 

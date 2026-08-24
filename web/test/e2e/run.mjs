@@ -125,6 +125,74 @@ try {
       : bad(`no page image decoded (${imgs.length} candidates) — the reader shows nothing`);
   }
 
+  // ---------------------------------------------------------------- make a library, for real
+  //
+  // The reason this is here: creating a library was impossible from the UI for the whole life of the
+  // feature. The API accepted any folder path; the panel only ever offered a list of suggestions computed
+  // from the top level of the library root, which on a real install holds source names. Every server test
+  // passed, because they all called the route directly. So this types a path in like a person would.
+  console.log('\n  libraries');
+  // `scope` restricts the search to the open dialog. Without it this reached for the first two text inputs
+  // on the PAGE, which are the global search box in the top bar -- typing into that opens the command
+  // palette over the dialog, and every assertion after it fails for a reason that has nothing to do with
+  // what is being tested.
+  const clickText = (text, scope = null) => page.evaluate((t, sel) => {
+    const root = sel ? document.querySelector(sel) : document;
+    if (!root) return false;
+    const el = [...root.querySelectorAll('button')].find((b) => (b.innerText || '').trim() === t);
+    if (el) el.click();
+    return !!el;
+  }, text, scope);
+  const DIALOG = '[role="dialog"]';
+
+  await page.goto(`${BASE}/admin`, { waitUntil: 'networkidle2', timeout: 60000 });
+  await sleep(1500);
+  (await clickText('Library')) ? ok('opened the Library tab') : bad('no Library tab in the admin panel');
+  await sleep(1500);
+
+  if (!(await clickText('New library'))) bad('no way to create a library');
+  else {
+    await sleep(600);
+    const boxes = await page.$$(`${DIALOG} input[type=text], ${DIALOG} input:not([type])`);
+    if (boxes.length < 2) bad(`the new-library dialog has ${boxes.length} text field(s) — the folder box is the point of it`);
+    else {
+      await boxes[0].type('E2E Shelf');
+      await boxes[1].type('Test Source');
+      await sleep(1200);   // debounced preview
+      const dlg = await page.evaluate(() => document.body.innerText || '');
+      /series would move/.test(dlg)
+        ? ok('a typed path is previewed before committing')
+        : bad('typing a folder produced no preview — the count is the only thing shown before committing');
+      await shot('admin-new-library');
+
+      (await clickText('Create', DIALOG)) || bad('no Create button');
+      await sleep(2500);
+      const after = await page.evaluate(() => document.body.innerText || '');
+      /E2E Shelf/.test(after) && /Test Source/.test(after)
+        ? ok('created a library from a typed path')
+        : bad('the library was not created from a typed path — this is the bug the whole rework is about');
+      await shot('admin-libraries');
+
+      // Access, from the library's own row.
+      (await clickText('Access')) || bad('no Access control on a library row');
+      await sleep(900);
+      /Who can open/.test(await page.evaluate(() => document.body.innerText || ''))
+        ? ok('access opens from the library side')
+        : bad('the Access dialog did not open');
+      (await clickText('Cancel', DIALOG)) || (await page.keyboard.press('Escape'));
+      await sleep(600);
+
+      // And undo it, so the run leaves nothing behind.
+      (await clickText('Remove')) || bad('no Remove on a library row');
+      await sleep(700);
+      (await clickText('Remove library', DIALOG)) || bad('the remove confirmation did not appear');
+      await sleep(2500);
+      /E2E Shelf/.test(await page.evaluate(() => document.body.innerText || ''))
+        ? bad('the library survived being removed')
+        : ok('removed it again');
+    }
+  }
+
   // ---------------------------------------------------------------- phone
   console.log('\n  phone 390x844');
   await page.setViewport({ width: 390, height: 844, isMobile: true, hasTouch: true });

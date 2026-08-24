@@ -49,19 +49,27 @@ for (const code of LOCALES) {
     problems.push('the navigation is still in English — nothing was translated');
   }
 
-  // The admin sidebar renders `tr(variable)`, which a literal scan of the source cannot see. That blind spot
-  // has now shipped untranslated labels twice -- once for the main nav, once for the admin panel -- so it is
-  // checked here instead, where a variable and a literal look the same.
+  // Nav labels reach `tr()` through a VARIABLE, which a literal scan of the source cannot see. That blind
+  // spot has now shipped untranslated labels three times: the main nav, the admin sidebar, and the profile
+  // tabs. `keys()` in lib/i18n.ts makes them discoverable at the definition site; this is the second net,
+  // checked in a browser where a variable and a literal look the same.
+  //
+  // Both consoles are visited. Checking only /admin is exactly how /profile shipped an English tab row.
+  const CONSOLES = [
+    ['/admin', ['Overview', 'Members', 'Settings', 'Providers', 'Server', 'People', 'Content', 'Sources']],
+    ['/profile', ['Reading', 'Account', 'Settings', 'Badges', 'Language', 'Accent']],
+  ];
   if (code !== 'en') {
-    await p.goto(`${BASE}/admin`, { waitUntil: 'networkidle2', timeout: 60000 });
-    await new Promise((r) => setTimeout(r, 2200));
-    const admin = await p.evaluate(() => document.body.innerText || '');
-    const english = ['Overview', 'Members', 'Settings', 'Providers', 'Server', 'People', 'Content', 'Sources']
-      .filter((w) => new RegExp(`\\b${w}\\b`).test(admin));
-    if (english.length >= 3) problems.push(`admin sidebar still in English: ${english.join(', ')}`);
-    const aOver = await p.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
-    if (aOver > 4) problems.push(`admin: ${aOver}px of horizontal overflow`);
-    await p.screenshot({ path: `${OUT}/${code}-admin.png` });
+    for (const [path, words] of CONSOLES) {
+      await p.goto(`${BASE}${path}`, { waitUntil: 'networkidle2', timeout: 60000 });
+      await new Promise((r) => setTimeout(r, 2400));
+      const text = await p.evaluate(() => document.body.innerText || '');
+      const english = words.filter((w) => new RegExp(`\\b${w}\\b`).test(text));
+      if (english.length >= 3) problems.push(`${path} still in English: ${english.join(', ')}`);
+      const over = await p.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+      if (over > 4) problems.push(`${path}: ${over}px of horizontal overflow`);
+      await p.screenshot({ path: `${OUT}/${code}-${path.slice(1)}.png` });
+    }
   }
 
   await p.screenshot({ path: `${OUT}/${code}.png` });

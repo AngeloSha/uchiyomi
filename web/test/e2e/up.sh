@@ -11,6 +11,11 @@ set -euo pipefail
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 PORT=${E2E_PORT:-18140}
 NET=${E2E_NET:-uchiyomi-e2e}
+# Container names are derived from the network, not hardcoded. They were hardcoded, so a second run with
+# E2E_NET/E2E_PORT overridden -- the whole point of those knobs -- tore down the first run's containers on
+# the way in and again on the way out.
+APP="$NET"
+DB="$NET-db"
 # Docker's default address pools can be exhausted on a busy host, so the subnet is pinned rather than left
 # to chance -- an unexplained "all predefined address pools have been fully subnetted" is a bad first
 # impression of a test suite.
@@ -21,7 +26,7 @@ LIB=$(mktemp -d)
 
 cleanup() {
   [ "${KEEP:-0}" = "1" ] && { echo "kept: $NET on :$PORT (library $LIB)"; return; }
-  docker rm -f uchiyomi-e2e uchiyomi-e2e-db >/dev/null 2>&1 || true
+  docker rm -f "$APP" "$DB" >/dev/null 2>&1 || true
   docker network rm "$NET" >/dev/null 2>&1 || true
   rm -rf "$LIB"
 }
@@ -33,16 +38,16 @@ python3 "$REPO/web/test/e2e/seed.py" "$LIB"
 echo "· building the all-in-one image"
 docker build -q -f "$REPO/Dockerfile.aio" -t uchiyomi:e2e "$REPO" >/dev/null
 
-docker rm -f uchiyomi-e2e uchiyomi-e2e-db >/dev/null 2>&1 || true
+docker rm -f "$APP" "$DB" >/dev/null 2>&1 || true
 docker network rm "$NET" >/dev/null 2>&1 || true
 docker network create --subnet "$SUBNET" "$NET" >/dev/null
 
-docker run -d --name uchiyomi-e2e-db --network "$NET" \
+docker run -d --name "$DB" --network "$NET" \
   -e POSTGRES_PASSWORD=e2e -e POSTGRES_DB=yomi postgres:16-alpine >/dev/null
-for _ in $(seq 1 60); do docker exec uchiyomi-e2e-db pg_isready -q 2>/dev/null && break; sleep 1; done
+for _ in $(seq 1 60); do docker exec "$DB" pg_isready -q 2>/dev/null && break; sleep 1; done
 
-docker run -d --name uchiyomi-e2e --network "$NET" -p "127.0.0.1:$PORT:3000" \
-  -e DATABASE_URL='postgres://postgres:e2e@uchiyomi-e2e-db:5432/yomi' \
+docker run -d --name "$APP" --network "$NET" -p "127.0.0.1:$PORT:3000" \
+  -e DATABASE_URL="postgres://postgres:e2e@$DB:5432/yomi" \
   -e JWT_SECRET='e2e-secret-at-least-16-chars' \
   -e LIBRARY_BACKEND=owned \
   -e PUID="$(id -u)" -e PGID="$(id -g)" \

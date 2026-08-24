@@ -8,20 +8,23 @@ import { Img } from '@/components/ui';
 import { EmptyState } from '@/components/EmptyState';
 import { ART } from '@/lib/art';
 import { IcChevronLeft, IcCheck, IcPlay } from '@/components/icons';
-import { t as tr } from '@/lib/i18n';
+import { keys, t as tr } from '@/lib/i18n';
 
 interface HistoryRow {
   book_id: string; series_id: string; page: number; completed: boolean; created_at: string;
   book_title: string; series_title: string;
 }
 
+// Two of these three are translatable strings reaching `tr()` through a variable, so they are declared;
+// the third is already localised by the browser. See lib/i18n.ts.
+const DAY_LABELS = keys('Today', 'Yesterday');
 const dayLabel = (iso: string) => {
   const d = new Date(iso);
   const today = new Date();
   const yest = new Date(today.getTime() - 86400000);
   const same = (a: Date, b: Date) => a.toDateString() === b.toDateString();
-  if (same(d, today)) return 'Today';
-  if (same(d, yest)) return 'Yesterday';
+  if (same(d, today)) return DAY_LABELS[0];
+  if (same(d, yest)) return DAY_LABELS[1];
   return d.toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' });
 };
 
@@ -57,7 +60,7 @@ export default function HistoryPage() {
       ) : (
         <div className="px-4 pt-2 lg:mx-auto lg:max-w-2xl lg:px-0">
           {groups.map((g) => (
-            <section key={tr(g.label)} className="mb-5">
+            <section key={g.label} className="mb-5">
               <h2 className="sticky top-0 z-10 bg-ink-950/90 py-2 text-xs font-semibold uppercase tracking-widest text-fog-500 backdrop-blur">
                 {tr(g.label)}
               </h2>

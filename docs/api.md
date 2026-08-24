@@ -241,7 +241,10 @@ PUT    /api/admin/series/:id/art  PUT    /api/admin/series/:id/meta
 PATCH  /api/admin/series/:id      DELETE /api/admin/series/:id
 GET    /api/admin/libraries       POST   /api/admin/libraries
 GET    /api/admin/libraries/preview
+GET    /api/admin/libraries/folders
 PATCH  /api/admin/libraries/:id   DELETE /api/admin/libraries/:id
+POST   /api/admin/series/:id/library
+POST   /api/admin/series/library
 GET    /api/admin/library/writable
 POST   /api/admin/series/:id/delete-files
 POST   /api/admin/series/:id/rename-folder
