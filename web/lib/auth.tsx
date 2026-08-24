@@ -2,6 +2,7 @@
 import { createContext, useContext, useEffect, useRef, useState, ReactNode } from 'react';
 import { api, refreshSession, setAccessToken } from './api';
 import { deviceId, deviceName } from './device';
+import { clearShownOnce } from './shownOnce';
 
 export interface Avatar { emoji?: string; color?: string }
 interface User {
@@ -120,6 +121,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setAccessToken(null);
     setUser(null);
     setStatus('anon');
+    // Secrets the server only ever sends once are held outside React so a remount cannot destroy them.
+    // That store has to end with the session, or a shared machine hands the next person a live token.
+    clearShownOnce();
   };
 
   const setSettings = (partial: Record<string, any>) => {

@@ -45,19 +45,34 @@ export function Img({
   src,
   alt,
   className = '',
+  imgClassName = '',
   eager = false,
 }: {
   src: string;
   alt: string;
   className?: string;
+  /**
+   * Classes for the inner <img>, not the wrapper. `className` lands on the positioning div, so an
+   * `object-top` passed there is inert -- and a 2:3 cover cropped into a landscape box without it crops to
+   * the middle of the artwork, which on a manga cover is reliably the part with no face and no title.
+   */
+  imgClassName?: string;
   eager?: boolean;
 }) {
   const [loaded, setLoaded] = useState(false);
   const [failed, setFailed] = useState(false);
   const error = failed || !src; // no src at all is the same broken tile as a src that 404s
   const setError = setFailed;
+  // `relative` is only applied when the caller has not chosen a position of their own.
+  //
+  // Tailwind emits `.absolute` BEFORE `.relative`, and CSS resolves by stylesheet order, not by the order
+  // of names in a class attribute. So `<Img className="absolute inset-0 h-full w-full">` silently stayed
+  // relative, `h-full` had no definite parent height to resolve against, and the wrapper grew to the
+  // image's natural size: a 112px card rendered 620px tall with its own content pushed out of sight. It
+  // looks like a layout mistake in the caller and is not one.
+  const positioned = /(^|\s)(absolute|fixed|sticky|static)(\s|$)/.test(className);
   return (
-    <div className={`relative overflow-hidden bg-ink-800 ${className}`}>
+    <div className={`${positioned ? '' : 'relative'} overflow-hidden bg-ink-800 ${className}`}>
       {!loaded && !error && <div className="skeleton absolute inset-0" />}
       {error ? (
         <div className="flex h-full w-full items-center justify-center text-ink-500">
@@ -75,7 +90,7 @@ export function Img({
           decoding="async"
           onLoad={() => setLoaded(true)}
           onError={() => setError(true)}
-          className={`h-full w-full object-cover transition-all duration-700 ease-out ${loaded ? 'scale-100 opacity-100 blur-0' : 'scale-105 opacity-0 blur-md'}`}
+          className={`h-full w-full object-cover ${imgClassName} transition-all duration-700 ease-out ${loaded ? 'scale-100 opacity-100 blur-0' : 'scale-105 opacity-0 blur-md'}`}
         />
       )}
     </div>

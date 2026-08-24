@@ -88,6 +88,22 @@ function SeriesEditModal({ id, series, onClose, onSaved }: { id: string; series:
     setBusy(false);
   };
 
+  // Which library this series is filed under. `''` means the folder rule decides, which is the default and
+  // what almost every series should stay on -- picking one explicitly is a decision that then survives
+  // rescans, new libraries, and re-pathing an existing one, which is the whole point and also the reason not
+  // to do it by accident.
+  const [lib, setLib] = useState<string>(series.libraryPinned ? series.libraryId : '');
+  const { data: libs } = useQuery({
+    queryKey: ['admin-libraries'],
+    queryFn: () => api<{ content: { id: string; name: string; age_rating: number | null }[] }>('/api/admin/libraries'),
+  });
+  const saveLib = async (next: string) => {
+    const prev = lib;
+    setLib(next);
+    try { await api(`/api/admin/series/${id}/library`, { method: 'POST', json: { libraryId: next || null } }); onSaved(); }
+    catch (e) { setLib(prev); toast(msgOf(e, tr('Could not move that')), 'error'); }
+  };
+
   const [autoUpdate, setAutoUpdate] = useState(series.autoUpdate !== false);
   const toggleAuto = async (next: boolean) => {
     setAutoUpdate(next);
@@ -124,6 +140,17 @@ function SeriesEditModal({ id, series, onClose, onSaved }: { id: string; series:
           <h3 className="font-display text-lg font-semibold leading-tight">{tr('Edit series')}</h3>
           <button onClick={onClose} className="shrink-0 text-fog-500 hover:text-fog-200">✕</button>
         </div>
+        <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-fog-500">{tr('Library')}</label>
+        <select value={lib} onChange={(e) => saveLib(e.target.value)} className={fld}>
+          <option value="">{tr('Automatic — follow the folder')}</option>
+          {(libs?.content ?? []).map((l) => (
+            <option key={l.id} value={l.id}>{l.name}{l.age_rating != null ? ` (${l.age_rating}+)` : ''}</option>
+          ))}
+        </select>
+        <p className="mb-3 mt-1 text-[11px] text-fog-600">
+          {lib ? tr('Filed here by hand. Rescans and new libraries will leave it alone.')
+               : tr('Whichever library covers this folder, most specific first.')}
+        </p>
         <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-fog-500">{tr('Title')}</label>
         <input value={title} onChange={(e) => setTitle(e.target.value)} className={fld} />
         <label className="mb-1 mt-3 block text-xs font-semibold uppercase tracking-wider text-fog-500">{tr('Description')}</label>

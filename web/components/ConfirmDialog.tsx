@@ -22,14 +22,27 @@ export function Modal({
   wide?: boolean;
 }) {
   const ref = useRef<HTMLDivElement>(null);
+  // Read through a ref so the effect below can depend on nothing. Callers pass `onClose={() => ...}`, a new
+  // function identity on every render, so an effect depending on it re-ran after every keystroke.
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
 
   // Escape closes, and focus starts inside rather than wherever it happened to be.
+  //
+  // Runs ONCE. It used to re-run whenever `onClose` changed identity, i.e. on every render, i.e. after every
+  // character typed into any field in the dialog -- and it focused `input, button, textarea`, whose first
+  // match in document order is the ✕ in the header, not the first field. So the first keystroke landed, the
+  // rest went to the close button, and the first SPACE activated it and threw the dialog away mid-sentence.
+  // Every modal in the app with a text field had this.
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') closeRef.current(); };
     document.addEventListener('keydown', onKey);
-    ref.current?.querySelector<HTMLElement>('input, button, textarea')?.focus();
+    // A field if there is one; the close button only when there is nothing to type into.
+    const first = ref.current?.querySelector<HTMLElement>('input, textarea, select')
+      ?? ref.current?.querySelector<HTMLElement>('button');
+    first?.focus();
     return () => document.removeEventListener('keydown', onKey);
-  }, [onClose]);
+  }, []);
 
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-ink-950/70 p-4 backdrop-blur-sm" onClick={onClose}>
