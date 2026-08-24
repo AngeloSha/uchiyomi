@@ -97,10 +97,32 @@ curl -X POST -H "Authorization: Bearer $TOK" -H 'Content-Type: application/json'
 `chapterCount` limits how many of the most recent chapters to grab (omit for all); `autoUpdate` enrols it in the
 scheduled updater.
 
+`GET /api/sources` lists what you can reach: each entry carries `id`, `name`, `lang` (null when the source
+declares no single language, which means it belongs to every language group), `latest` (whether it can be
+browsed without a query), `used` (how many series in the library came from it) and its health `status`.
+
+`GET /api/sources/latest?source=<id>&page=<n>` is bounded at `SOURCE_LATEST_TIMEOUT_MS` (default 8000) per
+source and cached server-side for ten minutes per source and page, with concurrent requests for the same page
+collapsed into one outbound fetch. A source that times out is recorded against its health and earns a
+cooldown, so it stops being picked first.
+
 Responses worth handling: **200** with `message: "already in library"` if you have that exact series already,
 and **409** `duplicate` if a series with the same title came from a *different* source — retry with
-`"force": true` to add the second copy anyway. Adding can also be denied with **403** for a non-admin whose
-`canDownload` permission is off.
+`"force": true` to add the second copy anyway.
+
+**403 on the whole `/api/sources/*` surface.** Two account settings gate these routes, and both are enforced
+server-side rather than only in the app:
+
+* A non-admin whose `canDownload` permission is off is refused on **every** route in this group, not just
+  `add` — listing sources, searching, browsing newest, series detail and the job list all return `403`.
+* An account whose `max_age_rating` is set below 18 cannot reach a source its extension declares adult. Such
+  a source is omitted from `GET /api/sources` entirely, refused with `403` by id on `latest`, `search`,
+  `detail` and `add`, and silently dropped from the `find` and `search-all` fan-outs (a fan-out has no single
+  source to refuse). Sources with no adult signal at all — built-ins, packs, custom sites — count as not
+  adult, the same way an unrated series stays visible.
+
+Because these responses differ per account, do not cache them in anything shared. The app's service worker
+explicitly excludes `/api/sources*` for that reason.
 
 To add a whole *site* rather than one series, that is `POST /api/admin/sources/custom` (admin scope).
 

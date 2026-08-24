@@ -62,6 +62,13 @@ reclaim the RAM as well, `docker compose stop uchiyomi-suwayomi` (`yomi-suwayomi
 | `SUWAYOMI_URL` | the bundled engine | Where the extension engine is. Empty turns the feature off. |
 | `SUWAYOMI_USERNAME` / `SUWAYOMI_PASSWORD` | empty | Only if your engine has authentication enabled. |
 | `SUWAYOMI_MAX_SOURCES` | `25` | Ceiling on how many extension sources register at once. |
+| `SOURCE_LATEST_TIMEOUT_MS` | `8000` | How long one source gets to answer "what's new" on Discover before it is given up on and marked unhealthy. |
+
+**Adult sources.** Extensions declare whether they are adult, and Uchiyomi records that per source. A member
+whose age limit is set below 18 cannot reach one: it is left out of their source list entirely, and the
+server refuses it by id rather than relying on the app to hide it. Admins and members with no age limit are
+unaffected. Sources with no such declaration — the built-in engines, source packs, custom sites — are treated
+as not adult, the same way an unrated series stays visible instead of vanishing the moment a limit is set.
 
 You can point `SUWAYOMI_URL` at a Suwayomi you already run instead of the bundled one; Uchiyomi doesn't care
 whose it is.

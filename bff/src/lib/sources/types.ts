@@ -40,6 +40,19 @@ export interface SourceAdapter {
   imageHeaders?: Record<string, string> | ((imageUrl: string) => Record<string, string>);
   /** Lower = earlier in the cross-source "find" provider order (default: large). */
   preferredOrder?: number;
+  /**
+   * BCP-47-ish language this source publishes in, when it only publishes in one. Suwayomi reports it per
+   * source; a built-in declares it only when its own requests pin a language (MangaDex asks for `en` and
+   * nothing else). Absent means "no single language", which the language grouping reads as "belongs to
+   * every group" -- so declaring it wrongly is worse than leaving it off.
+   */
+  lang?: string;
+  /**
+   * The source itself is adult, as opposed to carrying the odd adult title. Only Suwayomi supplies this
+   * signal; everything else stays undefined and is treated as not-adult, matching `visible()`'s rule that
+   * unrated content stays visible rather than vanishing the moment someone sets an age limit.
+   */
+  isNsfw?: boolean;
 }
 
 /** Host services the core injects into a source plugin's register(host) (so plugins never import core internals). */

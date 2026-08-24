@@ -102,6 +102,32 @@ export const visibleToAll = (alias: string): string => visible(alias, SYSTEM_CTX
 
 
 /**
+ * The age at which adult content stops being withheld, and the top of the rating scale the admin UI offers
+ * (`z.number().int().min(0).max(18)` in three places in admin.ts).
+ */
+export const ADULT_RATING = 18;
+
+/**
+ * May this viewer reach this source at all?
+ *
+ * `visible()` answers the same question for a series already in the library, using a rating on the row. A
+ * source has no rows yet -- the whole point of Discover is that nothing has been added -- so the only signal
+ * is the adult flag its extension declares, and the only sane reading of it is all-or-nothing: an adult
+ * source's newest page is twenty-four adult covers.
+ *
+ * Structurally typed rather than taking a `SourceAdapter` so the visibility module keeps depending on
+ * nothing, exactly as `visible()` does.
+ *
+ * Undefined `isNsfw` means allowed, matching `visible()`'s rule about unrated content: only Suwayomi tells
+ * us anything, and treating every built-in and custom site as adult would empty Discover for a capped
+ * account rather than filter it.
+ */
+export function sourceAllowedFor(src: { isNsfw?: boolean } | null | undefined, maxAgeRating: number | null): boolean {
+  if (!src?.isNsfw) return true;
+  return maxAgeRating === null || maxAgeRating >= ADULT_RATING;
+}
+
+/**
  * The viewer for one request.
  *
  * Called once per handler. Everything downstream -- every SQL source, the image server, OPDS -- inherits

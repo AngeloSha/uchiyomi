@@ -983,9 +983,12 @@ export default async function adminRoutes(app: FastifyInstance) {
       remote = await listRemoteSources();
     } catch {
       reachable = false;
-      remote = (await q<{ source_id: string; name: string; lang: string | null }>(
-        'SELECT source_id, name, lang FROM suwayomi_sources ORDER BY name',
-      )).map((r) => ({ id: r.source_id, name: r.name, lang: r.lang }));
+      // The persisted `nsfw` is read here rather than defaulting to false: this fallback renders the whole
+      // source list when Suwayomi is briefly down, and an adult source shown as clean is the one mistake
+      // this list must not make.
+      remote = (await q<{ source_id: string; name: string; lang: string | null; nsfw: boolean }>(
+        'SELECT source_id, name, lang, nsfw FROM suwayomi_sources ORDER BY name',
+      )).map((r) => ({ id: r.source_id, name: r.name, lang: r.lang, isNsfw: r.nsfw }));
     }
     const on = new Set(
       (await q<{ source_id: string }>('SELECT source_id FROM suwayomi_sources WHERE enabled = true')).map((r) => r.source_id),
@@ -1015,10 +1018,14 @@ export default async function adminRoutes(app: FastifyInstance) {
     const remote = await listRemoteSources().catch(() => []);
     const match = remote.find((s) => String(s.id) === id);
     await q(
-      `INSERT INTO suwayomi_sources (source_id, name, lang, enabled) VALUES ($1,$2,$3,$4)
+      // COALESCE on nsfw for the same reason as the name: when the remote list is unreachable `match` is
+      // undefined, and defaulting to false there would silently un-flag an adult source on every toggle.
+      `INSERT INTO suwayomi_sources (source_id, name, lang, nsfw, enabled) VALUES ($1,$2,$3,$4,$5)
        ON CONFLICT (source_id) DO UPDATE SET enabled = EXCLUDED.enabled,
-         name = COALESCE(NULLIF(EXCLUDED.name, ''), suwayomi_sources.name)`,
-      [id, match ? (match.displayName?.trim() || match.name) : id, match?.lang ?? null, b.data.enabled],
+         name = COALESCE(NULLIF(EXCLUDED.name, ''), suwayomi_sources.name),
+         nsfw = COALESCE(EXCLUDED.nsfw, suwayomi_sources.nsfw)`,
+      [id, match ? (match.displayName?.trim() || match.name) : id, match?.lang ?? null,
+       match ? !!match.isNsfw : null, b.data.enabled],
     );
     await reloadAll();
     await logAudit(b.data.enabled ? 'source.extension_enable' : 'source.extension_disable', {
@@ -1109,9 +1116,10 @@ export default async function adminRoutes(app: FastifyInstance) {
     const provided = enable ? await sourcesOfExtension(pkgName).catch(() => []) : priorSources;
     for (const s of provided) {
       await q(
-        `INSERT INTO suwayomi_sources (source_id, name, lang, enabled) VALUES ($1,$2,$3,$4)
-         ON CONFLICT (source_id) DO UPDATE SET enabled = EXCLUDED.enabled, name = EXCLUDED.name, lang = EXCLUDED.lang`,
-        [s.id, s.name, s.lang, enable],
+        `INSERT INTO suwayomi_sources (source_id, name, lang, nsfw, enabled) VALUES ($1,$2,$3,$4,$5)
+         ON CONFLICT (source_id) DO UPDATE SET enabled = EXCLUDED.enabled, name = EXCLUDED.name,
+           lang = EXCLUDED.lang, nsfw = EXCLUDED.nsfw`,
+        [s.id, s.name, s.lang, !!s.nsfw, enable],
       ).catch(() => {});
     }
     if (b.data.action === 'uninstall') {

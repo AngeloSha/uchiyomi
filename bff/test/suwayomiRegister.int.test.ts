@@ -64,6 +64,30 @@ test('extension source registration', { skip: DSN ? false : 'set TEST_DATABASE_U
     assert.equal(row[0].enabled, true, 'an existing choice must survive a refresh');
   });
 
+  await t.test('the adult flag survives a re-register rather than being reset', async () => {
+    // `isNsfw` was selected in SOURCES_Q and then discarded at every step: no column, nothing on the
+    // adapter, nothing in the API. It is now the ONLY signal keeping an age-capped account out of an adult
+    // source, so an extension that turns adult in a later version must not keep an old `false`, and one that
+    // is already adult must not be un-flagged by the next refresh.
+    reset();
+    await q('DELETE FROM suwayomi_sources');
+    await reg.loadSuwayomiSources(async () => [{ id: '9', name: 'Clean', lang: 'en' }]);
+    assert.equal((await q<{ nsfw: boolean }>(`SELECT nsfw FROM suwayomi_sources WHERE source_id = '9'`))[0].nsfw, false);
+
+    await reg.loadSuwayomiSources(async () => [{ id: '9', name: 'Clean', lang: 'en', isNsfw: true }]);
+    assert.equal(
+      (await q<{ nsfw: boolean }>(`SELECT nsfw FROM suwayomi_sources WHERE source_id = '9'`))[0].nsfw, true,
+      'a source that became adult stayed marked clean',
+    );
+
+    await q(`UPDATE suwayomi_sources SET enabled = true WHERE source_id = '9'`);
+    await reg.loadSuwayomiSources(async () => [{ id: '9', name: 'Clean', lang: 'en', isNsfw: true }]);
+    const adapter = loader.getSource('sw:9');
+    assert.ok(adapter, 'the enabled source should be registered');
+    assert.equal(adapter!.isNsfw, true, 'the flag reached the database but not the adapter the routes check');
+    assert.equal(adapter!.lang, 'en', 'the language must reach the adapter too, or it joins every group');
+  });
+
   await t.test('the cap is enforced, and what it dropped is reported', async () => {
     reset();
     const { env } = await import('../src/env');

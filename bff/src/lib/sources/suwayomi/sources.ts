@@ -140,6 +140,10 @@ export function makeSuwayomiAdapter(remote: RemoteSource, run: Gql = defaultGql)
   const adapter: SourceAdapter = {
     id: adapterId,
     name: remote.displayName?.trim() || remote.name,
+    lang: remote.lang?.trim() || undefined,
+    // Declared by the extension author and the only adult signal any source gives us. Carried onto the
+    // adapter so the routes can decide with the object they already hold, without a per-request DB read.
+    isNsfw: !!remote.isNsfw,
     requiresCloudflare: false,
     imageHeaders: suwayomiImageHeaders,
     // After the built-ins but ahead of user-added engine sites: an extension is usually a better-maintained

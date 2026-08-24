@@ -29,9 +29,11 @@ export async function enabledSourceIds(): Promise<Set<string>> {
 async function remember(sources: RemoteSource[]): Promise<void> {
   for (const s of sources) {
     await q(
-      `INSERT INTO suwayomi_sources (source_id, name, lang, enabled) VALUES ($1,$2,$3,false)
-       ON CONFLICT (source_id) DO UPDATE SET name = EXCLUDED.name, lang = EXCLUDED.lang`,
-      [String(s.id), s.displayName?.trim() || s.name, s.lang ?? null],
+      // `nsfw` is refreshed on every re-register alongside the name and language: an extension that turns
+      // adult in a later version must not keep an old `false` and stay reachable by a capped account.
+      `INSERT INTO suwayomi_sources (source_id, name, lang, nsfw, enabled) VALUES ($1,$2,$3,$4,false)
+       ON CONFLICT (source_id) DO UPDATE SET name = EXCLUDED.name, lang = EXCLUDED.lang, nsfw = EXCLUDED.nsfw`,
+      [String(s.id), s.displayName?.trim() || s.name, s.lang ?? null, !!s.isNsfw],
     ).catch(() => {});
   }
 }

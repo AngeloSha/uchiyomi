@@ -466,6 +466,12 @@ CREATE TABLE IF NOT EXISTS suwayomi_sources (
   enabled   boolean NOT NULL DEFAULT true,
   added_at  timestamptz NOT NULL DEFAULT now()
 );
+-- Whether the extension declares itself adult. Suwayomi has always told us -- isNsfw is selected in
+-- SOURCES_Q -- and it was thrown away three times over: no column, no field on the adapter, nothing in the
+-- API. Without it there is no way to keep an age-capped account out of an adult source, and on a real
+-- install that is not a corner case: 36 of 44 enabled sources on the one this was written for are adult.
+ALTER TABLE suwayomi_sources ADD COLUMN IF NOT EXISTS nsfw boolean NOT NULL DEFAULT false;
+
 
 -- OIDC identity linked to a local account. Kept alongside the password columns rather than replacing them,
 -- so a person can have both and local login keeps working if the identity provider is down.

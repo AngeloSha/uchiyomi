@@ -72,14 +72,14 @@ export async function setExtensionState(pkgName: string, action: ExtensionAction
 }
 
 /** The source ids one installed extension provides — an extension can carry several (one per language). */
-export async function sourcesOfExtension(pkgName: string, run: Gql = defaultGql): Promise<Array<{ id: string; name: string; lang: string | null }>> {
-  const d = await run<{ extensions: { nodes: Array<{ pkgName: string; source?: { nodes?: Array<{ id: string; name?: string; lang?: string }> } }> } }>(
-    `{ extensions { nodes { pkgName source { nodes { id name lang } } } } }`, {}, 30000,
+export async function sourcesOfExtension(pkgName: string, run: Gql = defaultGql): Promise<Array<{ id: string; name: string; lang: string | null; nsfw: boolean }>> {
+  const d = await run<{ extensions: { nodes: Array<{ pkgName: string; source?: { nodes?: Array<{ id: string; name?: string; lang?: string; isNsfw?: boolean }> } }> } }>(
+    `{ extensions { nodes { pkgName source { nodes { id name lang isNsfw } } } } }`, {}, 30000,
   );
   const hit = (d?.extensions?.nodes || []).find((e) => e.pkgName === pkgName);
   return (hit?.source?.nodes || [])
     .filter((s) => s && s.id != null)
-    .map((s) => ({ id: String(s.id), name: s.name || pkgName, lang: s.lang ?? null }));
+    .map((s) => ({ id: String(s.id), name: s.name || pkgName, lang: s.lang ?? null, nsfw: !!s.isNsfw }));
 }
 
 // ---- extension repositories -------------------------------------------------

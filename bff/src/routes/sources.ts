@@ -1,7 +1,7 @@
 // Search across sources and add a new series to the library (queues its download). Backed by the source
 // adapters + the downloader. The cover proxy lives under /img (cookie auth) so <img> tags can load it.
-import type { FastifyInstance } from 'fastify';
-import { authenticate } from '../lib/auth';
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import { authenticate, userIdOf, roleOf } from '../lib/auth';
 import { getSource, listSources, isSwAdapterId, SW_PREFIX } from '../lib/sources';
 import type { SourceAdapter, SourceSeries } from '../lib/sources/types';
 import { downloadChapter, sanitize } from '../lib/downloader';
@@ -13,7 +13,10 @@ import { logAudit } from '../lib/audit';
 import { env } from '../env';
 // The "already in library" annotation is deliberately library-wide: it answers "would adding this be a
 // duplicate on this server", which is a property of the server, not of the person asking.
-import { visibleToAll } from '../lib/visibility';
+//
+// Which SOURCES you may reach is the opposite: entirely about who is asking, which is what `viewCtxFor` and
+// `sourceAllowedFor` answer.
+import { visibleToAll, viewCtxFor, sourceAllowedFor, type ViewCtx } from '../lib/visibility';
 
 interface Job { title: string; total: number; done: number; status: 'downloading' | 'done' | 'error'; reason?: string }
 const jobs = new Map<string, Job>();
@@ -236,7 +239,39 @@ export async function findBestMatch(term: string): Promise<{ source: string; sou
 export default async function sourceRoutes(app: FastifyInstance) {
   app.addHook('preHandler', authenticate);
 
-  app.get('/api/sources', async () => {
+  /**
+   * Every route in this file is "add something to the library", or a step towards it.
+   *
+   * `canDownload: false` was enforced in exactly one place in the entire server -- the final POST -- so a
+   * denied account could still list every source, search them, browse their newest pages and read full
+   * series detail. It only met a wall on the last button. One hook removes the whole surface, and folds in
+   * the copy of this check that used to live inside `add`.
+   *
+   * Semantics are otherwise unchanged: only the literal `false` denies, an absent permission is allowed, and
+   * admins are exempt. The one deliberate change is denying when the user row cannot be read, where the old
+   * check fell through to allowed -- a database blip should not open the one route that writes to disk.
+   */
+  app.addHook('preHandler', async (req, reply) => {
+    const me = await one<{ role: string; perms: { canDownload?: boolean } | null }>(
+      'SELECT role, perms FROM users WHERE id = $1', [userIdOf(req)]).catch(() => null);
+    if (!me) return reply.code(403).send({ error: 'forbidden', message: 'Could not check your permissions.' });
+    if (me.role !== 'admin' && me.perms?.canDownload === false) {
+      return reply.code(403).send({ error: 'forbidden', message: "You don't have permission to add series." });
+    }
+    // Resolved once per request, as in catalog.ts. Only `maxAgeRating` is read here, but taking the whole
+    // context means this file cannot drift from everyone else's idea of who the viewer is.
+    (req as any).viewCtx = await viewCtxFor(userIdOf(req), roleOf(req));
+  });
+
+  const vc = (req: FastifyRequest): ViewCtx => (req as any).viewCtx as ViewCtx;
+  /** Same shape for every by-id rejection, and it does not say what is being withheld. */
+  const denySource = (reply: FastifyReply) =>
+    reply.code(403).send({ error: 'forbidden', message: 'That source is not available on this account.' });
+  /** The sources this viewer may reach, in registry order. */
+  const reachable = (req: FastifyRequest): SourceAdapter[] =>
+    listSources().filter((s) => sourceAllowedFor(s, vc(req).maxAgeRating));
+
+  app.get('/api/sources', async (req) => {
     const health = new Map((await healthAll()).map((h) => [h.source_id, h]));
     // Which language a source serves is an operator's choice recorded per source, not a property of the
     // adapter (adapters are code), so it lives only in suwayomi_sources. Discover groups by it: forty-five
@@ -257,15 +292,18 @@ export default async function sourceRoutes(app: FastifyInstance) {
     );
     const now = Date.now();
     return {
-      content: listSources().map((s) => {
+      // An adult source is not merely hidden from the wall: it never appears in the list the client fans out
+      // over, so a capped account cannot learn its id here and then ask for it directly.
+      content: reachable(req).map((s) => {
         const h = health.get(s.id);
         const blocked = !!(h?.blocked_until && new Date(h.blocked_until).getTime() > now);
         return {
           id: s.id,
           name: s.name,
           // null means "declares no single language", which is not the same as "serves none": a source
-          // like MangaDex belongs in every group rather than in an orphan bucket.
-          lang: isSwAdapterId(s.id) ? (langs.get(s.id.slice(SW_PREFIX.length)) ?? null) : null,
+          // like MangaDex belongs in every group rather than in an orphan bucket. An adapter may now declare
+          // one itself, which is how MangaDex -- hardcoded to ask for English -- stops joining all thirty.
+          lang: s.lang ?? (isSwAdapterId(s.id) ? (langs.get(s.id.slice(SW_PREFIX.length)) ?? null) : null),
           latest: typeof s.latest === 'function',
           // What the reader has actually used. Health-then-alphabetical put "18 Porn Comic" and "1Manga.co"
           // at the front of this install's English group while Aqua Manga -- 176 of its 214 series, answering
@@ -281,10 +319,11 @@ export default async function sourceRoutes(app: FastifyInstance) {
   // full per-source health for the admin provider dashboard
   app.get('/api/sources/status', async () => ({ content: await healthAll() }));
 
-  app.get('/api/sources/search', async (req) => {
+  app.get('/api/sources/search', async (req, reply) => {
     const { source, q: query } = req.query as { source?: string; q?: string };
     const src = source ? getSource(source) : null;
     if (!src || !query?.trim()) return { content: [] };
+    if (!sourceAllowedFor(src, vc(req).maxAgeRating)) return denySource(reply);
     const raw = await src.search(query.trim()).catch(() => []);
     // dedupe by sourceId (duplicate ids collide on the React key → wrong cover/title on a card)
     const seen = new Set<string>();
@@ -299,7 +338,10 @@ export default async function sourceRoutes(app: FastifyInstance) {
   app.get('/api/sources/search-all', async (req) => {
     const term = ((req.query as { q?: string }).q || '').trim();
     if (!term) return { content: [] };
-    const per = await Promise.all(findOrder().map(async (id) => {
+    // Filtered rather than rejected: a fan-out has no single source to refuse, and a capped account asking
+    // for a title that only exists on adult sources should get "nobody has it", not a partial denial.
+    const allowed = new Set(reachable(req).map((x) => x.id));
+    const per = await Promise.all(findOrder().filter((id) => allowed.has(id)).map(async (id) => {
       const src = getSource(id);
       if (!src) return [];
       if (await isDisabled(id).catch(() => false)) return [];
@@ -329,10 +371,13 @@ export default async function sourceRoutes(app: FastifyInstance) {
   });
 
   // Browse a source's newest / recently-updated series (no query). Same card shape as search.
-  app.get('/api/sources/latest', async (req) => {
+  app.get('/api/sources/latest', async (req, reply) => {
     const { source, page } = req.query as { source?: string; page?: string };
     const src = source ? getSource(source) : null;
     if (!src || typeof src.latest !== 'function') return { content: [] };
+    // Refused by id, not merely hidden in the list. The web app is a static export, so a UI-only filter
+    // would leave this returning twenty-four adult covers as JSON to a capped account holding the id.
+    if (!sourceAllowedFor(src, vc(req).maxAgeRating)) return denySource(reply);
     if (await isDisabled(source!).catch(() => false)) return { content: [] };
     const p = Math.max(1, parseInt(page || '1', 10) || 1);
     const results = await latestPage(src, p);
@@ -348,6 +393,9 @@ export default async function sourceRoutes(app: FastifyInstance) {
     if (!trendingCache || Date.now() - trendingCache.at > 6 * 3600_000) {
       try { trendingCache = { at: Date.now(), items: await fetchTrendingManhwa() }; } catch { if (!trendingCache) return { content: [] }; }
     }
+    // No per-user filter here on purpose: `isAdult:false` is an argument to the AniList query, so adult
+    // titles never arrive, and the cache is shared for six hours -- filtering it per viewer would pin one
+    // capped account's view for everyone.
     const have = await inLibrary(trendingCache.items.map((t) => t.title));
     return { content: trendingCache.items.filter((t) => !have.has(norm(t.title))).slice(0, 24) };
   });
@@ -360,8 +408,9 @@ export default async function sourceRoutes(app: FastifyInstance) {
     // Scoped, because unscoped this is one outbound request per registered source: forty-five sites hit for
     // one tap. The client already knows which sources the reader is browsing and passes them.
     const wanted = sources ? new Set(sources.split(',').map((x) => x.trim()).filter(Boolean)) : null;
+    const allowed = new Set(reachable(req).map((x) => x.id));
     const found = await Promise.all(
-      findOrder().filter((id) => !wanted || wanted.has(id)).map(async (id) => {
+      findOrder().filter((id) => allowed.has(id) && (!wanted || wanted.has(id))).map(async (id) => {
         const src = getSource(id);
         if (!src) return null;
         // search-all and latest both skip disabled sources and this did not, so it offered a provider an
@@ -381,6 +430,7 @@ export default async function sourceRoutes(app: FastifyInstance) {
     const { source, sourceId } = req.query as { source?: string; sourceId?: string };
     const src = source ? getSource(source) : null;
     if (!src || !sourceId) return reply.code(400).send({ error: 'bad_request' });
+    if (!sourceAllowedFor(src, vc(req).maxAgeRating)) return denySource(reply);
     const [series, chapters] = await Promise.all([src.getSeries(sourceId).catch(() => null), src.listChapters(sourceId).catch(() => [])]);
     const nums = chapters.map((c) => c.number);
     return {
@@ -395,9 +445,8 @@ export default async function sourceRoutes(app: FastifyInstance) {
     const { source, sourceId, force, chapterCount, autoUpdate } = (req.body ?? {}) as
       { source?: string; sourceId?: string; force?: boolean; chapterCount?: number; autoUpdate?: boolean };
     if (!source || !sourceId) return reply.code(400).send({ error: 'bad_request' });
-    // permission: non-admins can be denied the ability to add/download series
-    const me = await one<{ role: string; perms: { canDownload?: boolean } }>('SELECT role, perms FROM users WHERE id = $1', [(req as any).user?.sub]);
-    if (me && me.role !== 'admin' && me.perms?.canDownload === false) return reply.code(403).send({ error: 'forbidden', message: "You don't have permission to add series." });
+    // canDownload is now checked for the whole plugin in the preHandler above, including this route.
+    if (!sourceAllowedFor(getSource(source), vc(req).maxAgeRating)) return denySource(reply);
     const r = await addSeriesFromSource({ source, sourceId, force, chapterCount, autoUpdate });
     if (!r.ok) return reply.code(r.status).send({ error: r.error, message: r.message, existing: r.existing, status: r.blockStatus });
     logAudit('download.add', { userId: (req as any).user?.sub, detail: { title: r.title, source, chapters: r.chapters }, req });

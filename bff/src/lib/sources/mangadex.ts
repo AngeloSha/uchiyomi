@@ -42,6 +42,11 @@ function toSeries(m: any): SourceSeries {
 export const mangadex: SourceAdapter = {
   id: 'mangadex',
   name: 'MangaDex',
+  // MangaDex hosts every language, but this adapter asks for exactly one: `availableTranslatedLanguage[]=en`
+  // in latest() and `translatedLanguage[]=en` in listChapters(). Reporting no language meant it joined every
+  // language group, so picking Japanese filled a third of the wall with English MangaDex rows -- which is
+  // exactly the "says Japanese, serves English" the owner reported, seen from the reader's side.
+  lang: 'en',
   imageReferer: 'https://mangadex.org/', // CDN rejects image fetches without the mangadex referer
   preferredOrder: 10,
 
