@@ -96,7 +96,52 @@ which is the only thing it wins.
 documented, and `deploy/docker-compose.yml` is unchanged. The single-container build is additive: the same
 API image serves the web app only when `WEB_ROOT` points at it.
 
+### Discover, rebuilt
+
+The page that adds new series was a search box on black with a ragged grid hanging off it. Production
+disagreed with that design: in 48 hours there were 32 requests for "what's new on this source" and **zero**
+searches. So the wall of what your sources just published is the page now, led by a full-bleed hero built
+from the AniList key art the endpoint had been returning since it shipped and the page was rendering as a
+144px thumbnail. Forty-five sources across thirty languages collapse to one remembered language chip. Search
+survives as a field, with a way back out that it never had.
+
+**It is also much faster.** `GET /api/sources/latest` was the only endpoint of its kind with no time limit of
+its own: it inherited the adapter's, which is 30 seconds for an extension source and 95 for a site behind
+FlareSolverr. The worst measured call took **63 seconds**. It is now capped at 8 seconds (`SOURCE_LATEST_TIMEOUT_MS`),
+cached for ten minutes per source and page, and concurrent requests for the same page collapse into one
+outbound fetch instead of six. A source that times out is recorded against its health, so it earns a cooldown
+and stops being asked first. The six sources fetched are now ranked by what your library actually came from,
+rather than alphabetically, which had been putting sources with no series behind them ahead of the one that
+supplied 80% of the collection.
+
+The horizontal rails have **a visible scrollbar and arrows**. They had neither, and smooth scrolling eats a
+vertical wheel over a horizontal strip, so on a desktop mouse there was no way to move them at all.
+
+### Adult sources, and who may open Discover
+
+Two account settings that existed only in name now hold:
+
+**A member whose age limit is below 18 cannot reach a source its extension declares adult.** It is absent
+from their source list, and the server refuses it by id. The app is a static export, so hiding it in the UI
+would have left the JSON one guessed URL away. This is not an edge case on a real install: on the one this
+was written against, 36 of 44 enabled sources are adult. Sources that declare nothing (the built-in engines, source
+packs, custom sites) count as not adult, the same way an unrated series stays visible.
+
+**A member who may not add series no longer sees Discover.** `canDownload` was enforced on exactly one route,
+the final POST, so a denied account could browse every source, search them and read full series detail, and
+only met a wall on the last button. Every route behind the page refuses now, and the tab is gone.
+
 ### Also
+
+MangaDex asks its API for English and nothing else, but declared no language, so it joined all thirty
+language groups: choosing Japanese filled a third of the wall with English MangaDex rows. It declares English
+now. The language chips also count **sites** rather than rows, so one site installed once per language stops
+presenting itself as thirty separate choices.
+
+Editing a series' metadata failed with "Could not save" for **every** field, not just the age rating that
+made it noticeable: the statement asked for seven values and was given six, so Postgres refused it. Queries
+now fail loudly at the call site when their placeholders and parameters disagree, which is how this was
+found and how the next one will be.
 
 The comparison table gained the two rows where something else does more: **reflowable EPUB**, which Kavita
 reads and this deliberately does not, and **Kobo device sync**, which Komga has and this has no answer for.
