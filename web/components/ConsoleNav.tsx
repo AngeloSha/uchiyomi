@@ -26,6 +26,7 @@ export function ConsoleNav<T extends string>({
   onTab,
   ariaLabel,
   flat,
+  footer,
   children,
 }: {
   groups: ReadonlyArray<NavGroup<T>>;
@@ -34,6 +35,13 @@ export function ConsoleNav<T extends string>({
   ariaLabel: string;
   /** True when every group holds one entry: suppresses the group eyebrows and the phone group sheet. */
   flat?: boolean;
+  /**
+   * Actions that belong to the rail rather than to any one panel, pinned under the tab list and repeated at
+   * the bottom of the phone sheet. Profile puts Admin and Sign out here: both were reachable only by picking
+   * the right tab and scrolling a board of eight cards to the end, which is a long way for the two things
+   * people go to that page to do.
+   */
+  footer?: ReactNode;
   children: ReactNode;
 }) {
   const [sheet, setSheet] = useState(false);
@@ -65,6 +73,9 @@ export function ConsoleNav<T extends string>({
                 </div>
               </div>
             ))}
+            {footer && (
+              <div className="space-y-1 border-t border-ink-800/80 pt-4">{footer}</div>
+            )}
           </div>
         </nav>
 
@@ -87,6 +98,8 @@ export function ConsoleNav<T extends string>({
               ))}
             </div>
           </div>
+          {/* A flat nav has no group sheet, so on a phone the footer would have nowhere to live. */}
+          {footer && flat && <div className="mb-4 flex flex-wrap gap-2 lg:hidden">{footer}</div>}
 
           {/* Keyed on the tab so each panel animates in rather than snapping. */}
           <motion.div key={tab} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
@@ -97,7 +110,7 @@ export function ConsoleNav<T extends string>({
       </div>
 
       {sheet && (
-        <GroupSheet groups={groups} ariaLabel={ariaLabel} current={tab}
+        <GroupSheet groups={groups} ariaLabel={ariaLabel} current={tab} footer={footer}
           onPick={(t) => { onTab(t); setSheet(false); }} onClose={() => setSheet(false)} />
       )}
     </div>
@@ -110,10 +123,11 @@ export function ConsoleNav<T extends string>({
  * A bottom sheet rather than a dropdown, matching the library's Filters drawer -- an idiom this app already
  * has, so it is one pattern rather than two.
  */
-function GroupSheet<T extends string>({ groups, ariaLabel, current, onPick, onClose }: {
+function GroupSheet<T extends string>({ groups, ariaLabel, current, footer, onPick, onClose }: {
   groups: ReadonlyArray<NavGroup<T>>;
   ariaLabel: string;
   current: T;
+  footer?: ReactNode;
   onPick: (t: T) => void;
   onClose: () => void;
 }) {
@@ -137,6 +151,7 @@ function GroupSheet<T extends string>({ groups, ariaLabel, current, onPick, onCl
               </div>
             </div>
           ))}
+          {footer && <div className="space-y-1 border-t border-ink-800/80 pt-4">{footer}</div>}
         </div>
       </div>
     </div>

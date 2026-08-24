@@ -20,7 +20,7 @@ import { Switch } from '@/components/Switch';
 import { Modal, msgOf } from '@/components/ConfirmDialog';
 import { Backdrop, ProgressBar } from '@/components/ui';
 import { useToast } from '@/components/Toast';
-import { IcDownload, IcSparkle, IcCheck, IcChevronRight, IcPlay, IcRefresh } from '@/components/icons';
+import { IcDownload, IcSparkle, IcCheck, IcChevronRight, IcPlay, IcRefresh, IcSettings, IcLogOut } from '@/components/icons';
 import { t as tr, LOCALES, keys } from '@/lib/i18n';
 import { useT } from '@/lib/I18nProvider';
 
@@ -357,7 +357,10 @@ export default function ProfilePage() {
       </header>
 
       {/* ------------------------------ INDEX + BOARD ------------------------------ */}
-      <ConsoleNav groups={PROFILE_GROUPS} tab={tab} onTab={setTab} ariaLabel={tr('You')} flat>
+      {/* The two things people actually come to this page to do were both at the bottom of the Account tab,
+          behind a board of eight cards. They belong to the person, not to a panel, so they live on the rail. */}
+      <ConsoleNav groups={PROFILE_GROUPS} tab={tab} onTab={setTab} ariaLabel={tr('You')} flat
+        footer={<RailActions isAdmin={isAdmin} />}>
         <div className="board">{cards}</div>
       </ConsoleNav>
 
@@ -365,6 +368,34 @@ export default function ProfilePage() {
         <GoalModal current={stats?.weeklyGoal ?? 0} onClose={() => setGoalOpen(false)} onSave={saveGoal} />
       )}
     </div>
+  );
+}
+
+/**
+ * Admin and Sign out, pinned to the console rail.
+ *
+ * Both already exist as cards on the Account tab and stay there -- this is a second way to reach them, not a
+ * move, because someone who knows where they are should not have to relearn the page. Styled as rail items
+ * rather than as buttons so the column still reads as one list, with Sign out in the app's destructive red
+ * and set apart from the link above it.
+ */
+function RailActions({ isAdmin }: { isAdmin: boolean }) {
+  const { logout } = useAuth();
+  const row = 'flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-start text-sm transition';
+  return (
+    <>
+      {isAdmin && (
+        <Link href="/admin/" className={`${row} text-fog-400 hover:bg-ink-800/60 hover:text-fog-100`}>
+          <IcSettings width={16} height={16} className="shrink-0" />
+          <span className="min-w-0 truncate">{tr('Admin')}</span>
+          <IcChevronRight width={15} height={15} className="ms-auto shrink-0 opacity-60" />
+        </Link>
+      )}
+      <button onClick={logout} className={`${row} text-red-300/90 hover:bg-red-500/10 hover:text-red-300`}>
+        <IcLogOut width={16} height={16} className="shrink-0" />
+        <span className="min-w-0 truncate">{tr('Sign out')}</span>
+      </button>
+    </>
   );
 }
 
