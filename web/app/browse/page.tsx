@@ -13,6 +13,7 @@ import { EmptyState } from '@/components/EmptyState';
 import { Img, Reveal } from '@/components/ui';
 import { IcChevronLeft, IcSparkle } from '@/components/icons';
 import { useAuth, canDownload } from '@/lib/auth';
+import { AdultToggle } from '@/components/AdultToggle';
 import { t as tr } from '@/lib/i18n';
 
 /**
@@ -146,9 +147,12 @@ function BrowseInner() {
               <p className="mt-0.5 text-xs text-fog-500">{tr('{n} genres in your library', { n: all.length })}</p>
             )}
           </div>
-          <button onClick={surprise} className="btn-accent shrink-0 px-4 py-2 text-sm">
-            <IcSparkle width={16} height={16} />{tr('Surprise me')}
-          </button>
+          <div className="flex shrink-0 items-center gap-2">
+            <AdultToggle />
+            <button onClick={surprise} className="btn-accent shrink-0 px-4 py-2 text-sm">
+              <IcSparkle width={16} height={16} />{tr('Surprise me')}
+            </button>
+          </div>
         </div>
         {/* Only once the wall is long enough that scrolling it is worse than typing. */}
         {all.length > 24 && (

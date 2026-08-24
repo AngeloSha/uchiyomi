@@ -249,6 +249,31 @@ try {
     return r.ok ? (await r.json()).accessToken : null;
   };
 
+  // ---------------------------------------------------------------- clicking, not typing URLs
+  //
+  // Every check above navigates with page.goto, which is a fresh load with an empty react-query cache. A
+  // person clicks the nav instead, and that carries the cache from one page to the next -- which is how
+  // /discover/ shipped broken while every URL-driven test passed: it shared the query key `['trending']`
+  // with the home page, was handed the home page's differently-shaped data, and threw on first render.
+  console.log('\n  moving around by clicking');
+  await page.goto(BASE, { waitUntil: 'networkidle2', timeout: 60000 });
+  await sleep(3000);
+  for (const href of ['/library', '/browse', '/discover', '/collections', '/updates', '/', '/discover']) {
+    const clicked = await page.evaluate((h) => {
+      const links = [...document.querySelectorAll('a')];
+      const a = links.find((x) => (x.getAttribute('href') || '').replace(/\/$/, '') === h.replace(/\/$/, ''));
+      if (!a) return false;
+      a.click();
+      return true;
+    }, href);
+    if (!clicked) { console.log(`    [ -- ] no link to ${href} in this account's nav`); continue; }
+    await sleep(4000);
+    const t = await page.evaluate(() => document.body.innerText || '').catch(() => 'EVAL FAILED');
+    /client-side exception|Application error/i.test(t)
+      ? bad(`clicking through to ${href} crashed the app`)
+      : ok(`${href} survives being clicked into`);
+  }
+
   // ---------------------------------------------------------------- 18+ libraries stay off the shelf
   //
   // The whole chain, end to end: a session cookie set by the button, a query parameter added to every API
