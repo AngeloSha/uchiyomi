@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v0.9.0 — 2026-08-24
+
 ### Libraries you can actually build
 
 A library is now **a folder, plus any series you file into it by hand**, and there is a way to pick that

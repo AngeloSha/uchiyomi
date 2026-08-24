@@ -66,10 +66,12 @@ into a single image.** Point it at your library, add sources by URL, and it does
   run it as the owner of your library (`PUID`), it can also rename folders and delete chapter files.
 - **Command palette:** press **Ctrl+K** anywhere — instant series search, quick actions, recent items.
 - **Collections:** hand-curated reading lists with accent colors, reorderable, surfaced on Home.
-- **Discover:** one search across **every source at once** (one card per title; pick which provider to add
-  from), a **newest-releases rail per source**, and a global trending-manhwa rail.
+- **Discover:** a wall of **what your sources just published**, grouped by language and led by full-bleed key
+  art for what the world is reading. Each source gets **eight seconds** and is cached, so one slow site cannot
+  hold up the page, and the ones your library actually came from are asked first. Search is still there, across
+  **every source at once** (one card per title; pick which provider to add from).
 
-  <img src="docs/shots/discover.webp" alt="Searching every source at once" width="820">
+  <img src="docs/shots/discover.webp" alt="The Discover page: newest releases from your own sources" width="820">
 
 - **Multi-user:** username + password accounts, per-user reading progress / favorites / history timeline,
   avatars, streaks, and a "household" leaderboard — with accurate completion tracking, mark-as-read
@@ -161,11 +163,13 @@ Suwayomi) fetches chapters but is Android-only or wraps them in a basic web UI. 
 | Runs in one container (+ a database) | ✅ | ✅ | ✅ *(an app)* | ✅ |
 | Interface in 9 languages | ✅ | ✅ | ✅ | limited |
 | Age ratings + per-member limit | ✅ | ✅ | ❌ | ❌ |
+| Hide an 18+ library until asked for | ✅ | ❌ | ❌ | ❌ |
+| Per-member permission to add series | ✅ | ❌ | ❌ | ❌ |
 | Syncs to AniList / MAL / Kitsu | ✅ | Kavita+, paid | ✅ | ✅ |
 | Reads text ebooks (reflowable EPUB) | ❌ *(on purpose)* | Kavita ✅ | ❌ | ❌ |
 | Kobo device sync | ❌ | Komga ✅ | ❌ | ❌ |
 
-<sub>Compiled 2026-08-23 from each project's own docs. These projects move fast and I do not run all of them
+<sub>Compiled 2026-08-24 from each project's own docs. These projects move fast and I do not run all of them
 daily — if a row is wrong or out of date, [open an issue](https://github.com/AngeloSha/uchiyomi/issues) and I
 will fix it.</sub>
 
@@ -387,10 +391,13 @@ Actively developed. On deck:
 
 - 🧭 **Per-source genre & popular browsing:** rounding out the newest-releases rails.
 
-Recently shipped: 📚 multiple libraries with per-member access, 🔍 library filters and bulk actions,
-✏️ editable series and chapter metadata that survives a rescan, 📁 any folder layout, 🗂️ series delete / restore / merge, 🔎 content fingerprinting so renamed
-folders are recognised, 🔗 AniList progress sync, 🔔 push notifications, 📡 OPDS, browser-based first-run setup, and
-cross-source search.
+Recently shipped: 🔞 an 18+ library kept off every browsing surface until you ask for it, 🧒 age ratings with a
+per-member limit, 🚫 a per-member permission to add series at all, 🧭 Discover rebuilt around what your sources
+just published, 🌍 nine languages with right-to-left, 🔖 bookmarks, 📄 PDF and image EPUB, 📚 multiple libraries
+with per-member access, 🔍 library filters and bulk actions, ✏️ editable series and chapter metadata that
+survives a rescan, 📁 any folder layout, 🗂️ series delete / restore / merge, 🔎 content fingerprinting so renamed
+folders are recognised, 🔗 progress sync to AniList, MyAnimeList and Kitsu, 🔔 push notifications, 📡 OPDS with
+expiring links, browser-based first-run setup, and cross-source search.
 
 ## Support
 

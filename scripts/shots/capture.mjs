@@ -180,9 +180,18 @@ async function main() {
   }
 
   if (want('discover')) {
+    // The WALL, not a search. Discover was rebuilt around what your sources just published -- the hero, the
+    // language chips and the grid are the page now, and search is a field in the corner. This used to type
+    // "solo leveling" and photograph the results, so every screenshot in the docs and on the marketing site
+    // illustrated the one thing the page had stopped leading with.
     await go('/discover/', 600);
-    const box = await page.$('input[placeholder*="Search"]');
-    if (box) { await box.type('solo leveling'); await page.keyboard.press('Enter'); await sleep(9000); await settle(page); }
+    // Sources are fetched independently and land as they answer, so wait for the wall rather than a timer.
+    await page.waitForFunction(
+      () => document.querySelectorAll('a[href*="/series/"], button img').length > 12,
+      { timeout: 30000 },
+    ).catch(() => {});
+    await sleep(2500);
+    await settle(page);
     await shot(page, 'discover');
   }
 
