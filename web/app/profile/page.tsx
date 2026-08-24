@@ -380,14 +380,19 @@ export default function ProfilePage() {
  */
 function RailActions({ isAdmin }: { isAdmin: boolean }) {
   const { logout } = useAuth();
-  const row = 'flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-start text-sm transition';
+  // Two shapes, one markup. On a desktop these are rail rows under the tab list; on a phone the rail does
+  // not exist and they sit under the pill row, so they take the pill's shape and wrap instead of stacking
+  // three full-width bars above the content.
+  const row = 'flex items-center gap-2 rounded-full border border-ink-700 px-3 py-1.5 text-start text-sm transition ' +
+    'lg:w-full lg:rounded-lg lg:border-0';
+  const chev = 'ms-auto hidden shrink-0 opacity-60 lg:block';
   return (
     <>
       {isAdmin && (
         <Link href="/admin/" className={`${row} text-fog-400 hover:bg-ink-800/60 hover:text-fog-100`}>
           <IcSettings width={16} height={16} className="shrink-0" />
           <span className="min-w-0 truncate">{tr('Admin')}</span>
-          <IcChevronRight width={15} height={15} className="ms-auto shrink-0 opacity-60" />
+          <IcChevronRight width={15} height={15} className={chev} />
         </Link>
       )}
       {/* Promoted out of the bottom of the Account tab, where it sat behind eight cards and a scroll. It is
@@ -397,7 +402,7 @@ function RailActions({ isAdmin }: { isAdmin: boolean }) {
         className={`${row} text-fog-400 hover:bg-ink-800/60 hover:text-fog-100`}>
         <span aria-hidden className="shrink-0 text-base leading-none">☕</span>
         <span className="min-w-0 truncate">{tr('Support Uchiyomi')}</span>
-        <IcChevronRight width={15} height={15} className="ms-auto shrink-0 opacity-60" />
+        <IcChevronRight width={15} height={15} className={chev} />
       </a>
       <button onClick={logout} className={`${row} text-red-300/90 hover:bg-red-500/10 hover:text-red-300`}>
         <IcLogOut width={16} height={16} className="shrink-0" />
