@@ -79,11 +79,16 @@ export function languagesOf(sources: Src[]): { code: string; label: string; coun
  * forty-five concurrent scrapes. Six, best-first:
  *   1. healthy before rate-limited or blocked, because a blocked source is a guaranteed timeout for a
  *      guaranteed nothing;
- *   2. sources that actually declare the chosen language before the universals, since the chip is the point;
- *   3. what the library actually came from. This is the one that mattered: with only (1) and (2), ties fell
- *      back to the server's order, which resolves alphabetically -- "18 Porn Comic", "1Manga.co", "3Hentai" --
- *      while the source 176 of that library's 214 series came from, answering in 2.5s, was never in the six.
+ *   2. what the library actually came from;
+ *   3. sources that declare the chosen language before the universals;
  *   4. registry order after that, which puts the preferred adapters first (Array.sort is stable).
+ *
+ * (2) sits above (3) on evidence, not taste. With the language first, the English chip on that install
+ * fetched MangaDex and five adult extension sources with no series behind any of them, while Aqua Manga --
+ * 189 of the library's 214 series, answering in 2.5s -- was never among the six, because it is a universal
+ * source and declares no language at all. `inGroup` has already excluded everything not in the group by
+ * this point, so (3) is only a preference among sources the reader could legitimately be shown; a source
+ * they demonstrably read from is the better one of those.
  */
 export function budgetFor(sources: Src[], lang: string, max = 6): Src[] {
   const declares = (s: Src) => langsOf(s).includes(lang);
@@ -91,8 +96,8 @@ export function budgetFor(sources: Src[], lang: string, max = 6): Src[] {
     .filter((s) => s.latest && s.status !== 'disabled' && inGroup(s, lang))
     .sort((a, b) =>
       Number(a.status !== 'ok') - Number(b.status !== 'ok') ||
-      Number(declares(b)) - Number(declares(a)) ||
-      (b.used ?? 0) - (a.used ?? 0))
+      (b.used ?? 0) - (a.used ?? 0) ||
+      Number(declares(b)) - Number(declares(a)))
     .slice(0, max);
 }
 

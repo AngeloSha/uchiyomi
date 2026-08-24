@@ -97,6 +97,17 @@ test('the budget prefers healthy, then the declared language, then what the libr
     'a disabled source was fetched, or the ordering is wrong',
   );
 
+  // THE REGRESSION, measured on production after this shipped: with "declares the language" ranked above
+  // "the library came from it", the English chip fetched five adult extension sources and MangaDex, and
+  // Aqua Manga -- 189 of that library's 214 series -- was never in the six, because it is a universal source
+  // and declares no language. A universal the reader actually uses beats a declared source they never have.
+  const real = budgetFor([
+    src({ id: 'declared-1', name: 'Declared One', lang: 'en', used: 0 }),
+    src({ id: 'declared-2', name: 'Declared Two', lang: 'en', used: 0 }),
+    src({ id: 'aqua-univ', name: 'Aqua Manga', lang: null, used: 189 }),
+  ], 'en', 2).map((s) => s.id);
+  assert.equal(real[0], 'aqua-univ', 'a universal source with the whole library behind it was not fetched first');
+
   // The reported symptom of the old ordering: health-then-alphabetical put "18 Porn Comic" and "1Manga.co"
   // at the front of the English group while Aqua Manga -- 176 of this library's 214 series, answering in
   // 2.5s -- was never among the six actually fetched.
