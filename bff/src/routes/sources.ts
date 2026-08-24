@@ -115,7 +115,12 @@ async function latestPage(src: SourceAdapter, page: number): Promise<SourceSerie
       // dedupe by sourceId (duplicate ids collide on the React key -> wrong cover/title on a card)
       const items = raw.filter((r) => !!r.sourceId && !seen.has(r.sourceId) && (seen.add(r.sourceId), true)).slice(0, 24);
       latestCache.set(key, { at: Date.now(), items });
-      void reportOk(src.id);
+      // Only a page with something on it counts as proof of life. Several adapters answer a failed
+      // Cloudflare challenge with an empty array rather than by throwing -- on this install Aqua Manga and
+      // Natomanga both do -- and `reportOk` CLEARS `blocked_until` and resets the failure count. Browsing
+      // Discover would then wipe a cooldown the downloader had legitimately recorded, using a response that
+      // carries no information either way: "nothing new" and "I could not read the page" look identical.
+      if (items.length) void reportOk(src.id);
       return items;
     } catch (e) {
       // Nothing reported health from here, so a source that timed out on every single visit kept its `ok`

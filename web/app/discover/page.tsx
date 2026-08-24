@@ -98,10 +98,28 @@ export default function DiscoverPage() {
   const [seed, setSeed] = useState<AddSeed | null>(null);
   const [added, setAdded] = useState<Set<string>>(new Set());
 
-  const budget = useMemo(() => budgetFor(sources, lang), [sources, lang]);
+  // Ranked once; how many of them are actually asked grows as answers come back.
+  const ranked = useMemo(() => budgetFor(sources, lang, 12), [sources, lang]);
 
   // Changing language starts a new wall. Keeping the old one would show Korean sources under an English chip.
   useEffect(() => { setById({}); setOrder([]); setStates({}); setPage(1); }, [lang]);
+
+  /**
+   * Six sources, plus one more for every one that came back with nothing.
+   *
+   * Ranking by what the library actually came from is right, and on a real install it turned out that four
+   * of that reader's own six top sources answer "newest" with an empty page: their Cloudflare challenge
+   * fails and the adapter returns [] rather than throwing, so nothing marks them unhealthy and nothing
+   * moves them down. A fixed six then spends most of the wall on sources that cannot fill it.
+   *
+   * Each replacement is only requested after an earlier source has settled, so this widens the wall without
+   * widening the burst. Bounded twice over: by the ranked list and by the cap.
+   */
+  const emptied = Object.values(states).filter((s) => s === 'empty' || s === 'blocked').length;
+  const budget = useMemo(
+    () => ranked.slice(0, Math.min(ranked.length, 10, 6 + emptied)),
+    [ranked, emptied],
+  );
 
   const onSettled = useCallback((id: string, items: SourceItem[], ok: boolean) => {
     setById((prev) => (prev[id]?.length && !items.length ? prev : { ...prev, [id]: [...(prev[id] ?? []), ...items] }));

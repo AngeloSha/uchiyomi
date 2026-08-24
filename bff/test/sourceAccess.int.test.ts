@@ -33,12 +33,13 @@ const skip = DSN ? false : 'set TEST_DATABASE_URL to run';
 const CLEAN = 't-clean';
 const ADULT = 't-adult';
 const SLOW = 't-slow';
+const EMPTY = 't-empty';
 const USERS = ['sa-admin', 'sa-plain', 'sa-capped', 'sa-nodl', 'sa-emptyperms', 'sa-yesdl', 'sa-adminnodl'];
 
 /** Counts calls so the cache can be shown to be doing something rather than assumed to be. */
-const calls = { [CLEAN]: 0, [ADULT]: 0, [SLOW]: 0 } as Record<string, number>;
+const calls = { [CLEAN]: 0, [ADULT]: 0, [SLOW]: 0, [EMPTY]: 0 } as Record<string, number>;
 
-function fake(id: string, name: string, opts: { isNsfw?: boolean; hang?: boolean } = {}) {
+function fake(id: string, name: string, opts: { isNsfw?: boolean; hang?: boolean; empty?: boolean } = {}) {
   const series = (n: number) => ({ sourceId: `${id}-${n}`, source: id, title: `${name} Title ${n}` });
   return {
     id, name, isNsfw: opts.isNsfw,
@@ -49,6 +50,8 @@ function fake(id: string, name: string, opts: { isNsfw?: boolean; hang?: boolean
     async latest() {
       calls[id]++;
       if (opts.hang) return new Promise<any[]>(() => { /* never settles, like a site behind a challenge */ });
+      // An adapter whose Cloudflare challenge failed: no throw, just nothing. Real, and common.
+      if (opts.empty) return [];
       return [series(1), series(2)];
     },
   };
@@ -68,6 +71,7 @@ async function setup() {
   registerAdapter(fake(CLEAN, 'Clean Source') as any);
   registerAdapter(fake(ADULT, 'Adult Source', { isNsfw: true }) as any);
   registerAdapter(fake(SLOW, 'Slow Source', { hang: true }) as any);
+  registerAdapter(fake(EMPTY, 'Empty Source', { empty: true }) as any);
 
   const mk = async (username: string, role: string, perms: any, cap: number | null) =>
     (await q<{ id: string }>(
@@ -253,6 +257,32 @@ test('sources: who may reach them, and how long they get', { skip }, async (t) =
       assert.ok(h.blocked_until, 'no cooldown was recorded');
     });
 
+    await t.test('an empty page does not clear a cooldown somebody else recorded', async () => {
+      // reportOk resets consecutive and nulls blocked_until. Adapters that answer a failed Cloudflare
+      // challenge with [] rather than a throw would otherwise let a visit to Discover clear a block the
+      // downloader had recorded, on the strength of a response that says nothing at all.
+      const { clearLatestCache } = await import('../src/routes/sources');
+      clearLatestCache();
+      await q(
+        `INSERT INTO source_health (source_id, status, consecutive, blocked_until, updated_at)
+         VALUES ($1,'blocked',3, now() + interval '30 minutes', now())
+         ON CONFLICT (source_id) DO UPDATE SET status='blocked', consecutive=3,
+           blocked_until = now() + interval '30 minutes', updated_at=now()`,
+        [EMPTY],
+      );
+      const r = await app.inject({ method: 'GET', url: `/api/sources/latest?source=${EMPTY}`, headers: tok(ids.plain) });
+      assert.equal(r.statusCode, 200);
+      assert.deepEqual(r.json().content, []);
+      // reportOk is fired without being awaited, so reading health straight away races it and the row still
+      // says "blocked" whether or not the guard is there. This assertion is about the ABSENCE of a write,
+      // so there is nothing to poll for: give it time to land, then check it did not.
+      await new Promise((res) => setTimeout(res, 750));
+      const h = (await q<{ status: string; blocked_until: string | null }>(
+        'SELECT status, blocked_until FROM source_health WHERE source_id = $1', [EMPTY]))[0];
+      assert.equal(h.status, 'blocked', 'an empty page cleared the source status');
+      assert.ok(h.blocked_until, 'an empty page cleared an active cooldown');
+    });
+
     await t.test('the cache answers the second call, and concurrent calls collapse into one', async () => {
       const { clearLatestCache } = await import('../src/routes/sources');
       clearLatestCache();
@@ -279,6 +309,6 @@ test('sources: who may reach them, and how long they get', { skip }, async (t) =
   } finally {
     await app.close();
     await q('DELETE FROM users WHERE username = ANY($1)', [USERS]).catch(() => {});
-    await q('DELETE FROM source_health WHERE source_id = ANY($1)', [[CLEAN, ADULT, SLOW]]).catch(() => {});
+    await q('DELETE FROM source_health WHERE source_id = ANY($1)', [[CLEAN, ADULT, SLOW, EMPTY]]).catch(() => {});
   }
 });
