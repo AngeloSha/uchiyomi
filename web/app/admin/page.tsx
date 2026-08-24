@@ -1,5 +1,5 @@
 'use client';
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, ApiError, img } from '@/lib/api';
@@ -7,12 +7,16 @@ import { useAuth } from '@/lib/auth';
 import { triggerRefresh } from '@/lib/refresh';
 import { bytes, relativeTime } from '@/lib/format';
 import { useToast } from '@/components/Toast';
-import { ConfirmDialog, Modal } from '@/components/ConfirmDialog';
+import { ConfirmDialog, Modal, msgOf } from '@/components/ConfirmDialog';
 import { Avatar } from '@/components/Avatar';
 import { IcChevronLeft, IcTrash, IcPlus, IcRefresh } from '@/components/icons';
-import { Backdrop } from '@/components/ui';
-import { motion } from 'framer-motion';
-import { t as tr } from '@/lib/i18n';
+import { Backdrop, Img } from '@/components/ui';
+import { SeriesCard } from '@/components/cards';
+import { Switch } from '@/components/Switch';
+import { ConsoleNav } from '@/components/ConsoleNav';
+import { motion, useReducedMotion } from 'framer-motion';
+import { t as tr, keys } from '@/lib/i18n';
+import type { Series } from '@/lib/types';
 
 /**
  * Ten panels, grouped by what an admin is actually doing rather than by what the code is called.
@@ -23,17 +27,19 @@ import { t as tr } from '@/lib/i18n';
  * why nobody found that either.
  */
 const GROUPS = [
-  { id: 'server',  label: 'Server',  tabs: ['Overview', 'Tasks', 'Settings'] },
-  { id: 'people',  label: 'People',  tabs: ['Members', 'Sessions', 'Activity'] },
-  { id: 'content', label: 'Content', tabs: ['Library', 'Health', 'Art'] },
-  { id: 'sources', label: 'Sources', tabs: ['Providers', 'Extensions'] },
+  // `keys()` is the identity function; it exists so these reach the translation extractor. ConsoleNav
+  // renders them as `tr(g.label)` and `tr(tab)`, which a scan for inline tr() calls cannot see, and that blind
+  // spot has now shipped an English sidebar twice. See lib/i18n.ts.
+  { id: 'server',  label: 'Server',  tabs: keys('Overview', 'Tasks', 'Settings') },
+  { id: 'people',  label: 'People',  tabs: keys('Members', 'Sessions', 'Activity') },
+  { id: 'content', label: 'Content', tabs: keys('Library', 'Health', 'Art') },
+  { id: 'sources', label: 'Sources', tabs: keys('Providers', 'Extensions') },
 ] as const;
+// The group labels themselves, for the same reason.
+const _GROUP_LABELS = keys('Server', 'People', 'Content', 'Sources');
 
 const TABS = GROUPS.flatMap((g) => g.tabs);
 type Tab = (typeof TABS)[number];
-const groupOf = (t: Tab) => GROUPS.find((g) => (g.tabs as readonly string[]).includes(t))!;
-const msgOf = (e: any, fb: string) => { try { return JSON.parse(e?.body || '{}').message || fb; } catch { return fb; } };
-const fld = 'w-full rounded-xl border border-ink-700 bg-ink-900 px-3 py-2.5 text-sm text-fog-50 outline-none focus:border-accent';
 const STATUS_STYLE: Record<string, string> = {
   ok: 'bg-emerald-600/20 text-emerald-300', blocked: 'bg-red-600/20 text-red-300',
   rate_limited: 'bg-amber-600/20 text-amber-300', down: 'bg-orange-600/20 text-orange-300', disabled: 'bg-ink-700 text-fog-400',
@@ -43,17 +49,15 @@ export default function AdminPage() {
   const { isAdmin } = useAuth();
   const router = useRouter();
   const [tab, setTab] = useState<Tab>('Overview');
-  const [sheet, setSheet] = useState(false);
-  const group = groupOf(tab);
 
   if (!isAdmin) return <div className="flex min-h-screen-d items-center justify-center text-fog-400">{tr('Admins only.')}</div>;
 
   const panel = (
     <>
-      {tab === 'Overview' && <Overview />}
+      {tab === 'Overview' && <Overview onTab={setTab} />}
       {tab === 'Members' && <Members />}
       {tab === 'Providers' && <Providers />}
-      {tab === 'Extensions' && <Extensions />}
+      {tab === 'Extensions' && <div className="board"><Extensions span="full" /></div>}
       {tab === 'Art' && <ArtReview />}
       {tab === 'Health' && <Health />}
       {tab === 'Library' && <LibraryPanel />}
@@ -65,65 +69,12 @@ export default function AdminPage() {
   );
 
   return (
-    <div className="min-h-screen-d">
+    <div className="min-h-screen-d px-4 lg:px-0">
       <AdminHero onBack={() => router.back()} />
 
-      <div className="px-4 lg:mx-auto lg:max-w-6xl lg:px-6">
-        <div className="lg:flex lg:gap-8">
-          {/* ---- desktop: a sticky sidebar, grouped ---- */}
-          <nav className="hidden shrink-0 lg:block lg:w-52" aria-label={tr('Admin')}>
-            <div className="sticky top-6 space-y-5">
-              {GROUPS.map((g) => (
-                <div key={g.id}>
-                  <p className="mb-1.5 px-3 text-[11px] font-semibold uppercase tracking-wider text-fog-600">{tr(g.label)}</p>
-                  <div className="space-y-0.5">
-                    {g.tabs.map((t) => (
-                      <button key={t} onClick={() => setTab(t)}
-                        aria-current={tab === t ? 'page' : undefined}
-                        className={`relative flex w-full items-center rounded-lg px-3 py-1.5 text-start text-sm transition ${
-                          tab === t ? 'bg-accent-soft font-medium text-accent' : 'text-fog-400 hover:bg-ink-800/60 hover:text-fog-100'
-                        }`}>
-                        {/* the accent rail the rest of the app marks "you are here" with */}
-                        {tab === t && <span aria-hidden className="absolute inset-y-1.5 start-0 w-0.5 rounded-full bg-accent" />}
-                        {tr(t)}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </nav>
-
-          {/* ---- phone: the group is a sheet, its panels stay a pill row ---- */}
-          <div className="min-w-0 flex-1">
-            <div className="mb-4 flex items-center gap-2 lg:hidden">
-              <button onClick={() => setSheet(true)}
-                className="chip shrink-0 gap-1 text-xs" aria-haspopup="dialog">
-                {tr(group.label)}
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="m6 9 6 6 6-6" /></svg>
-              </button>
-              <div className="-me-4 flex gap-1.5 overflow-x-auto pe-4 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-                {group.tabs.map((t) => (
-                  <button key={t} onClick={() => setTab(t)}
-                    className={`shrink-0 rounded-full px-3.5 py-1.5 text-sm font-medium transition ${
-                      tab === t ? 'bg-accent text-white' : 'bg-ink-800 text-fog-300'
-                    }`}>{tr(t)}</button>
-                ))}
-              </div>
-            </div>
-
-            {/* Keyed on the tab so each panel animates in rather than snapping. */}
-            <motion.div key={tab} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.28, ease: [0.22, 0.61, 0.36, 1] }} className="pb-10">
-              {panel}
-            </motion.div>
-          </div>
-        </div>
-      </div>
-
-      {sheet && (
-        <GroupSheet current={tab} onPick={(t) => { setTab(t); setSheet(false); }} onClose={() => setSheet(false)} />
-      )}
+      <ConsoleNav groups={GROUPS} tab={tab} onTab={setTab} ariaLabel={tr('Admin')}>
+        {panel}
+      </ConsoleNav>
     </div>
   );
 }
@@ -178,12 +129,14 @@ function AdminHero({ onBack }: { onBack: () => void; onScan?: undefined }) {
   ].filter(Boolean) as string[];
 
   return (
-    <div className="relative mb-6 overflow-hidden lg:mx-auto lg:mt-4 lg:max-w-6xl lg:rounded-3xl">
+    <div className="bleed relative isolate mb-6 overflow-hidden lg:mt-2 lg:rounded-b-3xl">
       {rnd?.seriesId && <Backdrop seriesId={rnd.seriesId} className="absolute inset-0" />}
       {/* Drowned deliberately: this is a wash to sit text on, not a picture to look at. */}
       <div className="absolute inset-0 bg-gradient-to-t from-ink-950 via-ink-950/90 to-ink-950/70" />
-      <div className="pointer-events-none absolute inset-0"
-        style={{ background: 'radial-gradient(75% 120% at 12% 0%, rgb(var(--accent) / 0.22), transparent 60%)' }} />
+      {/* The bloom takes the verdict's colour, so the whole top of the page goes amber the moment a check
+          fails. One ternary, no assets, and every pixel of it is data. */}
+      <div aria-hidden className="pointer-events-none absolute inset-0"
+        style={{ background: `radial-gradient(75% 120% at var(--start) 0%, ${bad ? 'rgba(245,158,11,0.20)' : 'rgb(var(--accent) / 0.22)'}, transparent 60%)` }} />
 
       <div className="relative px-4 pb-6 pt-[max(0.9rem,calc(env(safe-area-inset-top)+0.5rem))] lg:px-8 lg:pb-8 lg:pt-8">
         <div className="mb-5 flex items-center gap-2">
@@ -219,97 +172,163 @@ function AdminHero({ onBack }: { onBack: () => void; onScan?: undefined }) {
 }
 
 /**
- * The group switcher on a phone.
+ * The overview.
  *
- * A bottom sheet rather than a dropdown, matching the library's Filters drawer -- an idiom this app already
- * has, so it is one pattern rather than two.
+ * Four bands, in the order an admin wants the answers: what is wrong, who is reading, what they are
+ * reading, and where to go next. Severity takes width -- a failing check spans the whole board and a clean
+ * bill of health is one small tile -- so the panel reports the server's state by its shape before a word of
+ * it is read.
+ *
+ * The four stat tiles and the scan button that used to lead this panel live in the hero, where they are
+ * read before anything is clicked. Repeating them here would be the same numbers twice on one screen.
  */
-function GroupSheet({ current, onPick, onClose }: { current: Tab; onPick: (t: Tab) => void; onClose: () => void }) {
-  return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-ink-950/70 backdrop-blur-sm sm:items-center" onClick={onClose}>
-      <div className="glass max-h-[80vh] w-full overflow-y-auto rounded-t-2xl border border-ink-700 p-5 pb-[calc(5.5rem+env(safe-area-inset-bottom))] sm:pb-[max(1.25rem,env(safe-area-inset-bottom))] sm:max-w-md sm:rounded-2xl"
-        role="dialog" aria-modal="true" aria-label={tr('Admin')} onClick={(e) => e.stopPropagation()}>
-        <div className="mb-4 flex items-start justify-between gap-3">
-          <h3 className="font-display text-lg font-semibold leading-tight">{tr('Admin')}</h3>
-          <button onClick={onClose} aria-label={tr('Close')} className="shrink-0 text-fog-500 hover:text-fog-200">✕</button>
-        </div>
-        <div className="space-y-4">
-          {GROUPS.map((g) => (
-            <div key={g.id}>
-              <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-fog-600">{tr(g.label)}</p>
-              <div className="flex flex-wrap gap-1.5">
-                {g.tabs.map((t) => (
-                  <button key={t} onClick={() => onPick(t)}
-                    className={`chip text-xs ${current === t ? 'chip-active' : ''}`}>{tr(t)}</button>
-                ))}
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function Overview() {
+function Overview({ onTab }: { onTab: (t: Tab) => void }) {
+  const still = useReducedMotion();
   const { data: stats } = useQuery({ queryKey: ['admin-stats'], queryFn: () => api<any>('/api/admin/stats') });
   const { data: health } = useQuery({
     queryKey: ['admin-health'],
     queryFn: () => api<{ generatedAt: string; checks: HealthCheck[] }>('/api/admin/health'),
   });
-  // The four stat tiles and the scan button that used to lead this panel now live in the hero, where they
-  // are read before anything is clicked. Repeating them here would be the same numbers twice on one screen.
+  // What the household is actually reading, cross-user and last-14-days. The endpoint has existed since the
+  // home screen shipped and admin has never called it; it is the best available answer to "is anyone
+  // reading any of this", for one query and no new component.
+  const { data: trending } = useQuery({
+    queryKey: ['trending'],
+    queryFn: () => api<{ content: Series[] }>('/api/trending'),
+    staleTime: 5 * 60_000,
+  });
+  const { data: audit } = useQuery({ queryKey: ['admin-audit', 8], queryFn: () => api<{ content: any[] }>('/api/admin/audit?limit=8') });
+  const { data: tasks } = useQuery({ queryKey: ['admin-tasks'], queryFn: () => api<{ content: any[] }>('/api/admin/tasks') });
+  const { data: sessions } = useQuery({ queryKey: ['admin-sessions'], queryFn: () => api<{ content: any[] }>('/api/admin/sessions') });
+  const { data: sources } = useQuery({ queryKey: ['sources'], queryFn: () => api<{ content: any[] }>('/api/sources') });
+
   const failing = (health?.checks ?? []).filter((c) => c.status !== 'ok');
+  const activity: any[] = stats?.activity ?? [];
+  const rail = trending?.content ?? [];
+  const latest = audit?.content?.[0];
+  const lastRun = Math.max(0, ...(tasks?.content ?? []).map((t: any) => t.lastRun || 0));
 
   return (
-    <div className="space-y-6 lg:grid lg:grid-cols-5 lg:items-start lg:gap-6 lg:space-y-0">
-      <div className="lg:col-span-3">
-        <h2 className="mb-2 font-display text-base font-semibold">{tr('Member activity')}</h2>
-        {!stats?.activity?.length ? (
-          <div className="card p-6 text-center text-sm text-fog-500">{tr('No activity yet.')}</div>
-        ) : (
-          <div className="card divide-y divide-ink-800/70 overflow-hidden">
-            {stats.activity.map((a: any) => (
-              <div key={a.id} className="flex items-center gap-3 px-4 py-3">
-                <Avatar avatar={a.avatar} size={32} />
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm text-fog-100">{a.display_name}</p>
-                  <p className="text-[11px] text-fog-500">
-                    {a.last_active ? tr('active {when}', { when: relativeTime(a.last_active) }) : tr('No activity yet.')}
-                  </p>
-                </div>
-                <span className="shrink-0 text-xs text-fog-400">{a.total} ch · <span className="text-accent">{a.week} wk</span></span>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
+    <div className="board">
+      {/* Severity takes width: a problem is the widest thing on screen, "all good" is a small tile. */}
+      <NeedsAttention health={health} className={failing.length ? 'full' : ''} />
 
-      {/* What needs attention, so the answer is on the first screen rather than a tab away. */}
-      <div className="lg:col-span-2">
-        <h2 className="mb-2 font-display text-base font-semibold">{tr('Needs attention')}</h2>
-        {!health ? (
-          <div className="card p-6 text-center text-sm text-fog-500">{tr('Checking your library…')}</div>
-        ) : !failing.length ? (
-          <div className="card p-6 text-center">
-            <p className="text-sm text-fog-200">{tr('Everything looks healthy')}</p>
-            <p className="mt-1 text-[11px] text-fog-500">{tr('checked {when}', { when: relativeTime(health.generatedAt) })}</p>
-          </div>
-        ) : (
-          <div className="card divide-y divide-ink-800/70 overflow-hidden">
-            {failing.map((c) => (
-              <div key={c.id} className="px-4 py-3">
-                <p className="text-sm text-fog-100">{c.title}</p>
-                <p className="mt-0.5 text-[11px] text-fog-500">{c.summary}</p>
-              </div>
+      {/* Band A -- the house: one card per member, washed in the cover of what they last read. */}
+      {activity.length > 0 && (
+        <div className="full">
+          <h2 className="mb-2 font-display text-base font-semibold">{tr('Member activity')}</h2>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            {activity.map((m: any, i: number) => (
+              <motion.div key={m.id} className="card grad-border relative min-h-28 overflow-hidden p-4"
+                initial={still ? false : { opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.4, delay: i * 0.04, ease: [0.22, 0.61, 0.36, 1] }}>
+                {/* The cover re-checks visibility for THIS admin on the way out, so a restricted admin gets
+                    the broken-image glyph rather than art from a library they cannot open. */}
+                {m.last_series_id && (
+                  <Img src={img.seriesThumb(m.last_series_id)} alt=""
+                    className="pointer-events-none absolute inset-0 h-full w-full scale-110 opacity-25 blur-[2px]" />
+                )}
+                <div aria-hidden className="absolute inset-0 bg-gradient-to-r from-ink-950 via-ink-950/80 to-ink-950/35 rtl:bg-gradient-to-l" />
+                <div className="relative flex items-center gap-3">
+                  <Avatar avatar={m.avatar} size={48} />
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium text-fog-50">{m.display_name}</p>
+                    <p className="truncate text-[11px] text-fog-500">
+                      {m.last_active ? tr('active {when}', { when: relativeTime(m.last_active) }) : tr('No activity yet.')}
+                    </p>
+                    {m.last_series_title && <p className="truncate text-[11px] text-fog-400">{m.last_series_title}</p>}
+                  </div>
+                  <span className="ms-auto shrink-0 text-end">
+                    <span className="font-display text-xl font-bold tabular-nums text-accent">{m.week}</span>
+                    <span className="block text-[10px] tabular-nums text-fog-500">{m.total}</span>
+                  </span>
+                </div>
+              </motion.div>
             ))}
           </div>
-        )}
-      </div>
+        </div>
+      )}
+
+      {/* Band B -- what the household is reading. Unmounts entirely when empty: never a heading over nothing. */}
+      {rail.length > 0 && (
+        <div className="full">
+          <h2 className="mb-2 font-display text-base font-semibold">{tr('Top 10 in your library')}</h2>
+          <div className="hide-scrollbar -mx-4 flex gap-3 overflow-x-auto px-4 pb-1 [scroll-snap-type:x_mandatory] lg:mx-0 lg:px-0"
+            data-lenis-prevent>
+            {/* The heading says ten. */}
+            {rail.slice(0, 10).map((sx) => <SeriesCard key={sx.id} series={sx} />)}
+          </div>
+        </div>
+      )}
+
+      {/* Band C -- where to go next, each tile carrying the one number that decides whether to go there. */}
+      <TabTile label={tr('Tasks')} value={String(tasks?.content?.length ?? 0)}
+        sub={lastRun ? relativeTime(new Date(lastRun).toISOString()) : undefined} onClick={() => onTab('Tasks')} />
+      <TabTile label={tr('Sessions')} value={String(sessions?.content?.length ?? 0)}
+        sub={sessions?.content?.[0] ? relativeTime(sessions.content[0].last_seen) : undefined} onClick={() => onTab('Sessions')} />
+      <TabTile label={tr('Providers')} value={String(sources?.content?.length ?? 0)} onClick={() => onTab('Providers')} />
+      {/* Activity's headline is a time rather than a count: "how long since anything happened" is the
+          question, and eight rows of audit cannot answer "how many". */}
+      <TabTile label={tr('Activity')} value={latest ? relativeTime(latest.at) : '0'}
+        sub={latest ? `${latest.event.replace(/[._]/g, ' ')}${latest.username ? ` · ${latest.username}` : ''}` : tr('No activity yet.')}
+        onClick={() => onTab('Activity')} />
     </div>
   );
 }
 
+/**
+ * Whether anything is wrong, and what.
+ *
+ * Sized by severity rather than by convention: the caller hands it `full` when something is failing, so the
+ * same component is a quiet tile on a healthy server and the widest thing on the board on a broken one.
+ */
+function NeedsAttention({ health, className = '' }: {
+  health?: { generatedAt: string; checks: HealthCheck[] };
+  className?: string;
+}) {
+  const failing = (health?.checks ?? []).filter((c) => c.status !== 'ok');
+  return (
+    <div className={`card grad-border p-4 ${className}`}>
+      <h2 className="mb-2 font-display text-base font-semibold">{tr('Needs attention')}</h2>
+      {!health ? (
+        <p className="text-sm text-fog-500">{tr('Checking your library…')}</p>
+      ) : !failing.length ? (
+        <>
+          <p className="text-sm text-fog-200">{tr('Everything looks healthy')}</p>
+          <p className="mt-1 text-[11px] text-fog-500">{tr('checked {when}', { when: relativeTime(health.generatedAt) })}</p>
+        </>
+      ) : (
+        <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+          {failing.map((c) => (
+            <div key={c.id} className={`rounded-2xl border px-3 py-2.5 ${HEALTH_TONE[c.status]}`}>
+              <p className="text-sm font-medium text-fog-100">{c.title}</p>
+              <p className="mt-0.5 text-[11px] text-fog-400">{c.summary}</p>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** A navigational tile: the one number that decides whether the tab behind it is worth opening. */
+function TabTile({ label, value, sub, onClick }: { label: string; value: string; sub?: string; onClick: () => void }) {
+  return (
+    <button onClick={onClick} className="card grad-border p-4 text-start transition hover:border-accent/40">
+      <p className="text-[11px] font-semibold uppercase tracking-wider text-fog-500">{label}</p>
+      <p className="mt-1 font-display text-3xl font-bold tabular-nums text-fog-50">{value}</p>
+      {sub && <p className="mt-0.5 truncate text-[11px] text-fog-500">{sub}</p>}
+    </button>
+  );
+}
+
+/**
+ * The household.
+ *
+ * One card per member rather than one divided list. The list was correct at 864px and wrong at 1592, where
+ * every row left a lake of nothing between a name and the chips that act on it; a card puts the actions
+ * under the face they belong to at every width, and twenty members become a wall you can scan.
+ */
 function Members() {
   const { user } = useAuth();
   const toast = useToast();
@@ -320,6 +339,13 @@ function Members() {
   const [displayName, setDisplayName] = useState('');
   const [role, setRole] = useState<'user' | 'admin'>('user');
   const [busy, setBusy] = useState(false);
+  // A password reset and a deletion are the two things here that cannot be undone by clicking again, so
+  // both go through the app's own dialogs. prompt()/confirm() were untranslatable, unstyled, and in a
+  // standalone PWA are rendered badly or suppressed outright.
+  const [resetting, setResetting] = useState<any | null>(null);
+  const [pw, setPw] = useState('');
+  const [deleting, setDeleting] = useState<any | null>(null);
+  const [deletingBusy, setDeletingBusy] = useState(false);
   const inval = () => qc.invalidateQueries({ queryKey: ['admin-users'] });
 
   const create = async (e: React.FormEvent) => {
@@ -331,38 +357,48 @@ function Members() {
     setBusy(false);
   };
   const patch = async (u: any, body: any, ok: string) => { try { await api(`/api/admin/users/${u.id}`, { method: 'PATCH', json: body }); toast(ok, 'success'); inval(); } catch (e: any) { toast(msgOf(e, 'Could not update'), 'error'); } };
-  const reset = async (u: any) => { const p = prompt(`New password for @${u.username} (min 8)`); if (p) patch(u, { password: p }, 'Password reset · sessions revoked'); };
-  const del = async (u: any) => { if (!confirm(`Delete @${u.username}?`)) return; try { await api(`/api/admin/users/${u.id}`, { method: 'DELETE' }); toast('Deleted', 'success'); inval(); } catch { toast('Could not delete (last admin?)', 'error'); } };
+  const closeReset = () => { setResetting(null); setPw(''); };
+  const del = async (u: any) => {
+    setDeletingBusy(true);
+    try { await api(`/api/admin/users/${u.id}`, { method: 'DELETE' }); toast('Deleted', 'success'); setDeleting(null); inval(); }
+    catch { toast('Could not delete (last admin?)', 'error'); }
+    setDeletingBusy(false);
+  };
 
   return (
-    <div>
-      <form onSubmit={create} className="card mb-5 p-4">
+    <div className="board">
+      <form onSubmit={create} className="card grad-border p-4">
         <h2 className="mb-3 font-display text-base font-semibold">{tr('New account')}</h2>
         <div className="space-y-2">
-          <input value={username} onChange={(e) => setUsername(e.target.value)} placeholder={tr('username')} autoCapitalize="none" autoCorrect="off" className={fld} />
-          <input value={displayName} onChange={(e) => setDisplayName(e.target.value)} placeholder={tr('display name (optional)')} className={fld} />
-          <input value={password} onChange={(e) => setPassword(e.target.value)} type="password" placeholder={tr('password (min 8)')} className={fld} />
+          <input value={username} onChange={(e) => setUsername(e.target.value)} placeholder={tr('username')} autoCapitalize="none" autoCorrect="off" className="field" />
+          <input value={displayName} onChange={(e) => setDisplayName(e.target.value)} placeholder={tr('display name (optional)')} className="field" />
+          <input value={password} onChange={(e) => setPassword(e.target.value)} type="password" placeholder={tr('password (min 8)')} className="field" />
           <div className="flex gap-2">{(['user', 'admin'] as const).map((r) => <button key={r} type="button" onClick={() => setRole(r)} className={`flex-1 rounded-xl border py-2 text-sm capitalize ${role === r ? 'border-accent bg-accent-soft text-accent' : 'border-ink-700 text-fog-300'}`}>{r}</button>)}</div>
         </div>
         <button type="submit" disabled={busy || !username.trim() || password.length < 8} className="btn-accent mt-3 w-full disabled:opacity-50"><IcPlus width={18} height={18} /> {busy ? 'Creating…' : 'Create account'}</button>
       </form>
-      <div className="card divide-y divide-ink-800/70 overflow-hidden">
-        {(data?.content ?? []).map((u: any) => {
-          const self = u.id === user?.id;
-          const canDl = u.perms?.canDownload !== false;
-          return (
-            <div key={u.id} className="px-4 py-3">
-              <div className="flex items-center gap-3">
-                <Avatar avatar={u.avatar} size={36} />
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm text-fog-100">{u.display_name} <span className="text-fog-500">@{u.username}</span></p>
-                  <p className="text-[11px] text-fog-500">{u.role === 'admin' ? 'Admin' : 'Member'}{self ? ' · you' : ''}{u.disabled ? ' · disabled' : ''}{u.totp_enabled ? ' · 2FA' : ''}</p>
-                </div>
-                <button onClick={() => reset(u)} className="chip text-xs">{tr('Reset')}</button>
-                {!self && <button onClick={() => del(u)} className="grid h-9 w-9 place-items-center rounded-full border border-ink-700 text-red-300"><IcTrash width={16} height={16} /></button>}
+
+      {(data?.content ?? []).map((u: any) => {
+        const self = u.id === user?.id;
+        const canDl = u.perms?.canDownload !== false;
+        return (
+          <div key={u.id} className="card grad-border p-4">
+            <div className="flex items-center gap-3">
+              <Avatar avatar={u.avatar} size={40} />
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm text-fog-100">{u.display_name}</p>
+                <p className="truncate text-[11px] text-fog-500">@{u.username}</p>
               </div>
               {!self && (
-                <div className="mt-2 flex flex-wrap gap-1.5 ps-12">
+                <button onClick={() => setDeleting(u)} aria-label={tr('Remove')}
+                  className="grid h-9 w-9 shrink-0 place-items-center rounded-full border border-ink-700 text-red-300"><IcTrash width={16} height={16} /></button>
+              )}
+            </div>
+            <p className="mt-2 text-[11px] text-fog-500">{u.role === 'admin' ? 'Admin' : 'Member'}{self ? ' · you' : ''}{u.disabled ? ' · disabled' : ''}{u.totp_enabled ? ' · 2FA' : ''}</p>
+            <div className="mt-2.5 flex flex-wrap gap-1.5">
+              <button onClick={() => setResetting(u)} className="chip text-xs">{tr('Reset')}</button>
+              {!self && (
+                <>
                   <button onClick={() => patch(u, { role: u.role === 'admin' ? 'user' : 'admin' }, 'Role updated')} className="chip text-xs">{u.role === 'admin' ? 'Make member' : 'Make admin'}</button>
                   <button onClick={() => patch(u, { disabled: !u.disabled }, u.disabled ? 'Enabled' : 'Disabled')} className="chip text-xs">{u.disabled ? 'Enable' : 'Disable'}</button>
                   <button onClick={() => patch(u, { perms: { ...u.perms, canDownload: !canDl } }, 'Permission updated')} className="chip text-xs">{canDl ? 'Deny downloads' : 'Allow downloads'}</button>
@@ -370,12 +406,39 @@ function Members() {
                       library added next month is visible to unrestricted accounts without editing anyone. */}
                   {u.role !== 'admin' && <LibraryAccess user={u} onSaved={inval} />}
                   {u.role !== 'admin' && <AgeCap user={u} onSaved={inval} />}
-                </div>
+                </>
               )}
             </div>
-          );
-        })}
-      </div>
+          </div>
+        );
+      })}
+
+      {resetting && (
+        <Modal title={tr('Change password')} onClose={closeReset}>
+          <p className="mb-3 text-sm text-fog-400">@{resetting.username}</p>
+          <input type="password" value={pw} onChange={(e) => setPw(e.target.value)} autoComplete="new-password"
+            placeholder={tr('New password (min 8 characters)')} className="field" />
+          <div className="mt-4 flex gap-2">
+            <button onClick={closeReset} className="btn-ghost flex-1 py-2 text-sm">{tr('Cancel')}</button>
+            <button disabled={pw.length < 8}
+              onClick={() => { patch(resetting, { password: pw }, 'Password reset · sessions revoked'); closeReset(); }}
+              className="btn-accent flex-1 py-2 text-sm disabled:opacity-50">{tr('Update password')}</button>
+          </div>
+        </Modal>
+      )}
+
+      {deleting && (
+        <ConfirmDialog
+          title={tr('Remove “{name}”?', { name: `@${deleting.username}` })}
+          body={tr('Their reading history, favourites and sessions go with the account. Nothing in the library is touched and no files are deleted.')}
+          confirmLabel={tr('Remove')}
+          confirmText={deleting.username}
+          danger
+          busy={deletingBusy}
+          onConfirm={() => del(deleting)}
+          onClose={() => setDeleting(null)}
+        />
+      )}
     </div>
   );
 }
@@ -469,24 +532,24 @@ function Providers() {
   };
   const list = srcs?.content || [];
   return (
-    <div>
-      <div className="mb-3 flex items-center justify-between">
+    <div className="board">
+      <div className="full flex items-center justify-between gap-3">
         <p className="text-sm text-fog-400">{list.length} source{list.length === 1 ? '' : 's'} installed</p>
-        <button onClick={reload} disabled={reloading} className="chip text-xs disabled:opacity-50">{reloading ? 'Reloading…' : '↻ Reload sources'}</button>
+        <button onClick={reload} disabled={reloading} className="chip shrink-0 text-xs disabled:opacity-50">{reloading ? 'Reloading…' : '↻ Reload sources'}</button>
       </div>
 
       {/* Add a site (Madara / Manganato engines — most manga aggregators) */}
-      <div className="card mb-3 p-3">
+      <div className="card grad-border wide p-4">
         <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-fog-500">{tr('Add a site')}</p>
         <div className="flex flex-wrap gap-2">
-          <select value={eng} onChange={(e) => setEng(e.target.value as any)} className={`${fld} w-auto`}>
+          <select value={eng} onChange={(e) => setEng(e.target.value as any)} className="field w-auto">
             <option value="auto">{tr('Auto-detect')}</option>
             <option value="madara">{tr('Madara (WordPress)')}</option>
             <option value="mangathemesia">{tr('MangaThemesia')}</option>
             <option value="manganato">{tr('Manganato')}</option>
           </select>
-          <input value={sname} onChange={(e) => setSname(e.target.value)} placeholder={tr('Name')} className={`${fld} min-w-[110px] flex-1`} />
-          <input value={sbase} onChange={(e) => setSbase(e.target.value)} placeholder="https://site.com" autoCapitalize="none" className={`${fld} min-w-[170px] flex-[2]`} />
+          <input value={sname} onChange={(e) => setSname(e.target.value)} placeholder={tr('Name')} className="field min-w-[110px] flex-1" />
+          <input value={sbase} onChange={(e) => setSbase(e.target.value)} placeholder="https://site.com" autoCapitalize="none" className="field min-w-[170px] flex-[2]" />
           <button onClick={addSite} disabled={adding || !sname.trim() || !sbase.trim()} className="btn-accent px-4 text-sm disabled:opacity-50">{adding ? 'Adding…' : 'Add'}</button>
         </div>
         <p className="mt-1.5 text-[11px] text-fog-500">Just paste a site&apos;s homepage URL — the engine is auto-detected (or pick it). Picked up instantly, no restart. Works for sites on the Madara, MangaThemesia, or Manganato engines.</p>
@@ -511,10 +574,10 @@ function Providers() {
       </div>
 
       {/* Extension sources, from an optional Suwayomi server running Mihon/Tachiyomi extensions */}
-      <Extensions />
+      <Extensions span="full" />
 
       {/* Import a list of titles */}
-      <div className="card mb-3 p-3">
+      <div className="card grad-border wide p-4">
         <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-fog-500">{tr('Import a list')}</p>
         <p className="mb-2 text-[11px] text-fog-500">Bring your library over from another app. Uchiyomi searches your sources for each title and adds the best match.</p>
 
@@ -526,12 +589,12 @@ function Providers() {
             {parsing ? 'Reading…' : 'Mihon / Tachiyomi backup'}
           </button>
           <span className="text-[11px] text-fog-600">or</span>
-          <input value={mdUrl} onChange={(e) => setMdUrl(e.target.value)} placeholder={tr('public MangaDex list link')} autoCapitalize="none" className={`${fld} min-w-0 flex-1`} />
+          <input value={mdUrl} onChange={(e) => setMdUrl(e.target.value)} placeholder={tr('public MangaDex list link')} autoCapitalize="none" className="field min-w-0 flex-1" />
           <button onClick={() => parseMangadex()} disabled={parsing || !mdUrl.trim()} className="chip text-xs disabled:opacity-50">{tr('Load')}</button>
         </div>
         <p className="mb-2 text-[10px] text-fog-600">A .tachibk backup stays on your server — only the titles are read. MangaDex lists must be public; private follows need a MangaDex login, which Uchiyomi doesn&apos;t ask for.</p>
 
-        <textarea value={imp} onChange={(e) => setImp(e.target.value)} rows={4} placeholder={'…or paste titles, one per line'} className={`${fld} resize-y`} />
+        <textarea value={imp} onChange={(e) => setImp(e.target.value)} rows={4} placeholder={'…or paste titles, one per line'} className="field resize-y" />
         {parsed && (
           <div className="mt-2 rounded-xl border border-ink-700 bg-ink-900/50 p-2.5 text-xs">
             <p className="text-fog-300">{tr('Found')}<strong className="text-fog-100">{parsed.total}</strong> titles
@@ -564,17 +627,17 @@ function Providers() {
       </div>
 
       {list.length === 0 ? (
-        <div className="card p-6 text-center">
+        <div className="card grad-border full p-6 text-center">
           <p className="text-sm font-semibold text-fog-100">{tr('No sources installed')}</p>
           <p className="mx-auto mt-1 max-w-md text-xs text-fog-500">Mount a compiled source pack at the server&apos;s <code className="rounded bg-ink-800 px-1 py-0.5">SOURCES_DIR</code>, then hit Reload. With none installed, Uchiyomi reads only the library you already own.</p>
         </div>
       ) : (
-        <div className="card divide-y divide-ink-800/70 overflow-hidden">
+        <>
           {list.map((s: any) => {
             const h = hmap.get(s.id) as any;
             const st = s.status as string;
             return (
-              <div key={s.id} className="px-4 py-3">
+              <div key={s.id} className="card grad-border p-4">
                 <div className="flex items-center gap-2">
                   <span className="flex-1 text-sm text-fog-100">{s.name}{customIds.has(s.id) && <span className="ms-2 rounded bg-ink-700 px-1.5 py-0.5 text-[10px] text-fog-400">custom</span>}</span>
                   <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${STATUS_STYLE[st] || STATUS_STYLE.ok}`}>{st === 'rate_limited' ? 'rate-limited' : st}</span>
@@ -588,7 +651,7 @@ function Providers() {
               </div>
             );
           })}
-        </div>
+        </>
       )}
     </div>
   );
@@ -625,8 +688,8 @@ function ArtReview() {
   };
   const job = bf?.job;
   return (
-    <div className="space-y-4">
-      <div className="card p-4">
+    <div className="board">
+      <div className="card grad-border full p-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h2 className="font-display text-lg font-semibold">Cover &amp; banner health</h2>
@@ -640,20 +703,20 @@ function ArtReview() {
           <p className="mt-2 text-xs text-fog-400">Last run: +{job.banners} banners, +{job.covers} covers, {job.misses} not found.</p>
         )}
       </div>
-      <div className="flex gap-1.5 overflow-x-auto pb-1">
+      <div className="hide-scrollbar full flex gap-1.5 overflow-x-auto pb-1">
         {([['nobanner', 'Missing banner'], ['nocover', 'Missing cover'], ['fixed', 'Overridden'], ['all', 'All']] as const).map(([k, label]) => (
           <button key={k} onClick={() => setFilter(k)} className={`shrink-0 rounded-full px-3 py-1.5 text-xs font-medium ${filter === k ? 'bg-accent text-white' : 'bg-ink-800 text-fog-300'}`}>
             {label}{k !== 'all' ? ` (${(data?.content ?? []).filter((r) => (k === 'nobanner' ? !r.has_banner && !r.override_banner : k === 'nocover' ? !r.has_cover && !r.override_cover : r.override_banner || r.override_cover)).length})` : ''}
           </button>
         ))}
       </div>
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+      <div className="full grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5 xl:grid-cols-6 min-[1700px]:grid-cols-8">
         {rows.map((r) => (
           <button key={r.id} onClick={() => setOpen(r)} className="card overflow-hidden p-0 text-start transition hover:border-accent/40">
             <div className="relative h-16 w-full overflow-hidden bg-ink-900">
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src={`/img/series/${encodeURIComponent(r.id)}/backdrop?rv=${bust[r.id] || 0}`} alt="" className="h-full w-full object-cover" loading="lazy" />
-              {!r.has_banner && !r.override_banner && <span className="absolute right-1 top-1 rounded bg-red-600/80 px-1.5 py-0.5 text-[9px] font-bold text-white">NO BANNER</span>}
+              {!r.has_banner && !r.override_banner && <span className="absolute end-1 top-1 rounded bg-red-600/80 px-1.5 py-0.5 text-[9px] font-bold text-white">NO BANNER</span>}
             </div>
             <div className="flex items-center gap-2 p-2">
               {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -751,17 +814,21 @@ function Tasks() {
   const qc = useQueryClient();
   const { data } = useQuery({ queryKey: ['admin-tasks'], queryFn: () => api<{ content: any[] }>('/api/admin/tasks'), refetchInterval: 5000 });
   const run = async (id: string) => { try { await api(`/api/admin/tasks/${id}/run`, { method: 'POST' }); toast('Started', 'success'); qc.invalidateQueries({ queryKey: ['admin-tasks'] }); } catch { toast('Failed', 'error'); } };
+  // Chronological, per-row actions: a list, not a card grid. But an explicit column template rather than
+  // `justify-between`, which at 1592px left a lake of nothing between a task's name and its own button.
   return (
-    <div className="card divide-y divide-ink-800/70 overflow-hidden">
-      {(data?.content || []).map((t: any) => (
-        <div key={t.id} className="flex items-center gap-3 px-4 py-3.5">
-          <div className="min-w-0 flex-1">
-            <p className="text-sm text-fog-100">{t.name}</p>
-            <p className="text-[11px] text-fog-500">{t.schedule} · {t.lastRun ? `last run ${relativeTime(new Date(t.lastRun).toISOString())}` : 'not run yet'}{taskResult(t.lastResult)}</p>
+    <div className="board">
+      <div className="card grad-border full divide-y divide-ink-800/70 overflow-hidden">
+        {(data?.content || []).map((t: any) => (
+          <div key={t.id} className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 px-4 py-3.5 lg:grid-cols-[minmax(0,20rem)_minmax(0,1fr)_auto]">
+            <p className="col-start-1 row-start-1 min-w-0 truncate text-sm text-fog-100">{t.name}</p>
+            {/* Phone stacks the schedule under the name; from lg it takes a track of its own. */}
+            <p className="col-start-1 row-start-2 min-w-0 truncate text-[11px] text-fog-500 lg:col-start-2 lg:row-start-1">{t.schedule} · {t.lastRun ? `last run ${relativeTime(new Date(t.lastRun).toISOString())}` : 'not run yet'}{taskResult(t.lastResult)}</p>
+            <button onClick={() => run(t.id)} disabled={t.running}
+              className="chip col-start-2 row-span-2 row-start-1 shrink-0 justify-self-end text-xs disabled:opacity-50 lg:col-start-3 lg:row-span-1">{t.running ? 'Running…' : 'Run now'}</button>
           </div>
-          <button onClick={() => run(t.id)} disabled={t.running} className="chip text-xs disabled:opacity-50">{t.running ? 'Running…' : 'Run now'}</button>
-        </div>
-      ))}
+        ))}
+      </div>
     </div>
   );
 }
@@ -769,18 +836,27 @@ function Tasks() {
 function Activity() {
   const { data } = useQuery({ queryKey: ['admin-audit'], queryFn: () => api<{ content: any[] }>('/api/admin/audit?limit=150'), refetchInterval: 8000 });
   const label = (e: string) => e.replace(/\./g, ' ').replace(/_/g, ' ');
+  // A feed stays a feed -- chronological data must not be chopped into a card grid. What changes is that a
+  // row is now an explicit column template, so at 1592px the detail fills the space that used to be a lake
+  // between the event and its timestamp, and the 60-character truncation of the detail is no longer needed.
   return (
-    <div className="card divide-y divide-ink-800/70 overflow-hidden">
-      {(data?.content || []).map((a: any) => (
-        <div key={a.id} className="flex items-start gap-3 px-4 py-2.5">
-          <span className={`mt-1 h-2 w-2 shrink-0 rounded-full ${/fail|block|disable|delete/.test(a.event) ? 'bg-red-400' : /login|ok|register/.test(a.event) ? 'bg-emerald-400' : 'bg-accent'}`} />
-          <div className="min-w-0 flex-1">
-            <p className="text-sm text-fog-100"><span className="font-medium capitalize">{label(a.event)}</span>{a.username ? <span className="text-fog-400"> · {a.username}</span> : ''}</p>
-            <p className="truncate text-[11px] text-fog-500">{relativeTime(a.at)}{a.ip ? ` · ${a.ip}` : ''}{a.detail && Object.keys(a.detail).length ? ` · ${JSON.stringify(a.detail).slice(0, 60)}` : ''}</p>
-          </div>
-        </div>
-      ))}
-      {!data?.content?.length && <p className="px-4 py-8 text-center text-sm text-fog-500">{tr('No activity yet.')}</p>}
+    <div className="board">
+      <div className="card grad-border full divide-y divide-ink-800/70 overflow-hidden">
+        {(data?.content || []).map((a: any) => {
+          const detail = a.detail && Object.keys(a.detail).length ? JSON.stringify(a.detail) : '';
+          return (
+            <div key={a.id} className="grid grid-cols-[8px_minmax(0,1fr)_auto] items-baseline gap-x-3 px-4 py-2.5 lg:grid-cols-[8px_minmax(0,20rem)_minmax(0,1fr)_auto]">
+              <span aria-hidden className={`h-2 w-2 translate-y-1 rounded-full ${/fail|block|disable|delete/.test(a.event) ? 'bg-red-400' : /login|ok|register/.test(a.event) ? 'bg-emerald-400' : 'bg-accent'}`} />
+              <p className="min-w-0 truncate text-sm text-fog-100"><span className="font-medium capitalize">{label(a.event)}</span>{a.username ? <span className="text-fog-400"> · {a.username}</span> : ''}</p>
+              {/* Hidden below lg rather than reflowed: a display:none child takes no track, so the phone
+                  template is the three columns it declares and the desktop one is four. */}
+              <p className="hidden min-w-0 truncate font-mono text-[11px] text-fog-500 lg:block">{detail}</p>
+              <p className="shrink-0 text-end text-[11px] text-fog-500">{relativeTime(a.at)}{a.ip ? ` · ${a.ip}` : ''}</p>
+            </div>
+          );
+        })}
+        {!data?.content?.length && <p className="px-4 py-8 text-center text-sm text-fog-500">{tr('No activity yet.')}</p>}
+      </div>
     </div>
   );
 }
@@ -791,17 +867,33 @@ function Sessions() {
   const { data } = useQuery({ queryKey: ['admin-sessions'], queryFn: () => api<{ content: any[] }>('/api/admin/sessions') });
   const revoke = async (id: string) => { await api(`/api/admin/sessions/${id}`, { method: 'DELETE' }); toast('Revoked', 'success'); qc.invalidateQueries({ queryKey: ['admin-sessions'] }); };
   return (
-    <div className="card divide-y divide-ink-800/70 overflow-hidden">
-      {(data?.content || []).map((s: any) => (
-        <div key={s.id} className="flex items-center gap-3 px-4 py-3">
-          <div className="min-w-0 flex-1">
-            <p className="truncate text-sm text-fog-100">{s.display_name || s.username} <span className="text-fog-500">· {s.device_name || 'Device'}</span></p>
-            <p className="truncate text-[11px] text-fog-500">{s.ip || 'unknown'} · active {relativeTime(s.last_seen)}</p>
+    <div className="board">
+      <div className="card grad-border full divide-y divide-ink-800/70 overflow-hidden">
+        {(data?.content || []).map((s: any) => (
+          <div key={s.id} className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 px-4 py-3 lg:grid-cols-[minmax(0,16rem)_minmax(0,14rem)_minmax(0,10rem)_auto]">
+            <p className="col-start-1 row-start-1 min-w-0 truncate text-sm text-fog-100">{s.display_name || s.username}</p>
+            {/* Phone folds device and ip under the name; from lg each takes its own track. */}
+            <p className="col-start-1 row-start-2 min-w-0 truncate text-[11px] text-fog-500 lg:col-start-2 lg:row-start-1">
+              {s.device_name || 'Device'}
+              <span className="lg:hidden"> · {s.ip || 'unknown'} · active {relativeTime(s.last_seen)}</span>
+            </p>
+            <p className="hidden min-w-0 truncate font-mono text-[11px] text-fog-500 lg:col-start-3 lg:row-start-1 lg:block">{s.ip || 'unknown'}</p>
+            <div className="col-start-2 row-span-2 row-start-1 flex shrink-0 items-center gap-2 justify-self-end lg:col-start-4 lg:row-span-1">
+              <span className="hidden text-[11px] text-fog-500 lg:inline">active {relativeTime(s.last_seen)}</span>
+              {/* `current` marks the caller's own session. The admin route does not send it yet, so this is
+                  inert rather than wrong: without it, revoking the row you are sitting on logs you out. */}
+              {s.current ? (
+                <span className="flex items-center gap-1.5 text-[11px] text-fog-500">
+                  <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-accent" />{tr('You')}
+                </span>
+              ) : (
+                <button onClick={() => revoke(s.id)} className="text-xs text-red-300 hover:underline">{tr('Revoke')}</button>
+              )}
+            </div>
           </div>
-          <button onClick={() => revoke(s.id)} className="text-xs text-red-300 hover:underline">{tr('Revoke')}</button>
-        </div>
-      ))}
-      {!data?.content?.length && <p className="px-4 py-8 text-center text-sm text-fog-500">{tr('No active sessions.')}</p>}
+        ))}
+        {!data?.content?.length && <p className="px-4 py-8 text-center text-sm text-fog-500">{tr('No active sessions.')}</p>}
+      </div>
     </div>
   );
 }
@@ -813,29 +905,28 @@ function Settings() {
   const [name, setName] = useState<string | null>(null);
   const [hours, setHours] = useState<number | null>(null);
   const save = async (body: any, ok: string) => { try { await api('/api/admin/settings', { method: 'PATCH', json: body }); toast(ok, 'success'); qc.invalidateQueries({ queryKey: ['admin-settings'] }); } catch { toast('Failed', 'error'); } };
-  if (!data) return <div className="card p-6 text-center text-sm text-fog-500">{tr('Loading…')}</div>;
+  if (!data) return <div className="board"><div className="card grad-border p-6 text-center text-sm text-fog-500">{tr('Loading…')}</div></div>;
+  // Three settings look like three settings. Padding a sparse panel out with a chart is the exact failure
+  // this rework exists to undo, so this one is deliberately left with room around it.
   return (
-    <div className="space-y-4">
-      <div className="card p-4">
+    <div className="board">
+      <div className="card grad-border p-4">
         <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-fog-500">{tr('Server name')}</label>
-        <input value={name ?? data.server_name} onChange={(e) => setName(e.target.value)} className={fld} />
+        <input value={name ?? data.server_name} onChange={(e) => setName(e.target.value)} className="field" />
         <button onClick={() => save({ serverName: name ?? data.server_name }, 'Saved')} className="btn-accent mt-2 w-full py-2 text-sm">{tr('Save name')}</button>
       </div>
-      <div className="card flex items-center justify-between p-4">
-        <div><p className="text-sm text-fog-100">{tr('Open registration')}</p><p className="text-[11px] text-fog-500">{tr('Let anyone create their own account')}</p></div>
-        <button onClick={() => save({ allowRegistration: !data.allow_registration }, data.allow_registration ? 'Registration closed' : 'Registration open')} className={`relative h-6 w-11 rounded-full transition ${data.allow_registration ? 'bg-accent' : 'bg-ink-700'}`}>
-          <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white transition-all ${data.allow_registration ? 'left-[1.375rem]' : 'left-0.5'}`} />
-        </button>
+      <div className="card grad-border flex items-center justify-between gap-3 p-4">
+        <div className="min-w-0">
+          <p className="text-sm text-fog-100">{tr('Open registration')}</p>
+          <p className="max-w-prose text-[11px] text-fog-500">{tr('Let anyone create their own account')}</p>
+        </div>
+        <Switch on={!!data.allow_registration} label={tr('Open registration')}
+          onChange={(next) => save({ allowRegistration: next }, next ? 'Registration open' : 'Registration closed')} />
       </div>
-      <div className="card p-4">
+      <div className="card grad-border p-4">
         <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-fog-500">{tr('Auto-update interval (hours)')}</label>
-        <input type="number" min={1} max={168} value={hours ?? data.updater_hours} onChange={(e) => setHours(Number(e.target.value))} className={fld} />
+        <input type="number" min={1} max={168} value={hours ?? data.updater_hours} onChange={(e) => setHours(Number(e.target.value))} className="field" />
         <button onClick={() => save({ updaterHours: hours ?? data.updater_hours }, 'Saved')} className="btn-accent mt-2 w-full py-2 text-sm">{tr('Save interval')}</button>
-      </div>
-      <div className="card p-4">
-        <h3 className="mb-1 font-display text-base font-semibold">{tr('Support Uchiyomi')}</h3>
-        <p className="mb-3 text-sm text-fog-400">Uchiyomi is free &amp; open-source. If you find it useful, you can help fund development.</p>
-        <a href="https://ko-fi.com/angeloshaheen" target="_blank" rel="noopener noreferrer" className="btn-accent flex w-full items-center justify-center gap-2 py-2 text-sm">☕ Buy me a coffee</a>
       </div>
     </div>
   );
@@ -856,8 +947,17 @@ interface DeletedRow { id: string; title: string; folder: string; books_count: n
 
 /** What has been removed from the library, and the way back. Removing never touches files, so this is
  *  always reversible -- the series keeps its id, and with it everyone's progress, favourites and ratings. */
-interface LibraryRow { id: string; name: string; path: string; n: number }
-interface LibraryCandidate { path: string; series: number; looksLikeSource: boolean }
+interface LibraryRow {
+  id: string; name: string; path: string; n: number;
+  age_rating: number | null;
+  /** How many of its series were placed here by hand rather than by the folder rule. */
+  pinned: number;
+  /** Who can open it. Includes members with no restriction at all, who see every library. */
+  members: string[];
+}
+interface LibraryCandidate { path: string; series: number; looksLikeSource: boolean; depth?: number }
+interface FolderRow { name: string; path: string; series: number }
+interface FolderPage { path: string; parent: string | null; folders: FolderRow[] }
 
 /**
  * Libraries are declared here, never inferred from the filesystem.
@@ -994,14 +1094,63 @@ function LibraryAccess({ user, onSaved }: { user: any; onSaved: () => void }) {
   );
 }
 
+/**
+ * Pick a folder: browse what is actually on disk, or type the path.
+ *
+ * The old dialog offered a fixed list of candidates and nothing else, and that list was computed from the
+ * FIRST path segment only -- which on a real install holds the source names the downloader wrote. So the
+ * only options offered were the ones not to pick, and the folder an admin actually wanted could not be
+ * reached at all. The API always accepted any path; nothing ever asked for one.
+ */
+function FolderPicker({ value, onPick }: { value: string; onPick: (p: string) => void }) {
+  const [at, setAt] = useState('');
+  const { data, isFetching } = useQuery({
+    queryKey: ['admin-folders', at],
+    queryFn: () => api<FolderPage>(`/api/admin/libraries/folders?path=${encodeURIComponent(at)}`),
+  });
+
+  return (
+    <div className="rounded-lg border border-ink-700 bg-ink-900/40">
+      <div className="flex items-center gap-2 border-b border-ink-800 px-2.5 py-1.5">
+        <button type="button" disabled={data?.parent === null}
+          onClick={() => setAt(data?.parent ?? '')}
+          className="chip shrink-0 text-[11px] disabled:opacity-40">↑</button>
+        <p className="truncate font-mono text-[11px] text-fog-400">{at || tr('Library root')}</p>
+      </div>
+      <div className="max-h-44 overflow-y-auto p-1.5">
+        {isFetching && !data ? (
+          <p className="px-2 py-3 text-center text-[11px] text-fog-600">{tr('Loading…')}</p>
+        ) : !data?.folders.length ? (
+          <p className="px-2 py-3 text-center text-[11px] text-fog-600">{tr('No folders here')}</p>
+        ) : data.folders.map((f) => (
+          <div key={f.path} className="flex items-center gap-2">
+            <button type="button" onClick={() => setAt(f.path)}
+              className="min-w-0 flex-1 truncate rounded px-2 py-1 text-start text-xs text-fog-200 hover:bg-ink-800/70">
+              {f.name} <span className="text-fog-600">· {f.series}</span>
+            </button>
+            <button type="button" onClick={() => onPick(f.path)}
+              className={`chip shrink-0 text-[11px] ${value === f.path ? 'chip-active' : ''}`}>
+              {tr('Use')}
+            </button>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function LibrariesSection() {
   const qc = useQueryClient();
   const toast = useToast();
-  const [adding, setAdding] = useState<LibraryCandidate | null>(null);
+  const [adding, setAdding] = useState(false);
+  const [editing, setEditing] = useState<LibraryRow | null>(null);
   const [name, setName] = useState('');
+  const [path, setPath] = useState('');
+  const [age, setAge] = useState<string>('');
   const [preview, setPreview] = useState<{ series: number; sample: string[] } | null>(null);
   const [busy, setBusy] = useState(false);
   const [confirmDel, setConfirmDel] = useState<LibraryRow | null>(null);
+  const [access, setAccess] = useState<LibraryRow | null>(null);
 
   const { data } = useQuery({
     queryKey: ['admin-libraries'],
@@ -1009,27 +1158,55 @@ function LibrariesSection() {
   });
   const libs = data?.content ?? [];
   const candidates = data?.candidates ?? [];
-  const refresh = () => { for (const k of [['admin-libraries'], ['library'], ['home']]) qc.invalidateQueries({ queryKey: k }); };
+  // Only to tell "nobody may open this" apart from "there is nobody yet", which on a fresh install is the
+  // difference between a warning and a fact. Admins always see everything and are not members.
+  const { data: people } = useQuery({
+    queryKey: ['admin-users'],
+    queryFn: () => api<{ content: { role: string }[] }>('/api/admin/users'),
+  });
+  const anyMembers = (people?.content ?? []).some((u) => u.role !== 'admin');
+  const refresh = () => { for (const k of [['admin-libraries'], ['admin-users'], ['library'], ['home']]) qc.invalidateQueries({ queryKey: k }); };
 
-  const openAdd = async (c: LibraryCandidate) => {
-    setAdding(c);
-    setName(c.path.split('/').pop() || c.path);
-    setPreview(null);
-    try {
-      const r = await api<{ series: number; sample: string[] }>(`/api/admin/libraries/preview?path=${encodeURIComponent(c.path)}`);
-      setPreview(r);
-    } catch { /* the count is a courtesy; the create still works without it */ }
+  // Preview follows whatever is typed or clicked, so "what will this contain" is answered before committing.
+  useEffect(() => {
+    const p = path.trim();
+    // Nothing to promise when the path has not been touched: the handler claims only series a LESS specific
+    // library holds, so an unchanged path is always zero, and "0 series would move" reads like a warning.
+    if (!p || (editing && p === editing.path)) { setPreview(null); return; }
+    let alive = true;
+    const t = setTimeout(() => {
+      api<{ series: number; sample: string[] }>(`/api/admin/libraries/preview?path=${encodeURIComponent(p)}`)
+        .then((r) => { if (alive) setPreview(r); })
+        .catch(() => { if (alive) setPreview(null); });
+    }, 250);
+    return () => { alive = false; clearTimeout(t); };
+  }, [path, editing]);
+
+  const openNew = () => { setAdding(true); setEditing(null); setName(''); setPath(''); setAge(''); setPreview(null); };
+  const openEdit = (l: LibraryRow) => {
+    setEditing(l); setAdding(false);
+    setName(l.name); setPath(l.path); setAge(l.age_rating == null ? '' : String(l.age_rating)); setPreview(null);
   };
 
-  const create = async () => {
-    if (!adding) return;
+  const save = async () => {
     setBusy(true);
     try {
-      await api('/api/admin/libraries', { method: 'POST', json: { name: name.trim(), path: adding.path } });
-      toast(`"${name.trim()}" created`, 'success');
-      setAdding(null);
+      const ageRating = age === '' ? null : Number(age);
+      if (editing) {
+        const body: Record<string, unknown> = { name: name.trim(), ageRating };
+        if (editing.id !== 'lib' && path.trim() !== editing.path) body.path = path.trim();
+        await api(`/api/admin/libraries/${editing.id}`, { method: 'PATCH', json: body });
+        toast(tr('Saved'), 'success');
+      } else {
+        // One request. This used to POST the library and then PATCH the rating separately, and skip the
+        // PATCH entirely when the rating was null -- so a failed second call created an unrated library
+        // under a "Created" toast, which is the one outcome nobody would check for.
+        await api('/api/admin/libraries', { method: 'POST', json: { name: name.trim(), path: path.trim(), ageRating } });
+        toast(tr('Created'), 'success');
+      }
+      setAdding(false); setEditing(null);
       refresh();
-    } catch (e) { toast(msgOf(e, 'Could not create that library'), 'error'); }
+    } catch (e) { toast(msgOf(e, tr('Could not save that library')), 'error'); }
     setBusy(false);
   };
 
@@ -1037,33 +1214,58 @@ function LibrariesSection() {
     setBusy(true);
     try {
       await api(`/api/admin/libraries/${l.id}`, { method: 'DELETE' });
-      toast(`"${l.name}" removed. Its series went back to the default library.`, 'success');
+      toast(tr('Removed'), 'success');
       setConfirmDel(null);
       refresh();
-    } catch (e) { toast(msgOf(e, 'Could not remove that library'), 'error'); }
+    } catch (e) { toast(msgOf(e, tr('Could not remove that library')), 'error'); }
     setBusy(false);
   };
 
+  const open = adding || editing;
+  const canSave = name.trim() && (editing?.id === 'lib' || path.trim());
+
   return (
-    <section className="mb-8">
-      <h3 className="mb-1 font-display text-base font-semibold">{tr('Libraries')}</h3>
-      <p className="mb-3 text-xs leading-relaxed text-fog-500">
-        Split your collection into separate libraries, then choose who can see each one under Members.
-        Everything starts in one library, and nothing moves unless you say so.
+    <section className="full">
+      <div className="mb-1 flex items-center justify-between gap-3">
+        <h3 className="font-display text-base font-semibold">{tr('Libraries')}</h3>
+        <button onClick={openNew} className="chip shrink-0 text-xs"><IcPlus width={13} height={13} />{tr('New library')}</button>
+      </div>
+      <p className="mb-3 max-w-prose text-xs leading-relaxed text-fog-500">
+        {tr('A library is a folder, plus any series you file into it by hand. Give it an age rating and everything in it inherits that, and choose who can open it.')}
       </p>
 
-      <div className="divide-y divide-ink-800 rounded-xl border border-ink-700">
+      {/* Cards rather than one divided list: at 1592px a row left a lake between a library's path and the
+          buttons that act on it, and a library is a thing rather than an entry in a feed. */}
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
         {libs.map((l) => (
-          <div key={l.id} className="flex items-center gap-3 px-3 py-2.5">
-            <div className="min-w-0 flex-1">
+          <div key={l.id} className="card grad-border p-3">
+            <div className="min-w-0">
               <p className="truncate text-sm text-fog-100">{l.name}</p>
-              <p className="truncate text-[11px] text-fog-500">
-                {l.path ? l.path : 'everything not in another library'} · {l.n} series
+              <p className="truncate font-mono text-[11px] text-fog-500">
+                {l.path || tr('everything not in another library')}
+              </p>
+              <p className="truncate text-[11px] text-fog-600">
+                {l.n} {tr('series')}
+                {l.pinned > 0 && <> · {tr('{n} filed by hand', { n: l.pinned })}</>}
+                {' · '}{!anyMembers ? tr('admins only') : l.members.length ? tr('{n} can open it', { n: l.members.length }) : tr('nobody can open it')}
               </p>
             </div>
-            {l.id !== 'lib' && (
-              <button onClick={() => setConfirmDel(l)} className="chip shrink-0 text-xs hover:border-rose-500/50 hover:text-rose-400">{tr('Remove')}</button>
-            )}
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {/* The rating is its own control on the card, not just a badge.
+                  It lives inside the settings dialog, which is correct, but "Edit" gave no hint that age
+                  ratings were in there -- so a rating that had never been set looked like a feature that
+                  did not exist. Showing the UNRATED state is the point: no badge used to mean both
+                  "everyone can see this" and "I never looked". */}
+              <button onClick={() => openEdit(l)}
+                className={`chip text-xs ${l.age_rating != null ? 'border-amber-500/40 text-amber-300' : ''}`}>
+                {l.age_rating != null ? tr('{n}+', { n: l.age_rating }) : tr('Not rated')}
+              </button>
+              <button onClick={() => setAccess(l)} className="chip text-xs">{tr('Access')}</button>
+              <button onClick={() => openEdit(l)} className="chip text-xs">{tr('Settings')}</button>
+              {l.id !== 'lib' && (
+                <button onClick={() => setConfirmDel(l)} className="chip text-xs hover:border-rose-500/50 hover:text-rose-400">{tr('Remove')}</button>
+              )}
+            </div>
           </div>
         ))}
       </div>
@@ -1073,51 +1275,66 @@ function LibrariesSection() {
           <p className="mb-1.5 mt-4 text-xs font-semibold uppercase tracking-wider text-fog-500">{tr('Folders you could split out')}</p>
           <div className="flex flex-wrap gap-1.5">
             {candidates.slice(0, 12).map((c) => (
-              <button key={c.path} onClick={() => openAdd(c)}
-                className={`chip text-xs ${c.looksLikeSource ? 'opacity-60' : ''}`}
-                title={c.looksLikeSource ? 'This looks like a source folder created by the downloader' : undefined}>
-                {c.path} <span className="text-fog-500">· {c.series}</span>
-                {c.looksLikeSource && <span className="ms-1 text-amber-400">source?</span>}
+              <button key={c.path} onClick={() => { openNew(); setPath(c.path); setName(c.path.split('/').pop() || c.path); }}
+                className={`chip text-xs ${c.looksLikeSource ? 'opacity-60' : ''}`}>
+                <span className="font-mono">{c.path}</span> <span className="text-fog-500">· {c.series}</span>
+                {c.looksLikeSource && <span className="ms-1 text-amber-400">{tr('source?')}</span>}
               </button>
             ))}
           </div>
         </>
       )}
 
-      {adding && (
-        <Modal title={tr('New library')} onClose={() => setAdding(null)}>
-          <p className="text-sm text-fog-300">{tr('Everything under')}<span className="text-fog-100">{adding.path}</span> becomes its own library.
+      {open && (
+        <Modal title={editing ? tr('Edit library') : tr('New library')} onClose={() => { setAdding(false); setEditing(null); }}>
+          <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-fog-500">{tr('Name')}</label>
+          <input value={name} onChange={(e) => setName(e.target.value)} className="field" />
+
+          {editing?.id !== 'lib' && (
+            <>
+              <label className="mb-1 mt-3 block text-xs font-semibold uppercase tracking-wider text-fog-500">{tr('Folder')}</label>
+              <input value={path} onChange={(e) => setPath(e.target.value)} spellCheck={false}
+                placeholder={tr('e.g. Manga/Seinen')} className="field font-mono" />
+              <p className="mb-2 mt-1 text-[11px] text-fog-600">
+                {tr('Type any folder under your library root, or browse below. Libraries may sit inside one another — the most specific one wins.')}
+              </p>
+              <FolderPicker value={path} onPick={(p) => { setPath(p); if (!name.trim()) setName(p.split('/').pop() || p); }} />
+            </>
+          )}
+
+          <label className="mb-1 mt-3 block text-xs font-semibold uppercase tracking-wider text-fog-500">{tr('Age rating')}</label>
+          <select value={age} onChange={(e) => setAge(e.target.value)} className="field">
+            <option value="">{tr('Not rated — visible to everyone')}</option>
+            {[6, 10, 13, 15, 17, 18].map((v) => <option key={v} value={String(v)}>{v}+</option>)}
+          </select>
+          <p className="mt-1 text-[11px] text-fog-600">
+            {tr('Everything in this library inherits it. A single series can still be rated differently from its own page.')}
           </p>
-          {adding.looksLikeSource && (
-            <p className="mt-2 rounded-lg border border-amber-500/30 bg-amber-500/10 p-2.5 text-[11px] leading-relaxed text-amber-200">
-              This folder name matches one of your sources, so it was probably created by Uchiyomi&rsquo;s
-              downloader rather than by you. Libraries are usually collections like Manga or Comics.
-            </p>
-          )}
-          <label className="mb-1 mt-3 block text-xs font-semibold uppercase tracking-wider text-fog-500">{tr('Name')}</label>
-          <input value={name} onChange={(e) => setName(e.target.value)}
-            className="w-full rounded-lg border border-ink-700 bg-ink-900/60 px-3 py-2 text-sm text-fog-50 outline-none focus:border-accent" />
+
           {preview && (
-            <p className="mt-2 text-[11px] leading-relaxed text-fog-500">
-              {preview.series} series would move, including {preview.sample.slice(0, 3).join(', ')}
-              {preview.sample.length > 3 ? '…' : ''}. Nothing is deleted and no reading progress changes.
+            <p className="mt-3 text-[11px] leading-relaxed text-fog-500">
+              {tr('{n} series would move', { n: preview.series })}
+              {preview.sample.length > 0 && <>, {tr('including')} {preview.sample.slice(0, 3).join(', ')}{preview.sample.length > 3 ? '…' : ''}</>}
+              . {tr('No files are deleted.')}
             </p>
           )}
+
           <div className="mt-4 flex gap-2">
-            <button onClick={() => setAdding(null)} className="btn-ghost flex-1 py-2 text-sm">{tr('Cancel')}</button>
-            <button onClick={create} disabled={busy || !name.trim()} className="btn-accent flex-1 py-2 text-sm disabled:opacity-50">
-              {busy ? 'Working…' : 'Create'}
+            <button onClick={() => { setAdding(false); setEditing(null); }} className="btn-ghost flex-1 py-2 text-sm">{tr('Cancel')}</button>
+            <button onClick={save} disabled={busy || !canSave} className="btn-accent flex-1 py-2 text-sm disabled:opacity-50">
+              {busy ? tr('Working…') : editing ? tr('Save') : tr('Create')}
             </button>
           </div>
         </Modal>
       )}
 
+      {access && <LibraryAccessDialog lib={access} onClose={() => setAccess(null)} onSaved={refresh} />}
+
       {confirmDel && (
         <ConfirmDialog
-          title={`Remove "${confirmDel.name}"?`}
-          body={<>Its {confirmDel.n} series go back to the default library. Nothing is deleted, no files are
-            touched, and no reading progress changes. Anyone restricted to this library will lose access to it.</>}
-          confirmLabel="Remove library"
+          title={tr('Remove “{name}”?', { name: confirmDel.name })}
+          body={<>{tr('Its series go back to whichever library still covers their folder, or to the default. Nothing is deleted, no files are touched, and no reading progress changes.')}</>}
+          confirmLabel={tr('Remove library')}
           danger
           busy={busy}
           onConfirm={() => remove(confirmDel)}
@@ -1125,6 +1342,61 @@ function LibrariesSection() {
         />
       )}
     </section>
+  );
+}
+
+/**
+ * Who can open one library.
+ *
+ * The subtlety worth stating in the UI: a member with no restrictions at all can see EVERY library, so they
+ * are shown as already able to open this one. Granting them is a no-op. Revoking them is not -- it has to
+ * write out every other library explicitly, because "everything except this" cannot be said any other way.
+ * The server does that; this just has to describe it honestly.
+ */
+function LibraryAccessDialog({ lib, onClose, onSaved }: { lib: LibraryRow; onClose: () => void; onSaved: () => void }) {
+  const toast = useToast();
+  const [busy, setBusy] = useState(false);
+  const [sel, setSel] = useState<Set<string>>(new Set(lib.members));
+  const { data } = useQuery({ queryKey: ['admin-users'], queryFn: () => api<{ content: any[] }>('/api/admin/users') });
+  const members = (data?.content ?? []).filter((u) => u.role !== 'admin');
+
+  const save = async () => {
+    setBusy(true);
+    try {
+      await api(`/api/admin/libraries/${lib.id}`, { method: 'PATCH', json: { members: [...sel] } });
+      toast(tr('Saved'), 'success');
+      onSaved();
+      onClose();
+    } catch (e) { toast(msgOf(e, tr('Could not change that')), 'error'); }
+    setBusy(false);
+  };
+
+  return (
+    <Modal title={tr('Who can open “{name}”?', { name: lib.name })} onClose={onClose}>
+      {!members.length ? (
+        <p className="text-sm text-fog-500">{tr('No members yet.')}</p>
+      ) : (
+        <div className="space-y-1">
+          {members.map((u) => (
+            <label key={u.id} className="flex cursor-pointer items-center justify-between gap-3 rounded-lg px-2 py-1.5 text-sm hover:bg-ink-800/50">
+              <span className="min-w-0 truncate text-fog-200">{u.display_name || u.username}</span>
+              <input type="checkbox" checked={sel.has(u.id)} disabled={busy}
+                onChange={(e) => setSel((prev) => { const n = new Set(prev); e.target.checked ? n.add(u.id) : n.delete(u.id); return n; })}
+                className="size-4 shrink-0 accent-accent" />
+            </label>
+          ))}
+        </div>
+      )}
+      <p className="mt-3 text-[11px] leading-relaxed text-fog-600">
+        {tr('Admins can always see everything. A member with no limits set can open every library, including ones added later — unticking them here is what turns that into an explicit list.')}
+      </p>
+      <div className="mt-4 flex gap-2">
+        <button onClick={onClose} className="btn-ghost flex-1 py-2 text-sm">{tr('Cancel')}</button>
+        <button onClick={save} disabled={busy} className="btn-accent flex-1 py-2 text-sm disabled:opacity-50">
+          {busy ? tr('Working…') : tr('Save')}
+        </button>
+      </div>
+    </Modal>
   );
 }
 
@@ -1168,7 +1440,7 @@ function LibraryPanel() {
   };
 
   return (
-    <>
+    <div className="board">
       <LibrariesSection />
       {purge && (
         <ConfirmDialog
@@ -1190,36 +1462,36 @@ function LibraryPanel() {
           onClose={() => setPurge(null)}
         />
       )}
-    <div className="space-y-3">
-      <p className="text-xs text-fog-500">
-        Removing a series hides it from the library, search and the updater. Its files are left exactly where
-        they are, and everyone&rsquo;s reading progress is kept, so putting it back changes nothing else.
-      </p>
-      {isLoading ? (
-        <div className="card p-4 text-sm text-fog-500">{tr('Loading…')}</div>
-      ) : !rows.length ? (
-        <div className="card p-6 text-center text-sm text-fog-500">{tr('Nothing has been removed.')}</div>
-      ) : (
-        <div className="card divide-y divide-ink-800/70">
-          {rows.map((r) => (
-            <div key={r.id} className="flex items-center gap-3 px-4 py-3">
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-sm text-fog-100">{r.title}</p>
-                <p className="truncate text-[11px] text-fog-500">
-                  {r.books_count} chapter{r.books_count === 1 ? '' : 's'} \u00b7 removed {relativeTime(r.deleted_at)} \u00b7 {r.folder}
+      <div className="full space-y-3">
+        <p className="max-w-prose text-xs text-fog-500">
+          Removing a series hides it from the library, search and the updater. Its files are left exactly where
+          they are, and everyone&rsquo;s reading progress is kept, so putting it back changes nothing else.
+        </p>
+        {isLoading ? (
+          <div className="card grad-border p-4 text-sm text-fog-500">{tr('Loading…')}</div>
+        ) : !rows.length ? (
+          <div className="card grad-border p-6 text-center text-sm text-fog-500">{tr('Nothing has been removed.')}</div>
+        ) : (
+          <div className="card grad-border divide-y divide-ink-800/70 overflow-hidden">
+            {rows.map((r) => (
+              <div key={r.id} className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1.5 px-4 py-3 lg:grid-cols-[minmax(0,24rem)_minmax(0,1fr)_auto]">
+                <p className="col-start-1 row-start-1 min-w-0 truncate text-sm text-fog-100">{r.title}</p>
+                <p className="col-start-1 row-start-2 min-w-0 truncate text-[11px] text-fog-500 lg:col-start-2 lg:row-start-1">
+                  {r.books_count} chapter{r.books_count === 1 ? '' : 's'} · removed {relativeTime(r.deleted_at)} · {r.folder}
                 </p>
+                <div className="col-start-2 row-span-2 row-start-1 flex shrink-0 gap-1.5 justify-self-end lg:col-start-3 lg:row-span-1">
+                  <button onClick={() => restore(r)} disabled={busy === r.id} className="chip shrink-0 text-xs disabled:opacity-50">
+                    {busy === r.id ? 'Restoring\u2026' : 'Put back'}
+                  </button>
+                  {/* The escalation, and only ever after the reversible step. Hiding is undoable; this is not. */}
+                  <button onClick={() => setPurge(r)} className="chip shrink-0 text-xs hover:border-rose-500/50 hover:text-rose-400">{tr('Delete files')}</button>
+                </div>
               </div>
-              <button onClick={() => restore(r)} disabled={busy === r.id} className="chip shrink-0 text-xs disabled:opacity-50">
-                {busy === r.id ? 'Restoring\u2026' : 'Put back'}
-              </button>
-              {/* The escalation, and only ever after the reversible step. Hiding is undoable; this is not. */}
-              <button onClick={() => setPurge(r)} className="chip shrink-0 text-xs hover:border-rose-500/50 hover:text-rose-400">{tr('Delete files')}</button>
-            </div>
-          ))}
-        </div>
-      )}
+            ))}
+          </div>
+        )}
+      </div>
     </div>
-    </>
   );
 }
 
@@ -1236,9 +1508,11 @@ function Health() {
   const checks = data?.checks || [];
   const bad = checks.filter((c) => c.status !== 'ok').length;
 
+  // One card per check, and a failing one earns the full width of the board -- the same severity rule the
+  // overview uses, so the shape of the panel is the verdict.
   return (
-    <div className="space-y-3">
-      <div className="flex items-center justify-between gap-3">
+    <div className="board">
+      <div className="full flex items-center justify-between gap-3">
         <p className="text-xs text-fog-500">
           {!data ? 'Checking your library…'
             : bad ? `${bad} of ${checks.length} checks found something`
@@ -1287,11 +1561,11 @@ function Health() {
       {checks.map((c) => {
         const isOpen = open === c.id;
         return (
-          <div key={c.id} className="card overflow-hidden">
+          <div key={c.id} className={`card grad-border overflow-hidden ${c.status !== 'ok' ? 'full' : ''}`}>
             <button
               onClick={() => setOpen(isOpen ? null : c.id)}
               disabled={!c.items.length}
-              className="flex w-full items-center gap-3 px-4 py-3.5 text-start disabled:cursor-default"
+              className="flex w-full flex-wrap items-center gap-x-3 gap-y-1.5 px-4 py-3.5 text-start disabled:cursor-default"
             >
               <span className={`shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-medium ${HEALTH_TONE[c.status]}`}>
                 {HEALTH_LABEL[c.status]}
@@ -1344,7 +1618,7 @@ interface Catalog { content: CatalogExt[]; total: number; matched: number; shown
  * exactly the friction this replaced. Uchiyomi never hosts extensions: the catalogue comes from repositories
  * the operator adds here, and the extension server does the fetching.
  */
-function Extensions() {
+function Extensions({ span = '' }: { span?: string }) {
   const toast = useToast();
   const qc = useQueryClient();
   const [q2, setQ2] = useState('');
@@ -1372,7 +1646,7 @@ function Extensions() {
 
   if (!status.configured) {
     return (
-      <div className="card mb-3 p-3">
+      <div className={`card grad-border p-4 ${span}`}>
         <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-fog-500">{tr('Extensions')}</p>
         <p className="text-[11px] leading-relaxed text-fog-500">
           The extension engine isn&apos;t running. It normally starts with the rest of Uchiyomi — if you turned it
@@ -1435,7 +1709,7 @@ function Extensions() {
   const list = cat?.content || [];
 
   return (
-    <div className="card mb-3 p-3">
+    <div className={`card grad-border p-4 ${span}`}>
       <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
         <p className="text-xs font-semibold uppercase tracking-wider text-fog-500">{tr('Extensions')}</p>
         <div className="flex items-center gap-2">

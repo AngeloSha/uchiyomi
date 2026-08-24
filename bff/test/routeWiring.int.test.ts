@@ -185,6 +185,37 @@ test('the catalog routes are wired to the backend they claim', { skip }, async (
         assert.ok(r.body.includes('<feed'), `${url} did not return an OPDS feed`);
       }
     });
+    await t.test('THE FOURTH: the genre endpoints answer over HTTP, not just in the library', async () => {
+      // Every assertion about genreOverview lives in genreOverview.int.test.ts and calls the function
+      // directly, which is exactly the gap this file exists for: a correct function reached by a wrong
+      // route is what shipped in v0.8.0. So drive it the way the browse page does.
+      const plain = await app.inject({ method: 'GET', url: '/api/genres', headers: auth });
+      assert.equal(plain.statusCode, 200);
+      assert.ok(Array.isArray(plain.json().content), '/api/genres must still return { content: string[] }');
+
+      const r = await app.inject({ method: 'GET', url: '/api/genres/overview', headers: auth });
+      assert.equal(r.statusCode, 200, `/api/genres/overview answered ${r.statusCode}`);
+      const rows = r.json().content;
+      assert.ok(Array.isArray(rows), 'the browse page maps over content');
+      for (const row of rows) {
+        assert.equal(typeof row.key, 'string');
+        assert.equal(typeof row.label, 'string');
+        assert.ok(Array.isArray(row.covers), 'a tile with no covers array cannot render a mosaic');
+      }
+
+      // The cover count is a query parameter, and a tile that asks for six must not be handed four.
+      const six = (await app.inject({ method: 'GET', url: '/api/genres/overview?covers=6', headers: auth })).json();
+      for (const row of six.content) assert.ok(row.covers.length <= 6);
+
+      // And it must be bounded rather than trusted: an unbounded slice is a way to ask for the whole library.
+      const daft = await app.inject({ method: 'GET', url: '/api/genres/overview?covers=99999', headers: auth });
+      assert.equal(daft.statusCode, 200, 'a silly value must clamp, not 500');
+      for (const row of daft.json().content) assert.ok(row.covers.length <= 8, 'covers must be capped');
+
+      const junk = await app.inject({ method: 'GET', url: '/api/genres/overview?covers=abc', headers: auth });
+      assert.equal(junk.statusCode, 200, 'a non-numeric value must fall back, not crash');
+    });
+
   } finally {
     await teardown(app, q);
   }

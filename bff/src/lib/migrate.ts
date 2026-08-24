@@ -421,6 +421,15 @@ CREATE TABLE IF NOT EXISTS opds_tokens (
 -- settings on someone's phone, so a leak stayed useful until the owner happened to notice and regenerate.
 -- Existing tokens get a year from NOW rather than from when they were issued, so upgrading does not sign
 -- anyone's e-reader out on the spot.
+-- A library can carry an age rating that its series inherit. Rating 210 series one at a time is not a thing
+-- anyone does, so without this the age limits shipped alongside are impractical on a real library.
+ALTER TABLE libraries ADD COLUMN IF NOT EXISTS age_rating int;
+
+-- Why a series is in the library it is in. The scanner already keeps an existing series where it is, so a
+-- hand-move survives a rescan by accident; this records that it was DELIBERATE, so creating or re-pathing a
+-- library never steals it back and the UI can say "pinned here" rather than "here because of the folder".
+ALTER TABLE lib_series ADD COLUMN IF NOT EXISTS library_pinned boolean NOT NULL DEFAULT false;
+
 -- Page bookmarks. Keyed like read_progress, and like it these outlive the file: deleting a series' chapter
 -- files keeps every progress row on purpose, and a bookmark is the same kind of record -- a note about
 -- having read something, not a pointer to bytes.

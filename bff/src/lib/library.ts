@@ -342,6 +342,13 @@ export interface LibraryRow { id: string; path: string }
  *
  * Library zero has path '' and therefore prefixes everything, which is why an install that has never
  * declared a library behaves exactly as it did before this existed.
+ *
+ * Longest path wins, which is also what makes NESTING unambiguous: a series under `Manga/Seinen` belongs to
+ * that library rather than to `Manga`, and deleting the inner one returns it to `Manga` rather than to the
+ * default. Nested libraries used to be refused out of caution even though this rule already handled them.
+ *
+ * Only consulted for a folder the scanner has not seen before: an existing row keeps the library it is in,
+ * so an admin's hand-move is never recomputed away.
  */
 export function libraryIdFor(folderRel: string, libs: LibraryRow[]): string {
   let best: LibraryRow | null = null;

@@ -27,6 +27,8 @@ export interface Series {
   folder?: string;
   id: string;
   libraryId: string;
+  /** Whether an admin filed this series into that library by hand, rather than the folder rule doing it. */
+  libraryPinned?: boolean;
   name: string;
   created?: string | null; // when the series entered the library
   booksCount: number;

@@ -5,6 +5,7 @@ import { api } from '@/lib/api';
 import { relativeTime } from '@/lib/format';
 import { useToast } from '@/components/Toast';
 import { IcSearch, IcSparkle } from '@/components/icons';
+import { Switch } from '@/components/Switch';
 import { t as tr } from '@/lib/i18n';
 
 interface SourceResult { sourceId: string; source: string; title: string; coverUrl?: string; inLibrary?: boolean; updatedAt?: string }
@@ -419,12 +420,12 @@ function AddDialog({ modal, patch, close, pickProvider, doAdd, presets }: {
               <p className="rounded-lg bg-amber-500/10 px-3 py-2 text-[11px] leading-snug text-amber-300">⚠ Grabbing many chapters quickly can get you temporarily rate-limited by this source. It pauses automatically if that happens — you can resume later, or download fewer to start.</p>
             )}
 
-            <button onClick={() => patch({ autoUpdate: !modal.autoUpdate })} className="flex w-full items-center justify-between rounded-xl border border-ink-700 bg-ink-850/60 px-3 py-2.5 text-start">
+            {/* The row was one big <button> with a fake toggle inside it; a real <button role="switch"> cannot
+                nest in another button, so the row is now a plain row and the switch is the control. */}
+            <div className="flex w-full items-center justify-between gap-3 rounded-xl border border-ink-700 bg-ink-850/60 px-3 py-2.5">
               <span className="text-sm text-fog-100">{tr('Auto-update new chapters')}</span>
-              <span className={`relative h-6 w-11 rounded-full transition ${modal.autoUpdate ? 'bg-accent' : 'bg-ink-700'}`}>
-                <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white transition-all ${modal.autoUpdate ? 'left-[1.375rem]' : 'left-0.5'}`} />
-              </span>
-            </button>
+              <Switch on={!!modal.autoUpdate} onChange={(next) => patch({ autoUpdate: next })} label={tr('Auto-update new chapters')} />
+            </div>
 
             {modal.dup && <p className="rounded-lg bg-amber-500/10 px-3 py-2 text-xs text-amber-300">{modal.dup}</p>}
             <button onClick={() => doAdd(!!modal.dup)} disabled={modal.adding} className="btn-accent w-full py-2.5 text-sm disabled:opacity-60">

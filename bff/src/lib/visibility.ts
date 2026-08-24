@@ -54,7 +54,13 @@ export function visible(alias: string, ctx: ViewCtx, p: Params): string {
     // a correlated subquery rather than a join because `visible()` is applied wherever `lib_series` appears
     // -- including booksSrc, which joins it with no access to series_overrides. Only a capped account pays
     // for it, and an unrestricted one adds no clause at all.
-    const eff = `COALESCE((SELECT o2.age_rating FROM series_overrides o2 WHERE o2.series_id = ${alias}.id), ${alias}.age_rating)`;
+    // Series override beats what the scan read, which beats the library's own rating. That last step is
+    // what makes ratings usable: marking one library 18+ covers everything in it, and a single title inside
+    // it can still be let through by rating it lower.
+    const eff = `COALESCE(
+      (SELECT o2.age_rating FROM series_overrides o2 WHERE o2.series_id = ${alias}.id),
+      ${alias}.age_rating,
+      (SELECT l2.age_rating FROM libraries l2 WHERE l2.id = ${alias}.library_id))`;
     // Unrated stays visible on purpose. Treating NULL as adults-only would empty most libraries the first
     // time anyone set a cap, and a parent would reasonably read that as the app being broken.
     parts.push(`(${eff} IS NULL OR ${eff} <= ${p.add(ctx.maxAgeRating)})`);
@@ -69,6 +75,20 @@ export function visible(alias: string, ctx: ViewCtx, p: Params): string {
  * pre-warmer (whose id list already came from a user-filtered endpoint), and health checks that are
  * reporting on the library as a whole. It must never be reachable from a request handler.
  */
+/**
+ * The grant row that means "no libraries at all".
+ *
+ * `user_libraries` having no rows means EVERY library. That is deliberate and load-bearing on upgrade -- it
+ * is why nobody was locked out when per-library access shipped -- but it left "nothing" with no
+ * representation, and every path that could remove a member's last grant therefore handed them the whole
+ * collection instead: unticking their last library, revoking them from it in the library's own Access
+ * dialog, or just deleting that library. Three different ways to widen access, all silent.
+ *
+ * No library can have this id (they are `lib` or `lib_<hex>`), so `library_id = ANY(...)` matches nothing
+ * while the row count stays non-zero. That is exactly "restricted, to nothing", said in the existing shape.
+ */
+export const NO_LIBRARIES = '';
+
 export const SYSTEM_CTX: ViewCtx = { userId: null, libraryIds: null, maxAgeRating: null };
 
 /**

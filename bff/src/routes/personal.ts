@@ -355,10 +355,33 @@ export default async function personalRoutes(app: FastifyInstance) {
       total_events: 0,
       last_read_at: null,
     };
-    const byDay = await q(
-      `SELECT to_char(date_trunc('day', created_at), 'YYYY-MM-DD') AS day, count(*) FILTER (WHERE completed) AS chapters
-       FROM reading_events WHERE user_id = $1 AND created_at > now() - interval '90 days'
-       GROUP BY 1 ORDER BY 1`,
+    // DENSE, and one definition of "a day".
+    //
+    // This used to `GROUP BY date_trunc(...)` and return only the days that had events, which the chart then
+    // rendered as one bar per row: someone who read on five days saw five fat evenly-spaced bars under a
+    // label saying "Last 90 days". The gaps -- the actual information in a reading chart -- were silently
+    // deleted, and the fewer days you read the more wrong it looked.
+    //
+    // The two queries also disagreed with each other: this one bucketed in the server's local zone and the
+    // streak query on the next line bucketed in UTC, so on a container with a non-UTC TZ the chart and the
+    // streak were off by one. Both now use UTC, which is at least ONE definition; a reader's own zone would
+    // need the client to say what it is, and a streak that changes when you fly is a worse bug than a
+    // boundary that is a few hours off.
+    const byDay = await q<{ day: string; chapters: number }>(
+      `SELECT to_char(d::date, 'YYYY-MM-DD') AS day,
+              coalesce(e.chapters, 0)::int   AS chapters
+         FROM generate_series(
+                (now() AT TIME ZONE 'UTC')::date - interval '89 days',
+                (now() AT TIME ZONE 'UTC')::date,
+                interval '1 day') AS d
+         LEFT JOIN (
+           SELECT date_trunc('day', created_at AT TIME ZONE 'UTC')::date AS day,
+                  count(*) FILTER (WHERE completed) AS chapters
+             FROM reading_events
+            WHERE user_id = $1 AND created_at > now() - interval '90 days'
+            GROUP BY 1
+         ) e ON e.day = d::date
+        ORDER BY 1`,
       [uid],
     );
     const days = (
@@ -594,6 +617,14 @@ export default async function personalRoutes(app: FastifyInstance) {
     // avatar is identity shown to other household members -> mirror onto the users row
     if (data.avatar && typeof data.avatar === 'object') {
       await q('UPDATE users SET avatar = $2 WHERE id = $1', [uid, JSON.stringify(data.avatar)]);
+    }
+    // ...and so is the name. Only an admin could set one, and only when creating the account, so anyone
+    // whose display_name was left at the default saw a generic fallback where their name should be, forever,
+    // with nothing on screen suggesting a cause or a fix. Stored on the users row rather than in the
+    // free-form settings blob because other members read it (the leaderboard, member activity, sessions).
+    if (typeof data.displayName === 'string') {
+      const name = data.displayName.trim().slice(0, 40);
+      if (name) await q('UPDATE users SET display_name = $2 WHERE id = $1', [uid, name]);
     }
     const row = await one<{ data: unknown }>('SELECT data FROM app_settings WHERE user_id = $1', [uid]);
     return row?.data ?? {};
