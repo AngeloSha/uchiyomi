@@ -131,6 +131,26 @@ packs, custom sites) count as not adult, the same way an unrated series stays vi
 the final POST, so a denied account could browse every source, search them and read full series detail, and
 only met a wall on the last button. Every route behind the page refuses now, and the tab is gone.
 
+### An 18+ library stays off the shelf
+
+Marking a library 18+ already capped who could open it. It now also decides what turns up unasked: such a
+library is left out of the home rails, the library grid, search, browse-by-genre, collections, updates,
+history, bookmarks and the OPDS feeds, and its tab is gone from the Library page. A **Show 18+** button beside
+the sorts brings it back for as long as the browser is open, and hides it again by itself. The button appears
+only for accounts that actually have such a library, and never for one whose own age limit is below 18.
+Admins are not exempt, because this is about a tidy screen rather than about permission.
+
+**It is not an access control**, and the distinction is the whole design. A link, a bookmark, an
+offline-downloaded chapter, next-and-previous and reading progress all keep working while the library is
+hidden. The alternative was tempting and wrong: the service worker flushes reading progress with the app
+closed, an image tag carries no session, and an OPDS reader has no button to press, so folding this into the
+access rule would have silently lost people's place in whatever they were reading.
+
+Two long-standing gaps closed along the way. The library list had no notion of age limits at all, so a member
+capped at 13 was shown the name of the 18+ shelf and a tab that could only ever be empty. And reading history
+had no visibility rule whatsoever, so it kept listing the titles of series that had been deleted, merged away
+or moved into a library that member no longer holds.
+
 ### Also
 
 MangaDex asks its API for English and nothing else, but declared no language, so it joined all thirty

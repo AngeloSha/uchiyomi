@@ -316,6 +316,16 @@ series back to `Manga`, not to the default.
 action rather than two hundred. A single title can still be rated differently from its own page, which is
 what makes an exception possible. Unrated stays visible to everyone on purpose.
 
+**A library rated 18+ is also kept off the shelf.** Not just from members with an age limit, but from
+everybody, until somebody asks for it. It stays out of the home rails, the library grid, search, browse,
+your collections, updates, history, bookmarks and the OPDS feeds, and its tab does not appear on the Library
+page. A **Show 18+** button sits beside the sorts on the Library page and brings it all back; the reveal
+lasts until you close the browser and then it hides itself again. The button only appears for accounts that
+actually have such a library, and never for one whose age limit is below 18.
+
+This is about what turns up unasked, not about access. A link, a bookmark, an offline download and reading
+progress all keep working while the library is hidden, because losing your place is not tidying.
+
 **Access.** **Access** on a library row lists who can open it. One thing worth knowing: a member with no
 limits set can open every library, including ones you add later. Unticking them here is what turns that into
 an explicit list -- so granting a library to an unrestricted member changes nothing, and revoking one is what

@@ -149,6 +149,23 @@ one-line `summary`, and the individual `items`. Useful as a nightly cron that em
 curl -X POST -H "Authorization: Bearer $TOK" https://your-server/api/admin/library/scan
 ```
 
+## 18+ libraries
+
+A library whose `age_rating` is 18 or higher is left out of every **listing** endpoint by default: the home
+rails, `POST /api/series/search`, genres, collections, favourites, updates, history, bookmarks, wrapped and
+the OPDS feeds. Add `?adult=1` to a request to include it. Admins are not exempt, because this is about what
+appears unasked rather than about permission -- `max_age_rating` is the permission and is unrelated.
+
+It is deliberately **not** applied to endpoints that resolve one id you already hold: the series page, its
+chapter list, `GET /api/books/:id`, its pages, the offline manifest, next/previous, `PUT
+/api/books/:id/progress` and `/opds/book/:id/file` all work whether or not the library is hidden. A filter
+that refused to record what you read would lose data rather than tidy a screen.
+
+OPDS feeds have no way to pass the parameter and are always filtered. Chapter downloads still work.
+
+`GET /api/libraries` reports `adult: true` for such a library so a client can offer the reveal, and drops
+any library rated above the caller's own `max_age_rating` entirely.
+
 ## Rate limiting
 
 The API isn't rate-limited for authenticated users, but the *sources* it fetches from are. Endpoints that
