@@ -1,6 +1,8 @@
 // Same-origin API client. Access token lives in memory; the httpOnly refresh
 // cookie silently re-mints it (and the image cookie) on 401 or app launch.
 
+import { withAdult } from './adult';
+
 let accessToken: string | null = null;
 let refreshing: Promise<boolean> | null = null;
 
@@ -47,7 +49,9 @@ async function raw(path: string, opts: Opts, retry: boolean): Promise<Response> 
   const body = opts.json !== undefined ? JSON.stringify(opts.json) : undefined;
   if (body) headers.set('content-type', 'application/json');
 
-  const res = await fetch(path, {
+  // The one place the 18+ reveal is attached, so no caller has to remember it and no listing can quietly
+  // forget. It rides in the URL rather than a header on purpose -- see lib/adult.ts.
+  const res = await fetch(withAdult(path), {
     method: opts.method || (body ? 'POST' : 'GET'),
     headers,
     body,

@@ -240,6 +240,75 @@ try {
     else ok(`the arrow scrolls the rail (${moved.before} -> ${moved.after})`);
   }
 
+  /** Sign in over plain HTTP and return an access token. Used by the two setup-heavy cases below. */
+  const login = async (u, p) => {
+    const r = await fetch(`${BASE}/auth/login`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ username: u, password: p }),
+    });
+    return r.ok ? (await r.json()).accessToken : null;
+  };
+
+  // ---------------------------------------------------------------- 18+ libraries stay off the shelf
+  //
+  // The whole chain, end to end: a session cookie set by the button, a query parameter added to every API
+  // call, a predicate on the server, and a grid that actually changes. Marking the seeded library 18+ is
+  // the cheapest way to get a real one, and it is put back afterwards.
+  console.log('\n  an 18+ library');
+  await page.setViewport({ width: 1440, height: 900 });
+  const adminTok0 = await login(USER, PASS);
+  const libList = adminTok0
+    ? await (await fetch(`${BASE}/api/admin/libraries`, { headers: { authorization: `Bearer ${adminTok0}` } })).json().catch(() => null)
+    : null;
+  const lib0 = (libList?.content ?? libList ?? [])[0];
+  if (!adminTok0 || !lib0?.id) {
+    bad('could not read the library list to mark one 18+');
+  } else {
+    const setRating = (v) => fetch(`${BASE}/api/admin/libraries/${encodeURIComponent(lib0.id)}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${adminTok0}` },
+      body: JSON.stringify({ ageRating: v }),
+    });
+    const marked = await setRating(18);
+    if (!marked.ok) bad(`could not mark a library 18+ (${marked.status} ${(await marked.text()).slice(0, 100)})`);
+    else {
+      try {
+        await page.goto(`${BASE}/library/`, { waitUntil: 'networkidle2', timeout: 60000 });
+        await sleep(3000);
+        await shot('library-18-hidden');
+        const hiddenText = await page.evaluate(() => document.body.innerText || '');
+        SEEDED.some((n) => hiddenText.includes(n))
+          ? bad('an 18+ library is still listed on the library page by default')
+          : ok('the 18+ library is off the grid');
+
+        const chip = await page.evaluate(() => {
+          const b = [...document.querySelectorAll('button')].find((x) => /18\+/.test(x.textContent || ''));
+          if (!b) return false;
+          b.click();
+          return true;
+        });
+        if (!chip) bad('no "Show 18+" control appeared for an account that has an 18+ library');
+        else {
+          await sleep(3500);
+          await shot('library-18-shown');
+          const shownText = await page.evaluate(() => document.body.innerText || '');
+          SEEDED.every((n) => shownText.includes(n))
+            ? ok('the button brings it back')
+            : bad('clicking "Show 18+" did not reveal the library');
+
+          // The reveal is a session cookie, so the home screen agrees without another click.
+          await page.goto(BASE, { waitUntil: 'networkidle2', timeout: 60000 });
+          await sleep(2500);
+          const cookieOn = await page.evaluate(() => document.cookie.includes('yomi_adult=1'));
+          cookieOn ? ok('the reveal is a session cookie, shared across the app') : bad('the reveal did not persist off the library page');
+        }
+      } finally {
+        await setRating(null).catch(() => {});
+        await page.evaluate(() => { document.cookie = 'yomi_adult=; path=/; max-age=0'; });
+      }
+    }
+  }
+
   // ---------------------------------------------------------------- who may add series
   //
   // `canDownload: false` used to be enforced on exactly one route -- the final POST. A denied account still
@@ -257,14 +326,6 @@ try {
     await page.evaluate(() => fetch('/auth/logout', { method: 'POST', credentials: 'include' }).catch(() => {}));
     await page.evaluate(() => { localStorage.clear(); sessionStorage.clear(); });
     await page.deleteCookie(...(await page.cookies()));
-  };
-
-  const login = async (u, p) => {
-    const r = await fetch(`${BASE}/auth/login`, {
-      method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ username: u, password: p }),
-    });
-    return r.ok ? (await r.json()).accessToken : null;
   };
 
   const adminTok = await login(USER, PASS);

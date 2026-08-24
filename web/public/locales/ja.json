@@ -2,7 +2,7 @@
  "_meta": {
   "language": "ja",
   "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-  "strings": 428
+  "strings": 429
  },
  "1 check found something": "1 件のチェックで問題を検出",
  "1 member": "メンバー 1 人",
@@ -313,6 +313,7 @@
  "Sessions": "セッション",
  "Set up 2FA": "2段階認証を設定",
  "Settings": "設定",
+ "Show 18+": "18禁を表示",
  "Show all": "すべて表示",
  "Sign out": "ログアウト",
  "Signed in as": "サインイン中",

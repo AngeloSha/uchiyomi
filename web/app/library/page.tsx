@@ -13,6 +13,7 @@ import { triggerRefresh } from '@/lib/refresh';
 import { useToast } from '@/components/Toast';
 import { Modal } from '@/components/ConfirmDialog';
 import { useAuth, canDownload } from '@/lib/auth';
+import { AdultToggle, useAdultShown, useLibraries } from '@/components/AdultToggle';
 import { keys, t as tr } from '@/lib/i18n';
 
 // `keys()` is the identity function; it exists so these reach the translation extractor, which cannot see
@@ -121,11 +122,14 @@ function LibraryInner() {
   // Which library, or '' for all of them. This lists only what the viewer may open -- the endpoint filters
   // by their grants -- so the tab row doubles as an honest answer to "what do I actually have access to".
   const lib = params.get('lib') || '';
-  const { data: libs } = useQuery({
-    queryKey: ['libraries'],
-    queryFn: () => api<{ id: string; name: string }[]>('/api/libraries'),
-    staleTime: 5 * 60 * 1000,
-  });
+  const { data: allLibs } = useLibraries();
+  const adultOn = useAdultShown();
+  // An 18+ library's own tab goes with its contents: leaving it there while the grid it opens is empty is
+  // worse than not offering it, and the toggle beside the sorts is what brings both back.
+  const libs = useMemo(
+    () => (allLibs ?? []).filter((l) => adultOn || !l.adult),
+    [allLibs, adultOn],
+  );
   const [sheet, setSheet] = useState(false);
   // Select mode. Cleared whenever the filters change, so a selection can never outlive the list it was
   // made from and act on series the user can no longer see.
@@ -221,12 +225,12 @@ function LibraryInner() {
             {total} series{activeCount > 0 && <span className="text-accent"> · filtered</span>}
           </p>
         )}
-        {(libs?.length ?? 0) > 1 && (
+        {libs.length > 1 && (
           <div className="hide-scrollbar -mx-5 mt-3 flex gap-2 overflow-x-auto px-5 lg:mx-0 lg:px-0">
             <button onClick={() => setParam('lib', '')} className={`chip whitespace-nowrap ${lib ? '' : 'chip-active'}`}>
               {tr('All')}
             </button>
-            {libs!.map((l) => (
+            {libs.map((l) => (
               <button key={l.id} onClick={() => setParam('lib', l.id)}
                 className={`chip whitespace-nowrap ${lib === l.id ? 'chip-active' : ''}`}>
                 {l.name}
@@ -247,6 +251,8 @@ function LibraryInner() {
           <button onClick={() => setSheet(true)} className={`chip whitespace-nowrap ${activeCount ? 'chip-active' : ''}`}>
             {tr('Filters')}{activeCount > 0 ? ` · ${activeCount}` : ''}
           </button>
+          {/* Renders nothing unless this account actually holds an 18+ library. */}
+          <AdultToggle />
           <button onClick={() => { setSelecting((v) => !v); setPicked(new Set()); }}
             className={`chip whitespace-nowrap ${selecting ? 'chip-active' : ''}`}>
             {selecting ? tr('Done') : tr('Select')}

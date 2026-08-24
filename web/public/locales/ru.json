@@ -2,7 +2,7 @@
  "_meta": {
   "language": "ru",
   "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-  "strings": 428
+  "strings": 429
  },
  "1 check found something": "1 проверка нашла проблему",
  "1 member": "1 участник",
@@ -313,6 +313,7 @@
  "Sessions": "Сеансы",
  "Set up 2FA": "Настроить 2FA",
  "Settings": "Настройки",
+ "Show 18+": "Показать 18+",
  "Show all": "Показать все",
  "Sign out": "Выйти",
  "Signed in as": "Вы вошли как",
