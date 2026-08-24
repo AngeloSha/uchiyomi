@@ -282,13 +282,17 @@ export default async function sourceRoutes(app: FastifyInstance) {
         'SELECT source_id, lang FROM suwayomi_sources WHERE enabled = true',
       ).catch(() => [])).map((r) => [r.source_id, r.lang]),
     );
-    // How many series the library actually holds from each source. `lib_series.source` is the display name
-    // the folder was created under (the scanner reads it from the folder's parent, and `addSeriesFromSource`
-    // creates `${src.name}/<title>`), so it joins to `s.name`. One grouped count, not a scan per source.
+    // How many series the library actually holds from each source, keyed on the ADAPTER ID rather than the
+    // display name. `lib_series.source` is the folder's parent, which is the name the source had when the
+    // series was added, so renaming a source orphans its history: on this install the same adapter reads as
+    // 13 under "Aqua Manga" and 176 under "Aqua Manga (EN)", when it is one source with 189. `source_id` is
+    // written by addSeriesFromSource and is the id the ranking is applied to. NULL means "not from a
+    // source" -- filed by hand, or imported -- which is not a vote for anything.
     const used = new Map(
-      (await q<{ source: string | null; n: string }>(
-        `SELECT source, count(*)::text AS n FROM lib_series s WHERE ${visibleToAll('s')} GROUP BY source`,
-      ).catch(() => [])).map((r) => [r.source ?? '', Number(r.n)]),
+      (await q<{ source_id: string; n: string }>(
+        `SELECT source_id, count(*)::text AS n FROM lib_series s
+          WHERE ${visibleToAll('s')} AND s.source_id IS NOT NULL GROUP BY source_id`,
+      ).catch(() => [])).map((r) => [r.source_id, Number(r.n)]),
     );
     const now = Date.now();
     return {
@@ -308,7 +312,7 @@ export default async function sourceRoutes(app: FastifyInstance) {
           // What the reader has actually used. Health-then-alphabetical put "18 Porn Comic" and "1Manga.co"
           // at the front of this install's English group while Aqua Manga -- 176 of its 214 series, answering
           // in 2.5s -- was never in the first six fetched.
-          used: used.get(s.name) ?? 0,
+          used: used.get(s.id) ?? 0,
           status: h?.disabled ? 'disabled' : blocked ? h!.status : 'ok',
           blockedUntil: blocked ? h!.blocked_until : null,
         };

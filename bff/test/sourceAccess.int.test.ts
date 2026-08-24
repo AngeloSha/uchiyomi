@@ -172,6 +172,30 @@ test('sources: who may reach them, and how long they get', { skip }, async (t) =
       assert.equal(providers.includes(ADULT), false, 'search-all returned the adult source');
     });
 
+    await t.test('`used` counts by adapter id, not by the name the folder was created under', async () => {
+      // The ranking on the client sorts by this, so getting it wrong silently returns the old alphabetical
+      // order. A source that has been renamed keeps its history under the old name in `lib_series.source`:
+      // on the install this was written against, one adapter read as 13 under "Aqua Manga" and 176 under
+      // "Aqua Manga (EN)" while being one source with 189 series.
+      await q('DELETE FROM lib_series WHERE id = ANY($1)', [['sa_used_1', 'sa_used_2']]);
+      for (const [id, folderName] of [['sa_used_1', 'Clean Source'], ['sa_used_2', 'A Former Name']] as const) {
+        await q(
+          `INSERT INTO lib_series (id, source, source_id, title, folder, books_count)
+           VALUES ($1,$2,$3,$4,$5,1)`,
+          [id, folderName, CLEAN, `Used ${id}`, `${folderName}/${id}`],
+        );
+      }
+      try {
+        const r = await app.inject({ method: 'GET', url: '/api/sources', headers: tok(ids.plain) });
+        const row = r.json().content.find((s: any) => s.id === CLEAN);
+        assert.equal(row.used, 2, `both series should count toward ${CLEAN}, got ${row.used}`);
+        // A series filed by hand has no source_id and must not be a vote for anything.
+        assert.equal(r.json().content.find((s: any) => s.id === SLOW).used, 0);
+      } finally {
+        await q('DELETE FROM lib_series WHERE id = ANY($1)', [['sa_used_1', 'sa_used_2']]).catch(() => {});
+      }
+    });
+
     // ------------------------------------------------------------------ canDownload
     await t.test('canDownload:false is refused on EVERY route here, not just add', async () => {
       for (const r of ROUTES) {
