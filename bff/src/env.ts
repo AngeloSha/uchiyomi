@@ -67,6 +67,11 @@ const schema = z.object({
   // Suwayomi can expose hundreds of sources; cross-source search fans out to every REGISTERED source, so
   // registration is opt-in per source and additionally capped here.
   SUWAYOMI_MAX_SOURCES: z.coerce.number().int().min(1).max(500).default(25),
+  // How long one source gets to answer "what is new" on Discover. This handler was the only one of its
+  // siblings with no bound of its own and inherited the adapter's -- 30s for Suwayomi, 95s for a
+  // FlareSolverr-backed site -- so a single slow source stalled the whole wall for over a minute. Settable
+  // because an operator on a slow link may want more, and because a test cannot afford to wait 8 seconds.
+  SOURCE_LATEST_TIMEOUT_MS: z.coerce.number().int().min(100).max(120000).default(8000),
   // Recognising a series whose folder was renamed or moved, by matching its chapters' content fingerprints.
   //   off    - a moved folder becomes a new series, as it always has
   //   report - work out what it WOULD match and write it to the audit log, change nothing

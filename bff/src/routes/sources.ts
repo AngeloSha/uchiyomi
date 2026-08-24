@@ -3,12 +3,14 @@
 import type { FastifyInstance } from 'fastify';
 import { authenticate } from '../lib/auth';
 import { getSource, listSources, isSwAdapterId, SW_PREFIX } from '../lib/sources';
+import type { SourceAdapter, SourceSeries } from '../lib/sources/types';
 import { downloadChapter, sanitize } from '../lib/downloader';
 import { persistScan, setBookDates } from '../lib/library';
 import { fetchAniListArt, fetchTrendingManhwa, TrendingItem } from '../lib/anilist';
 import { q, one } from '../lib/db';
-import { healthAll, isDisabled } from '../lib/sourceHealth';
+import { healthAll, isDisabled, reportOk, reportFail, classify } from '../lib/sourceHealth';
 import { logAudit } from '../lib/audit';
+import { env } from '../env';
 // The "already in library" annotation is deliberately library-wide: it answers "would adding this be a
 // duplicate on this server", which is a property of the server, not of the person asking.
 import { visibleToAll } from '../lib/visibility';
@@ -52,6 +54,89 @@ function pickBest<T extends { title: string }>(list: T[], term: string): T | nul
 }
 const withTimeout = <T>(p: Promise<T>, ms: number): Promise<T> =>
   Promise.race([p, new Promise<T>((_, rej) => setTimeout(() => rej(new Error('timeout')), ms))]);
+
+/**
+ * Which of these titles the library already has.
+ *
+ * Was `SELECT s.title FROM lib_series` -- every row, every column value in memory, once per source per wall
+ * paint, and again per page as you scroll. Six sources on a 214-series library is six full scans to answer a
+ * question about twenty-four titles. The normalisation matches `norm()` and the duplicate check in
+ * `addSeriesFromSource`, which has always compared this way.
+ */
+const NORM_SQL = "lower(regexp_replace(s.title, '[^a-zA-Z0-9]', '', 'g'))";
+async function inLibrary(titles: Array<string | undefined>): Promise<Set<string>> {
+  const keys = [...new Set(titles.map((t) => norm(t || '')).filter(Boolean))];
+  if (!keys.length) return new Set();
+  const rows = await q<{ k: string }>(
+    `SELECT ${NORM_SQL} AS k FROM lib_series s WHERE ${visibleToAll('s')} AND ${NORM_SQL} = ANY($1)`,
+    [keys],
+  ).catch(() => []);
+  return new Set(rows.map((r) => r.k));
+}
+
+/**
+ * How long one source gets to answer "what is new".
+ *
+ * This handler was the only one of its siblings with no bound of its own: `search-all` caps the adapter at
+ * 20s and `find` at 25s, while this called `src.latest()` bare and inherited whatever the adapter allowed
+ * itself -- 30s for Suwayomi, 95s for a FlareSolverr-backed site. Production's worst measured call was 63.5s
+ * for a single source, against a median of 355ms. Eight seconds is well past the p90 of 2.5s.
+ */
+const LATEST_TIMEOUT = env.SOURCE_LATEST_TIMEOUT_MS;
+const LATEST_TTL = 10 * 60_000;
+const latestCache = new Map<string, { at: number; items: SourceSeries[] }>();
+const latestInflight = new Map<string, Promise<SourceSeries[]>>();
+
+/**
+ * One source's newest page, cached and de-duplicated.
+ *
+ * Keyed by source and page and NOT by user, deliberately: a source's newest page is the same bytes for
+ * everyone, and *which sources you may ask for* is decided before this is ever called. That separation is
+ * also why the service worker must not cache this endpoint -- the Cache API keys by URL with no `Vary`, so
+ * on a shared household device it would serve one account's wall to another.
+ *
+ * The in-flight map matters more than the TTL here: six chips, several tabs and a page refresh otherwise
+ * become six identical outbound scrapes of the same site within a second of each other.
+ */
+async function latestPage(src: SourceAdapter, page: number): Promise<SourceSeries[]> {
+  const key = `${src.id}:${page}`;
+  const hit = latestCache.get(key);
+  if (hit && Date.now() - hit.at < LATEST_TTL) return hit.items;
+  const flying = latestInflight.get(key);
+  if (flying) return flying;
+
+  const run = async (): Promise<SourceSeries[]> => {
+    try {
+      const raw = await withTimeout(src.latest!(page), LATEST_TIMEOUT);
+      const seen = new Set<string>();
+      // dedupe by sourceId (duplicate ids collide on the React key -> wrong cover/title on a card)
+      const items = raw.filter((r) => !!r.sourceId && !seen.has(r.sourceId) && (seen.add(r.sourceId), true)).slice(0, 24);
+      latestCache.set(key, { at: Date.now(), items });
+      void reportOk(src.id);
+      return items;
+    } catch (e) {
+      // Nothing reported health from here, so a source that timed out on every single visit kept its `ok`
+      // status forever and the client's ranking kept putting it first. Reporting is what earns it a cooldown.
+      void reportFail(src.id, classify(e) ?? 'down', (e as Error)?.message || 'latest failed');
+      // Stale beats empty: an old page is still this source's newest page, whereas an empty one reads as
+      // "this source has nothing", which is a different and false statement. /api/discover/trending already
+      // serves stale on failure for the same reason.
+      return hit?.items ?? [];
+    }
+  };
+
+  // Registered before anything can await, and removed only if it is still the entry we put there.
+  const p = run();
+  latestInflight.set(key, p);
+  void p.finally(() => { if (latestInflight.get(key) === p) latestInflight.delete(key); });
+  return p;
+}
+
+/** Exposed for tests: the cache is process-global and would otherwise leak between cases. */
+export function clearLatestCache(): void {
+  latestCache.clear();
+  latestInflight.clear();
+}
 
 export interface AddResult {
   ok: boolean; status: number; error?: string; message?: string;
@@ -162,6 +247,14 @@ export default async function sourceRoutes(app: FastifyInstance) {
         'SELECT source_id, lang FROM suwayomi_sources WHERE enabled = true',
       ).catch(() => [])).map((r) => [r.source_id, r.lang]),
     );
+    // How many series the library actually holds from each source. `lib_series.source` is the display name
+    // the folder was created under (the scanner reads it from the folder's parent, and `addSeriesFromSource`
+    // creates `${src.name}/<title>`), so it joins to `s.name`. One grouped count, not a scan per source.
+    const used = new Map(
+      (await q<{ source: string | null; n: string }>(
+        `SELECT source, count(*)::text AS n FROM lib_series s WHERE ${visibleToAll('s')} GROUP BY source`,
+      ).catch(() => [])).map((r) => [r.source ?? '', Number(r.n)]),
+    );
     const now = Date.now();
     return {
       content: listSources().map((s) => {
@@ -174,6 +267,10 @@ export default async function sourceRoutes(app: FastifyInstance) {
           // like MangaDex belongs in every group rather than in an orphan bucket.
           lang: isSwAdapterId(s.id) ? (langs.get(s.id.slice(SW_PREFIX.length)) ?? null) : null,
           latest: typeof s.latest === 'function',
+          // What the reader has actually used. Health-then-alphabetical put "18 Porn Comic" and "1Manga.co"
+          // at the front of this install's English group while Aqua Manga -- 176 of its 214 series, answering
+          // in 2.5s -- was never in the first six fetched.
+          used: used.get(s.name) ?? 0,
           status: h?.disabled ? 'disabled' : blocked ? h!.status : 'ok',
           blockedUntil: blocked ? h!.blocked_until : null,
         };
@@ -193,7 +290,7 @@ export default async function sourceRoutes(app: FastifyInstance) {
     const seen = new Set<string>();
     const results = raw.filter((r) => !!r.sourceId && !seen.has(r.sourceId) && (seen.add(r.sourceId), true)).slice(0, 24);
     // flag titles already in the library so the UI can mark them instead of offering a duplicate add
-    const have = new Set((await q<{ title: string }>(`SELECT s.title FROM lib_series s WHERE ${visibleToAll('s')}`)).map((r) => norm(r.title)));
+    const have = await inLibrary(results.map((r) => r.title));
     return { content: results.map((r) => ({ ...r, inLibrary: have.has(norm(r.title)) })) };
   });
 
@@ -223,7 +320,7 @@ export default async function sourceRoutes(app: FastifyInstance) {
         g.providers.push({ source: r.source, name: r.name, sourceId: r.sourceId, coverUrl: r.coverUrl, title: r.title });
       }
     }
-    const have = new Set((await q<{ title: string }>(`SELECT s.title FROM lib_series s WHERE ${visibleToAll('s')}`)).map((x) => norm(x.title)));
+    const have = await inLibrary([...groups.values()].map((g) => g.title));
     const out = [...groups.values()]
       .map((g) => ({ ...g, inLibrary: have.has(norm(g.title)) }))
       .sort((a, b) => b.providers.length - a.providers.length)
@@ -238,10 +335,8 @@ export default async function sourceRoutes(app: FastifyInstance) {
     if (!src || typeof src.latest !== 'function') return { content: [] };
     if (await isDisabled(source!).catch(() => false)) return { content: [] };
     const p = Math.max(1, parseInt(page || '1', 10) || 1);
-    const raw = await src.latest(p).catch(() => []);
-    const seen = new Set<string>();
-    const results = raw.filter((r) => !!r.sourceId && !seen.has(r.sourceId) && (seen.add(r.sourceId), true)).slice(0, 24);
-    const have = new Set((await q<{ title: string }>(`SELECT s.title FROM lib_series s WHERE ${visibleToAll('s')}`)).map((r) => norm(r.title)));
+    const results = await latestPage(src, p);
+    const have = await inLibrary(results.map((r) => r.title));
     return { content: results.map((r) => ({ ...r, inLibrary: have.has(norm(r.title)) })) };
   });
 
@@ -253,7 +348,7 @@ export default async function sourceRoutes(app: FastifyInstance) {
     if (!trendingCache || Date.now() - trendingCache.at > 6 * 3600_000) {
       try { trendingCache = { at: Date.now(), items: await fetchTrendingManhwa() }; } catch { if (!trendingCache) return { content: [] }; }
     }
-    const have = new Set((await q<{ title: string }>(`SELECT s.title FROM lib_series s WHERE ${visibleToAll('s')}`)).map((r) => norm(r.title)));
+    const have = await inLibrary(trendingCache.items.map((t) => t.title));
     return { content: trendingCache.items.filter((t) => !have.has(norm(t.title))).slice(0, 24) };
   });
 
