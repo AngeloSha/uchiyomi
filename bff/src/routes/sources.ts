@@ -8,7 +8,7 @@ import { downloadChapter, sanitize } from '../lib/downloader';
 import { persistScan, setBookDates } from '../lib/library';
 import { fetchAniListArt, fetchTrendingManhwa, TrendingItem } from '../lib/anilist';
 import { q, one } from '../lib/db';
-import { healthAll, isDisabled, reportOk, reportFail, classify } from '../lib/sourceHealth';
+import { healthAll, isDisabled, blockedNow, reportOk, reportFail, classify } from '../lib/sourceHealth';
 import { logAudit } from '../lib/audit';
 import { env } from '../env';
 // The "already in library" annotation is deliberately library-wide: it answers "would adding this be a
@@ -139,6 +139,9 @@ async function latestPage(src: SourceAdapter, page: number): Promise<SourceSerie
   void p.finally(() => { if (latestInflight.get(key) === p) latestInflight.delete(key); });
   return p;
 }
+
+/** Whatever is on hand for this source and page, however old. Used when a source is in cooldown. */
+const cachedLatest = (id: string, page: number): SourceSeries[] => latestCache.get(`${id}:${page}`)?.items ?? [];
 
 /** Exposed for tests: the cache is process-global and would otherwise leak between cases. */
 export function clearLatestCache(): void {
@@ -389,6 +392,16 @@ export default async function sourceRoutes(app: FastifyInstance) {
     if (!sourceAllowedFor(src, vc(req).maxAgeRating)) return denySource(reply);
     if (await isDisabled(source!).catch(() => false)) return { content: [] };
     const p = Math.max(1, parseInt(page || '1', 10) || 1);
+    // A source serving out a cooldown is not asked again -- that is what the cooldown is FOR. Reporting
+    // health from here was only affecting the client's ordering, so a source that had already proved it
+    // cannot answer still cost the full timeout on every single visit: on this install two of them burned
+    // 8s each, every time, for nothing. Whatever was last cached is still served, because an old page is
+    // better than a blank one. blocked_until expires on its own, so the source heals without intervention.
+    if (await blockedNow(source!).catch(() => null)) {
+      const stale = cachedLatest(src.id, p);
+      const had = await inLibrary(stale.map((r) => r.title));
+      return { content: stale.map((r) => ({ ...r, inLibrary: had.has(norm(r.title)) })) };
+    }
     const results = await latestPage(src, p);
     const have = await inLibrary(results.map((r) => r.title));
     return { content: results.map((r) => ({ ...r, inLibrary: have.has(norm(r.title)) })) };

@@ -283,6 +283,28 @@ test('sources: who may reach them, and how long they get', { skip }, async (t) =
       assert.ok(h.blocked_until, 'an empty page cleared an active cooldown');
     });
 
+    await t.test('a source serving a cooldown is not asked again', async () => {
+      // Reporting health only changed the client's ordering, so a source that had already proved it cannot
+      // answer still cost the full timeout on every visit. On the install this was written against, two of
+      // them burned 8s each on every load of the page, forever.
+      const { clearLatestCache } = await import('../src/routes/sources');
+      clearLatestCache();
+      calls[SLOW] = 0;
+      await q(
+        `INSERT INTO source_health (source_id, status, consecutive, blocked_until, updated_at)
+         VALUES ($1,'down',2, now() + interval '30 minutes', now())
+         ON CONFLICT (source_id) DO UPDATE SET status='down', consecutive=2,
+           blocked_until = now() + interval '30 minutes', updated_at=now()`,
+        [SLOW],
+      );
+      const started = Date.now();
+      const r = await app.inject({ method: 'GET', url: `/api/sources/latest?source=${SLOW}`, headers: tok(ids.plain) });
+      assert.equal(r.statusCode, 200);
+      assert.equal(calls[SLOW], 0, 'a source in cooldown was asked anyway');
+      assert.ok(Date.now() - started < 1000, 'the request waited on a source it should not have asked');
+      await q('DELETE FROM source_health WHERE source_id = $1', [SLOW]);
+    });
+
     await t.test('the cache answers the second call, and concurrent calls collapse into one', async () => {
       const { clearLatestCache } = await import('../src/routes/sources');
       clearLatestCache();
