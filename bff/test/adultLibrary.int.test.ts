@@ -146,7 +146,9 @@ async function setup() {
 interface Listing { name: string; method: 'GET' | 'POST'; url: string; payload?: any; opds?: boolean }
 const LISTINGS: Listing[] = [
   { name: 'library grid / search', method: 'POST', url: '/api/series/search', payload: { page: 0, size: 100 } },
-  { name: 'search by title', method: 'POST', url: '/api/series/search', payload: { fullTextSearch: 'Zzz', size: 100 } },
+  // `query`, not `fullTextSearch`: the route's zod schema takes the former and silently drops the latter,
+  // so the wrong key turns this case into a plain unfiltered listing that passes for the wrong reason.
+  { name: 'search by title', method: 'POST', url: '/api/series/search', payload: { query: 'Zzz', size: 100 } },
   { name: 'search by genre', method: 'POST', url: '/api/series/search', payload: { condition: { genre: { operator: 'is', value: 'Zzztestgenre' } }, size: 100 } },
   { name: 'home', method: 'GET', url: '/api/home' },
   { name: 'featured', method: 'GET', url: '/api/featured' },
