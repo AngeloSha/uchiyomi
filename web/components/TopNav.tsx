@@ -10,14 +10,18 @@ import { api } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { Avatar } from './Avatar';
 import { useToast } from './Toast';
-import { t as tr } from '@/lib/i18n';
+import { keys, t as tr } from '@/lib/i18n';
 
+// `keys()` is the identity function; it exists so these reach the translation extractor, which
+// cannot see a label rendered as `tr(label)`. This nav shipped untranslated once already.
+// See lib/i18n.ts.
+const NAV_LABELS = keys('Home', 'Library', 'Browse', 'Lists', 'Discover');
 const links = [
-  { href: '/', label: 'Home', Icon: IcHome, match: (p: string) => p === '/' },
-  { href: '/library', label: 'Library', Icon: IcGrid, match: (p: string) => p.startsWith('/library') || p.startsWith('/series') },
-  { href: '/browse', label: 'Browse', Icon: IcSparkle, match: (p: string) => p.startsWith('/browse') },
-  { href: '/collections', label: 'Lists', Icon: IcBookmark, match: (p: string) => p.startsWith('/collection') },
-  { href: '/discover', label: 'Discover', Icon: IcPlus, match: (p: string) => p.startsWith('/discover') },
+  { href: '/', label: NAV_LABELS[0], Icon: IcHome, match: (p: string) => p === '/' },
+  { href: '/library', label: NAV_LABELS[1], Icon: IcGrid, match: (p: string) => p.startsWith('/library') || p.startsWith('/series') },
+  { href: '/browse', label: NAV_LABELS[2], Icon: IcSparkle, match: (p: string) => p.startsWith('/browse') },
+  { href: '/collections', label: NAV_LABELS[3], Icon: IcBookmark, match: (p: string) => p.startsWith('/collection') },
+  { href: '/discover', label: NAV_LABELS[4], Icon: IcPlus, match: (p: string) => p.startsWith('/discover') },
 ];
 
 export function TopNav({ onSearchFocus }: { onSearchFocus?: () => void }) {
@@ -44,7 +48,7 @@ export function TopNav({ onSearchFocus }: { onSearchFocus?: () => void }) {
 
   return (
     <header className="sticky top-0 z-40 hidden border-b border-ink-800/70 bg-ink-950/80 backdrop-blur-xl lg:block">
-      <div className="flex items-center gap-6 px-8 py-3">
+      <div className="shell flex items-center gap-6 py-3">
         <Link href="/"><Lockup className="text-2xl" markSize={38} /></Link>
         <nav className="flex items-center gap-1">
           {links.map(({ href, label, Icon, match }) => {

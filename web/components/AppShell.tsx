@@ -50,7 +50,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     <>
       <CinematicFX />
       <TopNav onSearchFocus={() => setPalette(true)} />
-      <main className="relative z-[1] mx-auto max-w-2xl pb-28 lg:max-w-none lg:px-8 lg:pb-12">
+      <main className="shell relative z-[1] pb-28 lg:pb-12">
         <PageTransition>{children}</PageTransition>
       </main>
       <BottomNav />

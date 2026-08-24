@@ -15,12 +15,19 @@ const config: Config = {
           600: '#26262f',
           500: '#3a3a45',
         },
+        // 200 and 600 were used 65 times across the app and were never DEFINED, so every one of those
+        // elements produced no rule at all and inherited fog-50 instead. Two thirds of the app's
+        // "secondary" text was therefore rendering at the same near-white as its primary text, which is
+        // most of why flat surfaces read as flat. Filling the gaps is the fix that keeps every existing
+        // intent; rewriting 65 call sites to shades that happen to exist would not.
         fog: {
           50: '#f7f7fb',
           100: '#ececf2',
+          200: '#d5d5df',
           300: '#b9b9c6',
           400: '#9292a3',
           500: '#6f6f81',
+          600: '#53535f',
         },
         accent: {
           DEFAULT: 'rgb(var(--accent) / <alpha-value>)',

@@ -5,7 +5,21 @@
 :root {
   --accent: 124 92 255; /* electric violet #7c5cff — themeable from Settings */
   --vh: 1vh;
+
+  /* The page gutter, owned in ONE place.
+     It used to be owned by ~98 individual elements, each writing its own px-4 / px-5 / lg:px-0, which is
+     why the home page's section headings sit 16px to the right of the greeting above them on a desktop and
+     4px to the left of it on a phone. Anything that opts into .shell gets the same edge as everything else. */
+  --gutter: 1rem;
+
+  /* Logical anchor for directional gradients. Tailwind's rtl: variant cannot mirror a radial's position,
+     and a scrim lighting the wrong corner in Arabic makes the label unreadable rather than merely odd. */
+  --start: 0%;
+
 }
+[dir='rtl'] { --start: 100%; }
+@media (min-width: 640px)  { :root { --gutter: 1.25rem; } }
+@media (min-width: 1024px) { :root { --gutter: 2rem; } }
 
 @layer base {
   html {
@@ -32,6 +46,55 @@
 @layer components {
   .h-screen-d { height: calc(var(--vh, 1vh) * 100); }
   .min-h-screen-d { min-height: calc(var(--vh, 1vh) * 100); }
+
+  /* The one page container. A page that uses this must not also set its own max-width.
+     Deliberately padding-free below lg: every page already carries its own px-4/px-5 there, and adding a
+     second gutter underneath them would double the inset on every phone screen in the app. At lg it is
+     exactly the 2rem the shell used to hard-code.
+     And DELIBERATELY UNCAPPED. A max-width here centres the shell on a large display, and the home hero
+     bleeds out of the shell's padding rather than out of the viewport -- so a 3440px screen got 504px of
+     black down each side of a hero that is supposed to be the full width of the wall. Line length is
+     bounded where it actually matters instead: `.field` caps an input, `max-w-prose` caps a paragraph, and
+     `.board` answers extra width with more columns rather than wider ones. */
+  .shell {
+    width: 100%;
+    margin-inline: auto;
+  }
+  @media (min-width: 1024px) { .shell { padding-inline: 2rem; } }
+
+  /* The one escape hatch, for art that has to reach the edges. Logical margins, so it still reaches the
+     right edges under dir="rtl" instead of tearing the layout open on one side.
+     Contract: valid only on a child of a page root carrying `px-4 lg:px-0`. */
+  .bleed { margin-inline: -1rem; width: calc(100% + 2rem); }
+  @media (min-width: 1024px) { .bleed { margin-inline: -2rem; width: calc(100% + 4rem); } }
+  /* One field style. It was copy-pasted as a local `fld` const in three files, which is how two of them
+     drifted. max-w-md never binds inside a card and binds hard in a full-width one, which is what keeps a
+     text input from stretching to two thousand pixels on a wide display. */
+  .field {
+    @apply w-full max-w-md rounded-xl border border-ink-700 bg-ink-850 px-3 py-2.5
+           text-sm text-fog-100 outline-none focus:border-accent;
+  }
+
+  /* A horizontal scrim running from the START edge, for text laid over art.
+     CSS gradients have no logical direction keyword, so this is the one place a dir= selector is the
+     honest fix: without it the darkening sits on the wrong side in Arabic and the label is unreadable. */
+  .scrim-inline {
+    background-image: linear-gradient(to right, rgb(0 0 0 / 0.85), rgb(0 0 0 / 0.28) 46%, transparent 76%);
+  }
+
+  /* A board of cards that answers extra width with MORE COLUMNS rather than wider columns. This is the
+     whole trick: a settings form stretched to 2000px is unreadable, so nothing here ever stretches. */
+  .board {
+    display: grid;
+    align-items: start;
+    gap: 0.75rem;
+    grid-template-columns: repeat(auto-fill, minmax(min(19rem, 100%), 1fr));
+  }
+  @media (min-width: 1024px) { .board { gap: 1rem; } }
+  .board > .full { grid-column: 1 / -1; }
+  /* Spanning two tracks is only safe where two can exist. In a one-track auto-fill grid `span 2` FORGES a
+     second track, which is how a "wide" card ends up half off the side of a 390px phone. */
+  @media (min-width: 768px) { .board > .wide { grid-column: span 2 / span 2; } }
 
   /* Status-bar / notch safe clearance for top bars. Lives in the components layer so a plain
      `pt-*` utility no longer silently overrides it; pair with `lg:pt-*` to override on desktop. */
@@ -140,4 +203,8 @@ html.lenis, html.lenis body { height: auto; }
   color: transparent;
   -webkit-text-stroke: 2px rgb(var(--accent) / 0.5);
   text-shadow: 0 6px 28px rgb(var(--accent) / 0.16);
+}
+
+[dir='rtl'] .scrim-inline {
+  background-image: linear-gradient(to left, rgb(0 0 0 / 0.85), rgb(0 0 0 / 0.28) 46%, transparent 76%);
 }
