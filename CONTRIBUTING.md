@@ -14,7 +14,15 @@ Thanks for your interest. Bug reports, feature ideas, and pull requests are all 
 cp .env.example .env      # point LIBRARY_PATH at your manga
 docker compose up -d
 ```
-Open http://localhost:3000, create the admin account, and add a source by URL.
+Open http://localhost:8080, create the admin account, and add a source by URL.
+
+That builds `Dockerfile.aio` — the single container that is actually released, and the only layout the
+end-to-end tests drive. The deprecated two-container split is still buildable from source when you need to
+touch `web/nginx.conf` or its Dockerfile:
+
+```bash
+docker compose --profile split up -d     # adds yomi-bff + yomi-web on http://localhost:8081
+```
 
 ## Pull requests
 - Keep changes focused: one topic per PR.

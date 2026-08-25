@@ -198,8 +198,9 @@ Adding a language: copy `en` semantics into `web/public/locales/<code>.json`, ad
 
 | Service | What it is |
 | --- | --- |
-| `yomi-web` | Next.js static-export PWA on nginx, reverse-proxying `/api`, `/auth`, `/img` to the BFF. **Development stack only** — the shipped image serves the PWA from the API process itself |
-| `yomi-bff` | Fastify + TypeScript API: auth, catalog over the CBZ library, disk image cache, the source loader |
+| `yomi-app` | The whole app in one container, built from `Dockerfile.aio` — the same topology the released image ships. This is what `docker compose up -d` starts |
+| `yomi-bff` | Fastify + TypeScript API: auth, catalog over the CBZ library, disk image cache, the source loader. **Only under `--profile split`** |
+| `yomi-web` | Next.js static-export PWA on nginx, reverse-proxying `/api`, `/auth`, `/img` to the BFF. **Only under `--profile split`** — the shipped image serves the PWA from the API process itself |
 | `yomi-db` | Private Postgres (no host port) |
 | `yomi-flaresolverr` | Optional headless-Chrome Cloudflare solver, used only by Cloudflare-protected source plugins |
 | `yomi-suwayomi` | The extension engine that runs Mihon / Tachiyomi extensions — a JVM, ~800 MB; set `SUWAYOMI_URL=` empty to turn it off ([docs](docs/extensions.md)) |
@@ -276,7 +277,10 @@ docker compose logs -f uchiyomi  # watch it boot
 ```
 
 Cloning the repo and want a CLI-seeded admin instead of the browser setup step? `bash scripts/setup.sh`
-generates the secrets, creates the admin from a password you type, fixes volume perms, and starts the stack.
+generates the secrets, creates the admin from a password you type, fixes volume ownership, and starts the
+development stack — which builds the **same single container** the install ships, so what you run matches
+what you would have deployed. It refuses to run in a checkout whose `docker-compose.override.yml` manages a
+service it does not, so it cannot restart a server install.
 
 Change the port with `WEB_PORT` in `.env` (default `8080`; e.g. `WEB_PORT=9000` → http://localhost:9000).
 
@@ -399,8 +403,8 @@ Everything is in `.env` (see `.env.example`). Notably:
 - `PUID` / `PGID`: run as the user that owns your library, so file operations work. Unset means the app runs
   as its own uid and treats your library as read-only.
 - `SOURCES_PATH`: host path to a built source pack (empty by default = no sources).
-- `WEB_PORT`: host port the app is published on — `8080` with `deploy/docker-compose.yml`, `3000` in the
-  development stack.
+- `WEB_PORT`: host port the app is published on — `8080` everywhere. (`SPLIT_WEB_PORT`, default `8081`, is
+  the split's own port under `--profile split`, so both can run side by side.)
 - `PUBLIC_ORIGIN`: the URL the app is served from (match your domain behind a reverse proxy).
 
 ## Roadmap

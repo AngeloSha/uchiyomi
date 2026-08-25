@@ -34,9 +34,10 @@ point `LIBRARY_PATH` at it first (`cp .env.example .env`, set `LIBRARY_PATH=/pat
 contains chapters, at any depth. Each chapter is a `.cbz`, a `.cbr`, or a folder of images (an archive may
 carry a `ComicInfo.xml` for metadata).
 
-Prefer a CLI-seeded admin? Run `bash scripts/setup.sh` instead — it generates the secrets, creates the admin from
-a password you type, fixes volume ownership, and starts the development stack (`yomi-web`, `yomi-bff`, `yomi-db`, `yomi-suwayomi`,
-`yomi-flaresolverr`).
+Prefer a CLI-seeded admin? Run `bash scripts/setup.sh` from a clone instead — it generates the secrets, creates
+the admin from a password you type, fixes volume ownership, and starts the development stack (`yomi-app`,
+`yomi-db`, `yomi-suwayomi`, `yomi-flaresolverr`). `yomi-app` is the same single container the install ships,
+built from source.
 
 ---
 

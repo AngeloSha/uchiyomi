@@ -6,7 +6,8 @@
 # │  See README.md -> Install.                                                │
 # └───────────────────────────────────────────────────────────────────────────┘
 # Uchiyomi — self-hosted OLED manga/manhwa reader (bring-your-own CBZ library)
-# services: yomi-db (private Postgres) · yomi-bff (Fastify API) · yomi-web (static PWA) · yomi-flaresolverr (optional)
+# services: yomi-db (private Postgres) · yomi-app (the single container, same as the install) ·
+#           yomi-flaresolverr + yomi-suwayomi (optional) · yomi-bff + yomi-web under `--profile split`
 services:
   yomi-db:
     image: supabase/postgres:15.8.1.085
@@ -29,7 +30,10 @@ services:
     labels:
       - com.centurylinklabs.watchtower.enable=false
 
+  # The two-container split. Still built from source here because its images are still published on
+  # every release -- `docker compose --profile split up -d` brings it back. Not started by default.
   yomi-bff:
+    profiles: ["split"]
     build: ./bff
     image: yomi-bff:prod
     container_name: yomi-bff
@@ -46,7 +50,7 @@ services:
       KOMGA_API_KEY: ${KOMGA_API_KEY:-}        # only used when LIBRARY_BACKEND=komga
       JWT_SECRET: ${JWT_SECRET:-}                                 # optional: auto-generated + persisted to /config if empty
       INITIAL_USER_PASSWORD_HASH_B64: ${INITIAL_USER_PASSWORD_HASH_B64:-}   # optional: first-run web setup creates the admin
-      PUBLIC_ORIGIN: ${PUBLIC_ORIGIN:-http://localhost:3000}
+      PUBLIC_ORIGIN: ${PUBLIC_ORIGIN:-http://localhost:8081}   # the split serves on SPLIT_WEB_PORT
       CACHE_DIR: /cache
       CACHE_MAX_BYTES: "16106127360"   # 15 GiB image cache cap
       LIBRARY_ROOT: /library
@@ -86,6 +90,7 @@ services:
       - com.centurylinklabs.watchtower.enable=false
 
   yomi-web:
+    profiles: ["split"]
     build: ./web
     image: yomi-web:prod
     container_name: yomi-web
@@ -93,7 +98,7 @@ services:
     expose:
       - "80"
     ports:
-      - "${WEB_PORT:-3000}:80"   # open the app at http://localhost:3000 (front with a reverse proxy for HTTPS)
+      - "${SPLIT_WEB_PORT:-8081}:80"   # split only; WEB_PORT belongs to yomi-app, which stays up alongside it
     networks:
       - yomi_app
     depends_on:
@@ -106,6 +111,63 @@ services:
       start_period: 10s
     labels:
       - com.centurylinklabs.watchtower.enable=false
+  # The shipped topology, built from source. `docker compose up -d` gives you the SAME single container the
+  # install ships and the end-to-end tests drive, so a contributor runs what is released.
+  yomi-app:
+    build:
+      context: .
+      dockerfile: Dockerfile.aio
+    image: yomi-app:prod
+    container_name: yomi-app
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      # Run as the owner of your library so file operations work. Unset = uid 10002, library read-only.
+      PUID: ${PUID:-}
+      PGID: ${PGID:-}
+      NODE_ENV: production
+      PORT: "3000"
+      DATABASE_URL: postgres://yomi:${DB_PASSWORD:-uchiyomi}@yomi-db:5432/yomi
+      JWT_SECRET: ${JWT_SECRET:-}                                 # auto-generated + persisted to /config if empty
+      INITIAL_USER_PASSWORD_HASH_B64: ${INITIAL_USER_PASSWORD_HASH_B64:-}
+      PUBLIC_ORIGIN: ${PUBLIC_ORIGIN:-http://localhost:8080}
+      CACHE_DIR: /cache
+      CACHE_MAX_BYTES: "16106127360"   # 15 GiB image cache cap
+      LIBRARY_ROOT: /library
+      DL_ROOT: /library-dl             # owned, writable download dir
+      LIBRARY_BACKEND: ${LIBRARY_BACKEND:-owned}
+      FLARESOLVERR_URL: http://yomi-flaresolverr:8191
+      SOURCES_DIR: /sources
+      CUSTOM_SITES_FILE: /config/sites.json
+      SUWAYOMI_URL: ${SUWAYOMI_URL:-http://yomi-suwayomi:4567}
+      SUWAYOMI_USERNAME: ${SUWAYOMI_USERNAME:-}
+      SUWAYOMI_PASSWORD: ${SUWAYOMI_PASSWORD:-}
+      SUWAYOMI_MAX_SOURCES: ${SUWAYOMI_MAX_SOURCES:-25}
+    volumes:
+      - yomi_imgcache:/cache
+      - ${LIBRARY_PATH:-./library}:/library                   # your existing CBZ library (bring-your-own)
+      - yomi_library:/library-dl
+      - ${SOURCES_PATH:-./sources}:/sources:ro
+      - yomi_config:/config
+      - ${BACKUP_PATH:-yomi_backups}:/backups
+    networks:
+      - yomi_internal
+      - yomi_app
+    ports:
+      - "${WEB_PORT:-8080}:3000"   # open the app at http://localhost:8080
+    depends_on:
+      yomi-db:
+        condition: service_healthy
+    healthcheck:
+      # /livez, not /healthz: a database blip must not mark the whole app unhealthy. Matches Dockerfile.aio.
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/livez >/dev/null 2>&1 || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    labels:
+      - com.centurylinklabs.watchtower.enable=false
+
 
   # Cloudflare solver (headless Chrome) — lets the Aqua Manga source adapter get past Cloudflare.
   yomi-flaresolverr:

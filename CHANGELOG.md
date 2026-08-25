@@ -1,5 +1,35 @@
 # Changelog
 
+## Unreleased
+
+### The repo now runs what it ships
+
+Cloning the repo and running `docker compose up -d` gave you the deprecated two-container split, while every
+document told you the install is one container. `scripts/setup.sh` did the same, and the README offered it as
+a normal alternative to the browser setup step without saying which layout it started.
+
+`docker compose up -d` now builds **`yomi-app`** from `Dockerfile.aio` — the same single container the
+released image ships and the only layout the end-to-end tests drive. The split is still there and still
+buildable from source, because its images are still published on every release; it moved behind a profile:
+
+```bash
+docker compose --profile split up -d     # yomi-bff + yomi-web, on SPLIT_WEB_PORT (8081)
+```
+
+It gets its own port on purpose: the profile adds services rather than replacing them, so both would
+otherwise fight over the same one.
+
+`setup.sh` follows, and gained a guard — it refuses to run in a checkout whose `docker-compose.override.yml`
+manages a service it does not, so it can no longer rebuild and restart a server's live install from the
+working tree. It also chowns volumes to the configured `PUID`/`PGID` instead of a hardcoded 10002, which was
+already wrong for anyone running as the owner of their library.
+
+**`WEB_PORT` is 8080 everywhere now.** It was 3000 in the development stack and 8080 in the shipped one, and
+`.env.example` hard-set the development values while `docs/USAGE.md` tells you to copy that file to point
+`LIBRARY_PATH` at your library — so following the docs moved the app off the port the same page had just
+told you to open, and left `PUBLIC_ORIGIN` pointing somewhere else again. Both are now commented out in
+`.env.example`, so the compose default wins unless you deliberately change them.
+
 ## v0.9.2 — 2026-08-25
 
 ### The single container could not back itself up, and said nothing

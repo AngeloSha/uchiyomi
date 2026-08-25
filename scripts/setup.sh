@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
-# Uchiyomi one-time setup. Run from the repo root:  bash scripts/setup.sh
+# Uchiyomi one-time setup for a REPO CLONE. Run from the repo root:  bash scripts/setup.sh
+# Builds the single container from source (Dockerfile.aio) -- the same topology the released image ships,
+# which is what `docker compose up -d` in this repo now gives you. To install Uchiyomi you do not need this
+# script or a clone at all: take deploy/docker-compose.yml and create the admin in the browser.
 # - generates DB/JWT secrets and hashes your admin password (argon2id; plaintext never persisted)
 # - writes them into .env, brings the whole stack up, ensures the DB + login work
 set -euo pipefail
@@ -9,6 +12,16 @@ ENV_FILE="$DIR/.env"
 COMPOSE=(docker compose --project-directory "$DIR" -f "$DIR/docker-compose.yml")
 # a server-specific override (e.g. reverse-proxy networks) is applied automatically when present
 [ -f "$DIR/docker-compose.override.yml" ] && COMPOSE+=(-f "$DIR/docker-compose.override.yml")
+
+# A server override can run a RELEASED image under its own service name. This script builds from the working
+# tree and force-recreates what it starts, so on such a host it would rebuild and restart a live install --
+# naming a service on the command line also activates its profile, so being profile-gated is not protection.
+if "${COMPOSE[@]}" config --services 2>/dev/null | grep -qxv -e yomi-app -e yomi-db -e yomi-bff -e yomi-web -e yomi-flaresolverr -e yomi-suwayomi; then
+  echo "This checkout has a docker-compose.override.yml running services setup.sh does not manage:"
+  "${COMPOSE[@]}" config --services 2>/dev/null | grep -xv -e yomi-app -e yomi-db -e yomi-bff -e yomi-web -e yomi-flaresolverr -e yomi-suwayomi | sed "s/^/  - /"
+  echo "setup.sh is the contributor script for a plain clone. Refusing to touch a server install."
+  exit 1
+fi
 
 [ -f "$ENV_FILE" ] || { cp "$DIR/.env.example" "$ENV_FILE" 2>/dev/null && echo "Created .env from .env.example"; }
 [ -f "$ENV_FILE" ] || { echo "Missing $ENV_FILE"; exit 1; }
@@ -27,11 +40,11 @@ echo "==> Ensuring base secrets…"; ensure_secret DB_PASSWORD; ensure_secret JW
 DB_PASSWORD="$(grep -E '^DB_PASSWORD=' "$ENV_FILE" | head -1 | cut -d= -f2-)"
 
 echo "==> Building BFF image (needed for hashing + key minting helpers)…"
-docker build -q -t yomi-bff:prod "$DIR/bff" >/dev/null
+docker build -q -f "$DIR/Dockerfile.aio" -t yomi-app:prod "$DIR" >/dev/null
 
 # web-push (VAPID) keys for new-chapter notifications — generate once if absent
 if ! grep -qE '^VAPID_PUBLIC_KEY=.+' "$ENV_FILE"; then
-  VJSON="$(docker run --rm yomi-bff:prod node -e 'console.log(JSON.stringify(require("web-push").generateVAPIDKeys()))' 2>/dev/null || true)"
+  VJSON="$(docker run --rm --entrypoint node yomi-app:prod -e 'console.log(JSON.stringify(require("web-push").generateVAPIDKeys()))' 2>/dev/null || true)"
   VPUB="$(printf '%s' "$VJSON" | sed -n 's/.*"publicKey":"\([^"]*\)".*/\1/p')"
   VPRIV="$(printf '%s' "$VJSON" | sed -n 's/.*"privateKey":"\([^"]*\)".*/\1/p')"
   if [ -n "$VPUB" ] && [ -n "$VPRIV" ]; then
@@ -52,11 +65,11 @@ if [ -z "${KOMGA_KEY:-}" ]; then
   read -rp "  Komga username/email: " KU
   read -rsp "  Komga password: " KP; echo
   echo "  Minting key via http://komga:25600 (internal)…"
-  KOMGA_KEY="$(docker run --rm --network proxy_internal -e KU="$KU" -e KP="$KP" yomi-bff:prod node -e '
+  KOMGA_KEY="$(docker run --rm --network proxy_internal -e KU="$KU" -e KP="$KP" --entrypoint node yomi-app:prod -e '
     const a=Buffer.from(process.env.KU+":"+process.env.KP).toString("base64");
     fetch("http://komga:25600/api/v2/users/me/api-keys",{method:"POST",
       headers:{authorization:"Basic "+a,"content-type":"application/json"},
-      body:JSON.stringify({comment:"yomi-bff"})})
+      body:JSON.stringify({comment:"uchiyomi"})})
       .then(async r=>{ if(!r.ok){console.error("Komga HTTP "+r.status+": "+(await r.text()).slice(0,200));process.exit(2);}
         const j=await r.json(); process.stdout.write(j.key||""); })
       .catch(e=>{console.error(String(e&&e.message||e));process.exit(3);});
@@ -77,7 +90,7 @@ read -rsp "  Confirm: " AP2; echo
 [ -n "$AP1" ] || { echo "Empty password."; exit 1; }
 
 echo "  Hashing with argon2id…"
-HASH="$(docker run --rm -e PW="$AP1" yomi-bff:prod node -e '
+HASH="$(docker run --rm -e PW="$AP1" --entrypoint node yomi-app:prod -e '
   const {hash}=require("@node-rs/argon2");
   hash(process.env.PW).then(h=>process.stdout.write(h)).catch(e=>{console.error(e.message);process.exit(1);});
 ')"
@@ -115,28 +128,30 @@ docker exec -e PGPASSWORD="$DB_PASSWORD" yomi-db psql -U yomi -h 127.0.0.1 -d yo
   "UPDATE users SET password_hash = convert_from(decode('$HASH_B64','base64'),'UTF8'), auth_kind='password'" >/dev/null 2>&1 || true
 
 # ---- 5. Recreate BFF --------------------------------------------------------
-echo "==> Recreating yomi-bff"
-"${COMPOSE[@]}" up -d --force-recreate yomi-bff
+echo "==> Recreating yomi-app"
+"${COMPOSE[@]}" up -d --force-recreate yomi-app
 
 # ---- 5b. Volume ownership ---------------------------------------------------
 # Docker creates named volumes owned by root:root (0755), but the BFF runs as the non-root app user
-# (uid 10002), so it can't write to its cache / downloads / config volumes. Chown them once (idempotent).
-echo "==> Setting volume ownership for the app user (uid 10002)"
+# (uid 10002 by default, or PUID/PGID when set), so it can't write to its cache / downloads / config
+# volumes. Chown them to whatever this install actually runs as. Idempotent.
+APP_UID="${PUID:-10002}"; APP_GID="${PGID:-10002}"
+echo "==> Setting volume ownership for the app user (uid $APP_UID)"
 sleep 1
 for dest in /config /library-dl /cache; do
-  vol="$(docker inspect yomi-bff --format "{{range .Mounts}}{{if eq .Destination \"$dest\"}}{{.Name}}{{end}}{{end}}" 2>/dev/null || true)"
+  vol="$(docker inspect yomi-app --format "{{range .Mounts}}{{if eq .Destination \"$dest\"}}{{.Name}}{{end}}{{end}}" 2>/dev/null || true)"
   if [ -n "$vol" ]; then
-    docker run --rm -v "$vol":/v alpine chown -R 10002:10002 /v >/dev/null 2>&1 && echo "  ✓ $dest ($vol)"
+    docker run --rm -v "$vol":/v alpine chown -R "$APP_UID:$APP_GID" /v >/dev/null 2>&1 && echo "  ✓ $dest ($vol)"
   fi
 done
 # restart so the app boots cleanly with the corrected ownership
-"${COMPOSE[@]}" up -d --force-recreate yomi-bff >/dev/null 2>&1 || true
+"${COMPOSE[@]}" up -d --force-recreate yomi-app >/dev/null 2>&1 || true
 
 echo
 echo "✓ Done. Verifying login…"
 sleep 2
-if docker run --rm --network "container:yomi-bff" -e PW="$AP1" yomi-bff:prod node -e '
+if docker run --rm --network "container:yomi-app" -e PW="$AP1" --entrypoint node yomi-app:prod -e '
   fetch("http://127.0.0.1:3000/auth/login",{method:"POST",headers:{"content-type":"application/json"},
-    body:JSON.stringify({password:process.env.PW})}).then(async r=>{
+    body:JSON.stringify({username:"admin",password:process.env.PW})}).then(async r=>{
     console.log("login HTTP",r.status); process.exit(r.ok?0:1);}).catch(e=>{console.error(e.message);process.exit(1);});
-'; then echo "✓ Login works. Uchiyomi backend is live."; else echo "⚠ Login test failed — check: docker logs yomi-bff"; fi
+'; then echo "✓ Login works. Uchiyomi backend is live."; else echo "⚠ Login test failed — check: docker logs yomi-app"; fi
