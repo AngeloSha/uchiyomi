@@ -1,39 +1,27 @@
-# Uchiyomi — install from the published images.
-#
-# This is the file to use if you just want to run Uchiyomi. It pulls prebuilt multi-arch images
-# (amd64 + arm64) instead of compiling anything, so it starts in seconds on a NAS or a Pi.
-# The repo's top-level docker-compose.yml builds from source and is meant for development.
+# Uchiyomi, single container (plus Postgres).
 #
 #   curl -O https://raw.githubusercontent.com/AngeloSha/uchiyomi/main/deploy/docker-compose.yml
 #   docker compose up -d
 #
-# Then open http://localhost:8080 and create your admin account in the browser.
-# No secrets to generate, no config file to edit.
+# Then open http://localhost:8080 and create your admin account in the browser. There are no secrets to
+# generate and no config file to edit.
 #
-# To UPDATE later:
-#   docker compose pull      <- required; `up -d` alone will not fetch a newer :latest
-#   docker compose up -d
+# This is the layout Uchiyomi ships. There is also a two-container split (docker-compose.split.yml) where a
+# separate nginx serves the web app; it still works and is still published, but it is no longer the one the
+# docs lead with. See docs/MIGRATING.md to move between them -- both use the same volumes, so it is a compose
+# swap rather than a data migration. Measured against the split layout on the same host:
+# 238 MB instead of 385 MB, 33 MiB of memory instead of 41, one less network hop on every API call, and no
+# redirect on deep links. nginx serves a static file about 0.9 ms faster, which is the only thing it wins.
 #
-# Optional overrides (put them in a .env file next to this one — it is picked up automatically):
-#   LIBRARY_PATH=/mnt/media/comics   your existing CBZ/CBR library (default: ./library)
+# The extension engine is still opt-in and still its own container, because it is a JVM. Leave it out and
+# this is two containers total.
+#
+#   LIBRARY_PATH=/mnt/media/comics   your existing library (default: ./library)
 #   PUID= / PGID=                    run as the user that OWNS your library, so Uchiyomi can rename and
-#                                    delete files in it. Find them with `id -u` / `id -g`. Leave both unset
-#                                    and nothing changes: the app runs as uid 10002 and treats your library
-#                                    as read-only, exactly as before. Removing :ro from the mount alone does
-#                                    NOT grant write access; the uid has to match.
-#   WEB_PORT=8080                    host port to serve on
+#                                    delete files in it. `id -u` and `id -g`. Leave both unset and nothing
+#                                    changes: the app runs as uid 10002 and your library is read-only.
+#   WEB_PORT=8080                    the port you open in a browser
 #   DB_PASSWORD=...                  only used inside the private network; the DB has no published port
-#   PUBLIC_ORIGIN=https://manga.example.com   set this if you put it behind a reverse proxy
-#   BACKUP_PATH=/mnt/backups/uchiyomi   where nightly backups go — ideally a different disk than your Docker
-#                                       volumes, so a dead drive doesn't take the backups with it.
-#                                       IF YOU SET THIS to a host path, create it and give it to uid 10002
-#                                       first, or backups fail silently — Docker makes a bind mount
-#                                       root-owned and the app does not run as root:
-#                                         sudo mkdir -p /mnt/backups/uchiyomi
-#                                         sudo chown 10002:10002 /mnt/backups/uchiyomi
-#                                       (named volumes, the default, need none of this)
-#   SOURCES_PATH=/path/to/sources/dist  a built source pack, mounted read-only (optional; none by default)
-#   VAPID_PUBLIC_KEY= / VAPID_PRIVATE_KEY= / VAPID_SUBJECT=   enable web push (see docs/USAGE.md)
 
 services:
   uchiyomi-db:
@@ -53,9 +41,9 @@ services:
       retries: 10
     networks: [uchiyomi_internal]
 
-  uchiyomi-bff:
-    image: ghcr.io/angelosha/uchiyomi-bff:latest
-    container_name: uchiyomi-bff
+  uchiyomi:
+    image: ghcr.io/angelosha/uchiyomi:latest
+    container_name: uchiyomi
     restart: unless-stopped
     environment:
       # Run as the owner of your library so file operations work. Unset = uid 10002, library read-only.
@@ -69,15 +57,12 @@ services:
       FLARESOLVERR_URL: http://uchiyomi-flaresolverr:8191
       SOURCES_DIR: /sources
       CUSTOM_SITES_FILE: /config/sites.json
-      # Generated and persisted to /config on first boot when left empty; set JWT_SECRET in .env to pin it.
+      # Generated and persisted to /config on first boot when left empty.
       JWT_SECRET: ${JWT_SECRET:-}
-      # Web push is off unless you supply keys (see docs/USAGE.md).
       VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:-}
       VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:-}
       VAPID_SUBJECT: ${VAPID_SUBJECT:-}
       BACKUP_KEEP: ${BACKUP_KEEP:-14}
-      # Optional single sign-on. Leave OIDC_ISSUER empty and nothing changes; set it plus a client id
-      # and a "Continue with ..." button appears on the login screen. See docs/api.md.
       OIDC_ISSUER: ${OIDC_ISSUER:-}
       OIDC_CLIENT_ID: ${OIDC_CLIENT_ID:-}
       OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET:-}
@@ -85,39 +70,27 @@ services:
       OIDC_ALLOW_SIGNUP: ${OIDC_ALLOW_SIGNUP:-false}
       OIDC_LINK_BY_USERNAME: ${OIDC_LINK_BY_USERNAME:-false}
       OIDC_ADMIN_GROUP: ${OIDC_ADMIN_GROUP:-}
-      # Extension engine (Mihon/Tachiyomi extensions), wired up by default. Set to an empty string to
-      # turn the feature off entirely. See docs/extensions.md.
+      # Extension engine (Mihon/Tachiyomi extensions). Set to an empty string to turn it off entirely and
+      # drop the container below; it is a JVM and costs about 800 MB.
       SUWAYOMI_URL: ${SUWAYOMI_URL:-http://uchiyomi-suwayomi:4567}
       SUWAYOMI_USERNAME: ${SUWAYOMI_USERNAME:-}
       SUWAYOMI_PASSWORD: ${SUWAYOMI_PASSWORD:-}
       SUWAYOMI_MAX_SOURCES: ${SUWAYOMI_MAX_SOURCES:-25}
     volumes:
-      - ${LIBRARY_PATH:-./library}:/library     # your existing comics (see PUID below)
+      - ${LIBRARY_PATH:-./library}:/library      # your existing comics (see PUID above)
       - ${SOURCES_PATH:-./sources}:/sources:ro   # optional built source pack
       - uchiyomi_downloads:/library-dl           # chapters Uchiyomi downloads
       - uchiyomi_config:/config                  # secrets, custom sites, art overrides
       - uchiyomi_cache:/cache                    # image cache (safe to delete)
-      - ${BACKUP_PATH:-uchiyomi_backups}:/backups # nightly database + config backups
+      - ${BACKUP_PATH:-uchiyomi_backups}:/backups
+    ports:
+      - "${WEB_PORT:-8080}:3000"
     depends_on:
       uchiyomi-db:
         condition: service_healthy
-    networks:
-      uchiyomi_internal:
-      uchiyomi_app:
-        # the web image's nginx proxies to this hostname
-        aliases: [yomi-bff]
+    networks: [uchiyomi_internal, uchiyomi_app]
 
-  uchiyomi-web:
-    image: ghcr.io/angelosha/uchiyomi-web:latest
-    container_name: uchiyomi-web
-    restart: unless-stopped
-    ports:
-      - "${WEB_PORT:-8080}:80"
-    depends_on:
-      - uchiyomi-bff
-    networks: [uchiyomi_app]
-
-  # Only used when you add a source that sits behind Cloudflare. Harmless to leave running.
+  # Cloudflare solver. Most manga aggregators sit behind Cloudflare, so the fetching half needs this.
   uchiyomi-flaresolverr:
     image: ghcr.io/flaresolverr/flaresolverr:latest
     container_name: uchiyomi-flaresolverr
@@ -125,21 +98,19 @@ services:
     environment:
       LOG_LEVEL: warning
     networks: [uchiyomi_app]
+    expose:
+      - "8191"
 
-  # Extension engine (Mihon/Tachiyomi extensions on the JVM). Browse and install them from Uchiyomi's own
-  # admin panel. Pinned rather than :stable because :stable is older than the extension API today's
-  # repository indexes require. It is a JVM and sits around 800MB of RAM.
+  # Optional: Mihon/Tachiyomi extensions. Remove this service and set SUWAYOMI_URL= empty to drop it.
   uchiyomi-suwayomi:
     image: ghcr.io/suwayomi/suwayomi-server:v2.3.2243
     container_name: uchiyomi-suwayomi
     restart: unless-stopped
     environment:
       TZ: ${TZ:-UTC}
-      # Uchiyomi owns the library and does the downloading; this must never write into it.
-      AUTO_DOWNLOAD_CHAPTERS: "false"
     volumes:
       - uchiyomi_suwayomi:/home/suwayomi/.local/share/Tachidesk
-    networks: [uchiyomi_internal]
+    networks: [uchiyomi_app]
     expose:
       - "4567"
 
@@ -148,9 +119,9 @@ networks:
   uchiyomi_app:
 
 volumes:
-  uchiyomi_suwayomi:   # optional extension engine's own data
   uchiyomi_pgdata:
   uchiyomi_downloads:
   uchiyomi_config:
   uchiyomi_cache:
   uchiyomi_backups:
+  uchiyomi_suwayomi:

@@ -343,7 +343,7 @@ In your identity provider, create an OAuth2/OpenID Connect application with:
 - **Grant type**: authorization code (PKCE is used automatically)
 - **Scopes**: `openid profile email`
 
-Then set these on the `uchiyomi-bff` container and restart it (`yomi-bff` if you run the development stack):
+Then set these on the `uchiyomi` container and restart it (`yomi-bff` if you run the development stack):
 
 ```yaml
 environment:

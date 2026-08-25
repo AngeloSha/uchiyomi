@@ -198,7 +198,7 @@ Adding a language: copy `en` semantics into `web/public/locales/<code>.json`, ad
 
 | Service | What it is |
 | --- | --- |
-| `yomi-web` | Next.js static-export PWA on nginx; reverse-proxies `/api`, `/auth`, `/img` to the BFF (single origin) |
+| `yomi-web` | Next.js static-export PWA on nginx, reverse-proxying `/api`, `/auth`, `/img` to the BFF. **Development stack only** — the shipped image serves the PWA from the API process itself |
 | `yomi-bff` | Fastify + TypeScript API: auth, catalog over the CBZ library, disk image cache, the source loader |
 | `yomi-db` | Private Postgres (no host port) |
 | `yomi-flaresolverr` | Optional headless-Chrome Cloudflare solver, used only by Cloudflare-protected source plugins |
@@ -220,8 +220,8 @@ compile and it comes up in seconds even on a NAS or a Raspberry Pi.
 > *development* stack. The one command below is the whole install.
 
 ```bash
-curl -O https://raw.githubusercontent.com/AngeloSha/uchiyomi/main/deploy/docker-compose.aio.yml
-docker compose -f docker-compose.aio.yml up -d
+curl -O https://raw.githubusercontent.com/AngeloSha/uchiyomi/main/deploy/docker-compose.yml
+docker compose up -d
 ```
 
 Then open **http://localhost:8080** and **create your admin account right in the browser**. There are no
@@ -232,20 +232,20 @@ fetching half needs for most aggregators, and the extension engine, which is a J
 Leave the extension engine out and it is three containers; only the first two are Uchiyomi itself.
 
 <details>
-<summary>There is also a split layout, where a separate nginx serves the web app</summary>
+<summary>Already running the older two-container layout?</summary>
 
-`deploy/docker-compose.yml` runs the API and the web app as two containers. It is the original layout, it is
-still built and published, and it still works — if you are already running it, nothing needs to change.
+Uchiyomi used to ship as `uchiyomi-bff` + `uchiyomi-web`, with a separate nginx serving the web app. That
+layout is **deprecated but not dead**: it is still built, still published and still works, and nothing about
+your install has stopped functioning. You are not required to move.
 
-The single-container build is what the install above uses because it measured better on the same host:
-**238 MB instead of 385 MB**, **33 MiB of memory instead of 41**, one less network hop on every API call, and
-no redirect on deep links. nginx serves a static file about 0.9 ms faster, which is the only thing it wins
-and it disappears behind any network at all.
+It is deprecated because the single container measured better on the same host — **241 MB instead of
+385 MB**, less memory, one less network hop on every API call, and no redirect on deep links — and because
+the end-to-end tests only ever drive the single container, so it is the layout that is actually proven on
+every commit.
 
-```bash
-curl -O https://raw.githubusercontent.com/AngeloSha/uchiyomi/main/deploy/docker-compose.yml
-docker compose up -d
-```
+Moving is a compose swap, not a data migration: both layouts use the **same named volumes** and the same
+Postgres image. Four commands, in **[docs/MIGRATING.md](docs/MIGRATING.md)**. The file itself is still there
+as [`deploy/docker-compose.split.yml`](deploy/docker-compose.split.yml).
 </details>
 
 To read a library you already have, point `LIBRARY_PATH` at it. By default Uchiyomi runs as its own user and
@@ -258,22 +258,21 @@ docker compose up -d
 ```
 
 **On CasaOS?** Use [`deploy/casaos/docker-compose.yml`](deploy/casaos/docker-compose.yml) instead — import it
-as a custom app and it appears with an icon like any store app. That manifest ships four containers rather
-than five — it leaves out the extension engine, so Mihon/Tachiyomi extensions are off there; add
-`uchiyomi-suwayomi` from `deploy/docker-compose.yml` and set `SUWAYOMI_URL` if you want them.
+as a custom app and it appears with an icon like any store app. That manifest leaves out the extension
+engine, so Mihon/Tachiyomi extensions are off there; add `uchiyomi-suwayomi` from
+[`deploy/docker-compose.yml`](deploy/docker-compose.yml) and set `SUWAYOMI_URL` if you want them.
 
-The split layout runs five containers:
+What you end up running:
 
 | Container | Role |
 |---|---|
-| `uchiyomi-web` | the PWA (what you open in the browser) |
-| `uchiyomi-bff` | the API |
+| `uchiyomi` | the app: the API and the PWA it serves |
 | `uchiyomi-db` | private Postgres (no published port — unreachable from outside the stack) |
 | `uchiyomi-flaresolverr` | Cloudflare solver — **started automatically**; sources that need it use it with no config |
 | `uchiyomi-suwayomi` | the extension engine, so Mihon / Tachiyomi extensions work ([docs](docs/extensions.md)) |
 
 ```bash
-docker compose logs -f uchiyomi-bff  # watch it boot
+docker compose logs -f uchiyomi  # watch it boot
 ```
 
 Cloning the repo and want a CLI-seeded admin instead of the browser setup step? `bash scripts/setup.sh`
@@ -310,7 +309,7 @@ database migrates itself on boot.
 > way, ask the app whether it can write:
 >
 > ```bash
-> docker compose exec uchiyomi-bff sh -c 'touch /config/.probe && echo OK && rm /config/.probe'
+> docker compose exec uchiyomi sh -c 'touch /config/.probe && echo OK && rm /config/.probe'
 > ```
 >
 > If that prints `OK`, you are fine and can skip the rest. If it errors, fix it once:
@@ -329,8 +328,8 @@ database migrates itself on boot.
 ### Serving it on a domain (HTTPS)
 
 The compose file is **standalone**: it publishes the app on a local port and creates its own private networks,
-so a fresh install just works. To put it on a public domain with TLS, front the web container with any reverse
-proxy (Caddy, Traefik, Nginx Proxy Manager, …) and set `PUBLIC_ORIGIN` in `.env` to your URL.
+so a fresh install just works. To put it on a public domain with TLS, front the app with any reverse proxy
+(Caddy, Traefik, Nginx Proxy Manager, …) and set `PUBLIC_ORIGIN` in `.env` to your URL.
 
 If your proxy reaches containers over a shared Docker network, drop a `docker-compose.override.yml` next to the
 compose file — Compose loads it automatically:
@@ -341,12 +340,16 @@ networks:
   proxy:
     external: true
 services:
-  uchiyomi-web:
-    networks: [uchiyomi_app, proxy]   # keep uchiyomi_app so it still reaches the API
+  uchiyomi:
+    networks: [uchiyomi_app, uchiyomi_internal, proxy]   # keep the first two: the solver, and the database
 ```
 
-> Using the development stack from a clone instead? Its service and network are named `yomi-web` and
-> `yomi_app`.
+Point the proxy at **`uchiyomi` port 3000**. Once it reaches the app over a shared Docker network you no
+longer need the published host port, and deleting the `ports:` entry stops the app also being served over
+plain HTTP alongside your HTTPS domain.
+
+> Using the development stack from a clone instead? Its services are named `yomi-*`, with networks
+> `yomi_app` and `yomi_internal`.
 
 ## Sources (optional)
 

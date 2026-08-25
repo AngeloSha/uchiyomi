@@ -2,6 +2,28 @@
 
 ## Unreleased
 
+### One container is the install now
+
+The docs used to present two layouts as equals, which meant three published images and a reader having to
+pick before they knew anything. The single container is now the only one the instructions describe, and the
+default filename went with it: `deploy/docker-compose.yml` is the single container, and the two-container
+split moved to `deploy/docker-compose.split.yml`.
+
+**The split is deprecated, not removed.** Both images are still built and still published on every release.
+Nothing about a running install has stopped working, and there is no deadline. Unpublishing them while
+leaving the packages in place would be the worst of both worlds: `docker compose pull` would keep succeeding
+and silently freeze people on the last release with nothing to tell them, which is exactly the trap the old
+`koryomi-*` packages caused.
+
+**There is now a migration guide**, which there never was: `docs/MIGRATING.md`. Both layouts use the same
+named volumes and the same Postgres image, so moving is four commands and no data is copied or converted.
+The one step that is easy to miss is repointing a reverse proxy, because nothing errors: it was aimed at
+`uchiyomi-web:80`, and that container no longer exists.
+
+The CasaOS manifest ships the single container too, so its store tile stops naming a container that would
+not exist. And the screenshot rig, the proxy helper and the container names in the backup-and-restore
+instructions all follow the same layout the reader is being told to run.
+
 ## v0.9.1 — 2026-08-25
 
 ### The single container compresses again
@@ -121,6 +143,7 @@ ebook library, and Kavita is the better answer if you want one.
 
 `deploy/docker-compose.aio.yml` runs Uchiyomi as a single container: the API serves the web app itself
 instead of a second nginx doing it. It is now the install the README leads with.
+*(That file is simply `deploy/docker-compose.yml` since 2026-08-25 — see the Unreleased section.)*
 
 Measured against the split layout on the same host: **238 MB instead of 385 MB**, **33 MiB of memory instead
 of 41**, one less network hop on every API call, and no redirect at all on deep links -- nginx answered
@@ -130,6 +153,13 @@ which is the only thing it wins.
 **Nothing breaks if you are already running the split layout.** It is still built, still published, still
 documented, and `deploy/docker-compose.yml` is unchanged. The single-container build is additive: the same
 API image serves the web app only when `WEB_ROOT` points at it.
+
+> **Correction, 2026-08-25.** Two thirds of that paragraph still hold and one no longer does. The split
+> layout is still built and still published, and nothing about a running install has stopped working. It is
+> no longer *documented as an equal option*: the docs now lead with the single container, and the file moved
+> from `deploy/docker-compose.yml` to `deploy/docker-compose.split.yml` so the default name belongs to the
+> layout the instructions actually describe. If you already downloaded the old file it keeps working — it
+> pulls images by name, not by filename. See `docs/MIGRATING.md` when you want to move.
 
 ### Discover, rebuilt
 

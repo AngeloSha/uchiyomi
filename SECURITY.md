@@ -14,7 +14,7 @@ Helpful things to include, roughly in order of usefulness:
 
 - what an attacker gains, stated plainly (read another user's library, escalate to admin, read files off the host)
 - the smallest set of steps that reproduces it, ideally against a fresh `deploy/docker-compose.yml` install
-- the version — `docker inspect ghcr.io/angelosha/uchiyomi-bff:latest` or the tag you pulled
+- the version — `docker inspect ghcr.io/angelosha/uchiyomi:latest` or the tag you pulled
 - whether it needs an existing account, and at what permission level
 
 You will get a first reply within **72 hours**. If a report is valid, expect a fix in the next release; if the

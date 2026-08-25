@@ -15,8 +15,13 @@ set -euo pipefail
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 DB=${DB_CONTAINER:-yomi-db}
 NET=${SHOT_NET:-yomi_yomi_app}
-BASE=${SHOT_BASE:-http://yomi-web}
-BFF_IMAGE=${BFF_IMAGE:-yomi-bff:prod}
+# The app serves its own web UI, so there is no separate nginx to point at. These defaults follow the
+# single-container layout; override them if you are shooting against the development stack, where the
+# equivalents are `http://yomi-web` and `yomi-bff:prod`.
+BASE=${SHOT_BASE:-http://uchiyomi:3000}
+# Only used as a throwaway node+sharp environment for hashing a password and encoding WebP -- any image
+# with the app's dependencies will do, which is why it is the app image rather than a separate tool.
+BFF_IMAGE=${BFF_IMAGE:-ghcr.io/angelosha/uchiyomi:latest}
 SHOT_USER=shotbot
 OUT_PNG=$(mktemp -d)
 OUT_WEBP="$REPO/docs/shots"

@@ -20,10 +20,10 @@ services:
     networks:
       - uchiyomi
 
-  uchiyomi-bff:
-    container_name: uchiyomi-bff
-    hostname: uchiyomi-bff
-    image: ghcr.io/angelosha/uchiyomi-bff:latest
+  uchiyomi:
+    container_name: uchiyomi
+    hostname: uchiyomi
+    image: ghcr.io/angelosha/uchiyomi:latest
     environment:
       # Run as the owner of your library so file operations work. Unset = uid 10002, library read-only.
       PUID: ${PUID:-}
@@ -43,24 +43,20 @@ services:
       - /DATA/AppData/uchiyomi/config:/config
       - /DATA/AppData/uchiyomi/cache:/cache
       - /DATA/AppData/uchiyomi/backups:/backups
+    ports:
+      # The app serves the web UI itself now, on 3000. The old split layout published nginx's port 80 here.
+      - "8080:3000"
     depends_on:
       uchiyomi-db:
         condition: service_healthy
-    restart: unless-stopped
-    networks:
-      uchiyomi:
-        # the web image's nginx proxies to this hostname, so keep the alias whatever the service is called
-        aliases:
-          - yomi-bff
-
-  uchiyomi-web:
-    container_name: uchiyomi-web
-    hostname: uchiyomi-web
-    image: ghcr.io/angelosha/uchiyomi-web:latest
-    ports:
-      - "8080:80"
-    depends_on:
-      - uchiyomi-bff
+    healthcheck:
+      # /livez, not /healthz: the latter queries the database, so a database blip would mark the whole app
+      # unhealthy rather than reporting what it is, which is the app running and the database not ready.
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/livez >/dev/null 2>&1 || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
     restart: unless-stopped
     networks:
       - uchiyomi
@@ -84,7 +80,7 @@ x-casaos:
   architectures:
     - amd64
     - arm64
-  main: uchiyomi-web
+  main: uchiyomi
   author: AngeloSha
   developer: AngeloSha
   category: Media

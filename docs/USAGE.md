@@ -27,7 +27,7 @@ docker compose up -d         # no config needed — secrets are generated automa
 > **Updating later:** run `docker compose pull` *before* `docker compose up -d`. Without the pull, Docker
 > keeps using the `:latest` image it already has and you stay on your installed version silently.
 
-Open the app at your `PUBLIC_ORIGIN` (e.g. `http://localhost:3000`) and **create your admin account in the
+Open the app at your `PUBLIC_ORIGIN` (e.g. `http://localhost:8080`) and **create your admin account in the
 browser** on first run (the first account created becomes the server admin). To read an existing collection,
 point `LIBRARY_PATH` at it first (`cp .env.example .env`, set `LIBRARY_PATH=/path/to/your/manga`, then
 `docker compose up -d`). Your library can be laid out however you already keep it: a folder counts as a series when it directly
@@ -35,7 +35,7 @@ contains chapters, at any depth. Each chapter is a `.cbz`, a `.cbr`, or a folder
 carry a `ComicInfo.xml` for metadata).
 
 Prefer a CLI-seeded admin? Run `bash scripts/setup.sh` instead — it generates the secrets, creates the admin from
-a password you type, fixes volume ownership, and starts the five containers (`yomi-web`, `yomi-bff`, `yomi-db`, `yomi-suwayomi`,
+a password you type, fixes volume ownership, and starts the development stack (`yomi-web`, `yomi-bff`, `yomi-db`, `yomi-suwayomi`,
 `yomi-flaresolverr`).
 
 ---
@@ -278,7 +278,7 @@ PGID=1000    # id -g
 ```
 
 Set those to the user that owns your library and restart. The startup log says which way it went, so
-`docker compose logs uchiyomi-bff` answers "why is the button missing" without you having to guess.
+`docker compose logs uchiyomi` answers "why is the button missing" without you having to guess.
 
 **Rename folder** is on the series page, under the admin actions next to *Edit details*. It moves the folder
 on disk and rewrites the chapter paths, and it keeps chapter ids and everyone's reading progress, so nothing
@@ -484,22 +484,21 @@ Restore the database into a **fresh, empty** database first and check it looks r
 one:
 
 ```
-docker exec uchiyomi-bff sh -c 'gunzip -c /backups/20260819-030000/db.sql.gz' | docker exec -i -e PGPASSWORD="$DB_PASSWORD" uchiyomi-db psql -U yomi -h 127.0.0.1 -d yomi
+docker exec uchiyomi sh -c 'gunzip -c /backups/20260819-030000/db.sql.gz' | docker exec -i -e PGPASSWORD="$DB_PASSWORD" uchiyomi-db psql -U yomi -h 127.0.0.1 -d yomi
 ```
 
 Then restore the config files (custom sites, uploaded cover art, the JWT secret):
 
 ```
-docker exec -i uchiyomi-bff sh -c 'tar -xzf - -C /config' < config.tar.gz
+docker exec -i uchiyomi sh -c 'tar -xzf - -C /config' < config.tar.gz
 ```
 
-Restart the app afterwards (`docker compose restart uchiyomi-bff`). If you restore the database *without* the
+Restart the app afterwards (`docker compose restart uchiyomi`). If you restore the database *without* the
 config archive, any admin-uploaded cover art will be missing even though the database still references it.
 
-> Container names above match the split layout in `deploy/docker-compose.yml`. On the single-container
-> install (`deploy/docker-compose.aio.yml`, the one the README leads with) the app is one container named
-> `uchiyomi`, so use that wherever these say `uchiyomi-bff`. If you cloned the repo and run the development
-> stack instead, the containers are `yomi-bff` / `yomi-db` — substitute accordingly.
+> Container names above are the shipped install: one app container named `uchiyomi`, plus `uchiyomi-db`.
+> On the deprecated split layout the app container is `uchiyomi-bff`; if you cloned the repo and run the
+> development stack, they are `yomi-bff` and `yomi-db`. Substitute accordingly.
 > (The development stack also runs Postgres 15 rather than 16; the dumps are plain SQL, so they restore either
 > way, but don't expect the two data directories to be interchangeable.)
 

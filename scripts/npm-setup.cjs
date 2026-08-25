@@ -7,8 +7,8 @@ const LE_EMAIL = process.env.LE_EMAIL || EMAIL;
 const DOMAIN = process.env.DOMAIN || 'yomi.example.com';
 // which container to forward to — the app by default, but the same script can front any container
 // on the proxy network (e.g. a marketing site) by setting FORWARD_HOST.
-const FORWARD_HOST = process.env.FORWARD_HOST || 'yomi-web';
-const FORWARD_PORT = Number(process.env.FORWARD_PORT || 80);
+const FORWARD_HOST = process.env.FORWARD_HOST || 'uchiyomi';
+const FORWARD_PORT = Number(process.env.FORWARD_PORT || 3000);
 
 async function call(method, path, token, body) {
   const r = await fetch(NPM + path, {

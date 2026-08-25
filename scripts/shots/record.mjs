@@ -12,7 +12,7 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import puppeteer from 'puppeteer';
 
-const BASE = process.env.SHOT_BASE || 'http://yomi-web';
+const BASE = process.env.SHOT_BASE || 'http://uchiyomi:3000';
 const OUT = process.env.SHOT_OUT || '/out';
 const USER = process.env.SHOT_USER;
 const PASS = process.env.SHOT_PASS;
