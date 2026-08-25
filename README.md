@@ -14,10 +14,18 @@ webtoon reader as the centerpiece. Point it at your own CBZ library and read on 
 
 [![Uchiyomi — a walk through the app](docs/shots/tour.webp)](https://uchiyomi.com)
 
-Uchiyomi is a **bring-your-own-library reader**. Like Komga / Kavita / Calibre-web, it reads comics *you* supply.
-It bundles **MangaDex** (the official public API) plus generic engines for the common manga-site families, so
-you can also add sources by pasting a site's URL, but it ships with **no specific sites baked in**; you add the
-ones you want.
+Uchiyomi is a **bring-your-own-library reader** first: like Komga / Kavita / Calibre-web, it reads comics *you*
+supply, and the library and reader work on nothing but files you already own.
+
+**It also fetches**, by two routes, and both ship in the default install. **Mihon / Tachiyomi extensions**: a
+browsable catalogue of ~1,400 community extensions, installed with **one click** in the admin panel and
+searchable immediately, run by a bundled engine that starts with the stack. And **generic engines** for the
+common manga-site families, where you paste a site's URL yourself. Plus **MangaDex**, via its official public
+API.
+
+No source is enabled until you choose one, and nothing is compiled into the image. But the catalogue arrives
+wired up and one click away, so calling this a reader alone would undersell what it does. You pick what to
+enable, and you are responsible for using it in line with those sites' terms and your local law.
 
 > 📖 **[Full usage guide →](docs/USAGE.md)**: every screen walked through with screenshots (library, reader,
 > Discover, admin, security, offline).
@@ -27,11 +35,11 @@ ones you want.
 Self-hosting manga the usual way means a pile of services: an indexer, a grabber that watches for new
 releases, a download client, a Cloudflare solver, and a media server to read it all, so four or five containers
 and a weekend of compose files. **Uchiyomi folds the whole pipeline (discover → grab → monitor → serve → read)
-into a single image.** Point it at your library, add sources by URL, and it does the rest.
+into a single image.** Point it at your library, install an extension or paste a site's URL, and it does the rest.
 
 | The usual self-hosted stack | Uchiyomi, built in |
 | --- | --- |
-| **Prowlarr / Jackett** — indexers & search | Add a source by pasting its URL (engine auto-detected) + bundled MangaDex, all searchable in Discover |
+| **Prowlarr / Jackett** — indexers & search | ~1,400 Mihon/Tachiyomi extensions installable with one click, plus paste-a-URL generic engines and bundled MangaDex, all searchable in Discover |
 | **Sonarr / Radarr** — grab + watch for new releases | Add to library, then a scheduled updater auto-grabs new chapters (per-series, configurable interval) |
 | **qBittorrent** — download client | Built-in chapter downloader → CBZ, with offline PWA sync |
 | **FlareSolverr** — Cloudflare solver | Bundled and wired in — nothing to configure |
@@ -372,9 +380,13 @@ plain HTTP alongside your HTTPS domain.
 
 ## Sources (optional)
 
-Uchiyomi can fetch new chapters from external providers. It bundles a few **generic engines** (parsers for the
-common manga-site families: Madara / MangaThemesia / Manganato) but **no specific sites**. Nothing fetches
-anything until *you* add a site:
+This section covers one of the two fetch routes: the **generic engines**. The other, and the one most people
+will use, is the one-click extension catalogue described under
+[Mihon / Tachiyomi extensions](#features) and in [docs/extensions.md](docs/extensions.md).
+
+Uchiyomi bundles a few **generic engines** (parsers for the common manga-site families: Madara /
+MangaThemesia / Manganato) but **no specific sites for them**. Along this route, nothing fetches anything
+until *you* add a site:
 
 **Admin → Providers → Add a site:** pick the engine, paste a site's homepage URL, done. It loads instantly
 (no rebuild). The engines are generic parsers; you supply the URLs, and you're responsible for using them in
@@ -392,7 +404,8 @@ SOURCES_PATH=/path/to/your/plugins/dist     # compiled .js plugins, mounted read
 
 The reader scans `SOURCES_DIR` (`/sources`) at boot and registers every plugin it finds. Drop in or update a
 plugin and hit **Admin → Providers → Reload** (`POST /api/admin/sources/reload`); no rebuild. With no sites
-added and no pack mounted, Uchiyomi is just a clean reader for the library you already own.
+added, no extensions installed and no pack mounted, Uchiyomi is just a clean reader for the library you
+already own.
 
 ## Configuration
 
