@@ -36,7 +36,14 @@ ENV NODE_ENV=production
 # The app's own volumes have to EXIST and be owned before the entrypoint drops privileges. Without this the
 # image runs fine until the first page is served, then fails with EACCES on mkdir /cache -- the reader shows
 # blank pages and nothing else looks wrong. The entrypoint only chowns directories that are already there.
-RUN apk add --no-cache su-exec tini \
+#
+# postgresql16-client supplies pg_dump for the built-in backup task, exactly as bff/Dockerfile installs it.
+# It was missing here from the day this file was written (v0.9.0, v0.9.1), and the backup task does not fail
+# loudly without it: spawn() reports ENOENT, but the gzip stream has already been opened, so what lands on
+# disk is a 20-byte empty archive in a directory that looks like a backup. aioParity.test.ts now holds the
+# line, because "the split image did this and the single one quietly stopped" is the whole class of bug that
+# file exists for.
+RUN apk add --no-cache su-exec tini postgresql16-client \
  && addgroup -g 10002 -S yomi \
  && adduser -u 10002 -S -G yomi yomi \
  && mkdir -p /cache /backups /config /library-dl /library /sources \

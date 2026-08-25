@@ -185,6 +185,36 @@ test('the catalog routes are wired to the backend they claim', { skip }, async (
         assert.ok(r.body.includes('<feed'), `${url} did not return an OPDS feed`);
       }
     });
+    await t.test('THE FIFTH: progress for a chapter that does not resolve is 404, never 500', async () => {
+      // Migration 0004 gave read_progress a foreign key to lib_series. The route's fallback for a chapter it
+      // cannot look up was seriesId 'unknown', and no series has that id -- so from 0004 onward that path
+      // could only ever violate the constraint and return 500. Reached in practice by the service worker's
+      // offline outbox replaying a queued page for a series deleted or merged since, where a 500 means the
+      // entry is retried forever instead of being dropped.
+      const gone = await app.inject({
+        method: 'PUT',
+        url: '/api/books/b_does_not_exist_at_all/progress',
+        headers: auth,
+        payload: { page: 3 },
+      });
+      assert.equal(gone.statusCode, 404, `an unresolvable chapter answered ${gone.statusCode}, not 404`);
+
+      // And nothing was written on the way out.
+      const rows = await q(`SELECT 1 FROM read_progress WHERE book_id = 'b_does_not_exist_at_all'`);
+      assert.equal(rows.length, 0, 'a 404 still wrote a progress row');
+
+      // The ordinary path must be untouched: a real chapter still records progress.
+      const okr = await app.inject({
+        method: 'PUT',
+        url: `/api/books/b_${S1}/progress`,
+        headers: auth,
+        payload: { page: 2 },
+      });
+      assert.equal(okr.statusCode, 200, 'a resolvable chapter must still accept progress');
+      const wrote = await q(`SELECT page FROM read_progress WHERE book_id = $1`, [`b_${S1}`]);
+      assert.equal(wrote[0]?.page, 2, 'the ordinary progress write stopped working');
+    });
+
     await t.test('THE FOURTH: the genre endpoints answer over HTTP, not just in the library', async () => {
       // Every assertion about genreOverview lives in genreOverview.int.test.ts and calls the function
       // directly, which is exactly the gap this file exists for: a correct function reached by a wrong

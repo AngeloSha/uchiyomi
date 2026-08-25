@@ -27,12 +27,27 @@ function dumpSql(target: string): Promise<void> {
     const gz = createGzip();
     const out = createWriteStream(target);
     let stderr = '';
+    let exited: number | null = null;
+    // The write stream still finishes when pg_dump never ran at all -- an empty pipe closes cleanly and gzip
+    // emits its 20-byte header/trailer. Resolving on `finish` alone therefore called an absent pg_dump a
+    // success, which is how the all-in-one image shipped two releases writing empty archives. Both halves
+    // now have to agree: the process exited 0 AND the file closed.
+    const settle = () => { if (exited === 0 && out.closed) resolve(); };
     pg.stderr.on('data', (d) => { stderr += String(d); });
-    pg.on('error', reject);
+    pg.on('error', (e: NodeJS.ErrnoException) =>
+      reject(e?.code === 'ENOENT'
+        // Say which binary and where it comes from: the failure is a missing package in the image, not
+        // anything the operator did, and the message is the only thing they will have to go on.
+        ? new Error('pg_dump not found in the image — the backup task needs the postgresql client installed')
+        : e));
     out.on('error', reject);
     gz.on('error', reject);
-    pg.on('close', (code) => { if (code !== 0) reject(new Error(`pg_dump exited ${code}: ${stderr.slice(0, 500)}`)); });
-    out.on('finish', () => resolve());
+    pg.on('close', (code) => {
+      exited = code;
+      if (code !== 0) reject(new Error(`pg_dump exited ${code}: ${stderr.slice(0, 500)}`));
+      else settle();
+    });
+    out.on('close', settle);
     pg.stdout.pipe(gz).pipe(out);
   });
 }
@@ -79,6 +94,17 @@ export async function pruneBackups(keep = env.BACKUP_KEEP): Promise<string[]> {
   return doomed;
 }
 
+/** Persist a failed run where the admin UI reads it. Without this the Tasks panel keeps showing the last
+ *  SUCCESSFUL backup, so an install whose backups have been broken for weeks still reports a healthy one --
+ *  which is exactly how a missing pg_dump went unnoticed across two releases. */
+async function recordFailure(e: unknown): Promise<void> {
+  const error = e instanceof Error ? e.message : String(e);
+  await q(
+    `UPDATE server_settings SET backup_last_run = now(), backup_last_result = $1 WHERE id = 1`,
+    [JSON.stringify({ error: error.slice(0, 500), failed: true })],
+  ).catch(() => {});
+}
+
 /** Dump the database + config into BACKUP_DIR/<stamp>/, then prune old runs. Throws on dump failure. */
 export async function runBackup(): Promise<BackupResult> {
   const started = Date.now();
@@ -97,7 +123,15 @@ export async function runBackup(): Promise<BackupResult> {
     throw e;
   }
 
-  await dumpSql(path.join(dir, 'db.sql.gz'));
+  try {
+    await dumpSql(path.join(dir, 'db.sql.gz'));
+  } catch (e) {
+    // Leave nothing that looks like a backup. A directory holding a 20-byte archive reads as a successful
+    // run in `ls`, and rotation counts it, so a week of failures can push the last good dump out of KEEP.
+    await fs.rm(dir, { recursive: true, force: true }).catch(() => {});
+    await recordFailure(e);
+    throw e;
+  }
 
   // config: jwt.secret, sites.json, series-art/ overrides. Small; tar keeps permissions/layout intact.
   let configEmpty = false;

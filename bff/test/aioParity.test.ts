@@ -52,6 +52,42 @@ test('the container healthcheck probes liveness, not the database', () => {
   assert.ok(!/\/healthz/.test(hc.split('\n').slice(0, 3).join('\n')), 'the healthcheck still points at /healthz');
 });
 
+test('the runtime carries pg_dump, so the backup task can actually dump', () => {
+  // This is the regression this whole file is named for, and it still got through: bff/Dockerfile installs
+  // postgresql*-client explicitly for the backup task, Dockerfile.aio did not, and v0.9.0 and v0.9.1 both
+  // shipped writing 20-byte empty archives. Nothing failed loudly -- no log line, and the admin Tasks panel
+  // kept showing the last SUCCESSFUL run, which on a migrated install was written by the old split stack.
+  const aio = readFileSync(join(REPO, 'Dockerfile.aio'), 'utf8');
+  const split = readFileSync(join(REPO, 'bff', 'Dockerfile'), 'utf8');
+
+  // Strip comments first. Both Dockerfiles EXPLAIN why the client is there, so a naive search matches the
+  // prose that survives deleting the instruction -- this guard passed a deliberate reintroduction of the bug
+  // until it read only what docker actually executes.
+  const instructions = (s: string) => s.split('\n').filter((l) => !l.trim().startsWith('#')).join('\n');
+  const clientIn = (s: string) => /postgresql\d*-client/.test(instructions(s));
+  assert.ok(clientIn(split), 'bff/Dockerfile stopped installing the postgres client — check this test still means anything');
+  assert.ok(clientIn(aio),
+    'Dockerfile.aio does not install postgresql*-client, so pg_dump is absent and every backup writes an\n' +
+    'empty archive while reporting nothing wrong. bff/Dockerfile installs it; the single container must too.');
+
+  // tar and gzip archive CONFIG_DIR (jwt.secret, sites.json, series-art). node:alpine has busybox versions,
+  // so this is a presence check on the source rather than the package name.
+  assert.match(readFileSync(join(REPO, 'bff', 'src', 'lib', 'backup.ts'), 'utf8'), /spawn\('pg_dump'/,
+    'the backup task no longer shells out to pg_dump — this guard is checking for the wrong thing');
+});
+
+test('a failed dump is recorded, not silently left as the last success', () => {
+  // The other half of the same bug: even once pg_dump is back, a future failure must not leave the panel
+  // reporting an older healthy run. Both the writer and the caller have to say so.
+  const backup = readFileSync(join(REPO, 'bff', 'src', 'lib', 'backup.ts'), 'utf8');
+  assert.match(backup, /recordFailure/, 'runBackup no longer records failures — a broken backup will read as healthy');
+  assert.match(backup, /fs\.rm\(dir/, 'a failed run leaves its directory behind, which rotation then counts as a backup');
+
+  const admin = readFileSync(join(REPO, 'bff', 'src', 'routes', 'admin.ts'), 'utf8');
+  const run = admin.slice(admin.indexOf("if (id === 'backup')"), admin.indexOf("if (id === 'backup')") + 600);
+  assert.ok(!/\.catch\(\(\) => \{\}\)/.test(run), 'the manual backup route swallows its error again');
+});
+
 test('the root build context is pruned', () => {
   const p = join(REPO, '.dockerignore');
   assert.ok(existsSync(p),

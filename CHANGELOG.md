@@ -1,6 +1,48 @@
 # Changelog
 
-## Unreleased
+## v0.9.2 — 2026-08-25
+
+### The single container could not back itself up, and said nothing
+
+**If you run the all-in-one image, your backups have been empty since v0.9.0.** `Dockerfile.aio` never
+installed the Postgres client, so `pg_dump` was not in the image. `bff/Dockerfile` installs it and always
+has, with a comment saying it is there for the backup task; the line was simply never carried across when
+the single-container image was written.
+
+Nothing about it was visible. The task wrote a 20-byte empty archive into a directory that looks like a
+backup, logged nothing at all, and left `backup_last_result` untouched — so the admin Tasks panel kept
+reporting the last run that *had* worked. On an install migrated from the split layout, that was a real
+backup written by the old containers, which is about the most convincing way to be told everything is fine.
+
+Three things changed, because the missing package was only the first of them:
+
+- The runtime installs `postgresql16-client`, exactly as the split image does.
+- **A failed dump is now recorded as a failure.** The Tasks panel shows the error, and the manual
+  Backup button no longer discards it. A run that fails also deletes its own directory, so rotation cannot
+  count empty archives as backups and push the last good one out of retention.
+- `pg_dump` missing by name gets a message that says so, instead of an ENOENT.
+
+The dump helper also resolved too early: an empty pipe closes cleanly and gzip still emits its header, so
+"the file finished writing" was treated as "the dump succeeded". It now requires the process to have exited
+0 as well.
+
+`bff/test/aioParity.test.ts` — which exists for exactly this, "the split image did something and the single
+one quietly stopped" — now holds all of it. Worth saying that the first version of that guard did not work:
+both Dockerfiles *explain* why the client is installed, so searching the file matched the comment that
+survives deleting the instruction. It reads only what Docker executes now.
+
+**Check your own install:** `docker exec <container> pg_dump --version`. No output means every backup you
+have taken since v0.9.0 is empty. Compare the sizes in your backup directory — a real dump is megabytes, a
+broken one is 20 bytes.
+
+### Reading progress for a chapter that no longer resolves
+
+`PUT /api/books/:id/progress` answered **500** when it could not look the chapter up. The route fell back to
+a placeholder series id, and migration `0004` had since given `read_progress` a foreign key to `lib_series` —
+so that fallback could only ever violate the constraint.
+
+The client that reaches it is the offline outbox replaying a queued page for a series deleted or merged in
+the meantime. A 500 is retried forever; a **404** lets the queue drop the entry, which is what it now gets.
 
 ### One container is the install now
 

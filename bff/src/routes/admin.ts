@@ -129,7 +129,10 @@ export default async function adminRoutes(app: FastifyInstance) {
       runtime.backingUp = true;
       runBackup()
         .then((r) => { runtime.lastBackup = Date.now(); runtime.lastBackupResult = { bytes: r.bytes, ms: r.ms }; })
-        .catch(() => {})
+        // Never swallow this. An admin pressing Backup and seeing the panel still report yesterday's healthy
+        // run is worse than an error: runBackup persists the failure itself, and this logs it so the reason
+        // is in `docker logs` too.
+        .catch((e) => { runtime.lastBackup = Date.now(); runtime.lastBackupResult = null; app.log.error(e); })
         .finally(() => { runtime.backingUp = false; });
       return { ok: true, started: true };
     }

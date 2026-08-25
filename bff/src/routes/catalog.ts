@@ -556,10 +556,17 @@ export default async function catalogRoutes(app: FastifyInstance) {
         const b = await komga.book(vc(req), id);
         if (!sid) sid = b.seriesId;
         if (!done && reachedEnd(page, b?.media?.pagesCount ?? 0)) done = true;
-      } catch { if (!sid) sid = 'unknown'; }
+      } catch { /* the chapter did not resolve; handled below */ }
     }
 
-    await writeProgress({ userId: uid, bookId: id, seriesId: sid!, page, completed: done, silent, deviceId });
+    // No series means the chapter is gone, hidden, or was never visible to this account. That used to fall
+    // back to seriesId 'unknown', which migration 0004 made impossible to store: read_progress now has a
+    // foreign key to lib_series, and no row has that id, so every such write became a 500. The client that
+    // actually hits this is the offline outbox replaying a queued page for a series deleted or merged since
+    // -- and a 500 is a retry forever, where a 404 lets it drop the entry.
+    if (!sid) return reply.code(404).send({ error: 'not_found' });
+
+    await writeProgress({ userId: uid, bookId: id, seriesId: sid, page, completed: done, silent, deviceId });
 
     if (NATIVE_PROGRESS && roleOf(req) === 'admin') komga.setReadProgress(vc(req), id, page, done).catch(() => {});
     return reply.send({ ok: true });

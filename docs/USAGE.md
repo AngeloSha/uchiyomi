@@ -456,6 +456,16 @@ Uchiyomi backs itself up. Every night (03:00 by default) it writes a compressed 
 archive of your config to `/backups`, keeping the most recent 14 runs. You can also run it on demand from
 **Admin → Tasks → Backup database & config → Run now**, which shows the last run time and size.
 
+> **If you are on v0.9.0 or v0.9.1 of the single container, your backups are empty.** Those images were
+> built without the Postgres client, so the task produced a 20-byte file and still reported success. Update
+> to v0.9.2 or later, then check: a real dump is megabytes.
+>
+> ```
+> docker compose exec uchiyomi pg_dump --version
+> ```
+>
+> No output means the image cannot dump, whatever the Tasks panel says.
+
 **What's in a backup:** accounts and passwords, everyone's reading progress and history, favorites,
 collections, ratings, the catalogue, your admin art overrides, and any custom sites you added.
 **What isn't:** downloaded chapter files and the image cache — those are large and re-downloadable, so
