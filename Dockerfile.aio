@@ -57,7 +57,10 @@ ENV PORT=3000
 EXPOSE 3000
 
 # No USER: the entrypoint starts as root only to drop to PUID, and refuses to run the app as root.
+# /livez, not /healthz. /healthz runs SELECT 1, which is the right answer for "should traffic be sent here"
+# and the wrong one for a container healthcheck: it makes one Postgres blip mark the whole app unhealthy,
+# where the split layout's nginx stayed up and kept serving the shell so the app could render an error.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-  CMD wget -qO- http://127.0.0.1:3000/healthz >/dev/null 2>&1 || exit 1
+  CMD wget -qO- http://127.0.0.1:3000/livez >/dev/null 2>&1 || exit 1
 ENTRYPOINT ["/sbin/tini", "--", "/usr/local/bin/docker-entrypoint.sh"]
 CMD ["node", "dist/server.js"]

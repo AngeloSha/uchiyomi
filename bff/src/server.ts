@@ -4,6 +4,7 @@ import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
 import jwt from '@fastify/jwt';
 import rateLimit from '@fastify/rate-limit';
+import compress from '@fastify/compress';
 import { env } from './env';
 import { pool } from './lib/db';
 import { runtime } from './lib/runtime';
@@ -49,6 +50,35 @@ async function main() {
   await app.register(cookie);
   await app.register(jwt, { secret: env.JWT_SECRET });
   await app.register(rateLimit, { global: false });
+  /**
+   * The single-container layout has no nginx in front of it, and nginx was the only thing compressing
+   * anything: `gzip_types text/css application/javascript application/json image/svg+xml
+   * application/manifest+json` with `gzip_min_length 1024` (web/nginx.conf:30-32). Without this, the
+   * all-in-one image ships 736 KB of JS and CSS on a cold load where the split layout shipped 261 KB, and
+   * every API response goes out uncompressed too -- `application/json` was in that list.
+   *
+   * No explicit type list: the plugin compresses whatever mime-db marks compressible, which is a superset
+   * of nginx's five and includes text/html, which nginx only covered implicitly. Brotli is offered first
+   * and is something nginx never had here at all -- `nginx:1.27-alpine` ships no brotli module.
+   *
+   * `@fastify/compress` also sets `Vary: Accept-Encoding`, which nginx did NOT: it ran `gzip on` with no
+   * `gzip_vary`, so a shared cache in front of it could hand a gzipped body to a client that never asked
+   * for one. This is parity plus that fix.
+   */
+  // The threshold only bites on buffered replies, which is nearly all of the API: static files are streamed
+  // by @fastify/static with no Content-Length, so those are compressed whatever their size. nginx skipped
+  // anything under 1 KB; the difference is a few bytes of gzip framing on the handful of tiny assets.
+  await app.register(compress, { threshold: 1024, encodings: ['br', 'gzip', 'deflate'] });
+
+  /**
+   * Liveness, deliberately separate from readiness.
+   *
+   * `/healthz` below runs `SELECT 1`, which is the right answer for "should traffic be sent here" and the
+   * wrong one for a container healthcheck: in the split layout nginx answered /healthz itself and stayed
+   * healthy through a database outage, still serving the shell so the app could render an error. Pointing
+   * the Docker healthcheck at a database probe means one Postgres blip marks the whole app unhealthy.
+   */
+  app.get('/livez', async () => ({ ok: true }));
 
   app.get('/healthz', async (_req, reply) => {
     try {

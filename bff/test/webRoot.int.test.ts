@@ -32,6 +32,9 @@ async function buildExport(): Promise<string> {
   await writeFile(join(root, 'manifest.webmanifest'), '{"name":"Uchiyomi"}');
   await mkdir(join(root, '_next/static/chunks'), { recursive: true });
   await writeFile(join(root, '_next/static/chunks/app.js'), 'console.log(1)');
+  // Two sizes on purpose: compression has a 1 KB threshold, so a fixture that only has tiny files would
+  // let a broken registration pass. This one is ~8 KB and highly compressible, like a real chunk.
+  await writeFile(join(root, '_next/static/chunks/big.js'), `// ${'x'.repeat(8000)}\n`);
   await mkdir(join(root, 'icons'), { recursive: true });
   await writeFile(join(root, 'icons/icon.png'), 'png');
   await mkdir(join(root, 'library'), { recursive: true });
@@ -59,6 +62,82 @@ async function makeApp(root: string) {
   await app.ready();
   return app;
 }
+
+/** The same instance, plus compression registered exactly as src/server.ts registers it. */
+async function makeCompressedApp(root: string) {
+  process.env.WEB_ROOT = root;
+  const mod = await import('../src/lib/webRoot');
+  const Fastify = (await import('fastify')).default;
+  const compress = (await import('@fastify/compress')).default;
+  const app = Fastify();
+  await app.register(compress, { threshold: 1024, encodings: ['br', 'gzip', 'deflate'] });
+  await mod.registerWebRoot(app);
+  await app.ready();
+  return app;
+}
+
+test('the static export is compressed, as nginx compressed it', async (t) => {
+  // nginx gzipped CSS, JS, JSON, SVG and the manifest above 1 KB (web/nginx.conf:30-32). The single
+  // container has no nginx, so without this the app ships 736 KB of JS and CSS where the split layout
+  // shipped 261 KB -- measured against the live site, not estimated.
+  const root = await buildExport();
+  const app = await makeCompressedApp(root);
+  try {
+    await t.test('a chunk over the threshold comes back compressed, and says so', async () => {
+      const r = await app.inject({
+        method: 'GET', url: '/_next/static/chunks/big.js',
+        headers: { 'accept-encoding': 'gzip' },
+      });
+      assert.equal(r.statusCode, 200);
+      assert.equal(r.headers['content-encoding'], 'gzip', 'a large JS chunk was served uncompressed');
+      // nginx ran `gzip on` with no `gzip_vary`, so it never sent this -- a shared cache in front of it
+      // could hand a gzipped body to a client that never asked. Parity would have kept the hazard.
+      assert.match(String(r.headers.vary ?? ''), /accept-encoding/i, 'no Vary: Accept-Encoding');
+    });
+
+    await t.test('a client that cannot decompress still gets plain bytes', async () => {
+      const r = await app.inject({
+        method: 'GET', url: '/_next/static/chunks/big.js',
+        headers: { 'accept-encoding': 'identity' },
+      });
+      assert.equal(r.statusCode, 200);
+      assert.equal(r.headers['content-encoding'], undefined);
+      assert.ok(r.body.length > 8000, 'the identity response should be the full file');
+    });
+
+    await t.test('the 1 KB threshold does NOT apply to static files, and that is fine', async () => {
+      // Worth pinning because it is surprising and I got it wrong first: @fastify/static streams, so there
+      // is no Content-Length for @fastify/compress to compare the threshold against, and it compresses
+      // regardless of size. nginx's `gzip_min_length 1024` did skip small files. A 14-byte chunk comes back
+      // as 34 bytes of gzip framing -- worse than sending it raw, and completely immaterial.
+      //
+      // The threshold is not pointless: buffered JSON replies DO carry a Content-Length, so it still keeps
+      // small API responses uncompressed. This asserts the real behaviour so nobody "fixes" a passing test
+      // into a false one later.
+      const r = await app.inject({
+        method: 'GET', url: '/_next/static/chunks/app.js',
+        headers: { 'accept-encoding': 'gzip' },
+      });
+      assert.equal(r.statusCode, 200);
+      assert.equal(r.headers['content-length'], undefined, 'static is streamed; if this ever gains a length, the threshold starts applying');
+      assert.equal(r.headers['content-encoding'], 'gzip');
+    });
+
+    await t.test('the cache-control contract survives compression', async () => {
+      // Compression sits in front of the static handler, so it is a plausible place for the headers that
+      // keep a PWA from pinning itself to an old build to get lost.
+      const sw = await app.inject({ method: 'GET', url: '/sw.js', headers: { 'accept-encoding': 'gzip' } });
+      assert.match(String(sw.headers['cache-control']), /no-store|no-cache/);
+      const chunk = await app.inject({
+        method: 'GET', url: '/_next/static/chunks/big.js', headers: { 'accept-encoding': 'gzip' },
+      });
+      assert.match(String(chunk.headers['cache-control']), /immutable/);
+    });
+  } finally {
+    await app.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
 
 test('the web app served from the API process', async (t) => {
   const root = await buildExport();

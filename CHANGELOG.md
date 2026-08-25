@@ -2,6 +2,39 @@
 
 ## Unreleased
 
+## v0.9.1 — 2026-08-25
+
+### The single container compresses again
+
+Moving the web tier into the API process quietly dropped the one thing nginx was doing that nobody thinks of
+as an application concern: it gzipped CSS, JS, JSON, SVG and the manifest, and because `application/json` was
+in that list, every API response too. The all-in-one image had no compression plugin at all.
+
+Measured against a real install: a cold load went from **261 KB of JS and CSS to 736 KB**. Nothing breaks, it
+just gets slower, and only noticeably off your own network. Fixed with `@fastify/compress`, which also offers
+brotli, which nginx never had here at all.
+
+It also sends `Vary: Accept-Encoding`, which nginx did **not**: it ran `gzip on` with no `gzip_vary`, so a
+shared cache in front of it could hand a gzipped body to a client that never asked for one. That is a real
+hazard closed, not merely parity restored.
+
+### A healthcheck that means liveness
+
+`/healthz` runs `SELECT 1`, which is the right answer for "should traffic be sent here" and the wrong one for
+a container healthcheck: the single container pointed at it, so one database blip marked the whole app
+unhealthy. In the split layout nginx answered `/healthz` itself and stayed up through an outage, still
+serving the shell so the app could render an error rather than the browser showing connection refused.
+
+There is now a `/livez` that answers unconditionally, and the container healthcheck uses it. `/healthz` is
+unchanged and still the readiness probe.
+
+### Also
+
+The repository root had no `.dockerignore`, and `Dockerfile.aio` builds from the root, so `COPY web/ ./` and
+`COPY bff/ ./` copied the host's `node_modules` straight over the ones `npm ci` had just installed one layer
+earlier, native modules included. Continuous integration never saw it, because a fresh checkout has none. Local
+builds dragged around 790 MB of context and could produce a wrong build from a stale tree.
+
 ## v0.9.0 — 2026-08-24
 
 ### Libraries you can actually build

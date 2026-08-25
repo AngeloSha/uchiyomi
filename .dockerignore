@@ -1,0 +1,12 @@
+# Dockerfile.aio builds from the REPO ROOT, so web/.dockerignore and bff/.dockerignore do not apply here.
+# Without this file, `COPY web/ ./` and `COPY bff/ ./` copy the host's node_modules straight over the ones
+# `npm ci` just installed one layer earlier -- including native modules (sharp, @node-rs/argon2, mupdf)
+# built for whatever the host happens to be. It also dragged ~790 MB of context into every build and
+# defeated layer caching. CI never hit it because a fresh checkout has no node_modules.
+**/node_modules
+web/.next
+web/out
+bff/dist
+.git
+.env
+docker-compose.override.yml
