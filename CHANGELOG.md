@@ -1,6 +1,38 @@
 # Changelog
 
-## Unreleased
+## v0.9.3 — 2026-08-25
+
+### The dependency tree answers for itself
+
+Turning on GitHub's vulnerability alerts surfaced **49 findings** across the two lockfiles, four of them
+critical. This release clears them.
+
+**The ones that were real.** The API ran `fast-jwt` 4 — the library that verifies every login token — which
+has since accumulated three critical advisories (auth bypass via an empty HMAC secret with async key
+resolvers, cache confusion that can return one token's claims for another, and an algorithm-confusion fix
+bypass). None of the three is reachable with Uchiyomi's configuration, which uses a static HS256 secret and
+no RSA — but "not reachable today" is not an argument for keeping a known-broken verifier under the auth
+system. Alongside it: `@fastify/static` (route-guard bypass via path traversal — it serves the web app in
+the single container), `fastify` itself (a Content-Type parsing quirk that bypasses body validation),
+`sharp` (inherited libvips CVEs — it processes untrusted images downloaded from sources), and `adm-zip`
+(a crafted ZIP forcing a 4 GB allocation — it opens CBZs fetched from sources).
+
+All of those fixes live on the far side of a framework major, so the whole family moved together:
+**Fastify 4 → 5** with `@fastify/jwt` 10 (carrying `fast-jwt` 6.3), `@fastify/static` 10, and new majors of
+compress, helmet, cors, cookie and rate-limit; plus `sharp` 0.35 and `adm-zip` 0.6. The entire 476-test
+suite, the mounted-route wiring tests and the browser end-to-end pass unchanged on the new major — and
+tokens signed by the old verifier still verify under the new one (and vice versa), so **nobody is signed
+out by upgrading**, or by rolling back.
+
+**The ones that were theoretical.** Thirty findings pointed at Next.js. The web app is a **static export**:
+there is no Next server, no middleware, no Server Actions and no image optimizer running anywhere in
+production, so none of those advisories was reachable. They are cleared anyway — **Next 14 → 15, React
+18 → 19** — because an install page full of open advisories makes a reader do the reachability analysis
+themselves. Next also vendors its own old copy of `postcss`; an override pins the patched one everywhere.
+
+One finding remains open by necessity: `extract-zip`, a development-only dependency of the browser-test
+harness, has no patched release to move to. It never ships in any image.
+
 
 ### The repo now runs what it ships
 

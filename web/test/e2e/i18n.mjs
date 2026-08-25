@@ -18,6 +18,9 @@ await p.setViewport({ width: 1280, height: 900 });
 
 // Sign in once.
 await p.goto(BASE, { waitUntil: 'networkidle2', timeout: 60000 });
+// networkidle2 fires before React has hydrated the login form under puppeteer 24 + Next 15, so grabbing
+// inputs immediately found none. Wait for the form itself, not the network.
+await p.waitForSelector('input[type=password]', { timeout: 30000 });
 const i = await p.$$('input');
 await i[0].type(process.env.E2E_USER || 'e2e');
 await p.type('input[type=password]', process.env.E2E_PASS || 'e2e-passw0rd-123');

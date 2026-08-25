@@ -66,10 +66,13 @@ export async function registerWebRoot(app: FastifyInstance): Promise<void> {
     redirect: false,
     index: false,
     wildcard: false,
-    setHeaders(res: any, filePath: string) {
+    // @fastify/static v10 hands this the fastify REPLY, not the raw Node response v7 passed. The old
+    // `res.setHeader` threw on every static file, which the handler surfaced as a 500 for the whole
+    // web root -- the suite caught it before it shipped.
+    setHeaders(reply: any, filePath: string) {
       const rel = '/' + filePath.slice(root.length).replace(/^\/+/, '');
-      res.setHeader('Cache-Control', cacheControl(rel));
-      if (rel.endsWith('.webmanifest')) res.setHeader('Content-Type', 'application/manifest+json');
+      reply.header('Cache-Control', cacheControl(rel));
+      if (rel.endsWith('.webmanifest')) reply.header('Content-Type', 'application/manifest+json');
     },
   });
 

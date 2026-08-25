@@ -53,6 +53,9 @@ try {
   // ---------------------------------------------------------------- sign in
   console.log('\n  sign in');
   await page.goto(BASE, { waitUntil: 'networkidle2', timeout: 60000 });
+  // The form appears at hydration, after networkidle2. This only ever passed because shot() added enough
+  // latency to lose the race; i18n.mjs, without a screenshot first, lost it deterministically.
+  await page.waitForSelector('input[type=password]', { timeout: 30000 }).catch(() => {});
   await shot('login');
   const inputs = await page.$$('input');
   if (!inputs.length) bad('the login page has no form');

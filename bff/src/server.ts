@@ -110,7 +110,8 @@ async function main() {
     }
     const status = (err as any).statusCode || 500;
     if (status >= 500) req.log.error(err);
-    return reply.code(status).send({ error: status >= 500 ? 'internal' : err.message || 'error' });
+    // fastify 5 types the handler's error as unknown, so the message needs the same narrowing statusCode gets
+    return reply.code(status).send({ error: status >= 500 ? 'internal' : (err as Error).message || 'error' });
   });
 
   await app.register(authRoutes);
