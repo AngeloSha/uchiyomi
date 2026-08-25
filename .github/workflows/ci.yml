@@ -20,7 +20,12 @@ permissions:
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  # Pull requests: cancel superseded runs, since only the latest push matters.
+  # main: never cancel. The Tests job runs ~18 minutes (integration tests are serial against a real
+  # Postgres on purpose), so two commits landing inside that window used to kill the earlier run mid-job --
+  # and GitHub renders a *cancelled* run as a red "failing" badge even when every job that finished had
+  # passed. That badge is the first line of the README.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   DOCKER_BUILDKIT: "1"
