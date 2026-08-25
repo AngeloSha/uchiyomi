@@ -57,6 +57,16 @@ jobs:
           push: true
           # version tag only. See the note at the top about why `latest` is not set here.
           tags: ${{ matrix.image }}:${{ github.ref_name }}
+          # OCI labels: what the GHCR package page shows, and how tooling traces an image back to its
+          # source and release. Absent until v0.9.2, so package pages had no description or licence.
+          labels: |
+            org.opencontainers.image.title=Uchiyomi (${{ matrix.service }})
+            org.opencontainers.image.description=Self-hosted manga & manhwa reader that also fetches — webtoon-first OLED PWA
+            org.opencontainers.image.source=https://github.com/AngeloSha/uchiyomi
+            org.opencontainers.image.url=https://uchiyomi.com
+            org.opencontainers.image.version=${{ github.ref_name }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.licenses=MPL-2.0
 
   # Only once BOTH images exist at this version does `latest` move. Re-tagging a manifest copies no layers,
   # so this is a few seconds and cannot itself half-apply in a way that matters.

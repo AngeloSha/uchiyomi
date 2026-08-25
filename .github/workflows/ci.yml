@@ -5,9 +5,10 @@ name: CI
 # `tsc` for the BFF and `next build` for the web app. The Tests job additionally
 # proves behaviour — including the reading-progress rules, which are enforced in
 # SQL and so run against a real Postgres.
-# Build BFF / Build Web are required to pass before a PR can be merged into main
-# (see branch protection). They stay required even though the split layout they build is deprecated: it is
-# still published, so it still has to compile.
+# All five jobs are required to pass before a PR can be merged into main (branch protection). Until
+# 2026-08-25 only the two build jobs were required, which made the entire test tier advisory: a PR with
+# failing tests could merge as long as the code compiled. The split builds stay required even though that
+# layout is deprecated: it is still published, so it still has to compile.
 
 on:
   push:
