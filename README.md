@@ -239,8 +239,8 @@ Uchiyomi used to ship as `uchiyomi-bff` + `uchiyomi-web`, with a separate nginx 
 layout is **deprecated but not dead**: it is still built, still published and still works, and nothing about
 your install has stopped functioning. You are not required to move.
 
-It is deprecated because the single container measured better on the same host — **240 MB instead of
-398 MB**, less memory, one less network hop on every API call, and no redirect on deep links — and because
+It is deprecated because the single container measured better on the same host — **265 MB instead of
+441 MB**, less memory, one less network hop on every API call, and no redirect on deep links — and because
 the end-to-end tests only ever drive the single container, so it is the layout that is actually proven on
 every commit.
 
