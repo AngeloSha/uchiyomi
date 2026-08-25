@@ -238,8 +238,8 @@ Uchiyomi used to ship as `uchiyomi-bff` + `uchiyomi-web`, with a separate nginx 
 layout is **deprecated but not dead**: it is still built, still published and still works, and nothing about
 your install has stopped functioning. You are not required to move.
 
-It is deprecated because the single container measured better on the same host — **241 MB instead of
-385 MB**, less memory, one less network hop on every API call, and no redirect on deep links — and because
+It is deprecated because the single container measured better on the same host — **240 MB instead of
+398 MB**, less memory, one less network hop on every API call, and no redirect on deep links — and because
 the end-to-end tests only ever drive the single container, so it is the layout that is actually proven on
 every commit.
 
@@ -294,6 +294,21 @@ you first installed, indefinitely, with nothing to tell you. Watch
 
 Upgrading in place is safe: accounts, reading progress, downloads and settings live in named volumes, and the
 database migrates itself on boot.
+
+> **Running the single container on v0.9.0 or v0.9.1? Your backups are empty. Upgrade.**
+>
+> Those two images were built without the Postgres client, so `pg_dump` was not present and the backup task
+> wrote a 20-byte empty archive every night. It said nothing: no log line, and the admin Tasks panel kept
+> reporting the last run that *had* worked — which, if you came from the split layout, was a real backup
+> written by the old containers.
+>
+> ```bash
+> docker compose exec uchiyomi pg_dump --version
+> ```
+>
+> No output means the image cannot dump, whatever the panel says. Check the file sizes too — a real dump is
+> megabytes, a broken one is 20 bytes. Fixed in **v0.9.2**, which also makes a failed backup report itself
+> instead of leaving the last success standing. The split layout was never affected.
 
 > **First installed before v0.5.1? Upgrading will not fix this — it needs one manual step.**
 >

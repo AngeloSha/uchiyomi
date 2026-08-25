@@ -3,7 +3,7 @@
 Everything the web app does, it does over this API, so anything you can do in the browser you can script.
 
 This page covers how to authenticate and the endpoints worth scripting. It is not an exhaustive dump of all
-169 routes; the full list is at the bottom for reference.
+174 routes; the full list is at the bottom for reference.
 
 ## Authenticating
 
@@ -179,10 +179,17 @@ Grouped by the module that serves them. Anything under `/api/admin/` needs an ad
 
 ### Health
 ```
-GET    /healthz
+GET    /livez                     GET    /healthz
 ```
-The only unauthenticated route, and what the container healthcheck polls. It answers before login exists, so
-it is also the right thing to point a reverse proxy or an uptime monitor at.
+The two unauthenticated routes. Both answer before login exists, and they mean different things:
+
+- **`/livez`** answers `{"ok":true}` unconditionally — is the process alive. This is what the container
+  healthcheck polls, so that a database blip does not mark the whole app unhealthy.
+- **`/healthz`** runs `SELECT 1` and returns **503** when Postgres is unreachable — should traffic be sent
+  here. This is the one for a load balancer or an uptime monitor that should page you.
+
+Point a reverse proxy's own health check at `/livez` if you want it to keep serving the shell during a
+database outage, and at `/healthz` if you want it to take the app out of rotation instead.
 
 ### Authentication and setup
 ```
@@ -202,7 +209,8 @@ GET    /auth/oidc/start             GET    /auth/oidc/callback
 GET    /api/home                  GET    /api/featured
 GET    /api/foryou                GET    /api/trending
 GET    /api/random                GET    /api/genres
-GET    /api/libraries             GET    /api/updates
+GET    /api/genres/overview       GET    /api/libraries
+GET    /api/updates
 POST   /api/updates/seen          POST   /api/refresh
 GET    /api/series/:id            GET    /api/series/:id/books
 GET    /api/series/:id/similar    GET    /api/series/:id/color
