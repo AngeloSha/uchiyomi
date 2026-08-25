@@ -1,12 +1,13 @@
 name: CI
 
-# Builds the two deployable images and runs the test suites on every pull request
+# Builds all three published images and runs the test suites on every pull request
 # (and on pushes to main). A green build proves deps install and the app compiles:
 # `tsc` for the BFF and `next build` for the web app. The Tests job additionally
 # proves behaviour — including the reading-progress rules, which are enforced in
 # SQL and so run against a real Postgres.
 # Build BFF / Build Web are required to pass before a PR can be merged into main
-# (see branch protection).
+# (see branch protection). They stay required even though the split layout they build is deprecated: it is
+# still published, so it still has to compile.
 
 on:
   push:
