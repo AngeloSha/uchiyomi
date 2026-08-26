@@ -19,3 +19,6 @@ docker-compose.override.yml
 web/test/e2e/shots/
 web/test/e2e/shots-i18n/
 .design/
+
+# Instance-local files that must never be committed: a login wall built from a real library, etc.
+local/

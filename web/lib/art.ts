@@ -5,6 +5,10 @@ export const ART = {
   // library: the login screen is pre-auth, /img/* is 401 there, and a public page fed from the library would
   // walk straight past per-library grants, max_age_rating and the 18+ hide.
   loginWall: '/art/login-wall.webp',
+  // A 5120-wide twin for high-DPI screens. Without it a 2K display at devicePixelRatio 2 asks for 5120
+  // device pixels, gets 2560, and upscales -- which reads as a soft, pixelated backdrop no amount of
+  // WebP quality fixes, because the loss is in the scaling rather than the encoding.
+  loginWall2x: '/art/login-wall@2x.webp',
   splash: '/art/splash.webp',
   hero: '/art/hero.webp',
   section: '/art/section.webp',

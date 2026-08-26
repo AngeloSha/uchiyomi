@@ -95,6 +95,10 @@ export function LoginScreen() {
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <motion.img
           src={ART.loginWall}
+          // The browser picks by device pixel ratio: a 2K screen at DPR 2 needs 5120 device pixels, and
+          // handing it the 2560 one produced exactly the softness this is here to fix.
+          srcSet={`${ART.loginWall} 2560w, ${ART.loginWall2x} 5120w`}
+          sizes="100vw"
           alt=""
           initial={still ? false : { scale: 1.1, opacity: 0 }}
           animate={still ? { opacity: 1 } : { scale: 1, opacity: 1 }}

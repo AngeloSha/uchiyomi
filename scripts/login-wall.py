@@ -17,6 +17,8 @@ Output:      web/public/art/login-wall.webp
 """
 from __future__ import annotations
 
+import argparse
+import glob
 import math
 import os
 import random
@@ -42,6 +44,40 @@ TINTS = [
 ]
 
 random.seed(20260826)              # deterministic: same wall on every regeneration
+REAL_COVERS = False                # set by --covers; changes the grading, since real covers are not dark
+
+
+def cover_sources(d: str) -> list[Image.Image]:
+    """Load real cover images from a directory (--covers).
+
+    For an operator who would rather see their own shelf than generated art. The result is INSTANCE-LOCAL:
+    cover art belongs to its publishers, and a login screen is reachable by anyone who can reach the server,
+    so a wall built this way must never be committed or baked into a published image. The shipped default
+    stays the generated wall.
+    """
+    files = sorted(
+        f for e in ("*.webp", "*.jpg", "*.jpeg", "*.png")
+        for f in glob.glob(os.path.join(d, e))
+    )
+    if not files:
+        raise SystemExit(f"no images found in {d}")
+    return [Image.open(f).convert("RGB") for f in files]
+
+
+def cover_tile(im: Image.Image) -> Image.Image:
+    """A real cover, cropped to 2:3 and otherwise left alone.
+
+    No blurring: a cover is the artwork someone chose, and softening it to obscure a title costs more than
+    the title is worth. The vertical bias below keeps heads and figures in frame when a tall cover has to
+    lose height, which is the only judgement this function makes.
+    """
+    w, h = im.size
+    target = TILE_W / TILE_H
+    if w / h > target:                      # too wide: take the middle column
+        cw = int(h * target); x = (w - cw) // 2; im = im.crop((x, 0, x + cw, h))
+    else:                                   # too tall: bias upward, where the art usually is
+        ch = int(w / target); y = int((h - ch) * 0.28); im = im.crop((0, y, w, y + ch))
+    return im.resize((TILE_W, TILE_H), Image.LANCZOS)
 
 
 def sources() -> list[Image.Image]:
@@ -93,14 +129,20 @@ def as_cover(t: Image.Image, depth: float, tint: tuple[int, int, int]) -> Image.
 
     depth 0 = front row, 1 = far back. Kept shallow for the same reason.
     """
-    t = ImageEnhance.Brightness(t).enhance(1.55 - 0.35 * depth)
-    t = ImageEnhance.Color(t).enhance(1.5 - 0.25 * depth)
+    if REAL_COVERS:
+        # Real covers are already bright and saturated. The lift that rescues dark generated key art
+        # blows them out, so they only get pushed back in space.
+        t = ImageEnhance.Brightness(t).enhance(1.0 - 0.3 * depth)
+        t = ImageEnhance.Color(t).enhance(1.0 - 0.2 * depth)
+    else:
+        t = ImageEnhance.Brightness(t).enhance(1.55 - 0.35 * depth)
+        t = ImageEnhance.Color(t).enhance(1.5 - 0.25 * depth)
     t = ImageEnhance.Contrast(t).enhance(1.12)
 
     # Per-tile tint. One accent wash across everything flattened fifteen pictures into one colour; giving
     # each tile its own hue is what makes a wall read as a catalogue of different books.
     wash = Image.new("RGB", t.size, tint)
-    t = Image.blend(t, wash, 0.14)
+    t = Image.blend(t, wash, 0.04 if REAL_COVERS else 0.14)
 
     d = ImageDraw.Draw(t, "RGBA")
     # spine: a soft dark edge down one side, which is most of what makes a rectangle look like a book
@@ -117,13 +159,32 @@ def as_cover(t: Image.Image, depth: float, tint: tuple[int, int, int]) -> Image.
     return t
 
 
-def build() -> Image.Image:
-    srcs = sources()
-    pool: list[Image.Image] = []
-    for im in srcs:
-        pool.extend(crops(im))
+def build(covers_dir: str | None = None) -> Image.Image:
+    if covers_dir:
+        srcs = cover_sources(covers_dir)
+        # Never draw a cover larger than it really is. Cover art tops out around 460px wide (AniList's
+        # `large` is the biggest variant published for most manga; `extraLarge` 404s), so a tile any wider
+        # than the source is upscaling -- which is what actually reads as "pixelated" on a high-DPI screen,
+        # not the WebP quality. Shrinking the tile means more, smaller covers, which is also what the wall
+        # this imitates looks like.
+        # Median, not max: one high-resolution outlier in a set of ordinary covers would otherwise let the
+        # tile grow past what almost every source can fill.
+        import statistics
+        typical = int(statistics.median([im.size[0] for im in srcs]))
+        if TILE_W > typical:
+            k = typical / TILE_W
+            globals()["TILE_W"], globals()["TILE_H"] = typical, int(TILE_H * k)
+            globals()["GAP_X"], globals()["GAP_Y"] = max(1, int(GAP_X * k)), max(1, int(GAP_Y * k))
+            print(f"  tile capped at the source width: {TILE_W}x{TILE_H} (no upscaling)")
+        pool = [cover_tile(im) for im in srcs]
+        print(f"  {len(srcs)} real covers -> {len(pool)} tiles")
+    else:
+        srcs = sources()
+        pool = []
+        for im in srcs:
+            pool.extend(crops(im))
+        print(f"  {len(srcs)} source images -> {len(pool)} distinct tiles")
     random.shuffle(pool)
-    print(f"  {len(srcs)} source images -> {len(pool)} distinct tiles")
 
     # Oversize the working canvas so that after rotation no tile is cut mid-row at the edges.
     diag = int(math.hypot(W, H) * 1.25)
@@ -156,14 +217,39 @@ def build() -> Image.Image:
 
 
 def main() -> None:
-    wall = build()
-    for q in (72, 66, 60, 54, 48):
-        wall.save(OUT, "WEBP", quality=q, method=6)
-        kb = os.path.getsize(OUT) // 1024
-        print(f"  quality {q}: {kb} KB")
-        if kb <= 250:
-            break
-    print(f"  -> {OUT}  {wall.size[0]}x{wall.size[1]}  {os.path.getsize(OUT)//1024} KB")
+    global REAL_COVERS, W, H
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--covers", metavar="DIR", help="build from real cover images in DIR (instance-local; see cover_sources)")
+    ap.add_argument("--out", metavar="PATH", help=f"where to write (default {OUT})")
+    # Real covers carry far more detail than generated key art, so a wall built from them is heavier at the
+    # same canvas. Since it is displayed scaled down, dropping the canvas buys more than dropping quality.
+    ap.add_argument("--width", type=int, default=W, metavar="PX", help=f"canvas width (default {W}, 16:10)")
+    # Fixed quality beats chasing a size budget. Stepping quality down until a file fits a number is how
+    # this wall ended up at q30 with visible artifacts -- a login backdrop is mostly large flat artwork,
+    # which is exactly what low WebP quality ruins first.
+    ap.add_argument("--quality", type=int, default=0, metavar="Q", help="fixed WebP quality; omit to step down to fit ~250 KB")
+    a = ap.parse_args()
+
+    REAL_COVERS = bool(a.covers)
+    if a.width != W:
+        global TILE_W, TILE_H, GAP_X, GAP_Y
+        k = a.width / W
+        W, H = a.width, int(a.width * 10 / 16)
+        # Keep the composition identical and raise its resolution, rather than fitting more, smaller covers.
+        TILE_W, TILE_H = int(TILE_W * k), int(TILE_H * k)
+        GAP_X, GAP_Y = max(1, int(GAP_X * k)), max(1, int(GAP_Y * k))
+    out = a.out or OUT
+    wall = build(a.covers)
+    if a.quality:
+        wall.save(out, "WEBP", quality=a.quality, method=6)
+    else:
+        for q in (72, 66, 60, 54, 48, 42, 36, 30):
+            wall.save(out, "WEBP", quality=q, method=6)
+            kb = os.path.getsize(out) // 1024
+            print(f"  quality {q}: {kb} KB")
+            if kb <= 250:
+                break
+    print(f"  -> {out}  {wall.size[0]}x{wall.size[1]}  {os.path.getsize(out)//1024} KB")
 
 
 if __name__ == "__main__":
