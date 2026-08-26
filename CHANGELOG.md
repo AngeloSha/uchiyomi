@@ -1,5 +1,40 @@
 # Changelog
 
+## v0.9.5 — 2026-08-27
+
+### Discover no longer stalls, and the language chips are gone
+
+Switching language before the wall had finished loading left covers stuck loading, sometimes for the rest of
+the session. That was a bug, not slowness.
+
+Each source on the wall reports back when it settles. The report fires on a change, and a source that
+appeared under both the old and the new language never changed: it kept its place, kept its cached answer,
+and so never reported again — while the page had just forgotten it. The wall was then permanently waiting on
+a source that had already answered, which is why the loading tiles never resolved, the progress bar stuck,
+and scrolling for more stopped working.
+
+Two things made it worse. Switching could fire ten requests at once instead of four. And nothing was
+cancelled, so every abandoned request still cost the server its full eight-second budget — and a request that
+times out puts that source on a cooldown for the next five to thirty minutes. Clicking impatiently actively
+made the wall emptier.
+
+**The language chips are removed.** They were the trigger, and the thing they were solving is better solved
+by ranking: healthy sources first, then the ones your library actually came from. The source chips above the
+wall are the filter now, and they still show which sources are being asked and how each one answered.
+
+The causes are fixed separately from the trigger, since the same failure would return the moment anything
+else restarted the wall. Requests are now cancelled when abandoned, so changing your mind no longer costs a
+source its availability for half an hour.
+
+Also fixed: with the add dialog open on the hero, every source that finished loading refired a search across
+every source — a fan-out with a 25-second timeout each, over and over, while the wall filled in behind it.
+
+### A sharper sign-in wall on high-DPI screens
+
+The cover wall behind the sign-in screen looked soft on a 2K display. A screen at that pixel ratio asks for
+5120 pixels of image and was handed 2560, then stretched them. There is a larger twin now, and the page picks
+it only on screens that can use it — an ordinary display still takes the small one.
+
 ## v0.9.4 — 2026-08-26
 
 ### A wall of covers behind the sign-in screen
