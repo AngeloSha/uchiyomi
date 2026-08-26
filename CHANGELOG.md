@@ -1,5 +1,26 @@
 # Changelog
 
+## v0.9.4 — 2026-08-26
+
+### A wall of covers behind the sign-in screen
+
+The login screen sat on a single piece of key art. It now sits behind a tilted grid of cover tiles, which is
+what a manga library should look like before you have signed into it.
+
+The tiles are cut from the art Uchiyomi already ships — the twelve genre backdrops plus the login, splash,
+wrapped, hero and section pieces — at several crop positions each, because at wall scale a different crop of
+one image reads as a different book. Seventeen sources give fifty-nine tiles. `scripts/login-wall.py`
+composes them and is seeded, so it rebuilds the same wall every time.
+
+**It is deliberately not your library.** The sign-in screen is pre-authentication, so anything on it is
+visible to anyone who can reach your server. Feeding it real covers would serve titles and art straight past
+per-library access, per-user age caps and the 18+ hide, and the service worker would then keep those covers
+in a cache that survives signing out on a shared device. The wall is generated art, and the sign-in screen
+still requests no images from your library at all.
+
+Also fixed: the backdrop's entrance animation ignored `prefers-reduced-motion`. The CSS rule that handles
+this everywhere else cannot reach a JavaScript animation, so that screen never honoured the setting.
+
 ## v0.9.3 — 2026-08-25
 
 ### The dependency tree answers for itself
