@@ -1,15 +1,19 @@
-// Which sources belong to which language group, and which of them are worth fetching.
+// Which sources are worth fetching for the Discover wall, and in what order.
 //
 // Split out of SourcePicker so it can be tested: the component is a client component that pulls in
 // react-query and JSX, and this is arithmetic on a list of rows. `components/SourcePicker.tsx` re-exports
 // everything here, so nothing else had to change.
-import { langName } from './langNames';
-import { storedLocale, detectLocale } from './i18n';
+//
+// This used to also group sources by declared language and render a chip per language. That is gone. The
+// grouping was the trigger for a stall -- switching group mid-load left the wall counting sources it had
+// forgotten, so its skeletons never resolved -- and thrashing the chips fired abandoned scrapes that each
+// cost the server a full timeout and then wrote a multi-minute cooldown against the source. Ranking survived
+// the removal because ranking was the useful half.
 
 export interface Src {
   id: string;
   name: string;
-  /** null means "declares no single language", not "serves none". See `inGroup`. */
+  /** Retained on the row; nothing reads it since the language grouping was removed. */
   lang: string | null;
   latest?: boolean;
   status?: 'ok' | 'disabled' | 'rate_limited' | 'blocked' | 'down';
@@ -18,86 +22,26 @@ export interface Src {
   used?: number;
 }
 
-/**
- * The languages a source serves.
- *
- * Suwayomi gives one language per source today — the multi-language extensions register once per language
- * instead — so this matches a single code in every real row. It exists so a future source that reports
- * `en,ja` lands in both groups rather than in a group called "en,ja" that nothing selects.
- */
-const langsOf = (s: Src): string[] =>
-  (s.lang ?? '').split(',').map((x) => x.trim()).filter(Boolean);
-
-/**
- * The site a source belongs to, for counting.
- *
- * 29 of this install's 45 rows are one site (3Hentai) installed once per language, which is the Mihon
- * `SourceFactory` model. Counting rows made the language rail a rendering of that one site's supported
- * languages: thirty chips, most of them leading to the same place.
- */
-const siteOf = (s: Src): string => s.name.toLowerCase().replace(/[^a-z0-9]+/g, '');
-
 export type SrcState = 'loading' | 'ok' | 'empty' | 'idle' | 'blocked' | 'off';
-
-/**
- * A source belongs to a language group when it declares that language, or declares none.
- *
- * A source with no declared language is not an orphan: MangaDex serves everything, and the pack sources are
- * code rather than an operator's choice. Bucketing those separately would put a "no language" chip on a page
- * whose entire organising idea is language.
- */
-export const inGroup = (s: Src, lang: string) => {
-  if (!lang) return true;
-  const own = langsOf(s);
-  return !own.length || own.includes('all') || own.includes(lang);
-};
-
-/** Languages worth a chip: those a `latest`-capable source actually declares, counted by SITE. */
-export function languagesOf(sources: Src[]): { code: string; label: string; count: number }[] {
-  const locale = (typeof window === 'undefined' ? 'en' : (storedLocale() ?? detectLocale())) as string;
-  const n = new Map<string, Set<string>>();
-  for (const s of sources) {
-    if (!s.latest || s.status === 'disabled') continue;
-    for (const code of langsOf(s)) {
-      // 'all' would otherwise add itself to all thirty counts and tell you nothing.
-      if (code === 'all') continue;
-      let set = n.get(code);
-      if (!set) { set = new Set(); n.set(code, set); }
-      set.add(siteOf(s));
-    }
-  }
-  return [...n.entries()]
-    .map(([code, sites]) => ({ code, label: langName(code, locale), count: sites.size }))
-    .sort((a, b) => (a.code === locale ? -1 : b.code === locale ? 1 : 0) || b.count - a.count || a.label.localeCompare(b.label));
-}
 
 /**
  * Which sources to actually fetch, and in what order.
  *
- * English on one real install is six declared sources plus four universals plus three packs. Fetching
- * thirteen at eight seconds each is not a plan, and the page that fetched every registered source opened
- * forty-five concurrent scrapes. Six, best-first:
+ * The page that fetched every registered source opened forty-five concurrent scrapes. Six, best-first:
  *   1. healthy before rate-limited or blocked, because a blocked source is a guaranteed timeout for a
  *      guaranteed nothing;
  *   2. what the library actually came from;
- *   3. sources that declare the chosen language before the universals;
- *   4. registry order after that, which puts the preferred adapters first (Array.sort is stable).
+ *   3. registry order after that, which puts the preferred adapters first (Array.sort is stable).
  *
- * (2) sits above (3) on evidence, not taste. With the language first, the English chip on that install
- * fetched MangaDex and five adult extension sources with no series behind any of them, while Aqua Manga --
- * 189 of the library's 214 series, answering in 2.5s -- was never among the six, because it is a universal
- * source and declares no language at all. `inGroup` has already excluded everything not in the group by
- * this point, so (3) is only a preference among sources the reader could legitimately be shown; a source
- * they demonstrably read from is the better one of those.
+ * (2) sits there on evidence, not taste. On one real install the wall was fetching MangaDex and five adult
+ * extension sources with no series behind any of them, while Aqua Manga -- 189 of that library's 214 series,
+ * answering in 2.5s -- was never among the six. Ranking by what someone demonstrably reads from fixed it.
  */
-export function budgetFor(sources: Src[], lang: string, max = 6): Src[] {
-  const declares = (s: Src) => langsOf(s).includes(lang);
+export function budgetFor(sources: Src[], max = 6): Src[] {
   return sources
-    .filter((s) => s.latest && s.status !== 'disabled' && inGroup(s, lang))
+    .filter((s) => s.latest && s.status !== 'disabled')
     .sort((a, b) =>
       Number(a.status !== 'ok') - Number(b.status !== 'ok') ||
-      (b.used ?? 0) - (a.used ?? 0) ||
-      Number(declares(b)) - Number(declares(a)))
+      (b.used ?? 0) - (a.used ?? 0))
     .slice(0, max);
 }
-

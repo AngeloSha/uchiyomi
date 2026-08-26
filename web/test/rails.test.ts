@@ -27,11 +27,13 @@ test("Discover's rails do not hide their own scrollbar", () => {
   }
 });
 
-test('both rails go through ScrollRail, and leave room for the bar', () => {
+test('the rail goes through ScrollRail, and leaves room for the bar', () => {
   // globals.css styles the bar at 8px, so anything under pb-2 puts it on top of the content above it.
   const MIN_PB = 3; // Tailwind pb-3 = 0.75rem = 12px
   let rails = 0;
-  for (const file of ['app/discover/page.tsx', 'components/SourcePicker.tsx']) {
+  // SourcePicker used to carry a second rail, the language strip. That whole dimension was removed after it
+  // turned out to be the trigger for a wall that stalled mid-load, so the trending rail is the only one left.
+  for (const file of ['app/discover/page.tsx']) {
     const src = read(file);
     assert.ok(src.includes('<ScrollRail'), `${file} has no ScrollRail — is a rail still hand-rolled?`);
     // No raw overflow-x-auto left behind: that is the shape that had the problem.
@@ -48,7 +50,7 @@ test('both rails go through ScrollRail, and leave room for the bar', () => {
       );
     }
   }
-  assert.equal(rails, 2, `expected the trending rail and the language strip, found ${rails}`);
+  assert.equal(rails, 1, `expected the trending rail, found ${rails}`);
 });
 
 test('the arrows exist, are desktop-only, and mirror under RTL', () => {

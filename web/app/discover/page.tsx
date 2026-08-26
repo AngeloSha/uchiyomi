@@ -5,15 +5,14 @@ import { api } from '@/lib/api';
 import { ART } from '@/lib/art';
 import { relativeTime } from '@/lib/format';
 import { useAuth, canDownload } from '@/lib/auth';
-import { loadDiscoverPrefs, saveDiscoverPrefs } from '@/lib/discoverPrefs';
-import { storedLocale, detectLocale, t as tr } from '@/lib/i18n';
+import { t as tr } from '@/lib/i18n';
 import { useToast } from '@/components/Toast';
 import { EmptyState } from '@/components/EmptyState';
 import { ProgressBar, Reveal } from '@/components/ui';
 import { SourceCard, SourceItem } from '@/components/cards';
 import { ScrollRail } from '@/components/ScrollRail';
 import { DiscoverHero, TrendingCard, Trending } from '@/components/DiscoverHero';
-import { SourcePicker, SourceLatest, Src, SrcState, budgetFor, languagesOf } from '@/components/SourcePicker';
+import { SourcePicker, SourceLatest, Src, SrcState, budgetFor } from '@/components/SourcePicker';
 import { AddSeriesDialog, AddSeed } from '@/components/AddSeriesDialog';
 import { IcChevronLeft, IcSearch, IcSparkle, IcX } from '@/components/icons';
 
@@ -33,7 +32,7 @@ const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, '');
  *
  * So: a wall of what your sources published, led by a full-bleed hero built from AniList key art that
  * `/api/discover/trending` has been returning all along and this page rendered as a 144px thumbnail. The 45
- * sources across 30 languages collapse to one remembered language chip. Search survives as a field, with a
+ * sources are ranked and the best few are fetched at once. Search survives as a field, with a
  * way back out that it never had.
  *
  * `/api/sources/latest` takes up to fifteen seconds, so the six sources are fetched independently and the
@@ -71,25 +70,6 @@ export default function DiscoverPage() {
     refetchOnMount: 'always',
   });
 
-  // ---------------------------------------------------------------- the language
-  const [lang, setLang] = useState('');
-  const resolved = useRef(false);
-  useEffect(() => {
-    if (resolved.current || !sources.length) return;
-    resolved.current = true;
-    const avail = new Set(languagesOf(sources).map((l) => l.code));
-    const stored = loadDiscoverPrefs().lang ?? (user?.settings as any)?.discover?.lang;
-    const ui = storedLocale() ?? detectLocale();
-    // Their own UI language is the right first guess and needs no request to know.
-    setLang(
-      stored && avail.has(stored) ? stored
-      : avail.has(ui) ? ui
-      : avail.has('en') ? 'en'
-      : (languagesOf(sources)[0]?.code ?? ''),
-    );
-  }, [sources, user]);
-  const pickLang = (code: string) => { setLang(code); saveDiscoverPrefs({ lang: code }); };
-
   // ---------------------------------------------------------------- the wall
   const [mode, setMode] = useState<'newest' | 'search'>('newest');
   const [q, setQ] = useState('');
@@ -103,10 +83,11 @@ export default function DiscoverPage() {
   const [added, setAdded] = useState<Set<string>>(new Set());
 
   // Ranked once; how many of them are actually asked grows as answers come back.
-  const ranked = useMemo(() => budgetFor(sources, lang, 12), [sources, lang]);
+  const ranked = useMemo(() => budgetFor(sources, 12), [sources]);
 
-  // Changing language starts a new wall. Keeping the old one would show Korean sources under an English chip.
-  useEffect(() => { setById({}); setOrder([]); setStates({}); setPage(1); }, [lang]);
+  // Nothing resets the wall any more. That reset -- and specifically resetting it WITHOUT remounting the
+  // children, which kept their React keys and their cached queries -- is what left the page counting sources
+  // it had just forgotten, with skeletons that never resolved. See the warning on SourceLatest.
 
   /**
    * Six sources, plus one more for every one that came back with nothing.
@@ -124,6 +105,11 @@ export default function DiscoverPage() {
     () => ranked.slice(0, Math.min(ranked.length, 10, 6 + emptied)),
     [ranked, emptied],
   );
+
+  // AddSeriesDialog's effect depends on this list. Built inline it was a fresh array every render, so with
+  // the hero's add dialog open every settling source refired /api/sources/find -- a fan-out with a
+  // 25-second per-source timeout, repeatedly, while the wall filled in behind it.
+  const budgetIds = useMemo(() => budget.map((s) => s.id), [budget]);
 
   const onSettled = useCallback((id: string, items: SourceItem[], ok: boolean) => {
     setById((prev) => (prev[id]?.length && !items.length ? prev : { ...prev, [id]: [...(prev[id] ?? []), ...items] }));
@@ -271,8 +257,7 @@ export default function DiscoverPage() {
       </header>
 
       {mode === 'newest' && (
-        <SourcePicker sources={sources} lang={lang} onLang={pickLang} states={states}
-          settled={settled} total={budget.length} />
+        <SourcePicker sources={budget} states={states} settled={settled} total={budget.length} />
       )}
 
       {/* One mounted child per budgeted source. Renders nothing; owns one request. */}
@@ -332,9 +317,9 @@ export default function DiscoverPage() {
         <div className="card col-span-full mt-2 p-8 text-center">
           <p className="text-sm text-fog-400">
             {mode === 'search' ? tr('No results across your sources — try another title.')
-              : budget.length === 0 ? tr('No sources available in this language. Try another one above.')
+              : budget.length === 0 ? tr('No sources are set up yet. Add one in Admin \u2192 Providers.')
               : Object.values(states).every((s) => s === 'blocked')
-                ? tr('No source in this language could be reached.')
+                ? tr('No source could be reached right now.')
                 : tr('Nothing new from these sources right now.')}
           </p>
           {mode === 'newest' && (
@@ -366,7 +351,7 @@ export default function DiscoverPage() {
       {seed && (
         <AddSeriesDialog
           seed={seed}
-          sources={budget.map((s) => s.id)}
+          sources={budgetIds}
           onClose={() => setSeed(null)}
           onAdded={(r) => {
             setAdded((prev) => new Set(prev).add(norm(r.title)));

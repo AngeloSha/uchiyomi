@@ -2,13 +2,10 @@
 import { useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '@/lib/api';
-import { ScrollRail } from '@/components/ScrollRail';
-import { t as tr } from '@/lib/i18n';
 
 export type { Src, SrcState } from '@/lib/sourceGroups';
-export { inGroup, languagesOf, budgetFor } from '@/lib/sourceGroups';
+export { budgetFor } from '@/lib/sourceGroups';
 import type { Src } from '@/lib/sourceGroups';
-import { inGroup, languagesOf } from '@/lib/sourceGroups';
 import type { SrcState } from '@/lib/sourceGroups';
 
 const DOT: Record<SrcState, string> = {
@@ -20,35 +17,24 @@ const DOT: Record<SrcState, string> = {
   off: 'bg-ink-600',
 };
 
-export function SourcePicker({ sources, lang, onLang, states, settled, total }: {
+/**
+ * Which sources are being asked, and how each one answered.
+ *
+ * This is the whole filter surface now. There was a language rail above it, which is gone: it made the wall
+ * restartable mid-load, and a restart was what stalled it.
+ */
+export function SourcePicker({ sources, states, settled, total }: {
   sources: Src[];
-  lang: string;
-  onLang: (code: string) => void;
   states: Record<string, SrcState>;
   settled: number;
   total: number;
 }) {
-  const langs = languagesOf(sources);
-  const group = sources.filter((s) => s.latest && inGroup(s, lang)).slice(0, 12);
+  const shown = sources.filter((s) => s.latest).slice(0, 12);
 
   return (
     <div className="mt-4 space-y-2.5">
-      {langs.length > 1 && (
-        <ScrollRail size="sm" label={tr('Language')}
-          className="bleed flex items-center gap-2 px-4 pb-3 lg:px-8">
-          <span className="shrink-0 pe-1 text-[11px] font-semibold uppercase tracking-wider text-fog-500">{tr('Language')}</span>
-          {langs.map((l) => (
-            <button key={l.code} onClick={() => onLang(l.code)}
-              className={`chip shrink-0 whitespace-nowrap text-xs ${l.code === lang ? 'chip-active' : ''}`}>
-              {l.label}<span className="ms-1 tabular-nums text-fog-500">{l.count}</span>
-            </button>
-          ))}
-        </ScrollRail>
-      )}
-
-      {/* The source chips ARE the loading indicator: which sources are being asked, and how each answered. */}
       <div className="flex flex-wrap items-center gap-2">
-        {group.map((s) => {
+        {shown.map((s) => {
           const st = states[s.id] ?? 'idle';
           return (
             <span key={s.id} title={s.name}
@@ -76,6 +62,13 @@ export function SourcePicker({ sources, lang, onLang, states, settled, total }: 
  * and each owns its own query, rather than the parent trying to call `useQuery` in a loop. `enabled` is the
  * concurrency gate; `retry: false` because a fifteen-second failure retried three times is forty-five
  * seconds of nothing.
+ *
+ * ⚠ If the parent ever clears its settle bookkeeping again, it MUST also change these children's React key
+ * so they remount. That combination is what caused the stall this component was rewritten to fix: a source
+ * present both before and after a reset kept its key, so it never unmounted; its query still held cached
+ * data, so `isSuccess` and `data` never changed identity, so the effect below never re-ran; and the parent
+ * had just forgotten it. `settled` could then never reach `budget.length`, leaving skeleton tiles on screen
+ * forever and killing infinite scroll for the rest of the session.
  */
 export function SourceLatest({ source, page, enabled, onSettled }: {
   source: Src;
@@ -85,7 +78,13 @@ export function SourceLatest({ source, page, enabled, onSettled }: {
 }) {
   const { data, isError, isSuccess } = useQuery({
     queryKey: ['src-latest', source.id, page],
-    queryFn: () => api<{ content: any[] }>(`/api/sources/latest?source=${encodeURIComponent(source.id)}&page=${page}`),
+    // The signal matters more here than anywhere else in the app. Without consuming it, react-query's
+    // `removeObserver` takes its non-aborting branch, so a source dropped from the wall keeps scraping:
+    // the server spends its full eight-second budget on an answer nobody will read, and a timeout then
+    // writes a five-to-thirty-minute cooldown against that source. Abandoning a request used to make the
+    // wall worse for the next half hour.
+    queryFn: ({ signal }) =>
+      api<{ content: any[] }>(`/api/sources/latest?source=${encodeURIComponent(source.id)}&page=${page}`, { signal }),
     enabled,
     retry: false,
     staleTime: 5 * 60 * 1000,
