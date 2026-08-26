@@ -1,6 +1,10 @@
 // Generated cinematic key-art (Higgsfield), served from /public/art.
 export const ART = {
   login: '/art/login.webp',
+  // The login screen's cover wall. Built from this app's own key art by scripts/login-wall.py, NOT from the
+  // library: the login screen is pre-auth, /img/* is 401 there, and a public page fed from the library would
+  // walk straight past per-library grants, max_age_rating and the 18+ hide.
+  loginWall: '/art/login-wall.webp',
   splash: '/art/splash.webp',
   hero: '/art/hero.webp',
   section: '/art/section.webp',

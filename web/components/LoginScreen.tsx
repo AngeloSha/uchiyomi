@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useState } from 'react';
-import { motion } from 'framer-motion';
+import { motion, useReducedMotion } from 'framer-motion';
 import { useAuth } from '@/lib/auth';
 import { api } from '@/lib/api';
 import { ART } from '@/lib/art';
@@ -30,6 +30,9 @@ export function LoginScreen() {
   const [errMsg, setErrMsg] = useState('');
   const [sso, setSso] = useState<{ enabled: boolean; name: string }>({ enabled: false, name: '' });
   const err = !!errMsg;
+  // globals.css kills CSS animation under prefers-reduced-motion, but it cannot reach framer-motion, so
+  // this screen's backdrop ignored the setting until now.
+  const still = useReducedMotion();
 
   // First-run detection: if the server has no users yet, show a create-admin form instead of login.
   useEffect(() => {
@@ -84,18 +87,23 @@ export function LoginScreen() {
 
   return (
     <div className="relative flex min-h-screen-d flex-col items-center justify-center overflow-hidden px-6">
-      {/* cinematic key-art backdrop */}
+      {/* A wall of cover art, tilted. Built from this app's own key art (scripts/login-wall.py), never from
+          the library: this screen is pre-auth, so anything here is visible to anyone who can reach the
+          server. The scrims below are what carry the form's contrast -- the image itself is deliberately
+          brighter than it looks here, because these layers darken it. */}
       <div className="absolute inset-0">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <motion.img
-          src={ART.login}
+          src={ART.loginWall}
           alt=""
-          initial={{ scale: 1.12, opacity: 0 }}
-          animate={{ scale: 1, opacity: 1 }}
-          transition={{ duration: 1.6, ease: [0.22, 1, 0.36, 1] }}
+          initial={still ? false : { scale: 1.1, opacity: 0 }}
+          animate={still ? { opacity: 1 } : { scale: 1, opacity: 1 }}
+          transition={still ? { duration: 0 } : { duration: 1.8, ease: [0.22, 1, 0.36, 1] }}
           className="h-full w-full object-cover"
         />
-        <div className="absolute inset-0 bg-gradient-to-t from-ink-950 via-ink-950/72 to-ink-950/35" />
+        {/* Heavier than the single key art needed: a busy wall takes more separating from the form. */}
+        <div className="absolute inset-0 bg-gradient-to-t from-ink-950 via-ink-950/88 to-ink-950/62" />
+        <div className="absolute inset-0" style={{ background: 'radial-gradient(58% 46% at 50% 42%, rgb(0 0 0 / 0.72), transparent 72%)' }} />
         <div className="absolute inset-0" style={{ background: 'radial-gradient(60% 50% at 50% 18%, rgb(var(--accent) / 0.18), transparent 70%)' }} />
       </div>
       <div className="fx-grain" />
