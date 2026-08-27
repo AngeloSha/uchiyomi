@@ -114,8 +114,13 @@ export function DiscoverHero({ slides, onPick }: { slides: Trending[]; onPick: (
           </button>
           {slides.length > 1 && (() => {
             // A window, not one dot per slide: see lib/carousel. The ends shrink when there is more beyond
-            // them, which is what keeps ten slides legible in the width five used to take.
-            const { items, moreBefore, moreAfter } = dotWindow(slides.length, i);
+            // them.
+            //
+            // The window exists because ten inline dots overflow a PHONE, next to a padded button inside a
+            // padded container. That was never a desktop problem, and capping it everywhere made the jump
+            // from five slides to ten completely invisible: the row looked pixel-identical either way. So
+            // the bound follows the constraint -- generous where there is room, tight where there is not.
+            const { items, moreBefore, moreAfter } = dotWindow(slides.length, i, wide ? 12 : 5);
             return (
               <div className="flex gap-1.5 ps-1">
                 {items.map((k, n) => {

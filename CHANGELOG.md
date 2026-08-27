@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.9.7 — 2026-08-27
+
+### The trending hero shows the slides it has
+
+v0.9.6 took the hero from five titles to ten and then hid the fact. Its position dots are drawn as a sliding
+window, capped so that a long carousel cannot push the row off the side of a phone, and that cap was applied
+at every screen size. The row therefore looked identical whether it held five slides or ten.
+
+The overflow it guards against was only ever a phone problem. The window now follows the space available:
+every dot on a desktop, the compact window on a phone.
+
 ## v0.9.6 — 2026-08-27
 
 ### Failing sources now say what is wrong, and what to do about it
