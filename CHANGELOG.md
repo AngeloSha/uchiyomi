@@ -1,5 +1,56 @@
 # Changelog
 
+## v0.9.6 — 2026-08-27
+
+### Failing sources now say what is wrong, and what to do about it
+
+Discover showed a dot beside each source: green when it came back with covers, grey when it did not. Grey
+turned out to mean four unrelated things, and the two worth knowing about were invisible.
+
+A source serving out a cooldown is never asked at all, so it returns an empty list and looks exactly like a
+healthy source with nothing new. And an empty answer was recorded nowhere: a Cloudflare check served as an
+ordinary page, or a site that had changed its layout, produced no error, so nothing was ever written down.
+A source could be broken for weeks while looking merely quiet.
+
+Both are now visible. An empty answer is counted without being treated as a failure, which matters: several
+sites answer a failed check with an empty page rather than an error, and treating that as success would wipe
+a cooldown that was recorded for good reason. A source that keeps answering with nothing is marked as such,
+sorted below the ones that work, and says so on Discover with an estimate of when it will be tried again.
+
+Admin, Sources, Providers gains a **Test** button. It goes and looks at the site right now, deliberately
+without the Cloudflare solver in the way, then exercises the source end to end and reports which step failed.
+That distinction is the whole point: a site that answers this server directly while the solver is failing is
+a solver problem, not a site problem, and those two were indistinguishable before.
+
+The reason is written in plain language with a suggested fix, rather than as the raw recorded error. Five
+different faults used to record the single word "timeout".
+
+Custom sites can finally have their address changed. Previously the only options were add and delete, and
+deleting loses the link to every series that came from that source, so following a site to a new domain
+meant orphaning your library.
+
+### The Cloudflare solver stops failing silently
+
+Chrome cannot run in Docker's default 64 MB of shared memory. It was crashing mid-check, and the app
+faithfully reported that as the *sites* blocking us. The solver also leaks memory, reaching 2.5 GB after two
+months here, and a bloated one fails in that same misleading way.
+
+It now gets the memory it needs, a cap so a leak restarts it instead of degrading it, and a health check, so
+"running" and "working" stop being the same thing. The health page carries it as its own line and points at
+it directly when several sources fail at once and all of them blame it.
+
+Also fixed: the health page's count of how many series depend on a source, which compared a display name to
+an id and so always reported zero.
+
+### More on the Discover hero
+
+The trending hero rotates through ten titles instead of five, a little quicker, and preloads the next one.
+
+Raising the number alone would have done nothing on a large library. The hero only used titles with wide
+banner art, and of forty trending titles only sixteen have any; on a 215-series library just seven survived
+the filter for things you do not already own. It now fills the remaining slots from titles with ordinary
+cover art, which it already knew how to display.
+
 ## v0.9.5 — 2026-08-27
 
 ### Discover no longer stalls, and the language chips are gone
