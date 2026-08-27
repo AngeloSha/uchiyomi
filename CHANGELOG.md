@@ -1,5 +1,35 @@
 # Changelog
 
+## v0.9.8 — 2026-08-27
+
+### Sources are now checked for you
+
+A source that dies quietly stays dead. It answers with an empty page, throws no error, records nothing, and
+goes on reporting itself healthy. One install ran six weeks that way: its main site, holding 189 of 215
+series, had its domain quietly repurposed into an unrelated website, and the only symptom was that some dots
+on Discover looked wrong.
+
+There is now a daily check. It asks each site directly, exercises the source end to end, and writes down
+what it finds. Two things it fixes by itself, because both have exactly one correct answer and both can be
+verified before committing to them:
+
+- **A site that has moved** is followed to its new address, but only after the new address proves it can
+  still search, list chapters and serve pages. If it cannot, the change is rolled back. This matters more
+  than it sounds: on the install this was built for, one dead site redirected to a chat community and
+  another to a page serving "404 Not Found" with a success code. Both would have looked like moves.
+- **Extensions with an update available** are updated.
+
+Everything else is reported rather than acted on: a site refusing the server, a listing that has changed
+shape, a host that has gone. Those need a judgement call, and disabling a source over what turns out to be a
+two-hour outage is worse than leaving it be. Admins get a notification when something needs them, and
+Admin, Sources, Providers has a **Check all now** button that runs the identical sweep on demand.
+
+### Two sources repaired
+
+Manganato-engine sites had stopped listing anything. The path the engine asked for, `/genre-all`, now
+answers successfully with a page containing no series at all, which is exactly the silent failure above. It
+now asks for the current listing path and keeps the old one as a fallback for sites that still serve it.
+
 ## v0.9.7 — 2026-08-27
 
 ### The trending hero shows the slides it has

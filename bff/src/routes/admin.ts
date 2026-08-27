@@ -15,7 +15,9 @@ import { authenticate, requireAdmin, userIdOf, revokeAllSessions, revokeRefreshT
 import { logAudit, recentAudit } from '../lib/audit';
 import { healthAll, setDisabled, clearBlock, SourceHealth } from '../lib/sourceHealth';
 import { smokeTest, probeBase } from '../lib/sourceProbe';
+import { runSourceCheck, checkRunning } from '../lib/sourceWatchdog';
 import { diagnose } from '../lib/sourceDiagnosis';
+import { readSites, writeSites } from '../lib/sources/customSites';
 import { reloadAll, listSources, getSource, detectEngine, listRemoteSources, suwayomiConfigured, suwayomiAbout, swAdapterId } from '../lib/sources';
 import { listExtensions, refreshExtensions, setExtensionState, sourcesOfExtension, getRepos, setRepos, normalizeRepoUrl, altRepoUrl } from '../lib/sources/suwayomi/extensions';
 import { readFile, writeFile, mkdir, rm } from 'fs/promises';
@@ -153,10 +155,7 @@ export default async function adminRoutes(app: FastifyInstance) {
 
   // ---- custom "template" sites (Madara/Manganato added by name+URL, no code). The core only reads/writes
   // a JSON file; the source pack's custom plugin instantiates the adapters from it on reload. ----
-  const SITES_FILE = process.env.CUSTOM_SITES_FILE || '/config/sites.json';
-  type Site = { engine: string; id: string; name: string; base: string; order?: number };
-  const readSites = async (): Promise<Site[]> => { try { const j = JSON.parse(await readFile(SITES_FILE, 'utf8')); return Array.isArray(j) ? j : []; } catch { return []; } };
-  const writeSites = async (list: Site[]) => { await mkdir(dirname(SITES_FILE), { recursive: true }).catch(() => {}); await writeFile(SITES_FILE, JSON.stringify(list, null, 2)); };
+  // readSites/writeSites moved to lib/sources/customSites so the watchdog can follow a moved site too.
   const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, '').slice(0, 40);
 
   app.get('/api/admin/sources/custom', async () => ({ content: await readSites() }));
@@ -1329,6 +1328,29 @@ export default async function adminRoutes(app: FastifyInstance) {
    *   proof it will download. Auto-clearing would also reset `consecutive` to 0, so the next failure would
    *   earn a SHORTER cooldown than the one before it.
    */
+  /**
+   * Run the source watchdog now, rather than waiting for its daily sweep.
+   *
+   * Same code path as the schedule, including the auto-fixes, so what an admin sees here is exactly what
+   * happens unattended. It can take a while: every source is probed and smoke-tested one at a time, on
+   * purpose, because they share one Cloudflare solver.
+   */
+  app.post('/api/admin/sources/check', async (req, reply) => {
+    if (checkRunning()) return reply.code(409).send({ error: 'busy', message: 'A source check is already running.' });
+    try {
+      const r = await runSourceCheck();
+      await logAudit('source.check', {
+        userId: userIdOf(req),
+        detail: { checked: r.sources.length, attention: r.needsAttention.length, extensions: r.extensionsUpdated.length },
+        req,
+      });
+      return reply.send(r);
+    } catch (e: any) {
+      if (e?.busy) return reply.code(409).send({ error: 'busy' });
+      throw e;
+    }
+  });
+
   const testing = new Set<string>();
   app.post('/api/admin/sources/:id/test', async (req, reply) => {
     const { id } = req.params as { id: string };

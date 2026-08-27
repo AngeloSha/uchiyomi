@@ -3,7 +3,7 @@
 Everything the web app does, it does over this API, so anything you can do in the browser you can script.
 
 This page covers how to authenticate and the endpoints worth scripting. It is not an exhaustive dump of all
-176 routes; the full list is at the bottom for reference.
+177 routes; the full list is at the bottom for reference.
 
 ## Authenticating
 
@@ -117,6 +117,13 @@ returning per-step `checks`, the `probe` result and a `diagnosis`. It ignores an
 point, and it deliberately writes no health of its own: a diagnostic that changed the diagnosis would let
 repeated clicks drive a source's cooldown to its ceiling. A pass reports `canClear` rather than clearing the
 block itself, because the smoke test stops at listing page URLs and never fetches an image byte.
+
+`POST /api/admin/sources/check` (admin) runs the source watchdog immediately instead of waiting for its
+daily sweep. It probes every enabled source and smoke-tests its adapter, one at a time because they share a
+single Cloudflare solver, then returns a verdict per source. It applies only the two fixes that are
+verifiable: it follows a site to a new address **after** the new one passes a smoke test (rolling back if it
+does not), and it updates extensions whose server reports an update. Everything else is reported with a
+reason and a suggested fix, and admins get a push notification. Answers **409** while a sweep is running.
 
 `PATCH /api/admin/sources/custom/:id` (admin) changes a custom site's `base` address and nothing else. The
 source id is derived from its name and the library is keyed on that id, so editing in place is the only way
@@ -304,6 +311,7 @@ POST   /api/admin/tasks/:id/run   POST   /api/admin/library/scan
 POST   /api/admin/update          POST   /api/admin/update/:id
 GET    /api/admin/sources         POST   /api/admin/sources/:id/:action
 POST   /api/admin/sources/:id/test
+POST   /api/admin/sources/check
 POST   /api/admin/sources/reload  GET    /api/admin/sources/custom
 POST   /api/admin/sources/custom  DELETE /api/admin/sources/custom/:id
 PATCH  /api/admin/sources/custom/:id

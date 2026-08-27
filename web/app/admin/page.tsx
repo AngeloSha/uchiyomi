@@ -491,6 +491,21 @@ function Providers() {
   };
   // A live verdict per source, kept until the panel is left. The stored error can be months older than the
   // running container, so a test result always wins the display.
+  const [sweep, setSweep] = useState<any>(null);
+  const [checking, setChecking] = useState(false);
+  /** Run the daily watchdog on demand. Slow on purpose: every source is probed one at a time. */
+  const checkAll = async () => {
+    setChecking(true);
+    try {
+      const r = await api<any>('/api/admin/sources/check', { method: 'POST' });
+      setSweep(r);
+      toast(r.needsAttention.length ? `${r.needsAttention.length} source(s) need attention` : 'All sources healthy',
+        r.needsAttention.length ? 'error' : 'success');
+      inval();
+    } catch (e: any) { toast(msgOf(e, 'Could not run the check'), 'error'); }
+    setChecking(false);
+  };
+
   const [tested, setTested] = useState<Map<string, any>>(new Map());
   const [testingId, setTestingId] = useState<string | null>(null);
   const testSource = async (id: string) => {
@@ -566,10 +581,33 @@ function Providers() {
   const list = srcs?.content || [];
   return (
     <div className="board">
-      <div className="full flex items-center justify-between gap-3">
+      <div className="full flex flex-wrap items-center justify-between gap-3">
         <p className="text-sm text-fog-400">{list.length} source{list.length === 1 ? '' : 's'} installed</p>
-        <button onClick={reload} disabled={reloading} className="chip shrink-0 text-xs disabled:opacity-50">{reloading ? 'Reloading…' : '↻ Reload sources'}</button>
+        <div className="flex gap-1.5">
+          {/* The same sweep that runs daily on its own, so what you see here is what happens unattended. */}
+          <button onClick={checkAll} disabled={checking} className="chip shrink-0 text-xs disabled:opacity-50">
+            {checking ? 'Checking…' : '🔍 Check all now'}
+          </button>
+          <button onClick={reload} disabled={reloading} className="chip shrink-0 text-xs disabled:opacity-50">{reloading ? 'Reloading…' : '↻ Reload sources'}</button>
+        </div>
       </div>
+      {sweep && (
+        <div className="full rounded-xl border border-ink-700 bg-ink-850/60 p-3">
+          <p className="text-xs text-fog-300">
+            Checked {sweep.sources.length} source{sweep.sources.length === 1 ? '' : 's'}.
+            {sweep.needsAttention.length
+              ? ` ${sweep.needsAttention.length} need${sweep.needsAttention.length === 1 ? 's' : ''} attention.`
+              : ' Nothing needs attention.'}
+            {sweep.extensionsUpdated.length ? ` Updated ${sweep.extensionsUpdated.length} extension(s).` : ''}
+          </p>
+          {sweep.sources.filter((v: any) => v.action).map((v: any) => (
+            <p key={v.id} className="mt-1 text-[11px] text-emerald-300">✓ {v.name}: followed its move to a new address</p>
+          ))}
+          {sweep.needsAttention.map((v: any) => (
+            <p key={v.id} className="mt-1 text-[11px] text-fog-400"><span className="text-fog-200">{v.name}</span>: {v.fix || v.reason}</p>
+          ))}
+        </div>
+      )}
 
       {/* Add a site (Madara / Manganato engines — most manga aggregators) */}
       <div className="card grad-border wide p-4">

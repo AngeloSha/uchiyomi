@@ -17,6 +17,9 @@ export interface SourceHealth {
   /** Consecutive empty `latest()` pages. Evidence for the diagnosis layer; nothing else reads it. */
   empty_streak: number;
   last_empty_at: string | null;
+  /** When the watchdog last checked this source deliberately, and what it concluded. */
+  checked_at: string | null;
+  check_code: string | null;
   updated_at: string;
 }
 
@@ -101,7 +104,7 @@ export async function blockedNow(sourceId: string): Promise<SourceHealth | null>
 }
 
 export const healthAll = () =>
-  q<SourceHealth>('SELECT source_id, status, consecutive, last_error, last_fail_at, last_ok_at, blocked_until, disabled, empty_streak, last_empty_at, updated_at FROM source_health');
+  q<SourceHealth>('SELECT source_id, status, consecutive, last_error, last_fail_at, last_ok_at, blocked_until, disabled, empty_streak, last_empty_at, checked_at, check_code, updated_at FROM source_health');
 
 export const isDisabled = async (sourceId: string) =>
   !!(await one<{ disabled: boolean }>('SELECT disabled FROM source_health WHERE source_id = $1', [sourceId]))?.disabled;

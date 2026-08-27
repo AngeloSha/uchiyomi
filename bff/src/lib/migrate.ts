@@ -272,6 +272,11 @@ CREATE TABLE IF NOT EXISTS source_health (
 -- columns are evidence that only the diagnosis layer reads.
 ALTER TABLE source_health ADD COLUMN IF NOT EXISTS empty_streak  int NOT NULL DEFAULT 0;
 ALTER TABLE source_health ADD COLUMN IF NOT EXISTS last_empty_at timestamptz;
+-- When the watchdog last looked at this source, and what it concluded. Separate from status/last_error,
+-- which describe what happened during ordinary use: these describe a deliberate check, and a check that
+-- ran and found nothing wrong is itself worth recording.
+ALTER TABLE source_health ADD COLUMN IF NOT EXISTS checked_at timestamptz;
+ALTER TABLE source_health ADD COLUMN IF NOT EXISTS check_code text;
 
 -- server-wide settings (single row, id=1)
 CREATE TABLE IF NOT EXISTS server_settings (

@@ -53,3 +53,15 @@ export async function notifyNewChapter(seriesId: string, title: string, addedCou
   };
   await Promise.all(users.map((u) => sendToUser(u.user_id, payload)));
 }
+
+/**
+ * Tell the operators something needs a decision.
+ *
+ * Admins only: these messages name sources, and the action they ask for lives behind Admin. A household
+ * reader cannot act on "ManhuaUS is refusing this server" and should not be woken up for it.
+ */
+export async function notifyAdmins(title: string, body: string, url = '/admin/', tag = 'sources'): Promise<void> {
+  if (!enabled) return;
+  const users = await q<{ id: string }>("SELECT id FROM users WHERE role = 'admin'").catch(() => []);
+  await Promise.all(users.map((u) => sendToUser(u.id, { title, body, url, tag })));
+}

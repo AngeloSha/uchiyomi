@@ -11,6 +11,7 @@ import { runtime } from './lib/runtime';
 import { migrate } from './lib/migrate';
 import { loadSources, loadCustomSites, loadBuiltins, listSources, loadSuwayomiSources, scheduleSuwayomiRetry } from './lib/sources';
 import { scheduleFingerprintBackfill } from './lib/fingerprintJob';
+import { runSourceCheck } from './lib/sourceWatchdog';
 import { runUpdateAll } from './lib/updater';
 import { startSweeper } from './lib/imageCache';
 import { runBackup, msUntilHour } from './lib/backup';
@@ -157,6 +158,34 @@ async function main() {
       } catch { /* settings row not readable yet — keep the 6h default */ }
       setTimeout(tick, hours * 60 * 60 * 1000).unref();
     })();
+  }
+
+  /**
+   * Daily source watchdog.
+   *
+   * A source that dies quietly stays dead: it answers with an empty list, throws nothing, records nothing,
+   * and keeps reporting healthy. One install ran six weeks that way after its main site's domain was
+   * repurposed into an unrelated website, and only noticed because the dots on Discover looked wrong.
+   *
+   * Daily rather than hourly because each sweep genuinely scrapes every source, and they share one
+   * Cloudflare solver. The first run waits ten minutes so a restart loop cannot turn this into a flood, and
+   * so a server that has just booted is answering readers before it starts checking itself.
+   */
+  {
+    const DAY = 24 * 60 * 60 * 1000;
+    const tick = async () => {
+      try {
+        const r = await runSourceCheck();
+        app.log.info(
+          `source check: ${r.sources.length} checked, ${r.needsAttention.length} need attention` +
+          (r.extensionsUpdated.length ? `, ${r.extensionsUpdated.length} extension(s) updated` : ''),
+        );
+      } catch (e) {
+        app.log.error(e as any);
+      }
+      setTimeout(tick, DAY).unref();
+    };
+    setTimeout(tick, 10 * 60 * 1000).unref();
   }
 
   // Nightly backup, aligned to a wall-clock hour and re-read from settings each run so it stays live-editable.

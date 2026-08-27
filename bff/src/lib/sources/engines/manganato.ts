@@ -9,6 +9,46 @@ import { seriesSlug, isOwnChapterUrl } from '../slug';
 const strip = (s: string) => s.replace(/<[^>]+>/g, '').replace(/&amp;/g, '&').replace(/&#0?39;|&apos;/g, "'").replace(/&quot;/g, '"').replace(/\s+/g, ' ').trim();
 const norm = (u: string) => u.replace(/^\/\//, 'https://').replace(/&amp;/g, '&').trim();
 
+/**
+ * Series cards from a Manganato-family listing page, whichever markup it happens to be serving.
+ *
+ * Patterns are tried in order and the first that yields anything wins. The `title`-attribute form is the
+ * most precise on current markup; the two below it are older layouts. Note the alt-text fallback already
+ * handled the rebranded pages on its own -- these are belt and braces for a template pointed at whatever
+ * Manganato-family site an operator names, not a fix for a specific site.
+ */
+export function parseListing(h: string, sourceId: string): SourceSeries[] {
+  if (!h) return [];
+  const covers = new Map<string, string>();
+  for (const m of h.matchAll(/<a[^>]+href="([^"]+\/manga\/[^"]+)"[^>]*>\s*<img[^>]+src="([^"]+)"/gi)) covers.set(norm(m[1]), norm(m[2]));
+
+  const patterns: Array<[RegExp, 1 | 2]> = [
+    // current: <a href=".../manga/slug" title="Name"><img ...>, inside .list-comic-item-wrap
+    [/<a[^>]+href="([^"]+\/manga\/[^"]+)"[^>]*\stitle="([^"]+)"/gi, 2],
+    // older Manganato: the name is the anchor's text under .genres-item-name / .item-title
+    [/(?:genres-item-name|item-title)[^>]*>\s*<a[^>]+href="([^"]+\/manga\/[^"]+)"[^>]*>([\s\S]*?)<\/a>/gi, 2],
+    // last resort: take it off the thumbnail's alt text
+    [/<a[^>]+href="([^"]+\/manga\/[^"]+)"[^>]*>\s*<img[^>]+alt="([^"]*?)"/gi, 2],
+  ];
+
+  for (const [re] of patterns) {
+    const out: SourceSeries[] = [];
+    const seen = new Set<string>();
+    for (const m of h.matchAll(re)) {
+      const url = norm(m[1]);
+      const title = strip(m[2]).replace(/\s+class=.*$/i, '');
+      // A listing page also links series from its sidebar and its "hot" carousel. Those are real series, so
+      // they cannot be filtered by shape -- but they are few, and de-duplicating by url keeps them from
+      // appearing twice. Order still follows the document, which is the listing itself.
+      if (!title || seen.has(url)) continue;
+      seen.add(url);
+      out.push({ sourceId: url, source: sourceId, title, url, coverUrl: covers.get(url) });
+    }
+    if (out.length) return out;
+  }
+  return [];
+}
+
 export function makeManganato(cfg: { id: string; name: string; base: string; order?: number }): SourceAdapter {
   const base = cfg.base.replace(/\/$/, '');
   const mangaUrl = (id: string) => (id.startsWith('http') ? id : `${base}/manga/${id}`);
@@ -46,29 +86,34 @@ export function makeManganato(cfg: { id: string; name: string; base: string; ord
       return out;
     },
 
-    // Browse the site's most recently updated series (Manganato's /genre-all listing, default latest order).
+    /**
+     * Browse the site's most recently updated series.
+     *
+     * Two listing layouts and two URL shapes, tried in order, because this engine template is pointed at
+     * whatever Manganato-family site the operator names and they do not all move at once.
+     *
+     * THE PATH is what broke, not the parsing. `/genre-all` was the only path here, and both sites on this
+     * install stopped serving it: it now answers 200 with a 20 KB stub carrying no series links at all.
+     * Because an empty parse throws nothing, the sources reported no error and simply went quiet -- the
+     * silent failure `reportLatest` exists to make visible. Mangakakalot and Natomanga had been returning
+     * nothing for weeks and months respectively while still reporting healthy.
+     *
+     * Worth stating plainly, because it was mis-diagnosed once already: the current markup parses fine
+     * under the pre-existing fallback. Nothing had to change about reading the page, only about which page
+     * is asked for.
+     */
     async latest(page = 1) {
       const p = Math.max(1, page);
-      const h = await cfGet(`${base}/genre-all${p > 1 ? `/${p}` : ''}`);
-      const covers = new Map<string, string>();
-      for (const m of h.matchAll(/<a[^>]+href="([^"]+\/manga\/[^"]+)"[^>]*>\s*<img[^>]+src="([^"]+)"/gi)) covers.set(norm(m[1]), norm(m[2]));
-      const out: SourceSeries[] = [];
-      const seen = new Set<string>();
-      for (const m of h.matchAll(/(?:genres-item-name|item-title)[^>]*>\s*<a[^>]+href="([^"]+\/manga\/[^"]+)"[^>]*>([\s\S]*?)<\/a>/gi)) {
-        const url = norm(m[1]);
-        if (seen.has(url)) continue;
-        seen.add(url);
-        out.push({ sourceId: url, source: cfg.id, title: strip(m[2]), url, coverUrl: covers.get(url) });
+      const paths = [
+        `/manga-list/latest-manga${p > 1 ? `?page=${p}` : ''}`,
+        `/genre-all${p > 1 ? `/${p}` : ''}`,
+      ];
+      for (const path of paths) {
+        const h = await cfGet(`${base}${path}`).catch(() => '');
+        const out = parseListing(h, cfg.id);
+        if (out.length) return out;
       }
-      if (!out.length) {
-        for (const m of h.matchAll(/<a[^>]+href="([^"]+\/manga\/[^"]+)"[^>]*>\s*<img[^>]+alt="([^"]*?)"/gi)) {
-          const url = norm(m[1]);
-          if (seen.has(url)) continue;
-          seen.add(url);
-          out.push({ sourceId: url, source: cfg.id, title: strip(m[2]).replace(/\s+class=.*$/i, ''), url, coverUrl: covers.get(url) });
-        }
-      }
-      return out;
+      return [];
     },
 
     async getSeries(id) {
