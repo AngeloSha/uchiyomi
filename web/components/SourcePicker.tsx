@@ -5,16 +5,17 @@ import { api } from '@/lib/api';
 
 export type { Src, SrcState } from '@/lib/sourceGroups';
 export { budgetFor } from '@/lib/sourceGroups';
+import { noteFor, retryIn } from '@/lib/sourceGroups';
 import type { Src } from '@/lib/sourceGroups';
 import type { SrcState } from '@/lib/sourceGroups';
 
-const DOT: Record<SrcState, string> = {
-  loading: 'bg-accent animate-pulse-soft',
+// Keyed on what `noteFor` decided, not on the raw state, because "empty" is two different things and the
+// server is the only one who knows which. `loading` and `off` used to be in here and nothing ever set them.
+const DOT = {
   ok: 'bg-emerald-400',
-  empty: 'bg-fog-600',
+  warn: 'bg-amber-400',
+  quiet: 'bg-fog-600',
   idle: 'bg-ink-500',
-  blocked: 'bg-amber-400',
-  off: 'bg-ink-600',
 };
 
 /**
@@ -30,21 +31,39 @@ export function SourcePicker({ sources, states, settled, total }: {
   total: number;
 }) {
   const shown = sources.filter((s) => s.latest).slice(0, 12);
+  // Sources that are actually broken, as opposed to merely having nothing new. Two at most: this is a hint
+  // under a wall of covers, not an incident report, and the full story lives in Admin.
+  const troubled = shown
+    .map((s) => ({ s, ...noteFor(s, states[s.id] ?? 'idle') }))
+    .filter((x) => !!x.note)
+    .slice(0, 2);
 
   return (
     <div className="mt-4 space-y-2.5">
       <div className="flex flex-wrap items-center gap-2">
         {shown.map((s) => {
           const st = states[s.id] ?? 'idle';
+          const { dot, note } = noteFor(s, st);
           return (
-            <span key={s.id} title={s.name}
-              className={`chip max-w-[46vw] cursor-default text-xs sm:max-w-none ${st === 'idle' || st === 'off' ? 'opacity-55' : ''}`}>
-              <span aria-hidden className={`h-1.5 w-1.5 shrink-0 rounded-full ${DOT[st]}`} />
+            <span key={s.id} title={note ? `${s.name} — ${note}` : s.name}
+              className={`chip max-w-[46vw] cursor-default text-xs sm:max-w-none ${st === 'idle' ? 'opacity-55' : ''}`}>
+              <span aria-hidden className={`h-1.5 w-1.5 shrink-0 rounded-full ${DOT[dot]}`} />
               <span className="truncate">{s.name}</span>
             </span>
           );
         })}
       </div>
+
+      {/* `title` is invisible on a touchscreen, which is most of this app's use, so the reason also has to
+          exist as text. Without this the amber dot would be one more colour nobody can interpret. */}
+      {troubled.map(({ s, note }) => {
+        const when = retryIn(s);
+        return (
+          <p key={s.id} className="text-[11px] leading-relaxed text-fog-500">
+            <span className="text-fog-400">{s.name}</span>: {note}{when ? ` (${when})` : ''}
+          </p>
+        );
+      })}
 
       {settled < total && (
         <div className="h-px w-full overflow-hidden bg-ink-700">

@@ -72,6 +72,11 @@ const schema = z.object({
   // FlareSolverr-backed site -- so a single slow source stalled the whole wall for over a minute. Settable
   // because an operator on a slow link may want more, and because a test cannot afford to wait 8 seconds.
   SOURCE_LATEST_TIMEOUT_MS: z.coerce.number().int().min(100).max(120000).default(8000),
+  // How long the admin "test this source" probe gets, end to end. It exercises search -> series -> chapters
+  // -> pages, and each of those can reach FlareSolverr's own 95s abort, so the original 30s Promise.race on
+  // the add-a-site path was guarding a 380s worst case (four search terms, serially). This is a wall-clock
+  // deadline checked BETWEEN stages and between search terms, which is a bound rather than a hope.
+  SOURCE_TEST_TIMEOUT_MS: z.coerce.number().int().min(1000).max(120000).default(25000),
   // Recognising a series whose folder was renamed or moved, by matching its chapters' content fingerprints.
   //   off    - a moved folder becomes a new series, as it always has
   //   report - work out what it WOULD match and write it to the audit log, change nothing

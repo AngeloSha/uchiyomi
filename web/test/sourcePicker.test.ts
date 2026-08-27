@@ -11,7 +11,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'fs';
 import { join } from 'path';
-import { budgetFor, Src } from '../lib/sourceGroups';
+import { budgetFor, noteFor, retryIn, Src } from '../lib/sourceGroups';
 
 const src = (p: Partial<Src> & { id: string }): Src =>
   ({ name: p.id, lang: null, latest: true, status: 'ok', ...p }) as Src;
@@ -98,4 +98,45 @@ test('the wall consumes the abort signal, so abandoning a source does not cost a
   // nothing either way, which is a guard that tests nothing.
   const mentions = (fn.match(/signal/g) ?? []).length;
   assert.ok(mentions >= 2, `the signal is accepted but never passed through to api() (seen ${mentions}x)`);
+});
+
+test('THE REPORTED BUG: a broken source must not look like a quiet one', () => {
+  // What prompted all of this: on Discover, "answered with nothing" and "is broken and could not answer"
+  // were the same grey dot. Four of ten sources on a real install sat broken for weeks looking exactly like
+  // sources that simply had no new chapters.
+  //
+  // Reintroduce by having `noteFor` return the same dot for `empty` whether or not a note is present.
+  const broken = src({ id: 'broken', note: 'This source is blocking this server right now.' });
+  const quiet = src({ id: 'quiet' });
+
+  assert.equal(noteFor(broken, 'empty').dot, 'warn', 'a source with a reason must stand out');
+  assert.equal(noteFor(quiet, 'empty').dot, 'quiet', 'a source with nothing new must not raise an alarm');
+  assert.notEqual(noteFor(broken, 'empty').dot, noteFor(quiet, 'empty').dot);
+  assert.equal(noteFor(broken, 'empty').note, broken.note);
+  assert.equal(noteFor(quiet, 'empty').note, null);
+});
+
+test('a healthy or unasked source says nothing', () => {
+  assert.deepEqual(noteFor(src({ id: 'a' }), 'ok'), { dot: 'ok', note: null });
+  assert.deepEqual(noteFor(src({ id: 'a' }), 'idle'), { dot: 'idle', note: null });
+});
+
+test('a source that answers with nothing sorts below one that works', () => {
+  // `quiet` is the server naming a state that used to be unrepresentable: no error was ever thrown, so no
+  // cooldown was earned, so `status` stayed 'ok' and the wall kept fetching it first for weeks.
+  //
+  // Reintroduce by narrowing budgetFor's comparator from `status !== 'ok'` to `status === 'blocked'`:
+  // 'quiet' then ties with healthy and its much larger `used` count lifts it back to the front.
+  const picked = budgetFor([
+    src({ id: 'drifted', status: 'quiet', used: 500 }),
+    src({ id: 'works', used: 10 }),
+  ], 2).map((x) => x.id);
+  assert.deepEqual(picked, ['works', 'drifted'], 'a source that returns nothing was fetched first');
+});
+
+test('the cooldown is reported as a wait, not a timestamp', () => {
+  const now = Date.parse('2026-08-27T09:00:00Z');
+  assert.equal(retryIn(src({ id: 'a', blockedUntil: '2026-08-27T09:12:00Z' }), now), 'back in ~12 min');
+  assert.equal(retryIn(src({ id: 'a', blockedUntil: '2026-08-27T08:50:00Z' }), now), null, 'an expired block is not a wait');
+  assert.equal(retryIn(src({ id: 'a' }), now), null);
 });

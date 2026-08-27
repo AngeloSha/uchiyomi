@@ -43,6 +43,9 @@ type Tab = (typeof TABS)[number];
 const STATUS_STYLE: Record<string, string> = {
   ok: 'bg-emerald-600/20 text-emerald-300', blocked: 'bg-red-600/20 text-red-300',
   rate_limited: 'bg-amber-600/20 text-amber-300', down: 'bg-orange-600/20 text-orange-300', disabled: 'bg-ink-700 text-fog-400',
+  // Answers without error, returns nothing. Deliberately not red: it may be a site redesign rather than a
+  // failure, and until it is tested nobody knows which.
+  quiet: 'bg-fog-600/20 text-fog-300',
 };
 
 export default function AdminPage() {
@@ -486,6 +489,36 @@ function Providers() {
     catch (e: any) { toast(msgOf(e, "Couldn't add — check the URL or pick the engine manually"), 'error'); }
     setAdding(false);
   };
+  // A live verdict per source, kept until the panel is left. The stored error can be months older than the
+  // running container, so a test result always wins the display.
+  const [tested, setTested] = useState<Map<string, any>>(new Map());
+  const [testingId, setTestingId] = useState<string | null>(null);
+  const testSource = async (id: string) => {
+    setTestingId(id);
+    try {
+      const r = await api<any>(`/api/admin/sources/${encodeURIComponent(id)}/test`, { method: 'POST' });
+      setTested((m) => new Map(m).set(id, r));
+      toast(r.ok ? 'Working' : (r.diagnosis?.reason || 'Still failing'), r.ok ? 'success' : 'error');
+      inval();
+    } catch (e: any) {
+      toast(msgOf(e, 'Could not test that source'), 'error');
+    }
+    setTestingId(null);
+  };
+  /** The one-click half of a moved site: the probe already found where it went. */
+  const moveSite = async (id: string) => {
+    const to = tested.get(id)?.probe?.finalUrl;
+    if (!to) return;
+    const origin = (() => { try { return new URL(to).origin; } catch { return null; } })();
+    if (!origin) return;
+    try {
+      const r = await api<any>(`/api/admin/sources/custom/${encodeURIComponent(id)}`, { method: 'PATCH', json: { base: origin } });
+      toast(r.smoke?.ok ? `Moved to ${origin}, verified` : `Moved to ${origin}`, r.smoke?.ok ? 'success' : 'error');
+      setTested((m) => { const n = new Map(m); n.delete(id); return n; });
+      inval();
+    } catch (e: any) { toast(msgOf(e, 'Could not update the address'), 'error'); }
+  };
+
   const removeSite = async (id: string) => { try { await api(`/api/admin/sources/custom/${id}`, { method: 'DELETE' }); toast('Removed', 'success'); inval(); } catch { toast('Failed', 'error'); } };
 
   type ImportJob = { running: boolean; total: number; done: number; added: number; already: number; notFound: number; failed: number; details: Array<{ title: string; status: string; source?: string }> };
@@ -642,10 +675,44 @@ function Providers() {
                   <span className="flex-1 text-sm text-fog-100">{s.name}{customIds.has(s.id) && <span className="ms-2 rounded bg-ink-700 px-1.5 py-0.5 text-[10px] text-fog-400">custom</span>}</span>
                   <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${STATUS_STYLE[st] || STATUS_STYLE.ok}`}>{st === 'rate_limited' ? 'rate-limited' : st}</span>
                 </div>
-                {h?.last_error && (st === 'blocked' || st === 'rate_limited' || st === 'down') && <p className="mt-1 truncate text-[11px] text-fog-500">{h.consecutive}× · {h.last_error}</p>}
-                <div className="mt-2 flex gap-1.5">
+                {/* The diagnosis, then the fix, then the raw error last and small. The raw string was all there
+                    used to be: "timeout", truncated to one line, written by three different faults. */}
+                {(() => {
+                  const t = tested.get(s.id);
+                  const d = t?.diagnosis;
+                  const unwell = st === 'blocked' || st === 'rate_limited' || st === 'down' || st === 'quiet';
+                  if (!d && !(h?.last_error && unwell)) return null;
+                  return (
+                    <div className="mt-1.5 space-y-1">
+                      {d && <p className="text-[12px] text-fog-200">{d.reason || 'Working normally.'}</p>}
+                      {d?.fix && <p className="text-[11px] leading-relaxed text-fog-400">{d.fix}</p>}
+                      {h?.last_error && unwell && (
+                        <p className="truncate text-[11px] text-fog-600" title={h.last_error}>{h.consecutive}× · {h.last_error}</p>
+                      )}
+                    </div>
+                  );
+                })()}
+                {(() => {
+                  const t = tested.get(s.id);
+                  if (!t) return null;
+                  return (
+                    <div className={`mt-2 rounded-xl border p-2 ${t.ok ? 'border-emerald-600/30 bg-emerald-600/10' : 'border-amber-600/30 bg-amber-600/10'}`}>
+                      {t.checks.map((c: any, i: number) => (
+                        <p key={i} className="text-[11px] text-fog-300">{c.ok ? '✓' : '✗'} {c.name}: <span className="text-fog-500">{c.detail}</span></p>
+                      ))}
+                      {t.timedOut && <p className="text-[11px] text-amber-300">Gave up waiting. The site is slow or heavily protected.</p>}
+                    </div>
+                  );
+                })()}
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  <button onClick={() => testSource(s.id)} disabled={testingId === s.id} className="chip text-xs disabled:opacity-50">
+                    {testingId === s.id ? 'Testing…' : tr('Test')}
+                  </button>
                   {(st === 'blocked' || st === 'rate_limited' || st === 'down') && <button onClick={() => act(s.id, 'unblock', 'Cleared')} className="chip text-xs">{tr('Clear block')}</button>}
                   <button onClick={() => act(s.id, st === 'disabled' ? 'enable' : 'disable', st === 'disabled' ? 'Enabled' : 'Disabled')} className="chip text-xs">{st === 'disabled' ? 'Enable' : 'Disable'}</button>
+                  {customIds.has(s.id) && tested.get(s.id)?.diagnosis?.code === 'moved' && (
+                    <button onClick={() => moveSite(s.id)} className="chip text-xs text-accent">{tr('Update address')}</button>
+                  )}
                   {customIds.has(s.id) && <button onClick={() => removeSite(s.id)} className="ms-auto text-xs text-red-300 hover:underline">{tr('Remove')}</button>}
                 </div>
               </div>

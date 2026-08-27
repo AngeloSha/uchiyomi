@@ -38,6 +38,19 @@ export interface SourceAdapter {
   imageReferer?: string | ((chapterUrl: string) => string);
   /** Extra headers for page/cover image fetches — e.g. auth for a source that proxies its own images. */
   imageHeaders?: Record<string, string> | ((imageUrl: string) => Record<string, string>);
+  /**
+   * The site's own homepage, when the adapter is a template over a user-supplied URL.
+   *
+   * Only the diagnostics use this: probing the base directly, WITHOUT the Cloudflare solver, is what
+   * separates "the site moved", "the CDN refuses this server" and "the solver is broken" from each other.
+   * Those three look identical in `source_health` and had been doing so for months.
+   *
+   * Optional on purpose. Template engines set it from the URL the operator typed, so every custom site gets
+   * it for free; hand-written pack adapters keep their base private and simply do not offer this, and the
+   * diagnosis falls back to stored evidence alone.
+   */
+  base?: string;
+
   /** Lower = earlier in the cross-source "find" provider order (default: large). */
   preferredOrder?: number;
   /**

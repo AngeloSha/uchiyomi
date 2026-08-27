@@ -4,6 +4,7 @@ import { Img, useWideViewport } from '@/components/ui';
 import { sourceCover } from '@/components/cards';
 import { IcPlus, IcSparkle } from '@/components/icons';
 import { t as tr } from '@/lib/i18n';
+import { dotWindow } from '@/lib/carousel';
 
 export interface Trending {
   title: string;
@@ -34,11 +35,25 @@ export function DiscoverHero({ slides, onPick }: { slides: Trending[]; onPick: (
   const [paused, setPaused] = useState(false);
   const startX = useRef(0);
 
+  // 5s, not 7s. With ten slides a seven-second beat is a seventy-second loop, so the back half was seen by
+  // essentially nobody; fifty seconds gives every slide a realistic chance while still leaving time to read
+  // a title and decide.
   useEffect(() => {
     if (paused || slides.length < 2) return;
-    const t = setTimeout(() => setI((v) => (v + 1) % slides.length), 7000);
+    const t = setTimeout(() => setI((v) => (v + 1) % slides.length), 5000);
     return () => clearTimeout(t);
   }, [i, paused, slides.length]);
+
+  // Warm the next slide's art. Nothing preloaded before, which at seven seconds was survivable and at five
+  // would read as a flash of empty box on every advance. One Image per change, discarded immediately.
+  useEffect(() => {
+    if (slides.length < 2) return;
+    const next = slides[(i + 1) % slides.length];
+    const art = wide && next.banner ? next.banner : next.cover;
+    if (!art) return;
+    const img = new Image();
+    img.src = sourceCover(undefined, art, wide ? 1600 : 800);
+  }, [i, slides, wide]);
 
   if (!slides.length) return null;
   const cur = slides[Math.min(i, slides.length - 1)];
@@ -97,15 +112,24 @@ export function DiscoverHero({ slides, onPick }: { slides: Trending[]; onPick: (
           <button onClick={() => onPick(cur)} className="btn-accent px-6 py-3 text-sm lg:px-7 lg:py-3.5 lg:text-base">
             <IcPlus width={17} height={17} />{tr('Find and add')}
           </button>
-          {slides.length > 1 && (
-            <div className="flex gap-1.5 ps-1">
-              {slides.map((s, k) => (
-                <button key={s.title} onClick={() => setI(k)} aria-label={s.title} className="grid place-items-center py-2">
-                  <span className={`h-1.5 rounded-full transition-all ${k === i ? 'w-6 bg-accent' : 'w-1.5 bg-white/35'}`} />
-                </button>
-              ))}
-            </div>
-          )}
+          {slides.length > 1 && (() => {
+            // A window, not one dot per slide: see lib/carousel. The ends shrink when there is more beyond
+            // them, which is what keeps ten slides legible in the width five used to take.
+            const { items, moreBefore, moreAfter } = dotWindow(slides.length, i);
+            return (
+              <div className="flex gap-1.5 ps-1">
+                {items.map((k, n) => {
+                  const edge = (n === 0 && moreBefore) || (n === items.length - 1 && moreAfter);
+                  return (
+                    <button key={k} onClick={() => setI(k)} aria-label={slides[k].title}
+                      aria-current={k === i} className="grid place-items-center py-2">
+                      <span className={`rounded-full transition-all ${k === i ? 'h-1.5 w-6 bg-accent' : edge ? 'h-1 w-1 bg-white/25' : 'h-1.5 w-1.5 bg-white/35'}`} />
+                    </button>
+                  );
+                })}
+              </div>
+            );
+          })()}
         </div>
       </div>
     </div>

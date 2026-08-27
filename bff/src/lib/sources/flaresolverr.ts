@@ -22,16 +22,43 @@ async function solve(cmd: 'request.get' | 'request.post', url: string, postData?
   return s;
 }
 
+/**
+ * The solved page, or a throw.
+ *
+ * This used to be `s.response || ''`. An empty body is never a legitimate page -- every caller parses it
+ * straight into `[]` -- so a solver that answered with nothing was indistinguishable from a site with
+ * nothing on it, and `latestPage` recorded neither success nor failure. Whole classes of failure went into
+ * the void: on this install FlareSolverr's own browser was crashing and the affected sources simply looked
+ * quiet.
+ *
+ * Throwing routes it through the caller's existing catch, where `classify` finally has an HTTP status to
+ * read. That status was always here: `Solution.status` carries what the ORIGIN answered, and discarding it
+ * is why every caller had to call `classify(e)` with no second argument. The 403 that manhuaus.com and
+ * manhuafast.net return on every request was arriving on this line and being thrown away.
+ */
+function body(s: Solution, url: string): string {
+  if (s.response) return s.response;
+  let host = url;
+  try { host = new URL(s.url || url).host; } catch { /* the id is for humans; a bad URL must not mask the failure */ }
+  throw Object.assign(
+    new Error(`flaresolverr: empty body (HTTP ${s.status ?? '?'}) from ${host}`),
+    { status: s.status },
+  );
+}
+
 export async function cfGet(url: string): Promise<string> {
-  return (await solve('request.get', url)).response || '';
+  return body(await solve('request.get', url), url);
 }
 export async function cfPost(url: string, postData: string): Promise<string> {
-  return (await solve('request.post', url, postData)).response || '';
+  return body(await solve('request.post', url, postData), url);
 }
 
 /** Cookie header + UA to fetch binaries (images) directly — FlareSolverr can't return binary bodies. */
 export async function cfSession(url: string): Promise<{ cookie: string; userAgent: string }> {
   const origin = new URL(url).origin;
-  if (!sessions.has(origin)) await cfGet(`${origin}/`);
+  // Only the side effect matters here: `solve` stores the cookie jar before it returns, so an empty body
+  // (which now throws) has still given us what we came for. Before `cfGet` could throw this was a bare
+  // await, and letting it throw now would fail image downloads that used to succeed.
+  if (!sessions.has(origin)) await cfGet(`${origin}/`).catch(() => {});
   return sessions.get(origin) || { cookie: '', userAgent: 'Mozilla/5.0' };
 }

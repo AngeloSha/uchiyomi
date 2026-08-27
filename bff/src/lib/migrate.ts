@@ -266,6 +266,13 @@ CREATE TABLE IF NOT EXISTS source_health (
   updated_at    timestamptz NOT NULL DEFAULT now()
 );
 
+-- How often this source answered "what is new" with an empty page. Deliberately NOT part of the status
+-- column: an empty answer must never clear a cooldown (see routes/sources.ts) and must never create
+-- one either, because a genuinely quiet source would then earn a ban for having nothing new. These two
+-- columns are evidence that only the diagnosis layer reads.
+ALTER TABLE source_health ADD COLUMN IF NOT EXISTS empty_streak  int NOT NULL DEFAULT 0;
+ALTER TABLE source_health ADD COLUMN IF NOT EXISTS last_empty_at timestamptz;
+
 -- server-wide settings (single row, id=1)
 CREATE TABLE IF NOT EXISTS server_settings (
   id                 int PRIMARY KEY DEFAULT 1 CHECK (id = 1),

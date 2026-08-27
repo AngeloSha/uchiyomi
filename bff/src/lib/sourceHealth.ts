@@ -14,6 +14,9 @@ export interface SourceHealth {
   last_ok_at: string | null;
   blocked_until: string | null;
   disabled: boolean;
+  /** Consecutive empty `latest()` pages. Evidence for the diagnosis layer; nothing else reads it. */
+  empty_streak: number;
+  last_empty_at: string | null;
   updated_at: string;
 }
 
@@ -51,6 +54,43 @@ export async function reportFail(sourceId: string, status: SourceStatus, error: 
   ).catch(() => {});
 }
 
+/**
+ * What a `latest()` answer says about a source's health. The whole rule lives here because it has three
+ * edges and every one of them has bitten something.
+ *
+ * 1. **Only page 1 is evidence.** Discover scrolls this endpoint to page 5. An empty page 3 is a healthy
+ *    source running out of pagination, so counting it would turn infinite scroll into a machine for
+ *    condemning the sources people use most.
+ * 2. **A non-empty page reports OK, exactly as before.** The invariant documented in routes/sources.ts is
+ *    preserved literally: `reportOk` still fires only when something came back.
+ * 3. **An empty page records emptiness and NOTHING else.** Not `status`, not `consecutive`, not
+ *    `blocked_until`. Several adapters answer a failed Cloudflare challenge with `[]` rather than throwing,
+ *    so calling `reportOk` here would clear a cooldown the downloader legitimately recorded; calling
+ *    `reportFail` would hand a merely quiet source a thirty-minute ban and inflate the backoff multiplier.
+ *    Both were tried in the design and both are wrong. The streak is evidence, never a verdict.
+ *
+ * Note `reportOk` deliberately does not clear the streak -- only this function does, and only via the
+ * latest path. `reportOk` is also called by the chapter downloader, and "downloads fine, but its listing
+ * no longer parses" is a real state worth being able to see.
+ */
+export async function reportLatest(sourceId: string, count: number, page: number): Promise<void> {
+  if (page > 1) return;
+  if (count > 0) {
+    await reportOk(sourceId);
+    await q('UPDATE source_health SET empty_streak = 0 WHERE source_id = $1 AND empty_streak <> 0', [sourceId]).catch(() => {});
+    return;
+  }
+  await q(
+    `INSERT INTO source_health (source_id, empty_streak, last_empty_at, updated_at)
+     VALUES ($1, 1, now(), now())
+     ON CONFLICT (source_id) DO UPDATE SET
+       empty_streak = source_health.empty_streak + 1,
+       last_empty_at = now(),
+       updated_at = now()`,
+    [sourceId],
+  ).catch(() => {});
+}
+
 /** Is this source currently in a cooldown (recently blocked/rate-limited)? Used to warn before adding. */
 export async function blockedNow(sourceId: string): Promise<SourceHealth | null> {
   const h = await one<SourceHealth>(
@@ -61,7 +101,7 @@ export async function blockedNow(sourceId: string): Promise<SourceHealth | null>
 }
 
 export const healthAll = () =>
-  q<SourceHealth>('SELECT source_id, status, consecutive, last_error, last_fail_at, last_ok_at, blocked_until, disabled, updated_at FROM source_health');
+  q<SourceHealth>('SELECT source_id, status, consecutive, last_error, last_fail_at, last_ok_at, blocked_until, disabled, empty_streak, last_empty_at, updated_at FROM source_health');
 
 export const isDisabled = async (sourceId: string) =>
   !!(await one<{ disabled: boolean }>('SELECT disabled FROM source_health WHERE source_id = $1', [sourceId]))?.disabled;

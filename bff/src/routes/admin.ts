@@ -13,7 +13,9 @@ import { runBackup } from '../lib/backup';
 import { runUpdateAll, updateSeries } from '../lib/updater';
 import { authenticate, requireAdmin, userIdOf, revokeAllSessions, revokeRefreshTokenById, passwordError } from '../lib/auth';
 import { logAudit, recentAudit } from '../lib/audit';
-import { healthAll, setDisabled, clearBlock } from '../lib/sourceHealth';
+import { healthAll, setDisabled, clearBlock, SourceHealth } from '../lib/sourceHealth';
+import { smokeTest, probeBase } from '../lib/sourceProbe';
+import { diagnose } from '../lib/sourceDiagnosis';
 import { reloadAll, listSources, getSource, detectEngine, listRemoteSources, suwayomiConfigured, suwayomiAbout, swAdapterId } from '../lib/sources';
 import { listExtensions, refreshExtensions, setExtensionState, sourcesOfExtension, getRepos, setRepos, normalizeRepoUrl, altRepoUrl } from '../lib/sources/suwayomi/extensions';
 import { readFile, writeFile, mkdir, rm } from 'fs/promises';
@@ -157,36 +159,6 @@ export default async function adminRoutes(app: FastifyInstance) {
   const writeSites = async (list: Site[]) => { await mkdir(dirname(SITES_FILE), { recursive: true }).catch(() => {}); await writeFile(SITES_FILE, JSON.stringify(list, null, 2)); };
   const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, '').slice(0, 40);
 
-  // After adding a site, actually exercise it (search → series → chapters → pages) so the admin gets immediate
-  // ✓/✗ feedback instead of discovering a parse failure later. Best-effort; bounded by a caller-side timeout.
-  const smokeTest = async (src: any): Promise<{ ok: boolean; checks: Array<{ name: string; ok: boolean; detail: string }> }> => {
-    const checks: Array<{ name: string; ok: boolean; detail: string }> = [];
-    const clip = (s: any) => String(s || '').slice(0, 80);
-    let results: any[] = [];
-    let searchOk = false;
-    let searchDetail = 'no results — markup may not match this engine';
-    for (const qq of ['the', 'one', 'love', 'a']) {
-      try { const r = await src.search(qq); if (Array.isArray(r) && r.length) { results = r; searchOk = true; searchDetail = `${r.length} result(s)`; break; } }
-      catch (e: any) { searchDetail = clip(e?.message || 'error'); }
-    }
-    checks.push({ name: 'Search', ok: searchOk, detail: searchDetail });
-    if (!searchOk) return { ok: false, checks };
-    let chapters: any[] = [];
-    try {
-      const series = await src.getSeries(results[0].sourceId);
-      checks.push({ name: 'Series page', ok: !!series?.title, detail: series?.title ? clip(series.title) : 'no data' });
-      chapters = await src.listChapters(results[0].sourceId);
-      checks.push({ name: 'Chapters', ok: chapters.length > 0, detail: chapters.length ? `${chapters.length} chapter(s)` : 'none found' });
-    } catch (e: any) {
-      checks.push({ name: 'Series / chapters', ok: false, detail: clip(e?.message || 'error') });
-    }
-    if (chapters.length) {
-      try { const pages = await src.getPageUrls(chapters[0].sourceId); checks.push({ name: 'Pages', ok: pages.length > 0, detail: pages.length ? `${pages.length} page(s)` : 'none found' }); }
-      catch (e: any) { checks.push({ name: 'Pages', ok: false, detail: clip(e?.message || 'error') }); }
-    }
-    return { ok: checks.every((c) => c.ok), checks };
-  };
-
   app.get('/api/admin/sources/custom', async () => ({ content: await readSites() }));
   app.post('/api/admin/sources/custom', async (req, reply) => {
     const b = z.object({ engine: z.enum(['auto', 'madara', 'manganato', 'mangathemesia']), name: z.string().min(1).max(60), base: z.string().url() }).safeParse(req.body);
@@ -208,14 +180,41 @@ export default async function adminRoutes(app: FastifyInstance) {
     await logAudit('source.custom_add', { userId: userIdOf(req), detail: { id, engine, base: b.data.base }, req });
     // Verify the freshly-added site actually works, bounded so a slow/Cloudflare-heavy site can't hang the request.
     const added = getSource(id);
+    // No Promise.race any more: `smokeTest` carries its own wall-clock deadline. The race returned after 30s
+    // but did not cancel, so the adapter kept scraping behind an answered request, and its own worst case
+    // (four search terms at up to 95s each) was twelve times the guard it sat behind.
     const smoke = added
-      ? await Promise.race([
-          smokeTest(added),
-          new Promise<{ ok: boolean; timedOut: boolean; checks: Array<{ name: string; ok: boolean; detail: string }> }>((res) =>
-            setTimeout(() => res({ ok: false, timedOut: true, checks: [{ name: 'Verify', ok: false, detail: 'timed out — site is slow or heavily protected; added anyway' }] }), 30000)),
-        ])
+      ? await smokeTest(added)
       : { ok: false, checks: [{ name: 'Verify', ok: false, detail: 'source failed to load' }] };
     return reply.send({ ok: true, id, engine, available: listSources().length, smoke });
+  });
+  /**
+   * Change a custom site's address, and nothing else.
+   *
+   * There was no way to do this: only add and delete existed, so "the site moved to a new domain" -- far and
+   * away the most common real failure -- meant deleting and re-adding. That is a trap, because the id is
+   * `slug(name)` and `lib_series.source_id` is keyed on it, so re-adding under any other name orphans every
+   * series that came from it. Editing the base in place keeps the id, and therefore keeps the library.
+   *
+   * `base` only. Name and engine stay put, precisely because the id derives from the name.
+   */
+  app.patch('/api/admin/sources/custom/:id', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const b = z.object({ base: z.string().url() }).safeParse(req.body);
+    if (!b.success) return reply.code(400).send({ error: 'bad_request', message: 'Give a valid https URL.' });
+    const list = await readSites();
+    const site = list.find((s) => s.id === id);
+    if (!site) return reply.code(404).send({ error: 'not_found' });
+    const from = site.base;
+    site.base = b.data.base.replace(/\/+$/, '');
+    await writeSites(list);
+    await reloadAll();
+    // A moved site's recorded failures describe an address that no longer exists, and leaving the cooldown
+    // in place would suppress the very first request that could prove the new one works.
+    await clearBlock(id).catch(() => {});
+    await logAudit('source.custom_edit', { userId: userIdOf(req), detail: { id, from, to: site.base }, req });
+    const src = getSource(id);
+    return reply.send({ ok: true, id, base: site.base, smoke: src ? await smokeTest(src) : null });
   });
   app.delete('/api/admin/sources/custom/:id', async (req) => {
     const { id } = req.params as { id: string };
@@ -1309,6 +1308,69 @@ export default async function adminRoutes(app: FastifyInstance) {
 
   // ---- provider/source health control ----
   app.get('/api/admin/sources', async () => ({ content: await healthAll() }));
+  /**
+   * Go and look at this source right now, and say what is wrong with it.
+   *
+   * Its own route rather than another arm of the `:action` switch below: Fastify ranks a static segment
+   * above a parametric one, so `/:id/test` wins, and this needs its own timeout, response shape and audit
+   * line, none of which fit a switch whose every arm returns `{ok: true}`.
+   *
+   * Three deliberate non-features, each of which looks like an omission:
+   *
+   * - **It does not consult the cooldown.** `blockedNow` is read in exactly two places and neither is on
+   *   this path, so nothing had to be added to bypass it. Do not "fix" that for consistency: running while
+   *   the source is blocked is the entire point of the button.
+   * - **It writes no health.** Adding `reportFail` here is the obvious-looking mistake: three impatient
+   *   clicks would take `consecutive` from 3 to 6 and the cooldown from 90 minutes to its ceiling. A
+   *   diagnostic must never change the diagnosis.
+   * - **Passing does not clear the block.** It reports `canClear` and leaves the decision to the admin. The
+   *   smoke test stops at listing page URLs and never fetches an image byte, while the downloader's own
+   *   failures are about bytes: hotlink protection, HTML served where a JPEG was promised. Green here is not
+   *   proof it will download. Auto-clearing would also reset `consecutive` to 0, so the next failure would
+   *   earn a SHORTER cooldown than the one before it.
+   */
+  const testing = new Set<string>();
+  app.post('/api/admin/sources/:id/test', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const src = getSource(id);
+    if (!src) return reply.code(404).send({ error: 'not_found' });
+    if (testing.has(id)) return reply.code(409).send({ error: 'busy', message: 'That source is already being tested.' });
+    testing.add(id);
+    try {
+      const h = await one<SourceHealth>(
+        `SELECT source_id, status, consecutive, last_error, last_fail_at, last_ok_at, blocked_until, disabled,
+                empty_streak, last_empty_at, updated_at FROM source_health WHERE source_id = $1`,
+        [id],
+      ).catch(() => null);
+      // The site first, and without the solver: when the solver is the broken part, asking it tells us
+      // nothing. This one request separates "moved", "refused" and "solver down" from each other.
+      const probe = src.base ? await probeBase(src.base) : undefined;
+      const smoke = await smokeTest(src);
+      const facts = {
+        status: h?.status ?? 'ok',
+        lastError: h?.last_error ?? null,
+        consecutive: h?.consecutive ?? 0,
+        lastOkAt: h?.last_ok_at ?? null,
+        emptyStreak: h?.empty_streak ?? 0,
+        blockedUntil: h?.blocked_until ?? null,
+        disabled: !!h?.disabled,
+      };
+      // A search that returns nothing without throwing IS the markup-drift signature, so let the live result
+      // speak even when the stored record is clean. This is the one fault no stored evidence ever captures.
+      const parsedNothing = smoke.checks[0]?.ok === false && /no results/.test(smoke.checks[0]?.detail || '');
+      const d = diagnose(
+        { ...facts, emptyStreak: parsedNothing ? Math.max(facts.emptyStreak, 3) : facts.emptyStreak },
+        probe,
+        src.base,
+      );
+      const blocked = !!(h?.blocked_until && new Date(h.blocked_until).getTime() > Date.now());
+      await logAudit('source.test', { userId: userIdOf(req), detail: { source: id, ok: smoke.ok, code: d.code }, req });
+      return reply.send({ ok: smoke.ok, timedOut: smoke.timedOut, checks: smoke.checks, probe, diagnosis: d, canClear: smoke.ok && blocked });
+    } finally {
+      testing.delete(id);
+    }
+  });
+
   app.post('/api/admin/sources/:id/:action', async (req, reply) => {
     const { id, action } = req.params as { id: string; action: string };
     if (action === 'disable') await setDisabled(id, true);

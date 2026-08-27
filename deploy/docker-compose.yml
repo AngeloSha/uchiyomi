@@ -95,6 +95,11 @@ services:
     image: ghcr.io/flaresolverr/flaresolverr:latest
     container_name: uchiyomi-flaresolverr
     restart: unless-stopped
+    # Chrome writes its shared-memory segments here, and Docker's default /dev/shm is 64 MB. Under that,
+    # chromedriver dies mid-challenge and FlareSolverr reports "Service /app/chromedriver unexpectedly
+    # exited" or fails to reach its own session -- which looks, from the app's side, exactly like the manga
+    # site blocking us. Measured on one install: seven such failures in 24 hours across four sources.
+    shm_size: 1gb
     environment:
       LOG_LEVEL: warning
     networks: [uchiyomi_app]

@@ -8,7 +8,8 @@ import { downloadChapter, sanitize } from '../lib/downloader';
 import { persistScan, setBookDates } from '../lib/library';
 import { fetchAniListArt, fetchTrendingManhwa, TrendingItem } from '../lib/anilist';
 import { q, one } from '../lib/db';
-import { healthAll, isDisabled, blockedNow, reportOk, reportFail, classify } from '../lib/sourceHealth';
+import { healthAll, isDisabled, blockedNow, reportLatest, reportFail, classify } from '../lib/sourceHealth';
+import { diagnose, EMPTY_SUSPECT } from '../lib/sourceDiagnosis';
 import { logAudit } from '../lib/audit';
 import { env } from '../env';
 // The "already in library" annotation is deliberately library-wide: it answers "would adding this be a
@@ -56,7 +57,12 @@ function pickBest<T extends { title: string }>(list: T[], term: string): T | nul
   return null;
 }
 const withTimeout = <T>(p: Promise<T>, ms: number): Promise<T> =>
-  Promise.race([p, new Promise<T>((_, rej) => setTimeout(() => rej(new Error('timeout')), ms))]);
+  // The message names US as the one who gave up, and for how long. Bare 'timeout' was the single most
+  // common string in source_health on this install, written by three genuinely different faults -- a
+  // moved domain, a 403 at the CDN, and a solver that never answered -- because this line discards
+  // everything the adapter knew. `classify` still reads it as `down` (its /timeout/ branch), but the
+  // diagnosis layer can now tell an abandoned call apart from a site that actively refused one.
+  Promise.race([p, new Promise<T>((_, rej) => setTimeout(() => rej(new Error(`timeout after ${ms}ms`)), ms))]);
 
 /**
  * Which of these titles the library already has.
@@ -114,13 +120,24 @@ async function latestPage(src: SourceAdapter, page: number): Promise<SourceSerie
       const seen = new Set<string>();
       // dedupe by sourceId (duplicate ids collide on the React key -> wrong cover/title on a card)
       const items = raw.filter((r) => !!r.sourceId && !seen.has(r.sourceId) && (seen.add(r.sourceId), true)).slice(0, 24);
-      latestCache.set(key, { at: Date.now(), items });
-      // Only a page with something on it counts as proof of life. Several adapters answer a failed
-      // Cloudflare challenge with an empty array rather than by throwing -- on this install Aqua Manga and
-      // Natomanga both do -- and `reportOk` CLEARS `blocked_until` and resets the failure count. Browsing
-      // Discover would then wipe a cooldown the downloader had legitimately recorded, using a response that
-      // carries no information either way: "nothing new" and "I could not read the page" look identical.
-      if (items.length) void reportOk(src.id);
+      // An empty answer must not evict a good page. This ran unconditionally, and BEFORE the length check
+      // below, so one transient empty reply both poisoned this source for the next ten minutes and could
+      // overwrite a page that had real titles on it. Keep the older, better answer; leaving its timestamp
+      // stale is deliberate, so the next visit retries instead of serving the empty one for ten minutes.
+      if (items.length || !hit?.items.length) latestCache.set(key, { at: Date.now(), items });
+      // Only a page with something on it counts as proof of life, and that has not changed: `reportLatest`
+      // reports OK only when something came back. Several adapters answer a failed Cloudflare challenge with
+      // an empty array rather than by throwing -- on this install Aqua Manga and Natomanga both do -- and
+      // `reportOk` CLEARS `blocked_until` and resets the failure count, so browsing Discover would wipe a
+      // cooldown the downloader had legitimately recorded.
+      //
+      // What HAS changed is that the empty case is no longer silent. It used to write nothing at all, which
+      // meant a Cloudflare interstitial served as HTTP 200, and a site whose markup had drifted, were both
+      // completely undetectable: "nothing new" and "I could not read the page" looked identical to the
+      // server as well as to the reader. `reportLatest` records the empty streak and touches nothing else,
+      // so the two can finally be told apart without a quiet source earning a cooldown for it. Page is
+      // passed because only page 1 is evidence -- see the function.
+      void reportLatest(src.id, items.length, page);
       return items;
     } catch (e) {
       // Nothing reported health from here, so a source that timed out on every single visit kept its `ok`
@@ -309,6 +326,14 @@ export default async function sourceRoutes(app: FastifyInstance) {
       content: reachable(req).map((s) => {
         const h = health.get(s.id);
         const blocked = !!(h?.blocked_until && new Date(h.blocked_until).getTime() > now);
+        const suspect = (h?.empty_streak ?? 0) >= EMPTY_SUSPECT;
+        const d = (blocked || suspect) && h
+          ? diagnose({
+              status: h.status, lastError: h.last_error, consecutive: h.consecutive,
+              lastOkAt: h.last_ok_at, emptyStreak: h.empty_streak ?? 0,
+              blockedUntil: h.blocked_until, disabled: !!h.disabled,
+            })
+          : null;
         return {
           id: s.id,
           name: s.name,
@@ -321,8 +346,17 @@ export default async function sourceRoutes(app: FastifyInstance) {
           // at the front of this install's English group while Aqua Manga -- 176 of its 214 series, answering
           // in 2.5s -- was never in the first six fetched.
           used: used.get(s.id) ?? 0,
-          status: h?.disabled ? 'disabled' : blocked ? h!.status : 'ok',
+          // `quiet` is new, and it is the one state that used to be unrepresentable. A source whose listing
+          // has drifted answers 200 with an empty page and throws nothing, so it never earned a cooldown and
+          // `status` stayed 'ok' forever while the wall kept fetching it first. `budgetFor` sorts on
+          // `status !== 'ok'`, so naming it is all it takes to stop ranking it above sources that work.
+          status: h?.disabled ? 'disabled' : blocked ? h!.status : suspect ? 'quiet' : 'ok',
           blockedUntil: blocked ? h!.blocked_until : null,
+          // The PUBLIC sentence only, and only when something is actually wrong. Never `fix`, which names
+          // containers and config files, and never `last_error`, which carries internal hostnames and ports.
+          // This route is cached client-side under one query key that does not vary by account, so there is
+          // deliberately no admin branch here: two shapes for one cache key leak on a shared device.
+          note: d ? d.reason : null,
         };
       }),
     };
@@ -422,17 +456,41 @@ export default async function sourceRoutes(app: FastifyInstance) {
     return { content: all.filter((j) => !hidden.has(j.folder)) };
   });
 
+  // How many trending titles reach the client. The hero takes the first ten and the rail shows the rest, so
+  // this is both budgets at once. AniList returns 40 in the one query already, so raising it costs nothing.
+  const TREND_KEEP = 36;
+
   // Globally trending manhwa you don't already have, for the Discover recommendations rail.
   app.get('/api/discover/trending', async (_req, reply) => {
     reply.header('cache-control', 'no-store'); // never let a stale/empty copy get pinned client-side
     if (!trendingCache || Date.now() - trendingCache.at > 6 * 3600_000) {
-      try { trendingCache = { at: Date.now(), items: await fetchTrendingManhwa() }; } catch { if (!trendingCache) return { content: [] }; }
+      try {
+        let items = await fetchTrendingManhwa();
+        // A second page, only when the first cannot fill the wall. On a large library most of page 1 is
+        // already owned: measured on a 215-series install, 40 fetched became 28 after the library filter,
+        // and only 7 of those carried the wide art the hero prefers. The common case still costs one
+        // request per six-hour cache miss, and the page argument has been there unused since this shipped.
+        if (items.length < TREND_KEEP + 8) {
+          const more = await fetchTrendingManhwa(2).catch(() => [] as typeof items);
+          const seen = new Set(items.map((t) => norm(t.title)));
+          items = items.concat(more.filter((t) => !seen.has(norm(t.title))));
+        }
+        trendingCache = { at: Date.now(), items };
+      } catch { if (!trendingCache) return { content: [] }; }
     }
     // No per-user filter here on purpose: `isAdult:false` is an argument to the AniList query, so adult
     // titles never arrive, and the cache is shared for six hours -- filtering it per viewer would pin one
     // capped account's view for everyone.
     const have = await inLibrary(trendingCache.items.map((t) => t.title));
-    return { content: trendingCache.items.filter((t) => !have.has(norm(t.title))).slice(0, 24) };
+    // Deduped by normalised title, not raw: the hero and its dots are keyed by title, so two spellings of
+    // the same series would collide on a React key and swap art under the reader. Rare on one page, less so
+    // across two.
+    const seen = new Set<string>();
+    const out = trendingCache.items.filter((t) => {
+      const k = norm(t.title);
+      return !have.has(k) && !seen.has(k) && (seen.add(k), true);
+    });
+    return { content: out.slice(0, TREND_KEEP) };
   });
 
   // Find a title across all providers (Aqua first) → the best match per provider that carries it.

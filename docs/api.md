@@ -3,7 +3,7 @@
 Everything the web app does, it does over this API, so anything you can do in the browser you can script.
 
 This page covers how to authenticate and the endpoints worth scripting. It is not an exhaustive dump of all
-174 routes; the full list is at the bottom for reference.
+176 routes; the full list is at the bottom for reference.
 
 ## Authenticating
 
@@ -99,7 +99,28 @@ scheduled updater.
 
 `GET /api/sources` lists what you can reach: each entry carries `id`, `name`, `lang` (null when the source
 declares no single language, which means it belongs to every language group), `latest` (whether it can be
-browsed without a query), `used` (how many series in the library came from it) and its health `status`.
+browsed without a query), `used` (how many series in the library came from it), its health `status`, and
+`note`.
+
+`status` is `ok`, `disabled`, or, while a cooldown is running, one of `rate_limited` / `blocked` / `down`.
+It is also `quiet`, which means the source answers without error and returns nothing: a listing that has
+stopped parsing never throws, so it never earns a cooldown, and before this existed such a source kept
+reporting `ok` and kept being fetched first.
+
+`note` is one sentence saying what is wrong, or `null` when nothing is. It is written for readers, so it
+never contains a hostname, a component name or any part of the recorded error. The operator-facing half of
+the diagnosis, which does name containers and config files, is only on the admin routes.
+
+`POST /api/admin/sources/:id/test` (admin) probes a source right now: it fetches the site's own homepage
+directly, without the Cloudflare solver, and then exercises the adapter (search, series, chapters, pages),
+returning per-step `checks`, the `probe` result and a `diagnosis`. It ignores any cooldown, which is the
+point, and it deliberately writes no health of its own: a diagnostic that changed the diagnosis would let
+repeated clicks drive a source's cooldown to its ceiling. A pass reports `canClear` rather than clearing the
+block itself, because the smoke test stops at listing page URLs and never fetches an image byte.
+
+`PATCH /api/admin/sources/custom/:id` (admin) changes a custom site's `base` address and nothing else. The
+source id is derived from its name and the library is keyed on that id, so editing in place is the only way
+to follow a site to a new domain without orphaning every series that came from it.
 
 `GET /api/sources/latest?source=<id>&page=<n>` is bounded at `SOURCE_LATEST_TIMEOUT_MS` (default 8000) per
 source and cached server-side for ten minutes per source and page, with concurrent requests for the same page
@@ -282,8 +303,10 @@ GET    /api/admin/audit           GET    /api/admin/tasks
 POST   /api/admin/tasks/:id/run   POST   /api/admin/library/scan
 POST   /api/admin/update          POST   /api/admin/update/:id
 GET    /api/admin/sources         POST   /api/admin/sources/:id/:action
+POST   /api/admin/sources/:id/test
 POST   /api/admin/sources/reload  GET    /api/admin/sources/custom
 POST   /api/admin/sources/custom  DELETE /api/admin/sources/custom/:id
+PATCH  /api/admin/sources/custom/:id
 PUT    /api/admin/series/:id/art  PUT    /api/admin/series/:id/meta
 PATCH  /api/admin/series/:id      DELETE /api/admin/series/:id
 GET    /api/admin/libraries       POST   /api/admin/libraries

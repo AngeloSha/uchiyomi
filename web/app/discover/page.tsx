@@ -19,6 +19,14 @@ import { IcChevronLeft, IcSearch, IcSparkle, IcX } from '@/components/icons';
 interface Job { folder: string; title: string; total: number; done: number; status: string; reason?: string }
 interface SearchGroup { title: string; coverUrl?: string; inLibrary?: boolean; updatedAt?: string; providers: { source: string; name: string; sourceId: string; title: string; coverUrl?: string }[] }
 
+/**
+ * How many titles the hero rotates through.
+ *
+ * At 5s a slide this is a 50-second loop. Going much higher means the last few slides are seen by nobody,
+ * and every slide is one more proxied cover fetch.
+ */
+const HERO_SLIDES = 10;
+
 /** Titles compare the way the server compares them, so a card can flip to "in library" with no refetch. */
 const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, '');
 
@@ -187,10 +195,23 @@ export default function DiscoverPage() {
   });
   const jobs = jobsData?.content ?? [];
 
+  /**
+   * The hero's slides: everything with wide key art first, then topped up from the rest.
+   *
+   * This was `withArt.length ? withArt : all` -- all-or-nothing, falling back only when NOTHING had a
+   * banner -- and it quietly capped the hero far below its own limit. Measured on a real library: AniList
+   * returns 40 trending manhwa, 16 carry banner art, and after removing the 215 series that library already
+   * owned, 7 banner-bearing titles were left. Raising the slice alone would have changed nothing, and the
+   * pool shrinks further with every series added.
+   *
+   * Topping up costs nothing, because the hero already handles a missing banner: it falls back to the 2:3
+   * cover and letterboxes it on wide viewports.
+   */
   const heroSlides = useMemo(() => {
     const all = trending?.content ?? [];
     const withArt = all.filter((t) => t.banner);
-    return (withArt.length ? withArt : all).slice(0, 5);
+    const rest = all.filter((t) => !t.banner);
+    return [...withArt, ...rest].slice(0, HERO_SLIDES);
   }, [trending]);
   const rail = useMemo(() => {
     const lead = new Set(heroSlides.map((s) => s.title));
