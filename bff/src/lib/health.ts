@@ -259,7 +259,13 @@ async function solverHealth(): Promise<HealthCheck> {
       summary: `Not answering at ${url}${ping.error ? ` (${ping.error})` : ''}`,
       note: 'Sources on Cloudflare-protected sites cannot work without it. Check the container is running '
           + 'and that FLARESOLVERR_URL points at it.',
-      items: blaming.map((b) => ({ title: b.source_id, detail: 'failing, and its recorded error names the solver' })),
+      // The solver itself is the first item, not just the sources blaming it. Every other check on this page
+      // holds "no items means ok", and a solver that is simply absent has nothing to list -- so without this
+      // it would report a warning with an empty body, which reads as a page bug rather than a finding.
+      items: [
+        { title: url, detail: ping.error ? `not answering (${ping.error})` : 'not answering' },
+        ...blaming.map((b) => ({ title: b.source_id, detail: 'failing, and its recorded error names the solver' })),
+      ],
     };
   }
   return {

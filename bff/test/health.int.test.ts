@@ -57,7 +57,7 @@ test('library health checks', { skip: DSN ? false : 'set TEST_DATABASE_URL to ru
 
   await t.test('reports every check and a timestamp', () => {
     assert.ok(Date.parse(report.generatedAt) > 0);
-    for (const id of ['chapter-gaps', 'short-chapters', 'outliers', 'duplicates', 'sources']) {
+    for (const id of ['chapter-gaps', 'short-chapters', 'outliers', 'duplicates', 'sources', 'solver']) {
       assert.ok(find(report, id), `missing check: ${id}`);
     }
   });
