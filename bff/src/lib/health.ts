@@ -11,6 +11,8 @@
 //    genuinely one image long. Only whole-numbered chapters are worth flagging as too short.
 import { q } from './db';
 import { visibleToAll } from './visibility';
+import { solverPing, solverUrl } from './sources/flaresolverr';
+import { diagnose } from './sourceDiagnosis';
 
 export type HealthStatus = 'ok' | 'warn' | 'problem';
 
@@ -118,12 +120,17 @@ async function shortChapters(): Promise<HealthCheck> {
 async function sourceTrouble(): Promise<HealthCheck> {
   const rows = await q<{
     source_id: string; status: string; consecutive: number; disabled: boolean;
-    blocked_until: string | null; last_error: string | null; series: number;
+    blocked_until: string | null; last_error: string | null; empty_streak: number; last_ok_at: string | null;
+    series: number;
   }>(
     `SELECT sh.source_id, sh.status, sh.consecutive, sh.disabled, sh.blocked_until, sh.last_error,
-            (SELECT count(*) FROM lib_series ls WHERE ls.source = sh.source_id AND ${visibleToAll('ls')})::int AS series
+            sh.empty_streak, sh.last_ok_at,
+            -- ls.source_id, NOT ls.source: the former is the adapter id ('aqua'), the latter is the
+            -- display name as it was at add time ('Aqua Manga (EN)'). This compared a name to an id, so it
+            -- matched nothing and every row of this check has always reported "0 series use it".
+            (SELECT count(*) FROM lib_series ls WHERE ls.source_id = sh.source_id AND ${visibleToAll('ls')})::int AS series
        FROM source_health sh
-      WHERE sh.status <> 'ok' OR sh.disabled = true
+      WHERE sh.status <> 'ok' OR sh.disabled = true OR sh.empty_streak >= 3
       ORDER BY sh.disabled DESC, sh.consecutive DESC`,
   );
   const now = Date.now();
@@ -134,7 +141,8 @@ async function sourceTrouble(): Promise<HealthCheck> {
     summary: rows.length
       ? `${rows.length} source${rows.length === 1 ? ' is' : 's are'} failing or blocked`
       : 'All sources responding normally',
-    note: 'A blocked source usually means the site returned 403 or a Cloudflare challenge we could not solve.',
+    note: 'A blocked source usually means the site returned 403 or a Cloudflare challenge we could not solve. '
+        + 'If several fail at once and all of them mention the solver, check the solver rather than the sites.',
     items: rows.map((r) => {
       const until = r.blocked_until ? new Date(r.blocked_until).getTime() : 0;
       // A block whose deadline has passed is not actually holding anything back; say so rather than
@@ -146,10 +154,17 @@ async function sourceTrouble(): Promise<HealthCheck> {
           : until
             ? `${r.status} until ${new Date(until).toISOString().slice(0, 16).replace('T', ' ')}`
             : r.status;
-      const err = r.last_error ? ` — ${r.last_error.slice(0, 80)}` : '';
+      // The plain-language cause and its fix, rather than the raw string. This page is admin-only, so it
+      // gets the operator half of the diagnosis, which is the half that names what to actually go and do.
+      const d = diagnose({
+        status: r.status as any, lastError: r.last_error, consecutive: r.consecutive,
+        lastOkAt: r.last_ok_at, emptyStreak: r.empty_streak ?? 0,
+        blockedUntil: r.blocked_until, disabled: r.disabled,
+      });
+      const why = d.code === 'ok' ? '' : ` — ${d.fix || d.reason}`;
       return {
         title: r.source_id,
-        detail: `${state}; ${r.series} series use it${err}`,
+        detail: `${state}; ${r.series} series use it${why}`,
       };
     }),
   };
@@ -217,6 +232,51 @@ async function outlierChapters(): Promise<HealthCheck> {
   };
 }
 
+/**
+ * The Cloudflare solver, as its own line.
+ *
+ * When it dies, every source behind it fails and each records the failure against ITSELF, so the operator
+ * sees four broken websites and nothing pointing at the one container they all share. On this install it
+ * ran for 62 days with Docker's default 64 MB of shared memory, which is far too little for Chrome: it kept
+ * crashing mid-challenge, and the app dutifully reported that the sites were blocking us.
+ */
+async function solverHealth(): Promise<HealthCheck> {
+  const ping = await solverPing();
+  // Sources whose own recorded failure blames the solver. This is the correlation that turns "four sites
+  // are broken" into "one container is broken".
+  const blaming = await q<{ source_id: string }>(
+    `SELECT source_id FROM source_health
+      WHERE disabled = false AND last_error ILIKE '%flaresolverr%'
+        AND (status <> 'ok' OR blocked_until > now())`,
+  ).catch(() => []);
+
+  const url = solverUrl();
+  if (!ping.ok) {
+    return {
+      id: 'solver',
+      title: 'Cloudflare solver',
+      status: blaming.length ? 'problem' : 'warn',
+      summary: `Not answering at ${url}${ping.error ? ` (${ping.error})` : ''}`,
+      note: 'Sources on Cloudflare-protected sites cannot work without it. Check the container is running '
+          + 'and that FLARESOLVERR_URL points at it.',
+      items: blaming.map((b) => ({ title: b.source_id, detail: 'failing, and its recorded error names the solver' })),
+    };
+  }
+  return {
+    id: 'solver',
+    title: 'Cloudflare solver',
+    status: blaming.length ? 'warn' : 'ok',
+    summary: blaming.length
+      ? `Answering, but ${blaming.length} source${blaming.length === 1 ? '' : 's'} recently failed inside it`
+      : `Ready${ping.version ? ` (v${ping.version})` : ''}`,
+    note: blaming.length
+      ? 'It responds, but it has been failing mid-request. Chrome needs far more than Docker\'s default '
+      + '64 MB of shared memory (set shm_size: 1gb), and the solver leaks memory, so it wants a restart.'
+      : undefined,
+    items: blaming.map((b) => ({ title: b.source_id, detail: 'its last failure happened inside the solver' })),
+  };
+}
+
 // ---- report -----------------------------------------------------------------
 
 export async function runHealthChecks(): Promise<HealthReport> {
@@ -227,6 +287,7 @@ export async function runHealthChecks(): Promise<HealthReport> {
     outlierChapters(),
     duplicateSeries(),
     sourceTrouble(),
+    solverHealth(),
   ]);
   // worst first, so the page opens on whatever needs attention
   const rank: Record<HealthStatus, number> = { problem: 0, warn: 1, ok: 2 };

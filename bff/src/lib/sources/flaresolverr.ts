@@ -62,3 +62,25 @@ export async function cfSession(url: string): Promise<{ cookie: string; userAgen
   if (!sessions.has(origin)) await cfGet(`${origin}/`).catch(() => {});
   return sessions.get(origin) || { cookie: '', userAgent: 'Mozilla/5.0' };
 }
+
+/** Where the solver is expected to be. Exported so the health page can name it without re-deriving it. */
+export const solverUrl = (): string => FS;
+
+/**
+ * Is the Cloudflare solver alive?
+ *
+ * Worth asking directly, because when it is not, every source behind it fails and each one records the
+ * failure against ITSELF. The operator sees four broken sites and no hint that one container explains all
+ * four. This turns that into a single line on the health page.
+ */
+export async function solverPing(timeoutMs = 5000): Promise<{ ok: boolean; version?: string; error?: string }> {
+  try {
+    const r = await fetch(`${FS}/`, { signal: AbortSignal.timeout(timeoutMs) });
+    if (!r.ok) return { ok: false, error: `HTTP ${r.status}` };
+    const j: any = await r.json().catch(() => ({}));
+    // The root endpoint answers with a readiness sentence rather than a status field.
+    return { ok: /ready/i.test(String(j?.msg || '')), version: j?.version, error: j?.msg ? undefined : 'unexpected response' };
+  } catch (e: any) {
+    return { ok: false, error: String(e?.cause?.code || e?.name || e?.message || 'unreachable') };
+  }
+}
