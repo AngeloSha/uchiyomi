@@ -246,15 +246,47 @@ test('sources: who may reach them, and how long they get', { skip }, async (t) =
       assert.equal(r.statusCode, 200);
       assert.deepEqual(r.json().content, []);
 
-      // reportFail is fired without being awaited, so give the write a moment before reading it back.
-      let h: any = null;
-      for (let i = 0; i < 40 && !h; i++) {
-        h = (await q('SELECT status, blocked_until FROM source_health WHERE source_id = $1', [SLOW]))[0] ?? null;
-        if (!h) await new Promise((r2) => setTimeout(r2, 50));
+      // The write is fired without being awaited, so give it a moment before reading it back.
+      const read = async () => {
+        let h: any = null;
+        for (let i = 0; i < 40 && !h; i++) {
+          h = (await q(
+            'SELECT status, consecutive, slow_streak, blocked_until FROM source_health WHERE source_id = $1',
+            [SLOW],
+          ))[0] ?? null;
+          if (!h) await new Promise((r2) => setTimeout(r2, 50));
+        }
+        return h;
+      };
+
+      // It is recorded as SLOW, which is a different fact from failing, and this is the whole point.
+      // Previously the timeout went through `classify` as `down` and earned an escalating five-to-thirty
+      // minute cooldown -- during which the route short-circuits and never asks again, so the punishment
+      // removed the only requests that could have shown the source working. A real install lost its
+      // largest source that way: it answered correctly in ~11.5s against an 8s budget and vanished for a
+      // day while every check reported it healthy.
+      const first = await read();
+      assert.ok(first, 'a timeout recorded nothing at all, so a hung source stays invisible to diagnosis');
+      assert.equal(first.slow_streak, 1, 'our own impatience should be counted as such');
+      assert.equal(first.consecutive, 0, 'and must never feed the failure backoff');
+      assert.equal(first.status, 'ok', 'being slow is not being down');
+      assert.equal(first.blocked_until, null, 'one slow answer must not cost a source its place');
+
+      // ...but it must not keep being asked first forever. That was the real point of the old assertion
+      // here, and it still holds -- just after a few chances rather than instantly, and via a short fixed
+      // breather rather than a half-hour block.
+      for (let i = 0; i < 3; i++) {
+        await Promise.race([
+          app.inject({ method: 'GET', url: `/api/sources/latest?source=${SLOW}&page=${i + 2}`, headers: tok(ids.plain) }),
+          new Promise<null>((res) => setTimeout(() => res(null), 3000)),
+        ]);
       }
-      assert.ok(h, 'a source that timed out kept its ok status, so the ranking keeps picking it first');
-      assert.notEqual(h.status, 'ok');
-      assert.ok(h.blocked_until, 'no cooldown was recorded');
+      const after = await read();
+      assert.ok(after.slow_streak >= 3, `expected repeated slowness to be counted, got ${after.slow_streak}`);
+      assert.ok(after.blocked_until, 'a source that is always too slow should eventually get a breather');
+      assert.equal(after.consecutive, 0, 'even then, it is still not a failure');
+      const mins = (new Date(after.blocked_until).getTime() - Date.now()) / 60000;
+      assert.ok(mins <= 6, `the breather must stay short and fixed, got ${mins} min`);
     });
 
     await t.test('an empty page does not clear a cooldown somebody else recorded', async () => {

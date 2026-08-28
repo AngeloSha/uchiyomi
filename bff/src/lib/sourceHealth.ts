@@ -20,6 +20,9 @@ export interface SourceHealth {
   /** When the watchdog last checked this source deliberately, and what it concluded. */
   checked_at: string | null;
   check_code: string | null;
+  /** Times our own budget ran out on this source. Never feeds the blocked/down backoff. */
+  slow_streak: number;
+  last_slow_at: string | null;
   updated_at: string;
 }
 
@@ -80,7 +83,11 @@ export async function reportLatest(sourceId: string, count: number, page: number
   if (page > 1) return;
   if (count > 0) {
     await reportOk(sourceId);
-    await q('UPDATE source_health SET empty_streak = 0 WHERE source_id = $1 AND empty_streak <> 0', [sourceId]).catch(() => {});
+    await q(
+      `UPDATE source_health SET empty_streak = 0, slow_streak = 0
+        WHERE source_id = $1 AND (empty_streak <> 0 OR slow_streak <> 0)`,
+      [sourceId],
+    ).catch(() => {});
     return;
   }
   await q(
@@ -94,6 +101,41 @@ export async function reportLatest(sourceId: string, count: number, page: number
   ).catch(() => {});
 }
 
+/** After this many consecutive over-budget answers, stop paying the full budget on every single load. */
+export const SLOW_PATIENCE = 3;
+
+/**
+ * WE ran out of patience. The site did not refuse us.
+ *
+ * This is a different fact from `reportFail` and had been recorded as the same one, which is how a working
+ * source became invisible. Aqua Manga answers in about 11.5 seconds through the Cloudflare solver; the wall
+ * allowed 8. Every load timed out, `classify` read "timeout" as `down`, and `reportFail` handed it an
+ * escalating five-to-thirty-minute cooldown -- during which `/api/sources/latest` short-circuits and never
+ * asks again. A source was thereby punished for being slower than our own budget, and the punishment
+ * removed every chance it had to prove otherwise. 190 series went missing while every diagnostic reported
+ * the source healthy.
+ *
+ * So this writes NEITHER `status` NOR `consecutive`: it cannot escalate, and it cannot make a slow source
+ * look like a blocked one. It only counts, and only once the count shows a pattern does it ask for a short,
+ * FIXED breather -- enough that browsing does not spend the whole budget on the same source over and over,
+ * never enough to hide it for half an hour.
+ */
+export async function reportSlow(sourceId: string, ms: number): Promise<void> {
+  await q(
+    `INSERT INTO source_health (source_id, slow_streak, last_slow_at, last_error, updated_at)
+     VALUES ($1, 1, now(), $2, now())
+     ON CONFLICT (source_id) DO UPDATE SET
+       slow_streak   = source_health.slow_streak + 1,
+       last_slow_at  = now(),
+       last_error    = $2,
+       -- Fixed, never multiplied, and only once it is clearly a pattern rather than one slow afternoon.
+       blocked_until = CASE WHEN source_health.slow_streak + 1 >= ${SLOW_PATIENCE}
+                            THEN now() + interval '5 minutes' ELSE source_health.blocked_until END,
+       updated_at    = now()`,
+    [sourceId, `timeout after ${ms}ms`],
+  ).catch(() => {});
+}
+
 /** Is this source currently in a cooldown (recently blocked/rate-limited)? Used to warn before adding. */
 export async function blockedNow(sourceId: string): Promise<SourceHealth | null> {
   const h = await one<SourceHealth>(
@@ -104,7 +146,7 @@ export async function blockedNow(sourceId: string): Promise<SourceHealth | null>
 }
 
 export const healthAll = () =>
-  q<SourceHealth>('SELECT source_id, status, consecutive, last_error, last_fail_at, last_ok_at, blocked_until, disabled, empty_streak, last_empty_at, checked_at, check_code, updated_at FROM source_health');
+  q<SourceHealth>('SELECT source_id, status, consecutive, last_error, last_fail_at, last_ok_at, blocked_until, disabled, empty_streak, last_empty_at, checked_at, check_code, slow_streak, last_slow_at, updated_at FROM source_health');
 
 export const isDisabled = async (sourceId: string) =>
   !!(await one<{ disabled: boolean }>('SELECT disabled FROM source_health WHERE source_id = $1', [sourceId]))?.disabled;

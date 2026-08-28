@@ -22,6 +22,7 @@ export type DiagnosisCode =
   | 'solver_down'     // FlareSolverr is not answering at all
   | 'solver_timeout'  // the challenge did not finish inside the solver's budget
   | 'timeout'         // WE gave up. Says nothing about why, and must not pretend otherwise.
+  | 'too_slow'        // WE gave up, repeatedly, and the site is answering -- just not fast enough.
   | 'markup_drift'    // answers fine, parses to nothing
   | 'unreachable'     // DNS failure, refused connection, gone
   | 'rate_limited'
@@ -39,6 +40,10 @@ export interface HealthFacts {
   emptyStreak: number;
   blockedUntil: string | null;
   disabled: boolean;
+  /** Times our own budget ran out. Distinct from a failure: see `reportSlow`. */
+  slowStreak?: number;
+  /** The budget those timeouts ran out of, so the advice can name a number. */
+  budgetMs?: number;
 }
 
 /** Live evidence. Optional by design: most callers have only what is in the table. */
@@ -212,6 +217,17 @@ export function diagnose(f: HealthFacts, probe?: Probe, baseUrl?: string): Diagn
         'The site answers, but its listing no longer matches the parser, so the site changed its markup. Re-add it with auto-detect to re-pick the engine.',
         'admin', { silent: true });
     }
+  }
+
+  // Before the stored-error rules, because a slow source's `last_error` is literally "timeout after Nms" and
+  // the generic timeout rule would shrug at it. Repeatedly outrunning the budget is not an unknown cause; it
+  // is a known one with a specific fix, and it is the fault that made a working source disappear.
+  if ((f.slowStreak ?? 0) >= EMPTY_SUSPECT) {
+    const budget = f.budgetMs ? `${Math.round(f.budgetMs / 1000)}s` : 'the time allowed';
+    return D('too_slow',
+      'This source answers, but more slowly than it is given.',
+      `It keeps taking longer than ${budget} to return its newest page. Raise SOURCE_LATEST_TIMEOUT_MS if the wait is acceptable; otherwise the site itself, or the Cloudflare solver in front of it, is the slow part.`,
+      'admin');
   }
 
   for (const [re, make] of RULES) if (re.test(err)) return make();

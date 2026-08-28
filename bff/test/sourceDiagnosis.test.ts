@@ -175,3 +175,31 @@ test('a working adapter outranks anything the homepage says', () => {
   assert.equal(d.code, 'ok');
   assert.equal(d.reason, '');
 });
+
+test('THE DESIGN FLAW: being slower than our budget is not the same as being refused', () => {
+  // The bug this exists for, in full. Aqua Manga answered correctly in ~11.5s through the Cloudflare
+  // solver; the wall allowed 8s. `withTimeout` threw "timeout", `classify` read that as `down`, and
+  // `reportFail` handed it an escalating 5-to-30 minute cooldown -- during which the route short-circuits
+  // and never asks again. A working source holding 190 of 215 series disappeared from Discover for a day
+  // while the watchdog, which allows 45s, kept truthfully reporting it healthy.
+  //
+  // Reintroduce by deleting the slowStreak branch in diagnose(): the verdict falls through to the generic
+  // `timeout` rule, which shrugs and says it does not know -- exactly the state that hid this for a day.
+  const d = diagnose(facts({ lastError: 'timeout after 8000ms', slowStreak: 4, budgetMs: 8000 }));
+  assert.equal(d.code, 'too_slow');
+  assert.match(d.fix, /SOURCE_LATEST_TIMEOUT_MS/, 'the fix must name the setting to change');
+  assert.match(d.fix, /8s/, 'and the budget it is currently running out of');
+  assert.doesNotMatch(d.reason, /block/i, 'a slow source must not be described as blocked');
+});
+
+test('one slow afternoon is not a pattern', () => {
+  // The distinction only means something once it repeats; a single slow response is noise.
+  assert.notEqual(diagnose(facts({ lastError: 'timeout after 8000ms', slowStreak: 1 })).code, 'too_slow');
+  assert.notEqual(diagnose(facts({ lastError: 'timeout after 8000ms', slowStreak: 2 })).code, 'too_slow');
+});
+
+test('a genuine failure still earns a real verdict, not the slow one', () => {
+  // The fix must not swallow real faults: a site refusing us is still a site refusing us.
+  assert.equal(diagnose(facts({ lastError: 'HTTP 403 Forbidden', slowStreak: 0 })).code, 'edge_403');
+  assert.equal(diagnose(facts({ lastError: 'getaddrinfo ENOTFOUND x', slowStreak: 0 })).code, 'unreachable');
+});

@@ -1,5 +1,31 @@
 # Changelog
 
+## v0.9.10 — 2026-08-28
+
+### A slow source is no longer treated as a broken one
+
+Discover gives each source a few seconds to return its newest page. When that ran out, the source was
+recorded as having failed, and a failing source is put aside for five to thirty minutes — during which it is
+not asked at all. So a source that was merely slower than the time allowed was punished by having taken away
+from it the only thing that could have shown it working, and the punishment grew each time.
+
+That is not a hypothetical. On the install this was found on, the largest source — holding 190 of 215 series
+— answered perfectly well in about eleven and a half seconds, against a budget of eight. It disappeared from
+Discover for a day while every health check, which allows itself far longer, kept correctly reporting it
+healthy. The two were never measuring the same thing.
+
+Running out of our own patience is now recorded as its own fact. It cannot escalate, and it cannot make a
+slow source look like a blocked one. A single slow answer costs the source nothing at all. Only once it is
+clearly a pattern does the source get a short, fixed pause — enough that browsing does not spend the whole
+budget on the same source over and over, never enough to hide it — and it is ranked below sources that
+answer in time rather than removed. A page that arrives in time clears the record.
+
+A source in that state now says so plainly, and names the setting to change and the number it keeps
+exceeding, instead of reporting an unexplained failure.
+
+Sites that genuinely refuse us are unaffected: those still back off hard, because asking a refusing site
+again soon costs something and gains nothing.
+
 ## v0.9.9 — 2026-08-28
 
 ### The source check no longer cries wolf

@@ -1377,6 +1377,7 @@ export default async function adminRoutes(app: FastifyInstance) {
         lastOkAt: h?.last_ok_at ?? null,
         emptyStreak: h?.empty_streak ?? 0,
         blockedUntil: h?.blocked_until ?? null,
+        slowStreak: h?.slow_streak ?? 0,
         disabled: !!h?.disabled,
       };
       // A search that returns nothing without throwing IS the markup-drift signature, so let the live result

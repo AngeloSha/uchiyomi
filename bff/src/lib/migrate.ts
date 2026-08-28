@@ -277,6 +277,11 @@ ALTER TABLE source_health ADD COLUMN IF NOT EXISTS last_empty_at timestamptz;
 -- ran and found nothing wrong is itself worth recording.
 ALTER TABLE source_health ADD COLUMN IF NOT EXISTS checked_at timestamptz;
 ALTER TABLE source_health ADD COLUMN IF NOT EXISTS check_code text;
+-- Times WE gave up waiting, as opposed to the site failing. Kept apart from the consecutive counter on
+-- purpose: a source slower than our own budget must never feed the blocked/down backoff, because that
+-- backoff then stops it being asked at all and a perfectly working source disappears.
+ALTER TABLE source_health ADD COLUMN IF NOT EXISTS slow_streak  int NOT NULL DEFAULT 0;
+ALTER TABLE source_health ADD COLUMN IF NOT EXISTS last_slow_at timestamptz;
 
 -- server-wide settings (single row, id=1)
 CREATE TABLE IF NOT EXISTS server_settings (

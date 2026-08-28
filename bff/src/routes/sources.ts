@@ -8,7 +8,7 @@ import { downloadChapter, sanitize } from '../lib/downloader';
 import { persistScan, setBookDates } from '../lib/library';
 import { fetchAniListArt, fetchTrendingManhwa, TrendingItem } from '../lib/anilist';
 import { q, one } from '../lib/db';
-import { healthAll, isDisabled, blockedNow, reportLatest, reportFail, classify } from '../lib/sourceHealth';
+import { healthAll, isDisabled, blockedNow, reportLatest, reportFail, reportSlow, classify } from '../lib/sourceHealth';
 import { diagnose, EMPTY_SUSPECT } from '../lib/sourceDiagnosis';
 import { logAudit } from '../lib/audit';
 import { env } from '../env';
@@ -56,13 +56,21 @@ function pickBest<T extends { title: string }>(list: T[], term: string): T | nul
   }
   return null;
 }
+/**
+ * Give up after `ms`, and be honest about who gave up.
+ *
+ * The error is TAGGED, not merely worded. A string saying "timeout" went through `classify`, came out as
+ * `down`, and earned the source the same escalating cooldown as a site refusing us -- which then stopped it
+ * being asked at all. That is how Aqua Manga, answering correctly in about 11.5 seconds against an 8 second
+ * budget, vanished from Discover entirely while every check reported it healthy. Being slower than our own
+ * patience is not a fault of the source, and the caller now has a way to tell the difference.
+ */
 const withTimeout = <T>(p: Promise<T>, ms: number): Promise<T> =>
-  // The message names US as the one who gave up, and for how long. Bare 'timeout' was the single most
-  // common string in source_health on this install, written by three genuinely different faults -- a
-  // moved domain, a 403 at the CDN, and a solver that never answered -- because this line discards
-  // everything the adapter knew. `classify` still reads it as `down` (its /timeout/ branch), but the
-  // diagnosis layer can now tell an abandoned call apart from a site that actively refused one.
-  Promise.race([p, new Promise<T>((_, rej) => setTimeout(() => rej(new Error(`timeout after ${ms}ms`)), ms))]);
+  Promise.race([
+    p,
+    new Promise<T>((_, rej) =>
+      setTimeout(() => rej(Object.assign(new Error(`timeout after ${ms}ms`), { selfTimeout: true, ms })), ms)),
+  ]);
 
 /**
  * Which of these titles the library already has.
@@ -140,9 +148,18 @@ async function latestPage(src: SourceAdapter, page: number): Promise<SourceSerie
       void reportLatest(src.id, items.length, page);
       return items;
     } catch (e) {
-      // Nothing reported health from here, so a source that timed out on every single visit kept its `ok`
-      // status forever and the client's ranking kept putting it first. Reporting is what earns it a cooldown.
-      void reportFail(src.id, classify(e) ?? 'down', (e as Error)?.message || 'latest failed');
+      // Two different facts, recorded two different ways. A source that actually failed earns the escalating
+      // cooldown, because asking a refusing site again soon is pure cost. A source that merely outran OUR
+      // budget does not: it is counted, and at worst gets a short fixed breather. The escalating version
+      // removed the very requests that would have shown it working, which is how a healthy source went
+      // missing for a day while every diagnostic said it was fine.
+      if ((e as { selfTimeout?: boolean })?.selfTimeout) {
+        void reportSlow(src.id, (e as { ms?: number }).ms ?? LATEST_TIMEOUT);
+      } else {
+        // Nothing reported health from here, so a source that failed on every single visit kept its `ok`
+        // status forever and the client's ranking kept putting it first. Reporting earns it a cooldown.
+        void reportFail(src.id, classify(e) ?? 'down', (e as Error)?.message || 'latest failed');
+      }
       // Stale beats empty: an old page is still this source's newest page, whereas an empty one reads as
       // "this source has nothing", which is a different and false statement. /api/discover/trending already
       // serves stale on failure for the same reason.
@@ -326,12 +343,13 @@ export default async function sourceRoutes(app: FastifyInstance) {
       content: reachable(req).map((s) => {
         const h = health.get(s.id);
         const blocked = !!(h?.blocked_until && new Date(h.blocked_until).getTime() > now);
-        const suspect = (h?.empty_streak ?? 0) >= EMPTY_SUSPECT;
+        const suspect = (h?.empty_streak ?? 0) >= EMPTY_SUSPECT || (h?.slow_streak ?? 0) >= EMPTY_SUSPECT;
         const d = (blocked || suspect) && h
           ? diagnose({
               status: h.status, lastError: h.last_error, consecutive: h.consecutive,
               lastOkAt: h.last_ok_at, emptyStreak: h.empty_streak ?? 0,
               blockedUntil: h.blocked_until, disabled: !!h.disabled,
+              slowStreak: h.slow_streak ?? 0, budgetMs: LATEST_TIMEOUT,
             })
           : null;
         return {

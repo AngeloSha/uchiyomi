@@ -159,6 +159,7 @@ async function sweep(opts: { autoFix?: boolean }): Promise<WatchdogResult> {
         lastOkAt: h?.last_ok_at ?? null,
         emptyStreak: parsedNothing ? Math.max(h?.empty_streak ?? 0, 3) : (h?.empty_streak ?? 0),
         blockedUntil: h?.blocked_until ?? null,
+        slowStreak: h?.slow_streak ?? 0,
         disabled: false,
       },
       probe,
