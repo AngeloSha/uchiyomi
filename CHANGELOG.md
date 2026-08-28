@@ -1,5 +1,21 @@
 # Changelog
 
+## v0.9.12 — 2026-08-28
+
+### The rest of the missing covers
+
+v0.9.11 fixed two ways a listing could go wrong and left a third in place. Sites of one family were still
+returning a wall where half the entries had no artwork.
+
+A listing page carries more than its listing: alongside it sit "popular" and "recommended" panels, and those
+links look enough like results to be mistaken for them. They also appear near the top of the page, so they
+were taking places from real entries — and since those panels show no thumbnails, the places they took came
+out blank. The listing itself is now read on its own, and the panels beside it are left alone. Sites that
+lay their pages out differently are unaffected.
+
+Measured against a live listing: twenty-four titles, twenty-four covers, where before thirteen of the
+twenty-four had none.
+
 ## v0.9.11 — 2026-08-28
 
 ### Covers come back, and chapters stop pretending to be series

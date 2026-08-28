@@ -46,10 +46,18 @@ export function parseListing(h: string, sourceId: string): SourceSeries[] {
     [/<a[^>]+href="([^"]+\/manga\/[^"]+)"[^>]*>\s*<img[^>]+alt="([^"]*?)"/gi, 2],
   ];
 
+  // Parse the CARDS, not the page. A listing also carries sidebar and "popular" widgets whose links have a
+  // `title` attribute but no thumbnail beside them, and they sit early in the document -- so they crowded
+  // out real results and arrived without covers. On natomanga that was thirteen of twenty-four entries with
+  // no artwork. Splitting on the card wrapper first keeps the budget for actual listing entries; when a
+  // theme has no such wrapper, the whole document is used exactly as before.
+  const cards = h.split(/(?=class="[^"]*list-comic-item-wrap[^"]*")/i);
+  const scope = cards.length > 1 ? cards.slice(1) : [h];
+
   for (const [re] of patterns) {
     const out: SourceSeries[] = [];
     const seen = new Set<string>();
-    for (const m of h.matchAll(re)) {
+    for (const m of scope.join('').matchAll(re)) {
       const url = norm(m[1]);
       const title = strip(m[2]).replace(/\s+class=.*$/i, '');
       // A listing page also links series from its sidebar and its "hot" carousel. Those are real series, so

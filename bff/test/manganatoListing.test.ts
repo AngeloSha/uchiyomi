@@ -108,3 +108,32 @@ test('every returned item is a series url, never a chapter one', () => {
     assert.match(item.sourceId, /\/manga\/[^/]+\/?$/, `${item.sourceId} is not a series url`);
   }
 });
+
+test('THE MISSING COVERS: sidebar links must not crowd out the listing', () => {
+  // A listing page also carries "popular" and "recommended" widgets. Their links have a `title` attribute
+  // but no thumbnail beside them, and they appear EARLY in the document -- so parsing the whole page fed
+  // the wall sidebar entries with no artwork and pushed real results past the item budget. Measured on
+  // natomanga: thirteen of twenty-four entries arrived with no cover.
+  //
+  // Reintroduce by parsing `h` instead of the card scope: the sidebar entry comes back and it has no cover.
+  const html = `
+    <aside class="widget">
+      <a href="https://www.natomanga.com/manga/sidebar-favourite" title="Sidebar Favourite">Sidebar Favourite</a>
+    </aside>
+    <div class="list-comic-item-wrap">
+      <a class="list-story-item cover" href="https://www.natomanga.com/manga/real-listing" title="Real Listing">
+        <img alt="Real Listing" src="https://imgs-2.2xstorage.com/thumb/real-listing.webp">
+      </a>
+    </div>`;
+  const out = parseListing(html, 'natomanga');
+  assert.deepEqual(out.map((o) => o.title), ['Real Listing'], 'a sidebar entry reached the wall');
+  assert.ok(out[0].coverUrl, 'the listing entry should carry its cover');
+});
+
+test('a theme with no card wrapper still parses the whole page', () => {
+  // The scoping must not break sites that lay their listing out differently; those fall back to the old
+  // behaviour of reading the document. Reintroduce by scoping unconditionally: this returns nothing.
+  const out = parseListing(LEGACY, 'other');
+  assert.equal(out.length, 1);
+  assert.equal(out[0].title, 'Some Older Series');
+});
