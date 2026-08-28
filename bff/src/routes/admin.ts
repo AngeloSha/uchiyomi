@@ -1366,8 +1366,10 @@ export default async function adminRoutes(app: FastifyInstance) {
       ).catch(() => null);
       // The site first, and without the solver: when the solver is the broken part, asking it tells us
       // nothing. This one request separates "moved", "refused" and "solver down" from each other.
-      const probe = src.base ? await probeBase(src.base) : undefined;
+      const bare = src.base ? await probeBase(src.base) : undefined;
       const smoke = await smokeTest(src);
+      // Same evidence the scheduled sweep uses, so the button and the schedule cannot disagree.
+      const probe = bare && { ...bare, adapterOk: smoke.ok, needsSolver: !!src.requiresCloudflare };
       const facts = {
         status: h?.status ?? 'ok',
         lastError: h?.last_error ?? null,

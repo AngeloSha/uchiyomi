@@ -144,8 +144,12 @@ async function sweep(opts: { autoFix?: boolean }): Promise<WatchdogResult> {
     const h = await healthOf(src.id);
     if (h?.disabled) continue; // switched off deliberately; not a fault to report
 
-    const probe = src.base ? await probeBase(src.base) : undefined;
+    const bare = src.base ? await probeBase(src.base) : undefined;
     const smoke = await smokeTest(src);
+    // The adapter's own result and whether this source is solver-fronted are both live evidence, and both
+    // outrank a bare homepage request. Without them a Cloudflare-protected site that works perfectly reads
+    // as a 403 block, because the probe deliberately does not use the solver.
+    const probe = bare && { ...bare, adapterOk: smoke.ok, needsSolver: !!src.requiresCloudflare };
     const parsedNothing = smoke.checks[0]?.ok === false && /no results/.test(smoke.checks[0]?.detail || '');
     let d = diagnose(
       {

@@ -50,6 +50,20 @@ export interface Probe {
   /** 'ENOTFOUND' | 'ECONNREFUSED' | 'timeout' | ... when the transport failed before HTTP. */
   transport?: string;
   looksHtml?: boolean;
+  /**
+   * Did the ADAPTER work, just now? This outranks everything: a source that can search, list chapters and
+   * serve pages is working, whatever a bare HTTP request to its homepage made of it.
+   */
+  adapterOk?: boolean;
+  /**
+   * Does this source normally reach its site through the Cloudflare solver?
+   *
+   * If so, a 403 or 503 from `probeBase` is the EXPECTED answer and carries no information: the probe
+   * deliberately does not use the solver, so it is seeing the challenge everybody sees. Reading it as "the
+   * CDN is blocking this server" reported the healthiest source on one install -- 190 series, working --
+   * as blocked.
+   */
+  needsSolver?: boolean;
 }
 
 export interface Diagnosis {
@@ -159,6 +173,10 @@ export function diagnose(f: HealthFacts, probe?: Probe, baseUrl?: string): Diagn
   const suspect = f.emptyStreak >= EMPTY_SUSPECT;
 
   if (probe) {
+    // The adapter did the whole job a moment ago. Nothing a homepage request says can outrank that, and
+    // pretending otherwise is how a working source gets reported as broken.
+    if (probe.adapterOk) return D('ok', '', '', 'none');
+
     const base = hostOf(baseUrl);
     const now = hostOf(probe.finalUrl);
     if (base && now && base !== now) {
@@ -169,7 +187,9 @@ export function diagnose(f: HealthFacts, probe?: Probe, baseUrl?: string): Diagn
       return D('unreachable', 'This source is not answering right now.',
         `The address could not be reached (${probe.transport}). Check the URL. The site may be gone.`, 'admin');
     }
-    if (probe.httpStatus === 403) {
+    // Only meaningful for a source that does NOT go through the solver. For one that does, this is just the
+    // challenge page and says nothing about whether the source works.
+    if (probe.httpStatus === 403 && !probe.needsSolver) {
       return D('edge_403', 'This source is blocking this server right now.',
         "The site's CDN answered 403 to a direct request. A challenge solver cannot fix that; it is usually a datacentre-IP block.",
         'admin');

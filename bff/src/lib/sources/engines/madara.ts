@@ -35,7 +35,9 @@ export function makeMadara(cfg: { id: string; name: string; base: string; order?
     name: cfg.name,
     base,
     imageReferer: `${base}/`, // covers/images often live on a separate hotlink-protected CDN that wants the SITE origin as Referer
-    requiresCloudflare: true, // Madara sites serve pages + images from behind Cloudflare
+    // Madara sites serve pages + images from behind Cloudflare. Also read by the diagnosis layer: it is
+    // what tells it that a 403 from a bare, solver-less probe is the challenge page, not a block.
+    requiresCloudflare: true,
     preferredOrder: cfg.order,
 
     async search(query) {

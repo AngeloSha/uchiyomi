@@ -76,7 +76,10 @@ const schema = z.object({
   // -> pages, and each of those can reach FlareSolverr's own 95s abort, so the original 30s Promise.race on
   // the add-a-site path was guarding a 380s worst case (four search terms, serially). This is a wall-clock
   // deadline checked BETWEEN stages and between search terms, which is a bound rather than a hope.
-  SOURCE_TEST_TIMEOUT_MS: z.coerce.number().int().min(1000).max(120000).default(25000),
+  // 45s, not 25s: a solver-fronted source makes four or more sequential requests through FlareSolverr at
+  // one to four seconds each, plus a challenge solve. At 25s the healthiest source on one install timed out
+  // mid-test, which then cascaded into a confidently wrong "this site is blocking us" verdict.
+  SOURCE_TEST_TIMEOUT_MS: z.coerce.number().int().min(1000).max(120000).default(45000),
   // Recognising a series whose folder was renamed or moved, by matching its chapters' content fingerprints.
   //   off    - a moved folder becomes a new series, as it always has
   //   report - work out what it WOULD match and write it to the audit log, change nothing

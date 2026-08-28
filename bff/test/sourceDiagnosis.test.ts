@@ -139,3 +139,39 @@ test('NO PUBLIC SENTENCE LEAKS INFRASTRUCTURE', () => {
   // If someone adds a code without a fixture, this fails and they have to prove it does not leak either.
   assert.equal(seen.size, cases.length, 'every fixture must produce a distinct code');
 });
+
+test('THE FALSE ALARM: a Cloudflare-fronted site is not "blocking us" for answering a bare request 403', () => {
+  // Shipped and caught in production the same day. `probeBase` deliberately does NOT use the solver, so
+  // every Cloudflare-protected site answers it 403 -- that is the challenge page, the normal state, and it
+  // says nothing about whether the source works. Reading it as a verdict reported the healthiest source on
+  // the install (190 series, working, verified parsing 19 titles) as blocked.
+  //
+  // Reintroduce by dropping the `!probe.needsSolver` condition on the 403 branch.
+  const d = diagnose(
+    facts({ status: 'ok', lastError: null, consecutive: 0 }),
+    { httpStatus: 403, needsSolver: true },
+    'https://aquareader.org',
+  );
+  assert.notEqual(d.code, 'edge_403', 'a challenge page was mistaken for a block');
+
+  // ...and a source that does NOT go through the solver still reports a real 403.
+  assert.equal(
+    diagnose(facts(), { httpStatus: 403, needsSolver: false }, 'https://example.org').code,
+    'edge_403',
+  );
+});
+
+test('a working adapter outranks anything the homepage says', () => {
+  // The adapter searched, listed chapters and served pages seconds ago. Whatever a bare GET made of the
+  // homepage -- 403, a redirect, an odd content type -- the source works.
+  //
+  // Reintroduce by removing the `probe.adapterOk` short-circuit: the redirect below becomes a "moved"
+  // verdict and the watchdog would rewrite a working source's address.
+  const d = diagnose(
+    facts({ lastError: 'timeout' }),
+    { httpStatus: 200, finalUrl: 'https://cdn.example.net/', adapterOk: true },
+    'https://aquareader.org',
+  );
+  assert.equal(d.code, 'ok');
+  assert.equal(d.reason, '');
+});

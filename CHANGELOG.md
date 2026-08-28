@@ -1,5 +1,26 @@
 # Changelog
 
+## v0.9.9 — 2026-08-28
+
+### The source check no longer cries wolf
+
+The first real run of the daily check reported the healthiest source on a live install as blocked. It was
+working: 190 series, answering normally.
+
+The check asks each site directly, on purpose, without the Cloudflare solver in the way, because that is
+what separates "the site is down" from "the solver is broken". But a site behind Cloudflare answers a
+request like that with a refusal every single time. That is the challenge page, not a verdict, and it was
+being read as one.
+
+Two corrections. A source that just demonstrated it can search, list chapters and serve pages is now
+reported as working, whatever a bare request to its homepage made of it. And a refusal to such a request is
+no longer treated as evidence for sources that reach their site through the solver, since for those it is
+simply the expected answer.
+
+The check also gets longer to work with. A source behind the solver makes several requests in sequence, each
+taking a few seconds, and the old budget was tight enough that a healthy source could run out of time
+mid-check, which then became the wrong conclusion rather than no conclusion.
+
 ## v0.9.8 — 2026-08-27
 
 ### Sources are now checked for you
