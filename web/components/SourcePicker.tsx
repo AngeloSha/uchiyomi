@@ -24,10 +24,14 @@ const RING = {
 };
 
 /**
- * A source's icon, or a lettered tile when it has none.
+ * A source's icon.
  *
- * The route answers 404 for a source with no findable icon and caches that answer, so the failure costs one
- * request ever rather than one per paint. `onError` is what turns it into the tile.
+ * The route always answers with an image: a source with no icon of its own gets a lettered tile rendered
+ * server-side, using the same colour hash as `iconTint` below. That is deliberate -- answering 404 and
+ * letting the browser fall back meant a console error per iconless source per visit, which the end-to-end
+ * run caught as six of them.
+ *
+ * `onError` therefore only fires if the request itself fails, and is kept as a last resort.
  */
 function SourceIcon({ id, name, ring }: { id: string; name: string; ring: string }) {
   const [failed, setFailed] = useState(false);

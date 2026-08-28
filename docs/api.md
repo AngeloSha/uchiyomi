@@ -137,9 +137,10 @@ never serves the other, and an empty *popular* page is deliberately not treated 
 parser has drifted, the way an empty *newest* page is.
 
 `GET /img/sources/icon/<id>` returns a source's own icon at 64px, resolved from the extension's declared
-icon or, for a site added by URL, from the site's own favicon. It answers **404** when a source has no
-findable icon, and caches that answer as deliberately as a hit, so a source without one costs one lookup
-rather than one per page load. Clients are expected to fall back to their own placeholder on 404.
+icon or, for a site added by URL, from the site's own favicon. A source with no findable icon gets a
+lettered tile rendered here rather than a 404, so clients never need a fallback and a missing icon does not
+log a console error in every visitor's browser. Either answer is cached, so a source without an icon costs
+one lookup rather than one per page load.
 
 `GET /api/sources/latest?source=<id>&page=<n>` is bounded at `SOURCE_LATEST_TIMEOUT_MS` (default 8000) per
 source and cached server-side for ten minutes per source and page, with concurrent requests for the same page

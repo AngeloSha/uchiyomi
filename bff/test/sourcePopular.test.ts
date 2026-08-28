@@ -74,3 +74,20 @@ test('only the newest listing is evidence about a source', () => {
   const before = text.slice(Math.max(0, at - 200), at);
   assert.match(before, /mode === 'latest'/, 'reportLatest is not gated on the listing mode');
 });
+
+test('THE CONSOLE NOISE: a source with no icon still gets an image, never a 404', () => {
+  // The first version answered 404 for a source with no findable icon and let the browser fall back to a
+  // tile. Behind an <img> a 404 is a console error, so every iconless source logged one in every visitor's
+  // browser on every visit. The end-to-end run counts console errors and failed with six.
+  //
+  // Reintroduce by replying 404 instead of rendering the tile.
+  const text = read('routes', 'images.ts');
+  const at = text.indexOf("app.get('/img/sources/icon/:id'");
+  assert.ok(at > 0, 'the source icon route is gone');
+  const body = text.slice(at, text.indexOf('\n  });', at));
+  assert.match(body, /letterTile\(/, 'no fallback tile is rendered, so an iconless source has nothing to return');
+  // Only the RESOLUTION path matters. Answering 404 for an id that is not a source at all is correct and
+  // stays -- nothing renders an <img> for a source that does not exist.
+  const resolving = body.slice(body.indexOf('serveImage('));
+  assert.doesNotMatch(resolving, /code\(404\)/, 'a 404 here becomes a console error in every visitor browser');
+});

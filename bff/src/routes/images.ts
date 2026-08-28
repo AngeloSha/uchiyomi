@@ -447,23 +447,21 @@ export default async function imageRoutes(app: FastifyInstance) {
     const src = getSource(id);
     if (!src) return reply.code(404).send({ error: 'not_found' });
 
-    const NONE = 'application/x-empty';
-    const build = async () => {
+    return serveImage(req, reply, `srcicon:${id}`, async () => {
       const raw = await sourceIconBytes(src).catch(() => null);
-      if (!raw) return { buffer: Buffer.from('0'), contentType: NONE };
-      try {
-        const buffer = await sharp(raw).resize({ width: 64, withoutEnlargement: true }).webp({ quality: 80 }).toBuffer();
-        return { buffer, contentType: 'image/webp' };
-      } catch {
-        // An .ico sharp cannot read, or an HTML error page served as an image. Both are "no icon".
-        return { buffer: Buffer.from('0'), contentType: NONE };
+      if (raw) {
+        try {
+          const buffer = await sharp(raw).resize({ width: 64, withoutEnlargement: true }).webp({ quality: 80 }).toBuffer();
+          return { buffer, contentType: 'image/webp' };
+        } catch { /* an .ico sharp cannot read, or an error page wearing an image's URL */ }
       }
-    };
-    // Resolve first so a cached MISS answers without touching the network, then let `serveImage` do the
-    // streaming, ETag and 304 handling for a real hit -- it reads the entry this call just wrote.
-    const { meta } = await getOrFetch(`srcicon:${id}`, build);
-    if (meta.contentType === NONE) return reply.code(404).send({ error: 'no_icon' });
-    return serveImage(req, reply, `srcicon:${id}`, build);
+      // Falling back to a lettered tile HERE rather than answering 404 and letting the browser fall back.
+      // A 404 behind an <img> is a console error, so a source with no icon would log one in every visitor's
+      // browser on every visit -- six of them in the end-to-end run, which is how this was caught. The tile
+      // is cached like any other answer, so a source without an icon still costs one lookup rather than one
+      // per paint.
+      return { buffer: await letterTile(src.name || src.id), contentType: 'image/webp' };
+    });
   });
 
   app.get('/img/sources/cover', async (req, reply) => {
@@ -534,4 +532,26 @@ async function sourceIconBytes(src: { id: string; iconUrl?: string; base?: strin
     }
   } catch { /* no homepage, no icon */ }
   return null;
+}
+
+/**
+ * A lettered tile for a source with no icon of its own.
+ *
+ * Server-side so the route can always answer with an image. The hash matches `iconTint` in the web app so
+ * the two agree on a colour; the client keeps its own copy only as a last resort for when the network is
+ * gone entirely, at which point nothing here would have loaded anyway.
+ */
+async function letterTile(name: string): Promise<Buffer> {
+  const ch = (name.trim()[0] || '?').toUpperCase().replace(/[<&>]/g, '?');
+  let h = 0;
+  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) % 360;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64">
+    <defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="hsl(${h} 45% 30%)"/><stop offset="100%" stop-color="hsl(${(h + 40) % 360} 45% 18%)"/>
+    </linearGradient></defs>
+    <rect width="64" height="64" rx="14" fill="url(#g)"/>
+    <text x="32" y="33" fill="#e8e8ee" font-family="system-ui,sans-serif" font-size="34" font-weight="700"
+          text-anchor="middle" dominant-baseline="central">${ch}</text>
+  </svg>`;
+  return sharp(Buffer.from(svg)).webp({ quality: 80 }).toBuffer();
 }
