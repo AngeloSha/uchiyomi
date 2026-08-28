@@ -62,6 +62,14 @@ export const mangadex: SourceAdapter = {
     return (j.data || []).map(toSeries);
   },
 
+  // The same endpoint and the same filters, ordered by how many people follow the series. `toSeries` does
+  // not care how the list was sorted, so this is one query parameter and no new parsing.
+  async popular(page = 1) {
+    const offset = (Math.max(1, page) - 1) * 24;
+    const j = await jget(`${API}/manga?order[followedCount]=desc&limit=24&offset=${offset}&hasAvailableChapters=true&availableTranslatedLanguage[]=en&${RATINGS}&includes[]=cover_art&includes[]=author`);
+    return (j.data || []).map(toSeries);
+  },
+
   async getSeries(id) {
     const j = await jget(`${API}/manga/${id}?includes[]=cover_art&includes[]=author`);
     return j.data ? toSeries(j.data) : null;

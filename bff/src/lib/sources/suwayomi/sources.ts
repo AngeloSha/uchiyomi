@@ -144,6 +144,10 @@ export function makeSuwayomiAdapter(remote: RemoteSource, run: Gql = defaultGql)
     // Declared by the extension author and the only adult signal any source gives us. Carried onto the
     // adapter so the routes can decide with the object they already hold, without a per-request DB read.
     isNsfw: !!remote.isNsfw,
+    // The extension ships its own logo and `SOURCES_Q` has always selected it; it was simply dropped here.
+    // Served to browsers through /img/sources/icon/:id, never linked directly: the extension server is not
+    // reachable from a browser.
+    iconUrl: remote.iconUrl?.trim() || undefined,
     requiresCloudflare: false,
     imageHeaders: suwayomiImageHeaders,
     // After the built-ins but ahead of user-added engine sites: an extension is usually a better-maintained
@@ -185,5 +189,14 @@ export function makeSuwayomiAdapter(remote: RemoteSource, run: Gql = defaultGql)
   if (remote.supportsLatest) {
     adapter.latest = (page = 1) => fetchList('LATEST', null, page);
   }
+
+  // Popular is NOT gated, and the asymmetry with `latest` above is deliberate rather than an oversight.
+  // In the Mihon source model a catalogue must implement popular -- it is the abstract method every
+  // extension fills in -- while latest is the optional extra, which is exactly why `supportsLatest` exists
+  // as a field and `supportsPopular` does not. So every enabled extension can answer this, and there is no
+  // capability to probe. `fetchList` has accepted 'POPULAR' in its signature since it was written; this is
+  // the first caller.
+  adapter.popular = (page = 1) => fetchList('POPULAR', null, page);
+
   return adapter;
 }

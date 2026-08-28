@@ -425,6 +425,47 @@ export default async function imageRoutes(app: FastifyInstance) {
     });
   });
 
+  /**
+   * A source's own icon, same-origin.
+   *
+   * Three ways a source can have one, tried in order:
+   *   1. an extension names it (`iconUrl`) -- Suwayomi has always returned this and the adapter now keeps it;
+   *   2. a template site has a `base`, so its own favicon is fetchable;
+   *   3. nothing, and the client draws a lettered tile instead.
+   *
+   * The MISS is cached as deliberately as the hit. Without that, every source with no icon costs a fetch --
+   * for a template site, two, including a homepage parse -- on every single page load, forever. A one-byte
+   * sentinel is stored and served as a 404, so the second visit is a cache read.
+   *
+   * One day, not `immutable`: sites change their logo, and unlike a cover the URL carries no version. This
+   * matches how extension icons are already cached.
+   */
+  app.get('/img/sources/icon/:id', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    // Source ids are slugs or `sw:<numeric>`; this lands in a cache path, so allow only those shapes.
+    if (!/^[A-Za-z0-9:._-]{1,120}$/.test(id)) return reply.code(400).send({ error: 'bad' });
+    const src = getSource(id);
+    if (!src) return reply.code(404).send({ error: 'not_found' });
+
+    const NONE = 'application/x-empty';
+    const build = async () => {
+      const raw = await sourceIconBytes(src).catch(() => null);
+      if (!raw) return { buffer: Buffer.from('0'), contentType: NONE };
+      try {
+        const buffer = await sharp(raw).resize({ width: 64, withoutEnlargement: true }).webp({ quality: 80 }).toBuffer();
+        return { buffer, contentType: 'image/webp' };
+      } catch {
+        // An .ico sharp cannot read, or an HTML error page served as an image. Both are "no icon".
+        return { buffer: Buffer.from('0'), contentType: NONE };
+      }
+    };
+    // Resolve first so a cached MISS answers without touching the network, then let `serveImage` do the
+    // streaming, ETag and 304 handling for a real hit -- it reads the entry this call just wrote.
+    const { meta } = await getOrFetch(`srcicon:${id}`, build);
+    if (meta.contentType === NONE) return reply.code(404).send({ error: 'no_icon' });
+    return serveImage(req, reply, `srcicon:${id}`, build);
+  });
+
   app.get('/img/sources/cover', async (req, reply) => {
     const { u, source, w } = req.query as { u?: string; source?: string; w?: string };
     if (!u) return reply.code(400).send({ error: 'bad' });
@@ -440,4 +481,57 @@ export default async function imageRoutes(app: FastifyInstance) {
       return { buffer, contentType: 'image/webp' };
     });
   });
+}
+
+/** Browser-ish, because several of these sites serve a 403 to anything that does not look like one. */
+const ICON_UA = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36';
+
+/**
+ * The raw bytes of a source's icon, or null when it has none worth showing.
+ *
+ * Deliberately NOT through the Cloudflare solver. An icon is a nice-to-have, the solver is a shared and
+ * occasionally fragile resource, and spending a challenge solve on a 64px logo would be a poor trade -- a
+ * site that refuses a plain request simply gets a lettered tile.
+ */
+async function sourceIconBytes(src: { id: string; iconUrl?: string; base?: string }): Promise<Buffer | null> {
+  const grab = async (url: string, headers: Record<string, string> = {}): Promise<Buffer | null> => {
+    try {
+      const r = await fetch(url, { headers: { 'user-agent': ICON_UA, ...headers }, signal: AbortSignal.timeout(8000) });
+      if (!r.ok) return null;
+      const buf = Buffer.from(await r.arrayBuffer());
+      // A 0-byte body, or an HTML "not found" page wearing an image's URL, is not an icon.
+      return buf.length > 64 && !/^\s*<(?:!doctype|html)/i.test(buf.subarray(0, 40).toString('latin1')) ? buf : null;
+    } catch { return null; }
+  };
+
+  // 1. The extension names its own icon. It lives on the extension server, which a browser cannot reach.
+  if (src.iconUrl) {
+    const abs = /^https?:/i.test(src.iconUrl) ? src.iconUrl : suwayomiUrl(src.iconUrl);
+    const hit = await grab(abs, suwayomiImageHeaders());
+    if (hit) return hit;
+  }
+  if (!src.base) return null;
+
+  // 2. The conventional location, which most sites still honour.
+  const origin = (() => { try { return new URL(src.base).origin; } catch { return null; } })();
+  if (!origin) return null;
+  const direct = await grab(`${origin}/favicon.ico`);
+  if (direct) return direct;
+
+  // 3. Whatever the homepage declares. Takes the last <link rel=icon>, which is conventionally the largest.
+  try {
+    const r = await fetch(origin, { headers: { 'user-agent': ICON_UA }, signal: AbortSignal.timeout(8000) });
+    if (!r.ok) return null;
+    const html = (await r.text()).slice(0, 60000);
+    const hrefs = [...html.matchAll(/<link[^>]+rel="[^"]*icon[^"]*"[^>]*>/gi)]
+      .map((m) => (m[0].match(/href="([^"]+)"/i) || [])[1])
+      .filter(Boolean) as string[];
+    for (const href of hrefs.reverse()) {
+      const abs = (() => { try { return new URL(href, origin).toString(); } catch { return null; } })();
+      if (!abs) continue;
+      const hit = await grab(abs);
+      if (hit) return hit;
+    }
+  } catch { /* no homepage, no icon */ }
+  return null;
 }

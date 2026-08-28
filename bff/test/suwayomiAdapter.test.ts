@@ -166,3 +166,35 @@ test('listRemoteSources tolerates a shapeless answer', async () => {
   const ok = await listRemoteSources((async () => ({ sources: { nodes: [LOCAL, null, { name: 'no id' }] } })) as never);
   assert.deepEqual(ok.map((s) => s.id), ['0']);
 });
+
+test('popular is offered by every extension, unlike latest', async () => {
+  const { makeSuwayomiAdapter } = await load();
+  // The asymmetry is the point and looks like a bug otherwise. In the Mihon source model popular is the
+  // MANDATORY listing every catalogue implements, and latest is the optional extra -- which is exactly why
+  // the server reports `supportsLatest` and has no `supportsPopular` to report.
+  //
+  // Reintroduce by gating popular on `supportsLatest`: the second assertion fails and every source that
+  // cannot do latest would silently vanish from Popular too.
+  assert.equal(typeof makeSuwayomiAdapter(LOCAL, fakeGql({})).popular, 'function');
+  assert.equal(typeof makeSuwayomiAdapter({ ...LOCAL, supportsLatest: false }, fakeGql({})).popular, 'function');
+});
+
+test('popular asks for POPULAR, and asks for the page it was given', async () => {
+  const { makeSuwayomiAdapter } = await load();
+  const seen: string[] = [];
+  const a = makeSuwayomiAdapter(LOCAL, fakeGql({ fetchSourceManga: { fetchSourceManga: { mangas: [] } } }, seen));
+  await a.popular!(2);
+  assert.ok(seen[0].includes('"type":"POPULAR"'), seen[0]);
+  assert.ok(seen[0].includes('"page":2'), seen[0]);
+  // A query must NOT be sent for a browse listing; some extensions treat a stray empty query as a search.
+  assert.ok(!seen[0].includes('"query":"'), seen[0]);
+});
+
+test('the extension icon is carried onto the adapter', async () => {
+  const { makeSuwayomiAdapter } = await load();
+  // `SOURCES_Q` has always selected iconUrl and the adapter used to drop it, so every extension source
+  // showed a blank square. Reintroduce by removing the assignment.
+  const a = makeSuwayomiAdapter({ ...LOCAL, iconUrl: '/api/v1/source/0/icon' }, fakeGql({}));
+  assert.equal(a.iconUrl, '/api/v1/source/0/icon');
+  assert.equal(makeSuwayomiAdapter(LOCAL, fakeGql({})).iconUrl, undefined, 'no icon means no field, not an empty one');
+});

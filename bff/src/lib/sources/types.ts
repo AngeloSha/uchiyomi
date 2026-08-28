@@ -31,6 +31,14 @@ export interface SourceAdapter {
   getPageUrls(chapterId: string): Promise<string[]>;
   /** optional: browse the source's newest / recently-updated series (no search query). `page` is 1-based. */
   latest?(page?: number): Promise<SourceSeries[]>;
+  /**
+   * optional: browse what the source itself considers popular. `page` is 1-based.
+   *
+   * Deliberately the source's own ranking rather than one we compute. Every family here already publishes
+   * this listing -- it is the same page `latest` reads with a different sort -- so the alternative would be
+   * inventing a ranking out of data we do not have, and getting it wrong.
+   */
+  popular?(page?: number): Promise<SourceSeries[]>;
   // ---- optional, plugin-declared capabilities (the core consults these instead of hardcoding ids) ----
   /** page/cover images sit behind Cloudflare → fetch them with FlareSolverr session cookies. */
   requiresCloudflare?: boolean;
@@ -38,6 +46,15 @@ export interface SourceAdapter {
   imageReferer?: string | ((chapterUrl: string) => string);
   /** Extra headers for page/cover image fetches — e.g. auth for a source that proxies its own images. */
   imageHeaders?: Record<string, string> | ((imageUrl: string) => Record<string, string>);
+  /**
+   * The source's own logo, when it has one it can name.
+   *
+   * Only Suwayomi extensions supply this; template sites carry `base` instead and their icon is resolved
+   * from the site itself. Never handed to a browser as-is -- the extension server is not reachable from
+   * one -- so it is proxied through /img/sources/icon/:id like every other remote image.
+   */
+  iconUrl?: string;
+
   /**
    * The site's own homepage, when the adapter is a template over a user-supplied URL.
    *

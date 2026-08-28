@@ -12,7 +12,8 @@ import { ProgressBar, Reveal } from '@/components/ui';
 import { SourceCard, SourceItem } from '@/components/cards';
 import { ScrollRail } from '@/components/ScrollRail';
 import { DiscoverHero, TrendingCard, Trending } from '@/components/DiscoverHero';
-import { SourcePicker, SourceLatest, Src, SrcState, budgetFor } from '@/components/SourcePicker';
+import { SourcePicker, SourceLatest, Src, SrcState } from '@/components/SourcePicker';
+import { budgetForMode, type ListMode } from '@/lib/sourceGroups';
 import { AddSeriesDialog, AddSeed } from '@/components/AddSeriesDialog';
 import { IcChevronLeft, IcSearch, IcSparkle, IcX } from '@/components/icons';
 
@@ -80,6 +81,14 @@ export default function DiscoverPage() {
 
   // ---------------------------------------------------------------- the wall
   const [mode, setMode] = useState<'newest' | 'search'>('newest');
+  /**
+   * Which listing the wall shows, and which single source (if any) is shown alone.
+   *
+   * `listMode` is NOT the same axis as `mode` above: that one is browse-versus-search, this one is the
+   * sort within browsing.
+   */
+  const [listMode, setListMode] = useState<ListMode>('newest');
+  const [selected, setSelected] = useState<string | null>(null);
   const [q, setQ] = useState('');
   const [page, setPage] = useState(1);
   const [byId, setById] = useState<Record<string, SourceItem[]>>({});
@@ -91,7 +100,9 @@ export default function DiscoverPage() {
   const [added, setAdded] = useState<Set<string>>(new Set());
 
   // Ranked once; how many of them are actually asked grows as answers come back.
-  const ranked = useMemo(() => budgetFor(sources, 12), [sources]);
+  // A source that cannot answer the chosen listing is not ranked at all, the same way one without `latest`
+  // has never been. Popular is universal among extensions but absent from a few site engines.
+  const ranked = useMemo(() => budgetForMode(sources, listMode, 12), [sources, listMode]);
 
   // Nothing resets the wall any more. That reset -- and specifically resetting it WITHOUT remounting the
   // children, which kept their React keys and their cached queries -- is what left the page counting sources
@@ -108,7 +119,17 @@ export default function DiscoverPage() {
    * Each replacement is only requested after an earlier source has settled, so this widens the wall without
    * widening the burst. Bounded twice over: by the ranked list and by the cap.
    */
-  const emptied = Object.values(states).filter((s) => s === 'empty' || s === 'blocked').length;
+  // Everything the wall accumulates is keyed `${listMode}:${sourceId}`, never bare. That is what lets the
+  // Newest/Popular toggle work WITHOUT clearing anything: switching simply reads a different set of keys,
+  // and switching back shows what was already loaded, instantly. Clearing is the one thing that has ever
+  // broken this page -- see the warning on SourceLatest -- so the toggle is built so it never has to.
+  const kOf = useCallback((id: string) => `${listMode}:${id}`, [listMode]);
+  const mine = useCallback(
+    <T,>(rec: Record<string, T>) => Object.entries(rec).filter(([k]) => k.startsWith(`${listMode}:`)),
+    [listMode],
+  );
+
+  const emptied = mine(states).filter(([, v]) => v === 'empty' || v === 'blocked').length;
   const budget = useMemo(
     () => ranked.slice(0, Math.min(ranked.length, 10, 6 + emptied)),
     [ranked, emptied],
@@ -125,8 +146,9 @@ export default function DiscoverPage() {
     setStates((prev) => ({ ...prev, [id]: !ok ? 'blocked' : items.length ? 'ok' : 'empty' }));
   }, []);
 
-  // The concurrency gate. Four at a time; each settle releases the next.
-  const settled = order.length;
+  // The concurrency gate. Four at a time; each settle releases the next. Counted within the current
+  // listing only, or switching modes would look already-finished and never fetch.
+  const settled = order.filter((k) => k.startsWith(`${listMode}:`)).length;
   const gate = 4 + settled;
 
   const wall = useMemo(() => {
@@ -134,8 +156,12 @@ export default function DiscoverPage() {
     const seen = new Set<string>();
     const out: SourceItem[] = [];
     // Strict arrival order. Interleaving by rank would push already-read tiles down as a slow source lands.
-    for (const id of order) {
-      for (const it of byId[id] ?? []) {
+    for (const key of order) {
+      if (!key.startsWith(`${listMode}:`)) continue;
+      // Filtering is display-only: everything stays loaded, this just decides what is shown. That is why
+      // tapping a chip is instant and why it cannot strand the wall the way restarting it used to.
+      if (selected && key !== `${listMode}:${selected}`) continue;
+      for (const it of byId[key] ?? []) {
         const k = `${it.source}:${it.sourceId}`;
         if (seen.has(k)) continue;
         seen.add(k);
@@ -143,7 +169,7 @@ export default function DiscoverPage() {
       }
     }
     return out;
-  }, [mode, searchHits, order, byId]);
+  }, [mode, listMode, selected, searchHits, order, byId]);
 
   const nameOf = useCallback((id: string) => sources.find((s) => s.id === id)?.name, [sources]);
   const pending = mode === 'newest' ? Math.max(0, budget.length - settled) : (searching ? 3 : 0);
@@ -278,12 +304,21 @@ export default function DiscoverPage() {
       </header>
 
       {mode === 'newest' && (
-        <SourcePicker sources={budget} states={states} settled={settled} total={budget.length} />
+        <SourcePicker
+          sources={budget} states={states} settled={settled} total={budget.length}
+          selected={selected} onSelect={setSelected}
+          mode={listMode}
+          onMode={(m) => { setListMode(m); setSelected(null); setPage(1); }}
+        />
       )}
 
-      {/* One mounted child per budgeted source. Renders nothing; owns one request. */}
+      {/* One mounted child per budgeted source. Renders nothing; owns one request.
+          The key carries the listing mode, so switching Newest/Popular REMOUNTS these and they fetch the
+          other listing. That pairing is not optional: a child that keeps its key keeps its cached query,
+          never re-reports, and the wall waits forever on a source it thinks it has not heard from. */}
       {mode === 'newest' && budget.map((s, i) => (
-        <SourceLatest key={`${s.id}:${page}`} source={s} page={page} enabled={i < gate} onSettled={onSettled} />
+        <SourceLatest key={`${listMode}:${s.id}:${page}`} source={s} listMode={listMode}
+          page={page} enabled={i < gate} onSettled={onSettled} />
       ))}
 
       {jobs.length > 0 && (

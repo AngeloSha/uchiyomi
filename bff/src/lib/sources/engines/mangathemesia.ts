@@ -45,6 +45,14 @@ export function makeMangaThemesia(cfg: { id: string; name: string; base: string;
       return parseBsx(await cfGet(`${base}${path}`));
     },
 
+    // The same listing endpoint; `order` is just the sort key. The theme's own popularity ranking, and
+    // `parseBsx` is shared with search and latest already, so nothing new is parsed.
+    async popular(page = 1) {
+      const p = Math.max(1, page);
+      const path = p > 1 ? `/manga/?page=${p}&order=popular` : `/manga/?order=popular`;
+      return parseBsx(await cfGet(`${base}${path}`));
+    },
+
     async getSeries(id) {
       const url = id.startsWith('http') ? id : `${base}/manga/${id}/`;
       const h = await cfGet(url);

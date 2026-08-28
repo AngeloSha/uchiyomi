@@ -95,6 +95,10 @@ const GATED: Record<string, string> = {
   '/img/lib/books/:id/page/:n': 'bookFileAbs -> visibleBookFile',
   '/img/extensions/icon/:pkgName': 'n/a: extension icon from the engine, not library content',
   '/img/sources/cover': 'n/a: remote source cover, not library content',
+  // The id is looked up in the source registry before anything is fetched, so the outbound URL comes from
+  // the operator's own configured sources and never from the request -- a caller cannot point this at an
+  // address of their choosing. No library content is involved either way.
+  '/img/sources/icon/:id': 'n/a: source icon, resolved only from a registered source; not library content',
   // opds.ts
   '/opds': 'n/a: static navigation feed, no library data',
   '/opds/search': 'seriesSrc(vc(req)) via opdsSeriesSearch',

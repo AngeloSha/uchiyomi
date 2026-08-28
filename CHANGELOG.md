@@ -1,5 +1,25 @@
 # Changelog
 
+## v0.10.0 — 2026-08-28
+
+### Discover shows you where things come from, and lets you choose
+
+The row of source names above the wall was information and nothing else: which sources were asked, and how
+each one answered. It is now the place you steer from.
+
+**Sources show their own icons.** Extension sources have always sent one; the app fetched it and threw it
+away. Sites you added yourself now show their own favicon, and anything without a usable icon gets a
+lettered tile in a colour of its own rather than a blank square.
+
+**Tap a source to see only its titles**, and tap again to go back to all of them. This is instant and
+changes nothing about what is loading: every source carries on filling in behind the filter, so there is no
+waiting and nothing to lose by trying it.
+
+**Newest or Popular**, for the whole wall. This is each source's *own* ranking rather than anything this
+server works out — most sites already publish a popularity listing beside their recently-updated one, and
+extensions have always offered both. Sources that cannot offer one step aside while Popular is chosen.
+Switching between the two is instant the second time, because neither view discards the other's work.
+
 ## v0.9.12 — 2026-08-28
 
 ### The rest of the missing covers

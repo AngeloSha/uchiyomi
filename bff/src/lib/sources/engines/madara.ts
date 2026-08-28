@@ -91,6 +91,15 @@ export function makeMadara(cfg: { id: string; name: string; base: string; order?
       return parseResults(await cfGet(`${base}${path}`), cfg.id);
     },
 
+    // Identical query with a different sort key. Madara's listing takes `m_orderby=views` for the site's own
+    // all-time popularity, and serves the same result cards, so `parseResults` -- already shared between
+    // search and latest by design -- reads it unchanged.
+    async popular(page = 1) {
+      const p = Math.max(1, page);
+      const path = p > 1 ? `/page/${p}/?s=&post_type=wp-manga&m_orderby=views` : `/?s=&post_type=wp-manga&m_orderby=views`;
+      return parseResults(await cfGet(`${base}${path}`), cfg.id);
+    },
+
     async getSeries(id) {
       const url = mangaUrl(id);
       const h = await cfGet(url);

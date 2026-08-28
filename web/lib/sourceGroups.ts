@@ -16,6 +16,8 @@ export interface Src {
   /** Retained on the row; nothing reads it since the language grouping was removed. */
   lang: string | null;
   latest?: boolean;
+  /** Whether this source can answer "what is popular" as well as "what is new". */
+  popular?: boolean;
   /**
    * `quiet` is the server saying "this answers without error and returns nothing". It used to be
    * unrepresentable: a source whose listing had drifted threw nothing, so it never earned a cooldown, kept
@@ -88,4 +90,30 @@ export function retryIn(src: Src, now = Date.now()): string | null {
   if (!src.blockedUntil) return null;
   const mins = Math.ceil((new Date(src.blockedUntil).getTime() - now) / 60000);
   return mins > 0 ? `back in ~${mins} min` : null;
+}
+
+/** Which listing the wall is showing. The source's own ranking, never one we compute. */
+export type ListMode = 'newest' | 'popular';
+
+/**
+ * Sources worth asking for the mode currently selected.
+ *
+ * A source that cannot answer the chosen listing drops out entirely, the same way one without `latest`
+ * already does -- showing a chip that can never fill would be worse than showing one fewer chip.
+ */
+export function budgetForMode(sources: Src[], mode: ListMode, max = 6): Src[] {
+  return budgetFor(mode === 'popular' ? sources.filter((s) => s.popular) : sources, max);
+}
+
+/** Where the browser can find a source's icon. The route answers 404 when there is none; the tile covers it. */
+export const sourceIcon = (id: string) => `/img/sources/icon/${encodeURIComponent(id)}`;
+
+/**
+ * A stable colour for a source with no icon, so the lettered tile still looks chosen rather than random.
+ * Mirrors the hash in lib/art.ts's `genreGradient`, so the two palettes belong to the same app.
+ */
+export function iconTint(name: string): string {
+  let h = 0;
+  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) % 360;
+  return `linear-gradient(135deg, hsl(${h} 45% 30%), hsl(${(h + 40) % 360} 45% 18%))`;
 }

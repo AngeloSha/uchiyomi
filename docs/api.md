@@ -3,7 +3,7 @@
 Everything the web app does, it does over this API, so anything you can do in the browser you can script.
 
 This page covers how to authenticate and the endpoints worth scripting. It is not an exhaustive dump of all
-177 routes; the full list is at the bottom for reference.
+179 routes; the full list is at the bottom for reference.
 
 ## Authenticating
 
@@ -99,8 +99,8 @@ scheduled updater.
 
 `GET /api/sources` lists what you can reach: each entry carries `id`, `name`, `lang` (null when the source
 declares no single language, which means it belongs to every language group), `latest` (whether it can be
-browsed without a query), `used` (how many series in the library came from it), its health `status`, and
-`note`.
+browsed without a query), `popular` (whether it can offer its own popularity ranking), `used` (how many
+series in the library came from it), its health `status`, and `note`.
 
 `status` is `ok`, `disabled`, or, while a cooldown is running, one of `rate_limited` / `blocked` / `down`.
 It is also `quiet`, which means the source answers without error and returns nothing: a listing that has
@@ -128,6 +128,18 @@ reason and a suggested fix, and admins get a push notification. Answers **409** 
 `PATCH /api/admin/sources/custom/:id` (admin) changes a custom site's `base` address and nothing else. The
 source id is derived from its name and the library is keyed on that id, so editing in place is the only way
 to follow a site to a new domain without orphaning every series that came from it.
+
+`GET /api/sources/popular?source=<id>&page=<n>` is the same listing sorted by the source's OWN popularity,
+not by anything this server computes: it is the page each site already publishes, reached with a different
+sort. Every guard on the newest listing applies identically. A source that cannot offer one reports
+`popular: false` and is simply not asked. Note the two listings are cached separately, so asking for one
+never serves the other, and an empty *popular* page is deliberately not treated as evidence that a source's
+parser has drifted, the way an empty *newest* page is.
+
+`GET /img/sources/icon/<id>` returns a source's own icon at 64px, resolved from the extension's declared
+icon or, for a site added by URL, from the site's own favicon. It answers **404** when a source has no
+findable icon, and caches that answer as deliberately as a hit, so a source without one costs one lookup
+rather than one per page load. Clients are expected to fall back to their own placeholder on 404.
 
 `GET /api/sources/latest?source=<id>&page=<n>` is bounded at `SOURCE_LATEST_TIMEOUT_MS` (default 8000) per
 source and cached server-side for ten minutes per source and page, with concurrent requests for the same page
@@ -309,6 +321,7 @@ GET    /api/admin/sessions        DELETE /api/admin/sessions/:id
 GET    /api/admin/audit           GET    /api/admin/tasks
 POST   /api/admin/tasks/:id/run   POST   /api/admin/library/scan
 POST   /api/admin/update          POST   /api/admin/update/:id
+GET    /api/sources/popular      GET    /img/sources/icon/:id
 GET    /api/admin/sources         POST   /api/admin/sources/:id/:action
 POST   /api/admin/sources/:id/test
 POST   /api/admin/sources/check

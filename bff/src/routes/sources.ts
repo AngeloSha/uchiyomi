@@ -115,8 +115,13 @@ const latestInflight = new Map<string, Promise<SourceSeries[]>>();
  * The in-flight map matters more than the TTL here: six chips, several tabs and a page refresh otherwise
  * become six identical outbound scrapes of the same site within a second of each other.
  */
-async function latestPage(src: SourceAdapter, page: number): Promise<SourceSeries[]> {
-  const key = `${src.id}:${page}`;
+export type ListMode = 'latest' | 'popular';
+
+async function latestPage(src: SourceAdapter, page: number, mode: ListMode = 'latest'): Promise<SourceSeries[]> {
+  // The mode belongs in the key. Without it the two listings share a cache entry and an in-flight promise,
+  // so whichever is asked for first answers both -- Popular would serve Newest's results for ten minutes,
+  // or the reverse, depending only on which the reader happened to open.
+  const key = `${src.id}:${mode}:${page}`;
   const hit = latestCache.get(key);
   if (hit && Date.now() - hit.at < LATEST_TTL) return hit.items;
   const flying = latestInflight.get(key);
@@ -124,7 +129,8 @@ async function latestPage(src: SourceAdapter, page: number): Promise<SourceSerie
 
   const run = async (): Promise<SourceSeries[]> => {
     try {
-      const raw = await withTimeout(src.latest!(page), LATEST_TIMEOUT);
+      const fetchList = mode === 'popular' ? src.popular! : src.latest!;
+      const raw = await withTimeout(fetchList(page), LATEST_TIMEOUT);
       const seen = new Set<string>();
       // dedupe by sourceId (duplicate ids collide on the React key -> wrong cover/title on a card)
       const items = raw.filter((r) => !!r.sourceId && !seen.has(r.sourceId) && (seen.add(r.sourceId), true)).slice(0, 24);
@@ -145,7 +151,11 @@ async function latestPage(src: SourceAdapter, page: number): Promise<SourceSerie
       // server as well as to the reader. `reportLatest` records the empty streak and touches nothing else,
       // so the two can finally be told apart without a quiet source earning a cooldown for it. Page is
       // passed because only page 1 is evidence -- see the function.
-      void reportLatest(src.id, items.length, page);
+      // Only the NEWEST listing is evidence about a source's health. An empty popular page much more often
+      // means the source has no popularity listing worth the name than that its parser has drifted, and
+      // feeding that into `empty_streak` would mark working sources as broken. Failures that throw still
+      // report through the catch below, for either mode.
+      if (mode === 'latest') void reportLatest(src.id, items.length, page);
       return items;
     } catch (e) {
       // Two different facts, recorded two different ways. A source that actually failed earns the escalating
@@ -158,7 +168,7 @@ async function latestPage(src: SourceAdapter, page: number): Promise<SourceSerie
       } else {
         // Nothing reported health from here, so a source that failed on every single visit kept its `ok`
         // status forever and the client's ranking kept putting it first. Reporting earns it a cooldown.
-        void reportFail(src.id, classify(e) ?? 'down', (e as Error)?.message || 'latest failed');
+        void reportFail(src.id, classify(e) ?? 'down', (e as Error)?.message || `${mode} failed`);
       }
       // Stale beats empty: an old page is still this source's newest page, whereas an empty one reads as
       // "this source has nothing", which is a different and false statement. /api/discover/trending already
@@ -175,7 +185,8 @@ async function latestPage(src: SourceAdapter, page: number): Promise<SourceSerie
 }
 
 /** Whatever is on hand for this source and page, however old. Used when a source is in cooldown. */
-const cachedLatest = (id: string, page: number): SourceSeries[] => latestCache.get(`${id}:${page}`)?.items ?? [];
+const cachedLatest = (id: string, page: number, mode: ListMode = 'latest'): SourceSeries[] =>
+  latestCache.get(`${id}:${mode}:${page}`)?.items ?? [];
 
 /** Exposed for tests: the cache is process-global and would otherwise leak between cases. */
 export function clearLatestCache(): void {
@@ -360,6 +371,9 @@ export default async function sourceRoutes(app: FastifyInstance) {
           // one itself, which is how MangaDex -- hardcoded to ask for English -- stops joining all thirty.
           lang: s.lang ?? (isSwAdapterId(s.id) ? (langs.get(s.id.slice(SW_PREFIX.length)) ?? null) : null),
           latest: typeof s.latest === 'function',
+          // Reported from the method's presence, exactly as `latest` is. A source without it simply
+          // drops out of the wall while Popular is selected, the same way one without `latest` does.
+          popular: typeof s.popular === 'function',
           // What the reader has actually used. Health-then-alphabetical put "18 Porn Comic" and "1Manga.co"
           // at the front of this install's English group while Aqua Manga -- 176 of its 214 series, answering
           // in 2.5s -- was never in the first six fetched.
@@ -455,6 +469,31 @@ export default async function sourceRoutes(app: FastifyInstance) {
       return { content: stale.map((r) => ({ ...r, inLibrary: had.has(norm(r.title)) })) };
     }
     const results = await latestPage(src, p);
+    const have = await inLibrary(results.map((r) => r.title));
+    return { content: results.map((r) => ({ ...r, inLibrary: have.has(norm(r.title)) })) };
+  });
+
+  /**
+   * Browse what a source itself considers popular.
+   *
+   * Every guard the newest listing has applies identically -- the adult refusal by id, the disabled check,
+   * the cooldown short-circuit -- so this is deliberately the same handler shape rather than a clever
+   * shared one: the two differ only in which adapter method runs, and a wrapper that hid that would make
+   * the access checks harder to see rather than easier.
+   */
+  app.get('/api/sources/popular', async (req, reply) => {
+    const { source, page } = req.query as { source?: string; page?: string };
+    const src = source ? getSource(source) : null;
+    if (!src || typeof src.popular !== 'function') return { content: [] };
+    if (!sourceAllowedFor(src, vc(req).maxAgeRating)) return denySource(reply);
+    if (await isDisabled(source!).catch(() => false)) return { content: [] };
+    const p = Math.max(1, parseInt(page || '1', 10) || 1);
+    if (await blockedNow(source!).catch(() => null)) {
+      const stale = cachedLatest(src.id, p, 'popular');
+      const had = await inLibrary(stale.map((r) => r.title));
+      return { content: stale.map((r) => ({ ...r, inLibrary: had.has(norm(r.title)) })) };
+    }
+    const results = await latestPage(src, p, 'popular');
     const have = await inLibrary(results.map((r) => r.title));
     return { content: results.map((r) => ({ ...r, inLibrary: have.has(norm(r.title)) })) };
   });

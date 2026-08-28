@@ -139,6 +139,29 @@ export function makeManganato(cfg: { id: string; name: string; base: string; ord
       return [];
     },
 
+    /**
+     * The site's own popularity listing.
+     *
+     * This family is the awkward one: the sort is a PATH SEGMENT, not a query parameter, so there is no
+     * single URL that works everywhere and a wrong guess is indistinguishable from an empty page. Hence the
+     * same candidate list `latest` uses -- try each, take the first that parses, give up quietly. Giving up
+     * quietly is the right failure here: the source simply drops out of Popular rather than throwing, and a
+     * listing that returns nothing is now recorded rather than silent.
+     */
+    async popular(page = 1) {
+      const p = Math.max(1, page);
+      const paths = [
+        `/manga-list/hot-manga${p > 1 ? `?page=${p}` : ''}`,
+        `/genre-all${p > 1 ? `/${p}` : ''}?type=topview`,
+      ];
+      for (const path of paths) {
+        const h = await cfGet(`${base}${path}`).catch(() => '');
+        const out = parseListing(h, cfg.id);
+        if (out.length) return out;
+      }
+      return [];
+    },
+
     async getSeries(id) {
       const url = mangaUrl(id);
       const h = await cfGet(url);

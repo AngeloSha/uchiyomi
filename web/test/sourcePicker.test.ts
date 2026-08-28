@@ -11,7 +11,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'fs';
 import { join } from 'path';
-import { budgetFor, noteFor, retryIn, Src } from '../lib/sourceGroups';
+import { budgetFor, budgetForMode, noteFor, retryIn, iconTint, Src } from '../lib/sourceGroups';
 
 const src = (p: Partial<Src> & { id: string }): Src =>
   ({ name: p.id, lang: null, latest: true, status: 'ok', ...p }) as Src;
@@ -139,4 +139,46 @@ test('the cooldown is reported as a wait, not a timestamp', () => {
   assert.equal(retryIn(src({ id: 'a', blockedUntil: '2026-08-27T09:12:00Z' }), now), 'back in ~12 min');
   assert.equal(retryIn(src({ id: 'a', blockedUntil: '2026-08-27T08:50:00Z' }), now), null, 'an expired block is not a wait');
   assert.equal(retryIn(src({ id: 'a' }), now), null);
+});
+
+test('a source that cannot rank its own titles is not asked to', () => {
+  // Popular is the source's OWN ranking, so a source without one has nothing to contribute and is dropped
+  // entirely -- exactly as one without `latest` already is. Showing a chip that can never fill would be
+  // worse than showing one chip fewer.
+  //
+  // Reintroduce by ignoring the mode in budgetForMode: 'no-pop' comes back and its column stays empty.
+  const pool = [src({ id: 'both', popular: true, used: 5 }), src({ id: 'no-pop', used: 99 })];
+  assert.deepEqual(budgetForMode(pool, 'newest', 9).map((s) => s.id), ['no-pop', 'both'], 'newest takes both');
+  assert.deepEqual(budgetForMode(pool, 'popular', 9).map((s) => s.id), ['both'], 'popular takes only the one that can');
+});
+
+test('THE NAMESPACING: switching listing must remount the children', () => {
+  // The wall keys everything by `${listMode}:${sourceId}` so the toggle never has to CLEAR anything -- and
+  // clearing is the only thing that has ever broken this page. But the two halves are a pair: if the key
+  // does not also change, a source present in both listings keeps its React key, keeps its cached query,
+  // never re-reports, and the wall waits forever on a source it believes it has not heard from.
+  //
+  // Reintroduce by dropping `${listMode}` from SourceLatest's key.
+  const page = readFileSync(join(__dirname, '..', 'app', 'discover', 'page.tsx'), 'utf8');
+  const key = page.match(/<SourceLatest[^>]*key=\{`([^`]+)`\}/)?.[1] ?? '';
+  assert.ok(key.includes('listMode'), `SourceLatest's key is \`${key}\` and does not carry the listing mode`);
+});
+
+test('filtering shows less, it never loads less', () => {
+  // Tapping a chip is display-only: every budgeted source keeps loading and nothing is discarded, which is
+  // what makes it instant and what keeps it from stranding the wall. If it ever starts clearing state, the
+  // guard above about remounting applies to it too.
+  //
+  // Reintroduce by clearing byId/order/states when a source is selected.
+  const page = readFileSync(join(__dirname, '..', 'app', 'discover', 'page.tsx'), 'utf8');
+  assert.doesNotMatch(page, /setOrder\(\[\]\)|setStates\(\{\}\)|setById\(\{\}\)/,
+    'the wall is being cleared somewhere; see the stall guard above');
+  assert.match(page, /selected && key !== /, 'the wall no longer filters by the selected source');
+});
+
+test('a source with no icon still gets a stable, deliberate colour', () => {
+  const a = iconTint('Aqua Manga');
+  assert.equal(a, iconTint('Aqua Manga'), 'the tile must not change colour between renders');
+  assert.notEqual(a, iconTint('MangaDex'), 'two sources should not collide on one colour');
+  assert.match(a, /^linear-gradient\(/);
 });
