@@ -9,26 +9,66 @@ import { seriesSlug, isOwnChapterUrl } from '../slug';
 const strip = (s: string) => s.replace(/<[^>]+>/g, '').replace(/&amp;/g, '&').replace(/\s+/g, ' ').trim();
 const norm = (u: string) => u.replace(/^\/\//, 'https://').replace(/&amp;/g, '&').trim();
 
+// Madara search-result and latest-listing pages share the same result-card markup, so parse both here.
+export function parseResults(h: string, sourceId: string): SourceSeries[] {
+  const covers = new Map<string, string>();
+  // Capture the whole <img> tag and choose the attribute afterwards. Writing `(?:data-src|src)=` after a
+  // greedy `<img[^>]+` does NOT express a preference -- the greedy prefix runs to the last attribute that
+  // matches, so ATTRIBUTE ORDER decides. On a lazy-loading theme that means the spacer in `src` wins over
+  // the real cover in `data-src`, and every card renders as the same grey pixel. The old code carried a
+  // comment claiming it preferred data-src; it did not.
+  const pickSrc = (imgTag: string): string | null =>
+    (imgTag.match(/\sdata-src="([^"]+)"/i) || imgTag.match(/\ssrc="([^"]+)"/i) || [])[1] ?? null;
+
+  // `tab-thumb` is stock Madara; `item-thumb`/`item-thumbnail` is what several themes ship instead, and
+  // matching only the first meant those sites returned every title with no cover at all -- a wall of blank
+  // cards. ManhuaPlus was one: fifteen results, fifteen thumbnails in the html, none of them found.
+  for (const m of h.matchAll(/class="[^"]*(?:tab-thumb|item-thumb)[^"]*"[^>]*>\s*<a[^>]+href="([^"]+)"[^>]*>\s*(<img[^>]+>)/gi)) {
+    const u = pickSrc(m[2]);
+    if (u) covers.set(norm(m[1]), norm(u));
+  }
+  // Some themes hang the thumbnail off the anchor with no wrapper class at all. Only consulted for urls the
+  // pass above did not already resolve, so a real thumbnail always wins over a guess.
+  for (const m of h.matchAll(/<a[^>]+href="([^"]+\/manga\/[^"]+)"[^>]*>\s*(<img[^>]+>)/gi)) {
+    const key = norm(m[1]);
+    const u = pickSrc(m[2]);
+    if (u && !covers.has(key)) covers.set(key, norm(u));
+  }
+  const out: SourceSeries[] = [];
+  const seen = new Set<string>();
+  // match `post-title` as a class token in any tag (div/h3/…) with extra classes — sites tweak this markup
+  for (const m of h.matchAll(/class="[^"]*\bpost-title\b[^"]*"[^>]*>[\s\S]*?<a[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi)) {
+    const url = norm(m[1]);
+    if (seen.has(url)) continue;
+    seen.add(url);
+    out.push({ sourceId: url, source: sourceId, title: strip(m[2]), url, coverUrl: covers.get(url) });
+  }
+
+  // A second way in, for themes whose cards carry a thumbnail but no `post-title` heading the pass above can
+  // read. The name then comes from the img `alt`, which these themes do fill in. Anything already found
+  // keeps the title the site put in its heading, so this only ever adds.
+  //
+  // Bounded to the CARD thumbnail wrappers rather than to every /manga/ link on the page. Unbounded it also
+  // harvested the sidebar and "popular" widgets: sixty-three entries where the listing holds six, so the
+  // wall would fill with perennially-popular titles instead of what is actually new.
+  //
+  // (Note for anyone counting: a listing showing fifteen cards for six series is normal and correct. The
+  // same series appears once per recent chapter, and de-duplicating by url is the right answer.)
+  for (const m of h.matchAll(/class="[^"]*(?:tab-thumb|item-thumb)[^"]*"[^>]*>\s*<a[^>]+href="([^"]+\/manga\/[^"/?#]+)\/?"[^>]*>\s*(<img[^>]+>)/gi)) {
+    const url = norm(m[1]);
+    if (seen.has(url)) continue;
+    const alt = (m[2].match(/\salt="([^"]+)"/i) || [])[1];
+    if (!alt) continue;
+    seen.add(url);
+    out.push({ sourceId: url, source: sourceId, title: strip(alt), url, coverUrl: covers.get(url) });
+  }
+  return out;
+}
+
 export function makeMadara(cfg: { id: string; name: string; base: string; order?: number }): SourceAdapter {
   const base = cfg.base.replace(/\/$/, '');
   const mangaUrl = (id: string) => (id.startsWith('http') ? id : `${base}/manga/${id}/`);
-  // Madara search-result and latest-listing pages share the same result-card markup, so parse both here.
-  const parseResults = (h: string): SourceSeries[] => {
-    const covers = new Map<string, string>();
-    for (const m of h.matchAll(/class="[^"]*tab-thumb[^"]*"[^>]*>\s*<a[^>]+href="([^"]+)"[^>]*>\s*<img[^>]+(?:data-src|src)="([^"]+)"/gi)) {
-      covers.set(norm(m[1]), norm(m[2]));
-    }
-    const out: SourceSeries[] = [];
-    const seen = new Set<string>();
-    // match `post-title` as a class token in any tag (div/h3/…) with extra classes — sites tweak this markup
-    for (const m of h.matchAll(/class="[^"]*\bpost-title\b[^"]*"[^>]*>[\s\S]*?<a[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi)) {
-      const url = norm(m[1]);
-      if (seen.has(url)) continue;
-      seen.add(url);
-      out.push({ sourceId: url, source: cfg.id, title: strip(m[2]), url, coverUrl: covers.get(url) });
-    }
-    return out;
-  };
+  // Parsing lives at module scope so it can be tested against real markup; see madaraListing.test.ts.
 
   return {
     id: cfg.id,
@@ -41,14 +81,14 @@ export function makeMadara(cfg: { id: string; name: string; base: string; order?
     preferredOrder: cfg.order,
 
     async search(query) {
-      return parseResults(await cfGet(`${base}/?s=${encodeURIComponent(query)}&post_type=wp-manga`));
+      return parseResults(await cfGet(`${base}/?s=${encodeURIComponent(query)}&post_type=wp-manga`), cfg.id);
     },
 
     // Browse the site's most recently updated series (Madara's `m_orderby=latest` listing).
     async latest(page = 1) {
       const p = Math.max(1, page);
       const path = p > 1 ? `/page/${p}/?s=&post_type=wp-manga&m_orderby=latest` : `/?s=&post_type=wp-manga&m_orderby=latest`;
-      return parseResults(await cfGet(`${base}${path}`));
+      return parseResults(await cfGet(`${base}${path}`), cfg.id);
     },
 
     async getSeries(id) {

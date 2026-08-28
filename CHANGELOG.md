@@ -1,5 +1,31 @@
 # Changelog
 
+## v0.9.11 — 2026-08-28
+
+### Covers come back, and chapters stop pretending to be series
+
+Two separate faults, both visible on the Discover wall as cards that were wrong rather than missing, so
+nothing anywhere reported a problem.
+
+**Half of some walls were not series at all.** A listing page shows each title alongside its newest
+chapters, and both live at similar addresses. The reader was treating those chapter links as if they were
+series, so a wall of twenty-four could be twelve real titles and twelve entries called "Chapter 2" or
+"Chapter 156" — each with no cover, because a chapter page has none to show. This arrived in v0.9.8 and is
+now gone: only a link to a series itself is accepted.
+
+**Some sites returned every title with no artwork.** Sites built on the same engine do not agree on how they
+mark up a thumbnail, and only one of the conventions was recognised. A site using the other returned a full
+wall of blank cards. Both are now read, along with a third arrangement some themes use.
+
+Fixing that surfaced a third fault underneath. Where a site provides a placeholder image and the real cover
+separately — which is how a page avoids loading every picture at once — which of the two was picked came
+down to the order the site happened to write them in, rather than to any preference. Sometimes the
+placeholder won, and a card showed a grey square. The real cover is now chosen deliberately.
+
+Also worth stating, since it looks like a bug and is not: a listing showing fifteen cards for six series is
+correct. A title appears once for each of its recent chapters, and collapsing those into one result is the
+right answer.
+
 ## v0.9.10 — 2026-08-28
 
 ### A slow source is no longer treated as a broken one

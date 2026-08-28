@@ -17,10 +17,25 @@ const norm = (u: string) => u.replace(/^\/\//, 'https://').replace(/&amp;/g, '&'
  * handled the rebranded pages on its own -- these are belt and braces for a template pointed at whatever
  * Manganato-family site an operator names, not a fix for a specific site.
  */
+/**
+ * Is this a link to a SERIES, or to a chapter of one?
+ *
+ * Both live under `/manga/`: a series is `/manga/some-slug`, a chapter is `/manga/some-slug/chapter-12`.
+ * Matching on `/manga/` alone therefore harvests every chapter link on the page as if it were a series, and
+ * a listing page is full of them -- it shows the latest chapters beside each title. On natomanga that turned
+ * twenty-four results into twelve real series and twelve entries called "Chapter 2", "Chapter 156", each
+ * with no cover, because a chapter page has no cover to find.
+ *
+ * So: exactly one path segment after `/manga/`, and nothing that looks like a chapter.
+ */
+const isSeriesUrl = (u: string): boolean => /\/manga\/[^/?#]+\/?(?:[?#]|$)/.test(u) && !/\/chapter/i.test(u);
+
 export function parseListing(h: string, sourceId: string): SourceSeries[] {
   if (!h) return [];
   const covers = new Map<string, string>();
-  for (const m of h.matchAll(/<a[^>]+href="([^"]+\/manga\/[^"]+)"[^>]*>\s*<img[^>]+src="([^"]+)"/gi)) covers.set(norm(m[1]), norm(m[2]));
+  for (const m of h.matchAll(/<a[^>]+href="([^"]+\/manga\/[^"]+)"[^>]*>\s*<img[^>]+src="([^"]+)"/gi)) {
+    if (isSeriesUrl(m[1])) covers.set(norm(m[1]), norm(m[2]));
+  }
 
   const patterns: Array<[RegExp, 1 | 2]> = [
     // current: <a href=".../manga/slug" title="Name"><img ...>, inside .list-comic-item-wrap
@@ -40,7 +55,7 @@ export function parseListing(h: string, sourceId: string): SourceSeries[] {
       // A listing page also links series from its sidebar and its "hot" carousel. Those are real series, so
       // they cannot be filtered by shape -- but they are few, and de-duplicating by url keeps them from
       // appearing twice. Order still follows the document, which is the listing itself.
-      if (!title || seen.has(url)) continue;
+      if (!title || seen.has(url) || !isSeriesUrl(url)) continue;
       seen.add(url);
       out.push({ sourceId: url, source: sourceId, title, url, coverUrl: covers.get(url) });
     }

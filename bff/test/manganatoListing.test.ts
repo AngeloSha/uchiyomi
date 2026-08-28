@@ -77,3 +77,34 @@ test('the same series linked twice is returned once', () => {
   const out = parseListing(CURRENT + CURRENT, 'x');
   assert.equal(out.length, 2, 'duplicate urls should collapse');
 });
+
+// Real markup: a listing page shows each series WITH its latest chapters, and both live under /manga/.
+const WITH_CHAPTERS = `
+<div class="list-comic-item-wrap">
+  <a class="list-story-item cover" href="https://www.natomanga.com/manga/dog-eat-dog" title="Dog Eat Dog">
+    <img alt="Dog Eat Dog" src="https://imgs-2.2xstorage.com/thumb/dog-eat-dog.webp">
+  </a>
+  <a href="https://www.natomanga.com/manga/dog-eat-dog/chapter-2" title="Chapter 2">Chapter 2</a>
+  <a href="https://www.natomanga.com/manga/dog-eat-dog/chapter-1" title="Chapter 1">Chapter 1</a>
+</div>`;
+
+test('THE REGRESSION: a chapter link is not a series', () => {
+  // Shipped in v0.9.8 and found on the live wall. Matching any anchor whose href contains /manga/ harvested
+  // every chapter link on the page: natomanga returned twenty-four "series", of which twelve were called
+  // things like "Chapter 156" and had no cover, because a chapter page has no cover to find. Half the wall
+  // was junk.
+  //
+  // Reintroduce by dropping the isSeriesUrl guard: the count goes to 3 and the titles become chapters.
+  const out = parseListing(WITH_CHAPTERS, 'natomanga');
+  assert.equal(out.length, 1, `expected only the series, got ${out.map((o) => o.title).join(', ')}`);
+  assert.equal(out[0].title, 'Dog Eat Dog');
+  assert.doesNotMatch(out[0].sourceId, /chapter/i);
+  assert.match(out[0].coverUrl || '', /dog-eat-dog\.webp$/, 'the series cover should survive the filter');
+});
+
+test('every returned item is a series url, never a chapter one', () => {
+  for (const item of parseListing(WITH_CHAPTERS + CURRENT, 'x')) {
+    assert.doesNotMatch(item.sourceId, /\/chapter/i, `${item.title} is a chapter, not a series`);
+    assert.match(item.sourceId, /\/manga\/[^/]+\/?$/, `${item.sourceId} is not a series url`);
+  }
+});
