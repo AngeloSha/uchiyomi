@@ -332,9 +332,11 @@ export default function DiscoverPage() {
                   <p className="mt-1 text-[11px] tabular-nums text-fog-500">{j.done}/{j.total}</p>
                 </>
               ) : j.status === 'error' ? (
+                // `reason` is now written when a job fails and names the source and how far it got. This
+                // line used to show the same sentence whatever had actually happened.
                 // A download killed by a rate-limit used to vanish from this strip entirely, taking its
                 // reason with it: the row was filtered to `downloading` and `reason` was never declared.
-                <p className="mt-1 text-[11px] text-amber-300">{tr('Download stopped. Try another source or wait.')}</p>
+                <p className="mt-1 text-[11px] text-amber-300">{j.reason || tr('Download stopped. Try another source or wait.')}</p>
               ) : (
                 <p className="mt-1 text-[11px] text-emerald-400">{tr('Downloaded')}</p>
               )}

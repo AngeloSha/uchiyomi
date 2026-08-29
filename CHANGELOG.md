@@ -1,5 +1,31 @@
 # Changelog
 
+## v0.10.1 — 2026-08-29
+
+### Adding a series tells you straight away
+
+Pressing Add left the button saying "Working…" for up to a minute, and the only way to learn that it had in
+fact started was to close the dialog and find it further down the Discover page. On one install that wait
+was measured at fifteen, forty-eight and fifty-nine seconds.
+
+The reason is that the request downloaded the whole first chapter before it answered. It no longer does.
+Everything that decides what to tell you still happens first, so you are still told immediately if the title
+is already in your library, if you have it from another source, or if there is nothing to download. Only the
+fetching happens afterwards, which is what the app was already doing for every chapter after the first.
+
+**Downloads now follow you.** A small indicator appears wherever you are while anything is downloading,
+showing what it is and how far along, and it opens to a list. Previously progress lived in one strip on
+Discover, below the hero and hidden behind the add window itself, so navigating away meant losing sight of
+it entirely.
+
+**A download that fails now says why.** It names the source and how far it got, instead of the same single
+sentence for every possible cause, and it stays until you dismiss it. Finished downloads now clear
+themselves after a few minutes; before this they were never removed at all and simply accumulated.
+
+Two smaller things this fixes. An add that took longer than two minutes used to report "Add failed" while
+succeeding perfectly well in the background. And pressing Escape, or clicking outside the window, while an
+add was in flight closed it and left you with no confirmation at all.
+
 ## v0.10.0 — 2026-08-28
 
 ### Discover shows you where things come from, and lets you choose

@@ -3,7 +3,7 @@
 Everything the web app does, it does over this API, so anything you can do in the browser you can script.
 
 This page covers how to authenticate and the endpoints worth scripting. It is not an exhaustive dump of all
-179 routes; the full list is at the bottom for reference.
+180 routes; the full list is at the bottom for reference.
 
 ## Authenticating
 
@@ -128,6 +128,23 @@ reason and a suggested fix, and admins get a push notification. Answers **409** 
 `PATCH /api/admin/sources/custom/:id` (admin) changes a custom site's `base` address and nothing else. The
 source id is derived from its name and the library is keyed on that id, so editing in place is the only way
 to follow a site to a new domain without orphaning every series that came from it.
+
+`POST /api/sources/add` answers as soon as the outcome is decided and downloads afterwards. It used to hold
+the request until the first chapter had been fetched, measured at 15 to 59 seconds on a real install.
+Everything that decides the answer still happens inline and still gets its own status code: **403** disabled,
+**404** `no_chapters`, **409** `duplicate` (with the "add anyway" message), and **200** with `chapters: 0`
+for a title already in the library. A successful reply now carries `started: true`, which is what
+distinguishes "downloading now" from "already had it" — previously only `chapters === 0` said so.
+
+One response is deliberately gone: the **429** `blocked` for a source refusing downloads. That can only be
+known after the download is attempted, so it now arrives as a failed job carrying its reason. This is also
+strictly better than before, where the 429 came back only after the whole chapter attempt had burned its
+budget.
+
+`GET /api/sources/jobs` lists downloads in progress. A finished job is swept a few minutes after it ends; a
+**failed** one is never swept, because it is the only record that the download did not work, and it carries
+a `reason` naming the source and how far it got. `DELETE /api/sources/jobs/<folder>` dismisses a job that
+has stopped, and answers **409** for one still running.
 
 `GET /api/sources/popular?source=<id>&page=<n>` is the same listing sorted by the source's OWN popularity,
 not by anything this server computes: it is the page each site already publishes, reached with a different
@@ -323,6 +340,7 @@ GET    /api/admin/audit           GET    /api/admin/tasks
 POST   /api/admin/tasks/:id/run   POST   /api/admin/library/scan
 POST   /api/admin/update          POST   /api/admin/update/:id
 GET    /api/sources/popular      GET    /img/sources/icon/:id
+DELETE /api/sources/jobs/:folder
 GET    /api/admin/sources         POST   /api/admin/sources/:id/:action
 POST   /api/admin/sources/:id/test
 POST   /api/admin/sources/check

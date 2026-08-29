@@ -5,6 +5,7 @@ import { useAuth } from '@/lib/auth';
 import { runSmartOffline } from '@/lib/offlineSync';
 import { BottomNav } from './BottomNav';
 import { TopNav } from './TopNav';
+import { DownloadsIndicator } from './DownloadsIndicator';
 import { LoginScreen } from './LoginScreen';
 import { CinematicFX } from './CinematicFX';
 import { PageTransition } from './PageTransition';
@@ -54,6 +55,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <PageTransition>{children}</PageTransition>
       </main>
       <BottomNav />
+      {/* Renders nothing unless something is downloading or has failed. */}
+      <DownloadsIndicator />
       <CommandPalette open={palette} onClose={() => setPalette(false)} />
     </>
   );

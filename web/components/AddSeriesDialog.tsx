@@ -61,7 +61,7 @@ export function AddSeriesDialog({ seed, sources, onClose, onAdded }: {
   const [autoUpdate, setAutoUpdate] = useState(true);
   const [adding, setAdding] = useState(false);
   const [dup, setDup] = useState<string | null>(null);
-  const [done, setDone] = useState<{ title: string; folder: string; chapters: number } | null>(null);
+  const [done, setDone] = useState<{ title: string; folder: string; chapters: number; started?: boolean } | null>(null);
   const [opening, setOpening] = useState(false);
   const title = seed.kind === 'result' ? seed.provider.title : seed.title;
 
@@ -101,8 +101,12 @@ export function AddSeriesDialog({ seed, sources, onClose, onAdded }: {
     if (!picked) return;
     setAdding(true); setDup(null);
     try {
-      const r = await api<{ title: string; folder: string; chapters: number }>('/api/sources/add', {
+      const r = await api<{ title: string; folder: string; chapters: number; started?: boolean }>('/api/sources/add', {
         json: { source: picked.source, sourceId: picked.sourceId, chapterCount: count || undefined, autoUpdate, force },
+        // The client has never set a timeout anywhere, so the only bound was the proxy's 120s -- which
+        // turned a slow-but-working add into "Add failed. Try another source." while the download carried
+        // on. The request now answers in seconds, so this is a backstop rather than the usual path.
+        signal: AbortSignal.timeout(45_000),
       });
       setDone(r);
       onAdded(r);
@@ -194,7 +198,10 @@ export function AddSeriesDialog({ seed, sources, onClose, onAdded }: {
   const presets = [10, 25, 50, 100, 200].filter((n) => detail && n < detail.count);
 
   return (
-    <Modal title={detail?.title || title} onClose={onClose} wide>
+    // Not dismissable while the request is in flight. Escape or a backdrop click used to unmount the dialog
+    // mid-add: the add still completed, but `setDone` and `onAdded` ran against nothing, so there was no
+    // confirmation and the tile was never marked as added -- the worst possible version of "did that work?"
+    <Modal title={detail?.title || title} onClose={adding ? () => {} : onClose} wide>
       {loading || !detail ? (
         <p className="py-10 text-center text-sm text-fog-500">{tr('Loading…')}</p>
       ) : (

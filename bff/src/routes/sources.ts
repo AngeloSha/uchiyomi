@@ -19,8 +19,24 @@ import { env } from '../env';
 // `sourceAllowedFor` answer.
 import { visibleToAll, viewCtxFor, sourceAllowedFor, browsable, Params, type ViewCtx, hideAdult } from '../lib/visibility';
 
-interface Job { title: string; total: number; done: number; status: 'downloading' | 'done' | 'error'; reason?: string }
+interface Job {
+  title: string; total: number; done: number;
+  status: 'downloading' | 'done' | 'error';
+  reason?: string;
+  /** When it stopped, so a finished one can age out. A FAILED one never does: it is the only record. */
+  finishedAt?: number;
+}
 const jobs = new Map<string, Job>();
+
+/** How long a completed download stays listed. `jobs.delete` had exactly one call site -- the chapter-1
+ *  failure path -- so a successful job was never removed and the strip filled with green cards that only a
+ *  restart cleared. Swept lazily on read rather than on a timer: the client polls this often enough. */
+const DONE_TTL = 5 * 60_000;
+function sweepJobs(now = Date.now()): void {
+  for (const [folder, j] of jobs) {
+    if (j.status === 'done' && j.finishedAt && now - j.finishedAt > DONE_TTL) jobs.delete(folder);
+  }
+}
 
 // Trending recommendations are global + slow-moving; cache the AniList pull for a few hours.
 let trendingCache: { at: number; items: TrendingItem[] } | null = null;
@@ -101,6 +117,8 @@ async function inLibrary(titles: Array<string | undefined>): Promise<Set<string>
  */
 const LATEST_TIMEOUT = env.SOURCE_LATEST_TIMEOUT_MS;
 const LATEST_TTL = 10 * 60_000;
+/** What the two lookups an add must do inline are allowed to take. Matches the /find handler's budget. */
+const ADD_LOOKUP_TIMEOUT = 20_000;
 const latestCache = new Map<string, { at: number; items: SourceSeries[] }>();
 const latestInflight = new Map<string, Promise<SourceSeries[]>>();
 
@@ -198,19 +216,34 @@ export interface AddResult {
   ok: boolean; status: number; error?: string; message?: string;
   title?: string; folder?: string; chapters?: number;
   existing?: { title: string; source: string }; blockStatus?: string;
+  /** The download was started rather than completed. Absent when the series was already in the library. */
+  started?: boolean;
 }
 
 /** Add one series from a source to the library (downloads chapter 1 synchronously, the rest in background).
  *  Shared by POST /api/sources/add and the bulk importer. Returns a result instead of touching the reply. */
 export async function addSeriesFromSource(opts: {
   source?: string; sourceId?: string; force?: boolean; chapterCount?: number; autoUpdate?: boolean;
+  /**
+   * Await the first chapter before returning.
+   *
+   * The bulk importer does, because it counts what actually landed and has its own progress surface. A
+   * person pressing a button must not: that await is the whole of this request's cost -- measured at 15.5s,
+   * 48.3s and 59.2s on one install -- and it held the button on "Working…" for all of it while the download
+   * had in fact already started. Defaults to true so every existing caller is unchanged.
+   */
+  wait?: boolean;
 }): Promise<AddResult> {
   const { source, sourceId, force, chapterCount, autoUpdate } = opts;
   const src = source ? getSource(source) : null;
   if (!src || !sourceId) return { ok: false, status: 400, error: 'bad_request' };
   if (await isDisabled(source!)) return { ok: false, status: 403, error: 'disabled', message: `${src.name} is disabled by the admin.` };
 
-  const series = await src.getSeries(sourceId).catch(() => null);
+  // Bounded, like every sibling call in this file. These two are the only network work left inline -- they
+  // decide what to TELL the caller (does it exist, is it a duplicate, has it any chapters), so they cannot
+  // move to the background. Unbounded they could still hold the button for a minute on a challenged source:
+  // each is a headless-browser solve, and Madara's listChapters can issue two.
+  const series = await withTimeout(src.getSeries(sourceId), ADD_LOOKUP_TIMEOUT).catch(() => null);
   const title = series?.title || 'Series';
   const folder = `${src.name}/${sanitize(title)}`;
 
@@ -232,47 +265,84 @@ export async function addSeriesFromSource(opts: {
     if (dup) return { ok: false, status: 409, error: 'duplicate', existing: dup, message: `You already have "${dup.title}" from ${dup.source}. Add this copy anyway?` };
   }
 
-  const chapters = await src.listChapters(sourceId).catch(() => []);
+  const chapters = await withTimeout(src.listChapters(sourceId), ADD_LOOKUP_TIMEOUT).catch(() => []);
   if (!chapters.length) return { ok: false, status: 404, error: 'no_chapters', message: 'No readable chapters for this title on this source. Try a different source.' };
   const selected = chapterCount && chapterCount > 0 ? chapters.slice(0, chapterCount) : chapters;
   const meta = { series: title, summary: series?.summary, author: series?.author, genres: series?.genres, url: series?.url, status: series?.status };
   jobs.set(folder, { title, total: selected.length, done: 0, status: 'downloading' });
 
-  let firstPages = 0; let blockReason: string | null = null;
-  try { const r = await downloadChapter({ sourceId: source!, seriesFolder: folder, chapter: selected[0], meta }); firstPages = r.skipped ? 1 : r.pages; }
-  catch (e: any) { blockReason = e?.blockStatus || null; }
-  if (!firstPages) {
-    jobs.delete(folder);
-    if (blockReason) {
-      const verb = blockReason === 'rate_limited' ? 'rate-limiting' : blockReason === 'blocked' ? 'blocking' : 'unreachable for';
-      return { ok: false, status: 429, error: 'blocked', blockStatus: blockReason, message: `${src.name} is currently ${verb} downloads — wait a bit or pick another source.` };
+  /**
+   * Everything from here is the WORK, as opposed to the decision.
+   *
+   * It used to run before the reply, which is why the button sat on "Working…" for up to a minute: the
+   * first chapter is fetched a page at a time, up to 45s each, behind a queue with no bound, and on a
+   * Cloudflare source every step is a real challenge solve. The job row already existed by this point, so
+   * the Discover strip knew the download had started while the caller was still waiting to be told.
+   */
+  const run = async (): Promise<AddResult> => {
+    let firstPages = 0; let blockReason: string | null = null;
+    try { const r = await downloadChapter({ sourceId: source!, seriesFolder: folder, chapter: selected[0], meta }); firstPages = r.skipped ? 1 : r.pages; }
+    catch (e: any) { blockReason = e?.blockStatus || null; }
+    if (!firstPages) {
+      const why = blockReason
+        ? `${src.name} is currently ${blockReason === 'rate_limited' ? 'rate-limiting' : blockReason === 'blocked' ? 'blocking' : 'unreachable for'} downloads.`
+        : 'No downloadable chapters here — this title may be licensed or hosted externally on this source.';
+      if (opts.wait === false) {
+        // Detached: the caller has already been told the download started, so this card IS the failure
+        // report. It is deliberately not swept -- see sweepJobs -- and is dismissed by hand.
+        const j = jobs.get(folder); if (j) { j.status = 'error'; j.reason = why; j.finishedAt = Date.now(); }
+      } else {
+        // Awaited: the caller gets a real HTTP answer and has its own reporting, so leaving a card behind
+        // would just be noise -- the bulk importer would strand one per failed title.
+        jobs.delete(folder);
+      }
+      if (blockReason) {
+        return { ok: false, status: 429, error: 'blocked', blockStatus: blockReason, message: `${why} Wait a bit or pick another source.` };
+      }
+      return { ok: false, status: 422, error: 'undownloadable', message: `${why} Try a different source.` };
     }
-    return { ok: false, status: 422, error: 'undownloadable', message: 'No downloadable chapters here — this title may be licensed or hosted externally on this source. Try a different source.' };
-  }
-  const j0 = jobs.get(folder); if (j0) j0.done = 1;
-  await persistScan().catch(() => {});
-  await setBookDates(folder, selected).catch(() => {});
-  await q('UPDATE lib_series SET auto_update = $1, source_id = $2, source_series_id = $3 WHERE folder = $4',
-    [autoUpdate !== false, source, sourceId, folder]).catch(() => {});
-  if (series?.coverUrl) {
-    await q(`INSERT INTO series_art (series_id, cover) SELECT id, $1 FROM lib_series WHERE folder = $2
-      ON CONFLICT (series_id) DO UPDATE SET cover = COALESCE(series_art.cover, EXCLUDED.cover)`, [series.coverUrl, folder]).catch(() => {});
-  }
-  fetchAniListArt(title)
-    .then((a) => q(`INSERT INTO series_art (series_id, banner, cover) SELECT id, $1, $2 FROM lib_series WHERE folder = $3
-      ON CONFLICT (series_id) DO UPDATE SET banner = COALESCE(series_art.banner, EXCLUDED.banner), cover = COALESCE(series_art.cover, EXCLUDED.cover)`, [a.banner, a.cover, folder]))
-    .catch(() => {});
-  void (async () => {
-    for (const ch of selected.slice(1)) {
-      try { await downloadChapter({ sourceId: source!, seriesFolder: folder, chapter: ch, meta }); }
-      catch (e: any) { if (e?.blockStatus) { const j = jobs.get(folder); if (j) { j.status = 'error'; j.reason = e.blockStatus; } break; } }
-      const j = jobs.get(folder); if (j) { j.done++; if (j.done % 5 === 0) await persistScan().catch(() => {}); }
-    }
+    const j0 = jobs.get(folder); if (j0) j0.done = 1;
     await persistScan().catch(() => {});
     await setBookDates(folder, selected).catch(() => {});
-    const j = jobs.get(folder); if (j && j.status !== 'error') j.status = 'done';
-  })();
-  return { ok: true, status: 200, title, folder, chapters: selected.length };
+    await q('UPDATE lib_series SET auto_update = $1, source_id = $2, source_series_id = $3 WHERE folder = $4',
+      [autoUpdate !== false, source, sourceId, folder]).catch(() => {});
+    if (series?.coverUrl) {
+      await q(`INSERT INTO series_art (series_id, cover) SELECT id, $1 FROM lib_series WHERE folder = $2
+        ON CONFLICT (series_id) DO UPDATE SET cover = COALESCE(series_art.cover, EXCLUDED.cover)`, [series.coverUrl, folder]).catch(() => {});
+    }
+    fetchAniListArt(title)
+      .then((a) => q(`INSERT INTO series_art (series_id, banner, cover) SELECT id, $1, $2 FROM lib_series WHERE folder = $3
+        ON CONFLICT (series_id) DO UPDATE SET banner = COALESCE(series_art.banner, EXCLUDED.banner), cover = COALESCE(series_art.cover, EXCLUDED.cover)`, [a.banner, a.cover, folder]))
+      .catch(() => {});
+    void (async () => {
+      for (const ch of selected.slice(1)) {
+        try { await downloadChapter({ sourceId: source!, seriesFolder: folder, chapter: ch, meta }); }
+        catch (e: any) {
+          if (e?.blockStatus) {
+            const j = jobs.get(folder);
+            if (j) {
+              j.status = 'error';
+              j.reason = `${src.name} stopped part-way: it is ${e.blockStatus === 'rate_limited' ? 'rate-limiting' : e.blockStatus === 'blocked' ? 'blocking' : 'unreachable for'} downloads. ${j.done} of ${j.total} chapters saved.`;
+              j.finishedAt = Date.now();
+            }
+            break;
+          }
+        }
+        const j = jobs.get(folder); if (j) { j.done++; if (j.done % 5 === 0) await persistScan().catch(() => {}); }
+      }
+      await persistScan().catch(() => {});
+      await setBookDates(folder, selected).catch(() => {});
+      const j = jobs.get(folder);
+      if (j && j.status !== 'error') { j.status = 'done'; j.finishedAt = Date.now(); }
+    })();
+    return { ok: true, status: 200, title, folder, chapters: selected.length };
+  };
+
+  if (opts.wait !== false) return run();
+  // Detached. `started` is what lets the caller say "downloading now" rather than guessing from
+  // `chapters === 0`, which is the only signal an already-in-library answer has ever had.
+  void run().catch(() => {});
+  return { ok: true, status: 200, title, folder, chapters: selected.length, started: true };
 }
 
 /** Best single cross-source match for a title (searches sources in preferred order, returns the first real hit). */
@@ -499,6 +569,7 @@ export default async function sourceRoutes(app: FastifyInstance) {
   });
 
   app.get('/api/sources/jobs', async (req) => {
+    sweepJobs();
     const all = [...jobs.entries()].map(([folder, j]) => ({ folder, ...j }));
     if (!vc(req).hideAdultLibraries) return { content: all };
     // A download job carries the series title, so the strip on Discover is a listing like any other. Jobs
@@ -511,6 +582,24 @@ export default async function sourceRoutes(app: FastifyInstance) {
       p.values as any[],
     ).catch(() => [])).map((r) => r.folder));
     return { content: all.filter((j) => !hidden.has(j.folder)) };
+  });
+
+  /**
+   * Dismiss a finished or failed download.
+   *
+   * A failed one is never swept, because it is the only record that the download did not work -- an add now
+   * answers before the download starts, so this card is where a blocked source or an unreadable chapter
+   * actually surfaces. It therefore has to be dismissible, or it would sit there for good.
+   */
+  app.delete('/api/sources/jobs/:folder', async (req, reply) => {
+    const { folder } = req.params as { folder: string };
+    const j = jobs.get(folder);
+    if (!j) return reply.code(404).send({ error: 'not_found' });
+    // Only something that has stopped. Dropping a running job would orphan a download that is still going
+    // and leave no way to see it again.
+    if (j.status === 'downloading') return reply.code(409).send({ error: 'running' });
+    jobs.delete(folder);
+    return { ok: true };
   });
 
   // How many trending titles reach the client. The hero takes the first ten and the rail shows the rest, so
@@ -597,9 +686,14 @@ export default async function sourceRoutes(app: FastifyInstance) {
     if (!source || !sourceId) return reply.code(400).send({ error: 'bad_request' });
     // canDownload is now checked for the whole plugin in the preHandler above, including this route.
     if (!sourceAllowedFor(getSource(source), vc(req).maxAgeRating)) return denySource(reply);
-    const r = await addSeriesFromSource({ source, sourceId, force, chapterCount, autoUpdate });
+    // `wait: false` -- answer once the decision is made and download afterwards. Everything that decides
+    // what to tell the caller (disabled, already present, duplicate, no chapters) still happens inline and
+    // still gets its proper status code; only the fetching moves behind the reply.
+    const r = await addSeriesFromSource({ source, sourceId, force, chapterCount, autoUpdate, wait: false });
     if (!r.ok) return reply.code(r.status).send({ error: r.error, message: r.message, existing: r.existing, status: r.blockStatus });
+    // Audited here rather than after the download, so a slow or failing download does not delay the record
+    // of who asked for it. What actually landed is the job's business.
     logAudit('download.add', { userId: (req as any).user?.sub, detail: { title: r.title, source, chapters: r.chapters }, req });
-    return { ok: true, title: r.title, folder: r.folder, chapters: r.chapters };
+    return { ok: true, title: r.title, folder: r.folder, chapters: r.chapters, started: !!r.started };
   });
 }
