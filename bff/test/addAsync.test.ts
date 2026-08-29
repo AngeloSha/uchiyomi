@@ -52,15 +52,26 @@ test('the work is behind the reply, and the decisions are not', () => {
   assert.ok(!decide.includes('downloadChapter('), 'the chapter download is back in the inline half');
 });
 
-test('the two inline lookups are bounded', () => {
-  // These are the only network calls left before the reply, and they had no timeout at all -- on a
-  // challenged source each is a browser solve and Madara can issue two, so "answers immediately" would
-  // still have meant a minute.
+test('the two inline lookups are bounded, parallel, and shared with the dialog', () => {
+  // These are the only network calls left before the reply and they had no timeout at all. Worse, `add` ran
+  // them one after the other while `/api/sources/detail` -- which the add dialog calls seconds earlier for
+  // the very same two facts -- ran them together. So opening the dialog and pressing Add paid for four
+  // challenge solves to learn two things, measured at 22.8s for an add that had already backgrounded its
+  // downloading.
   //
-  // Reintroduce by removing either withTimeout: the inline half becomes unbounded again.
-  const decide = addFn();
-  assert.match(decide, /withTimeout\(src\.getSeries\(/, 'getSeries is unbounded');
-  assert.match(decide, /withTimeout\(src\.listChapters\(/, 'listChapters is unbounded');
+  // Reintroduce by removing a withTimeout, by awaiting them in sequence, or by having either caller fetch
+  // directly instead of through the shared helper.
+  const t = code(read('routes', 'sources.ts'));
+  const helper = t.slice(t.indexOf('async function seriesAndChapters'), t.indexOf('export function clearDetailCache'));
+  assert.match(helper, /withTimeout\(src\.getSeries\(/, 'getSeries is unbounded');
+  assert.match(helper, /withTimeout\(src\.listChapters\(/, 'listChapters is unbounded');
+  assert.match(helper, /Promise\.all\(/, 'the two lookups are sequential again, so an add pays the sum');
+  assert.match(helper, /detailCache\.set/, 'nothing is cached, so the dialog and the add each pay in full');
+
+  // Both callers must go through it, or the caching is pointless.
+  assert.match(addFn(), /seriesAndChapters\(src, sourceId\)/, 'add fetches its own copy again');
+  const detail = t.slice(t.indexOf("app.get('/api/sources/detail'"), t.indexOf("app.get('/api/sources/detail'") + 900);
+  assert.match(detail, /seriesAndChapters\(src, sourceId\)/, 'detail does not populate the cache the add reads');
 });
 
 test('a failed background download leaves the failure behind; an awaited one does not', () => {

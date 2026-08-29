@@ -1,5 +1,23 @@
 # Changelog
 
+## v0.10.2 — 2026-08-30
+
+### The Add button stops being where you wait
+
+v0.10.1 moved the downloading out from behind the button, and measuring the result showed the button still
+took twenty-three seconds to answer. The reason turned out to be worse than slowness.
+
+Opening the add window asks the site for the series and its chapter list, which is how it can tell you "120
+chapters". Pressing Add then asked the site for exactly the same two things all over again, a few seconds
+later, and asked for them one after the other rather than together. On a site behind a bot check, each of
+those questions costs a real browser challenge, so opening the window and pressing Add paid for four of them
+to learn two facts.
+
+Both now share one answer, fetched once and remembered for a minute and a half. In the ordinary case —
+open, glance, press Add — the button does no network work at all before replying.
+
+The window's own opening pause is unchanged, because that part is the site's own cost rather than ours.
+
 ## v0.10.1 — 2026-08-29
 
 ### Adding a series tells you straight away

@@ -3,7 +3,7 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { authenticate, userIdOf, roleOf } from '../lib/auth';
 import { getSource, listSources, isSwAdapterId, SW_PREFIX } from '../lib/sources';
-import type { SourceAdapter, SourceSeries } from '../lib/sources/types';
+import type { SourceAdapter, SourceSeries, SourceChapter } from '../lib/sources/types';
 import { downloadChapter, sanitize } from '../lib/downloader';
 import { persistScan, setBookDates } from '../lib/library';
 import { fetchAniListArt, fetchTrendingManhwa, TrendingItem } from '../lib/anilist';
@@ -119,6 +119,39 @@ const LATEST_TIMEOUT = env.SOURCE_LATEST_TIMEOUT_MS;
 const LATEST_TTL = 10 * 60_000;
 /** What the two lookups an add must do inline are allowed to take. Matches the /find handler's budget. */
 const ADD_LOOKUP_TIMEOUT = 20_000;
+
+/**
+ * What `/api/sources/detail` just fetched, so an add does not fetch it all over again.
+ *
+ * The add dialog calls `detail` to show the cover, summary and chapter count, and `add` then made the exact
+ * same two calls seconds later -- on a Cloudflare source that is two more challenge solves, and it was
+ * measured at 22.8s of an add that had already moved its downloading to the background. Nobody presses Add
+ * a minute after opening the dialog, so a short life is enough, and a short life is also what keeps a
+ * chapter list from going stale.
+ *
+ * Keyed by source and series only: this is what the SITE said, identical for every viewer, exactly like
+ * `latestCache` above.
+ */
+const DETAIL_TTL = 90_000;
+const detailCache = new Map<string, { at: number; series: SourceSeries | null; chapters: SourceChapter[] }>();
+
+async function seriesAndChapters(src: SourceAdapter, sourceId: string):
+  Promise<{ series: SourceSeries | null; chapters: SourceChapter[] }> {
+  const key = `${src.id}:${sourceId}`;
+  const hit = detailCache.get(key);
+  if (hit && Date.now() - hit.at < DETAIL_TTL) return { series: hit.series, chapters: hit.chapters };
+  // In parallel. `add` ran these one after the other while `detail` had always run them together, so an add
+  // paid the sum of two solves where the dialog beside it paid the larger of the two.
+  const [series, chapters] = await Promise.all([
+    withTimeout(src.getSeries(sourceId), ADD_LOOKUP_TIMEOUT).catch(() => null),
+    withTimeout(src.listChapters(sourceId), ADD_LOOKUP_TIMEOUT).catch(() => [] as SourceChapter[]),
+  ]);
+  detailCache.set(key, { at: Date.now(), series, chapters });
+  return { series, chapters };
+}
+
+/** Exposed for tests: the cache is process-global and would otherwise leak between cases. */
+export function clearDetailCache(): void { detailCache.clear(); }
 const latestCache = new Map<string, { at: number; items: SourceSeries[] }>();
 const latestInflight = new Map<string, Promise<SourceSeries[]>>();
 
@@ -239,11 +272,11 @@ export async function addSeriesFromSource(opts: {
   if (!src || !sourceId) return { ok: false, status: 400, error: 'bad_request' };
   if (await isDisabled(source!)) return { ok: false, status: 403, error: 'disabled', message: `${src.name} is disabled by the admin.` };
 
-  // Bounded, like every sibling call in this file. These two are the only network work left inline -- they
-  // decide what to TELL the caller (does it exist, is it a duplicate, has it any chapters), so they cannot
-  // move to the background. Unbounded they could still hold the button for a minute on a challenged source:
-  // each is a headless-browser solve, and Madara's listChapters can issue two.
-  const series = await withTimeout(src.getSeries(sourceId), ADD_LOOKUP_TIMEOUT).catch(() => null);
+  // The only network work left inline. It decides what to TELL the caller -- does it exist, is it a
+  // duplicate, has it any chapters -- so it cannot move behind the reply. Shared with `/api/sources/detail`,
+  // which the add dialog calls seconds earlier for the very same two things: without that, opening the
+  // dialog and pressing Add paid for four challenge solves to learn two facts.
+  const { series, chapters } = await seriesAndChapters(src, sourceId);
   const title = series?.title || 'Series';
   const folder = `${src.name}/${sanitize(title)}`;
 
@@ -265,7 +298,6 @@ export async function addSeriesFromSource(opts: {
     if (dup) return { ok: false, status: 409, error: 'duplicate', existing: dup, message: `You already have "${dup.title}" from ${dup.source}. Add this copy anyway?` };
   }
 
-  const chapters = await withTimeout(src.listChapters(sourceId), ADD_LOOKUP_TIMEOUT).catch(() => []);
   if (!chapters.length) return { ok: false, status: 404, error: 'no_chapters', message: 'No readable chapters for this title on this source. Try a different source.' };
   const selected = chapterCount && chapterCount > 0 ? chapters.slice(0, chapterCount) : chapters;
   const meta = { series: title, summary: series?.summary, author: series?.author, genres: series?.genres, url: series?.url, status: series?.status };
@@ -670,7 +702,8 @@ export default async function sourceRoutes(app: FastifyInstance) {
     const src = source ? getSource(source) : null;
     if (!src || !sourceId) return reply.code(400).send({ error: 'bad_request' });
     if (!sourceAllowedFor(src, vc(req).maxAgeRating)) return denySource(reply);
-    const [series, chapters] = await Promise.all([src.getSeries(sourceId).catch(() => null), src.listChapters(sourceId).catch(() => [])]);
+    // Through the shared lookup so the add that usually follows this reuses it rather than re-solving.
+    const { series, chapters } = await seriesAndChapters(src, sourceId);
     const nums = chapters.map((c) => c.number);
     return {
       source, sourceId,
