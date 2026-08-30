@@ -45,15 +45,17 @@ before(async () => {
   await flushOutbox();
 });
 
+// Deliberately un-versioned: the app owns the schema, and pinning a number here made this file fail the
+// moment the store was bumped to v2 for per-account scoping.
 const outbox = async () => {
-  const d = await openDB('yomi-offline', 1);
+  const d = await openDB('yomi-offline');
   const all = await d.getAll('outbox');
   d.close();
   return all;
 };
 
 async function reset(rs: Reply[]) {
-  const d = await openDB('yomi-offline', 1);
+  const d = await openDB('yomi-offline');
   const tx = d.transaction('outbox', 'readwrite');
   await tx.objectStore('outbox').clear();
   await tx.done;

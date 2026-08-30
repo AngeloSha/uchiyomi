@@ -1,13 +1,30 @@
 // Offline chapter store (IndexedDB): page blobs + chapter metadata + a progress outbox.
 import { openDB, IDBPDatabase } from 'idb';
-import { api, ApiError } from './api';
+import { api, ApiError, getCurrentUser } from './api';
 import { DownloadManifest } from './types';
 import { deviceId } from './device';
 
 const DB_NAME = 'yomi-offline';
-const VERSION = 1;
+/**
+ * v2 scopes every record to the account that downloaded it.
+ *
+ * v1 keyed `chapters` by bookId alone and `pages` by `bookId:n`, with no account anywhere. The reader
+ * consults this store BEFORE any server call (`loadChapter` in app/reader/page.tsx returns the offline copy
+ * and never asks), so on a shared device the next person to sign in could open the previous person's
+ * downloads by navigating to those book ids, with `visible()` never consulted and the age cap and library
+ * grants both bypassed. That is the same hole the v0.11.0 sign-out purge closed for cached API responses,
+ * left open on the larger and more permanent store beside it.
+ *
+ * The v1 records are dropped rather than migrated: nothing in them records who saved them, so there is no
+ * honest owner to assign. Losing a re-downloadable cache is the right side of that trade.
+ */
+const VERSION = 2;
 
 export interface OfflineChapter {
+  /** `${userId}:${bookId}` — the primary key, and the whole point of v2. */
+  key: string;
+  /** Who downloaded it. Indexed, so listing is a lookup rather than a filter over everyone's records. */
+  userId: string;
   bookId: string;
   seriesId: string;
   seriesTitle: string;
@@ -20,12 +37,29 @@ export interface OfflineChapter {
   pages: { number: number; width: number | null; height: number | null }[];
 }
 
+/**
+ * The account these records belong to. `anon` is a deliberate dead end rather than a shared bucket: if
+ * nobody is signed in there is nothing legitimate to read, and writing under a shared key would recreate
+ * exactly the leak this file is fixing.
+ */
+const owner = () => getCurrentUser() || 'anon';
+const chapterKey = (bookId: string) => `${owner()}:${bookId}`;
+const pageKey = (bookId: string, n: number) => `${owner()}:${bookId}:${n}`;
+
 let dbp: Promise<IDBPDatabase> | null = null;
 function db() {
   if (!dbp) {
     dbp = openDB(DB_NAME, VERSION, {
-      upgrade(d) {
-        if (!d.objectStoreNames.contains('chapters')) d.createObjectStore('chapters', { keyPath: 'bookId' });
+      upgrade(d, oldVersion) {
+        // Unattributable v1 content goes. The outbox is deliberately NOT dropped: it holds reading that has
+        // not reached the server yet, and losing it would be exactly the data loss v0.11.0 was spent closing.
+        if (oldVersion < 2) {
+          if (d.objectStoreNames.contains('chapters')) d.deleteObjectStore('chapters');
+          if (d.objectStoreNames.contains('pages')) d.deleteObjectStore('pages');
+        }
+        if (!d.objectStoreNames.contains('chapters')) {
+          d.createObjectStore('chapters', { keyPath: 'key' }).createIndex('byUser', 'userId');
+        }
         if (!d.objectStoreNames.contains('pages')) d.createObjectStore('pages');
         if (!d.objectStoreNames.contains('outbox')) d.createObjectStore('outbox', { keyPath: 'id', autoIncrement: true });
       },
@@ -36,23 +70,24 @@ function db() {
 
 export async function isDownloaded(bookId: string): Promise<boolean> {
   const d = await db();
-  return !!(await d.get('chapters', bookId));
+  return !!(await d.get('chapters', chapterKey(bookId)));
 }
 
 export async function listDownloads(): Promise<OfflineChapter[]> {
   const d = await db();
-  const all = (await d.getAll('chapters')) as OfflineChapter[];
+  // From the index, not the whole store: another account's downloads must not appear even in a count.
+  const all = (await d.getAllFromIndex('chapters', 'byUser', owner())) as OfflineChapter[];
   return all.sort((a, b) => b.savedAt - a.savedAt);
 }
 
 export async function getOfflineChapter(bookId: string): Promise<OfflineChapter | undefined> {
   const d = await db();
-  return (await d.get('chapters', bookId)) as OfflineChapter | undefined;
+  return (await d.get('chapters', chapterKey(bookId))) as OfflineChapter | undefined;
 }
 
 export async function getPageBlob(bookId: string, n: number): Promise<Blob | undefined> {
   const d = await db();
-  return (await d.get('pages', `${bookId}:${n}`)) as Blob | undefined;
+  return (await d.get('pages', pageKey(bookId, n))) as Blob | undefined;
 }
 
 export async function downloadChapter(
@@ -72,7 +107,7 @@ export async function downloadChapter(
       const res = await fetch(p.url, { credentials: 'include' });
       if (!res.ok) throw new Error(`page ${p.number}: HTTP ${res.status}`);
       const blob = await res.blob();
-      await d.put('pages', blob, `${bookId}:${p.number}`);
+      await d.put('pages', blob, pageKey(bookId, p.number));
       done++;
       onProgress?.(done, manifest.pages.length);
     }
@@ -84,12 +119,14 @@ export async function downloadChapter(
     // visibilitychange and every `online` event, so on a phone with poor signal this accumulated daily until
     // the quota filled -- at which point "free up space" moved nothing, because nothing knew they were there.
     for (let n = 0; n < done; n++) {
-      await d.delete('pages', `${bookId}:${manifest.pages[n].number}`).catch(() => {});
+      await d.delete('pages', pageKey(bookId, manifest.pages[n].number)).catch(() => {});
     }
     throw e;
   }
 
   const meta: OfflineChapter = {
+    key: chapterKey(bookId),
+    userId: owner(),
     bookId,
     seriesId: manifest.seriesId,
     seriesTitle: manifest.seriesTitle,
@@ -110,11 +147,11 @@ export async function downloadChapter(
 
 export async function deleteDownload(bookId: string): Promise<void> {
   const d = await db();
-  const meta = (await d.get('chapters', bookId)) as OfflineChapter | undefined;
+  const meta = (await d.get('chapters', chapterKey(bookId))) as OfflineChapter | undefined;
   if (meta) {
-    for (const p of meta.pages) await d.delete('pages', `${bookId}:${p.number}`);
+    for (const p of meta.pages) await d.delete('pages', pageKey(bookId, p.number));
   }
-  await d.delete('chapters', bookId);
+  await d.delete('chapters', chapterKey(bookId));
   api(`/api/downloads/${bookId}?deviceId=${deviceId()}`, { method: 'DELETE' }).catch(() => {});
 }
 
@@ -160,7 +197,10 @@ export interface ProgressEvent {
 
 export async function queueProgress(ev: ProgressEvent): Promise<void> {
   const d = await db();
-  await d.add('outbox', { ...ev, ts: Date.now(), tries: 0 });
+  // Stamped with the owner because the flush authenticates as whoever is signed in AT THAT MOMENT, which is
+  // not necessarily who read the pages. On a shared device, A's queued chapters would otherwise be filed
+  // against B's reading history, streaks and leaderboard position.
+  await d.add('outbox', { ...ev, userId: owner(), ts: Date.now(), tries: 0 });
   // background sync: the SW flushes the outbox when connectivity returns, even if the app is closed
   try {
     // Bounded: `serviceWorker.ready` never resolves when no worker becomes active, and this is awaited on
@@ -196,10 +236,14 @@ export async function flushOutbox(): Promise<number> {
   // One read, and the key comes off the record, which carries it (`keyPath: 'id'`). Reading `getAllKeys` and
   // `getAll` separately meant two IDB transactions: the service worker flushing between them shifted the
   // arrays out of step, after which a failure on one entry deleted a different, unrelated one.
-  const all = (await d.getAll('outbox')) as Array<ProgressEvent & { id?: number; tries?: number; ts?: number }>;
+  const all = (await d.getAll('outbox')) as Array<ProgressEvent & { id?: number; tries?: number; ts?: number; userId?: string }>;
+  const me = owner();
   let sent = 0;
   for (const ev of all) {
     if (ev.id == null) continue; // written before autoIncrement keys existed; nothing safe to delete by
+    // Another account's queued reading waits for them to sign back in. Events written before v2 carry no
+    // owner; those still go, because the alternative is discarding reading that was genuinely recorded.
+    if (ev.userId && ev.userId !== me) continue;
     try {
       await api(`/api/books/${ev.bookId}/progress`, {
         method: 'PUT',

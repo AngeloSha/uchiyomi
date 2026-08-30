@@ -516,8 +516,12 @@ export default async function sourceRoutes(app: FastifyInstance) {
     };
   });
 
-  // full per-source health for the admin provider dashboard
-  app.get('/api/sources/status', async () => ({ content: await healthAll() }));
+  // GET /api/sources/status was here, and is deliberately gone. It answered any AUTHENTICATED caller (this
+  // file's preHandler is `authenticate`, not `requireAdmin`) with the raw source_health row, `last_error`
+  // included -- the very field the comment fifteen lines above forbids exposing, because it carries internal
+  // hostnames and ports. Its own comment said "for the admin provider dashboard", and the admin dashboard
+  // has always called the properly gated twin at GET /api/admin/sources (routes/admin.ts). Nothing else ever
+  // called this one. Deleted rather than gated, because a second door to the same room is what went wrong.
 
   app.get('/api/sources/search', async (req, reply) => {
     const { source, q: query } = req.query as { source?: string; q?: string };

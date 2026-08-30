@@ -283,8 +283,8 @@ GET    /api/offline/plan
 GET    /api/sources               GET    /api/sources/find
 GET    /api/sources/detail        GET    /api/sources/search
 GET    /api/sources/search-all    GET    /api/sources/latest
-GET    /api/sources/status        GET    /api/sources/jobs
-POST   /api/sources/add           GET    /api/discover/trending
+GET    /api/sources/jobs          POST   /api/sources/add
+GET    /api/discover/trending
 ```
 
 ### Bulk actions

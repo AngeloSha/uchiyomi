@@ -6,11 +6,26 @@ import { withAdult } from './adult';
 let accessToken: string | null = null;
 let refreshing: Promise<boolean> | null = null;
 
+/**
+ * Who the offline store belongs to.
+ *
+ * Held beside the token rather than in React state because the IndexedDB layer is a plain module with no
+ * access to context, and because it has to be answerable synchronously: `loadChapter` consults the offline
+ * store BEFORE any server call, so there is no request in flight to carry the identity.
+ */
+let currentUserId: string | null = null;
+
 export function setAccessToken(t: string | null) {
   accessToken = t;
 }
 export function getAccessToken() {
   return accessToken;
+}
+export function setCurrentUser(id: string | null) {
+  currentUserId = id;
+}
+export function getCurrentUser() {
+  return currentUserId;
 }
 
 export class ApiError extends Error {

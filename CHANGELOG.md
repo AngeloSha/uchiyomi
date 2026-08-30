@@ -1,5 +1,35 @@
 # Changelog
 
+## v0.11.1 — 2026-08-30
+
+### Two ways one account could reach another account's things
+
+Both found by auditing the running instance rather than the code, and both are the same shape as the
+sign-out fix in v0.11.0: something that is correct for one person and wrong the moment a device is shared.
+
+**Downloaded chapters had no owner.** Offline chapters were stored under the chapter's id alone, with no
+record of who downloaded them, and signing out did not remove them. The reader checks that store before it
+asks the server, which means for anything downloaded the store IS the permission check. So on a shared
+tablet or PC, one person could download chapters, sign out, and the next person to sign in could open them
+by opening those chapters, with the age limit and the library permissions never consulted.
+
+Everything downloaded is now filed under the account that downloaded it, and is simply not there for anyone
+else. Signing back in brings your own downloads back, so this is scoping rather than deletion.
+
+The same applied more quietly to reading that had not yet reached the server: a queue left behind by one
+person would have been filed against whoever signed in next, taking their streak and leaderboard position
+with it. Queued reading now waits for the person who did the reading.
+
+**One thing to expect on this upgrade:** chapters downloaded before today are removed, because nothing about
+them records who saved them and there is no honest way to assign an owner after the fact. They can be
+downloaded again. Reading progress is untouched, including anything still queued.
+
+**An internal detail was readable by any signed-in account.** One source-status route answered with the raw
+health record, including the last error text, which names internal addresses and ports. The public route
+fifteen lines above it goes out of its way not to publish that, and says so in a comment. The leaking one
+was a duplicate of a properly restricted admin route that the admin page has always used instead, and
+nothing else ever called it, so it is gone rather than merely restricted.
+
 ## v0.11.0 — 2026-08-30
 
 ### Twelve things that were failing without telling you

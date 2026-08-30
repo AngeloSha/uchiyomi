@@ -360,6 +360,32 @@ test('sources: who may reach them, and how long they get', { skip }, async (t) =
       await app.inject({ method: 'GET', url: `/api/sources/latest?source=${CLEAN}&page=2`, headers: tok(ids.plain) });
       assert.equal(calls[CLEAN], 2);
     });
+    // ------------------------------------------------------- internal detail must not leave this route file
+    //
+    // `GET /api/sources/status` used to sit fifteen lines below a comment forbidding exactly what it did. The
+    // public `/api/sources` deliberately publishes only a public sentence, "never `last_error`, which carries
+    // internal hostnames and ports", because it is cached client-side under one key that does not vary by
+    // account. The status route then answered any AUTHENTICATED caller with the whole row. This file's
+    // preHandler is `authenticate`, not `requireAdmin`, so "any caller" meant every member of the household.
+    await t.test('the raw health row is not reachable from a non-admin route', async () => {
+      await q(
+        `INSERT INTO source_health (source_id, status, last_error) VALUES ($1,'down',$2)
+         ON CONFLICT (source_id) DO UPDATE SET status='down', last_error = EXCLUDED.last_error`,
+        [CLEAN, 'connect ECONNREFUSED 172.19.0.4:8191 (flaresolverr)'],
+      );
+
+      const gone = await app.inject({ method: 'GET', url: '/api/sources/status', headers: tok(ids.plain) });
+      assert.equal(gone.statusCode, 404, 'the duplicate route must stay deleted, not merely unused');
+
+      // and the surviving public route must still refuse to name the internals
+      const pub = await app.inject({ method: 'GET', url: '/api/sources', headers: tok(ids.plain) });
+      assert.equal(pub.statusCode, 200);
+      const body = pub.body;
+      assert.ok(!body.includes('last_error'), 'the field name leaked');
+      assert.ok(!body.includes('ECONNREFUSED'), 'the error text leaked');
+      assert.ok(!body.includes('172.19.0.4'), 'an internal address leaked');
+      assert.ok(!body.includes('8191'), 'an internal port leaked');
+    });
   } finally {
     await app.close();
     await q('DELETE FROM users WHERE username = ANY($1)', [USERS]).catch(() => {});

@@ -1,6 +1,6 @@
 'use client';
 import { createContext, useContext, useEffect, useRef, useState, ReactNode } from 'react';
-import { api, refreshSession, setAccessToken } from './api';
+import { api, refreshSession, setAccessToken, setCurrentUser } from './api';
 import { deviceId, deviceName } from './device';
 import { clearShownOnce } from './shownOnce';
 
@@ -91,13 +91,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (ok) {
         try {
           const me = await api<User>('/auth/me');
+          // Before setUser, and before anything renders: the reader reads the offline store without waiting
+          // for React, so the identity has to be in place the moment the session is known. This is the path
+          // that runs on every page load, which makes it the one that matters most.
+          setCurrentUser(me.id);
           setUser(me);
           applyAccent(me.settings);
           setStatus('authed');
         } catch {
+          setCurrentUser(null);
           setStatus('anon');
         }
       } else {
+        setCurrentUser(null);
         setStatus('anon');
       }
     })();
@@ -116,6 +122,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       });
       await purgeAccountCaches(); // whoever used this device last does not get to answer this account's requests
       setAccessToken(res.accessToken);
+      setCurrentUser(res.user.id);
       setUser(res.user);
       applyAccent(res.user.settings);
       setStatus('authed');
@@ -140,6 +147,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       const res = await api<{ accessToken: string; user: User }>('/api/setup', { json: { username, password } });
       setAccessToken(res.accessToken);
+      setCurrentUser(res.user.id);
       setUser(res.user);
       applyAccent(res.user.settings);
       setStatus('authed');
@@ -156,6 +164,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       await api('/auth/logout', { method: 'POST' });
     } catch {}
     setAccessToken(null);
+    setCurrentUser(null);
     setUser(null);
     setStatus('anon');
     // Secrets the server only ever sends once are held outside React so a remount cannot destroy them.
