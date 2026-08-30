@@ -58,6 +58,8 @@ export interface BackupResult {
   ms: number;
   /** true when the config archive was skipped because CONFIG_DIR held nothing */
   configEmpty?: boolean;
+  /** dirSize could not measure the folder. Distinct from a genuinely empty one, which is a failure. */
+  sizeUnknown?: boolean;
 }
 
 /** UTC timestamp folder name, matching the host's existing <name>-<YYYYMMDD-HHMMSS> convention. */
@@ -144,14 +146,22 @@ export async function runBackup(): Promise<BackupResult> {
     configEmpty = true; // no config dir mounted — the dump alone is still worth keeping
   }
 
-  const bytes = await dirSize(dir).catch(() => 0);
+  // `bytes` is the ONLY health signal this task has ever shown, so it must never be able to report the
+  // failure value on a good run. `.catch(() => 0)` did exactly that: a readdir or stat hiccup inside dirSize
+  // rendered a complete backup as '0 B' -- the identical signal to the empty-archive bug this file was
+  // rewritten to prevent. `null` says "not measured", which is a different sentence from "nothing here".
+  const bytes = await dirSize(dir).catch(() => null);
   await pruneBackups().catch(() => {});
-  const res: BackupResult = { dir, bytes, ms: Date.now() - started, configEmpty };
+  const res: BackupResult = { dir, bytes: bytes ?? 0, sizeUnknown: bytes === null, ms: Date.now() - started, configEmpty };
 
   // persist last-run so the admin UI still reports it after a container restart (runtime.* is in-memory)
+  //
+  // configEmpty and sizeUnknown are carried through here on purpose. Both were computed and then dropped at
+  // this line, so a backup that had silently lost jwt.secret, sites.json and every series-art override was
+  // stored as, and displayed as, a clean run.
   await q(
     `UPDATE server_settings SET backup_last_run = now(), backup_last_result = $1 WHERE id = 1`,
-    [JSON.stringify({ bytes: res.bytes, ms: res.ms, dir: path.basename(dir) })],
+    [JSON.stringify({ bytes: res.bytes, ms: res.ms, dir: path.basename(dir), configEmpty: res.configEmpty, sizeUnknown: res.sizeUnknown })],
   ).catch(() => {});
   return res;
 }

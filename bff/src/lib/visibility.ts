@@ -228,11 +228,19 @@ export async function viewCtxFor(
   // a model this backend does not have.
   if (process.env.LIBRARY_BACKEND !== 'owned') return { userId, libraryIds: null, maxAgeRating: null, hideAdultLibraries: false };
   if (!userId || role === 'admin') return { userId, libraryIds: null, maxAgeRating: null, hideAdultLibraries };
+  // Deliberately NOT caught. Both restrictions are expressed by a NON-null value, so any fallback here is a
+  // fallback to "unrestricted": `.catch(() => [])` collapsed through `rows.length ? ... : null` into
+  // `libraryIds: null`, and `.catch(() => null)` into `maxAgeRating: null`. A database hiccup therefore handed
+  // a capped account a context field-identical to SYSTEM_CTX, on the same path that governs page bytes and
+  // OPDS downloads (see visibleBookFile below).
+  //
+  // The contract at the top of this file already says an empty list "must never be produced by a `|| []`
+  // fallback -- that would turn a lookup failure into a silent lockout instead of an error". Letting the
+  // failure surface is that rule applied in the safe direction: an error the caller reports, not a widening
+  // nobody sees.
   const [rows, cap] = await Promise.all([
-    q<{ library_id: string }>('SELECT library_id FROM user_libraries WHERE user_id = $1', [userId])
-      .catch(() => [] as Array<{ library_id: string }>),
-    one<{ max_age_rating: number | null }>('SELECT max_age_rating FROM users WHERE id = $1', [userId])
-      .catch(() => null),
+    q<{ library_id: string }>('SELECT library_id FROM user_libraries WHERE user_id = $1', [userId]),
+    one<{ max_age_rating: number | null }>('SELECT max_age_rating FROM users WHERE id = $1', [userId]),
   ]);
   return {
     userId,

@@ -4,10 +4,15 @@
 export const runtime: {
   lastScan: number;
   lastUpdate: number;
-  lastUpdateResult: { series: number; added: number } | null;
+  // `healthy` is what separates a quiet night from a broken one. Without it the admin panel showed
+  // '+0 chapters' for both, and a library that had silently stopped updating looked exactly like one with
+  // nothing new.
+  lastUpdateResult: { series: number; added: number; failed?: number; chapterFailures?: number; healthy?: boolean } | null;
   updating: boolean;
   lastBackup: number;
-  lastBackupResult: { bytes: number; ms: number } | null;
+  // configEmpty / sizeUnknown were computed by runBackup and then dropped before anything stored them, so
+  // a backup missing the whole config directory reported as a clean run.
+  lastBackupResult: { bytes: number; ms: number; configEmpty?: boolean; sizeUnknown?: boolean } | null;
   backingUp: boolean;
 } = {
   lastScan: 0,

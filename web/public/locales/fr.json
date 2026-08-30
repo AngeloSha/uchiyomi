@@ -435,5 +435,10 @@
   "…or paste an image URL": "…ou collez l’URL d’une image",
   "{n} downloading": "{n} en téléchargement",
   "{n} failed": "{n} en échec",
-  "Dismiss": "Ignorer"
+  "Dismiss": "Ignorer",
+  "Chapter unreadable": "Chapitre illisible",
+  "Chapter unavailable": "Chapitre indisponible",
+  "This chapter": "Ce chapitre",
+  "This chapter has no readable pages. The file may be damaged, or its library may not be mounted right now.": "Ce chapitre n'a aucune page lisible. Le fichier est peut-être endommagé, ou sa bibliothèque n'est pas montée pour le moment.",
+  "This chapter could not be loaded. It may have been removed, or the connection dropped.": "Ce chapitre n’a pas pu être chargé. Il a peut-être été supprimé, ou la connexion a été perdue."
 }

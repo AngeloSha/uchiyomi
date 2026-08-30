@@ -128,6 +128,9 @@ export async function serveImage(
 }
 
 // ---- size-capped LRU sweeper ------------------------------------------------
+const TMP_RE = /\.bin\.tmp\.[0-9a-f]+$/;
+/** Long enough that a legitimately in-flight write is never removed from under itself. */
+const TMP_MAX_AGE_MS = 60 * 60 * 1000;
 async function walk(dir: string): Promise<{ file: string; size: number; atime: number }[]> {
   const out: { file: string; size: number; atime: number }[] = [];
   let entries: import('node:fs').Dirent[];
@@ -139,6 +142,19 @@ async function walk(dir: string): Promise<{ file: string; size: number; atime: n
   for (const e of entries) {
     const full = path.join(dir, e.name);
     if (e.isDirectory()) out.push(...(await walk(full)));
+    // An abandoned half-write from `writeAtomic`. It renames into place on success, so a `.bin.tmp.<hex>`
+    // still here is one that never got there: ENOSPC, or the container killed between write and rename.
+    // Nothing in this file ever deleted one, and `walk` only collected `.bin`, so cacheBytes() and the
+    // sweeper were both blind to them -- the cache reported itself under its cap while the directory sat
+    // well over it, which is precisely how a disk fills again after being cleared. The random suffix means
+    // no later write ever reuses the name either.
+    else if (TMP_RE.test(e.name)) {
+      try {
+        const st = await fs.stat(full);
+        if (Date.now() - st.mtimeMs > TMP_MAX_AGE_MS) await fs.rm(full, { force: true });
+        else out.push({ file: full, size: st.size, atime: Math.max(st.atimeMs, st.mtimeMs) });
+      } catch { /* race: file gone */ }
+    }
     else if (e.name.endsWith('.bin')) {
       try {
         const st = await fs.stat(full);

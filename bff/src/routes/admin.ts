@@ -121,7 +121,7 @@ export default async function adminRoutes(app: FastifyInstance) {
     const { id } = req.params as { id: string };
     await logAudit('task.run', { userId: userIdOf(req), detail: { task: id }, req });
     if (id === 'scan') return { ok: true, ...(await persistScan()) };
-    if (id === 'update') { runUpdateAll({ maxNew: 10 }).then((r) => { runtime.lastUpdate = Date.now(); runtime.lastUpdateResult = { series: r.series, added: r.added }; }).catch(() => {}); return { ok: true, started: true }; }
+    if (id === 'update') { runUpdateAll({ maxNew: 10 }).then((r) => { runtime.lastUpdate = Date.now(); runtime.lastUpdateResult = { series: r.series, added: r.added, failed: r.failed, chapterFailures: r.chapterFailures, healthy: r.healthy }; }).catch(() => {}); return { ok: true, started: true }; }
     if (id === 'fingerprint') {
       if (fpState.running) return { ok: false, error: 'busy' };
       // never awaited: on a large library this is minutes, and the caller is an admin clicking a button
@@ -1569,12 +1569,26 @@ export default async function adminRoutes(app: FastifyInstance) {
   app.delete('/api/admin/users/:id', async (req, reply) => {
     const { id } = req.params as { id: string };
     if (id === userIdOf(req)) return reply.code(400).send({ error: 'cannot_delete_self' });
-    const target = await one<{ role: string }>('SELECT role FROM users WHERE id = $1', [id]);
+    const target = await one<{ role: string; username: string }>('SELECT role, username FROM users WHERE id = $1', [id]);
     if (!target) return reply.code(404).send({ error: 'not_found' });
     if (target.role === 'admin') {
       const admins = await one<{ c: number }>(`SELECT count(*)::int AS c FROM users WHERE role = 'admin'`);
       if ((admins?.c ?? 0) <= 1) return reply.code(400).send({ error: 'last_admin' });
     }
+    // Seventeen tables cascade from users(id) -- read progress, reading events, favourites, ratings, notes,
+    // collections, bookmarks, offline downloads, trackers. This was the ONLY mutating route in this file with
+    // no audit entry, out of thirty-nine, so the single most destructive action the admin UI offers was also
+    // the one that left no record of having happened or of who did it. Counted BEFORE the delete, because
+    // afterwards there is nothing left to count.
+    const lost = await one<{ progress: number; events: number; favorites: number }>(
+      `SELECT (SELECT count(*)::int FROM read_progress  WHERE user_id = $1) AS progress,
+              (SELECT count(*)::int FROM reading_events WHERE user_id = $1) AS events,
+              (SELECT count(*)::int FROM favorites      WHERE user_id = $1) AS favorites`, [id]).catch(() => null);
+    await logAudit('user.delete', {
+      userId: userIdOf(req),
+      detail: { target: id, username: target.username, role: target.role, destroyed: lost ?? 'uncounted' },
+      req,
+    });
     await q('DELETE FROM users WHERE id = $1', [id]);
     return reply.send({ ok: true });
   });

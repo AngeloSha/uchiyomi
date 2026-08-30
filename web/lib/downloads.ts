@@ -1,6 +1,6 @@
 // Offline chapter store (IndexedDB): page blobs + chapter metadata + a progress outbox.
 import { openDB, IDBPDatabase } from 'idb';
-import { api } from './api';
+import { api, ApiError } from './api';
 import { DownloadManifest } from './types';
 import { deviceId } from './device';
 
@@ -67,13 +67,26 @@ export async function downloadChapter(
 
   const d = await db();
   let done = 0;
-  for (const p of manifest.pages) {
-    const res = await fetch(p.url, { credentials: 'include' });
-    if (!res.ok) throw new Error(`page ${p.number}: HTTP ${res.status}`);
-    const blob = await res.blob();
-    await d.put('pages', blob, `${bookId}:${p.number}`);
-    done++;
-    onProgress?.(done, manifest.pages.length);
+  try {
+    for (const p of manifest.pages) {
+      const res = await fetch(p.url, { credentials: 'include' });
+      if (!res.ok) throw new Error(`page ${p.number}: HTTP ${res.status}`);
+      const blob = await res.blob();
+      await d.put('pages', blob, `${bookId}:${p.number}`);
+      done++;
+      onProgress?.(done, manifest.pages.length);
+    }
+  } catch (e) {
+    // Take the half-download with us. The `chapters` record below is the ONLY index of what is stored, and it
+    // is written last, so a failure at page 30 of 50 used to strand 29 full-size blobs that no UI path could
+    // ever reach: deleteDownload reads the meta first and skips the pages when it is missing, and
+    // clearAllDownloads iterates listDownloads(), which reads only `chapters`. Smart-offline re-runs on every
+    // visibilitychange and every `online` event, so on a phone with poor signal this accumulated daily until
+    // the quota filled -- at which point "free up space" moved nothing, because nothing knew they were there.
+    for (let n = 0; n < done; n++) {
+      await d.delete('pages', `${bookId}:${manifest.pages[n].number}`).catch(() => {});
+    }
+    throw e;
   }
 
   const meta: OfflineChapter = {
@@ -150,31 +163,55 @@ export async function queueProgress(ev: ProgressEvent): Promise<void> {
   await d.add('outbox', { ...ev, ts: Date.now(), tries: 0 });
   // background sync: the SW flushes the outbox when connectivity returns, even if the app is closed
   try {
-    const reg = await navigator.serviceWorker?.ready;
+    // Bounded: `serviceWorker.ready` never resolves when no worker becomes active, and this is awaited on
+    // every page turn. The event is already in the outbox by this point, so the worst a timeout costs is the
+    // background-sync hint, which the foreground flush covers anyway.
+    const reg = await Promise.race([
+      navigator.serviceWorker?.ready,
+      new Promise<undefined>((r) => setTimeout(() => r(undefined), 1500)),
+    ]);
     await (reg as any)?.sync?.register('yomi-progress');
   } catch { /* no background-sync support — the foreground online/timer flush still runs */ }
 }
 
+/**
+ * A queued event may only be discarded when the server has PERMANENTLY rejected it.
+ *
+ * `api()` throws the same way for a dead network, a 401 mid-refresh, a 429 and a 500 as it does for a bad
+ * payload, so counting attempts and dropping at five treated "the server is down" as "this entry is
+ * poisoned". Read twenty chapters on a plane, land, let the phone flap between cellular and a captive portal,
+ * and the queue was deleted with no message: progress, streaks and Continue Reading all rewound.
+ *
+ * The service worker's copy of this same queue (public/sw.js) has always drawn the line here instead, and
+ * the two disagreeing is what showed this one up. A genuinely poisoned entry still leaves immediately, as a
+ * 4xx; nothing else is a reason to throw away something somebody read.
+ */
+function permanentlyRejected(e: unknown): boolean {
+  const status = e instanceof ApiError ? e.status : 0;
+  return status >= 400 && status < 500 && status !== 401 && status !== 429;
+}
+
 export async function flushOutbox(): Promise<number> {
   const d = await db();
-  const keys = await d.getAllKeys('outbox');
-  const all = (await d.getAll('outbox')) as Array<ProgressEvent & { tries?: number }>;
+  // One read, and the key comes off the record, which carries it (`keyPath: 'id'`). Reading `getAllKeys` and
+  // `getAll` separately meant two IDB transactions: the service worker flushing between them shifted the
+  // arrays out of step, after which a failure on one entry deleted a different, unrelated one.
+  const all = (await d.getAll('outbox')) as Array<ProgressEvent & { id?: number; tries?: number; ts?: number }>;
   let sent = 0;
-  for (let i = 0; i < all.length; i++) {
-    const ev = all[i];
+  for (const ev of all) {
+    if (ev.id == null) continue; // written before autoIncrement keys existed; nothing safe to delete by
     try {
       await api(`/api/books/${ev.bookId}/progress`, {
         method: 'PUT',
-        json: { page: ev.page, completed: ev.completed, seriesId: ev.seriesId, deviceId: ev.deviceId },
+        json: { page: ev.page, completed: ev.completed, seriesId: ev.seriesId, deviceId: ev.deviceId, at: ev.ts },
       });
-      await d.delete('outbox', keys[i]);
+      await d.delete('outbox', ev.id);
       sent++;
-    } catch {
-      // don't let one poisoned entry (deleted book, bad payload) block the whole queue forever:
-      // count the failure and drop the entry after 5 attempts; keep trying the rest this pass
-      const tries = (ev.tries ?? 0) + 1;
-      if (tries >= 5) await d.delete('outbox', keys[i]);
-      else await d.put('outbox', { ...ev, tries }); // outbox has keyPath 'id' — the record carries its own key
+    } catch (e) {
+      if (permanentlyRejected(e)) await d.delete('outbox', ev.id);
+      // Otherwise it stays queued. `tries` is kept for diagnostics only: it must never again decide whether
+      // someone's reading survives. A failing entry does not block the others -- this loop moves on regardless.
+      else await d.put('outbox', { ...ev, tries: (ev.tries ?? 0) + 1 });
     }
   }
   return sent;

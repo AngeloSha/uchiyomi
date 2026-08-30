@@ -89,7 +89,11 @@ const GATED: Record<string, string> = {
   '/img/series/:id/thumb': 'komga-mode passthrough; owned ids dispatch to serveLibSeriesThumb',
   '/img/books/:id/thumb': 'komga-mode passthrough; owned ids dispatch to serveLibBookThumb',
   '/img/books/:id/page/:n': 'komga-mode passthrough; owned ids dispatch to serveLibBookPage',
-  '/img/series/:id/backdrop': 'backdropRecipe takes the request viewer',
+  // This note used to read "backdropRecipe takes the request viewer", and that was not a gate. The ctx is
+  // consulted only inside backdropRecipe's FALLBACK path, so whenever series_art holds a banner -- the normal
+  // state, since AniList art is fetched lazily for every series -- the image was produced from that URL with
+  // no series join at all, and an age-capped account could render key art for a series it cannot open.
+  '/img/series/:id/backdrop': 'seriesVisible check at the top of the route, like its thumb sibling',
   '/img/lib/series/:id/thumb': 'seriesVisible check at the top of serveLibSeriesThumb',
   '/img/lib/books/:id/thumb': 'bookFileAbs -> visibleBookFile',
   '/img/lib/books/:id/page/:n': 'bookFileAbs -> visibleBookFile',

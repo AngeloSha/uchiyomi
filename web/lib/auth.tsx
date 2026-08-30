@@ -57,6 +57,27 @@ function applyAccent(settings?: Record<string, any>) {
   }
 }
 
+/**
+ * Tell the service worker to empty the caches that hold one account's answers.
+ *
+ * The SW's API and image caches are keyed by URL with no `Vary` and were only ever emptied on a VERSION
+ * bump, so on a shared tablet the next person to sign in could be served the previous one's home screen,
+ * history and covers the moment the network hiccuped. Sent on the way out AND on the way in, because signing
+ * in as someone else without signing out first is the ordinary way a household device changes hands.
+ */
+async function purgeAccountCaches(): Promise<void> {
+  try {
+    // `serviceWorker.ready` resolves only once a worker is ACTIVE, and never at all if registration failed or
+    // has not happened yet -- so awaiting it bare would hang sign-in on exactly the browsers where there is
+    // nothing cached to purge. Bounded, and the purge is best-effort by nature.
+    const reg = await Promise.race([
+      navigator.serviceWorker?.ready,
+      new Promise<undefined>((r) => setTimeout(() => r(undefined), 1500)),
+    ]);
+    reg?.active?.postMessage({ type: 'yomi-signout' });
+  } catch { /* no service worker (dev, or an unsupported browser) — nothing is cached to leak */ }
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<Status>('loading');
   const [user, setUser] = useState<User | null>(null);
@@ -93,6 +114,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const res = await api<{ accessToken: string; user: User }>('/auth/login', {
         json: { username, password, code, deviceId: deviceId(), deviceName: deviceName() },
       });
+      await purgeAccountCaches(); // whoever used this device last does not get to answer this account's requests
       setAccessToken(res.accessToken);
       setUser(res.user);
       applyAccent(res.user.settings);
@@ -139,6 +161,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // Secrets the server only ever sends once are held outside React so a remount cannot destroy them.
     // That store has to end with the session, or a shared machine hands the next person a live token.
     clearShownOnce();
+    await purgeAccountCaches();
   };
 
   const setSettings = (partial: Record<string, any>) => {

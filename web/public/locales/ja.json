@@ -435,5 +435,10 @@
   "…or paste an image URL": "…または画像の URL を貼り付け",
   "{n} downloading": "ダウンロード中 {n}",
   "{n} failed": "失敗 {n}",
-  "Dismiss": "閉じる"
+  "Dismiss": "閉じる",
+  "Chapter unreadable": "チャプターを読み込めません",
+  "Chapter unavailable": "チャプターがありません",
+  "This chapter": "このチャプター",
+  "This chapter has no readable pages. The file may be damaged, or its library may not be mounted right now.": "このチャプターには読み込めるページがありません。ファイルが破損しているか、ライブラリが現在マウントされていない可能性があります。",
+  "This chapter could not be loaded. It may have been removed, or the connection dropped.": "このチャプターを読み込めませんでした。削除されたか、接続が切れた可能性があります。"
 }

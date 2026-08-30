@@ -2,7 +2,7 @@
 // adapters + the downloader. The cover proxy lives under /img (cookie auth) so <img> tags can load it.
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { authenticate, userIdOf, roleOf } from '../lib/auth';
-import { getSource, listSources, isSwAdapterId, SW_PREFIX } from '../lib/sources';
+import { getSource, listSources, isSwAdapterId, SW_PREFIX, withTimeout } from '../lib/sources';
 import type { SourceAdapter, SourceSeries, SourceChapter } from '../lib/sources/types';
 import { downloadChapter, sanitize } from '../lib/downloader';
 import { persistScan, setBookDates } from '../lib/library';
@@ -72,21 +72,6 @@ function pickBest<T extends { title: string }>(list: T[], term: string): T | nul
   }
   return null;
 }
-/**
- * Give up after `ms`, and be honest about who gave up.
- *
- * The error is TAGGED, not merely worded. A string saying "timeout" went through `classify`, came out as
- * `down`, and earned the source the same escalating cooldown as a site refusing us -- which then stopped it
- * being asked at all. That is how Aqua Manga, answering correctly in about 11.5 seconds against an 8 second
- * budget, vanished from Discover entirely while every check reported it healthy. Being slower than our own
- * patience is not a fault of the source, and the caller now has a way to tell the difference.
- */
-const withTimeout = <T>(p: Promise<T>, ms: number): Promise<T> =>
-  Promise.race([
-    p,
-    new Promise<T>((_, rej) =>
-      setTimeout(() => rej(Object.assign(new Error(`timeout after ${ms}ms`), { selfTimeout: true, ms })), ms)),
-  ]);
 
 /**
  * Which of these titles the library already has.
@@ -142,11 +127,20 @@ async function seriesAndChapters(src: SourceAdapter, sourceId: string):
   if (hit && Date.now() - hit.at < DETAIL_TTL) return { series: hit.series, chapters: hit.chapters };
   // In parallel. `add` ran these one after the other while `detail` had always run them together, so an add
   // paid the sum of two solves where the dialog beside it paid the larger of the two.
+  //
+  // `failed` is tracked separately from the empty value, because the two are indistinguishable otherwise:
+  // both `getSeries` and `listChapters` answer a timeout or a throw with null/[], which is exactly what a
+  // title with genuinely nothing on it looks like.
+  let failed = false;
   const [series, chapters] = await Promise.all([
-    withTimeout(src.getSeries(sourceId), ADD_LOOKUP_TIMEOUT).catch(() => null),
-    withTimeout(src.listChapters(sourceId), ADD_LOOKUP_TIMEOUT).catch(() => [] as SourceChapter[]),
+    withTimeout(src.getSeries(sourceId), ADD_LOOKUP_TIMEOUT).catch(() => { failed = true; return null; }),
+    withTimeout(src.listChapters(sourceId), ADD_LOOKUP_TIMEOUT).catch(() => { failed = true; return [] as SourceChapter[]; }),
   ]);
-  detailCache.set(key, { at: Date.now(), series, chapters });
+  // Only a real answer is remembered. Caching the failure -- which this did when the cache was added -- turns
+  // a hiccup into a confident "No readable chapters for this title on this source. Try a different source."
+  // pinned for ninety seconds, so retrying inside the window returns the same wrong advice. Before the cache
+  // existed the same catch was here, but a retry worked; the cache is what made it stick.
+  if (!failed) detailCache.set(key, { at: Date.now(), series, chapters });
   return { series, chapters };
 }
 
@@ -277,7 +271,18 @@ export async function addSeriesFromSource(opts: {
   // which the add dialog calls seconds earlier for the very same two things: without that, opening the
   // dialog and pressing Add paid for four challenge solves to learn two facts.
   const { series, chapters } = await seriesAndChapters(src, sourceId);
-  const title = series?.title || 'Series';
+  // No title, no add. This used to fall back to the literal string 'Series', which becomes the folder --
+  // so a `getSeries` that timed out while `listChapters` succeeded filed the title under `<Source>/Series`,
+  // and the NEXT one to do that was told "already in library" and quietly merged into the same shelf.
+  // A network hiccup could therefore collapse unrelated titles into one, which is library corruption rather
+  // than a failed add, and nothing anywhere would have said so.
+  const title = series?.title?.trim();
+  if (!title) {
+    return {
+      ok: false, status: 503, error: 'no_title',
+      message: `${src.name} did not return this title just now. Try again in a moment.`,
+    };
+  }
   const folder = `${src.name}/${sanitize(title)}`;
 
   // A deleted series does not count as present: re-adding it is how you undo a delete from the app side.
@@ -347,11 +352,13 @@ export async function addSeriesFromSource(opts: {
         ON CONFLICT (series_id) DO UPDATE SET banner = COALESCE(series_art.banner, EXCLUDED.banner), cover = COALESCE(series_art.cover, EXCLUDED.cover)`, [a.banner, a.cover, folder]))
       .catch(() => {});
     void (async () => {
+      let failures = 0;
       for (const ch of selected.slice(1)) {
-        try { await downloadChapter({ sourceId: source!, seriesFolder: folder, chapter: ch, meta }); }
-        catch (e: any) {
+        try {
+          await downloadChapter({ sourceId: source!, seriesFolder: folder, chapter: ch, meta });
+        } catch (e: any) {
+          const j = jobs.get(folder);
           if (e?.blockStatus) {
-            const j = jobs.get(folder);
             if (j) {
               j.status = 'error';
               j.reason = `${src.name} stopped part-way: it is ${e.blockStatus === 'rate_limited' ? 'rate-limiting' : e.blockStatus === 'blocked' ? 'blocking' : 'unreachable for'} downloads. ${j.done} of ${j.total} chapters saved.`;
@@ -359,13 +366,26 @@ export async function addSeriesFromSource(opts: {
             }
             break;
           }
+          // ANY other failure -- a full disk, a permission error, a chapter with no readable pages -- used
+          // to be swallowed whole, and the counter below still advanced. The bar filled to 100%, the tick
+          // went green, and nothing had landed. On a host whose disk is nearly full that is the likeliest
+          // failure there is, and it was the one that said nothing.
+          failures++;
+          if (j) j.reason = `${failures} chapter${failures === 1 ? '' : 's'} could not be saved: ${String(e?.message || e).slice(0, 120)}`;
+          continue; // do NOT count a chapter that was not written
         }
         const j = jobs.get(folder); if (j) { j.done++; if (j.done % 5 === 0) await persistScan().catch(() => {}); }
       }
       await persistScan().catch(() => {});
       await setBookDates(folder, selected).catch(() => {});
       const j = jobs.get(folder);
-      if (j && j.status !== 'error') { j.status = 'done'; j.finishedAt = Date.now(); }
+      if (j && j.status !== 'error') {
+        // "Done" has to mean everything landed. A run that lost chapters ends as an error carrying the
+        // count, because a green tick over a short library is worse than no tick at all: it tells you to
+        // stop looking.
+        j.status = failures ? 'error' : 'done';
+        j.finishedAt = Date.now();
+      }
     })();
     return { ok: true, status: 200, title, folder, chapters: selected.length };
   };

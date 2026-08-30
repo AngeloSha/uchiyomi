@@ -435,5 +435,10 @@
   "…or paste an image URL": "…или вставьте URL изображения",
   "{n} downloading": "Загружается: {n}",
   "{n} failed": "Ошибок: {n}",
-  "Dismiss": "Скрыть"
+  "Dismiss": "Скрыть",
+  "Chapter unreadable": "Главу не удаётся прочитать",
+  "Chapter unavailable": "Глава недоступна",
+  "This chapter": "Эта глава",
+  "This chapter has no readable pages. The file may be damaged, or its library may not be mounted right now.": "В этой главе нет читаемых страниц. Файл может быть повреждён, либо его библиотека сейчас не подключена.",
+  "This chapter could not be loaded. It may have been removed, or the connection dropped.": "Не удалось загрузить эту главу. Возможно, она была удалена или прервалось соединение."
 }

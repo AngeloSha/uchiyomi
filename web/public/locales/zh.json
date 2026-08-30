@@ -435,5 +435,10 @@
   "…or paste an image URL": "…或粘贴一个图片网址",
   "{n} downloading": "正在下载 {n}",
   "{n} failed": "失败 {n}",
-  "Dismiss": "忽略"
+  "Dismiss": "忽略",
+  "Chapter unreadable": "章节无法读取",
+  "Chapter unavailable": "章节不可用",
+  "This chapter": "本章节",
+  "This chapter has no readable pages. The file may be damaged, or its library may not be mounted right now.": "本章节没有可读取的页面。文件可能已损坏，或其所属媒体库当前未挂载。",
+  "This chapter could not be loaded. It may have been removed, or the connection dropped.": "无法加载本章节。它可能已被删除，或者连接已中断。"
 }

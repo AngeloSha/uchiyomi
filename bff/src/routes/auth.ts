@@ -21,11 +21,11 @@ import {
   resetFailedLogins,
   revokeAllSessions,
   revokeRefreshToken,
-  revokeRefreshTokenById,
   revokeSessionForUser,
   touchSession,
   userIdOf,
   validateRefreshToken,
+  validateRefreshForRotation,
 } from '../lib/auth';
 import { generateRecoveryCodes, generateSecret, otpauthURL, sha256, verifyTotp } from '../lib/totp';
 import { oidcEnabled, oidcName, beginLogin, completeLogin, isAdminByGroup, type OidcClaims } from '../lib/oidc';
@@ -321,7 +321,7 @@ export default async function authRoutes(app: FastifyInstance) {
   app.post('/auth/refresh', async (req, reply) => {
     const token = req.cookies?.[REFRESH_COOKIE];
     if (!token) return reply.code(401).send({ error: 'no_refresh' });
-    const valid = await validateRefreshToken(token);
+    const valid = await validateRefreshForRotation(token);
     if (!valid) {
       reply.clearCookie(REFRESH_COOKIE, { path: '/' });
       return reply.code(401).send({ error: 'invalid_refresh' });
@@ -332,12 +332,20 @@ export default async function authRoutes(app: FastifyInstance) {
       reply.clearCookie(REFRESH_COOKIE, { path: '/' });
       return reply.code(403).send({ error: 'disabled' });
     }
-    await revokeRefreshTokenById(valid.id);
+    // Lost a rotation race against one of this device's own other tabs. The winner has already written a good
+    // token to the cookie jar both tabs share, so the one thing we must not do here is touch the cookie --
+    // clearing it, which is what this used to do, throws away the winner's token and signs the device out.
+    // Hand back a fresh access token, rotate nothing, and leave the jar exactly as the winner left it.
+    if (valid.stale) {
+      setImgCookie(app, reply, valid.userId);
+      return reply.send({ ...signAccess(app, valid.userId, disabled?.role ?? 'user'), user: await userPayload(valid.userId) });
+    }
     const next = await issueRefreshToken(valid.userId, {
       deviceId: valid.deviceId ?? undefined,
       deviceName: valid.deviceName ?? undefined,
       ip: clientIp(req),
       userAgent: (req.headers['user-agent'] as string) || null,
+      replaces: valid.id, // revokes the old row AND records that a rotation, not a logout, is what killed it
     });
     reply.setCookie(REFRESH_COOKIE, next, cookieOptions());
     setImgCookie(app, reply, valid.userId);

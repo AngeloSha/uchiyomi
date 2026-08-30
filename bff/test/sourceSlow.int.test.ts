@@ -84,7 +84,10 @@ test('THE ROUTING: latestPage must tell the two apart', () => {
   // The distinction is worthless if the call site still sends everything to reportFail. Static, because the
   // branch is inside a closure around a live fetch. Reintroduce by removing the selfTimeout check.
   const src = readFileSync(join(__dirname, '..', 'src', 'routes', 'sources.ts'), 'utf8');
-  assert.match(src, /selfTimeout: true/, 'withTimeout no longer tags the error it throws');
+  // withTimeout moved to lib/sources so the updater could share the same bound; the tag it sets is what this
+  // whole distinction rests on, so it is still asserted, just where the function now lives.
+  const lib = readFileSync(join(__dirname, '..', 'src', 'lib', 'sources', 'index.ts'), 'utf8');
+  assert.match(lib, /selfTimeout: true/, 'withTimeout no longer tags the error it throws');
   const at = src.indexOf('} catch (e) {', src.indexOf('const run = async'));
   const block = src.slice(at, at + 900);
   assert.match(block, /selfTimeout/, 'the catch does not distinguish our own timeout from a real failure');

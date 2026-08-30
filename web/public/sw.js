@@ -3,14 +3,39 @@
    this SW handles the shell, static assets, and casual image/API re-reads. */
 // Bump on any change to cached assets. /icons is served cache-first, so the rebrand's new icons only reach
 // existing visitors once this changes — the activate handler evicts every cache whose name doesn't end in it.
-const VERSION = 'v6';
+//
+// v7: the API cache was previously kept per-URL with no cap and was never cleared on sign-out, so on a shared
+// device it may already hold one account's home screen, history and stats. Those existing caches have to go on
+// upgrade, not merely stop growing, which is what this bump does.
+const VERSION = 'v7';
 const SHELL = `yomi-shell-${VERSION}`;
 const STATIC = `yomi-static-${VERSION}`;
 const IMG = `yomi-img-${VERSION}`;
 const API = `yomi-api-${VERSION}`;
 const IMG_MAX = 1000;
+// The API cache had no cap at all. The reader alone stores three distinct URLs per chapter (/api/books/:id,
+// /api/books/:id/pages, and the series' book list), none of which ever repeat, so across a library this size
+// it grew without limit. On iOS the Cache API and IndexedDB share ONE origin quota and eviction is
+// origin-wide, so left alone it eventually takes the downloaded offline chapters with it.
+const API_MAX = 300;
 
 self.addEventListener('install', () => self.skipWaiting());
+
+/**
+ * Empty every cache that can hold one account's answers.
+ *
+ * These caches are origin-scoped and keyed by URL with no `Vary`, and `activate` only ever emptied them on a
+ * VERSION bump -- so signing out left the previous person's home screen, history, stats and covers sitting
+ * there. On a shared household tablet the next reader only had to hit one network hiccup for `networkFirst`
+ * to fall through and serve them, including titles their age cap and library grants correctly hide.
+ */
+async function clearAccountCaches() {
+  await Promise.all([caches.delete(API), caches.delete(IMG)]);
+}
+
+self.addEventListener('message', (e) => {
+  if (e.data?.type === 'yomi-signout') e.waitUntil(clearAccountCaches());
+});
 
 self.addEventListener('activate', (e) => {
   e.waitUntil(
@@ -56,11 +81,15 @@ async function staleWhileRevalidate(req, name, trim) {
   return hit || network;
 }
 
-async function networkFirst(req, name) {
+async function networkFirst(req, name, max) {
   const c = await caches.open(name);
   try {
     const res = await fetch(req);
-    if (res.ok) c.put(req, res.clone());
+    if (res.ok) {
+      c.put(req, res.clone());
+      // same sampling as the image cache: enumerating every entry on each request is not worth it
+      if (max && Math.random() < 0.05) trimCache(name, max);
+    }
     return res;
   } catch {
     const hit = await c.match(req);
@@ -123,7 +152,7 @@ self.addEventListener('fetch', (e) => {
       e.respondWith(fetch(req));
       return;
     }
-    e.respondWith(networkFirst(req, API));
+    e.respondWith(networkFirst(req, API, API_MAX));
     return;
   }
 });
@@ -208,7 +237,7 @@ async function flushOutboxSW() {
       const r = await fetch(`/api/books/${ev.bookId}/progress`, {
         method: 'PUT',
         headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
-        body: JSON.stringify({ page: ev.page, completed: ev.completed, seriesId: ev.seriesId, deviceId: ev.deviceId }),
+        body: JSON.stringify({ page: ev.page, completed: ev.completed, seriesId: ev.seriesId, deviceId: ev.deviceId, at: ev.ts }),
       });
       // success or permanent rejection -> drop the entry; transient failures stay queued
       if (r.ok || (r.status >= 400 && r.status < 500 && r.status !== 401 && r.status !== 429)) {

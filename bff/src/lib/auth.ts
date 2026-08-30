@@ -101,18 +101,29 @@ export async function resolveOpdsBasic(authHeader?: string): Promise<string | nu
   return row?.user_id ?? null;
 }
 
-/** Issue a fresh opaque refresh token and persist its hash. Returns the raw token. */
+/**
+ * Issue a fresh opaque refresh token and persist its hash. Returns the raw token.
+ *
+ * `replaces` marks this as a rotation: the old row is revoked and pointed at the new one. Rotating through
+ * here rather than with a bare revoke is what lets `validateRefreshForRotation` tell a device that simply
+ * moved on from a session someone deliberately ended.
+ */
 export async function issueRefreshToken(
   userId: string,
-  opts: { deviceId?: string; deviceName?: string; ip?: string | null; userAgent?: string | null } = {},
+  opts: { deviceId?: string; deviceName?: string; ip?: string | null; userAgent?: string | null; replaces?: string } = {},
 ): Promise<string> {
   const token = randomBytes(48).toString('hex');
   const expires = new Date(Date.now() + env.REFRESH_TTL_DAYS * 24 * 60 * 60 * 1000);
-  await q(
+  const row = await one<{ id: string }>(
     `INSERT INTO refresh_tokens (user_id, token_hash, device_id, device_name, expires_at, ip, user_agent, last_seen)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, now())`,
+     VALUES ($1, $2, $3, $4, $5, $6, $7, now())
+     RETURNING id`,
     [userId, sha256(token), opts.deviceId ?? null, opts.deviceName ?? null, expires, opts.ip ?? null, (opts.userAgent ?? null)?.slice(0, 200) ?? null],
   );
+  if (opts.replaces) {
+    await q('UPDATE refresh_tokens SET revoked_at = now(), replaced_by = $2 WHERE id = $1 AND revoked_at IS NULL',
+      [opts.replaces, row!.id]);
+  }
   return token;
 }
 
@@ -127,6 +138,44 @@ export async function validateRefreshToken(
     [sha256(token)],
   );
   return row ? { userId: row.user_id, id: row.id, deviceId: row.device_id, deviceName: row.device_name } : null;
+}
+
+/**
+ * How long a token this device just rotated away still answers a refresh.
+ *
+ * One browser is one cookie jar, but it runs several refresh timers over it: every mounted AuthProvider
+ * refreshes on load and then every twelve minutes, and the service worker refreshes on its own for background
+ * sync. Two tabs left open collide on that schedule forever. The loser's request was already in flight
+ * carrying the token the winner had just rotated, and answering it by clearing the cookie deleted the good
+ * token the winner had written one moment earlier -- signing out the tab, the other tab, and the device.
+ */
+export const REFRESH_GRACE_MS = 60_000;
+
+/**
+ * Validate for the refresh endpoint, which forgives a token this device rotated a moment ago.
+ *
+ * `stale` marks the loser of that race. Only a ROTATED token qualifies, because only a rotation sets
+ * `replaced_by`: a token killed by logout, by an admin, or by sign-out-everywhere has it null and is refused
+ * on the spot, so ending a session still means ending it.
+ */
+export async function validateRefreshForRotation(
+  token: string,
+  graceMs: number = REFRESH_GRACE_MS,
+): Promise<{ userId: string; id: string; deviceId: string | null; deviceName: string | null; stale: boolean } | null> {
+  const row = await one<{ id: string; user_id: string; device_id: string | null; device_name: string | null; revoked_at: Date | null }>(
+    `SELECT id, user_id, device_id, device_name, revoked_at FROM refresh_tokens
+     WHERE token_hash = $1
+       AND expires_at > now()
+       AND (revoked_at IS NULL
+            OR (replaced_by IS NOT NULL AND revoked_at > now() - make_interval(secs => $2)))
+     LIMIT 1`,
+    [sha256(token), graceMs / 1000],
+  );
+  if (!row) return null;
+  return {
+    userId: row.user_id, id: row.id, deviceId: row.device_id, deviceName: row.device_name,
+    stale: row.revoked_at != null,
+  };
 }
 
 // ---- account security: brute-force lockout + password policy ----

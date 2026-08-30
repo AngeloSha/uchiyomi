@@ -108,6 +108,10 @@ const progressBody = z.object({
   // manual mark-as-read: update read_progress but skip the reading_events append, so bulk-marking a
   // backlog doesn't inflate the weekly leaderboard / stats (events = chapters actually read in the app)
   silent: z.boolean().default(false),
+  // When the event actually happened, in client ms. The offline outbox replays events minutes or days after
+  // the fact, and without this the server cannot tell a queued page-12 from a live one and lets it overwrite
+  // a position the reader has since moved well past. Absent means "now", which is every live ping.
+  at: z.coerce.number().int().positive().optional(),
 });
 
 const forYouCache = new Map<string, { ts: number; pool: any[] }>();
@@ -545,19 +549,31 @@ export default async function catalogRoutes(app: FastifyInstance) {
   app.put('/api/books/:id/progress', async (req, reply) => {
     const uid = userIdOf(req);
     const { id } = req.params as { id: string };
-    const { page, completed, seriesId, deviceId, silent } = progressBody.parse(req.body ?? {});
+    const { page, completed, seriesId, deviceId, silent, at } = progressBody.parse(req.body ?? {});
 
-    let sid = seriesId;
+    let sid: string | undefined;
     let done = completed;
-    // Safety net for any client: reaching the last page IS completion, even if the client never sends the
-    // explicit completed ping (fast scroll-past starved streaks/leaderboard).
-    if (!sid || !done) {
-      try {
-        const b = await komga.book(vc(req), id);
-        if (!sid) sid = b.seriesId;
-        if (!done && reachedEnd(page, b?.media?.pagesCount ?? 0)) done = true;
-      } catch { /* the chapter did not resolve; handled below */ }
+    let unavailable = false;
+    // Always resolve the book, and take the series from IT. Which series a chapter belongs to is the server's
+    // fact, not the client's, and this lookup used to be skipped exactly when the body carried both a
+    // seriesId and completed:true -- the completion ping, and every replay the offline outbox sends. A phone
+    // that was offline while an admin merged duplicates then filed finished chapters under the merged-away
+    // id: `seriesCompleted` groups by series_id so they never counted toward the survivor, and the Continue
+    // Reading query excludes it via `merged_into IS NULL`, so the series simply vanished from the rail and
+    // read as permanently unread. Nothing repaired it afterwards, because the merge's fix-up had already run.
+    try {
+      const b = await komga.book(vc(req), id);
+      sid = b?.seriesId;
+      // Safety net for any client: reaching the last page IS completion, even if the client never sends the
+      // explicit completed ping (fast scroll-past starved streaks/leaderboard).
+      if (!done && reachedEnd(page, b?.media?.pagesCount ?? 0)) done = true;
+    } catch (e: any) {
+      // A 404 means the chapter is genuinely gone, hidden, or was never this account's to see, and the outbox
+      // should drop it. Anything else is the database having a moment -- and since the outbox treats 4xx as
+      // permanent, answering that with 404 would make the client throw away a chapter somebody really read.
+      if (e?.statusCode !== 404) unavailable = true;
     }
+    if (unavailable) return reply.code(503).send({ error: 'unavailable' });
 
     // No series means the chapter is gone, hidden, or was never visible to this account. That used to fall
     // back to seriesId 'unknown', which migration 0004 made impossible to store: read_progress now has a
@@ -566,7 +582,7 @@ export default async function catalogRoutes(app: FastifyInstance) {
     // -- and a 500 is a retry forever, where a 404 lets it drop the entry.
     if (!sid) return reply.code(404).send({ error: 'not_found' });
 
-    await writeProgress({ userId: uid, bookId: id, seriesId: sid, page, completed: done, silent, deviceId });
+    await writeProgress({ userId: uid, bookId: id, seriesId: sid, page, completed: done, silent, deviceId, at });
 
     if (NATIVE_PROGRESS && roleOf(req) === 'admin') komga.setReadProgress(vc(req), id, page, done).catch(() => {});
     return reply.send({ ok: true });

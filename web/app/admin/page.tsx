@@ -906,11 +906,31 @@ function ArtPicker({ row, onClose, onApplied }: { row: ArtRow; onClose: () => vo
   );
 }
 
-/** Tasks report different result shapes (updater: chapters added; backup: size on disk). */
+/**
+ * Tasks report different result shapes (updater: chapters added; backup: size on disk).
+ *
+ * `healthy: false` is the case this panel could not previously express. A sweep in which every source was
+ * down and one in which nothing was new both rendered '+0 chapters', so a library that had quietly stopped
+ * updating looked exactly like a quiet week.
+ */
 function taskResult(r: any): string {
   if (!r) return '';
-  if (typeof r.added === 'number') return ` · +${r.added} chapters`;
-  if (typeof r.bytes === 'number') return ` · ${bytes(r.bytes)}`;
+  if (typeof r.added === 'number') {
+    const base = ` · +${r.added} chapters`;
+    if (r.healthy === false) {
+      const bits: string[] = [];
+      if (r.failed) bits.push(`${r.failed} series did not answer`);
+      if (r.chapterFailures) bits.push(`${r.chapterFailures} chapters could not be saved`);
+      return `${base} · ${bits.join(', ') || 'some sources failed'}`;
+    }
+    return base;
+  }
+  if (typeof r.bytes === 'number') {
+    // Both of these used to be invisible: the archive could be missing every config file, or its size could
+    // have failed to measure, and the panel showed a contented size either way.
+    const warn = [r.configEmpty && 'config not captured', r.sizeUnknown && 'size not measured'].filter(Boolean);
+    return ` · ${r.sizeUnknown ? 'size unknown' : bytes(r.bytes)}${warn.length ? ` · ${warn.join(', ')}` : ''}`;
+  }
   return '';
 }
 

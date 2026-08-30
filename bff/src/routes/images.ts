@@ -387,6 +387,12 @@ export default async function imageRoutes(app: FastifyInstance) {
   // ?style=hero → the REAL art sharp, frame-aware (?ar=wide|tall). Recipe + warmer live at module level.
   app.get('/img/series/:id/backdrop', async (req, reply) => {
     const { id } = req.params as { id: string };
+    // The same check every sibling image route opens with, and the only one this family was missing. The ctx
+    // passed to backdropRecipe below reaches only its FALLBACK path, so whenever series_art holds a banner --
+    // the normal state, since AniList art is fetched lazily for everything -- the image was produced from that
+    // URL with no series join at all, and an age-capped account could render key art for a series it is
+    // otherwise correctly walled off from.
+    if (!(await seriesVisible(id, vc(req)))) return reply.code(404).send({ error: 'not_found' });
     const hero = (req.query as Record<string, string>)?.style === 'hero';
     const ar: HeroAr = (req.query as Record<string, string>)?.ar === 'tall' ? 'tall' : 'wide';
     const r = await backdropRecipe(id, hero, ar, vc(req));

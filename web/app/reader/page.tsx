@@ -5,6 +5,7 @@ import { useSearchParams, useRouter } from 'next/navigation';
 import { AnimatePresence, motion } from 'framer-motion';
 import { useQuery } from '@tanstack/react-query';
 import { api, img } from '@/lib/api';
+import { chapterOutcome } from '@/lib/readerState';
 import { Book, Page, PageInfo, Series } from '@/lib/types';
 import { chapterLabel } from '@/lib/format';
 import { deviceId } from '@/lib/device';
@@ -56,6 +57,15 @@ function ReaderInner() {
   const [startPage, setStartPage] = useState(1);
   const [ready, setReady] = useState(false);
   const [ended, setEnded] = useState(false); // reached the last chapter of the series → show Up Next
+  /**
+   * The chapter could not be read. There was no such state at all, and three different upstream causes all
+   * arrived as one: a corrupt CBZ or an unmounted library answers `200 []` from the pages endpoint, while a
+   * book this account may not see throws 404. On first load both set `ready` with nothing behind it, which
+   * cleared the loading overlay and left a full-screen black rectangle. Mid-series both took the SAME branch
+   * as a genuine end of series, so a transient error told the reader "You finished".
+   */
+  const [failed, setFailed] = useState<null | 'unreadable' | 'unavailable'>(null);
+  const [reloadKey, setReloadKey] = useState(0);
 
   const [prefs, setPrefs] = useState<ReaderPrefs>(loadPrefs());
   const [zoom, setZoom] = useState(1);
@@ -106,7 +116,12 @@ function ReaderInner() {
     blobUrls.current.clear();
     (async () => {
       const first = await loadChapter(bookId);
-      if (!alive || !first) { setReady(true); return; }
+      if (!alive) return;
+      setFailed(null);
+      // Empty and absent are different sentences, and neither of them is silence.
+      const outcome = chapterOutcome(first);
+      // `|| !first` is for the type narrower's benefit; chapterOutcome already answers 'unavailable' for null.
+      if (outcome !== 'ok' || !first) { setFailed(outcome === 'ok' ? 'unavailable' : outcome); setReady(true); return; }
       // resume page from live progress
       try {
         const b = await api<Book>(`/api/books/${bookId}`);
@@ -136,7 +151,7 @@ function ReaderInner() {
       blobUrls.current.clear();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [bookId]);
+  }, [bookId, reloadKey]);
 
   // ---- flat page list across loaded chapters ----
   const flat: FlatItem[] = useMemo(() => {
@@ -284,8 +299,11 @@ function ReaderInner() {
       const next = idx >= 0 ? chapterRefs[idx + 1] : null;
       if (!next) { noMore.current = true; setEnded(true); appending.current = false; return; }
       const ch = await loadChapter(next.id);
-      if (ch && ch.pages.length) setChapters((cs) => (cs.some((c) => c.id === ch.id) ? cs : [...cs, ch]));
-      else { noMore.current = true; setEnded(true); }
+      const outcome = chapterOutcome(ch);
+      if (outcome === 'ok') setChapters((cs) => (cs.some((c) => c.id === ch!.id) ? cs : [...cs, ch!]));
+      // There IS a next chapter -- chapterRefs says so -- and it would not load. Claiming the series is
+      // finished here is how a corrupt file or a dropped connection came to read as an ending.
+      else { noMore.current = true; setFailed(outcome); }
       appending.current = false;
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -532,6 +550,32 @@ function ReaderInner() {
   );
 
   // end-of-series "Up Next" card (rendered at the tail of both reading modes)
+  /**
+   * What the reader sees when a chapter will not open. Previously nothing: a black screen on first load, or
+   * the "You finished" card mid-series. Both told them to stop looking.
+   */
+  const retry = () => { setFailed(null); setReady(false); setReloadKey((k) => k + 1); };
+  const failureCard = (
+    <motion.div initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }}
+      className="mx-auto w-full max-w-3xl px-6 py-16 text-center">
+      <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-fog-500">
+        {failed === 'unreadable' ? tr('Chapter unreadable') : tr('Chapter unavailable')}
+      </p>
+      <h2 className="mt-1.5 font-display text-2xl font-bold text-white">
+        {activeChapter?.seriesTitle || tr('This chapter')}
+      </h2>
+      <p className="mx-auto mt-3 max-w-md text-sm text-fog-400">
+        {failed === 'unreadable'
+          ? tr('This chapter has no readable pages. The file may be damaged, or its library may not be mounted right now.')
+          : tr('This chapter could not be loaded. It may have been removed, or the connection dropped.')}
+      </p>
+      <div className="mt-6 flex justify-center gap-2">
+        <button onClick={retry} className="btn-accent text-sm">{tr('Try again')}</button>
+        <button onClick={() => (seriesHref ? router.push(seriesHref) : back())} className="btn-ghost text-sm">{tr('Back to series')}</button>
+      </div>
+    </motion.div>
+  );
+
   const upNextCard = (
     <motion.div initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5 }}
       className="mx-auto w-full max-w-3xl px-6 py-16 text-center">
@@ -586,6 +630,7 @@ function ReaderInner() {
               </div>
             ))}
             {ended && upNextCard}
+            {failed && !!flat.length && failureCard}
           </div>
         </div>
       ) : (
@@ -612,6 +657,11 @@ function ReaderInner() {
           {ended && (
             <div className="flex h-full w-full shrink-0 snap-center items-start justify-center overflow-y-auto">
               {upNextCard}
+            </div>
+          )}
+          {failed && !!flat.length && (
+            <div className="flex h-full w-full shrink-0 snap-center items-start justify-center overflow-y-auto">
+              {failureCard}
             </div>
           )}
         </div>
@@ -713,6 +763,12 @@ function ReaderInner() {
       {!ready && (
         <div className="absolute inset-0 z-50 flex items-center justify-center bg-ink-950">
           <div className="animate-pulse-soft text-fog-500">{tr('Loading chapter…')}</div>
+        </div>
+      )}
+      {/* Nothing loaded at all. `ready` alone used to clear the overlay here and leave the bare backdrop. */}
+      {ready && failed && !flat.length && (
+        <div className="absolute inset-0 z-50 flex items-center justify-center overflow-y-auto bg-ink-950">
+          {failureCard}
         </div>
       )}
     </div>

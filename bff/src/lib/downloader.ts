@@ -114,6 +114,26 @@ async function fetchChapter(
     await reportFail(input.sourceId, status, `0/${urls.length} pages downloaded (HTTP ${worst || 'error'})`);
     throw Object.assign(new Error('no images downloaded (blocked?)'), { blockStatus: status });
   }
+  // A PARTIAL chapter must not be written as a complete one.
+  //
+  // `worst` was only consulted when every single page failed, so seventeen of twenty pages was packed,
+  // returned as success, and -- because an existing file is skipped on sight (see the stat check above) --
+  // never fetched again. The reader would simply stop three pages early, for good, with nothing anywhere
+  // recording that it had happened.
+  //
+  // `expected` prefers what the SOURCE said the chapter contains, which MangaDex supplies, and falls back
+  // to the number of page URLs we were given. Both are the source's own account of the chapter.
+  const expected = input.chapter.pages && input.chapter.pages > 0 ? input.chapter.pages : urls.length;
+  if (n < expected) {
+    const status: SourceStatus = worst === 1 ? 'down' : classify(null, worst >= 400 ? worst : undefined) || 'blocked';
+    await reportFail(input.sourceId, status, `${n}/${expected} pages downloaded (HTTP ${worst || 'error'})`);
+    throw Object.assign(
+      new Error(`incomplete chapter: ${n} of ${expected} pages`),
+      // Deliberately NOT a blockStatus unless the pages actually failed with one: an incomplete chapter is
+      // a reason to stop and say so, not necessarily a reason to declare the whole source blocked.
+      worst >= 400 || worst === 1 ? { blockStatus: status } : {},
+    );
+  }
   await reportOk(input.sourceId); // a successful download clears any prior block
 
   zip.addFile('ComicInfo.xml', Buffer.from(comicInfo({

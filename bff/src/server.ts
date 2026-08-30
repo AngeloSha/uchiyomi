@@ -140,8 +140,15 @@ async function main() {
         runtime.updating = true;
         const r = await runUpdateAll({ maxNew: 5 });
         runtime.lastUpdate = Date.now();
-        runtime.lastUpdateResult = { series: r.series, added: r.added };
-        app.log.info(`updater: +${r.added} chapters across ${r.series} series`);
+        runtime.lastUpdateResult = { series: r.series, added: r.added, failed: r.failed, chapterFailures: r.chapterFailures, healthy: r.healthy };
+        // A sweep that added nothing because nothing was new, and one that added nothing because every source
+        // was down, used to print the identical line. They no longer do.
+        if (r.healthy) app.log.info(`updater: +${r.added} chapters across ${r.series} series`);
+        else app.log.warn(
+          `updater: +${r.added} chapters across ${r.series} series, but ${r.failed} series failed to answer` +
+          `${r.chapterFailures ? ` and ${r.chapterFailures} chapters could not be saved` : ''} ` +
+          `(${Object.entries(r.outcomes).filter(([, n]) => n).map(([k, n]) => `${k}=${n}`).join(' ')})`,
+        );
       } catch (e) {
         app.log.error(e as any);
       } finally {
@@ -195,7 +202,7 @@ async function main() {
         runtime.backingUp = true;
         const r = await runBackup();
         runtime.lastBackup = Date.now();
-        runtime.lastBackupResult = { bytes: r.bytes, ms: r.ms };
+        runtime.lastBackupResult = { bytes: r.bytes, ms: r.ms, configEmpty: r.configEmpty, sizeUnknown: r.sizeUnknown };
         app.log.info(`backup: ${(r.bytes / 1024 / 1024).toFixed(1)} MB in ${r.ms}ms -> ${r.dir}`);
       } catch (e) {
         app.log.error(e as any);

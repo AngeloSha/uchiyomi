@@ -1,5 +1,71 @@
 # Changelog
 
+## v0.11.0 — 2026-08-30
+
+### Twelve things that were failing without telling you
+
+This release came out of auditing a running instance rather than reading the code, and everything in it has
+the same shape: the app said nothing was wrong, and something was being lost anyway. They are listed roughly
+by what they cost.
+
+**Getting signed out at random.** One browser is one cookie jar, but it runs several refresh timers over it:
+every open tab has its own, and so does the offline worker. Two tabs left open collided every twelve minutes,
+and the one that lost the race deleted the login the winner had just written. Both tabs, and the whole
+device, were signed out. On a family server that means someone locked out until an adult resets their
+password. A login that was rotated a moment ago is now recognised for what it is. Signing out, or being
+signed out by an admin, still takes effect instantly.
+
+**Reading that vanished after a trip.** Chapters finished offline queue up and send when you reconnect. That
+queue counted every failure the same way and deleted the entry on the fifth attempt, so a bad connection was
+treated exactly like a corrupted record. Finish twenty chapters on a plane, land somewhere with a flaky
+captive portal, and the lot was silently discarded: progress, streaks and Continue Reading all rewound. Only a
+genuine, permanent rejection can discard something you read now.
+
+**One person's library showing up for the next.** On a shared tablet, the stored copies of pages like your
+home screen, history and stats were never cleared when you signed out, and one network hiccup was enough for
+the next person to be shown them, including titles their age limit is meant to hide. Signing in or out now
+clears them. The same store also had no size limit and grew forever, which on an iPhone eventually pushes out
+your downloaded chapters.
+
+**Restrictions that lifted themselves.** If the database stumbled while checking which libraries an account
+may see, the answer came back as "all of them, with no age limit". That check now fails safe.
+
+**Key art you should not have been able to see.** Every image route checks whether you may see the series.
+One did not.
+
+**Chapters filed under the wrong series.** Finishing a chapter let the app tell the server which series it
+belonged to. After merging two duplicate entries, a phone that had been offline could file its reading under
+the version that no longer exists, where it counted for nothing and quietly disappeared from Continue
+Reading. The server works this out for itself now.
+
+**A bookmark that jumped backwards.** A queued page from six hours ago could overwrite where you had since
+read to on another device. Events now carry the time they happened, and the most recent one wins. Turning back
+a page still works exactly as before.
+
+**Nightly updates that could stop entirely.** Six different ways for the update sweep to fail all reported
+"+0 chapters", which is also what a perfectly quiet night reports. Every source could have been broken for
+weeks and the admin page would have looked fine. It now says which sources did not answer, and one hung site
+no longer holds up the whole sweep.
+
+**A black screen in the reader.** A damaged file, a library that is not mounted, or a chapter someone else
+deleted all produced either a black screen with no explanation or, part-way through a series, the "You
+finished" card. There is now a message saying which it is, and a Try again button.
+
+**Deleting a member left no trace.** It is the most destructive thing the admin page can do, removing
+someone's entire reading history, and it was the only action that recorded nothing. It now records what was
+removed and who removed it.
+
+**Backups that reported clean when they were not.** The backup already knew when it had failed to capture the
+config folder, and knew when it could not measure itself, and then threw both facts away before anyone could
+see them.
+
+**Two things quietly filling the disk.** Half-written image files that the cleanup could not see, so it
+reported the cache under its limit while the folder was over it; and failed offline downloads leaving page
+data behind that nothing could reach, including "clear all downloads".
+
+Nine new test files came with these, and every fix was checked by putting the original bug back and confirming
+the test noticed.
+
 ## v0.10.2 — 2026-08-30
 
 ### The Add button stops being where you wait

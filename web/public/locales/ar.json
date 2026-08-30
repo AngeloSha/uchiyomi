@@ -435,5 +435,10 @@
   "…or paste an image URL": "…أو الصق رابط صورة",
   "{n} downloading": "جارٍ تنزيل {n}",
   "{n} failed": "فشل {n}",
-  "Dismiss": "تجاهل"
+  "Dismiss": "تجاهل",
+  "Chapter unreadable": "تعذّرت قراءة الفصل",
+  "Chapter unavailable": "الفصل غير متوفر",
+  "This chapter": "هذا الفصل",
+  "This chapter has no readable pages. The file may be damaged, or its library may not be mounted right now.": "لا يحتوي هذا الفصل على صفحات قابلة للقراءة. قد يكون الملف تالفًا، أو أن مكتبته غير موصولة حاليًا.",
+  "This chapter could not be loaded. It may have been removed, or the connection dropped.": "تعذّر تحميل هذا الفصل. ربما تمت إزالته، أو انقطع الاتصال."
 }

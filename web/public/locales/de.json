@@ -435,5 +435,10 @@
   "…or paste an image URL": "…oder eine Bild-URL einfügen",
   "{n} downloading": "{n} werden geladen",
   "{n} failed": "{n} fehlgeschlagen",
-  "Dismiss": "Ausblenden"
+  "Dismiss": "Ausblenden",
+  "Chapter unreadable": "Kapitel nicht lesbar",
+  "Chapter unavailable": "Kapitel nicht verfügbar",
+  "This chapter": "Dieses Kapitel",
+  "This chapter has no readable pages. The file may be damaged, or its library may not be mounted right now.": "Dieses Kapitel enthält keine lesbaren Seiten. Die Datei könnte beschädigt sein, oder ihre Bibliothek ist gerade nicht eingebunden.",
+  "This chapter could not be loaded. It may have been removed, or the connection dropped.": "Dieses Kapitel konnte nicht geladen werden. Möglicherweise wurde es entfernt, oder die Verbindung ist abgebrochen."
 }

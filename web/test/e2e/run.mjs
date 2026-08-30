@@ -431,6 +431,28 @@ try {
     }
   }
 
+  // --------------------------------------------------------- the reader, when it cannot open a chapter
+  //
+  // There was no failure state at all. A book that will not load set `ready` with nothing behind it, which
+  // dismissed the loading overlay and left a full-screen black rectangle: no message, no retry, no way back.
+  // That is indistinguishable from the app hanging, and it is what a reader saw for a corrupt file, an
+  // unmounted library, or a chapter someone else had deleted.
+  console.log('\n  reader failure state');
+  {
+    const before = consoleErrors.length;
+    await page.goto(`${BASE}/reader?book=b_e2e_definitely_not_a_real_book`, { waitUntil: 'networkidle2', timeout: 60000 }).catch(() => {});
+    await new Promise((r) => setTimeout(r, 1500));
+    const seen = await page.evaluate(() => document.body.innerText || '');
+    await page.screenshot({ path: `${OUT}/${String(++step).padStart(2, '0')}-reader-missing.png` });
+    if (/Loading chapter/i.test(seen)) bad('the reader is still showing its spinner for a book that will never load');
+    else if (!/unavailable|unreadable|Try again/i.test(seen)) {
+      bad(`the reader shows nothing at all for a missing chapter (body was ${JSON.stringify(seen.slice(0, 80))}) — this is the black screen`);
+    } else if (/You finished/i.test(seen)) bad('a chapter that failed to load is being reported as finishing the series');
+    else ok('a missing chapter says so, and offers a way out');
+    // a 404 the app asked for and handled is not an app error; only NEW noise counts against it
+    if (consoleErrors.length > before + 1) bad('opening a missing chapter floods the console');
+  }
+
   // ---------------------------------------------------------------- installable
   console.log('\n  pwa');
   const mf = await page.evaluate(async () => {
