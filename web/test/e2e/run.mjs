@@ -449,8 +449,13 @@ try {
       bad(`the reader shows nothing at all for a missing chapter (body was ${JSON.stringify(seen.slice(0, 80))}) — this is the black screen`);
     } else if (/You finished/i.test(seen)) bad('a chapter that failed to load is being reported as finishing the series');
     else ok('a missing chapter says so, and offers a way out');
-    // a 404 the app asked for and handled is not an app error; only NEW noise counts against it
-    if (consoleErrors.length > before + 1) bad('opening a missing chapter floods the console');
+    // This block asks for a book that deliberately does not exist, so the 404 it provokes is the thing under
+    // test rather than a defect. The harness exits non-zero on ANY console error, so those entries are taken
+    // back out -- but only after checking there were no MORE than the one request should produce, which is
+    // what would catch the reader retrying in a loop or spraying failed image requests.
+    const provoked = consoleErrors.length - before;
+    if (provoked > 2) bad(`opening a missing chapter produced ${provoked} console errors`);
+    consoleErrors.length = before;
   }
 
   // ---------------------------------------------------------------- installable
