@@ -65,6 +65,17 @@ function applyAccent(settings?: Record<string, any>) {
  * history and covers the moment the network hiccuped. Sent on the way out AND on the way in, because signing
  * in as someone else without signing out first is the ordinary way a household device changes hands.
  */
+/** Tell the worker who is signed in, so background sync files queued reading against the right account. */
+async function tellWorkerUser(userId: string | null): Promise<void> {
+  try {
+    const reg = await Promise.race([
+      navigator.serviceWorker?.ready,
+      new Promise<undefined>((r) => setTimeout(() => r(undefined), 1500)),
+    ]);
+    reg?.active?.postMessage({ type: 'yomi-user', userId });
+  } catch { /* no worker: the foreground flush is the only one, and it knows */ }
+}
+
 async function purgeAccountCaches(): Promise<void> {
   try {
     // `serviceWorker.ready` resolves only once a worker is ACTIVE, and never at all if registration failed or
@@ -95,6 +106,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           // for React, so the identity has to be in place the moment the session is known. This is the path
           // that runs on every page load, which makes it the one that matters most.
           setCurrentUser(me.id);
+          void tellWorkerUser(me.id);
           setUser(me);
           applyAccent(me.settings);
           setStatus('authed');
@@ -123,6 +135,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       await purgeAccountCaches(); // whoever used this device last does not get to answer this account's requests
       setAccessToken(res.accessToken);
       setCurrentUser(res.user.id);
+      void tellWorkerUser(res.user.id);
       setUser(res.user);
       applyAccent(res.user.settings);
       setStatus('authed');
@@ -148,6 +161,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const res = await api<{ accessToken: string; user: User }>('/api/setup', { json: { username, password } });
       setAccessToken(res.accessToken);
       setCurrentUser(res.user.id);
+      void tellWorkerUser(res.user.id);
       setUser(res.user);
       applyAccent(res.user.settings);
       setStatus('authed');

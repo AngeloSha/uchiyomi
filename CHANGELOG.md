@@ -1,5 +1,35 @@
 # Changelog
 
+## v0.11.2 — 2026-08-31
+
+### Fixes "Loading chapter..." never finishing
+
+A regression introduced by v0.11.1 the same day, and the reason to be sorry rather than pleased about it.
+
+v0.11.1 moved the offline store to a new version so that downloaded chapters could belong to an account.
+A browser will not change a database's version while anything else still has it open, and the service worker
+had it open: it opened the store to send queued reading and never closed it again, on any path out. So the
+upgrade waited for a worker that was never going to let go, the page waited for the upgrade, and the reader
+waited for the page. Because the reader checks for a downloaded copy before it asks the server, that wait
+happened before anything could be drawn, and every chapter showed "Loading chapter..." for good.
+
+Three things changed, because any one of them alone leaves the door open:
+
+* The service worker now closes the store on every path out, and steps aside immediately if a page needs to
+  change the version while it is working.
+* The page no longer waits indefinitely for a store it cannot open. If something is holding the old version,
+  it gives up at once and reads online instead, and tries again next time rather than giving up for good.
+* A store that cannot be opened now means "nothing is downloaded" rather than an error, so a cache that is
+  unavailable can never stop you reading.
+
+If you are stuck right now, closing every tab of the app and opening it again clears it, because that
+releases the connection that is holding the upgrade.
+
+This is squarely the same failure the previous two releases were spent on: something that could not answer,
+where nothing was built to notice. The v0.11.0 work gave the reader a failure state, and a failure state does
+not help when the answer never arrives at all. There is now a test that squats on the old version and asserts
+the reader still gets an answer; with the shipped code it hangs until the runner is killed.
+
 ## v0.11.1 — 2026-08-30
 
 ### Two ways one account could reach another account's things

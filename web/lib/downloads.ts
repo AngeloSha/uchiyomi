@@ -46,10 +46,43 @@ const owner = () => getCurrentUser() || 'anon';
 const chapterKey = (bookId: string) => `${owner()}:${bookId}`;
 const pageKey = (bookId: string, n: number) => `${owner()}:${bookId}:${n}`;
 
+/**
+ * Opening this database must never be able to hang, and v0.11.1 proved why.
+ *
+ * An IndexedDB version change waits for every OTHER open connection to close first. The service worker held
+ * one (it opened `yomi-offline` for the outbox flush and never closed it), so the page's v1 to v2 upgrade
+ * fired `blocked` and, with no handler, the promise never settled. `loadChapter` awaits the offline lookup
+ * before it does anything else, so the reader sat on "Loading chapter..." forever, for every chapter, for
+ * anyone who already had the old database. A fresh browser creates v2 directly and never blocks, which is
+ * exactly why the browser end-to-end pass did not catch it.
+ *
+ * Two defences, because either alone is thin. `blocked` gives up rather than waiting, and the deadline makes
+ * "the store is unavailable" a bounded answer rather than a state the app can wait in.
+ */
+const DB_OPEN_TIMEOUT = 4000;
+
 let dbp: Promise<IDBPDatabase> | null = null;
-function db() {
+function db(): Promise<IDBPDatabase> {
   if (!dbp) {
-    dbp = openDB(DB_NAME, VERSION, {
+    // `blocked` REJECTS this, it does not throw. Throwing inside the callback escapes as an uncaught
+    // exception (idb dispatches it through an event target) instead of settling the open, which is a
+    // different way of not answering.
+    let refuse!: (e: Error) => void;
+    const blocked = new Promise<never>((_, rej) => { refuse = rej; });
+
+    const open = openDB(DB_NAME, VERSION, {
+      blocked() {
+        refuse(new Error('offline store upgrade blocked by another connection'));
+      },
+      blocking() {
+        // We are holding up somebody ELSE's upgrade. Let go at once and drop the handle, so the next call
+        // reopens cleanly at the new version.
+        dbp = null;
+        void open.then((d) => d.close()).catch(() => {});
+      },
+      terminated() {
+        dbp = null; // the browser dropped it; reopen on next use rather than failing forever
+      },
       upgrade(d, oldVersion) {
         // Unattributable v1 content goes. The outbox is deliberately NOT dropped: it holds reading that has
         // not reached the server yet, and losing it would be exactly the data loss v0.11.0 was spent closing.
@@ -64,30 +97,51 @@ function db() {
         if (!d.objectStoreNames.contains('outbox')) d.createObjectStore('outbox', { keyPath: 'id', autoIncrement: true });
       },
     });
+    // If the open later succeeds after we already gave up, close it rather than leaking the handle, and
+    // never let its rejection surface unhandled.
+    void open.then((d) => { if (dbp === null) d.close(); }).catch(() => {});
+
+    dbp = Promise.race([
+      open,
+      blocked,
+      new Promise<never>((_, rej) =>
+        setTimeout(() => rej(new Error('offline store did not open in time')), DB_OPEN_TIMEOUT)),
+    ]).catch((e) => {
+      dbp = null; // never cache the failure: a block clears the moment the other connection goes away
+      throw e;
+    });
   }
   return dbp;
 }
 
 export async function isDownloaded(bookId: string): Promise<boolean> {
-  const d = await db();
-  return !!(await d.get('chapters', chapterKey(bookId)));
+  try {
+    const d = await db();
+    return !!(await d.get('chapters', chapterKey(bookId)));
+  } catch { return false; }
 }
 
 export async function listDownloads(): Promise<OfflineChapter[]> {
-  const d = await db();
-  // From the index, not the whole store: another account's downloads must not appear even in a count.
-  const all = (await d.getAllFromIndex('chapters', 'byUser', owner())) as OfflineChapter[];
-  return all.sort((a, b) => b.savedAt - a.savedAt);
+  try {
+    const d = await db();
+    // From the index, not the whole store: another account's downloads must not appear even in a count.
+    const all = (await d.getAllFromIndex('chapters', 'byUser', owner())) as OfflineChapter[];
+    return all.sort((a, b) => b.savedAt - a.savedAt);
+  } catch { return []; }
 }
 
 export async function getOfflineChapter(bookId: string): Promise<OfflineChapter | undefined> {
-  const d = await db();
-  return (await d.get('chapters', chapterKey(bookId))) as OfflineChapter | undefined;
+  try {
+    const d = await db();
+    return (await d.get('chapters', chapterKey(bookId))) as OfflineChapter | undefined;
+  } catch { return undefined; }
 }
 
 export async function getPageBlob(bookId: string, n: number): Promise<Blob | undefined> {
-  const d = await db();
-  return (await d.get('pages', pageKey(bookId, n))) as Blob | undefined;
+  try {
+    const d = await db();
+    return (await d.get('pages', pageKey(bookId, n))) as Blob | undefined;
+  } catch { return undefined; }
 }
 
 export async function downloadChapter(
@@ -232,7 +286,8 @@ function permanentlyRejected(e: unknown): boolean {
 }
 
 export async function flushOutbox(): Promise<number> {
-  const d = await db();
+  let d;
+  try { d = await db(); } catch { return 0; } // unavailable store: the queue waits, nothing is lost
   // One read, and the key comes off the record, which carries it (`keyPath: 'id'`). Reading `getAllKeys` and
   // `getAll` separately meant two IDB transactions: the service worker flushing between them shifted the
   // arrays out of step, after which a failure on one entry deleted a different, unrelated one.

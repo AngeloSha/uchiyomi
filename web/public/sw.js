@@ -7,7 +7,10 @@
 // v7: the API cache was previously kept per-URL with no cap and was never cleared on sign-out, so on a shared
 // device it may already hold one account's home screen, history and stats. Those existing caches have to go on
 // upgrade, not merely stop growing, which is what this bump does.
-const VERSION = 'v7';
+// v8: this worker leaked an IndexedDB connection, which blocked the page's v1 to v2 upgrade of the offline
+// store and hung the reader on "Loading chapter...". The old worker has to be replaced for that to stop, so
+// the bump is load-bearing here rather than cosmetic.
+const VERSION = 'v8';
 const SHELL = `yomi-shell-${VERSION}`;
 const STATIC = `yomi-static-${VERSION}`;
 const IMG = `yomi-img-${VERSION}`;
@@ -33,8 +36,22 @@ async function clearAccountCaches() {
   await Promise.all([caches.delete(API), caches.delete(IMG)]);
 }
 
+/**
+ * Who the app last told us is signed in, or null.
+ *
+ * Background sync runs with the app closed and authenticates with `freshAccessToken()`, which uses the
+ * refresh cookie: that is whoever signed in LAST, not necessarily whoever queued the reading. Without this,
+ * one person's queued chapters would be filed against the next person's history and streak.
+ *
+ * Null means "not told yet" (a worker that has not seen a page since it started). In that state, events
+ * stamped with an owner are left alone and the foreground flush, which does know, handles them. It runs
+ * four seconds after every launch, so nothing waits long.
+ */
+let ownerHint = null;
+
 self.addEventListener('message', (e) => {
-  if (e.data?.type === 'yomi-signout') e.waitUntil(clearAccountCaches());
+  if (e.data?.type === 'yomi-signout') { ownerHint = null; e.waitUntil(clearAccountCaches()); }
+  if (e.data?.type === 'yomi-user') ownerHint = e.data.userId || null;
 });
 
 self.addEventListener('activate', (e) => {
@@ -221,9 +238,28 @@ async function freshAccessToken() {
     return (await r.json()).accessToken || null;
   } catch (_) { return null; }
 }
+// This connection MUST be closed on every path out.
+//
+// It was not, and v0.11.1 turned that into a hang. An IndexedDB version change waits for every other open
+// connection to close, so this one, held open by a long-lived worker after the first flush, blocked the
+// page's v1 to v2 upgrade indefinitely. The page awaits the offline store before rendering a chapter, so the
+// reader sat on "Loading chapter..." for good. Note the several early returns below: each one used to leak
+// the handle, and the `!vals.length` path is the common case, so it leaked almost every time.
+//
+// `onversionchange` is the belt to that braces: if a page starts an upgrade while we are mid-flush, let go
+// at once rather than making it wait for us.
 async function flushOutboxSW() {
   let db;
   try { db = await reqp(indexedDB.open('yomi-offline')); } catch (_) { return; }
+  db.onversionchange = () => { try { db.close(); } catch (_) {} };
+  try {
+    await flushOutboxWith(db);
+  } finally {
+    try { db.close(); } catch (_) {}
+  }
+}
+
+async function flushOutboxWith(db) {
   if (!db.objectStoreNames.contains('outbox')) return;
   const ro = db.transaction('outbox', 'readonly').objectStore('outbox');
   let keys, vals;
@@ -233,6 +269,10 @@ async function flushOutboxSW() {
   if (!token) return;
   for (let i = 0; i < vals.length; i++) {
     const ev = vals[i];
+    // Events carry an owner since v0.11.1. The worker cannot know who is signed in, and `freshAccessToken`
+    // authenticates as whoever holds the refresh cookie, so an event stamped with a different account is
+    // left for the app to flush when that person is actually signed in.
+    if (ev.userId && ev.userId !== ownerHint) continue;
     try {
       const r = await fetch(`/api/books/${ev.bookId}/progress`, {
         method: 'PUT',
