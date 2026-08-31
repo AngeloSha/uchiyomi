@@ -7,11 +7,13 @@ the thirteen hours after it, and none of them appeared in a single image.
 ```bash
 bash scripts/shots/run.sh --yes                        # everything
 bash scripts/shots/run.sh --yes --only home,library    # a subset
-bash scripts/shots/run.sh --yes --site                 # also refresh the marketing site's copies
+bash scripts/shots/run.sh --yes --site-dir ../site      # also refresh the marketing site's copies
 ```
 
-Output lands in `docs/shots/` as WebP. With `--site` it also writes smaller copies into the marketing site's
-`assets/shots/` — one capture, two encodes, because the docs want sharpness and the site wants bytes.
+Output lands in `docs/shots/` as WebP. With `--site-dir` it also writes smaller copies into the marketing
+site's `assets/shots/` — one capture, two encodes, because the docs want sharpness and the site wants bytes.
+Point `--site-dir` at either the site checkout or its `assets/shots/` directly; both resolve to the same
+place.
 
 ## What it does
 

@@ -124,6 +124,15 @@ docker run --rm --network "$NET" \
 mkdir -p "$OUT_WEBP"
 # Encode with the bff image's sharp — no new dependency, and it is already in every dev's cache.
 # Docs get sharp originals; the marketing site gets smaller ones. One source, two encodes.
+# The docs say the site copies land in the marketing site's `assets/shots/`, and the encoder below writes to
+# the root of whatever is mounted at /site. Point --site-dir at a site checkout and you get six webp files
+# dumped in its root instead, which is silent: the run reports success and the site keeps serving the old
+# images. Resolve it here so both readings of --site-dir do the right thing.
+if [ -n "$SITE" ] && [ -d "$SITE/assets/shots" ]; then
+  echo "· site: resolving $SITE -> $SITE/assets/shots"
+  SITE="$SITE/assets/shots"
+fi
+
 docker run --rm -u 0 --entrypoint node -w /app -e NODE_PATH=/app/node_modules \
   -v "$OUT_PNG":/png -v "$OUT_WEBP":/webp ${SITE:+-v "$SITE":/site} "$BFF_IMAGE" -e '
 const sharp=require("sharp"), fs=require("fs");
