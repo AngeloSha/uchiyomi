@@ -1,5 +1,40 @@
 # Changelog
 
+## v0.12.0 — 2026-08-31
+
+### Find missing chapters
+
+A new button on every series page. It asks every source you have whether it carries this series, works out
+which of your missing chapters it could supply, shows you what it found, and fetches only after you say yes.
+
+v0.11.3 fixed the usual reason a series is short, and for most of them the nightly update now repairs itself.
+This is for the rest: a series whose own source genuinely never had the early chapters, where the only way to
+complete it is to take them from somewhere else.
+
+**It asks before it fetches, and that is the whole point.** A chapter is stored under its number, so a chapter
+taken from the wrong series lands exactly where the right one belongs, looks correct in every list, and is
+only discovered by opening it. So the dialog shows you which source, what the series is called *there* (often
+something quite different: yours is listed elsewhere as "Mr Devourer, Please Act Like a Final Boss"), how many
+of your existing chapters line up, and how many it would add. Nothing is downloaded until you press a button
+that repeats all of that back to you.
+
+Sources it checked and rejected are listed too, with the reason, because "this one has it but numbers its
+chapters differently" is worth seeing.
+
+It will not offer:
+
+* a source whose numbering does not line up with yours, which is what catches a series that restarts counting
+  each season, and most cases of the wrong series entirely
+* chapters before the beginning or after the end of what you have, since those are not gaps, they are simply
+  where you have got to
+* a hole where the two sides do not agree on the chapters either side of it
+* anything at all on a series with fewer than three chapters, because there is not enough there to tell one
+  series from another
+
+If a source has it under a name too different to find, there is a box to search under that name instead.
+
+Progress appears in the same downloads panel as everything else, and it keeps going if you close the dialog.
+
 ## v0.11.3 — 2026-08-31
 
 ### Series from Mangakakalot and Natomanga were arriving two-thirds empty

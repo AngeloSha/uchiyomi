@@ -10,6 +10,18 @@ import { fetchAniListArt, fetchTrendingManhwa, TrendingItem } from '../lib/anili
 import { q, one } from '../lib/db';
 import { healthAll, isDisabled, blockedNow, reportLatest, reportFail, reportSlow, classify } from '../lib/sourceHealth';
 import { diagnose, EMPTY_SUSPECT } from '../lib/sourceDiagnosis';
+import {
+  gapsOf, assess, verdict, authorise, putPlan, getPlan, planKey, sweepPlans,
+  MIN_HAVE, PLAN_TTL, type PlanCandidate, type Refusal,
+} from '../lib/fill';
+
+/**
+ * The most chapters one confirmed fill may fetch.
+ *
+ * At the download gate's 1200ms minimum spacing plus fetch time, 300 chapters is several hours of background
+ * work. A bound, not a policy: it exists so a mis-click cannot start something that runs all week.
+ */
+const FILL_MAX_CHAPTERS = 300;
 import { logAudit } from '../lib/audit';
 import { env } from '../env';
 // The "already in library" annotation is deliberately library-wide: it answers "would adding this be a
@@ -539,6 +551,188 @@ export default async function sourceRoutes(app: FastifyInstance) {
 
   // Search a title across ALL enabled providers at once, grouped so one card carries every source that
   // has it — the UI then lets you choose which source to add from (like the trending flow).
+  /**
+   * What is missing from a series, and who could supply it.
+   *
+   * Read-only. Answers with a plan id; the chapter URLs stay on this side of the wire and the fill below
+   * quotes the id back. The client therefore names a chapter NUMBER and nothing else, so no request can
+   * point the downloader at content a person was never shown.
+   *
+   * POST rather than GET because it fans out across every reachable source, and a GET would be prefetchable
+   * and service-worker-cacheable -- the same reasoning as `latestPage` above.
+   */
+  app.post('/api/sources/fill/scan', async (req, reply) => {
+    const { seriesId, altTitle } = (req.body ?? {}) as { seriesId?: string; altTitle?: string };
+    if (!seriesId) return reply.code(400).send({ error: 'bad_request' });
+
+    // Browsable by THIS viewer, not merely present: otherwise a capped member could learn about, and write
+    // into, a series they are walled off from. Fails closed, as the permission hook above does.
+    // One lookup, through browsable(): it carries the deleted/merged rule, the per-library grant and the age
+    // cap together, so this route cannot drift from the others by hand-writing part of it. Fails closed --
+    // a database blip must not make a series someone cannot see fillable.
+    const p = new Params();
+    const rows = await q<any>(
+      `SELECT s.id, s.title, s.folder, s.source_id, s.source_series_id, s.summary, s.author, s.genres, s.web, s.status
+         FROM lib_series s WHERE s.id = ${p.add(seriesId)} AND ${browsable('s', vc(req), p)}`, p.values,
+    ).then((r) => r, () => null);
+    if (rows === null) return reply.code(503).send({ error: 'unavailable' });
+    const s = rows[0];
+    if (!s) return reply.code(404).send({ error: 'not_found' });
+
+    const have = (await q<{ number: number }>('SELECT number FROM lib_books WHERE series_id = $1', [seriesId]))
+      .map((r: { number: number }) => Number(r.number)).filter((n: number) => Number.isFinite(n));
+    // Coverage measured against two chapters proves nothing at all: any long series covers them.
+    if (have.length < MIN_HAVE) {
+      return { seriesId, title: s.title, have: { count: have.length }, gaps: [], candidates: [],
+        refusal: { code: 'too_few_chapters', message: 'Too few chapters here to match against another source.' } };
+    }
+    const gaps = gapsOf(have);
+
+    // Candidates: the series' own source first (no cross-source guessing at all -- it is where the series
+    // already comes from), then one best match per other reachable source.
+    const terms = [...new Set([s.title, (altTitle || '').trim()].filter(Boolean))] as string[];
+    const allowed = new Set(reachable(req).map((x) => x.id));
+    const found: { source: string; name: string; sourceId: string; title: string; coverUrl?: string; pinned: boolean }[] = [];
+    if (s.source_id && s.source_series_id && allowed.has(s.source_id)) {
+      const own = getSource(s.source_id);
+      if (own) found.push({ source: own.id, name: own.name, sourceId: s.source_series_id, title: s.title, pinned: true });
+    }
+    await Promise.all(findOrder().filter((id) => allowed.has(id)).map(async (id) => {
+      if (found.some((f) => f.source === id && f.pinned)) return;
+      const src = getSource(id);
+      if (!src || await isDisabled(id).catch(() => false)) return;
+      for (const term of terms) {
+        try {
+          const hit = pickBest(await withTimeout(src.search(term), 20000), term);
+          if (hit?.sourceId) {
+            found.push({ source: src.id, name: src.name, sourceId: hit.sourceId, title: hit.title, coverUrl: hit.coverUrl, pinned: false });
+            return;
+          }
+        } catch { /* one source failing is not the scan failing */ }
+      }
+    }));
+
+    // Only now, and only for sources that produced a match, do we pay for a chapter list. Routed through the
+    // shared lookup so it reuses whatever the add dialog already fetched.
+    const chapters = new Map<string, SourceChapter[]>();
+    const candidates: PlanCandidate[] = [];
+    await Promise.all(found.map(async (f) => {
+      const src = getSource(f.source);
+      if (!src) return;
+      let list: SourceChapter[] = [];
+      let why: Refusal = 'ok';
+      if (await blockedNow(f.source).catch(() => false)) why = 'blocked';
+      else {
+        try { list = (await seriesAndChapters(src, f.sourceId)).chapters; }
+        catch { why = 'no_chapters'; }
+      }
+      const nums = list.map((c) => c.number);
+      const a = assess(have, nums);
+      chapters.set(planKey(f.source, f.sourceId), list);
+      candidates.push({
+        source: f.source, name: f.name, sourceSeriesId: f.sourceId, title: f.title, coverUrl: f.coverUrl,
+        count: list.length, first: nums.length ? Math.min(...nums) : null, last: nums.length ? Math.max(...nums) : null,
+        coverage: Math.round(a.coverage * 100) / 100, matched: a.matched,
+        fillable: a.fillable, newer: a.newer,
+        why: why === 'ok' ? verdict(a, list.length) : why,
+        pinned: f.pinned,
+      });
+    }));
+
+    // Usable first, the series' own source ahead of the rest, then by how much each would repair.
+    candidates.sort((x, y) =>
+      Number(y.why === 'ok') - Number(x.why === 'ok') ||
+      Number(y.pinned) - Number(x.pinned) ||
+      y.fillable.length - x.fillable.length);
+
+    const plan = putPlan({ seriesId, folder: s.folder, chapters, candidates });
+    return {
+      seriesId, title: s.title, folder: s.folder,
+      have: { count: have.length, first: Math.min(...have), last: Math.max(...have) },
+      gaps, candidates, planId: plan.id, expiresIn: PLAN_TTL,
+      refusal: gaps.length || candidates.some((c) => c.newer.length) ? null
+        : { code: 'no_gaps', message: 'Nothing is missing between the chapters you already have.' },
+    };
+  });
+
+  /** Fetch the chapters a person picked, from the source they picked, and nothing else. */
+  app.post('/api/sources/fill', async (req, reply) => {
+    const { planId, source, sourceSeriesId, numbers } = (req.body ?? {}) as
+      { planId?: string; source?: string; sourceSeriesId?: string; numbers?: number[] };
+    if (!planId || !source || !sourceSeriesId || !Array.isArray(numbers)) {
+      return reply.code(400).send({ error: 'bad_request' });
+    }
+    const plan = getPlan(planId);
+    if (!plan) return reply.code(409).send({ error: 'plan_stale', message: 'That list has moved on. Scan again.' });
+
+    const auth = authorise(plan, source, sourceSeriesId, numbers.map(Number), FILL_MAX_CHAPTERS);
+    if (!auth.ok) return reply.code(400).send({ error: auth.error, message: auth.message });
+
+    const src = getSource(source);
+    if (!src) return reply.code(400).send({ error: 'bad_request' });
+    if (!sourceAllowedFor(src, vc(req).maxAgeRating)) return denySource(reply);
+    if (await isDisabled(source).catch(() => false)) return reply.code(409).send({ error: 'disabled' });
+    if (await blockedNow(source).catch(() => false)) return reply.code(429).send({ error: 'blocked' });
+
+    const s = await one<any>(
+      `SELECT id, title, folder, summary, author, genres, web, status FROM lib_series WHERE id = $1`, [plan.seriesId]);
+    if (!s) return reply.code(404).send({ error: 'not_found' });
+
+    const running = jobs.get(s.folder);
+    if (running && running.status === 'downloading') return reply.code(409).send({ error: 'busy' });
+
+    const picked = auth.chapters;
+    jobs.set(s.folder, { title: s.title, total: picked.length, done: 0, status: 'downloading' });
+    await logAudit('series.fill', {
+      userId: userIdOf(req),
+      detail: { seriesId: plan.seriesId, title: s.title, source, sourceSeriesId, numbers: picked.map((c) => c.number) },
+      req,
+    });
+
+    void (async () => {
+      let failures = 0;
+      for (const ch of picked) {
+        try {
+          /**
+           * `meta` comes from OUR series row, never from the candidate.
+           *
+           * `downloadChapter` writes meta.series into the CBZ's ComicInfo <Series>, and every persistScan
+           * re-reads the FIRST chapter's ComicInfo and overwrites the series row's title, summary, author,
+           * status, genres and web from it (lib/library.ts, ON CONFLICT DO UPDATE). Filling a gap at the
+           * START of a series writes the new first chapter -- so passing the candidate's title here would
+           * silently rename the series, for everyone, on the next scan. It fires even when the match is
+           * RIGHT, because a right match is often under a different English title.
+           */
+          const res = await downloadChapter({
+            sourceId: source, seriesFolder: s.folder, chapter: ch,
+            meta: { series: s.title, summary: s.summary, author: s.author, genres: s.genres, url: s.web, status: s.status },
+          });
+          const j = jobs.get(s.folder);
+          if (j && !res.skipped) { j.done++; if (j.done % 5 === 0) await persistScan().catch(() => {}); }
+        } catch (e: any) {
+          failures++;
+          const j = jobs.get(s.folder);
+          if (e?.blockStatus) {
+            if (j) {
+              j.status = 'error';
+              j.reason = `${src.name} stopped part-way. ${j.done} of ${j.total} chapters saved.`;
+              j.finishedAt = Date.now();
+            }
+            break;
+          }
+          if (j) j.reason = `${failures} chapter${failures === 1 ? '' : 's'} could not be saved: ${String(e?.message || e).slice(0, 120)}`;
+          // NOT counted: a chapter that was not written must never advance the bar.
+        }
+      }
+      await persistScan().catch(() => {});
+      await setBookDates(s.folder, picked).catch(() => {});
+      const j = jobs.get(s.folder);
+      if (j && j.status !== 'error') { j.status = failures ? 'error' : 'done'; j.finishedAt = Date.now(); }
+    })();
+
+    return { ok: true, started: true, folder: s.folder, total: picked.length };
+  });
+
   app.get('/api/sources/search-all', async (req) => {
     const term = ((req.query as { q?: string }).q || '').trim();
     if (!term) return { content: [] };

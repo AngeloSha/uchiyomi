@@ -12,9 +12,10 @@ import { Img, Backdrop, Rail, SectionTitle } from '@/components/ui';
 import { SeriesCard } from '@/components/cards';
 import { useToast } from '@/components/Toast';
 import { ConfirmDialog, Modal, msgOf } from '@/components/ConfirmDialog';
-import { useAuth } from '@/lib/auth';
+import { useAuth, canDownload } from '@/lib/auth';
 import { IcChevronLeft, IcHeart, IcStar, IcPlay, IcDownload, IcCheck, IcTrash, IcSliders } from '@/components/icons';
 import { t as tr } from '@/lib/i18n';
+import { FindMissingDialog } from '@/components/FindMissingDialog';
 
 // The four the scanner itself writes from ComicInfo's PublishingStatus. Kept as a suggestion list rather
 // than a hard enum, because a file can carry anything and rejecting it would reject Uchiyomi's own data.
@@ -496,10 +497,11 @@ function SeriesInner() {
   const router = useRouter();
   const qc = useQueryClient();
   const toast = useToast();
-  const { isAdmin } = useAuth();
+  const { isAdmin, user } = useAuth();
   const [editChapter, setEditChapter] = useState<Book | null>(null);
   const [editing, setEditing] = useState(false);
   const [collecting, setCollecting] = useState(false);
+  const [findingMissing, setFindingMissing] = useState(false);
   const [asc, setAsc] = useState(true);
   const [downloaded, setDownloaded] = useState<Set<string>>(new Set());
   const [showSummary, setShowSummary] = useState(false);
@@ -679,6 +681,10 @@ function SeriesInner() {
         <StarRating value={rating} onSet={setStars} />
         <span className="text-xs text-fog-500">{rating ? `${rating}/5` : 'Rate this'}</span>
       </div>
+      {canDownload(user) && (series?.booksCount ?? 0) >= 3 && (
+        <button onClick={() => setFindingMissing(true)} className="mt-1 flex items-center justify-center gap-2 rounded-full border border-ink-700 py-2.5 text-sm text-fog-300">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /><path d="M11 8v6M8 11h6" /></svg>{tr('Find missing chapters')}</button>
+      )}
       {isAdmin && (
         <>
           <button onClick={() => setEditing(true)} className="mt-1 flex items-center justify-center gap-2 rounded-full border border-ink-700 py-2.5 text-sm text-fog-300">
@@ -835,6 +841,7 @@ function SeriesInner() {
           onSaved={() => { for (const k of [['series-books', id], ['series', id], ['home']]) qc.invalidateQueries({ queryKey: k }); }} />
       )}
       {collecting && <CollectionSheet seriesId={id} onClose={() => setCollecting(false)} />}
+      {findingMissing && <FindMissingDialog seriesId={id} onClose={() => setFindingMissing(false)} />}
 
       {(similar?.content?.length ?? 0) > 0 && (
         <section className="mt-10">

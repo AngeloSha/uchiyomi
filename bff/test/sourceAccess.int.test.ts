@@ -110,6 +110,10 @@ const ROUTES: Array<{ method: 'GET' | 'POST'; url: string; payload?: any }> = [
   { method: 'GET', url: '/api/sources/jobs' },
   { method: 'GET', url: '/api/discover/trending' },
   { method: 'POST', url: '/api/sources/add', payload: { source: CLEAN, sourceId: `${CLEAN}-1` } },
+  // The fill pair. They belong in this table for the same reason everything else here does: the permission
+  // is a preHandler on the whole plugin, so the only way to know a new route is covered is to name it.
+  { method: 'POST', url: '/api/sources/fill/scan', payload: { seriesId: 's_nope' } },
+  { method: 'POST', url: '/api/sources/fill', payload: { planId: 'fp_nope', source: CLEAN, sourceSeriesId: 'x', numbers: [1] } },
 ];
 
 test('sources: who may reach them, and how long they get', { skip }, async (t) => {

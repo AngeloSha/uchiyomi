@@ -284,7 +284,21 @@ GET    /api/sources               GET    /api/sources/find
 GET    /api/sources/detail        GET    /api/sources/search
 GET    /api/sources/search-all    GET    /api/sources/latest
 GET    /api/sources/jobs          POST   /api/sources/add
-GET    /api/discover/trending
+GET    /api/discover/trending     POST   /api/sources/fill/scan
+POST   /api/sources/fill
+```
+
+**Filling a series' gaps.** `POST /api/sources/fill/scan` takes `{seriesId, altTitle?}` and answers with what
+is missing, a short-lived `planId`, and every source that was checked — including the ones it refused, with
+the reason and the measured overlap. `POST /api/sources/fill` then takes
+`{planId, source, sourceSeriesId, numbers[]}`.
+
+The split is deliberate. Chapter URLs never leave the server: the client names chapter NUMBERS, and only ones
+that the quoted plan actually offered for that source. A chapter fetched from the wrong series would land as
+`Chapter <n>.cbz` exactly where the right one belongs and look identical in every listing, so nothing is
+fetched until a person has been shown which source, which title on it, and how many chapters.
+
+```
 ```
 
 ### Bulk actions
