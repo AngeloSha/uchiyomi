@@ -1,5 +1,38 @@
 # Changelog
 
+## v0.11.3 — 2026-08-31
+
+### Series from Mangakakalot and Natomanga were arriving two-thirds empty
+
+Someone opened a series and found chapter 93 was the first one in it. It was not that series: it was every
+series from those two sites.
+
+Both run on the same reader engine here, and the way it read a chapter list was to fetch the series page and
+take the links out of it. That page only ever shows the newest fifty chapters, and it says so nowhere. There
+is no "next page" to click, no "load more", no "showing 50 of 145". It is simply a list that stops. So every
+series added from those two sites arrived with only its most recent fifty chapters, and the nightly update
+could never repair it, because it kept asking the same page and kept getting the same fifty.
+
+On this library that was **7 of the 10 series** from those sources, about **528 chapters** missing. The worst
+was down to 8 chapters out of 76.
+
+The page does name where the rest live: there is a proper chapter-list feed behind it, which the site's own
+front end uses. The engine now reads that instead, following it to the end rather than stopping at the first
+fifty, and falls back to reading the page the old way for the older sites that do not offer it.
+
+Two of the affected series, before and after:
+
+```
+Act Like a Boss Monster, Mr. Swallow!    51  ->  145 chapters
+Return of the War God                    57  ->  176 chapters
+```
+
+The missing chapters will fill in over the coming nights, oldest first.
+
+**A second thing came free.** That feed also carries each chapter's real release date, which these two sites
+never gave us any other way. New chapters from them will be properly dated instead of undated, so "released
+3 months ago" on the series page starts being true for them.
+
 ## v0.11.2 — 2026-08-31
 
 ### Fixes "Loading chapter..." never finishing

@@ -8,6 +8,10 @@ import { seriesSlug, isOwnChapterUrl } from '../slug';
 
 const strip = (s: string) => s.replace(/<[^>]+>/g, '').replace(/&amp;/g, '&').replace(/&#0?39;|&apos;/g, "'").replace(/&quot;/g, '"').replace(/\s+/g, ' ').trim();
 const norm = (u: string) => u.replace(/^\/\//, 'https://').replace(/&amp;/g, '&').trim();
+/** The solver returns JSON inside an HTML <pre>, so the payload arrives entity-escaped. */
+const unescapeHtml = (s: string) => s
+  .replace(/&quot;/g, '"').replace(/&#0?39;|&apos;/g, "'")
+  .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
 
 /**
  * Series cards from a Manganato-family listing page, whichever markup it happens to be serving.
@@ -75,6 +79,51 @@ export function parseListing(h: string, sourceId: string): SourceSeries[] {
 export function makeManganato(cfg: { id: string; name: string; base: string; order?: number }): SourceAdapter {
   const base = cfg.base.replace(/\/$/, '');
   const mangaUrl = (id: string) => (id.startsWith('http') ? id : `${base}/manga/${id}`);
+
+  /**
+   * The chapter list as JSON, paged.
+   *
+   * `/api/manga/<slug>/chapters` answers `{data:{chapters:[…],pagination:{total,limit,offset,has_more}}}`.
+   * It caps at fifty per call whatever you ask for by default, so this walks `offset` until the server says
+   * there is no more, rather than trusting one large `limit` that a future cap could quietly shrink.
+   *
+   * Returns [] rather than throwing when the site is not one of the ones that serves this, so the caller
+   * falls back to scraping the page. Older Manganato-family sites do not have it.
+   */
+  const CHAPTER_PAGE = 200;   // asked for; the server may return fewer, which `has_more` then tells us
+  const MAX_PAGES = 40;       // 8,000 chapters, far past the longest thing anyone reads. A stop, not a limit.
+
+  async function apiChapters(seriesUrl: string): Promise<SourceChapter[]> {
+    const slug = seriesSlug(seriesUrl);
+    if (!slug) return [];
+    const out: SourceChapter[] = [];
+    const seen = new Set<number>();
+    for (let page = 0, offset = 0; page < MAX_PAGES; page++) {
+      const raw = await cfGet(`${base}/api/manga/${slug}/chapters?limit=${CHAPTER_PAGE}&offset=${offset}`);
+      // The solver hands back a browser's rendering of the JSON, so the body arrives inside <pre>.
+      const body = (raw.match(/<pre[^>]*>([\s\S]*?)<\/pre>/i) || [, raw])[1] || '';
+      const data = JSON.parse(unescapeHtml(body).trim())?.data;
+      const rows: any[] = data?.chapters || [];
+      if (!rows.length) break;
+      for (const r of rows) {
+        const number = typeof r.chapter_num === 'number' ? r.chapter_num : parseFloat(r.chapter_num);
+        if (!Number.isFinite(number) || seen.has(number)) continue;
+        seen.add(number);
+        const cslug = String(r.chapter_slug || '').replace(/^\/+/, '');
+        if (!cslug) continue;
+        out.push({
+          sourceId: `${base}/manga/${slug}/${cslug}`,
+          number,
+          title: strip(String(r.chapter_name || `Chapter ${number}`)),
+          publishedAt: r.updated_at ? new Date(r.updated_at).toISOString() : undefined,
+        });
+      }
+      const pg = data?.pagination;
+      if (!pg?.has_more) break;
+      offset += rows.length;
+    }
+    return out.sort((a, b) => a.number - b.number);
+  }
 
   return {
     id: cfg.id,
@@ -179,6 +228,19 @@ export function makeManganato(cfg: { id: string; name: string; base: string; ord
 
     async listChapters(seriesId) {
       const url = mangaUrl(seriesId);
+      // The JSON list first. The HTML below only ever carried the newest FIFTY chapters, and nothing on the
+      // page said so: no pagination control, no "load more", just a list that stopped. Every series added
+      // from a site on this engine therefore arrived truncated, silently, and the updater could not repair it
+      // because it only ever asked the same page. On this install that was 7 of the 10 series from the two
+      // manganato-family sources, about 528 chapters, and it took a reader hitting "chapter 93 is the first
+      // one" to notice.
+      //
+      // The page itself names the endpoint that has the rest, in `data-api-url` on #chapter-list-container.
+      // It also answers with a real `chapter_num` and a real `updated_at`, so this path is more accurate than
+      // the scrape as well as more complete: no number parsed out of a URL, and a release date we otherwise
+      // do not get from these sites at all.
+      const viaApi = await apiChapters(url).catch(() => null);
+      if (viaApi && viaApi.length) return viaApi;
       // Only accept chapters under THIS manga's slug — sidebar widgets link to other titles' chapters and would
       // otherwise be scraped as phantom chapters (e.g. a stray "2021"). See lib/sources/slug.ts.
       const slug = seriesSlug(url);
