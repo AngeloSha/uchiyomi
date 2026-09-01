@@ -50,6 +50,16 @@ before(async () => {
     // Five pages, always.
     getPageUrls: async () => ['a', 'b', 'c', 'd', 'e'].map((p) => `https://example.invalid/${p}.png`),
   } as any);
+  // A long chapter, so the difference between "lost one page in a hundred" and "lost a fifth of it" can be
+  // expressed at all. On a five-page chapter every shortfall is a large one.
+  registerAdapter({
+    id: 'test-long',
+    name: 'Test Long',
+    search: async () => [],
+    getSeries: async () => null,
+    listChapters: async () => [],
+    getPageUrls: async () => Array.from({ length: 110 }, (_, i) => `https://example.invalid/p${i}.png`),
+  } as any);
 });
 beforeEach(() => { served = []; });
 after(async () => { globalThis.fetch = realFetch; await rm(ROOT, { recursive: true, force: true }); });
@@ -96,4 +106,89 @@ test('a chapter where nothing downloaded still reports as blocked', async () => 
     downloadChapter({ sourceId: 'test-partial', seriesFolder: 'T/None', chapter: chapter(4) } as any),
     (e: any) => !!e.blockStatus,
   );
+});
+
+/** Fails exactly the pages at `bad`, every time they are asked for. Everything else serves. */
+function serveExcept(bad: number[], status = 503) {
+  const fail = new Set(bad);
+  served = [];
+  globalThis.fetch = (async (u: any) => {
+    const i = Number(String(u).match(/p(\d+)\.png$/)?.[1] ?? -1);
+    served.push(i);
+    if (fail.has(i)) return new Response('nope', { status });
+    return new Response(PIXEL, { status: 200, headers: { 'content-type': 'image/png' } });
+  }) as typeof fetch;
+}
+
+test('THE COOLDOWN: losing one page in a hundred must not condemn the source', async () => {
+  // This is the regression. The first version of the guard called reportFail on ANY shortfall, so a single
+  // flaky image put the whole source into an escalating cooldown -- which on the live install blocked
+  // mangakakalot over 98 of 101 pages and stopped a 92-chapter fill after three.
+  serveExcept([7]);
+  const err = await downloadChapter({
+    sourceId: 'test-long', seriesFolder: 'Long/Series', chapter: chapter(1),
+  }).then(() => null, (e) => e);
+
+  assert.ok(err, 'the chapter is still refused: an incomplete chapter must never be written');
+  assert.match(String(err.message), /incomplete chapter: 109 of 110/);
+  assert.equal(err.blockStatus, undefined,
+    'and crucially it carries NO blockStatus, so the caller keeps going instead of ending the whole run');
+  assert.equal(await exists('Long/Series/Chapter 1.cbz'), false);
+});
+
+test('the pages that failed are retried once, and only once', async () => {
+  serveExcept([3, 9]);
+  await downloadChapter({ sourceId: 'test-long', seriesFolder: 'Long/Series', chapter: chapter(2) })
+    .catch(() => {});
+  const asked = (i: number) => served.filter((x) => x === i).length;
+  assert.equal(asked(3), 2, 'the failed page is asked for a second time');
+  assert.equal(asked(9), 2);
+  assert.equal(asked(4), 1, 'a page that arrived is not asked again');
+  assert.equal(served.length, 112, '110 pages plus exactly two retries, not a loop');
+});
+
+test('a retry that succeeds saves the chapter, in the right order', async () => {
+  // Fail page 5 on the first pass only, then serve it. This is the ordinary flaky-CDN case, and before the
+  // retry existed it cost the chapter AND a day of cooldown.
+  let firstPass = true;
+  served = [];
+  globalThis.fetch = (async (u: any) => {
+    const i = Number(String(u).match(/p(\d+)\.png$/)?.[1] ?? -1);
+    served.push(i);
+    if (i === 5 && firstPass) { firstPass = false; return new Response('nope', { status: 503 }); }
+    return new Response(PIXEL, { status: 200, headers: { 'content-type': 'image/png' } });
+  }) as typeof fetch;
+
+  const res = await downloadChapter({ sourceId: 'test-long', seriesFolder: 'Long/Series', chapter: chapter(3) });
+  assert.equal(res.pages, 110, 'all 110 pages made it');
+  assert.equal(await exists('Long/Series/Chapter 3.cbz'), true);
+
+  const AdmZip = (await import('adm-zip')).default;
+  const names = new AdmZip(join(ROOT, 'Long/Series/Chapter 3.cbz')).getEntries()
+    .map((e: any) => e.entryName).filter((x: string) => x !== 'ComicInfo.xml');
+  assert.deepEqual(names, [...names].sort(),
+    'the retried page keeps its place: pages are held by position, not appended as they arrive');
+  assert.equal(names.length, 110);
+});
+
+test('a source that is REFUSING still stops the run, however few pages it lost', async () => {
+  // 403 and 429 are the source saying no. That must still end the caller's run even at 109 of 110, which is
+  // the one case where a near-complete chapter is not a flaky CDN.
+  serveExcept([2], 403);
+  const err = await downloadChapter({
+    sourceId: 'test-long', seriesFolder: 'Long/Series', chapter: chapter(4),
+  }).then(() => null, (e) => e);
+  assert.ok(err);
+  assert.ok(err.blockStatus, 'a refusal still carries blockStatus');
+});
+
+test('a large shortfall is still the source\'s fault', async () => {
+  // 17 of 20 was the original bug and must stay caught: refused, unwritten, and blamed on the source.
+  serveExcept(Array.from({ length: 30 }, (_, i) => i + 80));
+  const err = await downloadChapter({
+    sourceId: 'test-long', seriesFolder: 'Long/Series', chapter: chapter(5),
+  }).then(() => null, (e) => e);
+  assert.ok(err);
+  assert.match(String(err.message), /incomplete chapter: 80 of 110/);
+  assert.equal(await exists('Long/Series/Chapter 5.cbz'), false);
 });

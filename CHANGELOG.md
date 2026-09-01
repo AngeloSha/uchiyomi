@@ -1,5 +1,32 @@
 # Changelog
 
+## v0.12.1 — 2026-09-01
+
+### One missing page stopped blaming the whole site
+
+You pressed "find missing chapters" and it fetched 3 of 92. That was my fault, not the sites'.
+
+A chapter that comes back short is refused, because writing an incomplete one leaves a file that is then
+skipped forever. That part was right. What was wrong is what happened next: it also marked the whole source
+as failing and put it in a cooldown, no matter how small the shortfall. Two of your sources were sitting in
+one over **98 of 101 pages** and **109 of 110**. Since every download run stops when a source starts
+refusing, your 92-chapter fill stopped at the first chapter that lost a single image.
+
+It was costing more than that one button. Across the last four nightly updates the library gained 26 chapters
+and lost 40, with seven or eight series skipped each night for sources that were not really broken.
+
+Three changes:
+
+* **Pages that fail are asked for a second time.** Almost every one of these is a single image on a busy
+  server that answers fine a moment later. One extra request, instead of losing the chapter and the day.
+* **A shortfall is only the site's fault when it is a real one.** Losing a page or two out of a hundred is
+  now recorded against that chapter and nothing else. Losing a fifth of a chapter, or being told no outright,
+  still counts against the source exactly as before.
+* **One bad chapter no longer ends the whole run.** It is skipped, counted and reported, and the rest of the
+  run carries on.
+
+The two sources have been let out of their cooldown, so the chapters you were waiting for can arrive.
+
 ## v0.12.0 — 2026-08-31
 
 ### Find missing chapters

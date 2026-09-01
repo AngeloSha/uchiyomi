@@ -46,6 +46,15 @@ const DL_CONCURRENCY = Number(process.env.DOWNLOAD_CONCURRENCY || 2);
 const DL_MIN_GAP_MS = Number(process.env.DOWNLOAD_MIN_GAP_MS || 1200);
 
 /** Download one chapter into <LIBRARY_ROOT>/<seriesFolder>/Chapter <n>.cbz. Skips if already present. */
+/**
+ * How complete a chapter has to be for the shortfall to be the chapter's fault rather than the source's.
+ *
+ * 0.95 sits between the two things that must stay distinguishable: 17 of 20 pages (0.85) is a source that
+ * has stopped serving and must still be caught, while 109 of 110 (0.99) and 98 of 101 (0.97) are the flaky
+ * CDN reads that were putting whole sources into a day-long cooldown.
+ */
+const NEAR_COMPLETE = 0.95;
+
 export async function downloadChapter(input: DownloadInput): Promise<{ file: string; pages: number; skipped?: boolean }> {
   const src = getSource(input.sourceId);
   if (!src) throw new Error(`unknown source ${input.sourceId}`);
@@ -82,9 +91,15 @@ async function fetchChapter(
     : src.imageReferer
       ?? (/^https?:/.test(input.chapter.sourceId) ? `${new URL(input.chapter.sourceId).origin}/` : '');
   const zip = new AdmZip();
-  let n = 0;
   let worst = 0; // worst HTTP status (or 1 for network/timeout) seen on a failed page
-  for (const u of urls) {
+
+  // Held by position rather than appended as they arrive, so a page fetched on the RETRY below still lands
+  // in reading order. The buffers were already all resident before (AdmZip holds what you add), so this
+  // costs no memory that was not already spent.
+  const page: (Buffer | null)[] = new Array(urls.length).fill(null);
+  const ext: string[] = new Array(urls.length).fill('jpg');
+
+  const fetchPage = async (u: string, i: number): Promise<void> => {
     const headers: Record<string, string> = {
       referer,
       accept: 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
@@ -97,17 +112,41 @@ async function fetchChapter(
     Object.assign(headers, typeof src.imageHeaders === 'function' ? src.imageHeaders(u) : src.imageHeaders ?? {});
     try {
       const r = await fetch(u, { headers, signal: AbortSignal.timeout(45000) });
-      if (!r.ok) { if (r.status >= 400) worst = Math.max(worst, r.status); continue; }
+      if (!r.ok) { if (r.status >= 400) worst = Math.max(worst, r.status); return; }
       const ct = (r.headers.get('content-type') || '').toLowerCase();
-      if (/^text\/|html|json/.test(ct)) { worst = Math.max(worst, 415); continue; } // hotlink/error page, not an image — don't pack garbage
+      if (/^text\/|html|json/.test(ct)) { worst = Math.max(worst, 415); return; } // hotlink/error page, not an image
       const buf = Buffer.from(await r.arrayBuffer());
-      if (buf.length < 256) continue; // skip blocked/empty
+      if (buf.length < 256) return; // blocked/empty
       // Content-Type first: some sources (and any source proxied through an extension server) serve pages
       // from extension-less URLs, and a wrong extension makes the chapter read as zero pages.
-      zip.addFile(`${String(++n).padStart(4, '0')}.${imageExt(u, ct)}`, buf);
+      page[i] = buf;
+      ext[i] = imageExt(u, ct);
     } catch {
       if (!worst) worst = 1; // network/timeout
     }
+  };
+
+  for (let i = 0; i < urls.length; i++) await fetchPage(urls[i], i);
+
+  /**
+   * One retry for the pages that did not arrive.
+   *
+   * Almost every shortfall seen on this install is one or two pages out of a hundred, on a CDN that answers
+   * again immediately. Before this, a single missing page condemned the chapter AND put the whole source in
+   * a cooldown, which is how mangakakalot ended up blocked over 98 of 101 pages and a 92-chapter fill
+   * stopped after three. A retry costs one request; the alternative cost a day.
+   *
+   * Skipped when NOTHING arrived: that is not a flaky page, that is the source saying no, and hammering it
+   * a second time is exactly what earns a real block.
+   */
+  const gaps = page.map((b, i) => (b ? -1 : i)).filter((i) => i >= 0);
+  if (gaps.length && gaps.length < urls.length) {
+    for (const i of gaps) await fetchPage(urls[i], i);
+  }
+
+  let n = 0;
+  for (let i = 0; i < urls.length; i++) {
+    if (page[i]) zip.addFile(`${String(++n).padStart(4, '0')}.${ext[i]}`, page[i]!);
   }
   if (!n) {
     const status: SourceStatus = worst === 1 ? 'down' : classify(null, worst >= 400 ? worst : undefined) || 'blocked';
@@ -125,13 +164,31 @@ async function fetchChapter(
   // to the number of page URLs we were given. Both are the source's own account of the chapter.
   const expected = input.chapter.pages && input.chapter.pages > 0 ? input.chapter.pages : urls.length;
   if (n < expected) {
+    /**
+     * The chapter is still refused. What changed is who gets BLAMED for it.
+     *
+     * The first version of this called reportFail unconditionally, which put the whole source into an
+     * escalating cooldown. That is right for a source that is refusing us and badly wrong for a CDN that
+     * dropped one image: on this install it blocked mangakakalot over 98 of 101 pages and natomanga over
+     * 109 of 110, and a 92-chapter fill stopped after three because every caller breaks on `blockStatus`.
+     * The comment below already said an incomplete chapter is "not necessarily a reason to declare the
+     * whole source blocked", and the line above it did exactly that anyway.
+     *
+     * So: near-complete after a retry is a bad chapter, recorded against the chapter. A large shortfall, or
+     * an outright refusal status, is a bad SOURCE and still earns the cooldown.
+     */
+    const ratio = n / expected;
+    const refusing = worst === 403 || worst === 429; // the source saying no, whatever the page count
+    const blip = ratio >= NEAR_COMPLETE && !refusing;
     const status: SourceStatus = worst === 1 ? 'down' : classify(null, worst >= 400 ? worst : undefined) || 'blocked';
-    await reportFail(input.sourceId, status, `${n}/${expected} pages downloaded (HTTP ${worst || 'error'})`);
+    if (!blip) {
+      await reportFail(input.sourceId, status, `${n}/${expected} pages downloaded (HTTP ${worst || 'error'})`);
+    }
     throw Object.assign(
       new Error(`incomplete chapter: ${n} of ${expected} pages`),
-      // Deliberately NOT a blockStatus unless the pages actually failed with one: an incomplete chapter is
-      // a reason to stop and say so, not necessarily a reason to declare the whole source blocked.
-      worst >= 400 || worst === 1 ? { blockStatus: status } : {},
+      // `blockStatus` ends the CALLER'S whole run, so it is now reserved for the source actually refusing,
+      // or for the network being gone underneath a large shortfall. One flaky page must cost one chapter.
+      refusing || (worst === 1 && !blip) ? { blockStatus: status } : {},
     );
   }
   await reportOk(input.sourceId); // a successful download clears any prior block
