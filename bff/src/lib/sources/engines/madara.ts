@@ -4,7 +4,7 @@
 import { SourceAdapter, SourceSeries, SourceChapter } from '../types';
 import { cfGet, cfPost } from '../flaresolverr';
 import { parseWhen } from '../dates';
-import { seriesSlug, isOwnChapterUrl } from '../slug';
+import { seriesSlug, isOwnChapterUrl, rebase } from '../slug';
 
 const strip = (s: string) => s.replace(/<[^>]+>/g, '').replace(/&amp;/g, '&').replace(/\s+/g, ' ').trim();
 const norm = (u: string) => u.replace(/^\/\//, 'https://').replace(/&amp;/g, '&').trim();
@@ -67,7 +67,7 @@ export function parseResults(h: string, sourceId: string): SourceSeries[] {
 
 export function makeMadara(cfg: { id: string; name: string; base: string; order?: number }): SourceAdapter {
   const base = cfg.base.replace(/\/$/, '');
-  const mangaUrl = (id: string) => (id.startsWith('http') ? id : `${base}/manga/${id}/`);
+  const mangaUrl = (id: string) => (id.startsWith('http') ? rebase(id, base) : `${base}/manga/${id}/`);
   // Parsing lives at module scope so it can be tested against real markup; see madaraListing.test.ts.
 
   return {

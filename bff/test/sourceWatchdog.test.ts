@@ -64,3 +64,107 @@ test('an unknown source or an unparseable url changes nothing', async () => {
   assert.equal(await followMove('aqua', 'not a url', h.deps), false);
   assert.deepEqual(h.writes, []);
 });
+
+// ---- extension updates -------------------------------------------------------
+//
+// The bug this guards: `updateExtensions` used to end every attempt with `.catch(() => false)`. A 404 from
+// the repository -- the common failure, and the one the household hit -- left the extension on its old
+// version permanently while producing exactly the same observable result as having no update available:
+// nothing logged, nothing returned, nothing shown. The only trace was a Java stack trace in the extension
+// server's own log, which nobody reads.
+//
+// Reintroduce by replacing the try/catch in updateExtensions with `.catch(() => false)`: `failed` comes back
+// empty and both of the first two tests below fail.
+
+/** Fake extension server. `outcome` decides what each pkgName does. */
+function extHarness(
+  list: Array<{ pkgName: string; name: string; installed: boolean; hasUpdate: boolean }>,
+  outcome: (pkg: string) => boolean | Error,
+) {
+  const audits: Array<{ event: string; detail: any }> = [];
+  const tried: string[] = [];
+  const deps = {
+    listExtensions: async () => list as any,
+    setExtensionState: (async (pkg: string) => {
+      tried.push(pkg);
+      const r = outcome(pkg);
+      if (r instanceof Error) throw r;
+      return r;
+    }) as any,
+    logAudit: (async (event: string, opts: any) => { audits.push({ event, detail: opts?.detail }); }) as any,
+  };
+  return { deps, audits, tried };
+}
+
+const ext = (pkgName: string, name: string, hasUpdate = true) => ({ pkgName, name, installed: true, hasUpdate });
+
+test('a repository 404 is reported, not swallowed', async () => {
+  const { updateExtensions } = await load();
+  const h = extHarness([ext('org.x.argos', 'Argos Scan')], () => new Error('HTTP error 404'));
+
+  const r = await updateExtensions(h.deps);
+
+  assert.deepEqual(r.updated, [], 'nothing was actually updated');
+  assert.equal(r.failed.length, 1, 'the failure must survive to the caller');
+  assert.equal(r.failed[0].name, 'Argos Scan');
+  assert.match(
+    r.failed[0].reason,
+    /repository no longer offers/,
+    'a 404 means the repository moved the download, which is not something "HTTP error 404" conveys',
+  );
+  assert.ok(
+    h.audits.some((a) => a.event === 'extension.auto_update_failed'),
+    'a failure nobody can read afterwards is the bug being fixed',
+  );
+});
+
+test('one broken extension does not hide the ones that worked', async () => {
+  const { updateExtensions } = await load();
+  const h = extHarness(
+    [ext('org.x.a', 'Alpha'), ext('org.x.dead', 'Dead One'), ext('org.x.b', 'Beta')],
+    (pkg) => (pkg === 'org.x.dead' ? new Error('HTTP error 404') : true),
+  );
+
+  const r = await updateExtensions(h.deps);
+
+  assert.deepEqual(r.updated, ['Alpha', 'Beta'], 'the run continues past a failure');
+  assert.deepEqual(r.failed.map((f) => f.name), ['Dead One']);
+  assert.ok(r.failed[0].reason.length > 0, 'a failure with no reason is barely better than no failure at all');
+  assert.equal(h.tried.length, 3, 'every candidate is still attempted');
+});
+
+test('accepted-but-not-installed counts as a failure', async () => {
+  // Suwayomi answers this mutation with a null extension rather than an error when it declines the work.
+  // Treating a falsy return as success is how an update silently does nothing.
+  const { updateExtensions } = await load();
+  const h = extHarness([ext('org.x.quiet', 'Quiet Failure')], () => false);
+
+  const r = await updateExtensions(h.deps);
+
+  assert.deepEqual(r.updated, []);
+  assert.equal(r.failed.length, 1);
+  assert.match(r.failed[0].reason, /did not install it/);
+});
+
+test('extensions without an update are left alone', async () => {
+  const { updateExtensions } = await load();
+  const h = extHarness(
+    [ext('org.x.current', 'Current', false), { pkgName: 'org.x.gone', name: 'Not Installed', installed: false, hasUpdate: true }],
+    () => true,
+  );
+
+  const r = await updateExtensions(h.deps);
+
+  assert.deepEqual(h.tried, [], 'neither an up-to-date nor an uninstalled extension is touched');
+  assert.deepEqual(r.updated, []);
+  assert.deepEqual(r.failed, []);
+});
+
+test('a timeout reads as a timeout rather than as a missing download', async () => {
+  const { updateExtensions } = await load();
+  const h = extHarness([ext('org.x.slow', 'Slow One')], () => new Error('request timed out after 180000ms'));
+
+  const r = await updateExtensions(h.deps);
+
+  assert.match(r.failed[0].reason, /did not answer in time/);
+});

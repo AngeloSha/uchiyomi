@@ -1,5 +1,39 @@
 # Changelog
 
+## v0.13.0 — 2026-09-01
+
+### Series kept asking a site that had moved
+
+"Mr Devourer, Please Act Like a Final Boss" would not download anything new, and nor would most of the
+library. Aqua Manga moved from aquareader.net to aquareader.org, the address was updated here, which is the
+right thing to do, and it changed nothing. A series stores the full address it was added with, one per
+series, so the 176 Aqua series added before the move went on asking the old host.
+
+What hid it is the shape of the failure. The old host still answers. It just answers with a "page not found"
+page rather than an error, so the fetch succeeded, the chapter list came back empty, and an empty chapter
+list looks exactly like a series with nothing new. Every surface reported healthy, including the health
+checks. All 176 series on the old address had gone a fortnight with no new file; of the 16 already on the new
+one, 12 had not.
+
+Now a stored address pointing at a host the site no longer uses is pointed at the current one as it is read.
+Changing a site's address in settings is you saying it moved, and that now applies to series already in the
+library rather than only to new ones. The series that was listing 0 chapters lists 142.
+
+### Extensions say when they are out of date, and say when they cannot update
+
+A failed extension update was invisible here. The nightly check tried, the attempt threw, and the error was
+discarded on the spot: nothing logged, nothing shown, and no difference between "this failed" and "there was
+nothing to do". The only trace was a stack trace in the extension server's own log, which is not somewhere
+anyone looks.
+
+- The extensions panel now says how many installed extensions are out of date, with an Update all button
+  beside it. The per-extension Update button is unchanged.
+- A failed update is reported with a reason in plain words. "HTTP error 404" becomes "the repository no
+  longer offers that version to download", which is the repository's problem rather than yours.
+- Admins are notified when an update fails, and both outcomes are written to the audit log.
+
+Update all runs the same code the nightly check runs, rather than a second copy of it that could drift.
+
 ## v0.12.2 — 2026-09-01
 
 ### Asking a site to slow down, instead of ignoring it

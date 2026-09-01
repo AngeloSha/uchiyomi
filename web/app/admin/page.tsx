@@ -599,7 +599,15 @@ function Providers() {
               ? ` ${sweep.needsAttention.length} need${sweep.needsAttention.length === 1 ? 's' : ''} attention.`
               : ' Nothing needs attention.'}
             {sweep.extensionsUpdated.length ? ` Updated ${sweep.extensionsUpdated.length} extension(s).` : ''}
+            {sweep.extensionsFailed?.length
+              ? ` ${sweep.extensionsFailed.length} extension(s) could not be updated.`
+              : ''}
           </p>
+          {(sweep.extensionsFailed || []).map((f: any) => (
+            <p key={f.pkgName} className="mt-1 text-[11px] text-amber-300">
+              <span className="text-amber-200">{f.name}</span>: {f.reason}
+            </p>
+          ))}
           {sweep.sources.filter((v: any) => v.action).map((v: any) => (
             <p key={v.id} className="mt-1 text-[11px] text-emerald-300">✓ {v.name}: followed its move to a new address</p>
           ))}
@@ -1800,6 +1808,29 @@ function Extensions({ span = '' }: { span?: string }) {
     setBusy(null);
   };
 
+  /**
+   * Update everything at once. The per-row button stays: this is for the common case of coming back after a
+   * week and finding several at once, which is otherwise several trips through a 1,400-row list.
+   */
+  const updateAll = async () => {
+    setBusy('__updateall');
+    try {
+      const r = await api<{ updated: string[]; failed: { name: string; reason: string }[] }>(
+        '/api/admin/extensions/update-all', { json: {} },
+      );
+      refreshAll();
+      if (r.failed.length) {
+        // Naming the first one and why beats a count: the reason is usually the repository's, not ours.
+        toast(`Updated ${r.updated.length}. Could not update ${r.failed[0].name}: ${r.failed[0].reason}`, 'error');
+      } else {
+        toast(r.updated.length
+          ? `Updated ${r.updated.length} extension${r.updated.length === 1 ? '' : 's'}`
+          : 'Everything is already up to date', 'success');
+      }
+    } catch (err: any) { toast(msgOf(err, 'Could not update extensions'), 'error'); }
+    setBusy(null);
+  };
+
   const refreshRepos = async () => {
     setBusy('__refresh');
     try {
@@ -1895,6 +1926,22 @@ function Extensions({ span = '' }: { span?: string }) {
               </div>
             )}
           </div>
+
+          {/* Out of date is a thing to be told, not a thing to go looking for. The per-row Update button was
+              only ever visible to someone already scrolling the installed list. */}
+          {!!cat?.updatable && (
+            <div className="mb-2 flex items-center gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-2.5 py-2">
+              <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-amber-400" />
+              <p className="min-w-0 flex-1 text-[11px] leading-snug text-amber-200">
+                {cat.updatable === 1 ? '1 extension is out of date' : `${cat.updatable} extensions are out of date`}
+                <span className="text-amber-200/60"> · a newer version is available from its repository</span>
+              </p>
+              <button onClick={updateAll} disabled={!!busy}
+                className="shrink-0 rounded-full bg-amber-500/25 px-3 py-1 text-[11px] font-medium text-amber-100 transition hover:bg-amber-500/40 disabled:opacity-50">
+                {busy === '__updateall' ? 'Updating…' : 'Update all'}
+              </button>
+            </div>
+          )}
 
           {/* search + filters */}
           <div className="mb-2 flex flex-wrap items-center gap-2">

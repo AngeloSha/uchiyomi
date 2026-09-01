@@ -15,7 +15,7 @@ import { authenticate, requireAdmin, userIdOf, revokeAllSessions, revokeRefreshT
 import { logAudit, recentAudit } from '../lib/audit';
 import { healthAll, setDisabled, clearBlock, SourceHealth } from '../lib/sourceHealth';
 import { smokeTest, probeBase } from '../lib/sourceProbe';
-import { runSourceCheck, checkRunning } from '../lib/sourceWatchdog';
+import { runSourceCheck, checkRunning, updateExtensions } from '../lib/sourceWatchdog';
 import { diagnose } from '../lib/sourceDiagnosis';
 import { readSites, writeSites } from '../lib/sources/customSites';
 import { reloadAll, listSources, getSource, detectEngine, listRemoteSources, suwayomiConfigured, suwayomiAbout, swAdapterId } from '../lib/sources';
@@ -1081,6 +1081,22 @@ export default async function adminRoutes(app: FastifyInstance) {
       hiddenAdult: nsfw === 'true' ? 0 : all.filter((e) => e.nsfw && !e.installed).length,
       langs,
     };
+  });
+
+  /**
+   * Update every installed extension that has a newer version.
+   *
+   * Deliberately the same function the nightly sweep runs, rather than a second loop that would drift from
+   * it. Failures come back per extension with a reason instead of a count, because "3 could not update" tells
+   * an operator nothing they can act on.
+   */
+  app.post('/api/admin/extensions/update-all', async (req, reply) => {
+    if (needExt(reply)) return;
+    const r = await updateExtensions();
+    await logAudit('extension.update_all', {
+      userId: userIdOf(req), detail: { updated: r.updated.length, failed: r.failed.length }, req,
+    });
+    return { ok: true, ...r };
   });
 
   app.post('/api/admin/extensions/refresh', async (req, reply) => {

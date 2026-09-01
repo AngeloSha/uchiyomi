@@ -4,7 +4,7 @@
 import { SourceAdapter, SourceSeries, SourceChapter } from '../types';
 import { cfGet } from '../flaresolverr';
 import { parseWhen } from '../dates';
-import { seriesSlug, isOwnChapterUrl } from '../slug';
+import { seriesSlug, isOwnChapterUrl, rebase } from '../slug';
 
 const strip = (s: string) => s.replace(/<[^>]+>/g, '').replace(/&amp;/g, '&').replace(/&#0?39;|&apos;/g, "'").replace(/&quot;/g, '"').replace(/\s+/g, ' ').trim();
 const norm = (u: string) => u.replace(/^\/\//, 'https://').replace(/&amp;/g, '&').trim();
@@ -78,7 +78,7 @@ export function parseListing(h: string, sourceId: string): SourceSeries[] {
 
 export function makeManganato(cfg: { id: string; name: string; base: string; order?: number }): SourceAdapter {
   const base = cfg.base.replace(/\/$/, '');
-  const mangaUrl = (id: string) => (id.startsWith('http') ? id : `${base}/manga/${id}`);
+  const mangaUrl = (id: string) => (id.startsWith('http') ? rebase(id, base) : `${base}/manga/${id}`);
 
   /**
    * The chapter list as JSON, paged.

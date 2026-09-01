@@ -2,6 +2,7 @@
 // biggest manga-site family after Madara. No specific site is hardcoded — `makeMangaThemesia` takes a base URL
 // supplied by the user. Most are behind Cloudflare → the core's FlareSolverr client. Series ids are the full
 // series page URL (search returns them), so /series, /manga or /komik path prefixes all work.
+import { rebase } from '../slug';
 import { SourceAdapter, SourceSeries, SourceChapter } from '../types';
 import { cfGet } from '../flaresolverr';
 import { parseWhen } from '../dates';
@@ -54,7 +55,7 @@ export function makeMangaThemesia(cfg: { id: string; name: string; base: string;
     },
 
     async getSeries(id) {
-      const url = id.startsWith('http') ? id : `${base}/manga/${id}/`;
+      const url = id.startsWith('http') ? rebase(id, base) : `${base}/manga/${id}/`;
       const h = await cfGet(url);
       const title = strip((h.match(/class="entry-title"[^>]*>([\s\S]*?)<\/h1>/i) || h.match(/property="og:title" content="([^"]+)"/i) || [])[1] || '');
       let summary = strip((h.match(/itemprop="description"[^>]*>([\s\S]*?)<\/div>/i) || h.match(/property="og:description" content="([^"]+)"/i) || [])[1] || '');
@@ -67,7 +68,7 @@ export function makeMangaThemesia(cfg: { id: string; name: string; base: string;
     },
 
     async listChapters(seriesId) {
-      const url = seriesId.startsWith('http') ? seriesId : `${base}/manga/${seriesId}/`;
+      const url = seriesId.startsWith('http') ? rebase(seriesId, base) : `${base}/manga/${seriesId}/`;
       const h = await cfGet(url);
       const out: SourceChapter[] = [];
       const seen = new Set<string>();
