@@ -98,6 +98,7 @@ async function fetchChapter(
   // costs no memory that was not already spent.
   const page: (Buffer | null)[] = new Array(urls.length).fill(null);
   const ext: string[] = new Array(urls.length).fill('jpg');
+  let retryAfterMs = 0; // set when the source answers 429; how long it asked us to wait
 
   const fetchPage = async (u: string, i: number): Promise<void> => {
     const headers: Record<string, string> = {
@@ -112,7 +113,17 @@ async function fetchChapter(
     Object.assign(headers, typeof src.imageHeaders === 'function' ? src.imageHeaders(u) : src.imageHeaders ?? {});
     try {
       const r = await fetch(u, { headers, signal: AbortSignal.timeout(45000) });
-      if (!r.ok) { if (r.status >= 400) worst = Math.max(worst, r.status); return; }
+      if (!r.ok) {
+        if (r.status >= 400) worst = Math.max(worst, r.status);
+        // A 429 is the site asking for room, and the rest of this chapter is another hundred requests it did
+        // not ask for. Note it (and any Retry-After it sent) so the burst can stop instead of finishing the
+        // loop and collecting a hundred more of them, which is how 12 of 108 pages arrived.
+        if (r.status === 429) {
+          const ra = Number(r.headers.get('retry-after'));
+          retryAfterMs = Math.max(retryAfterMs, Number.isFinite(ra) && ra > 0 ? Math.min(ra, 60) * 1000 : 5000);
+        }
+        return;
+      }
       const ct = (r.headers.get('content-type') || '').toLowerCase();
       if (/^text\/|html|json/.test(ct)) { worst = Math.max(worst, 415); return; } // hotlink/error page, not an image
       const buf = Buffer.from(await r.arrayBuffer());
@@ -126,7 +137,12 @@ async function fetchChapter(
     }
   };
 
-  for (let i = 0; i < urls.length; i++) await fetchPage(urls[i], i);
+  for (let i = 0; i < urls.length; i++) {
+    await fetchPage(urls[i], i);
+    // Stop the moment the site says slow down. Carrying on collects ninety more refusals, turns a pause into
+    // a "12 of 108 pages" failure, and earns a cooldown for behaviour that was ours.
+    if (retryAfterMs) break;
+  }
 
   /**
    * One retry for the pages that did not arrive.
@@ -141,7 +157,12 @@ async function fetchChapter(
    */
   const gaps = page.map((b, i) => (b ? -1 : i)).filter((i) => i >= 0);
   if (gaps.length && gaps.length < urls.length) {
-    for (const i of gaps) await fetchPage(urls[i], i);
+    // Honour the pause before asking again, or the retry is just the same burst a moment later.
+    if (retryAfterMs) { await new Promise((r) => setTimeout(r, retryAfterMs)); retryAfterMs = 0; }
+    for (const i of gaps) {
+      await fetchPage(urls[i], i);
+      if (retryAfterMs) break; // still rate-limited: stop, and let the shortfall be reported honestly
+    }
   }
 
   let n = 0;

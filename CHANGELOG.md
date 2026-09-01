@@ -1,5 +1,25 @@
 # Changelog
 
+## v0.12.2 — 2026-09-01
+
+### Asking a site to slow down, instead of ignoring it
+
+v0.12.1 stopped a lost page from blaming the whole site, and it worked. Retrying the fill straight afterwards
+got further and then stopped again, this time for a real reason: Mangakakalot asked us to slow down and we
+kept asking anyway.
+
+A chapter here is around a hundred images, fetched one after another with no pause between them. The pause
+that exists is between *chapters*, not between pages. So three chapters in a row is a few hundred rapid
+requests, and the site starts refusing. What made it worse is that the refusal changed nothing: the loop
+carried on and asked for the remaining ninety-odd pages too, collected ninety-odd more refusals, and turned
+a pause into a chapter that had lost most of itself.
+
+Now, when a site says slow down, we stop asking, wait for as long as it asked for, and pick up the pages we
+missed. In the ordinary case the chapter simply completes a few seconds later instead of failing.
+
+If a site is still refusing after that wait, the run stops and says so, which is the same as before and is
+the right thing: at that point it is not a blip, it is a no.
+
 ## v0.12.1 — 2026-09-01
 
 ### One missing page stopped blaming the whole site

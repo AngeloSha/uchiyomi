@@ -192,3 +192,43 @@ test('a large shortfall is still the source\'s fault', async () => {
   assert.match(String(err.message), /incomplete chapter: 80 of 110/);
   assert.equal(await exists('Long/Series/Chapter 5.cbz'), false);
 });
+
+test('a 429 stops the burst instead of collecting a hundred more of them', async () => {
+  // Live, mangakakalot answered 429 partway through a 108-page chapter and the loop asked for every
+  // remaining page anyway, so 12 arrived and 96 refusals were collected. Stopping on the first 429 turns
+  // that into a pause the retry can recover from.
+  let asked = 0;
+  served = [];
+  globalThis.fetch = (async (u: any) => {
+    asked++;
+    served.push(asked);
+    if (asked > 10) return new Response('slow down', { status: 429, headers: { 'retry-after': '1' } });
+    return new Response(PIXEL, { status: 200, headers: { 'content-type': 'image/png' } });
+  }) as typeof fetch;
+
+  const err = await downloadChapter({
+    sourceId: 'test-long', seriesFolder: 'Long/Series', chapter: chapter(6),
+  }).then(() => null, (e) => e);
+
+  assert.ok(err, 'still refused: the chapter is genuinely short');
+  assert.ok(asked < 40,
+    `it must stop asking once told to slow down, asked ${asked} times for a 110-page chapter`);
+  assert.equal(err.blockStatus, 'rate_limited', 'and a 429 still ends the caller run, which is correct');
+});
+
+test('a rate limit that lifts is recovered by the retry', async () => {
+  // The ordinary case: a burst trips the limit, we wait the Retry-After, and the rest of the chapter arrives.
+  let asked = 0;
+  let limited = true;
+  served = [];
+  globalThis.fetch = (async (u: any) => {
+    asked++;
+    if (limited && asked > 10) { limited = false; return new Response('slow', { status: 429, headers: { 'retry-after': '1' } }); }
+    return new Response(PIXEL, { status: 200, headers: { 'content-type': 'image/png' } });
+  }) as typeof fetch;
+
+  const res = await downloadChapter({ sourceId: 'test-long', seriesFolder: 'Long/Series', chapter: chapter(7) })
+    .catch(() => null);
+  assert.ok(res, 'the chapter completes once the pause is honoured');
+  assert.equal(res!.pages, 110);
+});
