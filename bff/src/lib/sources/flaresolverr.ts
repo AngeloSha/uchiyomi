@@ -5,7 +5,39 @@ const FS = (process.env.FLARESOLVERR_URL || 'http://yomi-flaresolverr:8191').rep
 interface Solution { url: string; status: number; response: string; cookies: Array<{ name: string; value: string }>; userAgent: string }
 const sessions = new Map<string, { cookie: string; userAgent: string }>();
 
+/**
+ * How many solves may be in flight at once.
+ *
+ * FlareSolverr drives real Chrome instances. The fill scan searches every source at the same time, which put
+ * a dozen challenges on it simultaneously and produced "Task queue depth is 4" followed by
+ * "Error starting Chrome: Service /app/chromedriver unexpectedly exited" -- the solver falling over under
+ * our own fan-out. A crashed solve is reported as the SITE refusing us, so this was manufacturing source
+ * failures out of nothing.
+ */
+const SOLVER_CONCURRENCY = Math.max(1, Number(process.env.SOLVER_CONCURRENCY || 4));
+let inFlight = 0;
+const waiting: Array<() => void> = [];
+
+async function acquire(): Promise<void> {
+  if (inFlight < SOLVER_CONCURRENCY) { inFlight++; return; }
+  await new Promise<void>((resolve) => waiting.push(resolve));
+  inFlight++;
+}
+function release(): void {
+  inFlight--;
+  waiting.shift()?.();
+}
+
 async function solve(cmd: 'request.get' | 'request.post', url: string, postData?: string): Promise<Solution> {
+  await acquire();
+  try {
+    return await solveNow(cmd, url, postData);
+  } finally {
+    release();
+  }
+}
+
+async function solveNow(cmd: 'request.get' | 'request.post', url: string, postData?: string): Promise<Solution> {
   const r = await fetch(`${FS}/v1`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },

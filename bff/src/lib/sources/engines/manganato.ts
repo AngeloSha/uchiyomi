@@ -265,12 +265,32 @@ export function makeManganato(cfg: { id: string; name: string; base: string; ord
       return out.sort((a, b) => a.number - b.number);
     },
 
+    /**
+     * The images of one chapter, and nothing else on the page.
+     *
+     * The reader block is matched first, but the `|| h` fallback made a failed match silently mean "the
+     * whole page", and these sites carry a sidebar of other series. Live, chapter 35 of one series came back
+     * as 96 "pages" whose last entry was `/thumb/the-proper-way-to-perform-a-sacrifice.webp` -- a cover for
+     * an unrelated title. Those junk entries inflate the expected page count, so a chapter that fetched
+     * every real page still reads as incomplete and gets refused.
+     *
+     * So two filters that hold whether or not the block matched: covers live under `/thumb/` and are never
+     * chapter pages, and a chapter's pages all sit in ONE directory. Keeping the largest directory group
+     * discards a handful of sidebar images without needing the block match to be right.
+     */
     async getPageUrls(chapterId) {
       const h = await cfGet(chapterId);
       const block = (h.match(/class="[^"]*container-chapter-reader[^"]*"[^>]*>([\s\S]*?)(?:<div class="container|<\/body)/i) || [])[1] || h;
       const urls: string[] = [];
       for (const m of block.matchAll(/<img[^>]+src="(https?:\/\/[^"]+\.(?:jpg|jpeg|png|webp)[^"?]*)/gi)) urls.push(norm(m[1]));
-      return urls.filter((u) => /^https?:/.test(u));
+      const pages = urls.filter((u) => /^https?:/.test(u) && !/\/thumb(?:s)?\//i.test(u));
+      if (pages.length < 2) return pages;
+      const dirOf = (u: string) => u.slice(0, u.lastIndexOf('/'));
+      const tally = new Map<string, number>();
+      for (const u of pages) tally.set(dirOf(u), (tally.get(dirOf(u)) || 0) + 1);
+      let best = '';
+      for (const [dir, n] of tally) if (n > (tally.get(best) || 0)) best = dir;
+      return pages.filter((u) => dirOf(u) === best); // document order preserved
     },
   };
 }

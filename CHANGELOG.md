@@ -1,5 +1,40 @@
 # Changelog
 
+## v0.13.2 — 2026-09-02
+
+### Sidebar covers were being counted as chapter pages
+
+Chapter pages are read out of the reader block on the page. When that block did not match, the code fell
+back to scanning the *whole* document, and these sites carry a sidebar of other series. Measured on one
+chapter: 96 "pages", the last of which was the cover of a completely unrelated title.
+
+That is not cosmetic. The number of page URLs is what a chapter is measured against, so junk entries make a
+chapter that fetched every real page still look short. A short chapter is refused, and a big enough
+shortfall is reported as the *source* failing. A parsing slip was being charged to the site, and then the
+site was put in a cooldown for it.
+
+Covers are now never counted, and a chapter's pages are taken from the one directory they all share, so a
+handful of sidebar images cannot survive even when the block match fails.
+
+### We were crashing the Cloudflare solver ourselves
+
+Looking for missing chapters searches every source you have. It did that all at once, and the solver drives
+real browsers, so a dozen simultaneous challenges made it log "Task queue depth is 4" and then
+"Error starting Chrome". A crashed solve arrives looking exactly like the site refusing us, so the fan-out
+was manufacturing source failures out of nothing.
+
+Solves are now capped at four at a time (`SOLVER_CONCURRENCY`).
+
+### A source that could not be reached said nothing at all
+
+If a search threw or timed out, the source was dropped from the results silently, which looks identical to
+"that source does not have this title". Aqua Manga holds 192 of the 224 series here, and it was being
+dropped from *every* scan because its Cloudflare challenge takes about 63 seconds against a 20 second
+budget. Nothing anywhere said so.
+
+Sources that could not be asked are now listed with the reason, and the budget was raised to 45 seconds so
+a source waiting its turn behind the new solver cap is not counted as broken.
+
 ## v0.13.1 — 2026-09-02
 
 ### Downloads stopped going too fast and then blaming the site

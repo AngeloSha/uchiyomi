@@ -597,19 +597,25 @@ export default async function sourceRoutes(app: FastifyInstance) {
       const own = getSource(s.source_id);
       if (own) found.push({ source: own.id, name: own.name, sourceId: s.source_series_id, title: s.title, pinned: true });
     }
+    // Sources that could not be asked at all, so the dialog can say so rather than imply they lack the title.
+    const unreachable: { source: string; name: string }[] = [];
     await Promise.all(findOrder().filter((id) => allowed.has(id)).map(async (id) => {
       if (found.some((f) => f.source === id && f.pinned)) return;
       const src = getSource(id);
       if (!src || await isDisabled(id).catch(() => false)) return;
+      let failed = false;
       for (const term of terms) {
         try {
-          const hit = pickBest(await withTimeout(src.search(term), 20000), term);
+          // 45s, not 20s: solves are now queued behind SOLVER_CONCURRENCY, so waiting a turn is expected
+          // rather than a fault. The old budget timed out the queued sources and then hid them.
+          const hit = pickBest(await withTimeout(src.search(term), 45000), term);
           if (hit?.sourceId) {
             found.push({ source: src.id, name: src.name, sourceId: hit.sourceId, title: hit.title, coverUrl: hit.coverUrl, pinned: false });
             return;
           }
-        } catch { /* one source failing is not the scan failing */ }
+        } catch { failed = true; /* one source failing is not the scan failing -- but it must not be silent */ }
       }
+      if (failed) unreachable.push({ source: src.id, name: src.name });
     }));
 
     // Only now, and only for sources that produced a match, do we pay for a chapter list. Routed through the
@@ -638,6 +644,14 @@ export default async function sourceRoutes(app: FastifyInstance) {
         pinned: f.pinned,
       });
     }));
+
+    for (const u of unreachable) {
+      candidates.push({
+        source: u.source, name: u.name, sourceSeriesId: '', title: '',
+        count: 0, first: null, last: null, coverage: 0, matched: 0,
+        fillable: [], newer: [], why: 'unreachable', pinned: false,
+      });
+    }
 
     // Usable first, the series' own source ahead of the rest, then by how much each would repair.
     candidates.sort((x, y) =>

@@ -45,6 +45,7 @@ function whyText(c: Candidate): string {
     case 'nothing_to_fill': return tr('Has nothing you are missing');
     case 'no_chapters': return tr('Listed no chapters');
     case 'blocked': return tr('Temporarily unavailable');
+    case 'unreachable': return tr('Could not be reached (timed out or refused)');
     case 'disabled': return tr('Switched off');
     default: return tr('Not usable');
   }
