@@ -23,6 +23,7 @@ if (DSN) {
   process.env.DL_ROOT = ROOT;
   process.env.DOWNLOAD_MIN_GAP_MS = '0';
   process.env.DOWNLOAD_PAGE_GAP_MS = '0'; // pacing is real now; timing it belongs in downloadPacing, not here
+  process.env.MIN_FREE_GB = '0'; // the disk floor belongs to diskGuard.test.ts
   process.env.CONFIG_DIR = process.env.CONFIG_DIR || '/tmp/uchiyomi-test-config';
 }
 const skip = DSN ? false : 'set TEST_DATABASE_URL to run';
@@ -37,6 +38,16 @@ function serveExcept(bad: number[], status = 503) {
   globalThis.fetch = (async (u: any) => {
     const i = Number(String(u).match(/p(\d+)\.png$/)?.[1] ?? -1);
     if (fail.has(i)) return new Response('nope', { status });
+    return new Response(PIXEL, { status: 200, headers: { 'content-type': 'image/png' } });
+  }) as typeof fetch;
+}
+
+/** Answers 200 with nothing behind it for the pages at `empty`, the way a CDN does when its origin is gone. */
+function serveEmpty(empty: number[]) {
+  const e = new Set(empty);
+  globalThis.fetch = (async (u: any) => {
+    const i = Number(String(u).match(/p(\d+)\.png$/)?.[1] ?? -1);
+    if (e.has(i)) return new Response(Buffer.alloc(10), { status: 200, headers: { 'content-type': 'image/png' } });
     return new Response(PIXEL, { status: 200, headers: { 'content-type': 'image/png' } });
   }) as typeof fetch;
 }
@@ -151,4 +162,42 @@ test('a source that says 429 to everything is still eventually a refusal', { ski
   const h = await health();
   assert.ok(h, 'a sustained refusal still earns the cooldown');
   assert.equal(h.consecutive, 1);
+});
+
+
+/**
+ * THE EMPTY BODY: a CDN answering 200 with nothing in it is not the source refusing.
+ *
+ * `if (buf.length < 256) return;` set no `worst`, so this was the one page failure that reached the blame
+ * code as `worst === 0`, and classify(null, undefined) fell through to the harshest 'blocked' tier. Live:
+ * 151 of 176 pages arrived, one chapter, a 30-minute cooldown on the source that carries 192 of 226 series,
+ * 164 series skipped for the rest of the night, and not one line in the log.
+ *
+ * Reintroduce by restoring the two lines that did the damage, in place of the soft/blip/blameFor trio:
+ *   const blip = ratio >= NEAR_COMPLETE && !refusing;
+ *   const status: SourceStatus = worst === 1 ? 'down' : classify(null, worst >= 400 ? worst : undefined) || 'blocked';
+ * The first test then finds a 'blocked' row. The second needs the bare `return` at the 256-byte check put
+ * back as well, so `worst` stays 0 and falls through classify() to 'blocked': with the sentinel alone it
+ * lands on 'down' only because EMPTY_BODY happens to equal the old network value. Restoring only the bare
+ * `return` brings nothing back -- `worst === 0` is caught by the soft branch regardless. The sentinel names
+ * the failure; the threshold and blameFor() are the fix.
+ */
+test('THE EMPTY BODY: a CDN serving nothing for a few pages is not the source refusing', { skip }, async () => {
+  serveEmpty(Array.from({ length: 16 }, (_, i) => i + 40)); // 94 of 110 real: 0.855, under NEAR_COMPLETE
+  const err = await downloadChapter({ sourceId: SRC, seriesFolder: 'B/S', chapter: { sourceId: 'c7', number: 7 } })
+    .then(() => null, (e) => e);
+  assert.ok(err, 'still refused: an incomplete chapter must never be written');
+  assert.match(err.message, /incomplete chapter: 94 of 110/);
+  assert.equal(err.blockStatus, undefined, 'and it must not end the caller\'s run');
+  assert.equal(await health(), null, 'no strike, no cooldown: half the chapter arriving proves the CDN is up');
+});
+
+test('a CDN serving nothing for MOST of a chapter is an outage, and a mild one', { skip }, async () => {
+  serveEmpty(Array.from({ length: 100 }, (_, i) => i)); // 10 of 110 real: under EMPTY_TOLERANCE
+  const err = await downloadChapter({ sourceId: SRC, seriesFolder: 'B/S', chapter: { sourceId: 'c8', number: 8 } })
+    .then(() => null, (e) => e);
+  assert.equal(err?.blockStatus, 'down', 'an outage ends the run, at the 5-minute tier, not the 30-minute one');
+  const h = await health();
+  assert.equal(h?.status, 'down', 'down, never blocked: nobody refused anything');
+  assert.equal(Number(h?.consecutive), 1);
 });

@@ -117,6 +117,53 @@ async function shortChapters(): Promise<HealthCheck> {
 }
 
 /** Sources that are failing or blocked, and how much of the library depends on them. */
+/**
+ * Chapters the updater or a fill could not save, by source.
+ *
+ * Rows clear themselves when the chapter lands (persistScan), so what is listed here is what is STILL
+ * failing, and how many times it has been tried. Before the ledger existed one night's sweep lost 164 of 226
+ * series to a single chapter and no surface, not even the log, said so.
+ */
+async function chapterFailures(): Promise<HealthCheck> {
+  const rows = await q<{
+    source_id: string; chapters: number; series: number; since: string; attempts: number;
+    latest_title: string; latest_number: number; latest_status: string; latest_reason: string | null;
+  }>(
+    `SELECT f.source_id,
+            count(*)::int AS chapters,
+            count(DISTINCT f.series_id)::int AS series,
+            min(f.at) AS since,
+            max(f.attempts)::int AS attempts,
+            (array_agg(ls.title  ORDER BY f.at DESC))[1] AS latest_title,
+            (array_agg(f.number  ORDER BY f.at DESC))[1] AS latest_number,
+            (array_agg(f.status  ORDER BY f.at DESC))[1] AS latest_status,
+            (array_agg(f.reason  ORDER BY f.at DESC))[1] AS latest_reason
+       FROM chapter_failures f JOIN lib_series ls ON ls.id = f.series_id AND ${visibleToAll('ls')}
+      GROUP BY f.source_id ORDER BY chapters DESC`,
+  ).catch(() => [] as any[]);
+  const items: HealthItem[] = rows.slice(0, 20).map((r) => ({
+    title: r.source_id,
+    detail:
+      `${r.chapters} chapter${r.chapters === 1 ? '' : 's'} in ${r.series} series since ` +
+      `${new Date(r.since).toISOString().slice(0, 10)}, tried up to ${r.attempts} time${r.attempts === 1 ? '' : 's'}; ` +
+      `latest: "${r.latest_title}" ch ${r.latest_number} (${r.latest_status}` +
+      `${r.latest_reason ? `: ${String(r.latest_reason).slice(0, 80)}` : ''})`,
+  }));
+  const total = rows.reduce((n, r) => n + r.chapters, 0);
+  return {
+    id: 'chapter-failures',
+    title: 'Chapters that would not download',
+    status: rows.length ? 'warn' : 'ok',
+    summary: rows.length
+      ? `${total} chapter${total === 1 ? '' : 's'} across ${rows.length} source${rows.length === 1 ? '' : 's'} keep failing`
+      : 'Every attempted chapter landed',
+    note:
+      'One entry per source, counting chapters still missing after an attempt and how often each has been tried. ' +
+      'They clear themselves the moment the chapter lands.' + (rows.length > 20 ? ` ${rows.length - 20} more not shown.` : ''),
+    items,
+  };
+}
+
 async function sourceTrouble(): Promise<HealthCheck> {
   const rows = await q<{
     source_id: string; status: string; consecutive: number; disabled: boolean;
@@ -293,6 +340,7 @@ export async function runHealthChecks(): Promise<HealthReport> {
     outlierChapters(),
     duplicateSeries(),
     sourceTrouble(),
+    chapterFailures(),
     solverHealth(),
   ]);
   // worst first, so the page opens on whatever needs attention

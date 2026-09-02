@@ -7,7 +7,9 @@ export const runtime: {
   // `healthy` is what separates a quiet night from a broken one. Without it the admin panel showed
   // '+0 chapters' for both, and a library that had silently stopped updating looked exactly like one with
   // nothing new.
-  lastUpdateResult: { series: number; added: number; failed?: number; chapterFailures?: number; healthy?: boolean } | null;
+  // `visited`/`stopped`: a sweep now has a budget and a disk floor, and a sweep that stopped early is a
+  // different night from one that finished, even at the same +N.
+  lastUpdateResult: { series: number; visited?: number; added: number; failed?: number; chapterFailures?: number; healthy?: boolean; stopped?: 'budget' | 'disk' } | null;
   updating: boolean;
   lastBackup: number;
   // configEmpty / sizeUnknown were computed by runBackup and then dropped before anything stored them, so

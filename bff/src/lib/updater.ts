@@ -7,6 +7,7 @@ import { getSource, SourceChapter, withTimeout } from './sources';
 import { downloadChapter } from './downloader';
 import { persistScan, setBookDates } from './library';
 import { blockedNow } from './sourceHealth';
+import { noteChapterFailure } from './chapterFailures';
 import { notifyNewChapter } from './push';
 import { visibleToAll } from './visibility';
 
@@ -31,10 +32,31 @@ export type UpdateOutcome =
  */
 const LIST_TIMEOUT = Number(process.env.UPDATER_LIST_TIMEOUT_MS) || 20_000;
 
+/**
+ * Attempts (added + failed) one sweep may spend before it stops and says so.
+ *
+ * Until this existed the only cap was `maxNew` per series, so a sweep's ceiling was 226 x 5 = 1,130
+ * chapters -- and after v0.13.0 revived 176 series that were ~12,000 chapters behind, that was the plan for
+ * every night, on a disk at 87%. 150 fits inside the 6-hour interval with the page pacing (~55s a chapter
+ * plus ~45 min of listings), drains that backlog in about three weeks, and is a number an operator can read.
+ * Chapters already on disk are skipped for free and do not count.
+ */
+const SWEEP_MAX = Number(process.env.UPDATER_SWEEP_MAX) || 150;
+
+export type SweepStop = 'budget' | 'disk';
+
+/** What the source said, kept on the row. See the migrate comment on source_chapters. */
+async function stampChecked(seriesId: string, chapters: number | null, missing: number | null): Promise<void> {
+  await q(
+    `UPDATE lib_series SET source_checked_at = now(), source_chapters = $2, source_missing = $3 WHERE id = $1`,
+    [seriesId, chapters, missing],
+  ).catch(() => {});
+}
+
 export async function updateSeries(
   seriesId: string,
   maxNew = 10,
-): Promise<{ title: string; added: number; available: number; outcome: UpdateOutcome; failed: number; folder?: string; chapters?: SourceChapter[] }> {
+): Promise<{ title: string; added: number; available: number; outcome: UpdateOutcome; failed: number; folder?: string; chapters?: SourceChapter[]; diskFull?: boolean }> {
   const s = await one<any>(`SELECT id,title,source_id,source_series_id,web,folder,summary,author,genres,status FROM lib_series s WHERE s.id=$1 AND ${visibleToAll('s')}`, [seriesId]);
   if (!s) return { title: '', added: 0, available: 0, outcome: 'gone', failed: 0 };
   const src = s.source_id ? getSource(s.source_id) : null;
@@ -47,14 +69,18 @@ export async function updateSeries(
   // comment saying why, two files away.
   let listFailed = false;
   const chapters = await withTimeout(src.listChapters(ref), LIST_TIMEOUT).catch(() => { listFailed = true; return [] as SourceChapter[]; });
-  if (listFailed) return { title: s.title, added: 0, available: 0, outcome: 'source_error', failed: 0 };
-  if (!chapters.length) return { title: s.title, added: 0, available: 0, outcome: 'ok', failed: 0 };
+  // Stamped on every path where the source was ASKED, so a dead source's series still rotate to the back of
+  // the queue instead of sitting at its front forever. Not stamped above, on the cooldown path: never asked.
+  if (listFailed) { await stampChecked(seriesId, null, null); return { title: s.title, added: 0, available: 0, outcome: 'source_error', failed: 0 }; }
+  if (!chapters.length) { await stampChecked(seriesId, 0, 0); return { title: s.title, added: 0, available: 0, outcome: 'ok', failed: 0 }; }
 
   const have = new Set((await q<{ number: number }>('SELECT number FROM lib_books WHERE series_id=$1', [seriesId])).map((r) => Number(r.number)));
   const missing = chapters.filter((c) => !have.has(c.number)).sort((a, b) => a.number - b.number);
+  await stampChecked(seriesId, chapters.length, missing.length);
 
   let added = 0;
   let failed = 0;
+  let diskFull = false;
   // oldest-missing-first: a partial "first N" add fills forward coherently, and new releases (all > our max)
   // are still the only gap once a series is fully downloaded.
   for (const ch of missing.slice(0, maxNew)) {
@@ -67,7 +93,11 @@ export async function updateSeries(
       });
       if (!res.skipped) added++;
     } catch (e: any) {
+      // The library disk is at its floor: not this chapter's fault, not the source's, and pointless to try
+      // the next one. Stop here and let the sweep say so.
+      if (e?.diskFull) { diskFull = true; break; }
       failed++; // a failed chapter shouldn't abort the rest, but it must not vanish either
+      await noteChapterFailure({ seriesId, title: s.title, number: ch.number, sourceId: s.source_id, err: e });
       // ...unless the SOURCE is refusing. Both other callers of downloadChapter already stop here; this one
       // did not, so a single rate-limit became five. Measured on this install: one unpaced burst against
       // mangakakalot produced five reportFail calls in 74 seconds, and because the cooldown escalates with
@@ -79,39 +109,91 @@ export async function updateSeries(
   if (added) notifyNewChapter(seriesId, s.title, added).catch(() => {});
   // backfill release dates onto already-scanned books; freshly downloaded ones are stamped after the sweep's scan
   await setBookDates(s.folder, chapters).catch(() => {});
-  return { title: s.title, added, available: chapters.length, outcome: 'ok', failed, folder: s.folder, chapters };
+  return { title: s.title, added, available: chapters.length, outcome: 'ok', failed, folder: s.folder, chapters, diskFull };
 }
 
-/** Sweep the library for new chapters. onlyFavorites keeps a manual run quick; throttled for politeness. */
-export async function runUpdateAll(opts: { onlyFavorites?: boolean; maxNew?: number } = {}): Promise<{
-  series: number; added: number; failed: number; chapterFailures: number;
-  outcomes: Record<UpdateOutcome | 'threw', number>; healthy: boolean;
+/**
+ * Sweep the library for new chapters.
+ *
+ * Three things this loop did not do, and what each cost on the night it was measured:
+ *
+ * - It had no budget. The only cap was maxNew per series, so a sweep's ceiling was every series times five.
+ * - It walked series in `latest_mtime DESC` order, freshest first. The 54 series furthest behind sorted LAST,
+ *   so anything that cut a sweep short starved exactly them, every night.
+ * - It walked them in one flat line. 192 of 226 series share one source, and when that source went into a
+ *   cooldown 28 series in, the remaining 164 were skipped one after another -- and the 34 series on other
+ *   sources behind them in the line never got their turn either.
+ *
+ * Now: one queue per source, visited round-robin, least-recently-checked first; a source that goes into a
+ * cooldown parks its own queue and nobody else's; attempts stop at SWEEP_MAX; a full disk stops everything
+ * and says so. Chapters already on disk cost nothing against the budget.
+ */
+export async function runUpdateAll(opts: { onlyFavorites?: boolean; maxNew?: number; sweepMax?: number } = {}): Promise<{
+  series: number; visited: number; added: number; failed: number; chapterFailures: number;
+  outcomes: Record<UpdateOutcome | 'threw' | 'skipped', number>; healthy: boolean; stopped?: SweepStop;
 }> {
-  const ids = opts.onlyFavorites
-      ? (await q<{ series_id: string }>(`SELECT DISTINCT f.series_id FROM favorites f JOIN lib_series s ON s.id = f.series_id WHERE s.auto_update AND ${visibleToAll('s')}`)).map((r) => r.series_id)
-      : (await q<{ id: string }>(`SELECT id FROM lib_series s WHERE s.auto_update AND ${visibleToAll('s')} ORDER BY s.latest_mtime DESC`)).map((r) => r.id);
+  const sweepMax = opts.sweepMax ?? SWEEP_MAX;
+  // Rows never checked sort first, so the first sweep after this change visits in the old order.
+  const order = 'ORDER BY s.source_checked_at ASC NULLS FIRST, s.latest_mtime DESC';
+  const rows = opts.onlyFavorites
+      ? await q<{ id: string; source_id: string | null }>(`SELECT DISTINCT s.id, s.source_id, s.source_checked_at, s.latest_mtime FROM favorites f JOIN lib_series s ON s.id = f.series_id WHERE s.auto_update AND ${visibleToAll('s')} ${order}`)
+      : await q<{ id: string; source_id: string | null }>(`SELECT s.id, s.source_id FROM lib_series s WHERE s.auto_update AND ${visibleToAll('s')} ${order}`);
+
+  const queues = new Map<string, string[]>();
+  for (const r of rows) {
+    const k = r.source_id || '';
+    if (!queues.has(k)) queues.set(k, []);
+    queues.get(k)!.push(r.id);
+  }
+  const parked = new Set<string>();
+
   let added = 0;
   let chapterFailures = 0;
+  let visited = 0;
+  let spent = 0;
+  let stopped: SweepStop | undefined;
   // Tallied so the caller can say what happened. `updateSeries` throwing outright is its own outcome:
   // catching it into `{ added: 0 }` is what made "the database went away mid-sweep" read as "nothing new".
-  const outcomes: Record<UpdateOutcome | 'threw', number> = { ok: 0, gone: 0, unrouted: 0, blocked: 0, source_error: 0, threw: 0 };
+  // `skipped` is what the budget or a parked source left unvisited: not a failure, and not nothing either.
+  const outcomes: Record<UpdateOutcome | 'threw' | 'skipped', number> = { ok: 0, gone: 0, unrouted: 0, blocked: 0, source_error: 0, threw: 0, skipped: 0 };
   const dated: { folder: string; chapters: SourceChapter[] }[] = [];
-  for (const id of ids) {
-    const r = await updateSeries(id, opts.maxNew ?? 10)
-      .catch(() => ({ added: 0, outcome: 'threw' as const, failed: 0 } as { added: number; outcome: 'threw'; failed: number; folder?: string; chapters?: SourceChapter[] }));
-    added += r.added;
-    chapterFailures += r.failed ?? 0;
-    outcomes[r.outcome] = (outcomes[r.outcome] ?? 0) + 1;
-    if (r.added && r.folder && r.chapters?.length) dated.push({ folder: r.folder, chapters: r.chapters });
-    await new Promise((res) => setTimeout(res, 1500));
+
+  sweep: while (queues.size) {
+    let progressed = false;
+    for (const [src, ids] of [...queues]) {
+      if (!ids.length) { queues.delete(src); continue; }
+      if (parked.has(src)) continue;
+      if (spent >= sweepMax) { stopped = 'budget'; break sweep; }
+      const id = ids.shift()!;
+      progressed = true;
+      visited++;
+      const r = await updateSeries(id, Math.min(opts.maxNew ?? 10, Math.max(1, sweepMax - spent)))
+        .catch(() => ({ added: 0, outcome: 'threw' as const, failed: 0 } as { added: number; outcome: 'threw'; failed: number; folder?: string; chapters?: SourceChapter[]; diskFull?: boolean }));
+      added += r.added;
+      chapterFailures += r.failed ?? 0;
+      spent += r.added + (r.failed ?? 0);
+      outcomes[r.outcome] = (outcomes[r.outcome] ?? 0) + 1;
+      if (r.added && r.folder && r.chapters?.length) dated.push({ folder: r.folder, chapters: r.chapters });
+      if (r.diskFull) { stopped = 'disk'; break sweep; }
+      if (r.outcome === 'blocked') parked.add(src);
+      await new Promise((res) => setTimeout(res, 1500));
+    }
+    if (!progressed) {
+      // Only parked queues remain. Ask once whether any cooldown has lapsed; if none has, the sweep is over.
+      let freed = false;
+      for (const src of parked) if (!(await blockedNow(src))) { parked.delete(src); freed = true; }
+      if (!freed) break;
+    }
   }
+  for (const ids of queues.values()) outcomes.skipped += ids.length;
+
   if (added) await persistScan();
   for (const d of dated) await setBookDates(d.folder, d.chapters).catch(() => {}); // stamp the books the scan just created
   // `healthy` is the question the admin panel should have been asking all along: was this a quiet night, or
   // did nothing work? A run where every source failed now looks nothing like one where nothing was new.
   const broken = outcomes.source_error + outcomes.threw;
   return {
-    series: ids.length, added, failed: broken, chapterFailures, outcomes,
-    healthy: broken === 0 && chapterFailures === 0,
+    series: rows.length, visited, added, failed: broken, chapterFailures, outcomes, stopped,
+    healthy: broken === 0 && chapterFailures === 0 && stopped !== 'disk',
   };
 }

@@ -1,5 +1,42 @@
 # Changelog
 
+## v0.14.0 — 2026-09-02
+
+### The nightly sweep stopped sabotaging itself
+
+Last night's sweep reported `ok=61, blocked=164`. One chapter came up 25 images short, and those 25 had
+arrived as HTTP 200 with nothing in them, which turned out to be the one kind of page failure that set no
+status at all. The blame code fell through to its harshest default, a 30-minute cooldown, on the source
+that carries 192 of your 226 series. Every later series on that source was skipped for the night. Nothing
+was logged.
+
+Four things changed, each measured before it was written:
+
+- **An empty body is not a refusal.** A CDN answering 200 with nothing behind it now reads as "not serving",
+  the 5-minute tier, and only when more than half the chapter is missing. Half the chapter arriving as real
+  images proves the CDN is up and the holes are per-image.
+- **The sweep has a budget**, 150 attempts by default (`UPDATER_SWEEP_MAX`). That fits inside the six-hour
+  interval and drains the backlog the moved-domain fix uncovered in about three weeks, instead of hitting it
+  as hard as possible every night. Chapters already on disk cost nothing against it.
+- **Sources take turns.** One queue per source, visited round-robin, least-recently-checked first. A source
+  that goes into a cooldown parks its own queue and nobody else's, and whatever a sweep leaves unvisited goes
+  first next time instead of never. Under the old order the 54 series furthest behind sorted last.
+- **The disk has a floor**, 10 GiB by default (`MIN_FREE_GB`). Nothing checked free space before; the first
+  sign would have been a half-written chapter.
+
+The sweep's log line now says how many series it visited and whether the budget or the disk stopped it.
+
+### Failures are written down
+
+A chapter that would not download was a bumped counter. "12 chapters could not be saved" was the whole
+record: which series, which chapter, which source and why existed nowhere, and the next sweep tried the
+same ones again. Every failure now logs one line naming all four, and is kept per chapter with how many
+times it has been tried. The health page lists them by source, and the entry disappears the moment the
+chapter lands.
+
+The admin overview also says how far behind the library is, from what each source said the last time it
+was asked. Until now that number could not be known without asking every source again.
+
 ## v0.13.2 — 2026-09-02
 
 ### Sidebar covers were being counted as chapter pages

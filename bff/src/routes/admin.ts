@@ -121,7 +121,7 @@ export default async function adminRoutes(app: FastifyInstance) {
     const { id } = req.params as { id: string };
     await logAudit('task.run', { userId: userIdOf(req), detail: { task: id }, req });
     if (id === 'scan') return { ok: true, ...(await persistScan()) };
-    if (id === 'update') { runUpdateAll({ maxNew: 10 }).then((r) => { runtime.lastUpdate = Date.now(); runtime.lastUpdateResult = { series: r.series, added: r.added, failed: r.failed, chapterFailures: r.chapterFailures, healthy: r.healthy }; }).catch(() => {}); return { ok: true, started: true }; }
+    if (id === 'update') { runUpdateAll({ maxNew: 10 }).then((r) => { runtime.lastUpdate = Date.now(); runtime.lastUpdateResult = { series: r.series, visited: r.visited, added: r.added, failed: r.failed, chapterFailures: r.chapterFailures, healthy: r.healthy, stopped: r.stopped }; }).catch(() => {}); return { ok: true, started: true }; }
     if (id === 'fingerprint') {
       if (fpState.running) return { ok: false, error: 'busy' };
       // never awaited: on a large library this is minutes, and the caller is an admin clicking a button
@@ -1435,11 +1435,18 @@ export default async function adminRoutes(app: FastifyInstance) {
   });
 
   app.get('/api/admin/stats', async () => {
-    const [libs, seriesPage, cb, members, activity] = await Promise.all([
+    const [libs, seriesPage, cb, members, backlog, activity] = await Promise.all([
       komga.libraries(SYSTEM_CTX).catch(() => [] as any[]),
       komga.searchSeries(SYSTEM_CTX, {}, 0, 1).catch(() => ({ totalElements: 0 } as any)),
       cacheBytes().catch(() => 0),
       one<{ c: number }>('SELECT count(*)::int AS c FROM users'),
+      // How far behind the library is, from what the sources said last time the updater asked. Before the
+      // columns existed this was unknowable without asking every source again.
+      one<{ chapters: number; series: number }>(
+        `SELECT coalesce(sum(s.source_missing), 0)::int AS chapters,
+                count(*) FILTER (WHERE s.source_missing > 0)::int AS series
+           FROM lib_series s WHERE s.auto_update AND ${visibleToAll('s')}`,
+      ).catch(() => null),
       q(
         // What each member last read, so the admin overview can show a person against the cover of the
         // thing they were reading rather than against another flat card. Admin-only by construction: this
@@ -1475,6 +1482,7 @@ export default async function adminRoutes(app: FastifyInstance) {
       cacheBytes: cb,
       lastScan: runtime.lastScan || null,
       members: members?.c ?? 0,
+      backlog: { chapters: backlog?.chapters ?? 0, series: backlog?.series ?? 0 },
       activity,
     };
   });

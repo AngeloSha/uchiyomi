@@ -5,6 +5,7 @@ import { authenticate, userIdOf, roleOf } from '../lib/auth';
 import { getSource, listSources, isSwAdapterId, SW_PREFIX, withTimeout } from '../lib/sources';
 import type { SourceAdapter, SourceSeries, SourceChapter } from '../lib/sources/types';
 import { downloadChapter, sanitize } from '../lib/downloader';
+import { noteChapterFailure } from '../lib/chapterFailures';
 import { persistScan, setBookDates } from '../lib/library';
 import { fetchAniListArt, fetchTrendingManhwa, TrendingItem } from '../lib/anilist';
 import { q, one } from '../lib/db';
@@ -329,11 +330,15 @@ export async function addSeriesFromSource(opts: {
    * the Discover strip knew the download had started while the caller was still waiting to be told.
    */
   const run = async (): Promise<AddResult> => {
-    let firstPages = 0; let blockReason: string | null = null;
+    let firstPages = 0; let blockReason: string | null = null; let diskFull: string | null = null;
     try { const r = await downloadChapter({ sourceId: source!, seriesFolder: folder, chapter: selected[0], meta }); firstPages = r.skipped ? 1 : r.pages; }
-    catch (e: any) { blockReason = e?.blockStatus || null; }
+    catch (e: any) { blockReason = e?.blockStatus || null; diskFull = e?.diskFull ? String(e.message) : null; }
     if (!firstPages) {
-      const why = blockReason
+      // A full disk used to read as "this title may be licensed", which sends a person off to try another
+      // source for a problem no source can fix.
+      const why = diskFull
+        ? `Not enough free space to download: ${diskFull}.`
+        : blockReason
         ? `${src.name} is currently ${blockReason === 'rate_limited' ? 'rate-limiting' : blockReason === 'blocked' ? 'blocking' : 'unreachable for'} downloads.`
         : 'No downloadable chapters here — this title may be licensed or hosted externally on this source.';
       if (opts.wait === false) {
@@ -345,6 +350,7 @@ export async function addSeriesFromSource(opts: {
         // would just be noise -- the bulk importer would strand one per failed title.
         jobs.delete(folder);
       }
+      if (diskFull) return { ok: false, status: 507, error: 'disk_full', message: why };
       if (blockReason) {
         return { ok: false, status: 429, error: 'blocked', blockStatus: blockReason, message: `${why} Wait a bit or pick another source.` };
       }
@@ -724,8 +730,13 @@ export default async function sourceRoutes(app: FastifyInstance) {
           const j = jobs.get(s.folder);
           if (j && !res.skipped) { j.done++; if (j.done % 5 === 0) await persistScan().catch(() => {}); }
         } catch (e: any) {
-          failures++;
           const j = jobs.get(s.folder);
+          if (e?.diskFull) {
+            if (j) { j.status = 'error'; j.reason = `Not enough free space: ${String(e.message)}. ${j.done} of ${j.total} chapters saved.`; j.finishedAt = Date.now(); }
+            break;
+          }
+          failures++;
+          await noteChapterFailure({ seriesId: plan.seriesId, title: s.title, number: ch.number, sourceId: source, err: e });
           if (e?.blockStatus) {
             if (j) {
               j.status = 'error';

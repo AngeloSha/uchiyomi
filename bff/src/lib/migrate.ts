@@ -185,6 +185,13 @@ ALTER TABLE lib_series ADD COLUMN IF NOT EXISTS auto_update boolean NOT NULL DEF
 -- so the updater calls getSource(source_id).listChapters(source_series_id) directly — no name/url reverse-parsing.)
 ALTER TABLE lib_series ADD COLUMN IF NOT EXISTS source_id        text;
 ALTER TABLE lib_series ADD COLUMN IF NOT EXISTS source_series_id text;
+-- What the source said when the updater last asked, so "how far behind is this series" is a query rather
+-- than 192 listChapters calls. source_missing is the exact count the updater computed (chapters the source
+-- lists that we do not hold). source_checked_at is stamped whenever the source was ASKED, answered or not,
+-- and never when it was skipped for a cooldown, so the sweep can visit least-recently-checked first.
+ALTER TABLE lib_series ADD COLUMN IF NOT EXISTS source_chapters   int;
+ALTER TABLE lib_series ADD COLUMN IF NOT EXISTS source_missing    int;
+ALTER TABLE lib_series ADD COLUMN IF NOT EXISTS source_checked_at timestamptz;
 
 -- Content identity, so a chapter can be recognised after it moves. Derived from the archive's central
 -- directory (entry names + CRC-32 + uncompressed sizes), which is cheap to read and survives recompression.
@@ -287,6 +294,21 @@ ALTER TABLE source_health ADD COLUMN IF NOT EXISTS check_code text;
 -- backoff then stops it being asked at all and a perfectly working source disappears.
 ALTER TABLE source_health ADD COLUMN IF NOT EXISTS slow_streak  int NOT NULL DEFAULT 0;
 ALTER TABLE source_health ADD COLUMN IF NOT EXISTS last_slow_at timestamptz;
+
+-- One row per chapter the updater or a fill could not save, bumped on every further attempt and deleted by
+-- persistScan the moment the chapter appears. Per CHAPTER, not per attempt: the question it answers is
+-- "what is still failing, and how many times has it been tried". Per-source failure lives on source_health.
+CREATE TABLE IF NOT EXISTS chapter_failures (
+  series_id text NOT NULL REFERENCES lib_series(id) ON DELETE CASCADE,
+  number    real NOT NULL,
+  source_id text NOT NULL,
+  status    text NOT NULL,
+  reason    text,
+  attempts  int  NOT NULL DEFAULT 1,
+  at        timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (series_id, number)
+);
+CREATE INDEX IF NOT EXISTS idx_chapter_failures_source ON chapter_failures(source_id, at DESC);
 
 -- server-wide settings (single row, id=1)
 CREATE TABLE IF NOT EXISTS server_settings (

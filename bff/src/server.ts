@@ -140,12 +140,14 @@ async function main() {
         runtime.updating = true;
         const r = await runUpdateAll({ maxNew: 5 });
         runtime.lastUpdate = Date.now();
-        runtime.lastUpdateResult = { series: r.series, added: r.added, failed: r.failed, chapterFailures: r.chapterFailures, healthy: r.healthy };
+        runtime.lastUpdateResult = { series: r.series, visited: r.visited, added: r.added, failed: r.failed, chapterFailures: r.chapterFailures, healthy: r.healthy, stopped: r.stopped };
         // A sweep that added nothing because nothing was new, and one that added nothing because every source
-        // was down, used to print the identical line. They no longer do.
-        if (r.healthy) app.log.info(`updater: +${r.added} chapters across ${r.series} series`);
+        // was down, used to print the identical line. They no longer do. Nor does a sweep that finished look
+        // like one the budget or the disk cut short.
+        const scope = `visited ${r.visited} of ${r.series} series${r.stopped ? ` (stopped: ${r.stopped})` : ''}`;
+        if (r.healthy) app.log.info(`updater: +${r.added} chapters, ${scope}`);
         else app.log.warn(
-          `updater: +${r.added} chapters across ${r.series} series, but ${r.failed} series failed to answer` +
+          `updater: +${r.added} chapters, ${scope}, but ${r.failed} series failed to answer` +
           `${r.chapterFailures ? ` and ${r.chapterFailures} chapters could not be saved` : ''} ` +
           `(${Object.entries(r.outcomes).filter(([, n]) => n).map(([k, n]) => `${k}=${n}`).join(' ')})`,
         );

@@ -3,7 +3,7 @@
 // session cookies for the binary image fetches (FlareSolverr itself can't return binaries).
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const AdmZip = require('adm-zip');
-import { mkdir, writeFile, stat } from 'fs/promises';
+import { mkdir, writeFile, stat, statfs } from 'fs/promises';
 import { join, dirname } from 'path';
 import { getSource, SourceChapter, SourceSeries } from './sources';
 import { cfSession } from './sources/flaresolverr';
@@ -68,6 +68,49 @@ const MAX_RESUMES = 3;
  * CDN reads that were putting whole sources into a day-long cooldown.
  */
 const NEAR_COMPLETE = 0.95;
+/**
+ * Sentinels for `worst` below the HTTP range. `worst` is "the worst thing that happened to any page": a real
+ * HTTP status when one was received, else one of these. NET_ERROR outranks EMPTY_BODY because a request that
+ * never completed says more about the connection than one that completed with nothing in it.
+ */
+const EMPTY_BODY = 1; // HTTP 200 with no image behind it (under 256 bytes)
+const NET_ERROR = 2;  // fetch threw: timeout, reset, DNS
+/**
+ * A softer completeness bar when the only failures were empty bodies.
+ *
+ * NEAR_COMPLETE is right for HTTP errors and network failures. It was wrong for a CDN that answers 200 with
+ * nothing in it. Live, 151 of 176 pages arrived that way: 0.858 fell under the bar, and because an empty body
+ * set no `worst` at all the status fell through classify() to the harshest 'blocked' tier. One chapter put
+ * aqua -- 192 of 226 series -- into a 30-minute cooldown, the sweep skipped the other 164 for the night, and
+ * nothing logged it. Half the chapter arriving as real images proves the CDN is up and the holes are
+ * per-image; under half is an outage, and is treated as one.
+ */
+const EMPTY_TOLERANCE = 0.5;
+
+/** Whose fault a shortfall is. Values below 400 are sentinels, not statuses, and none of them is a refusal. */
+function blameFor(worst: number): SourceStatus {
+  if (worst < 400) return 'down';
+  return classify(null, worst) || 'blocked';
+}
+const worstLabel = (worst: number) => (worst >= 400 ? String(worst) : worst === EMPTY_BODY ? 'empty body' : 'error');
+
+/**
+ * Refuse to start a download when the library disk is nearly full.
+ *
+ * Nothing consulted free space before. The first sign would have been ENOSPC part-way through a chapter, on
+ * a filesystem that was already at 87% and holds the library, every download and the only backup. Fails
+ * OPEN when statfs is unavailable: a guard that cannot measure must not stop everything.
+ */
+const MIN_FREE_GB = process.env.MIN_FREE_GB === undefined ? 10 : Number(process.env.MIN_FREE_GB) || 0;
+async function assertFreeSpace(): Promise<void> {
+  if (!(MIN_FREE_GB > 0)) return;
+  const free = await statfs(DL_ROOT).then((f) => Number(f.bavail) * Number(f.bsize)).catch(() => null);
+  if (free === null || free >= MIN_FREE_GB * 2 ** 30) return;
+  throw Object.assign(
+    new Error(`${(free / 2 ** 30).toFixed(1)} GiB free under ${DL_ROOT}, floor is ${MIN_FREE_GB} GiB`),
+    { diskFull: true },
+  );
+}
 
 export async function downloadChapter(input: DownloadInput): Promise<{ file: string; pages: number; skipped?: boolean }> {
   const src = getSource(input.sourceId);
@@ -77,6 +120,7 @@ export async function downloadChapter(input: DownloadInput): Promise<{ file: str
   const abs = join(DL_ROOT, rel);
   // the already-downloaded check is free, so do it before queueing for a slot
   if (await stat(abs).then(() => true).catch(() => false)) return { file: rel, pages: 0, skipped: true };
+  await assertFreeSpace();
 
   return withGate(input.sourceId, () => fetchChapter(src, input, rel), { concurrency: DL_CONCURRENCY, minGapMs: DL_MIN_GAP_MS });
 }
@@ -105,7 +149,7 @@ async function fetchChapter(
     : src.imageReferer
       ?? (/^https?:/.test(input.chapter.sourceId) ? `${new URL(input.chapter.sourceId).origin}/` : '');
   const zip = new AdmZip();
-  let worst = 0; // worst HTTP status (or 1 for network/timeout) seen on a failed page
+  let worst = 0; // worst HTTP status seen on a failed page, or a sentinel below 400 (EMPTY_BODY, NET_ERROR)
 
   // Held by position rather than appended as they arrive, so a page fetched on the RETRY below still lands
   // in reading order. The buffers were already all resident before (AdmZip holds what you add), so this
@@ -141,13 +185,13 @@ async function fetchChapter(
       const ct = (r.headers.get('content-type') || '').toLowerCase();
       if (/^text\/|html|json/.test(ct)) { worst = Math.max(worst, 415); return; } // hotlink/error page, not an image
       const buf = Buffer.from(await r.arrayBuffer());
-      if (buf.length < 256) return; // blocked/empty
+      if (buf.length < 256) { worst = Math.max(worst, EMPTY_BODY); return; } // 200 with nothing behind it
       // Content-Type first: some sources (and any source proxied through an extension server) serve pages
       // from extension-less URLs, and a wrong extension makes the chapter read as zero pages.
       page[i] = buf;
       ext[i] = imageExt(u, ct);
     } catch {
-      if (!worst) worst = 1; // network/timeout
+      worst = Math.max(worst, NET_ERROR); // network/timeout; never outranks a real HTTP status
     }
   };
 
@@ -201,9 +245,9 @@ async function fetchChapter(
     if (page[i]) zip.addFile(`${String(++n).padStart(4, '0')}.${ext[i]}`, page[i]!);
   }
   if (!n) {
-    const status: SourceStatus = worst === 1 ? 'down' : classify(null, worst >= 400 ? worst : undefined) || 'blocked';
-    await reportFail(input.sourceId, status, `0/${urls.length} pages downloaded (HTTP ${worst || 'error'})`);
-    throw Object.assign(new Error('no images downloaded (blocked?)'), { blockStatus: status });
+    const status = blameFor(worst);
+    await reportFail(input.sourceId, status, `0/${urls.length} pages downloaded (HTTP ${worstLabel(worst)})`);
+    throw Object.assign(new Error('no images downloaded (blocked?)'), { blockStatus: status, status, pages: 0, expected: urls.length, worst });
   }
   // A PARTIAL chapter must not be written as a complete one.
   //
@@ -231,16 +275,22 @@ async function fetchChapter(
      */
     const ratio = n / expected;
     const refusing = worst === 403 || worst === 429; // the source saying no, whatever the page count
-    const blip = ratio >= NEAR_COMPLETE && !refusing;
-    const status: SourceStatus = worst === 1 ? 'down' : classify(null, worst >= 400 ? worst : undefined) || 'blocked';
+    // Only empty bodies, or a source that listed more pages than it served: nothing was refused and nothing
+    // timed out, so the softer bar applies. See EMPTY_TOLERANCE for the night this cost.
+    const soft = worst < 400 && worst !== NET_ERROR;
+    const blip = !refusing && ratio >= (soft ? EMPTY_TOLERANCE : NEAR_COMPLETE);
+    const status = blameFor(worst);
     if (!blip) {
-      await reportFail(input.sourceId, status, `${n}/${expected} pages downloaded (HTTP ${worst || 'error'})`);
+      await reportFail(input.sourceId, status, `${n}/${expected} pages downloaded (HTTP ${worstLabel(worst)})`);
     }
     throw Object.assign(
       new Error(`incomplete chapter: ${n} of ${expected} pages`),
-      // `blockStatus` ends the CALLER'S whole run, so it is now reserved for the source actually refusing,
-      // or for the network being gone underneath a large shortfall. One flaky page must cost one chapter.
-      refusing || (worst === 1 && !blip) ? { blockStatus: status } : {},
+      // Carried so the caller can say which chapter, how short, and who was blamed -- see chapterFailures.ts.
+      { pages: n, expected, status, worst },
+      // `blockStatus` ends the CALLER'S whole run, so it is reserved for the source actually refusing, or for
+      // the connection being gone (or the CDN serving nothing) underneath a LARGE shortfall. One flaky page
+      // must cost one chapter.
+      refusing || (worst < 400 && !blip) ? { blockStatus: status } : {},
     );
   }
   await reportOk(input.sourceId); // a successful download clears any prior block

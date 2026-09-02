@@ -19,6 +19,7 @@ process.env.DL_ROOT = ROOT;
 // every test in this file. downloadPacing.int.test.ts is where the delay itself is pinned.
 process.env.DOWNLOAD_PAGE_GAP_MS = '0';
 process.env.DOWNLOAD_MIN_GAP_MS ||= '0';
+process.env.MIN_FREE_GB = '0'; // the disk floor is not the subject here; diskGuard.test.ts is
 process.env.DATABASE_URL ||= 'postgres://unused:unused@127.0.0.1:1/unused';
 process.env.JWT_SECRET ||= 'test-secret-at-least-16-chars';
 

@@ -528,6 +528,8 @@ export async function persistScan(): Promise<{ series: number; books: number; ms
   }
   await q(`UPDATE lib_series s SET books_count = c.n, latest_mtime = COALESCE(c.mt, 0)
            FROM (SELECT series_id, count(*) AS n, max(mtime) AS mt FROM lib_books GROUP BY series_id) c WHERE c.series_id = s.id`);
+  // A chapter that has landed is no longer a failure. Cheap: the ledger only ever holds what is still missing.
+  await q(`DELETE FROM chapter_failures f USING lib_books b WHERE b.series_id = f.series_id AND b.number = f.number`).catch(() => {});
   return { series: seenFolders.size, books: nBooks, ms: Date.now() - t0 };
 }
 
