@@ -40,9 +40,39 @@ async function fetchUpstreamWithType(path: string): Promise<{ buffer: Buffer; co
 
 const CF_IMAGE_TIMEOUT_MS = 5000;
 
+/**
+ * A cover value this server can actually go and fetch, or null.
+ *
+ * `fetchCoverImage` is handed whatever a source, an admin override or a query string called a cover, and a
+ * value that is not a URL used to reach the network layer and come back as an unhandled `TypeError` -- a 500
+ * with a level-50 stack behind an `<img>`, rather than a missing cover. It failed in two different shapes,
+ * and a check for one would have missed the other:
+ *
+ *   'mangakakalot'  -> `new URL()` throws ERR_INVALID_URL         (a plain source id)
+ *   'sw:8796296...' -> parses fine, origin is the string "null",
+ *                      and undici then rejects it with `fetch failed: unknown scheme`  (a Suwayomi id)
+ *
+ * So the test is "absolute, and http(s)", not "does `new URL` survive it".
+ */
+export function fetchableCoverUrl(u: string | null | undefined): URL | null {
+  if (!u) return null;
+  let parsed: URL;
+  try { parsed = new URL(u); } catch { return null; }
+  return parsed.protocol === 'http:' || parsed.protocol === 'https:' ? parsed : null;
+}
+
+/** Thrown for a cover value that could never be fetched, so callers can tell it from a transient failure. */
+export class UnfetchableCoverUrl extends Error {
+  readonly statusCode = 400;
+  constructor(readonly url: string) { super('cover url is not fetchable'); }
+}
+
 /** Fetch a remote cover image as raw bytes. Sends browser-ish headers (AniList/MangaDex CDNs reject bare
  *  requests) and, for Cloudflare-protected source hosts (Aqua/ManhuaPlus), attaches FlareSolverr cookies. */
 async function fetchCoverImage(u: string, source?: string): Promise<Buffer> {
+  // Before anything else, and before any network call: everything below assumes a real http(s) URL.
+  const parsed = fetchableCoverUrl(u);
+  if (!parsed) throw new UnfetchableCoverUrl(u);
   const src = source ? getSource(source) : null;
   const staticReferer = typeof src?.imageReferer === 'string' ? src.imageReferer : undefined;
   const headers: Record<string, string> = {
@@ -50,7 +80,7 @@ async function fetchCoverImage(u: string, source?: string): Promise<Buffer> {
     accept: 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
     'accept-language': 'en-US,en;q=0.9',
     'sec-fetch-dest': 'image', 'sec-fetch-mode': 'no-cors', 'sec-fetch-site': 'cross-site',
-    referer: staticReferer ?? `${new URL(u).origin}/`,
+    referer: staticReferer ?? `${parsed.origin}/`,
     ...(typeof src?.imageHeaders === 'function' ? src.imageHeaders(u) : src?.imageHeaders ?? {}),
   };
   if (src?.requiresCloudflare) {
@@ -480,7 +510,20 @@ export default async function imageRoutes(app: FastifyInstance) {
     const width = w === '1600' ? 1600 : w === '800' ? 800 : 400;
     // The width is part of the cache key, or the first variant fetched would be served for every size.
     return serveImage(req, reply, `srccover:${width}:${u}`, async () => {
-      const input = await fetchCoverImage(u, source);
+      let input: Buffer;
+      try {
+        input = await fetchCoverImage(u, source);
+      } catch (e) {
+        // A value that is not a URL is a caller's mistake, not a bad minute on someone's CDN: it cannot be
+        // retried into working, and every affected tile answered 500 with a TypeError in the log. Serve the
+        // placeholder -- a missing cover is what the reader sees either way.
+        //
+        // ONLY for that case. A genuine fetch failure must keep erroring, because `Img` answers a failed
+        // proxy by retrying `fallbackSrc` (the direct URL), and a placeholder served with 200 would look
+        // like a success and take that second chance away.
+        if (!(e instanceof UnfetchableCoverUrl)) throw e;
+        return { buffer: await coverPlaceholder(width), contentType: 'image/webp' };
+      }
       const buffer = await sharp(input).resize({ width, withoutEnlargement: true }).webp({ quality: 72 }).toBuffer();
       return { buffer, contentType: 'image/webp' };
     });
@@ -558,6 +601,25 @@ async function letterTile(name: string): Promise<Buffer> {
     <rect width="64" height="64" rx="14" fill="url(#g)"/>
     <text x="32" y="33" fill="#e8e8ee" font-family="system-ui,sans-serif" font-size="34" font-weight="700"
           text-anchor="middle" dominant-baseline="central">${ch}</text>
+  </svg>`;
+  return sharp(Buffer.from(svg)).webp({ quality: 80 }).toBuffer();
+}
+
+/**
+ * The "no cover" tile, in cover proportions.
+ *
+ * Deliberately the same broken-image glyph on the same ink the client's own `Img` error state draws, so a
+ * cover the server could not fetch and one the browser could not load look like one thing rather than two.
+ */
+async function coverPlaceholder(width: number): Promise<Buffer> {
+  const h = Math.round((width * 3) / 2); // 2:3, the aspect every cover tile in the app is laid out at
+  const g = Math.round(width / 5); // glyph box
+  const x = (width - g) / 2, y = (h - g) / 2, s = g / 24; // the 24x24 icon, scaled and centred
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${h}">
+    <rect width="${width}" height="${h}" fill="#111116"/>
+    <g transform="translate(${x} ${y}) scale(${s})" fill="none" stroke="#3a3a45" stroke-width="1.5">
+      <rect x="3" y="3" width="18" height="18" rx="3"/><path d="m4 16 4-4 4 4 3-3 5 5"/>
+    </g>
   </svg>`;
   return sharp(Buffer.from(svg)).webp({ quality: 80 }).toBuffer();
 }

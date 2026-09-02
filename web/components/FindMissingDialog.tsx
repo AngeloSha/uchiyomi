@@ -136,7 +136,7 @@ export function FindMissingDialog({ seriesId, onClose }: { seriesId: string; onC
           {usable.map((c) => (
             <div key={`${c.source}:${c.sourceSeriesId}`} className="mt-4 rounded-2xl border border-ink-700 p-3">
               <div className="flex gap-3">
-                <Img src={sourceCover(c.coverUrl, c.source)} alt="" className="h-16 w-12 shrink-0 rounded-lg object-cover" />
+                <Img src={sourceCover(c.source, c.coverUrl)} alt="" className="h-16 w-12 shrink-0 rounded-lg object-cover" />
                 <div className="min-w-0">
                   <p className="truncate text-sm font-semibold text-white">{c.name}</p>
                   {/* Their title, verbatim. If it is not this series, this line is where a person notices. */}
