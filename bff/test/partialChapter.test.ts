@@ -15,6 +15,10 @@ import { join } from 'path';
 // Set before the module graph loads: DL_ROOT is read once, at import, and the downloader writes real files.
 const ROOT = mkdtempSync(join(tmpdir(), 'uy-dl-'));
 process.env.DL_ROOT = ROOT;
+// Pacing is production politeness, not the subject here, and 110 pages x 250ms would add half a minute to
+// every test in this file. downloadPacing.int.test.ts is where the delay itself is pinned.
+process.env.DOWNLOAD_PAGE_GAP_MS = '0';
+process.env.DOWNLOAD_MIN_GAP_MS ||= '0';
 process.env.DATABASE_URL ||= 'postgres://unused:unused@127.0.0.1:1/unused';
 process.env.JWT_SECRET ||= 'test-secret-at-least-16-chars';
 

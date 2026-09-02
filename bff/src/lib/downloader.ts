@@ -44,6 +44,20 @@ export interface DownloadInput {
 // so this is the one place that decides how hard we ever hit a site.
 const DL_CONCURRENCY = Number(process.env.DOWNLOAD_CONCURRENCY || 2);
 const DL_MIN_GAP_MS = Number(process.env.DOWNLOAD_MIN_GAP_MS || 1200);
+/**
+ * Space between PAGE requests inside one chapter.
+ *
+ * The gate above spaces CHAPTERS, and for a long time nothing spaced the images inside one. A chapter here
+ * is 110-130 images fetched back to back, two chapters at a time: a burst of several requests a second
+ * sustained for minutes. That burst is what earned the 429s on mangakakalot and natomanga, not anything the
+ * sites changed -- measured at ~1.9 pages/second right up to the refusal. A quarter-second between pages
+ * costs about 30s on a 120-page chapter, against a 75-minute cooldown for going too fast.
+ */
+const DL_PAGE_GAP_MS = Number(process.env.DOWNLOAD_PAGE_GAP_MS || 250);
+/** Ceiling for the adaptive slow-down after a 429, so a resume cannot crawl indefinitely. */
+const MAX_PAGE_GAP_MS = 2000;
+/** How many times a chapter may wait out a 429 and resume before we accept the source is refusing. */
+const MAX_RESUMES = 3;
 
 /** Download one chapter into <LIBRARY_ROOT>/<seriesFolder>/Chapter <n>.cbz. Skips if already present. */
 /**
@@ -120,7 +134,7 @@ async function fetchChapter(
         // loop and collecting a hundred more of them, which is how 12 of 108 pages arrived.
         if (r.status === 429) {
           const ra = Number(r.headers.get('retry-after'));
-          retryAfterMs = Math.max(retryAfterMs, Number.isFinite(ra) && ra > 0 ? Math.min(ra, 60) * 1000 : 5000);
+          retryAfterMs = Math.max(retryAfterMs, Number.isFinite(ra) && ra > 0 ? Math.min(ra, 120) * 1000 : 5000);
         }
         return;
       }
@@ -137,7 +151,11 @@ async function fetchChapter(
     }
   };
 
+  const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  let gap = DL_PAGE_GAP_MS;
+
   for (let i = 0; i < urls.length; i++) {
+    if (i && gap) await sleep(gap);
     await fetchPage(urls[i], i);
     // Stop the moment the site says slow down. Carrying on collects ninety more refusals, turns a pause into
     // a "12 of 108 pages" failure, and earns a cooldown for behaviour that was ours.
@@ -145,23 +163,36 @@ async function fetchChapter(
   }
 
   /**
-   * One retry for the pages that did not arrive.
+   * Wait out a rate limit and pick up where we stopped, a bounded number of times.
    *
    * Almost every shortfall seen on this install is one or two pages out of a hundred, on a CDN that answers
-   * again immediately. Before this, a single missing page condemned the chapter AND put the whole source in
-   * a cooldown, which is how mangakakalot ended up blocked over 98 of 101 pages and a 92-chapter fill
-   * stopped after three. A retry costs one request; the alternative cost a day.
+   * again immediately, so the first pass here is the plain retry it has always been.
    *
-   * Skipped when NOTHING arrived: that is not a flaky page, that is the source saying no, and hammering it
-   * a second time is exactly what earns a real block.
+   * What it did NOT do is survive a 429 on the FIRST page. `gaps.length < urls.length` is false when
+   * nothing has arrived, so the whole block was skipped -- INCLUDING the sleep. The site had said "wait
+   * five seconds"; instead the chapter was reported as "0/115 pages downloaded (HTTP 429)" 1.28 seconds
+   * after a single request, which put the source in a cooldown and abandoned the other 58 chapters of the
+   * run. Every "I tried a different source and it still failed" on this install is that line.
+   *
+   * Nothing arriving IS a refusal and hammering it earns a real block -- but a 429 is the one refusal that
+   * comes with the remedy attached, and discarding that instruction is not politeness, it is deafness.
    */
-  const gaps = page.map((b, i) => (b ? -1 : i)).filter((i) => i >= 0);
-  if (gaps.length && gaps.length < urls.length) {
-    // Honour the pause before asking again, or the retry is just the same burst a moment later.
-    if (retryAfterMs) { await new Promise((r) => setTimeout(r, retryAfterMs)); retryAfterMs = 0; }
+  for (let round = 0; round < MAX_RESUMES; round++) {
+    const gaps = page.map((b, i) => (b ? -1 : i)).filter((i) => i >= 0);
+    if (!gaps.length) break;
+    if (gaps.length === urls.length && !retryAfterMs) break; // a silent refusal: do not ask twice
+    if (retryAfterMs) {
+      await sleep(retryAfterMs);
+      retryAfterMs = 0;
+      // Resume slower than the burst that caused this, or the wait only buys one more page.
+      gap = gap ? Math.min(gap * 2, MAX_PAGE_GAP_MS) : 0;
+    } else if (round) {
+      break; // a stable shortfall with no 429: the pages are not there, and one retry was enough to know
+    }
     for (const i of gaps) {
+      if (gap) await sleep(gap);
       await fetchPage(urls[i], i);
-      if (retryAfterMs) break; // still rate-limited: stop, and let the shortfall be reported honestly
+      if (retryAfterMs) break;
     }
   }
 

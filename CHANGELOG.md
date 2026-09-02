@@ -1,5 +1,52 @@
 # Changelog
 
+## v0.13.1 — 2026-09-02
+
+### Downloads stopped going too fast and then blaming the site
+
+"Act Like a Boss Monster, Mr. Swallow!" would not fill its missing chapters, 34 to 92, from any source. Six
+attempts over three days put zero chapters into that gap. The sites were not the problem. We were.
+
+A chapter here is 110 to 130 images. The pause that existed was between *chapters*, not between images, so
+each chapter went out as a burst of a hundred-odd requests back to back, two chapters at a time. Measured at
+the moment it broke: about two images a second, sustained for minutes. Both sites eventually said "slow
+down" (HTTP 429), which is a fair thing for them to say. We were not banned: at a third of a request per
+second the same hosts served us normally minutes later.
+
+What happened next is the part that was mine. A 429 arrives with the remedy attached, namely how long to
+wait. That instruction was only honoured if at least one image had already arrived. When the very first
+image was refused, the whole wait-and-retry step was skipped, so the chapter was written off as
+"0 of 115 pages" 1.28 seconds after a single request, the source was put in a cooldown, and because a
+cooldown ends the entire run, the other 58 chapters were abandoned untried. Every attempt died inside
+chapter 34.
+
+The nightly sweep then compounded it. It was the one place that did not stop when a source refused, so it
+asked for four more chapters that were never going to arrive, and each refusal lengthened the cooldown:
+15 minutes, then 30, 45, 60, 75. A single burst locked the source for over an hour, which is why trying
+again by hand did not work either.
+
+Three changes:
+
+- A quarter of a second between images. A 120-page chapter takes about 30 seconds longer. A cooldown took
+  75 minutes.
+- A 429 is now waited out and the chapter resumes where it stopped, up to three times, going slower after
+  each one. A source still refusing after that is genuinely refusing, and is treated exactly as before.
+- The nightly sweep stops at the first refusal, which is what both other callers already did.
+
+One more thing worth knowing: trying "a different source" was less different than it looked. Mangakakalot
+and Natomanga run the same engine here and serve their images from the same CDN, so five of the six
+attempts were effectively the same site.
+
+### The Cloudflare cookie that was never kept
+
+Before fetching a chapter's images we ask the solver for a clearance cookie by loading the image host's
+front page. An image CDN has no front page: it answers 403, the solver reports that as a block, and the
+cookie was thrown away with it. Nothing was ever cached, so this repeated for every single chapter, and
+every image was then fetched with no cookie at all, on exactly the hosts that were refusing us.
+
+It now falls back to the image address we are about to fetch, which does exist and so can be solved, and
+remembers a host that cannot be solved rather than asking again on every chapter.
+
 ## v0.13.0 — 2026-09-01
 
 ### Series kept asking a site that had moved

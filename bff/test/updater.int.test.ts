@@ -28,6 +28,9 @@ const skip = DSN ? false : 'set TEST_DATABASE_URL to run';
 
 const LIB = 'lib_upd';
 const SRC_OK = 'upd-ok', SRC_THROW = 'upd-throw', SRC_HANG = 'upd-hang', SRC_EMPTY = 'upd-empty';
+const SRC_BLOCK = 'upd-block';
+/** Counts how many chapters the sweep actually ATTEMPTS against a source that is refusing. */
+let blockAsks = 0;
 const S = (k: string) => `s_upd_${k}`;
 let q: any, updateSeries: any, runUpdateAll: any;
 
@@ -59,6 +62,16 @@ before(async () => {
   registerAdapter(fake(SRC_THROW, 'throw') as any);
   registerAdapter(fake(SRC_HANG, 'hang') as any);
   registerAdapter(fake(SRC_EMPTY, 'empty') as any);
+  registerAdapter({
+    id: SRC_BLOCK, name: SRC_BLOCK,
+    async search() { return []; },
+    async getSeries(sid: string) { return { sourceId: sid, source: SRC_BLOCK, title: SRC_BLOCK }; },
+    async listChapters() {
+      return Array.from({ length: 5 }, (_, i) => ({ number: i + 1, title: `Chapter ${i + 1}`, id: `c${i + 1}` }));
+    },
+    async getPageUrls() { blockAsks++; return ['https://example.invalid/refused.png']; },
+    async latest() { return []; },
+  } as any);
 
   await q(`INSERT INTO libraries (id, name, path) VALUES ($1,'Upd',$1) ON CONFLICT (id) DO NOTHING`, [LIB]);
   const mk = async (key: string, sourceId: string | null) =>
@@ -69,11 +82,13 @@ before(async () => {
   await mk('hang', SRC_HANG);
   await mk('empty', SRC_EMPTY);
   await mk('unrouted', null);
+  await mk('block', SRC_BLOCK);
 });
 
 after(async () => {
   if (!DSN) return;
   await q('DELETE FROM lib_series WHERE library_id = $1', [LIB]).catch(() => {});
+  await q('DELETE FROM source_health WHERE source_id = $1', [SRC_BLOCK]).catch(() => {});
   await q('DELETE FROM libraries WHERE id = $1', [LIB]).catch(() => {});
 });
 
@@ -126,4 +141,31 @@ test('a sweep where everything failed does not look like a sweep with nothing ne
     assert.equal(r.healthy, true, '...and that is exactly why the two must differ somewhere else');
     assert.equal(r.failed, 0);
   });
+});
+
+
+/**
+ * A source that refuses must cost ONE chapter, not five.
+ *
+ * The updater was the only caller of downloadChapter that did not stop on `blockStatus` -- its catch was a
+ * bare `failed++`. So when mangakakalot rate-limited us, the sweep asked it for four more chapters it was
+ * never going to serve, and each refusal called reportFail again. The cooldown escalates with `consecutive`
+ * (15, 30, 45, 60, 75 minutes), so one burst produced five escalations in 74 seconds and locked the source
+ * for 75 minutes. The person's own manual retry was then refused too, which is what "I tried again and it
+ * still doesn't work" actually was.
+ *
+ * Reintroduce by restoring `} catch { failed++; }` in updater.ts: blockAsks becomes 5 and consecutive 5.
+ */
+test('a refusing source costs one chapter, not the whole run', { skip }, async () => {
+  globalThis.fetch = (async () => new Response('go away', { status: 403 })) as typeof fetch;
+  blockAsks = 0;
+  await q('DELETE FROM source_health WHERE source_id = $1', [SRC_BLOCK]);
+
+  await updateSeries(S('block'), 5);
+
+  assert.equal(blockAsks, 1, 'the sweep stopped at the first refusal instead of asking five times');
+  const h = (await q(`SELECT consecutive FROM source_health WHERE source_id = $1`, [SRC_BLOCK]))[0];
+  assert.ok(h, 'the refusal is still recorded once');
+  assert.equal(Number(h.consecutive), 1,
+    'one refusal is one strike: five strikes turned a 15-minute cooldown into 75');
 });

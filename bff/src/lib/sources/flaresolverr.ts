@@ -54,12 +54,27 @@ export async function cfPost(url: string, postData: string): Promise<string> {
 }
 
 /** Cookie header + UA to fetch binaries (images) directly — FlareSolverr can't return binary bodies. */
+/** Origins whose last solve failed, and when, so a dead root is not re-solved for every chapter. */
+const unsolvable = new Map<string, number>();
+const RESOLVE_AFTER_MS = 5 * 60_000;
+
 export async function cfSession(url: string): Promise<{ cookie: string; userAgent: string }> {
   const origin = new URL(url).origin;
   // Only the side effect matters here: `solve` stores the cookie jar before it returns, so an empty body
   // (which now throws) has still given us what we came for. Before `cfGet` could throw this was a bare
   // await, and letting it throw now would fail image downloads that used to succeed.
-  if (!sessions.has(origin)) await cfGet(`${origin}/`).catch(() => {});
+  if (!sessions.has(origin) && Date.now() - (unsolvable.get(origin) || 0) > RESOLVE_AFTER_MS) {
+    // The origin ROOT is the cheap way in and works for a normal site. An image CDN is not a normal site:
+    // `imgs-2.2xstorage.com/` and `storage.waitst.com/` both answer 403 with an access-denied page, which
+    // FlareSolverr reports as a block, so `solve` threw BEFORE caching anything. The session was therefore
+    // never stored, the root was re-solved for every single chapter, and every image was then fetched with
+    // no clearance cookie at all -- on the sites where the 429s were coming from.
+    //
+    // So fall back to the URL we are actually about to fetch. That one exists, so it can be solved.
+    await cfGet(`${origin}/`).catch(() => cfGet(url)).catch(() => {});
+    if (sessions.has(origin)) unsolvable.delete(origin);
+    else unsolvable.set(origin, Date.now());
+  }
   return sessions.get(origin) || { cookie: '', userAgent: 'Mozilla/5.0' };
 }
 

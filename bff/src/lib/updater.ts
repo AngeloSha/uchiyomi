@@ -66,8 +66,14 @@ export async function updateSeries(
         meta: { series: s.title, summary: s.summary, author: s.author, genres: s.genres, url: s.web, status: s.status },
       });
       if (!res.skipped) added++;
-    } catch {
+    } catch (e: any) {
       failed++; // a failed chapter shouldn't abort the rest, but it must not vanish either
+      // ...unless the SOURCE is refusing. Both other callers of downloadChapter already stop here; this one
+      // did not, so a single rate-limit became five. Measured on this install: one unpaced burst against
+      // mangakakalot produced five reportFail calls in 74 seconds, and because the cooldown escalates with
+      // `consecutive` (15, 30, 45, 60, 75 minutes) it locked the source for 75 minutes instead of 15 --
+      // long enough that the person's own manual retry was refused too.
+      if (e?.blockStatus) break;
     }
   }
   if (added) notifyNewChapter(seriesId, s.title, added).catch(() => {});

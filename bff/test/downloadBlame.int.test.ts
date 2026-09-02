@@ -22,6 +22,7 @@ if (DSN) {
   process.env.DATABASE_URL = DSN;
   process.env.DL_ROOT = ROOT;
   process.env.DOWNLOAD_MIN_GAP_MS = '0';
+  process.env.DOWNLOAD_PAGE_GAP_MS = '0'; // pacing is real now; timing it belongs in downloadPacing, not here
   process.env.CONFIG_DIR = process.env.CONFIG_DIR || '/tmp/uchiyomi-test-config';
 }
 const skip = DSN ? false : 'set TEST_DATABASE_URL to run';
@@ -102,4 +103,52 @@ test('a chapter that recovers on the retry clears nothing and blames nobody', { 
   assert.equal(res.pages, 110, 'the retry saved it');
   const h = await health();
   assert.ok(!h || h.status === 'ok', 'and the source is not marked down for a page that arrived on the second ask');
+});
+
+
+/**
+ * A 429 on the very first page.
+ *
+ * The retry block was guarded by `gaps.length < urls.length`, which is FALSE when nothing arrived -- so on a
+ * first-page 429 the entire block was skipped, including the sleep the site had just asked for. Measured
+ * live: "0/115 pages downloaded (HTTP 429)" was written 1.28 seconds after ONE request. That put the source
+ * in an escalating cooldown and, because every caller breaks on blockStatus, abandoned the other 58 chapters
+ * of the run. Three separate "it still won't download" reports were all this line.
+ *
+ * Reintroduce by restoring `if (gaps.length && gaps.length < urls.length)`: this test fails with
+ * "no images downloaded (blocked?)" and a health row appears.
+ */
+test('a 429 on the FIRST page is waited out, not reported as "0 of 110"', { skip }, async () => {
+  let refuse = true;
+  globalThis.fetch = (async () => {
+    if (refuse) { refuse = false; return new Response('slow down', { status: 429, headers: { 'retry-after': '1' } }); }
+    return new Response(PIXEL, { status: 200, headers: { 'content-type': 'image/png' } });
+  }) as typeof fetch;
+
+  const res = await downloadChapter({ sourceId: SRC, seriesFolder: 'B/S', chapter: { sourceId: 'c5', number: 5 } });
+
+  assert.equal(res.pages, 110, 'the chapter completes once Retry-After is honoured');
+  // A completed download calls reportOk, so a row is expected here -- what must NOT be here is blame.
+  const h = await health();
+  assert.equal(h?.status ?? 'ok', 'ok', 'the burst was ours, and the site told us the remedy');
+  assert.equal(Number(h?.consecutive ?? 0), 0, 'no strike against the source');
+  assert.ok(!h?.blocked_until, 'and above all no cooldown, which is what abandoned the other 58 chapters');
+});
+
+/**
+ * The protection this must not remove: a source that keeps refusing IS refusing.
+ *
+ * Waiting out a 429 is right; waiting forever is how a polite pause becomes a hammer. After MAX_RESUMES the
+ * chapter is refused and the source earns its cooldown, exactly as before.
+ */
+test('a source that says 429 to everything is still eventually a refusal', { skip }, async () => {
+  globalThis.fetch = (async () =>
+    new Response('no', { status: 429, headers: { 'retry-after': '1' } })) as typeof fetch;
+
+  await downloadChapter({ sourceId: SRC, seriesFolder: 'B/S', chapter: { sourceId: 'c6', number: 6 } })
+    .then(() => assert.fail('a chapter that never arrived must be refused'), () => {});
+
+  const h = await health();
+  assert.ok(h, 'a sustained refusal still earns the cooldown');
+  assert.equal(h.consecutive, 1);
 });
