@@ -1,10 +1,12 @@
-// Selects the content backend: the real Komga client, or our owned CBZ-library backend.
-// Flip with LIBRARY_BACKEND=owned. Until cutover the default keeps the live app on Komga.
+// Selects the content backend: our owned CBZ-library backend (the default), or the legacy Komga client.
+// Only LIBRARY_BACKEND=komga selects Komga. The old rule was `=== 'owned'`, which meant an unset or
+// misspelled variable silently chose the backend whose visibility model is "Komga enforces it", i.e. no
+// restriction at all on the path that governs page bytes and OPDS. The default must be the safe one.
 import { komga } from './komga';
 import { owned } from './ownedCatalog';
 import type { ViewCtx } from './visibility';
 
-export const OWNED = process.env.LIBRARY_BACKEND === 'owned';
+export const OWNED = process.env.LIBRARY_BACKEND !== 'komga';
 
 // When false (owned mode) there is no native Komga progress store, so every account — including admin —
 // is tracked via read_progress (catalog.ts gates its admin-native-progress branches on this).

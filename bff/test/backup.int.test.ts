@@ -84,6 +84,9 @@ test('a backup reports what it really captured', { skip }, async (t) => {
     assert.equal(r.configEmpty, false, 'the config was captured');
     assert.ok(r.bytes > 0, 'a real dump has a size');
     assert.ok(existsSync(join(r.dir, 'db.sql.gz')), 'and the dump is on disk');
+    // Written as .part and renamed once whole. Reintroduce by dumping straight to db.sql.gz: nothing here
+    // changes, but a SIGKILL mid-dump then leaves a partial archive that ls and rotation both count as a run.
+    assert.ok(!existsSync(join(r.dir, 'db.sql.gz.part')), 'and no half-written .part is left beside it');
     assert.ok(existsSync(join(r.dir, 'config.tar.gz')), 'so is the config archive');
 
     const p = await persisted();

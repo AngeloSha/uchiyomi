@@ -20,6 +20,7 @@ if (DSN) {
 }
 
 const S_GAPS = 's_health_gaps';
+const S_ZERO = 's_health_zero'; // 0, 93, 94, 95: the shape on which health and fill used to disagree
 const S_CLEAN = 's_health_clean';
 
 async function setup() {
@@ -27,7 +28,7 @@ async function setup() {
   const { q } = await import('../src/lib/db');
   const health = await import('../src/lib/health');
   await migrate();
-  for (const id of [S_GAPS, S_CLEAN]) await q(`DELETE FROM lib_series WHERE id = $1`, [id]);
+  for (const id of [S_GAPS, S_CLEAN, S_ZERO]) await q(`DELETE FROM lib_series WHERE id = $1`, [id]);
 
   const series = async (id: string, title: string) =>
     q(`INSERT INTO lib_series (id, source, title, folder) VALUES ($1,'test',$2,$1)`, [id, title]);
@@ -40,6 +41,10 @@ async function setup() {
   // chapters 1,2,3 then 7,8 — a hole at 4-6
   for (const n of [1, 2, 3, 7, 8]) await book(S_GAPS, n, 20);
 
+  // The exact shape from the incident: chapter 0 then 93 onwards. The SQL implementation dropped the 0
+  // (WHERE number > 0) and saw one unbroken run; gapsOf() keeps it and sees 1-92. Same data, two answers.
+  await series(S_ZERO, 'Health Zero Fixture');
+  for (const n of [0, 93, 94, 95]) await book(S_ZERO, n, 20);
   await series(S_CLEAN, 'Health Clean Fixture');
   for (const n of [1, 2, 3]) await book(S_CLEAN, n, 20);
   await book(S_CLEAN, 4, 0); // never opened: page count unknown, NOT a broken file
@@ -68,6 +73,11 @@ test('library health checks', { skip: DSN ? false : 'set TEST_DATABASE_URL to ru
     assert.ok(item, 'expected the gappy fixture to be reported');
     assert.match(item.detail, /3 missing/);
     assert.match(item.detail, /4-6/);
+    // Reintroduce by restoring the SQL islands-and-gaps with `WHERE number > 0`: this series vanishes from the
+    // check while "find missing chapters" still offers to fetch 92 for it.
+    const zero = c.items.find((i: any) => i.title === 'Health Zero Fixture');
+    assert.ok(zero, 'a series holding 0 and 93.. is reported as having a gap, exactly as the fill dialog says');
+    assert.match(zero.detail, /^92 missing — 1-92/);
   });
 
   await t.test('a series with no holes is not reported as gappy', () => {

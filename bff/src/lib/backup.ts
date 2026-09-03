@@ -126,7 +126,10 @@ export async function runBackup(): Promise<BackupResult> {
   }
 
   try {
-    await dumpSql(path.join(dir, 'db.sql.gz'));
+    // Written as .part and renamed once pg_dump has exited 0 and the file has closed. A SIGKILL or OOM in the
+    // middle used to leave a partial db.sql.gz that `ls` and pruneBackups() both counted as a run.
+    await dumpSql(path.join(dir, 'db.sql.gz.part'));
+    await fs.rename(path.join(dir, 'db.sql.gz.part'), path.join(dir, 'db.sql.gz'));
   } catch (e) {
     // Leave nothing that looks like a backup. A directory holding a 20-byte archive reads as a successful
     // run in `ls`, and rotation counts it, so a week of failures can push the last good dump out of KEEP.

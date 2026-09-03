@@ -13,6 +13,7 @@ import { q } from './db';
 import { visibleToAll } from './visibility';
 import { solverPing, solverUrl } from './sources/flaresolverr';
 import { getSource } from './sources';
+import { gapsOf } from './fill';
 import { diagnose } from './sourceDiagnosis';
 
 export type HealthStatus = 'ok' | 'warn' | 'problem';
@@ -50,24 +51,32 @@ function truncate<T>(rows: T[]): { items: T[]; hidden: number } {
 
 // ---- individual checks ------------------------------------------------------
 
-/** Missing runs of chapter numbers: either the source never had them, or a download failed. */
+/**
+ * Missing runs of chapter numbers: either the source never had them, or a download failed.
+ *
+ * Computed by `gapsOf`, the same function the fill dialog uses, and nothing else. There used to be a second
+ * implementation here in SQL that filtered `WHERE number > 0`, so on a series shaped `0, 93..141` this page
+ * said "no gaps" while "find missing chapters" offered to fetch 92 -- both green in their own tests. Two
+ * definitions of one fact is how that happens; there is now one.
+ */
 async function chapterGaps(): Promise<HealthCheck> {
-  // Islands-and-gaps: group consecutive chapter numbers into runs, then report the holes between runs.
-  const rows = await q<{ series_id: string; title: string; missing: number; ranges: string }>(
-    `WITH n AS (SELECT DISTINCT series_id, floor(number)::int AS c FROM lib_books WHERE number > 0),
-          b AS (SELECT series_id, c, c - row_number() OVER (PARTITION BY series_id ORDER BY c) AS grp FROM n),
-          runs AS (SELECT series_id, min(c) lo, max(c) hi FROM b GROUP BY series_id, grp),
-          ord AS (SELECT series_id, lo, hi, lag(hi) OVER (PARTITION BY series_id ORDER BY lo) AS prev FROM runs),
-          gaps AS (SELECT series_id, prev + 1 AS gap_lo, lo - 1 AS gap_hi
-                     FROM ord WHERE prev IS NOT NULL AND lo - prev > 1)
-     SELECT g.series_id, ls.title,
-            sum(gap_hi - gap_lo + 1)::int AS missing,
-            string_agg(CASE WHEN gap_lo = gap_hi THEN gap_lo::text ELSE gap_lo || '-' || gap_hi END,
-                       ', ' ORDER BY gap_lo) AS ranges
-       FROM gaps g JOIN lib_series ls ON ls.id = g.series_id AND ${visibleToAll('ls')}
-      GROUP BY g.series_id, ls.title
-      ORDER BY missing DESC`,
+  const series = await q<{ series_id: string; title: string; numbers: number[] }>(
+    `SELECT b.series_id, ls.title, array_agg(b.number::float8) AS numbers
+       FROM lib_books b JOIN lib_series ls ON ls.id = b.series_id AND ${visibleToAll('ls')}
+      GROUP BY b.series_id, ls.title`,
   );
+  const rows = series
+    .map((r) => {
+      const gaps = gapsOf(r.numbers.map(Number));
+      return {
+        series_id: r.series_id,
+        title: r.title,
+        missing: gaps.reduce((n, g) => n + g.count, 0),
+        ranges: gaps.map((g) => (g.lo === g.hi ? String(g.lo) : `${g.lo}-${g.hi}`)).join(', '),
+      };
+    })
+    .filter((r) => r.missing > 0)
+    .sort((a, b) => b.missing - a.missing);
   const { items, hidden } = truncate(rows);
   return {
     id: 'chapter-gaps',

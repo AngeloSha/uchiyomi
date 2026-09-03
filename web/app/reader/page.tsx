@@ -317,7 +317,10 @@ function ReaderInner() {
   const completedSent = useRef(new Set<string>());
   const prevPos = useRef<{ ci: number } | null>(null);
   const sendProgress = useCallback((chId: string, sId: string, page: number, completed: boolean) => {
-    const payload = { page, completed, seriesId: sId, deviceId: deviceId() };
+    // `at` is what lets the server refuse a stale write. The offline outbox always sent it; the live path
+    // never did, so every live ping took the "no timestamp" leg of the guard and applied unconditionally --
+    // a desktop tab left open on chapter 3 could still rewind the phone that had read to chapter 9.
+    const payload = { page, completed, seriesId: sId, deviceId: deviceId(), at: Date.now() };
     api(`/api/books/${chId}/progress`, { method: 'PUT', json: payload }).catch(() => queueProgress({ bookId: chId, ...payload }));
   }, []);
   useEffect(() => {

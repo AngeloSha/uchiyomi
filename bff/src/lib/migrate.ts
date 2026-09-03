@@ -324,6 +324,9 @@ INSERT INTO server_settings (id) VALUES (1) ON CONFLICT (id) DO NOTHING;
 ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS backup_hour        int NOT NULL DEFAULT 3;
 ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS backup_last_run    timestamptz;
 ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS backup_last_result jsonb;
+-- When the updater last COMPLETED a sweep, so a restart schedules the remainder of the interval instead of
+-- a whole new one. Before this every deploy pushed the next sweep out by the full interval.
+ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS updater_last_run timestamptz;
 
 -- external progress trackers (AniList today; provider leaves room for MAL/Kitsu without a migration)
 -- access_token is encrypted at rest: AniList issues scopeless tokens with near-full account access.

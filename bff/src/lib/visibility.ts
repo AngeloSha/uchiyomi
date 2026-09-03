@@ -225,8 +225,10 @@ export async function viewCtxFor(
 ): Promise<ViewCtx> {
   const hideAdultLibraries = !!opts?.hideAdult;
   // Komga mode has its own libraries and its own restrictions, enforced by Komga. Do not pretend to enforce
-  // a model this backend does not have.
-  if (process.env.LIBRARY_BACKEND !== 'owned') return { userId, libraryIds: null, maxAgeRating: null, hideAdultLibraries: false };
+  // a model this backend does not have. Only an EXPLICIT 'komga' takes this branch: with `!== 'owned'` an
+  // unset or misspelled variable handed every account an unrestricted context on the path that governs page
+  // bytes and OPDS downloads. Fail closed, into the restricted model below.
+  if (process.env.LIBRARY_BACKEND === 'komga') return { userId, libraryIds: null, maxAgeRating: null, hideAdultLibraries: false };
   if (!userId || role === 'admin') return { userId, libraryIds: null, maxAgeRating: null, hideAdultLibraries };
   // Deliberately NOT caught. Both restrictions are expressed by a NON-null value, so any fallback here is a
   // fallback to "unrestricted": `.catch(() => [])` collapsed through `rows.length ? ... : null` into

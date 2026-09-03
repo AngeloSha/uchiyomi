@@ -219,8 +219,18 @@ test('a refusing source costs one chapter, not the whole run', { skip }, async (
 // series were skipped one after another -- with the 34 series on other sources stuck behind them. The only
 // record was "blocked=164" in one log line.
 
-/** Only these rows take part in the next sweep. The earlier tests toggle auto_update by source; this is by id. */
-const only = (keys: string[]) => q(`UPDATE lib_series SET auto_update = (id = ANY($1::text[])) WHERE library_id = $2`, [keys.map(S), LIB]);
+/**
+ * Only these rows take part in the next sweep: everything else is switched off, whichever library or test file
+ * it came from. Scoping this to LIB let a fixture left behind by another file sharing the scratch database ride
+ * into the sweep and put every count off by one.
+ */
+const only = async (keys: string[]) => {
+  await q(`UPDATE lib_series SET auto_update = (id = ANY($1::text[]))`, [keys.map(S)]);
+  // A scan run by an earlier test can merge or soft-delete a hand-made fixture; the sweep's query would then
+  // silently select nothing. Restore visibility for the rows this test is about, and let the precondition
+  // assertions below say so if anything else is off.
+  await q(`UPDATE lib_series SET deleted_at = NULL, merged_into = NULL WHERE id = ANY($1::text[])`, [keys.map(S)]);
+};
 const onDisk = (key: string, n: number) => existsSync(join(ROOT, S(key), `Chapter ${n}.cbz`));
 const stamp = async (key: string) =>
   (await q(`SELECT source_chapters AS c, source_missing AS m, source_checked_at AS t FROM lib_series WHERE id = $1`, [S(key)]))[0];
@@ -350,4 +360,86 @@ test('a chapter that will not download is written down, and erased when it lands
   assert.ok(onDisk('ledger', 2));
   await persistScan();
   assert.equal(await row(), undefined, 'erased the moment the chapter exists');
+});
+
+
+/**
+ * A completed sweep leaves a persisted timestamp, and only a completed one.
+ *
+ * The scheduled updater's first run after boot used to wait a full interval, so every deploy pushed the
+ * next sweep out by six hours; three deploys in one day meant no scheduled sweep at all, measured live. The
+ * first tick now schedules the remainder of the interval since this stamp. Reintroduce by removing the
+ * UPDATE in runSweep: the stamp stays null and a restart starts the clock from zero again.
+ */
+test('a completed sweep records when it finished', { skip }, async () => {
+  const { runSweep } = await import('../src/lib/updater');
+  await only(['empty']);
+  await q('UPDATE server_settings SET updater_last_run = NULL WHERE id = 1');
+  const quiet = { info() {}, warn() {}, error() {} };
+  const run = runSweep({ maxNew: 1 }, quiet as any);
+  assert.ok(run, 'nothing else was running, so it started');
+  await run;
+  const t = (await q('SELECT updater_last_run AS t FROM server_settings WHERE id = 1'))[0].t;
+  assert.ok(t && Date.now() - new Date(t).getTime() < 60_000, 'stamped within the last minute');
+
+  // A sweep that threw is not a completed sweep: the stamp must not move.
+  await q('UPDATE server_settings SET updater_last_run = NULL WHERE id = 1');
+  const boom = runSweep({ maxNew: 1 }, quiet as any, async () => { throw new Error('sweep died'); });
+  assert.ok(boom); await boom;
+  assert.equal((await q('SELECT updater_last_run AS t FROM server_settings WHERE id = 1'))[0].t, null,
+    'a run that died does not count as the last completed one');
+});
+
+
+/**
+ * A stop request ends the sweep at a boundary, and says so.
+ *
+ * There was no signal handler at all: `docker compose up -d` in the middle of a sweep killed it wherever it
+ * was, the job card polled a run that no longer existed, and the result was indistinguishable from a sweep
+ * that finished. Now SIGTERM sets runtime.stopping; the sweep checks it between series and between
+ * chapters, never mid-write, and reports `stopped: 'shutdown'`.
+ *
+ * Reintroduce by removing either `runtime.stopping` check in updater.ts: the matching test fails.
+ */
+test('a stop request ends the sweep between series, and it is not a healthy night', { skip }, async () => {
+  const { runtime } = await import('../src/lib/runtime');
+  await only(['many1', 'many2']);
+  await q('DELETE FROM source_health WHERE source_id = $1', [SRC_MANY]);
+  // Precondition, asserted rather than assumed: the two rows must be what the sweep's own query selects.
+  const pre = await q(`SELECT id, auto_update, deleted_at, merged_into, library_id FROM lib_series WHERE id = ANY($1::text[]) ORDER BY id`, [[S('many1'), S('many2')]]);
+  assert.deepEqual(pre.map((r: any) => [r.id, r.auto_update, r.deleted_at, r.merged_into]),
+    [[S('many1'), true, null, null], [S('many2'), true, null, null]], `fixture rows are not sweepable: ${JSON.stringify(pre)}`);
+  globalThis.fetch = (async () => png()) as typeof fetch;
+  runtime.stopping = true;
+  try {
+    const r = await runUpdateAll({ maxNew: 5 });
+    assert.equal(r.visited, 0, 'nothing was started once a stop was requested');
+    assert.equal(r.stopped, 'shutdown');
+    assert.equal(r.outcomes.skipped, 2, 'what it did not reach is counted as skipped, not as done');
+    assert.equal(r.healthy, false, 'an interrupted sweep must not read as a quiet night');
+  } finally { runtime.stopping = false; }
+});
+
+test('a stop request mid-series finishes the current chapter and takes no more', { skip }, async () => {
+  const { runtime } = await import('../src/lib/runtime');
+  const { registerAdapter } = await import('../src/lib/sources');
+  const SRC_STOP = 'upd-stop';
+  registerAdapter({
+    id: SRC_STOP, name: SRC_STOP,
+    async search() { return []; },
+    async getSeries(sid: string) { return { sourceId: sid, source: SRC_STOP, title: sid }; },
+    async listChapters() { return Array.from({ length: 5 }, (_, i) => ({ number: i + 1, title: `Chapter ${i + 1}`, sourceId: `s${i + 1}` })); },
+    // The stop arrives while chapter 1 is being fetched: chapter 1 must still land whole, chapter 2 must not start.
+    async getPageUrls() { runtime.stopping = true; return ['https://example.invalid/page.png']; },
+    async latest() { return []; },
+  } as any);
+  await q(`INSERT INTO lib_series (id, source, title, folder, books_count, library_id, source_id, source_series_id, auto_update)
+           VALUES ($1,'T!upd',$1,$1,0,$2,$3,$4,true) ON CONFLICT (id) DO NOTHING`, [S('stop'), LIB, SRC_STOP, `${SRC_STOP}-1`]);
+  globalThis.fetch = (async () => png()) as typeof fetch;
+  try {
+    const r = await updateSeries(S('stop'), 5);
+    assert.equal(r.added, 1, 'the chapter in flight completed');
+    assert.ok(onDisk('stop', 1), 'and is whole on disk');
+    assert.ok(!onDisk('stop', 2), 'the next one was never started');
+  } finally { runtime.stopping = false; }
 });

@@ -1,4 +1,5 @@
 import { createHash, randomBytes } from 'node:crypto';
+import { writeAtomic } from './fsAtomic';
 import { createReadStream } from 'node:fs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -35,11 +36,8 @@ async function readMeta(key: string): Promise<Meta | null> {
 
 const inflight = new Map<string, Promise<Meta>>();
 
-async function writeAtomic(file: string, data: Buffer | string): Promise<void> {
-  const tmp = `${file}.tmp.${randomBytes(6).toString('hex')}`;
-  await fs.writeFile(tmp, data);
-  await fs.rename(tmp, file);
-}
+// writeAtomic now lives in fsAtomic.ts, shared with the downloader: the library deserved the same guarantee
+// the cache already had.
 
 /** Get cached metadata for `variant`, fetching+storing via `fetcher` on a miss.
  *  Exported for cache pre-warmers (e.g. hero backdrops) that want to populate the cache without a request. */

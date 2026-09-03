@@ -44,7 +44,7 @@ const LIST_TIMEOUT = Number(process.env.UPDATER_LIST_TIMEOUT_MS) || 20_000;
  */
 const SWEEP_MAX = Number(process.env.UPDATER_SWEEP_MAX) || 150;
 
-export type SweepStop = 'budget' | 'disk';
+export type SweepStop = 'budget' | 'disk' | 'shutdown';
 
 /** What the source said, kept on the row. See the migrate comment on source_chapters. */
 async function stampChecked(seriesId: string, chapters: number | null, missing: number | null): Promise<void> {
@@ -85,6 +85,7 @@ export async function updateSeries(
   // oldest-missing-first: a partial "first N" add fills forward coherently, and new releases (all > our max)
   // are still the only gap once a series is fully downloaded.
   for (const ch of missing.slice(0, maxNew)) {
+    if (runtime.stopping) break; // between chapters, never mid-write
     try {
       const res = await downloadChapter({
         sourceId: s.source_id,
@@ -164,6 +165,7 @@ export async function runUpdateAll(opts: { onlyFavorites?: boolean; maxNew?: num
     for (const [src, ids] of [...queues]) {
       if (!ids.length) { queues.delete(src); continue; }
       if (parked.has(src)) continue;
+      if (runtime.stopping) { stopped = 'shutdown'; break sweep; }
       if (spent >= sweepMax) { stopped = 'budget'; break sweep; }
       const id = ids.shift()!;
       progressed = true;
@@ -195,7 +197,7 @@ export async function runUpdateAll(opts: { onlyFavorites?: boolean; maxNew?: num
   const broken = outcomes.source_error + outcomes.threw;
   return {
     series: rows.length, visited, added, failed: broken, chapterFailures, outcomes, stopped,
-    healthy: broken === 0 && chapterFailures === 0 && stopped !== 'disk',
+    healthy: broken === 0 && chapterFailures === 0 && stopped !== 'disk' && stopped !== 'shutdown',
   };
 }
 
@@ -229,6 +231,8 @@ export function runSweep(opts: SweepOpts, log: SweepLog, sweep: typeof runUpdate
     try {
       const r = await sweep(opts);
       runtime.lastUpdate = Date.now();
+      // Persisted so a restart schedules the remainder of the interval rather than a whole new one.
+      await q(`UPDATE server_settings SET updater_last_run = now() WHERE id = 1`).catch(() => {});
       runtime.lastUpdateResult = { series: r.series, visited: r.visited, added: r.added, failed: r.failed, chapterFailures: r.chapterFailures, healthy: r.healthy, stopped: r.stopped };
       // A sweep that added nothing because nothing was new, and one that added nothing because every source
       // was down, used to print the identical line. They no longer do. Nor does a sweep that finished look

@@ -3,7 +3,7 @@
 // session cookies for the binary image fetches (FlareSolverr itself can't return binaries).
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const AdmZip = require('adm-zip');
-import { mkdir, writeFile, stat, statfs } from 'fs/promises';
+import { mkdir, stat, statfs } from 'fs/promises';
 import { join, dirname } from 'path';
 import { getSource, SourceChapter, SourceSeries } from './sources';
 import { cfSession } from './sources/flaresolverr';
@@ -11,6 +11,7 @@ import { DL_ROOT } from './library';
 import { classify, reportOk, reportFail, SourceStatus } from './sourceHealth';
 import { withGate } from './gate';
 import { imageExt } from './imageExt';
+import { writeAtomic } from './fsAtomic';
 
 export function sanitize(s: string): string {
   return (s || '').replace(/[\/\\:*?"<>|]+/g, '_').replace(/\s+/g, ' ').trim().slice(0, 150) || 'untitled';
@@ -307,6 +308,8 @@ async function fetchChapter(
   })));
 
   await mkdir(dirname(abs), { recursive: true });
-  await writeFile(abs, zip.toBuffer());
+  // Atomic, because the skip check at the top of downloadChapter is a bare stat(): a chapter half-written
+  // when the container went down would otherwise be honoured as complete on every later sweep, forever.
+  await writeAtomic(abs, zip.toBuffer());
   return { file: rel, pages: n };
 }

@@ -1,5 +1,40 @@
 # Changelog
 
+## v0.14.2 — 2026-09-03
+
+### Small things that were quietly wrong
+
+Each of these was known and written down a week ago. None was the biggest thing at the time, and all of
+them are the kind of defect that produces no error and no log line.
+
+- **A stale tab could rewind your place.** The server refuses a progress write older than the one it has,
+  but only when the write carries a timestamp. The offline queue always sent one; the live path never did,
+  so every live ping was accepted unconditionally, and a desktop tab left open on chapter 3 could still
+  rewind the phone that had read to chapter 9. The live write now carries its clock.
+- **Two definitions of "gap".** The health page and "find missing chapters" each computed missing chapters
+  their own way, and on a series that starts at chapter 0 and jumps to 93 they disagreed: health said no
+  gaps, the dialog offered to fetch 92. Both green in their own tests. There is one definition now, the
+  dialog's, and the health page uses it.
+- **Chapters were written less carefully than the thumbnail cache.** A chapter file was written straight
+  onto its final name, and the "already downloaded" check is a bare look for that name, so a container
+  restarted mid-download could leave a half-chapter that was then skipped forever. The cache already wrote
+  to a temporary name and renamed on success; the library now does too, and abandoned temporaries are
+  swept on boot. The nightly database dump gets the same treatment, so a backup interrupted halfway does not
+  masquerade as a completed one.
+- **The safe backend is now the default.** `LIBRARY_BACKEND` had to be exactly `owned` for the permission
+  model to apply; unset or misspelled, the code fell back to the legacy mode whose model is "the other
+  server enforces it", which on this backend means no restriction at all, on the path that serves page
+  images and OPDS downloads. Every compose file sets the variable, which is exactly why nobody noticed. Only
+  an explicit `komga` selects the legacy mode now.
+- **Deploys no longer starve the nightly sweep.** The first sweep after boot waited a full interval, so
+  every deploy pushed it out by six hours; on a day with three releases the library did not update at all,
+  measured. The time of the last completed sweep is now kept, and a restart schedules whatever remains of
+  the interval, with a ten-minute floor.
+- **Stopping the server stops the sweep at a chapter boundary.** There was no signal handler at all: a
+  restart mid-sweep killed it mid-chapter, the job card kept polling a run that no longer existed, and
+  nothing recorded that it had been interrupted rather than finished. The sweep now ends between chapters
+  on SIGTERM and reports `stopped: shutdown`.
+
 ## v0.14.1 — 2026-09-03
 
 ### The fill dialog stops recommending sources that have never worked

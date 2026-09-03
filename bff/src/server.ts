@@ -8,6 +8,8 @@ import compress from '@fastify/compress';
 import { env } from './env';
 import { pool } from './lib/db';
 import { runtime } from './lib/runtime';
+import { reapStaleTemp } from './lib/fsAtomic';
+import { DL_ROOT } from './lib/library';
 import { migrate } from './lib/migrate';
 import { loadSources, loadCustomSites, loadBuiltins, listSources, loadSuwayomiSources, scheduleSuwayomiRetry } from './lib/sources';
 import { scheduleFingerprintBackfill } from './lib/fingerprintJob';
@@ -147,14 +149,23 @@ async function main() {
       }
       setTimeout(tick, hours * 60 * 60 * 1000).unref();
     };
-    // first run honors the configured interval too (a 1h setting shouldn't wait 6h after a reboot)
+    // The first run used to wait a full interval after boot, so every deploy pushed the next sweep out by
+    // six hours: three deploys in one day meant no scheduled sweep at all, measured. Now the first run is
+    // scheduled for whatever remains of the interval since the last COMPLETED sweep (persisted, so it
+    // survives the restart), with a ten-minute floor so a restart loop cannot turn into a flood and a booting
+    // server answers readers before it starts fetching.
     void (async () => {
       let hours = 6;
+      let last = 0;
       try {
-        const s = await pool.query('SELECT updater_hours FROM server_settings WHERE id = 1');
+        const s = await pool.query('SELECT updater_hours, updater_last_run FROM server_settings WHERE id = 1');
         hours = Math.min(168, Math.max(1, s.rows[0]?.updater_hours || 6));
-      } catch { /* settings row not readable yet — keep the 6h default */ }
-      setTimeout(tick, hours * 60 * 60 * 1000).unref();
+        last = s.rows[0]?.updater_last_run ? new Date(s.rows[0].updater_last_run).getTime() : 0;
+      } catch { /* settings row not readable yet — keep the defaults */ }
+      const due = last + hours * 60 * 60 * 1000 - Date.now();
+      const delay = Math.max(10 * 60 * 1000, due);
+      app.log.info(`updater: first sweep in ${Math.round(delay / 60000)} min` + (last ? ` (last completed ${new Date(last).toISOString()})` : ' (no completed sweep on record)'));
+      setTimeout(tick, delay).unref();
     })();
   }
 
@@ -214,6 +225,21 @@ async function main() {
     void (async () => { setTimeout(backupTick, await nextBackupDelay()).unref(); })();
   }
 
+  // Abandoned half-writes from a previous life: a chapter or cache file whose rename never happened.
+  void reapStaleTemp(DL_ROOT).then((n) => { if (n) app.log.info(`reaped ${n} half-written file(s) under ${DL_ROOT}`); });
+
+  // Stop at a boundary, and say so. Before this there was no handler at all: `docker compose up -d` in the
+  // middle of a sweep killed it mid-chapter, the job card polled a dead id, and nothing recorded that a run
+  // had been interrupted rather than finished.
+  for (const sig of ['SIGTERM', 'SIGINT'] as const) {
+    process.once(sig, () => {
+      runtime.stopping = true;
+      app.log.info(`${sig}: finishing the current chapter, then stopping`);
+      void app.close().finally(() => process.exit(0));
+      setTimeout(() => process.exit(0), 20_000).unref(); // never hang a shutdown on a slow site
+    });
+  }
+
   await app.listen({ host: '0.0.0.0', port: env.PORT });
 
   // Says which topology is running, so "why is / a 404" is answerable from `docker compose logs`.
@@ -224,7 +250,7 @@ async function main() {
   // Content fingerprints for the library, filled in behind the server rather than during boot: it reads
   // every archive on disk, so putting it on the boot path would make start-up time grow with the size of
   // someone's library. Nothing reads the column yet, so not finishing is harmless.
-  if (process.env.LIBRARY_BACKEND === 'owned') scheduleFingerprintBackfill();
+  if (process.env.LIBRARY_BACKEND !== 'komga') scheduleFingerprintBackfill();
 }
 
 main().catch((e) => {
