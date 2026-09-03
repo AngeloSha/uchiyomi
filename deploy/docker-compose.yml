@@ -126,11 +126,25 @@ services:
     restart: unless-stopped
     environment:
       TZ: ${TZ:-UTC}
+      # Uchiyomi owns the library and does the downloading; this instance must never write into it. The
+      # development compose has said so from the start and this file, the one people actually install from,
+      # did not.
+      AUTO_DOWNLOAD_CHAPTERS: "false"
+      DOWNLOAD_AS_CBZ: "true"
     volumes:
       - uchiyomi_suwayomi:/home/suwayomi/.local/share/Tachidesk
     networks: [uchiyomi_app]
     expose:
       - "4567"
+    healthcheck:
+      # The image has bash but no curl, wget or nc, so bash opens the socket itself. 401 counts as alive:
+      # the engine is up, it just has authentication switched on. A JVM takes a while to come up, hence the
+      # long start period; before this `docker ps` could not tell "still starting" from "broken".
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/4567; printf 'GET /api/v1/settings/about HTTP/1.0\\r\\n\\r\\n' >&3; head -1 <&3 | grep -qE ' (200|401) '"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 90s
 
 networks:
   uchiyomi_internal:   # database only — deliberately not reachable from outside the stack

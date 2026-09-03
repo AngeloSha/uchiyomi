@@ -115,6 +115,28 @@ test('reading and writing repositories round-trips', async () => {
   assert.ok(seen[0].includes('example.org/b.json'), seen[0]);
 });
 
+test('refreshing the repositories passes its timeout through to the transport', async () => {
+  // The scheduled extension check needs a longer budget than an admin pressing Refresh: it downloads every
+  // configured repository index, and the default 120s was chosen for one person waiting on one button.
+  // A parameter that is accepted and then ignored looks exactly like one that works, right up until a slow
+  // repository makes the scheduled check time out and report the engine as broken.
+  //
+  // Reintroduce by dropping the timeoutMs parameter, or by not forwarding it to run(): the recorded
+  // timeout falls back to 120000 and the assertion below fails.
+  const { refreshExtensions } = await load();
+  const timeouts: (number | undefined)[] = [];
+  const rec = (async (_q: string, _v: Record<string, unknown> = {}, timeoutMs?: number) => {
+    timeouts.push(timeoutMs);
+    return { fetchExtensions: { extensions: [{ pkgName: 'a.b.c' }] } };
+  }) as never;
+
+  assert.equal(await refreshExtensions(rec), 1);
+  assert.equal(timeouts[0], 120000, 'the default budget changed without this test being updated');
+
+  await refreshExtensions(rec, 300000);
+  assert.equal(timeouts[1], 300000, 'refreshExtensions ignored the timeout it was given');
+});
+
 test('a repository that yields nothing gets one alternative url to try', async () => {
   const { altRepoUrl } = await load();
   // insurance for varying repository layouts; the caller only keeps it if it actually returns more

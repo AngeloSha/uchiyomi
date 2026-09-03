@@ -51,10 +51,18 @@ export async function listExtensions(run: Gql = defaultGql): Promise<ExtensionIn
   return Array.isArray(nodes) ? nodes.map(toInfo).filter((e): e is ExtensionInfo => !!e) : [];
 }
 
-/** Re-read the repositories. Slow (it downloads each repo index), so it is only ever explicit. */
-export async function refreshExtensions(run: Gql = defaultGql): Promise<number> {
+/**
+ * Re-read the repositories. Slow (it downloads each repo index), so it runs when someone asks for it or on
+ * the scheduled extension check -- never on every catalogue read.
+ *
+ * This is the ONLY thing that makes the engine recompute "update available". Its previous one-line comment
+ * said "only ever explicit", and that sentence was the bug: the nightly auto-updater read the catalogue
+ * without ever calling this, so it compared against whatever an admin had last refreshed by hand and found
+ * nothing to do, indefinitely.
+ */
+export async function refreshExtensions(run: Gql = defaultGql, timeoutMs = 120000): Promise<number> {
   const d = await run<{ fetchExtensions: { extensions: RawExtension[] } }>(
-    `mutation{ fetchExtensions(input:{}){ extensions { pkgName } } }`, {}, 120000,
+    `mutation{ fetchExtensions(input:{}){ extensions { pkgName } } }`, {}, timeoutMs,
   );
   return d?.fetchExtensions?.extensions?.length ?? 0;
 }

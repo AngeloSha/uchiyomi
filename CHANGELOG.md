@@ -1,5 +1,34 @@
 # Changelog
 
+## v0.14.4 — 2026-09-03
+
+### The extension engine can no longer download into its own volume, and says when it is down
+
+Three compose files describe the same optional extension engine, and they had drifted. The development file
+set `AUTO_DOWNLOAD_CHAPTERS: "false"` and explained in a comment that the engine "must never write into" the
+library. `deploy/docker-compose.yml` -- the file the README tells you to download -- set only the timezone.
+
+So an install done the documented way ran an engine that would download chapters into its own Docker volume
+the first time a series from an extension source was followed: a second copy of the library that nothing
+manages, prunes, backs up, or shows you. Both deploy files now carry the setting, and a test compares all
+three so they cannot drift again.
+
+The engine also had no healthcheck in any file, so a wedged JVM was indistinguishable from a healthy one in
+`docker ps` and the only symptom was the app timing out. It has one now. It is written with bash rather than
+curl because the image ships no curl, wget or nc, and it treats 401 as alive -- an engine with authentication
+switched on is up, not broken.
+
+Deliberately no `depends_on`: the service is optional and the compose file tells you how to remove it, and a
+`depends_on` pointing at a removed service makes `docker compose up` fail outright.
+
+Also:
+
+- `.env.example` documents the `SUWAYOMI_*` variables. The extensions guide told you to edit `.env`, and the
+  example file it referred to had never mentioned them.
+- The comment above the extensions API said Uchiyomi "never fetches or installs extension APKs itself" and
+  that installing was a link out to the engine's own interface. That stopped being true the day the catalogue
+  was written, ninety lines below it.
+
 ## v0.14.3 — 2026-09-03
 
 ### "Find missing chapters" stops calling sources broken for waiting their turn

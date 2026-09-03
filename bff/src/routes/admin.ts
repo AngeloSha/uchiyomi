@@ -960,8 +960,11 @@ export default async function adminRoutes(app: FastifyInstance) {
   app.get('/api/admin/art/backfill/status', async () => ({ job: artJob }));
 
   // ---- extensions (Mihon/Tachiyomi sources, via an optional Suwayomi server) ----
-  // Uchiyomi never fetches or installs extension APKs itself: installing is a link out to Suwayomi's own UI.
-  // All this does is let the operator choose WHICH of the extension's sources become Uchiyomi sources.
+  // Uchiyomi is the remote control, the engine does the work: the catalogue below asks Suwayomi to fetch its
+  // repositories and to install, update or remove an extension, and the routes after it choose WHICH of an
+  // extension's sources become Uchiyomi sources. Nothing here downloads an APK into this process. (This
+  // comment used to claim the opposite -- that installing was a link out to Suwayomi's UI -- which stopped
+  // being true the day the catalogue block below was written.)
   app.get('/api/admin/extensions/status', async () => {
     if (!suwayomiConfigured()) return { configured: false, reachable: false };
     let version: string | null = null;
