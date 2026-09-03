@@ -106,3 +106,70 @@ test('library health checks', { skip: DSN ? false : 'set TEST_DATABASE_URL to ru
 
   for (const id of [S_GAPS, S_CLEAN]) await q(`DELETE FROM lib_series WHERE id = $1`, [id]);
 });
+
+
+const S_FROZEN = 's_health_frozen', S_ROUTED = 's_health_routed';
+
+/**
+ * A series whose source no longer exists must be SAID somewhere.
+ *
+ * `updateSeries` returns `unrouted` for it every night and the sweep discards the count; its health row, if
+ * any, reads `ok` because nothing was ever asked; the fill scan never pins it. Live: 31 chapters, frozen for
+ * twelve days, and every surface said fine.
+ *
+ * Reintroduce by removing frozenSeries() from the Promise.all in runHealthChecks: the check is absent.
+ */
+test('a series with no working source is listed, one with a working source is not', { skip: DSN ? false : 'set TEST_DATABASE_URL to run' }, async () => {
+  const { migrate } = await import('../src/lib/migrate');
+  const { q } = await import('../src/lib/db');
+  const { runHealthChecks } = await import('../src/lib/health');
+  const { registerAdapter } = await import('../src/lib/sources');
+  await migrate();
+  registerAdapter({ id: 'health-live', name: 'Health Live', search: async () => [], getSeries: async () => null,
+    listChapters: async () => [], getPageUrls: async () => [], latest: async () => [] } as any);
+  for (const id of [S_FROZEN, S_ROUTED]) await q('DELETE FROM lib_series WHERE id = $1', [id]);
+  await q(`INSERT INTO lib_series (id, source, title, folder, books_count, source_id, source_series_id)
+           VALUES ($1, 'test', 'Frozen Fixture', $1, 31, 'sw:999999999', '9')`, [S_FROZEN]);
+  await q(`INSERT INTO lib_series (id, source, title, folder, books_count, source_id, source_series_id)
+           VALUES ($1, 'test', 'Routed Fixture', $1, 5, 'health-live', 'x')`, [S_ROUTED]);
+  try {
+    const report = await runHealthChecks();
+    const check = report.checks.find((c: any) => c.id === 'frozen-series');
+    assert.ok(check, 'the check exists');
+    assert.equal(check.status, 'warn');
+    const titles = check.items.map((i: any) => i.title);
+    assert.ok(titles.includes('Frozen Fixture'), `the frozen series is named: ${titles.join(', ')}`);
+    assert.ok(!titles.includes('Routed Fixture'), 'a series whose adapter is loaded is not');
+    assert.match(check.items.find((i: any) => i.title === 'Frozen Fixture').detail, /sw:999999999 is no longer installed/);
+  } finally {
+    for (const id of [S_FROZEN, S_ROUTED]) await q('DELETE FROM lib_series WHERE id = $1', [id]);
+  }
+});
+
+/**
+ * The prune that runs when an extension is uninstalled must keep the health row of a source that still
+ * has series. That row is the only record the source ever existed, and those series are frozen, not gone.
+ * This exercises the function the route calls; the route itself needs a live extension server.
+ *
+ * Reintroduce by dropping the NOT EXISTS clause in pruneOrphanedHealth: orphan-b is deleted and this fails.
+ */
+test('uninstall prunes an orphaned health row and keeps one that still has series', { skip: DSN ? false : 'set TEST_DATABASE_URL to run' }, async () => {
+  const { migrate } = await import('../src/lib/migrate');
+  const { q } = await import('../src/lib/db');
+  const { pruneOrphanedHealth } = await import('../src/lib/sourceHealth');
+  await migrate();
+  const A = 'sw:orphan-a', B = 'sw:orphan-b', SB = 's_health_orphan_b';
+  await q('DELETE FROM lib_series WHERE id = $1', [SB]);
+  await q('DELETE FROM source_health WHERE source_id = ANY($1::text[])', [[A, B]]);
+  await q(`INSERT INTO source_health (source_id, status) VALUES ($1, 'down'), ($2, 'ok')`, [A, B]);
+  await q(`INSERT INTO lib_series (id, source, title, folder, source_id, source_series_id) VALUES ($1, 'test', 'Orphan B', $1, $2, '1')`, [SB, B]);
+  try {
+    const pruned = await pruneOrphanedHealth([A, B]);
+    assert.equal(pruned, 1, 'exactly one row went');
+    const left = (await q<{ source_id: string }>('SELECT source_id FROM source_health WHERE source_id = ANY($1::text[]) ORDER BY 1', [[A, B]])).map((r) => r.source_id);
+    assert.deepEqual(left, [B], 'the orphan went, the one with a series stayed');
+  } finally {
+    await q('DELETE FROM lib_series WHERE id = $1', [SB]);
+    await q('DELETE FROM source_health WHERE source_id = ANY($1::text[])', [[A, B]]);
+  }
+});

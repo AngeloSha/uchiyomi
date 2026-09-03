@@ -198,3 +198,36 @@ test('a stale plan is refused rather than re-derived', { skip }, async () => {
   assert.equal(res.statusCode, 409);
   assert.equal(res.json().error, 'plan_stale');
 });
+
+
+/**
+ * A source with a failure streak is still OFFERED, and the dialog is told.
+ *
+ * The scan gated on `blocked_until` alone. Once a cooldown lapsed the source came back as a clean
+ * `why='ok'`, whatever its record: live, WeebCentral had 403'd on every image byte since June, never once
+ * completed a download, and rendered as a confident "Fetch 12 chapters" button. Hiding it instead would
+ * deadlock it -- `consecutive` is cleared only by reportOk, which fires only after a download succeeds.
+ *
+ * Reintroduce by dropping the `health:` field from the candidate: the first assertion below fails.
+ */
+test('a source with a streak is offered with its record attached, not hidden', { skip }, async () => {
+  await q(`INSERT INTO source_health (source_id, status, consecutive, last_fail_at, last_ok_at, blocked_until)
+           VALUES ($1, 'rate_limited', 3, now(), NULL, now() - interval '1 hour')
+           ON CONFLICT (source_id) DO UPDATE SET status = 'rate_limited', consecutive = 3, last_fail_at = now(),
+             last_ok_at = NULL, blocked_until = now() - interval '1 hour'`, [RICH]);
+  let rich = (await scan()).json().candidates.find((c: any) => c.source === RICH);
+  assert.ok(rich, 'the source is still in the list');
+  // Whatever the verdict says about its chapters, the streak itself must not have decided anything.
+  assert.notEqual(rich.why, 'blocked', 'a lapsed cooldown is not a block: a warning is not a filter');
+  assert.ok(['ok', 'nothing_to_fill', 'numbering_mismatch'].includes(rich.why), `judged on its chapters, got ${rich.why}`);
+  assert.ok(rich.health, 'and the dialog is told what it is dealing with');
+  assert.equal(rich.health.status, 'rate_limited');
+  assert.equal(rich.health.consecutive, 3);
+  assert.equal(rich.health.lastOkAt, null, 'never completed a download here: the fact that would have saved a person from WeebCentral');
+  assert.ok(!('lastError' in rich.health) && !JSON.stringify(rich).includes('last_error'),
+    'last_error carries internal hostnames and this route is not admin-only');
+
+  await q('DELETE FROM source_health WHERE source_id = $1', [RICH]);
+  rich = (await scan()).json().candidates.find((c: any) => c.source === RICH);
+  assert.equal(rich.health, null, 'a clean source carries no warning');
+});

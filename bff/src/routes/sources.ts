@@ -628,12 +628,16 @@ export default async function sourceRoutes(app: FastifyInstance) {
     // shared lookup so it reuses whatever the add dialog already fetched.
     const chapters = new Map<string, SourceChapter[]>();
     const candidates: PlanCandidate[] = [];
+    // One read for every source, rather than one blockedNow() per candidate: the same row answers "is it
+    // in a cooldown" and "what is its record", and the record is what the dialog was never told.
+    const health = new Map((await healthAll().catch(() => [])).map((h) => [h.source_id, h]));
     await Promise.all(found.map(async (f) => {
       const src = getSource(f.source);
       if (!src) return;
       let list: SourceChapter[] = [];
       let why: Refusal = 'ok';
-      if (await blockedNow(f.source).catch(() => false)) why = 'blocked';
+      const h = health.get(f.source);
+      if (h?.blocked_until && new Date(h.blocked_until).getTime() > Date.now()) why = 'blocked';
       else {
         try { list = (await seriesAndChapters(src, f.sourceId)).chapters; }
         catch { why = 'no_chapters'; }
@@ -648,6 +652,9 @@ export default async function sourceRoutes(app: FastifyInstance) {
         fillable: a.fillable, newer: a.newer,
         why: why === 'ok' ? verdict(a, list.length) : why,
         pinned: f.pinned,
+        health: h && (h.status !== 'ok' || h.consecutive > 0)
+          ? { status: h.status, consecutive: h.consecutive, lastFailAt: h.last_fail_at, lastOkAt: h.last_ok_at }
+          : null,
       });
     }));
 

@@ -25,6 +25,7 @@ interface Candidate {
   coverage: number; matched: number;
   fillable: number[]; newer: number[];
   why: string; pinned: boolean;
+  health?: { status: string; consecutive: number; lastFailAt: string | null; lastOkAt: string | null } | null;
 }
 interface Scan {
   seriesId: string; title: string; folder: string;
@@ -147,6 +148,16 @@ export function FindMissingDialog({ seriesId, onClose }: { seriesId: string; onC
                       .replace('{m}', String(c.matched)).replace('{n}', String(d.have.count))}
                     {c.pinned && ` · ${tr('this series’ own source')}`}
                   </p>
+                  {/* A warning, never a filter: hiding a source with a streak would deadlock it, because only a
+                      successful download clears the streak. The person decides, with the record in front of them. */}
+                  {c.health && (
+                    <p className="mt-1 text-xs text-amber-300">
+                      {tr('Recently unreliable')} · {c.health.status === 'rate_limited' ? tr('rate-limited us')
+                        : c.health.status === 'blocked' ? tr('refused us') : tr('did not answer')}
+                      {c.health.consecutive > 1 && ` ${tr('{n} times in a row').replace('{n}', String(c.health.consecutive))}`}
+                      {!c.health.lastOkAt && ` · ${tr('never completed a download here')}`}
+                    </p>
+                  )}
                 </div>
               </div>
               <button

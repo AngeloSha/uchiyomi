@@ -13,7 +13,7 @@ import { runBackup } from '../lib/backup';
 import { runUpdateAll, updateSeries } from '../lib/updater';
 import { authenticate, requireAdmin, userIdOf, revokeAllSessions, revokeRefreshTokenById, passwordError } from '../lib/auth';
 import { logAudit, recentAudit } from '../lib/audit';
-import { healthAll, setDisabled, clearBlock, SourceHealth } from '../lib/sourceHealth';
+import { healthAll, setDisabled, clearBlock, SourceHealth, pruneOrphanedHealth } from '../lib/sourceHealth';
 import { smokeTest, probeBase } from '../lib/sourceProbe';
 import { runSourceCheck, checkRunning, updateExtensions } from '../lib/sourceWatchdog';
 import { diagnose } from '../lib/sourceDiagnosis';
@@ -1142,6 +1142,11 @@ export default async function adminRoutes(app: FastifyInstance) {
     if (b.data.action === 'uninstall') {
       // the sources are gone from the server too; don't leave rows implying otherwise
       await q('DELETE FROM suwayomi_sources WHERE source_id = ANY($1)', [provided.map((s) => s.id)]).catch(() => {});
+      // ...and neither their health rows, which nothing else ever deletes. Live this had accumulated twelve
+      // orphans, three of them recording 404s from the very evening their extensions were pulled. A row whose
+      // source still has series is kept: it is the only record that source ever existed, and those series
+      // are frozen, not gone -- the health page says so.
+      await pruneOrphanedHealth(provided.map((s) => `sw:${s.id}`));
     }
     const r = await reloadAll();
     return { ok: true, sources: provided.length, registered: r.suwayomi };

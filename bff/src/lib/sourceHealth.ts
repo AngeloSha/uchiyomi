@@ -2,6 +2,7 @@
 // a cooldown so the UI can warn + the updater can back off. Failures elsewhere are silently swallowed, so we
 // report here from the one place that matters most — the chapter downloader.
 import { q, one } from './db';
+import { visibleToAll } from './visibility';
 
 export type SourceStatus = 'ok' | 'rate_limited' | 'blocked' | 'down';
 
@@ -154,6 +155,27 @@ export const isDisabled = async (sourceId: string) =>
 export const setDisabled = (sourceId: string, disabled: boolean) =>
   q(`INSERT INTO source_health (source_id, disabled, updated_at) VALUES ($1, $2, now())
      ON CONFLICT (source_id) DO UPDATE SET disabled = $2, updated_at = now()`, [sourceId, disabled]);
+
+/**
+ * Drop the health rows of sources that no longer exist, unless a series still points at them.
+ *
+ * Nothing else ever deletes from source_health. Uninstalling an extension removed its suwayomi_sources rows
+ * and left these behind: live that had accumulated twelve orphans, three of them recording 404s from the very
+ * evening their extensions were pulled. A row whose source still has series is kept on purpose -- it is the
+ * only record those series ever had a home, and they are frozen, not gone (the health page says so).
+ * `visibleToAll` rather than a hand-written predicate: a merged-away or deleted series must not keep a dead
+ * source's row alive either.
+ */
+export async function pruneOrphanedHealth(sourceIds: string[]): Promise<number> {
+  if (!sourceIds.length) return 0;
+  const rows = await q<{ source_id: string }>(
+    `DELETE FROM source_health h WHERE h.source_id = ANY($1::text[])
+        AND NOT EXISTS (SELECT 1 FROM lib_series s WHERE s.source_id = h.source_id AND ${visibleToAll('s')})
+      RETURNING h.source_id`,
+    [sourceIds],
+  ).catch(() => [] as { source_id: string }[]);
+  return rows.length;
+}
 
 export const clearBlock = (sourceId: string) =>
   q(`UPDATE source_health SET status = 'ok', consecutive = 0, blocked_until = NULL, updated_at = now() WHERE source_id = $1`, [sourceId]);

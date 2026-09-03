@@ -1,6 +1,6 @@
 {
   "name": "yomi-bff",
-  "version": "0.14.0",
+  "version": "0.14.1",
   "private": true,
   "type": "commonjs",
   "engines": {

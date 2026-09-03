@@ -12,6 +12,7 @@
 import { q } from './db';
 import { visibleToAll } from './visibility';
 import { solverPing, solverUrl } from './sources/flaresolverr';
+import { getSource } from './sources';
 import { diagnose } from './sourceDiagnosis';
 
 export type HealthStatus = 'ok' | 'warn' | 'problem';
@@ -160,6 +161,47 @@ async function chapterFailures(): Promise<HealthCheck> {
     note:
       'One entry per source, counting chapters still missing after an attempt and how often each has been tried. ' +
       'They clear themselves the moment the chapter lands.' + (rows.length > 20 ? ` ${rows.length - 20} more not shown.` : ''),
+    items,
+  };
+}
+
+/**
+ * Series whose source no longer exists, so the updater and the fill can never reach them.
+ *
+ * `updateSeries` returns `unrouted` for these every night and the sweep prints the count and discards it.
+ * Their chapters read fine, their health row (if any) says `ok` because nothing ever failed -- nothing was
+ * ever asked -- and the fill scan never even pins them. Live: one series, 31 chapters, frozen since its
+ * extension was uninstalled twelve days earlier, and no surface anywhere said so.
+ */
+async function frozenSeries(): Promise<HealthCheck> {
+  const rows = await q<{ id: string; title: string; source_id: string | null; books_count: number }>(
+    `SELECT ls.id, ls.title, ls.source_id, ls.books_count
+       FROM lib_series ls
+      WHERE ls.auto_update AND ${visibleToAll('ls')}
+        AND (ls.source_id IS NULL OR ls.source_series_id IS NULL OR ls.source_id NOT IN (SELECT source_id FROM suwayomi_sources WHERE enabled)
+             OR ls.source_id LIKE 'sw:%')
+      ORDER BY ls.books_count DESC`,
+  ).catch(() => [] as any[]);
+  // The SQL over-selects on purpose (it cannot know which adapters are loaded); the loaded registry decides.
+  const frozen = rows.filter((r) => !r.source_id || !getSource(r.source_id));
+  const items: HealthItem[] = frozen.slice(0, 20).map((r) => ({
+    seriesId: r.id,
+    title: r.title,
+    detail: r.source_id
+      ? `${r.books_count} chapters; its source ${r.source_id} is no longer installed`
+      : `${r.books_count} chapters; no source recorded`,
+  }));
+  return {
+    id: 'frozen-series',
+    title: 'Series that can no longer update',
+    status: frozen.length ? 'warn' : 'ok',
+    summary: frozen.length
+      ? `${frozen.length} series ${frozen.length === 1 ? 'has' : 'have'} no working source`
+      : 'Every series has a working source',
+    note:
+      'These read fine, but nothing can fetch new chapters for them and "find missing chapters" will not offer ' +
+      'their own source. Re-add the extension, or re-point the series at a source that carries it.' +
+      (frozen.length > 20 ? ` ${frozen.length - 20} more not shown.` : ''),
     items,
   };
 }
@@ -341,6 +383,7 @@ export async function runHealthChecks(): Promise<HealthReport> {
     duplicateSeries(),
     sourceTrouble(),
     chapterFailures(),
+    frozenSeries(),
     solverHealth(),
   ]);
   // worst first, so the page opens on whatever needs attention

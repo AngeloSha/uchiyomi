@@ -1,5 +1,34 @@
 # Changelog
 
+## v0.14.1 — 2026-09-03
+
+### The fill dialog stops recommending sources that have never worked
+
+"Find missing chapters" checked one thing before offering a source: whether its cooldown had lapsed. Not its
+record. So a source could be offered as a clean option while sitting in a nineteen-deep failure streak, or
+having never once completed a download here. WeebCentral had refused every image byte since June, and
+because listing chapters still worked it rendered as a confident "Fetch 12 chapters" button.
+
+Hiding those sources would have been the obvious fix, and it would have been wrong: a streak is cleared only
+by a successful download, which is the very thing hiding it prevents. So the dialog now shows the record
+under the button instead: "Recently unreliable · refused us 3 times in a row · never completed a download
+here". The decision stays with the person, with the facts in front of them.
+
+### Series that can never update are now said out loud
+
+When an extension is removed, the series that came from it keep reading fine and quietly stop updating
+forever. The nightly sweep counted them as "unrouted" and threw the count away; their health row, if any,
+said fine because nothing had ever been asked. One series had been frozen that way for twelve days.
+
+The health page now lists them, with the fix: re-add the extension, or point the series at a source that
+carries it.
+
+### Removing an extension no longer leaves its health rows behind
+
+Uninstalling deleted the sources but not their health rows, which had accumulated a dozen orphans, three of
+them recording 404s from the evening their extensions were pulled. They are now removed with the extension,
+except for a source that still has series, whose row is the only record those series ever had a home.
+
 ## v0.14.0 — 2026-09-02
 
 ### The nightly sweep stopped sabotaging itself
