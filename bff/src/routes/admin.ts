@@ -10,7 +10,7 @@ import { containedPath } from '../lib/fsGuard';
 import { deleteSeries, restoreSeries, mergeSeries, getSeriesRow, deleteSeriesFiles, renameSeriesFolder } from '../lib/libraryAdmin';
 import { runFingerprintBackfill, fingerprintRemaining, fpState } from '../lib/fingerprintJob';
 import { runBackup } from '../lib/backup';
-import { runUpdateAll, updateSeries } from '../lib/updater';
+import { runUpdateAll, updateSeries, runSweep } from '../lib/updater';
 import { authenticate, requireAdmin, userIdOf, revokeAllSessions, revokeRefreshTokenById, passwordError } from '../lib/auth';
 import { logAudit, recentAudit } from '../lib/audit';
 import { healthAll, setDisabled, clearBlock, SourceHealth, pruneOrphanedHealth } from '../lib/sourceHealth';
@@ -121,7 +121,13 @@ export default async function adminRoutes(app: FastifyInstance) {
     const { id } = req.params as { id: string };
     await logAudit('task.run', { userId: userIdOf(req), detail: { task: id }, req });
     if (id === 'scan') return { ok: true, ...(await persistScan()) };
-    if (id === 'update') { runUpdateAll({ maxNew: 10 }).then((r) => { runtime.lastUpdate = Date.now(); runtime.lastUpdateResult = { series: r.series, visited: r.visited, added: r.added, failed: r.failed, chapterFailures: r.chapterFailures, healthy: r.healthy, stopped: r.stopped }; }).catch(() => {}); return { ok: true, started: true }; }
+    if (id === 'update') {
+      // Never awaited: a sweep is minutes to hours, and the caller is an admin clicking a button. runSweep
+      // marks it running, keeps the result, logs the summary and refuses to start on top of another one --
+      // everything this path used to skip, which is why the panel showed a manual sweep as idle throughout.
+      if (!runSweep({ maxNew: 10 }, app.log)) return { ok: false, error: 'busy' };
+      return { ok: true, started: true };
+    }
     if (id === 'fingerprint') {
       if (fpState.running) return { ok: false, error: 'busy' };
       // never awaited: on a large library this is minutes, and the caller is an admin clicking a button

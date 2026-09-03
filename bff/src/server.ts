@@ -12,7 +12,7 @@ import { migrate } from './lib/migrate';
 import { loadSources, loadCustomSites, loadBuiltins, listSources, loadSuwayomiSources, scheduleSuwayomiRetry } from './lib/sources';
 import { scheduleFingerprintBackfill } from './lib/fingerprintJob';
 import { runSourceCheck } from './lib/sourceWatchdog';
-import { runUpdateAll } from './lib/updater';
+import { runSweep } from './lib/updater';
 import { startSweeper } from './lib/imageCache';
 import { runBackup, msUntilHour } from './lib/backup';
 import { KomgaError } from './lib/komga';
@@ -137,24 +137,13 @@ async function main() {
       try {
         const s = await pool.query('SELECT updater_hours FROM server_settings WHERE id = 1');
         hours = Math.min(168, Math.max(1, s.rows[0]?.updater_hours || 6));
-        runtime.updating = true;
-        const r = await runUpdateAll({ maxNew: 5 });
-        runtime.lastUpdate = Date.now();
-        runtime.lastUpdateResult = { series: r.series, visited: r.visited, added: r.added, failed: r.failed, chapterFailures: r.chapterFailures, healthy: r.healthy, stopped: r.stopped };
-        // A sweep that added nothing because nothing was new, and one that added nothing because every source
-        // was down, used to print the identical line. They no longer do. Nor does a sweep that finished look
-        // like one the budget or the disk cut short.
-        const scope = `visited ${r.visited} of ${r.series} series${r.stopped ? ` (stopped: ${r.stopped})` : ''}`;
-        if (r.healthy) app.log.info(`updater: +${r.added} chapters, ${scope}`);
-        else app.log.warn(
-          `updater: +${r.added} chapters, ${scope}, but ${r.failed} series failed to answer` +
-          `${r.chapterFailures ? ` and ${r.chapterFailures} chapters could not be saved` : ''} ` +
-          `(${Object.entries(r.outcomes).filter(([, n]) => n).map(([k, n]) => `${k}=${n}`).join(' ')})`,
-        );
+        // The running flag, the stored result and the summary line all live in runSweep now, so the panel's
+        // "Run now" button gets the same treatment as this tick -- and this tick can see the button's sweep.
+        const run = runSweep({ maxNew: 5 }, app.log);
+        if (run) await run;
+        else app.log.info('updater: the previous sweep is still running, skipping this tick');
       } catch (e) {
         app.log.error(e as any);
-      } finally {
-        runtime.updating = false;
       }
       setTimeout(tick, hours * 60 * 60 * 1000).unref();
     };

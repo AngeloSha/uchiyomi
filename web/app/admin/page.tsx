@@ -950,7 +950,15 @@ function Tasks() {
   const toast = useToast();
   const qc = useQueryClient();
   const { data } = useQuery({ queryKey: ['admin-tasks'], queryFn: () => api<{ content: any[] }>('/api/admin/tasks'), refetchInterval: 5000 });
-  const run = async (id: string) => { try { await api(`/api/admin/tasks/${id}/run`, { method: 'POST' }); toast('Started', 'success'); qc.invalidateQueries({ queryKey: ['admin-tasks'] }); } catch { toast('Failed', 'error'); } };
+  const run = async (id: string) => {
+    try {
+      const r = await api<{ ok?: boolean; error?: string }>(`/api/admin/tasks/${id}/run`, { method: 'POST' });
+      // A refusal is a 200 with ok:false (the task is already running), and used to toast "Started" too.
+      if (r?.ok === false) toast(r.error === 'busy' ? 'Already running' : 'Failed', 'error');
+      else toast('Started', 'success');
+      qc.invalidateQueries({ queryKey: ['admin-tasks'] });
+    } catch { toast('Failed', 'error'); }
+  };
   // Chronological, per-row actions: a list, not a card grid. But an explicit column template rather than
   // `justify-between`, which at 1592px left a lake of nothing between a task's name and its own button.
   return (

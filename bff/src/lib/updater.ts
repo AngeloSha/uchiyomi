@@ -10,6 +10,7 @@ import { blockedNow } from './sourceHealth';
 import { noteChapterFailure } from './chapterFailures';
 import { notifyNewChapter } from './push';
 import { visibleToAll } from './visibility';
+import { runtime } from './runtime';
 
 /**
  * Why a series produced nothing this run.
@@ -196,4 +197,59 @@ export async function runUpdateAll(opts: { onlyFavorites?: boolean; maxNew?: num
     series: rows.length, visited, added, failed: broken, chapterFailures, outcomes, stopped,
     healthy: broken === 0 && chapterFailures === 0 && stopped !== 'disk',
   };
+}
+
+/** The part of a Fastify logger the sweep reports through. A test hands in one that captures. */
+export type SweepLog = { info(msg: string): void; warn(msg: string): void; error(err: unknown): void };
+export type SweepOpts = Parameters<typeof runUpdateAll>[0];
+export type SweepResult = Awaited<ReturnType<typeof runUpdateAll>>;
+
+/**
+ * Run one sweep the way the scheduled one is run: flagged as running while it goes, refused if one already
+ * is, its result kept for the admin panel, and one summary line in the log when it ends.
+ *
+ * All of that lived in server.ts's tick, and the panel's "Run now" button did none of it. It called
+ * runUpdateAll bare, so a manual sweep reported `running: false` for its whole duration (measured live:
+ * well over ten minutes, with `lastResult` still saying whatever the night before had said), wrote nothing
+ * to the log when it finished, swallowed a throw with a `.catch(() => {})`, and -- since `runtime.updating`
+ * is the tick's only overlap guard -- a scheduled sweep could start on top of it.
+ *
+ * Returns `false`, synchronously and without starting, when a sweep is already running. Otherwise the
+ * promise of the result, which resolves to null if the sweep itself threw: that is logged here, so no
+ * caller has to remember to, and none needs a `.catch(() => {})` again.
+ *
+ * `sweep` is the seam a test uses to make the sweep itself throw. No fake source can: a source that throws
+ * is a per-series `source_error`, which is the sweep working as designed.
+ */
+export function runSweep(opts: SweepOpts, log: SweepLog, sweep: typeof runUpdateAll = runUpdateAll): Promise<SweepResult | null> | false {
+  if (runtime.updating) return false;
+  // Set before the first await, so two starts in the same turn of the event loop cannot both get through.
+  runtime.updating = true;
+  return (async () => {
+    try {
+      const r = await sweep(opts);
+      runtime.lastUpdate = Date.now();
+      runtime.lastUpdateResult = { series: r.series, visited: r.visited, added: r.added, failed: r.failed, chapterFailures: r.chapterFailures, healthy: r.healthy, stopped: r.stopped };
+      // A sweep that added nothing because nothing was new, and one that added nothing because every source
+      // was down, used to print the identical line. They no longer do. Nor does a sweep that finished look
+      // like one the budget or the disk cut short.
+      const scope = `visited ${r.visited} of ${r.series} series${r.stopped ? ` (stopped: ${r.stopped})` : ''}`;
+      if (r.healthy) log.info(`updater: +${r.added} chapters, ${scope}`);
+      else log.warn(
+        `updater: +${r.added} chapters, ${scope}, but ${r.failed} series failed to answer` +
+        `${r.chapterFailures ? ` and ${r.chapterFailures} chapters could not be saved` : ''} ` +
+        `(${Object.entries(r.outcomes).filter(([, n]) => n).map(([k, n]) => `${k}=${n}`).join(' ')})`,
+      );
+      return r;
+    } catch (e) {
+      // The rule the backup path already follows: the panel must not keep showing the last good run as if it
+      // were this one. Last run moves to now, the result is cleared, and the reason is in `docker logs`.
+      runtime.lastUpdate = Date.now();
+      runtime.lastUpdateResult = null;
+      log.error(e);
+      return null;
+    } finally {
+      runtime.updating = false;
+    }
+  })();
 }
