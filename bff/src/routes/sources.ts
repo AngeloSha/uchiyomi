@@ -7,6 +7,7 @@ import type { SourceAdapter, SourceSeries, SourceChapter } from '../lib/sources/
 import { downloadChapter, sanitize } from '../lib/downloader';
 import { noteChapterFailure } from '../lib/chapterFailures';
 import { scanOrder } from '../lib/scanOrder';
+import { budgetFor } from '../lib/sources/budget';
 import { SOLVER_CONCURRENCY } from '../lib/sources/flaresolverr';
 
 /**
@@ -20,7 +21,7 @@ import { SOLVER_CONCURRENCY } from '../lib/sources/flaresolverr';
  */
 const SCAN_CONCURRENCY = Math.max(1, Number(process.env.SCAN_CONCURRENCY || SOLVER_CONCURRENCY));
 const SCAN_ENOUGH = Math.max(1, Number(process.env.SCAN_ENOUGH || 3));
-const SCAN_SEARCH_MS = 45_000;
+const SCAN_SEARCH_MS = Number(process.env.SCAN_SEARCH_MS) || 45_000;
 import { persistScan, setBookDates } from '../lib/library';
 import { fetchAniListArt, fetchTrendingManhwa, TrendingItem } from '../lib/anilist';
 import { q, one } from '../lib/db';
@@ -161,8 +162,8 @@ async function seriesAndChapters(src: SourceAdapter, sourceId: string):
   // title with genuinely nothing on it looks like.
   let failed = false;
   const [series, chapters] = await Promise.all([
-    withTimeout(src.getSeries(sourceId), ADD_LOOKUP_TIMEOUT).catch(() => { failed = true; return null; }),
-    withTimeout(src.listChapters(sourceId), ADD_LOOKUP_TIMEOUT).catch(() => { failed = true; return [] as SourceChapter[]; }),
+    withTimeout(src.getSeries(sourceId), budgetFor(src, ADD_LOOKUP_TIMEOUT)).catch(() => { failed = true; return null; }),
+    withTimeout(src.listChapters(sourceId), budgetFor(src, ADD_LOOKUP_TIMEOUT)).catch(() => { failed = true; return [] as SourceChapter[]; }),
   ]);
   // Only a real answer is remembered. Caching the failure -- which this did when the cache was added -- turns
   // a hiccup into a confident "No readable chapters for this title on this source. Try a different source."
@@ -437,7 +438,7 @@ export async function findBestMatch(term: string): Promise<{ source: string; sou
     if (!src) continue;
     if (await isDisabled(id).catch(() => false)) continue;
     try {
-      const best = pickBest(await withTimeout(src.search(term), 20000), term);
+      const best = pickBest(await withTimeout(src.search(term), budgetFor(src, 20000)), term);
       if (best?.sourceId) return { source: id, sourceId: best.sourceId, title: best.title };
     } catch { /* try next source */ }
   }
@@ -644,7 +645,7 @@ export default async function sourceRoutes(app: FastifyInstance) {
         let failed = false;
         for (const term of terms) {
           try {
-            const hit = pickBest(await withTimeout(src.search(term), SCAN_SEARCH_MS), term);
+            const hit = pickBest(await withTimeout(src.search(term), budgetFor(src, SCAN_SEARCH_MS)), term);
             if (hit?.sourceId) {
               found.push({ source: src.id, name: src.name, sourceId: hit.sourceId, title: hit.title, coverUrl: hit.coverUrl, pinned: false });
               return;
@@ -813,7 +814,7 @@ export default async function sourceRoutes(app: FastifyInstance) {
       const src = getSource(id);
       if (!src) return [];
       if (await isDisabled(id).catch(() => false)) return [];
-      try { return (await withTimeout(src.search(term), 20000)).slice(0, 12).map((r) => ({ ...r, name: src.name })); }
+      try { return (await withTimeout(src.search(term), budgetFor(src, 20000))).slice(0, 12).map((r) => ({ ...r, name: src.name })); }
       catch { return []; }
     }));
     // group by normalized title → one card that carries every provider offering it (preferred order preserved)
@@ -976,7 +977,7 @@ export default async function sourceRoutes(app: FastifyInstance) {
         // admin had switched off and the add then failed with "disabled by the admin".
         if (await isDisabled(id).catch(() => false)) return null;
         try {
-          const best = pickBest(await withTimeout(src.search(term), 25000), term);
+          const best = pickBest(await withTimeout(src.search(term), budgetFor(src, 25000)), term);
           return best ? { source: id, name: src.name, sourceId: best.sourceId, title: best.title, coverUrl: best.coverUrl } : null;
         } catch { return null; }
       }),

@@ -32,6 +32,7 @@ if (DSN) {
   process.env.CONFIG_DIR = process.env.CONFIG_DIR || '/tmp/uchiyomi-test-config';
   process.env.LIBRARY_BACKEND = 'owned';
   process.env.UPDATER_LIST_TIMEOUT_MS = '300'; // the real bound is 20s; nobody should wait that to prove it exists
+  process.env.SOLVER_BUDGET_MS = '800';       // and a solver-fronted source gets this instead (real: 90s)
 }
 const skip = DSN ? false : 'set TEST_DATABASE_URL to run';
 
@@ -224,6 +225,12 @@ test('a refusing source costs one chapter, not the whole run', { skip }, async (
  * it came from. Scoping this to LIB let a fixture left behind by another file sharing the scratch database ride
  * into the sweep and put every count off by one.
  */
+/** A fixture series row; the `mk` inside before() is not reachable from later tests. */
+const mkSeries = (key: string, sourceId: string | null) =>
+  q(`INSERT INTO lib_series (id, source, title, folder, books_count, library_id, source_id, source_series_id, auto_update)
+     VALUES ($1,'T!upd',$1,$1,0,$2,$3,$4,true) ON CONFLICT (id) DO NOTHING`,
+    [S(key), LIB, sourceId, sourceId ? `${sourceId}-1` : null]);
+
 const only = async (keys: string[]) => {
   await q(`UPDATE lib_series SET auto_update = (id = ANY($1::text[]))`, [keys.map(S)]);
   // A scan run by an earlier test can merge or soft-delete a hand-made fixture; the sweep's query would then
@@ -442,4 +449,67 @@ test('a stop request mid-series finishes the current chapter and takes no more',
     assert.ok(onDisk('stop', 1), 'and is whole on disk');
     assert.ok(!onDisk('stop', 2), 'the next one was never started');
   } finally { runtime.stopping = false; }
+});
+
+
+/**
+ * A source behind the Cloudflare solver gets a listing budget that fits a challenge.
+ *
+ * aqua's challenge takes about a minute; the listing budget was 20 seconds for every source alike, so the
+ * first scheduled sweep on v0.14 lost 15 aqua series to `source_error` while the solver was busy. A
+ * 60-second challenge against a 20-second timeout is a structural loss, not a flaky site.
+ *
+ * Reintroduce by passing LIST_TIMEOUT instead of budgetFor(src, LIST_TIMEOUT): the first test fails.
+ */
+test('a solver-fronted source is given time for its challenge; a plain one is not', { skip }, async () => {
+  const { registerAdapter } = await import('../src/lib/sources');
+  const slow = (id: string, requiresCloudflare: boolean) => ({
+    id, name: id, requiresCloudflare,
+    async search() { return []; },
+    async getSeries(sid: string) { return { sourceId: sid, source: id, title: id }; },
+    async listChapters() { await new Promise((r) => setTimeout(r, 500)); return [{ number: 1, title: 'Chapter 1', sourceId: 'c1' }]; },
+    async getPageUrls() { return ['https://example.invalid/page.png']; },
+    async latest() { return []; },
+  });
+  registerAdapter(slow('upd-cf-slow', true) as any);
+  registerAdapter(slow('upd-plain-slow', false) as any);
+  await mkSeries('cfslow', 'upd-cf-slow');
+  await mkSeries('plainslow', 'upd-plain-slow');
+  globalThis.fetch = (async () => png()) as typeof fetch;
+
+  const cf = await updateSeries(S('cfslow'), 1);
+  assert.equal(cf.outcome, 'ok', 'a 500 ms listing is inside the 800 ms solver budget');
+  assert.equal(cf.available, 1);
+  const plain = await updateSeries(S('plainslow'), 1);
+  assert.equal(plain.outcome, 'source_error', 'the same 500 ms is over the 300 ms budget for a source that needs no solver');
+});
+
+/**
+ * A chapter that has failed CHAPTER_RETRY_CAP times is left alone by the sweep, and counted.
+ *
+ * Reintroduce by iterating `missing` instead of `eligible`: the source is asked for the capped chapter and
+ * `capped` reads 0.
+ */
+test('a chapter past the retry cap is not attempted by the sweep, and is counted', { skip }, async () => {
+  const { CHAPTER_RETRY_CAP } = await import('../src/lib/updater');
+  const { registerAdapter } = await import('../src/lib/sources');
+  const asked: number[] = [];
+  registerAdapter({
+    id: 'upd-cap', name: 'upd-cap',
+    async search() { return []; },
+    async getSeries(sid: string) { return { sourceId: sid, source: 'upd-cap', title: sid }; },
+    async listChapters() { return [1, 2, 3].map((n) => ({ number: n, title: `Chapter ${n}`, sourceId: `c${n}` })); },
+    async getPageUrls(chId: string) { asked.push(Number(chId.slice(1))); return ['https://example.invalid/page.png']; },
+    async latest() { return []; },
+  } as any);
+  await mkSeries('cap', 'upd-cap');
+  await q('DELETE FROM chapter_failures WHERE series_id = $1', [S('cap')]);
+  await q(`INSERT INTO chapter_failures (series_id, number, source_id, status, reason, attempts) VALUES ($1, 1, 'upd-cap', 'incomplete', 'x', $2), ($1, 2, 'upd-cap', 'incomplete', 'x', $3)`,
+    [S('cap'), CHAPTER_RETRY_CAP, CHAPTER_RETRY_CAP - 1]);
+  globalThis.fetch = (async () => png()) as typeof fetch;
+
+  const r = await updateSeries(S('cap'), 5);
+  assert.deepEqual(asked.sort(), [2, 3], `chapter 1 is capped and must not be asked for; asked: ${asked}`);
+  assert.equal(r.capped, 1, 'and the sweep says how many it left alone');
+  assert.equal(r.added, 2);
 });

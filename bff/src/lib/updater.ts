@@ -8,6 +8,7 @@ import { downloadChapter } from './downloader';
 import { persistScan, setBookDates } from './library';
 import { blockedNow } from './sourceHealth';
 import { noteChapterFailure } from './chapterFailures';
+import { budgetFor } from './sources/budget';
 import { notifyNewChapter } from './push';
 import { visibleToAll } from './visibility';
 import { runtime } from './runtime';
@@ -44,6 +45,18 @@ const LIST_TIMEOUT = Number(process.env.UPDATER_LIST_TIMEOUT_MS) || 20_000;
  */
 const SWEEP_MAX = Number(process.env.UPDATER_SWEEP_MAX) || 150;
 
+/**
+ * After this many failed attempts a chapter is left alone by the sweep.
+ *
+ * Measured over three scheduled sweeps: the same 17 chapters failed three times with IDENTICAL shortfalls
+ * (94 of 95 pages, 151 of 176 ...), nothing that had failed twice ever landed, and together they were
+ * costing 26 of every 150 attempts, every sweep, forever. A capped chapter still shows on the health page
+ * with its count, and "find missing chapters" can still fetch it on purpose; only the unattended sweep
+ * stops trying. The ledger row is cleared the moment the chapter lands, so a source that fixes its file
+ * clears the cap by itself.
+ */
+export const CHAPTER_RETRY_CAP = Math.max(1, Number(process.env.CHAPTER_RETRY_CAP) || 3);
+
 export type SweepStop = 'budget' | 'disk' | 'shutdown';
 
 /** What the source said, kept on the row. See the migrate comment on source_chapters. */
@@ -57,7 +70,7 @@ async function stampChecked(seriesId: string, chapters: number | null, missing: 
 export async function updateSeries(
   seriesId: string,
   maxNew = 10,
-): Promise<{ title: string; added: number; available: number; outcome: UpdateOutcome; failed: number; folder?: string; chapters?: SourceChapter[]; diskFull?: boolean }> {
+): Promise<{ title: string; added: number; available: number; outcome: UpdateOutcome; failed: number; capped?: number; folder?: string; chapters?: SourceChapter[]; diskFull?: boolean }> {
   const s = await one<any>(`SELECT id,title,source_id,source_series_id,web,folder,summary,author,genres,status FROM lib_series s WHERE s.id=$1 AND ${visibleToAll('s')}`, [seriesId]);
   if (!s) return { title: '', added: 0, available: 0, outcome: 'gone', failed: 0 };
   const src = s.source_id ? getSource(s.source_id) : null;
@@ -69,7 +82,7 @@ export async function updateSeries(
   // indistinguishable from a series with nothing new. routes/sources.ts already separates these two, with a
   // comment saying why, two files away.
   let listFailed = false;
-  const chapters = await withTimeout(src.listChapters(ref), LIST_TIMEOUT).catch(() => { listFailed = true; return [] as SourceChapter[]; });
+  const chapters = await withTimeout(src.listChapters(ref), budgetFor(src, LIST_TIMEOUT)).catch(() => { listFailed = true; return [] as SourceChapter[]; });
   // Stamped on every path where the source was ASKED, so a dead source's series still rotate to the back of
   // the queue instead of sitting at its front forever. Not stamped above, on the cooldown path: never asked.
   if (listFailed) { await stampChecked(seriesId, null, null); return { title: s.title, added: 0, available: 0, outcome: 'source_error', failed: 0 }; }
@@ -78,13 +91,20 @@ export async function updateSeries(
   const have = new Set((await q<{ number: number }>('SELECT number FROM lib_books WHERE series_id=$1', [seriesId])).map((r) => Number(r.number)));
   const missing = chapters.filter((c) => !have.has(c.number)).sort((a, b) => a.number - b.number);
   await stampChecked(seriesId, chapters.length, missing.length);
+  // Chapters that have already failed CHAPTER_RETRY_CAP times are not attempted again by the sweep.
+  const cappedNums = new Set(
+    (await q<{ number: number }>(`SELECT number FROM chapter_failures WHERE series_id = $1 AND attempts >= $2`, [seriesId, CHAPTER_RETRY_CAP])
+      .catch(() => [])).map((r) => Number(r.number)),
+  );
+  const eligible = missing.filter((c) => !cappedNums.has(c.number));
+  const capped = missing.length - eligible.length;
 
   let added = 0;
   let failed = 0;
   let diskFull = false;
   // oldest-missing-first: a partial "first N" add fills forward coherently, and new releases (all > our max)
   // are still the only gap once a series is fully downloaded.
-  for (const ch of missing.slice(0, maxNew)) {
+  for (const ch of eligible.slice(0, maxNew)) {
     if (runtime.stopping) break; // between chapters, never mid-write
     try {
       const res = await downloadChapter({
@@ -111,7 +131,7 @@ export async function updateSeries(
   if (added) notifyNewChapter(seriesId, s.title, added).catch(() => {});
   // backfill release dates onto already-scanned books; freshly downloaded ones are stamped after the sweep's scan
   await setBookDates(s.folder, chapters).catch(() => {});
-  return { title: s.title, added, available: chapters.length, outcome: 'ok', failed, folder: s.folder, chapters, diskFull };
+  return { title: s.title, added, available: chapters.length, outcome: 'ok', failed, capped, folder: s.folder, chapters, diskFull };
 }
 
 /**
@@ -131,7 +151,7 @@ export async function updateSeries(
  * and says so. Chapters already on disk cost nothing against the budget.
  */
 export async function runUpdateAll(opts: { onlyFavorites?: boolean; maxNew?: number; sweepMax?: number } = {}): Promise<{
-  series: number; visited: number; added: number; failed: number; chapterFailures: number;
+  series: number; visited: number; added: number; failed: number; chapterFailures: number; capped: number;
   outcomes: Record<UpdateOutcome | 'threw' | 'skipped', number>; healthy: boolean; stopped?: SweepStop;
 }> {
   const sweepMax = opts.sweepMax ?? SWEEP_MAX;
@@ -151,6 +171,7 @@ export async function runUpdateAll(opts: { onlyFavorites?: boolean; maxNew?: num
 
   let added = 0;
   let chapterFailures = 0;
+  let capped = 0;
   let visited = 0;
   let spent = 0;
   let stopped: SweepStop | undefined;
@@ -174,6 +195,7 @@ export async function runUpdateAll(opts: { onlyFavorites?: boolean; maxNew?: num
         .catch(() => ({ added: 0, outcome: 'threw' as const, failed: 0 } as { added: number; outcome: 'threw'; failed: number; folder?: string; chapters?: SourceChapter[]; diskFull?: boolean }));
       added += r.added;
       chapterFailures += r.failed ?? 0;
+      capped += (r as { capped?: number }).capped ?? 0;
       spent += r.added + (r.failed ?? 0);
       outcomes[r.outcome] = (outcomes[r.outcome] ?? 0) + 1;
       if (r.added && r.folder && r.chapters?.length) dated.push({ folder: r.folder, chapters: r.chapters });
@@ -196,7 +218,7 @@ export async function runUpdateAll(opts: { onlyFavorites?: boolean; maxNew?: num
   // did nothing work? A run where every source failed now looks nothing like one where nothing was new.
   const broken = outcomes.source_error + outcomes.threw;
   return {
-    series: rows.length, visited, added, failed: broken, chapterFailures, outcomes, stopped,
+    series: rows.length, visited, added, failed: broken, chapterFailures, capped, outcomes, stopped,
     healthy: broken === 0 && chapterFailures === 0 && stopped !== 'disk' && stopped !== 'shutdown',
   };
 }
@@ -241,7 +263,8 @@ export function runSweep(opts: SweepOpts, log: SweepLog, sweep: typeof runUpdate
       if (r.healthy) log.info(`updater: +${r.added} chapters, ${scope}`);
       else log.warn(
         `updater: +${r.added} chapters, ${scope}, but ${r.failed} series failed to answer` +
-        `${r.chapterFailures ? ` and ${r.chapterFailures} chapters could not be saved` : ''} ` +
+        `${r.chapterFailures ? ` and ${r.chapterFailures} chapters could not be saved` : ''}` +
+        `${r.capped ? ` (${r.capped} left alone after ${CHAPTER_RETRY_CAP} failed tries)` : ''} ` +
         `(${Object.entries(r.outcomes).filter(([, n]) => n).map(([k, n]) => `${k}=${n}`).join(' ')})`,
       );
       return r;

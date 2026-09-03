@@ -1,5 +1,33 @@
 # Changelog
 
+## v0.15.1 — 2026-09-03
+
+### A source behind Cloudflare gets the time its challenge takes
+
+Every wait in the app was one number regardless of how a source answers. A plain site answers in a second;
+a site behind Cloudflare answers only after the solver has driven a real browser through a challenge, which
+for the source that carries most of this library takes about a minute. The nightly sweep gave a listing 20
+seconds and lost 15 of that source's series to it, every sweep. The fill scan gave a search 45 seconds and
+lost the same source at exactly the moment it mattered. A minute-long challenge against a 20-second wait is a
+structural loss, not a flaky site.
+
+Sources that need the solver now get a budget that fits it (`SOLVER_BUDGET_MS`, 90 seconds) for listings,
+searches and the add path; everything else keeps the short waits it had.
+
+### Chapters that keep failing identically are left alone
+
+Over three sweeps the same seventeen chapters failed three times each with the same page counts (94 of 95,
+151 of 176), nothing that had failed twice ever landed, and together they cost 26 of every 150 download
+attempts, every sweep, indefinitely. After three failed tries (`CHAPTER_RETRY_CAP`) the sweep now leaves a
+chapter alone and says how many it skipped. The health page shows them with their counts, "find missing
+chapters" on the series still fetches them on purpose, and the moment one lands its record clears itself.
+
+### One series got its source back
+
+*The Avenger's Reincarnation Eldmia Ega* had been frozen since its extension was removed on 20 August. It is
+now pointed at Mangakakalot, which lists it under "Eldmia Ega, the Reincarnated Avenger", and picked up two
+of its four newer chapters straight away.
+
 ## v0.15.0 — 2026-09-03
 
 ### Extensions now actually update themselves

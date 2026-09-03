@@ -14,6 +14,7 @@ import { visibleToAll } from './visibility';
 import { solverPing, solverUrl } from './sources/flaresolverr';
 import { getSource } from './sources';
 import { gapsOf } from './fill';
+import { CHAPTER_RETRY_CAP } from './updater';
 import { diagnose } from './sourceDiagnosis';
 
 export type HealthStatus = 'ok' | 'warn' | 'problem';
@@ -136,7 +137,7 @@ async function shortChapters(): Promise<HealthCheck> {
  */
 async function chapterFailures(): Promise<HealthCheck> {
   const rows = await q<{
-    source_id: string; chapters: number; series: number; since: string; attempts: number;
+    source_id: string; chapters: number; series: number; since: string; attempts: number; capped: number;
     latest_title: string; latest_number: number; latest_status: string; latest_reason: string | null;
   }>(
     `SELECT f.source_id,
@@ -144,6 +145,7 @@ async function chapterFailures(): Promise<HealthCheck> {
             count(DISTINCT f.series_id)::int AS series,
             min(f.at) AS since,
             max(f.attempts)::int AS attempts,
+            count(*) FILTER (WHERE f.attempts >= ${CHAPTER_RETRY_CAP})::int AS capped,
             (array_agg(ls.title  ORDER BY f.at DESC))[1] AS latest_title,
             (array_agg(f.number  ORDER BY f.at DESC))[1] AS latest_number,
             (array_agg(f.status  ORDER BY f.at DESC))[1] AS latest_status,
@@ -155,7 +157,8 @@ async function chapterFailures(): Promise<HealthCheck> {
     title: r.source_id,
     detail:
       `${r.chapters} chapter${r.chapters === 1 ? '' : 's'} in ${r.series} series since ` +
-      `${new Date(r.since).toISOString().slice(0, 10)}, tried up to ${r.attempts} time${r.attempts === 1 ? '' : 's'}; ` +
+      `${new Date(r.since).toISOString().slice(0, 10)}, tried up to ${r.attempts} time${r.attempts === 1 ? '' : 's'}` +
+      `${r.capped ? `, ${r.capped} left alone after ${CHAPTER_RETRY_CAP}` : ''}; ` +
       `latest: "${r.latest_title}" ch ${r.latest_number} (${r.latest_status}` +
       `${r.latest_reason ? `: ${String(r.latest_reason).slice(0, 80)}` : ''})`,
   }));
@@ -169,7 +172,8 @@ async function chapterFailures(): Promise<HealthCheck> {
       : 'Every attempted chapter landed',
     note:
       'One entry per source, counting chapters still missing after an attempt and how often each has been tried. ' +
-      'They clear themselves the moment the chapter lands.' + (rows.length > 20 ? ` ${rows.length - 20} more not shown.` : ''),
+      `They clear themselves the moment the chapter lands. After ${CHAPTER_RETRY_CAP} failed tries the nightly sweep leaves a chapter alone; ` +
+      '"Find missing chapters" on the series still fetches it on purpose.' + (rows.length > 20 ? ` ${rows.length - 20} more not shown.` : ''),
     items,
   };
 }

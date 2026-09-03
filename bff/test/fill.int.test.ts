@@ -27,6 +27,8 @@ if (DSN) {
   process.env.DOWNLOAD_MIN_GAP_MS = '0';
   process.env.SCAN_CONCURRENCY = '4'; // the scan-latency test below assumes four slots and
   process.env.SCAN_ENOUGH = '3';      // stops once three sources have the title
+  process.env.SCAN_SEARCH_MS = '300'; // real: 45s; the budget test below needs it short
+  process.env.SOLVER_BUDGET_MS = '800';
 }
 const skip = DSN ? false : 'set TEST_DATABASE_URL to run';
 
@@ -279,4 +281,29 @@ test('a scan with many slow sources times out none, asks the likely ones first, 
   const tried = j.candidates.filter((c: any) => c.source.startsWith('slow-ru-') && c.why !== 'not_tried').map((c: any) => c.source);
   assert.deepEqual(tried, [], 'every Russian-only source was reported as not tried, not as broken or absent');
   assert.equal(why('slow-any-0'), 'nothing_to_fill', 'a source that was asked and had the title carries a real verdict');
+});
+
+
+/**
+ * The scan gives a source behind the solver time for its challenge, and only that source.
+ *
+ * Reintroduce by passing SCAN_SEARCH_MS instead of budgetFor(src, SCAN_SEARCH_MS): the solver-fronted source
+ * reads `unreachable`.
+ */
+test('a solver-fronted source that answers inside the solver budget is asked, a plain one that slow is not', { skip }, async () => {
+  const { registerAdapter } = await import('../src/lib/sources');
+  const slow = (id: string, requiresCloudflare: boolean) => ({
+    id, name: id, requiresCloudflare, preferredOrder: -1,
+    async search() { await new Promise((r) => setTimeout(r, 500)); return [{ sourceId: `${id}-s`, source: id, title: 'Filled Series', coverUrl: undefined }]; },
+    async getSeries(sid: string) { return { sourceId: sid, source: id, title: 'Filled Series' }; },
+    async listChapters() { return [8, 9, 10, 11].map(page); },
+    async getPageUrls() { return ['https://example.invalid/p1.jpg']; },
+    async latest() { return []; },
+  });
+  registerAdapter(slow('budget-cf', true) as any);
+  registerAdapter(slow('budget-plain', false) as any);
+  const j = (await scan()).json();
+  const why = (id: string) => j.candidates.find((c: any) => c.source === id)?.why;
+  assert.notEqual(why('budget-cf'), 'unreachable', 'a 500 ms answer fits an 800 ms solver budget');
+  assert.equal(why('budget-plain'), 'unreachable', 'the same 500 ms is over a 300 ms budget with no solver involved');
 });
