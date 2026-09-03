@@ -532,6 +532,10 @@ CREATE INDEX IF NOT EXISTS lib_series_age_idx ON lib_series (age_rating) WHERE a
 
 ALTER TABLE opds_tokens ADD COLUMN IF NOT EXISTS expires_at timestamptz;
 UPDATE opds_tokens SET expires_at = now() + interval '1 year' WHERE expires_at IS NULL;
+-- Whether this reader may list 18+ libraries. Per credential, not per account: the phone in a pocket and the
+-- e-reader on the shelf are different audiences for the same person. Off by default, because an OPDS
+-- client cannot ask for the reveal the way the web app does. The age cap is a permission and is unaffected.
+ALTER TABLE opds_tokens ADD COLUMN IF NOT EXISTS show_adult boolean NOT NULL DEFAULT false;
 
 -- Suwayomi-provided sources (one per source in an installed Mihon/Tachiyomi extension) that the operator
 -- has switched on. Suwayomi may expose hundreds of them; only the enabled ones are registered as Uchiyomi

@@ -220,7 +220,10 @@ chapter list, `GET /api/books/:id`, its pages, the offline manifest, next/previo
 /api/books/:id/progress` and `/opds/book/:id/file` all work whether or not the library is hidden. A filter
 that refused to record what you read would lose data rather than tidy a screen.
 
-OPDS feeds have no way to pass the parameter and are always filtered. Chapter downloads still work.
+OPDS feeds cannot pass the parameter, so the preference lives on the OPDS token instead: `PATCH
+/api/opds/token { "showAdult": true }` (also a checkbox under **Profile → External readers**). Off by
+default, per credential rather than per account, because the phone and the e-reader are different audiences.
+Chapter downloads and page streaming work either way; the age cap is a permission and is unaffected.
 
 `GET /api/libraries` reports `adult: true` for such a library so a client can offer the reveal, and drops
 any library rated above the caller's own `max_age_rating` entirely.
@@ -329,6 +332,7 @@ GET    /api/bookmarks             PUT    /api/bookmarks/:bookId/:page
 DELETE /api/bookmarks/:bookId/:page
 DELETE /api/tokens/:id            POST   /api/opds/token
 GET    /api/opds/token            DELETE /api/opds/token
+PATCH  /api/opds/token
 GET    /api/trackers              POST   /api/trackers/anilist
 POST   /api/trackers/:provider/connect
 POST   /api/trackers/anilist/backfill
@@ -416,6 +420,27 @@ GET    /api/admin/extensions/sources     POST   /api/admin/extensions/sources/:i
 
 ### Images and OPDS
 Cookie and HTTP Basic respectively, as described above.
+
+The OPDS catalogue is 1.2 (Atom). Two extensions ride on it, both ignorable by a reader that does not know
+them:
+
+- **Page streaming (OPDS-PSE 1.1).** Every chapter entry carries a
+  `rel="http://vaemendis.net/opds-pse/stream"` link whose `href` is a template,
+  `/opds/book/:id/page/{pageNumber}?maxWidth={maxWidth}`, with `pse:count` (pages), and, when this reader
+  has progress in the chapter, `pse:lastRead` and `pse:lastReadDate`. `{pageNumber}` is **zero-based**, per
+  the spec and the same base as `read_progress.page`. Panels, Chunky and KOReader read page by page over
+  this instead of downloading the CBZ; everything else keeps using the acquisition link. Without `maxWidth`
+  the original bytes are served (shared cache with the web reader); with it, a JPEG no wider than asked
+  (64–2000).
+- **Facets (OPDS 1.2 §7).** `/opds/series` and `/opds/search` carry `rel="http://opds-spec.org/facet"`
+  links in four `opds:facetGroup`s -- Sort, Library, Genre, Status -- each with `thresholdCount` (how many
+  of *your* series it leaves) and `opds:activeFacet` on the one in force. The matching query parameters are
+  `sort` (`updated|title|added`), `library`, `genre` (case-insensitive) and `status`; they combine with `q`
+  and with each other, and `next` links carry them. Counts come from the same gated source as the listing,
+  so a genre that exists only in a library you cannot open is not listed.
+
+`<updated>` is honest: a series carries its newest chapter's time, a chapter its own, and a feed the newest
+of its entries. It used to be "now" on every fetch, which defeated readers' change detection.
 ```
 GET    /img/series/:id/thumb      GET    /img/series/:id/backdrop
 GET    /img/extensions/icon/:pkgName
@@ -425,6 +450,7 @@ GET    /img/lib/books/:id/page/:n GET    /img/sources/cover
 GET    /opds                      GET    /opds/series
 GET    /opds/series/:id           GET    /opds/search
 GET    /opds/opensearch.xml       GET    /opds/book/:id/file
+GET    /opds/book/:id/page/:n
 ```
 
 ---

@@ -918,7 +918,7 @@ function SignedInCard({ span = '' }: { span?: string }) {
 interface OpdsLink { token: string; url: string; expiresInDays?: number }
 /** The token that already exists, if any. The raw password is shown once, so this is the only way to see
  *  whether one is out there, when it expires, and whether a reader is still using it. */
-interface OpdsStatus { exists: boolean; createdAt?: string; expiresAt?: string; lastSeen?: string | null; expired?: boolean }
+interface OpdsStatus { exists: boolean; createdAt?: string; expiresAt?: string; lastSeen?: string | null; expired?: boolean; showAdult?: boolean }
 
 function OpdsCard({ span = '', link, setLink }: { span?: string; link: OpdsLink | null; setLink: (v: OpdsLink | null) => void }) {
   const { user } = useAuth();
@@ -940,6 +940,12 @@ function OpdsCard({ span = '', link, setLink }: { span?: string; link: OpdsLink 
     try { await api('/api/opds/token', { method: 'DELETE' }); setLink(null); await load(); }
     catch (e: any) { toast(msgOf(e, tr('Could not change that')), 'error'); }
     setBusy(false);
+  };
+  // On the token, not the account: the phone in a pocket and the e-reader on the shelf are different
+  // audiences, and an OPDS app has no button of its own for the reveal the Library page offers.
+  const setAdult = async (on: boolean) => {
+    try { setSt(await api<OpdsStatus>('/api/opds/token', { method: 'PATCH', json: { showAdult: on } })); }
+    catch (e: any) { toast(msgOf(e, tr('Could not change that')), 'error'); }
   };
 
   const summary = st?.exists
@@ -972,6 +978,18 @@ function OpdsCard({ span = '', link, setLink }: { span?: string; link: OpdsLink 
               ? tr('expired {when}', { when: relativeTime(st.expiresAt) })
               : tr('expires {when}', { when: relativeTime(st.expiresAt) })}</>}
           </p>
+        </div>
+      )}
+
+      {st?.exists && (
+        <div className="mt-3 flex items-center justify-between gap-3 rounded-xl border border-ink-700/70 bg-ink-850/50 p-3">
+          <div className="min-w-0">
+            <p className="text-xs text-fog-100">{tr('Include 18+ libraries in this reader')}</p>
+            <p className="max-w-prose text-[11px] text-fog-500">
+              {tr('Off by default. Your age limit, if you have one, still applies whatever this says.')}
+            </p>
+          </div>
+          <Switch on={!!st.showAdult} disabled={busy} label={tr('Include 18+ libraries in this reader')} onChange={setAdult} />
         </div>
       )}
 

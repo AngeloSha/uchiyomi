@@ -52,10 +52,10 @@ export async function revokeOpdsToken(userId: string): Promise<void> {
 
 /** What the profile page shows: whether a token exists, when it expires, when a reader last used it. */
 export async function opdsTokenStatus(userId: string): Promise<
-  { exists: boolean; createdAt?: string; expiresAt?: string; lastSeen?: string | null; expired?: boolean }
+  { exists: boolean; createdAt?: string; expiresAt?: string; lastSeen?: string | null; expired?: boolean; showAdult?: boolean }
 > {
-  const row = await one<{ created_at: string; expires_at: string | null; last_seen: string | null; expired: boolean }>(
-    `SELECT created_at, expires_at, last_seen,
+  const row = await one<{ created_at: string; expires_at: string | null; last_seen: string | null; expired: boolean; show_adult: boolean }>(
+    `SELECT created_at, expires_at, last_seen, show_adult,
             (expires_at IS NOT NULL AND expires_at <= now()) AS expired
        FROM opds_tokens WHERE user_id = $1`,
     [userId],
@@ -67,11 +67,35 @@ export async function opdsTokenStatus(userId: string): Promise<
     expiresAt: row.expires_at ?? undefined,
     lastSeen: row.last_seen,
     expired: row.expired,
+    showAdult: row.show_adult,
   };
 }
 
-/** Resolve an HTTP Basic `Authorization` header (password = the OPDS token) to a user id, or null. */
-export async function resolveOpdsBasic(authHeader?: string): Promise<string | null> {
+/**
+ * Let this reader list 18+ libraries, or stop it.
+ *
+ * On the credential rather than the account, because the two things a person points at this feed -- the
+ * phone in their pocket and the e-reader on the shelf -- are different audiences. Returns false when there
+ * is no token to set it on, so the route can say so rather than silently succeeding.
+ */
+export async function setOpdsShowAdult(userId: string, on: boolean): Promise<boolean> {
+  const r = await q<{ user_id: string }>(
+    'UPDATE opds_tokens SET show_adult = $2 WHERE user_id = $1 RETURNING user_id', [userId, on],
+  );
+  return r.length > 0;
+}
+
+/** Who an OPDS credential belongs to, and the one thing it is allowed to say about how it wants to browse. */
+export interface OpdsIdentity { userId: string; showAdult: boolean }
+
+/**
+ * Resolve an HTTP Basic `Authorization` header (password = the OPDS token) to its owner, or null.
+ *
+ * Returns the identity object rather than a bare id because the token carries a browsing preference of its
+ * own (`show_adult`), and a reader has no other channel to express one: no session, no query parameter
+ * the app controls, no button. Callers that only want the id read `.userId`.
+ */
+export async function resolveOpdsBasic(authHeader?: string): Promise<OpdsIdentity | null> {
   if (!authHeader || !/^basic /i.test(authHeader)) return null;
   let decoded = '';
   try { decoded = Buffer.from(authHeader.slice(6).trim(), 'base64').toString('utf8'); } catch { return null; }
@@ -79,8 +103,8 @@ export async function resolveOpdsBasic(authHeader?: string): Promise<string | nu
   if (!pass) return null;
   // The expiry is checked in SQL rather than in JS so there is no window where a token that has just
   // expired still resolves because two clocks disagree about which one is authoritative.
-  const row = await one<{ user_id: string }>(
-    `SELECT user_id FROM opds_tokens
+  const row = await one<{ user_id: string; show_adult: boolean }>(
+    `SELECT user_id, show_adult FROM opds_tokens
       WHERE token_hash = $1 AND (expires_at IS NULL OR expires_at > now())`,
     [sha256(pass)],
   );
@@ -98,7 +122,7 @@ export async function resolveOpdsBasic(authHeader?: string): Promise<string | nu
     q('UPDATE opds_tokens SET last_seen = now() WHERE user_id = $1 AND token_hash = $2',
       [row.user_id, sha256(pass)]).catch(() => {});
   }
-  return row?.user_id ?? null;
+  return row ? { userId: row.user_id, showAdult: !!row.show_adult } : null;
 }
 
 /**

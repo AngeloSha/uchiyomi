@@ -320,7 +320,8 @@ what makes an exception possible. Unrated stays visible to everyone on purpose.
 **A library rated 18+ is also kept off the shelf.** Not just from members with an age limit, but from
 everybody, until somebody asks for it. It stays out of the home rails, the library grid, search, browse,
 your collections, updates, history, bookmarks and the OPDS feeds, and its tab does not appear on the Library
-page. A **Show 18+** button sits beside the sorts on the Library page and brings it all back; the reveal
+page. (An OPDS reader has no button to press, so for it the choice sits on its own credential: **Profile →
+External readers → Include 18+ libraries in this reader**, off by default.) A **Show 18+** button sits beside the sorts on the Library page and brings it all back; the reveal
 lasts until you close the browser and then it hides itself again. The button only appears for accounts that
 actually have such a library, and never for one whose age limit is below 18.
 

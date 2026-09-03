@@ -44,12 +44,12 @@ test('OPDS tokens', { skip }, async (t) => {
   try {
     await t.test('a fresh token works', async () => {
       const token = await auth.issueOpdsToken(userId);
-      assert.equal(await auth.resolveOpdsBasic(basic(USER, token)), userId);
+      assert.equal((await auth.resolveOpdsBasic(basic(USER, token)))?.userId, userId);
     });
 
     await t.test('THE POINT: an expired token does not', async () => {
       const token = await auth.issueOpdsToken(userId);
-      assert.equal(await auth.resolveOpdsBasic(basic(USER, token)), userId, 'valid before expiry');
+      assert.equal((await auth.resolveOpdsBasic(basic(USER, token)))?.userId, userId, 'valid before expiry');
 
       await q(`UPDATE opds_tokens SET expires_at = now() - interval '1 second' WHERE user_id = $1`, [userId]);
       assert.equal(await auth.resolveOpdsBasic(basic(USER, token)), null,
@@ -75,7 +75,7 @@ test('OPDS tokens', { skip }, async (t) => {
         'a freshly issued token must not inherit the last-used date of the one it replaced');
 
       assert.equal(await auth.resolveOpdsBasic(basic(USER, first)), null, 'the replaced token must stop working');
-      assert.equal(await auth.resolveOpdsBasic(basic(USER, second)), userId);
+      assert.equal((await auth.resolveOpdsBasic(basic(USER, second)))?.userId, userId);
     });
 
     await t.test('revoking works immediately', async () => {
@@ -117,7 +117,7 @@ test('OPDS tokens', { skip }, async (t) => {
         `UPDATE opds_tokens SET expires_at = NULL, created_at = now() - interval '2 years' WHERE user_id = $1`,
         [userId],
       );
-      assert.equal(await auth.resolveOpdsBasic(basic(USER, token)), userId,
+      assert.equal((await auth.resolveOpdsBasic(basic(USER, token)))?.userId, userId,
         'a pre-expiry token must keep working until the backfill gives it a date');
 
       const { migrate } = await import('../src/lib/migrate');
@@ -126,7 +126,23 @@ test('OPDS tokens', { skip }, async (t) => {
       assert.ok(st.expiresAt, 'the migration should backfill an expiry');
       assert.ok(new Date(st.expiresAt!).getTime() > Date.now(),
         'backfilled expiry must be in the FUTURE -- dating it from issue would expire live tokens on upgrade');
-      assert.equal(await auth.resolveOpdsBasic(basic(USER, token)), userId, 'and it still works afterwards');
+      assert.equal((await auth.resolveOpdsBasic(basic(USER, token)))?.userId, userId, 'and it still works afterwards');
+    });
+
+    await t.test('the 18+ preference rides on the credential, off by default', async () => {
+      // A reader has no other way to say it: no session, no button, no query parameter it knows about.
+      // Reintroduce by returning a bare user id from resolveOpdsBasic again: the feed cannot tell the two
+      // readers apart and the toggle on the profile page does nothing.
+      const token = await auth.issueOpdsToken(userId);
+      assert.equal((await auth.resolveOpdsBasic(basic(USER, token)))?.showAdult, false, 'must default to hidden');
+      assert.equal(await auth.setOpdsShowAdult(userId, true), true);
+      assert.equal((await auth.resolveOpdsBasic(basic(USER, token)))?.showAdult, true);
+      assert.equal((await auth.opdsTokenStatus(userId)).showAdult, true, 'the profile page reads it from status');
+      // Regenerating keeps the preference: it belongs to the reader, not to the secret.
+      const again = await auth.issueOpdsToken(userId);
+      assert.equal((await auth.resolveOpdsBasic(basic(USER, again)))?.showAdult, true);
+      await auth.revokeOpdsToken(userId);
+      assert.equal(await auth.setOpdsShowAdult(userId, true), false, 'nothing to set it on');
     });
 
     await t.test('a wrong password is refused, and a missing header is not a crash', async () => {

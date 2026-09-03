@@ -105,11 +105,12 @@ const GATED: Record<string, string> = {
   '/img/sources/icon/:id': 'n/a: source icon, resolved only from a registered source; not library content',
   // opds.ts
   '/opds': 'n/a: static navigation feed, no library data',
-  '/opds/search': 'seriesSrc(vc(req)) via opdsSeriesSearch',
+  '/opds/search': 'seriesSrc(vc(req)) via seriesFeed, the same handler as /opds/series',
   '/opds/opensearch.xml': 'n/a: OpenSearch descriptor document, no library data',
   '/opds/series': 'seriesSrc(vc(req))',
   '/opds/series/:id': 'seriesSrc(vc(req)) for the series, booksSrc join for its chapters',
   '/opds/book/:id/file': 'visibleBookFile(vc(req))',
+  '/opds/book/:id/page/:n': 'visibleBookFile(vc(req)); zero-based page for OPDS-PSE readers',
 };
 
 test('every image and OPDS route says how it is gated', () => {

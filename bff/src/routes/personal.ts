@@ -5,7 +5,7 @@ import { q, one } from '../lib/db';
 // `lib/komga` import silently nulled every series lookup here after the owned-library cutover.
 import { content as komga } from '../lib/backend';
 import { viewCtxFor, visible, browsable, browsableIds, Params, type ViewCtx, hideAdult } from '../lib/visibility';
-import { authenticate, userIdOf, roleOf, issueOpdsToken, issueApiToken, listApiTokens, revokeApiToken, API_SCOPES, revokeOpdsToken, opdsTokenStatus, OPDS_TOKEN_DAYS } from '../lib/auth';
+import { authenticate, userIdOf, roleOf, issueOpdsToken, issueApiToken, listApiTokens, revokeApiToken, API_SCOPES, revokeOpdsToken, opdsTokenStatus, setOpdsShowAdult, OPDS_TOKEN_DAYS } from '../lib/auth';
 import { env } from '../env';
 import { pushEnabled, vapidPublicKey, saveSubscription, removeSubscription } from '../lib/push';
 import { statusFor, saveConnection, disconnect, whoAmI, pushSeriesProgress, pushSeriesProgressAsync, clearTrackerFloor } from '../lib/trackers';
@@ -52,6 +52,15 @@ export default async function personalRoutes(app: FastifyInstance) {
   app.delete('/api/opds/token', async (req) => {
     await revokeOpdsToken(userIdOf(req));
     return { ok: true };
+  });
+
+  // Whether the reader behind this token may list 18+ libraries. Lives on the token because an OPDS client
+  // cannot press the web app's reveal button, and because the phone and the e-reader are different
+  // audiences for the same account. The age cap is a permission and is not touched by this.
+  app.patch('/api/opds/token', async (req, reply) => {
+    const b = z.object({ showAdult: z.boolean() }).parse(req.body);
+    if (!(await setOpdsShowAdult(userIdOf(req), b.showAdult))) return reply.code(404).send({ error: 'no_token' });
+    return opdsTokenStatus(userIdOf(req));
   });
 
   // ---- personal API tokens ----

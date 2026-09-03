@@ -263,8 +263,8 @@ export default async function imageRoutes(app: FastifyInstance) {
       } catch { /* fall through to OPDS auth */ }
     }
     // OPDS readers load covers/pages with the same HTTP Basic token as the feed
-    const uid = await resolveOpdsBasic(req.headers.authorization);
-    if (uid) { (req as any).viewCtx = await viewCtxFor(uid); return; }
+    const who = await resolveOpdsBasic(req.headers.authorization);
+    if (who) { (req as any).viewCtx = await viewCtxFor(who.userId); return; }
     return reply.code(401).send({ error: 'unauthorized' });
   });
 
