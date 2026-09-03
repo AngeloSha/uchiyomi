@@ -86,7 +86,7 @@ into a single image.** Point it at your library, install an extension or paste a
   anywhere, and bulk offline-download management.
 - **Offline:** installable PWA with offline downloads + smart auto-sync of favorites.
 - **Push notifications:** opt-in web push the moment a followed series gets a new chapter.
-- **OPDS:** browse & read your Uchiyomi library from other reader apps (Panels, Chunky, KOReader, …).
+- **OPDS:** browse & read your Uchiyomi library from other reader apps (Panels, Chunky, KOReader, …) — page by page over OPDS-PSE, with sort / library / genre / status filters, and an 18+ switch per reader.
 - **Mihon / Tachiyomi extensions:** browse and install the same ~1,400 extensions those apps use, from inside
   Uchiyomi's admin panel. Click Add and the source is searchable immediately. They run on a bundled
   [Suwayomi](https://github.com/Suwayomi/Suwayomi-Server) engine that starts with the stack and configures
@@ -432,7 +432,7 @@ just published, 🌍 nine languages with right-to-left, 🔖 bookmarks, 📄 PDF
 with per-member access, 🔍 library filters and bulk actions, ✏️ editable series and chapter metadata that
 survives a rescan, 📁 any folder layout, 🗂️ series delete / restore / merge, 🔎 content fingerprinting so renamed
 folders are recognised, 🔗 progress sync to AniList, MyAnimeList and Kitsu, 🔔 push notifications, 📡 OPDS with
-expiring links, browser-based first-run setup, and cross-source search.
+page streaming, facets and expiring links, browser-based first-run setup, and cross-source search.
 
 ## Support
 
