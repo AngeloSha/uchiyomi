@@ -1,5 +1,24 @@
 # Changelog
 
+## v0.14.3 — 2026-09-03
+
+### "Find missing chapters" stops calling sources broken for waiting their turn
+
+With many sources installed, the scan asked all of them at once. The Cloudflare solver runs four at a time,
+so most of the queue spent its entire 45 second budget waiting for a slot and was then reported as "could
+not be reached". In one real scan, 16 of 21 candidates were sources that never got a turn.
+
+Three changes:
+
+- A search's clock starts when it starts, not while it waits. The scan now holds a solver slot before the
+  timer runs, so a source is only "unreachable" if it actually failed to answer.
+- Sources are asked in a sensible order: the series' own source, then sources in its language, then sources
+  that publish in several languages, and only then sources pinned to another language.
+- The scan stops asking once enough sources have the title (three, `SCAN_ENOUGH`). Sources it did not get to
+  are listed as "not asked", which is what they are, rather than as broken or as not having it.
+
+Nothing about which sources are installed or enabled changed; only how the scan uses them.
+
 ## v0.14.2 — 2026-09-03
 
 ### Small things that were quietly wrong

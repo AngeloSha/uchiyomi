@@ -25,6 +25,8 @@ if (DSN) {
   process.env.LIBRARY_BACKEND = 'owned';
   process.env.DL_ROOT = root;
   process.env.DOWNLOAD_MIN_GAP_MS = '0';
+  process.env.SCAN_CONCURRENCY = '4'; // the scan-latency test below assumes four slots and
+  process.env.SCAN_ENOUGH = '3';      // stops once three sources have the title
 }
 const skip = DSN ? false : 'set TEST_DATABASE_URL to run';
 
@@ -230,4 +232,51 @@ test('a source with a streak is offered with its record attached, not hidden', {
   await q('DELETE FROM source_health WHERE source_id = $1', [RICH]);
   rich = (await scan()).json().candidates.find((c: any) => c.source === RICH);
   assert.equal(rich.health, null, 'a clean source carries no warning');
+});
+
+
+/**
+ * Many slow sources: none may be reported unreachable just for waiting its turn, the likely ones are asked
+ * first, and the scan stops asking once it has enough.
+ *
+ * Live, with 35 sources and a four-slot solver, 16 of 21 candidates were sources whose whole 45 s budget went
+ * on waiting for a slot, reported as `unreachable` -- which reads as broken. Here: thirty sources at 200 ms
+ * each behind four slots. Reintroduce by removing the slot gate (the timer then runs while queued; with a
+ * short SCAN_SEARCH_MS the tail would time out), by removing the `enough()` check (nothing is `not_tried`),
+ * or by dropping scanOrder (a Russian-only source can be asked before an unpinned one).
+ */
+test('a scan with many slow sources times out none, asks the likely ones first, and stops when it has enough', { skip }, async () => {
+  const { registerAdapter } = await import('../src/lib/sources');
+  const started: string[] = [];
+  const slow = (id: string, lang: string | undefined, preferredOrder: number, carries: boolean) => ({
+    id, name: id, lang, preferredOrder,
+    async search() {
+      started.push(id);
+      await new Promise((r) => setTimeout(r, 200));
+      return carries ? [{ sourceId: `${id}-s`, source: id, title: 'Filled Series', coverUrl: undefined }] : [];
+    },
+    async getSeries(sid: string) { return { sourceId: sid, source: id, title: 'Filled Series' }; },
+    async listChapters() { return [8, 9, 10, 11].map(page); },
+    async getPageUrls() { return ['https://example.invalid/p1.jpg']; },
+    async latest() { return []; },
+  });
+  // Five unpinned sources that carry the title, and twenty-five pinned to a language the series is not in.
+  // The pinned ones get the BETTER preferredOrder on purpose: only language ranking puts the unpinned ones
+  // first, so this fails if the route stops using scanOrder.
+  for (let i = 0; i < 5; i++) registerAdapter(slow(`slow-any-${i}`, undefined, 100 + i, true) as any);
+  for (let i = 0; i < 25; i++) registerAdapter(slow(`slow-ru-${i}`, 'ru', i, true) as any);
+
+  const t0 = Date.now();
+  const j = (await scan()).json();
+  const ms = Date.now() - t0;
+  const why = (id: string) => j.candidates.find((c: any) => c.source === id)?.why;
+
+  assert.ok(ms < 10_000, `thirty sources at 200 ms behind four slots must not take ${ms} ms`);
+  assert.ok(!j.candidates.some((c: any) => c.why === 'unreachable'),
+    `nothing was unreachable: ${JSON.stringify(j.candidates.filter((c: any) => c.why === 'unreachable').map((c: any) => c.source))}`);
+  assert.ok(started.length >= 3 && started.every((id) => id.startsWith('slow-any-')),
+    `only unpinned sources were asked before the scan had enough; asked: ${started.join(', ')}`);
+  const tried = j.candidates.filter((c: any) => c.source.startsWith('slow-ru-') && c.why !== 'not_tried').map((c: any) => c.source);
+  assert.deepEqual(tried, [], 'every Russian-only source was reported as not tried, not as broken or absent');
+  assert.equal(why('slow-any-0'), 'nothing_to_fill', 'a source that was asked and had the title carries a real verdict');
 });

@@ -14,7 +14,7 @@ const sessions = new Map<string, { cookie: string; userAgent: string }>();
  * our own fan-out. A crashed solve is reported as the SITE refusing us, so this was manufacturing source
  * failures out of nothing.
  */
-const SOLVER_CONCURRENCY = Math.max(1, Number(process.env.SOLVER_CONCURRENCY || 4));
+export const SOLVER_CONCURRENCY = Math.max(1, Number(process.env.SOLVER_CONCURRENCY || 4));
 let inFlight = 0;
 const waiting: Array<() => void> = [];
 

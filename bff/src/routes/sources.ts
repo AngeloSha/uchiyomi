@@ -6,6 +6,21 @@ import { getSource, listSources, isSwAdapterId, SW_PREFIX, withTimeout } from '.
 import type { SourceAdapter, SourceSeries, SourceChapter } from '../lib/sources/types';
 import { downloadChapter, sanitize } from '../lib/downloader';
 import { noteChapterFailure } from '../lib/chapterFailures';
+import { scanOrder } from '../lib/scanOrder';
+import { SOLVER_CONCURRENCY } from '../lib/sources/flaresolverr';
+
+/**
+ * How many searches a fill scan runs at once, and when it stops starting new ones.
+ *
+ * The scan used to fan out to every registered source at once with a 45s timeout each. The solver runs
+ * SOLVER_CONCURRENCY solves at a time, so with 35 sources the tail of the queue spent its whole timeout
+ * waiting for a slot and was then reported `unreachable`: in one live scan, 16 of 21 candidates were sources
+ * that never got a turn. Now a search holds one of these slots BEFORE its clock starts, sources are asked in
+ * relevance order (see scanOrder), and once SCAN_ENOUGH sources have the title the rest are not asked at all.
+ */
+const SCAN_CONCURRENCY = Math.max(1, Number(process.env.SCAN_CONCURRENCY || SOLVER_CONCURRENCY));
+const SCAN_ENOUGH = Math.max(1, Number(process.env.SCAN_ENOUGH || 3));
+const SCAN_SEARCH_MS = 45_000;
 import { persistScan, setBookDates } from '../lib/library';
 import { fetchAniListArt, fetchTrendingManhwa, TrendingItem } from '../lib/anilist';
 import { q, one } from '../lib/db';
@@ -603,25 +618,41 @@ export default async function sourceRoutes(app: FastifyInstance) {
       const own = getSource(s.source_id);
       if (own) found.push({ source: own.id, name: own.name, sourceId: s.source_series_id, title: s.title, pinned: true });
     }
-    // Sources that could not be asked at all, so the dialog can say so rather than imply they lack the title.
+    // Sources that were asked and did not answer, and sources never asked because enough already had the
+    // title. Both are shown; neither is "does not have it", and the old scan called all of them `unreachable`.
     const unreachable: { source: string; name: string }[] = [];
-    await Promise.all(findOrder().filter((id) => allowed.has(id)).map(async (id) => {
+    const notTried: { source: string; name: string }[] = [];
+    const ownSrc = s.source_id ? getSource(s.source_id) : null;
+    const order = scanOrder(
+      findOrder().filter((id) => allowed.has(id)).map((id) => getSource(id)).filter((x): x is NonNullable<typeof x> => !!x),
+      ownSrc ? { id: ownSrc.id, lang: ownSrc.lang } : null,
+    );
+    // A slot is held before the search starts, so the timeout measures the search and not the queue. The
+    // queue is FIFO, so relevance order is the order sources actually get asked in.
+    let inFlight = 0;
+    const waiting: Array<() => void> = [];
+    const slot = async () => { if (inFlight >= SCAN_CONCURRENCY) await new Promise<void>((r) => waiting.push(r)); inFlight++; };
+    const free = () => { inFlight--; waiting.shift()?.(); };
+    const enough = () => found.filter((f) => !f.pinned).length >= SCAN_ENOUGH;
+    await Promise.all(order.map(async (id) => {
       if (found.some((f) => f.source === id && f.pinned)) return;
-      const src = getSource(id);
-      if (!src || await isDisabled(id).catch(() => false)) return;
-      let failed = false;
-      for (const term of terms) {
-        try {
-          // 45s, not 20s: solves are now queued behind SOLVER_CONCURRENCY, so waiting a turn is expected
-          // rather than a fault. The old budget timed out the queued sources and then hid them.
-          const hit = pickBest(await withTimeout(src.search(term), 45000), term);
-          if (hit?.sourceId) {
-            found.push({ source: src.id, name: src.name, sourceId: hit.sourceId, title: hit.title, coverUrl: hit.coverUrl, pinned: false });
-            return;
-          }
-        } catch { failed = true; /* one source failing is not the scan failing -- but it must not be silent */ }
-      }
-      if (failed) unreachable.push({ source: src.id, name: src.name });
+      await slot();
+      try {
+        const src = getSource(id);
+        if (!src || await isDisabled(id).catch(() => false)) return;
+        if (enough()) { notTried.push({ source: src.id, name: src.name }); return; }
+        let failed = false;
+        for (const term of terms) {
+          try {
+            const hit = pickBest(await withTimeout(src.search(term), SCAN_SEARCH_MS), term);
+            if (hit?.sourceId) {
+              found.push({ source: src.id, name: src.name, sourceId: hit.sourceId, title: hit.title, coverUrl: hit.coverUrl, pinned: false });
+              return;
+            }
+          } catch { failed = true; /* one source failing is not the scan failing -- but it must not be silent */ }
+        }
+        if (failed) unreachable.push({ source: src.id, name: src.name });
+      } finally { free(); }
     }));
 
     // Only now, and only for sources that produced a match, do we pay for a chapter list. Routed through the
@@ -658,6 +689,13 @@ export default async function sourceRoutes(app: FastifyInstance) {
       });
     }));
 
+    for (const u of notTried) {
+      candidates.push({
+        source: u.source, name: u.name, sourceSeriesId: '', title: '',
+        count: 0, first: null, last: null, coverage: 0, matched: 0,
+        fillable: [], newer: [], why: 'not_tried', pinned: false,
+      });
+    }
     for (const u of unreachable) {
       candidates.push({
         source: u.source, name: u.name, sourceSeriesId: '', title: '',
