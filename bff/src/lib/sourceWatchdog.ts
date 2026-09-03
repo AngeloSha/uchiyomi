@@ -7,14 +7,17 @@
 // Two more sites had moved their listing path and failed the same silent way, one of them for months.
 //
 // What it will do on its own is deliberately narrow. A moved domain has exactly one correct answer and is
-// verifiable before committing to it, so it is followed automatically. An extension with an update
-// available is likewise unambiguous. Everything else -- markup drift, a CDN refusing us, a dead host -- is
-// reported and left alone, because "disable it" and "wait, it is a blip" look identical from here and
-// getting that wrong turns a two-hour outage into a source nobody notices is off.
+// verifiable before committing to it, so it is followed automatically. Everything else -- markup drift, a CDN
+// refusing us, a dead host -- is reported and left alone, because "disable it" and "wait, it is a blip" look
+// identical from here, and getting that wrong turns a two-hour outage into a source nobody notices is off.
+//
+// Extension updates used to be the second thing it did on its own. They are their own scheduled job now
+// (lib/extensionMonitor.ts), because they need the engine's repositories re-read first -- which this never
+// did, so it installed updates it could not see -- and because two schedulers with two busy flags can drive
+// the same install mutation at once.
 import { q } from './db';
 import { getSource, listSources, reloadAll } from './sources';
 import { readSites, writeSites } from './sources/customSites';
-import { listExtensions, setExtensionState } from './sources/suwayomi/extensions';
 import { smokeTest, probeBase } from './sourceProbe';
 import { diagnose, Diagnosis } from './sourceDiagnosis';
 import { clearBlock, SourceHealth } from './sourceHealth';
@@ -29,25 +32,12 @@ export interface SourceVerdict {
   fix: string;
   ok: boolean;
   /** What the watchdog changed by itself, if anything. */
-  action?: 'followed-move' | 'extension-updated';
-}
-
-/** An update that was attempted and did not take, with a reason a person can act on. */
-export interface ExtensionUpdateFailure {
-  pkgName: string;
-  name: string;
-  reason: string;
+  action?: 'followed-move';
 }
 
 export interface WatchdogResult {
   checkedAt: string;
   sources: SourceVerdict[];
-  extensionsUpdated: string[];
-  /**
-   * Updates that were tried and failed. Reported rather than swallowed: an extension whose update 404s stays
-   * on its old version for good, and until this existed that outcome looked exactly like having no update.
-   */
-  extensionsFailed: ExtensionUpdateFailure[];
   /** Verdicts an operator needs to act on. */
   needsAttention: SourceVerdict[];
 }
@@ -110,66 +100,6 @@ export async function followMove(id: string, to: string, deps: MoveDeps = REAL):
   await q(`UPDATE source_health SET empty_streak = 0, last_error = NULL WHERE source_id = $1`, [id]).catch(() => {});
   await logAudit('source.auto_move', { detail: { id, from, to: origin } });
   return true;
-}
-
-/**
- * A failed extension update, phrased for whoever has to do something about it.
- *
- * 404 is the one worth naming outright, because it is both the most common and the most misleading: it means
- * the repository's index still advertises a version whose APK is no longer where the index says it is. That
- * is the repository's problem rather than this server's, and nobody reading "HTTP error 404" can tell.
- */
-function updateFailureReason(err: unknown): string {
-  const msg = (err instanceof Error ? err.message : String(err ?? '')).trim() || 'no reason given';
-  if (/\b404\b/.test(msg)) return 'the repository no longer offers that version to download (404)';
-  if (/\b(408|timed?[ _-]?out|ETIMEDOUT|abort)/i.test(msg)) return 'the extension server did not answer in time';
-  if (/\b5\d\d\b/.test(msg)) return 'the repository host returned a server error';
-  return msg.slice(0, 160);
-}
-
-/** Injected so the failure paths below can be tested; module-export mocking silently no-ops under esbuild. */
-export interface ExtensionDeps {
-  listExtensions: typeof listExtensions;
-  setExtensionState: typeof setExtensionState;
-  logAudit: typeof logAudit;
-}
-
-const liveExtensionDeps: ExtensionDeps = { listExtensions, setExtensionState, logAudit };
-
-/**
- * Extensions the extension server says have a newer version. Unambiguous, so just take them.
- *
- * Every outcome is recorded. The previous version ended each attempt with `.catch(() => false)`, which made a
- * failed update indistinguishable from no update being available: nothing logged, nothing surfaced, nothing
- * for anyone to notice. An extension can sit broken behind that silence indefinitely.
- */
-export async function updateExtensions(
-  deps: ExtensionDeps = liveExtensionDeps,
-): Promise<{ updated: string[]; failed: ExtensionUpdateFailure[] }> {
-  const updated: string[] = [];
-  const failed: ExtensionUpdateFailure[] = [];
-  const exts = await deps.listExtensions().catch(() => []);
-  for (const e of exts) {
-    if (!e.installed || !e.hasUpdate) continue;
-    const name = e.name || e.pkgName;
-    let ok = false;
-    let reason = '';
-    try {
-      ok = await deps.setExtensionState(e.pkgName, 'update');
-      // A falsy result is its own failure: the server took the request and did not install anything.
-      if (!ok) reason = 'the extension server accepted the request but did not install it';
-    } catch (err) {
-      reason = updateFailureReason(err);
-    }
-    if (ok) {
-      updated.push(name);
-      await deps.logAudit('extension.auto_update', { detail: { pkgName: e.pkgName, name } });
-    } else {
-      failed.push({ pkgName: e.pkgName, name, reason });
-      await deps.logAudit('extension.auto_update_failed', { detail: { pkgName: e.pkgName, name, reason } });
-    }
-  }
-  return { updated, failed };
 }
 
 /**
@@ -239,10 +169,6 @@ async function sweep(opts: { autoFix?: boolean }): Promise<WatchdogResult> {
     verdicts.push({ id: src.id, name: src.name, code: d.code, reason: d.reason, fix: d.fix, ok: smoke.ok, action });
   }
 
-  const ext = autoFix
-    ? await updateExtensions()
-    : { updated: [] as string[], failed: [] as ExtensionUpdateFailure[] };
-  const { updated: extensionsUpdated, failed: extensionsFailed } = ext;
   const needsAttention = verdicts.filter((v) => ACTIONABLE.has(v.code));
 
   if (needsAttention.length) {
@@ -253,25 +179,9 @@ async function sweep(opts: { autoFix?: boolean }): Promise<WatchdogResult> {
     ).catch(() => {});
   }
 
-  // A source needing attention and an extension that will not update are different jobs for the operator, so
-  // they get their own notification rather than being folded into a count of "things wrong".
-  if (extensionsFailed.length) {
-    const lead = extensionsFailed[0];
-    await notifyAdmins(
-      extensionsFailed.length === 1
-        ? `${lead.name} could not be updated`
-        : `${extensionsFailed.length} extensions could not be updated`,
-      extensionsFailed.map((f) => `${f.name}: ${f.reason}`).join(' \u00b7 ').slice(0, 300),
-      '/admin/',
-      'extensions',
-    ).catch(() => {});
-  }
-
   return {
     checkedAt: new Date().toISOString(),
     sources: verdicts,
-    extensionsUpdated,
-    extensionsFailed,
     needsAttention,
   };
 }

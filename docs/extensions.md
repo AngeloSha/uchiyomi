@@ -16,6 +16,41 @@ You browse and install them from **Admin → Providers → Extensions**. There i
 Adult extensions are hidden until you tap **18+**. Installed ones show **Remove**, and one with a newer
 version shows **Update**.
 
+## Automatic updates
+
+Uchiyomi checks your repositories **every 6 hours** and installs new versions of the extensions you have
+installed. You do not have to press anything.
+
+The check is a task like any other: **Admin → Server → Tasks** shows when it last ran, what it did, and a
+**Run now** button. You get a notification when extensions are updated, and a separate one when an update
+fails — an extension whose download 404s stays on its old version, and that is worth knowing rather than
+silently living with.
+
+What it does on its own:
+
+- **Re-reads your repositories, then updates.** This order is the whole point. The engine only recalculates
+  "an update is available" when its repositories are re-read, so a check that skips that step compares
+  against whatever was last fetched by hand and reliably finds nothing to do.
+- **Waits for the chapter updater.** Replacing an extension while a library sweep is using it breaks that
+  sweep's downloads, so updates wait for the next check instead. The panel says when it did.
+- **Puts your repository list back.** The list is stored by Uchiyomi as well as by the engine, so deleting the
+  engine's volume no longer silently un-configures the feature. If the volume is wiped, the check restores
+  the repositories and reinstalls the extensions you had.
+- **Tells you when an extension is abandoned.** An installed extension that no repository offers any more
+  keeps working but will never update again. It is reported, never uninstalled — uninstalling would orphan
+  every series routed through it.
+
+What it will not do: install extensions you did not ask for, uninstall anything, or reinstall something you
+removed yourself. Removing an extension in the engine's own interface is reported, not undone.
+
+**To turn it off:** Admin → Server → Settings → *Update extensions automatically*. The check still runs and
+still tells you what is waiting; it just does not install anything. The **Update all** button in the
+Extensions panel remains the manual path, and it now refreshes the repositories first, so it no longer says
+"everything is already up to date" against a stale catalogue.
+
+The interval is *Extension check interval* in the same place. Six hours is chosen against how often the
+repositories actually move (roughly every fifteen hours); there is nothing to gain from checking every hour.
+
 ## Why there is a second container
 
 Those extensions are Kotlin, compiled to Android bytecode and shipped as APKs. They cannot run in Uchiyomi's
@@ -45,7 +80,8 @@ Two things worth knowing:
 
 - A series added through an extension is routed using an id from the engine's own database. Wiping that
   database loses the routing for those series (they stay in your library; re-adding repairs it). Don't delete
-  its volume.
+  its volume. The scheduled check will put your repositories and your installed extensions back, but it
+  cannot restore that routing — nothing outside the engine ever knew those ids.
 - Every source you enable is queried on every cross-source search. Installing a handful is fine; installing
   hundreds would make search slow and hammer a lot of sites at once. `SUWAYOMI_MAX_SOURCES` (default 25) is a
   backstop, and it logs what it skipped rather than silently dropping it.
@@ -62,6 +98,9 @@ reclaim the RAM as well, `docker compose stop uchiyomi-suwayomi` (`yomi-suwayomi
 | `SUWAYOMI_URL` | the bundled engine | Where the extension engine is. Empty turns the feature off. |
 | `SUWAYOMI_USERNAME` / `SUWAYOMI_PASSWORD` | empty | Only if your engine has authentication enabled. |
 | `SUWAYOMI_MAX_SOURCES` | `25` | Ceiling on how many extension sources register at once. |
+
+The update check's own settings live in **Admin → Server → Settings**, not here: *Update extensions
+automatically* (on by default) and *Extension check interval* (6 hours).
 | `SOURCE_LATEST_TIMEOUT_MS` | `8000` | How long one source gets to answer "what's new" on Discover before it is given up on and marked unhealthy. |
 
 **Adult sources.** Extensions declare whether they are adult, and Uchiyomi records that per source. A member

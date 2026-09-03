@@ -5,6 +5,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, ApiError, img } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { triggerRefresh } from '@/lib/refresh';
+import { taskResult } from '@/lib/tasks';
 import { bytes, relativeTime } from '@/lib/format';
 import { useToast } from '@/components/Toast';
 import { ConfirmDialog, Modal, msgOf } from '@/components/ConfirmDialog';
@@ -602,16 +603,7 @@ function Providers() {
             {sweep.needsAttention.length
               ? ` ${sweep.needsAttention.length} need${sweep.needsAttention.length === 1 ? 's' : ''} attention.`
               : ' Nothing needs attention.'}
-            {sweep.extensionsUpdated.length ? ` Updated ${sweep.extensionsUpdated.length} extension(s).` : ''}
-            {sweep.extensionsFailed?.length
-              ? ` ${sweep.extensionsFailed.length} extension(s) could not be updated.`
-              : ''}
           </p>
-          {(sweep.extensionsFailed || []).map((f: any) => (
-            <p key={f.pkgName} className="mt-1 text-[11px] text-amber-300">
-              <span className="text-amber-200">{f.name}</span>: {f.reason}
-            </p>
-          ))}
           {sweep.sources.filter((v: any) => v.action).map((v: any) => (
             <p key={v.id} className="mt-1 text-[11px] text-emerald-300">✓ {v.name}: followed its move to a new address</p>
           ))}
@@ -918,34 +910,6 @@ function ArtPicker({ row, onClose, onApplied }: { row: ArtRow; onClose: () => vo
   );
 }
 
-/**
- * Tasks report different result shapes (updater: chapters added; backup: size on disk).
- *
- * `healthy: false` is the case this panel could not previously express. A sweep in which every source was
- * down and one in which nothing was new both rendered '+0 chapters', so a library that had quietly stopped
- * updating looked exactly like a quiet week.
- */
-function taskResult(r: any): string {
-  if (!r) return '';
-  if (typeof r.added === 'number') {
-    const base = ` · +${r.added} chapters`;
-    if (r.healthy === false) {
-      const bits: string[] = [];
-      if (r.failed) bits.push(`${r.failed} series did not answer`);
-      if (r.chapterFailures) bits.push(`${r.chapterFailures} chapters could not be saved`);
-      return `${base} · ${bits.join(', ') || 'some sources failed'}`;
-    }
-    return base;
-  }
-  if (typeof r.bytes === 'number') {
-    // Both of these used to be invisible: the archive could be missing every config file, or its size could
-    // have failed to measure, and the panel showed a contented size either way.
-    const warn = [r.configEmpty && 'config not captured', r.sizeUnknown && 'size not measured'].filter(Boolean);
-    return ` · ${r.sizeUnknown ? 'size unknown' : bytes(r.bytes)}${warn.length ? ` · ${warn.join(', ')}` : ''}`;
-  }
-  return '';
-}
-
 function Tasks() {
   const toast = useToast();
   const qc = useQueryClient();
@@ -1049,10 +1013,13 @@ function Settings() {
   const { data } = useQuery({ queryKey: ['admin-settings'], queryFn: () => api<any>('/api/admin/settings') });
   const [name, setName] = useState<string | null>(null);
   const [hours, setHours] = useState<number | null>(null);
+  const [extHours, setExtHours] = useState<number | null>(null);
   const save = async (body: any, ok: string) => { try { await api('/api/admin/settings', { method: 'PATCH', json: body }); toast(ok, 'success'); qc.invalidateQueries({ queryKey: ['admin-settings'] }); } catch { toast('Failed', 'error'); } };
   if (!data) return <div className="board"><div className="card grad-border p-6 text-center text-sm text-fog-500">{tr('Loading…')}</div></div>;
-  // Three settings look like three settings. Padding a sparse panel out with a chart is the exact failure
-  // this rework exists to undo, so this one is deliberately left with room around it.
+  // A handful of settings look like a handful of settings. Padding a sparse panel out with a chart is the
+  // exact failure this rework exists to undo, so this one is deliberately left with room around it.
+  // The extension cards only appear when there is an extension server. `extension_hours` cannot answer that
+  // -- it has a NOT NULL default, so it is always set -- which is why the endpoint returns a separate flag.
   return (
     <div className="board">
       <div className="card grad-border p-4">
@@ -1073,6 +1040,25 @@ function Settings() {
         <input type="number" min={1} max={168} value={hours ?? data.updater_hours} onChange={(e) => setHours(Number(e.target.value))} className="field" />
         <button onClick={() => save({ updaterHours: hours ?? data.updater_hours }, 'Saved')} className="btn-accent mt-2 w-full py-2 text-sm">{tr('Save interval')}</button>
       </div>
+      {data.extensions_configured && (
+        <>
+          <div className="card grad-border flex items-center justify-between gap-3 p-4">
+            <div className="min-w-0">
+              <p className="text-sm text-fog-100">{tr('Update extensions automatically')}</p>
+              <p className="max-w-prose text-[11px] text-fog-500">
+                {tr('Install new versions of your installed extensions as their repositories publish them. Turn this off to be told about updates and apply them yourself.')}
+              </p>
+            </div>
+            <Switch on={data.extension_auto_update !== false} label={tr('Update extensions automatically')}
+              onChange={(next) => save({ extensionAutoUpdate: next }, next ? 'Extensions update automatically' : 'Extension updates are manual')} />
+          </div>
+          <div className="card grad-border p-4">
+            <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-fog-500">{tr('Extension check interval (hours)')}</label>
+            <input type="number" min={1} max={168} value={extHours ?? data.extension_hours} onChange={(e) => setExtHours(Number(e.target.value))} className="field" />
+            <button onClick={() => save({ extensionHours: extHours ?? data.extension_hours }, 'Saved')} className="btn-accent mt-2 w-full py-2 text-sm">{tr('Save interval')}</button>
+          </div>
+        </>
+      )}
     </div>
   );
 }

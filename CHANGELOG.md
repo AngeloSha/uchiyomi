@@ -1,5 +1,44 @@
 # Changelog
 
+## v0.15.0 — 2026-09-03
+
+### Extensions now actually update themselves
+
+Uchiyomi has had an automatic extension updater since v0.11. On the install it was written for it had, as far
+as can be told, never updated a single extension.
+
+The reason is one missing call. Suwayomi does not poll its repositories; it recalculates "an update is
+available" only when it is told to re-read them. Uchiyomi asked for that in exactly three places, all of them
+buttons in Admin. The nightly job that installed updates was not one of them. So every night it read a
+catalogue whose freshness depended on somebody having pressed **Refresh**, found nothing marked as updatable,
+and reported a clean run. Fifteen extensions installed, zero flagged, while the repository behind them
+published roughly every fifteen hours.
+
+Extension updates are now their own scheduled task, running every 6 hours, and the first thing it does is
+re-read the repositories. It appears in **Admin → Server → Tasks** with its last run, its result and a **Run
+now** button, and it can be switched off in Settings, in which case it still tells you what is waiting.
+
+**Update all** had the same bug and is fixed the same way: it refreshes before it updates, so it can no
+longer tell you everything is up to date by consulting a catalogue from three weeks ago.
+
+While fixing that, four related things that were invisible:
+
+- **A repository that cannot be read is no longer silence.** An unreachable repository and a genuinely
+  up-to-date library produced identical output. A failed refresh is now a named outcome, shown in the panel
+  and pushed once — not once per check, because an engine that is down stays down.
+- **Your repository list survives the engine's volume.** It was stored only inside the extension engine, in
+  the volume people delete when it misbehaves, and it was not in the nightly backup. Uchiyomi now keeps its
+  own copy, adopts whatever the engine has on first run, and puts the list back — along with the extensions
+  you had installed — if that volume is wiped. It cannot restore which series came from which extension;
+  nothing outside the engine ever knew those ids.
+- **Abandoned extensions are named.** An installed extension no repository offers any more keeps working and
+  will never update again. It is now reported. It is never uninstalled: that would orphan every series routed
+  through it.
+- **Updates wait for the chapter updater.** Swapping an extension out while a library sweep is using it
+  breaks that sweep's downloads. The check now defers, and says that it did.
+
+An extension you remove in the engine's own interface stays removed. The check reports it and leaves it alone.
+
 ## v0.14.4 — 2026-09-03
 
 ### The extension engine can no longer download into its own volume, and says when it is down

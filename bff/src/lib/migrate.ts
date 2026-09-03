@@ -328,6 +328,36 @@ ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS backup_last_result jsonb;
 -- a whole new one. Before this every deploy pushed the next sweep out by the full interval.
 ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS updater_last_run timestamptz;
 
+-- Scheduled extension check (lib/extensionMonitor.ts). The engine recomputes "an update is available" only
+-- when its repositories are re-read, which until now happened only when an admin pressed Refresh -- so the
+-- nightly auto-updater compared against a catalogue that never changed and found nothing to do, for weeks.
+ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS extension_hours       int     NOT NULL DEFAULT 6;
+ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS extension_auto_update boolean NOT NULL DEFAULT true;
+ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS extension_last_run    timestamptz;
+ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS extension_last_result jsonb;
+-- The repository URLs, kept here as well as on the extension server. Its volume is the one people delete
+-- when it misbehaves, and its settings went with it silently -- they are not in our backup either.
+ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS extension_repos       jsonb   NOT NULL DEFAULT '[]';
+
+-- What the repositories offered and what was installed, as of the last check. This is what makes "new
+-- upstream", "dropped upstream" and "installed outside Uchiyomi" answerable at all, and what lets a wiped
+-- extension server get its extensions back rather than just its repository list.
+-- Rows are never deleted: last_seen older than a run is how "no repository offers this any more" is spelled.
+CREATE TABLE IF NOT EXISTS extension_catalog (
+  pkg_name          text PRIMARY KEY,
+  name              text NOT NULL,
+  lang              text,
+  repo              text,
+  version_name      text,
+  installed         boolean NOT NULL DEFAULT false,
+  obsolete          boolean NOT NULL DEFAULT false,
+  nsfw              boolean NOT NULL DEFAULT false,
+  installed_version text,
+  first_seen        timestamptz NOT NULL DEFAULT now(),
+  last_seen         timestamptz NOT NULL DEFAULT now(),
+  updated_at        timestamptz NOT NULL DEFAULT now()
+);
+
 -- external progress trackers (AniList today; provider leaves room for MAL/Kitsu without a migration)
 -- access_token is encrypted at rest: AniList issues scopeless tokens with near-full account access.
 CREATE TABLE IF NOT EXISTS user_trackers (

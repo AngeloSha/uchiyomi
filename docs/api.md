@@ -122,8 +122,9 @@ block itself, because the smoke test stops at listing page URLs and never fetche
 daily sweep. It probes every enabled source and smoke-tests its adapter, one at a time because they share a
 single Cloudflare solver, then returns a verdict per source. It applies only the two fixes that are
 verifiable: it follows a site to a new address **after** the new one passes a smoke test (rolling back if it
-does not), and it updates extensions whose server reports an update. Everything else is reported with a
-reason and a suggested fix, and admins get a push notification. Answers **409** while a sweep is running.
+does not). Everything else is reported with a reason and a suggested fix, and admins get a push notification.
+Answers **409** while a sweep is running. It no longer touches extensions -- that is its own scheduled task,
+below, because the engine has to re-read its repositories before "an update is available" means anything.
 
 `PATCH /api/admin/sources/custom/:id` (admin) changes a custom site's `base` address and nothing else. The
 source id is derived from its name and the library is keyed on that id, so editing in place is the only way
@@ -388,6 +389,22 @@ GET    /api/admin/import/status
 ### Admin — extensions (Mihon / Tachiyomi)
 
 Present only when an extension engine is configured; see [extensions.md](extensions.md).
+
+Installed extensions are kept current by a scheduled task, `extensions`, which appears in
+`GET /api/admin/tasks` and can be started with `POST /api/admin/tasks/extensions/run` (answers
+`{ ok: false, error: 'busy' }` while one is running, `not_configured` when there is no engine). Its interval
+and kill switch are `extensionHours` and `extensionAutoUpdate` on `PATCH /api/admin/settings`, whose
+response also carries `extensions_configured` -- not a column, and the only field that says whether there is
+an engine at all (`extension_hours` has a default, so it is set on every install either way).
+
+Its stored result -- `extension_last_result`, returned as the task's `lastResult` -- carries `refreshed`
+(false when the repositories could not be read, with `refreshError`), `updated`, `failed`, `obsolete`,
+`updatesAvailable`, `newUpstream`, `removedUpstream`, `reposRestored`, `reinstalled`, `removedOutside` and
+`deferred`. A check that could not refresh reports nothing else: it deliberately does not fall back to the
+stale catalogue.
+
+`POST /api/admin/extensions/update-all` re-reads the repositories first and then applies everything, which is
+the same work the scheduled check does with `forceUpdate`. It answers **409** while a check is running.
 
 ```
 GET    /api/admin/extensions/status      GET    /api/admin/extensions/catalog

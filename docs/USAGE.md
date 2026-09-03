@@ -387,7 +387,9 @@ per-title result (added / already had / not found / failed).
 Importing hundreds of titles takes a while on purpose: downloads are paced so a big import doesn't hammer
 the sites you're pulling from and get your server blocked.
 
-**Tasks:** run the **library scan** or **check-for-new-chapters** on demand, and see when each last ran.
+**Tasks:** run the **library scan**, **check-for-new-chapters** or **extension updates** on demand, and see
+when each last ran and what it did. Extension updates run every 6 hours on their own and can be switched
+off in Settings; see [extensions.md](extensions.md).
 
 **Activity:** the audit feed, every login (success and failure), user change, settings change, source action.
 

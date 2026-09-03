@@ -15,7 +15,8 @@ import { authenticate, requireAdmin, userIdOf, revokeAllSessions, revokeRefreshT
 import { logAudit, recentAudit } from '../lib/audit';
 import { healthAll, setDisabled, clearBlock, SourceHealth, pruneOrphanedHealth } from '../lib/sourceHealth';
 import { smokeTest, probeBase } from '../lib/sourceProbe';
-import { runSourceCheck, checkRunning, updateExtensions } from '../lib/sourceWatchdog';
+import { runSourceCheck, checkRunning } from '../lib/sourceWatchdog';
+import { runExtensionMonitor, runExtensionCheck, extState } from '../lib/extensionMonitor';
 import { diagnose } from '../lib/sourceDiagnosis';
 import { readSites, writeSites } from '../lib/sources/customSites';
 import { reloadAll, listSources, getSource, detectEngine, listRemoteSources, suwayomiConfigured, suwayomiAbout, swAdapterId } from '../lib/sources';
@@ -85,20 +86,38 @@ export default async function adminRoutes(app: FastifyInstance) {
   }));
 
   // ---- server settings ----
-  app.get('/api/admin/settings', async () => one('SELECT server_name, allow_registration, updater_hours FROM server_settings WHERE id = 1'));
+  const SETTINGS_COLS = 'server_name, allow_registration, updater_hours, extension_hours, extension_auto_update';
+  // `extensions_configured` is not a column: extension_hours has a NOT NULL default, so its presence says
+  // nothing about whether there is an engine to check. The settings page needs to know, or it offers two
+  // controls for a job that can never run.
+  const settingsRow = async () => ({
+    ...(await one(`SELECT ${SETTINGS_COLS} FROM server_settings WHERE id = 1`)),
+    extensions_configured: suwayomiConfigured(),
+  });
+  app.get('/api/admin/settings', settingsRow);
   app.patch('/api/admin/settings', async (req) => {
-    const b = z.object({ serverName: z.string().min(1).max(64).optional(), allowRegistration: z.boolean().optional(), updaterHours: z.number().int().min(1).max(168).optional() }).parse(req.body);
+    const b = z.object({
+      serverName: z.string().min(1).max(64).optional(),
+      allowRegistration: z.boolean().optional(),
+      updaterHours: z.number().int().min(1).max(168).optional(),
+      extensionHours: z.number().int().min(1).max(168).optional(),
+      extensionAutoUpdate: z.boolean().optional(),
+    }).parse(req.body);
     if (b.serverName !== undefined) await q('UPDATE server_settings SET server_name = $1, updated_at = now() WHERE id = 1', [b.serverName]);
     if (b.allowRegistration !== undefined) await q('UPDATE server_settings SET allow_registration = $1, updated_at = now() WHERE id = 1', [b.allowRegistration]);
     if (b.updaterHours !== undefined) await q('UPDATE server_settings SET updater_hours = $1, updated_at = now() WHERE id = 1', [b.updaterHours]);
+    if (b.extensionHours !== undefined) await q('UPDATE server_settings SET extension_hours = $1, updated_at = now() WHERE id = 1', [b.extensionHours]);
+    if (b.extensionAutoUpdate !== undefined) await q('UPDATE server_settings SET extension_auto_update = $1, updated_at = now() WHERE id = 1', [b.extensionAutoUpdate]);
     await logAudit('settings.update', { userId: userIdOf(req), detail: b, req });
-    return one('SELECT server_name, allow_registration, updater_hours FROM server_settings WHERE id = 1');
+    return settingsRow();
   });
 
   // ---- scheduled tasks ----
   app.get('/api/admin/tasks', async () => {
-    const s = await one<{ updater_hours: number; backup_hour: number; backup_last_run: string | null; backup_last_result: any }>(
-      'SELECT updater_hours, backup_hour, backup_last_run, backup_last_result FROM server_settings WHERE id = 1',
+    const s = await one<{ updater_hours: number; backup_hour: number; backup_last_run: string | null; backup_last_result: any; extension_hours: number; extension_auto_update: boolean; extension_last_run: string | null; extension_last_result: any }>(
+      `SELECT updater_hours, backup_hour, backup_last_run, backup_last_result,
+              extension_hours, extension_auto_update, extension_last_run, extension_last_result
+         FROM server_settings WHERE id = 1`,
     );
     // the backup's last run is persisted, so prefer the DB value over the in-memory one (which resets on restart)
     const backupLast = runtime.lastBackup || (s?.backup_last_run ? new Date(s.backup_last_run).getTime() : null);
@@ -115,6 +134,16 @@ export default async function adminRoutes(app: FastifyInstance) {
         running: fpState.running,
         remaining: await fingerprintRemaining().catch(() => null),
       },
+      // Only when there is an extension server to check. Listing a task that cannot run reads as a broken
+      // one, and every install without the optional engine would show it permanently "never run".
+      ...(suwayomiConfigured() ? [{
+        id: 'extensions',
+        name: 'Extension updates',
+        schedule: `every ${s?.extension_hours ?? 6}h` + (s?.extension_auto_update === false ? ' \u00b7 check only' : ''),
+        lastRun: extState.lastRun || (s?.extension_last_run ? new Date(s.extension_last_run).getTime() : null),
+        lastResult: extState.lastResult ?? s?.extension_last_result ?? null,
+        running: extState.running,
+      }] : []),
     ] };
   });
   app.post('/api/admin/tasks/:id/run', async (req) => {
@@ -126,6 +155,13 @@ export default async function adminRoutes(app: FastifyInstance) {
       // marks it running, keeps the result, logs the summary and refuses to start on top of another one --
       // everything this path used to skip, which is why the panel showed a manual sweep as idle throughout.
       if (!runSweep({ maxNew: 10 }, app.log)) return { ok: false, error: 'busy' };
+      return { ok: true, started: true };
+    }
+    if (id === 'extensions') {
+      if (!suwayomiConfigured()) return { ok: false, error: 'not_configured' };
+      // Not awaited: re-reading every repository index and installing an APK is minutes, and the caller is
+      // an admin clicking a button. runExtensionMonitor does the flag, the stored result and the log line.
+      if (!runExtensionMonitor(app.log)) return { ok: false, error: 'busy' };
       return { ok: true, started: true };
     }
     if (id === 'fingerprint') {
@@ -1095,17 +1131,25 @@ export default async function adminRoutes(app: FastifyInstance) {
   /**
    * Update every installed extension that has a newer version.
    *
-   * Deliberately the same function the nightly sweep runs, rather than a second loop that would drift from
-   * it. Failures come back per extension with a reason instead of a count, because "3 could not update" tells
-   * an operator nothing they can act on.
+   * Deliberately the same function the scheduled check runs, rather than a second loop that would drift from
+   * it -- and this route is the reason that matters. It used to call the updater directly, which meant it
+   * inherited the scheduled job's bug: nothing re-read the repositories first, so "Update all" pressed
+   * without "Refresh" pressed before it compared against a catalogue that could be weeks old and answered
+   * "Everything is already up to date".
+   *
+   * Failures come back per extension with a reason instead of a count, because "3 could not update" tells an
+   * operator nothing they can act on.
    */
   app.post('/api/admin/extensions/update-all', async (req, reply) => {
     if (needExt(reply)) return;
-    const r = await updateExtensions();
+    if (extState.running) return reply.code(409).send({ error: 'busy', message: 'An extension check is already running.' });
+    const r = await runExtensionCheck({ forceUpdate: true });
     await logAudit('extension.update_all', {
-      userId: userIdOf(req), detail: { updated: r.updated.length, failed: r.failed.length }, req,
+      userId: userIdOf(req), detail: { updated: r.updated.length, failed: r.failed.length, refreshed: r.refreshed }, req,
     });
-    return { ok: true, ...r };
+    // `updated` stays a list of names on the wire: the admin page reads it that way, and the version pair is
+    // in `updatedDetail` for anything that wants it.
+    return { ok: true, ...r, updated: r.updated.map((u) => u.name), updatedDetail: r.updated };
   });
 
   app.post('/api/admin/extensions/refresh', async (req, reply) => {
@@ -1371,7 +1415,7 @@ export default async function adminRoutes(app: FastifyInstance) {
       const r = await runSourceCheck();
       await logAudit('source.check', {
         userId: userIdOf(req),
-        detail: { checked: r.sources.length, attention: r.needsAttention.length, extensions: r.extensionsUpdated.length },
+        detail: { checked: r.sources.length, attention: r.needsAttention.length },
         req,
       });
       return reply.send(r);

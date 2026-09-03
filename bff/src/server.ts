@@ -11,10 +11,11 @@ import { runtime } from './lib/runtime';
 import { reapStaleTemp } from './lib/fsAtomic';
 import { DL_ROOT } from './lib/library';
 import { migrate } from './lib/migrate';
-import { loadSources, loadCustomSites, loadBuiltins, listSources, loadSuwayomiSources, scheduleSuwayomiRetry } from './lib/sources';
+import { loadSources, loadCustomSites, loadBuiltins, listSources, loadSuwayomiSources, scheduleSuwayomiRetry, suwayomiConfigured } from './lib/sources';
 import { scheduleFingerprintBackfill } from './lib/fingerprintJob';
 import { runSourceCheck } from './lib/sourceWatchdog';
 import { runSweep } from './lib/updater';
+import { runExtensionMonitor } from './lib/extensionMonitor';
 import { startSweeper } from './lib/imageCache';
 import { runBackup, msUntilHour } from './lib/backup';
 import { KomgaError } from './lib/komga';
@@ -185,16 +186,50 @@ async function main() {
     const tick = async () => {
       try {
         const r = await runSourceCheck();
-        app.log.info(
-          `source check: ${r.sources.length} checked, ${r.needsAttention.length} need attention` +
-          (r.extensionsUpdated.length ? `, ${r.extensionsUpdated.length} extension(s) updated` : ''),
-        );
+        app.log.info(`source check: ${r.sources.length} checked, ${r.needsAttention.length} need attention`);
       } catch (e) {
         app.log.error(e as any);
       }
       setTimeout(tick, DAY).unref();
     };
     setTimeout(tick, 10 * 60 * 1000).unref();
+  }
+
+  // Keep the installed extensions current with the repositories they came from.
+  //
+  // Its own schedule rather than a step in the watchdog above: that one is a daily, deliberately serial
+  // scrape of every source at up to 45 seconds each, and this is one index download plus one list query.
+  // Sharing a schedule would mean either running the expensive thing four times a day or catching an
+  // upstream push a day late -- and upstream pushes roughly every fifteen hours.
+  if (suwayomiConfigured()) {
+    const tick = async () => {
+      let hours = 6;
+      try {
+        const s = await pool.query('SELECT extension_hours FROM server_settings WHERE id = 1');
+        hours = Math.min(168, Math.max(1, s.rows[0]?.extension_hours || 6));
+        const run = runExtensionMonitor(app.log);
+        if (run) await run;
+        else app.log.info('extensions: the previous check is still running, skipping this tick');
+      } catch (e) {
+        app.log.error(e as any);
+      }
+      setTimeout(tick, hours * 60 * 60 * 1000).unref();
+    };
+    // Same reasoning as the sweep: schedule the REMAINDER of the interval since the last completed check, so
+    // a deploy does not push the next one out by a full interval. The ten-minute floor also means a fresh
+    // install sees its first check while someone is still watching, rather than six hours later.
+    void (async () => {
+      let hours = 6;
+      let last = 0;
+      try {
+        const s = await pool.query('SELECT extension_hours, extension_last_run FROM server_settings WHERE id = 1');
+        hours = Math.min(168, Math.max(1, s.rows[0]?.extension_hours || 6));
+        last = s.rows[0]?.extension_last_run ? new Date(s.rows[0].extension_last_run).getTime() : 0;
+      } catch { /* settings row not readable yet -- keep the defaults */ }
+      const delay = Math.max(10 * 60 * 1000, last + hours * 60 * 60 * 1000 - Date.now());
+      app.log.info(`extensions: first check in ${Math.round(delay / 60000)} min`);
+      setTimeout(tick, delay).unref();
+    })();
   }
 
   // Nightly backup, aligned to a wall-clock hour and re-read from settings each run so it stays live-editable.
