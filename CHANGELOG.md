@@ -1,5 +1,48 @@
 # Changelog
 
+## v0.16.0 — 2026-09-03
+
+### An OPDS reader can read page by page, and filter what it sees
+
+Until now an OPDS reader could do one thing with a chapter: download the whole CBZ. Panels, Chunky and
+KOReader all stream pages over OPDS-PSE when a feed offers it -- the reader fetches page one, then page
+two, and a long chapter starts in a second instead of after a download -- so every chapter entry now
+carries the stream link: a page template, the page count, and where *this* reader last stopped, taken from
+its own reading progress. Without a width the original page comes back, from the same cache the web reader
+uses; ask for a width and you get a JPEG no wider than that. A reader that does not know the extension sees
+nothing different and keeps downloading.
+
+The series feeds carry facets: sort, library, genre and status, each with how many of your series it would
+leave, marked when in force, and combinable. Search is now the same feed as the listing, so it pages and
+filters too, where before it stopped at sixty hits with no way past them. Counts come from the same gated
+source as the listing, and a library is only offered as a filter when you can see more than one -- a count
+is a disclosure, and "Library (1)" would have said a hidden one exists.
+
+Every `<updated>` in the catalogue was the moment of the request. A reader that checks for changes saw the
+whole library change on every fetch. A series now carries its newest chapter's time, a chapter its own, and
+a feed the newest of its entries.
+
+### 18+ libraries in a reader, if that reader is the one you want them in
+
+The web app has a reveal button for 18+ libraries; an OPDS reader has no button, so it always got them
+hidden, with no way to ask. The choice now lives on the OPDS credential itself -- **Profile → External
+readers → Include 18+ libraries in this reader** -- off by default, and per credential rather than per
+account, because the phone in a pocket and the e-reader on the shelf are different audiences for the same
+person. Your age limit, if you have one, applies whatever the switch says; that is a permission, and this is
+not.
+
+### Two things found on the way
+
+**The chapter list of a series answered 500, and had since v0.8.0.** The query behind
+`/opds/series/:id` reused the parameter list of the lookup above it, so Postgres was handed a value it could
+never type and refused the whole statement. It shipped that way on 2026-08-23 and has been in every release
+since; nobody on this install had opened a chapter list in a reader, which is the only reason it stayed
+quiet. It works now, and the test drives it over HTTP against a real archive.
+
+**Paging links were escaped twice.** A reader paging past sixty series was sent `&amp;amp;page=1`, decoded
+that to a query key named `amp;page`, and started again from page one. Links are now built raw and escaped
+exactly once, where they are written.
+
 ## v0.15.1 — 2026-09-03
 
 ### A source behind Cloudflare gets the time its challenge takes
