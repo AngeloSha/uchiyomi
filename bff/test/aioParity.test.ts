@@ -98,3 +98,37 @@ test('the root build context is pruned', () => {
     assert.match(ignore, new RegExp(needed.replace('.', '\\.')), `.dockerignore does not exclude ${needed}`);
   }
 });
+
+test('the single image can run its own Postgres, of the same major as its pg_dump', () => {
+  // Embedded mode (DATABASE_URL unset) needs the server package; the client is what pg_dump comes from. If
+  // the two majors ever differ, pg_dump writes archives the embedded server cannot restore -- the exact
+  // mismatch the backup task's plain-SQL choice was made to survive against an OLDER server, not a newer.
+  const aio = readFileSync(join(REPO, 'Dockerfile.aio'), 'utf8');
+  const apk = aio.split('\n').filter((l) => !l.trim().startsWith('#')).join('\n');
+  const server = /postgresql(\d+)(?![-\w])/.exec(apk);
+  const client = /postgresql(\d+)-client/.exec(apk);
+  assert.ok(server, 'Dockerfile.aio does not install the postgresql server package, so embedded mode cannot start');
+  assert.ok(client, 'Dockerfile.aio does not install the postgresql client');
+  assert.equal(server![1], client![1], `server is postgresql${server![1]}, client is postgresql${client![1]}-client`);
+  // The healthcheck must ask the database too when it is inside the container. Reintroduce by restoring
+  // the /livez-only check: a wedged embedded Postgres reads as healthy.
+  const hc = aio.slice(aio.indexOf('HEALTHCHECK'));
+  assert.match(hc, /pg_isready/, 'the container healthcheck ignores the embedded database');
+  assert.match(hc, /\.embedded/, 'the healthcheck cannot tell embedded from external, so it either always or never asks Postgres');
+  assert.match(aio, /mkdir -p [^\n]*\/data\b/, '/data is not created in the image, so the volume seeds as a root-owned mountpoint');
+  // Reintroduce by dropping nss_wrapper from the apk line: a container started with `user:` cannot run
+  // its database, because initdb refuses a uid with no passwd entry.
+  assert.match(apk, /\bnss_wrapper\b/, 'nss_wrapper is not installed, so embedded mode refuses any `user:` the image does not know');
+});
+
+test('the entrypoint owns the embedded database lifecycle, and only when asked', () => {
+  const ep = readFileSync(join(REPO, 'bff', 'docker-entrypoint.sh'), 'utf8');
+  const code = ep.split('\n').filter((l) => !l.trim().startsWith('#')).join('\n');
+  for (const needed of ['initdb', 'pg_ctl', 'PG_VERSION', 'listen_addresses', 'MIGRATING.md#postgres-upgrade', 'EMBEDDED_DB=1', 'nss_wrapper', 'adduser']) {
+    assert.ok(code.includes(needed), `docker-entrypoint.sh no longer mentions ${needed}`);
+  }
+  // The switch, spelled the one way that cannot misfire: an empty or unset DATABASE_URL.
+  assert.match(code, /\[ -z "\$\{DATABASE_URL:-\}" \]/, 'the embedded switch is no longer "DATABASE_URL unset"');
+  // The behaviour itself is driven in entrypointEmbedded.test.ts; this is the cheap guard that the file
+  // still carries the pieces that test relies on.
+});

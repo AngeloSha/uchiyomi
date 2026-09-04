@@ -1,38 +1,55 @@
-# Uchiyomi, one container.
+# Uchiyomi, single container, with Postgres as its own container.
 #
-#   curl -O https://raw.githubusercontent.com/AngeloSha/uchiyomi/main/deploy/docker-compose.yml
-#   docker compose up -d
+#   curl -O https://raw.githubusercontent.com/AngeloSha/uchiyomi/main/deploy/docker-compose.external-db.yml
+#   docker compose -f docker-compose.external-db.yml up -d
 #
-# Then open http://localhost:8080 and create your admin account in the browser. There are no secrets to
-# generate, no config file to edit, and no database to run: Postgres lives inside the container, on a unix
-# socket, in the uchiyomi_data volume. Leave DATABASE_URL unset and that is what you get; set it and the
-# same image talks to a database you run yourself instead (docker-compose.external-db.yml is that layout,
-# ready to use). The two share every other volume, and docs/MIGRATING.md has the move in both directions.
+# This was the layout the install instructions used until v0.18.0. It still works, is still supported, and
+# is the right choice when you want the database in a container you manage yourself -- or already have one.
+# The layout the docs now lead with is docker-compose.yml: one container, with Postgres inside it on a unix
+# socket. See docs/MIGRATING.md to move between them; it is a dump and a restore, and both directions are
+# written down.
+#
+# An existing install keeps using this file. Nothing here changed except this header.
 #
 # The extension engine is still opt-in and still its own container, because it is a JVM. Leave it out and
-# the whole thing is one container plus the Cloudflare solver.
+# this is two containers total.
 #
 #   LIBRARY_PATH=/mnt/media/comics   your existing library (default: ./library)
 #   PUID= / PGID=                    run as the user that OWNS your library, so Uchiyomi can rename and
 #                                    delete files in it. `id -u` and `id -g`. Leave both unset and nothing
 #                                    changes: the app runs as uid 10002 and your library is read-only.
 #   WEB_PORT=8080                    the port you open in a browser
+#   DB_PASSWORD=...                  only used inside the private network; the DB has no published port
 
 services:
+  uchiyomi-db:
+    image: postgres:16-alpine
+    container_name: uchiyomi-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: yomi
+      POSTGRES_USER: yomi
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-uchiyomi}
+    volumes:
+      - uchiyomi_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U yomi -d yomi"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks: [uchiyomi_internal]
+
   uchiyomi:
     image: ghcr.io/angelosha/uchiyomi:latest
     container_name: uchiyomi
     restart: unless-stopped
-    # The app finishes the chapter it is writing on SIGTERM (up to 20 s), and then Postgres checkpoints and
-    # stops. Docker's default 10 s would kill the database mid-checkpoint.
-    stop_grace_period: 40s
     environment:
       # Run as the owner of your library so file operations work. Unset = uid 10002, library read-only.
       PUID: ${PUID:-}
       PGID: ${PGID:-}
       NODE_ENV: production
       PORT: "3000"
-      # No DATABASE_URL: that is the switch. Set one here and the embedded database is not started.
+      DATABASE_URL: postgres://yomi:${DB_PASSWORD:-uchiyomi}@uchiyomi-db:5432/yomi
       LIBRARY_BACKEND: ${LIBRARY_BACKEND:-owned}
       PUBLIC_ORIGIN: ${PUBLIC_ORIGIN:-http://localhost:8080}
       FLARESOLVERR_URL: http://uchiyomi-flaresolverr:8191
@@ -60,14 +77,16 @@ services:
     volumes:
       - ${LIBRARY_PATH:-./library}:/library      # your existing comics (see PUID above)
       - ${SOURCES_PATH:-./sources}:/sources:ro   # optional built source pack
-      - uchiyomi_data:/data                      # the embedded database (Postgres, in /data/pg)
       - uchiyomi_downloads:/library-dl           # chapters Uchiyomi downloads
       - uchiyomi_config:/config                  # secrets, custom sites, art overrides
       - uchiyomi_cache:/cache                    # image cache (safe to delete)
       - ${BACKUP_PATH:-uchiyomi_backups}:/backups
     ports:
       - "${WEB_PORT:-8080}:3000"
-    networks: [uchiyomi_app]
+    depends_on:
+      uchiyomi-db:
+        condition: service_healthy
+    networks: [uchiyomi_internal, uchiyomi_app]
 
   # Cloudflare solver. Most manga aggregators sit behind Cloudflare, so the fetching half needs this.
   uchiyomi-flaresolverr:
@@ -126,10 +145,11 @@ services:
       start_period: 90s
 
 networks:
+  uchiyomi_internal:   # database only — deliberately not reachable from outside the stack
   uchiyomi_app:
 
 volumes:
-  uchiyomi_data:       # the embedded database; back it up like any other volume, or rely on the nightly dump in /backups
+  uchiyomi_pgdata:
   uchiyomi_downloads:
   uchiyomi_config:
   uchiyomi_cache:

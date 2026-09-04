@@ -1541,6 +1541,9 @@ export default async function adminRoutes(app: FastifyInstance) {
       lastScan: runtime.lastScan || null,
       members: members?.c ?? 0,
       backlog: { chapters: backlog?.chapters ?? 0, series: backlog?.series ?? 0 },
+      // Where the database lives. The entrypoint exports EMBEDDED_DB=1 only when it started Postgres itself
+      // (DATABASE_URL was unset); an install talking to its own database never sees the variable.
+      database: process.env.EMBEDDED_DB === '1' ? 'embedded' : 'external',
       activity,
     };
   });

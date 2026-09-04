@@ -61,7 +61,7 @@ jobs:
   e2e:
     name: Browser end-to-end
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -78,9 +78,15 @@ jobs:
       - name: Every language renders, and Arabic mirrors
         working-directory: ./web
         run: npm run test:i18n
+      # The same browser suite against the one-container layout: no Postgres container, DATABASE_URL unset,
+      # the image running its own database. A second STEP rather than a matrix, on purpose: the job's name
+      # is one of the five required status checks, and a matrix renames it.
+      - name: Bring it up again with the embedded database, and drive it
+        working-directory: ./web
+        run: E2E_EMBEDDED=1 E2E_NET=uchiyomi-e2e-embedded E2E_PORT=18141 E2E_SUBNET=10.222.1.0/24 npm run test:e2e
       - name: Tear it down
         if: always()
-        run: docker rm -f uchiyomi-e2e uchiyomi-e2e-db || true
+        run: docker rm -f uchiyomi-e2e uchiyomi-e2e-db uchiyomi-e2e-embedded || true
       - name: Keep the screenshots when it fails
         if: failure()
         uses: actions/upload-artifact@v4

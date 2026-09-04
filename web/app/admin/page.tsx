@@ -129,6 +129,8 @@ function AdminHero({ onBack }: { onBack: () => void; onScan?: undefined }) {
     stats ? tr('{n} series', { n: stats.seriesTotal }) : null,
     stats ? (stats.members === 1 ? tr('1 member') : tr('{n} members', { n: stats.members })) : null,
     stats ? tr('{size} cached', { size: bytes(stats.cacheBytes) }) : null,
+    // Which layout this is, in one word: the answer to "where is my database" without reading a compose file.
+    stats?.database ? (stats.database === 'embedded' ? tr('embedded database') : tr('external database')) : null,
     stats?.lastScan ? tr('scanned {when}', { when: relativeTime(new Date(stats.lastScan).toISOString()) }) : null,
     // From what the sources said the last time the updater asked. Absent until a sweep has stamped it.
     stats?.backlog?.chapters

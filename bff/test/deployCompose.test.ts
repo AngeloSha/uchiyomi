@@ -43,7 +43,7 @@ function suwayomiBlock(file: string): string {
 const instructions = (block: string): string =>
   block.split('\n').filter((l) => !l.trim().startsWith('#')).join('\n');
 
-const FILES = ['deploy/docker-compose.yml', 'deploy/docker-compose.split.yml', 'docker-compose.yml'];
+const FILES = ['deploy/docker-compose.yml', 'deploy/docker-compose.external-db.yml', 'deploy/docker-compose.split.yml', 'docker-compose.yml'];
 
 test('the extension engine is told never to download into its own volume', () => {
   for (const file of FILES) {
@@ -83,4 +83,24 @@ test('the optional engine is not made mandatory by a depends_on', () => {
       assert.ok(!/suwayomi/.test(m[0]), `${file}: something depends_on the optional extension engine`);
     }
   }
+});
+
+test('the install file is one container, and the external-database file still is not', () => {
+  // deploy/docker-compose.yml is what the README tells people to curl. Since v0.18.0 it runs the database
+  // inside the container: no db service, no DATABASE_URL (that is the switch), a /data volume, and a grace
+  // period long enough for the app to finish a chapter and Postgres to checkpoint.
+  const one = instructions(readFileSync(join(REPO, 'deploy/docker-compose.yml'), 'utf8'));
+  // Reintroduce by pasting a DATABASE_URL back in: the embedded database silently never starts and the app
+  // waits forever for a host that is not there.
+  assert.ok(!/DATABASE_URL/.test(one), 'deploy/docker-compose.yml sets DATABASE_URL, which turns embedded mode off');
+  assert.ok(!/^\s{2}[a-z-]*-db:$/m.test(one), 'deploy/docker-compose.yml still runs a database container');
+  assert.match(one, /uchiyomi_data:\/data/, 'the embedded database has no volume, so it is lost on every recreate');
+  assert.match(one, /stop_grace_period:\s*[2-9]\d+s/, 'no stop_grace_period: docker kills Postgres mid-checkpoint at 10 s');
+  assert.ok(!/uchiyomi_pgdata/.test(one), 'a pgdata volume is declared for a database container that is not there');
+
+  // The external layout is still shipped, unchanged in substance, for people who run Postgres themselves.
+  const ext = instructions(readFileSync(join(REPO, 'deploy/docker-compose.external-db.yml'), 'utf8'));
+  assert.match(ext, /^\s{2}uchiyomi-db:$/m, 'the external-database file lost its database container');
+  assert.match(ext, /DATABASE_URL:\s*postgres:\/\//, 'the external-database file no longer points the app at its database');
+  assert.match(ext, /depends_on:[\s\S]{0,80}uchiyomi-db/, 'the app no longer waits for its database in the external layout');
 });

@@ -238,9 +238,20 @@ docker compose up -d
 Then open **http://localhost:8080** and **create your admin account right in the browser**. There are no
 secrets to generate and no config file to edit.
 
-That is **Uchiyomi in one container**, plus Postgres. Two more are optional: a Cloudflare solver, which the
+That is **Uchiyomi in one container, database included**: Postgres runs inside it, on a unix socket, in a
+volume of its own, and there is nothing to configure. Two more are optional: a Cloudflare solver, which the
 fetching half needs for most aggregators, and the extension engine, which is a JVM and costs about 800 MB.
-Leave the extension engine out and it is three containers; only the first two are Uchiyomi itself.
+Leave the extension engine out and it is two containers; only the first is Uchiyomi itself.
+
+<details>
+<summary>Prefer to run Postgres yourself?</summary>
+
+Set `DATABASE_URL` and the same image talks to your database instead of starting its own; that one variable
+is the whole switch. [`deploy/docker-compose.external-db.yml`](deploy/docker-compose.external-db.yml) is
+that layout ready to use, with a Postgres container beside the app -- it is what the install instructions
+used before v0.18.0, and an existing install keeps working on it unchanged. Moving between the two is a
+dump and a restore, written down in both directions in **[docs/MIGRATING.md](docs/MIGRATING.md)**.
+</details>
 
 <details>
 <summary>Already running the older two-container layout?</summary>
@@ -254,9 +265,9 @@ It is deprecated because the single container measured better on the same host â
 the end-to-end tests only ever drive the single container, so it is the layout that is actually proven on
 every commit.
 
-Moving is a compose swap, not a data migration: both layouts use the **same named volumes** and the same
-Postgres image. Four commands, in **[docs/MIGRATING.md](docs/MIGRATING.md)**. The file itself is still there
-as [`deploy/docker-compose.split.yml`](deploy/docker-compose.split.yml).
+Moving to the external-database layout is a compose swap, not a data migration: both use the **same named
+volumes** and the same Postgres image. Four commands, in **[docs/MIGRATING.md](docs/MIGRATING.md)**. The
+file itself is still there as [`deploy/docker-compose.split.yml`](deploy/docker-compose.split.yml).
 </details>
 
 To read a library you already have, point `LIBRARY_PATH` at it. By default Uchiyomi runs as its own user and

@@ -6,6 +6,10 @@
 #
 #   bash web/test/e2e/up.sh              # build, run, clean up
 #   KEEP=1 bash web/test/e2e/up.sh       # leave it running to poke at
+#   E2E_EMBEDDED=1 bash web/test/e2e/up.sh   # no Postgres container: the image runs its own (DATABASE_URL unset)
+#
+# The embedded leg is the proof that the one-container layout behaves like the two-container one, in the
+# only place both are actually driven end to end. CI runs both.
 set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
@@ -22,13 +26,16 @@ DB="$NET-db"
 SUBNET=${E2E_SUBNET:-10.222.0.0/24}
 USER=${E2E_USER:-e2e}
 PASS=${E2E_PASS:-e2e-passw0rd-123}
+EMBEDDED=${E2E_EMBEDDED:-0}
 LIB=$(mktemp -d)
+DATA=$(mktemp -d)
 
 cleanup() {
-  [ "${KEEP:-0}" = "1" ] && { echo "kept: $NET on :$PORT (library $LIB)"; return; }
+  [ "${KEEP:-0}" = "1" ] && { echo "kept: $NET on :$PORT (library $LIB, data $DATA)"; return; }
   docker rm -f "$APP" "$DB" >/dev/null 2>&1 || true
   docker network rm "$NET" >/dev/null 2>&1 || true
-  rm -rf "$LIB"
+  # /data is written by the container as PUID (our own uid), so a plain rm works.
+  rm -rf "$LIB" "$DATA"
 }
 trap cleanup EXIT INT TERM
 
@@ -42,16 +49,25 @@ docker rm -f "$APP" "$DB" >/dev/null 2>&1 || true
 docker network rm "$NET" >/dev/null 2>&1 || true
 docker network create --subnet "$SUBNET" "$NET" >/dev/null
 
-docker run -d --name "$DB" --network "$NET" \
-  -e POSTGRES_PASSWORD=e2e -e POSTGRES_DB=yomi postgres:16-alpine >/dev/null
-for _ in $(seq 1 60); do docker exec "$DB" pg_isready -q 2>/dev/null && break; sleep 1; done
+if [ "$EMBEDDED" = "1" ]; then
+  echo "· embedded database: no Postgres container, DATABASE_URL unset, /data mounted"
+  docker run -d --name "$APP" --network "$NET" -p "127.0.0.1:$PORT:3000" \
+    -e JWT_SECRET='e2e-secret-at-least-16-chars' \
+    -e LIBRARY_BACKEND=owned \
+    -e PUID="$(id -u)" -e PGID="$(id -g)" \
+    -v "$LIB":/library -v "$DATA":/data uchiyomi:e2e >/dev/null
+else
+  docker run -d --name "$DB" --network "$NET" \
+    -e POSTGRES_PASSWORD=e2e -e POSTGRES_DB=yomi postgres:16-alpine >/dev/null
+  for _ in $(seq 1 60); do docker exec "$DB" pg_isready -q 2>/dev/null && break; sleep 1; done
 
-docker run -d --name "$APP" --network "$NET" -p "127.0.0.1:$PORT:3000" \
-  -e DATABASE_URL="postgres://postgres:e2e@$DB:5432/yomi" \
-  -e JWT_SECRET='e2e-secret-at-least-16-chars' \
-  -e LIBRARY_BACKEND=owned \
-  -e PUID="$(id -u)" -e PGID="$(id -g)" \
-  -v "$LIB":/library uchiyomi:e2e >/dev/null
+  docker run -d --name "$APP" --network "$NET" -p "127.0.0.1:$PORT:3000" \
+    -e DATABASE_URL="postgres://postgres:e2e@$DB:5432/yomi" \
+    -e JWT_SECRET='e2e-secret-at-least-16-chars' \
+    -e LIBRARY_BACKEND=owned \
+    -e PUID="$(id -u)" -e PGID="$(id -g)" \
+    -v "$LIB":/library uchiyomi:e2e >/dev/null
+fi
 
 echo "· waiting for it to come up"
 for _ in $(seq 1 90); do
