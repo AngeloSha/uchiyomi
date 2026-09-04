@@ -1,5 +1,20 @@
 # Changelog
 
+## v0.17.0 — 2026-09-04
+
+### The API has a reference now, and it cannot fall behind
+
+Every route the app has -- all 184 of them -- is described in one OpenAPI file, and the app serves it at
+**`/api/docs`**: a browsable reference with "try it out", authenticated with the same token you would use
+from a script. Each operation says what it does, what it takes, what it answers and how it is gated, and the
+security schemes match the three ways in: a session or API token, the image cookie, the OPDS password.
+
+The point is not the file but the test behind it. A hand-written reference goes stale the day someone adds
+a route and forgets it; this one is checked against the routes the server actually registers, in both
+directions, every time the suite runs, and so is the route list in `docs/api.md` -- which turned out to be
+one short, with nothing to say so. The served version number must match the package too, so a release
+cannot ship a reference claiming to be an older API.
+
 ## v0.16.0 — 2026-09-03
 
 ### An OPDS reader can read page by page, and filter what it sees
