@@ -1,5 +1,35 @@
 # Changelog
 
+## v0.19.0 — 2026-09-04
+
+### Releases that build on the machine they run on
+
+Every arm64 image used to be cross-built under emulation on an amd64 machine, and that broke four of the
+last five releases the same way: the native-module builds hung until the timeout or died on an illegal
+instruction, and re-running the failed half was the standing fix. Each architecture is now built on a
+machine of that architecture and the two are merged into one image afterwards. The version tag exists only
+once both halves do, and `latest` moves only once every image has both, so a half-built release cannot
+reach anyone through either.
+
+Every published image now carries a signed statement of which workflow built it from which commit, and a
+software bill of materials. `gh attestation verify oci://ghcr.io/angelosha/uchiyomi:v0.19.0 --owner AngeloSha`
+checks it.
+
+### Watched dependencies, scanned code
+
+Dependabot watches the two npm trees, the workflow actions and the base images of all three Dockerfiles,
+weekly and grouped, so the eighteen-minute test run happens once per ecosystem per week rather than thirty
+times. CodeQL scans the TypeScript on every push and weekly; findings land in the repository's Security tab.
+
+### Unraid and Umbrel
+
+An Unraid Community Applications template (`deploy/unraid/uchiyomi.xml`) and an Umbrel app
+(`deploy/umbrel/uchiyomi/`), both the one-container layout with the database inside, which is what both
+stores expect and what v0.18.0 made possible. Honesty note: the Umbrel manifest is written to Umbrel's
+published format and tested for shape, but has not yet been run on umbrelOS itself; its store submission is
+a pull request to Umbrel's app repository, and it pins the image by digest, which is filled in once this
+release exists.
+
 ## v0.18.0 — 2026-09-04
 
 ### One container, database included
