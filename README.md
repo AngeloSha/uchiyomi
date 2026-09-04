@@ -284,13 +284,15 @@ as a custom app and it appears with an icon like any store app. That manifest le
 engine, so Mihon/Tachiyomi extensions are off there; add `uchiyomi-suwayomi` from
 [`deploy/docker-compose.yml`](deploy/docker-compose.yml) and set `SUWAYOMI_URL` if you want them.
 
-**On Unraid?** Add `https://raw.githubusercontent.com/AngeloSha/uchiyomi/main/deploy/unraid/uchiyomi.xml`
-under *Docker → Add Container → Template repositories* (or install from Community Applications once it is
-listed). One container, database included; set PUID/PGID to the owner of your library for renames.
+**On Unraid?** Add `https://github.com/AngeloSha/unraid-templates` under *Docker → Add Container →
+Template repositories* and pick *uchiyomi* (a Community Applications listing is requested). One container,
+database included; set PUID/PGID to the owner of your library for renames. The template is mirrored here as
+[`deploy/unraid/uchiyomi.xml`](deploy/unraid/uchiyomi.xml).
 
-**On Umbrel?** The app manifest lives at [`deploy/umbrel/uchiyomi`](deploy/umbrel/uchiyomi) and is
-submitted to the Umbrel app store from there. It runs as Umbrel's own user with the database inside the
-container; nothing to configure.
+**On Umbrel?** Uchiyomi is [submitted to the Umbrel App Store](https://github.com/getumbrel/umbrel-apps/pull/6055); until it is listed, the package at
+[`deploy/umbrel/uchiyomi`](deploy/umbrel/uchiyomi) is the exact one under review. It runs the database inside
+the container, reads your library from *Downloads/manga*, and includes the Cloudflare solver; the Mihon
+extension engine is not part of it.
 
 What you end up running:
 

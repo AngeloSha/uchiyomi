@@ -16,7 +16,7 @@
   <Overview>A self-hosted manga and manhwa reader that also fetches new chapters: discover, grab, monitor, serve and read in one container. Point it at a folder of CBZ/CBR files and read them on any device through a true-black OLED interface built webtoon-first. Installs as a PWA, works offline, per-user progress and favourites, two-factor auth, nightly backups, no account, no telemetry. The database runs inside the container; there is nothing else to install.</Overview>
   <Category>MediaServer:Books MediaApp:Books</Category>
   <WebUI>http://[IP]:[PORT:3000]/</WebUI>
-  <TemplateURL>https://raw.githubusercontent.com/AngeloSha/uchiyomi/main/deploy/unraid/uchiyomi.xml</TemplateURL>
+  <TemplateURL>https://raw.githubusercontent.com/AngeloSha/unraid-templates/main/uchiyomi.xml</TemplateURL>
   <Icon>https://raw.githubusercontent.com/AngeloSha/uchiyomi/main/web/public/icons/icon-512.png</Icon>
   <!-- The app finishes the chapter it is writing on stop, then Postgres checkpoints; Docker's default 10 s would cut that short. -->
   <ExtraParams>--stop-timeout 40</ExtraParams>

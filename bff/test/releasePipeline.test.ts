@@ -80,24 +80,39 @@ test('the Unraid template names every volume, the ports, and the ids, and stops 
   assert.equal(opens, closes, 'an unclosed <Config> element');
 });
 
-test('the Umbrel app has the proxy block, runs as 1000, pins by digest, and keeps its data', () => {
+test('the Umbrel package is the one under review: proxy block, PUID, digest pin, data under app-data', () => {
+  // Mirrors what was submitted to getumbrel/umbrel-apps and linted there with `lint:apps --check-images`.
   const m = parseYaml(read('deploy/umbrel/uchiyomi/umbrel-app.yml'));
-  assert.equal(m.manifestVersion, 1); assert.equal(m.id, 'uchiyomi'); assert.equal(m.port, 8080);
-  for (const k of ['name', 'tagline', 'description', 'developer', 'repo', 'support', 'category', 'version']) assert.ok(m[k], `manifest lacks ${k}`);
+  assert.equal(m.manifestVersion, 1); assert.equal(m.id, 'uchiyomi');
+  // 8110: unique across the store's manifest ports and raw compose ports at submission time (8080 was not).
+  assert.equal(m.port, 8110);
+  for (const k of ['name', 'tagline', 'description', 'developer', 'repo', 'support', 'category', 'version', 'submitter']) assert.ok(m[k], `manifest lacks ${k}`);
+  assert.deepEqual(m.gallery, [], 'the store adds gallery images; the package ships none');
+  assert.deepEqual(m.permissions, ['STORAGE_DOWNLOADS'], 'the library is read from Umbrel Downloads, which needs this permission');
+  assert.match(m.submission, /getumbrel\/umbrel-apps\/pull\/\d+$/, 'submission must be the store PR');
   const c = parseYaml(read('deploy/umbrel/uchiyomi/docker-compose.yml'));
   assert.ok(c.services.app_proxy, 'no app_proxy service: Umbrel cannot route to the app');
   assert.equal(c.services.app_proxy.environment.APP_HOST, 'uchiyomi_server_1');
   assert.equal(c.services.app_proxy.environment.APP_PORT, 3000);
+  // OPDS readers and API-token scripts cannot carry the Umbrel cookie; first-run setup must stay behind it.
+  assert.match(String(c.services.app_proxy.environment.PROXY_AUTH_WHITELIST), /\/opds\/\*.*\/img\/\*.*\/api\/\*/);
+  assert.match(String(c.services.app_proxy.environment.PROXY_AUTH_BLACKLIST), /\/api\/setup/, 'first-run setup is reachable without Umbrel login');
   const s = c.services.server;
-  assert.equal(s.user, '1000:1000', 'Umbrel runs apps as 1000:1000; the entrypoint takes its non-root path for that');
+  // PUID/PGID, not user:: the image has a permission-fixing root entrypoint (the store guide's own rule).
+  assert.equal(s.user, undefined, 'user: forces a uid on an image whose entrypoint must start as root');
+  assert.equal(String(s.environment.PUID), '1000'); assert.equal(String(s.environment.PGID), '1000');
   assert.match(s.image, /^ghcr\.io\/angelosha\/uchiyomi:v\d+\.\d+\.\d+@sha256:[0-9a-f]{64}$/, 'Umbrel requires the image pinned by digest');
+  assert.ok(!/0{64}/.test(s.image), 'the digest is still the placeholder');
   assert.ok(!('DATABASE_URL' in (s.environment ?? {})), 'DATABASE_URL set: the embedded database is off and there is no other');
-  assert.ok(s.volumes.some((v: string) => v.endsWith(':/data')), 'no /data volume: the database is lost on every update');
-  assert.ok(s.volumes.some((v: string) => v.endsWith(':/library')), 'no library mount');
+  assert.ok(s.volumes.some((v: string) => v.startsWith('${APP_DATA_DIR}/data/db:') && v.endsWith(':/data')), 'the database must live under app-data');
+  assert.ok(s.volumes.some((v: string) => v.includes('/data/storage/downloads/') && v.endsWith(':/library')), 'the library must come from Umbrel Downloads');
   assert.match(String(s.stop_grace_period), /40s/);
-  // Umbrel manifests name a version; it must be the version the compose pins, or the store shows one thing
-  // and installs another.
   assert.ok(s.image.includes(`:v${m.version}@`), `manifest version ${m.version} does not match the pinned image ${s.image}`);
+  assert.match(String(s.environment.JWT_SECRET), /APP_UCHIYOMI_JWT_SECRET/, 'the session secret should come from exports.sh');
+  assert.match(read('deploy/umbrel/uchiyomi/exports.sh'), /derive_entropy/, 'exports.sh does not derive the secret');
+  for (const d of ['db', 'config', 'cache', 'downloads', 'backups']) assert.ok(existsSync(join(REPO, `deploy/umbrel/uchiyomi/data/${d}/.gitkeep`)), `data/${d} is not committed; Umbrel would mount an empty root-owned path`);
+  const f = c.services.flaresolverr;
+  assert.ok(f && /@sha256:[0-9a-f]{64}$/.test(f.image), 'the solver sidecar is not pinned by digest');
 });
 
 test('the README tells Unraid and Umbrel users where their manifest is', () => {

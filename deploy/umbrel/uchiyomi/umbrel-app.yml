@@ -1,33 +1,50 @@
-# Umbrel app manifest. Submitted as a PR to getumbrel/umbrel-apps; this copy is the source of truth.
-# Unverified on umbrelOS itself at the time of writing -- see the CHANGELOG entry that added it.
 manifestVersion: 1
 id: uchiyomi
 category: media
 name: Uchiyomi
 version: "0.19.0"
-tagline: A self-hosted manga and manhwa reader that also keeps up with new chapters
+tagline: Manga & manhwa reader that also keeps up with new chapters
 description: >-
-  Uchiyomi is a self-hosted manga and manhwa reader that also fetches new chapters: discover, grab, monitor,
-  serve and read in one place. Point it at a folder of CBZ/CBR files and read them on any device through a
-  true-black OLED interface built webtoon-first, with continuous vertical scroll across chapters, pinch zoom
-  and double-page spreads for classic manga. It installs as a PWA, works offline, and keeps per-user reading
-  progress, favourites and history for a household. Two-factor auth, an audit log, nightly backups, no
-  account, no telemetry: your library stays yours. The database runs inside the container.
+  Uchiyomi is a self-hosted manga and manhwa reader that also fetches new chapters: discover, grab,
+  monitor, serve and read, in one app. Open it and create your admin account in the browser; there is no
+  default password. Put your existing CBZ or CBR files (any folder layout) in the Downloads folder under
+  "manga", using the Files app or a network share, and they appear after the first scan. The database runs
+  inside the app; there is nothing else to set up.
+
+
+  Read on any device through a true-black OLED interface built webtoon-first: continuous vertical scroll
+  across chapters, pinch zoom, per-series settings, and double-page spreads for classic manga. It installs
+  as a PWA, so it works offline and lives on your home screen. External reader apps such as Panels, Chunky
+  and KOReader can connect over OPDS, including page streaming.
+
+
+  Unlike a plain library server it can follow series: add a source by pasting a site's address, and a
+  scheduled updater grabs new chapters as they appear. A Cloudflare solver is included for the many sites
+  that need one. Bring your library over from Mihon/Tachiyomi with a backup file, or from a public MangaDex
+  list. The optional Mihon extension engine (a separate 800 MB Java server) is not part of this package.
+
+
+  Built for a household: per-user reading progress, favourites, history and a leaderboard, two-factor
+  auth, an audit log, an admin panel, and nightly backups. No account, no telemetry, no cloud.
+releaseNotes: ""
+
 developer: AngeloSha
 website: https://uchiyomi.com
 dependencies: []
 repo: https://github.com/AngeloSha/uchiyomi
 support: https://github.com/AngeloSha/uchiyomi/issues
-port: 8080
-gallery:
-  - 1.jpg
-  - 2.jpg
-  - 3.jpg
+
+port: 8110
+gallery: []
 path: ""
+
 defaultUsername: ""
 defaultPassword: ""
-releaseNotes: >-
-  One container with its own database, OPDS page streaming for external readers, an API reference at
-  /api/docs, and extensions that keep themselves up to date.
+
+permissions:
+  - STORAGE_DOWNLOADS
+backupIgnore:
+  - data/cache/*
+
 submitter: AngeloSha
-submission: https://github.com/getumbrel/umbrel-apps/pull/TODO
+submission: https://github.com/getumbrel/umbrel-apps/pull/6055
