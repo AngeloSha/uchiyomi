@@ -28,6 +28,13 @@ mkdirSync(OUT, { recursive: true });
 const fails = [];
 const consoleErrors = [];
 const serverErrors = [];
+// A cover proxied from a third-party CDN that answered the proxy with an error is not this app failing.
+// /img/sources/cover fetches whatever URL a source or AniList gave it; when that upstream refuses or falls
+// over -- which a GitHub runner's IP invites -- the route answers 5xx on purpose, so the browser's <img> can
+// fall back to the direct URL. That is the documented design, and it turned a passing run (40/40) into a red
+// badge on 2026-09-04 over one AniList cover. Noted, not counted; every other 5xx and console error still is.
+const thirdPartyCover = (url) => /\/img\/sources\/cover\?[^ ]*\bu=https?%3A/i.test(url || '');
+const thirdPartyNotes = [];
 let step = 0;
 
 const ok = (what) => console.log(`    [ ok ] ${what}`);
@@ -44,9 +51,16 @@ try {
   await page.setViewport({ width: 1440, height: 900 });
   page.on('console', (m) => {
     // A 401 on /auth/me before signing in is expected noise, not a fault.
-    if (m.type() === 'error' && !/401|auth\/me/.test(m.text())) consoleErrors.push(`${page.url()} :: ${m.text()}`);
+    if (m.type() === 'error' && !/401|auth\/me/.test(m.text())) {
+      if (thirdPartyCover(m.location()?.url)) thirdPartyNotes.push(`console @ ${page.url()}: ${m.location().url}`);
+      else consoleErrors.push(`${page.url()} :: ${m.text()}`);
+    }
   });
-  page.on('response', (r) => { if (r.status() >= 500) serverErrors.push(`${r.status()} ${r.request().method()} ${r.url()}`); });
+  page.on('response', (r) => {
+    if (r.status() < 500) return;
+    if (thirdPartyCover(r.url())) thirdPartyNotes.push(`${r.status()} ${r.url()}`);
+    else serverErrors.push(`${r.status()} ${r.request().method()} ${r.url()}`);
+  });
 
   const shot = async (name) => page.screenshot({ path: `${OUT}/${String(++step).padStart(2, '0')}-${name}.png` });
 
@@ -477,5 +491,9 @@ console.log(`${fails.length} failure(s), ${consoleErrors.length} console error(s
 for (const f of fails) console.log(`  ${f}`);
 for (const c of [...new Set(consoleErrors)].slice(0, 10)) console.log(`  console: ${c.slice(0, 160)}`);
 for (const s of [...new Set(serverErrors)].slice(0, 10)) console.log(`  server:  ${s.slice(0, 160)}`);
+if (thirdPartyNotes.length) {
+  console.log(`  ${thirdPartyNotes.length} third-party cover(s) failed upstream (noted, not counted):`);
+  for (const n of [...new Set(thirdPartyNotes)].slice(0, 5)) console.log(`    ${n.slice(0, 160)}`);
+}
 writeFileSync(`${OUT}/result.json`, JSON.stringify({ fails, consoleErrors, serverErrors }, null, 2));
 process.exit(fails.length || consoleErrors.length || serverErrors.length ? 1 : 0);
