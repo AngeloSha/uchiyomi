@@ -2,8 +2,11 @@
 
 Everything the web app does, it does over this API, so anything you can do in the browser you can script.
 
-This page covers how to authenticate and the endpoints worth scripting. It is not an exhaustive dump of all
-180 routes; the full list is at the bottom for reference.
+This page covers how to authenticate and the endpoints worth scripting. It is not an exhaustive dump of
+every route; the full list is at the bottom for reference, and the complete, browsable reference is served
+by the app itself at **`/api/docs`** (Swagger UI, with "try it out") from
+[`bff/openapi.yaml`](../bff/openapi.yaml). Both this list and that file are checked against the registered
+routes in both directions by `bff/test/openapiCoverage.test.ts`, so neither can silently fall behind.
 
 ## Authenticating
 
@@ -413,6 +416,7 @@ the same work the scheduled check does with `forceUpdate`. It answers **409** wh
 ```
 GET    /api/admin/extensions/status      GET    /api/admin/extensions/catalog
 POST   /api/admin/extensions/catalog/:pkgName
+POST   /api/admin/extensions/update-all
 GET    /api/admin/extensions/repos       POST   /api/admin/extensions/repos
 DELETE /api/admin/extensions/repos       POST   /api/admin/extensions/refresh
 GET    /api/admin/extensions/sources     POST   /api/admin/extensions/sources/:id

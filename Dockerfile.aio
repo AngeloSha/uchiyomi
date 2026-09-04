@@ -54,6 +54,8 @@ RUN npm ci --omit=dev --no-audit --no-fund 2>/dev/null || npm install --omit=dev
  && npm cache clean --force
 
 COPY --from=api /app/dist ./dist
+# The API reference the server serves at /api/docs. Next to dist/, where lib/apiDocs.ts resolves it.
+COPY bff/openapi.yaml ./openapi.yaml
 COPY --from=web /w/out ./web
 COPY bff/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh

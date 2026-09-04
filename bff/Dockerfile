@@ -23,6 +23,8 @@ COPY package.json package-lock.json* ./
 RUN if [ -f package-lock.json ]; then npm ci --omit=dev --no-audit --no-fund; \
     else npm install --omit=dev --no-audit --no-fund; fi
 COPY --from=build /app/dist ./dist
+# The API reference the server serves at /api/docs. Next to dist/, where lib/apiDocs.ts resolves it.
+COPY openapi.yaml ./openapi.yaml
 # postgresql-client supplies pg_dump/pg_restore for the built-in backup task (it reaches the DB over the
 # network via DATABASE_URL — the container has no docker socket, so it can't shell out to the db container).
 # su-exec drops privileges in the entrypoint; shadow supplies usermod/groupmod for PUID/PGID.

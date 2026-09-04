@@ -21,6 +21,7 @@ import { runBackup, msUntilHour } from './lib/backup';
 import { KomgaError } from './lib/komga';
 import { ZodError } from 'zod';
 import { registerWebRoot, webRootConfigured } from './lib/webRoot';
+import { registerApiDocs } from './lib/apiDocs';
 import authRoutes from './routes/auth';
 import adminRoutes from './routes/admin';
 import catalogRoutes from './routes/catalog';
@@ -126,6 +127,11 @@ async function main() {
   await app.register(downloadRoutes);
   await app.register(sourceRoutes);
   await app.register(opdsRoutes);
+  // The interactive API reference, BEFORE the web root: registerWebRoot installs the not-found handler that
+  // serves the app shell for any unknown path, and a route added after it would still work, but its
+  // static assets under /api/docs/ would not be found by the UI in the same way. Unauthenticated on
+  // purpose -- every route name is already public in docs/api.md and the spec holds no secrets.
+  await registerApiDocs(app);
 
   // The web app, when it is packaged into this image. Registered after every API route so a path collision
   // can only ever go the safe way. Unset WEB_ROOT and this is a no-op: nginx keeps serving it as before.
