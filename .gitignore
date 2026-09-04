@@ -13,6 +13,10 @@ sources-pack/
 # mounted source plugins (user-supplied); keep the empty default dir but not its contents
 sources/*
 !sources/.gitkeep
+# The Umbrel package commits its (empty) data directories: umbrelOS mounts them, and a missing one becomes
+# a root-owned mountpoint the app cannot write. `data/` above would swallow them.
+!deploy/umbrel/uchiyomi/data/
+!deploy/umbrel/uchiyomi/data/**
 # server-specific compose override (reverse-proxy networks) — the committed compose runs standalone
 docker-compose.override.yml
 # browser end-to-end screenshots: evidence for a failing run, not source
