@@ -99,7 +99,9 @@ into a single image.** Point it at your library, install an extension or paste a
   OpenID Connect, with optional group-to-admin mapping. Local accounts and 2FA keep working alongside it,
   so a provider outage can't lock you out. See [docs/api.md](docs/api.md#single-sign-on-oidc).
 - **Scriptable:** long-lived, revocable API tokens with read / write / admin scopes, so a backup script or
-  a cron job can talk to the API without a browser session. See [docs/api.md](docs/api.md).
+  a cron job can talk to the API without a browser session. See [docs/api.md](docs/api.md), or the full
+  reference the app serves itself at `/api/docs` (Swagger UI with try-it-out), which a test keeps in step
+  with the routes.
 - **AniList sync:** connect your account once and finishing a chapter updates your AniList list on its own.
   Progress is the highest chapter you've *finished*, so re-reading an old one never rewinds your list, and
   AniList being down or your token expiring can never block or slow down your reading.
