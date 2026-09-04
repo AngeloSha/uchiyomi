@@ -29,6 +29,10 @@ test('arm64 is built on an arm64 runner, never emulated, and merged into one ind
   assert.ok(wf.jobs.merge, 'no merge job: nothing writes the tag over both architectures');
   assert.match(code(y), /imagetools create -t "\$\{\{ matrix\.image \}\}:\$\{\{ github\.ref_name \}\}"/, 'the merge job does not write the version tag');
   assert.match(code(y), /grep -q "linux\/\$arch"/, 'the merge job does not check both architectures are in the index');
+  // Reintroduce by piping `imagetools inspect` into grep -q or an early-exiting awk: buildx dies of SIGPIPE,
+  // pipefail makes that the step's status, and every merge fails after every build succeeded -- the first
+  // run of this pipeline, exactly.
+  assert.ok(!/imagetools inspect[^\n]*\|\s*(grep|awk|head)/.test(code(y)), 'release.yml pipes an imagetools inspect into a reader that can close the pipe early');
   // The gate: latest moves only after every image is merged. Reintroduce by pointing `needs` at build.
   assert.equal(wf.jobs.latest.needs, 'merge', 'latest is not gated on the merged indexes');
   assert.equal(wf.jobs.merge.needs, 'build');

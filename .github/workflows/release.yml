@@ -130,13 +130,18 @@ jobs:
           refs=""
           for f in digests/${{ matrix.service }}-*; do refs="$refs ${{ matrix.image }}@$(cat "$f")"; done
           docker buildx imagetools create -t "${{ matrix.image }}:${{ github.ref_name }}" $refs
-          docker buildx imagetools inspect "${{ matrix.image }}:${{ github.ref_name }}"
+          # Inspect ONCE into a variable and read from that. Piping the inspect into `grep -q` or an awk
+          # that exits early closes the pipe under it; buildx then dies of SIGPIPE, and with pipefail that
+          # is the step's exit status (255) -- which is exactly how the first run of this pipeline failed
+          # all three merges after every build had succeeded.
+          out=$(docker buildx imagetools inspect "${{ matrix.image }}:${{ github.ref_name }}")
+          printf '%s\n' "$out"
           # Both architectures must be in the index, or the tag is a half-publish with a new spelling.
           for arch in amd64 arm64; do
-            docker buildx imagetools inspect "${{ matrix.image }}:${{ github.ref_name }}" | grep -q "linux/$arch" \
+            grep -q "linux/$arch" <<<"$out" \
               || { echo "::error::${{ matrix.image }}:${{ github.ref_name }} has no linux/$arch"; exit 1; }
           done
-          digest=$(docker buildx imagetools inspect "${{ matrix.image }}:${{ github.ref_name }}" | awk '/^Digest:/{print $2; exit}')
+          digest=$(awk '/^Digest:/ && !d {print $2; d=1}' <<<"$out")
           echo "digest=$digest" >> "$GITHUB_OUTPUT"
           echo "::notice title=${{ matrix.image }}:${{ github.ref_name }}::$digest   (this is the digest an Umbrel manifest pins)"
       # A signed statement, verifiable with `gh attestation verify oci://<image>:<tag> --owner AngeloSha`,
@@ -170,9 +175,11 @@ jobs:
       - name: Verify every image resolves to the same digest under both tags
         run: |
           set -euo pipefail
+          # No early-exiting awk on a pipe from buildx: see the merge job for why.
+          digest_of() { local out; out=$(docker buildx imagetools inspect "$1"); awk '/^Digest:/ && !d {print $2; d=1}' <<<"$out"; }
           for img in $IMAGES; do
-            v=$(docker buildx imagetools inspect "$img:${GITHUB_REF_NAME}" | awk '/^Digest:/{print $2; exit}')
-            l=$(docker buildx imagetools inspect "$img:latest" | awk '/^Digest:/{print $2; exit}')
+            v=$(digest_of "$img:${GITHUB_REF_NAME}")
+            l=$(digest_of "$img:latest")
             echo "$img  version=$v  latest=$l"
             [ -n "$v" ] && [ "$v" = "$l" ] || { echo "::error::$img latest does not match ${GITHUB_REF_NAME}"; exit 1; }
           done
