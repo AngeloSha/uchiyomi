@@ -33,7 +33,7 @@
     "sharp": "^0.35.0",
     "undici": "^6.19.8",
     "web-push": "^3.6.7",
-    "zod": "^3.23.8"
+    "zod": "^4.5.4"
   },
   "devDependencies": {
     "@types/node": "^22.5.4",
