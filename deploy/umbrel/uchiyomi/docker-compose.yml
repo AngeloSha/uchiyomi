@@ -13,7 +13,7 @@ services:
       APP_PORT: 3000
 
   server:
-    image: ghcr.io/angelosha/uchiyomi:v0.19.0@sha256:0000000000000000000000000000000000000000000000000000000000000000
+    image: ghcr.io/angelosha/uchiyomi:v0.19.0@sha256:3ef240fe2074e860546c0adfccd17b3f97116b96ec0badbe339af2fb946b0743
     user: "1000:1000"
     restart: on-failure
     stop_grace_period: 40s
