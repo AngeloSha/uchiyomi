@@ -38,6 +38,10 @@ esac; exit 0`);
   fake('psql', `[ -f "$PGDATA/.dbcreated" ] && echo 1 || echo ""`);
   fake('createdb', `touch "$PGDATA/.dbcreated"`);
   fake('pg_isready', 'exit 0');
+  // The passwd lookup is the test's to decide. On a GitHub runner the process uid HAS an entry, so without
+  // this the "no passwd entry" tests never reached the nss_wrapper path they assert on -- green locally
+  // (a container uid with no entry), red in CI. Found by CI; the fake answers "not found" unless told.
+  fake('getent', `[ -f "$FAKE_GETENT_FOUND" ] && { echo "app:x:$2:$2::/tmp:/bin/sh"; exit 0; }; exit 2`);
   // The "app": records its environment, optionally waits, optionally reports a signal, exits as told.
   fake('app', `env | grep -E '^(DATABASE_URL|EMBEDDED_DB|LD_PRELOAD)=' > "$FAKELOG.env"
 trap 'echo "app got TERM" >> "$FAKELOG"; exit 0' TERM
@@ -59,7 +63,7 @@ function run(sb: ReturnType<typeof sandbox>, env: Record<string, string | undefi
   const child = spawn('sh', [SCRIPT, sb.app], {
     env: {
       PATH: `${sb.bin}:${process.env.PATH}`, HOME: sb.root, FAKELOG: sb.log, PGDATA: sb.pgdata, PGSOCK: sb.sock, NSS_WRAPPER_LIB: sb.nss,
-      FAKE_PG_REFUSE_START: join(sb.root, 'refuse-start'),
+      FAKE_PG_REFUSE_START: join(sb.root, 'refuse-start'), FAKE_GETENT_FOUND: join(sb.root, 'getent-found'),
       ...Object.fromEntries(Object.entries(env).filter(([, v]) => v !== undefined) as [string, string][]),
     },
   });
@@ -128,6 +132,15 @@ test('a uid with no passwd entry is given one for Postgres, and the app is not p
   assert.match(r.initdbEnv, /NSS_WRAPPER_PASSWD=/, 'no passwd file was handed to nss_wrapper');
   assert.match(r.out, /no passwd entry; Postgres will run as it through nss_wrapper/);
   assert.equal(r.env.LD_PRELOAD, undefined, 'the preload leaked into the app');
+});
+
+test('a uid that already has a passwd entry needs no remedy', async () => {
+  const sb = sandbox();
+  writeFileSync(join(sb.root, 'getent-found'), '');
+  const r = await run(sb, { DATABASE_URL: undefined });
+  assert.equal(r.code, 0, r.err);
+  assert.ok(!/LD_PRELOAD/.test(r.initdbEnv), 'nss_wrapper was preloaded for a uid that has an entry');
+  assert.ok(!/passwd entry/.test(r.out + r.err), 'a remedy was announced for a uid that needs none');
 });
 
 test('with neither remedy available it refuses, and says what to do instead', async () => {
