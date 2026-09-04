@@ -1,5 +1,36 @@
 # Changelog
 
+## v0.18.0 — 2026-09-04
+
+### One container, database included
+
+Leave `DATABASE_URL` unset and the container runs its own Postgres: initialised on first start in the
+`uchiyomi_data` volume, listening on a unix socket only -- nothing outside the container can reach it and
+there is no password to manage -- and started before the app so the app never races it. That one variable
+is the whole switch. Set it, as every install before this release has, and none of it runs; the container
+behaves exactly as it did.
+
+`deploy/docker-compose.yml`, the file the install instructions curl, is now that one container plus the
+optional solver and extension engine. The layout with a Postgres container beside the app is still shipped
+as `deploy/docker-compose.external-db.yml` and is still supported; `docs/MIGRATING.md` has the move in both
+directions, which is a dump and a restore over the socket. App stores expect a one-container app, and this
+is what makes the Unraid and Umbrel manifests in the next release possible at all.
+
+The container is now a supervisor for exactly two processes and knows which one is the database. On
+`docker stop` the app finishes what it is writing and then Postgres stops cleanly (the compose file gives it
+a 40 s grace period, because Docker's default ten would kill a checkpoint). If Postgres dies underneath the
+app, the app is stopped so the container exits and `restart: unless-stopped` brings both back in order,
+which is the opposite of what an init system's restart-the-service semantics would do to a database. A data
+directory from a different Postgres major is refused up front, with the upgrade path named, rather than
+crash-looping on an error nobody should have to decode. Docker's own healthcheck asks Postgres too when it
+is inside, and the admin overview says which layout this is in one word.
+
+The browser end-to-end suite now drives both layouts on every commit, and the entrypoint itself is driven
+as a script with fake Postgres binaries that record their arguments. That harness caught two mistakes before
+they shipped: the socket directory was never created when the container runs as a non-root `user:`, and the
+app was launched through a shell function in the background -- which puts it in a subshell, so the signal
+sent on `docker stop` would have stopped the subshell and left the app running with its database gone.
+
 ## v0.17.0 — 2026-09-04
 
 ### The API has a reference now, and it cannot fall behind
