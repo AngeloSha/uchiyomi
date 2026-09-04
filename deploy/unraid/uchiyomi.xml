@@ -1,0 +1,38 @@
+<?xml version="1.0"?>
+<!--
+  Unraid Community Applications template. One container: the database runs inside it (DATABASE_URL unset),
+  in the Data path below. Submit to a CA template repository, or add this file's raw URL under
+  Docker -> Add Container -> Template repositories.
+-->
+<Container version="2">
+  <Name>uchiyomi</Name>
+  <Repository>ghcr.io/angelosha/uchiyomi</Repository>
+  <Registry>https://github.com/AngeloSha/uchiyomi/pkgs/container/uchiyomi</Registry>
+  <Network>bridge</Network>
+  <Shell>sh</Shell>
+  <Privileged>false</Privileged>
+  <Support>https://github.com/AngeloSha/uchiyomi/issues</Support>
+  <Project>https://uchiyomi.com</Project>
+  <Overview>A self-hosted manga and manhwa reader that also fetches new chapters: discover, grab, monitor, serve and read in one container. Point it at a folder of CBZ/CBR files and read them on any device through a true-black OLED interface built webtoon-first. Installs as a PWA, works offline, per-user progress and favourites, two-factor auth, nightly backups, no account, no telemetry. The database runs inside the container; there is nothing else to install.</Overview>
+  <Category>MediaServer:Books MediaApp:Books</Category>
+  <WebUI>http://[IP]:[PORT:3000]/</WebUI>
+  <TemplateURL>https://raw.githubusercontent.com/AngeloSha/uchiyomi/main/deploy/unraid/uchiyomi.xml</TemplateURL>
+  <Icon>https://raw.githubusercontent.com/AngeloSha/uchiyomi/main/web/public/icons/icon-512.png</Icon>
+  <!-- The app finishes the chapter it is writing on stop, then Postgres checkpoints; Docker's default 10 s would cut that short. -->
+  <ExtraParams>--stop-timeout 40</ExtraParams>
+  <DonateText>Support development</DonateText>
+  <DonateLink>https://github.com/sponsors/AngeloSha</DonateLink>
+  <Config Name="Web UI port" Target="3000" Default="8080" Mode="tcp" Description="The port you open in a browser." Type="Port" Display="always" Required="true" Mask="false">8080</Config>
+  <Config Name="Library" Target="/library" Default="/mnt/user/media/comics" Mode="rw" Description="Your existing CBZ/CBR library. Any folder layout works. Set PUID/PGID to the owner of these files for renames and deletes; otherwise it is read-only." Type="Path" Display="always" Required="true" Mask="false">/mnt/user/media/comics</Config>
+  <Config Name="Data (embedded database)" Target="/data" Default="/mnt/user/appdata/uchiyomi/data" Mode="rw" Description="Postgres lives here. Back it up like any appdata, or rely on the nightly dump in Backups." Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/uchiyomi/data</Config>
+  <Config Name="Config" Target="/config" Default="/mnt/user/appdata/uchiyomi/config" Mode="rw" Description="Secrets, custom sites, art overrides." Type="Path" Display="advanced" Required="true" Mask="false">/mnt/user/appdata/uchiyomi/config</Config>
+  <Config Name="Downloads" Target="/library-dl" Default="/mnt/user/appdata/uchiyomi/downloads" Mode="rw" Description="Chapters Uchiyomi fetches from sources." Type="Path" Display="advanced" Required="true" Mask="false">/mnt/user/appdata/uchiyomi/downloads</Config>
+  <Config Name="Image cache" Target="/cache" Default="/mnt/user/appdata/uchiyomi/cache" Mode="rw" Description="Safe to delete." Type="Path" Display="advanced" Required="true" Mask="false">/mnt/user/appdata/uchiyomi/cache</Config>
+  <Config Name="Backups" Target="/backups" Default="/mnt/user/appdata/uchiyomi/backups" Mode="rw" Description="Nightly database and config dumps. Ideally a different disk from Data." Type="Path" Display="advanced" Required="true" Mask="false">/mnt/user/appdata/uchiyomi/backups</Config>
+  <Config Name="PUID" Target="PUID" Default="99" Mode="" Description="Run as this user id (Unraid's nobody is 99). Use the owner of your library to allow renames and deletes." Type="Variable" Display="always" Required="false" Mask="false">99</Config>
+  <Config Name="PGID" Target="PGID" Default="100" Mode="" Description="Run as this group id (Unraid's users is 100)." Type="Variable" Display="always" Required="false" Mask="false">100</Config>
+  <Config Name="PUBLIC_ORIGIN" Target="PUBLIC_ORIGIN" Default="" Mode="" Description="How you reach it, e.g. http://192.168.1.10:8080 or https://manga.example.com. Must match, or logins and cookies break." Type="Variable" Display="always" Required="true" Mask="false"></Config>
+  <Config Name="FLARESOLVERR_URL" Target="FLARESOLVERR_URL" Default="" Mode="" Description="A FlareSolverr instance for Cloudflare-protected sources, e.g. http://192.168.1.10:8191. Optional." Type="Variable" Display="advanced" Required="false" Mask="false"></Config>
+  <Config Name="SUWAYOMI_URL" Target="SUWAYOMI_URL" Default="" Mode="" Description="A Suwayomi server for Mihon/Tachiyomi extensions, e.g. http://192.168.1.10:4567. Leave empty to go without extensions." Type="Variable" Display="advanced" Required="false" Mask="false"></Config>
+  <Config Name="BACKUP_KEEP" Target="BACKUP_KEEP" Default="14" Mode="" Description="How many nightly backups to keep." Type="Variable" Display="advanced" Required="false" Mask="false">14</Config>
+</Container>

@@ -1,0 +1,31 @@
+# Weekly, grouped. The CI run is ~18 minutes and the test tier is serial on purpose, so one grouped pull
+# request per ecosystem per week is the right cadence -- thirty single-package PRs would each cost that.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /bff
+    schedule: { interval: weekly, day: monday }
+    groups:
+      bff-minor-and-patch:
+        update-types: [minor, patch]
+    open-pull-requests-limit: 3
+  - package-ecosystem: npm
+    directory: /web
+    schedule: { interval: weekly, day: monday }
+    groups:
+      web-minor-and-patch:
+        update-types: [minor, patch]
+    open-pull-requests-limit: 3
+  - package-ecosystem: github-actions
+    directory: /
+    schedule: { interval: weekly, day: monday }
+  # The base images in the three Dockerfiles (node:22-alpine, nginx:1.27-alpine).
+  - package-ecosystem: docker
+    directory: /
+    schedule: { interval: weekly, day: monday }
+  - package-ecosystem: docker
+    directory: /bff
+    schedule: { interval: weekly, day: monday }
+  - package-ecosystem: docker
+    directory: /web
+    schedule: { interval: weekly, day: monday }

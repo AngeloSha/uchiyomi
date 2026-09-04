@@ -284,6 +284,14 @@ as a custom app and it appears with an icon like any store app. That manifest le
 engine, so Mihon/Tachiyomi extensions are off there; add `uchiyomi-suwayomi` from
 [`deploy/docker-compose.yml`](deploy/docker-compose.yml) and set `SUWAYOMI_URL` if you want them.
 
+**On Unraid?** Add `https://raw.githubusercontent.com/AngeloSha/uchiyomi/main/deploy/unraid/uchiyomi.xml`
+under *Docker → Add Container → Template repositories* (or install from Community Applications once it is
+listed). One container, database included; set PUID/PGID to the owner of your library for renames.
+
+**On Umbrel?** The app manifest lives at [`deploy/umbrel/uchiyomi`](deploy/umbrel/uchiyomi) and is
+submitted to the Umbrel app store from there. It runs as Umbrel's own user with the database inside the
+container; nothing to configure.
+
 What you end up running:
 
 | Container | Role |

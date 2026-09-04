@@ -1,19 +1,24 @@
 name: Release
 
 # Publishes multi-arch Docker images to GHCR when you push a version tag (e.g. `git tag v0.1.0 && git push --tags`).
-# Uses the built-in GITHUB_TOKEN (no extra secrets). The published images are what make the CasaOS/Unraid/Umbrel
-# one-click manifests installable.
+# Uses the built-in GITHUB_TOKEN plus the id-token for attestations. The published images are what make the
+# CasaOS/Unraid/Umbrel one-click manifests installable.
 #
-# Two things here are scars rather than style.
+# Three things here are scars rather than style.
+#
+# Each architecture is built on a runner OF that architecture, and the two results are merged into one
+# index afterwards. Until v0.19.0 arm64 was cross-built under QEMU on an amd64 runner, and that broke four of
+# five releases: the native-module builds (sharp, mupdf, argon2) either hung until the timeout or died with
+# SIGILL, and `gh run rerun --failed` was the standing workaround. Native runners remove the cause; the
+# merge step is what keeps "one tag, both architectures" true.
 #
 # `timeout-minutes` exists because v0.7.0's web leg stalled inside QEMU and sat there for the full six-hour
-# GitHub maximum before anyone found out. A healthy build of either image is two to eight minutes, so 40 is
-# generous and still fails the same day.
+# GitHub maximum before anyone found out. A healthy build of either image is two to eight minutes.
 #
-# `:latest` is moved by a separate job that runs only after BOTH images have published. The legs are
-# independent, so before this an image that built in two minutes would move its own `:latest` while the other
-# leg was still going, and if that one then failed, `docker compose pull` handed people a bff from one release
-# and a web from another. v0.5.1 half-published this way and v0.7.0 did it again.
+# `:latest` is moved by a separate job that runs only after EVERY image has published under the version tag.
+# The legs are independent, so before this an image that built in two minutes would move its own `:latest`
+# while another was still going, and if that one then failed, `docker compose pull` handed people a bff from
+# one release and a web from another. v0.5.1 half-published this way and v0.7.0 did it again.
 
 on:
   push:
@@ -22,25 +27,36 @@ on:
 permissions:
   contents: read
   packages: write
+  # for the build provenance attestation
+  id-token: write
+  attestations: write
+
+env:
+  IMAGES: ghcr.io/angelosha/uchiyomi-bff ghcr.io/angelosha/uchiyomi-web ghcr.io/angelosha/uchiyomi
 
 jobs:
-  images:
-    runs-on: ubuntu-latest
+  build:
+    name: build ${{ matrix.service }} ${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 40
     strategy:
       # Publish whichever image can be published: a failure in one leg should not cancel a working build of
-      # the other. `latest` is gated on both succeeding, so a half-publish cannot reach anyone via :latest.
+      # the other. `latest` is gated on all of them succeeding, so a half-publish cannot reach anyone via :latest.
       fail-fast: false
       matrix:
+        service: [bff, web, aio]
+        arch: [amd64, arm64]
         include:
           - { service: bff, image: ghcr.io/angelosha/uchiyomi-bff, context: ./bff,  file: ./bff/Dockerfile }
           - { service: web, image: ghcr.io/angelosha/uchiyomi-web, context: ./web,  file: ./web/Dockerfile }
           # The single-container build: the same API serving the web app itself. Its context is the repo
           # root because it builds both halves.
           - { service: aio, image: ghcr.io/angelosha/uchiyomi,     context: .,      file: ./Dockerfile.aio }
+          # Native runners, no emulation: ubuntu-24.04-arm is a real arm64 machine (free for public repos).
+          - { arch: amd64, runner: ubuntu-latest }
+          - { arch: arm64, runner: ubuntu-24.04-arm }
     steps:
       - uses: actions/checkout@v4
-      - uses: docker/setup-qemu-action@v3
       - uses: docker/setup-buildx-action@v3
       - name: Log in to GHCR
         uses: docker/login-action@v3
@@ -48,15 +64,18 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Build and push ${{ matrix.service }}
+      - name: Build and push ${{ matrix.service }} for ${{ matrix.arch }}, by digest
+        id: build
         uses: docker/build-push-action@v6
         with:
           context: ${{ matrix.context }}
           file: ${{ matrix.file }}
-          platforms: linux/amd64,linux/arm64
-          push: true
-          # version tag only. See the note at the top about why `latest` is not set here.
-          tags: ${{ matrix.image }}:${{ github.ref_name }}
+          platforms: linux/${{ matrix.arch }}
+          # No tag here: each architecture is pushed by digest and the merge job below writes the tag over
+          # both. A per-arch tag would be a moment where the tag pointed at one architecture only.
+          outputs: type=image,name=${{ matrix.image }},push-by-digest=true,name-canonical=true,push=true
+          provenance: mode=max
+          sbom: true
           # OCI labels: what the GHCR package page shows, and how tooling traces an image back to its
           # source and release. Absent until v0.9.2, so package pages had no description or licence.
           labels: |
@@ -67,11 +86,71 @@ jobs:
             org.opencontainers.image.version=${{ github.ref_name }}
             org.opencontainers.image.revision=${{ github.sha }}
             org.opencontainers.image.licenses=MPL-2.0
+      - name: Record the digest
+        run: |
+          mkdir -p digests
+          echo "${{ steps.build.outputs.digest }}" > "digests/${{ matrix.service }}-${{ matrix.arch }}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: digest-${{ matrix.service }}-${{ matrix.arch }}
+          path: digests/*
+          retention-days: 1
 
-  # Only once BOTH images exist at this version does `latest` move. Re-tagging a manifest copies no layers,
+  # One index per image, written over both architectures' digests, and only then the version tag exists.
+  merge:
+    name: merge ${{ matrix.service }}
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { service: bff, image: ghcr.io/angelosha/uchiyomi-bff }
+          - { service: web, image: ghcr.io/angelosha/uchiyomi-web }
+          - { service: aio, image: ghcr.io/angelosha/uchiyomi }
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: digest-${{ matrix.service }}-*
+          path: digests
+          merge-multiple: true
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/setup-buildx-action@v3
+      - name: Write ${{ matrix.image }}:${{ github.ref_name }} over both architectures
+        id: index
+        run: |
+          set -euo pipefail
+          ls digests
+          refs=""
+          for f in digests/${{ matrix.service }}-*; do refs="$refs ${{ matrix.image }}@$(cat "$f")"; done
+          docker buildx imagetools create -t "${{ matrix.image }}:${{ github.ref_name }}" $refs
+          docker buildx imagetools inspect "${{ matrix.image }}:${{ github.ref_name }}"
+          # Both architectures must be in the index, or the tag is a half-publish with a new spelling.
+          for arch in amd64 arm64; do
+            docker buildx imagetools inspect "${{ matrix.image }}:${{ github.ref_name }}" | grep -q "linux/$arch" \
+              || { echo "::error::${{ matrix.image }}:${{ github.ref_name }} has no linux/$arch"; exit 1; }
+          done
+          digest=$(docker buildx imagetools inspect "${{ matrix.image }}:${{ github.ref_name }}" | awk '/^Digest:/{print $2; exit}')
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+          echo "::notice title=${{ matrix.image }}:${{ github.ref_name }}::$digest   (this is the digest an Umbrel manifest pins)"
+      # A signed statement, verifiable with `gh attestation verify oci://<image>:<tag> --owner AngeloSha`,
+      # that this index was built by this workflow from this commit.
+      - uses: actions/attest-build-provenance@v2
+        with:
+          subject-name: ${{ matrix.image }}
+          subject-digest: ${{ steps.index.outputs.digest }}
+          push-to-registry: true
+
+  # Only once EVERY image exists at this version does `latest` move. Re-tagging a manifest copies no layers,
   # so this is a few seconds and cannot itself half-apply in a way that matters.
   latest:
-    needs: images
+    needs: merge
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -84,16 +163,16 @@ jobs:
       - name: Point latest at ${{ github.ref_name }}
         run: |
           set -euo pipefail
-          for img in ghcr.io/angelosha/uchiyomi-bff ghcr.io/angelosha/uchiyomi-web ghcr.io/angelosha/uchiyomi; do
+          for img in $IMAGES; do
             echo "retagging $img:${GITHUB_REF_NAME} -> :latest"
             docker buildx imagetools create -t "$img:latest" "$img:${GITHUB_REF_NAME}"
           done
-      - name: Verify both images resolve to the same digest under both tags
+      - name: Verify every image resolves to the same digest under both tags
         run: |
           set -euo pipefail
-          for img in ghcr.io/angelosha/uchiyomi-bff ghcr.io/angelosha/uchiyomi-web ghcr.io/angelosha/uchiyomi; do
-            v=$(docker buildx imagetools inspect "$img:${GITHUB_REF_NAME}" --format '{{.Manifest.Digest}}')
-            l=$(docker buildx imagetools inspect "$img:latest" --format '{{.Manifest.Digest}}')
+          for img in $IMAGES; do
+            v=$(docker buildx imagetools inspect "$img:${GITHUB_REF_NAME}" | awk '/^Digest:/{print $2; exit}')
+            l=$(docker buildx imagetools inspect "$img:latest" | awk '/^Digest:/{print $2; exit}')
             echo "$img  version=$v  latest=$l"
-            [ "$v" = "$l" ] || { echo "::error::$img latest does not match ${GITHUB_REF_NAME}"; exit 1; }
+            [ -n "$v" ] && [ "$v" = "$l" ] || { echo "::error::$img latest does not match ${GITHUB_REF_NAME}"; exit 1; }
           done
