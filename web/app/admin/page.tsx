@@ -1017,6 +1017,75 @@ function Sessions() {
   );
 }
 
+/**
+ * The update check, and the opt-in install count.
+ *
+ * ⚠️ TWO CARDS BECAUSE THEY ARE TWO DIFFERENT PROMISES. The first reads a public GitHub url and tells
+ * nobody anything, which is why it may be on by default. The second sends a small payload to a server the
+ * project runs, and is off until somebody says otherwise. Merging them into one "telemetry" switch would
+ * make the honest option -- updates yes, counting no -- impossible to express.
+ *
+ * ⚠️ THE PAYLOAD IS SHOWN, NOT DESCRIBED. It is fetched from the endpoint that produces the real thing, so
+ * this cannot drift into being a flattering summary of something else. Written prose here would have been
+ * easier and would have been the wrong shape: what an admin agrees to should be the literal object.
+ */
+function UpdateAndCount({ data, save }: { data: any; save: (body: any, ok: string) => void }) {
+  const on = !!data.install_ping;
+  // Fetched whether or not it is on: seeing exactly what WOULD be sent is the point of the preview, and
+  // asking someone to consent first in order to find out would be backwards.
+  const { data: preview } = useQuery({
+    queryKey: ['install-ping-preview'],
+    queryFn: () => api<{ url: string; payload: Record<string, unknown>; sample: boolean }>('/api/admin/install-ping/preview'),
+    staleTime: 60_000,
+  });
+
+  return (
+    <>
+      <div className="card grad-border flex items-center justify-between gap-3 p-4">
+        <div className="min-w-0">
+          <p className="text-sm text-fog-100">{tr('Check for updates')}</p>
+          <p className="max-w-prose text-[11px] text-fog-500">
+            {tr('Ask GitHub once a day whether a newer Uchiyomi has been released, and show it under Health. Nothing about this server is sent — it is the same public page you could open yourself.')}
+          </p>
+        </div>
+        <Switch on={data.update_check !== false} label={tr('Check for updates')}
+          onChange={(next) => save({ updateCheck: next }, next ? 'Update checks on' : 'Update checks off')} />
+      </div>
+
+      <div className="card grad-border full p-4">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <p className="text-sm text-fog-100">{tr('Count this server in the anonymous install count')}</p>
+            <p className="max-w-prose text-[11px] leading-relaxed text-fog-500">
+              {tr('Off by default. Nobody can see how many people self-host this, which makes it hard to know whether a release reached anyone. If you turn this on, once a day your server sends the few facts below — and nothing else — to uchiyomi.com.')}
+            </p>
+          </div>
+          <Switch on={on} label={tr('Count this server in the anonymous install count')}
+            onChange={(next) => save({ installPing: next }, next ? 'Thank you — counted' : 'No longer counted')} />
+        </div>
+
+        {preview && (
+          <div className="mt-3 rounded-xl border border-ink-700 bg-ink-950/60 p-3">
+            <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-fog-500">
+              {on ? tr('What is sent, once a day') : tr('What would be sent, once a day')}
+            </p>
+            <pre className="overflow-x-auto text-[11px] leading-relaxed text-fog-300">
+              <code>{`POST ${preview.url}\n${JSON.stringify(preview.payload, null, 2)}`}</code>
+            </pre>
+          </div>
+        )}
+
+        <ul className="mt-3 space-y-1 text-[11px] leading-relaxed text-fog-500">
+          {/* The id is the part that needs explaining, so it goes first and in plain words. */}
+          <li>{tr('The id changes every month and is a hash of a secret that never leaves this server, so two months of pings cannot be connected to each other.')}</li>
+          <li>{tr('No library, no titles, no accounts, no address, no hostname. The list above is the whole of it.')}</li>
+          <li>{tr('Turning this off deletes the secret and asks for this month to be forgotten. A new id is made if you ever turn it back on.')}</li>
+        </ul>
+      </div>
+    </>
+  );
+}
+
 function Settings() {
   const toast = useToast();
   const qc = useQueryClient();
@@ -1050,6 +1119,7 @@ function Settings() {
         <input type="number" min={1} max={168} value={hours ?? data.updater_hours} onChange={(e) => setHours(Number(e.target.value))} className="field" />
         <button onClick={() => save({ updaterHours: hours ?? data.updater_hours }, 'Saved')} className="btn-accent mt-2 w-full py-2 text-sm">{tr('Save interval')}</button>
       </div>
+      <UpdateAndCount data={data} save={save} />
       {data.extensions_configured && (
         <>
           <div className="card grad-border flex items-center justify-between gap-3 p-4">

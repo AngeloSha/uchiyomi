@@ -525,5 +525,14 @@
   "Nothing matches those filters.": "Nichts entspricht diesen Filtern.",
   "Your library is empty.": "Deine Bibliothek ist leer.",
   "Filter by genre": "Nach Genre filtern",
-  "Once your series carry genres, this is where they gather.": "Sobald deine Serien Genres tragen, sammeln sie sich hier."
+  "Once your series carry genres, this is where they gather.": "Sobald deine Serien Genres tragen, sammeln sie sich hier.",
+  "Check for updates": "Nach Updates suchen",
+  "Ask GitHub once a day whether a newer Uchiyomi has been released, and show it under Health. Nothing about this server is sent — it is the same public page you could open yourself.": "Einmal täglich bei GitHub nachfragen, ob eine neuere Uchiyomi-Version erschienen ist, und das unter „Zustand“ anzeigen. Über diesen Server wird nichts gesendet — es ist dieselbe öffentliche Seite, die du selbst aufrufen könntest.",
+  "Count this server in the anonymous install count": "Diesen Server in die anonyme Installationszählung aufnehmen",
+  "Off by default. Nobody can see how many people self-host this, which makes it hard to know whether a release reached anyone. If you turn this on, once a day your server sends the few facts below — and nothing else — to uchiyomi.com.": "Standardmäßig aus. Niemand kann sehen, wie viele Leute das selbst hosten, und damit lässt sich kaum sagen, ob ein Release überhaupt jemanden erreicht hat. Wenn du das einschaltest, sendet dein Server einmal täglich die wenigen Angaben unten — und sonst nichts — an uchiyomi.com.",
+  "What is sent, once a day": "Was einmal täglich gesendet wird",
+  "What would be sent, once a day": "Was einmal täglich gesendet würde",
+  "The id changes every month and is a hash of a secret that never leaves this server, so two months of pings cannot be connected to each other.": "Die Kennung wechselt jeden Monat und ist ein Hash eines Geheimnisses, das diesen Server nie verlässt — zwei Monate lassen sich also nicht miteinander verknüpfen.",
+  "No library, no titles, no accounts, no address, no hostname. The list above is the whole of it.": "Keine Bibliothek, keine Titel, keine Konten, keine Adresse, kein Hostname. Die Liste oben ist alles.",
+  "Turning this off deletes the secret and asks for this month to be forgotten. A new id is made if you ever turn it back on.": "Beim Ausschalten wird das Geheimnis gelöscht und um das Vergessen dieses Monats gebeten. Schaltest du es je wieder ein, entsteht eine neue Kennung."
 }

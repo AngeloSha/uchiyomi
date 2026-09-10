@@ -749,6 +749,61 @@ try {
   await shot('library-filters-desktop');
   await page.setViewport({ width: 390, height: 844, isMobile: true, hasTouch: true });
 
+  // ------------------------------------------------- what the install count shows before you consent
+  //
+  // The unit tests pin what the payload CONTAINS. This checks the part that makes it consent rather than a
+  // policy document: that an admin is shown the literal object, in the page, without having to turn
+  // anything on first. A privacy promise nobody is shown is not one.
+  await page.setViewport({ width: 1440, height: 900 });
+  await page.goto(`${BASE}/admin/`, { waitUntil: 'networkidle2', timeout: 60000 }).catch(() => {});
+  await sleep(2500);
+  if (await ensureSignedIn(page, 'the settings tab')) {
+    await page.goto(`${BASE}/admin/`, { waitUntil: 'networkidle2', timeout: 60000 }).catch(() => {});
+    await sleep(2500);
+  }
+  {
+    const opened = await page.evaluate(() => {
+      const b = [...document.querySelectorAll('button')].find((x) => (x.textContent || '').trim() === 'Settings');
+      if (!b) return false;
+      b.click();
+      return true;
+    });
+    if (!opened) bad('admin: no Settings tab');
+    else {
+      await sleep(2500);
+      const seen = await page.evaluate(() => {
+        const pre = document.querySelector('pre');
+        const text = document.body.innerText || '';
+        const sw = [...document.querySelectorAll('[role=switch]')].length;
+        return { pre: pre ? (pre.textContent || '') : null, text: text.slice(0, 4000), switches: sw };
+      });
+      if (!seen.pre) bad('admin settings: the install count shows no payload — an admin is asked to consent to a description');
+      else {
+        // Exactly the documented fields, visible, before anything is switched on.
+        const want = ['id', 'month', 'version', 'arch', 'layout', 'db'];
+        const missing = want.filter((k) => !seen.pre.includes(`"${k}"`));
+        missing.length
+          ? bad(`admin settings: the shown payload is missing ${missing.join(', ')}`)
+          : ok('admin settings: the exact payload is shown before consenting');
+        // ⚠️ And nothing beyond them. A field added to the payload would appear here first.
+        const extra = (seen.pre.match(/"([a-zA-Z]+)":/g) || []).map((m) => m.slice(1, -2)).filter((k) => !want.includes(k));
+        extra.length
+          ? bad(`admin settings: the payload shows fields nobody agreed to: ${extra.join(', ')}`)
+          : ok('admin settings: and nothing beyond the documented fields');
+        seen.pre.includes('POST http')
+          ? ok('admin settings: it says where it would go')
+          : bad('admin settings: the payload is shown without saying where it goes');
+      }
+      const promises = ['changes every month', 'No library', 'deletes the secret'];
+      const said = promises.filter((t) => seen.text.includes(t));
+      said.length === promises.length
+        ? ok('admin settings: the three promises are on the page, not only in the docs')
+        : bad(`admin settings: missing promise text (${promises.filter((t) => !said.includes(t)).join(' | ')})`);
+      await shot('admin-install-count');
+    }
+  }
+  await page.setViewport({ width: 390, height: 844, isMobile: true, hasTouch: true });
+
   // ---------------------------------------------------------------- the rails move
   //
   // Discover's rails were `hide-scrollbar … overflow-x-auto`: the bar was deleted, Lenis's smooth wheel

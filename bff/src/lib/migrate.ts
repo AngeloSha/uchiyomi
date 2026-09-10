@@ -339,6 +339,17 @@ ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS extension_last_result jsonb
 -- when it misbehaves, and its settings went with it silently -- they are not in our backup either.
 ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS extension_repos       jsonb   NOT NULL DEFAULT '[]';
 
+-- Update check: reads a public GitHub releases URL and sends nothing about this install, which is why it
+-- may default to on. See lib/githubRelease.ts.
+ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS update_check          boolean NOT NULL DEFAULT true;
+-- The opt-in install count, which is a DIFFERENT thing pointing at a DIFFERENT server, and defaults to off.
+-- The secret stays here and is never sent: the payload carries sha256(secret + month), so two pings in one
+-- month can be counted as one install and two pings in different months cannot be linked at all. It is
+-- generated on opt-in and discarded on opt-out, so a server that never consents never even holds one.
+ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS install_ping          boolean NOT NULL DEFAULT false;
+ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS install_ping_secret   text;
+ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS install_ping_last     timestamptz;
+
 -- What the repositories offered and what was installed, as of the last check. This is what makes "new
 -- upstream", "dropped upstream" and "installed outside Uchiyomi" answerable at all, and what lets a wiped
 -- extension server get its extensions back rather than just its repository list.

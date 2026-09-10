@@ -37,6 +37,8 @@ import { titlesFromMangadexList } from '../lib/mangadexList';
 import { fetchAniListArt, fetchAniListCandidates, fetchAnimeBanner } from '../lib/anilist';
 import { fetchKitsuBanner } from '../lib/kitsu';
 import { randomBytes } from 'crypto';
+import { appVersion } from '../lib/appVersion';
+import { PING_URL, buildPayload, installFacts, monthlyId, newSecret, sendForget } from '../lib/installPing';
 
 type ImportJob = { running: boolean; total: number; done: number; added: number; already: number; notFound: number; failed: number; startedAt: number; details: Array<{ title: string; status: string; source?: string }> };
 let importJob: ImportJob | null = null;
@@ -87,7 +89,8 @@ export default async function adminRoutes(app: FastifyInstance) {
   }));
 
   // ---- server settings ----
-  const SETTINGS_COLS = 'server_name, allow_registration, updater_hours, extension_hours, extension_auto_update';
+  const SETTINGS_COLS = 'server_name, allow_registration, updater_hours, extension_hours, extension_auto_update, '
+    + 'update_check, install_ping, install_ping_last';
   // `extensions_configured` is not a column: extension_hours has a NOT NULL default, so its presence says
   // nothing about whether there is an engine to check. The settings page needs to know, or it offers two
   // controls for a job that can never run.
@@ -95,7 +98,52 @@ export default async function adminRoutes(app: FastifyInstance) {
     ...(await one(`SELECT ${SETTINGS_COLS} FROM server_settings WHERE id = 1`)),
     extensions_configured: suwayomiConfigured(),
   });
+  /**
+   * Turn the opt-in install count on or off.
+   *
+   * ⚠️ CONSENT IS THE SECRET. Opting in mints one; opting out DESTROYS it, so the id this server reported
+   * under can never be recomputed by anyone, including us. That is also why opting back in later produces a
+   * different id rather than resuming the old one -- which is the honest behaviour, even though it means
+   * the count cannot tell a returning install from a new one.
+   * Reintroduce by keeping the secret across an opt-out: the off switch stops the sending but leaves a
+   * permanent identifier on disk, and re-enabling silently re-links this server to its own history.
+   */
+  const setInstallPing = async (on: boolean) => {
+    if (!on) {
+      const row = await one<{ secret: string | null }>('SELECT install_ping_secret AS secret FROM server_settings WHERE id = 1');
+      // Best effort, and never blocking the opt-out: what we control is that we stop sending.
+      if (row?.secret) await sendForget(monthlyId(row.secret)).catch(() => false);
+      await q('UPDATE server_settings SET install_ping = false, install_ping_secret = NULL, install_ping_last = NULL, updated_at = now() WHERE id = 1');
+      return;
+    }
+    await q(
+      `UPDATE server_settings
+          SET install_ping = true,
+              install_ping_secret = COALESCE(install_ping_secret, $1),
+              updated_at = now()
+        WHERE id = 1`,
+      [newSecret()],
+    );
+  };
+
   app.get('/api/admin/settings', settingsRow);
+
+  /**
+   * Exactly what the install count would send, if it were on.
+   *
+   * ⚠️ THIS IS THE CONSENT SURFACE AND IT MUST NOT BE A DESCRIPTION. It returns the output of the same
+   * `buildPayload` the background job sends, so what the settings page shows an admin cannot drift away
+   * from what actually leaves the server -- a hand-written summary in the UI could, and would, eventually.
+   * The id is computed from a throwaway secret when none exists yet, so previewing does not itself opt in.
+   */
+  app.get('/api/admin/install-ping/preview', async () => {
+    const row = await one<{ secret: string | null }>('SELECT install_ping_secret AS secret FROM server_settings WHERE id = 1');
+    return {
+      url: PING_URL,
+      payload: buildPayload(row?.secret ?? newSecret(), installFacts(appVersion())),
+      sample: !row?.secret,
+    };
+  });
   app.patch('/api/admin/settings', async (req) => {
     const b = z.object({
       serverName: z.string().min(1).max(64).optional(),
@@ -103,12 +151,16 @@ export default async function adminRoutes(app: FastifyInstance) {
       updaterHours: z.number().int().min(1).max(168).optional(),
       extensionHours: z.number().int().min(1).max(168).optional(),
       extensionAutoUpdate: z.boolean().optional(),
+      updateCheck: z.boolean().optional(),
+      installPing: z.boolean().optional(),
     }).parse(req.body);
     if (b.serverName !== undefined) await q('UPDATE server_settings SET server_name = $1, updated_at = now() WHERE id = 1', [b.serverName]);
     if (b.allowRegistration !== undefined) await q('UPDATE server_settings SET allow_registration = $1, updated_at = now() WHERE id = 1', [b.allowRegistration]);
     if (b.updaterHours !== undefined) await q('UPDATE server_settings SET updater_hours = $1, updated_at = now() WHERE id = 1', [b.updaterHours]);
     if (b.extensionHours !== undefined) await q('UPDATE server_settings SET extension_hours = $1, updated_at = now() WHERE id = 1', [b.extensionHours]);
     if (b.extensionAutoUpdate !== undefined) await q('UPDATE server_settings SET extension_auto_update = $1, updated_at = now() WHERE id = 1', [b.extensionAutoUpdate]);
+    if (b.updateCheck !== undefined) await q('UPDATE server_settings SET update_check = $1, updated_at = now() WHERE id = 1', [b.updateCheck]);
+    if (b.installPing !== undefined) await setInstallPing(b.installPing);
     await logAudit('settings.update', { userId: userIdOf(req), detail: b, req });
     return settingsRow();
   });

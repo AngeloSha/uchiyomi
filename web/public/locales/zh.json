@@ -525,5 +525,14 @@
   "Nothing matches those filters.": "没有符合这些筛选条件的作品。",
   "Your library is empty.": "你的书库是空的。",
   "Filter by genre": "按类型筛选",
-  "Once your series carry genres, this is where they gather.": "等你的系列带上类型标签，它们就会聚集在这里。"
+  "Once your series carry genres, this is where they gather.": "等你的系列带上类型标签，它们就会聚集在这里。",
+  "Check for updates": "检查更新",
+  "Ask GitHub once a day whether a newer Uchiyomi has been released, and show it under Health. Nothing about this server is sent — it is the same public page you could open yourself.": "每天向 GitHub 查询一次是否发布了更新版本的 Uchiyomi，并显示在「健康」中。不会发送有关本服务器的任何信息——这与你自己打开那个公开页面是一样的。",
+  "Count this server in the anonymous install count": "将本服务器计入匿名安装统计",
+  "Off by default. Nobody can see how many people self-host this, which makes it hard to know whether a release reached anyone. If you turn this on, once a day your server sends the few facts below — and nothing else — to uchiyomi.com.": "默认关闭。没有人能看到有多少人自行部署本应用，因此很难知道一个版本是否触及了任何人。若开启，你的服务器每天会向 uchiyomi.com 发送下面这几项信息——仅此而已。",
+  "What is sent, once a day": "每天发送的内容",
+  "What would be sent, once a day": "开启后每天会发送的内容",
+  "The id changes every month and is a hash of a secret that never leaves this server, so two months of pings cannot be connected to each other.": "该标识每月更换一次，它是一个永不离开本服务器的密钥的哈希值，因此不同月份的上报无法相互关联。",
+  "No library, no titles, no accounts, no address, no hostname. The list above is the whole of it.": "没有书库、没有标题、没有账号、没有地址、没有主机名。上面这份清单就是全部。",
+  "Turning this off deletes the secret and asks for this month to be forgotten. A new id is made if you ever turn it back on.": "关闭会删除该密钥，并请求忘记本月的记录。若你日后再次开启，将生成一个新的标识。"
 }

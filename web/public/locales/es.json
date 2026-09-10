@@ -525,5 +525,14 @@
   "Nothing matches those filters.": "Nada coincide con esos filtros.",
   "Your library is empty.": "Tu biblioteca está vacía.",
   "Filter by genre": "Filtrar por género",
-  "Once your series carry genres, this is where they gather.": "Cuando tus series tengan géneros, se reunirán aquí."
+  "Once your series carry genres, this is where they gather.": "Cuando tus series tengan géneros, se reunirán aquí.",
+  "Check for updates": "Buscar actualizaciones",
+  "Ask GitHub once a day whether a newer Uchiyomi has been released, and show it under Health. Nothing about this server is sent — it is the same public page you could open yourself.": "Preguntar a GitHub una vez al día si se ha publicado una versión más reciente de Uchiyomi, y mostrarlo en Estado. No se envía nada sobre este servidor: es la misma página pública que podrías abrir tú.",
+  "Count this server in the anonymous install count": "Contar este servidor en el recuento anónimo de instalaciones",
+  "Off by default. Nobody can see how many people self-host this, which makes it hard to know whether a release reached anyone. If you turn this on, once a day your server sends the few facts below — and nothing else — to uchiyomi.com.": "Desactivado por defecto. Nadie puede ver cuánta gente aloja esto por su cuenta, así que es difícil saber si una versión llegó a alguien. Si lo activas, una vez al día tu servidor envía los pocos datos de abajo —y nada más— a uchiyomi.com.",
+  "What is sent, once a day": "Lo que se envía, una vez al día",
+  "What would be sent, once a day": "Lo que se enviaría, una vez al día",
+  "The id changes every month and is a hash of a secret that never leaves this server, so two months of pings cannot be connected to each other.": "El identificador cambia cada mes y es un hash de un secreto que nunca sale de este servidor, así que dos meses de envíos no pueden relacionarse entre sí.",
+  "No library, no titles, no accounts, no address, no hostname. The list above is the whole of it.": "Ni biblioteca, ni títulos, ni cuentas, ni dirección, ni nombre de host. La lista de arriba es todo.",
+  "Turning this off deletes the secret and asks for this month to be forgotten. A new id is made if you ever turn it back on.": "Desactivarlo borra el secreto y pide que se olvide este mes. Si algún día vuelves a activarlo, se crea un identificador nuevo."
 }

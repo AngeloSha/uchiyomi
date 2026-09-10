@@ -357,6 +357,7 @@ DELETE /api/downloads/:bookId     GET    /api/books/:id/download-manifest
 ```
 GET    /api/admin/stats           GET    /api/admin/health
 GET    /api/admin/settings        PATCH  /api/admin/settings
+GET    /api/admin/install-ping/preview
 GET    /api/admin/users           POST   /api/admin/users
 PATCH  /api/admin/users/:id       DELETE /api/admin/users/:id
 GET    /api/admin/sessions        DELETE /api/admin/sessions/:id

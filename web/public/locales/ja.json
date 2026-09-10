@@ -525,5 +525,14 @@
   "Nothing matches those filters.": "条件に一致する作品はありません。",
   "Your library is empty.": "ライブラリは空です。",
   "Filter by genre": "ジャンルで絞り込む",
-  "Once your series carry genres, this is where they gather.": "シリーズにジャンルが付くと、ここに集まります。"
+  "Once your series carry genres, this is where they gather.": "シリーズにジャンルが付くと、ここに集まります。",
+  "Check for updates": "更新を確認する",
+  "Ask GitHub once a day whether a newer Uchiyomi has been released, and show it under Health. Nothing about this server is sent — it is the same public page you could open yourself.": "新しいバージョンの Uchiyomi が公開されていないか、1日1回 GitHub に問い合わせて「状態」に表示します。このサーバーについては何も送信されません。あなた自身で開けるのと同じ公開ページです。",
+  "Count this server in the anonymous install count": "このサーバーを匿名のインストール数に含める",
+  "Off by default. Nobody can see how many people self-host this, which makes it hard to know whether a release reached anyone. If you turn this on, once a day your server sends the few facts below — and nothing else — to uchiyomi.com.": "既定ではオフです。どれだけの人が自分でこれを動かしているかは誰にも見えないため、リリースが誰かに届いたのかを知るのは困難です。オンにすると、1日1回、下に示すわずかな情報だけを uchiyomi.com に送信します。",
+  "What is sent, once a day": "1日1回送信される内容",
+  "What would be sent, once a day": "1日1回送信される内容（オンにした場合）",
+  "The id changes every month and is a hash of a secret that never leaves this server, so two months of pings cannot be connected to each other.": "ID は毎月変わり、このサーバーから出ることのない秘密鍵のハッシュです。そのため異なる月の送信を結び付けることはできません。",
+  "No library, no titles, no accounts, no address, no hostname. The list above is the whole of it.": "ライブラリも、作品名も、アカウントも、アドレスも、ホスト名もありません。上の一覧がすべてです。",
+  "Turning this off deletes the secret and asks for this month to be forgotten. A new id is made if you ever turn it back on.": "オフにすると秘密鍵を削除し、今月分を忘れるよう要求します。再びオンにした場合は新しい ID が作られます。"
 }

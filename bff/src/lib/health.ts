@@ -9,9 +9,11 @@
 //  * `lib_books.pages` is filled in lazily on first read, so "pages = 0" means "never opened", not "broken".
 //  * decimal chapters (12.5, 44.6) are overwhelmingly legitimate side-stories and "Notice!" pages, which are
 //    genuinely one image long. Only whole-numbered chapters are worth flagging as too short.
-import { q } from './db';
+import { q, one } from './db';
 import { visibleToAll } from './visibility';
-import { latestSolverVersion, isBehind } from './solverVersion';
+import { latestSolverVersion } from './solverVersion';
+import { isBehind, latestRelease } from './githubRelease';
+import { appVersion } from './appVersion';
 import { solverPing, solverUrl } from './sources/flaresolverr';
 import { getSource } from './sources';
 import { gapsOf } from './fill';
@@ -397,6 +399,56 @@ export async function solverHealth(): Promise<HealthCheck> {
   };
 }
 
+/** The repo releases are published from. A constant, not a setting: a "check for updates" pointed at an
+ *  operator-supplied url is an arbitrary outbound request wearing a friendly name. */
+const APP_REPO = 'AngeloSha/uchiyomi';
+
+/**
+ * Is there a newer Uchiyomi?
+ *
+ * ⚠️ ADVISORY ONLY, exactly like the solver's version row: `status` is always `ok`, because being a version
+ * behind is not a fault and an update notice that turns the admin page amber trains people to ignore it.
+ * The same rule is written at solverHealth().
+ *
+ * ⚠️ THIS SENDS NOTHING ABOUT THIS INSTALL. It is a GET of a public GitHub releases URL; GitHub learns an
+ * IP, which is unavoidable for any update check, and the answer is compared locally. The opt-in install
+ * count is a separate switch to a separate host -- see lib/installPing.ts for why they must never merge.
+ *
+ * Off is genuinely off: `update_check = false` makes no request at all, and says so rather than pretending
+ * to be up to date.
+ */
+async function updateCheck(): Promise<HealthCheck> {
+  const running = appVersion();
+  const row = await one<{ on: boolean }>('SELECT update_check AS on FROM server_settings WHERE id = 1')
+    .catch(() => null);
+  const on = row?.on !== false;
+
+  if (!on) {
+    return {
+      id: 'update', title: 'Version', status: 'ok',
+      summary: running ? `Running v${running} — update checks are off` : 'Update checks are off',
+      note: 'Nothing is requested while this is off. Turn it on in Settings to be told when a release is out.',
+      items: [],
+    };
+  }
+
+  const latest = await latestRelease(APP_REPO);
+  const behind = isBehind(running, latest);
+  return {
+    id: 'update', title: 'Version', status: 'ok',
+    summary: !running ? 'Could not read the running version'
+      : behind ? `Running v${running} — ${latest} is available`
+      : latest ? `Running v${running} — up to date`
+      : `Running v${running}`,
+    // ⚠️ Said out loud, because "up to date" and "we could not ask" look identical on a page and only one of
+    // them is a reason to relax. GitHub being unreachable or rate-limited is a normal Tuesday.
+    note: latest ? undefined : 'GitHub could not be reached just now, so this is not a clean bill of health.',
+    items: behind
+      ? [{ title: `v${running} → ${latest}`, detail: 'a newer release is published; see the changelog before upgrading' }]
+      : [],
+  };
+}
+
 // ---- report -----------------------------------------------------------------
 
 export async function runHealthChecks(): Promise<HealthReport> {
@@ -410,6 +462,7 @@ export async function runHealthChecks(): Promise<HealthReport> {
     chapterFailures(),
     frozenSeries(),
     solverHealth(),
+    updateCheck(),
   ]);
   // worst first, so the page opens on whatever needs attention
   const rank: Record<HealthStatus, number> = { problem: 0, warn: 1, ok: 2 };

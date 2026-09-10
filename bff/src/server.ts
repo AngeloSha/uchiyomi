@@ -6,7 +6,7 @@ import jwt from '@fastify/jwt';
 import rateLimit from '@fastify/rate-limit';
 import compress from '@fastify/compress';
 import { env } from './env';
-import { pool } from './lib/db';
+import { pool, q, one } from './lib/db';
 import { runtime } from './lib/runtime';
 import { reapStaleTemp } from './lib/fsAtomic';
 import { DL_ROOT } from './lib/library';
@@ -25,6 +25,8 @@ import { KomgaError } from './lib/komga';
 import { ZodError } from 'zod';
 import { registerWebRoot, webRootConfigured } from './lib/webRoot';
 import { registerApiDocs } from './lib/apiDocs';
+import { appVersion } from './lib/appVersion';
+import { buildPayload, installFacts, sendPing } from './lib/installPing';
 import authRoutes from './routes/auth';
 import adminRoutes from './routes/admin';
 import catalogRoutes from './routes/catalog';
@@ -231,6 +233,43 @@ async function main() {
       setTimeout(tick, HOUR).unref();
     };
     setTimeout(tick, 10 * 60 * 1000).unref();
+  }
+
+  /**
+   * The opt-in install count.
+   *
+   * ⚠️ THE FIRST THING THIS DOES IS CHECK CONSENT, EVERY TICK, FROM THE DATABASE. Not a value captured at
+   * boot: an admin who turns it off must stop being counted without restarting the server, and reading the
+   * flag at the top of each run is what makes the switch mean that. With it off, nothing here touches the
+   * network at all -- there is no request to fail closed.
+   *
+   * Daily, and the first run waits an hour: nothing about this is urgent, and an install that is restarted
+   * repeatedly (a crash loop, someone tuning their compose file) must not turn a headcount into a flood.
+   * Sending at most one ping a day per install is also what makes the number mean "installs", not "boots".
+   */
+  {
+    const DAY = 24 * 60 * 60 * 1000;
+    const tick = async () => {
+      try {
+        const row = await one<{ on: boolean; secret: string | null; last: Date | null }>(
+          'SELECT install_ping AS on, install_ping_secret AS secret, install_ping_last AS last FROM server_settings WHERE id = 1',
+        ).catch(() => null);
+        // No consent, or no secret because consent was never given: send nothing, say nothing.
+        if (row?.on && row.secret) {
+          const since = row.last ? Date.now() - new Date(row.last).getTime() : Infinity;
+          if (since >= DAY - 60_000) {
+            const ok = await sendPing(buildPayload(row.secret, installFacts(appVersion())));
+            // Only a delivered ping moves the clock, so a collector that is down is retried tomorrow
+            // rather than silently counted as done.
+            if (ok) await q('UPDATE server_settings SET install_ping_last = now() WHERE id = 1');
+          }
+        }
+      } catch (e) {
+        app.log.error(e as any);
+      }
+      setTimeout(tick, DAY).unref();
+    };
+    setTimeout(tick, 60 * 60 * 1000).unref();
   }
 
   /**

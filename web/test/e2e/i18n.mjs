@@ -20,12 +20,24 @@ await p.setViewport({ width: 1280, height: 900 });
 await p.goto(BASE, { waitUntil: 'networkidle2', timeout: 60000 });
 // networkidle2 fires before React has hydrated the login form under puppeteer 24 + Next 15, so grabbing
 // inputs immediately found none. Wait for the form itself, not the network.
-await p.waitForSelector('input[type=password]', { timeout: 30000 });
-const i = await p.$$('input');
-await i[0].type(process.env.E2E_USER || 'e2e');
-await p.type('input[type=password]', process.env.E2E_PASS || 'e2e-passw0rd-123');
-await p.keyboard.press('Enter');
-await new Promise((r) => setTimeout(r, 4500));
+/**
+ * Sign in, resolving each field at the moment it is typed into.
+ *
+ * ⚠️ NOT VIA `$$('input')` HANDLES. The form is grabbed after `waitForSelector`, but React re-renders it
+ * once the session check settles, and a handle taken before that render points at a node that is no longer
+ * in the document -- puppeteer then throws `DOM.resolveNode: Node with given id does not belong to the
+ * document` and the whole run dies before a single language is checked. Passing a selector makes puppeteer
+ * re-query at type time, which is the same race the comment above the original wait already describes.
+ */
+async function signIn() {
+  await p.waitForSelector('input[type=password]', { timeout: 30000 });
+  await new Promise((r) => setTimeout(r, 800));
+  await p.type('input:not([type=password])', process.env.E2E_USER || 'e2e');
+  await p.type('input[type=password]', process.env.E2E_PASS || 'e2e-passw0rd-123');
+  await p.keyboard.press('Enter');
+  await new Promise((r) => setTimeout(r, 4500));
+}
+await signIn();
 
 /**
  * Sign in again if the session went, and wait for the library to have actually rendered.
@@ -38,14 +50,8 @@ await new Promise((r) => setTimeout(r, 4500));
  */
 async function readyLibrary() {
   if (await p.$('input[type=password]')) {
-    const i2 = await p.$$('input');
-    if (i2.length) {
-      await i2[0].type(process.env.E2E_USER || 'e2e');
-      await p.type('input[type=password]', process.env.E2E_PASS || 'e2e-passw0rd-123');
-      await p.keyboard.press('Enter');
-      await new Promise((r) => setTimeout(r, 4500));
-      await p.goto(`${BASE}/library`, { waitUntil: 'networkidle2', timeout: 60000 });
-    }
+    await signIn();
+    await p.goto(`${BASE}/library`, { waitUntil: 'networkidle2', timeout: 60000 });
   }
   // The filter sidebar is the last thing on this page to exist, so it is the honest "rendered" signal.
   await p.waitForSelector('aside', { timeout: 20000 }).catch(() => {});

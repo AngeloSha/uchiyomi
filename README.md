@@ -48,6 +48,11 @@ enable, and you are responsible for using it in line with those sites' terms and
 - **Push notifications** when a followed series gets a new chapter.
 - **OPDS** — read from Panels, Chunky or KOReader, page by page over OPDS-PSE.
 - **Progress sync** to AniList, MyAnimeList and Kitsu.
+- **Nothing phones home.** An update check reads GitHub's public releases page and sends nothing about your
+  server; it can be turned off. An anonymous install count exists and is **off unless you turn it on**, and
+  the settings page shows you the exact object it would send before you agree to it — a monthly-rotating id,
+  the version, the CPU architecture and which deployment shape you run. No library, no titles, no accounts,
+  no address. [What leaves your server](docs/CONFIGURATION.md#what-leaves-your-server).
 
 > 📖 Every screen walked through with screenshots: **[docs/USAGE.md](docs/USAGE.md)**
 

@@ -17,6 +17,50 @@ The ones worth knowing:
 - `PUBLIC_ORIGIN`: the URL the app is served from (match your domain behind a reverse proxy).
 
 
+## What leaves your server
+
+Two things can, they are separate switches, and they go to different places. Both live in
+**Admin → Settings**.
+
+**Check for updates** — *on by default.* Once a day the server asks GitHub whether a newer Uchiyomi has been
+released and shows the answer under Admin → Health. It is a `GET` of a public releases page: GitHub sees your
+IP address, exactly as it would if you opened that page in a browser, and nothing else. Nothing about your
+install is sent. Being a version behind is never treated as a fault — it will not turn anything amber.
+
+**Count this server in the anonymous install count** — *off by default.* Nobody can see how many people
+self-host this, so nobody — including whoever wrote it — knows whether a release reached twenty people or two
+hundred. If you turn this on, once a day your server sends this, and nothing else, to `uchiyomi.com`:
+
+```json
+{
+  "id": "3f2a…",          // sha256(a secret that never leaves your server + the current month)
+  "month": "2026-09",
+  "version": "0.28.0",
+  "arch": "arm64",         // amd64 or arm64
+  "layout": "aio",         // the all-in-one image, or split containers
+  "db": "embedded"         // the database the image runs itself, or one you supplied
+}
+```
+
+The settings page shows you that exact object — produced by the same code that sends it — before you agree
+to anything.
+
+- **The id changes every month.** It is a hash of a per-install secret plus the month, and the secret stays
+  on your server. Two pings in one month count as one install; two pings in different months cannot be
+  connected to each other, by us or by anyone who obtained the data.
+- **No library, no titles, no accounts, no address, no hostname.** The object above is the whole of it, and
+  a test (`bff/test/installPing.test.ts`) fails the build if a field is ever added.
+- **The collector stores no IP address and no clock time** — only the UTC date, and access logging is off for
+  that endpoint precisely so there is no side channel that re-identifies a row. Months older than a year are
+  deleted.
+- **Turning it off** deletes the secret and asks the collector to forget the current month's id. If you ever
+  turn it back on, a new id is made — it cannot resume the old one, which is the honest behaviour even though
+  it means a returning install looks like a new one.
+- `GET https://uchiyomi.com/api/hello` returns the running totals, so you can see what your ping became.
+
+Set `UCHIYOMI_PING_URL` to point the count somewhere else — at your own collector if you run a fork — or to
+an empty string to make sure it can never send anything regardless of the setting.
+
 ## Sources
 
 This section covers one of the two fetch routes: the **generic engines**. The other, and the one most people

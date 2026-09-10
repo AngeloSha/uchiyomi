@@ -6,7 +6,7 @@
 openapi: 3.1.0
 info:
   title: Uchiyomi API
-  version: 0.27.0
+  version: 0.28.0
   description: "Everything the web app does, it does over this API. Session JWTs are for the browser; scripts
     use a personal API token (Profile -> Security -> API tokens), sent as `Authorization: Bearer uy_...`.
     Scopes: read (every token), write (anything that changes data), admin (the /api/admin surface, which also
@@ -2877,6 +2877,25 @@ paths:
           description: Not authenticated
         "403":
           description: "Forbidden: token scope, account permission or age limit"
+  /api/admin/install-ping/preview:
+    get:
+      tags:
+        - admin
+      summary: Exactly what the opt-in install count would send, so it can be shown before consenting.
+      operationId: getApiAdminInstallPingPreview
+      description: >-
+        Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. Returns
+        the collector url and the literal payload, produced by the same function the background job uses, so
+        the settings page cannot show something other than what is sent. Previewing does not opt in.
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
   /api/admin/settings:
     get:
       tags:
@@ -2896,8 +2915,8 @@ paths:
     patch:
       tags:
         - admin
-      summary: "Change server settings: name, open registration, update interval, extension check interval and its
-        kill switch."
+      summary: "Change server settings: name, open registration, update interval, extension check interval and
+        its kill switch, the update check, and the opt-in install count."
       operationId: patchApiAdminSettings
       description: Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
       requestBody:
@@ -2916,6 +2935,14 @@ paths:
                 extensionHours:
                   type: integer
                 extensionAutoUpdate:
+                  type: boolean
+                updateCheck:
+                  description: Ask GitHub whether a newer release exists. Sends nothing about this install.
+                  type: boolean
+                installPing:
+                  description: >-
+                    Opt in to the anonymous install count. Turning it on mints a per-install secret; turning
+                    it off destroys it and asks the collector to forget the current month's id.
                   type: boolean
       security:
         - bearer: []

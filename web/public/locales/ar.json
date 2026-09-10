@@ -525,5 +525,14 @@
   "Nothing matches those filters.": "لا شيء يطابق عوامل التصفية هذه.",
   "Your library is empty.": "مكتبتك فارغة.",
   "Filter by genre": "التصفية حسب التصنيف",
-  "Once your series carry genres, this is where they gather.": "حين تحمل سلاسلك تصنيفات، ستتجمع هنا."
+  "Once your series carry genres, this is where they gather.": "حين تحمل سلاسلك تصنيفات، ستتجمع هنا.",
+  "Check for updates": "التحقق من التحديثات",
+  "Ask GitHub once a day whether a newer Uchiyomi has been released, and show it under Health. Nothing about this server is sent — it is the same public page you could open yourself.": "اسأل GitHub مرة يوميًا عمّا إذا صدرت نسخة أحدث من Uchiyomi، واعرض ذلك في «الحالة». لا يُرسَل أي شيء عن هذا الخادم — إنها الصفحة العامة نفسها التي يمكنك فتحها بنفسك.",
+  "Count this server in the anonymous install count": "احتساب هذا الخادم ضمن عدّاد التثبيتات المجهول",
+  "Off by default. Nobody can see how many people self-host this, which makes it hard to know whether a release reached anyone. If you turn this on, once a day your server sends the few facts below — and nothing else — to uchiyomi.com.": "مُعطَّل افتراضيًا. لا أحد يعرف كم شخصًا يستضيف هذا التطبيق بنفسه، ممّا يجعل من الصعب معرفة ما إذا كان إصدارٌ ما قد وصل إلى أحد. إذا فعّلت هذا، سيُرسل خادمك مرة يوميًا الحقائق القليلة أدناه — ولا شيء غيرها — إلى uchiyomi.com.",
+  "What is sent, once a day": "ما يُرسَل، مرة يوميًا",
+  "What would be sent, once a day": "ما سيُرسَل، مرة يوميًا",
+  "The id changes every month and is a hash of a secret that never leaves this server, so two months of pings cannot be connected to each other.": "يتغيّر المعرّف كل شهر وهو بصمة لسرٍّ لا يغادر هذا الخادم أبدًا، لذا لا يمكن ربط شهرين من الإشارات ببعضهما.",
+  "No library, no titles, no accounts, no address, no hostname. The list above is the whole of it.": "لا مكتبة، ولا عناوين، ولا حسابات، ولا عنوان شبكة، ولا اسم مضيف. القائمة أعلاه هي كل شيء.",
+  "Turning this off deletes the secret and asks for this month to be forgotten. A new id is made if you ever turn it back on.": "إيقاف هذا يحذف السرّ ويطلب نسيان هذا الشهر. وسيُنشأ معرّف جديد إن أعدت تفعيله يومًا ما."
 }

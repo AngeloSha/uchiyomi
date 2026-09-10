@@ -525,5 +525,14 @@
   "Nothing matches those filters.": "Ничего не подходит под эти фильтры.",
   "Your library is empty.": "Ваша библиотека пуста.",
   "Filter by genre": "Фильтр по жанру",
-  "Once your series carry genres, this is where they gather.": "Как только у ваших серий появятся жанры, они соберутся здесь."
+  "Once your series carry genres, this is where they gather.": "Как только у ваших серий появятся жанры, они соберутся здесь.",
+  "Check for updates": "Проверять обновления",
+  "Ask GitHub once a day whether a newer Uchiyomi has been released, and show it under Health. Nothing about this server is sent — it is the same public page you could open yourself.": "Раз в сутки спрашивать у GitHub, вышла ли более новая версия Uchiyomi, и показывать это в разделе «Состояние». О самом сервере ничего не отправляется — это та же открытая страница, которую вы могли бы открыть сами.",
+  "Count this server in the anonymous install count": "Учитывать этот сервер в анонимном подсчёте установок",
+  "Off by default. Nobody can see how many people self-host this, which makes it hard to know whether a release reached anyone. If you turn this on, once a day your server sends the few facts below — and nothing else — to uchiyomi.com.": "По умолчанию выключено. Никто не видит, сколько людей разворачивают это у себя, поэтому трудно понять, дошёл ли релиз хоть до кого-нибудь. Если включить, раз в сутки ваш сервер отправит на uchiyomi.com лишь те несколько сведений, что перечислены ниже, — и ничего больше.",
+  "What is sent, once a day": "Что отправляется, раз в сутки",
+  "What would be sent, once a day": "Что будет отправляться, раз в сутки",
+  "The id changes every month and is a hash of a secret that never leaves this server, so two months of pings cannot be connected to each other.": "Идентификатор меняется каждый месяц и является хешем секрета, который никогда не покидает этот сервер, поэтому отправки за разные месяцы нельзя связать между собой.",
+  "No library, no titles, no accounts, no address, no hostname. The list above is the whole of it.": "Ни библиотеки, ни названий, ни учётных записей, ни адреса, ни имени хоста. Список выше — это всё.",
+  "Turning this off deletes the secret and asks for this month to be forgotten. A new id is made if you ever turn it back on.": "Выключение удаляет секрет и просит забыть текущий месяц. Если вы когда-нибудь включите снова, будет создан новый идентификатор."
 }

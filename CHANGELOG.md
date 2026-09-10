@@ -1,5 +1,58 @@
 # Changelog
 
+## v0.28.0 — 2026-09-10
+
+### The server can tell you a new version exists
+
+Until now it could not: the version lived in `package.json` and nothing read it at runtime, so the app did
+not know what it was, let alone whether anything newer had been published. **Admin → Health** now has a
+Version row, and once a day the server asks GitHub whether a newer release is out.
+
+It is a plain read of a public releases page — the same one you could open in a browser. **Nothing about
+your server is sent.** GitHub sees an IP address, as it would for anyone loading a public page, and that is
+all. Being a version behind is never treated as a fault and will not turn anything amber; an update notice
+that cries wolf is one people learn to ignore.
+
+On by default, with a switch in Settings. Off means no request is made at all, and the row says so rather
+than quietly claiming you are up to date. If GitHub cannot be reached, it says that too — "up to date" and
+"we could not ask" look identical on a page, and only one of them is a reason to relax.
+
+### And, if you want, it can be counted
+
+Nobody can see how many people self-host this. That is the point of self-hosting, and it also means nobody —
+including whoever wrote it — knows whether a release reached twenty people or two hundred.
+
+So there is now an **opt-in** install count, **off by default**, as a separate switch. Turn it on and once a
+day your server sends this, and nothing else, to uchiyomi.com:
+
+```json
+{ "id": "3f2a…", "month": "2026-09", "version": "0.28.0",
+  "arch": "arm64", "layout": "aio", "db": "embedded" }
+```
+
+The settings page shows you that exact object before you agree to it — not a description of it, the literal
+thing, built by the same code that sends it, so the two cannot drift apart.
+
+- **The id changes every month.** It is a hash of a secret that never leaves your server plus the current
+  month. Two pings in one month count as one install; two pings in different months cannot be linked to each
+  other — not by us, and not by anyone who obtained the data, because the secret is not in it.
+- **No library, no titles, no accounts, no address, no hostname.** A test fails the build if a field is ever
+  added to that payload, because a field added quietly is a field you were never shown.
+- **The collector stores no IP and no clock time**, only the UTC date, and access logging is off for that
+  endpoint so there is no side channel that re-identifies a row. Anything unrecognised in a ping is dropped
+  rather than stored. Months older than a year are deleted.
+- **Turning it off destroys the secret** and asks the collector to forget the current month. Turning it back
+  on later makes a new id — it cannot resume the old one, which is the honest behaviour even though it means
+  a returning install looks like a new one.
+- `GET https://uchiyomi.com/api/hello` shows the running totals, so you can see what your ping became.
+
+The two switches are deliberately separate and point at different servers. If the update check went to a
+server this project runs, that server could count installs from its access log whether or not anyone
+consented, and "updates on, counting off" would be a setting that did nothing. Keeping them apart is what
+makes the off position real, and there is a test that fails if they ever converge.
+
+`UCHIYOMI_PING_URL` repoints the count at your own collector, or disables it outright if set empty.
+
 ## v0.27.0 — 2026-09-09
 
 ### One Library, and its filters finally organised
