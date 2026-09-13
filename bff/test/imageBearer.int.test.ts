@@ -1,6 +1,6 @@
 // One credential for a third-party client: an API token fetches pages and covers, not only JSON.
 //
-// The Mihon extension holds exactly one secret, an API token from Profile -> Security. Until v0.29.0 that
+// The Mihon extension holds exactly one secret, an API token from Profile -> Account. Until v0.29.0 that
 // token opened /api/* and nothing else: /img/* took the yomi_img cookie or the OPDS Basic token, so a client
 // that had listed a chapter's pages could not fetch a single one of them without a second credential pasted
 // in. This drives the real image routes through a real scanned CBZ, because the file resolution

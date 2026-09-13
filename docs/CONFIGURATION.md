@@ -86,7 +86,7 @@ SOURCES_PATH=/path/to/your/plugins/dist     # compiled .js plugins, mounted read
 ```
 
 The reader scans `SOURCES_DIR` (`/sources`) at boot and registers every plugin it finds. Drop in or update a
-plugin and hit **Admin → Providers → Reload** (`POST /api/admin/sources/reload`); no rebuild. With no sites
+plugin and hit **Admin → Providers → Reload sources** (`POST /api/admin/sources/reload`); no rebuild. With no sites
 added, no extensions installed and no pack mounted, Uchiyomi is just a clean reader for the library you
 already own.
 
