@@ -1860,6 +1860,40 @@ function Extensions({ span = '' }: { span?: string }) {
     enabled: !!status?.configured && !!status?.reachable,
   });
 
+  // Every language an installed extension offers, with how many of its sources are switched on. Installing
+  // an extension turns all of them on at once (see admin.ts's catalog route) -- one extension can be twenty
+  // languages, most of which nobody reading this install wants, and turning each off by hand one card at a
+  // time in Providers is the "clutters the page" complaint this exists to fix.
+  type ExtSourceRow = { id: string; name: string; lang: string | null; nsfw: boolean; supportsLatest: boolean; enabled: boolean };
+  const { data: extSources } = useQuery({
+    queryKey: ['ext-sources-all'],
+    queryFn: () => api<{ content: ExtSourceRow[] }>('/api/admin/extensions/sources'),
+    enabled: !!status?.configured && !!status?.reachable,
+  });
+  const [showLangs, setShowLangs] = useState(false);
+  const [busyLang, setBusyLang] = useState<string | null>(null);
+  const langGroups = (() => {
+    const m = new Map<string, { total: number; enabled: number; ids: string[] }>();
+    for (const r of extSources?.content || []) {
+      const key = r.lang || 'other';
+      const g = m.get(key) || { total: 0, enabled: 0, ids: [] };
+      g.total++; if (r.enabled) g.enabled++; g.ids.push(r.id);
+      m.set(key, g);
+    }
+    return [...m.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+  })();
+  const setLangEnabled = async (langKey: string, ids: string[], en: boolean) => {
+    setBusyLang(langKey);
+    try {
+      await Promise.all(ids.map((id) => api(`/api/admin/extensions/sources/${encodeURIComponent(id)}`, { method: 'POST', json: { enabled: en } })));
+      qc.invalidateQueries({ queryKey: ['ext-sources-all'] });
+      qc.invalidateQueries({ queryKey: ['sources'] });
+      qc.invalidateQueries({ queryKey: ['admin-sources'] });
+      toast(en ? `Showing ${ids.length} ${langKey} source${ids.length === 1 ? '' : 's'}` : `Hid ${ids.length} ${langKey} source${ids.length === 1 ? '' : 's'}`, 'success');
+    } catch { toast('Could not update that language', 'error'); }
+    setBusyLang(null);
+  };
+
   if (!status) return null;
 
   if (!status.configured) {
@@ -2011,6 +2045,41 @@ function Extensions({ span = '' }: { span?: string }) {
               </div>
             )}
           </div>
+
+          {/* languages — hide the sub-sources an installed extension turned on that nobody here reads */}
+          {langGroups.length > 0 && (
+            <div className="mb-2 rounded-lg border border-ink-700/60 bg-ink-850/40 p-2">
+              <button onClick={() => setShowLangs(!showLangs)} className="flex w-full items-center justify-between text-start">
+                <span className="text-[11px] text-fog-300">
+                  {langGroups.length} language{langGroups.length === 1 ? '' : 's'} from installed extensions ·{' '}
+                  {langGroups.reduce((n, [, g]) => n + g.enabled, 0)} of {langGroups.reduce((n, [, g]) => n + g.total, 0)} sources on
+                </span>
+                <span className="text-[11px] text-fog-500">{showLangs ? 'Hide' : 'Manage'}</span>
+              </button>
+              {showLangs && (
+                <div className="mt-2 space-y-1.5">
+                  <p className="text-[10px] leading-relaxed text-fog-600">
+                    Adding an extension switches on every language it offers. Hide the ones you don&apos;t read —
+                    they stay installed, just off the sources list, Discover and the health check.
+                  </p>
+                  {langGroups.map(([lg, g]) => (
+                    <div key={lg} className="flex items-center gap-2">
+                      <span className="min-w-0 flex-1 truncate text-xs text-fog-200">{lg === 'other' ? 'no language' : lg}</span>
+                      <span className="shrink-0 text-[10px] text-fog-500">{g.enabled}/{g.total} on</span>
+                      <button onClick={() => setLangEnabled(lg, g.ids, false)} disabled={busyLang === lg || g.enabled === 0}
+                        className="chip shrink-0 text-[11px] disabled:opacity-50">
+                        {busyLang === lg ? '…' : 'Hide all'}
+                      </button>
+                      <button onClick={() => setLangEnabled(lg, g.ids, true)} disabled={busyLang === lg || g.enabled === g.total}
+                        className="chip shrink-0 text-[11px] disabled:opacity-50">
+                        {busyLang === lg ? '…' : 'Show all'}
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Out of date is a thing to be told, not a thing to go looking for. The per-row Update button was
               only ever visible to someone already scrolling the installed list. */}

@@ -239,15 +239,24 @@ async function sourceTrouble(): Promise<HealthCheck> {
       ORDER BY sh.disabled DESC, sh.consecutive DESC`,
   );
   const now = Date.now();
+  // A source someone switched off on purpose is not a fault -- it is the opposite, an operator decision this
+  // check should respect rather than nag about. `runSourceCheck`'s sweep already knows this (it skips
+  // disabled sources outright, see sourceWatchdog.ts); this list used to disagree with it and turn the whole
+  // page amber for every language an operator hid after installing an extension. Disabled rows stay in the
+  // list below for visibility, they just no longer decide the verdict or get counted in the summary.
+  const trouble = rows.filter((r) => !r.disabled);
   return {
     id: 'sources',
     title: 'Source health',
-    status: rows.length ? 'warn' : 'ok',
-    summary: rows.length
-      ? `${rows.length} source${rows.length === 1 ? ' is' : 's are'} failing or blocked`
-      : 'All sources responding normally',
+    status: trouble.length ? 'warn' : 'ok',
+    summary: trouble.length
+      ? `${trouble.length} source${trouble.length === 1 ? ' is' : 's are'} failing or blocked`
+      : rows.length
+        ? `All enabled sources responding normally (${rows.length} turned off)`
+        : 'All sources responding normally',
     note: 'A blocked source usually means the site returned 403 or a Cloudflare challenge we could not solve. '
-        + 'If several fail at once and all of them mention the solver, check the solver rather than the sites.',
+        + 'If several fail at once and all of them mention the solver, check the solver rather than the sites. '
+        + 'Sources you turned off on purpose are listed but never make this warn.',
     items: rows.map((r) => {
       const until = r.blocked_until ? new Date(r.blocked_until).getTime() : 0;
       // A block whose deadline has passed is not actually holding anything back; say so rather than
