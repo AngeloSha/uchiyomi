@@ -8,6 +8,7 @@
 // Suwayomi's database lives; wiping it orphans the routing, same as uninstalling an extension would.
 import type { SourceAdapter, SourceSeries, SourceChapter } from '../types';
 import { gql as defaultGql, suwayomiUrl, suwayomiImageHeaders, type Gql } from './client';
+import { env } from '../../../env';
 
 export const SW_PREFIX = 'sw:';
 
@@ -118,6 +119,10 @@ function toChapter(c: RemoteChapter): SourceChapter | null {
  * `requiresCloudflare` is deliberately false: Suwayomi solves Cloudflare itself with an embedded browser, so
  * these sources skip our FlareSolverr entirely. Images do need Suwayomi's auth header, which is declared via
  * `imageHeaders` rather than special-cased on the id, so the core keeps consulting capabilities not names.
+ * The same goes for pacing: `pageConcurrency` and `pageGapMs` say that page URLs here are the engine's own
+ * proxy paths, rate-limited by the engine towards the site, so the downloader may overlap them instead of
+ * applying the one-at-a-time quarter-second gap that scraped sites need. The downloader never asks whether
+ * an id starts with `sw:`; it reads these two fields.
  */
 export function makeSuwayomiAdapter(remote: RemoteSource, run: Gql = defaultGql): SourceAdapter {
   const adapterId = swAdapterId(remote.id);
@@ -150,6 +155,10 @@ export function makeSuwayomiAdapter(remote: RemoteSource, run: Gql = defaultGql)
     iconUrl: remote.iconUrl?.trim() || undefined,
     requiresCloudflare: false,
     imageHeaders: suwayomiImageHeaders,
+    // Pages are fetched from the engine, not the site, so they may overlap and need no gap of their own;
+    // see the doc comment above and SUWAYOMI_PAGE_CONCURRENCY in env.ts.
+    pageConcurrency: env.SUWAYOMI_PAGE_CONCURRENCY,
+    pageGapMs: 0,
     // After the built-ins but ahead of user-added engine sites: an extension is usually a better-maintained
     // parser than a generic engine pointed at the same site.
     preferredOrder: 30,

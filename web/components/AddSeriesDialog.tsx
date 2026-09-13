@@ -11,6 +11,7 @@ import { Switch } from '@/components/Switch';
 import { useToast } from '@/components/Toast';
 import { IcCheck, IcChevronLeft } from '@/components/icons';
 import { t as tr } from '@/lib/i18n';
+import { normTitle } from '@/lib/normTitle';
 
 export interface Provider { source: string; name: string; sourceId: string; title: string; coverUrl?: string }
 interface Detail {
@@ -24,7 +25,14 @@ export type AddSeed =
   | { kind: 'result'; provider: Provider }
   | { kind: 'group'; title: string; providers: Provider[] };
 
-const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, '');
+/**
+ * What the chapter <select> holds. Sources list chapters ascending, so "First N" has always meant the OLDEST
+ * N -- right for a title you are starting, wrong for one you are catching up on. "Latest N" is the other
+ * end, and the server puts a floor under the series so auto-update fetches new releases only.
+ */
+type ChapterPick = 'all' | `first:${number}` | `latest:${number}`;
+const CHAPTER_PRESETS = [10, 25, 50, 100, 200];
+
 /** Never render a swept-up <style>/<script> block as a description. The BFF guards this too. */
 const looksCss = (s: string) =>
   s.length > 2500 || /<\/?(?:style|script)\b|\.[a-z][\w-]*\s*[{,]|@import|gtag\(|wp-manga|woocommerce|datalayer/i.test(s);
@@ -57,7 +65,7 @@ export function AddSeriesDialog({ seed, sources, onClose, onAdded }: {
   );
   const [detail, setDetail] = useState<Detail | null>(null);
   const [loading, setLoading] = useState(false);
-  const [count, setCount] = useState(0);
+  const [pick, setPick] = useState<ChapterPick>('all');
   const [autoUpdate, setAutoUpdate] = useState(true);
   const [adding, setAdding] = useState(false);
   const [dup, setDup] = useState<string | null>(null);
@@ -83,7 +91,7 @@ export function AddSeriesDialog({ seed, sources, onClose, onAdded }: {
     const mine = ++want.current;
     setLoading(true); setDetail(null);
     api<Detail>(`/api/sources/detail?source=${encodeURIComponent(picked.source)}&sourceId=${encodeURIComponent(picked.sourceId)}`)
-      .then((d) => { if (mine === want.current) { setDetail(d); setCount(d.count); } })
+      .then((d) => { if (mine === want.current) { setDetail(d); setPick('all'); } })
       .catch(() => { if (mine === want.current) setDetail(null); })
       .finally(() => { if (mine === want.current) setLoading(false); });
   }, [picked]);
@@ -97,12 +105,17 @@ export function AddSeriesDialog({ seed, sources, onClose, onAdded }: {
   });
   const job = done ? (jobs?.content ?? []).find((j) => j.folder === done.folder) : undefined;
 
+  // Derived, not stored: the payload, the rate-limit warning and the "latest" hint all read these.
+  const chapterCount = pick === 'all' ? undefined : Number(pick.slice(pick.indexOf(':') + 1));
+  const chapterFrom: 'oldest' | 'newest' = pick.startsWith('latest:') ? 'newest' : 'oldest';
+  const count = chapterCount ?? detail?.count ?? 0;
+
   const add = async (force = false) => {
     if (!picked) return;
     setAdding(true); setDup(null);
     try {
       const r = await api<{ title: string; folder: string; chapters: number; started?: boolean }>('/api/sources/add', {
-        json: { source: picked.source, sourceId: picked.sourceId, chapterCount: count || undefined, autoUpdate, force },
+        json: { source: picked.source, sourceId: picked.sourceId, chapterCount, chapterFrom, autoUpdate, force },
         // The client has never set a timeout anywhere, so the only bound was the proxy's 120s -- which
         // turned a slow-but-working add into "Add failed. Try another source." while the download carried
         // on. The request now answers in seconds, so this is a backstop rather than the usual path.
@@ -125,7 +138,7 @@ export function AddSeriesDialog({ seed, sources, onClose, onAdded }: {
     try {
       // addSeriesFromSource persists the scan before returning, so in owned mode the row exists by now.
       const p = await api<Page<Series>>('/api/series/search', { json: { fullTextSearch: done.title, size: 5 } });
-      const hit = p.content.find((s) => norm(s.metadata?.title || s.name) === norm(done.title)) ?? p.content[0];
+      const hit = p.content.find((s) => normTitle(s.metadata?.title || s.name) === normTitle(done.title)) ?? p.content[0];
       qc.invalidateQueries({ queryKey: ['library'] });
       router.push(hit ? `/series/?id=${hit.id}` : '/downloads/');
     } catch { router.push('/downloads/'); }
@@ -195,7 +208,7 @@ export function AddSeriesDialog({ seed, sources, onClose, onAdded }: {
 
   // ---------------------------------------------------------------- options
   const summary = detail?.summary && !looksCss(detail.summary) ? detail.summary : '';
-  const presets = [10, 25, 50, 100, 200].filter((n) => detail && n < detail.count);
+  const presets = CHAPTER_PRESETS.filter((n) => detail && n < detail.count);
 
   return (
     // Not dismissable while the request is in flight. Escape or a backdrop click used to unmount the dialog
@@ -226,10 +239,16 @@ export function AddSeriesDialog({ seed, sources, onClose, onAdded }: {
             {summary && <p className="mt-2 line-clamp-4 text-xs leading-relaxed text-fog-400">{summary}</p>}
 
             <label className="mb-1 mt-4 block text-xs font-semibold uppercase tracking-wider text-fog-500">{tr('Chapters to download')}</label>
-            <select value={count} onChange={(e) => setCount(Number(e.target.value))} className="field">
-              <option value={detail.count}>{tr('All ({n})', { n: detail.count })}</option>
-              {presets.map((n) => <option key={n} value={n}>{tr('First {n}', { n })}</option>)}
+            <select value={pick} onChange={(e) => setPick(e.target.value as ChapterPick)} className="field">
+              <option value="all">{tr('All ({n})', { n: detail.count })}</option>
+              {presets.map((n) => <option key={`first:${n}`} value={`first:${n}`}>{tr('First {n}', { n })}</option>)}
+              {presets.map((n) => <option key={`latest:${n}`} value={`latest:${n}`}>{tr('Latest {n}', { n })}</option>)}
             </select>
+            {chapterFrom === 'newest' && (
+              <p className="mt-1.5 text-[11px] text-fog-500">
+                {tr('Older chapters are not fetched by auto-update; use Find missing chapters if you want them later.')}
+              </p>
+            )}
 
             <div className="mt-3 flex items-center justify-between gap-3">
               <span className="text-sm text-fog-200">{tr('Auto-update new chapters')}</span>

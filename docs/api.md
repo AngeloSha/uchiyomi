@@ -99,8 +99,12 @@ curl -X POST -H "Authorization: Bearer $TOK" -H 'Content-Type: application/json'
   https://your-server/api/sources/add
 ```
 
-`chapterCount` limits how many of the most recent chapters to grab (omit for all); `autoUpdate` enrols it in the
-scheduled updater.
+`chapterCount` limits how many chapters to grab (omit for all). It counts from the OLDEST unless
+`chapterFrom: "newest"` is sent, and whichever end it counts from the selection is downloaded ascending, so
+a partial add always reads as a coherent run. With `newest`, the chapters below the selection are left to
+**Find missing chapters** rather than the updater: a chapter floor is set on the series so the scheduled
+sweep fetches new releases only, instead of backfilling the whole back catalogue five per night with each
+new chapter queued behind it. `autoUpdate` enrols it in the scheduled updater.
 
 `GET /api/sources` lists what you can reach: each entry carries `id`, `name`, `lang` (null when the source
 declares no single language, which means it belongs to every language group), `latest` (whether it can be
@@ -398,6 +402,9 @@ POST   /api/admin/import          POST   /api/admin/import/parse
 GET    /api/admin/import/status
 ```
 
+The bulk importer's body takes `titles`, `autoUpdate`, `chapterCount` and `chapterFrom`, with the same
+meaning as on `/api/sources/add` (`chapterFrom: "newest"` takes the latest N and floors the series).
+
 ### Admin — extensions (Mihon / Tachiyomi)
 
 Present only when an extension engine is configured; see [extensions.md](extensions.md).
@@ -418,6 +425,16 @@ stale catalogue.
 `POST /api/admin/extensions/update-all` re-reads the repositories first and then applies everything, which is
 the same work the scheduled check does with `forceUpdate`. It answers **409** while a check is running.
 
+`POST /api/admin/extensions/sources/bulk` takes `{ ids?, langs?, enabled }` (at least one selector) and
+switches every matching source in one statement and one registry reload, answering `changed` (rows that
+actually flipped), `hiddenLangs`, `registered` and `skipped`. `langs` also records the standing preference:
+a hidden language stays off when the next extension is installed, until it is shown again. `ids` do not --
+turning one source back on by hand is an exception to the preference, not a change of it. A row whose
+language is null is reachable only by id. `GET /api/admin/extensions/sources` carries the per-language
+overview as `langs` (sources, enabled, series that came from them, hidden), unaffected by its `q`/`lang`
+filters, and `GET /api/admin/extensions/status` reports `registered`, `skipped` and `cap` so the
+`SUWAYOMI_MAX_SOURCES` overflow is visible rather than a line in the boot log.
+
 ```
 GET    /api/admin/extensions/status      GET    /api/admin/extensions/catalog
 POST   /api/admin/extensions/catalog/:pkgName
@@ -425,6 +442,7 @@ POST   /api/admin/extensions/update-all
 GET    /api/admin/extensions/repos       POST   /api/admin/extensions/repos
 DELETE /api/admin/extensions/repos       POST   /api/admin/extensions/refresh
 GET    /api/admin/extensions/sources     POST   /api/admin/extensions/sources/:id
+POST   /api/admin/extensions/sources/bulk
 ```
 
 ### Images and OPDS

@@ -108,6 +108,12 @@ const schema = z.object({
   // Suwayomi can expose hundreds of sources; cross-source search fans out to every REGISTERED source, so
   // registration is opt-in per source and additionally capped here.
   SUWAYOMI_MAX_SOURCES: z.coerce.number().int().min(1).max(500).default(25),
+  // How many pages of one chapter to fetch from the extension engine at once. The engine sits between us
+  // and the site with its own client and its own rate limiting, and its page URLs are local proxy paths,
+  // so the quarter-second one-at-a-time pacing that keeps scraped sites from 429ing us was only slowing
+  // extension downloads down for nothing (issue #37). Capped at 8: the engine is a JVM sharing the box, and
+  // a 429 from it drops the pool to one for the rest of the chapter anyway.
+  SUWAYOMI_PAGE_CONCURRENCY: z.coerce.number().int().min(1).max(8).default(4),
   // How long one source gets to answer "what is new" on Discover. This handler was the only one of its
   // siblings with no bound of its own and inherited the adapter's -- 30s for Suwayomi, 95s for a
   // FlareSolverr-backed site -- so a single slow source stalled the whole wall for over a minute. Settable

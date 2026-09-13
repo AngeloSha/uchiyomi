@@ -1150,7 +1150,9 @@ function Settings() {
   );
 }
 
-interface HealthItem { seriesId?: string; seriesIds?: string[]; titles?: string[]; title: string; detail: string }
+// `info`: listed for reference, never the reason a check is amber -- a source you switched off, a version
+// that is merely behind. Rendered dimmed so the eye lands on the real findings.
+interface HealthItem { seriesId?: string; seriesIds?: string[]; titles?: string[]; title: string; detail: string; info?: boolean }
 interface HealthCheck { id: string; title: string; status: 'ok' | 'warn' | 'problem'; summary: string; note?: string; items: HealthItem[] }
 
 const HEALTH_TONE: Record<HealthCheck['status'], string> = {
@@ -1802,7 +1804,7 @@ function Health() {
                 {c.note && <p className="px-4 pt-3 text-[11px] leading-relaxed text-fog-500">{c.note}</p>}
                 <div className="divide-y divide-ink-800/70">
                   {c.items.map((it, i) => (
-                    <div key={`${c.id}-${i}`} className="flex items-center gap-3 px-4 py-2.5">
+                    <div key={`${c.id}-${i}`} className={`flex items-center gap-3 px-4 py-2.5 ${it.info ? 'opacity-60' : ''}`}>
                       <div className="min-w-0 flex-1">
                         <p className="truncate text-sm text-fog-100">{it.title}</p>
                         <p className="text-[11px] text-fog-500">{it.detail}</p>
@@ -1825,7 +1827,12 @@ function Health() {
   );
 }
 
-interface ExtStatus { configured: boolean; reachable: boolean; version?: string | null; error?: string; enabled?: number; known?: number }
+interface ExtStatus {
+  configured: boolean; reachable: boolean; version?: string | null; error?: string; enabled?: number; known?: number;
+  /** what search actually reaches; differs from `enabled` by `skipped` when SUWAYOMI_MAX_SOURCES bites */
+  registered?: number; skipped?: number; cap?: number; hiddenLangs?: string[];
+}
+interface ExtLang { lang: string | null; sources: number; enabled: number; used: number; hidden: boolean }
 interface CatalogExt { pkgName: string; name: string; lang: string | null; versionName: string | null; iconUrl: string | null; installed: boolean; hasUpdate: boolean; obsolete: boolean; nsfw: boolean }
 interface Catalog { content: CatalogExt[]; total: number; matched: number; shown: number; installed: number; updatable: number; hiddenAdult: number; langs: string[] }
 
@@ -1847,8 +1854,17 @@ function Extensions({ span = '' }: { span?: string }) {
   const [repoUrl, setRepoUrl] = useState('');
   const [addingRepo, setAddingRepo] = useState(false);
   const [showRepos, setShowRepos] = useState(false);
+  const [showLangs, setShowLangs] = useState(false);
+  const [hiding, setHiding] = useState<ExtLang | null>(null);
 
   const { data: status } = useQuery({ queryKey: ['ext-status'], queryFn: () => api<ExtStatus>('/api/admin/extensions/status') });
+  // Fetched only while the block is open: it is the full source list joined with usage counts, and most
+  // visits to this panel never open it.
+  const { data: langData } = useQuery({
+    queryKey: ['ext-langs'],
+    queryFn: () => api<{ langs: ExtLang[] }>('/api/admin/extensions/sources'),
+    enabled: showLangs && !!status?.configured && !!status?.reachable,
+  });
   const { data: repos } = useQuery({
     queryKey: ['ext-repos'],
     queryFn: () => api<{ content: string[] }>('/api/admin/extensions/repos'),
@@ -1884,11 +1900,13 @@ function Extensions({ span = '' }: { span?: string }) {
   const act = async (e: CatalogExt, action: 'install' | 'uninstall' | 'update') => {
     setBusy(e.pkgName);
     try {
-      const r = await api<{ sources: number }>(`/api/admin/extensions/catalog/${encodeURIComponent(e.pkgName)}`, { json: { action } });
+      const r = await api<{ sources: number; hidden?: number }>(`/api/admin/extensions/catalog/${encodeURIComponent(e.pkgName)}`, { json: { action } });
       refreshAll();
+      qc.invalidateQueries({ queryKey: ['ext-langs'] });
       toast(action === 'uninstall' ? `Removed ${e.name}`
         : action === 'update' ? `Updated ${e.name}`
-        : `Added ${e.name}${r.sources ? ` — ${r.sources} source${r.sources === 1 ? '' : 's'} ready to search` : ''}`, 'success');
+        : `Added ${e.name}${r.sources ? ` — ${r.sources} source${r.sources === 1 ? '' : 's'} ready to search` : ''}`
+          + (r.hidden ? ` · ${r.hidden} left off (hidden languages)` : ''), 'success');
     } catch (err: any) { toast(msgOf(err, `Could not ${action} ${e.name}`), 'error'); }
     setBusy(null);
   };
@@ -1945,6 +1963,24 @@ function Extensions({ span = '' }: { span?: string }) {
       refreshAll();
       toast('Repository removed', 'success');
     } catch { toast('Could not remove it', 'error'); }
+  };
+
+  /**
+   * Hide or show one language: every source in it in one call, and the choice remembered for the next
+   * install. A hide that would freeze series goes through the confirm dialog first (see the render below).
+   */
+  const toggleLang = async (l: ExtLang, enabled: boolean) => {
+    const name = l.lang ?? 'none';
+    setBusy(`__lang:${name}`);
+    try {
+      const r = await api<{ changed: number; skipped: number }>('/api/admin/extensions/sources/bulk', { json: { langs: [l.lang], enabled } });
+      refreshAll();
+      qc.invalidateQueries({ queryKey: ['ext-langs'] });
+      toast((enabled ? `Showing ${name} — ${r.changed} source${r.changed === 1 ? '' : 's'} on` : `Hidden ${name} — ${r.changed} source${r.changed === 1 ? '' : 's'} off`)
+        + (r.skipped ? ` (${r.skipped} over the source limit)` : ''), 'success');
+    } catch (e: any) { toast(msgOf(e, `Could not ${enabled ? 'show' : 'hide'} ${name}`), 'error'); }
+    setBusy(null);
+    setHiding(null);
   };
 
   const list = cat?.content || [];
@@ -2011,6 +2047,77 @@ function Extensions({ span = '' }: { span?: string }) {
               </div>
             )}
           </div>
+
+          {/* languages — a standing instruction, applied now and on every later install */}
+          <div className="mb-2 rounded-lg border border-ink-700/60 bg-ink-850/40 p-2">
+            <button onClick={() => setShowLangs(!showLangs)} className="flex w-full items-center justify-between text-start">
+              <span className="text-[11px] text-fog-300">
+                <span>Languages</span>
+                <span className="text-fog-500"> · {status.hiddenLangs?.length ?? 0} hidden</span>
+              </span>
+              <span className="text-[11px] text-fog-500">{showLangs ? 'Hide' : 'Manage'}</span>
+            </button>
+            {showLangs && (
+              <div className="mt-2 space-y-1.5">
+                {(langData?.langs || []).map((l) => {
+                  const name = l.lang ?? 'none';
+                  const on = l.enabled > 0;
+                  const working = busy === `__lang:${name}`;
+                  return (
+                    <div key={name} className="flex items-center gap-2">
+                      <span className="min-w-0 flex-1 truncate text-[11px] text-fog-300">
+                        <span className={l.hidden ? 'text-fog-500' : 'text-fog-100'}>{name}</span>
+                        <span className="text-fog-500"> · {l.sources} source{l.sources === 1 ? '' : 's'} · {l.enabled} on · {l.used} series</span>
+                      </span>
+                      {/* Sources that declare no language cannot be selected by one -- the server reaches those rows by id
+                          only -- so the row is counts without a button. A language with nothing on can only be shown. */}
+                      {l.lang === null ? (
+                        <span className="shrink-0 text-[10px] text-fog-600">no language declared</span>
+                      ) : (
+                        <button
+                          onClick={() => (on ? (l.used > 0 ? setHiding(l) : toggleLang(l, false)) : toggleLang(l, true))}
+                          disabled={working}
+                          className={`shrink-0 rounded-full px-2.5 py-1 text-[11px] transition disabled:opacity-50 ${on ? 'bg-ink-700 text-fog-300 hover:text-fog-100' : 'bg-accent text-white'}`}>
+                          {working ? '…' : on ? 'Hide' : 'Show'}
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
+                {langData && !langData.langs.length && (
+                  <p className="text-[10px] text-fog-600">No extension sources yet — add an extension and its languages appear here.</p>
+                )}
+                {!langData && <p className="text-[10px] text-fog-600">{tr('Loading…')}</p>}
+                <p className="text-[10px] leading-relaxed text-fog-600">
+                  Hiding a language switches its sources off and keeps them off when you add the next extension. Series
+                  from a hidden language stay readable but stop updating until you show it again.
+                </p>
+              </div>
+            )}
+          </div>
+
+          {hiding && (
+            <ConfirmDialog
+              title={`Hide ${hiding.lang ?? 'none'}?`}
+              body={`Hiding ${hiding.lang ?? 'none'} turns off ${hiding.enabled} source${hiding.enabled === 1 ? '' : 's'}. ${hiding.used} series came from them and will stop updating until you show it again; they stay readable.`}
+              confirmLabel="Hide"
+              busy={busy === `__lang:${hiding.lang ?? 'none'}`}
+              onConfirm={() => toggleLang(hiding, false)}
+              onClose={() => setHiding(null)}
+            />
+          )}
+
+          {/* The cap overflow used to be one line in the boot log: the panel counted the sources that were on,
+              search reached fewer, and nothing showed the difference. */}
+          {!!status.skipped && (
+            <div className="mb-2 flex items-center gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-2.5 py-2">
+              <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-amber-400" />
+              <p className="min-w-0 flex-1 text-[11px] leading-snug text-amber-200">
+                {status.skipped} enabled source{status.skipped === 1 ? ' is' : 's are'} not registered — over the limit of {status.cap}.
+                <span className="text-amber-200/60"> Hide languages you don&apos;t read, or raise SUWAYOMI_MAX_SOURCES.</span>
+              </p>
+            </div>
+          )}
 
           {/* Out of date is a thing to be told, not a thing to go looking for. The per-row Update button was
               only ever visible to someone already scrolling the installed list. */}

@@ -33,6 +33,7 @@ if (DSN) {
 const skip = DSN ? false : 'set TEST_DATABASE_URL to run';
 
 const LIB = 'lib_fill', SERIES = 's_fill_1', FOLDER = 'Rich Source/Filled Series';
+const LATEST = 's_fill_latest', LATEST_FOLDER = 'Rich Source/Latest Series';
 const RICH = 'fill-rich';      // has 1..10
 const POOR = 'fill-poor';      // has only 8..10, which is what our library was built from
 const WRONG = 'fill-wrong';    // a different series that numbers 1..3
@@ -93,6 +94,17 @@ before(async () => {
              VALUES ($1,$2,'T!fill',$3,$4,$5,'/library') ON CONFLICT (id) DO NOTHING`,
       [`b_fill_${n}`, SERIES, `${FOLDER}/Chapter ${n}.cbz`, n, `Chapter ${n}`]);
   }
+  // A series added as "Latest 4" from the rich source: holds 8..11 of its 1..11, floor 8. The run below is
+  // on the series' own source, which is the one case the scan may offer it from.
+  await q(`DELETE FROM lib_series WHERE id = $1`, [LATEST]);
+  await q(`INSERT INTO lib_series (id, source, title, folder, books_count, library_id, source_id, source_series_id, summary, author, chapter_floor)
+           VALUES ($1,'T!fill','Latest Series',$2,4,$3,$4,'rich-s','Our summary','Our author',8)`,
+    [LATEST, LATEST_FOLDER, LIB, RICH]);
+  for (const n of [8, 9, 10, 11]) {
+    await q(`INSERT INTO lib_books (id, series_id, source, file, number, title, root)
+             VALUES ($1,$2,'T!fill',$3,$4,$5,'/library') ON CONFLICT (id) DO NOTHING`,
+      [`b_latest_${n}`, LATEST, `${LATEST_FOLDER}/Chapter ${n}.cbz`, n, `Chapter ${n}`]);
+  }
   await q('DELETE FROM users WHERE username = $1', [USER]);
   uid = (await q(`INSERT INTO users (username, display_name, password_hash, role, auth_kind)
                   VALUES ($1,$1,'x','admin','password') RETURNING id`, [USER]))[0].id;
@@ -108,8 +120,8 @@ after(async () => {
   if (root) rmSync(root, { recursive: true, force: true });
   if (!DSN) return;
   await app?.close();
-  await q('DELETE FROM lib_books WHERE series_id = $1', [SERIES]).catch(() => {});
-  await q('DELETE FROM lib_series WHERE id = $1', [SERIES]).catch(() => {});
+  await q('DELETE FROM lib_books WHERE series_id = ANY($1)', [[SERIES, LATEST]]).catch(() => {});
+  await q('DELETE FROM lib_series WHERE id = ANY($1)', [[SERIES, LATEST]]).catch(() => {});
   await q('DELETE FROM libraries WHERE id = $1', [LIB]).catch(() => {});
   await q('DELETE FROM users WHERE username = $1', [USER]).catch(() => {});
   await q('DELETE FROM source_health WHERE source_id = ANY($1)', [[RICH, POOR, WRONG]]).catch(() => {});
@@ -146,6 +158,41 @@ test('the scan finds the hole and says who can fill it', { skip }, async (t) => 
   await t.test('a plan id is issued, and the chapter urls are not in the response', () => {
     assert.match(j.planId, /^fp_/);
     assert.ok(!JSON.stringify(j).includes('c/9'), 'no chapter URL may cross the wire');
+  });
+});
+
+test('a series added as "Latest N" can get its older chapters from its own source', { skip }, async (t) => {
+  // The add dialog's hint sends people here for the chapters a "Latest N" add left behind. Before this the
+  // scan offered interior gaps and newer chapters only, so that series answered "nothing is missing between
+  // the chapters you already have" -- a hint pointing at a dialog that could not deliver.
+  //
+  // Reintroduce by passing `{ older: false }` (or nothing) to assess() in the scan route: the pinned
+  // candidate's `older` is empty, its verdict is nothing_to_fill, and the `offers the run below` assertion
+  // fails.
+  const res = await scan({ seriesId: LATEST });
+  assert.equal(res.statusCode, 200);
+  const j = res.json();
+  const own = j.candidates.find((c: any) => c.source === RICH && c.pinned);
+  assert.ok(own, 'the series\' own source is a candidate');
+
+  await t.test('offers the run below what we hold, and nothing is refused', () => {
+    assert.deepEqual(own.older, [1, 2, 3, 4, 5, 6, 7], 'offers the run below');
+    assert.equal(own.why, 'ok');
+    assert.equal(j.refusal, null);
+    assert.equal(typeof j.fillMax, 'number', 'the dialog is told how much one fill may take');
+  });
+
+  await t.test('another source is never offered that run: below the floor is extrapolation from anyone else', () => {
+    for (const c of j.candidates.filter((c: any) => !c.pinned)) assert.deepEqual(c.older, [], `${c.source} offered older chapters`);
+  });
+
+  await t.test('and the fill accepts numbers from that run', async () => {
+    const r = await app.inject({
+      method: 'POST', url: '/api/sources/fill', headers: { authorization: tok },
+      payload: { planId: j.planId, source: RICH, sourceSeriesId: 'rich-s', numbers: [6, 7] },
+    });
+    assert.equal(r.statusCode, 200, r.body);
+    assert.equal(r.json().total, 2);
   });
 });
 

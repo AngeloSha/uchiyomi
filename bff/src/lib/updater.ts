@@ -71,7 +71,7 @@ export async function updateSeries(
   seriesId: string,
   maxNew = 10,
 ): Promise<{ title: string; added: number; available: number; outcome: UpdateOutcome; failed: number; capped?: number; folder?: string; chapters?: SourceChapter[]; diskFull?: boolean }> {
-  const s = await one<any>(`SELECT id,title,source_id,source_series_id,web,folder,summary,author,genres,status FROM lib_series s WHERE s.id=$1 AND ${visibleToAll('s')}`, [seriesId]);
+  const s = await one<any>(`SELECT id,title,source_id,source_series_id,web,folder,summary,author,genres,status,chapter_floor FROM lib_series s WHERE s.id=$1 AND ${visibleToAll('s')}`, [seriesId]);
   if (!s) return { title: '', added: 0, available: 0, outcome: 'gone', failed: 0 };
   const src = s.source_id ? getSource(s.source_id) : null;
   const ref = s.source_series_id;
@@ -88,8 +88,15 @@ export async function updateSeries(
   if (listFailed) { await stampChecked(seriesId, null, null); return { title: s.title, added: 0, available: 0, outcome: 'source_error', failed: 0 }; }
   if (!chapters.length) { await stampChecked(seriesId, 0, 0); return { title: s.title, added: 0, available: 0, outcome: 'ok', failed: 0 }; }
 
+  // A series added as "latest N" carries a floor, and what the source lists below it is not this job's
+  // business: the sweep exists to fetch new releases, and the oldest-first loop below would otherwise spend
+  // every night on the back catalogue with the new chapter queued behind it. Applied before `missing` is
+  // computed, so the source_missing stamp -- "{n} behind" on the series page -- counts only what the sweep
+  // would actually fetch. source_chapters still records the full count: that is what the source said.
+  const floor = s.chapter_floor == null ? -Infinity : Number(s.chapter_floor);
+  const wanted = chapters.filter((c) => c.number >= floor);
   const have = new Set((await q<{ number: number }>('SELECT number FROM lib_books WHERE series_id=$1', [seriesId])).map((r) => Number(r.number)));
-  const missing = chapters.filter((c) => !have.has(c.number)).sort((a, b) => a.number - b.number);
+  const missing = wanted.filter((c) => !have.has(c.number)).sort((a, b) => a.number - b.number);
   await stampChecked(seriesId, chapters.length, missing.length);
   // Chapters that have already failed CHAPTER_RETRY_CAP times are not attempted again by the sweep.
   const cappedNums = new Set(

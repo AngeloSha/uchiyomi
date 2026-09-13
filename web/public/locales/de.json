@@ -447,6 +447,7 @@
   "Checked, not usable": "Geprüft, nicht nutzbar",
   "Could not start.": "Konnte nicht gestartet werden.",
   "Fetch {n} chapters from {s}": "{n} Kapitel von {s} holen",
+  "Fetch {n} older chapters from {s}": "{n} ältere Kapitel von {s} holen",
   "Fetching {n} chapters…": "{n} Kapitel werden geholt…",
   "Filling in the gaps": "Lücken werden gefüllt",
   "Find missing chapters": "Fehlende Kapitel finden",
@@ -534,5 +535,7 @@
   "What would be sent, once a day": "Was einmal täglich gesendet würde",
   "The id changes every month and is a hash of a secret that never leaves this server, so two months of pings cannot be connected to each other.": "Die Kennung wechselt jeden Monat und ist ein Hash eines Geheimnisses, das diesen Server nie verlässt — zwei Monate lassen sich also nicht miteinander verknüpfen.",
   "No library, no titles, no accounts, no address, no hostname. The list above is the whole of it.": "Keine Bibliothek, keine Titel, keine Konten, keine Adresse, kein Hostname. Die Liste oben ist alles.",
-  "Turning this off deletes the secret and asks for this month to be forgotten. A new id is made if you ever turn it back on.": "Beim Ausschalten wird das Geheimnis gelöscht und um das Vergessen dieses Monats gebeten. Schaltest du es je wieder ein, entsteht eine neue Kennung."
+  "Turning this off deletes the secret and asks for this month to be forgotten. A new id is made if you ever turn it back on.": "Beim Ausschalten wird das Geheimnis gelöscht und um das Vergessen dieses Monats gebeten. Schaltest du es je wieder ein, entsteht eine neue Kennung.",
+  "Latest {n}": "Letzte {n}",
+  "Older chapters are not fetched by auto-update; use Find missing chapters if you want them later.": "Ältere Kapitel werden nicht automatisch geholt; nutze später Fehlende Kapitel finden, wenn du sie willst."
 }

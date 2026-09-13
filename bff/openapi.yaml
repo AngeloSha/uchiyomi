@@ -6,7 +6,7 @@
 openapi: 3.1.0
 info:
   title: Uchiyomi API
-  version: 0.29.0
+  version: 0.30.0
   description: "Everything the web app does, it does over this API. Session JWTs are for the browser; scripts
     use a personal API token (Profile -> Account -> API tokens), sent as `Authorization: Bearer uy_...`.
     Scopes: read (every token; GET plus the library search POST, which is a query), write (anything that changes data), admin (the /api/admin surface, which also
@@ -1191,6 +1191,14 @@ paths:
                   type: string
                 chapterCount:
                   type: integer
+                  minimum: 1
+                  description: How many chapters to take; omit for all.
+                chapterFrom:
+                  type: string
+                  enum: [oldest, newest]
+                  default: oldest
+                  description: Which end chapterCount counts from. Either way the selection is downloaded
+                    ascending. With newest, a chapter floor is set so auto-update fetches new releases only.
                 autoUpdate:
                   type: boolean
                 force:
@@ -3824,7 +3832,7 @@ paths:
     get:
       tags:
         - admin
-      summary: "Extension engine: configured, reachable, version, source counts, last check."
+      summary: "Extension engine: configured, reachable, version, source counts (enabled, registered, skipped over the cap), hidden languages."
       operationId: getApiAdminExtensionsStatus
       description: Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
       security:
@@ -3840,7 +3848,7 @@ paths:
     get:
       tags:
         - admin
-      summary: Sources the installed extensions provide, with which are enabled.
+      summary: "Sources the installed extensions provide, with which are enabled; plus a per-language overview (langs) and the hidden languages, unfiltered."
       operationId: getApiAdminExtensionsSources
       description: Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
       parameters:
@@ -3859,6 +3867,45 @@ paths:
       responses:
         "200":
           description: OK
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+  /api/admin/extensions/sources/bulk:
+    post:
+      tags:
+        - admin
+      summary: "Enable or disable many extension sources at once, by id or by language, in one statement and one reload. Languages also record the standing preference (hidden_langs) that installs respect; ids do not."
+      operationId: postApiAdminExtensionsSourcesBulk
+      description: Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. At least one of ids or langs must be non-empty.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - enabled
+              properties:
+                ids:
+                  type: array
+                  maxItems: 500
+                  items:
+                    type: string
+                langs:
+                  type: array
+                  maxItems: 100
+                  items:
+                    type: string
+                enabled:
+                  type: boolean
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: "OK: changed (rows that flipped), hiddenLangs, registered, skipped (over SUWAYOMI_MAX_SOURCES)"
+        "400":
+          description: Malformed body, neither ids nor langs given, or no extension server configured
         "401":
           description: Not authenticated
         "403":
@@ -3976,9 +4023,13 @@ paths:
     post:
       tags:
         - admin
-      summary: Install, update or uninstall an extension; its sources are enabled or removed to match.
+      summary: Install, update or uninstall an extension; its sources are enabled or removed to match, except
+        sources in a hidden language, which stay off.
       operationId: postApiAdminExtensionsCatalogPkgname
-      description: Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
+      description: "Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
+        The 200 body carries `sources` (how many the extension provides), `on` (switched on now) and `hidden`
+        (left off because their language is hidden; see /api/admin/extensions/sources/bulk)."
+
       parameters:
         - name: pkgName
           in: path
@@ -4155,6 +4206,30 @@ paths:
       summary: Import titles from a parsed backup; poll the status.
       operationId: postApiAdminImport
       description: Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [titles]
+              properties:
+                titles:
+                  type: array
+                  items:
+                    type: string
+                  minItems: 1
+                  maxItems: 500
+                autoUpdate:
+                  type: boolean
+                chapterCount:
+                  type: integer
+                  minimum: 1
+                chapterFrom:
+                  type: string
+                  enum: [oldest, newest]
+                  default: oldest
+                  description: Same meaning as on /api/sources/add, applied to every title in the list.
       security:
         - bearer: []
       responses:

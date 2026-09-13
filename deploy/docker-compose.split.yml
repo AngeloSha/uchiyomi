@@ -95,6 +95,7 @@ services:
       SUWAYOMI_USERNAME: ${SUWAYOMI_USERNAME:-}
       SUWAYOMI_PASSWORD: ${SUWAYOMI_PASSWORD:-}
       SUWAYOMI_MAX_SOURCES: ${SUWAYOMI_MAX_SOURCES:-25}
+      SUWAYOMI_PAGE_CONCURRENCY: ${SUWAYOMI_PAGE_CONCURRENCY:-4}
     volumes:
       - ${LIBRARY_PATH:-./library}:/library     # your existing comics (see PUID below)
       - ${SOURCES_PATH:-./sources}:/sources:ro   # optional built source pack

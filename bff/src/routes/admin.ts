@@ -22,6 +22,9 @@ import { diagnose } from '../lib/sourceDiagnosis';
 import { readSites, writeSites } from '../lib/sources/customSites';
 import { reloadAll, listSources, getSource, detectEngine, listRemoteSources, suwayomiConfigured, suwayomiAbout, swAdapterId } from '../lib/sources';
 import { listExtensions, refreshExtensions, setExtensionState, sourcesOfExtension, getRepos, setRepos, normalizeRepoUrl, altRepoUrl } from '../lib/sources/suwayomi/extensions';
+import { getHiddenLangs, setSourcesEnabled, adoptExtensionSources, langOverview } from '../lib/sources/suwayomi/langs';
+import { lastSuwayomiLoad } from '../lib/sources/suwayomi/register';
+import { env } from '../env';
 import { readFile, writeFile, mkdir, rm } from 'fs/promises';
 import { dirname } from 'path';
 import sharp from 'sharp';
@@ -1085,8 +1088,19 @@ export default async function adminRoutes(app: FastifyInstance) {
     const counts = await one<{ enabled: number; known: number }>(
       `SELECT count(*) FILTER (WHERE enabled)::int AS enabled, count(*)::int AS known FROM suwayomi_sources`,
     );
-    return { configured: true, reachable, version, error, enabled: counts?.enabled ?? 0, known: counts?.known ?? 0 };
+    // `enabled` is what the operator asked for; `registered` is what search actually reaches. They differ
+    // by `skipped` whenever the cap bites, and until the panel showed all three that gap was invisible.
+    const load = lastSuwayomiLoad();
+    return {
+      configured: true, reachable, version, error, enabled: counts?.enabled ?? 0, known: counts?.known ?? 0,
+      registered: load?.registered ?? 0, skipped: load?.skipped ?? 0, cap: env.SUWAYOMI_MAX_SOURCES,
+      hiddenLangs: await getHiddenLangs().catch(() => [] as string[]),
+    };
   });
+
+  // Every extension route from here down answers 400 rather than a confusing 502 when there is no engine.
+  const needExt = (reply: FastifyReply) =>
+    suwayomiConfigured() ? null : reply.code(400).send({ error: 'not_configured', message: 'No extension server is configured.' });
 
   // The full source list, joined with what we have switched on. Falls back to the remembered rows when the
   // extension server is briefly unreachable, so the page still renders something useful.
@@ -1121,7 +1135,35 @@ export default async function adminRoutes(app: FastifyInstance) {
       }))
       .filter((s) => (!needle || s.name.toLowerCase().includes(needle)) && (!lang || s.lang === lang))
       .sort((a, b) => Number(b.enabled) - Number(a.enabled) || a.name.localeCompare(b.name));
-    return { content, reachable, total: remote.length };
+    // The per-language overview rides along unfiltered: `q` and `lang` narrow the source list, and a
+    // Languages panel that only knew about the language you had just filtered to would be no panel.
+    return { content, reachable, total: remote.length, langs: await langOverview(), hiddenLangs: await getHiddenLangs() };
+  });
+
+  /**
+   * Many sources at once, by id or by language, in one statement and one reload.
+   *
+   * The per-source route below reloads the registry and smoke-tests the adapter on every call, which is
+   * right for one source and wrong for thirty: "hide Russian" would be thirty reloads and thirty probes of
+   * thirty sites. There is deliberately no smoke test here -- what this changes is which sources are
+   * registered, and a language is switched off far more often than on.
+   */
+  app.post('/api/admin/extensions/sources/bulk', async (req, reply) => {
+    const b = z.object({
+      ids: z.array(z.string().min(1).max(64)).max(500).optional(),
+      langs: z.array(z.string().min(1).max(16)).max(100).optional(),
+      enabled: z.boolean(),
+    }).refine((v) => (v.ids?.length ?? 0) + (v.langs?.length ?? 0) > 0, { message: 'ids or langs' }).safeParse(req.body);
+    if (!b.success) return reply.code(400).send({ error: 'bad_request' });
+    if (needExt(reply)) return;
+    const { ids = [], langs = [] } = b.data;
+    const r = await setSourcesEnabled({ ids, langs, enabled: b.data.enabled });
+    const load = await reloadAll();
+    await logAudit(b.data.enabled ? 'source.extension_enable' : 'source.extension_disable', {
+      userId: userIdOf(req), detail: { ids, langs, changed: r.changed }, req,
+    });
+    const after = lastSuwayomiLoad();
+    return { ok: true, changed: r.changed, hiddenLangs: r.hiddenLangs, registered: load.suwayomi, skipped: after?.skipped ?? 0 };
   });
 
   app.post('/api/admin/extensions/sources/:id', async (req, reply) => {
@@ -1161,9 +1203,6 @@ export default async function adminRoutes(app: FastifyInstance) {
   // Uchiyomi is a remote control for the operator's own extension server here: the catalogue comes from
   // repositories THEY configured, and that server does the fetching and installing. No repository URL ships
   // in this codebase and nothing is fetched until one is added.
-  const needExt = (reply: FastifyReply) =>
-    suwayomiConfigured() ? null : reply.code(400).send({ error: 'not_configured', message: 'No extension server is configured.' });
-
   app.get('/api/admin/extensions/catalog', async (req, reply) => {
     if (needExt(reply)) return;
     const { q: term, lang, installed, nsfw } = req.query as { q?: string; lang?: string; installed?: string; nsfw?: string };
@@ -1252,16 +1291,10 @@ export default async function adminRoutes(app: FastifyInstance) {
     await logAudit(`extension.${b.data.action}`, { userId: userIdOf(req), detail: { pkgName }, req });
 
     // Installing an extension and then having to hunt for its sources in a second list is exactly the
-    // friction this feature exists to remove, so switch them on (or off) as part of the same action.
+    // friction this feature exists to remove, so switch them on (or off) as part of the same action --
+    // except the ones in a language the operator has hidden, which stay off and are counted back.
     const provided = enable ? await sourcesOfExtension(pkgName).catch(() => []) : priorSources;
-    for (const s of provided) {
-      await q(
-        `INSERT INTO suwayomi_sources (source_id, name, lang, nsfw, enabled) VALUES ($1,$2,$3,$4,$5)
-         ON CONFLICT (source_id) DO UPDATE SET enabled = EXCLUDED.enabled, name = EXCLUDED.name,
-           lang = EXCLUDED.lang, nsfw = EXCLUDED.nsfw`,
-        [s.id, s.name, s.lang, !!s.nsfw, enable],
-      ).catch(() => {});
-    }
+    const adopted = await adoptExtensionSources(provided, enable);
     if (b.data.action === 'uninstall') {
       // the sources are gone from the server too; don't leave rows implying otherwise
       await q('DELETE FROM suwayomi_sources WHERE source_id = ANY($1)', [provided.map((s) => s.id)]).catch(() => {});
@@ -1272,7 +1305,7 @@ export default async function adminRoutes(app: FastifyInstance) {
       await pruneOrphanedHealth(provided.map((s) => `sw:${s.id}`));
     }
     const r = await reloadAll();
-    return { ok: true, sources: provided.length, registered: r.suwayomi };
+    return { ok: true, sources: provided.length, on: adopted.on, hidden: adopted.hidden, registered: r.suwayomi };
   });
 
   // ---- extension repositories ----
@@ -1422,7 +1455,10 @@ export default async function adminRoutes(app: FastifyInstance) {
   // ---- bulk import: paste a list of titles, match each to a source, add it ----
   app.post('/api/admin/import', async (req, reply) => {
     if (importJob?.running) return reply.code(409).send({ error: 'busy', message: 'An import is already running.' });
-    const b = z.object({ titles: z.array(z.string()).min(1).max(500), autoUpdate: z.boolean().optional(), chapterCount: z.number().int().positive().optional() }).safeParse(req.body);
+    const b = z.object({
+      titles: z.array(z.string()).min(1).max(500), autoUpdate: z.boolean().optional(),
+      chapterCount: z.number().int().positive().optional(), chapterFrom: z.enum(['oldest', 'newest']).optional(),
+    }).safeParse(req.body);
     if (!b.success) return reply.code(400).send({ error: 'bad_request', message: 'Paste at least one title.' });
     const titles = [...new Set(b.data.titles.map((t) => t.replace(/^[-*•\d.\s]+/, '').trim()).filter(Boolean))].slice(0, 500);
     if (!titles.length) return reply.code(400).send({ error: 'bad_request', message: 'No titles found.' });
@@ -1435,7 +1471,7 @@ export default async function adminRoutes(app: FastifyInstance) {
           const m = await findBestMatch(title);
           if (!m) { job.notFound++; job.details.push({ title, status: 'not_found' }); }
           else {
-            const r = await addSeriesFromSource({ source: m.source, sourceId: m.sourceId, autoUpdate: b.data.autoUpdate, chapterCount: b.data.chapterCount });
+            const r = await addSeriesFromSource({ source: m.source, sourceId: m.sourceId, autoUpdate: b.data.autoUpdate, chapterCount: b.data.chapterCount, chapterFrom: b.data.chapterFrom });
             if (r.ok && (r.chapters ?? 0) > 0) { job.added++; job.details.push({ title, status: 'added', source: m.source }); }
             else if (r.ok) { job.already++; job.details.push({ title, status: 'already', source: m.source }); }
             else { job.failed++; job.details.push({ title, status: r.error || 'failed', source: m.source }); }

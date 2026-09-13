@@ -447,6 +447,7 @@
   "Checked, not usable": "確認済み、使用不可",
   "Could not start.": "開始できませんでした。",
   "Fetch {n} chapters from {s}": "{s} から {n} 話を取得",
+  "Fetch {n} older chapters from {s}": "{s} から古い {n} 話を取得",
   "Fetching {n} chapters…": "{n} 話を取得中…",
   "Filling in the gaps": "欠けている話を補完中",
   "Find missing chapters": "欠けている話を探す",
@@ -534,5 +535,7 @@
   "What would be sent, once a day": "1日1回送信される内容（オンにした場合）",
   "The id changes every month and is a hash of a secret that never leaves this server, so two months of pings cannot be connected to each other.": "ID は毎月変わり、このサーバーから出ることのない秘密鍵のハッシュです。そのため異なる月の送信を結び付けることはできません。",
   "No library, no titles, no accounts, no address, no hostname. The list above is the whole of it.": "ライブラリも、作品名も、アカウントも、アドレスも、ホスト名もありません。上の一覧がすべてです。",
-  "Turning this off deletes the secret and asks for this month to be forgotten. A new id is made if you ever turn it back on.": "オフにすると秘密鍵を削除し、今月分を忘れるよう要求します。再びオンにした場合は新しい ID が作られます。"
+  "Turning this off deletes the secret and asks for this month to be forgotten. A new id is made if you ever turn it back on.": "オフにすると秘密鍵を削除し、今月分を忘れるよう要求します。再びオンにした場合は新しい ID が作られます。",
+  "Latest {n}": "最新の {n} 話",
+  "Older chapters are not fetched by auto-update; use Find missing chapters if you want them later.": "古い話は自動更新では取得されません。あとで欲しくなったら「欠けている話を探す」を使ってください。"
 }

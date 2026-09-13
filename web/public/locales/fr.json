@@ -447,6 +447,7 @@
   "Checked, not usable": "Vérifiées, inutilisables",
   "Could not start.": "Impossible de démarrer.",
   "Fetch {n} chapters from {s}": "Récupérer {n} chapitres depuis {s}",
+  "Fetch {n} older chapters from {s}": "Récupérer {n} chapitres plus anciens depuis {s}",
   "Fetching {n} chapters…": "Récupération de {n} chapitres…",
   "Filling in the gaps": "Comblement des trous",
   "Find missing chapters": "Trouver les chapitres manquants",
@@ -534,5 +535,7 @@
   "What would be sent, once a day": "Ce qui serait envoyé, une fois par jour",
   "The id changes every month and is a hash of a secret that never leaves this server, so two months of pings cannot be connected to each other.": "L’identifiant change chaque mois et c’est l’empreinte d’un secret qui ne quitte jamais ce serveur : deux mois d’envois ne peuvent donc pas être reliés.",
   "No library, no titles, no accounts, no address, no hostname. The list above is the whole of it.": "Aucune bibliothèque, aucun titre, aucun compte, aucune adresse, aucun nom d’hôte. La liste ci-dessus, c’est tout.",
-  "Turning this off deletes the secret and asks for this month to be forgotten. A new id is made if you ever turn it back on.": "Le désactiver supprime le secret et demande d’oublier le mois en cours. Un nouvel identifiant sera créé si vous le réactivez un jour."
+  "Turning this off deletes the secret and asks for this month to be forgotten. A new id is made if you ever turn it back on.": "Le désactiver supprime le secret et demande d’oublier le mois en cours. Un nouvel identifiant sera créé si vous le réactivez un jour.",
+  "Latest {n}": "{n} derniers",
+  "Older chapters are not fetched by auto-update; use Find missing chapters if you want them later.": "Les chapitres plus anciens ne sont pas récupérés par la mise à jour automatique ; utilisez Trouver les chapitres manquants si vous les voulez plus tard."
 }

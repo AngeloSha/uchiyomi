@@ -43,6 +43,13 @@ export interface Assessment {
   fillable: number[];
   /** Numbers above everything we hold. Reported, never filled by default: that is what "check for new" does. */
   newer: number[];
+  /**
+   * Numbers BELOW the lowest we hold: the run a "Latest N" add left behind on purpose. Empty unless the
+   * caller says the series has a chapter floor, and only ever asked of the series' own source -- same
+   * source, same series id, so there is no numbering to second-guess. From any other source the same run
+   * is the unanchored extrapolation the rest of this file refuses.
+   */
+  older: number[];
 }
 
 export const MIN_HAVE = 3;
@@ -72,7 +79,7 @@ export function gapsOf(have: number[]): Gap[] {
  * numbering will list nearly all of them; one that restarts numbering per season, or is offset by an arc,
  * will not, and collapses here rather than quietly filling a hole with the wrong instalments.
  */
-export function assess(have: number[], theirs: number[]): Assessment {
+export function assess(have: number[], theirs: number[], opts: { older?: boolean } = {}): Assessment {
   const ours = new Set(have.map((n) => Math.floor(n)));
   const them = new Set(theirs.map((n) => Math.floor(n)));
   let matched = 0;
@@ -88,7 +95,9 @@ export function assess(have: number[], theirs: number[]): Assessment {
     for (let n = g.lo; n <= g.hi; n++) if (them.has(n)) fillable.push(n);
   }
   const newer = [...them].filter((n) => n > max).sort((a, b) => a - b);
-  return { coverage, matched, fillable: fillable.sort((a, b) => a - b), newer };
+  const min = have.length ? Math.min(...have) : 0;
+  const older = opts.older ? [...them].filter((n) => n < min).sort((a, b) => a - b) : [];
+  return { coverage, matched, fillable: fillable.sort((a, b) => a - b), newer, older };
 }
 
 /** Why a candidate is not offered. Shown to the person, never swallowed. */
@@ -119,7 +128,7 @@ export type Refusal =
 export function verdict(a: Assessment, theirsCount: number): Refusal {
   if (!theirsCount) return 'no_chapters';
   if (a.coverage < MIN_COVERAGE) return 'numbering_mismatch';
-  if (!a.fillable.length) return 'nothing_to_fill';
+  if (!a.fillable.length && !a.older.length) return 'nothing_to_fill';
   return 'ok';
 }
 
@@ -143,6 +152,7 @@ export interface PlanCandidate {
   matched: number;
   fillable: number[];
   newer: number[];
+  older: number[];
   why: Refusal;
   /** The series' own source. Offered first, and the one case that involves no cross-source guessing at all. */
   pinned: boolean;
@@ -213,7 +223,7 @@ export function authorise(
   if (!cand) return { ok: false, error: 'not_in_plan', message: 'That source was not one of the options.' };
   if (cand.why !== 'ok') return { ok: false, error: 'not_in_plan', message: 'That source was not offered.' };
 
-  const offered = new Set([...cand.fillable, ...cand.newer]);
+  const offered = new Set([...cand.fillable, ...cand.newer, ...cand.older]);
   const bad = numbers.filter((n) => !offered.has(n));
   if (bad.length) {
     return { ok: false, error: 'not_offered', message: `Chapter ${bad[0]} was not part of what you were shown.` };

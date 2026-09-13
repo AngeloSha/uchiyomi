@@ -108,8 +108,12 @@ test('library health checks', { skip: DSN ? false : 'set TEST_DATABASE_URL to ru
   });
 
   await t.test('status reflects whether a check found anything', () => {
+    // Items flagged `info` are listed for reference and never decide the verdict: a source the operator
+    // switched off, a version that is merely behind. The old form of this rule (every item is a finding)
+    // only held because no test machine ever had an out-of-date solver, and the disabled-source case was
+    // a genuine false alarm that PR #39 ran into.
     for (const c of report.checks) {
-      assert.equal(c.items.length === 0, c.status === 'ok', `${c.id}: status and items disagree`);
+      assert.equal(c.items.filter((i: any) => !i.info).length === 0, c.status === 'ok', `${c.id}: status and items disagree`);
       assert.ok(c.summary.length > 0);
     }
   });
@@ -118,7 +122,7 @@ test('library health checks', { skip: DSN ? false : 'set TEST_DATABASE_URL to ru
 });
 
 
-const S_FROZEN = 's_health_frozen', S_ROUTED = 's_health_routed';
+const S_FROZEN = 's_health_frozen', S_ROUTED = 's_health_routed', S_OFF = 's_health_off';
 
 /**
  * A series whose source no longer exists must be SAID somewhere.
@@ -137,11 +141,17 @@ test('a series with no working source is listed, one with a working source is no
   await migrate();
   registerAdapter({ id: 'health-live', name: 'Health Live', search: async () => [], getSeries: async () => null,
     listChapters: async () => [], getPageUrls: async () => [], latest: async () => [] } as any);
-  for (const id of [S_FROZEN, S_ROUTED]) await q('DELETE FROM lib_series WHERE id = $1', [id]);
+  for (const id of [S_FROZEN, S_ROUTED, S_OFF]) await q('DELETE FROM lib_series WHERE id = $1', [id]);
+  await q(`DELETE FROM suwayomi_sources WHERE source_id = 'health-off'`);
   await q(`INSERT INTO lib_series (id, source, title, folder, books_count, source_id, source_series_id)
            VALUES ($1, 'test', 'Frozen Fixture', $1, 31, 'sw:999999999', '9')`, [S_FROZEN]);
   await q(`INSERT INTO lib_series (id, source, title, folder, books_count, source_id, source_series_id)
            VALUES ($1, 'test', 'Routed Fixture', $1, 5, 'health-live', 'x')`, [S_ROUTED]);
+  // A source that is still installed but switched off -- by hand, or by hiding its language -- is a
+  // different finding: the fix is a button, not a reinstall.
+  await q(`INSERT INTO suwayomi_sources (source_id, name, lang, enabled) VALUES ('health-off', 'Off', 'ru', false)`);
+  await q(`INSERT INTO lib_series (id, source, title, folder, books_count, source_id, source_series_id)
+           VALUES ($1, 'test', 'Off Fixture', $1, 7, 'sw:health-off', '1')`, [S_OFF]);
   try {
     const report = await runHealthChecks();
     const check = report.checks.find((c: any) => c.id === 'frozen-series');
@@ -151,8 +161,89 @@ test('a series with no working source is listed, one with a working source is no
     assert.ok(titles.includes('Frozen Fixture'), `the frozen series is named: ${titles.join(', ')}`);
     assert.ok(!titles.includes('Routed Fixture'), 'a series whose adapter is loaded is not');
     assert.match(check.items.find((i: any) => i.title === 'Frozen Fixture').detail, /sw:999999999 is no longer installed/);
+    // Reintroduce by dropping the EXISTS subquery from frozenSeries(): "a switched-off source is said to be
+    // switched off" fails, the detail reads "no longer installed" for a source that is right there.
+    assert.ok(titles.includes('Off Fixture'), 'a series on a switched-off source is still frozen');
+    assert.match(check.items.find((i: any) => i.title === 'Off Fixture').detail, /sw:health-off is switched off/,
+      'a switched-off source is said to be switched off');
   } finally {
-    for (const id of [S_FROZEN, S_ROUTED]) await q('DELETE FROM lib_series WHERE id = $1', [id]);
+    for (const id of [S_FROZEN, S_ROUTED, S_OFF]) await q('DELETE FROM lib_series WHERE id = $1', [id]);
+    await q(`DELETE FROM suwayomi_sources WHERE source_id = 'health-off'`);
+  }
+});
+
+/**
+ * A source the operator switched off themselves is listed, so the count stays visible, but it is never the
+ * reason the check is amber. Contributor PR #39 ran into the old behaviour while adding language hiding:
+ * turning off thirty Russian sources produced thirty "problems" that were the operator's own decision.
+ *
+ * Reintroduce by taking the verdict in sourceTrouble() from every row again (`status: rows.length ? 'warn'
+ * : 'ok'` instead of `live.length`): "a page with only switched-off sources is ok" fails -- it stays warn.
+ */
+test('a source you turned off is listed but never a warning', { skip: DSN ? false : 'set TEST_DATABASE_URL to run' }, async () => {
+  const { migrate } = await import('../src/lib/migrate');
+  const { q } = await import('../src/lib/db');
+  const { runHealthChecks } = await import('../src/lib/health');
+  await migrate();
+  const OFF = 'hl-off', DOWN = 'hl-down';
+  await q('DELETE FROM source_health WHERE source_id = ANY($1::text[])', [[OFF, DOWN]]);
+  await q(`INSERT INTO source_health (source_id, status, disabled) VALUES ($1, 'ok', true), ($2, 'down', false)`, [OFF, DOWN]);
+  // Other files leave their own rows in source_health (the suite shares one database, one file at a time),
+  // so the counts are checked against the items rather than assumed to be ours alone: the summary's
+  // "failing" figure must be exactly the non-info items, and the "turned off" figure exactly the info ones.
+  const counts = (c: any) => ({
+    failing: Number(c.summary.match(/^(\d+) source/)?.[1] ?? 0),
+    off: Number(c.summary.match(/(\d+) turned off by you/)?.[1] ?? 0),
+    live: c.items.filter((i: any) => !i.info).length,
+    info: c.items.filter((i: any) => i.info).length,
+  });
+  try {
+    const first = (await runHealthChecks()).checks.find((c: any) => c.id === 'sources');
+    assert.equal(first.status, 'warn', 'a source that is down is still a warning');
+    const n1 = counts(first);
+    assert.equal(n1.failing, n1.live, `the verdict counts only live faults (summary: ${first.summary})`);
+    assert.equal(n1.off, n1.info, 'and says how many are turned off');
+    const off = first.items.find((i: any) => i.title === OFF);
+    assert.ok(off, 'the switched-off source is still listed');
+    assert.equal(off.info, true, 'the switched-off source is marked as reference, not a finding');
+    assert.match(off.detail, /turned off/);
+    assert.notEqual(first.items.find((i: any) => i.title === DOWN)?.info, true, 'the down source is a real finding');
+
+    await q('DELETE FROM source_health WHERE source_id = $1', [DOWN]);
+    const second = (await runHealthChecks()).checks.find((c: any) => c.id === 'sources');
+    const n2 = counts(second);
+    assert.equal(second.status, n2.live ? 'warn' : 'ok', 'a page with only switched-off sources is ok');
+    assert.equal(n2.failing, n2.live, `still only live faults in the verdict (summary: ${second.summary})`);
+    assert.ok(second.items.some((i: any) => i.title === OFF && i.info), 'the switched-off source is still listed');
+  } finally {
+    await q('DELETE FROM source_health WHERE source_id = ANY($1::text[])', [[OFF, DOWN]]);
+  }
+});
+
+test('a source hidden by language is turned off too, however stale its health row', { skip: DSN ? false : 'set TEST_DATABASE_URL to run' }, async () => {
+  // Hiding a language flips suwayomi_sources.enabled, not source_health.disabled -- and an unregistered
+  // source is never probed again, so a 'down' recorded before it was hidden would keep this check amber
+  // for good. Reintroduce by dropping the suwayomi_sources EXISTS from the `disabled` column in
+  // sourceTrouble(): the `hidden by language is off` assertion fails with status warn.
+  const { migrate } = await import('../src/lib/migrate');
+  const { q } = await import('../src/lib/db');
+  const { runHealthChecks } = await import('../src/lib/health');
+  await migrate();
+  const ID = 'health-hidden-ru';
+  await q('DELETE FROM source_health WHERE source_id = $1', [`sw:${ID}`]);
+  await q('DELETE FROM suwayomi_sources WHERE source_id = $1', [ID]);
+  await q(`INSERT INTO suwayomi_sources (source_id, name, lang, enabled) VALUES ($1, 'Hidden RU', 'ru', false)`, [ID]);
+  await q(`INSERT INTO source_health (source_id, status, disabled, consecutive) VALUES ($1, 'down', false, 4)`, [`sw:${ID}`]);
+  try {
+    const c = (await runHealthChecks()).checks.find((x: any) => x.id === 'sources');
+    const row = c.items.find((i: any) => i.title === `sw:${ID}`);
+    assert.ok(row, 'still listed');
+    assert.equal(row.info, true, 'hidden by language is off');
+    assert.match(row.detail, /turned off/);
+    assert.ok(!c.items.some((i: any) => !i.info && i.title === `sw:${ID}`), 'never counted as a fault');
+  } finally {
+    await q('DELETE FROM source_health WHERE source_id = $1', [`sw:${ID}`]);
+    await q('DELETE FROM suwayomi_sources WHERE source_id = $1', [ID]);
   }
 });
 

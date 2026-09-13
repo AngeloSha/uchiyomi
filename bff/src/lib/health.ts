@@ -16,6 +16,9 @@ import { isBehind, latestRelease } from './githubRelease';
 import { appVersion } from './appVersion';
 import { solverPing, solverUrl } from './sources/flaresolverr';
 import { getSource } from './sources';
+import { suwayomiConfigured } from './sources/suwayomi/client';
+import { lastSuwayomiLoad } from './sources/suwayomi/register';
+import { env } from '../env';
 import { gapsOf } from './fill';
 import { CHAPTER_RETRY_CAP } from './updater';
 import { diagnose } from './sourceDiagnosis';
@@ -29,6 +32,13 @@ export interface HealthItem {
   titles?: string[];
   title: string;
   detail: string;
+  /**
+   * Listed for reference, never a reason to warn. A check's status is decided by the items WITHOUT this
+   * flag, so a source the operator switched off, or a version that is merely behind, can be shown without
+   * turning the page amber. Before this, "no items means ok" was the page's one invariant and both of
+   * those cases quietly broke it.
+   */
+  info?: boolean;
 }
 
 export interface HealthCheck {
@@ -190,8 +200,12 @@ async function chapterFailures(): Promise<HealthCheck> {
  * extension was uninstalled twelve days earlier, and no surface anywhere said so.
  */
 async function frozenSeries(): Promise<HealthCheck> {
-  const rows = await q<{ id: string; title: string; source_id: string | null; books_count: number }>(
-    `SELECT ls.id, ls.title, ls.source_id, ls.books_count
+  const rows = await q<{ id: string; title: string; source_id: string | null; books_count: number; switched_off: boolean; still_enabled: boolean }>(
+    // A source that is still installed but switched off (by hand, or by hiding its language) is a different
+    // finding from one that is gone: the fix is a button, not a reinstall.
+    `SELECT ls.id, ls.title, ls.source_id, ls.books_count,
+            EXISTS (SELECT 1 FROM suwayomi_sources ss WHERE 'sw:' || ss.source_id = ls.source_id AND NOT ss.enabled) AS switched_off,
+            EXISTS (SELECT 1 FROM suwayomi_sources ss WHERE 'sw:' || ss.source_id = ls.source_id AND ss.enabled) AS still_enabled
        FROM lib_series ls
       WHERE ls.auto_update AND ${visibleToAll('ls')}
         AND (ls.source_id IS NULL OR ls.source_series_id IS NULL OR ls.source_id NOT IN (SELECT source_id FROM suwayomi_sources WHERE enabled)
@@ -204,7 +218,9 @@ async function frozenSeries(): Promise<HealthCheck> {
     seriesId: r.id,
     title: r.title,
     detail: r.source_id
-      ? `${r.books_count} chapters; its source ${r.source_id} is no longer installed`
+      // Enabled yet unregistered is the third case: dropped by SUWAYOMI_MAX_SOURCES, which the cap check
+      // above names but a series page cannot see.
+      ? `${r.books_count} chapters; its source ${r.source_id} is ${r.switched_off ? 'switched off' : r.still_enabled ? 'over the source limit (SUWAYOMI_MAX_SOURCES)' : 'no longer installed'}`
       : `${r.books_count} chapters; no source recorded`,
   }));
   return {
@@ -216,7 +232,7 @@ async function frozenSeries(): Promise<HealthCheck> {
       : 'Every series has a working source',
     note:
       'These read fine, but nothing can fetch new chapters for them and "find missing chapters" will not offer ' +
-      'their own source. Re-add the extension, or re-point the series at a source that carries it.' +
+      'their own source. Switch the source back on, re-add the extension, or re-point the series at a source that carries it.' +
       (frozen.length > 20 ? ` ${frozen.length - 20} more not shown.` : ''),
     items,
   };
@@ -228,7 +244,13 @@ async function sourceTrouble(): Promise<HealthCheck> {
     blocked_until: string | null; last_error: string | null; empty_streak: number; last_ok_at: string | null;
     series: number;
   }>(
-    `SELECT sh.source_id, sh.status, sh.consecutive, sh.disabled, sh.blocked_until, sh.last_error,
+    `SELECT sh.source_id, sh.status, sh.consecutive,
+            -- Two ways a source is off on purpose: the Providers button (source_health.disabled) and a hidden
+            -- language (suwayomi_sources.enabled = false, which also unregisters it, so nothing ever probes
+            -- it again and a stale 'down' row would otherwise keep this check amber for good).
+            (sh.disabled OR EXISTS (SELECT 1 FROM suwayomi_sources ss
+                                      WHERE 'sw:' || ss.source_id = sh.source_id AND NOT ss.enabled)) AS disabled,
+            sh.blocked_until, sh.last_error,
             sh.empty_streak, sh.last_ok_at,
             -- ls.source_id, NOT ls.source: the former is the adapter id ('aqua'), the latter is the
             -- display name as it was at add time ('Aqua Manga (EN)'). This compared a name to an id, so it
@@ -236,16 +258,23 @@ async function sourceTrouble(): Promise<HealthCheck> {
             (SELECT count(*) FROM lib_series ls WHERE ls.source_id = sh.source_id AND ${visibleToAll('ls')})::int AS series
        FROM source_health sh
       WHERE sh.status <> 'ok' OR sh.disabled = true OR sh.empty_streak >= 3
-      ORDER BY sh.disabled DESC, sh.consecutive DESC`,
+         OR EXISTS (SELECT 1 FROM suwayomi_sources ss WHERE 'sw:' || ss.source_id = sh.source_id AND NOT ss.enabled)
+      ORDER BY 4 DESC, sh.consecutive DESC`,
   );
   const now = Date.now();
+  // A source the operator switched off themselves is not a fault, and reading it as one is how a health
+  // page trains people to ignore it. Contributor PR #39 spotted this while adding language hiding: turning
+  // off thirty Russian sources made the page amber with thirty "problems" that were the operator's own
+  // decision. They stay listed, greyed, so the count is still visible; the verdict comes from the rest.
+  const live = rows.filter((r) => !r.disabled);
+  const off = rows.length - live.length;
   return {
     id: 'sources',
     title: 'Source health',
-    status: rows.length ? 'warn' : 'ok',
-    summary: rows.length
-      ? `${rows.length} source${rows.length === 1 ? ' is' : 's are'} failing or blocked`
-      : 'All sources responding normally',
+    status: live.length ? 'warn' : 'ok',
+    summary: (live.length
+      ? `${live.length} source${live.length === 1 ? ' is' : 's are'} failing or blocked`
+      : 'All sources responding normally') + (off ? `; ${off} turned off by you` : ''),
     note: 'A blocked source usually means the site returned 403 or a Cloudflare challenge we could not solve. '
         + 'If several fail at once and all of them mention the solver, check the solver rather than the sites.',
     items: rows.map((r) => {
@@ -253,7 +282,7 @@ async function sourceTrouble(): Promise<HealthCheck> {
       // A block whose deadline has passed is not actually holding anything back; say so rather than
       // leaving the operator thinking the source is still down.
       const state = r.disabled
-        ? 'turned off'
+        ? 'turned off by you'
         : until && until < now
           ? `block expired, will retry on next use (was ${r.status})`
           : until
@@ -270,6 +299,7 @@ async function sourceTrouble(): Promise<HealthCheck> {
       return {
         title: r.source_id,
         detail: `${state}; ${r.series} series use it${why}`,
+        ...(r.disabled ? { info: true } : {}),
       };
     }),
   };
@@ -391,8 +421,11 @@ export async function solverHealth(): Promise<HealthCheck> {
       + '64 MB of shared memory (set shm_size: 1gb), and the solver leaks memory, so it wants a restart.'
       : undefined,
     items: [
+      // `info`: this row and `status: 'ok'` coexist on purpose, see the note above. Without the flag it
+      // contradicted the page's "no items means ok" rule, and the health test could only hold that rule
+      // because no test machine ever had an out-of-date solver.
       ...(behind
-        ? [{ title: `v${ping.version} → v${latest}`, detail: 'a newer solver is out; Cloudflare changes often break older ones' }]
+        ? [{ title: `v${ping.version} → v${latest}`, detail: 'a newer solver is out; Cloudflare changes often break older ones', info: true }]
         : []),
       ...blaming.map((b) => ({ title: b.source_id, detail: 'its last failure happened inside the solver' })),
     ],
@@ -443,8 +476,40 @@ async function updateCheck(): Promise<HealthCheck> {
     // ⚠️ Said out loud, because "up to date" and "we could not ask" look identical on a page and only one of
     // them is a reason to relax. GitHub being unreachable or rate-limited is a normal Tuesday.
     note: latest ? undefined : 'GitHub could not be reached just now, so this is not a clean bill of health.',
+    // `info` for the same reason as the solver's version row: advisory, and never the reason the page is amber.
     items: behind
-      ? [{ title: `v${running} → ${latest}`, detail: 'a newer release is published; see the changelog before upgrading' }]
+      ? [{ title: `v${running} → ${latest}`, detail: 'a newer release is published; see the changelog before upgrading', info: true }]
+      : [],
+  };
+}
+
+/**
+ * Enabled extension sources that are NOT registered because SUWAYOMI_MAX_SOURCES was reached.
+ *
+ * The cap is the right default -- search fans out to every registered source -- but hitting it used to be
+ * one console.warn at boot and nothing else: the panel counted the enabled sources, search reached fewer,
+ * and the difference was nowhere. Only runs when there is an engine; without one the check would be a
+ * permanent green line about a limit that cannot be reached.
+ */
+async function extensionCap(): Promise<HealthCheck> {
+  const load = lastSuwayomiLoad();
+  const skipped = load?.skipped ?? 0;
+  const cap = env.SUWAYOMI_MAX_SOURCES;
+  return {
+    id: 'extension-cap',
+    title: 'Extension source limit',
+    status: skipped ? 'warn' : 'ok',
+    // "0 of 25" is a measurement only when the engine answered; after a failed load it is the absence of
+    // one, and the cap warning would silently vanish for the length of an outage.
+    summary: skipped
+      ? `${skipped} enabled source${skipped === 1 ? ' is' : 's are'} not registered — over the limit of ${cap}`
+      : load && !load.reachable
+        ? `engine unreachable at the last load; nothing is registered (limit ${cap})`
+        : `${load?.registered ?? 0} of ${cap} extension sources in use`,
+    note: 'Every registered source is searched at once, which is why there is a limit. Hiding the languages you do not read ' +
+      'is the cheap way under it; SUWAYOMI_MAX_SOURCES raises it.',
+    items: skipped
+      ? [{ title: 'SUWAYOMI_MAX_SOURCES', detail: `${skipped} enabled sources not registered; the limit is ${cap}. Hide languages you do not read, or raise the limit.` }]
       : [],
   };
 }
@@ -463,6 +528,7 @@ export async function runHealthChecks(): Promise<HealthReport> {
     frozenSeries(),
     solverHealth(),
     updateCheck(),
+    ...(suwayomiConfigured() ? [extensionCap()] : []),
   ]);
   // worst first, so the page opens on whatever needs attention
   const rank: Record<HealthStatus, number> = { problem: 0, warn: 1, ok: 2 };

@@ -447,6 +447,7 @@
   "Checked, not usable": "جرى فحصها، غير صالحة",
   "Could not start.": "تعذّر البدء.",
   "Fetch {n} chapters from {s}": "جلب {n} فصلًا من {s}",
+  "Fetch {n} older chapters from {s}": "جلب {n} فصلًا أقدم من {s}",
   "Fetching {n} chapters…": "يجري جلب {n} فصلًا…",
   "Filling in the gaps": "يجري سدّ الفجوات",
   "Find missing chapters": "البحث عن الفصول الناقصة",
@@ -534,5 +535,7 @@
   "What would be sent, once a day": "ما سيُرسَل، مرة يوميًا",
   "The id changes every month and is a hash of a secret that never leaves this server, so two months of pings cannot be connected to each other.": "يتغيّر المعرّف كل شهر وهو بصمة لسرٍّ لا يغادر هذا الخادم أبدًا، لذا لا يمكن ربط شهرين من الإشارات ببعضهما.",
   "No library, no titles, no accounts, no address, no hostname. The list above is the whole of it.": "لا مكتبة، ولا عناوين، ولا حسابات، ولا عنوان شبكة، ولا اسم مضيف. القائمة أعلاه هي كل شيء.",
-  "Turning this off deletes the secret and asks for this month to be forgotten. A new id is made if you ever turn it back on.": "إيقاف هذا يحذف السرّ ويطلب نسيان هذا الشهر. وسيُنشأ معرّف جديد إن أعدت تفعيله يومًا ما."
+  "Turning this off deletes the secret and asks for this month to be forgotten. A new id is made if you ever turn it back on.": "إيقاف هذا يحذف السرّ ويطلب نسيان هذا الشهر. وسيُنشأ معرّف جديد إن أعدت تفعيله يومًا ما.",
+  "Latest {n}": "آخر {n}",
+  "Older chapters are not fetched by auto-update; use Find missing chapters if you want them later.": "لا يجلب التحديث التلقائي الفصول الأقدم؛ استخدم البحث عن الفصول الناقصة إذا أردتها لاحقًا."
 }

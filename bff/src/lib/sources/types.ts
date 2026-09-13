@@ -47,6 +47,23 @@ export interface SourceAdapter {
   /** Extra headers for page/cover image fetches — e.g. auth for a source that proxies its own images. */
   imageHeaders?: Record<string, string> | ((imageUrl: string) => Record<string, string>);
   /**
+   * How many pages of one chapter may be in flight at once. Default 1.
+   *
+   * Engines and pack sites are scraped from the site itself, and the sequential quarter-second pacing is
+   * what stopped the 429s there -- the default stays 1 so they keep it. An extension source is proxied by
+   * the engine, which has its own HTTP client and its own rate limits towards the site, so it may declare
+   * more; the downloader then overlaps that many fetches and falls back to one the moment the engine
+   * answers 429.
+   */
+  pageConcurrency?: number;
+  /**
+   * Minimum pause between one page request and the next for this source, overriding DOWNLOAD_PAGE_GAP_MS.
+   * 0 = none. Measured from the later of the previous request's start and its reply, and across all
+   * in-flight workers rather than per worker, so it is a floor on the request rate towards the source
+   * however wide the pool is -- and a slow site is still not asked again until the gap after its reply.
+   */
+  pageGapMs?: number;
+  /**
    * The source's own logo, when it has one it can name.
    *
    * Only Suwayomi extensions supply this; template sites carry `base` instead and their icon is resolved

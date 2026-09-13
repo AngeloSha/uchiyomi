@@ -513,3 +513,49 @@ test('a chapter past the retry cap is not attempted by the sweep, and is counted
   assert.equal(r.capped, 1, 'and the sweep says how many it left alone');
   assert.equal(r.added, 2);
 });
+
+/**
+ * A series added as "latest N" is not backfilled by the sweep.
+ *
+ * The add path writes `chapter_floor` = the lowest chapter it took, because the loop above is oldest-missing-
+ * first: a series added as the latest 25 of 200 would otherwise have the sweep fetch 1..175 five per night
+ * with every new release queued behind them, which is the opposite of what "latest" asked for. Chapters
+ * below the floor are left to the fill scan, on purpose.
+ *
+ * Reintroduce by filtering `chapters` for `missing` instead of `wanted` (i.e. dropping the `>= floor`
+ * filter): added reads 4 -- chapters 1, 2, 3 and 6 -- and source_missing reads 4.
+ */
+test('a floored series fetches the chapter above what it holds, not the ones below the floor', { skip }, async () => {
+  const { registerAdapter } = await import('../src/lib/sources');
+  const SRC_FLOOR = 'upd-floor';
+  const asked: number[] = [];
+  registerAdapter({
+    id: SRC_FLOOR, name: SRC_FLOOR,
+    async search() { return []; },
+    async getSeries(sid: string) { return { sourceId: sid, source: SRC_FLOOR, title: sid }; },
+    async listChapters() { return [1, 2, 3, 4, 5, 6].map((n) => ({ number: n, title: `Chapter ${n}`, sourceId: `c${n}` })); },
+    async getPageUrls(chId: string) { asked.push(Number(chId.slice(1))); return ['https://example.invalid/page.png']; },
+    async latest() { return [];  },
+  } as any);
+  await mkSeries('floor', SRC_FLOOR);
+  await q('UPDATE lib_series SET chapter_floor = 4 WHERE id = $1', [S('floor')]);
+  // Books 4 and 5 are what a "latest 2" add would have left behind, as rows rather than files: updateSeries
+  // reads lib_books, and the scan that would mint them from disk is not part of this test.
+  await q('DELETE FROM lib_books WHERE series_id = $1', [S('floor')]);
+  for (const n of [4, 5]) {
+    await q(`INSERT INTO lib_books (id, series_id, source, file, number, title, pages) VALUES ($1, $2, 'T!upd', $3, $4, $5, 1)`,
+      [`${S('floor')}_b${n}`, S('floor'), `${S('floor')}/Chapter ${n}.cbz`, n, `Chapter ${n}`]);
+  }
+  await q('DELETE FROM source_health WHERE source_id = $1', [SRC_FLOOR]);
+  globalThis.fetch = (async () => png()) as typeof fetch;
+
+  const r = await updateSeries(S('floor'), 5);
+
+  assert.equal(r.added, 1, `chapter 6 alone is new; asked for: ${asked}`);
+  assert.deepEqual(asked, [6], 'the sweep did not so much as ask for anything below the floor');
+  assert.ok(onDisk('floor', 6));
+  assert.ok(!onDisk('floor', 1) && !onDisk('floor', 3), 'nothing below the floor was fetched');
+  const st = await stamp('floor');
+  assert.equal(st.m, 1, '"{n} behind" on the series page counts what the sweep would fetch, not the back catalogue');
+  assert.equal(st.c, 6, 'while source_chapters still says what the source said');
+});

@@ -47,11 +47,22 @@ export interface LoadResult {
   error?: string;
 }
 
+// The most recent load, kept so the cap overflow is readable after the fact. Until this existed the only
+// record of "skipped 30 over the limit" was one console.warn at boot, which is exactly where nobody looks
+// when search quietly stops covering half their sources; the status route and the health page read it now.
+let last: LoadResult | null = null;
+export const lastSuwayomiLoad = (): LoadResult | null => last;
+
 /**
  * Called at boot and from reloadAll(). Returns a summary rather than throwing, so a dead extension server
  * degrades to "no extension sources" instead of taking the server down with it.
  */
 export async function loadSuwayomiSources(list: () => Promise<RemoteSource[]> = listRemoteSources): Promise<LoadResult> {
+  last = await load(list);
+  return last;
+}
+
+async function load(list: () => Promise<RemoteSource[]>): Promise<LoadResult> {
   if (!suwayomiConfigured()) return { configured: false, reachable: false, available: 0, registered: 0, skipped: 0 };
 
   let remote: RemoteSource[];

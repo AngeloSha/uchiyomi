@@ -447,6 +447,7 @@
   "Checked, not usable": "已检查，不可用",
   "Could not start.": "无法开始。",
   "Fetch {n} chapters from {s}": "从 {s} 获取 {n} 章",
+  "Fetch {n} older chapters from {s}": "从 {s} 获取更早的 {n} 章",
   "Fetching {n} chapters…": "正在获取 {n} 章…",
   "Filling in the gaps": "正在补齐缺失章节",
   "Find missing chapters": "查找缺失章节",
@@ -534,5 +535,7 @@
   "What would be sent, once a day": "开启后每天会发送的内容",
   "The id changes every month and is a hash of a secret that never leaves this server, so two months of pings cannot be connected to each other.": "该标识每月更换一次，它是一个永不离开本服务器的密钥的哈希值，因此不同月份的上报无法相互关联。",
   "No library, no titles, no accounts, no address, no hostname. The list above is the whole of it.": "没有书库、没有标题、没有账号、没有地址、没有主机名。上面这份清单就是全部。",
-  "Turning this off deletes the secret and asks for this month to be forgotten. A new id is made if you ever turn it back on.": "关闭会删除该密钥，并请求忘记本月的记录。若你日后再次开启，将生成一个新的标识。"
+  "Turning this off deletes the secret and asks for this month to be forgotten. A new id is made if you ever turn it back on.": "关闭会删除该密钥，并请求忘记本月的记录。若你日后再次开启，将生成一个新的标识。",
+  "Latest {n}": "最新 {n} 章",
+  "Older chapters are not fetched by auto-update; use Find missing chapters if you want them later.": "自动更新不会获取更早的章节；以后需要时请使用查找缺失章节。"
 }

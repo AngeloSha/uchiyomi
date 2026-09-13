@@ -72,6 +72,37 @@ test('a hole is only filled when BOTH its brackets are chapters they also have',
   assert.deepEqual(b.fillable, [], 'without both brackets, nothing is offered');
 });
 
+test('the run below a "Latest N" add is offered only when asked for, and only counts as fillable then', () => {
+  // We hold 8..11 because the person picked "Latest 4". They (the series' own source) hold 1..11.
+  const a = assess([8, 9, 10, 11], Array.from({ length: 11 }, (_, i) => i + 1), { older: true });
+  assert.deepEqual(a.older, [1, 2, 3, 4, 5, 6, 7], 'the run below what we hold');
+  assert.deepEqual(a.fillable, [], 'still no interior gap');
+  assert.equal(verdict(a, 11), 'ok', 'an older run alone is something to offer');
+  // Without the flag (any other source, or a series with no floor) nothing changes from before.
+  const b = assess([8, 9, 10, 11], Array.from({ length: 11 }, (_, i) => i + 1));
+  assert.deepEqual(b.older, []);
+  assert.equal(verdict(b, 11), 'nothing_to_fill');
+});
+
+test('an older chapter the plan offered may be filled; one it did not still may not', () => {
+  // Reintroduce by dropping `...cand.older` from `offered` in authorise(): chapter 5 was shown as older and
+  // agreed to, and the `older is offered` assertion fails with not_offered.
+  _clearPlans();
+  const cand = {
+    source: 'src', name: 'Src', sourceSeriesId: 'x', title: 'T', count: 11, first: 1, last: 11,
+    coverage: 1, matched: 4, fillable: [], newer: [], older: [5, 6, 7], why: 'ok' as const, pinned: true,
+  };
+  const p = putPlan({
+    seriesId: 's1', folder: 'f',
+    chapters: new Map([[planKey('src', 'x'), [ch(5), ch(6), ch(7), ch(9)]]]),
+    candidates: [cand],
+  });
+  assert.equal(authorise(p, 'src', 'x', [5, 6], 100).ok, true, 'older is offered');
+  const no = authorise(p, 'src', 'x', [9], 100);
+  assert.equal(no.ok, false);
+  assert.equal((no as any).error, 'not_offered', 'a number above what was shown is still refused');
+});
+
 test('a plan expires rather than lingering', () => {
   _clearPlans();
   const p = putPlan({ seriesId: 's1', folder: 'f', chapters: new Map(), candidates: [] });
@@ -83,7 +114,7 @@ test('ONLY what the plan offered may be filled', () => {
   _clearPlans();
   const cand = {
     source: 'src', name: 'Src', sourceSeriesId: 'x', title: 'T', count: 3, first: 1, last: 3,
-    coverage: 1, matched: 2, fillable: [2], newer: [], why: 'ok' as const, pinned: false,
+    coverage: 1, matched: 2, fillable: [2], newer: [], older: [], why: 'ok' as const, pinned: false,
   };
   const p = putPlan({
     seriesId: 's1', folder: 'f',
@@ -114,7 +145,7 @@ test('a candidate that was shown as refused cannot then be filled from', () => {
     chapters: new Map([[planKey('src', 'x'), [ch(2)]]]),
     candidates: [{
       source: 'src', name: 'Src', sourceSeriesId: 'x', title: 'T', count: 1, first: 2, last: 2,
-      coverage: 0.1, matched: 1, fillable: [2], newer: [], why: 'numbering_mismatch', pinned: false,
+      coverage: 0.1, matched: 1, fillable: [2], newer: [], older: [], why: 'numbering_mismatch', pinned: false,
     }],
   });
   const r = authorise(p, 'src', 'x', [2], 100);

@@ -46,13 +46,19 @@ export interface DownloadInput {
 const DL_CONCURRENCY = Number(process.env.DOWNLOAD_CONCURRENCY || 2);
 const DL_MIN_GAP_MS = Number(process.env.DOWNLOAD_MIN_GAP_MS || 1200);
 /**
- * Space between PAGE requests inside one chapter.
+ * Pause between one page request and the next inside one chapter, for sources that do not declare their own.
  *
  * The gate above spaces CHAPTERS, and for a long time nothing spaced the images inside one. A chapter here
  * is 110-130 images fetched back to back, two chapters at a time: a burst of several requests a second
  * sustained for minutes. That burst is what earned the 429s on mangakakalot and natomanga, not anything the
  * sites changed -- measured at ~1.9 pages/second right up to the refusal. A quarter-second between pages
  * costs about 30s on a 120-page chapter, against a 75-minute cooldown for going too fast.
+ *
+ * That quarter second is the right answer for a site we scrape ourselves and the wrong one for a source
+ * that only proxies through the extension engine, which has its own client and its own limits towards the
+ * site (issue #37: extension downloads ran at the scraped-site pace for no reason). So pacing is now the
+ * adapter's to declare -- `pageGapMs` overrides this value and `pageConcurrency` widens the pool past one
+ * -- and this stays the default for every adapter that says nothing, which is every engine and pack site.
  */
 const DL_PAGE_GAP_MS = Number(process.env.DOWNLOAD_PAGE_GAP_MS || 250);
 /** Ceiling for the adaptive slow-down after a 429, so a resume cannot crawl indefinitely. */
@@ -197,15 +203,56 @@ async function fetchChapter(
   };
 
   const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-  let gap = DL_PAGE_GAP_MS;
+  let gap = src.pageGapMs ?? DL_PAGE_GAP_MS;
+  // Pool width is the adapter's call (see pageConcurrency in sources/types.ts). One for everything that does
+  // not say otherwise, which reproduces the sequential loop this used to be exactly: no sleep before the
+  // first page, `gap` between starts.
+  // Clamped, and NaN-proof: a compiled plugin that declares nonsense gets one worker, not zero -- `Math.max(1,
+  // NaN)` is NaN, and an Array.from of NaN workers fetches nothing and reports a 0-page chapter as the site's
+  // fault. The ceiling is the same one the env knob has.
+  const declared = Number(src.pageConcurrency);
+  let workers = Number.isFinite(declared) ? Math.min(8, Math.max(1, Math.floor(declared))) : 1;
+  let lastStart = -Infinity;
+  let lastDone = -Infinity;
 
-  for (let i = 0; i < urls.length; i++) {
-    if (i && gap) await sleep(gap);
-    await fetchPage(urls[i], i);
-    // Stop the moment the site says slow down. Carrying on collects ninety more refusals, turns a pause into
-    // a "12 of 108 pages" failure, and earns a cooldown for behaviour that was ours.
-    if (retryAfterMs) break;
-  }
+  /**
+   * Fetch `indices` through up to `workers` loops that each pull the next index off a shared cursor.
+   *
+   * The gap is a floor between page requests across the whole pool, not per worker: each loop reserves its
+   * start slot synchronously (no await between reading the clocks and advancing `lastStart`) and only then
+   * sleeps until that slot comes round, so the request rate towards the source is the same however wide
+   * the pool. The slot is measured from the later of the previous START and the previous COMPLETION. The
+   * completion matters: the sequential loop this replaces slept `gap` AFTER each page, so a slow site got
+   * `rtt + gap` between requests -- measuring from starts alone would have handed a 500ms site the exact
+   * 1.9 pages/second that earned the 429s, with every pacing test still green. Results land by position
+   * (`page[i]`), so reading order does not depend on arrival order.
+   *
+   * The loop condition, not a break, checks `retryAfterMs`: the first 429 stops EVERY worker from starting
+   * another page while the ones in flight finish. Carrying on collects ninety more refusals, turns a pause
+   * into a "12 of 108 pages" failure, and earns a cooldown for behaviour that was ours. Re-checked after the
+   * sleep too, since a slot reserved before the 429 landed is exactly the request the site asked us not to
+   * make.
+   */
+  const run = async (indices: number[]): Promise<void> => {
+    let next = 0;
+    const worker = async () => {
+      while (!retryAfterMs && next < indices.length) {
+        const i = indices[next++];
+        const at = Math.max(Date.now(), lastStart + gap, lastDone + gap);
+        lastStart = at;
+        const wait = at - Date.now();
+        if (wait > 0) {
+          await sleep(wait);
+          if (retryAfterMs) return;
+        }
+        await fetchPage(urls[i], i);
+        lastDone = Date.now();
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(workers, indices.length) }, worker));
+  };
+
+  await run(urls.map((_, i) => i));
 
   /**
    * Wait out a rate limit and pick up where we stopped, a bounded number of times.
@@ -229,16 +276,15 @@ async function fetchChapter(
     if (retryAfterMs) {
       await sleep(retryAfterMs);
       retryAfterMs = 0;
-      // Resume slower than the burst that caused this, or the wait only buys one more page.
+      // Resume slower than the burst that caused this, or the wait only buys one more page. The burst is
+      // what was refused, so a widened pool narrows to one here too: an engine that said 429 to four
+      // overlapping requests is not going to like four more.
       gap = gap ? Math.min(gap * 2, MAX_PAGE_GAP_MS) : 0;
+      workers = 1;
     } else if (round) {
       break; // a stable shortfall with no 429: the pages are not there, and one retry was enough to know
     }
-    for (const i of gaps) {
-      if (gap) await sleep(gap);
-      await fetchPage(urls[i], i);
-      if (retryAfterMs) break;
-    }
+    await run(gaps);
   }
 
   let n = 0;

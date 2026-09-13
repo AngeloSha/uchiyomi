@@ -202,10 +202,13 @@ again.
   grid of one source's latest.
 - **Search:** type a title once and Uchiyomi searches **all your sources at the same time**. Results are
   de-duplicated into one card per title (a small badge shows how many sources carry it), and anything you
-  already own is marked **✓ In library**.
+  already own is marked **✓ In library**. The **Newest** / **Popular** wall does the same: a title several
+  of your sources publish is one card with the same badge, and tapping it lets you pick the source.
 - **Add:** tap a card and pick which source to add it from (skipped when only one has it). Choose **how many
-  chapters** to download (All or first N), toggle **auto-update**, and add it. It downloads chapter 1
-  immediately so the series shows up right away, then grabs the rest in the background (with a progress bar).
+  chapters** to download (All, First N, or Latest N), toggle **auto-update**, and add it. It downloads the
+  first selected chapter immediately so the series shows up right away, then grabs the rest in the
+  background (with a progress bar). With **Latest N**, auto-update only fetches chapters newer than the
+  ones you took; the older ones stay on the source until you ask for them with **Find missing chapters**.
 
 If you try to add a title you already have from another source, Uchiyomi warns you and lets you add a separate copy
 or cancel. A heads-up appears if you queue a lot of chapters at once (sources can rate-limit heavy downloads).
@@ -274,7 +277,7 @@ sites, but not every one.
 ### Extensions (Mihon / Tachiyomi)
 
 Beyond the built-in engines, Uchiyomi can use the **Mihon / Tachiyomi extension ecosystem** — around 1,400 of
-them. Go to **Admin → Providers → Extensions**, add an extension repository you trust (once), then search and
+them. Go to **Admin → Extensions**, add an extension repository you trust (once), then search and
 click **Add**. Installing switches that extension's sources on straight away, so it is searchable from Discover
 immediately.
 
@@ -312,6 +315,12 @@ Sessions, Activity), **Content** (Library, Health, Art) and **Sources** (Provide
 chapters, chapters that downloaded as one or two images, the same title sitting in the library twice, chapter
 numbers that can't be real, and any source that is failing or blocked. Each check says what it found and what
 it cannot see. Hit **Re-check** to run them again.
+
+A source you turned off yourself -- one at a time on Providers, or a whole language at once on Extensions --
+is listed greyed under *Source health* so the count stays visible, but it never makes the check amber: it is
+your decision, not a fault. The same greying marks the advisory rows, such as a solver or Uchiyomi version
+that is merely behind. When an extension server is configured there is one more check, *Extension source
+limit*, which goes amber when more sources are switched on than `SUWAYOMI_MAX_SOURCES` allows to register.
 
 ![Library health](shots/admin-health.webp)
 

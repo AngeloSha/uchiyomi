@@ -1,10 +1,12 @@
 // Search across sources and add a new series to the library (queues its download). Backed by the source
 // adapters + the downloader. The cover proxy lives under /img (cookie auth) so <img> tags can load it.
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import { z } from 'zod';
 import { authenticate, userIdOf, roleOf } from '../lib/auth';
 import { getSource, listSources, isSwAdapterId, SW_PREFIX, withTimeout } from '../lib/sources';
 import type { SourceAdapter, SourceSeries, SourceChapter } from '../lib/sources/types';
 import { downloadChapter, sanitize } from '../lib/downloader';
+import { selectChapters, type ChapterFrom } from '../lib/selectChapters';
 import { noteChapterFailure } from '../lib/chapterFailures';
 import { scanOrder } from '../lib/scanOrder';
 import { budgetFor } from '../lib/sources/budget';
@@ -280,6 +282,8 @@ export interface AddResult {
  *  Shared by POST /api/sources/add and the bulk importer. Returns a result instead of touching the reply. */
 export async function addSeriesFromSource(opts: {
   source?: string; sourceId?: string; force?: boolean; chapterCount?: number; autoUpdate?: boolean;
+  /** Which end of the list `chapterCount` counts from. Adapters list ascending, so the default is the oldest N. */
+  chapterFrom?: ChapterFrom;
   /**
    * Await the first chapter before returning.
    *
@@ -290,7 +294,7 @@ export async function addSeriesFromSource(opts: {
    */
   wait?: boolean;
 }): Promise<AddResult> {
-  const { source, sourceId, force, chapterCount, autoUpdate } = opts;
+  const { source, sourceId, force, chapterCount, chapterFrom, autoUpdate } = opts;
   const src = source ? getSource(source) : null;
   if (!src || !sourceId) return { ok: false, status: 400, error: 'bad_request' };
   if (await isDisabled(source!)) return { ok: false, status: 403, error: 'disabled', message: `${src.name} is disabled by the admin.` };
@@ -333,7 +337,7 @@ export async function addSeriesFromSource(opts: {
   }
 
   if (!chapters.length) return { ok: false, status: 404, error: 'no_chapters', message: 'No readable chapters for this title on this source. Try a different source.' };
-  const selected = chapterCount && chapterCount > 0 ? chapters.slice(0, chapterCount) : chapters;
+  const selected = selectChapters(chapters, chapterCount, chapterFrom);
   const meta = { series: title, summary: series?.summary, author: series?.author, genres: series?.genres, url: series?.url, status: series?.status };
   jobs.set(folder, { title, total: selected.length, done: 0, status: 'downloading' });
 
@@ -375,8 +379,18 @@ export async function addSeriesFromSource(opts: {
     const j0 = jobs.get(folder); if (j0) j0.done = 1;
     await persistScan().catch(() => {});
     await setBookDates(folder, selected).catch(() => {});
-    await q('UPDATE lib_series SET auto_update = $1, source_id = $2, source_series_id = $3 WHERE folder = $4',
-      [autoUpdate !== false, source, sourceId, folder]).catch(() => {});
+    // "Latest 25 of 200" leaves 1..175 on the source that we do not hold, and the updater treats every
+    // chapter it lists that we lack as missing, oldest first. Without this floor the sweep would backfill
+    // those 175 five at a time, night after night, with each new release queued behind them -- the exact
+    // opposite of what a person who picked "latest" asked for. Below the floor is left to "Find missing
+    // chapters", which offers that run from the series' own source. Written on every add, NULL included: a
+    // series soft-deleted and added again as "All" must not keep the floor from its earlier life, or a
+    // download that stops part-way leaves a remainder the sweep will never touch. The lowest of the
+    // selection, not its first element -- a plugin adapter is under no obligation to list ascending.
+    const floor = chapterFrom === 'newest' && selected.length < chapters.length
+      ? Math.min(...selected.map((c) => c.number)) : null;
+    await q('UPDATE lib_series SET auto_update = $1, source_id = $2, source_series_id = $3, chapter_floor = $5 WHERE folder = $4',
+      [autoUpdate !== false, source, sourceId, folder, floor]).catch(() => {});
     if (series?.coverUrl) {
       await q(`INSERT INTO series_art (series_id, cover) SELECT id, $1 FROM lib_series WHERE folder = $2
         ON CONFLICT (series_id) DO UPDATE SET cover = COALESCE(series_art.cover, EXCLUDED.cover)`, [series.coverUrl, folder]).catch(() => {});
@@ -594,7 +608,8 @@ export default async function sourceRoutes(app: FastifyInstance) {
     // a database blip must not make a series someone cannot see fillable.
     const p = new Params();
     const rows = await q<any>(
-      `SELECT s.id, s.title, s.folder, s.source_id, s.source_series_id, s.summary, s.author, s.genres, s.web, s.status
+      `SELECT s.id, s.title, s.folder, s.source_id, s.source_series_id, s.summary, s.author, s.genres, s.web, s.status,
+              s.chapter_floor
          FROM lib_series s WHERE s.id = ${p.add(seriesId)} AND ${browsable('s', vc(req), p)}`, p.values,
     ).then((r) => r, () => null);
     if (rows === null) return reply.code(503).send({ error: 'unavailable' });
@@ -675,13 +690,15 @@ export default async function sourceRoutes(app: FastifyInstance) {
         catch { why = 'no_chapters'; }
       }
       const nums = list.map((c) => c.number);
-      const a = assess(have, nums);
+      // The run below a "Latest N" add is offered from the series' own source and nowhere else: this is the
+      // dialog the add hint sends people to for the older chapters, and it must be able to deliver them.
+      const a = assess(have, nums, { older: f.pinned && s.chapter_floor != null });
       chapters.set(planKey(f.source, f.sourceId), list);
       candidates.push({
         source: f.source, name: f.name, sourceSeriesId: f.sourceId, title: f.title, coverUrl: f.coverUrl,
         count: list.length, first: nums.length ? Math.min(...nums) : null, last: nums.length ? Math.max(...nums) : null,
         coverage: Math.round(a.coverage * 100) / 100, matched: a.matched,
-        fillable: a.fillable, newer: a.newer,
+        fillable: a.fillable, newer: a.newer, older: a.older,
         why: why === 'ok' ? verdict(a, list.length) : why,
         pinned: f.pinned,
         health: h && (h.status !== 'ok' || h.consecutive > 0)
@@ -694,14 +711,14 @@ export default async function sourceRoutes(app: FastifyInstance) {
       candidates.push({
         source: u.source, name: u.name, sourceSeriesId: '', title: '',
         count: 0, first: null, last: null, coverage: 0, matched: 0,
-        fillable: [], newer: [], why: 'not_tried', pinned: false,
+        fillable: [], newer: [], older: [], why: 'not_tried', pinned: false,
       });
     }
     for (const u of unreachable) {
       candidates.push({
         source: u.source, name: u.name, sourceSeriesId: '', title: '',
         count: 0, first: null, last: null, coverage: 0, matched: 0,
-        fillable: [], newer: [], why: 'unreachable', pinned: false,
+        fillable: [], newer: [], older: [], why: 'unreachable', pinned: false,
       });
     }
 
@@ -715,8 +732,8 @@ export default async function sourceRoutes(app: FastifyInstance) {
     return {
       seriesId, title: s.title, folder: s.folder,
       have: { count: have.length, first: Math.min(...have), last: Math.max(...have) },
-      gaps, candidates, planId: plan.id, expiresIn: PLAN_TTL,
-      refusal: gaps.length || candidates.some((c) => c.newer.length) ? null
+      gaps, candidates, planId: plan.id, expiresIn: PLAN_TTL, fillMax: FILL_MAX_CHAPTERS,
+      refusal: gaps.length || candidates.some((c) => c.newer.length || c.older.length) ? null
         : { code: 'no_gaps', message: 'Nothing is missing between the chapters you already have.' },
     };
   });
@@ -1003,15 +1020,22 @@ export default async function sourceRoutes(app: FastifyInstance) {
   });
 
   app.post('/api/sources/add', async (req, reply) => {
-    const { source, sourceId, force, chapterCount, autoUpdate } = (req.body ?? {}) as
-      { source?: string; sourceId?: string; force?: boolean; chapterCount?: number; autoUpdate?: boolean };
+    // A plain cast let anything through: `chapterCount: "abc"` became NaN and quietly meant "all", and a
+    // misspelt `chapterFrom` would have meant "oldest". A missing source or sourceId is still the same 400.
+    const b = z.object({
+      source: z.string(), sourceId: z.string(), force: z.boolean().optional(),
+      chapterCount: z.number().int().positive().optional(), chapterFrom: z.enum(['oldest', 'newest']).optional(),
+      autoUpdate: z.boolean().optional(),
+    }).safeParse(req.body ?? {});
+    if (!b.success) return reply.code(400).send({ error: 'bad_request' });
+    const { source, sourceId, force, chapterCount, chapterFrom, autoUpdate } = b.data;
     if (!source || !sourceId) return reply.code(400).send({ error: 'bad_request' });
     // canDownload is now checked for the whole plugin in the preHandler above, including this route.
     if (!sourceAllowedFor(getSource(source), vc(req).maxAgeRating)) return denySource(reply);
     // `wait: false` -- answer once the decision is made and download afterwards. Everything that decides
     // what to tell the caller (disabled, already present, duplicate, no chapters) still happens inline and
     // still gets its proper status code; only the fetching moves behind the reply.
-    const r = await addSeriesFromSource({ source, sourceId, force, chapterCount, autoUpdate, wait: false });
+    const r = await addSeriesFromSource({ source, sourceId, force, chapterCount, chapterFrom, autoUpdate, wait: false });
     if (!r.ok) return reply.code(r.status).send({ error: r.error, message: r.message, existing: r.existing, status: r.blockStatus });
     // Audited here rather than after the download, so a slow or failing download does not delay the record
     // of who asked for it. What actually landed is the job's business.

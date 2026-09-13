@@ -104,3 +104,28 @@ test('the install file is one container, and the external-database file still is
   assert.match(ext, /DATABASE_URL:\s*postgres:\/\//, 'the external-database file no longer points the app at its database');
   assert.match(ext, /depends_on:[\s\S]{0,80}uchiyomi-db/, 'the app no longer waits for its database in the external layout');
 });
+
+/**
+ * Every SUWAYOMI_* knob docs/extensions.md tells a self-hoster to set must actually reach the app.
+ *
+ * The deploy files enumerate the app's environment explicitly (no env_file), so a variable that is documented
+ * but not listed there is a setting that does nothing: SUWAYOMI_PAGE_CONCURRENCY shipped in the docs, the
+ * env parser and the settings table before anybody noticed the compose files never passed it through.
+ * The table in docs/extensions.md is the contract; this reads it and checks each deploy file.
+ *
+ * Reintroduce by deleting the `SUWAYOMI_PAGE_CONCURRENCY:` line from deploy/docker-compose.yml: the
+ * `passes SUWAYOMI_PAGE_CONCURRENCY` assertion names the file.
+ */
+test('every documented extension knob is passed through by every deploy file', () => {
+  const docs = readFileSync(join(REPO, 'docs/extensions.md'), 'utf8');
+  const knobs = [...new Set([...docs.matchAll(/^\| `(SUWAYOMI_[A-Z_]+)`/gm)].map((m) => m[1]))]
+    // SUWAYOMI_USERNAME / _PASSWORD share one table row; the regex takes the first of a pair
+    .concat(/`SUWAYOMI_USERNAME` \/ `SUWAYOMI_PASSWORD`/.test(docs) ? ['SUWAYOMI_PASSWORD'] : []);
+  assert.ok(knobs.includes('SUWAYOMI_PAGE_CONCURRENCY'), `the settings table lost its rows: ${knobs.join(', ')}`);
+  for (const file of ['deploy/docker-compose.yml', 'deploy/docker-compose.external-db.yml', 'deploy/docker-compose.split.yml']) {
+    const src = instructions(readFileSync(join(REPO, file), 'utf8'));
+    for (const k of knobs) {
+      assert.ok(new RegExp(`^\\s+${k}:`, 'm').test(src), `${file} passes ${k}`);
+    }
+  }
+});

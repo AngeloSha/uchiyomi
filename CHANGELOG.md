@@ -1,5 +1,58 @@
 # Changelog
 
+## v0.30.0 — 2026-09-13
+
+Four things one reader asked for on the day the Mihon extension shipped ([#36](https://github.com/AngeloSha/uchiyomi/issues/36),
+[#37](https://github.com/AngeloSha/uchiyomi/issues/37), [#38](https://github.com/AngeloSha/uchiyomi/issues/38)).
+
+### Hide the languages you don't read
+
+Installing an extension switched on every source it ships, in every language — one extension can be thirty
+of them — and quietly ate the `SUWAYOMI_MAX_SOURCES` limit (25), with the overflow visible only in the server
+log. **Admin → Extensions → Languages** now lists every language your extensions offer, with how many sources
+and how many of your series came from them, and hides or shows a whole language in one press. Hidden is a
+standing setting: the next extension you install leaves those languages off. One request flips every row in
+one statement and reloads the sources once (`POST /api/admin/extensions/sources/bulk`).
+
+Two things came out of the same work. A source you switched off — by hand or by language — no longer turns
+the Health page amber; it is listed greyed as "turned off by you", and a series whose source you hid is
+reported as "switched off" rather than "no longer installed". And the source limit finally has a face: the
+panel and Health both say when enabled sources are not registered because of it.
+
+The panel's layout and the Health observation are from [#39](https://github.com/AngeloSha/uchiyomi/pull/39)
+by TIGamingTV; the implementation was reworked so hiding a language is one reload rather than one per source,
+and so an install respects it.
+
+### Extension downloads at the speed the engine allows
+
+Pages were fetched one at a time with a quarter-second pause between them. That rule exists because that is
+what stopped the 429s on the sites we scrape ourselves — but it was applied identically to extension sources,
+where every page request goes to the local engine, which fetches upstream one page at a time because we asked
+one at a time. A 120-page chapter through a proxy, serially, with a pause: one to two minutes.
+
+Pacing is now the source's to declare. Extension sources fetch four pages at once with no pause (the engine
+enforces each extension's own rate limits, as Mihon would); scraped sites keep the old rule to the
+millisecond — the floor is measured from the previous reply as well as the previous start, so a slow site is
+still not asked again until the gap after it answers. A 429 still stops the burst, and the retry runs one
+page at a time. `SUWAYOMI_PAGE_CONCURRENCY` (1–8, default 4) is the dial, and it is passed through by every
+deploy file — a test now reads the settings table in `docs/extensions.md` and checks each of them, because
+this knob was documented before it was wired.
+
+### "Latest N" when adding a series
+
+The Add dialog offers *Latest 10/25/50…* next to *First N* — which, to be honest about it, always meant the
+**oldest** N, and the API doc said the opposite. A series added as "Latest N" gets a floor: auto-update
+fetches new releases instead of spending weeks backfilling chapter 1 onwards. The older chapters are still
+one press away — *Find missing chapters* now offers the run below what you hold, from the series' own source
+and no other (the fill dialog's rule against extrapolating across sources stands). The floor is written on
+every add, so a series deleted and added again as "All" does not keep one from its earlier life.
+
+### One card per title on the Discover wall
+
+Search already folded the same title from several sources into one card with a count badge; the Newest and
+Popular wall did not, so a popular title sat there three or four times. It folds now, the same way, with the
+providers ordered as the page ranks sources so the dialog's "preferred" is the one it would have asked first.
+
 ## v0.29.0 — 2026-09-13
 
 ### One token for a third-party client

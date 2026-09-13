@@ -65,6 +65,7 @@ services:
       SUWAYOMI_USERNAME: ${SUWAYOMI_USERNAME:-}
       SUWAYOMI_PASSWORD: ${SUWAYOMI_PASSWORD:-}
       SUWAYOMI_MAX_SOURCES: ${SUWAYOMI_MAX_SOURCES:-25}
+      SUWAYOMI_PAGE_CONCURRENCY: ${SUWAYOMI_PAGE_CONCURRENCY:-4}
     volumes:
       - yomi_imgcache:/cache
       - ${LIBRARY_PATH:-./library}:/library                   # your existing CBZ library (bring-your-own)
@@ -143,6 +144,7 @@ services:
       SUWAYOMI_USERNAME: ${SUWAYOMI_USERNAME:-}
       SUWAYOMI_PASSWORD: ${SUWAYOMI_PASSWORD:-}
       SUWAYOMI_MAX_SOURCES: ${SUWAYOMI_MAX_SOURCES:-25}
+      SUWAYOMI_PAGE_CONCURRENCY: ${SUWAYOMI_PAGE_CONCURRENCY:-4}
     volumes:
       - yomi_imgcache:/cache
       - ${LIBRARY_PATH:-./library}:/library                   # your existing CBZ library (bring-your-own)

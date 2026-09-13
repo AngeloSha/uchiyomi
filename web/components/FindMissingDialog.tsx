@@ -23,7 +23,7 @@ interface Candidate {
   source: string; name: string; sourceSeriesId: string; title: string; coverUrl?: string;
   count: number; first: number | null; last: number | null;
   coverage: number; matched: number;
-  fillable: number[]; newer: number[];
+  fillable: number[]; newer: number[]; older: number[];
   why: string; pinned: boolean;
   health?: { status: string; consecutive: number; lastFailAt: string | null; lastOkAt: string | null } | null;
 }
@@ -33,6 +33,8 @@ interface Scan {
   gaps: { lo: number; hi: number; count: number }[];
   candidates: Candidate[];
   planId: string;
+  /** The most chapters one fill may take; the server refuses more, so the dialog never asks for more. */
+  fillMax?: number;
   refusal: { code: string; message: string } | null;
 }
 interface Job { folder: string; title: string; total: number; done: number; status: string; reason?: string }
@@ -77,11 +79,13 @@ export function FindMissingDialog({ seriesId, onClose }: { seriesId: string; onC
   });
   const job = jobs.data?.content?.find((j) => j.folder === started);
 
-  const run = async (c: Candidate) => {
+  const run = async (c: Candidate, which: 'fillable' | 'older' = 'fillable') => {
     if (!scan.data) return;
     setBusy(true);
     try {
-      const numbers = c.fillable;
+      // The older run can be long (a "Latest 25 of 200" add leaves 175 behind); the nearest chapters to what
+      // we hold go first, so a second press continues where this one stopped.
+      const numbers = which === 'older' ? c.older.slice(-(scan.data.fillMax ?? 300)) : c.fillable;
       const res = await api<{ folder: string }>('/api/sources/fill', {
         method: 'POST',
         json: { planId: scan.data.planId, source: c.source, sourceSeriesId: c.sourceSeriesId, numbers },
@@ -161,15 +165,29 @@ export function FindMissingDialog({ seriesId, onClose }: { seriesId: string; onC
                   )}
                 </div>
               </div>
-              <button
-                disabled={busy}
-                onClick={() => run(c)}
-                className="btn-accent mt-3 w-full text-sm disabled:opacity-50"
-              >
-                {tr('Fetch {n} chapters from {s}')
-                  .replace('{n}', String(c.fillable.length))
-                  .replace('{s}', c.name)}
-              </button>
+              {c.fillable.length > 0 && (
+                <button
+                  disabled={busy}
+                  onClick={() => run(c)}
+                  className="btn-accent mt-3 w-full text-sm disabled:opacity-50"
+                >
+                  {tr('Fetch {n} chapters from {s}')
+                    .replace('{n}', String(c.fillable.length))
+                    .replace('{s}', c.name)}
+                </button>
+              )}
+              {/* The chapters a "Latest N" add left behind, from the series' own source only. */}
+              {c.older.length > 0 && (
+                <button
+                  disabled={busy}
+                  onClick={() => run(c, 'older')}
+                  className={`${c.fillable.length ? 'btn-ghost' : 'btn-accent'} mt-2 w-full text-sm disabled:opacity-50`}
+                >
+                  {tr('Fetch {n} older chapters from {s}')
+                    .replace('{n}', String(Math.min(c.older.length, scan.data?.fillMax ?? 300)))
+                    .replace('{s}', c.name)}
+                </button>
+              )}
             </div>
           ))}
 

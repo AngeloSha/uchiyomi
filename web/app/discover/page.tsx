@@ -14,6 +14,8 @@ import { ScrollRail } from '@/components/ScrollRail';
 import { DiscoverHero, TrendingCard, Trending } from '@/components/DiscoverHero';
 import { SourcePicker, SourceLatest, Src, SrcState } from '@/components/SourcePicker';
 import { budgetForMode, type ListMode } from '@/lib/sourceGroups';
+import { normTitle } from '@/lib/normTitle';
+import { foldByTitle, type WallProvider } from '@/lib/wall';
 import { AddSeriesDialog, AddSeed } from '@/components/AddSeriesDialog';
 import { IcChevronLeft, IcSearch, IcSparkle, IcX } from '@/components/icons';
 
@@ -27,9 +29,6 @@ interface SearchGroup { title: string; coverUrl?: string; inLibrary?: boolean; u
  * and every slide is one more proxied cover fetch.
  */
 const HERO_SLIDES = 10;
-
-/** Titles compare the way the server compares them, so a card can flip to "in library" with no refetch. */
-const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, '');
 
 /**
  * Discover, rebuilt around what people actually do here.
@@ -151,8 +150,14 @@ export default function DiscoverPage() {
   const settled = order.filter((k) => k.startsWith(`${listMode}:`)).length;
   const gate = 4 + settled;
 
+  const nameOf = useCallback((id: string) => sources.find((s) => s.id === id)?.name, [sources]);
+  // The page's own ranking, so a folded card's "preferred" provider is the one the page would have asked
+  // first, not whichever answered first. Unranked sources sort last.
+  const rankOf = useCallback((id: string) => { const i = ranked.findIndex((s) => s.id === id); return i < 0 ? ranked.length : i; }, [ranked]);
+
   const wall = useMemo(() => {
-    if (mode === 'search') return searchHits;
+    // Search arrives already folded: the server grouped it and `search` stored the groups in groupsRef.
+    if (mode === 'search') return { items: searchHits, groups: {} as Record<string, WallProvider[]> };
     const seen = new Set<string>();
     const out: SourceItem[] = [];
     // Strict arrival order. Interleaving by rank would push already-read tiles down as a slow source lands.
@@ -168,10 +173,12 @@ export default function DiscoverPage() {
         out.push(it);
       }
     }
-    return out;
-  }, [mode, listMode, selected, searchHits, order, byId]);
+    // Then one card per title, the way search already is. Folding AFTER the flatten keeps the arrival order:
+    // the first source to land a title keeps the card, later ones only join its provider list, so the
+    // badge lights and the add dialog offers a choice without anything on screen moving.
+    return foldByTitle(out, nameOf, rankOf);
+  }, [mode, listMode, selected, searchHits, order, byId, nameOf, rankOf]);
 
-  const nameOf = useCallback((id: string) => sources.find((s) => s.id === id)?.name, [sources]);
   const pending = mode === 'newest' ? Math.max(0, budget.length - settled) : (searching ? 3 : 0);
 
   const search = async (e?: React.FormEvent) => {
@@ -186,7 +193,7 @@ export default function DiscoverPage() {
         title: g.title, coverUrl: g.coverUrl, updatedAt: g.updatedAt,
         inLibrary: g.inLibrary, providerCount: g.providers.length,
       })));
-      (r.content ?? []).forEach((g) => { (groupsRef.current as any)[norm(g.title)] = g.providers; });
+      (r.content ?? []).forEach((g) => { (groupsRef.current as any)[normTitle(g.title)] = g.providers; });
     } catch { toast(tr('Search failed'), 'error'); }
     setSearching(false);
   };
@@ -194,8 +201,10 @@ export default function DiscoverPage() {
   const backToNewest = () => { setQ(''); setMode('newest'); setSearchHits([]); };
 
   const open = (it: SourceItem) => {
-    if (it.inLibrary || added.has(norm(it.title))) return;
-    const providers = groupsRef.current[norm(it.title)];
+    const key = normTitle(it.title);
+    if (it.inLibrary || added.has(key)) return;
+    // The wall's own fold first, then what the last search stored: both are keyed the same way.
+    const providers = wall.groups[key] ?? groupsRef.current[key];
     if (providers?.length) setSeed({ kind: 'group', title: it.title, providers });
     else setSeed({ kind: 'result', provider: { source: it.source, name: nameOf(it.source) ?? it.source, sourceId: it.sourceId, title: it.title, coverUrl: it.coverUrl } });
   };
@@ -361,8 +370,8 @@ export default function DiscoverPage() {
       </div>
 
       <div className="grid grid-cols-3 gap-x-3 gap-y-5 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-7 lg:gap-x-4 xl:grid-cols-8 2xl:grid-cols-9 3xl:grid-cols-10">
-        {wall.map((it, i) => (
-          <SourceCard key={`${it.source}:${it.sourceId}`} item={{ ...it, inLibrary: it.inLibrary || added.has(norm(it.title)) }}
+        {wall.items.map((it, i) => (
+          <SourceCard key={`${it.source}:${it.sourceId}`} item={{ ...it, inLibrary: it.inLibrary || added.has(normTitle(it.title)) }}
             sourceName={mode === 'newest' && order.length > 1 ? nameOf(it.source) : undefined}
             onAdd={() => open(it)} eager={i < 12} />
         ))}
@@ -371,7 +380,7 @@ export default function DiscoverPage() {
         ))}
       </div>
 
-      {!wall.length && !pending && (
+      {!wall.items.length && !pending && (
         <div className="card col-span-full mt-2 p-8 text-center">
           <p className="text-sm text-fog-400">
             {mode === 'search' ? tr('No results across your sources — try another title.')
@@ -412,7 +421,7 @@ export default function DiscoverPage() {
           sources={budgetIds}
           onClose={() => setSeed(null)}
           onAdded={(r) => {
-            setAdded((prev) => new Set(prev).add(norm(r.title)));
+            setAdded((prev) => new Set(prev).add(normTitle(r.title)));
             qc.invalidateQueries({ queryKey: ['source-jobs'] });
           }}
         />

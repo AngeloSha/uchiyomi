@@ -192,6 +192,11 @@ ALTER TABLE lib_series ADD COLUMN IF NOT EXISTS source_series_id text;
 ALTER TABLE lib_series ADD COLUMN IF NOT EXISTS source_chapters   int;
 ALTER TABLE lib_series ADD COLUMN IF NOT EXISTS source_missing    int;
 ALTER TABLE lib_series ADD COLUMN IF NOT EXISTS source_checked_at timestamptz;
+-- The lowest chapter number the updater is asked to care about; NULL means no floor. Set when a series is
+-- added as "latest N": the updater otherwise counts every listed chapter we lack as missing, oldest first,
+-- so a series added as the latest 25 of 200 would have the sweep backfill 1..175 five per night with every
+-- new release queued behind them. Chapters below the floor are left to the fill scan, on purpose.
+ALTER TABLE lib_series ADD COLUMN IF NOT EXISTS chapter_floor     numeric;
 
 -- Content identity, so a chapter can be recognised after it moves. Derived from the archive's central
 -- directory (entry names + CRC-32 + uncompressed sizes), which is cheap to read and survives recompression.
@@ -338,6 +343,11 @@ ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS extension_last_result jsonb
 -- The repository URLs, kept here as well as on the extension server. Its volume is the one people delete
 -- when it misbehaves, and its settings went with it silently -- they are not in our backup either.
 ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS extension_repos       jsonb   NOT NULL DEFAULT '[]';
+-- Languages the operator does not read, as a standing instruction rather than a one-off: installing an
+-- extension switches on every source it provides, which for a multi-language extension is thirty sources in
+-- languages nobody here reads (issue #38), each one a fan-out target for cross-source search. Applied on
+-- install and retroactively by the bulk toggle. Codes are stored as the engine reports them (en, ru, zh-Hans).
+ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS hidden_langs          jsonb   NOT NULL DEFAULT '[]';
 
 -- Update check: reads a public GitHub releases URL and sends nothing about this install, which is why it
 -- may default to on. See lib/githubRelease.ts.

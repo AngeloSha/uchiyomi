@@ -101,6 +101,17 @@ test('extension source registration', { skip: DSN ? false : 'set TEST_DATABASE_U
       assert.equal(r.registered, 2);
       assert.equal(r.skipped, 3, 'over-cap sources must be counted, not silently dropped');
       assert.equal(loader.listSources().length, 2);
+
+      // ...and reported somewhere a person looks. The count above went to one console.warn at boot and
+      // nowhere else, so search quietly reached fewer sources than the panel said were on.
+      // Reintroduce by not recording `last` in loadSuwayomiSources (return load(list) directly): "the cap
+      // overflow reaches the health page" fails -- the check reads ok with nothing skipped.
+      const { runHealthChecks } = await import('../src/lib/health');
+      const cap = (await runHealthChecks()).checks.find((c) => c.id === 'extension-cap');
+      assert.ok(cap, 'the extension-cap check exists when an engine is configured');
+      assert.equal(cap!.status, 'warn', 'the cap overflow reaches the health page');
+      assert.match(cap!.summary, /3 enabled sources are not registered/);
+      assert.match(cap!.items[0]?.detail ?? '', /the limit is 2/);
     } finally {
       (env as { SUWAYOMI_MAX_SOURCES: number }).SUWAYOMI_MAX_SOURCES = original;
     }

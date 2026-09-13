@@ -56,8 +56,14 @@ after(async () => {
 });
 
 /**
- * Reintroduce by deleting the `if (i && gap) await sleep(gap)` line in downloader.ts: the pages arrive in a
- * burst, the smallest gap collapses to roughly zero, and this fails.
+ * Reintroduce by replacing the slot reservation in run() in downloader.ts with `const at = Date.now();`
+ * (dropping both the `lastStart + gap` and the `lastDone + gap` floors): every page's slot is "now", the
+ * pages arrive in a burst, the smallest gap collapses to roughly zero, and the `pages should be at least
+ * ~40ms apart` assertion fails. Dropping only one floor is NOT enough -- the other still spaces them -- which
+ * is the point of having two.
+ *
+ * The adapter here declares nothing, which is what every engine and pack site does, so this pins the default
+ * pacing; pageConcurrency.test.ts covers a source that declares its own.
  */
 test('pages inside a chapter are spaced, not fired in a burst', { skip }, async () => {
   stamps = [];

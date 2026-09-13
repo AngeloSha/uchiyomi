@@ -90,6 +90,26 @@ plugin and hit **Admin → Providers → Reload sources** (`POST /api/admin/sour
 added, no extensions installed and no pack mounted, Uchiyomi is just a clean reader for the library you
 already own.
 
+## Downloading
+
+All optional; the defaults are what the live install runs. Adding a series and importing hundreds of
+chapters both go through the same downloader, so these are the only knobs that decide how hard a site is
+ever hit.
+
+- `DOWNLOAD_CONCURRENCY` (default `2`): chapters downloaded at once, per source.
+- `DOWNLOAD_MIN_GAP_MS` (default `1200`): minimum gap between chapter downloads from the same source.
+- `DOWNLOAD_PAGE_GAP_MS` (default `250`): pause between page requests inside one chapter, for an engine or
+  pack site. A chapter is 110-130 images; fetching them back to back at ~1.9 pages a second is exactly what
+  earned the 429s on mangakakalot and natomanga, and a quarter second between pages costs about 30 seconds
+  per chapter against a 75-minute cooldown. Extension sources ignore this: see the next knob.
+- `SUWAYOMI_PAGE_CONCURRENCY` (default `4`, 1-8): pages fetched at once from the extension engine. An
+  extension source's page URLs are the engine's own proxy paths, and the engine has its own client and its
+  own rate limits towards the site, so the one-at-a-time pacing above was only slowing extension downloads
+  down for nothing. The first 429 from the engine drops the chapter back to one page at a time for the rest
+  of the download.
+- `MIN_FREE_GB` (default `10`): refuse to start a download when the download disk has less than this free.
+  `0` disables the floor. Fails open if free space cannot be measured.
+
 ## Push notifications
 
 Nothing to configure. The server generates a VAPID key pair on first boot and keeps it in `/config`, the

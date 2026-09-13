@@ -3,7 +3,7 @@
 Uchiyomi ships **generic engines** that reach whole families of manga sites by URL. On top of that it can use
 the **Mihon / Tachiyomi extension ecosystem** — the same extensions those apps use, roughly 1,400 of them.
 
-You browse and install them from **Admin → Providers → Extensions**. There is nothing to set up first.
+You browse and install them from **Admin → Extensions**. There is nothing to set up first.
 
 ## Using it
 
@@ -15,6 +15,19 @@ You browse and install them from **Admin → Providers → Extensions**. There i
 
 Adult extensions are hidden until you tap **18+**. Installed ones show **Remove**, and one with a newer
 version shows **Update**.
+
+**Languages you don't read.** A multi-language extension provides one source per language, and adding it
+switches all of them on -- thirty sources you will never search, each one counting towards the source
+limit. **Admin → Extensions → Languages** lists every language your extensions offer with how many sources
+it has, how many are on, and how many of your series came from them; **Hide** switches that language's
+sources off in one go, and it stays hidden: the next extension you add leaves its sources in that language
+off (the install message says how many). **Show** brings them back. Series added from a hidden language stay
+readable but stop updating until it is shown again, and the Health page names them.
+
+There is a ceiling, `SUWAYOMI_MAX_SOURCES` (25 by default), on how many extension sources register at once,
+because every one of them is searched together. If you have more switched on than that, the panel says so in
+an amber banner and **Content → Health** lists it under *Extension source limit*; hiding languages is the
+cheap way under it, raising the limit is the other.
 
 ## Automatic updates
 
@@ -98,6 +111,7 @@ reclaim the RAM as well, `docker compose stop uchiyomi-suwayomi` (`yomi-suwayomi
 | `SUWAYOMI_URL` | the bundled engine | Where the extension engine is. Empty turns the feature off. |
 | `SUWAYOMI_USERNAME` / `SUWAYOMI_PASSWORD` | empty | Only if your engine has authentication enabled. |
 | `SUWAYOMI_MAX_SOURCES` | `25` | Ceiling on how many extension sources register at once. |
+| `SUWAYOMI_PAGE_CONCURRENCY` | `4` | Pages of one chapter fetched from the engine at once (1-8). The engine rate-limits the site itself, so extension downloads skip the one-at-a-time pacing that scraped sites need; a 429 from the engine drops back to one for the rest of the chapter. |
 
 The update check's own settings live in **Admin → Server → Settings**, not here: *Update extensions
 automatically* (on by default) and *Extension check interval* (6 hours).
