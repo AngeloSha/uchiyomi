@@ -286,8 +286,8 @@ is in [docs/extensions.md](extensions.md).
 If you would rather keep reading in Mihon (Android), a Tachiyomi fork, Tachimanga (iOS) or Suwayomi, there is
 an extension that adds your Uchiyomi library as a source there. Add the store URL from
 [AngeloSha/uchiyomi-extension](https://github.com/AngeloSha/uchiyomi-extension) as an extension repo,
-install **Uchiyomi**, and give it your server address and a **read**-scoped API token (Profile → Security →
-API tokens). Favourites come first under *Popular*, recently updated under *Latest*, and search takes the
+install **Uchiyomi**, and give it your server address and a **read**-scoped API token (**Profile → Account →
+API tokens**, tap *Manage* then *New token*; leave *Allow changes* unticked). Favourites come first under *Popular*, recently updated under *Latest*, and search takes the
 same genre / status / read-state / library filters as the web app.
 
 One honest limit: **reading progress does not flow back to Uchiyomi** from there. The Mihon family only
@@ -460,9 +460,9 @@ interval** (how often Uchiyomi checks your library for new chapters).
 
 ## 9. Security: 2FA, sessions, password
 
-![Security](shots/profile-security.webp)
+![Profile](shots/profile-security.webp)
 
-In **Profile → Security** (every user has this):
+In **Profile → Account** (every user has this):
 
 - **Change password:** requires your current password; changing it signs out your other devices.
 - **Two-factor authentication:** tap **Set up 2FA**, scan the QR with any authenticator app (Google
@@ -478,8 +478,8 @@ Uchiyomi also locks an account after repeated failed logins and records everythi
 ### API tokens
 
 A normal sign-in expires every 15 minutes, which is fine for a browser and useless for a script. Under
-**Profile → Security → API tokens** you can create a long-lived token instead, scoped to **read**, **write** or
-**admin**, with an optional expiry. The token is shown once, so copy it then, and you can revoke it at any time.
+**Profile → Account → API tokens** (the card is collapsed — tap **Manage**, then **New token**) you can create a
+long-lived token instead, scoped to **read**, **write** or **admin**, with an optional expiry. The token is shown once, so copy it then, and you can revoke it at any time.
 
 Scopes only ever restrict: a read-only token gets a 403 on anything that changes data, and an admin-scoped
 token on a non-admin account still can't reach the admin API. See [docs/api.md](api.md) for the endpoints.
@@ -610,7 +610,7 @@ at `/library`, and any folder layout is read. If it is still empty, check that y
 scan; you can also force a rescan from the admin panel, or restart the stack.
 
 **I never set an admin password / can't sign in.** If no users exist yet, just open the app and the first-run
-screen lets you create the admin. If an admin already exists, reset the password under **Profile → Security**.
+screen lets you create the admin. If an admin already exists, reset the password under **Profile → Account**.
 
 **A source/site won't add.** Paste the site's **base URL** (e.g. `https://example.com`), not a series page.
 Uchiyomi auto-detects the engine (Madara, MangaThemesia, Manganato); Cloudflare-protected sites are handled
@@ -634,7 +634,7 @@ HTTPS.
 of the 6-digit code — that is the intended way back in, so keep them somewhere that is not the phone.
 
 If the recovery codes are gone too, the account cannot be recovered from the UI: turning 2FA off is
-self-service (**Profile → Security**) and needs the account's own password, and there is deliberately no admin
+self-service (**Profile → Account**) and needs the account's own password, and there is deliberately no admin
 override. Someone with server access can clear it directly:
 
 ```bash

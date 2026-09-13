@@ -4,7 +4,7 @@
 
 ### One token for a third-party client
 
-An API token (Profile → Security) opened `/api/*` and nothing else: pictures were served only to the
+An API token (Profile → Account) opened `/api/*` and nothing else: pictures were served only to the
 browser's cookie or to an OPDS reader's Basic credential. So a client that had just listed a chapter's pages
 could not fetch a single one of them without a second secret pasted in. `/img/*` now accepts an API token as
 a Bearer too, and a `read`-scoped token is enough — images are reads. Library grants apply exactly as they

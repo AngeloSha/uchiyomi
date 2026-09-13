@@ -15,7 +15,7 @@ There are two ways in, and for scripts you want the second one.
 **Session tokens** are what the web app uses: `POST /auth/login` returns a JWT that expires after 15 minutes,
 refreshed with a rotating cookie. Fine for a browser, miserable for a cron job.
 
-**API tokens** are long-lived, revocable, and scoped. Create one under **Profile → Security → API tokens**.
+**API tokens** are long-lived, revocable, and scoped. Create one under **Profile → Account → API tokens** (tap **Manage**, then **New token**).
 The token is shown once, so copy it then. It looks like `uy_` followed by random characters.
 
 ```bash
@@ -525,6 +525,6 @@ an ordinary user. Leave it unset to keep managing roles in the admin panel.
 - Boolean settings read the actual word, so `"false"` means false.
 - The ID token's signature is verified against the issuer's published keys on every sign-in, along with its
   issuer, audience, expiry and nonce.
-- SSO sessions appear in **Profile → Security** as a device named "SSO" and can be revoked like any other.
+- SSO sessions appear in **Profile → Account** as a device named "SSO" and can be revoked like any other.
 - Signing in through SSO does not ask for a second factor here; your identity provider is responsible for
   that. Local password logins still use Uchiyomi's own 2FA.

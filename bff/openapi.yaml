@@ -8,7 +8,7 @@ info:
   title: Uchiyomi API
   version: 0.29.0
   description: "Everything the web app does, it does over this API. Session JWTs are for the browser; scripts
-    use a personal API token (Profile -> Security -> API tokens), sent as `Authorization: Bearer uy_...`.
+    use a personal API token (Profile -> Account -> API tokens), sent as `Authorization: Bearer uy_...`.
     Scopes: read (every token; GET plus the library search POST, which is a query), write (anything that changes data), admin (the /api/admin surface, which also
     needs an admin account). /img/* takes the yomi_img cookie, an API token as a Bearer, or the OPDS token
     over HTTP Basic -- so a third-party client needs ONE credential for the JSON and the pictures alike;
