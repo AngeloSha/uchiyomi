@@ -65,7 +65,7 @@ const browseSrc = (ctx: ViewCtx, p: Params, alias = 'sv') => seriesSrcWith(brows
  */
 const booksSrc = (ctx: ViewCtx, p: Params, alias = 'bv') => `(
   SELECT b.id, b.series_id, b.source, b.file, b.root, b.pages, b.mtime, b.published_at, b.page_dims,
-         b.updated_at, b.fingerprint, b.scanlator, b.source_id,
+         b.updated_at, b.fingerprint, b.scanlator, b.source_id, b.pruned_at,
          COALESCE(ov.number, b.number) AS number,
          COALESCE(ov.title,  b.title)  AS title
     FROM lib_books b
@@ -147,6 +147,12 @@ function bookDto(r: any) {
     // explicit column list above: a name dropped there does not error, it silently reads as null here.
     scanlator: r.scanlator ?? null,
     sourceId: r.source_id ?? null,
+    // The file was deleted by the read-chapter cleanup and the row kept as a tombstone (lib/chapterCleanup).
+    // The chapter must still be LISTED -- it is part of the series, it is read, and everyone's progress and
+    // counts refer to it -- but nothing may offer to open or download it, because there are no pages behind
+    // it any more. A client that ignores this gets a 404 from the image server, which is the honest failure
+    // but a poor thing to find out by tapping.
+    pruned: !!r.pruned_at,
   };
 }
 
@@ -491,11 +497,15 @@ export const owned = {
     // Goes through booksSrc so page dimensions cannot enumerate a chapter of a hidden series.
     const p = new Params();
     const bsrc = booksSrc(ctx, p);
-    const r = await one<{ file: string; root: string; page_dims: Array<{ name: string; width: number | null; height: number | null }> | null }>(
-      `SELECT file, root, page_dims FROM ${bsrc} WHERE id = ${p.add(id)}`,
+    const r = await one<{ file: string; root: string; pruned_at: string | null; page_dims: Array<{ name: string; width: number | null; height: number | null }> | null }>(
+      `SELECT file, root, pruned_at, page_dims FROM ${bsrc} WHERE id = ${p.add(id)}`,
       p.values as any[],
     );
     if (!r) return [];
+    // The read-chapter cleanup deleted the file. page_dims is a CACHE and it outlives the pages it describes,
+    // so without this the reader would open a pruned chapter, lay out the right number of pages, and 404
+    // every single one of them. No pages is the truth.
+    if (r.pruned_at) return [];
     if (Array.isArray(r.page_dims) && r.page_dims.length) {
       return r.page_dims.map((pd, i) => ({ number: i + 1, fileName: pd.name, mediaType: mediaType(pd.name), width: pd.width ?? null, height: pd.height ?? null, sizeBytes: null }));
     }

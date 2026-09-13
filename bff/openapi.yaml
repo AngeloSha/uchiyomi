@@ -3041,8 +3041,8 @@ paths:
       tags:
         - admin
       summary: "Change server settings: name, open registration, update interval, extension check interval and
-        its kill switch, the update check, the opt-in install count, and the server-wide scanlation-group
-        preferences."
+        its kill switch, the update check, the opt-in install count, the opt-in read-chapter cleanup, and the
+        server-wide scanlation-group preferences."
       operationId: patchApiAdminSettings
       description: >-
         Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. Answers
@@ -3077,6 +3077,21 @@ paths:
                     The server-wide release preferences, replaced whole. Blocks made here apply to every
                     series; the priority applies to a series that has no ranking of its own.
                   $ref: "#/components/schemas/ScanlatorPrefs"
+                cleanupRead:
+                  description: >-
+                    Opt in to deleting the file of a chapter that everyone who started it has finished, once
+                    it has been finished for cleanupReadDays. Off by default. Only chapters under the
+                    download directory are ever touched; a chapter anyone is partway through is never
+                    touched; the chapter and everyone's reading progress survive the file.
+                  type: boolean
+                cleanupReadDays:
+                  description: >-
+                    Days to wait after the last reader finishes, counted from the newest progress update on
+                    the chapter. 0 means the next run deletes it; it is a grace period, not the off switch
+                    (that is cleanupRead).
+                  type: integer
+                  minimum: 0
+                  maximum: 3650
       security:
         - bearer: []
       responses:
@@ -3108,8 +3123,8 @@ paths:
     post:
       tags:
         - admin
-      summary: Start a scheduled task now (scan, update, backup, fingerprint, extensions). {ok:false,error:busy}
-        while it runs.
+      summary: Start a scheduled task now (scan, update, backup, fingerprint, pagehash, cleanup, extensions).
+        {ok:false,error:busy} while it runs, {ok:false,error:not_enabled} for a task that is switched off.
       operationId: postApiAdminTasksIdRun
       description: Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
       parameters:

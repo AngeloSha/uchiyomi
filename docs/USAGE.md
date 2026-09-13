@@ -413,6 +413,33 @@ step always comes first, and the irreversible one asks you to type the title. It
 and keeps every chapter row and every progress row, so the record of having read something survives the
 files.
 
+### Deleting chapters after they are read
+
+**Server → Settings → Delete read chapters.** Off by default, and turning it on asks you to confirm, with
+the number of chapters that would go on the first run in front of you. It is the only scheduled job in
+Uchiyomi that destroys anything.
+
+Once it is on, an hourly job deletes the file of any chapter that **everyone who started it has finished**,
+after however many days you set. Zero days is allowed and means the next run takes it. The wait is counted
+from the moment the *last* reader finished, so re-opening a chapter starts it again.
+
+What it will not touch:
+
+* a chapter **somebody is partway through** -- one unfinished reader keeps it for everybody;
+* a chapter **nobody has read**;
+* a chapter anyone has **bookmarked** (a bookmark points at a page inside the file);
+* the chapter a series draws its **cover** from;
+* anything in a library you assembled yourself. Only Uchiyomi's own downloads folder is ever pruned. Your
+  files are yours, and this job does not get an opinion about them.
+
+What survives: the chapter itself, and everyone's reading history. The chapter stays listed on the series
+page, marked *Deleted to free space*, and nothing is marked unread — so nothing is pushed to AniList and no
+count changes. It will **not** be downloaded again; the record of having had it is what stops the updater
+fetching it back the same night.
+
+**Server → Tasks → Delete read chapters** shows the last run, how much it freed, and how many chapters are
+waiting. **Run now** is there if you would rather not wait for the hour.
+
 **Merging duplicates** is on **Content → Health**, attached to the duplicate check that finds them: where it
 reports the same title sitting in your library twice, **Merge** folds one into the other. Every chapter and
 every progress row moves to the survivor. Chapters that look like duplicates are **kept**, not removed --

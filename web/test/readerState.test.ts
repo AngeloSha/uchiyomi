@@ -35,3 +35,18 @@ test('the two failures stay distinguishable from each other', () => {
   assert.notEqual(chapterOutcome({ pages: [] }), chapterOutcome(null),
     'they have different causes and the reader is told different things; collapsing them is the bug');
 });
+
+test('a chapter the server deliberately deleted is not blamed on the reader\'s library', () => {
+  // The read-chapter cleanup removes the file once everyone who started it has finished. That answers 200
+  // with an empty page list too, so without this it renders as "the file may be damaged, or its library may
+  // not be mounted" -- sending somebody to check their mounts over a perfectly healthy install, and
+  // offering a Try again that can never succeed.
+  assert.equal(chapterOutcome({ pages: [], pruned: true }), 'pruned');
+});
+
+test('pruned is decided before empty, because a pruned chapter is empty by definition', () => {
+  // Swap the two checks in chapterOutcome and this is the test that fails: every pruned chapter reports
+  // 'unreadable' and the distinction is gone again.
+  assert.notEqual(chapterOutcome({ pages: [], pruned: true }), chapterOutcome({ pages: [] }));
+  assert.equal(chapterOutcome({ pages: [{ number: 1 }], pruned: false }), 'ok');
+});

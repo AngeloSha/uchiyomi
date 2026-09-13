@@ -239,6 +239,19 @@ ALTER TABLE lib_books  ADD COLUMN IF NOT EXISTS fp_kind     text;         -- zip
 ALTER TABLE lib_books  ADD COLUMN IF NOT EXISTS fp_at       timestamptz;  -- when it was last attempted
 ALTER TABLE lib_books  ADD COLUMN IF NOT EXISTS size        bigint;
 CREATE INDEX IF NOT EXISTS lib_books_fp_idx ON lib_books (fingerprint) WHERE fingerprint IS NOT NULL;
+
+-- The chapter's file was deleted to reclaim space, by the opt-in read-chapter cleanup (lib/chapterCleanup.ts).
+--
+-- ⚠️ THE ROW IS A TOMBSTONE AND MUST STAY. Two things depend on it and both break if it is deleted instead:
+--   1. read_progress.book_id is ON DELETE RESTRICT, so erasing the row would mean erasing what people read
+--      of it -- the one loss with no undo, and one that syncs outward to AniList.
+--   2. the updater's "what do we already have" set is a plain SELECT over lib_books, so a deleted row is a
+--      missing chapter: the next sweep would download exactly what the cleanup just deleted, forever.
+-- pruned_at is therefore "we had this, it was read, we let the bytes go, and we are not fetching it again".
+-- persistScan clears it if the file ever comes back, so a manual re-copy or re-download undoes the mark.
+ALTER TABLE lib_books  ADD COLUMN IF NOT EXISTS pruned_at   timestamptz;
+CREATE INDEX IF NOT EXISTS lib_books_pruned_idx ON lib_books (pruned_at) WHERE pruned_at IS NOT NULL;
+
 -- breadcrumb for a series that gets rematched to a new folder, so a wrong match can be reversed
 ALTER TABLE lib_series ADD COLUMN IF NOT EXISTS folder_prev text;
 
@@ -396,6 +409,18 @@ ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS update_check          boole
 ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS install_ping          boolean NOT NULL DEFAULT false;
 ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS install_ping_secret   text;
 ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS install_ping_last     timestamptz;
+
+-- The opt-in read-chapter cleanup (lib/chapterCleanup.ts): delete the file of a chapter everyone who started
+-- it has finished, once it has been finished for cleanup_read_days. OFF by default and it must stay that
+-- way -- it is the only scheduled job in the product that destroys data, and an install that upgrades into
+-- it silently would lose files nobody asked it to lose.
+--
+-- Zero days is a supported value and means "at the next run", not "disabled": that is what cleanup_read is
+-- for. The two are separate columns precisely so turning it off does not have to overwrite the number.
+ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS cleanup_read          boolean NOT NULL DEFAULT false;
+ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS cleanup_read_days     int     NOT NULL DEFAULT 30;
+ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS cleanup_read_last_run timestamptz;
+ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS cleanup_read_last_result jsonb;
 
 -- What the repositories offered and what was installed, as of the last check. This is what makes "new
 -- upstream", "dropped upstream" and "installed outside Uchiyomi" answerable at all, and what lets a wiped

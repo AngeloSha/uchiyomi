@@ -23,7 +23,7 @@ import { IcChevronLeft, IcChevronRight, IcSliders, IcRefresh, IcGrid } from '@/c
 import { t as tr } from '@/lib/i18n';
 
 interface PageDim { number: number; width: number | null; height: number | null; junk?: boolean }
-interface Chapter { id: string; seriesId: string; seriesTitle: string; title: string; pages: PageDim[]; offline: boolean; readingDirection?: string | null }
+interface Chapter { id: string; seriesId: string; seriesTitle: string; title: string; pages: PageDim[]; offline: boolean; readingDirection?: string | null; pruned?: boolean }
 interface ChapterRef { id: string; label: string }
 interface FlatItem { ci: number; number: number; width: number | null; height: number | null; key: string; firstOfChapter: boolean; junk?: boolean }
 
@@ -51,6 +51,9 @@ async function loadChapter(bookId: string): Promise<Chapter | null> {
       title: b.metadata?.title || b.name,
       pages: pInfo.map((p) => ({ number: p.number, width: p.width ?? null, height: p.height ?? null, junk: p.junk })),
       offline: false,
+      // The server deleted this chapter's file after everyone finished it. Carried so the empty page list
+      // below can be explained rather than blamed on the reader's library mount.
+      pruned: b.pruned === true,
     };
   } catch {
     return null;
@@ -84,7 +87,7 @@ function ReaderInner() {
    * cleared the loading overlay and left a full-screen black rectangle. Mid-series both took the SAME branch
    * as a genuine end of series, so a transient error told the reader "You finished".
    */
-  const [failed, setFailed] = useState<null | 'unreadable' | 'unavailable'>(null);
+  const [failed, setFailed] = useState<null | 'unreadable' | 'unavailable' | 'pruned'>(null);
   const [reloadKey, setReloadKey] = useState(0);
 
   const [prefs, setPrefs] = useState<ReaderPrefs>(loadPrefs());
@@ -750,19 +753,23 @@ function ReaderInner() {
     <motion.div initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }}
       className="mx-auto w-full max-w-3xl px-6 py-16 text-center">
       <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-fog-500">
-        {failed === 'unreadable' ? tr('Chapter unreadable') : tr('Chapter unavailable')}
+        {failed === 'pruned' ? tr('Chapter deleted') : failed === 'unreadable' ? tr('Chapter unreadable') : tr('Chapter unavailable')}
       </p>
       <h2 className="mt-1.5 font-display text-2xl font-bold text-white">
         {activeChapter?.seriesTitle || tr('This chapter')}
       </h2>
       <p className="mx-auto mt-3 max-w-md text-sm text-fog-400">
-        {failed === 'unreadable'
-          ? tr('This chapter has no readable pages. The file may be damaged, or its library may not be mounted right now.')
-          : tr('This chapter could not be loaded. It may have been removed, or the connection dropped.')}
+        {failed === 'pruned'
+          ? tr('This server deletes chapters once everyone who started them has finished, to save space. This one is gone; the rest of the series is not affected.')
+          : failed === 'unreadable'
+            ? tr('This chapter has no readable pages. The file may be damaged, or its library may not be mounted right now.')
+            : tr('This chapter could not be loaded. It may have been removed, or the connection dropped.')}
       </p>
       <div className="mt-6 flex justify-center gap-2">
-        <button onClick={retry} className="btn-accent text-sm">{tr('Try again')}</button>
-        <button onClick={() => (seriesHref ? router.push(seriesHref) : back())} className="btn-ghost text-sm">{tr('Back to series')}</button>
+        {/* No Try again for a pruned chapter: there is nothing to retry, and a button that cannot work is
+            worse than no button. */}
+        {failed !== 'pruned' && <button onClick={retry} className="btn-accent text-sm">{tr('Try again')}</button>}
+        <button onClick={() => (seriesHref ? router.push(seriesHref) : back())} className={`text-sm ${failed === 'pruned' ? 'btn-accent' : 'btn-ghost'}`}>{tr('Back to series')}</button>
       </div>
     </motion.div>
   );
