@@ -6,12 +6,13 @@
 openapi: 3.1.0
 info:
   title: Uchiyomi API
-  version: 0.28.1
+  version: 0.29.0
   description: "Everything the web app does, it does over this API. Session JWTs are for the browser; scripts
     use a personal API token (Profile -> Security -> API tokens), sent as `Authorization: Bearer uy_...`.
-    Scopes: read (every token), write (anything that changes data), admin (the /api/admin surface, which also
-    needs an admin account). /img/* takes the yomi_img cookie or the OPDS token over HTTP Basic; /opds/* takes
-    the OPDS token over HTTP Basic; neither accepts API tokens. List endpoints answer { content: [...] };
+    Scopes: read (every token; GET plus the library search POST, which is a query), write (anything that changes data), admin (the /api/admin surface, which also
+    needs an admin account). /img/* takes the yomi_img cookie, an API token as a Bearer, or the OPDS token
+    over HTTP Basic -- so a third-party client needs ONE credential for the JSON and the pictures alike;
+    /opds/* takes the OPDS token over HTTP Basic only. List endpoints answer { content: [...] };
     errors answer a non-2xx status with { error, message }. The prose guide with worked examples is
     docs/api.md."
 servers:
@@ -571,6 +572,8 @@ paths:
         - library
       summary: "Search and page the library: the grid, the search page, browse-by-genre and the command palette all
         use this."
+      description: "A query, not a mutation: it is a POST only because the filter tree travels in a body, so a
+        read-scoped API token may call it (the one non-GET a read token can use)."
       operationId: postApiSeriesSearch
       parameters:
         - name: adult
@@ -592,6 +595,11 @@ paths:
                 size:
                   type: integer
                 sort:
+                  description: >-
+                    `field,dir`. Fields: `updated` (last chapter added), `added` (series created), `title`,
+                    `author`, `unread` (your unread count), `favorites` (your starred series first, then by
+                    unread -- what "popular" means for a personal library), `random`. The per-user ones need
+                    a signed-in caller and fall back to title order without one.
                   type: string
                 condition:
                   type: object
@@ -2333,6 +2341,7 @@ paths:
             type: integer
       security:
         - imgCookie: []
+        - bearer: []
         - opdsBasic: []
       responses:
         "200":
@@ -2355,6 +2364,7 @@ paths:
             type: string
       security:
         - imgCookie: []
+        - bearer: []
         - opdsBasic: []
       responses:
         "200":
@@ -2387,6 +2397,7 @@ paths:
             type: integer
       security:
         - imgCookie: []
+        - bearer: []
         - opdsBasic: []
       responses:
         "200":
@@ -2419,6 +2430,7 @@ paths:
             type: string
       security:
         - imgCookie: []
+        - bearer: []
         - opdsBasic: []
       responses:
         "200":
@@ -2446,6 +2458,7 @@ paths:
             type: integer
       security:
         - imgCookie: []
+        - bearer: []
         - opdsBasic: []
       responses:
         "200":
@@ -2468,6 +2481,7 @@ paths:
             type: string
       security:
         - imgCookie: []
+        - bearer: []
         - opdsBasic: []
       responses:
         "200":
@@ -2500,6 +2514,7 @@ paths:
             type: integer
       security:
         - imgCookie: []
+        - bearer: []
         - opdsBasic: []
       responses:
         "200":
@@ -2522,6 +2537,7 @@ paths:
             type: string
       security:
         - imgCookie: []
+        - bearer: []
         - opdsBasic: []
       responses:
         "200":
@@ -2544,6 +2560,7 @@ paths:
             type: string
       security:
         - imgCookie: []
+        - bearer: []
         - opdsBasic: []
       responses:
         "200":
@@ -2576,6 +2593,7 @@ paths:
             type: integer
       security:
         - imgCookie: []
+        - bearer: []
         - opdsBasic: []
       responses:
         "200":

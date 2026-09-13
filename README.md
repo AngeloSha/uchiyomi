@@ -47,6 +47,8 @@ enable, and you are responsible for using it in line with those sites' terms and
 - **Reading Studio & Wrapped** — a year heat-map, chapters by month and weekday, your top series and genres.
 - **Push notifications** when a followed series gets a new chapter.
 - **OPDS** — read from Panels, Chunky or KOReader, page by page over OPDS-PSE.
+- **A Mihon / Tachimanga extension** — read your library from Mihon, any Tachiyomi fork, Tachimanga (iOS)
+  or Suwayomi with one API token: [uchiyomi-extension](https://github.com/AngeloSha/uchiyomi-extension).
 - **Progress sync** to AniList, MyAnimeList and Kitsu.
 - **Nothing phones home.** An update check reads GitHub's public releases page and sends nothing about your
   server; it can be turned off. An anonymous install count exists and is **off unless you turn it on**, and

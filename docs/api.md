@@ -26,12 +26,12 @@ curl -H "Authorization: Bearer uy_your_token_here" https://your-server/api/home
 
 | Scope | What it allows |
 | --- | --- |
-| `read` | `GET` requests only. Every token has this. |
+| `read` | `GET` requests, plus `POST /api/series/search` — a query whose input happens to be a body. Every token has this. |
 | `write` | Anything that changes data: progress, favorites, adding series. |
 | `admin` | The `/api/admin/*` endpoints. |
 
 Scopes only ever *restrict*. An `admin`-scoped token belonging to a non-admin account still cannot reach the
-admin API, and a token without `write` gets `403` on any non-`GET` request:
+admin API, and a token without `write` gets `403` on any non-`GET` request other than the library search:
 
 ```json
 { "error": "forbidden", "message": "This token is read-only." }
@@ -47,8 +47,10 @@ same panel as your active sessions.
 
 `/img/*` is authorised by the `yomi_img` cookie rather than a header, because `<img>` tags can't send one — it
 also accepts an OPDS token over HTTP Basic, so an OPDS reader can load covers and pages with the same
-credentials it uses for the feed. `/opds/*` uses
-HTTP Basic with your OPDS token as the password (**Profile → External readers**). Neither accepts API tokens.
+credentials it uses for the feed, **and, since v0.29.0, an API token as a Bearer**, so a third-party client
+such as the Mihon extension needs one credential for the JSON and the pictures alike. A `read`-scoped token
+is enough for images. `/opds/*` uses HTTP Basic with your OPDS token as the password (**Profile → External
+readers**) and does not accept API tokens.
 
 ## Conventions
 

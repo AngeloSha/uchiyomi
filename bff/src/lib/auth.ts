@@ -305,6 +305,13 @@ export const API_SCOPES = ['read', 'write', 'admin'] as const;
 export type ApiScope = (typeof API_SCOPES)[number];
 
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
+/**
+ * Routes that are a POST only because their input is a JSON body, not because they change anything. A
+ * read-only token may use them: the whole point of the `read` scope is "this credential can look but not
+ * touch", and a search that takes a filter tree is looking. Keyed on the route *pattern* (not the request
+ * URL) so a query string cannot dress a mutation up as one of these.
+ */
+const READ_SHAPED_POSTS = new Set(['/api/series/search']);
 
 export interface ApiTokenRow {
   id: string;
@@ -364,7 +371,7 @@ export async function revokeApiToken(userId: string, id: string): Promise<boolea
 
 interface ResolvedToken { id: string; userId: string; role: string; scopes: string[] }
 
-async function resolveApiToken(raw: string): Promise<ResolvedToken | null> {
+export async function resolveApiToken(raw: string): Promise<ResolvedToken | null> {
   const row = await one<{ id: string; user_id: string; scopes: string[]; expires_at: string | null; role: string }>(
     `SELECT t.id, t.user_id, t.scopes, t.expires_at, u.role
        FROM api_tokens t JOIN users u ON u.id = t.user_id
@@ -388,7 +395,9 @@ export async function authenticate(request: FastifyRequest, reply: FastifyReply)
     if (raw.startsWith(API_TOKEN_PREFIX)) {
       const tok = await resolveApiToken(raw);
       if (!tok) return reply.code(401).send({ error: 'unauthorized' });
-      if (!tok.scopes.includes('write') && !SAFE_METHODS.has(request.method)) {
+      const readShaped = SAFE_METHODS.has(request.method)
+        || (request.method === 'POST' && READ_SHAPED_POSTS.has(request.routeOptions?.url ?? ''));
+      if (!tok.scopes.includes('write') && !readShaped) {
         return reply.code(403).send({ error: 'forbidden', message: 'This token is read-only.' });
       }
       // shaped like a verified JWT payload so userIdOf/roleOf work unchanged downstream

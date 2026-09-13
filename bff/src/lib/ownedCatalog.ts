@@ -218,7 +218,12 @@ function condSql(cond: any, params: any[], hasUser = false): string {
   throw new UnsupportedFilter(Object.keys(cond).filter((k) => k !== 'operator')[0] || 'unknown');
 }
 
-function sortSql(sort?: string): string {
+/**
+ * @param perUser whether the `mine`/`fav` joins are present in the FROM clause. The per-user sorts name
+ *   those aliases, and naming an alias that was not joined is a SQL error, not an empty column -- so
+ *   without a user they degrade to title order rather than to a 500.
+ */
+function sortSql(sort?: string, perUser = false): string {
   if (!sort) return 'title ASC';
   const [field, dir0] = String(sort).split(',');
   const dir = (dir0 || 'asc').toLowerCase() === 'desc' ? 'DESC' : 'ASC';
@@ -229,7 +234,14 @@ function sortSql(sort?: string): string {
   if (/author/i.test(field)) return `author ${dir} NULLS LAST`;
   // real unread count, which needs the `mine` CTE; the library page used to sort by total chapters and
   // label it "Most chapters" because this was not expressible
-  if (/unread/i.test(field)) return `(books_count - COALESCE(m.done, 0)) ${dir}`;
+  if (/unread/i.test(field)) return perUser ? `(books_count - COALESCE(m.done, 0)) ${dir}` : `title ${dir}`;
+  // "Popular", for a personal library. Mihon requires every source to have a popular listing, and for a
+  // shelf of one's own reading the honest meaning is: what you starred, then what you are furthest
+  // behind on. Needs both per-user CTEs (`mine` for unread, `fav` for the star); `desc` is the only
+  // sensible direction, so `asc` is simply the reverse rather than a different rule.
+  if (/favou?rites?/i.test(field)) {
+    return perUser ? `(f.series_id IS NOT NULL) ${dir}, (books_count - COALESCE(m.done, 0)) ${dir}, title ASC` : 'title ASC';
+  }
   return `title ${dir}`;
 }
 
@@ -247,6 +259,8 @@ const MINE_CTE = `WITH mine AS (
          count(*) FILTER (WHERE completed)::int     AS done,
          count(*) FILTER (WHERE NOT completed)::int AS started
     FROM read_progress WHERE user_id = $1 GROUP BY series_id
+), fav AS (
+  SELECT series_id FROM favorites WHERE user_id = $1
 )`;
 
 /**
@@ -414,12 +428,15 @@ export const owned = {
    * follows. Nothing here counts placeholders by hand.
    */
   searchSeries: async (ctx: ViewCtx, body: any, pg = 0, size = 40, sort?: string) => {
-    const wantsUser = !!ctx.userId && (JSON.stringify(body?.condition ?? {}).includes('readStatus') || /unread/i.test(sort || ''));
+    const wantsUser = !!ctx.userId
+      && (JSON.stringify(body?.condition ?? {}).includes('readStatus') || /unread|favou?rite/i.test(sort || ''));
     const p = new Params();
     const cte = wantsUser ? MINE_CTE : '';
     if (wantsUser) p.add(ctx.userId); // MINE_CTE reads $1
     const src = browseSrc(ctx, p);
-    const from = wantsUser ? `${src} LEFT JOIN mine m ON m.series_id = sv.id` : src;
+    const from = wantsUser
+      ? `${src} LEFT JOIN mine m ON m.series_id = sv.id LEFT JOIN fav f ON f.series_id = sv.id`
+      : src;
 
     let where = body?.condition ? condSql(body.condition, p.values as any[], wantsUser) : 'TRUE';
     if (body?.fullTextSearch) {
@@ -427,7 +444,7 @@ export const owned = {
     }
     const t = await total(ctx, where, clone(p), cte, from);
     const rows = await q(
-      `${cte} SELECT ${SERIES_COLS} FROM ${from} WHERE ${where} ORDER BY ${sortSql(sort)} LIMIT ${p.add(size)} OFFSET ${p.add(pg * size)}`,
+      `${cte} SELECT ${SERIES_COLS} FROM ${from} WHERE ${where} ORDER BY ${sortSql(sort, wantsUser)} LIMIT ${p.add(size)} OFFSET ${p.add(pg * size)}`,
       p.values as any[],
     );
     return page(rows.map(seriesDto), t, pg, size);

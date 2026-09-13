@@ -281,6 +281,19 @@ immediately.
 Adult extensions are hidden until you tap **18+**. Full detail, including how it works and how to turn it off,
 is in [docs/extensions.md](extensions.md).
 
+### The other direction: Uchiyomi *inside* Mihon or Tachimanga
+
+If you would rather keep reading in Mihon (Android), a Tachiyomi fork, Tachimanga (iOS) or Suwayomi, there is
+an extension that adds your Uchiyomi library as a source there. Add the store URL from
+[AngeloSha/uchiyomi-extension](https://github.com/AngeloSha/uchiyomi-extension) as an extension repo,
+install **Uchiyomi**, and give it your server address and a **read**-scoped API token (Profile → Security →
+API tokens). Favourites come first under *Popular*, recently updated under *Latest*, and search takes the
+same genre / status / read-state / library filters as the web app.
+
+One honest limit: **reading progress does not flow back to Uchiyomi** from there. The Mihon family only
+lets a *tracker* built into the app report reads, so an extension cannot; what you read in Mihon stays
+marked in Mihon. Needs Uchiyomi v0.29.0 or newer.
+
 ![The extension browser](shots/admin-extensions.webp)
 
 ## 8. The admin panel

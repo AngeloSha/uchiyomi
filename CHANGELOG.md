@@ -1,5 +1,37 @@
 # Changelog
 
+## v0.29.0 — 2026-09-13
+
+### One token for a third-party client
+
+An API token (Profile → Security) opened `/api/*` and nothing else: pictures were served only to the
+browser's cookie or to an OPDS reader's Basic credential. So a client that had just listed a chapter's pages
+could not fetch a single one of them without a second secret pasted in. `/img/*` now accepts an API token as
+a Bearer too, and a `read`-scoped token is enough — images are reads. Library grants apply exactly as they
+do for a session: a token for a member without access to a library gets the same 404 that member would.
+
+The same token could not search the library either: `POST /api/series/search` is a POST only because its
+filter tree travels in a body, but the `read` scope gated every non-GET as a write. That one route is now
+exempt — keyed on the route, not the URL, so a query string cannot dress a real mutation up as a search.
+Everything else a read token could not do, it still cannot.
+
+This is the groundwork for the Uchiyomi extension for Mihon, Tachimanga and Suwayomi
+([#33](https://github.com/AngeloSha/uchiyomi/issues/33)), which holds one token and needs it to work for
+everything it fetches. The extension itself lives at
+[AngeloSha/uchiyomi-extension](https://github.com/AngeloSha/uchiyomi-extension); the README and
+`docs/USAGE.md` point at it.
+
+### "Popular", for a library that belongs to one person
+
+Mihon requires every source to answer a popular listing, and for a personal shelf the word means nothing —
+so `POST /api/series/search` gained `sort: "favorites,desc"`: your starred series first, then whatever you
+are furthest behind on. It is per user, and there is a test that fails if one member's stars ever sort
+another member's list.
+
+Found on the way: the existing `unread` sort named a per-user join that only exists for signed-in callers,
+so an anonymous request with that sort was a SQL error rather than a listing. Nothing could reach it (the
+library requires a session), but it is closed now: without a user, both sorts fall back to title order.
+
 ## v0.28.1 — 2026-09-13
 
 ### A series folder with a cover in it is still a series

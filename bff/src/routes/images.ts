@@ -1,6 +1,6 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import sharp from 'sharp';
-import { IMG_COOKIE, resolveOpdsBasic } from '../lib/auth';
+import { IMG_COOKIE, API_TOKEN_PREFIX, resolveApiToken, resolveOpdsBasic } from '../lib/auth';
 import { komga, komgaImage } from '../lib/komga';
 import { serveImage, getOrFetch } from '../lib/imageCache';
 import { dominantHex } from '../lib/color';
@@ -362,6 +362,24 @@ export async function authorizeImageRequest(
       (req as any).viewCtx = await viewCtxFor(claims.sub ?? null);
       return;
     } catch { /* fall through to OPDS auth */ }
+  }
+  // A third-party client -- the Mihon extension -- holds ONE credential, an API token, and needs it to
+  // work for the page bytes as well as the JSON that named them. Until v0.29.0 it did not: /img/* took the
+  // cookie or the OPDS token and nothing else, so an extension would have needed two secrets pasted in.
+  //
+  // ⚠️ Resolved DIRECTLY, not through authenticate(). Images are GET, so a read-only token is exactly
+  // enough, which is the point: the README tells people to mint a token with the read scope alone. The
+  // grants still apply through viewCtxFor, so a token for a member without access to a library gets the
+  // same 404 that member's session would. Reintroduce by removing this branch: imageBearer.int.test.ts
+  // fails on its very first assertion, a read token fetching a page.
+  const auth = req.headers.authorization;
+  if (auth && /^bearer /i.test(auth)) {
+    const raw = auth.slice(7).trim();
+    if (raw.startsWith(API_TOKEN_PREFIX)) {
+      const tok = await resolveApiToken(raw);
+      if (tok) { (req as any).viewCtx = await viewCtxFor(tok.userId, tok.role); return; }
+      return reply.code(401).send({ error: 'unauthorized' });
+    }
   }
   // OPDS readers load covers/pages with the same HTTP Basic token as the feed
   const who = await resolveOpdsBasic(req.headers.authorization);

@@ -41,6 +41,10 @@ async function setup() {
   // three routes covering the axes that matter: read, write, and admin-only
   app.get('/api/who', { preHandler: auth.authenticate }, async (req) => ({ sub: auth.userIdOf(req), role: auth.roleOf(req) }));
   app.post('/api/write', { preHandler: auth.authenticate }, async () => ({ ok: true }));
+  // the one POST a read token may use: a query whose input is a body. Registered under the real pattern
+  // because the exemption keys on the route, and under a query-string alias to prove the URL can't fake it.
+  app.post('/api/series/search', { preHandler: auth.authenticate }, async () => ({ content: [] }));
+  app.post('/api/series/searchx', { preHandler: auth.authenticate }, async () => ({ ok: true }));
   app.get('/api/admin/thing', { preHandler: [auth.authenticate, auth.requireAdmin] }, async () => ({ ok: true }));
   await app.ready();
 
@@ -64,6 +68,21 @@ test('personal API tokens', { skip: DSN ? false : 'set TEST_DATABASE_URL to run'
     const r = await app.inject({ method: 'POST', url: '/api/write', headers: bearer(token) });
     assert.equal(r.statusCode, 403);
     assert.match(r.json().message, /read-only/i);
+  });
+
+  await t.test('a read token may POST the library search, and only that', async () => {
+    // Reintroduce by removing `/api/series/search` from READ_SHAPED_POSTS in auth.ts: the first request 403s
+    // with "read-only", and the Mihon extension — which the README tells to use a read token — cannot list a
+    // single series.
+    const { token } = await auth.issueApiToken(userId, 'reader3', ['read'], null);
+    const ok = await app.inject({ method: 'POST', url: '/api/series/search', headers: bearer(token), payload: {} });
+    assert.equal(ok.statusCode, 200);
+    // a different route that merely *starts* with the exempt path stays gated
+    const no = await app.inject({ method: 'POST', url: '/api/series/searchx', headers: bearer(token) });
+    assert.equal(no.statusCode, 403);
+    // and a query string on the write route does not dress it up as the search
+    const qs = await app.inject({ method: 'POST', url: '/api/write?/api/series/search', headers: bearer(token) });
+    assert.equal(qs.statusCode, 403);
   });
 
   await t.test('a write token can mutate', async () => {
