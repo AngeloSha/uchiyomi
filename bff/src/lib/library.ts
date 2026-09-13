@@ -76,6 +76,41 @@ function chapterKind(path: string): ChapterKind {
   return 'dir';
 }
 
+const ARCHIVE = /\.(cbz|cbr|zip|rar|pdf|epub)$/i;
+
+/**
+ * Is this subfolder a chapter made of loose images -- as opposed to a SERIES that happens to hold a cover?
+ *
+ * ⚠️ "CONTAINS AN IMAGE" IS NOT ENOUGH, AND THAT ONE TEST EMPTIED WHOLE LIBRARIES. Tranga, Komga, Kavita and
+ * Mihon's local source all write a `cover.jpg` (or a thumbnail named after the series) INTO each series
+ * folder, next to its chapters. Judged by "has an image", every one of those series folders reads as a
+ * chapter of its parent -- so the library root looked like a series with 38 chapters, `findSeriesDirs`
+ * declined to descend into it, and a scan of 5,536 chapters reported `{series: 0}` in four seconds with no
+ * error anywhere. Reported with the diagnosis in #34 by @ThomasRunting.
+ *
+ * A folder that holds archives, or holds image-bearing subfolders, is a series: its chapters are INSIDE it.
+ * Only a folder whose images are the whole of its contents is itself a chapter. The one layout this changes
+ * is a chapter folder with a nested image subfolder (`Ch 1/extras/`), which now reads as a tiny series with
+ * one chapter instead of a chapter that silently ignores its extras -- a rarer shape, and the new reading
+ * at least shows everything.
+ * Reintroduce by going back to `.some((n) => IMG.test(n))`: the Tranga fixture in scanLayouts.int.test.ts
+ * scans to zero series again.
+ */
+async function isImageChapterDir(abs: string): Promise<boolean> {
+  const entries = await readdir(abs, { withFileTypes: true }).catch(() => []);
+  let images = 0;
+  for (const e of entries) {
+    if (e.isFile()) {
+      if (ARCHIVE.test(e.name)) return false;
+      if (IMG.test(e.name)) images++;
+    } else if (e.isDirectory() && !SKIP_DIR.test(e.name)) {
+      const inner = await readdir(join(abs, e.name)).catch(() => []);
+      if (inner.some((n) => IMG.test(n) || ARCHIVE.test(n))) return false;
+    }
+  }
+  return images > 0;
+}
+
 /** Chapter entries in a series folder: cbz/cbr/zip/rar/pdf files, image EPUBs, + subfolders of images. */
 export async function listChapters(folderAbs: string): Promise<string[]> {
   const out: string[] = [];
@@ -86,7 +121,7 @@ export async function listChapters(folderAbs: string): Promise<string[]> {
     else if (e.isFile() && /\.epub$/i.test(e.name)) {
       if ((await epubPages(join(folderAbs, e.name))).length) out.push(e.name);
     }
-    else if (e.isDirectory() && (await readdir(join(folderAbs, e.name)).catch(() => [])).some((n) => IMG.test(n))) out.push(e.name);
+    else if (e.isDirectory() && !SKIP_DIR.test(e.name) && (await isImageChapterDir(join(folderAbs, e.name)))) out.push(e.name);
   }
   return out.sort(naturalCmp);
 }
@@ -313,10 +348,16 @@ async function findSeriesDirs(root: string): Promise<FoundSeries[]> {
     seenInode.add(key);
 
     const chapters = await listChapters(abs);
-    if (chapters.length) {
-      // Chapters win: this directory is a series, and we do not descend. Its chapter subfolders are
-      // chapters, not series.
-      if (rel) out.push({ folderRel: rel, folderAbs: abs, source: rel.split('/').slice(-2, -1)[0] || 'Library', chapters });
+    // Chapters win: this directory is a series, and we do not descend. Its chapter subfolders are
+    // chapters, not series.
+    //
+    // ⚠️ `&& rel`: the ROOT is never a series, so the root having chapters must not END the walk. It used
+    // to -- `if (rel) push; return;` pushed nothing at the root and returned without descending, so any
+    // root that looked chapter-ish scanned to zero. isImageChapterDir now stops a series folder from looking
+    // chapter-ish in the first place; this is the second lock on the same door, and it is the one-line fix
+    // @ThomasRunting proposed in #34.
+    if (chapters.length && rel) {
+      out.push({ folderRel: rel, folderAbs: abs, source: rel.split('/').slice(-2, -1)[0] || 'Library', chapters });
       return;
     }
 

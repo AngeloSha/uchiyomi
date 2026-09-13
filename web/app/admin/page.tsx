@@ -918,9 +918,16 @@ function Tasks() {
   const { data } = useQuery({ queryKey: ['admin-tasks'], queryFn: () => api<{ content: any[] }>('/api/admin/tasks'), refetchInterval: 5000 });
   const run = async (id: string) => {
     try {
-      const r = await api<{ ok?: boolean; error?: string }>(`/api/admin/tasks/${id}/run`, { method: 'POST' });
+      const r = await api<{ ok?: boolean; error?: string; series?: number; books?: number }>(`/api/admin/tasks/${id}/run`, { method: 'POST' });
       // A refusal is a 200 with ok:false (the task is already running), and used to toast "Started" too.
       if (r?.ok === false) toast(r.error === 'busy' ? 'Already running' : 'Failed', 'error');
+      // ⚠️ The scan is the one task that runs to completion before answering, and it answers with its
+      // counts. Toasting "Started" for it hid the only fact that mattered: in #34 a library scanned to zero
+      // series and the reporter's summary was "the run now buttons don't work" -- because from the outside,
+      // "Started" followed by nothing changing is indistinguishable from a button that does nothing.
+      else if (typeof r?.series === 'number') {
+        toast(r.series ? `Scan done: ${r.series} series, ${r.books ?? 0} chapters` : 'Scan done: nothing found — check the folder layout', r.series ? 'success' : 'error');
+      }
       else toast('Started', 'success');
       qc.invalidateQueries({ queryKey: ['admin-tasks'] });
     } catch { toast('Failed', 'error'); }

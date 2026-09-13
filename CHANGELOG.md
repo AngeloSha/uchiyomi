@@ -1,5 +1,40 @@
 # Changelog
 
+## v0.28.1 — 2026-09-13
+
+### A series folder with a cover in it is still a series
+
+Reported and diagnosed by [@ThomasRunting](https://github.com/ThomasRunting) in
+[#34](https://github.com/AngeloSha/uchiyomi/issues/34): a Tranga library — top-level series folders, each
+holding its `.cbz` chapters and a thumbnail — scanned to **zero series** in four seconds, with no error
+anywhere. They read the scanner and found why: any subfolder containing an image was counted as a chapter,
+so every series folder read as a chapter *of the root*; the root therefore "had chapters", and a directory
+with chapters is a series that the scanner does not descend into. At the root that pushed nothing and
+walked nothing.
+
+Their one-line fix is in. It is not the whole fix, though, because the same test hid three more layouts:
+Mihon's local source (`cover.jpg` beside chapter folders), Komga and Kavita (`cover.*` beside archives), and
+any of those inside a wrapper folder — where the failure was **worse than zero**, because the wrapper became
+a series whose "chapters" were the real series. A folder is now a chapter only if its images are the whole
+of its contents; anything holding archives or image-bearing subfolders is a series. Seven layout fixtures
+cover it, and each part of the fix has a test that only it holds.
+
+The "run now" buttons in Tasks were not broken — the scan ran, found nothing, and the toast said *Started*,
+which from the outside is indistinguishable from a button that does nothing. It now says what the scan
+found, and says "nothing found — check the folder layout" when that is the answer.
+
+### The cover proxy's engine exemption no longer follows redirects
+
+The cover proxy trusts one origin — the configured extension engine — and skips the SSRF guard for it. Its
+own comment said *"redirects are not followed here"*, and for two releases that was a sentence rather than a
+fact: the fetch used the default, which follows. A redirect from the engine to a private address would have
+been followed with no guard looking at the hop. It now refuses redirects, proven against a real redirecting
+server rather than a mock. Found by re-reading the line CodeQL flagged — the tool could not see the origin
+check, but it did make someone look.
+
+Two smaller CodeQL findings fixed on the way: a test that asserted a hostname by substring (the exact
+weakness it was asserting against), and a no-op `.replace('/', '/')` in the browser suite.
+
 ## v0.28.0 — 2026-09-10
 
 ### The server can tell you a new version exists

@@ -98,7 +98,7 @@ export class UnfetchableCoverUrl extends Error {
 
 /** Fetch a remote cover image as raw bytes. Sends browser-ish headers (AniList/MangaDex CDNs reject bare
  *  requests) and, for Cloudflare-protected source hosts (Aqua/ManhuaPlus), attaches FlareSolverr cookies. */
-async function fetchCoverImage(u: string, source?: string): Promise<Buffer> {
+export async function fetchCoverImage(u: string, source?: string): Promise<Buffer> {
   // ⚠️ THE EXTENSION ENGINE IS NOT THE PUBLIC INTERNET, AND ITS COVERS ARE NOT AN SSRF TARGET.
   //
   // Suwayomi proxies every cover through itself, so an extension source's `coverUrl` is an absolute URL on
@@ -114,10 +114,18 @@ async function fetchCoverImage(u: string, source?: string): Promise<Buffer> {
   // operator-configured, is where we already send credentials, and is the same trust the icon route assumes.
   // Redirects are not followed here: if the engine ever answered a redirect, it would leave this origin and
   // deserve the full guard, so a non-2xx simply fails.
+  //
+  // ⚠️ `redirect: 'error'` IS WHAT MAKES THAT SENTENCE TRUE. It was written, and believed, while the fetch
+  // below used the default -- which FOLLOWS redirects. So the one origin this exemption trusts could have
+  // handed back a 302 to anywhere, private addresses included, and the guard would never have looked at
+  // the hop. CodeQL flagged the line (js/request-forgery) for the caller-supplied url; it cannot see
+  // `isEngineOrigin`, but it did prompt the re-read that found the comment and the code disagreeing.
   // Reintroduce by allowing any private address instead of this one origin: the guard is gone and
-  // `coverProxy.int.test.ts` fails on yomi-db, the metadata service and an unrelated private host.
+  // `coverProxy.int.test.ts` fails on yomi-db, the metadata service and an unrelated private host. Or by
+  // dropping `redirect: 'error'`: the same file's redirect case is followed instead of refused.
   if (isEngineOrigin(u)) {
-    const r = await fetch(u, { headers: suwayomiImageHeaders(), signal: AbortSignal.timeout(20000) });
+    const r = await fetch(u, { headers: suwayomiImageHeaders(), redirect: 'error', signal: AbortSignal.timeout(20000) })
+      .catch(() => { throw Object.assign(new Error('cover'), { statusCode: 502 }); });
     if (!r.ok) throw Object.assign(new Error('cover'), { statusCode: 502 });
     return Buffer.from(await r.arrayBuffer());
   }

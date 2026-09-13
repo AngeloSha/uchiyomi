@@ -520,7 +520,10 @@ try {
       const href = await page.evaluate(() =>
         (document.querySelector('a[href*="/reader"]') || {}).getAttribute?.('href') || null);
       if (href) {
-        await page.goto(`${BASE}${href.replace(/^\//, '/')}`, { waitUntil: 'domcontentloaded', timeout: 60000 });
+        // Resolved against BASE rather than concatenated: `getAttribute('href')` can be root-relative or
+        // absolute, and the old `href.replace(/^\//, '/')` replaced a slash with a slash (CodeQL
+        // js/identity-replacement) -- it handled neither case, it just looked as if it did.
+        await page.goto(new URL(href, BASE).href, { waitUntil: 'domcontentloaded', timeout: 60000 });
         await sleep(9000);
         await revealChrome();
         await shot('27-coldboot-reader');

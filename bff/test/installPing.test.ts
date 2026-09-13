@@ -110,6 +110,12 @@ test('the default collector is not the update-check host', () => {
   // ⚠️ THE SEPARATION, ASSERTED. If the update check and the count shared a destination, that server could
   // count installs from its access log with nobody consenting, and the off switch would be theatre.
   // Reintroduce by pointing PING_URL at api.github.com, or the update check at uchiyomi.com.
-  assert.ok(!DEFAULT_PING_URL.includes('api.github.com'), 'the count must not be sent to the update-check host');
-  assert.match(DEFAULT_PING_URL, /^https:\/\//, 'the count must go over https');
+  // Compared as a parsed hostname, not a substring: `.includes('api.github.com')` is satisfied by
+  // `https://api.github.com.evil.example/` and misses `https://API.GITHUB.COM/`, which is the precise shape
+  // CodeQL's incomplete-url-substring rule exists for -- and an assertion about a security property should
+  // not itself have the weakness it is asserting against.
+  const dest = new URL(DEFAULT_PING_URL);
+  assert.equal(dest.protocol, 'https:', 'the count must go over https');
+  assert.notEqual(dest.hostname, 'api.github.com', 'the count must not be sent to the update-check host');
+  assert.ok(!dest.hostname.endsWith('.github.com') && dest.hostname !== 'github.com', 'nor to any GitHub host');
 });

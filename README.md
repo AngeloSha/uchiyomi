@@ -140,6 +140,10 @@ named here instead:
 - **Unraid install instructions** — [@hawwwwwk](https://github.com/hawwwwwk), who spotted that Unraid had
   removed the *Template repositories* field the docs told people to use, and opened pull requests against
   both this repo and [`unraid-templates`](https://github.com/AngeloSha/unraid-templates).
+- **The scanner finding zero series in a Tranga library** — [@ThomasRunting](https://github.com/ThomasRunting),
+  who did not stop at the bug report: they read the scanner, found the early return that made a cover image
+  turn a whole series folder into a "chapter of the root", proved it against their own 38-series library,
+  and proposed the one-line fix ([#34](https://github.com/AngeloSha/uchiyomi/issues/34)).
 
 ## License
 

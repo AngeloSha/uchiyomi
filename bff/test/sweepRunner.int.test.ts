@@ -129,6 +129,12 @@ test('a sweep started from the admin panel is the sweep', { skip }, async (t) =>
     });
 
     await t.test('a second start is refused while it runs, as the fingerprint task already was', async () => {
+      // ⚠️ Wait for the first sweep to REACH the source before counting. `start()` returns as soon as the
+      // sweep is marked running; the source is asked only after a database round-trip, and on a loaded host
+      // that took longer than the next line, so this read 0 and reported the refusal as "not started". The
+      // gate holds the first listing open, so once it is at 1 it stays at 1 unless a second sweep gets
+      // through -- which is exactly what the assertion is about.
+      await until(() => listed() >= 1, 'the first sweep to reach the source');
       assert.deepEqual(await start(), { ok: false, error: 'busy' });
       assert.equal(listed(), 1, 'refused means not started: the source has been asked exactly once');
     });
