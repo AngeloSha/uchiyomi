@@ -5,7 +5,7 @@ import { q, one, tx } from '../lib/db';
 import { content as komga } from '../lib/backend';
 import { cacheBytes } from '../lib/imageCache';
 import { runtime } from '../lib/runtime';
-import { persistScan, libraryIdFor, LIBRARY_ROOT, DL_ROOT } from '../lib/library';
+import { persistScan, libraryIdFor, LIBRARY_ROOT, DL_ROOT, setBookDates, setBookMeta } from '../lib/library';
 import { containedPath } from '../lib/fsGuard';
 import { deleteSeries, restoreSeries, mergeSeries, getSeriesRow, deleteSeriesFiles, renameSeriesFolder } from '../lib/libraryAdmin';
 import { runFingerprintBackfill, fingerprintRemaining, fpState } from '../lib/fingerprintJob';
@@ -14,7 +14,7 @@ import { runBackup } from '../lib/backup';
 import { runUpdateAll, updateSeries, runSweep } from '../lib/updater';
 import { authenticate, requireAdmin, userIdOf, revokeAllSessions, revokeRefreshTokenById, passwordError } from '../lib/auth';
 import { logAudit, recentAudit } from '../lib/audit';
-import { healthAll, setDisabled, clearBlock, SourceHealth, pruneOrphanedHealth } from '../lib/sourceHealth';
+import { healthAll, setDisabled, clearBlock, SourceHealth, pruneOrphanedHealth, isDisabled } from '../lib/sourceHealth';
 import { smokeTest, probeBase } from '../lib/sourceProbe';
 import { runSourceCheck, checkRunning } from '../lib/sourceWatchdog';
 import { runExtensionMonitor, runExtensionCheck, extState } from '../lib/extensionMonitor';
@@ -32,7 +32,11 @@ import { ART_DIR, artFile, artOverview } from '../lib/seriesArt';
 import { writePreflight } from '../lib/fsGuard';
 // Admin stats report on the whole library by definition; this route is already behind requireAdmin.
 import { NO_LIBRARIES, SYSTEM_CTX, visibleToAll } from '../lib/visibility';
-import { addSeriesFromSource, findBestMatch, norm } from './sources';
+import { addSeriesFromSource, findBestMatch, norm, seriesAndChapters } from './sources';
+import { getPlan, MIN_COVERAGE } from '../lib/fill';
+import { prefsSchema, readGlobalPrefs, readSeriesPrefs, effectivePrefsFor } from '../lib/scanlatorPrefs';
+import { groupsOf, normGroup } from '../lib/releases';
+import { seriesSourcesFor } from '../lib/seriesSources';
 import { titlesFromBackup } from '../lib/tachibk';
 import { linkSeries } from '../lib/trackers';
 import { runHealthChecks } from '../lib/health';
@@ -49,7 +53,7 @@ let importJob: ImportJob | null = null;
 type ArtJob = { running: boolean; total: number; done: number; banners: number; covers: number; misses: number; startedAt: number };
 let artJob: ArtJob | null = null;
 // per-series "check for new chapters" runs, so the UI can poll instead of blocking on a long download
-const seriesChecks = new Map<string, { running: boolean; added?: number; error?: string; startedAt?: number; finishedAt?: number }>();
+const seriesChecks = new Map<string, { running: boolean; added?: number; waiting?: number; error?: string; startedAt?: number; finishedAt?: number }>();
 
 /**
  * Stop a member's grant list from collapsing into "everything".
@@ -93,7 +97,7 @@ export default async function adminRoutes(app: FastifyInstance) {
 
   // ---- server settings ----
   const SETTINGS_COLS = 'server_name, allow_registration, updater_hours, extension_hours, extension_auto_update, '
-    + 'update_check, install_ping, install_ping_last';
+    + 'update_check, install_ping, install_ping_last, scanlator_prefs';
   // `extensions_configured` is not a column: extension_hours has a NOT NULL default, so its presence says
   // nothing about whether there is an engine to check. The settings page needs to know, or it offers two
   // controls for a job that can never run.
@@ -156,6 +160,7 @@ export default async function adminRoutes(app: FastifyInstance) {
       extensionAutoUpdate: z.boolean().optional(),
       updateCheck: z.boolean().optional(),
       installPing: z.boolean().optional(),
+      scanlatorPrefs: prefsSchema.optional(),
     }).parse(req.body);
     if (b.serverName !== undefined) await q('UPDATE server_settings SET server_name = $1, updated_at = now() WHERE id = 1', [b.serverName]);
     if (b.allowRegistration !== undefined) await q('UPDATE server_settings SET allow_registration = $1, updated_at = now() WHERE id = 1', [b.allowRegistration]);
@@ -164,6 +169,7 @@ export default async function adminRoutes(app: FastifyInstance) {
     if (b.extensionAutoUpdate !== undefined) await q('UPDATE server_settings SET extension_auto_update = $1, updated_at = now() WHERE id = 1', [b.extensionAutoUpdate]);
     if (b.updateCheck !== undefined) await q('UPDATE server_settings SET update_check = $1, updated_at = now() WHERE id = 1', [b.updateCheck]);
     if (b.installPing !== undefined) await setInstallPing(b.installPing);
+    if (b.scanlatorPrefs !== undefined) await q('UPDATE server_settings SET scanlator_prefs = $1::jsonb, updated_at = now() WHERE id = 1', [JSON.stringify(b.scanlatorPrefs)]);
     await logAudit('settings.update', { userId: userIdOf(req), detail: b, req });
     return settingsRow();
   });
@@ -341,15 +347,150 @@ export default async function adminRoutes(app: FastifyInstance) {
   // ---- admin-editable series metadata + art overrides (Jellyfin-style) ----
   // Edit title/summary; an empty value clears the override (back to the source's own metadata).
   // Per-series settings. auto_update could only ever be chosen at add time, and the UI never read it back,
-  // so there was no way to stop the updater chasing a series you had finished with.
+  // so there was no way to stop the updater chasing a series you had finished with. scanlatorPrefs is the
+  // series' own release preferences (lib/releases.ts); null clears them, so the series inherits the global
+  // ones again. Each field is written on its own, so a body naming only one leaves the other alone.
   app.patch('/api/admin/series/:id', async (req, reply) => {
     const { id } = req.params as { id: string };
-    const b = z.object({ autoUpdate: z.boolean() }).safeParse(req.body);
+    const b = z.object({
+      autoUpdate: z.boolean().optional(),
+      scanlatorPrefs: prefsSchema.nullable().optional(),
+    }).strict().safeParse(req.body);
     if (!b.success) return reply.code(400).send({ error: 'bad_request' });
-    const r = await q<{ id: string }>('UPDATE lib_series SET auto_update = $2 WHERE id = $1 RETURNING id', [id, b.data.autoUpdate]);
-    if (!r.length) return reply.code(404).send({ error: 'not_found' });
-    await logAudit('series.settings', { userId: userIdOf(req), detail: { id, autoUpdate: b.data.autoUpdate }, req });
-    return { ok: true, autoUpdate: b.data.autoUpdate };
+    if (b.data.autoUpdate === undefined && b.data.scanlatorPrefs === undefined) {
+      return reply.code(400).send({ error: 'bad_request', message: 'Nothing to change.' });
+    }
+    const row = await getSeriesRow(id);
+    if (!row) return reply.code(404).send({ error: 'not_found' });
+    const detail: Record<string, unknown> = { id };
+    if (b.data.autoUpdate !== undefined) {
+      await q('UPDATE lib_series SET auto_update = $2 WHERE id = $1', [id, b.data.autoUpdate]);
+      detail.autoUpdate = b.data.autoUpdate;
+    }
+    if (b.data.scanlatorPrefs !== undefined) {
+      await q('UPDATE lib_series SET scanlator_prefs = $2::jsonb WHERE id = $1',
+        [id, b.data.scanlatorPrefs === null ? null : JSON.stringify(b.data.scanlatorPrefs)]);
+      detail.scanlatorPrefs = b.data.scanlatorPrefs;
+    }
+    await logAudit('series.settings', { userId: userIdOf(req), detail, req });
+    return { ok: true, ...(b.data.autoUpdate !== undefined ? { autoUpdate: b.data.autoUpdate } : {}) };
+  });
+
+  /**
+   * The groups an admin can rank or block for one series, and where the current preferences stand.
+   *
+   * Two places know a group name: the files on disk (lib_books.scanlator, stamped as chapters land) and the
+   * listings of the series' sources, primary and followed alike. Both are read, because each misses what
+   * the other has -- a group that released the early chapters and then disbanded is only on disk, a group
+   * that just picked the title up is only in the listing. The names already in the prefs are added as a
+   * third set: a blocked group that has since vanished from the listing has to stay visible or there is no
+   * control left to unblock it with. Listing errors count as nothing listed rather than failing the page;
+   * the point is to offer names, and a source that is down still leaves the disk and the prefs to offer.
+   */
+  app.get('/api/admin/series/:id/scanlators', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const row = await getSeriesRow(id);
+    if (!row) return reply.code(404).send({ error: 'not_found' });
+    const prefs = await readSeriesPrefs(id);
+    const global = await readGlobalPrefs();
+    const eff = await effectivePrefsFor(prefs);
+
+    // Deduped by normGroup, first spelling wins: the source's casing over the disk's over the prefs'.
+    const groups = new Map<string, { name: string; onDisk: number; listed: number }>();
+    const entry = (name: string) => {
+      const key = normGroup(name);
+      if (!key) return null;
+      let g = groups.get(key);
+      if (!g) { g = { name, onDisk: 0, listed: 0 }; groups.set(key, g); }
+      return g;
+    };
+    for (const src of await seriesSourcesFor(id)) {
+      if (!src.registered || !src.sourceSeriesId) continue;
+      const adapter = getSource(src.sourceId);
+      if (!adapter) continue;
+      const chapters = await seriesAndChapters(adapter, src.sourceSeriesId).then((r) => r.chapters, () => []);
+      for (const c of chapters) for (const name of groupsOf(c)) { const g = entry(name); if (g) g.listed++; }
+    }
+    const onDisk = await q<{ scanlator: string; n: number }>(
+      'SELECT scanlator, count(*)::int AS n FROM lib_books WHERE series_id = $1 AND scanlator IS NOT NULL GROUP BY 1', [id]);
+    for (const r of onDisk) for (const name of groupsOf({ scanlator: r.scanlator })) { const g = entry(name); if (g) g.onDisk += r.n; }
+    // The effective set already holds the series' own names (a series priority replaces the global list, a
+    // series block joins it), so one pass over it covers both rows.
+    // Reintroduce by dropping this loop: "a blocked group that vanished from the listing is still offered"
+    // in scanlatorPrefs.int.test.ts fails -- the name is in `blocked` and absent from `groups`.
+    for (const name of [...eff.priority, ...eff.blocked]) entry(name);
+
+    return {
+      prefs,
+      global,
+      effective: { priority: eff.priority, blocked: eff.blocked, patienceDays: Math.round(eff.patienceMs / 86_400_000) },
+      groups: [...groups.values()].sort((a, b) => (b.onDisk + b.listed) - (a.onDisk + a.listed) || a.name.localeCompare(b.name)),
+    };
+  });
+
+  /**
+   * Follow another source for a series: its chapter list is merged with the primary's on every check, so a
+   * chapter the primary lacks, or lists only from a blocked group, can come from here instead.
+   *
+   * The candidate must come from a fill-scan plan, and the plan must have found it followable -- coverage
+   * at or over MIN_COVERAGE with a verdict that says the numbering lines up. The plan is the only place the
+   * "same series?" judgement is made (lib/fill.ts explains why it is a judgement and not a proof), and
+   * taking a bare (source, id) pair here would let a client follow anything it could name, which for a
+   * source that numbers a different story 1..N means every "new chapter" is the wrong book. The primary
+   * is refused as well: following it would list the same chapters twice.
+   */
+  app.post('/api/admin/series/:id/sources', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const b = z.object({
+      planId: z.string().min(1).max(64),
+      source: z.string().min(1).max(128),
+      sourceSeriesId: z.string().min(1).max(512),
+    }).safeParse(req.body);
+    if (!b.success) return reply.code(400).send({ error: 'bad_request' });
+    const { planId, source, sourceSeriesId } = b.data;
+    const plan = getPlan(planId);
+    if (!plan) return reply.code(409).send({ error: 'plan_stale', message: 'That list has moved on. Scan again.' });
+    if (plan.seriesId !== id) return reply.code(400).send({ error: 'bad_request', message: 'That plan is for another series.' });
+    const cand = plan.candidates.find((c) => c.source === source && c.sourceSeriesId === sourceSeriesId);
+    if (!cand) return reply.code(400).send({ error: 'not_in_plan', message: 'That source was not one of the options.' });
+    if (cand.pinned) return reply.code(409).send({ error: 'is_primary', message: 'That is already the series’ own source.' });
+    // The verdict already folds coverage in (lib/fill.ts verdict()), so the explicit bound is a belt for
+    // the day the verdict grows a case that does not; both halves fall together.
+    // Reintroduce by deleting this guard: "a source with a different story is refused" in
+    // seriesSources.int.test.ts fails with 200 -- the plan carries the WRONG fixture with its refusal
+    // attached, and nothing else between the plan and the INSERT reads it.
+    if (!(cand.coverage >= MIN_COVERAGE && (cand.why === 'ok' || cand.why === 'nothing_to_fill'))) {
+      // The reason is the scan's own verdict; only a numbering mismatch is a fault of the source, the rest is
+      // a source that could not be judged this time (in a cooldown, unreachable, not tried).
+      const message = cand.why === 'numbering_mismatch' || cand.why === 'ok' || cand.why === 'nothing_to_fill'
+        ? 'That source does not line up with the chapters you hold.'
+        : cand.why === 'no_chapters' ? 'That source lists no chapters for this title.'
+        : 'That source could not be checked this time. Scan again.';
+      return reply.code(400).send({ error: 'not_followable', reason: cand.why, coverage: cand.coverage, message });
+    }
+    if (!getSource(source) || await isDisabled(source).catch(() => false)) {
+      return reply.code(409).send({ error: 'source_unavailable', message: 'That source is not available right now.' });
+    }
+    const row = await getSeriesRow(id);
+    if (!row) return reply.code(404).send({ error: 'not_found' });
+    await q(
+      `INSERT INTO series_sources (series_id, source_id, source_series_id, title, coverage, added_by)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       ON CONFLICT (series_id, source_id) DO UPDATE SET source_series_id = EXCLUDED.source_series_id,
+         title = EXCLUDED.title, coverage = EXCLUDED.coverage`,
+      [id, source, sourceSeriesId, cand.title || null, cand.coverage, userIdOf(req)],
+    );
+    await logAudit('series.follow_source', { userId: userIdOf(req), detail: { id, title: row.title, source, sourceSeriesId, coverage: cand.coverage }, req });
+    return { ok: true, sources: await seriesSourcesFor(id) };
+  });
+
+  app.delete('/api/admin/series/:id/sources/:sourceId', async (req, reply) => {
+    const { id, sourceId } = req.params as { id: string; sourceId: string };
+    const gone = await q<{ source_id: string }>(
+      'DELETE FROM series_sources WHERE series_id = $1 AND source_id = $2 RETURNING source_id', [id, sourceId]);
+    if (!gone.length) return reply.code(404).send({ error: 'not_found' });
+    await logAudit('series.unfollow_source', { userId: userIdOf(req), detail: { id, source: sourceId }, req });
+    return { ok: true, sources: await seriesSourcesFor(id) };
   });
 
   // "Check for new chapters" for one series. updateSeries downloads synchronously and can run for minutes,
@@ -361,7 +502,24 @@ export default async function adminRoutes(app: FastifyInstance) {
     if (!row) return reply.code(404).send({ error: 'not_found' });
     seriesChecks.set(id, { running: true, startedAt: Date.now() });
     void updateSeries(id, Number((req.body as any)?.maxNew) || 10)
-      .then((r) => seriesChecks.set(id, { running: false, added: r.added, finishedAt: Date.now() }))
+      .then(async (r) => {
+        // A downloaded file is only a file until a scan makes it a book. The sweep scans after its loop;
+        // this path never did, so a chapter "Check" had just fetched stayed invisible until the next sweep
+        // -- the button appeared to do nothing, and the status said "1 added" about a series page that
+        // showed no new row. The stamps go on after the scan for the same reason the sweep orders them so:
+        // there is no row to stamp before it.
+        if (r.added > 0 && r.folder) {
+          // Logged, not swallowed: a failed scan here leaves the status saying "N added" over a page with no
+          // new rows, and the log line is the only trace of why.
+          const warn = (step: string) => (e: unknown) => console.warn(`[check] ${step} failed for ${r.folder}: ${(e as Error)?.message || e}`);
+          await persistScan().catch(warn('scan'));
+          await setBookDates(r.folder, r.chapters ?? []).catch(warn('date stamp'));
+          await setBookMeta(r.folder, r.landed).catch(warn('provenance stamp'));
+        }
+        // `waiting` is how many numbers are being held for the preferred group (lib/releases.ts), so the
+        // page can say "2 held for <group>" instead of leaving "0 added" to look like nothing is new.
+        seriesChecks.set(id, { running: false, added: r.added, ...(r.waiting ? { waiting: r.waiting } : {}), finishedAt: Date.now() });
+      })
       .catch((e) => seriesChecks.set(id, { running: false, error: (e as Error)?.message || 'failed', finishedAt: Date.now() }));
     await logAudit('series.check', { userId: userIdOf(req), detail: { id, title: row.title }, req });
     return { ok: true, started: true };

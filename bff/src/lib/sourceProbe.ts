@@ -68,7 +68,9 @@ export async function smokeTest(src: SourceAdapter, opts: { timeoutMs?: number }
     checks.push({ name: COVER_CHECK, ok: cov.ok, detail: cov.detail });
     if (past(deadline)) return bail();
     chapters = await src.listChapters(results[0].sourceId);
-    checks.push({ name: 'Chapters', ok: chapters.length > 0, detail: chapters.length ? `${chapters.length} chapter(s)` : 'none found' });
+    // Numbers, not rows: a source that lists a chapter once per group would otherwise report twice the count.
+    const numbers = new Set(chapters.map((c) => c.number)).size;
+    checks.push({ name: 'Chapters', ok: chapters.length > 0, detail: chapters.length ? `${numbers} chapter(s)` : 'none found' });
   } catch (e: any) {
     checks.push({ name: 'Series / chapters', ok: false, detail: clip(e?.message || 'error') });
   }

@@ -20,6 +20,32 @@ export interface SeriesMetadata {
   language?: string;
 }
 
+/**
+ * One place the updater asks about a series. The row it was added from is `primary`; the rest were followed
+ * later from Find missing chapters. `registered` is false when the adapter is no longer installed -- the row
+ * is kept so the choice survives a reinstall, but nothing can be fetched from it meanwhile.
+ */
+export interface SeriesSource {
+  sourceId: string;
+  name: string;
+  sourceSeriesId: string;
+  primary: boolean;
+  checkedAt: string | null;
+  chapters: number | null;
+  registered: boolean;
+}
+
+/**
+ * Which scanlation groups to prefer, which to refuse, and how long to hold a chapter for a preferred group.
+ * `patienceDays: null` means "whatever the server default is"; 0 means take the best copy available now.
+ * Stored per series as an override, or on the server as the default; the same shape in both places.
+ */
+export interface StoredPrefs {
+  priority: string[];
+  blocked: string[];
+  patienceDays: number | null;
+}
+
 export interface Series {
   /** Whether the scheduled updater fetches new chapters for this series. */
   autoUpdate?: boolean;
@@ -50,6 +76,10 @@ export interface Series {
     title: string | null; summary: string | null; cover: string | null; banner: string | null;
     author: string | null; status: string | null; genres: string[] | null; ageRating: number | null;
   };
+  /** Every source the updater asks for this series, primary first. Sent to every viewer. */
+  sources?: SeriesSource[];
+  /** This series' own scanlator overrides, or null when it follows the server defaults. Admins only. */
+  scanlatorPrefs?: StoredPrefs | null;
 }
 
 export interface ReadProgress {
@@ -78,6 +108,10 @@ export interface Book {
   media: { pagesCount: number; mediaType?: string; status?: string };
   metadata: BookMetadata;
   readProgress?: ReadProgress | null;
+  /** The group that released the copy on disk, as the source showed it. Null when the source did not say. */
+  scanlator?: string | null;
+  /** The adapter this copy was fetched from. Null for files that arrived any other way. */
+  sourceId?: string | null;
 }
 
 export interface PageInfo {

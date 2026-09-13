@@ -5,13 +5,15 @@
 import { q, one } from './db';
 import { getSource, SourceChapter, withTimeout } from './sources';
 import { downloadChapter } from './downloader';
-import { persistScan, setBookDates } from './library';
+import { persistScan, setBookDates, setBookMeta } from './library';
 import { blockedNow } from './sourceHealth';
 import { noteChapterFailure } from './chapterFailures';
 import { budgetFor } from './sources/budget';
 import { notifyNewChapter } from './push';
 import { visibleToAll } from './visibility';
 import { runtime } from './runtime';
+import { chooseReleases } from './releases';
+import { effectivePrefsFor, readSeriesPrefs } from './scanlatorPrefs';
 
 /**
  * Why a series produced nothing this run.
@@ -67,78 +69,162 @@ async function stampChecked(seriesId: string, chapters: number | null, missing: 
   ).catch(() => {});
 }
 
-export async function updateSeries(
-  seriesId: string,
-  maxNew = 10,
-): Promise<{ title: string; added: number; available: number; outcome: UpdateOutcome; failed: number; capped?: number; folder?: string; chapters?: SourceChapter[]; diskFull?: boolean }> {
-  const s = await one<any>(`SELECT id,title,source_id,source_series_id,web,folder,summary,author,genres,status,chapter_floor FROM lib_series s WHERE s.id=$1 AND ${visibleToAll('s')}`, [seriesId]);
-  if (!s) return { title: '', added: 0, available: 0, outcome: 'gone', failed: 0 };
-  const src = s.source_id ? getSource(s.source_id) : null;
-  const ref = s.source_series_id;
-  if (!src || !ref) return { title: s.title, added: 0, available: 0, outcome: 'unrouted', failed: 0 };
-  if (await blockedNow(s.source_id)) return { title: s.title, added: 0, available: 0, outcome: 'blocked', failed: 0 };
+/** A chapter that landed in this run, and what setBookMeta stamps onto the book the scan mints for it. */
+export type Landed = { number: number; scanlator?: string; source?: string };
+
+export interface UpdateResult {
+  title: string;
+  added: number;
+  /** Distinct chapter numbers across every source the series is followed on, after the release choice. */
+  available: number;
+  outcome: UpdateOutcome;
+  failed: number;
+  /** Missing numbers the sweep left alone because their preferred group has not released yet (lib/releases.ts). */
+  waiting: number;
+  landed: Landed[];
+  capped?: number;
+  folder?: string;
+  /** The chosen copy per number, ascending: what setBookDates is stamped from after the scan. */
+  chapters?: SourceChapter[];
+  diskFull?: boolean;
+}
+
+const nothing = (title: string, outcome: UpdateOutcome): UpdateResult =>
+  ({ title, added: 0, available: 0, outcome, failed: 0, waiting: 0, landed: [] });
+
+export async function updateSeries(seriesId: string, maxNew = 10): Promise<UpdateResult> {
+  const s = await one<any>(`SELECT id,title,source_id,source_series_id,web,folder,summary,author,genres,status,chapter_floor,scanlator_prefs FROM lib_series s WHERE s.id=$1 AND ${visibleToAll('s')}`, [seriesId]);
+  if (!s) return nothing('', 'gone');
+
+  // Everything the series is followed on: the primary pair first, then series_sources in the order they
+  // were added. That order is the tie-break chooseReleases applies between two copies that are otherwise
+  // equal, which is what makes the primary win by default. A source whose adapter is not loaded is skipped
+  // -- the primary included: a series whose extension was uninstalled but which follows a site that is
+  // still here keeps updating from that site, which is the whole reason to follow one, and is what the
+  // Health page promises when it lists such a series as reference rather than frozen. Only a series with
+  // nothing loaded at all is unrouted. A row naming the primary's own adapter would list it twice: the
+  // follow route refuses one, but a row older than that rule must not double the listing.
+  const extras = await q<{ source_id: string; source_series_id: string }>(
+    'SELECT source_id, source_series_id FROM series_sources WHERE series_id = $1 ORDER BY created_at, source_id', [seriesId],
+  ).catch(() => []);
+  const followed = [
+    ...(s.source_id && s.source_series_id && getSource(s.source_id)
+      ? [{ source: s.source_id as string, ref: s.source_series_id as string, primary: true }] : []),
+    ...extras.filter((e) => e.source_id !== s.source_id && getSource(e.source_id)).map((e) => ({ source: e.source_id, ref: e.source_series_id, primary: false })),
+  ];
+  if (!followed.length) return nothing(s.title, 'unrouted');
 
   // A throw and an empty list are NOT the same answer, and collapsing them is what made a broken source
   // indistinguishable from a series with nothing new. routes/sources.ts already separates these two, with a
   // comment saying why, two files away.
-  let listFailed = false;
-  const chapters = await withTimeout(src.listChapters(ref), budgetFor(src, LIST_TIMEOUT)).catch(() => { listFailed = true; return [] as SourceChapter[]; });
-  // Stamped on every path where the source was ASKED, so a dead source's series still rotate to the back of
-  // the queue instead of sitting at its front forever. Not stamped above, on the cooldown path: never asked.
-  if (listFailed) { await stampChecked(seriesId, null, null); return { title: s.title, added: 0, available: 0, outcome: 'source_error', failed: 0 }; }
-  if (!chapters.length) { await stampChecked(seriesId, 0, 0); return { title: s.title, added: 0, available: 0, outcome: 'ok', failed: 0 }; }
+  const tagged: SourceChapter[] = [];
+  let blocked = 0;
+  let answered = 0;
+  for (const f of followed) {
+    if (await blockedNow(f.source)) { blocked++; continue; }
+    // Looked up again after the awaits above: an extension refresh can unregister an adapter between
+    // building the list and asking it, and that is a source that did not answer, not a crash.
+    const adapter = getSource(f.source);
+    if (!adapter) continue;
+    const list = await withTimeout(adapter.listChapters(f.ref), budgetFor(adapter, LIST_TIMEOUT)).catch(() => null);
+    if (!list) continue;
+    answered++;
+    // Copied, not annotated in place: an adapter may hand back the very array its detail cache holds, and
+    // a `source` written onto those objects would be there for every later caller of the cache.
+    for (const c of list) tagged.push({ ...c, source: f.source });
+    // The follower's own stamp, mirroring source_checked_at / source_chapters on the primary below.
+    if (!f.primary) {
+      await q(`UPDATE series_sources SET checked_at = now(), chapters = $3 WHERE series_id = $1 AND source_id = $2`,
+        [seriesId, f.source, new Set(list.map((c) => c.number)).size]).catch(() => {});
+    }
+  }
+  // Stamped on every path where a source was ASKED, so a dead source's series still rotate to the back of
+  // the queue instead of sitting at its front forever. Not stamped on the cooldown path: never asked.
+  if (blocked === followed.length) return nothing(s.title, 'blocked');
+  if (!answered) { await stampChecked(seriesId, null, null); return nothing(s.title, 'source_error'); }
+
+  // One copy per number out of everything listed, by the release preferences: the series' own over the
+  // global ones, with the series' patience in force -- this is the sweep, and "Check now" runs the same
+  // code, so a number held for the preferred group is held on both. The series' row is only parsed when it
+  // has something of its own, which almost none do.
+  const prefs = await effectivePrefsFor(s.scanlator_prefs == null ? null : await readSeriesPrefs(seriesId));
+  const rank = new Map(followed.map((f, i) => [f.source, i]));
+  const { releases, waiting: held } = chooseReleases(tagged, prefs, { sourceRank: (id) => rank.get(id ?? '') ?? followed.length });
 
   // A series added as "latest N" carries a floor, and what the source lists below it is not this job's
   // business: the sweep exists to fetch new releases, and the oldest-first loop below would otherwise spend
   // every night on the back catalogue with the new chapter queued behind it. Applied before `missing` is
   // computed, so the source_missing stamp -- "{n} behind" on the series page -- counts only what the sweep
-  // would actually fetch. source_chapters still records the full count: that is what the source said.
+  // would actually fetch. source_chapters still records the full count: that is what the sources said.
   const floor = s.chapter_floor == null ? -Infinity : Number(s.chapter_floor);
-  const wanted = chapters.filter((c) => c.number >= floor);
+  const wanted = releases.filter((c) => c.number >= floor);
+  // What is on disk is never replaced, whoever released it: a copy from a better-ranked group appearing
+  // later is not a missing chapter. (A deliberate "replace with the preferred group" would be its own path.)
   const have = new Set((await q<{ number: number }>('SELECT number FROM lib_books WHERE series_id=$1', [seriesId])).map((r) => Number(r.number)));
   const missing = wanted.filter((c) => !have.has(c.number)).sort((a, b) => a.number - b.number);
-  await stampChecked(seriesId, chapters.length, missing.length);
+  await stampChecked(seriesId, releases.length, missing.length);
   // Chapters that have already failed CHAPTER_RETRY_CAP times are not attempted again by the sweep.
   const cappedNums = new Set(
     (await q<{ number: number }>(`SELECT number FROM chapter_failures WHERE series_id = $1 AND attempts >= $2`, [seriesId, CHAPTER_RETRY_CAP])
       .catch(() => [])).map((r) => Number(r.number)),
   );
-  const eligible = missing.filter((c) => !cappedNums.has(c.number));
-  const capped = missing.length - eligible.length;
+  // A number being held for its preferred group is still missing -- "{n} behind" must say so -- but it is
+  // not fetched: the whole point of the hold is that the copy on offer is not the one wanted yet.
+  const heldNums = new Set(held);
+  const eligible = missing.filter((c) => !cappedNums.has(c.number) && !heldNums.has(c.number));
+  const capped = missing.filter((c) => cappedNums.has(c.number)).length;
+  const waiting = missing.filter((c) => heldNums.has(c.number)).length;
 
   let added = 0;
   let failed = 0;
   let diskFull = false;
+  let attempts = 0;
+  const landed: Landed[] = [];
+  // A source that has refused once this run is not asked again, but the others still are: a rate-limited
+  // primary must not stop the follower's chapters, which are the reason the follower was added. The loop
+  // ends only when every followed source is refusing -- which for a series with one source is the first
+  // refusal, as before -- so each source still costs at most one strike per run.
+  const refusing = new Set<string>();
   // oldest-missing-first: a partial "first N" add fills forward coherently, and new releases (all > our max)
   // are still the only gap once a series is fully downloaded.
-  for (const ch of eligible.slice(0, maxNew)) {
+  for (const ch of eligible) {
+    if (attempts >= maxNew) break;
     if (runtime.stopping) break; // between chapters, never mid-write
+    const via = ch.source ?? (s.source_id as string);
+    if (refusing.has(via)) continue;
+    attempts++;
     try {
       const res = await downloadChapter({
-        sourceId: s.source_id,
+        sourceId: via,
         seriesFolder: s.folder,
         chapter: ch,
         meta: { series: s.title, summary: s.summary, author: s.author, genres: s.genres, url: s.web, status: s.status },
       });
-      if (!res.skipped) added++;
+      if (!res.skipped) { added++; landed.push({ number: ch.number, scanlator: ch.scanlator, source: via }); }
     } catch (e: any) {
       // The library disk is at its floor: not this chapter's fault, not the source's, and pointless to try
       // the next one. Stop here and let the sweep say so.
       if (e?.diskFull) { diskFull = true; break; }
       failed++; // a failed chapter shouldn't abort the rest, but it must not vanish either
-      await noteChapterFailure({ seriesId, title: s.title, number: ch.number, sourceId: s.source_id, err: e });
+      await noteChapterFailure({ seriesId, title: s.title, number: ch.number, sourceId: via, err: e });
       // ...unless the SOURCE is refusing. Both other callers of downloadChapter already stop here; this one
       // did not, so a single rate-limit became five. Measured on this install: one unpaced burst against
       // mangakakalot produced five reportFail calls in 74 seconds, and because the cooldown escalates with
       // `consecutive` (15, 30, 45, 60, 75 minutes) it locked the source for 75 minutes instead of 15 --
       // long enough that the person's own manual retry was refused too.
-      if (e?.blockStatus) break;
+      if (e?.blockStatus) {
+        refusing.add(via);
+        if (followed.every((f) => refusing.has(f.source))) break;
+      }
     }
   }
   if (added) notifyNewChapter(seriesId, s.title, added).catch(() => {});
   // backfill release dates onto already-scanned books; freshly downloaded ones are stamped after the sweep's scan
-  await setBookDates(s.folder, chapters).catch(() => {});
-  return { title: s.title, added, available: chapters.length, outcome: 'ok', failed, capped, folder: s.folder, chapters, diskFull };
+  await setBookDates(s.folder, releases).catch(() => {});
+  // Provenance goes only onto what LANDED, never onto the whole listing: the chosen copy for a number can
+  // change between runs, and the file on disk does not change with it.
+  await setBookMeta(s.folder, landed).catch(() => {});
+  return { title: s.title, added, available: releases.length, outcome: 'ok', failed, waiting, landed, capped, folder: s.folder, chapters: releases, diskFull };
 }
 
 /**
@@ -186,7 +272,7 @@ export async function runUpdateAll(opts: { onlyFavorites?: boolean; maxNew?: num
   // catching it into `{ added: 0 }` is what made "the database went away mid-sweep" read as "nothing new".
   // `skipped` is what the budget or a parked source left unvisited: not a failure, and not nothing either.
   const outcomes: Record<UpdateOutcome | 'threw' | 'skipped', number> = { ok: 0, gone: 0, unrouted: 0, blocked: 0, source_error: 0, threw: 0, skipped: 0 };
-  const dated: { folder: string; chapters: SourceChapter[] }[] = [];
+  const dated: { folder: string; chapters: SourceChapter[]; landed: Landed[] }[] = [];
 
   sweep: while (queues.size) {
     let progressed = false;
@@ -199,13 +285,13 @@ export async function runUpdateAll(opts: { onlyFavorites?: boolean; maxNew?: num
       progressed = true;
       visited++;
       const r = await updateSeries(id, Math.min(opts.maxNew ?? 10, Math.max(1, sweepMax - spent)))
-        .catch(() => ({ added: 0, outcome: 'threw' as const, failed: 0 } as { added: number; outcome: 'threw'; failed: number; folder?: string; chapters?: SourceChapter[]; diskFull?: boolean }));
+        .catch(() => ({ added: 0, outcome: 'threw' as const, failed: 0, landed: [] } as { added: number; outcome: 'threw'; failed: number; folder?: string; chapters?: SourceChapter[]; landed: Landed[]; diskFull?: boolean }));
       added += r.added;
       chapterFailures += r.failed ?? 0;
       capped += (r as { capped?: number }).capped ?? 0;
       spent += r.added + (r.failed ?? 0);
       outcomes[r.outcome] = (outcomes[r.outcome] ?? 0) + 1;
-      if (r.added && r.folder && r.chapters?.length) dated.push({ folder: r.folder, chapters: r.chapters });
+      if (r.added && r.folder && r.chapters?.length) dated.push({ folder: r.folder, chapters: r.chapters, landed: r.landed });
       if (r.diskFull) { stopped = 'disk'; break sweep; }
       if (r.outcome === 'blocked') parked.add(src);
       await new Promise((res) => setTimeout(res, 1500));
@@ -220,7 +306,10 @@ export async function runUpdateAll(opts: { onlyFavorites?: boolean; maxNew?: num
   for (const ids of queues.values()) outcomes.skipped += ids.length;
 
   if (added) await persistScan();
-  for (const d of dated) await setBookDates(d.folder, d.chapters).catch(() => {}); // stamp the books the scan just created
+  for (const d of dated) { // stamp the books the scan just created
+    await setBookDates(d.folder, d.chapters).catch(() => {});
+    await setBookMeta(d.folder, d.landed).catch(() => {});
+  }
   // `healthy` is the question the admin panel should have been asking all along: was this a quiet night, or
   // did nothing work? A run where every source failed now looks nothing like one where nothing was new.
   const broken = outcomes.source_error + outcomes.threw;

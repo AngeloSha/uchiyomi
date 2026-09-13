@@ -1,5 +1,54 @@
 # Changelog
 
+## v0.31.0 — 2026-09-13
+
+Both halves of [#35](https://github.com/AngeloSha/uchiyomi/issues/35): which group's release to keep, and
+following a series on more than one source.
+
+### Which scanlation group's release to keep
+
+On MangaDex, and on most extensions, a chapter comes back once per group that released it. Uchiyomi keeps
+one file per chapter number, so something had to pick — and until now that something was three adapters
+with three different rules, none of which knew what a group was: the extension bridge threw the name away
+one line after receiving it, MangaDex was never asked for it, and the pick was whichever copy happened to
+be listed first. Nothing in the Mihon family does better; Mihon only excludes groups, because it shows every
+duplicate row and leaves the choice to the reader.
+
+The choice is now one rule in one place (`bff/src/lib/releases.ts`), applied wherever a source is listed: a
+per-series ranking ("prefer A, then B"), a blocklist ("never C"), and a patience window — how long to wait
+for a ranked group before taking the best copy on offer (2 days by default, 0 to take it at once). Server
+defaults live under **Admin → Settings → Scanlators**; a series overrides them from *Edit details*. Blocks
+accumulate, a series ranking replaces the server's, and patience falls back. A joint release belongs to
+every group on it and is blocked only when all of them are. A chapter already on disk is never replaced by
+a better-ranked copy that arrives later; the chapter row shows which group it came from, and the group is
+written into the file as ComicInfo `<Translator>` — the tag Mihon and Suwayomi write and Komga and Kavita
+read. Files downloaded before this release carry no group.
+
+Three things the rule deliberately does not do: wait on a source that names no groups (a scraped site with a
+priority list set would otherwise hold every chapter for two days for a group that can never arrive); prefer
+an external link — MangaDex's pointer to the publisher's own site — over a copy that can actually be read,
+whatever group it carries; and replace anything. The add path applies the server blocklist too, because a
+blocked copy taken at add time would be locked in by the never-replace rule.
+
+### Following a series on a second source
+
+A series has always been wired to exactly one source. It can now also follow others: from **Find missing
+chapters**, any source whose numbering matches at least 90 % of what you hold can be followed with one
+press (admin only, the same gate that keeps the fill from filing another story's chapters under yours).
+The sweep then lists every followed source and takes each missing number from the first that has it, the
+primary winning ties — so whichever site releases first is the one that supplies the chapter, and a series
+whose extension was uninstalled keeps updating from the site it also follows. "N behind" counts across
+followed sources, each chapter row says where it came from, and Health lists a dead-primary series that
+still has a live follower as reference rather than frozen.
+
+Found on the way and fixed: *Check for new chapters now* downloaded chapters that only appeared in the
+library at the next scan; it scans now, and says when chapters are being held for a preferred group rather
+than reporting "already up to date".
+
+Guards for every rule above are proven by reintroduction — the one worth naming is that a series whose
+primary adapter is gone used to answer "unrouted" before its followers were even read, which three
+independent reviewers caught against the Health page's promise.
+
 ## v0.30.0 — 2026-09-13
 
 Four things one reader asked for on the day the Mihon extension shipped ([#36](https://github.com/AngeloSha/uchiyomi/issues/36),

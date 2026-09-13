@@ -237,3 +237,25 @@ test('a rate limit that lifts is recovered by the retry', async () => {
   assert.ok(res, 'the chapter completes once the pause is honoured');
   assert.equal(res!.pages, 110);
 });
+
+test('the CBZ names the releasing group in ComicInfo, and says nothing when the source named nobody', async () => {
+  // <Translator> is the ComicInfo v2.1 tag Mihon and Suwayomi write and Komga and Kavita read, so the
+  // provenance travels with the file, not only in lib_books. The ampersand is the joint-release spelling
+  // and has to survive XML escaping.
+  //
+  // Reintroduce by dropping `scanlator: input.chapter.scanlator` from the comicInfo() call in
+  // lib/downloader.ts: "ComicInfo carries the group" fails, the tag is absent.
+  const AdmZip = (await import('adm-zip')).default;
+  const xmlOf = (rel: string) =>
+    new AdmZip(join(ROOT, rel)).getEntry('ComicInfo.xml')!.getData().toString('utf8');
+
+  serve(5);
+  await downloadChapter({
+    sourceId: 'test-partial', seriesFolder: 'T/Credited', chapter: { ...chapter(1), scanlator: 'Alpha & Beta' },
+  } as any);
+  assert.match(xmlOf('T/Credited/Chapter 1.cbz'), /<Translator>Alpha &amp; Beta<\/Translator>/, 'ComicInfo carries the group');
+
+  serve(5);
+  await downloadChapter({ sourceId: 'test-partial', seriesFolder: 'T/Credited', chapter: chapter(2) } as any);
+  assert.doesNotMatch(xmlOf('T/Credited/Chapter 2.cbz'), /<Translator>/, 'no tag at all when nobody was named');
+});

@@ -15,6 +15,8 @@ import { authenticate, roleOf, userIdOf } from '../lib/auth';
 import { warmHeroBackdrops } from './images';
 import { writeProgress, reachedEnd } from '../lib/progress';
 import { enrichSeries, seriesSeen } from '../lib/enrich';
+import { seriesSourcesFor } from '../lib/seriesSources';
+import { readSeriesPrefs } from '../lib/scanlatorPrefs';
 
 
 
@@ -363,11 +365,17 @@ export default async function catalogRoutes(app: FastifyInstance) {
       // or reopening the modal would show the scanned value and saving would undo the correction.
       if (ov.age_rating != null && out.metadata) out.metadata.ageRating = ov.age_rating;
     }
+    // Where the chapters come from: the primary source first, then any followed ones. Every viewer gets
+    // this -- it is what the "Sources" line under the title shows, and nothing in it names the host.
+    out.sources = await seriesSourcesFor(id).catch(() => []);
     // Admins get the on-disk folder, because the rename control needs something to seed from and to show
     // what is about to move. Members do not: it is the one field here that describes the host filesystem.
+    // The series' own release preferences ride along for the same audience: the editor seeds from them, and
+    // null (rather than absent) says "none of its own, the global ones apply".
     if (roleOf(req) === 'admin') {
       const f = await one<{ folder: string }>('SELECT folder FROM lib_series WHERE id = $1', [id]);
       if (f) out.folder = f.folder;
+      out.scanlatorPrefs = await readSeriesPrefs(id).catch(() => null);
     }
     return out;
   });

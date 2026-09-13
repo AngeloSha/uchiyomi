@@ -17,7 +17,7 @@ export function sanitize(s: string): string {
   return (s || '').replace(/[\/\\:*?"<>|]+/g, '_').replace(/\s+/g, ' ').trim().slice(0, 150) || 'untitled';
 }
 
-function comicInfo(d: { series: string; number: number; title?: string; summary?: string; author?: string; genres?: string[]; web?: string; status?: string }): string {
+function comicInfo(d: { series: string; number: number; title?: string; summary?: string; author?: string; genres?: string[]; web?: string; status?: string; scanlator?: string }): string {
   const esc = (x: any = '') => String(x ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   return [
     '<?xml version="1.0" encoding="UTF-8"?>',
@@ -27,6 +27,10 @@ function comicInfo(d: { series: string; number: number; title?: string; summary?
     `  <Number>${d.number}</Number>`,
     `  <Summary>${esc(d.summary)}</Summary>`,
     `  <Writer>${esc(d.author)}</Writer>`,
+    // The group that released this copy, in the ComicInfo v2.1 tag Mihon and Suwayomi write and Komga and
+    // Kavita read -- so the file carries its provenance into any reader, not only into lib_books. Omitted
+    // rather than written empty when the source named nobody, since an empty tag reads as "no translator".
+    ...(d.scanlator ? [`  <Translator>${esc(d.scanlator)}</Translator>`] : []),
     `  <Genre>${esc((d.genres || []).join(', '))}</Genre>`,
     `  <Web>${esc(d.web)}</Web>`,
     `  <ty:PublishingStatusTachiyomi xmlns:ty="http://www.w3.org/2001/XMLSchema">${esc(d.status)}</ty:PublishingStatusTachiyomi>`,
@@ -351,6 +355,7 @@ async function fetchChapter(
     genres: input.meta?.genres,
     web: input.meta?.url || input.chapter.sourceId,
     status: input.meta?.status,
+    scanlator: input.chapter.scanlator,
   })));
 
   await mkdir(dirname(abs), { recursive: true });

@@ -20,6 +20,26 @@ export interface SourceChapter {
   lang?: string;
   pages?: number;
   publishedAt?: string; // ISO release date of the chapter on the source (best-effort for scraped sites)
+  /**
+   * The group that released this copy, as the source shows it. A display string, not an id: a joint
+   * release is the names joined with ' & ', which is the spelling Mihon's scanlator column and the
+   * ComicInfo Translator tag both use, so a file written by us reads the same as one written by them.
+   */
+  scanlator?: string;
+  /**
+   * The individual group names, only when the source is STRUCTURALLY multi-group (MangaDex relationships
+   * carry one entry per group). Every other source hands over one free-text string, and lib/releases.ts
+   * splits that on the usual separators instead -- so an adapter that has only the string must leave this
+   * absent rather than wrapping it in an array, or a "Group A & Group B" release reads as one group named
+   * that and never matches a block on either.
+   */
+  groups?: string[];
+  /**
+   * Adapter id the copy came from. Set ONLY by the updater's multi-source union, where one chapter list is
+   * built from several sources and the chooser needs to rank primary over follower; every adapter leaves
+   * it undefined, because inside one adapter it would only ever say what the caller already knows.
+   */
+  source?: string;
 }
 
 export interface SourceAdapter {

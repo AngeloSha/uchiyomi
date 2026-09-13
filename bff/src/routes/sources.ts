@@ -24,7 +24,9 @@ import { SOLVER_CONCURRENCY } from '../lib/sources/flaresolverr';
 const SCAN_CONCURRENCY = Math.max(1, Number(process.env.SCAN_CONCURRENCY || SOLVER_CONCURRENCY));
 const SCAN_ENOUGH = Math.max(1, Number(process.env.SCAN_ENOUGH || 3));
 const SCAN_SEARCH_MS = Number(process.env.SCAN_SEARCH_MS) || 45_000;
-import { persistScan, setBookDates } from '../lib/library';
+import { persistScan, setBookDates, setBookMeta } from '../lib/library';
+import { chooseReleases } from '../lib/releases';
+import { effectivePrefsFor, readSeriesPrefs } from '../lib/scanlatorPrefs';
 import { fetchAniListArt, fetchTrendingManhwa, TrendingItem } from '../lib/anilist';
 import { q, one } from '../lib/db';
 import { healthAll, isDisabled, blockedNow, reportLatest, reportFail, reportSlow, classify } from '../lib/sourceHealth';
@@ -151,7 +153,7 @@ const ADD_LOOKUP_TIMEOUT = 20_000;
 const DETAIL_TTL = 90_000;
 const detailCache = new Map<string, { at: number; series: SourceSeries | null; chapters: SourceChapter[] }>();
 
-async function seriesAndChapters(src: SourceAdapter, sourceId: string):
+export async function seriesAndChapters(src: SourceAdapter, sourceId: string):
   Promise<{ series: SourceSeries | null; chapters: SourceChapter[] }> {
   const key = `${src.id}:${sourceId}`;
   const hit = detailCache.get(key);
@@ -336,8 +338,15 @@ export async function addSeriesFromSource(opts: {
     if (dup) return { ok: false, status: 409, error: 'duplicate', existing: dup, message: `You already have "${dup.title}" from ${dup.source}. Add this copy anyway?` };
   }
 
-  if (!chapters.length) return { ok: false, status: 404, error: 'no_chapters', message: 'No readable chapters for this title on this source. Try a different source.' };
-  const selected = selectChapters(chapters, chapterCount, chapterFrom);
+  // One copy per chapter number, chosen under the GLOBAL preferences: the series row does not exist yet,
+  // so there is nothing per-series to merge, and patience is 0 because a person is waiting on this add.
+  // The blacklist has to apply here and not only in the sweep. The updater never replaces a chapter that
+  // is already on disk, so a blocked group's copy taken at add time -- the first row a source lists is as
+  // often the group nobody wanted as the one they did -- would be locked in for the life of the series.
+  const prefs = await effectivePrefsFor(null, 0);
+  const { releases: chosen } = chooseReleases(chapters, prefs);
+  if (!chosen.length) return { ok: false, status: 404, error: 'no_chapters', message: 'No readable chapters for this title on this source. Try a different source.' };
+  const selected = selectChapters(chosen, chapterCount, chapterFrom);
   const meta = { series: title, summary: series?.summary, author: series?.author, genres: series?.genres, url: series?.url, status: series?.status };
   jobs.set(folder, { title, total: selected.length, done: 0, status: 'downloading' });
 
@@ -350,8 +359,15 @@ export async function addSeriesFromSource(opts: {
    * the Discover strip knew the download had started while the caller was still waiting to be told.
    */
   const run = async (): Promise<AddResult> => {
+    // Which chapters this run wrote, for the provenance stamp. Only what LANDED, never the selection: a
+    // copy the downloader skipped because the file was already there is somebody else's work.
+    const landed: Array<{ number: number; scanlator?: string; source?: string }> = [];
     let firstPages = 0; let blockReason: string | null = null; let diskFull: string | null = null;
-    try { const r = await downloadChapter({ sourceId: source!, seriesFolder: folder, chapter: selected[0], meta }); firstPages = r.skipped ? 1 : r.pages; }
+    try {
+      const r = await downloadChapter({ sourceId: source!, seriesFolder: folder, chapter: selected[0], meta });
+      firstPages = r.skipped ? 1 : r.pages;
+      if (!r.skipped) landed.push({ number: selected[0].number, scanlator: selected[0].scanlator, source });
+    }
     catch (e: any) { blockReason = e?.blockStatus || null; diskFull = e?.diskFull ? String(e.message) : null; }
     if (!firstPages) {
       // A full disk used to read as "this title may be licensed", which sends a person off to try another
@@ -379,6 +395,7 @@ export async function addSeriesFromSource(opts: {
     const j0 = jobs.get(folder); if (j0) j0.done = 1;
     await persistScan().catch(() => {});
     await setBookDates(folder, selected).catch(() => {});
+    await setBookMeta(folder, landed).catch(() => {});
     // "Latest 25 of 200" leaves 1..175 on the source that we do not hold, and the updater treats every
     // chapter it lists that we lack as missing, oldest first. Without this floor the sweep would backfill
     // those 175 five at a time, night after night, with each new release queued behind them -- the exact
@@ -387,7 +404,7 @@ export async function addSeriesFromSource(opts: {
     // series soft-deleted and added again as "All" must not keep the floor from its earlier life, or a
     // download that stops part-way leaves a remainder the sweep will never touch. The lowest of the
     // selection, not its first element -- a plugin adapter is under no obligation to list ascending.
-    const floor = chapterFrom === 'newest' && selected.length < chapters.length
+    const floor = chapterFrom === 'newest' && selected.length < chosen.length
       ? Math.min(...selected.map((c) => c.number)) : null;
     await q('UPDATE lib_series SET auto_update = $1, source_id = $2, source_series_id = $3, chapter_floor = $5 WHERE folder = $4',
       [autoUpdate !== false, source, sourceId, folder, floor]).catch(() => {});
@@ -403,7 +420,8 @@ export async function addSeriesFromSource(opts: {
       let failures = 0;
       for (const ch of selected.slice(1)) {
         try {
-          await downloadChapter({ sourceId: source!, seriesFolder: folder, chapter: ch, meta });
+          const r = await downloadChapter({ sourceId: source!, seriesFolder: folder, chapter: ch, meta });
+          if (!r.skipped) landed.push({ number: ch.number, scanlator: ch.scanlator, source });
         } catch (e: any) {
           const j = jobs.get(folder);
           if (e?.blockStatus) {
@@ -426,6 +444,7 @@ export async function addSeriesFromSource(opts: {
       }
       await persistScan().catch(() => {});
       await setBookDates(folder, selected).catch(() => {});
+      await setBookMeta(folder, landed).catch(() => {});
       const j = jobs.get(folder);
       if (j && j.status !== 'error') {
         // "Done" has to mean everything landed. A run that lost chapters ends as an error carrying the
@@ -609,7 +628,7 @@ export default async function sourceRoutes(app: FastifyInstance) {
     const p = new Params();
     const rows = await q<any>(
       `SELECT s.id, s.title, s.folder, s.source_id, s.source_series_id, s.summary, s.author, s.genres, s.web, s.status,
-              s.chapter_floor
+              s.chapter_floor, s.scanlator_prefs
          FROM lib_series s WHERE s.id = ${p.add(seriesId)} AND ${browsable('s', vc(req), p)}`, p.values,
     ).then((r) => r, () => null);
     if (rows === null) return reply.code(503).send({ error: 'unavailable' });
@@ -618,9 +637,14 @@ export default async function sourceRoutes(app: FastifyInstance) {
 
     const have = (await q<{ number: number }>('SELECT number FROM lib_books WHERE series_id = $1', [seriesId]))
       .map((r: { number: number }) => Number(r.number)).filter((n: number) => Number.isFinite(n));
+    // The sources the updater already merges into this series (series_sources), so the dialog can mark a
+    // candidate as followed rather than offer to follow it twice.
+    const following = (await q<{ source_id: string }>(
+      'SELECT source_id FROM series_sources WHERE series_id = $1 ORDER BY created_at', [seriesId],
+    ).catch(() => [])).map((r) => r.source_id);
     // Coverage measured against two chapters proves nothing at all: any long series covers them.
     if (have.length < MIN_HAVE) {
-      return { seriesId, title: s.title, have: { count: have.length }, gaps: [], candidates: [],
+      return { seriesId, title: s.title, have: { count: have.length }, gaps: [], candidates: [], following,
         refusal: { code: 'too_few_chapters', message: 'Too few chapters here to match against another source.' } };
     }
     const gaps = gapsOf(have);
@@ -675,20 +699,29 @@ export default async function sourceRoutes(app: FastifyInstance) {
     // shared lookup so it reuses whatever the add dialog already fetched.
     const chapters = new Map<string, SourceChapter[]>();
     const candidates: PlanCandidate[] = [];
+    // The series' own release preferences over the global ones, with patience off: a person is choosing
+    // from this list now, and holding a chapter for a group that may never post here would read as "not
+    // on this source".
+    const prefs = await effectivePrefsFor(await readSeriesPrefs(seriesId), 0);
     // One read for every source, rather than one blockedNow() per candidate: the same row answers "is it
     // in a cooldown" and "what is its record", and the record is what the dialog was never told.
     const health = new Map((await healthAll().catch(() => [])).map((h) => [h.source_id, h]));
     await Promise.all(found.map(async (f) => {
       const src = getSource(f.source);
       if (!src) return;
-      let list: SourceChapter[] = [];
+      let raw: SourceChapter[] = [];
       let why: Refusal = 'ok';
       const h = health.get(f.source);
       if (h?.blocked_until && new Date(h.blocked_until).getTime() > Date.now()) why = 'blocked';
       else {
-        try { list = (await seriesAndChapters(src, f.sourceId)).chapters; }
+        try { raw = (await seriesAndChapters(src, f.sourceId)).chapters; }
         catch { why = 'no_chapters'; }
       }
+      // One copy per number BEFORE the list is assessed or stored in the plan. `authorise` filters the
+      // stored list by number, so a plan holding two copies of chapter 5 would answer a fill of [5] with
+      // both: the second is skipped at the file check, but the job's total counts it, and the bar ends
+      // one short of full on a fill that did everything it was asked.
+      const list = chooseReleases(raw, prefs).releases;
       const nums = list.map((c) => c.number);
       // The run below a "Latest N" add is offered from the series' own source and nowhere else: this is the
       // dialog the add hint sends people to for the older chapters, and it must be able to deliver them.
@@ -732,7 +765,7 @@ export default async function sourceRoutes(app: FastifyInstance) {
     return {
       seriesId, title: s.title, folder: s.folder,
       have: { count: have.length, first: Math.min(...have), last: Math.max(...have) },
-      gaps, candidates, planId: plan.id, expiresIn: PLAN_TTL, fillMax: FILL_MAX_CHAPTERS,
+      gaps, candidates, following, planId: plan.id, expiresIn: PLAN_TTL, fillMax: FILL_MAX_CHAPTERS,
       refusal: gaps.length || candidates.some((c) => c.newer.length || c.older.length) ? null
         : { code: 'no_gaps', message: 'Nothing is missing between the chapters you already have.' },
     };
@@ -774,6 +807,8 @@ export default async function sourceRoutes(app: FastifyInstance) {
 
     void (async () => {
       let failures = 0;
+      // What this fill wrote, for the provenance stamp; a skipped copy was already on disk and is not ours.
+      const landed: Array<{ number: number; scanlator?: string; source?: string }> = [];
       for (const ch of picked) {
         try {
           /**
@@ -790,6 +825,7 @@ export default async function sourceRoutes(app: FastifyInstance) {
             sourceId: source, seriesFolder: s.folder, chapter: ch,
             meta: { series: s.title, summary: s.summary, author: s.author, genres: s.genres, url: s.web, status: s.status },
           });
+          if (!res.skipped) landed.push({ number: ch.number, scanlator: ch.scanlator, source });
           const j = jobs.get(s.folder);
           if (j && !res.skipped) { j.done++; if (j.done % 5 === 0) await persistScan().catch(() => {}); }
         } catch (e: any) {
@@ -814,6 +850,7 @@ export default async function sourceRoutes(app: FastifyInstance) {
       }
       await persistScan().catch(() => {});
       await setBookDates(s.folder, picked).catch(() => {});
+      await setBookMeta(s.folder, landed).catch(() => {});
       const j = jobs.get(s.folder);
       if (j && j.status !== 'error') { j.status = failures ? 'error' : 'done'; j.finishedAt = Date.now(); }
     })();
@@ -1010,12 +1047,15 @@ export default async function sourceRoutes(app: FastifyInstance) {
     if (!sourceAllowedFor(src, vc(req).maxAgeRating)) return denySource(reply);
     // Through the shared lookup so the add that usually follows this reuses it rather than re-solving.
     const { series, chapters } = await seriesAndChapters(src, sourceId);
-    const nums = chapters.map((c) => c.number);
+    // Counted the way the add will take them -- one copy per number, the global blacklist applied -- so
+    // the dialog's "120 chapters" is the 120 the add lands and not the 200 rows the source listed.
+    const chosen = chooseReleases(chapters, await effectivePrefsFor(null, 0)).releases;
+    const nums = chosen.map((c) => c.number);
     return {
       source, sourceId,
       title: series?.title || '', summary: series?.summary || '', coverUrl: series?.coverUrl || null,
       genres: series?.genres || [], status: series?.status || '',
-      count: chapters.length, first: nums.length ? Math.min(...nums) : null, last: nums.length ? Math.max(...nums) : null,
+      count: chosen.length, first: nums.length ? Math.min(...nums) : null, last: nums.length ? Math.max(...nums) : null,
     };
   });
 

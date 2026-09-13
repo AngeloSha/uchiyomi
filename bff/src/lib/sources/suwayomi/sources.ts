@@ -110,6 +110,9 @@ function toChapter(c: RemoteChapter): SourceChapter | null {
     title: c.name?.trim() || `Chapter ${num}`,
     pages: typeof c.pageCount === 'number' && c.pageCount > 0 ? c.pageCount : undefined,
     publishedAt: Number.isFinite(when) && when > 0 ? new Date(when).toISOString() : undefined,
+    // Mihon's free-text scanlator column, verbatim. Blank means the extension does not know, and the
+    // chooser treats an absent group differently from an empty-named one, so it must not become ''.
+    scanlator: c.scanlator?.trim() || undefined,
   };
 }
 
@@ -177,10 +180,12 @@ export function makeSuwayomiAdapter(remote: RemoteSource, run: Gql = defaultGql)
       const d = await run<{ fetchChapters: { chapters: RemoteChapter[] } }>(FETCH_CHAPTERS, { mangaId: Number(seriesId) });
       const list = d?.fetchChapters?.chapters;
       if (!Array.isArray(list)) return [];
-      const seen = new Set<number>();
+      // Every copy of a number is reported, not just the first the engine listed. The choice between
+      // groups belongs to lib/releases.ts, which knows the series' preference; this adapter's job is to
+      // say who released what. Sorting stays: callers diff the list in order.
       return list
         .map(toChapter)
-        .filter((c): c is SourceChapter => !!c && (seen.has(c.number) ? false : (seen.add(c.number), true)))
+        .filter((c): c is SourceChapter => !!c)
         .sort((a, b) => a.number - b.number);
     },
 

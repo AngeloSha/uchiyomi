@@ -34,11 +34,15 @@ const skip = DSN ? false : 'set TEST_DATABASE_URL to run';
 
 const LIB = 'lib_fill', SERIES = 's_fill_1', FOLDER = 'Rich Source/Filled Series';
 const LATEST = 's_fill_latest', LATEST_FOLDER = 'Rich Source/Latest Series';
+const DUPE_SERIES = 's_fill_dupe', DUPE_FOLDER = 'Dupe Source/Dupe Series';
 const RICH = 'fill-rich';      // has 1..10
 const POOR = 'fill-poor';      // has only 8..10, which is what our library was built from
 const WRONG = 'fill-wrong';    // a different series that numbers 1..3
+const DUPE = 'fill-dupe';      // lists chapter 5 twice, once per group, the way MangaDex does
 const USER = 'fill-admin';
 let q: any, app: any, tok: string, uid: string;
+/** How many times the dupe source was asked for a chapter's pages: the number of downloads it served. */
+let dupePageCalls = 0;
 
 const page = (n: number) => ({ sourceId: `c/${n}`, number: n, title: `Chapter ${n}` });
 
@@ -66,6 +70,25 @@ function fake(id: string, name: string, nums: number[], title: string) {
   };
 }
 
+/** Chapters 3..7 with chapter 5 released by two groups: six rows for five numbers, each copy under its own id. */
+function dupe() {
+  return {
+    id: DUPE, name: 'Dupe Source',
+    async search() { return [{ sourceId: `${DUPE}-s`, source: DUPE, title: 'Dupe Series', coverUrl: undefined }]; },
+    async getSeries(sid: string) { return { sourceId: sid, source: DUPE, title: 'Dupe Series' }; },
+    async listChapters() {
+      return [
+        page(3), page(4),
+        { sourceId: 'c/5-a', number: 5, title: 'Chapter 5', scanlator: 'Group A' },
+        { sourceId: 'c/5-b', number: 5, title: 'Chapter 5', scanlator: 'Group B' },
+        page(6), page(7),
+      ];
+    },
+    async getPageUrls() { dupePageCalls++; return ['https://example.invalid/p1.jpg']; },
+    async latest() { return []; },
+  };
+}
+
 before(async () => {
   if (!DSN) return;
   const { migrate } = await import('../src/lib/migrate');
@@ -79,10 +102,11 @@ before(async () => {
   registerAdapter(fake(RICH, 'Rich Source', [1,2,3,4,5,6,7,8,9,10,11], 'Filled Series Deluxe Edition') as any);
   registerAdapter(fake(POOR, 'Poor Source', [8,9,10,11], 'Filled Series') as any);
   registerAdapter(fake(WRONG, 'Wrong Source', [1,2,3], 'Filled Series') as any);
+  registerAdapter(dupe() as any);
 
   // A previous run's failed downloads leave these fakes marked blocked in source_health, and a blocked source
   // is (correctly) not offered -- which would make this file fail for a reason that has nothing to do with it.
-  await q('DELETE FROM source_health WHERE source_id = ANY($1)', [[RICH, POOR, WRONG]]);
+  await q('DELETE FROM source_health WHERE source_id = ANY($1)', [[RICH, POOR, WRONG, DUPE]]);
 
   await q(`INSERT INTO libraries (id, name, path) VALUES ($1,'Fill',$1) ON CONFLICT (id) DO NOTHING`, [LIB]);
   await q(`DELETE FROM lib_series WHERE id = $1`, [SERIES]);
@@ -105,6 +129,16 @@ before(async () => {
              VALUES ($1,$2,'T!fill',$3,$4,$5,'/library') ON CONFLICT (id) DO NOTHING`,
       [`b_latest_${n}`, LATEST, `${LATEST_FOLDER}/Chapter ${n}.cbz`, n, `Chapter ${n}`]);
   }
+  // A series holding 3,4,6,7 -- a hole at 5 -- for the two-group listing below.
+  await q(`DELETE FROM lib_series WHERE id = $1`, [DUPE_SERIES]);
+  await q(`INSERT INTO lib_series (id, source, title, folder, books_count, library_id, source_id, source_series_id, summary, author)
+           VALUES ($1,'T!fill','Dupe Series',$2,4,$3,$4,'dupe-s','Our summary','Our author')`,
+    [DUPE_SERIES, DUPE_FOLDER, LIB, DUPE]);
+  for (const n of [3, 4, 6, 7]) {
+    await q(`INSERT INTO lib_books (id, series_id, source, file, number, title, root)
+             VALUES ($1,$2,'T!fill',$3,$4,$5,'/library') ON CONFLICT (id) DO NOTHING`,
+      [`b_dupe_${n}`, DUPE_SERIES, `${DUPE_FOLDER}/Chapter ${n}.cbz`, n, `Chapter ${n}`]);
+  }
   await q('DELETE FROM users WHERE username = $1', [USER]);
   uid = (await q(`INSERT INTO users (username, display_name, password_hash, role, auth_kind)
                   VALUES ($1,$1,'x','admin','password') RETURNING id`, [USER]))[0].id;
@@ -120,11 +154,12 @@ after(async () => {
   if (root) rmSync(root, { recursive: true, force: true });
   if (!DSN) return;
   await app?.close();
-  await q('DELETE FROM lib_books WHERE series_id = ANY($1)', [[SERIES, LATEST]]).catch(() => {});
-  await q('DELETE FROM lib_series WHERE id = ANY($1)', [[SERIES, LATEST]]).catch(() => {});
+  await q('DELETE FROM series_sources WHERE series_id = ANY($1)', [[SERIES, LATEST, DUPE_SERIES]]).catch(() => {});
+  await q('DELETE FROM lib_books WHERE series_id = ANY($1)', [[SERIES, LATEST, DUPE_SERIES]]).catch(() => {});
+  await q('DELETE FROM lib_series WHERE id = ANY($1)', [[SERIES, LATEST, DUPE_SERIES]]).catch(() => {});
   await q('DELETE FROM libraries WHERE id = $1', [LIB]).catch(() => {});
   await q('DELETE FROM users WHERE username = $1', [USER]).catch(() => {});
-  await q('DELETE FROM source_health WHERE source_id = ANY($1)', [[RICH, POOR, WRONG]]).catch(() => {});
+  await q('DELETE FROM source_health WHERE source_id = ANY($1)', [[RICH, POOR, WRONG, DUPE]]).catch(() => {});
 });
 
 const scan = (body: any = {}) =>
@@ -248,6 +283,80 @@ test('a stale plan is refused rather than re-derived', { skip }, async () => {
   });
   assert.equal(res.statusCode, 409);
   assert.equal(res.json().error, 'plan_stale');
+});
+
+
+/**
+ * A candidate that lists chapter 5 once per group goes into the plan as ONE copy of 5.
+ *
+ * `authorise` filters the stored list by number, so two stored copies answer a fill of [5] with both. The
+ * second is skipped at the downloader's file check -- the archive is named by number alone -- but the fill's
+ * `total` counts it, the job ends "done" at 1 of 2, and the bar sits one short of full on a fill that did
+ * everything it was asked. Reintroduce by storing the raw list (`const list = raw` in the scan route, in
+ * place of chooseReleases): `one copy per number` reads 6 and `one download, not one per group` reads 2.
+ *
+ * Reintroduce the stamp by removing `setBookMeta(s.folder, landed)` from the fill route: `stamped with the
+ * group whose copy landed` reads null.
+ */
+test('a two-group listing is planned as one copy per number, filled once, and stamped', { skip }, async (t) => {
+  const j = (await scan({ seriesId: DUPE_SERIES })).json();
+  const cand = j.candidates.find((c: any) => c.source === DUPE);
+  assert.ok(cand, 'the dupe source was found by title');
+
+  await t.test('the plan holds one copy of chapter 5', () => {
+    assert.equal(cand.why, 'ok', `judged on its chapters, got ${cand.why}`);
+    assert.equal(cand.count, 5, 'one copy per number');
+    assert.deepEqual(cand.fillable, [5]);
+    assert.deepEqual([cand.first, cand.last], [3, 7]);
+  });
+
+  await t.test('a fill of [5] is one download, and the job ends whole', async () => {
+    dupePageCalls = 0;
+    const r = await app.inject({
+      method: 'POST', url: '/api/sources/fill', headers: { authorization: tok },
+      payload: { planId: j.planId, source: DUPE, sourceSeriesId: cand.sourceSeriesId, numbers: [5] },
+    });
+    assert.equal(r.statusCode, 200, r.body);
+    assert.equal(r.json().total, 1, 'one download, not one per group');
+    let job: any = null;
+    for (let i = 0; i < 40 && job?.status !== 'done'; i++) {
+      await new Promise((res) => setTimeout(res, 250));
+      job = (await app.inject({ method: 'GET', url: '/api/sources/jobs', headers: { authorization: tok } })).json()
+        .content.find((x: any) => x.folder === DUPE_FOLDER);
+    }
+    assert.equal(job?.status, 'done', `job: ${JSON.stringify(job)}`);
+    assert.equal(job.done, job.total, 'the bar reaches full');
+    // Not the pin -- the downloader's on-disk check would skip a second copy before it reached the source
+    // even with the raw list stored -- just the sanity check that nothing was fetched twice. `total` above
+    // is the assertion the reintroduction fails.
+    assert.equal(dupePageCalls, 1, 'the source served exactly one chapter');
+  });
+
+  await t.test('the book that landed is stamped with its group and adapter', async () => {
+    // The stamp is written after the scan that creates the row, so it is there by the time the job is done.
+    const row = (await q(`SELECT scanlator, source_id FROM lib_books WHERE series_id = $1 AND number = 5`, [DUPE_SERIES]))[0];
+    assert.ok(row, 'chapter 5 was scanned in');
+    assert.deepEqual({ scanlator: row.scanlator, source_id: row.source_id }, { scanlator: 'Group A', source_id: DUPE },
+      'stamped with the group whose copy landed');
+  });
+});
+
+
+/**
+ * The scan says which sources the series already follows, so the dialog can mark them rather than offer to
+ * follow one twice. Reintroduce by dropping `following` from the scan response: `nothing followed yet` reads
+ * undefined.
+ */
+test('the scan lists the sources the series already follows', { skip }, async () => {
+  let j = (await scan({ seriesId: DUPE_SERIES })).json();
+  assert.deepEqual(j.following, [], 'nothing followed yet');
+  await q(`INSERT INTO series_sources (series_id, source_id, source_series_id) VALUES ($1, $2, 'dupe-s')`, [DUPE_SERIES, RICH]);
+  try {
+    j = (await scan({ seriesId: DUPE_SERIES })).json();
+    assert.deepEqual(j.following, [RICH], 'the followed source is named');
+  } finally {
+    await q('DELETE FROM series_sources WHERE series_id = $1', [DUPE_SERIES]);
+  }
 });
 
 

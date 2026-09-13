@@ -50,29 +50,53 @@ function toSeries(m: any): SourceSeries {
  */
 const CHAPTER_LANGS = ['en', 'es-la', 'es', 'pt-br', 'fr', 'ru', 'id'] as const;
 
-/** Every chapter MangaDex lists for one series in one language, paged out and deduped by chapter number. */
+/** The groups credited on one feed row, in the order MangaDex lists them. Empty when none is attached. */
+function groupsOn(c: any): string[] {
+  return ((c.relationships || []) as any[])
+    .filter((r) => r?.type === 'scanlation_group')
+    .map((r) => (typeof r.attributes?.name === 'string' ? r.attributes.name.trim() : ''))
+    .filter(Boolean);
+}
+
+/**
+ * Every chapter MangaDex lists for one series in one language, paged out, ascending by number. A number
+ * with several releases comes back as several rows.
+ *
+ * `includes[]=scanlation_group` expands each row's group relationships from bare `{id,type}` to carry the
+ * group's attributes; without it the name is a second request per group. `groups` keeps the names apart
+ * because MangaDex is the one source that lists them structurally, and `scanlator` joins them the way
+ * Mihon shows a joint release, so the ComicInfo Translator tag reads the same from either app.
+ */
 async function feedFor(seriesId: string, lang: string): Promise<SourceChapter[]> {
   const all: SourceChapter[] = [];
   let offset = 0;
   let total = Infinity;
   while (offset < total) {
-    const j = await jget(`${API}/manga/${seriesId}/feed?translatedLanguage[]=${encodeURIComponent(lang)}&order[chapter]=asc&order[volume]=asc&limit=500&offset=${offset}&${RATINGS}`);
+    const j = await jget(`${API}/manga/${seriesId}/feed?translatedLanguage[]=${encodeURIComponent(lang)}&order[chapter]=asc&order[volume]=asc&limit=500&offset=${offset}&${RATINGS}&includes[]=scanlation_group`);
     total = j.total ?? 0;
     for (const c of j.data || []) {
       const num = parseFloat(c.attributes?.chapter);
       if (Number.isNaN(num)) continue;
-      all.push({ sourceId: c.id, number: num, title: c.attributes?.title || undefined, lang: c.attributes?.translatedLanguage, pages: c.attributes?.pages, publishedAt: c.attributes?.publishAt || c.attributes?.readableAt || undefined });
+      const groups = groupsOn(c);
+      all.push({
+        sourceId: c.id,
+        number: num,
+        title: c.attributes?.title || undefined,
+        lang: c.attributes?.translatedLanguage,
+        pages: c.attributes?.pages,
+        publishedAt: c.attributes?.publishAt || c.attributes?.readableAt || undefined,
+        scanlator: groups.length ? groups.join(' & ') : undefined,
+        groups: groups.length ? groups : undefined,
+      });
     }
     offset += 500;
     if (!j.data?.length) break;
   }
-  // one entry per chapter number, preferring hosted chapters (pages>0) over external/licensed (pages=0)
-  const byNum = new Map<number, SourceChapter>();
-  for (const c of all) {
-    const ex = byNum.get(c.number);
-    if (!ex || ((c.pages || 0) > 0 && (ex.pages || 0) === 0)) byNum.set(c.number, c);
-  }
-  return [...byNum.values()].sort((a, b) => a.number - b.number);
+  // No collapse to one row per number here any more. This used to keep a hosted copy (pages>0) over an
+  // external one (pages=0) and otherwise the first seen; hosted-beats-external is now a tie-break in the
+  // chooser in lib/releases.ts, which needs `pages`, already on the row, and which is the only place that
+  // knows which group the reader wanted.
+  return all.sort((a, b) => a.number - b.number);
 }
 
 export const mangadex: SourceAdapter = {
@@ -118,10 +142,10 @@ export const mangadex: SourceAdapter = {
     // Portuguese came back with zero chapters and could not be added at all. It looked like a dead series.
     //
     // Why not simply drop the filter, which is what the obvious fix does: chapter numbers repeat across
-    // languages, and the dedup below keeps whichever entry it happens to see with pages>0 -- it has no
-    // notion of a preferred language. Pulling every language at once therefore produces a chapter list
-    // whose language is decided arbitrarily, per chapter. Asking one language at a time and stopping at the
-    // first that answers keeps the result single-language, so the dedup never has to arbitrate.
+    // languages, and the chooser in lib/releases.ts picks one copy per number by group, hosting and date --
+    // it has no notion of a preferred language. Pulling every language at once therefore produces a chapter
+    // list whose language is decided arbitrarily, per chapter. Asking one language at a time and stopping at
+    // the first that answers keeps the result single-language, so the chooser never has to arbitrate that.
     //
     // It also protects the reason this adapter declares `lang: 'en'` at all (see the comment up top):
     // reporting no language made it join every language group, and picking Japanese in the UI then filled a

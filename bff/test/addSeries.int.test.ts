@@ -27,6 +27,11 @@
 //     updater's oldest-missing-first loop backfills everything below the selection five per night with each
 //     new release queued behind it.
 //
+//  5. A source that lists a chapter once per group (MangaDex, or any site with two active teams) handed the
+//     add every row, so "2 chapters" downloaded three times and the first row for a number -- as often the
+//     group nobody wanted as the one they did -- was the copy that landed. The updater never replaces a file
+//     that is on disk, so a blocked group's copy taken at add time was locked in for the life of the series.
+//
 // Skipped automatically unless TEST_DATABASE_URL is set.
 import test, { before, after } from 'node:test';
 import assert from 'node:assert/strict';
@@ -53,9 +58,12 @@ const skip = DSN ? false : 'set TEST_DATABASE_URL to run';
 const MOODY = 'add-moody';   // fails once, then works: the transient case
 const NAMELESS = 'add-noname';
 const LATEST = 'add-latest'; // five chapters that really download, for the "latest N" add
+const GROUPS = 'add-groups'; // chapter 1 from two groups, the blocked one listed first
 const USER = 'add-route-user';
 let addSeriesFromSource: any, q: any;
 let moodyCalls = 0;
+/** Which chapter ids the groups source was asked for pages: who the add actually downloaded from. */
+let asked: string[] = [];
 
 const chapter = (n: number) => ({ number: n, title: `Chapter ${n}`, id: `c${n}`, pages: 1 });
 /** A one-pixel PNG, comfortably over the 256-byte floor the downloader uses to skip blocked responses. */
@@ -70,6 +78,28 @@ function latest() {
     async getSeries(sid: string) { return { sourceId: sid, source: LATEST, title: 'Caught Up' }; },
     async listChapters() { return [1, 2, 3, 4, 5].map((n) => ({ number: n, title: `Chapter ${n}`, sourceId: `c${n}`, pages: 1 })); },
     async getPageUrls(chId: string) { return [`https://example.invalid/${chId}/p1.png`]; },
+    async latest() { return []; },
+  };
+}
+
+/**
+ * Chapter 1 released by two groups, Bad Group's row first, and chapter 2 by Good Group alone. Three rows,
+ * two chapter numbers: exactly what a MangaDex listing looks like. Each copy has its own chapter id, which is
+ * how `asked` can tell whose copy was fetched.
+ */
+function groups() {
+  return {
+    id: GROUPS, name: 'Groups Source',
+    async search() { return []; },
+    async getSeries(sid: string) { return { sourceId: sid, source: GROUPS, title: 'Two Groups' }; },
+    async listChapters() {
+      return [
+        { number: 1, title: 'Chapter 1', sourceId: 'bad-c1', pages: 1, scanlator: 'Bad Group' },
+        { number: 1, title: 'Chapter 1', sourceId: 'good-c1', pages: 1, scanlator: 'Good Group' },
+        { number: 2, title: 'Chapter 2', sourceId: 'good-c2', pages: 1, scanlator: 'Good Group' },
+      ];
+    },
+    async getPageUrls(chId: string) { asked.push(chId); return [`https://example.invalid/${chId}/p1.png`]; },
     async latest() { return []; },
   };
 }
@@ -111,14 +141,16 @@ before(async () => {
   registerAdapter(moody() as any);
   registerAdapter(nameless() as any);
   registerAdapter(latest() as any);
+  registerAdapter(groups() as any);
 });
 
 after(async () => {
   globalThis.fetch = realFetch;
   if (root) rmSync(root, { recursive: true, force: true });
   if (!DSN) return;
-  await q(`DELETE FROM lib_series WHERE source_id = ANY($1)`, [[MOODY, NAMELESS, LATEST]]).catch(() => {});
+  await q(`DELETE FROM lib_series WHERE source_id = ANY($1)`, [[MOODY, NAMELESS, LATEST, GROUPS]]).catch(() => {});
   await q('DELETE FROM users WHERE username = $1', [USER]).catch(() => {});
+  await q(`UPDATE server_settings SET scanlator_prefs = DEFAULT WHERE id = 1`).catch(() => {});
 });
 
 test('an add that cannot name the series does not invent one', { skip }, async (t) => {
@@ -218,6 +250,65 @@ test('a "latest 2 of 5" add lands 4 and 5, and floors the series at 4', { skip }
 });
 
 /**
+ * A source that lists chapter 1 twice hands the add ONE copy, and not the blocked group's.
+ *
+ * Reintroduce by replacing `chooseReleases(chapters, prefs)` in addSeriesFromSource with the raw list
+ * (`const chosen = chapters`): `two chapter numbers, not three listed rows` reads 3, and behind it the
+ * archive names Bad Group, because the raw list's first row for chapter 1 is Bad Group's.
+ *
+ * Reintroduce the stamp by removing the `setBookMeta(folder, landed)` call at BOTH download sites in
+ * addSeriesFromSource (after the first chapter and after the background loop): the `stamped with the
+ * group that released it` assertion reads null for both books. Removing only the background one loses
+ * chapter 2's stamp; removing only the first one is covered by the background call, which stamps everything
+ * the run landed.
+ */
+test('an add from a two-group listing takes the unblocked copy, and stamps who released it', { skip }, async (t) => {
+  globalThis.fetch = (async () => new Response(PIXEL, { status: 200, headers: { 'content-type': 'image/png' } })) as typeof fetch;
+  const folder = 'Groups Source/Two Groups';
+  await q(`UPDATE server_settings SET scanlator_prefs = $1 WHERE id = 1`,
+    [JSON.stringify({ priority: [], blocked: ['Bad Group'], patienceDays: 2 })]);
+  try {
+    await t.test('the add counts two chapters and fetches Good Group\'s chapter 1', async () => {
+      asked = [];
+      const r = await addSeriesFromSource({ source: GROUPS, sourceId: `${GROUPS}-1`, wait: true });
+      assert.equal(r.ok, true, r.message);
+      assert.equal(r.chapters, 2, 'two chapter numbers, not three listed rows');
+      assert.ok(asked.includes('good-c1'), `Good Group's copy was fetched; asked for ${JSON.stringify(asked)}`);
+      assert.ok(!asked.includes('bad-c1'), `Bad Group's copy was never fetched; asked for ${JSON.stringify(asked)}`);
+    });
+
+    await t.test('the archive names the group in ComicInfo', async () => {
+      const AdmZip = (await import('adm-zip')).default;
+      const xml = new AdmZip(join(root, folder, 'Chapter 1.cbz')).readAsText('ComicInfo.xml');
+      assert.match(xml, /<Translator>Good Group<\/Translator>/, 'the file carries its provenance into any reader');
+    });
+
+    await t.test('once the background loop settles, both books are stamped with the group and the adapter', async () => {
+      // Chapter 1 is stamped before the add returns; chapter 2 lands in the detached loop that ends with
+      // its own scan and stamp. Poll for the second rather than guess a duration.
+      const rows = async () => (await q(
+        `SELECT b.number, b.scanlator, b.source_id FROM lib_books b JOIN lib_series s ON s.id = b.series_id
+          WHERE s.folder = $1 ORDER BY b.number`, [folder]))
+        .map((r: any) => ({ number: Number(r.number), scanlator: r.scanlator, source_id: r.source_id }));
+      const until = Date.now() + 15_000;
+      let have: any[] = [];
+      while (Date.now() < until) {
+        have = await rows();
+        if (have.length >= 2 && have.every((b) => b.scanlator)) break;
+        await new Promise((r) => setTimeout(r, 100));
+      }
+      assert.deepEqual(have, [
+        { number: 1, scanlator: 'Good Group', source_id: GROUPS },
+        { number: 2, scanlator: 'Good Group', source_id: GROUPS },
+      ], 'stamped with the group that released it');
+    });
+  } finally {
+    await q(`UPDATE server_settings SET scanlator_prefs = DEFAULT WHERE id = 1`);
+    globalThis.fetch = realFetch;
+  }
+});
+
+/**
  * The route validates its body rather than casting it.
  *
  * Reintroduce by restoring the plain `as { ... }` cast in POST /api/sources/add: 'sideways' is accepted, read
@@ -252,6 +343,14 @@ test('POST /api/sources/add refuses a chapterFrom it does not know', { skip }, a
     await t.test('a missing source or sourceId is still the same 400', async () => {
       const r = await app.inject({ method: 'POST', url: '/api/sources/add', headers, payload: { source: LATEST } });
       assert.equal(r.statusCode, 400);
+    });
+    await t.test('GET /api/sources/detail counts chapter numbers, not listed rows', async () => {
+      // The dialog's count has to be what the add will land. Reintroduce by counting `chapters` instead of
+      // `chosen` in the detail route: `count` reads 3.
+      const r = await app.inject({ method: 'GET', url: `/api/sources/detail?source=${GROUPS}&sourceId=${GROUPS}-1`, headers });
+      assert.equal(r.statusCode, 200, r.body);
+      assert.equal(r.json().count, 2, 'three rows list two chapter numbers');
+      assert.equal(r.json().last, 2);
     });
   } finally { await app.close(); }
 });

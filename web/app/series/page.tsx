@@ -5,7 +5,7 @@ import { motion } from 'framer-motion';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, img } from '@/lib/api';
-import { Book, Page, Series } from '@/lib/types';
+import { Book, Page, Series, SeriesSource, StoredPrefs } from '@/lib/types';
 import { chapterLabel, isVolumeName, relativeTime } from '@/lib/format';
 import { listDownloads, downloadChapter, deleteDownload } from '@/lib/downloads';
 import { applyCover, clearCover } from '@/lib/theme';
@@ -17,6 +17,7 @@ import { useAuth, canDownload } from '@/lib/auth';
 import { IcChevronLeft, IcHeart, IcStar, IcPlay, IcDownload, IcCheck, IcTrash, IcSliders, IcMoments } from '@/components/icons';
 import { t as tr } from '@/lib/i18n';
 import { FindMissingDialog } from '@/components/FindMissingDialog';
+import { hasGroup, normGroup, reorder, withoutGroup } from '@/lib/scanlators';
 
 // The four the scanner itself writes from ComicInfo's PublishingStatus. Kept as a suggestion list rather
 // than a hard enum, because a file can carry anything and rejecting it would reject Uchiyomi's own data.
@@ -38,6 +39,165 @@ function ArtEditor({ label, kind, busy, onUpload, onSetUrl, onReset }: { label: 
         <input value={url} onChange={(e) => setUrl(e.target.value)} placeholder={tr('…or paste an image URL')} autoCapitalize="none" className={`${fld} flex-1`} />
         <button onClick={() => { onSetUrl(kind, url); setUrl(''); }} disabled={busy || !url.trim()} className="btn-accent px-3 text-xs disabled:opacity-50">Set</button>
       </div>
+    </div>
+  );
+}
+
+interface ScanlatorGroup { name: string; onDisk: number; listed: number }
+interface ScanlatorInfo {
+  prefs: StoredPrefs | null;
+  global: StoredPrefs;
+  effective: { priority: string[]; blocked: string[]; patienceDays: number };
+  groups: ScanlatorGroup[];
+}
+interface PrefsDraft { priority: string[]; blocked: string[]; patience: string }
+
+/**
+ * Which groups' releases the updater takes for this series, and how long it waits for a preferred one.
+ *
+ * Collapsed by default and fetched only when opened: the group list is built by asking the source for the
+ * full chapter listing, which is a network call the edit dialog should not make for every "fix the title".
+ *
+ * The draft is seeded from the STORED override, not from the effective rules. The effective priority is
+ * the server default when this series has none of its own, and seeding from it would turn "follows the
+ * defaults" into a per-series copy of them on the first Save -- a copy that then stops following when the
+ * defaults change. Blank patience means the same thing for the same reason.
+ */
+function ScanlatorPrefs({ id, onSaved }: { id: string; onSaved: () => void }) {
+  const toast = useToast();
+  const qc = useQueryClient();
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const { data, isLoading, error } = useQuery({
+    queryKey: ['series-scanlators', id],
+    queryFn: () => api<ScanlatorInfo>(`/api/admin/series/${id}/scanlators`),
+    enabled: open,
+  });
+  // `null` until the row arrives, so a half-loaded form can never save an empty ruleset over a real one.
+  const [draft, setDraft] = useState<PrefsDraft | null>(null);
+  useEffect(() => {
+    if (data && !draft) {
+      setDraft({ priority: data.prefs?.priority ?? [], blocked: data.prefs?.blocked ?? [],
+                 patience: data.prefs?.patienceDays == null ? '' : String(data.prefs.patienceDays) });
+    }
+  }, [data, draft]);
+
+  // One row per group, by the server's equality: ranked groups first in rank order, then blocked ones, then
+  // everything the source lists or the disk holds, busiest first. A group that is in the stored lists but
+  // no longer appears anywhere still gets a row, or there would be no way to un-block it.
+  const rows = useMemo(() => {
+    if (!data || !draft) return [] as ScanlatorGroup[];
+    const counts = new Map(data.groups.map((g) => [normGroup(g.name), g]));
+    const seen = new Set<string>();
+    const out: ScanlatorGroup[] = [];
+    const push = (name: string) => {
+      const k = normGroup(name);
+      if (!k || seen.has(k)) return;
+      seen.add(k);
+      const g = counts.get(k);
+      out.push({ name: g?.name ?? name, onDisk: g?.onDisk ?? 0, listed: g?.listed ?? 0 });
+    };
+    draft.priority.forEach(push);
+    draft.blocked.forEach(push);
+    [...data.groups].sort((a, b) => b.listed - a.listed || b.onDisk - a.onDisk).forEach((g) => push(g.name));
+    return out;
+  }, [data, draft]);
+
+  const rankIn = (priority: string[], name: string) => { const k = normGroup(name); return priority.findIndex((p) => normGroup(p) === k); };
+  // Preferring a group unblocks it and blocking one un-ranks it: a group in both lists would be blocked
+  // (the server takes the union) while showing a rank that can never be used.
+  const togglePrefer = (name: string) => setDraft((d) => d && (rankIn(d.priority, name) >= 0
+    ? { ...d, priority: withoutGroup(d.priority, name) }
+    : { ...d, priority: [...d.priority, name], blocked: withoutGroup(d.blocked, name) }));
+  const toggleBlock = (name: string) => setDraft((d) => d && (hasGroup(d.blocked, name)
+    ? { ...d, blocked: withoutGroup(d.blocked, name) }
+    : { ...d, blocked: [...d.blocked, name], priority: withoutGroup(d.priority, name) }));
+  const move = (name: string, dir: -1 | 1) => setDraft((d) => d && { ...d, priority: reorder(d.priority, rankIn(d.priority, name), dir) });
+
+  const patch = async (scanlatorPrefs: StoredPrefs | null) => {
+    setBusy(true);
+    try {
+      await api(`/api/admin/series/${id}`, { method: 'PATCH', json: { scanlatorPrefs } });
+      toast(tr('Saved'), 'success');
+      qc.invalidateQueries({ queryKey: ['series-scanlators', id] });
+      onSaved();
+      return true;
+    } catch (e) { toast(msgOf(e, tr('Could not save')), 'error'); return false; }
+    finally { setBusy(false); }
+  };
+  const save = () => {
+    if (!draft) return;
+    const raw = draft.patience.trim();
+    const patienceDays = raw === '' ? null : Number(raw);
+    if (patienceDays != null && (!Number.isInteger(patienceDays) || patienceDays < 0 || patienceDays > 30)) {
+      toast(tr('Patience is a whole number of days, 0 to 30'), 'error');
+      return;
+    }
+    return patch({ priority: draft.priority, blocked: draft.blocked, patienceDays });
+  };
+  const useDefaults = async () => { if (await patch(null)) setDraft({ priority: [], blocked: [], patience: '' }); };
+
+  const serverDefault = data?.global.patienceDays ?? 2;
+  return (
+    <div className="mt-3 border-t border-ink-800 pt-3">
+      <button onClick={() => setOpen((o) => !o)} className="flex w-full items-center justify-between text-start">
+        <span className="text-xs font-semibold uppercase tracking-wider text-fog-500">{tr('Scanlators')}</span>
+        <span className="text-xs text-fog-500">{open ? '▴' : '▾'}</span>
+      </button>
+      {open && isLoading && <div className="skeleton mt-2 h-16 rounded-lg" />}
+      {open && !!error && <p className="mt-2 text-xs text-rose-300">{msgOf(error, tr('Could not load the groups'))}</p>}
+      {open && data && draft && (
+        <>
+          <p className="mt-1 text-[11px] leading-relaxed text-fog-500">
+            {tr('Preferred groups are taken first, in this order; blocked groups are never taken. New chapters wait for a preferred group for the patience below, then the best available copy is fetched.')}
+          </p>
+          {!rows.length && <p className="mt-2 text-xs text-fog-500">{tr('No groups known for this series yet.')}</p>}
+          <div className="mt-2 space-y-1">
+            {rows.map((g) => {
+              const rank = rankIn(draft.priority, g.name);
+              const blocked = hasGroup(draft.blocked, g.name);
+              const serverBlocked = hasGroup(data.global.blocked, g.name);
+              return (
+                <div key={normGroup(g.name)} className="flex items-center gap-1.5 text-xs">
+                  {/* Counts under the name, not beside it: on a phone the buttons leave the name a few characters. */}
+                  <span className="min-w-0 flex-1">
+                    <span className={`block truncate ${blocked || serverBlocked ? 'text-fog-600 line-through' : 'text-fog-200'}`} title={g.name}>{g.name}</span>
+                    <span className="block text-[10px] text-fog-600">{tr('{d} on disk · {l} listed', { d: g.onDisk, l: g.listed })}</span>
+                  </span>
+                  {rank >= 0 && (
+                    <span className="flex shrink-0 items-center">
+                      <button onClick={() => move(g.name, -1)} disabled={rank === 0} aria-label={tr('Move up')} className="px-1 text-fog-400 disabled:opacity-30">▲</button>
+                      <button onClick={() => move(g.name, 1)} disabled={rank === draft.priority.length - 1} aria-label={tr('Move down')} className="px-1 text-fog-400 disabled:opacity-30">▼</button>
+                    </span>
+                  )}
+                  <button onClick={() => togglePrefer(g.name)} disabled={serverBlocked && rank < 0}
+                    className={`chip shrink-0 px-2 py-0.5 text-[10px] disabled:opacity-40 ${rank >= 0 ? 'chip-active' : ''}`}>
+                    {rank >= 0 ? `#${rank + 1}` : tr('Prefer')}
+                  </button>
+                  {serverBlocked
+                    ? <span className="shrink-0 text-[10px] text-fog-600">{tr('blocked on server')}</span>
+                    : <button onClick={() => toggleBlock(g.name)}
+                        className={`chip shrink-0 px-2 py-0.5 text-[10px] ${blocked ? 'border-rose-500/40 text-rose-300' : ''}`}>
+                        {blocked ? tr('Blocked') : tr('Block')}
+                      </button>}
+                </div>
+              );
+            })}
+          </div>
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <label className="text-xs text-fog-400" htmlFor={`patience-${id}`}>{tr('Patience (days)')}</label>
+            <input id={`patience-${id}`} type="number" min={0} max={30} step={1} inputMode="numeric" value={draft.patience}
+              onChange={(e) => setDraft((d) => d && { ...d, patience: e.target.value })}
+              placeholder={String(serverDefault)} className={`${fld} w-20`} />
+            <span className="text-[11px] text-fog-500">{tr('Currently {n} days', { n: data.effective.patienceDays })}</span>
+          </div>
+          <p className="mt-1 text-[11px] text-fog-600">{tr('Blank uses the server default ({n}). 0 takes the best copy available at once.', { n: serverDefault })}</p>
+          <div className="mt-3 flex gap-2">
+            <button onClick={save} disabled={busy} className="btn-accent flex-1 py-2 text-xs disabled:opacity-50">{tr('Save')}</button>
+            <button onClick={useDefaults} disabled={busy || !data.prefs} className="chip text-xs disabled:opacity-50">{tr('Use server defaults')}</button>
+          </div>
+        </>
+      )}
     </div>
   );
 }
@@ -113,6 +273,20 @@ function SeriesEditModal({ id, series, onClose, onSaved }: { id: string; series:
     catch (e) { setAutoUpdate(!next); toast(msgOf(e, 'Could not change that'), 'error'); }
   };
 
+  // Extra sources are added from Find missing chapters, where a person has seen the source's title and its
+  // overlap with what is on disk. Here they can only be removed; the primary is not removable at all, since
+  // it is the row the series was created from.
+  const [unfollowing, setUnfollowing] = useState<string | null>(null);
+  const unfollow = async (s: SeriesSource) => {
+    setUnfollowing(s.sourceId);
+    try {
+      await api(`/api/admin/series/${id}/sources/${encodeURIComponent(s.sourceId)}`, { method: 'DELETE' });
+      toast(tr('No longer following {s}', { s: s.name }), 'success');
+      onSaved();
+    } catch (e) { toast(msgOf(e, tr('Could not remove that')), 'error'); }
+    setUnfollowing(null);
+  };
+
   const [checking, setChecking] = useState(false);
   const checkNow = async () => {
     setChecking(true);
@@ -122,11 +296,16 @@ function SeriesEditModal({ id, series, onClose, onSaved }: { id: string; series:
       // the download runs on the server; poll rather than hold the request open
       const started = Date.now();
       const tick = async () => {
-        const st = await api<{ running: boolean; added?: number; error?: string }>(`/api/admin/series/${id}/check`).catch(() => null);
+        const st = await api<{ running: boolean; added?: number; waiting?: number; error?: string }>(`/api/admin/series/${id}/check`).catch(() => null);
         if (st && !st.running) {
           setChecking(false);
           if (st.error) toast('Check failed', 'error');
-          else { toast(st.added ? `Added ${st.added} new chapter${st.added === 1 ? '' : 's'}` : 'Already up to date', 'success'); onSaved(); }
+          else {
+            // A number held for a preferred group is not "up to date": say it is being waited for.
+            const held = st.waiting ? ` · ${st.waiting} held for a preferred group` : '';
+            toast(st.added ? `Added ${st.added} new chapter${st.added === 1 ? '' : 's'}${held}` : st.waiting ? `Nothing new yet${held}` : 'Already up to date', 'success');
+            onSaved();
+          }
           return;
         }
         if (Date.now() - started > 10 * 60_000) { setChecking(false); return; }
@@ -210,6 +389,26 @@ function SeriesEditModal({ id, series, onClose, onSaved }: { id: string; series:
           <button onClick={checkNow} disabled={checking} className="mt-2 w-full rounded-full border border-ink-700 py-2 text-sm text-fog-300 disabled:opacity-50">
             {checking ? 'Checking\u2026' : 'Check for new chapters now'}
           </button>
+          <div className="mt-3 border-t border-ink-800 pt-3">
+            <p className="text-xs font-semibold uppercase tracking-wider text-fog-500">{tr('Sources')}</p>
+            <div className="mt-1.5 space-y-1">
+              {(series.sources ?? []).map((s) => (
+                <div key={s.sourceId} className="flex items-center gap-2 text-sm">
+                  <span className={`min-w-0 truncate ${s.registered ? 'text-fog-200' : 'text-fog-600'}`}>{s.name}</span>
+                  {s.primary && <span className="chip shrink-0 px-2 py-0.5 text-[10px]">{tr('primary')}</span>}
+                  {!s.registered && <span className="shrink-0 text-[11px] text-fog-600">{tr('not installed')}</span>}
+                  {s.chapters != null && <span className="ms-auto shrink-0 text-[11px] text-fog-500">{s.chapters} {tr('chapters')}</span>}
+                  {!s.primary && (
+                    <button onClick={() => unfollow(s)} disabled={unfollowing === s.sourceId} aria-label={tr('Stop following {s}', { s: s.name })}
+                      className={`shrink-0 text-fog-500 hover:text-rose-400 disabled:opacity-50 ${s.chapters == null ? 'ms-auto' : ''}`}>×</button>
+                  )}
+                </div>
+              ))}
+              {!(series.sources ?? []).length && <p className="text-xs text-fog-500">{tr('No source — the chapters were scanned from disk.')}</p>}
+            </div>
+            <p className="mt-1.5 text-[11px] text-fog-600">{tr('Add one from Find missing chapters')}</p>
+          </div>
+          <ScanlatorPrefs id={id} onSaved={onSaved} />
         </div>
         <ArtEditor label="Cover" kind="cover" busy={busy} onUpload={onUpload} onSetUrl={onSetUrl} onReset={onReset} />
         <ArtEditor label="Background" kind="banner" busy={busy} onUpload={onUpload} onSetUrl={onSetUrl} onReset={onReset} />
@@ -420,9 +619,13 @@ function ChapterEditModal({ book, onClose, onSaved }: { book: Book; onClose: () 
   );
 }
 
-function ChapterRow({ book, downloaded, onReader, onToggleDownload, onMark, onEdit }: {
+function ChapterRow({ book, downloaded, sourceNames, primarySource, onReader, onToggleDownload, onMark, onEdit }: {
   book: Book;
   downloaded: boolean;
+  /** Source id -> display name, from the series' followed sources; names the badge on a chapter another source supplied. */
+  sourceNames?: Record<string, string>;
+  /** The series' own source. A chapter from it gets no source badge: that is the normal case, not news. */
+  primarySource?: string;
   onReader: () => void;
   onToggleDownload: () => Promise<void>;
   onMark: (mode: 'read' | 'unread' | 'previous') => void;
@@ -433,6 +636,8 @@ function ChapterRow({ book, downloaded, onReader, onToggleDownload, onMark, onEd
   const [menu, setMenu] = useState(false);
   const rp = book.readProgress;
   const state = rp?.completed ? 'read' : rp ? 'reading' : 'unread';
+  // Only a name is shown; an id that resolves to nothing (a source since removed) shows no badge at all.
+  const altSource = book.sourceId && book.sourceId !== primarySource ? (sourceNames?.[book.sourceId] ?? null) : null;
 
   return (
     <div className="flex items-center gap-3 border-b border-ink-800/70 py-2.5">
@@ -444,6 +649,12 @@ function ChapterRow({ book, downloaded, onReader, onToggleDownload, onMark, onEd
         <span className={`h-2 w-2 shrink-0 rounded-full ${state === 'read' ? 'bg-ink-600' : state === 'reading' ? 'bg-accent' : 'bg-accent/40'}`} />
         <div className="min-w-0">
           <p className={`truncate text-sm ${state === 'read' ? 'text-fog-500' : 'text-fog-100'}`}>{chapterLabel(book)}</p>
+          {(book.scanlator || altSource) && (
+            <p className="mt-0.5 flex flex-wrap gap-1">
+              {book.scanlator && <span className="max-w-[10rem] truncate rounded-full border border-ink-700 px-1.5 text-[10px] leading-4 text-fog-500">{book.scanlator}</span>}
+              {altSource && <span className="max-w-[10rem] truncate rounded-full border border-ink-700 px-1.5 text-[10px] leading-4 text-fog-500">{altSource}</span>}
+            </p>
+          )}
           {state === 'reading' && rp && (
             <p className="text-[11px] text-accent">page {rp.page}/{book.media.pagesCount}</p>
           )}
@@ -553,6 +764,21 @@ function SeriesInner() {
     const c = books?.content ?? [];
     return asc ? c : [...c].reverse();
   }, [books, asc]);
+  // For the per-chapter source badge: which source each id is, and which one is the series' own. A chapter
+  // fetched through "Find missing chapters" carries the adapter it came from without that source being
+  // followed, so the names come from the full source list too -- never the raw id, which for an extension
+  // is a nineteen-digit number nobody can read.
+  const { data: allSources } = useQuery({
+    queryKey: ['sources'],
+    queryFn: () => api<{ content: { id: string; name: string }[] }>('/api/sources'),
+    staleTime: 60_000,
+    enabled: (books?.content ?? []).some((b) => !!b.sourceId),
+  });
+  const sourceNames = useMemo(() => ({
+    ...Object.fromEntries((allSources?.content ?? []).map((s) => [s.id, s.name])),
+    ...Object.fromEntries((series?.sources ?? []).map((s) => [s.sourceId, s.name])),
+  }), [series, allSources]);
+  const primarySource = series?.sources?.find((s) => s.primary)?.sourceId;
 
   const resumeBook = useMemo(() => {
     const c = books?.content ?? [];
@@ -774,7 +1000,7 @@ function SeriesInner() {
       </div>
       <div className="lg:grid lg:gap-x-8 lg:[grid-template-columns:repeat(auto-fill,minmax(250px,1fr))]">
         {chapters.map((b) => (
-          <ChapterRow key={b.id} book={b} downloaded={downloaded.has(b.id)}
+          <ChapterRow key={b.id} book={b} downloaded={downloaded.has(b.id)} sourceNames={sourceNames} primarySource={primarySource}
             onReader={() => router.push(`/reader/?book=${b.id}`)} onToggleDownload={() => toggleDownload(b.id)}
             onMark={(mode) => markChapter(b, mode)}
             onEdit={isAdmin ? () => setEditChapter(b) : undefined} />

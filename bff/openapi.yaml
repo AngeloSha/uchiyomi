@@ -6,7 +6,7 @@
 openapi: 3.1.0
 info:
   title: Uchiyomi API
-  version: 0.30.0
+  version: 0.31.0
   description: "Everything the web app does, it does over this API. Session JWTs are for the browser; scripts
     use a personal API token (Profile -> Account -> API tokens), sent as `Authorization: Bearer uy_...`.
     Scopes: read (every token; GET plus the library search POST, which is a query), write (anything that changes data), admin (the /api/admin surface, which also
@@ -53,6 +53,48 @@ components:
       in: cookie
       name: yomi_img
       description: Set at login so <img> tags can authenticate.
+  schemas:
+    ScanlatorPrefs:
+      type: object
+      description: >-
+        Release preferences: which scanlation group to take when a source lists a chapter more than once,
+        which never to take, and how long to hold a new chapter for a ranked group before the best available
+        copy is taken instead. Stored server-wide on the settings row and, optionally, per series. When both
+        exist they merge: blocked is the union, a per-series priority replaces the global list, and a null
+        per-series patienceDays inherits the global one (2 when that is null too). Names are compared
+        case-insensitively with punctuation and spaces ignored, so "Asura Scans" and "asurascans" are one
+        group. On write every field is optional: a missing list is empty and a missing patienceDays is
+        null (inherit); responses always carry all three.
+      properties:
+        priority:
+          type: array
+          maxItems: 50
+          items: { type: string, minLength: 1, maxLength: 80 }
+          description: Groups to take first, best first. A chapter only waits for one of these when the list is non-empty.
+        blocked:
+          type: array
+          maxItems: 200
+          items: { type: string, minLength: 1, maxLength: 80 }
+          description: >-
+            Groups never to take. A joint release is dropped only when every group on it is blocked, and a
+            copy that names no group is never blocked.
+        patienceDays:
+          type: [integer, "null"]
+          minimum: 0
+          maximum: 30
+          description: Days to hold a new chapter for a ranked group; 0 takes the best copy at once; null inherits.
+    SeriesSource:
+      type: object
+      description: One place a series' chapters come from. The primary is the pair the series was added with; the rest were followed later.
+      required: [sourceId, name, sourceSeriesId, primary, checkedAt, chapters, registered]
+      properties:
+        sourceId: { type: string, description: The adapter id. }
+        name: { type: string, description: The adapter's display name, or the id when the adapter is not loaded. }
+        sourceSeriesId: { type: string, description: The series' id on that source. }
+        primary: { type: boolean }
+        checkedAt: { type: [string, "null"], format: date-time, description: When the updater last listed it. }
+        chapters: { type: [integer, "null"], description: "For a follower, the distinct chapter numbers it listed then; for the primary, the merged count across every followed source after the release preferences (the same figure as the series' source.chapters)." }
+        registered: { type: boolean, description: Whether the adapter is loaded right now; a follower whose extension was removed keeps its row so it can still be unfollowed. }
 paths:
   /livez:
     get:
@@ -628,7 +670,27 @@ paths:
         - bearer: []
       responses:
         "200":
-          description: OK
+          description: >-
+            The series. Only the fields added in v0.31.0 are described here; the rest of the shape follows
+            Komga's series DTO (id, name, metadata, booksCount, ...).
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+                properties:
+                  sources:
+                    type: array
+                    description: Where the chapters come from, primary first, then followed sources in the order they were added. Present for every viewer.
+                    items:
+                      $ref: "#/components/schemas/SeriesSource"
+                  scanlatorPrefs:
+                    description: >-
+                      Admins only. The series' own release preferences, or null when it has none and the
+                      server-wide ones apply.
+                    oneOf:
+                      - $ref: "#/components/schemas/ScanlatorPrefs"
+                      - type: "null"
         "401":
           description: Not authenticated
         "404":
@@ -723,7 +785,7 @@ paths:
         - bearer: []
       responses:
         "200":
-          description: OK
+          description: "{ content: [Book] }; each Book carries the provenance fields described on GET /api/books/{id}."
         "401":
           description: Not authenticated
         "404":
@@ -744,7 +806,26 @@ paths:
         - bearer: []
       responses:
         "200":
-          description: OK
+          description: >-
+            The chapter. Only the fields added in v0.31.0 are described here; the rest of the shape follows
+            Komga's book DTO (id, seriesId, number, media, metadata, readProgress, ...). The same object is
+            what every other route that returns a chapter answers with (the series' chapter list, next,
+            the home shelves).
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+                properties:
+                  scanlator:
+                    type: [string, "null"]
+                    description: >-
+                      The group that released the file on disk, as the source showed it (a joint release
+                      reads "A & B"). Null for a chapter the scanner found rather than the downloader wrote,
+                      which includes everything downloaded before v0.31.0.
+                  sourceId:
+                    type: [string, "null"]
+                    description: The adapter the file was downloaded from; null when the scanner found it.
         "401":
           description: Not authenticated
         "404":
@@ -934,6 +1015,11 @@ paths:
         - sources
       summary: Find a series' missing chapters and which sources could supply them; answers with a short-lived planId.
       operationId: postApiSourcesFillScan
+      description: >-
+        Each candidate's count, first and last describe one copy per chapter number, chosen under the
+        series' release preferences with patience off, so a fill of [n] lands one file. `following` lists
+        the source ids the series already follows (see POST /api/admin/series/{id}/sources), on the
+        too_few_chapters early answer as well.
       requestBody:
         required: false
         content:
@@ -950,6 +1036,16 @@ paths:
       responses:
         "200":
           description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+                properties:
+                  following:
+                    type: array
+                    items: { type: string }
+                    description: Source ids the updater already merges into this series, in the order they were followed.
         "400":
           description: Malformed body or parameter
         "401":
@@ -2928,7 +3024,10 @@ paths:
         - admin
       summary: Server settings, plus extensions_configured (whether an extension engine exists).
       operationId: getApiAdminSettings
-      description: Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
+      description: >-
+        Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. The row
+        includes scanlator_prefs, the server-wide release preferences (ScanlatorPrefs; the default is no
+        priority, nothing blocked, two days of patience).
       security:
         - bearer: []
       responses:
@@ -2942,9 +3041,12 @@ paths:
       tags:
         - admin
       summary: "Change server settings: name, open registration, update interval, extension check interval and
-        its kill switch, the update check, and the opt-in install count."
+        its kill switch, the update check, the opt-in install count, and the server-wide scanlation-group
+        preferences."
       operationId: patchApiAdminSettings
-      description: Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
+      description: >-
+        Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. Answers
+        the same row GET does, so a client can replace what it holds.
       requestBody:
         required: false
         content:
@@ -2970,6 +3072,11 @@ paths:
                     Opt in to the anonymous install count. Turning it on mints a per-install secret; turning
                     it off destroys it and asks the collector to forget the current month's id.
                   type: boolean
+                scanlatorPrefs:
+                  description: >-
+                    The server-wide release preferences, replaced whole. Blocks made here apply to every
+                    series; the priority applies to a series that has no ranking of its own.
+                  $ref: "#/components/schemas/ScanlatorPrefs"
       security:
         - bearer: []
       responses:
@@ -3168,9 +3275,12 @@ paths:
     patch:
       tags:
         - admin
-      summary: Change a series' settings (auto-update, library pin).
+      summary: Change a series' settings (auto-update, its own scanlation-group preferences).
       operationId: patchApiAdminSeriesId
-      description: Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
+      description: >-
+        Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. The body
+        names at least one field and no others; each named field is written on its own, so a body naming
+        one leaves the other alone. Answers { ok: true }, with autoUpdate echoed when it was sent.
       parameters:
         - name: id
           in: path
@@ -3178,23 +3288,32 @@ paths:
           schema:
             type: string
       requestBody:
-        required: false
+        required: true
         content:
           application/json:
             schema:
               type: object
+              minProperties: 1
+              additionalProperties: false
               properties:
                 autoUpdate:
                   type: boolean
-                libraryPinned:
-                  type: boolean
+                  description: Whether the scheduled updater keeps checking this series.
+                scanlatorPrefs:
+                  description: >-
+                    The series' own release preferences, replaced whole; null clears them so the server-wide
+                    ones apply again. The priority given here replaces the global list for this series, the
+                    blocked list is added to it, and a null patienceDays inherits.
+                  oneOf:
+                    - $ref: "#/components/schemas/ScanlatorPrefs"
+                    - type: "null"
       security:
         - bearer: []
       responses:
         "200":
           description: OK
         "400":
-          description: Malformed body or parameter
+          description: Malformed body, an unknown field, or a body naming nothing to change
         "401":
           description: Not authenticated
         "403":
@@ -3224,6 +3343,176 @@ paths:
           description: "Forbidden: token scope, account permission or age limit"
         "404":
           description: Not found, or not visible to this account
+  /api/admin/series/{id}/scanlators:
+    get:
+      tags:
+        - admin
+      summary: The scanlation groups an admin can rank or block for one series, and where its preferences stand.
+      operationId: getApiAdminSeriesIdScanlators
+      description: >-
+        Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. Groups are
+        gathered from the files on disk (what each chapter was stamped with as it landed), from the current
+        chapter listings of the primary and every followed source, and from the names already in the
+        effective preferences, so a blocked group that has vanished from the listing stays visible to be
+        unblocked. A source that fails to list counts as listing nothing rather than failing the answer.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [prefs, global, effective, groups]
+                properties:
+                  prefs:
+                    description: The series' own preferences, or null when it has none.
+                    oneOf:
+                      - $ref: "#/components/schemas/ScanlatorPrefs"
+                      - type: "null"
+                  global:
+                    $ref: "#/components/schemas/ScanlatorPrefs"
+                  effective:
+                    type: object
+                    description: The merge the updater runs this series with.
+                    required: [priority, blocked, patienceDays]
+                    properties:
+                      priority: { type: array, items: { type: string } }
+                      blocked: { type: array, items: { type: string } }
+                      patienceDays: { type: integer }
+                  groups:
+                    type: array
+                    description: Sorted by onDisk + listed descending, then by name.
+                    items:
+                      type: object
+                      required: [name, onDisk, listed]
+                      properties:
+                        name: { type: string, description: The first spelling seen, the source's over the disk's over the preferences'. }
+                        onDisk: { type: integer, description: Chapters on disk this group released. }
+                        listed: { type: integer, description: Copies this group has in the sources' current listings. }
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+        "404":
+          description: Not found, or not visible to this account
+  /api/admin/series/{id}/sources:
+    post:
+      tags:
+        - admin
+      summary: Follow another source for a series, from a candidate a fill scan found followable.
+      operationId: postApiAdminSeriesIdSources
+      description: >-
+        Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. The
+        candidate has to come from a plan POST /api/sources/fill/scan answered for this series, and the plan
+        has to have found it followable: at least 90% of the chapter numbers already held were listed there
+        and the verdict was ok or nothing_to_fill. A bare (source, id) pair is not accepted: the plan is the
+        only place the "same series?" judgement is made. The series' own source is refused, since following
+        it would list every chapter twice. Following a source again updates its series id and coverage.
+        Once followed, the updater merges that source's chapter list with the primary's on every check.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [planId, source, sourceSeriesId]
+              properties:
+                planId:
+                  type: string
+                  description: From the fill scan.
+                source:
+                  type: string
+                  description: A candidate's source id in that plan.
+                sourceSeriesId:
+                  type: string
+                  description: That candidate's series id on the source.
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: Followed. The series' full source list, primary first.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, sources]
+                properties:
+                  ok: { type: boolean }
+                  sources:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/SeriesSource"
+        "400":
+          description: >-
+            bad_request (malformed body, or the plan is for another series); not_in_plan (that source and
+            id were not among the plan's candidates); not_followable (the plan refused it, with reason and
+            coverage in the body).
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+        "404":
+          description: Not found, or not visible to this account
+        "409":
+          description: >-
+            plan_stale (the plan expired or was never issued: scan again); is_primary (that is the series'
+            own source); source_unavailable (the adapter is not loaded or is disabled).
+  /api/admin/series/{id}/sources/{sourceId}:
+    delete:
+      tags:
+        - admin
+      summary: Stop following a source for a series.
+      operationId: deleteApiAdminSeriesIdSourcesSourceId
+      description: >-
+        Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. Chapters
+        already downloaded from it stay. The primary cannot be removed this way; it is not a followed source.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: sourceId
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: Unfollowed. The series' remaining source list, primary first.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, sources]
+                properties:
+                  ok: { type: boolean }
+                  sources:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/SeriesSource"
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+        "404":
+          description: The series was not following that source
   /api/admin/series/{id}/check:
     post:
       tags:
@@ -3255,7 +3544,11 @@ paths:
         - admin
       summary: Progress of a running series check.
       operationId: getApiAdminSeriesIdCheck
-      description: Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
+      description: >-
+        Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. Answers
+        { running } while the check runs and { running: false, added, waiting?, error?, startedAt,
+        finishedAt } once it has finished; waiting is how many missing chapter numbers were held back for a
+        ranked group (omitted when none), so "0 added" next to it does not read as nothing new.
       parameters:
         - name: id
           in: path
@@ -3267,6 +3560,18 @@ paths:
       responses:
         "200":
           description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [running]
+                properties:
+                  running: { type: boolean }
+                  added: { type: integer, description: Chapters that landed in this check. }
+                  waiting: { type: integer, description: Missing numbers held for a ranked group; absent when 0. }
+                  error: { type: string }
+                  startedAt: { type: integer, format: int64 }
+                  finishedAt: { type: integer, format: int64 }
         "401":
           description: Not authenticated
         "403":

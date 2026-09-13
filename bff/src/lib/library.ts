@@ -599,3 +599,30 @@ export async function setBookDates(folder: string, chapters: { number: number; p
   );
 }
 
+/**
+ * Stamp which group released the file on disk, and which adapter it came from, onto a series' books.
+ *
+ * Takes only the chapters that LANDED in this run, never the whole listing. The listing's chosen copy for
+ * a number can change from one sweep to the next (a preferred group catches up, a block is added), and
+ * stamping every listed number would relabel a file already on disk from group A as group B the moment
+ * the choice moved -- while the file itself stayed A's. Same RAW-number match as setBookDates, for the
+ * same reason: these numbers are the source's, not the override's.
+ */
+export async function setBookMeta(folder: string, landed: Array<{ number: number; scanlator?: string; source?: string }>): Promise<void> {
+  const rows = landed.filter((c) => Number.isFinite(c.number));
+  if (!rows.length) return;
+  const values: string[] = [];
+  const params: any[] = [folder];
+  for (const c of rows) {
+    params.push(c.number, c.scanlator ?? null, c.source ?? null);
+    values.push(`($${params.length - 2}::real, $${params.length - 1}::text, $${params.length}::text)`);
+  }
+  await q(
+    `UPDATE lib_books b SET scanlator = v.grp, source_id = v.src
+     FROM (VALUES ${values.join(',')}) AS v(n, grp, src), lib_series s
+     WHERE s.folder = $1 AND b.series_id = s.id AND b.number = v.n
+       AND (b.scanlator IS DISTINCT FROM v.grp OR b.source_id IS DISTINCT FROM v.src)`,
+    params,
+  );
+}
+

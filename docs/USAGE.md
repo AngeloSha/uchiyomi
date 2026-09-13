@@ -129,9 +129,69 @@ read it this week.
   order and what gets reported to a connected tracker.
 - **Auto-update** toggles whether the updater keeps checking this one for new chapters, and **Check now**
   runs that check immediately instead of waiting for the next sweep.
+- **Scanlators**, in the same *Edit details* panel, ranks or blocks the groups that release this series, for
+  when its source lists a chapter from more than one. See *Choosing a scanlation group* below.
+- **Sources**, also there, lists where the chapters come from: the source the series was added from, and any
+  other you have told it to follow. See *Following a second source* below.
 - **Delete** hides the series rather than erasing it. Chapters, ratings, favourites and everyone's reading
   history stay attached, so nothing is lost and it can be put back (see section 8). A hidden series stays
   hidden when the library is rescanned instead of reappearing as a new one.
+
+### Choosing a scanlation group
+
+A *scanlation group* is the team that translated and typeset a release. On MangaDex, and on extension
+sources that carry the same information, one chapter number often exists several times: group A's release,
+group B's a day later, sometimes a link to the publisher's own site. Uchiyomi keeps one file per chapter, so
+something has to choose, and until v0.31.0 that was whichever copy the source happened to list first.
+
+Now it is yours to decide. **Scanlators**, in the series page's *Edit details* panel, shows every group
+known for the series — how many chapters on disk each one released, and how many copies each has in the
+sources' current listings — and lets you **Prefer** groups in order or **Block** them. A preferred group's
+copy is taken first whenever it exists; a blocked group's copy is never taken while another copy exists. A
+joint release belongs to every group listed on it: it counts as the preferred group's when any of them is
+preferred, and it is blocked only when *all* of them are. A chapter that only blocked groups have released
+is left out altogether — not fetched, and not counted as behind — until someone else releases it; unblock
+the group if you would rather have their copy than none.
+
+**Patience** is how long a new chapter waits for a preferred group before the best available copy is
+fetched instead. The default is 2 days, which is roughly how far behind the second group on a popular
+title runs; 0 takes the best copy available at once. A series only ever waits when it has a preferred
+group to wait for — with no ranking, nothing is held — and the wait is judged from the release date the
+source shows, so a chapter that has already been out for longer than the patience is fetched on the next
+check. A chapter being held still counts in the series page's *N behind*, so a hold never reads as *up to
+date*.
+
+A chapter already on disk is never replaced, whoever released it: a preferred group's copy appearing later
+is not a missing chapter. The group's name is written into each new file as `<Translator>` in its
+`ComicInfo.xml`, and shown on the chapter row, so Komga, Kavita and Mihon see it too. Sources with no group
+information — the built-in engines and sites added by URL — are unaffected: nothing changes for them, and
+files downloaded before v0.31.0 show no group either.
+
+**Use server defaults** in that panel drops everything the series set for itself — ranking, blocks and
+patience; the defaults themselves live under
+**Admin → Settings → Scanlators**. The two combine sensibly: a group blocked on the server is blocked in
+every series, a series with its own ranking ignores the server's ranking, and a series with no patience of
+its own uses the server's.
+
+### Following a second source
+
+A series is added from one source, and that source is where new chapters come from. When it is slow, or
+stops carrying a title, an admin can **follow** a second source for the same series: on every check the
+updater merges both chapter lists and takes each missing chapter from whichever source has it, so a series
+whose main source is in a cooldown still updates from the other one.
+
+Following starts from **Find missing chapters** on the series page. Every source it scans and finds to line
+up with the chapters you already hold — at least 90% of your chapter numbers listed there, and the numbering
+agreeing — is offered with **Also follow this source**; one that is already followed says so. That check
+is deliberately the only way in: a source that numbers a different story 1..N would look right in every
+listing, and each "new chapter" from it would be the wrong book. The **Sources** list in the series page's
+*Edit details* panel shows what is followed, with the chapter count each source last showed and an × to
+stop following it; chapters already downloaded stay when a source is dropped.
+
+Once a series has more than one source, the chapter row shows where a chapter came from when it was not
+the main source, "N behind" counts the chapters missing across all of the followed sources, and the
+scanlator preferences above apply to the merged list — so a group you prefer is taken from whichever
+source carries it.
 
 ---
 
@@ -463,7 +523,10 @@ off in Settings; see [extensions.md](extensions.md).
 ![Settings](shots/admin-settings.webp)
 
 **Settings:** server name, an **open-registration** toggle (let anyone sign up), and the **auto-update
-interval** (how often Uchiyomi checks your library for new chapters).
+interval** (how often Uchiyomi checks your library for new chapters). The **Scanlators** card holds the
+server-wide defaults for choosing between scanlation groups — **Blocked groups**, which apply to every
+series, a **Default priority** for series that have no ranking of their own, and the **Patience (days)**
+before a chapter is taken from a group lower down the list; see *Choosing a scanlation group* in section 4.
 
 ---
 

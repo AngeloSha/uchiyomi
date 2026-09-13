@@ -142,7 +142,8 @@ to follow a site to a new domain without orphaning every series that came from i
 `POST /api/sources/add` answers as soon as the outcome is decided and downloads afterwards. It used to hold
 the request until the first chapter had been fetched, measured at 15 to 59 seconds on a real install.
 Everything that decides the answer still happens inline and still gets its own status code: **403** disabled,
-**404** `no_chapters`, **409** `duplicate` (with the "add anyway" message), and **200** with `chapters: 0`
+**404** `no_chapters` (also the answer when every copy the source lists is from a group blocked
+server-wide), **409** `duplicate` (with the "add anyway" message), and **200** with `chapters: 0`
 for a title already in the library. A successful reply now carries `started: true`, which is what
 distinguishes "downloading now" from "already had it" — previously only `chapters === 0` said so.
 
@@ -292,6 +293,17 @@ PUT    /api/books/:id/pages/:n/junk
 GET    /api/offline/plan
 ```
 
+**Where a series and its chapters came from.** `GET /api/series/:id` carries `sources`, primary first, then
+any source the series has been followed on (`POST /api/admin/series/:id/sources`, below); each entry is
+`{sourceId, name, sourceSeriesId, primary, checkedAt, chapters, registered}`, where `registered` says whether
+that adapter is loaded right now. Admins additionally get `scanlatorPrefs`: the series' own release
+preferences, or `null` when it has none and the server-wide ones apply. Every chapter object (this route's
+`books`, `GET /api/books/:id`, `next`, the home shelves) carries `scanlator` — the group that released the
+file on disk, as the source showed it, a joint release reading `"A & B"` — and `sourceId`, the adapter it was
+downloaded from. Both are `null` for a chapter the scanner found rather than the downloader wrote, which
+includes everything downloaded before v0.31.0. The same group name is written into the file's
+`ComicInfo.xml` as `<Translator>`.
+
 ### Sources
 ```
 GET    /api/sources               GET    /api/sources/find
@@ -311,6 +323,14 @@ The split is deliberate. Chapter URLs never leave the server: the client names c
 that the quoted plan actually offered for that source. A chapter fetched from the wrong series would land as
 `Chapter <n>.cbz` exactly where the right one belongs and look identical in every listing, so nothing is
 fetched until a person has been shown which source, which title on it, and how many chapters.
+
+The scan's answer also carries `following`: the source ids the series is already followed on, so a client
+can mark a candidate as followed instead of offering to follow it twice (present on the `too_few_chapters`
+early answer as well). Each candidate's `count`, `first` and `last` describe one copy per chapter number,
+chosen under the series' release preferences with the patience switched off, so a fill of `[n]` lands one
+file even when the source lists chapter `n` from three groups. `GET /api/sources/detail` counts the same
+way, under the server-wide preferences, so the "120 chapters" the add dialog shows is the 120 the add would
+land and not the 200 rows the source listed.
 
 ```
 ```
@@ -380,6 +400,8 @@ POST   /api/admin/sources/custom  DELETE /api/admin/sources/custom/:id
 PATCH  /api/admin/sources/custom/:id
 PUT    /api/admin/series/:id/art  PUT    /api/admin/series/:id/meta
 PATCH  /api/admin/series/:id      DELETE /api/admin/series/:id
+GET    /api/admin/series/:id/scanlators
+POST   /api/admin/series/:id/sources DELETE /api/admin/series/:id/sources/:sourceId
 GET    /api/admin/libraries       POST   /api/admin/libraries
 GET    /api/admin/libraries/preview
 GET    /api/admin/libraries/folders
@@ -404,6 +426,49 @@ GET    /api/admin/import/status
 
 The bulk importer's body takes `titles`, `autoUpdate`, `chapterCount` and `chapterFrom`, with the same
 meaning as on `/api/sources/add` (`chapterFrom: "newest"` takes the latest N and floors the series).
+
+**Scanlation groups.** When a source lists the same chapter from more than one group (MangaDex does, and
+so do extension sources that carry Mihon's scanlator column), the server keeps one file per number and the
+choice is made by the release preferences: `{priority: [...], blocked: [...], patienceDays}`, group names
+compared case-insensitively with spaces and punctuation ignored. The server-wide set is
+`scanlator_prefs` on `GET /api/admin/settings`, written whole through `PATCH /api/admin/settings
+{scanlatorPrefs}` (`priority` up to 50 names, `blocked` up to 200, `patienceDays` an integer 0–30 or
+`null`; the default is nothing ranked, nothing blocked, two days). A series can carry its own through
+`PATCH /api/admin/series/:id`, whose body is now `{autoUpdate?, scanlatorPrefs?}` — at least one, no other
+fields, each written on its own, and `scanlatorPrefs: null` clears the series' set. The two merge:
+**blocked is the union**, a series **priority replaces** the global list, and a series `patienceDays` of
+`null` **falls back** to the global one. A copy whose known groups are all blocked is dropped before the
+choice is made — a joint release survives while any group on it is unblocked, a copy naming no group is
+never blocked — so a number that only blocked groups have released is absent from the list altogether:
+neither fetched nor counted as missing. A series only ever *waits* for a group when its effective priority
+list is non-empty: with none, the best available copy is taken at once, so a series from a source that
+names no groups is never held.
+
+`GET /api/admin/series/:id/scanlators` is what the series page's editor reads: `{prefs, global, effective:
+{priority, blocked, patienceDays}, groups: [{name, onDisk, listed}]}`, the groups gathered from the files on
+disk, from the current listings of the primary and every followed source, and from the names already in the
+preferences (so a blocked group that has vanished from the listing can still be unblocked), sorted by
+`onDisk + listed` and then by name.
+
+**Following a second source.** `POST /api/admin/series/:id/sources {planId, source, sourceSeriesId}` makes
+the updater merge that source's chapter list with the primary's on every check; it answers `{ok, sources}`
+with the series' full source list, primary first. The candidate must come from a `POST /api/sources/fill/scan`
+plan for this series and the plan must have found it followable — at least 90% of the chapter numbers
+already held listed there, with a verdict of `ok` or `nothing_to_fill` — because the plan is the only place
+the "same series?" judgement is made, and a bare pair would let a client follow anything it could name.
+Refusals: **409** `plan_stale` (scan again), `is_primary`, `source_unavailable` (adapter not loaded or
+disabled); **400** `not_in_plan`, `not_followable` (with `reason` and `coverage`), or `bad_request` when the
+plan belongs to another series; **404** for an unknown series. Following the same source again updates its
+series id and coverage. `DELETE /api/admin/series/:id/sources/:sourceId` stops following it (**404** when
+the series was not) and answers the remaining list; chapters already downloaded from it stay.
+
+With a follower in place, the updater takes each missing number from whichever followed source offers the
+best copy — a ranked group first, then a hosted copy over an external link, then the primary over the
+followers in the order they were added, then the earliest release — and a series whose primary is in a
+cooldown still updates from a follower that answers; it is `blocked` only when every followed source is.
+`GET /api/admin/series/:id/check` now reports `waiting` alongside `added`: the number of missing chapters
+held back for a ranked group (omitted when none). The `frozen-series` health check lists a series whose
+primary is gone but which still follows a live source as information rather than a warning.
 
 ### Admin — extensions (Mihon / Tachiyomi)
 

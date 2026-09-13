@@ -172,6 +172,50 @@ test('a series with no working source is listed, one with a working source is no
   }
 });
 
+const S_COVERED = 's_health_covered', S_ORPHANED = 's_health_orphaned';
+
+/**
+ * A series whose primary is gone but which follows a source that is loaded still updates -- the updater
+ * merges the followers' lists -- so it is not frozen, and calling it frozen would send the operator to
+ * repair something that is fetching chapters every night. It is listed for reference instead, because a
+ * dead primary is still worth tidying. A follower that is itself gone changes nothing.
+ *
+ * Reintroduce by dropping the series_sources read in frozenSeries() (every unrouted row frozen): "a dead
+ * primary with a live follower is not frozen" fails -- the fixture is listed as a warning.
+ */
+test('a dead primary with a live follower is reference, not a warning; with a dead follower it is still frozen', { skip: DSN ? false : 'set TEST_DATABASE_URL to run' }, async () => {
+  const { migrate } = await import('../src/lib/migrate');
+  const { q } = await import('../src/lib/db');
+  const { runHealthChecks } = await import('../src/lib/health');
+  const { registerAdapter } = await import('../src/lib/sources');
+  await migrate();
+  registerAdapter({ id: 'health-follower', name: 'Health Follower', search: async () => [], getSeries: async () => null,
+    listChapters: async () => [], getPageUrls: async () => [], latest: async () => [] } as any);
+  for (const id of [S_COVERED, S_ORPHANED]) await q('DELETE FROM lib_series WHERE id = $1', [id]);
+  await q(`INSERT INTO lib_series (id, source, title, folder, books_count, source_id, source_series_id)
+           VALUES ($1, 'test', 'Covered Fixture', $1, 12, 'sw:888888888', '8')`, [S_COVERED]);
+  await q(`INSERT INTO series_sources (series_id, source_id, source_series_id) VALUES ($1, 'health-follower', 'f1')`, [S_COVERED]);
+  await q(`INSERT INTO lib_series (id, source, title, folder, books_count, source_id, source_series_id)
+           VALUES ($1, 'test', 'Orphaned Fixture', $1, 9, 'sw:777777777', '7')`, [S_ORPHANED]);
+  await q(`INSERT INTO series_sources (series_id, source_id, source_series_id) VALUES ($1, 'sw:666666666', 'f2')`, [S_ORPHANED]);
+  try {
+    const check = (await runHealthChecks()).checks.find((c: any) => c.id === 'frozen-series');
+    assert.ok(check, 'the check exists');
+    const covered = check.items.find((i: any) => i.title === 'Covered Fixture');
+    assert.ok(covered, 'the series with a dead primary is still listed');
+    assert.equal(covered.info, true, 'a dead primary with a live follower is not frozen');
+    assert.match(covered.detail, /primary sw:888888888 gone; still following Health Follower/);
+    assert.match(check.summary, /1 lost its primary but still follows another/);
+    const orphaned = check.items.find((i: any) => i.title === 'Orphaned Fixture');
+    assert.ok(orphaned, 'a dead primary with a dead follower is listed');
+    assert.notEqual(orphaned.info, true, 'and it is a real finding');
+    assert.match(orphaned.detail, /sw:777777777 is no longer installed/);
+    assert.equal(check.status, 'warn');
+  } finally {
+    for (const id of [S_COVERED, S_ORPHANED]) await q('DELETE FROM lib_series WHERE id = $1', [id]);
+  }
+});
+
 /**
  * A source the operator switched off themselves is listed, so the count stays visible, but it is never the
  * reason the check is amber. Contributor PR #39 ran into the old behaviour while adding language hiding:

@@ -213,23 +213,53 @@ async function frozenSeries(): Promise<HealthCheck> {
       ORDER BY ls.books_count DESC`,
   ).catch(() => [] as any[]);
   // The SQL over-selects on purpose (it cannot know which adapters are loaded); the loaded registry decides.
-  const frozen = rows.filter((r) => !r.source_id || !getSource(r.source_id));
+  const unrouted = rows.filter((r) => !r.source_id || !getSource(r.source_id));
+  // A series whose primary is gone but which follows another source that IS loaded still updates: the
+  // updater merges the followers' lists, so a dead primary costs it nothing but that one listing. Reported
+  // as reference, not as a fault -- the fix (re-point the primary, or leave it) is a tidy-up, not a repair.
+  // Reintroduce by dropping this read (every row of `unrouted` frozen): "a dead primary with a live follower
+  // is not frozen" in health.int.test.ts fails -- the fixture is listed as a warning.
+  const followed = new Map<string, string[]>();
+  if (unrouted.length) {
+    const extra = await q<{ series_id: string; source_id: string }>(
+      'SELECT series_id, source_id FROM series_sources WHERE series_id = ANY($1::text[]) ORDER BY created_at',
+      [unrouted.map((r) => r.id)],
+    ).catch(() => [] as { series_id: string; source_id: string }[]);
+    for (const e of extra) {
+      const src = getSource(e.source_id);
+      if (!src) continue;
+      followed.set(e.series_id, [...(followed.get(e.series_id) ?? []), src.name]);
+    }
+  }
+  const frozen = unrouted.filter((r) => !followed.has(r.id));
+  const covered = unrouted.filter((r) => followed.has(r.id));
+  const why = (r: typeof rows[number]) =>
+    // Enabled yet unregistered is the third case: dropped by SUWAYOMI_MAX_SOURCES, which the cap check
+    // above names but a series page cannot see.
+    r.switched_off ? 'switched off' : r.still_enabled ? 'over the source limit (SUWAYOMI_MAX_SOURCES)' : 'no longer installed';
   const items: HealthItem[] = frozen.slice(0, 20).map((r) => ({
     seriesId: r.id,
     title: r.title,
     detail: r.source_id
-      // Enabled yet unregistered is the third case: dropped by SUWAYOMI_MAX_SOURCES, which the cap check
-      // above names but a series page cannot see.
-      ? `${r.books_count} chapters; its source ${r.source_id} is ${r.switched_off ? 'switched off' : r.still_enabled ? 'over the source limit (SUWAYOMI_MAX_SOURCES)' : 'no longer installed'}`
+      ? `${r.books_count} chapters; its source ${r.source_id} is ${why(r)}`
       : `${r.books_count} chapters; no source recorded`,
   }));
+  for (const r of covered.slice(0, 20)) {
+    items.push({
+      seriesId: r.id,
+      title: r.title,
+      detail: `primary ${r.source_id ?? '(none)'} gone; still following ${followed.get(r.id)!.join(', ')}`,
+      info: true,
+    });
+  }
   return {
     id: 'frozen-series',
     title: 'Series that can no longer update',
     status: frozen.length ? 'warn' : 'ok',
-    summary: frozen.length
+    summary: (frozen.length
       ? `${frozen.length} series ${frozen.length === 1 ? 'has' : 'have'} no working source`
-      : 'Every series has a working source',
+      : 'Every series has a working source') +
+      (covered.length ? `; ${covered.length} lost ${covered.length === 1 ? 'its' : 'their'} primary but still follow${covered.length === 1 ? 's' : ''} another` : ''),
     note:
       'These read fine, but nothing can fetch new chapters for them and "find missing chapters" will not offer ' +
       'their own source. Switch the source back on, re-add the extension, or re-point the series at a source that carries it.' +

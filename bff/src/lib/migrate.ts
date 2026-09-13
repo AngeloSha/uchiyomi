@@ -198,6 +198,38 @@ ALTER TABLE lib_series ADD COLUMN IF NOT EXISTS source_checked_at timestamptz;
 -- new release queued behind them. Chapters below the floor are left to the fill scan, on purpose.
 ALTER TABLE lib_series ADD COLUMN IF NOT EXISTS chapter_floor     numeric;
 
+-- Release preferences (lib/releases.ts): which scanlation group to take when a source lists a chapter
+-- several times, which never to take, and how long to wait for the preferred one. The global set lives on
+-- server_settings; this is one series' own, NULL when it has none. A per-series priority replaces the
+-- global list, a per-series block adds to it.
+ALTER TABLE lib_series ADD COLUMN IF NOT EXISTS scanlator_prefs   jsonb;
+-- Who released the copy that is on disk and which adapter it came from, stamped when the file LANDS and
+-- never by the scanner, like published_at. NULL for a book that was scanned in from elsewhere. The stamp
+-- is what lets the series page say "group B holds chapters 40-52" and what a later "replace with the
+-- preferred group" could compare against.
+ALTER TABLE lib_books  ADD COLUMN IF NOT EXISTS scanlator text;
+ALTER TABLE lib_books  ADD COLUMN IF NOT EXISTS source_id text;
+
+-- Extra sources the updater merges into one chapter list for a series, beyond the primary pair stored on
+-- lib_series (source_id, source_series_id). One row per (series, adapter); the adapter's own series id is
+-- what listChapters is called with. coverage is the share of the primary's chapter numbers the follower
+-- also listed when it was added, kept so the picker can show it; checked_at and chapters are what the
+-- updater last saw there, mirroring source_checked_at / source_chapters on the primary.
+-- A soft-deleted or merged series keeps its rows: they are inert while the series is hidden and cost
+-- nothing, and the hard delete cascades them away with everything else.
+CREATE TABLE IF NOT EXISTS series_sources (
+  series_id        text NOT NULL REFERENCES lib_series(id) ON DELETE CASCADE,
+  source_id        text NOT NULL,
+  source_series_id text NOT NULL,
+  title            text,
+  coverage         real,
+  added_by         uuid,
+  created_at       timestamptz NOT NULL DEFAULT now(),
+  checked_at       timestamptz,
+  chapters         int,
+  PRIMARY KEY (series_id, source_id)
+);
+
 -- Content identity, so a chapter can be recognised after it moves. Derived from the archive's central
 -- directory (entry names + CRC-32 + uncompressed sizes), which is cheap to read and survives recompression.
 -- Nothing reads these yet; a background job fills them in, and fp_at is set even on failure so an unreadable
@@ -348,6 +380,11 @@ ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS extension_repos       jsonb
 -- languages nobody here reads (issue #38), each one a fan-out target for cross-source search. Applied on
 -- install and retroactively by the bulk toggle. Codes are stored as the engine reports them (en, ru, zh-Hans).
 ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS hidden_langs          jsonb   NOT NULL DEFAULT '[]';
+-- The server-wide release preferences: priority and blocked group names, and the patience in days before
+-- a chapter is taken from a group lower down the list (lib/releases.ts). Two days is roughly how far behind
+-- the second group on a popular title runs. Read tolerantly by lib/scanlatorPrefs.ts, so a hand-edited row
+-- cannot stop the sweep.
+ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS scanlator_prefs       jsonb   NOT NULL DEFAULT '{"priority":[],"blocked":[],"patienceDays":2}';
 
 -- Update check: reads a public GitHub releases URL and sends nothing about this install, which is why it
 -- may default to on. See lib/githubRelease.ts.

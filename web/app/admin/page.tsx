@@ -17,7 +17,8 @@ import { Switch } from '@/components/Switch';
 import { ConsoleNav } from '@/components/ConsoleNav';
 import { motion, useReducedMotion } from 'framer-motion';
 import { t as tr, keys } from '@/lib/i18n';
-import type { Series } from '@/lib/types';
+import type { Series, StoredPrefs } from '@/lib/types';
+import { hasGroup, normGroup, reorder, withoutGroup } from '@/lib/scanlators';
 
 /**
  * Ten panels, grouped by what an admin is actually doing rather than by what the code is called.
@@ -1093,6 +1094,99 @@ function UpdateAndCount({ data, save }: { data: any; save: (body: any, ok: strin
   );
 }
 
+const NO_PREFS: StoredPrefs = { priority: [], blocked: [], patienceDays: 2 };
+
+/**
+ * A row of group names as chips, with a box to add one. `ordered` adds the arrows that make the row a ranking.
+ * Names are compared the way the server compares them, so typing "asura-scans" next to "Asura Scans" is a
+ * no-op rather than a second chip the server would fold into the first on save.
+ */
+function GroupChips({ label, hint, value, ordered, onChange }: {
+  label: string; hint: string; value: string[]; ordered?: boolean; onChange: (next: string[]) => void;
+}) {
+  const [draft, setDraft] = useState('');
+  const toast = useToast();
+  const add = (raw: string) => {
+    const t = raw.trim().replace(/,$/, '').trim();
+    setDraft('');
+    if (!t || hasGroup(value, t)) return;
+    // The server refuses both of these; refusing them here says why instead of a chip that never lands.
+    if (t.length > 80) { toast('A group name is at most 80 characters', 'error'); return; }
+    if (!normGroup(t)) { toast('A group name needs at least one letter or digit', 'error'); return; }
+    onChange([...value, t]);
+  };
+  return (
+    <div className="mt-3">
+      <p className="mb-1 text-xs font-semibold uppercase tracking-wider text-fog-500">{label}</p>
+      <div className="flex flex-wrap gap-1.5 rounded-xl border border-ink-700 bg-ink-850 p-2">
+        {value.map((g, i) => (
+          <span key={g} className="inline-flex items-center gap-1 rounded-full bg-ink-800 px-2.5 py-1 text-xs text-fog-200">
+            {ordered && <span className="text-fog-500">{i + 1}.</span>}
+            {g}
+            {ordered && (
+              <>
+                <button type="button" onClick={() => onChange(reorder(value, i, -1))} disabled={i === 0} aria-label={tr('Move up')} className="text-fog-500 hover:text-fog-200 disabled:opacity-30">▲</button>
+                <button type="button" onClick={() => onChange(reorder(value, i, 1))} disabled={i === value.length - 1} aria-label={tr('Move down')} className="text-fog-500 hover:text-fog-200 disabled:opacity-30">▼</button>
+              </>
+            )}
+            <button type="button" onClick={() => onChange(withoutGroup(value, g))} aria-label={`Remove ${g}`} className="text-fog-500 hover:text-rose-400">×</button>
+          </span>
+        ))}
+        <input
+          value={draft}
+          onChange={(e) => (e.target.value.endsWith(',') ? add(e.target.value) : setDraft(e.target.value))}
+          onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); add(draft); }
+                              else if (e.key === 'Backspace' && !draft && value.length) onChange(value.slice(0, -1)); }}
+          onBlur={() => add(draft)}
+          placeholder={tr('Add a group…')}
+          className="min-w-[8rem] flex-1 bg-transparent px-1 py-1 text-sm text-fog-50 outline-hidden"
+        />
+      </div>
+      <p className="mt-1 max-w-prose text-[11px] text-fog-500">{hint}</p>
+    </div>
+  );
+}
+
+/**
+ * The scanlator defaults every series starts from. A series can rank its own groups and block more, but it
+ * cannot un-block one that is blocked here: the server takes the union, so this list is the one place a
+ * group is refused everywhere at once.
+ */
+function ScanlatorDefaults({ data, save }: { data: any; save: (body: any, ok: string) => void }) {
+  // `null` until the admin touches something, so the card shows what is stored until then. The draft is
+  // kept after a save rather than cleared: clearing it would show the old values for the moment between
+  // the PATCH and the refetch landing, and the button goes quiet on its own once the two agree.
+  const [draft, setDraft] = useState<StoredPrefs | null>(null);
+  const stored: StoredPrefs = { ...NO_PREFS, ...(data.scanlator_prefs ?? {}) };
+  const cur = draft ?? stored;
+  const dirty = !!draft && JSON.stringify(draft) !== JSON.stringify(stored);
+  const set = (patch: Partial<StoredPrefs>) => setDraft({ ...cur, ...patch });
+  return (
+    <div className="card grad-border full p-4">
+      <p className="text-sm text-fog-100">{tr('Scanlators')}</p>
+      <p className="max-w-prose text-[11px] leading-relaxed text-fog-500">
+        {tr('When a source lists the same chapter from more than one group, the updater takes the first group ranked here and never a blocked one. Each series can rank its own on its page; blocks made here apply to every series.')}
+      </p>
+      <GroupChips label={tr('Blocked groups')} value={cur.blocked} onChange={(blocked) => set({ blocked, priority: blocked.reduce((p, g) => withoutGroup(p, g), cur.priority) })}
+        hint={tr('Never take a release from these groups, in any series. A chapter only they have released is skipped until someone else releases it.')} />
+      <GroupChips label={tr('Default priority')} ordered value={cur.priority} onChange={(priority) => set({ priority, blocked: priority.reduce((b, g) => withoutGroup(b, g), cur.blocked) })}
+        hint={tr('Tried in this order. A series with its own ranking ignores this list.')} />
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <label className="text-xs font-semibold uppercase tracking-wider text-fog-500" htmlFor="scanlator-patience">{tr('Patience (days)')}</label>
+        <input id="scanlator-patience" type="number" min={0} max={30} step={1} inputMode="numeric" placeholder="2"
+          value={cur.patienceDays ?? ''}
+          onChange={(e) => set({ patienceDays: e.target.value === '' ? null : Math.max(0, Math.min(30, Math.floor(Number(e.target.value)))) })}
+          className="field w-24" />
+      </div>
+      <p className="mt-1 max-w-prose text-[11px] text-fog-500">
+        {tr('How long a new chapter waits for a ranked group before the best available copy is fetched instead. 0 takes the best copy at once; blank means 2.')}
+      </p>
+      <button onClick={() => save({ scanlatorPrefs: { priority: cur.priority, blocked: cur.blocked, patienceDays: cur.patienceDays } }, 'Saved')}
+        disabled={!dirty} className="btn-accent mt-3 w-full py-2 text-sm disabled:opacity-50">{tr('Save scanlator defaults')}</button>
+    </div>
+  );
+}
+
 function Settings() {
   const toast = useToast();
   const qc = useQueryClient();
@@ -1127,6 +1221,7 @@ function Settings() {
         <button onClick={() => save({ updaterHours: hours ?? data.updater_hours }, 'Saved')} className="btn-accent mt-2 w-full py-2 text-sm">{tr('Save interval')}</button>
       </div>
       <UpdateAndCount data={data} save={save} />
+      <ScanlatorDefaults data={data} save={save} />
       {data.extensions_configured && (
         <>
           <div className="card grad-border flex items-center justify-between gap-3 p-4">

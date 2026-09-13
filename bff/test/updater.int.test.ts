@@ -559,3 +559,309 @@ test('a floored series fetches the chapter above what it holds, not the ones bel
   assert.equal(st.m, 1, '"{n} behind" on the series page counts what the sweep would fetch, not the back catalogue');
   assert.equal(st.c, 6, 'while source_chapters still says what the source said');
 });
+
+
+// ---- v0.31.0: which copy of a chapter, from which group, from which source ----------------------------
+//
+// A source can list one number several times (MangaDex: one row per group), and a series can be followed
+// on more than one source. The updater now merges every listing it is given, hands the lot to
+// chooseReleases (lib/releases.ts) with the series' preferences, and fetches ONE copy per number; what it
+// fetched is stamped on the book (setBookMeta) and written into the file (ComicInfo <Translator>).
+
+/** One adapter whose listing each test below sets; `asked` records the chapter ids it was asked pages for. */
+const SRC_GRP = 'upd-grp';
+let grpList: any[] = [];
+const grpAsked: string[] = [];
+/** A primary and a follower for the multi-source tests; page urls carry the adapter so fetch can refuse one. */
+const SRC_PRI = 'upd-pri', SRC_EXT = 'upd-ext';
+const priAsked: string[] = [];
+const extAsked: string[] = [];
+const numbered = (n: number, prefix: string) => Array.from({ length: n }, (_, i) => ({ number: i + 1, title: `Chapter ${i + 1}`, sourceId: `${prefix}${i + 1}` }));
+const bookRow = (key: string, n: number) =>
+  (q(`SELECT series_id, scanlator, source_id FROM lib_books WHERE file LIKE $1`, [`%${S(key)}/Chapter ${n}.cbz`]) as Promise<any[]>).then((r) => r[0]);
+const comicInfo = (key: string, n: number): string => {
+  const AdmZip = require('adm-zip');
+  return new AdmZip(join(ROOT, S(key), `Chapter ${n}.cbz`)).readAsText('ComicInfo.xml');
+};
+
+before(async () => {
+  if (!DSN) return;
+  const { registerAdapter } = await import('../src/lib/sources');
+  registerAdapter({
+    id: SRC_GRP, name: SRC_GRP,
+    async search() { return []; },
+    async getSeries(sid: string) { return { sourceId: sid, source: SRC_GRP, title: sid }; },
+    async listChapters() { return grpList; },
+    async getPageUrls(chId: string) { grpAsked.push(chId); return ['https://example.invalid/grp/page.png']; },
+    async latest() { return []; },
+  } as any);
+  registerAdapter({
+    id: SRC_PRI, name: SRC_PRI,
+    async search() { return []; },
+    async getSeries(sid: string) { return { sourceId: sid, source: SRC_PRI, title: sid }; },
+    async listChapters() { return numbered(5, 'p'); },
+    async getPageUrls(chId: string) { priAsked.push(chId); return [`https://example.invalid/pri/${chId}.png`]; },
+    async latest() { return []; },
+  } as any);
+  registerAdapter({
+    id: SRC_EXT, name: SRC_EXT,
+    async search() { return []; },
+    async getSeries(sid: string) { return { sourceId: sid, source: SRC_EXT, title: sid }; },
+    async listChapters() { return numbered(6, 'e'); },
+    async getPageUrls(chId: string) { extAsked.push(chId); return [`https://example.invalid/ext/${chId}.png`]; },
+    async latest() { return []; },
+  } as any);
+});
+
+after(async () => {
+  if (!DSN) return;
+  await q('DELETE FROM source_health WHERE source_id = ANY($1::text[])', [[SRC_GRP, SRC_PRI, SRC_EXT]]).catch(() => {});
+});
+
+/**
+ * Reintroduce by replacing the chooseReleases call with `{ releases: tagged, waiting: [] }`: the loop takes
+ * the copies in listed order, A's id is asked for first, and "the preferred group's copy was fetched" fails.
+ * Reintroduce the stamp by dropping the setBookMeta call after persistScan in runUpdateAll: the file lands,
+ * the scan mints the row, and "stamped who released it" reads null.
+ */
+test('the preferred group\'s copy is the one fetched, and the file and the book both say so', { skip }, async () => {
+  grpList = [
+    { number: 6, title: 'Chapter 6', sourceId: 'g6a', scanlator: 'A' },
+    { number: 6, title: 'Chapter 6', sourceId: 'g6b', scanlator: 'B' },
+  ];
+  grpAsked.length = 0;
+  await mkSeries('grp', SRC_GRP);
+  await q(`UPDATE lib_series SET scanlator_prefs = '{"priority":["B"]}' WHERE id = $1`, [S('grp')]);
+  await q('DELETE FROM source_health WHERE source_id = $1', [SRC_GRP]);
+  await only(['grp']);
+  globalThis.fetch = (async () => png()) as typeof fetch;
+
+  const r = await runUpdateAll({ maxNew: 5 });
+
+  assert.equal(r.added, 1, 'one number, one file');
+  assert.deepEqual(grpAsked, ['g6b'], `the preferred group's copy was fetched, not the first listed; asked: ${grpAsked}`);
+  assert.ok(onDisk('grp', 6));
+  assert.match(comicInfo('grp', 6), /<Translator>B<\/Translator>/, 'the file carries the group in ComicInfo');
+  const b = await bookRow('grp', 6);
+  assert.ok(b, 'the sweep scanned the file into a book');
+  assert.equal(b.scanlator, 'B', 'and stamped who released it');
+  assert.equal(b.source_id, SRC_GRP, 'and where it came from');
+});
+
+/**
+ * Reintroduce by passing `{ ...prefs, patienceMs: 0 }` to chooseReleases: the first run fetches A's copy
+ * and "held for the preferred group" fails on added.
+ */
+test('a number whose preferred group has not released yet is held, counted as behind, and not fetched', { skip }, async () => {
+  grpList = [{ number: 7, title: 'Chapter 7', sourceId: 'g7a', scanlator: 'A', publishedAt: new Date().toISOString() }];
+  grpAsked.length = 0;
+  await mkSeries('pat', SRC_GRP);
+  await q('DELETE FROM source_health WHERE source_id = $1', [SRC_GRP]);
+  globalThis.fetch = (async () => png()) as typeof fetch;
+
+  // patienceDays null on the series: the global default (2 days) applies.
+  await q(`UPDATE lib_series SET scanlator_prefs = '{"priority":["B"]}' WHERE id = $1`, [S('pat')]);
+  const held = await updateSeries(S('pat'), 5);
+  assert.equal(held.added, 0, 'held for the preferred group');
+  assert.equal(held.waiting, 1, 'and the run says how many it is holding');
+  assert.equal(held.outcome, 'ok', 'holding is not a failure');
+  assert.deepEqual(grpAsked, [], 'nothing was asked for');
+  assert.equal((await stamp('pat')).m, 1, 'a held number is still a missing one: "1 behind" on the series page');
+  assert.equal((await stamp('pat')).c, 1);
+
+  // Patience off for this series: the same listing is taken now.
+  await q(`UPDATE lib_series SET scanlator_prefs = '{"priority":["B"],"patienceDays":0}' WHERE id = $1`, [S('pat')]);
+  const taken = await updateSeries(S('pat'), 5);
+  assert.equal(taken.added, 1, 'with no patience, the copy on offer is taken');
+  assert.equal(taken.waiting, 0);
+  assert.deepEqual(grpAsked, ['g7a']);
+});
+
+/**
+ * Reintroduce by dropping the `!have.has(c.number)` filter from `missing`: B is asked for chapter 5 and
+ * "a chapter on disk is not fetched again" fails.
+ */
+test('a chapter already on disk is never replaced by a better-ranked group\'s copy', { skip }, async () => {
+  grpList = [
+    { number: 5, title: 'Chapter 5', sourceId: 'g5a', scanlator: 'A' },
+    { number: 5, title: 'Chapter 5', sourceId: 'g5b', scanlator: 'B' },
+  ];
+  grpAsked.length = 0;
+  await mkSeries('keep', SRC_GRP);
+  await q(`UPDATE lib_series SET scanlator_prefs = '{"priority":["B"]}' WHERE id = $1`, [S('keep')]);
+  // Chapter 5 landed from A on an earlier run, as the row the scan would have minted for it.
+  await q('DELETE FROM lib_books WHERE series_id = $1', [S('keep')]);
+  await q(`INSERT INTO lib_books (id, series_id, source, file, number, title, pages, scanlator, source_id) VALUES ($1, $2, 'T!upd', $3, 5, 'Chapter 5', 1, 'A', $4)`,
+    [`${S('keep')}_b5`, S('keep'), `${S('keep')}/Chapter 5.cbz`, SRC_GRP]);
+  await q('DELETE FROM source_health WHERE source_id = $1', [SRC_GRP]);
+  globalThis.fetch = (async () => png()) as typeof fetch;
+
+  const r = await updateSeries(S('keep'), 5);
+
+  assert.deepEqual(grpAsked, [], `a chapter on disk is not fetched again, whoever released it; asked: ${grpAsked}`);
+  assert.equal(r.added, 0);
+  assert.equal((await stamp('keep')).m, 0, 'and it is not "behind" either');
+  const b = await bookRow('keep', 5);
+  assert.equal(b.scanlator, 'A', 'the stamp still names the group whose file is on disk');
+});
+
+/**
+ * Reintroduce by passing `releases` instead of `landed` to setBookMeta in updateSeries: chapter 5's row is
+ * relabelled B while A's file is what is on disk, and "a book that did not land keeps its stamp" fails.
+ */
+test('only the chapters that landed are stamped; a book from an earlier run keeps its group', { skip }, async () => {
+  grpList = [
+    { number: 5, title: 'Chapter 5', sourceId: 'g5b', scanlator: 'B' },
+    { number: 6, title: 'Chapter 6', sourceId: 'g6b', scanlator: 'B' },
+  ];
+  grpAsked.length = 0;
+  await mkSeries('stamp', SRC_GRP);
+  await q('DELETE FROM lib_books WHERE series_id = $1', [S('stamp')]);
+  await q(`INSERT INTO lib_books (id, series_id, source, file, number, title, pages, scanlator, source_id) VALUES ($1, $2, 'T!upd', $3, 5, 'Chapter 5', 1, 'A', $4)`,
+    [`${S('stamp')}_b5`, S('stamp'), `${S('stamp')}/Chapter 5.cbz`, SRC_GRP]);
+  await q('DELETE FROM source_health WHERE source_id = $1', [SRC_GRP]);
+  globalThis.fetch = (async () => png()) as typeof fetch;
+
+  const r = await updateSeries(S('stamp'), 5);
+
+  assert.equal(r.added, 1);
+  assert.deepEqual(r.landed, [{ number: 6, scanlator: 'B', source: SRC_GRP }], 'the run reports what landed, for the stamp after the scan');
+  assert.equal((await bookRow('stamp', 5)).scanlator, 'A', 'a book that did not land keeps its stamp');
+});
+
+/**
+ * Reintroduce by iterating `followed.slice(0, 1)` in the listing loop: the follower is never asked, chapter
+ * 6 is never seen, and "five from the primary and one from the follower" fails with added 5. Reintroduce
+ * the count by stamping `tagged.length` instead of `releases.length`: "source_chapters is the union of
+ * NUMBERS" fails, reading 11 copies where there are 6 numbers.
+ */
+test('a series followed on two sources takes what the primary has and the rest from the follower', { skip }, async () => {
+  priAsked.length = 0; extAsked.length = 0;
+  await mkSeries('two', SRC_PRI);
+  await q(`INSERT INTO series_sources (series_id, source_id, source_series_id) VALUES ($1, $2, 'ext-two') ON CONFLICT DO NOTHING`, [S('two'), SRC_EXT]);
+  await q('DELETE FROM lib_books WHERE series_id = $1', [S('two')]);
+  await q('DELETE FROM source_health WHERE source_id = ANY($1::text[])', [[SRC_PRI, SRC_EXT]]);
+  await only(['two']);
+  globalThis.fetch = (async () => png()) as typeof fetch;
+
+  const r = await runUpdateAll({ maxNew: 6 });
+
+  assert.equal(r.added, 6, 'five from the primary and one from the follower');
+  assert.deepEqual(extAsked, ['e6'], `chapter 6 came from the follower, and only chapter 6; asked: ${extAsked}`);
+  assert.deepEqual(priAsked, ['p1', 'p2', 'p3', 'p4', 'p5'], 'the primary wins every number it has');
+  assert.ok(onDisk('two', 6));
+  assert.equal((await bookRow('two', 6)).source_id, SRC_EXT, 'the book says which adapter it came from');
+  assert.equal((await bookRow('two', 1)).source_id, SRC_PRI);
+  const st = await stamp('two');
+  assert.equal(st.c, 6, 'source_chapters is the union of NUMBERS the sources listed, not the number of copies');
+  const ext = (await q('SELECT checked_at, chapters FROM series_sources WHERE series_id = $1 AND source_id = $2', [S('two'), SRC_EXT]))[0];
+  assert.ok(ext.checked_at, 'the follower carries its own checked stamp');
+  assert.equal(ext.chapters, 6, 'and what it listed');
+});
+
+/**
+ * A series whose primary adapter is gone -- the extension was uninstalled, or its language hidden -- but
+ * which follows a source that is still here keeps updating from that source. That is what following is
+ * for, and it is what the Health page says when it lists such a series as reference rather than frozen.
+ *
+ * Reintroduce by returning 'unrouted' when the PRIMARY adapter is missing (the check that used to run
+ * before series_sources was read): the follower is never asked and "the follower is asked" fails with
+ * outcome 'unrouted'.
+ */
+test('a dead primary with a live follower still updates from the follower', { skip }, async () => {
+  extAsked.length = 0;
+  await mkSeries('deadpri', 'sw:0000000000000000000'); // an adapter that is not loaded
+  await q(`INSERT INTO series_sources (series_id, source_id, source_series_id) VALUES ($1, $2, 'ext-two') ON CONFLICT DO NOTHING`, [S('deadpri'), SRC_EXT]);
+  await q('DELETE FROM lib_books WHERE series_id = $1', [S('deadpri')]);
+  await q('DELETE FROM source_health WHERE source_id = $1', [SRC_EXT]);
+  await only(['deadpri']);
+  globalThis.fetch = (async () => png()) as typeof fetch;
+
+  // Through the sweep, which scans what landed; updateSeries alone leaves the rows for the next scan.
+  const r = await runUpdateAll({ maxNew: 10 });
+  assert.equal(r.outcomes.unrouted ?? 0, 0, `the follower is asked; outcomes ${JSON.stringify(r.outcomes)}`);
+  assert.ok(extAsked.length >= 1, 'the follower served the chapters');
+  assert.equal(r.added, 6);
+  assert.equal((await bookRow('deadpri', 6)).source_id, SRC_EXT);
+});
+
+/**
+ * Reintroduce by returning 'blocked' when `blocked > 0` instead of when every followed source is: the
+ * follower is never listed and "a cooldown on the primary does not stop the follower" fails.
+ */
+test('a cooldown on the primary does not stop the follower; a cooldown on both is a blocked series', { skip }, async () => {
+  priAsked.length = 0; extAsked.length = 0;
+  await mkSeries('blk', SRC_PRI);
+  await q(`INSERT INTO series_sources (series_id, source_id, source_series_id) VALUES ($1, $2, 'ext-blk') ON CONFLICT DO NOTHING`, [S('blk'), SRC_EXT]);
+  // 1..5 are on disk; only the follower lists 6.
+  await q('DELETE FROM lib_books WHERE series_id = $1', [S('blk')]);
+  for (const n of [1, 2, 3, 4, 5]) {
+    await q(`INSERT INTO lib_books (id, series_id, source, file, number, title, pages) VALUES ($1, $2, 'T!upd', $3, $4, $5, 1)`,
+      [`${S('blk')}_b${n}`, S('blk'), `${S('blk')}/Chapter ${n}.cbz`, n, `Chapter ${n}`]);
+  }
+  const block = (id: string) => q(`INSERT INTO source_health (source_id, status, blocked_until) VALUES ($1, 'blocked', now() + interval '1 hour')
+    ON CONFLICT (source_id) DO UPDATE SET blocked_until = now() + interval '1 hour'`, [id]);
+  await q('DELETE FROM source_health WHERE source_id = ANY($1::text[])', [[SRC_PRI, SRC_EXT]]);
+  globalThis.fetch = (async () => png()) as typeof fetch;
+  try {
+    await block(SRC_PRI);
+    const r = await updateSeries(S('blk'), 5);
+    assert.equal(r.outcome, 'ok', 'a cooldown on the primary does not stop the follower');
+    assert.equal(r.added, 1);
+    assert.deepEqual(extAsked, ['e6']);
+    assert.deepEqual(priAsked, [], 'the primary was left alone');
+    assert.ok(onDisk('blk', 6));
+
+    await block(SRC_EXT);
+    await q('UPDATE lib_series SET source_checked_at = NULL WHERE id = $1', [S('blk')]);
+    assert.equal((await updateSeries(S('blk'), 5)).outcome, 'blocked', 'with every source in a cooldown, the series is blocked');
+    assert.equal((await stamp('blk')).t, null, 'and, never asked, it is not stamped');
+  } finally {
+    await q('DELETE FROM source_health WHERE source_id = ANY($1::text[])', [[SRC_PRI, SRC_EXT]]);
+  }
+});
+
+/**
+ * Reintroduce by restoring `if (e?.blockStatus) break;`: the refusal on the primary ends the loop, chapter
+ * 3 via the follower is never attempted, and "the follower's chapter still landed" fails.
+ */
+test('a refusing primary costs one strike and does not stop the follower\'s chapters', { skip }, async () => {
+  const { registerAdapter } = await import('../src/lib/sources');
+  // The primary lists 1..2, the follower 1..3, so the follower is only ever asked for chapter 3.
+  registerAdapter({
+    id: 'upd-pri2', name: 'upd-pri2',
+    async search() { return []; },
+    async getSeries(sid: string) { return { sourceId: sid, source: 'upd-pri2', title: sid }; },
+    async listChapters() { return numbered(2, 'q'); },
+    async getPageUrls(chId: string) { priAsked.push(chId); return [`https://example.invalid/refused/${chId}.png`]; },
+    async latest() { return []; },
+  } as any);
+  registerAdapter({
+    id: 'upd-ext2', name: 'upd-ext2',
+    async search() { return []; },
+    async getSeries(sid: string) { return { sourceId: sid, source: 'upd-ext2', title: sid }; },
+    async listChapters() { return numbered(3, 'f'); },
+    async getPageUrls(chId: string) { extAsked.push(chId); return [`https://example.invalid/ext/${chId}.png`]; },
+    async latest() { return []; },
+  } as any);
+  priAsked.length = 0; extAsked.length = 0;
+  await mkSeries('ref', 'upd-pri2');
+  await q(`INSERT INTO series_sources (series_id, source_id, source_series_id) VALUES ($1, 'upd-ext2', 'ext-ref') ON CONFLICT DO NOTHING`, [S('ref')]);
+  await q('DELETE FROM lib_books WHERE series_id = $1', [S('ref')]);
+  await q('DELETE FROM chapter_failures WHERE series_id = $1', [S('ref')]);
+  await q('DELETE FROM source_health WHERE source_id = ANY($1::text[])', [['upd-pri2', 'upd-ext2']]);
+  globalThis.fetch = (async (u: any) => (String(u).includes('/refused/') ? new Response('go away', { status: 403 }) : png())) as typeof fetch;
+  try {
+    const r = await updateSeries(S('ref'), 5);
+    assert.equal(priAsked.length, 1, `the refusing primary was asked once, not for chapter 2 as well; asked: ${priAsked}`);
+    assert.deepEqual(extAsked, ['f3'], 'the follower\'s chapter still landed');
+    assert.ok(onDisk('ref', 3));
+    assert.equal(r.added, 1);
+    assert.equal(r.failed, 1, 'the refusal is one failure, written down once');
+    const h = (await q('SELECT consecutive FROM source_health WHERE source_id = $1', ['upd-pri2']))[0];
+    assert.equal(Number(h?.consecutive), 1, 'one refusal is one strike');
+  } finally {
+    await q('DELETE FROM source_health WHERE source_id = ANY($1::text[])', [['upd-pri2', 'upd-ext2']]);
+    await q('DELETE FROM chapter_failures WHERE series_id = $1', [S('ref')]).catch(() => {});
+  }
+});

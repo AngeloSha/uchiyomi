@@ -17,7 +17,10 @@ import { Modal, msgOf } from '@/components/ConfirmDialog';
 import { Img, ProgressBar } from '@/components/ui';
 import { sourceCover } from '@/components/cards';
 import { useToast } from '@/components/Toast';
+import { useAuth } from '@/lib/auth';
 import { t as tr } from '@/lib/i18n';
+import { followable } from '@/lib/scanlators';
+import type { SeriesSource } from '@/lib/types';
 
 interface Candidate {
   source: string; name: string; sourceSeriesId: string; title: string; coverUrl?: string;
@@ -35,6 +38,8 @@ interface Scan {
   planId: string;
   /** The most chapters one fill may take; the server refuses more, so the dialog never asks for more. */
   fillMax?: number;
+  /** Source ids the updater already asks for this series, so a followed one offers no second follow button. */
+  following?: string[];
   refusal: { code: string; message: string } | null;
 }
 interface Job { folder: string; title: string; total: number; done: number; status: string; reason?: string }
@@ -58,6 +63,7 @@ function whyText(c: Candidate): string {
 export function FindMissingDialog({ seriesId, onClose }: { seriesId: string; onClose: () => void }) {
   const toast = useToast();
   const qc = useQueryClient();
+  const { isAdmin } = useAuth();
   const [altTitle, setAltTitle] = useState('');
   const [term, setTerm] = useState('');
   const [started, setStarted] = useState<string | null>(null);
@@ -100,6 +106,41 @@ export function FindMissingDialog({ seriesId, onClose }: { seriesId: string; onC
     }
   };
 
+  // Following is the same decision as filling -- this source, under this title, with this overlap -- made
+  // once for every future chapter instead of for the gaps in front of us. It goes through the same planId so
+  // the server can refuse a stale scan the same way. The scan's `following` is patched in place rather than
+  // refetched: a refetch is a fresh scan, which asks every source again and costs a cooldown when one is
+  // slow, all to learn a fact the response already carries.
+  const follow = async (c: Candidate) => {
+    if (!scan.data) return;
+    setBusy(true);
+    try {
+      const res = await api<{ ok: true; sources: SeriesSource[] }>(`/api/admin/series/${seriesId}/sources`, {
+        method: 'POST',
+        json: { planId: scan.data.planId, source: c.source, sourceSeriesId: c.sourceSeriesId },
+      });
+      const following = res.sources.map((x) => x.sourceId);
+      qc.setQueryData<Scan>(['fill-scan', seriesId, term], (old) => (old ? { ...old, following } : old));
+      qc.invalidateQueries({ queryKey: ['series', seriesId] });
+      toast(tr('Now following {s}').replace('{s}', c.name), 'success');
+    } catch (e) {
+      toast(msgOf(e, tr('Could not follow that source.')), 'error');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  /** The follow button for one candidate, or nothing when this person cannot follow or the source cannot be followed. */
+  const followButton = (c: Candidate) => {
+    if (!isAdmin || !followable(c)) return null;
+    const already = !!scan.data?.following?.includes(c.source);
+    return (
+      <button disabled={busy || already} onClick={() => follow(c)} className="btn-ghost mt-2 w-full text-sm disabled:opacity-50">
+        {already ? tr('Already followed') : tr('Also follow this source')}
+      </button>
+    );
+  };
+
   if (started) {
     return (
       <Modal title={tr('Filling in the gaps')} onClose={onClose}>
@@ -121,7 +162,10 @@ export function FindMissingDialog({ seriesId, onClose }: { seriesId: string; onC
 
   const d = scan.data;
   const usable = (d?.candidates || []).filter((c) => c.why === 'ok');
-  const rejected = (d?.candidates || []).filter((c) => c.why !== 'ok');
+  // A source that matches us and has nothing we lack is not usable for a fill, but it is exactly the kind
+  // worth following -- so for an admin it leaves the rejected list and gets its own, with the button.
+  const alsoFollow = isAdmin ? (d?.candidates || []).filter((c) => c.why === 'nothing_to_fill' && followable(c)) : [];
+  const rejected = (d?.candidates || []).filter((c) => c.why !== 'ok' && !alsoFollow.includes(c));
 
   return (
     <Modal title={tr('Find missing chapters')} onClose={onClose}>
@@ -188,6 +232,7 @@ export function FindMissingDialog({ seriesId, onClose }: { seriesId: string; onC
                     .replace('{s}', c.name)}
                 </button>
               )}
+              {followButton(c)}
             </div>
           ))}
 
@@ -210,6 +255,29 @@ export function FindMissingDialog({ seriesId, onClose }: { seriesId: string; onC
               </button>
             </div>
           </div>
+
+          {alsoFollow.length > 0 && (
+            <div className="mt-5">
+              <p className="text-xs uppercase tracking-wide text-fog-600">{tr('Could also be followed')}</p>
+              <p className="mt-1 text-xs text-fog-500">{tr('Up to date with what you have. Following one means new chapters are taken from whichever source has them first.')}</p>
+              {alsoFollow.map((c) => (
+                <div key={`${c.source}:${c.sourceSeriesId}`} className="mt-2 rounded-2xl border border-ink-700 p-3">
+                  <div className="flex gap-3">
+                    <Img src={sourceCover(c.source, c.coverUrl)} alt="" className="h-16 w-12 shrink-0 rounded-lg object-cover" />
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-semibold text-white">{c.name}</p>
+                      <p className="truncate text-xs text-fog-400">{tr('Listed there as')} “{c.title}”</p>
+                      <p className="mt-1 text-xs text-fog-500">
+                        {c.count} {tr('chapters')} ({c.first}–{c.last}) · {tr('matches {m} of your {n}')
+                          .replace('{m}', String(c.matched)).replace('{n}', String(d.have.count))}
+                      </p>
+                    </div>
+                  </div>
+                  {followButton(c)}
+                </div>
+              ))}
+            </div>
+          )}
 
           {rejected.length > 0 && (
             <div className="mt-5">

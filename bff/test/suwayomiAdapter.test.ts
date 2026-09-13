@@ -76,21 +76,30 @@ test('latest is claimed only when the extension supports it', async () => {
   assert.equal(makeSuwayomiAdapter({ ...LOCAL, supportsLatest: false }, fakeGql({})).latest, undefined);
 });
 
-test('chapters come back ascending, deduped, with dates', async () => {
+test('chapters come back ascending, every copy of a number, with dates and groups', async () => {
   const { makeSuwayomiAdapter } = await load();
   const a = makeSuwayomiAdapter(LOCAL, fakeGql({
     fetchChapters: { fetchChapters: { chapters: [
-      { id: 33, chapterNumber: 3, name: 'Chapter 3', pageCount: -1, uploadDate: '1787177865027' },
+      { id: 33, chapterNumber: 3, name: 'Chapter 3', pageCount: -1, uploadDate: '1787177865027', scanlator: '   ' },
       { id: 1, chapterNumber: 1, name: 'Chapter 1', pageCount: 3, uploadDate: '1787177840210' },
-      { id: 2, chapterNumber: 2, name: 'Chapter 2', pageCount: 3, uploadDate: '1787177840269' },
-      { id: 99, chapterNumber: 2, name: 'Chapter 2 (dupe scanlation)', pageCount: 3 },
+      { id: 2, chapterNumber: 2, name: 'Chapter 2', pageCount: 3, uploadDate: '1787177840269', scanlator: 'Main Team' },
+      { id: 99, chapterNumber: 2, name: 'Chapter 2 (dupe scanlation)', pageCount: 3, scanlator: ' Dupe Team ' },
     ] } },
   }));
   const cs = await a.listChapters('1');
-  assert.deepEqual(cs.map((c) => c.number), [1, 2, 3]);
-  assert.equal(cs[0].sourceId, '1');
+  // The second scanlation of chapter 2 used to be dropped here, first-listed wins. It is a real copy by a
+  // real group, and which one the reader wants is the chooser's call, not the adapter's -- the adapter
+  // cannot know the series' preference. Reintroduce by restoring the `seen` number filter in listChapters:
+  // the length assertion fails (3, not 4) and 'Dupe Team' is gone.
+  assert.equal(cs.length, 4);
+  assert.deepEqual(cs.map((c) => c.number), [1, 2, 2, 3]);
+  assert.deepEqual(cs.map((c) => c.sourceId), ['1', '2', '99', '33'], 'ascending, and the engine\'s order within a number');
+  // Mihon's scanlator column is free text; blank is "unknown", and unknown must be absent, not '' -- the
+  // chooser never blocks a copy with no group, but it would try to match a group named ''. Reintroduce by
+  // copying `c.scanlator` without the trim-or-undefined: this deepEqual fails with ' Dupe Team ' and '   '.
+  assert.deepEqual(cs.map((c) => c.scanlator), [undefined, 'Main Team', 'Dupe Team', undefined]);
   // pageCount -1 means "not counted yet" and must not be reported as a real page count
-  assert.equal(cs[2].pages, undefined);
+  assert.equal(cs[3].pages, undefined);
   assert.equal(cs[0].pages, 3);
   assert.equal(cs[0].publishedAt, new Date(1787177840210).toISOString());
 });
