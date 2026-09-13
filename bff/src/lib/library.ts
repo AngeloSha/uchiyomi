@@ -546,10 +546,16 @@ export async function persistScan(): Promise<{ series: number; books: number; ms
           }
           // Conflict on (root, file) for the same reason: an existing book keeps its id, and the same
           // relative path under a different root is a different book rather than a collision.
+          //
+          // pruned_at is cleared here because this loop only ever runs for a file that IS on disk. The
+          // read-chapter cleanup marks a row to say "the bytes are gone and we are not fetching them
+          // again" (lib/chapterCleanup.ts); a file back under that path -- re-copied by hand, restored from
+          // a backup, pulled down again -- makes that claim false, and a stale mark would leave the chapter
+          // showing as removed while it sits there readable.
           await qq(
             `INSERT INTO lib_books (id, series_id, source, file, number, title, mtime, root) VALUES ${tuples.join(',')}
              ON CONFLICT (root, file) DO UPDATE SET series_id=EXCLUDED.series_id, number=EXCLUDED.number,
-               title=EXCLUDED.title, mtime=EXCLUDED.mtime, updated_at=now()`,
+               title=EXCLUDED.title, mtime=EXCLUDED.mtime, updated_at=now(), pruned_at=NULL`,
             params,
           );
 

@@ -921,7 +921,10 @@ function Tasks() {
     try {
       const r = await api<{ ok?: boolean; error?: string; series?: number; books?: number }>(`/api/admin/tasks/${id}/run`, { method: 'POST' });
       // A refusal is a 200 with ok:false (the task is already running), and used to toast "Started" too.
-      if (r?.ok === false) toast(r.error === 'busy' ? 'Already running' : 'Failed', 'error');
+      // `not_enabled` is reachable in one narrow window: this list polls every five seconds, so a task
+      // switched off in Settings is still on screen for a moment afterwards. "Failed" would be a lie about
+      // something the admin had just done on purpose.
+      if (r?.ok === false) toast(r.error === 'busy' ? 'Already running' : r.error === 'not_enabled' ? 'That task is switched off' : 'Failed', 'error');
       // ⚠️ The scan is the one task that runs to completion before answering, and it answers with its
       // counts. Toasting "Started" for it hid the only fact that mattered: in #34 a library scanned to zero
       // series and the reporter's summary was "the run now buttons don't work" -- because from the outside,
@@ -1187,6 +1190,94 @@ function ScanlatorDefaults({ data, save }: { data: any; save: (body: any, ok: st
   );
 }
 
+/**
+ * The opt-in read-chapter cleanup.
+ *
+ * ⚠️ THE ONLY SWITCH ON THIS PAGE THAT DELETES FILES, so it is the only one that does not simply toggle.
+ * Turning it ON asks first, and the question carries `cleanup_read_due` from the settings endpoint: the
+ * number of chapters that would go on the first run. An admin deciding this needs "1,842 chapters" in front
+ * of them, not an adjective. Turning it OFF is instant -- an off switch that argues with you is a bug.
+ *
+ * The day count saves separately from the switch, and 0 is a legal value meaning "at the next run". They
+ * are two controls because they are two decisions, and because a slip in the number must not silently
+ * enable the job.
+ */
+function ReadCleanup({ data, save }: { data: any; save: (body: any, ok: string) => void }) {
+  const on = !!data.cleanup_read;
+  const stored: number = data.cleanup_read_days ?? 30;
+  const [days, setDays] = useState<number | null>(null);
+  const [confirm, setConfirm] = useState(false);
+  const cur = days ?? stored;
+  // What the server says would go on the next run. It is counted at the SAVED day count, so it is withheld
+  // while there is an unsaved number in the box: a figure that does not answer the setting on screen is
+  // worse than no figure, and this is the one number someone is about to make an irreversible decision on.
+  const due: number | null =
+    cur === stored && typeof data.cleanup_read_due === 'number' ? data.cleanup_read_due : null;
+
+  return (
+    <>
+      <div className="card grad-border full p-4">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <p className="text-sm text-fog-100">{tr('Delete read chapters')}</p>
+            <p className="max-w-prose text-[11px] leading-relaxed text-fog-500">
+              {tr('Free space by deleting a chapter\u2019s file once everyone who started it has finished it. A chapter someone is partway through is never deleted, and neither is one nobody has read.')}
+            </p>
+          </div>
+          <Switch on={on} label={tr('Delete read chapters')}
+            onChange={(next) => { if (next) setConfirm(true); else save({ cleanupRead: false }, 'Read chapters are kept'); }} />
+        </div>
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <label className="text-xs font-semibold uppercase tracking-wider text-fog-500" htmlFor="cleanup-days">{tr('Wait (days)')}</label>
+          <input id="cleanup-days" type="number" min={0} max={3650} step={1} inputMode="numeric"
+            value={cur}
+            onChange={(e) => setDays(Math.max(0, Math.min(3650, Math.floor(Number(e.target.value) || 0))))}
+            className="field w-24" />
+          <button onClick={() => save({ cleanupReadDays: cur }, 'Saved')} disabled={cur === stored}
+            className="chip text-xs disabled:opacity-50">{tr('Save')}</button>
+        </div>
+        <p className="mt-1 max-w-prose text-[11px] leading-relaxed text-fog-500">
+          {cur === 0
+            ? tr('0 \u2014 the chapter goes at the next hourly run after the last reader finishes it.')
+            : tr('Counted from the moment the last reader finished. Re-opening the chapter starts the wait again.')}
+        </p>
+        <p className="mt-2 max-w-prose text-[11px] leading-relaxed text-fog-600">
+          {tr('Only chapters Uchiyomi downloaded itself are removed \u2014 nothing in a library you built by hand is touched. The chapter stays listed and everyone keeps their reading history; the pages are what goes. It will not be downloaded again.')}
+        </p>
+        {due !== null && (
+          <p className={`mt-2 text-[11px] ${due > 0 ? 'text-amber-300' : 'text-fog-500'}`}>
+            {due > 0
+              ? tr('{n} chapters qualify right now.', { n: due.toLocaleString() })
+              : tr('No chapters qualify right now.')}
+          </p>
+        )}
+      </div>
+      {confirm && (
+        <ConfirmDialog
+          title={tr('Start deleting chapters after they are read?')}
+          body={(
+            <>
+              <p>{tr('From now on, an hourly job will permanently delete the file of any chapter that everyone who started it has finished, once it has been finished for the number of days set here. There is no undo and no recycle bin.')}</p>
+              <p className="mt-2">{tr('Chapters somebody is partway through, chapters nobody has read, bookmarked chapters, and files in a library you assembled yourself are all left alone. Reading history is never deleted.')}</p>
+              {due !== null && (
+                <p className={`mt-2 font-semibold ${due > 0 ? 'text-amber-300' : 'text-fog-400'}`}>
+                  {due > 0
+                    ? tr('{n} chapters qualify today and would go on the first run.', { n: due.toLocaleString() })
+                    : tr('Nothing qualifies today, so the first run would delete nothing.')}
+                </p>
+              )}
+            </>
+          )}
+          confirmLabel={tr('Turn it on')}
+          danger
+          onConfirm={() => { setConfirm(false); save({ cleanupRead: true }, 'Read chapters will be deleted'); }}
+          onClose={() => setConfirm(false)}
+        />
+      )}
+    </>
+  );
+}
+
 function Settings() {
   const toast = useToast();
   const qc = useQueryClient();
@@ -1221,6 +1312,7 @@ function Settings() {
         <button onClick={() => save({ updaterHours: hours ?? data.updater_hours }, 'Saved')} className="btn-accent mt-2 w-full py-2 text-sm">{tr('Save interval')}</button>
       </div>
       <UpdateAndCount data={data} save={save} />
+      <ReadCleanup data={data} save={save} />
       <ScanlatorDefaults data={data} save={save} />
       {data.extensions_configured && (
         <>

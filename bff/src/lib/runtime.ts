@@ -1,6 +1,28 @@
 // Small shared runtime state across routes (last scan, last updater run + result, last backup).
 // In-memory only: it resets on restart. Anything that must survive a restart (e.g. the backup's last run)
 // is also persisted to server_settings.
+
+/**
+ * What one run of the read-chapter cleanup did. Declared here rather than imported from lib/chapterCleanup
+ * because that module imports `runtime`, and a type-only cycle through a value import is the kind of thing
+ * that works until someone reorders the imports.
+ */
+export interface CleanupResult {
+  /** Chapters whose file was deleted. */
+  deleted: number;
+  /** Bytes reclaimed, as measured immediately before each unlink. */
+  bytes: number;
+  /** Eligible chapters left for the next run because this one hit its cap. */
+  remaining: number;
+  /** Files that were due but could not be removed; the rows are left unmarked so the next run retries. */
+  failed: number;
+  ms: number;
+  /** Why nothing was done, when nothing was done. Absent on a run that actually looked. */
+  skipped?: 'disabled' | 'read_only' | 'shutdown';
+  /** The grace period this run applied, so the panel reports the setting the run actually used. */
+  days?: number;
+}
+
 export const runtime: {
   lastScan: number;
   lastUpdate: number;
@@ -22,6 +44,16 @@ export const runtime: {
   // a backup missing the whole config directory reported as a clean run.
   lastBackupResult: { bytes: number; ms: number; configEmpty?: boolean; sizeUnknown?: boolean } | null;
   backingUp: boolean;
+  /**
+   * The opt-in read-chapter cleanup (lib/chapterCleanup.ts).
+   *
+   * `skipped` is not decoration. This job's normal outcome is "did nothing", and "did nothing because it is
+   * switched off", "did nothing because the download dir is read-only" and "did nothing because no chapter
+   * was due" are three different things an admin needs told apart before they conclude it is broken.
+   */
+  lastCleanup: number;
+  lastCleanupResult: CleanupResult | null;
+  cleaning: boolean;
 } = {
   lastScan: 0,
   lastUpdate: 0,
@@ -31,4 +63,7 @@ export const runtime: {
   lastBackup: 0,
   lastBackupResult: null,
   backingUp: false,
+  lastCleanup: 0,
+  lastCleanupResult: null,
+  cleaning: false,
 };

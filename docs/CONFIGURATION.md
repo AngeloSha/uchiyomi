@@ -110,6 +110,17 @@ ever hit.
 - `MIN_FREE_GB` (default `10`): refuse to start a download when the download disk has less than this free.
   `0` disables the floor. Fails open if free space cannot be measured.
 
+## Deleting chapters after they are read
+
+Off, and there is deliberately **no environment variable that turns it on**. It is switched on in
+**Admin → Settings → Delete read chapters**, behind a confirmation, because an install that upgraded into a
+file-deleting job because of a line in a compose file would be indefensible. See
+[USAGE](USAGE.md#deleting-chapters-after-they-are-read) for what it will and will not touch.
+
+- `CLEANUP_MAX_PER_RUN` (default `500`): most chapters one hourly run may delete. Not a performance limit —
+  unlinking is cheap — but a blast radius. The first run after switching this on, on a library that has been
+  read for years, is the one nobody has an intuition for; whatever is left over goes on the next run.
+
 ## Push notifications
 
 Nothing to configure. The server generates a VAPID key pair on first boot and keeps it in `/config`, the

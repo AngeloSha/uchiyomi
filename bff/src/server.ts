@@ -18,6 +18,7 @@ import { solverHealth } from './lib/health';
 import { notifyAdmins } from './lib/push';
 import { runSourceCheck } from './lib/sourceWatchdog';
 import { runSweep } from './lib/updater';
+import { runChapterCleanup } from './lib/chapterCleanup';
 import { runExtensionMonitor } from './lib/extensionMonitor';
 import { startSweeper } from './lib/imageCache';
 import { runBackup, msUntilHour } from './lib/backup';
@@ -360,6 +361,41 @@ async function main() {
       return msUntilHour(hour);
     };
     void (async () => { setTimeout(backupTick, await nextBackupDelay()).unref(); })();
+  }
+
+  /**
+   * The opt-in read-chapter cleanup (lib/chapterCleanup.ts).
+   *
+   * ⚠️ CONSENT IS RE-READ FROM THE DATABASE ON EVERY TICK, inside runChapterCleanup, never captured at boot.
+   * Same rule as the install count and for a much sharper reason: an admin who switches this off must stop
+   * losing files without restarting the server. With it off the tick does one SELECT and returns.
+   *
+   * Hourly, not daily, because zero days is a supported setting and it has to mean something. An admin who
+   * sets "delete as soon as it is read" and then waits until tomorrow morning has been told one thing and
+   * given another. Hourly is the compromise: the work is one indexed query when there is nothing to do.
+   *
+   * The first run waits fifteen minutes. This is the one job whose first run after a restart can delete
+   * files, so a crash loop must not turn into a delete loop, and a server that has just booted should be
+   * answering readers before it starts removing things from disk.
+   *
+   * Not scheduled against a Komga library: DL_ROOT is written only by the owned downloader, and read state
+   * there lives in Komga rather than in read_progress, so the rule this job applies would be reading the
+   * wrong table about the wrong files.
+   */
+  if (process.env.LIBRARY_BACKEND !== 'komga') {
+    const HOUR = 60 * 60 * 1000;
+    const tick = async () => {
+      try {
+        const run = runChapterCleanup(app.log);
+        if (run) await run;
+        else app.log.info('cleanup: the previous run is still going, skipping this tick');
+      } catch (e) {
+        // Outside the re-arm below, so a run that threw does not end the schedule.
+        app.log.error(e as any);
+      }
+      setTimeout(tick, HOUR).unref();
+    };
+    setTimeout(tick, 15 * 60 * 1000).unref();
   }
 
   // Abandoned half-writes from a previous life: a chapter or cache file whose rename never happened.

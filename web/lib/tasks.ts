@@ -13,6 +13,19 @@ import { bytes } from './format';
  */
 export function taskResult(r: any): string {
   if (!r) return '';
+  // ⚠️ BEFORE the backup branch. The read-chapter cleanup also reports `bytes`, so keying on that first
+  // would render "freed 4 GB" as a backup archive size and lose the chapter count entirely.
+  if (typeof r.deleted === 'number') {
+    // A run that did not look is not a run that found nothing. The read-only case in particular is a
+    // permissions problem on somebody's download volume, and reporting it as "0 chapters" is how it stays
+    // unnoticed for a month.
+    if (r.skipped === 'read_only') return ' \u00b7 the download folder is not writable';
+    if (r.skipped === 'shutdown') return ' \u00b7 stopped for a restart';
+    if (r.skipped) return ' \u00b7 switched off';
+    const bits = [`${r.deleted} chapters deleted`, bytes(r.bytes || 0) + ' freed'];
+    if (r.failed) bits.push(`${r.failed} could not be deleted`);
+    return ` \u00b7 ${bits.join(', ')}`;
+  }
   if (typeof r.added === 'number') {
     const base = ` \u00b7 +${r.added} chapters`;
     if (r.healthy === false) {

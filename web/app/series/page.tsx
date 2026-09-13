@@ -638,10 +638,21 @@ function ChapterRow({ book, downloaded, sourceNames, primarySource, onReader, on
   const state = rp?.completed ? 'read' : rp ? 'reading' : 'unread';
   // Only a name is shown; an id that resolves to nothing (a source since removed) shows no badge at all.
   const altSource = book.sourceId && book.sourceId !== primarySource ? (sourceNames?.[book.sourceId] ?? null) : null;
+  /**
+   * The server's read-chapter cleanup deleted the file. The row STAYS -- this is a real chapter of the
+   * series, it is read, and the counts and progress all refer to it -- but the two buttons that promise
+   * pages must stop promising them. Opening it would lay out zero pages and downloading it would save an
+   * empty chapter, and both would look like a bug in the reader rather than a decision the admin made.
+   *
+   * ⚠️ UNLESS IT IS ALREADY ON THIS DEVICE. The reader consults the offline copy before the server, so a
+   * chapter saved before the cleanup took it still opens and still reads perfectly. Greying that out would
+   * take away the one copy of it left in the world.
+   */
+  const pruned = book.pruned === true && !downloaded;
 
   return (
     <div className="flex items-center gap-3 border-b border-ink-800/70 py-2.5">
-      <button onClick={onReader} className="flex min-w-0 flex-1 items-center gap-3 text-start">
+      <button onClick={onReader} disabled={pruned} className="flex min-w-0 flex-1 items-center gap-3 text-start disabled:cursor-default">
         <div className={`relative h-14 w-10 shrink-0 overflow-hidden rounded-lg border ${state === 'read' ? 'border-ink-800 opacity-45' : 'border-ink-700'}`}>
           <Img src={img.bookThumb(book.id)} alt="" className="h-full w-full" />
           {state === 'reading' && <span className="absolute inset-x-0 bottom-0 h-0.5 bg-accent" />}
@@ -649,8 +660,11 @@ function ChapterRow({ book, downloaded, sourceNames, primarySource, onReader, on
         <span className={`h-2 w-2 shrink-0 rounded-full ${state === 'read' ? 'bg-ink-600' : state === 'reading' ? 'bg-accent' : 'bg-accent/40'}`} />
         <div className="min-w-0">
           <p className={`truncate text-sm ${state === 'read' ? 'text-fog-500' : 'text-fog-100'}`}>{chapterLabel(book)}</p>
-          {(book.scanlator || altSource) && (
+          {(book.scanlator || altSource || book.pruned) && (
             <p className="mt-0.5 flex flex-wrap gap-1">
+              {/* Shown even when a copy is saved on this device -- it is still gone from the server, and
+                  "yours is the last one" is exactly what somebody wants to know before clearing downloads. */}
+              {book.pruned && <span className="rounded-full border border-ink-700 px-1.5 text-[10px] leading-4 text-fog-600">{downloaded ? tr('Deleted from the server') : tr('Deleted to free space')}</span>}
               {book.scanlator && <span className="max-w-[10rem] truncate rounded-full border border-ink-700 px-1.5 text-[10px] leading-4 text-fog-500">{book.scanlator}</span>}
               {altSource && <span className="max-w-[10rem] truncate rounded-full border border-ink-700 px-1.5 text-[10px] leading-4 text-fog-500">{altSource}</span>}
             </p>
@@ -670,7 +684,10 @@ function ChapterRow({ book, downloaded, sourceNames, primarySource, onReader, on
           try { await onToggleDownload(); } catch {}
           setBusy(false);
         }}
-        className={`grid h-9 w-9 place-items-center rounded-full border ${downloaded ? 'border-accent/40 text-accent' : 'border-ink-700 text-fog-500'}`}
+        // `pruned` already excludes a chapter saved on this device, so removing that copy still works --
+        // which matters, because it is the only copy left.
+        disabled={pruned}
+        className={`grid h-9 w-9 place-items-center rounded-full border disabled:opacity-30 ${downloaded ? 'border-accent/40 text-accent' : 'border-ink-700 text-fog-500'}`}
         aria-label={downloaded ? 'Remove download' : 'Download'}
       >
         {busy ? <span className="text-[10px] font-semibold text-accent">…</span> : downloaded ? <IcCheck width={16} height={16} /> : <IcDownload width={16} height={16} />}
@@ -851,7 +868,10 @@ function SeriesInner() {
 
   const downloadAll = async () => {
     if (downloadingAll || !books) return;
-    const todo = books.content.filter((b) => !downloaded.has(b.id));
+    // A pruned chapter has no pages left on the server, so including it would "save" an empty chapter to
+    // this device and then report it as downloaded. Skipped silently: it is not an error and there is
+    // nothing the reader can do about it.
+    const todo = books.content.filter((b) => !downloaded.has(b.id) && !b.pruned);
     if (!todo.length) { toast('Everything is already downloaded', 'success'); return; }
     setDownloadingAll(true);
     toast(`Downloading ${todo.length} chapters…`);
