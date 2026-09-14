@@ -12,6 +12,7 @@ import { runFingerprintBackfill, fingerprintRemaining, fpState } from '../lib/fi
 import { runPageHashBackfill, pageHashRemaining, phState } from '../lib/pageHashJob';
 import { runBackup } from '../lib/backup';
 import { runUpdateAll, updateSeries, runSweep } from '../lib/updater';
+import { runChapterCleanup, cleanupSettings, dueCountCached } from '../lib/chapterCleanup';
 import { authenticate, requireAdmin, userIdOf, revokeAllSessions, revokeRefreshTokenById, passwordError } from '../lib/auth';
 import { logAudit, recentAudit } from '../lib/audit';
 import { healthAll, setDisabled, clearBlock, SourceHealth, pruneOrphanedHealth, isDisabled } from '../lib/sourceHealth';
@@ -97,14 +98,23 @@ export default async function adminRoutes(app: FastifyInstance) {
 
   // ---- server settings ----
   const SETTINGS_COLS = 'server_name, allow_registration, updater_hours, extension_hours, extension_auto_update, '
-    + 'update_check, install_ping, install_ping_last, scanlator_prefs';
+    + 'update_check, install_ping, install_ping_last, scanlator_prefs, cleanup_read, cleanup_read_days';
   // `extensions_configured` is not a column: extension_hours has a NOT NULL default, so its presence says
   // nothing about whether there is an engine to check. The settings page needs to know, or it offers two
   // controls for a job that can never run.
-  const settingsRow = async () => ({
-    ...(await one(`SELECT ${SETTINGS_COLS} FROM server_settings WHERE id = 1`)),
-    extensions_configured: suwayomiConfigured(),
-  });
+  const settingsRow = async () => {
+    const row = await one<any>(`SELECT ${SETTINGS_COLS} FROM server_settings WHERE id = 1`);
+    return {
+      ...row,
+      extensions_configured: suwayomiConfigured(),
+      // How many chapters the read-chapter cleanup would delete if it ran now, at the CURRENT day setting.
+      // Computed here rather than only in the tasks list because the tasks list does not show the job until
+      // it is switched on, and the number is wanted before the switch, not after: "turn on this irreversible
+      // thing and then go and see how much it took" is the wrong order to learn it in. Null if it cannot be
+      // counted -- an unavailable figure must not stop the settings page loading.
+      cleanup_read_due: await dueCountCached(row?.cleanup_read_days ?? 30).catch(() => null),
+    };
+  };
   /**
    * Turn the opt-in install count on or off.
    *
@@ -161,6 +171,11 @@ export default async function adminRoutes(app: FastifyInstance) {
       updateCheck: z.boolean().optional(),
       installPing: z.boolean().optional(),
       scanlatorPrefs: prefsSchema.optional(),
+      // The opt-in read-chapter cleanup. `cleanupReadDays: 0` is a value, not an absence: it means "at the
+      // next run". The switch and the number are separate so turning the job off does not destroy the
+      // setting, and so `.min(0)` cannot be mistaken for the off state.
+      cleanupRead: z.boolean().optional(),
+      cleanupReadDays: z.number().int().min(0).max(3650).optional(),
     }).parse(req.body);
     if (b.serverName !== undefined) await q('UPDATE server_settings SET server_name = $1, updated_at = now() WHERE id = 1', [b.serverName]);
     if (b.allowRegistration !== undefined) await q('UPDATE server_settings SET allow_registration = $1, updated_at = now() WHERE id = 1', [b.allowRegistration]);
@@ -170,15 +185,18 @@ export default async function adminRoutes(app: FastifyInstance) {
     if (b.updateCheck !== undefined) await q('UPDATE server_settings SET update_check = $1, updated_at = now() WHERE id = 1', [b.updateCheck]);
     if (b.installPing !== undefined) await setInstallPing(b.installPing);
     if (b.scanlatorPrefs !== undefined) await q('UPDATE server_settings SET scanlator_prefs = $1::jsonb, updated_at = now() WHERE id = 1', [JSON.stringify(b.scanlatorPrefs)]);
+    if (b.cleanupRead !== undefined) await q('UPDATE server_settings SET cleanup_read = $1, updated_at = now() WHERE id = 1', [b.cleanupRead]);
+    if (b.cleanupReadDays !== undefined) await q('UPDATE server_settings SET cleanup_read_days = $1, updated_at = now() WHERE id = 1', [b.cleanupReadDays]);
     await logAudit('settings.update', { userId: userIdOf(req), detail: b, req });
     return settingsRow();
   });
 
   // ---- scheduled tasks ----
   app.get('/api/admin/tasks', async () => {
-    const s = await one<{ updater_hours: number; backup_hour: number; backup_last_run: string | null; backup_last_result: any; extension_hours: number; extension_auto_update: boolean; extension_last_run: string | null; extension_last_result: any }>(
+    const s = await one<{ updater_hours: number; backup_hour: number; backup_last_run: string | null; backup_last_result: any; extension_hours: number; extension_auto_update: boolean; extension_last_run: string | null; extension_last_result: any; cleanup_read: boolean; cleanup_read_days: number; cleanup_read_last_run: string | null; cleanup_read_last_result: any }>(
       `SELECT updater_hours, backup_hour, backup_last_run, backup_last_result,
-              extension_hours, extension_auto_update, extension_last_run, extension_last_result
+              extension_hours, extension_auto_update, extension_last_run, extension_last_result,
+              cleanup_read, cleanup_read_days, cleanup_read_last_run, cleanup_read_last_result
          FROM server_settings WHERE id = 1`,
     );
     // the backup's last run is persisted, so prefer the DB value over the in-memory one (which resets on restart)
@@ -207,6 +225,22 @@ export default async function adminRoutes(app: FastifyInstance) {
         running: phState.running,
         remaining: await pageHashRemaining().catch(() => null),
       },
+      // Only when it is switched on -- same rule as the extension task below. This one additionally must
+      // not be listed while it is off because a "Run now" button beside a job an admin has not consented to
+      // is an invitation to delete files by clicking something to see what it does.
+      ...(s?.cleanup_read ? [{
+        id: 'cleanup',
+        name: 'Delete read chapters',
+        schedule: (s.cleanup_read_days === 0
+          ? 'hourly \u00b7 as soon as everyone has finished'
+          : `hourly \u00b7 ${s.cleanup_read_days} day${s.cleanup_read_days === 1 ? '' : 's'} after everyone has finished`),
+        lastRun: runtime.lastCleanup || (s.cleanup_read_last_run ? new Date(s.cleanup_read_last_run).getTime() : null),
+        lastResult: runtime.lastCleanupResult ?? s.cleanup_read_last_result ?? null,
+        running: runtime.cleaning,
+        // What it would delete if it ran now. The one number an admin wants before turning this on, and the
+        // reason the settings page can ask "are you sure" with a figure in it rather than a warning.
+        remaining: await dueCountCached(s.cleanup_read_days).catch(() => null),
+      }] : []),
       // Only when there is an extension server to check. Listing a task that cannot run reads as a broken
       // one, and every install without the optional engine would show it permanently "never run".
       ...(suwayomiConfigured() ? [{
@@ -235,6 +269,17 @@ export default async function adminRoutes(app: FastifyInstance) {
       // Not awaited: re-reading every repository index and installing an APK is minutes, and the caller is
       // an admin clicking a button. runExtensionMonitor does the flag, the stored result and the log line.
       if (!runExtensionMonitor(app.log)) return { ok: false, error: 'busy' };
+      return { ok: true, started: true };
+    }
+    if (id === 'cleanup') {
+      // The switch is checked here as well as inside the job. Not redundant: this is what turns "the task
+      // is off" into a refusal the panel can show, instead of a run that reports having done nothing.
+      const { on } = await cleanupSettings();
+      if (!on) return { ok: false, error: 'not_enabled' };
+      // Not awaited: deleting several hundred files across a network mount is not a request's worth of time.
+      const run = runChapterCleanup(app.log);
+      if (!run) return { ok: false, error: 'busy' };
+      run.catch(() => {}); // runChapterCleanup logs it; this only stops an unhandled rejection
       return { ok: true, started: true };
     }
     if (id === 'pagehash') {

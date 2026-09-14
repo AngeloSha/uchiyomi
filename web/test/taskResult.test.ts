@@ -25,6 +25,23 @@ test('a chapter sweep distinguishes a quiet week from a broken one', () => {
   assert.notEqual(broken, ' · +0 chapters');
 });
 
+test('the read-chapter cleanup is not mistaken for a backup', () => {
+  // ⚠️ Both results carry `bytes`. The cleanup branch has to come first, or "12 chapters deleted, 4 MB
+  // freed" renders as an archive size and the only number that matters -- how many files were destroyed --
+  // disappears from the panel entirely.
+  const r = taskResult({ deleted: 12, bytes: 4194304, remaining: 0, failed: 0, ms: 40 });
+  assert.match(r, /12 chapters deleted/);
+  assert.match(r, /4(\.0)? ?MB freed/i);
+});
+
+test('a cleanup run that could not look says why, instead of reporting nothing deleted', () => {
+  // A read-only download volume is a permissions problem on somebody's NAS. Rendering it as "0 chapters
+  // deleted" is how it goes unnoticed for a month.
+  assert.match(taskResult({ deleted: 0, bytes: 0, skipped: 'read_only' }), /not writable/);
+  assert.match(taskResult({ deleted: 0, bytes: 0, skipped: 'shutdown' }), /restart/);
+  assert.match(taskResult({ deleted: 3, bytes: 9, failed: 2 }), /2 could not be deleted/);
+});
+
 test('a backup that measured nothing says so instead of showing a contented size', () => {
   assert.match(taskResult({ bytes: 1048576 }), /1(\.0)? ?MB/i);
   assert.match(taskResult({ bytes: 0, sizeUnknown: true }), /size unknown/);
