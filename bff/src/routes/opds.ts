@@ -273,7 +273,12 @@ export default async function opdsRoutes(app: FastifyInstance) {
          FROM lib_books b
          JOIN lib_series s ON s.id = b.series_id AND ${visible('s', vc(req), bp)}
          LEFT JOIN read_progress rp ON rp.book_id = b.id AND rp.user_id = ${uid}
-        WHERE b.series_id = ${bp.add(id)} ORDER BY b.number ASC, b.file ASC`, bp.values as any[]);
+        WHERE b.series_id = ${bp.add(id)}
+          -- A tombstone (lib/chapterCleanup.ts) has no file behind it. Listed, the loop below would stat it
+          -- as a "never counted" chapter on every fetch and fail silently, and a reader would be offered a
+          -- CBZ that 404s.
+          AND b.pruned_at IS NULL
+        ORDER BY b.number ASC, b.file ASC`, bp.values as any[]);
     // A page count of 0 means "never counted", not "no pages". The scanner counts most archives, but a
     // streaming link with count 0 is a link a reader cannot use, so the unknowns get counted here, once,
     // and written back the way the image server does it.

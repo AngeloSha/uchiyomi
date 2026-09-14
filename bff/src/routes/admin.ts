@@ -6,34 +6,37 @@ import { content as komga } from '../lib/backend';
 import { cacheBytes } from '../lib/imageCache';
 import { runtime } from '../lib/runtime';
 import { persistScan, libraryIdFor, LIBRARY_ROOT, DL_ROOT, setBookDates, setBookMeta } from '../lib/library';
-import { containedPath } from '../lib/fsGuard';
+import { containedPath, allWritable } from '../lib/fsGuard';
 import { deleteSeries, restoreSeries, mergeSeries, getSeriesRow, deleteSeriesFiles, renameSeriesFolder } from '../lib/libraryAdmin';
 import { runFingerprintBackfill, fingerprintRemaining, fpState } from '../lib/fingerprintJob';
 import { runPageHashBackfill, pageHashRemaining, phState } from '../lib/pageHashJob';
 import { runBackup } from '../lib/backup';
 import { runUpdateAll, updateSeries, runSweep } from '../lib/updater';
-import { runChapterCleanup, cleanupSettings, dueCountCached } from '../lib/chapterCleanup';
+import { runChapterCleanup, cleanupSettings, dueCountCached, tombstoneBooks } from '../lib/chapterCleanup';
 import { authenticate, requireAdmin, userIdOf, revokeAllSessions, revokeRefreshTokenById, passwordError } from '../lib/auth';
 import { logAudit, recentAudit } from '../lib/audit';
-import { healthAll, setDisabled, clearBlock, SourceHealth, pruneOrphanedHealth, isDisabled } from '../lib/sourceHealth';
+import { healthAll, setDisabled, clearBlock, SourceHealth, pruneOrphanedHealth, isDisabled, blockedNow } from '../lib/sourceHealth';
 import { smokeTest, probeBase } from '../lib/sourceProbe';
 import { runSourceCheck, checkRunning } from '../lib/sourceWatchdog';
 import { runExtensionMonitor, runExtensionCheck, extState } from '../lib/extensionMonitor';
 import { diagnose } from '../lib/sourceDiagnosis';
 import { readSites, writeSites } from '../lib/sources/customSites';
-import { reloadAll, listSources, getSource, detectEngine, listRemoteSources, suwayomiConfigured, suwayomiAbout, swAdapterId } from '../lib/sources';
+import { reloadAll, listSources, getSource, detectEngine, listRemoteSources, suwayomiConfigured, suwayomiAbout, swAdapterId, withTimeout } from '../lib/sources';
 import { listExtensions, refreshExtensions, setExtensionState, sourcesOfExtension, getRepos, setRepos, normalizeRepoUrl, altRepoUrl } from '../lib/sources/suwayomi/extensions';
 import { getHiddenLangs, setSourcesEnabled, adoptExtensionSources, langOverview } from '../lib/sources/suwayomi/langs';
 import { lastSuwayomiLoad } from '../lib/sources/suwayomi/register';
 import { env } from '../env';
-import { readFile, writeFile, mkdir, rm } from 'fs/promises';
-import { dirname } from 'path';
+import { readFile, writeFile, mkdir, rm, rename, stat } from 'fs/promises';
+import { dirname, resolve } from 'path';
 import sharp from 'sharp';
 import { ART_DIR, artFile, artOverview } from '../lib/seriesArt';
 import { writePreflight } from '../lib/fsGuard';
 // Admin stats report on the whole library by definition; this route is already behind requireAdmin.
 import { NO_LIBRARIES, SYSTEM_CTX, visibleToAll } from '../lib/visibility';
-import { addSeriesFromSource, findBestMatch, norm, seriesAndChapters } from './sources';
+import { addSeriesFromSource, findBestMatch, norm, seriesAndChapters, jobBusy, startDownloadJob, FILL_MAX_CHAPTERS, REFRESH_BUDGET_MS } from './sources';
+import { chapterFileRel } from '../lib/downloader';
+import { REFETCH_BAK } from '../lib/fsAtomic';
+import type { SourceChapter } from '../lib/sources/types';
 import { getPlan, MIN_COVERAGE } from '../lib/fill';
 import { prefsSchema, readGlobalPrefs, readSeriesPrefs, effectivePrefsFor } from '../lib/scanlatorPrefs';
 import { groupsOf, normGroup } from '../lib/releases';
@@ -55,6 +58,9 @@ type ArtJob = { running: boolean; total: number; done: number; banners: number; 
 let artJob: ArtJob | null = null;
 // per-series "check for new chapters" runs, so the UI can poll instead of blocking on a long download
 const seriesChecks = new Map<string, { running: boolean; added?: number; waiting?: number; error?: string; startedAt?: number; finishedAt?: number }>();
+// The known-group list for GET /api/admin/scanlators, memoised for KNOWN_GROUPS_TTL (see the route).
+let knownGroups: { at: number; content: Array<{ name: string; onDisk: number; listed: number; series: number }> } | null = null;
+const KNOWN_GROUPS_TTL = 30_000;
 
 /**
  * Stop a member's grant list from collapsing into "everything".
@@ -422,6 +428,48 @@ export default async function adminRoutes(app: FastifyInstance) {
   });
 
   /**
+   * Every scanlation group this server knows of, for the Settings page's picker.
+   *
+   * The names come from the two places the per-series route reads -- the files on disk (lib_books.scanlator,
+   * split the way a joint release is) and the persisted listings of every source -- but from the listings
+   * TABLE rather than the sources themselves: this is one call for the whole library, and asking forty
+   * sites to build a chip list is not on. Merged by the server's own group equality (normGroup), first
+   * spelling wins and disk beats listing, as the per-series route does. Memoised for half a minute at
+   * module level because the Settings page refetches it on every focus and the number only has to be
+   * right, not live: a group that appears tonight is in the list tomorrow morning either way.
+   */
+  app.get('/api/admin/scanlators', async () => {
+    if (knownGroups && Date.now() - knownGroups.at < KNOWN_GROUPS_TTL) return { content: knownGroups.content };
+    const groups = new Map<string, { name: string; onDisk: number; listed: number; series: Set<string> }>();
+    const entry = (name: string) => {
+      const key = normGroup(name);
+      if (!key) return null;
+      let g = groups.get(key);
+      if (!g) { g = { name, onDisk: 0, listed: 0, series: new Set() }; groups.set(key, g); }
+      return g;
+    };
+    const onDisk = await q<{ scanlator: string; series_id: string; n: number }>(
+      `SELECT b.scanlator, b.series_id, count(*)::int AS n FROM lib_books b JOIN lib_series s ON s.id = b.series_id
+        WHERE b.scanlator IS NOT NULL AND ${visibleToAll('s')} GROUP BY 1, 2`);
+    for (const r of onDisk) for (const name of groupsOf({ scanlator: r.scanlator })) {
+      const g = entry(name);
+      if (g) { g.onDisk += r.n; g.series.add(r.series_id); }
+    }
+    const listed = await q<{ name: string; series_id: string; n: number }>(
+      `SELECT g AS name, l.series_id, count(*)::int AS n FROM series_listing l JOIN lib_series s ON s.id = l.series_id, unnest(l.groups) AS g
+        WHERE ${visibleToAll('s')} GROUP BY 1, 2`).catch(() => []);
+    for (const r of listed) {
+      const g = entry(r.name);
+      if (g) { g.listed += r.n; g.series.add(r.series_id); }
+    }
+    const content = [...groups.values()]
+      .map((g) => ({ name: g.name, onDisk: g.onDisk, listed: g.listed, series: g.series.size }))
+      .sort((a, b) => (b.onDisk + b.listed) - (a.onDisk + a.listed) || a.name.localeCompare(b.name));
+    knownGroups = { at: Date.now(), content };
+    return { content };
+  });
+
+  /**
    * The groups an admin can rank or block for one series, and where the current preferences stand.
    *
    * Two places know a group name: the files on disk (lib_books.scanlator, stamped as chapters land) and the
@@ -534,6 +582,20 @@ export default async function adminRoutes(app: FastifyInstance) {
     const gone = await q<{ source_id: string }>(
       'DELETE FROM series_sources WHERE series_id = $1 AND source_id = $2 RETURNING source_id', [id, sourceId]);
     if (!gone.length) return reply.code(404).send({ error: 'not_found' });
+    // The listing rows this source carried go with it. A listing row is the authorisation for a manual
+    // fetch (POST /api/sources/fetch, the refetch below), and the rows are otherwise rewritten only by the
+    // series' next successful check -- a full sweep cycle away on a large install, never if auto_update is
+    // off -- so until then a member could still fetch through the source the admin just removed, and the
+    // series page kept showing ghosts from it. Best effort: an unfollow must not fail on its ledger.
+    // Reintroduce by dropping this DELETE: "unfollowing a source takes its listing rows with it" in
+    // chapterActions.int.test.ts still finds the number listed.
+    await q('DELETE FROM series_listing WHERE series_id = $1 AND source_id = $2', [id, sourceId]).catch(() => {});
+    // The DELETE is the guarantee; the rewrite is the courtesy. A number both sources listed whose CHOSEN
+    // copy was the follower's went with the rows above, so until the next check it is neither a ghost nor
+    // fetchable even though the primary lists it. A listing pass with nothing to download (maxNew 0) puts
+    // those numbers back under the primary within seconds; if the primary does not answer, the DELETE has
+    // already done the part that matters. Not awaited: an unfollow answers at once.
+    void updateSeries(id, 0).catch(() => {});
     await logAudit('series.unfollow_source', { userId: userIdOf(req), detail: { id, source: sourceId }, req });
     return { ok: true, sources: await seriesSourcesFor(id) };
   });
@@ -752,6 +814,241 @@ export default async function adminRoutes(app: FastifyInstance) {
     if (!r.ok) return reply.code(409).send({ error: 'refused', message: r.reason, fix: r.fix });
     await logAudit('series.delete_files', { userId: userIdOf(req), detail: { id, files: r.files, bytes: r.bytes }, req });
     return r;
+  });
+
+  // ---- chapter-level file operations ----
+  //
+  // Both touch DL_ROOT only, on the same footing as the read-chapter cleanup (lib/chapterCleanup.ts): a
+  // file under DL_ROOT is one this server fetched and could fetch again, and the read library is somebody's
+  // own collection that we did not put there. Neither takes a typed confirmation -- that is the series-level
+  // rule, where the blast radius is a whole folder -- and the client confirms with a dialog naming the count.
+
+  /** The rows a chapter action was asked about, with everything the classification below needs. */
+  const chapterRows = (seriesId: string, ids: string[]) =>
+    q<{ id: string; root: string | null; file: string; number: number; pruned_at: string | null }>(
+      'SELECT id, root, file, number, pruned_at FROM lib_books WHERE series_id = $1 AND id = ANY($2)', [seriesId, ids]);
+
+  /**
+   * Delete the files of chosen chapters and keep their rows as tombstones, so reading history survives and
+   * the updater's have-set still contains the number (the same reasoning as the cleanup's, on the column's
+   * note in lib/migrate.ts). Delete-then-mark per file, so a failed unlink leaves an honest row.
+   */
+  app.post('/api/admin/series/:id/chapters/delete', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const b = z.object({ bookIds: z.array(z.string().min(1).max(64)).min(1).max(500) }).safeParse(req.body);
+    if (!b.success) return reply.code(400).send({ error: 'bad_request' });
+    const row = await getSeriesRow(id);
+    if (!row) return reply.code(404).send({ error: 'not_found' });
+    const ids = [...new Set(b.data.bookIds)];
+    const rows = new Map((await chapterRows(id, ids)).map((r) => [r.id, r]));
+    // The same veto the cleanup applies, for the same reason: a bookmark names a page number INSIDE the
+    // file, so deleting the pages turns it into a pointer at nothing. Progress survives a delete (it is a
+    // count); a bookmark does not, and the admin clicking Delete cannot see whose it is.
+    // Reintroduce by dropping this lookup: "a bookmarked chapter is skipped, and says so" in
+    // chapterActions.int.test.ts finds the file gone.
+    const bookmarked = new Set((await q<{ book_id: string }>(
+      'SELECT DISTINCT book_id FROM bookmarks WHERE book_id = ANY($1)', [ids])).map((r) => r.book_id));
+
+    const skipped: Array<{ id: string; reason: string }> = [];
+    const todo: Array<{ id: string; abs: string }> = [];
+    const root = resolve(DL_ROOT);
+    for (const bid of ids) {
+      const r = rows.get(bid);
+      if (!r) { skipped.push({ id: bid, reason: 'not_found' }); continue; }
+      // Reintroduce by dropping this check: "delete removes the file, keeps the row and the progress, skips
+      // the read library" in chapterActions.int.test.ts fails -- the read library's file is gone.
+      if (r.root !== DL_ROOT) { skipped.push({ id: bid, reason: 'not_owned' }); continue; }
+      if (r.pruned_at) { skipped.push({ id: bid, reason: 'already_pruned' }); continue; }
+      if (bookmarked.has(bid)) { skipped.push({ id: bid, reason: 'bookmarked' }); continue; }
+      const abs = containedPath(DL_ROOT, r.file);
+      // A path that escapes its root is refused, never "cleaned up" -- the health page can argue about it.
+      // So is the root ITSELF: containedPath accepts it, the rm below is recursive, and a row whose file
+      // resolves to `.` (a hand-edited row is the only way today) would take the whole download directory.
+      // Reintroduce by dropping the `abs === root` half: "the download root itself is never a chapter" in
+      // chapterActions.int.test.ts finds the directory gone.
+      if (!abs || abs === root) { skipped.push({ id: bid, reason: 'outside_root' }); continue; }
+      todo.push({ id: bid, abs });
+    }
+    if (todo.length) {
+      const w = await allWritable([DL_ROOT]);
+      if (!w.ok) return reply.code(409).send({ error: 'refused', message: w.reason, fix: w.fix });
+    }
+    let applied = 0;
+    let bytes = 0;
+    for (const t of todo) {
+      const st = await stat(t.abs).catch(() => null);
+      if (st) {
+        try { await rm(t.abs, { recursive: true, force: true }); }
+        catch { skipped.push({ id: t.id, reason: 'unlink_failed' }); continue; }
+        bytes += st.size;
+        // A set-aside copy from a refetch the process died in (`<file>.refetch-bak` beside the landed file,
+        // which reapStaleTemp deliberately leaves alone) must not outlive a deliberate delete of the file:
+        // at the next boot the reaper would see a bak with no original, put it back, and the chapter the
+        // admin deleted would be on disk again, un-marked by the next scan, its space never reclaimed.
+        // Reintroduce by dropping this rm: "a stray set-aside copy goes with the file" in
+        // chapterActions.int.test.ts finds the bak still there.
+        await rm(`${t.abs}${REFETCH_BAK}`, { force: true }).catch(() => {});
+      } else if (!(await stat(dirname(t.abs)).catch(() => null))) {
+        // ⚠️ The file is missing AND so is its folder: that is the volume not being there (an unmounted
+        // share whose empty mount point passed the preflight), not a chapter somebody removed by hand.
+        // Marking on that evidence would tombstone a chapter whose file is fine on the unmounted disk and
+        // throw away everything measured about it; the row is left as it is and the answer says why.
+        // Reintroduce by dropping this branch: "a missing download folder is not a deleted chapter" in
+        // chapterActions.int.test.ts finds pruned_at set.
+        skipped.push({ id: t.id, reason: 'unlink_failed' });
+        continue;
+      }
+      // A file already gone -- its folder still there -- is still marked: the row was claiming bytes that
+      // do not exist.
+      await tombstoneBooks([t.id]);
+      applied++;
+    }
+    // The cover follows the lowest LIVE chapter, the way persistScan and mergeSeries pick it: every
+    // thumbnail falls back to the cover chapter's first page, and a tombstone has none.
+    if (applied) {
+      await q(
+        `UPDATE lib_series SET cover_book_id = (
+           SELECT id FROM lib_books WHERE series_id = $1 ORDER BY (pruned_at IS NOT NULL), number ASC, file ASC LIMIT 1
+         ) WHERE id = $1`, [id]);
+    }
+    await logAudit('series.chapters_delete', { userId: userIdOf(req), detail: { id, title: row.title, bookIds: ids, applied, bytes }, req });
+    return { ok: true, applied, bytes, skipped };
+  });
+
+  /**
+   * Fetch chosen chapters again -- the copy the release rules choose NOW, which after a change of priority
+   * or a follow may be another group's -- onto the SAME rows, so progress stays attached.
+   *
+   * Only a file at exactly the path the downloader would write (`Chapter <n>.cbz` in the series folder,
+   * lib/downloader.ts chapterFileRel) is eligible: the downloader names its output from the number, so only
+   * that path lands back on the same lib_books row (the scanner conflicts on (root, file)), which is what
+   * keeps read_progress attached and lets persistScan clear the tombstone mark. A file named any other way
+   * would come back as a second row beside the old one.
+   *
+   * The old copy is set aside as `<file>.refetch-bak` -- a suffix the scanner does not read as a chapter --
+   * until the new one lands, and put back if it does not: a re-download that fails must never cost the
+   * chapter that was there. A restart mid-refetch leaves the bak orphaned; reapStaleTemp (lib/fsAtomic.ts)
+   * puts those back at boot.
+   */
+  app.post('/api/admin/series/:id/chapters/refetch', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const b = z.object({ bookIds: z.array(z.string().min(1).max(64)).min(1).max(FILL_MAX_CHAPTERS) }).safeParse(req.body);
+    if (!b.success) return reply.code(400).send({ error: 'bad_request' });
+    const s = await one<any>(
+      `SELECT id, title, folder, summary, author, genres, web, status, source_id FROM lib_series WHERE id = $1`, [id]);
+    if (!s) return reply.code(404).send({ error: 'not_found' });
+    const ids = [...new Set(b.data.bookIds)];
+    const rows = new Map((await chapterRows(id, ids)).map((r) => [r.id, r]));
+
+    const skipped: Array<{ id: string; reason: string }> = [];
+    const eligible: Array<{ id: string; number: number; file: string; abs: string; pruned: boolean }> = [];
+    const root = resolve(DL_ROOT);
+    for (const bid of ids) {
+      const r = rows.get(bid);
+      if (!r) { skipped.push({ id: bid, reason: 'not_found' }); continue; }
+      if (r.root !== DL_ROOT) { skipped.push({ id: bid, reason: 'not_owned' }); continue; }
+      const number = Number(r.number);
+      const abs = containedPath(DL_ROOT, r.file);
+      // The root itself can never be the chapter file (the path check below already forbids it: a chapter
+      // file ends in `Chapter <n>.cbz`), but the rename below is a destructive move and the comparison is
+      // free -- the same guard the delete route and the cleanup carry.
+      if (!abs || abs === root || r.file !== chapterFileRel(s.folder, number)) { skipped.push({ id: bid, reason: 'not_ours' }); continue; }
+      eligible.push({ id: bid, number, file: r.file, abs, pruned: !!r.pruned_at });
+    }
+    // The listing is refreshed FIRST, so the copy fetched is the one the release rules choose NOW -- which
+    // is the promise this route makes ("after a change of priority ... another group's"). A preferences
+    // save never touches series_listing, so without this the row still held the copy the LAST sweep chose:
+    // an admin who ranked Group B and clicked Fetch again got Group A's identical copy back and a toast
+    // saying nothing had changed. maxNew 0 lists and persists and breaks before any download; a source
+    // that does not answer leaves the previous listing standing (stale beats empty, lib/updater.ts), and
+    // the not_listed / source_unavailable paths below handle that. Best effort: the refresh must never be
+    // the thing that stops a fetch.
+    // Reintroduce by dropping this call: "fetch again takes the copy the rules choose now, not the one the
+    // last check chose" in chapterActions.int.test.ts downloads the old group's copy.
+    // Bounded like the member-facing fetch (REFRESH_BUDGET_MS, see routes/sources.ts), and only once the
+    // folder is known to be free: a busy folder is a 409 either way, and it should not cost a source call.
+    if (eligible.length) {
+      if (jobBusy(s.folder)) return reply.code(409).send({ error: 'busy', message: 'A download for that series is already running.' });
+      await withTimeout(updateSeries(id, 0), REFRESH_BUDGET_MS).catch(() => {});
+    }
+    // The listing is the authorisation, exactly as POST /api/sources/fetch: what is fetched is the chosen
+    // copy in it, and a number the sources no longer list has nothing to fetch.
+    const listed = new Map((await q<{ number: number; source_id: string; status: string; chosen: SourceChapter }>(
+      'SELECT number, source_id, status, chosen FROM series_listing WHERE series_id = $1 AND number = ANY($2::real[])',
+      [id, eligible.map((e) => e.number)],
+    )).map((r) => [Number(r.number), r]));
+    // A listing row's source_id is trusted only while the series still follows that source: the primary,
+    // or a series_sources row. An unfollow drops the rows it carried (the route above), but a stale row --
+    // one the next check has not rewritten yet, or one the unfollow's best-effort DELETE missed -- must
+    // never authorise a download from a source the admin removed.
+    // Reintroduce by dropping the `followed` check in stateOf: "a stale listing row never authorises a
+    // source the series does not follow" in chapterActions.int.test.ts starts a download from it.
+    const followed = new Set([
+      ...(s.source_id ? [s.source_id as string] : []),
+      ...(await q<{ source_id: string }>('SELECT source_id FROM series_sources WHERE series_id = $1', [id]).catch(() => [])).map((r) => r.source_id),
+    ]);
+    const sourceState = new Map<string, 'ok' | 'source_unavailable' | 'cooldown'>();
+    const stateOf = async (sid: string) => {
+      let st = sourceState.get(sid);
+      if (st) return st;
+      if (!followed.has(sid) || !getSource(sid) || await isDisabled(sid).catch(() => false)) st = 'source_unavailable';
+      else if (await blockedNow(sid).catch(() => null)) st = 'cooldown';
+      else st = 'ok';
+      sourceState.set(sid, st);
+      return st;
+    };
+    const todo: Array<{ row: typeof eligible[number]; chapter: SourceChapter }> = [];
+    for (const e of eligible) {
+      const l = listed.get(e.number);
+      if (!l) { skipped.push({ id: e.id, reason: 'not_listed' }); continue; }
+      if (l.status === 'blocked') { skipped.push({ id: e.id, reason: 'blocked_group' }); continue; }
+      const st = await stateOf(l.source_id);
+      if (st !== 'ok') { skipped.push({ id: e.id, reason: st }); continue; }
+      todo.push({ row: e, chapter: { ...l.chosen, source: l.source_id } });
+    }
+    if (!todo.length) {
+      return reply.code(409).send({ error: 'nothing_to_fetch', message: 'None of those chapters can be fetched again right now.', skipped });
+    }
+    if (jobBusy(s.folder)) return reply.code(409).send({ error: 'busy', message: 'A download for that series is already running.' });
+    const w = await allWritable([DL_ROOT]);
+    if (!w.ok) return reply.code(409).send({ error: 'refused', message: w.reason, fix: w.fix });
+
+    // Set aside, mark, forget the failures -- per row, before the job starts, so the downloader's own
+    // "already on disk" check does not skip the very file we are replacing.
+    const byNumber = new Map(todo.map((t) => [t.row.number, t.row]));
+    for (const t of todo) {
+      await rename(t.row.abs, `${t.row.abs}${REFETCH_BAK}`).catch((e: any) => {
+        // No file behind a tombstone is expected; anything else is worth a line, and the settle hook
+        // below still handles it (the file is where it was, so the downloader skips and the mark clears).
+        if (e?.code !== 'ENOENT') console.warn(`[refetch] could not set aside ${t.row.file}: ${e?.message || e}`);
+      });
+      await tombstoneBooks([t.row.id]);
+    }
+    await q('DELETE FROM chapter_failures WHERE series_id = $1 AND number = ANY($2::real[])',
+      [id, todo.map((t) => t.row.number)]).catch(() => {});
+    await logAudit('series.chapters_refetch', {
+      userId: userIdOf(req),
+      detail: { id, title: s.title, bookIds: todo.map((t) => t.row.id), numbers: todo.map((t) => t.row.number), skipped },
+      req,
+    });
+    const { total } = startDownloadJob({
+      folder: s.folder, title: s.title, seriesId: id,
+      chapters: todo.map((t) => t.chapter).sort((a, b) => a.number - b.number),
+      meta: { series: s.title, summary: s.summary, author: s.author, genres: s.genres, url: s.web, status: s.status },
+      onSettled: async (ch, landed) => {
+        const r = byNumber.get(ch.number);
+        if (!r) return;
+        const bak = `${r.abs}${REFETCH_BAK}`;
+        if (landed) { await rm(bak, { force: true }); return; }
+        // Not landed: put the old copy back if it was set aside, and un-mark the row whenever a file is
+        // there to read -- the restored one, or the original a failed rename left in place. A row that had
+        // no file to begin with (a tombstone being fetched again) keeps its mark: the bytes are still gone.
+        const exists = (p: string) => stat(p).then(() => true, () => false);
+        if (await exists(bak) && !(await exists(r.abs))) await rename(bak, r.abs).catch(() => {});
+        if (await exists(r.abs)) await q('UPDATE lib_books SET pruned_at = NULL WHERE id = $1', [r.id]).catch(() => {});
+      },
+    });
+    return { ok: true, started: true, folder: s.folder, total, skipped };
   });
 
   /**

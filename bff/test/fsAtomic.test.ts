@@ -28,14 +28,14 @@ test('a write that cannot finish leaves no file under the final name', async () 
   const left = readdirSync(dir);
   assert.ok(statSync(p).isDirectory(), 'nothing was written under the final name');
   assert.ok(left.some((n) => TMP_RE.test(n)), 'the abandoned temp is what remains, and it is recognisable');
-  assert.equal(await reapStaleTemp(ROOT), 1, 'and the boot-time reaper removes exactly it');
+  assert.equal((await reapStaleTemp(ROOT)).reaped, 1, 'and the boot-time reaper removes exactly it');
   assert.ok(!readdirSync(dir).some((n) => TMP_RE.test(n)));
 });
 
 test('the reaper ignores real files', async () => {
   writeFileSync(join(ROOT, 'keep.cbz'), 'k');
   writeFileSync(join(ROOT, 'keep.tmp'), 'k'); // not our suffix shape
-  assert.equal(await reapStaleTemp(ROOT), 0);
+  assert.equal((await reapStaleTemp(ROOT)).reaped, 0);
 });
 
 /**

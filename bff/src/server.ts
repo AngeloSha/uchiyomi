@@ -18,7 +18,7 @@ import { solverHealth } from './lib/health';
 import { notifyAdmins } from './lib/push';
 import { runSourceCheck } from './lib/sourceWatchdog';
 import { runSweep } from './lib/updater';
-import { runChapterCleanup } from './lib/chapterCleanup';
+import { runChapterCleanup, unpruneRestored } from './lib/chapterCleanup';
 import { runExtensionMonitor } from './lib/extensionMonitor';
 import { startSweeper } from './lib/imageCache';
 import { runBackup, msUntilHour } from './lib/backup';
@@ -398,8 +398,18 @@ async function main() {
     setTimeout(tick, 15 * 60 * 1000).unref();
   }
 
-  // Abandoned half-writes from a previous life: a chapter or cache file whose rename never happened.
-  void reapStaleTemp(DL_ROOT).then((n) => { if (n) app.log.info(`reaped ${n} half-written file(s) under ${DL_ROOT}`); });
+  // Abandoned half-writes from a previous life: a chapter or cache file whose rename never happened. A
+  // refetch the previous life died in has its old copy put back by the same walk, and the row's tombstone
+  // mark is cleared HERE, not "by the next scan": there is no boot scan, so a restored chapter otherwise
+  // read as deleted -- refused by the reader, hidden from OPDS and the offline plan -- until an unrelated
+  // scan happened to run, which on a quiet series is days.
+  void reapStaleTemp(DL_ROOT).then(async ({ reaped, restored }) => {
+    if (reaped) app.log.info(`reaped ${reaped} half-written file(s) under ${DL_ROOT}`);
+    if (restored.length) {
+      const n = await unpruneRestored(DL_ROOT, restored).catch(() => 0);
+      app.log.info(`put back ${restored.length} chapter(s) left aside by an interrupted refetch; ${n} row(s) un-marked`);
+    }
+  });
 
   // Stop at a boundary, and say so. Before this there was no handler at all: `docker compose up -d` in the
   // middle of a sweep killed it mid-chapter, the job card polled a dead id, and nothing recorded that a run

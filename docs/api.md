@@ -290,7 +290,7 @@ POST   /api/series/search         GET    /api/leaderboard
 GET    /api/books/:id             GET    /api/books/:id/pages
 GET    /api/books/:id/next        PUT    /api/books/:id/progress
 PUT    /api/books/:id/pages/:n/junk
-GET    /api/offline/plan
+GET    /api/offline/plan             GET    /api/series/:id/listing
 ```
 
 **Where a series and its chapters came from.** `GET /api/series/:id` carries `sources`, primary first, then
@@ -304,6 +304,24 @@ downloaded from. Both are `null` for a chapter the scanner found rather than the
 includes everything downloaded before v0.31.0. The same group name is written into the file's
 `ComicInfo.xml` as `<Translator>`.
 
+Two more flags on every chapter object since v0.32.0: `owned` — the file lives in the download directory,
+so it is one this server fetched and could fetch again (the only chapters the delete and re-fetch actions
+below will touch) — and `pruned` — the file was deleted by the read-chapter cleanup or by an admin, and the
+row is a tombstone: reading progress is still attached, but there are no pages behind it. A pruned chapter
+is listed by `GET /api/series/:id/books` (with the flag) and skipped everywhere a chapter is *served*:
+`next`, Continue reading, the OPDS feed, the offline plan; its download manifest answers **410** `pruned`.
+
+**Chapters the sources have that you don't.** `GET /api/series/:id/listing` answers
+`{checkedAt, content: [Ghost]}`: every chapter number the series' sources listed at the last check (the
+sweep, or **Check now**) that this server has no row for, each with the reason —
+`Ghost = {number, title, publishedAt, scanlator, groups, sourceId, sourceName, why, attempts?, reason?}`,
+`why` one of `missing` (not fetched yet), `held` (waiting for a preferred group under the release
+preferences), `failed` (the sweep gave up after the retry cap; `attempts` says how many tries), `blocked`
+(only blocked groups have released it), `floor` (below the series' Latest-N floor). The listing is read
+from what the updater persisted, never from the sources on a page open, so `checkedAt` is how old the
+answer is; a source that failed to answer leaves the previous listing standing. `reason`, the downloader's
+last error text, is present for admins only. A tombstone is a row, so it is never a ghost.
+
 ### Sources
 ```
 GET    /api/sources               GET    /api/sources/find
@@ -311,7 +329,7 @@ GET    /api/sources/detail        GET    /api/sources/search
 GET    /api/sources/search-all    GET    /api/sources/latest
 GET    /api/sources/jobs          POST   /api/sources/add
 GET    /api/discover/trending     POST   /api/sources/fill/scan
-POST   /api/sources/fill
+POST   /api/sources/fill          POST   /api/sources/fetch
 ```
 
 **Filling a series' gaps.** `POST /api/sources/fill/scan` takes `{seriesId, altTitle?}` and answers with what
@@ -332,8 +350,22 @@ file even when the source lists chapter `n` from three groups. `GET /api/sources
 way, under the server-wide preferences, so the "120 chapters" the add dialog shows is the 120 the add would
 land and not the 200 rows the source listed.
 
-```
-```
+**Fetching ghost chapters.** `POST /api/sources/fetch {seriesId, numbers[]}` (1–300 numbers, each
+0–1,000,000) fetches chapters from the listing above. What authorises a fetch is the *listing*: a client
+names chapter numbers, and only a number the sources list has anything to fetch from — the same footing
+as the fill plan, and for the same reason (no chapter URL ever crosses the wire). The listing is refreshed
+first (a check with no downloads), so what is fetched is the copy the release rules choose *now* — a group
+ranked a minute ago counts; a source that does not answer leaves the last listing standing. A `held`
+number is fetched regardless of patience, because a person clicking Fetch on a "waiting for group B" row
+is saying they will take it, but the blocklist is never ignored — a `blocked` number has no copy to fetch;
+unblock the group and check again. A manual fetch resets the chapter's retry cap. The answer is
+`{ok, started, folder, total, skipped: [{number, reason}]}` with `reason` one of `not_listed` (run
+**Check for new chapters** first), `blocked_group`, `already_here` (a live chapter, not a tombstone),
+`source_unavailable` (adapter not loaded or disabled, or a source the series no longer follows), `cooldown`;
+**409** `nothing_to_fetch` (with `skipped`) when nothing is fetchable, **409** `busy` while a download for
+that series is running, **404** for a series the caller cannot see. Same permission gate as the fill:
+`canDownload: false` is refused by the whole `/api/sources` surface, and a source outside the account's
+age cap answers **403**. Progress is on `GET /api/sources/jobs` under the series' `folder`.
 
 ### Bulk actions
 ```
@@ -400,7 +432,7 @@ POST   /api/admin/sources/custom  DELETE /api/admin/sources/custom/:id
 PATCH  /api/admin/sources/custom/:id
 PUT    /api/admin/series/:id/art  PUT    /api/admin/series/:id/meta
 PATCH  /api/admin/series/:id      DELETE /api/admin/series/:id
-GET    /api/admin/series/:id/scanlators
+GET    /api/admin/series/:id/scanlators GET    /api/admin/scanlators
 POST   /api/admin/series/:id/sources DELETE /api/admin/series/:id/sources/:sourceId
 GET    /api/admin/libraries       POST   /api/admin/libraries
 GET    /api/admin/libraries/preview
@@ -411,6 +443,7 @@ POST   /api/admin/series/library
 GET    /api/admin/library/writable
 POST   /api/admin/series/:id/delete-files
 POST   /api/admin/series/:id/rename-folder
+POST   /api/admin/series/:id/chapters/delete POST   /api/admin/series/:id/chapters/refetch
 PUT    /api/admin/books/:id/meta
 POST   /api/admin/series/:id/restore
 POST   /api/admin/series/:id/merge
@@ -450,6 +483,35 @@ disk, from the current listings of the primary and every followed source, and fr
 preferences (so a blocked group that has vanished from the listing can still be unblocked), sorted by
 `onDisk + listed` and then by name.
 
+`GET /api/admin/scanlators` is the library-wide version the Settings page's group picker reads:
+`{content: [{name, onDisk, listed, series}]}`, every group this server knows of, busiest first — the names
+gathered from the files on disk and from the persisted listings of every source (not from the sources
+themselves; this is one call for the whole library), merged by the same group equality the release rules
+use, `series` counting the series the group appears on. Memoised for 30 seconds.
+
+**Deleting a chapter from the server, and fetching it again.** Both are admin actions on chosen chapters,
+and both touch the download directory only: a chapter the scanner found in the read library is never
+touched (`owned: false` on the Book), on the same footing as the read-chapter cleanup. Neither takes a
+typed confirmation; the client confirms with the count.
+`POST /api/admin/series/:id/chapters/delete {bookIds[]}` (1–500) deletes the files and keeps the rows as
+tombstones, so reading history survives and the updater does not re-download them; the cover moves to the
+lowest live chapter. A chapter somebody has a bookmark in is skipped (`bookmarked`), as the cleanup skips
+it: a bookmark names a page inside the file. A chapter whose file *and* folder are missing is skipped
+(`unlink_failed`) rather than marked — that is the download volume not being mounted, not a deleted
+chapter. It answers `{ok, applied, bytes, skipped: [{id, reason}]}` with `reason` one of `not_found`,
+`not_owned`, `already_pruned`, `bookmarked`, `outside_root`, `unlink_failed`, or **409** `refused` (with
+`message` and `fix`) when the download directory is not writable.
+`POST /api/admin/series/:id/chapters/refetch {bookIds[]}` (1–300) downloads the chapters again as the copy
+the release rules choose *now* — after a change of priority, or a follow, that may be another group's —
+onto the **same rows**, so progress stays attached. Only a file at exactly the path the downloader writes
+(`Chapter <n>.cbz` in the series folder) is eligible (`not_ours` otherwise), because only that path lands
+back on the same row. The listing is refreshed first, as for `POST /api/sources/fetch`, so the copy is the
+one the rules choose *now*, with the same `not_listed` / `blocked_group` / `source_unavailable` (including
+a source the series no longer follows) / `cooldown` skips; the old file is set aside until
+the new one lands and put back if the download fails, so a failed re-download never costs the chapter that
+was there. A chapter the cleanup deleted is eligible: this is how it comes back. Answers
+`{ok, started, folder, total, skipped}`, **409** `nothing_to_fetch` / `busy` / `refused` as above.
+
 **Following a second source.** `POST /api/admin/series/:id/sources {planId, source, sourceSeriesId}` makes
 the updater merge that source's chapter list with the primary's on every check; it answers `{ok, sources}`
 with the series' full source list, primary first. The candidate must come from a `POST /api/sources/fill/scan`
@@ -460,7 +522,9 @@ Refusals: **409** `plan_stale` (scan again), `is_primary`, `source_unavailable` 
 disabled); **400** `not_in_plan`, `not_followable` (with `reason` and `coverage`), or `bad_request` when the
 plan belongs to another series; **404** for an unknown series. Following the same source again updates its
 series id and coverage. `DELETE /api/admin/series/:id/sources/:sourceId` stops following it (**404** when
-the series was not) and answers the remaining list; chapters already downloaded from it stay.
+the series was not) and answers the remaining list; chapters already downloaded from it stay, but the
+listing rows it carried go at once, so its ghosts leave the series page and nothing can be fetched through
+it before the next check.
 
 With a follower in place, the updater takes each missing number from whichever followed source offers the
 best copy — a ranked group first, then a hosted copy over an external link, then the primary over the

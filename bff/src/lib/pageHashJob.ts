@@ -34,11 +34,18 @@ export const phState: PageHashProgress = {
   remaining: null, startedAt: null, finishedAt: null, ms: null,
 };
 
-/** Chapters with no page hashed yet. Cheap enough for an admin endpoint. */
+/**
+ * Chapters with no page hashed yet. Cheap enough for an admin endpoint.
+ *
+ * A tombstone (lib/chapterCleanup.ts) is excluded here and in the batch query alike: its file is gone and its
+ * computed hashes went with it, so without the clause it would be opened -- and fail -- on every run, forever,
+ * and the count would never reach zero.
+ */
 export async function pageHashRemaining(): Promise<number> {
   const rows = await q<{ n: string }>(
     `SELECT count(*)::text n FROM lib_books b
-      WHERE NOT EXISTS (SELECT 1 FROM page_hashes p WHERE p.book_id = b.id AND p.page = 0)`,
+      WHERE b.pruned_at IS NULL
+        AND NOT EXISTS (SELECT 1 FROM page_hashes p WHERE p.book_id = b.id AND p.page = 0)`,
   );
   return Number(rows[0]?.n ?? 0);
 }
@@ -128,7 +135,8 @@ export async function runPageHashBackfill(opts: { max?: number } = {}): Promise<
     for (;;) {
       const batch = await q<Row>(
         `SELECT b.id, b.root, b.file FROM lib_books b
-          WHERE NOT EXISTS (SELECT 1 FROM page_hashes p WHERE p.book_id = b.id AND p.page = 0)
+          WHERE b.pruned_at IS NULL
+            AND NOT EXISTS (SELECT 1 FROM page_hashes p WHERE p.book_id = b.id AND p.page = 0)
           ORDER BY b.id LIMIT $1`,
         [Math.min(BATCH, Math.max(0, limit - phState.chapters))],
       );

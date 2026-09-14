@@ -562,9 +562,13 @@ export async function persistScan(): Promise<{ series: number; books: number; ms
           // Set the cover AFTER the books exist. It used to be computed by hashing the first chapter's path,
           // which only worked while ids were a pure function of the path -- now it would dangle, and a
           // dangling cover_book_id takes out every cover and backdrop in the product.
+          //
+          // The lowest LIVE chapter, not the lowest row: every thumbnail falls back to the cover chapter's
+          // first page, and a tombstone (lib/chapterCleanup.ts) has no first page. The cleanup itself vetoes
+          // the cover chapter, but an admin's manual delete does not, and mergeSeries picks the same way.
           await qq(
             `UPDATE lib_series SET cover_book_id = (
-               SELECT id FROM lib_books WHERE series_id = $1 ORDER BY number ASC, file ASC LIMIT 1
+               SELECT id FROM lib_books WHERE series_id = $1 ORDER BY (pruned_at IS NOT NULL), number ASC, file ASC LIMIT 1
              ) WHERE id = $1`,
             [id],
           );

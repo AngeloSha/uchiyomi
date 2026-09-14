@@ -123,11 +123,19 @@ async function assertFreeSpace(): Promise<void> {
   );
 }
 
+/**
+ * Where a downloaded chapter lands, relative to DL_ROOT: named from the NUMBER alone, never the title or
+ * the group. That is what makes a re-download of the same number land on the same lib_books row (the
+ * scanner conflicts on (root, file)), which is what keeps reading progress attached across a refetch --
+ * and it is why the refetch route in routes/admin.ts only ever offers a file at exactly this path.
+ */
+export const chapterFileRel = (seriesFolder: string, number: number): string => join(seriesFolder, `Chapter ${number}.cbz`);
+
 export async function downloadChapter(input: DownloadInput): Promise<{ file: string; pages: number; skipped?: boolean }> {
   const src = getSource(input.sourceId);
   if (!src) throw new Error(`unknown source ${input.sourceId}`);
 
-  const rel = join(input.seriesFolder, `Chapter ${input.chapter.number}.cbz`);
+  const rel = chapterFileRel(input.seriesFolder, input.chapter.number);
   const abs = join(DL_ROOT, rel);
   // the already-downloaded check is free, so do it before queueing for a slot
   if (await stat(abs).then(() => true).catch(() => false)) return { file: rel, pages: 0, skipped: true };

@@ -230,6 +230,37 @@ CREATE TABLE IF NOT EXISTS series_sources (
   PRIMARY KEY (series_id, source_id)
 );
 
+-- What every followed source listed for a series the last time it was asked (the sweep, Check now, or
+-- POST /api/admin/update/:id): one row per chapter NUMBER, whether or not the chapter is on disk. Written
+-- whole by lib/seriesListing.ts on every answered updateSeries and left standing when no source answered,
+-- because a stale listing beats an empty one -- the same rule the latest-page cache follows.
+-- Why it exists: until v0.32.0 the chapters a source had and this server lacked were visible nowhere but
+-- the sweep's own arithmetic. A chapter held for a preferred group, one that had failed three times, one
+-- released only by a blocked group, one below the Latest-N floor -- each was a quiet "0 added" on the
+-- series page. This table is what the series page reads to draw those as ghost rows with a reason, what a
+-- manual fetch is AUTHORISED against (a number never listed cannot be asked for, the same footing as the
+-- fill plan), and what the known-group picker counts.
+-- chosen is the full SourceChapter the release rules picked for the number (jsonb, so a manual fetch can
+-- hand it straight to the downloader); groups is every group that released ANY copy, deduped the way
+-- lib/releases.ts compares names; status is available, held (withheld for a preferred group this run) or
+-- blocked (every copy dropped because only blocked groups released it -- the row keeps the first copy so
+-- the page can still say who). number is real to match lib_books.number exactly, so the anti-join that
+-- turns a listing row into a ghost never misses on a float. The column is named chosen and not copy on
+-- purpose: COPY is a Postgres keyword.
+CREATE TABLE IF NOT EXISTS series_listing (
+  series_id    text NOT NULL REFERENCES lib_series(id) ON DELETE CASCADE,
+  number       real NOT NULL,
+  title        text,
+  published_at timestamptz,
+  scanlator    text,
+  groups       text[] NOT NULL DEFAULT '{}',
+  source_id    text NOT NULL,
+  chosen       jsonb NOT NULL,
+  status       text NOT NULL DEFAULT 'available',
+  updated_at   timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (series_id, number)
+);
+
 -- Content identity, so a chapter can be recognised after it moves. Derived from the archive's central
 -- directory (entry names + CRC-32 + uncompressed sizes), which is cheap to read and survives recompression.
 -- Nothing reads these yet; a background job fills them in, and fp_at is set even on failure so an unreadable

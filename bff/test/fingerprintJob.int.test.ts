@@ -189,3 +189,21 @@ test('backfill: books under the download root resolve against their own root', {
   assert.ok(row.fingerprint, 'a book in the download root was not fingerprinted');
   assert.equal(row.fp_kind, 'zip');
 });
+
+test('a deleted chapter is neither attempted nor counted as remaining', { skip }, async () => {
+  // A tombstone (lib/chapterCleanup.ts) has its fp_at cleared with its file, so it looks exactly like a
+  // chapter the job has not reached yet. Without its own clause the job would open the missing file once
+  // per run, forever, and `remaining` would never reach zero.
+  // Reintroduce by deleting `AND pruned_at IS NULL` from the batch query or from fingerprintRemaining in
+  // lib/fingerprintJob.ts: the count does not drop, or the row is stamped with fp_kind 'error'.
+  const { tombstoneBooks } = await import('../src/lib/chapterCleanup');
+  await insertBook('b_fpjob_pruned', rel('pruned.cbz')); // no file: the bytes are gone, as they would be
+  const before = await job.fingerprintRemaining();
+  await tombstoneBooks(['b_fpjob_pruned']);
+  assert.equal(await job.fingerprintRemaining(), before - 1, 'a tombstone must leave the queue');
+
+  await job.runFingerprintBackfill();
+  const [row] = await q(`SELECT fp_at, fp_kind FROM lib_books WHERE id = 'b_fpjob_pruned'`);
+  assert.equal(row.fp_at, null, 'the job attempted a chapter whose file was deleted');
+  assert.equal(row.fp_kind, null);
+});

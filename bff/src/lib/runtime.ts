@@ -19,6 +19,12 @@ export interface CleanupResult {
   ms: number;
   /** Why nothing was done, when nothing was done. Absent on a run that actually looked. */
   skipped?: 'disabled' | 'read_only' | 'shutdown';
+  /**
+   * Why a run that looked ended early. `unmounted`: a due chapter's folder was missing along with the file,
+   * which reads as the download volume not being there, so the run stopped at that chapter without marking
+   * it (lib/chapterCleanup.ts); it and the chapters after it are counted in `failed`.
+   */
+  stopped?: 'unmounted';
   /** The grace period this run applied, so the panel reports the setting the run actually used. */
   days?: number;
 }

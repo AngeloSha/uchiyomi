@@ -118,6 +118,53 @@ export interface Book {
    * be again. Nothing may offer to open or download it.
    */
   pruned?: boolean;
+  /**
+   * The file lives under the downloads root, i.e. Uchiyomi fetched it and can fetch it again. Only these
+   * may be deleted from the server or fetched again: a chapter in a library somebody assembled by hand is
+   * theirs, not the updater's, and no button here may touch it.
+   */
+  owned?: boolean;
+}
+
+/**
+ * Why a chapter the sources list is not on this server.
+ *   missing  nobody has asked for it yet (or the updater has not reached it)
+ *   held     a preferred group has not released it and the patience window is still open
+ *   blocked  every copy on offer is from a blocked group -- unblock first, it cannot be fetched
+ *   failed   the downloader gave up on it (`attempts` says how many times)
+ *   floor    below the series' Latest-N floor; Find missing chapters is the way to reach it
+ */
+export type GhostWhy = 'missing' | 'held' | 'blocked' | 'failed' | 'floor';
+
+/** A chapter the sources list that has no row in the library: what the updater knows about it, as of its last check. */
+export interface Ghost {
+  number: number;
+  title: string | null;
+  publishedAt: string | null;
+  /** The group of the copy the scanlator rules would take. Null when the source did not say. */
+  scanlator: string | null;
+  /** Every group that released this number, across every followed source. */
+  groups: string[];
+  sourceId: string;
+  sourceName: string;
+  why: GhostWhy;
+  attempts?: number;
+  /** The downloader's last error text. Admins only; absent for everyone else. */
+  reason?: string;
+}
+
+export interface Listing {
+  /** When the updater last wrote this list, or null when it never has. Stale beats empty, so the age is shown. */
+  checkedAt: string | null;
+  content: Ghost[];
+}
+
+/** A group name the server has seen anywhere, with how busy it is: chapters on disk and numbers listed by the sources. */
+export interface KnownGroup {
+  name: string;
+  onDisk: number;
+  listed: number;
+  series: number;
 }
 
 export interface PageInfo {

@@ -5,7 +5,7 @@ import { motion } from 'framer-motion';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, img } from '@/lib/api';
-import { Book, Page, Series, SeriesSource, StoredPrefs } from '@/lib/types';
+import { Book, Ghost, Listing, Page, Series, SeriesSource, StoredPrefs } from '@/lib/types';
 import { chapterLabel, isVolumeName, relativeTime } from '@/lib/format';
 import { listDownloads, downloadChapter, deleteDownload } from '@/lib/downloads';
 import { applyCover, clearCover } from '@/lib/theme';
@@ -18,6 +18,7 @@ import { IcChevronLeft, IcHeart, IcStar, IcPlay, IcDownload, IcCheck, IcTrash, I
 import { t as tr } from '@/lib/i18n';
 import { FindMissingDialog } from '@/components/FindMissingDialog';
 import { hasGroup, normGroup, reorder, withoutGroup } from '@/lib/scanlators';
+import { GHOST_CAP, mergeRows, whyLabel, runLabel } from '@/lib/chapterRows';
 
 // The four the scanner itself writes from ComicInfo's PublishingStatus. Kept as a suggestion list rather
 // than a hard enum, because a file can carry anything and rejecting it would reject Uchiyomi's own data.
@@ -619,9 +620,11 @@ function ChapterEditModal({ book, onClose, onSaved }: { book: Book; onClose: () 
   );
 }
 
-function ChapterRow({ book, downloaded, sourceNames, primarySource, onReader, onToggleDownload, onMark, onEdit }: {
+function ChapterRow({ book, downloaded, sourceNames, primarySource, onReader, onToggleDownload, onMark, onEdit, selectable, selected, onToggle }: {
   book: Book;
   downloaded: boolean;
+  /** Select mode: the row toggles instead of opening, shows the ✓ bubble, and hides its own two controls. */
+  selectable?: boolean; selected?: boolean; onToggle?: () => void;
   /** Source id -> display name, from the series' followed sources; names the badge on a chapter another source supplied. */
   sourceNames?: Record<string, string>;
   /** The series' own source. A chapter from it gets no source badge: that is the normal case, not news. */
@@ -652,10 +655,16 @@ function ChapterRow({ book, downloaded, sourceNames, primarySource, onReader, on
 
   return (
     <div className="flex items-center gap-3 border-b border-ink-800/70 py-2.5">
-      <button onClick={onReader} disabled={pruned} className="flex min-w-0 flex-1 items-center gap-3 text-start disabled:cursor-default">
-        <div className={`relative h-14 w-10 shrink-0 overflow-hidden rounded-lg border ${state === 'read' ? 'border-ink-800 opacity-45' : 'border-ink-700'}`}>
-          <Img src={img.bookThumb(book.id)} alt="" className="h-full w-full" />
+      {/* In select mode a pruned chapter is still selectable -- Mark read and Fetch again are exactly the
+          things one wants for it -- so the disable only applies to opening. */}
+      <button onClick={selectable ? onToggle : onReader} disabled={pruned && !selectable} aria-pressed={selectable ? !!selected : undefined}
+        className="flex min-w-0 flex-1 items-center gap-3 text-start disabled:cursor-default">
+        <div className={`relative h-14 w-10 shrink-0 overflow-hidden rounded-lg border ${state === 'read' ? 'border-ink-800 opacity-45' : 'border-ink-700'} ${book.pruned && !downloaded ? 'border-dashed border-ink-600' : ''}`}>
+          {/* A tombstone has no file to draw a thumbnail from; asking would be a 404 per row on every visit.
+              The dashed empty box is the ghost row's, so "no pages here" reads the same in both places. */}
+          {!(book.pruned && !downloaded) && <Img src={img.bookThumb(book.id)} alt="" className="h-full w-full" />}
           {state === 'reading' && <span className="absolute inset-x-0 bottom-0 h-0.5 bg-accent" />}
+          {selectable && <SelectBubble selected={!!selected} />}
         </div>
         <span className={`h-2 w-2 shrink-0 rounded-full ${state === 'read' ? 'bg-ink-600' : state === 'reading' ? 'bg-accent' : 'bg-accent/40'}`} />
         <div className="min-w-0">
@@ -663,8 +672,11 @@ function ChapterRow({ book, downloaded, sourceNames, primarySource, onReader, on
           {(book.scanlator || altSource || book.pruned) && (
             <p className="mt-0.5 flex flex-wrap gap-1">
               {/* Shown even when a copy is saved on this device -- it is still gone from the server, and
-                  "yours is the last one" is exactly what somebody wants to know before clearing downloads. */}
-              {book.pruned && <span className="rounded-full border border-ink-700 px-1.5 text-[10px] leading-4 text-fog-600">{downloaded ? tr('Deleted from the server') : tr('Deleted to free space')}</span>}
+                  "yours is the last one" is exactly what somebody wants to know before clearing downloads.
+                  One wording for every tombstone: the same mark is left by an admin's Delete from server
+                  as by the scheduled cleanup, and the row cannot tell which, so "to free space" blamed a
+                  job that is off on most installs. */}
+              {book.pruned && <span className="rounded-full border border-ink-700 px-1.5 text-[10px] leading-4 text-fog-600">{tr('Deleted from the server')}</span>}
               {book.scanlator && <span className="max-w-[10rem] truncate rounded-full border border-ink-700 px-1.5 text-[10px] leading-4 text-fog-500">{book.scanlator}</span>}
               {altSource && <span className="max-w-[10rem] truncate rounded-full border border-ink-700 px-1.5 text-[10px] leading-4 text-fog-500">{altSource}</span>}
             </p>
@@ -677,6 +689,7 @@ function ChapterRow({ book, downloaded, sourceNames, primarySource, onReader, on
       {book.metadata?.releaseDate && (
         <span className="shrink-0 text-[11px] text-fog-500">{relativeTime(book.metadata.releaseDate)}</span>
       )}
+      {!selectable && <>
       <button
         onClick={async () => {
           if (busy) return;
@@ -717,8 +730,91 @@ function ChapterRow({ book, downloaded, sourceNames, primarySource, onReader, on
           </>
         )}
       </div>
+      </>}
     </div>
   );
+}
+
+/** The ✓ bubble on a thumb in select mode -- the library tile's, so the two select modes look like one. */
+function SelectBubble({ selected }: { selected: boolean }) {
+  return (
+    <>
+      {selected && <span className="absolute inset-0 z-10 rounded-lg border-2 border-accent bg-accent/20" />}
+      <span className={`absolute start-1.5 top-1.5 z-20 grid h-6 w-6 place-items-center rounded-full border text-[11px] font-bold ${
+        selected ? 'border-accent bg-accent text-black' : 'border-white/50 bg-black/50 text-transparent'}`}>✓</span>
+    </>
+  );
+}
+
+/**
+ * A chapter the sources list that this server does not hold.
+ *
+ * Same grid and height as ChapterRow so the list reads as one list, dimmed so it reads as absent. It is
+ * inert outside select mode: there is nothing to open and nothing to download, and a row that looks like a
+ * chapter but does nothing when tapped is worse than one that says so with its cursor. The why pill is the
+ * point of the row -- "not downloaded yet" and "only blocked groups released it" want different things
+ * done about them -- and only `failed` is amber, because it is the only one that is news rather than a
+ * state. The downloader's error text rides on the pill's title for admins (the server sends `reason` to
+ * nobody else).
+ */
+function GhostRow({ ghost, sourceNames, primarySource, selectable, selected, onToggle }: {
+  ghost: Ghost;
+  sourceNames?: Record<string, string>;
+  primarySource?: string;
+  selectable?: boolean; selected?: boolean; onToggle?: () => void;
+}) {
+  const label = whyLabel(ghost);
+  // The same rule as the chapter row's badge: the series' own source is the normal case, not news. The
+  // listing carries the source's name, so an id the followed list no longer resolves still gets one --
+  // ⚠️ unless that "name" IS the id: the server falls back to `getSource(id)?.name ?? id`, so a source that
+  // is no longer loaded (an extension removed since the check) arrives as `ext:fake` or a nineteen-digit
+  // number, and the ChapterRow rule is that a badge is a name or nothing. Reintroduce by dropping the
+  // `!== ghost.sourceId` test: seed a ghost from an unloaded source and its pill reads the raw id.
+  const altSource = ghost.sourceId !== primarySource
+    ? (sourceNames?.[ghost.sourceId] ?? (ghost.sourceName !== ghost.sourceId ? ghost.sourceName : null))
+    : null;
+  // Most sources title a chapter "Chapter 12", which beside "Ch. 12" says nothing twice.
+  const title = ghost.title?.trim() || '';
+  const showTitle = !!title && !/^(ch(apter)?\.?\s*)?[\d.]+$/i.test(title);
+  return (
+    <div className={`flex items-center gap-3 border-b border-ink-800/70 py-2.5 ${selected ? '' : 'opacity-60'}`} aria-disabled={!selectable || undefined}>
+      <button type="button" onClick={selectable ? onToggle : undefined} disabled={!selectable} aria-pressed={selectable ? !!selected : undefined}
+        className="flex min-w-0 flex-1 items-center gap-3 text-start disabled:cursor-default">
+        <div className="relative h-14 w-10 shrink-0 rounded-lg border border-dashed border-ink-600">
+          {selectable && <SelectBubble selected={!!selected} />}
+        </div>
+        <span className="h-2 w-2 shrink-0 rounded-full border border-ink-600" />
+        <div className="min-w-0">
+          <p className="truncate text-sm text-fog-300">
+            {chapterLabel({ number: ghost.number })}
+            {showTitle && <span className="text-fog-500"> · {title}</span>}
+          </p>
+          <p className="mt-0.5 flex flex-wrap gap-1">
+            {label && (
+              <span title={ghost.reason} className={`rounded-full border px-1.5 text-[10px] leading-4 ${ghost.why === 'failed' ? 'border-amber-500/40 text-amber-300' : 'border-ink-700 text-fog-500'}`}>
+                {tr(label, { n: ghost.attempts ?? 0 })}
+              </span>
+            )}
+            {ghost.scanlator && <span className="max-w-[10rem] truncate rounded-full border border-ink-700 px-1.5 text-[10px] leading-4 text-fog-500">{ghost.scanlator}</span>}
+            {altSource && <span className="max-w-[10rem] truncate rounded-full border border-ink-700 px-1.5 text-[10px] leading-4 text-fog-500">{altSource}</span>}
+          </p>
+        </div>
+      </button>
+      {ghost.publishedAt && (
+        <span className="shrink-0 text-[11px] text-fog-500">{relativeTime(ghost.publishedAt)}</span>
+      )}
+    </div>
+  );
+}
+
+/** The one job the page started, and when: `dataUpdatedAt` is compared against `at`, see below. */
+interface StartedJob { folder: string; at: number }
+interface SourceJob { folder: string; status: string }
+
+/** The localStorage key for the per-device "show chapters not on this server" toggle. */
+const SHOW_GHOSTS_KEY = 'uchiyomi.showGhosts';
+function readShowGhosts(): boolean {
+  try { return localStorage.getItem(SHOW_GHOSTS_KEY) !== 'off'; } catch { return true; }
 }
 
 function SeriesInner() {
@@ -735,6 +831,24 @@ function SeriesInner() {
   const [downloaded, setDownloaded] = useState<Set<string>>(new Set());
   const [showSummary, setShowSummary] = useState(false);
   const [downloadingAll, setDownloadingAll] = useState(false);
+  // Ghost rows: the chapters the sources list that this server lacks. Per device, default on, because
+  // "there are 12 more of these" is the news this page exists to carry; off is for a phone that only ever
+  // reads what is already here.
+  const [showGhosts, setShowGhosts] = useState(true);
+  useEffect(() => { setShowGhosts(readShowGhosts()); }, []);
+  const [showAll, setShowAll] = useState(false);
+  // Select mode, the library's pattern. Two sets because a chapter is picked by id and a ghost has none --
+  // it is picked by number, which is what the fetch route takes. Cleared whenever the list under it
+  // changes shape, so a selection can never outlive the rows it was made from.
+  const [selecting, setSelecting] = useState(false);
+  const [pickedBooks, setPickedBooks] = useState<Set<string>>(new Set());
+  const [pickedGhosts, setPickedGhosts] = useState<Set<number>>(new Set());
+  const [acting, setActing] = useState(false);
+  const [confirming, setConfirming] = useState<null | 'delete' | 'refetch'>(null);
+  const [started, setStarted] = useState<StartedJob | null>(null);
+  const clearPicks = () => { setPickedBooks(new Set()); setPickedGhosts(new Set()); };
+  const leaveSelect = () => { setSelecting(false); clearPicks(); };
+  useEffect(() => { setSelecting(false); setPickedBooks(new Set()); setPickedGhosts(new Set()); setShowAll(false); }, [id, asc]);
 
   const { data: series } = useQuery({ queryKey: ['series', id], queryFn: () => api<Series>(`/api/series/${id}`), enabled: !!id });
   const { data: books } = useQuery({
@@ -742,6 +856,16 @@ function SeriesInner() {
     queryFn: () => api<Page<Book>>(`/api/series/${id}/books?size=1000&sort=metadata.numberSort,asc`),
     enabled: !!id,
   });
+  // What the sources list that the library lacks, as of the updater's last visit. A courtesy, never a
+  // blocker: no retry, and an error renders no ghost rows rather than a message, because the chapters on
+  // disk are the page and this is the margin note.
+  const { data: listing } = useQuery({
+    queryKey: ['series-listing', id],
+    queryFn: () => api<Listing>(`/api/series/${id}/listing`),
+    enabled: !!id,
+    retry: false,
+  });
+  const ghosts = useMemo(() => listing?.content ?? [], [listing]);
   const { data: similar } = useQuery({ queryKey: ['similar', id], queryFn: () => api<{ content: Series[] }>(`/api/series/${id}/similar`), enabled: !!id });
   // Saved pages and notes for this series. Both, because this door is the ONLY route to
   // `/moments/?series=<id>`, and that filtered view is the only place the note composer mounts -- the
@@ -777,10 +901,8 @@ function SeriesInner() {
     return () => clearCover();
   }, [series?.color]);
 
-  const chapters = useMemo(() => {
-    const c = books?.content ?? [];
-    return asc ? c : [...c].reverse();
-  }, [books, asc]);
+  // The list, in the list's direction: chapters on disk and, between them, the ghosts (see chapterRows.ts).
+  const rows = useMemo(() => mergeRows(books?.content ?? [], showGhosts ? ghosts : [], asc, showAll), [books, ghosts, showGhosts, asc, showAll]);
   // For the per-chapter source badge: which source each id is, and which one is the series' own. A chapter
   // fetched through "Find missing chapters" carries the adapter it came from without that source being
   // followed, so the names come from the full source list too -- never the raw id, which for an extension
@@ -799,8 +921,12 @@ function SeriesInner() {
 
   const resumeBook = useMemo(() => {
     const c = books?.content ?? [];
-    return c.find((b) => !b.readProgress?.completed) || c[0];
-  }, [books]);
+    // A chapter the server deleted has no pages to resume into -- unless this device saved a copy, in which
+    // case that copy is the last one and resuming into it is right. Without this, "Continue" on a series
+    // whose next unread chapter was pruned opened straight onto "Chapter deleted".
+    const openable = (b: Book) => !b.pruned || downloaded.has(b.id);
+    return c.find((b) => !b.readProgress?.completed && openable(b)) || c.find(openable) || c[0];
+  }, [books, downloaded]);
 
   const inProgress = books?.content.some((b) => b.readProgress && !b.readProgress.completed);
 
@@ -866,14 +992,9 @@ function SeriesInner() {
     toast(`Marked ${todo.length} chapters read`, 'success');
   };
 
-  const downloadAll = async () => {
-    if (downloadingAll || !books) return;
-    // A pruned chapter has no pages left on the server, so including it would "save" an empty chapter to
-    // this device and then report it as downloaded. Skipped silently: it is not an error and there is
-    // nothing the reader can do about it.
-    const todo = books.content.filter((b) => !downloaded.has(b.id) && !b.pruned);
-    if (!todo.length) { toast('Everything is already downloaded', 'success'); return; }
-    setDownloadingAll(true);
+  // The one download loop, for Download all and for Save offline in select mode: stops at the first
+  // failure, because the usual cause is a full device and every further attempt would fail the same way.
+  const saveOffline = async (todo: Book[]) => {
     toast(`Downloading ${todo.length} chapters…`);
     let done = 0;
     for (const b of todo) {
@@ -886,9 +1007,152 @@ function SeriesInner() {
         break;
       }
     }
-    setDownloadingAll(false);
     if (done) toast(`Saved ${done} chapters offline`, 'success');
   };
+  const downloadAll = async () => {
+    if (downloadingAll || !books) return;
+    // A pruned chapter has no pages left on the server, so including it would "save" an empty chapter to
+    // this device and then report it as downloaded. Skipped silently: it is not an error and there is
+    // nothing the reader can do about it.
+    const todo = books.content.filter((b) => !downloaded.has(b.id) && !b.pruned);
+    if (!todo.length) { toast('Everything is already downloaded', 'success'); return; }
+    setDownloadingAll(true);
+    await saveOffline(todo);
+    setDownloadingAll(false);
+  };
+
+  // ---- select mode -------------------------------------------------------------------------------
+  const togglePickBook = (bookId: string) =>
+    setPickedBooks((p) => { const n = new Set(p); n.has(bookId) ? n.delete(bookId) : n.add(bookId); return n; });
+  const togglePickGhost = (number: number) =>
+    setPickedGhosts((p) => { const n = new Set(p); n.has(number) ? n.delete(number) : n.add(number); return n; });
+  const toggleGhosts = () => {
+    const next = !showGhosts;
+    setShowGhosts(next);
+    try { localStorage.setItem(SHOW_GHOSTS_KEY, next ? 'on' : 'off'); } catch { /* private mode: the session still has it */ }
+    // Rows that are no longer on screen cannot stay picked, or Fetch would act on what nobody can see.
+    if (!next) setPickedGhosts(new Set());
+  };
+  const pickedBookList = useMemo(() => (books?.content ?? []).filter((b) => pickedBooks.has(b.id)), [books, pickedBooks]);
+  const pickedGhostList = useMemo(() => ghosts.filter((g) => pickedGhosts.has(g.number)), [ghosts, pickedGhosts]);
+  // Each action's eligible subset. A button acts on its subset, never on the whole selection, and is
+  // disabled when the subset is empty -- so picking three chapters and a ghost never makes Fetch try the
+  // chapters or Mark read try the ghost.
+  const saveable = pickedBookList.filter((b) => !b.pruned && !downloaded.has(b.id));
+  const fetchable = pickedGhostList.filter((g) => g.why !== 'blocked');
+  const refetchable = pickedBookList.filter((b) => b.owned);
+  // ⚠️ NOT filtered by `owned`. The server classifies each id and answers with a reason per skip, and the
+  // toast below repeats it -- "3 skipped: not downloaded by Uchiyomi" is the one line that explains why a
+  // hand-assembled library (86 % of the chapters on a real install) cannot be deleted from here. Filtering
+  // here made that toast dead code: the ids never reached the server, and picking only such chapters
+  // greyed the button out with no hint at all. Only tombstones are dropped, since there is no file to
+  // delete and the server would say `already_pruned` for every one of them. Reintroduce by adding
+  // `b.owned &&` back: pick a /library chapter and the delete says "0 deleted" -- or nothing.
+  const deletable = pickedBookList.filter((b) => !b.pruned);
+  const pickedCount = pickedBooks.size + pickedGhosts.size;
+
+  const invalidateChapters = () => {
+    for (const k of [['series-books', id], ['series-listing', id], ['series', id], ['home'], ['source-jobs']]) qc.invalidateQueries({ queryKey: k });
+  };
+  const bulkMark = async (completed: boolean) => {
+    setActing(true);
+    await setRead(pickedBookList, completed);
+    toast(`Marked ${pickedBookList.length} ${completed ? 'read' : 'unread'}`, 'success');
+    setActing(false);
+    leaveSelect();
+  };
+  const bulkSave = async () => {
+    setActing(true);
+    await saveOffline(saveable);
+    setActing(false);
+    leaveSelect();
+  };
+  // Fetch and Fetch again start a server job and return at once; the rows appear as the job lands them,
+  // which is what the polling below is for.
+  const startJob = async (path: string, body: Record<string, unknown>) => {
+    setActing(true);
+    try {
+      const res = await api<{ folder: string; total: number }>(path, { method: 'POST', json: body });
+      setStarted({ folder: res.folder, at: Date.now() });
+      toast(tr('Fetching {n} chapters…', { n: res.total }), 'info');
+      invalidateChapters();
+      leaveSelect();
+    } catch (e) {
+      toast(msgOf(e, tr('Could not start.')), 'error');
+    }
+    setActing(false);
+    setConfirming(null);
+  };
+  const bulkFetch = () => startJob('/api/sources/fetch', { seriesId: id, numbers: fetchable.map((g) => g.number) });
+  const bulkRefetch = () => startJob(`/api/admin/series/${id}/chapters/refetch`, { bookIds: refetchable.map((b) => b.id) });
+  const bulkDelete = async () => {
+    setActing(true);
+    try {
+      const res = await api<{ applied: number; skipped: { id: string; reason: string }[] }>(`/api/admin/series/${id}/chapters/delete`, {
+        method: 'POST', json: { bookIds: deletable.map((b) => b.id) },
+      });
+      // Say what was skipped rather than silently deleting fewer than were selected, one line per reason
+      // present: `not_owned` (the file is in a library the admin built, not one Uchiyomi fetched) and
+      // `bookmarked` (a reader's bookmark names a page inside it) are the two a person can act on; the
+      // rest -- `unlink_failed`, `outside_root`, `already_pruned` after a race -- are one line, because
+      // the fix for all of them is the server log, not this page.
+      const count = (reason: string) => res.skipped.filter((x) => x.reason === reason).length;
+      const notOwned = count('not_owned');
+      const bookmarked = count('bookmarked');
+      const other = res.skipped.length - notOwned - bookmarked;
+      const lines = [
+        { n: notOwned, text: tr('{n} skipped: not downloaded by Uchiyomi', { n: notOwned }) },
+        { n: bookmarked, text: tr('{n} skipped: bookmarked by a reader', { n: bookmarked }) },
+        { n: other, text: tr('{n} could not be deleted', { n: other }) },
+      ].filter((l) => l.n > 0);
+      if (res.applied === 0 && lines.length) {
+        // ⚠️ A delete that deleted nothing is not a success. A green "0 deleted" over unchanged rows was
+        // what an unlink failure looked like; the dominant reason, in red, is what it looks like now.
+        // Reintroduce by toasting "{n} deleted" unconditionally: pick a bookmarked chapter and delete it.
+        // The other reasons still get their line (the docs promise one per reason), just not in red.
+        const [head, ...rest] = lines.sort((a, b) => b.n - a.n);
+        toast(head.text, 'error');
+        for (const l of rest) toast(l.text, 'info');
+      } else {
+        toast(tr('{n} deleted', { n: res.applied }), 'success');
+        for (const l of lines) toast(l.text, 'info');
+      }
+      invalidateChapters();
+      leaveSelect();
+    } catch (e) {
+      toast(msgOf(e, tr('Could not delete those')), 'error');
+    }
+    setActing(false);
+    setConfirming(null);
+  };
+
+  // While the job this page started is downloading, poll the shared jobs key every 2 s (the
+  // FindMissingDialog pattern) and refresh the two chapter queries when it stops, so ghosts turn into rows
+  // without a reload. ⚠️ `dataUpdatedAt` is compared against the moment the job started: the key is shared
+  // with the downloads pill, so the first render after the POST sees that pill's CACHED list -- from before
+  // the job existed -- and "the job is not in the list" would otherwise read as "the job has finished".
+  const jobs = useQuery({
+    queryKey: ['source-jobs'],
+    queryFn: () => api<{ content: SourceJob[] }>('/api/sources/jobs'),
+    enabled: !!started,
+    refetchInterval: 2000,
+  });
+  const job = started ? jobs.data?.content?.find((j) => j.folder === started.folder) : undefined;
+  const jobFresh = !!started && jobs.dataUpdatedAt >= started.at;
+  // A fresh list without the job means it is over and has aged out -- or a poll that was already in flight
+  // when the POST landed answered without it. Five seconds tells those apart: a job that has not appeared
+  // by then is not going to. (`Date.now()` here is re-evaluated on every 2 s poll, which is what makes it
+  // a clock rather than a constant.)
+  const jobDone = jobFresh && (job ? job.status !== 'downloading' : Date.now() - started.at > 5000);
+  useEffect(() => {
+    if (!jobDone) return;
+    setStarted(null);
+    qc.invalidateQueries({ queryKey: ['series-books', id] });
+    qc.invalidateQueries({ queryKey: ['series-listing', id] });
+    qc.invalidateQueries({ queryKey: ['series', id] });
+    qc.invalidateQueries({ queryKey: ['home'] });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [jobDone]);
 
   const meta = series?.metadata;
   const summary = meta?.summary || series?.booksMetadata?.summary;
@@ -1009,29 +1273,112 @@ function SeriesInner() {
 
   const Chapters = (
     <div>
-      <div className="mb-1 flex items-center justify-between gap-2">
+      <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
         <h2 className="font-display text-lg font-semibold">{tr('Chapters')}</h2>
-        <div className="flex items-center gap-1.5">
+        <div className="flex flex-wrap items-center justify-end gap-1.5">
           <button onClick={markAllRead} className="chip text-xs"><IcCheck width={14} height={14} />{tr('Mark all read')}</button>
           <button onClick={() => setAsc((a) => !a)} className="chip text-xs">
             <IcSliders width={14} height={14} /> {asc ? 'Oldest' : 'Newest'}
           </button>
+          {/* A mode, not a filter: the library's chip, so the two select modes are one habit. */}
+          <button onClick={() => { setSelecting((v) => !v); clearPicks(); }} className={`chip text-xs whitespace-nowrap ${selecting ? 'chip-active' : ''}`}>
+            {selecting ? tr('Done') : tr('Select')}
+          </button>
+          {ghosts.length > 0 && (
+            <button onClick={toggleGhosts} aria-pressed={showGhosts} className={`chip text-xs ${showGhosts ? 'chip-active' : ''}`}>
+              {tr('Show chapters not on this server')}
+            </button>
+          )}
         </div>
       </div>
+      {/* Shown whether or not the ghost rows are: the count is the news, and "as of" is how old it is. */}
+      {ghosts.length > 0 && (
+        <p className="mb-2 text-xs text-fog-500">
+          {tr('{n} on the sources but not here', { n: ghosts.length })}
+          {listing?.checkedAt && <> · {tr('as of {ago}', { ago: relativeTime(listing.checkedAt) })}</>}
+        </p>
+      )}
       <div className="lg:grid lg:gap-x-8 lg:[grid-template-columns:repeat(auto-fill,minmax(250px,1fr))]">
-        {chapters.map((b) => (
-          <ChapterRow key={b.id} book={b} downloaded={downloaded.has(b.id)} sourceNames={sourceNames} primarySource={primarySource}
-            onReader={() => router.push(`/reader/?book=${b.id}`)} onToggleDownload={() => toggleDownload(b.id)}
-            onMark={(mode) => markChapter(b, mode)}
-            onEdit={isAdmin ? () => setEditChapter(b) : undefined} />
-        ))}
+        {rows.map((r) => {
+          if (r.kind === 'book') {
+            const b = r.book;
+            return (
+              <ChapterRow key={b.id} book={b} downloaded={downloaded.has(b.id)} sourceNames={sourceNames} primarySource={primarySource}
+                onReader={() => router.push(`/reader/?book=${b.id}`)} onToggleDownload={() => toggleDownload(b.id)}
+                onMark={(mode) => markChapter(b, mode)}
+                onEdit={isAdmin ? () => setEditChapter(b) : undefined}
+                selectable={selecting} selected={pickedBooks.has(b.id)} onToggle={() => togglePickBook(b.id)} />
+            );
+          }
+          if (r.kind === 'ghost') {
+            return (
+              <GhostRow key={`g${r.ghost.number}`} ghost={r.ghost} sourceNames={sourceNames} primarySource={primarySource}
+                selectable={selecting} selected={pickedGhosts.has(r.ghost.number)} onToggle={() => togglePickGhost(r.ghost.number)} />
+            );
+          }
+          if (r.kind === 'run') {
+            // One line for the whole stretch below the Latest-N floor. The sentence is the button, and it
+            // opens the same dialog the Find missing chapters button does -- for the people that button is
+            // shown to; everyone else reads it as the fact it is. The sentence itself (range or single
+            // number, plural or singular) is `runLabel`'s, where a test can reach it. `lg:col-span-full`
+            // because on a desktop the list is an auto-fill grid and a sentence in one 250 px cell wrapped
+            // to two lines while the "Show all" row below it already spanned the row.
+            const { key, args } = runLabel(r);
+            const text = tr(key, args);
+            return (
+              <div key={`run${r.from}`} className="flex items-center border-b border-ink-800/70 py-2.5 text-xs text-fog-500 lg:col-span-full">
+                {canDownload(user) && (series?.booksCount ?? 0) >= 3
+                  ? <button type="button" onClick={() => setFindingMissing(true)} className="text-start underline decoration-ink-600 underline-offset-2 hover:text-fog-300">{text}</button>
+                  : <span>{text}</span>}
+              </div>
+            );
+          }
+          return (
+            <div key="more" className="flex items-center justify-center py-2.5 lg:col-span-full">
+              <button type="button" onClick={() => setShowAll(true)} className="chip text-xs">{tr('Show all {n}', { n: r.hidden + GHOST_CAP })}</button>
+            </div>
+          );
+        })}
         {!books && Array.from({ length: 8 }).map((_, i) => <div key={i} className="skeleton my-3 h-6 rounded" />)}
       </div>
     </div>
   );
 
+  // The library's toolbar, verbatim in shape: fixed ABOVE the bottom nav, safe-area padded, one row that
+  // wraps. Every button is disabled when its subset is empty rather than hidden, so the row does not
+  // reflow as the selection changes; the two admin buttons and Fetch are hidden outside their audience.
+  //
+  // ⚠️ `bottom-0` here puts the bar UNDER the phone nav, not over it. This renders inside AppShell's
+  // `<main class="relative z-[1]">`, which is its own stacking context, while <BottomNav> is main's sibling
+  // at z-40 in the root context -- so whatever z-index this div carries, the nav paints on top of it. With
+  // seven chips wrapping to three rows at 390 px, Fetch, Fetch again, Delete from server and Cancel all sat
+  // behind the nav and elementFromPoint returned the nav for every one of them. On phones the bar therefore
+  // sits at the nav's top edge: 5.75rem plus the safe-area inset (the nav measures 92 px at 390 px; the
+  // Sheet's 5.5rem `overBottomNav` value tucks under the bar's own bottom padding and would overlap by 4 px
+  // here). From lg up the nav is hidden and the bar goes back to the bottom. Reintroduce by changing the
+  // bottom class back to `bottom-0` and picking every row on a phone: only the first row of chips is
+  // tappable.
+  const Toolbar = selecting && pickedCount > 0 && (
+    <div className="fixed inset-x-0 bottom-[calc(5.75rem+env(safe-area-inset-bottom))] z-40 border-t border-ink-700 bg-ink-950/95 px-4 pb-3 pt-3 backdrop-blur-xl lg:bottom-0 lg:pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+      {/* pe-36 on phones keeps the chips clear of the downloads pill (fixed bottom-20 end-3), which floats
+          over this bar's lower band while a source job is running. */}
+      <div className="mx-auto flex max-w-3xl flex-wrap items-center gap-2 pe-36 lg:pe-0">
+        <span className="me-auto text-sm font-medium text-fog-100">{acting ? '…' : tr('{n} selected', { n: pickedCount })}</span>
+        <button disabled={acting || !pickedBookList.length} onClick={() => bulkMark(true)} className="chip text-xs disabled:opacity-50">{tr('Mark read')}</button>
+        <button disabled={acting || !pickedBookList.length} onClick={() => bulkMark(false)} className="chip text-xs disabled:opacity-50">{tr('Mark unread')}</button>
+        <button disabled={acting || !saveable.length} onClick={bulkSave} className="chip text-xs disabled:opacity-50">{tr('Save offline')}</button>
+        {canDownload(user) && <button disabled={acting || !fetchable.length} onClick={bulkFetch} className="chip text-xs disabled:opacity-50">{tr('Fetch')}</button>}
+        {isAdmin && <button disabled={acting || !refetchable.length} onClick={() => setConfirming('refetch')} className="chip text-xs disabled:opacity-50">{tr('Fetch again')}</button>}
+        {isAdmin && <button disabled={acting || !deletable.length} onClick={() => setConfirming('delete')} className="chip text-xs text-rose-300 disabled:opacity-50">{tr('Delete from server')}</button>}
+        <button disabled={acting} onClick={leaveSelect} className="chip text-xs text-fog-500 disabled:opacity-50">{tr('Cancel')}</button>
+      </div>
+    </div>
+  );
+
+  // Room under the last rows while the bar is up: on a phone that is the bar (three rows of chips at
+  // 390 px) plus the nav it now sits on, so pb-24 left the last two chapters unreachable.
   return (
-    <div className="min-h-screen-d">
+    <div className={`min-h-screen-d ${Toolbar ? 'pb-40 lg:pb-24' : ''}`}>
       {/* sticky back bar */}
       <div className="safe-top sticky top-0 z-30 flex items-center gap-2 bg-linear-to-b from-ink-950 to-transparent px-4 pb-3 lg:static lg:bg-none lg:px-0 lg:py-4">
         <button onClick={back} className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-ink-800/70 text-fog-100 backdrop-blur lg:bg-ink-850">
@@ -1118,6 +1465,37 @@ function SeriesInner() {
       )}
       {collecting && <CollectionSheet seriesId={id} onClose={() => setCollecting(false)} />}
       {findingMissing && <FindMissingDialog seriesId={id} onClose={() => setFindingMissing(false)} />}
+      {Toolbar}
+      {confirming === 'delete' && (
+        <ConfirmDialog
+          title={tr('Delete {n} chapters from the server?', { n: deletable.length })}
+          danger
+          busy={acting}
+          confirmLabel={tr('Delete from server')}
+          body={
+            <>
+              <p>{tr('The files are deleted from the server. The chapters stay listed and everyone keeps their reading history, but anyone partway through one loses their place.')}</p>
+              {/* The two skips the server applies for the same reasons the scheduled cleanup does, said
+                  before the click rather than only in the toast after it. */}
+              <p className="mt-2">{tr('A chapter somebody has bookmarked, and a chapter in a library you assembled yourself, is skipped.')}</p>
+              <p className="mt-2">{tr('Fetch again brings a chapter back.')}</p>
+            </>
+          }
+          onConfirm={bulkDelete}
+          onClose={() => setConfirming(null)}
+        />
+      )}
+      {confirming === 'refetch' && (
+        <ConfirmDialog
+          title={tr('Fetch {n} chapters again?', { n: refetchable.length })}
+          danger
+          busy={acting}
+          confirmLabel={tr('Fetch again')}
+          body={<p>{tr('Each file is replaced with the copy the scanlator rules choose now. A different group’s copy may have a different page count, so reading positions inside the chapter may shift.')}</p>}
+          onConfirm={bulkRefetch}
+          onClose={() => setConfirming(null)}
+        />
+      )}
 
       {(similar?.content?.length ?? 0) > 0 && (
         <section className="mt-10">

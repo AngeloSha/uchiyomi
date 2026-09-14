@@ -1,5 +1,110 @@
 # Changelog
 
+## v0.32.0 — 2026-09-14
+
+What one reader asked for after v0.31.0 shipped ([#40](https://github.com/AngeloSha/uchiyomi/issues/40):
+the scanlator rules and the second source were real but invisible from the series page), and the first
+outside contribution to the code — [PR #41](https://github.com/AngeloSha/uchiyomi/pull/41) by TIGamingTV,
+a job that deletes chapters once everyone has read them — taken through the same pipeline as everything
+else and fixed where it needed fixing before it could be trusted with a `rm`.
+
+### Chapters the sources have that you don't
+
+Until now the series page listed what was on disk and nothing else. "3 behind" was a number with nothing
+under it; a chapter being held for a preferred group looked exactly like one the source had never released;
+a chapter that had failed three times and been given up on looked like nothing at all. The page now also
+shows, greyed, every chapter the followed sources list that this server does not hold, and says why: *not
+downloaded yet*, *waiting for a preferred group*, *failed 3 times*, *only blocked groups released it*, or
+below the "Latest N" floor — those last ones collapse into a single line that leads to *Find missing
+chapters*, which is where they were always meant to be taken from. Nothing is asked of a source when the
+page opens: the sweep and *Check now* now keep a per-series listing (`series_listing`) of every number a
+source offers and which copy the scanlator rules chose, and the page reads that. So a listing is exactly as
+old as the last check, and the page says so ("as of 2 hours ago"). Members see the grey rows too; only
+people who may download can act on them.
+
+Acting on them is the other half. **Select**, beside *Mark all read*, turns the chapter list into a pick
+list, and the bar at the bottom does the same job the Library's does: mark read or unread, save offline,
+and **Fetch** — download the ghosts you picked, now. A manual fetch has the same permission as *Find
+missing chapters* and takes the listing as its authorisation (a number the last check did not see is
+refused, not guessed at). It deliberately ignores two of the automatic rules: *patience* — you are the one
+asking, so the best copy on offer is taken rather than waited on — and the retry cap, which it resets. It
+never ignores the *blocklist*: a chapter only blocked groups released is shown so you know it exists, and
+unblocking the group is the way to have it.
+
+For admins the bar carries two more. **Delete from server** removes the file and nothing else: the chapter
+row stays, marked *Deleted from the server*, everyone's progress stays, the counts stay, and the series
+cover moves to the lowest chapter that still has a file — the same tombstone the cleanup below leaves. It
+only ever touches a file Uchiyomi downloaded itself, and never one a reader has bookmarked; a chapter in a
+library you assembled, or with a bookmark on it, is skipped and the toast says how many and why — and a
+delete that deleted nothing is reported as the failure it is, not as *0 deleted*. **Fetch again** is the replace that v0.31.0 refused to do on its own: the file is set
+aside, the copy the scanlator rules choose *now* is downloaded onto the same row — so a chapter you took
+before ranking a group can be swapped for that group's copy without losing where anyone was in it — and the
+old file is put back if the download fails. A different group's copy may have a different page count.
+
+### Pick from known groups
+
+A series' *Edit details* panel has listed its own groups since v0.31.0, but the server defaults under
+**Admin → Settings → Scanlators** — the blocklist that applies to every series, the ranking a series
+without one falls back to — were bare text fields, and a group name has to match exactly. They now offer,
+under the field, the group names actually seen across the library — on disk and in the sources' listings,
+busiest first, filtered as you type — as chips to press, so there is nothing to spell from memory
+(`GET /api/admin/scanlators`).
+
+### Delete chapters after they are read
+
+From [PR #41](https://github.com/AngeloSha/uchiyomi/pull/41) by TIGamingTV, the first code contribution,
+and good work: an opt-in hourly job that deletes the file of a chapter once **everyone who started it has
+finished**, N days after the last of them did (30 by default; 0 means the next run). Off by default, and
+switching it on under **Admin → Settings → Delete read chapters** asks you to confirm with the number of
+chapters the first run would take in front of you. It only touches Uchiyomi's own downloads folder, never a
+library you assembled; it leaves alone anything one reader is partway through, anything nobody has opened,
+anything bookmarked (a bookmark points at a page inside the file), and the chapter a series draws its cover
+from. What it leaves behind is a *tombstone*: the chapter row stays, marked deleted, so reading history
+survives, no count changes, nothing is pushed to AniList, and the updater — whose idea of "have" is the
+rows — does not fetch the chapter back the same night. `CLEANUP_MAX_PER_RUN` (500) caps one run, as a blast
+radius rather than a speed limit. **Admin → Tasks → Delete read chapters** shows the last run and what it
+freed.
+
+What was fixed on top before shipping, plainly. The PR's thirteen integration tests had never run: every
+one died at its seed, which set the series cover before the chapter existed, so the job's rules were
+proven by unit tests of the SQL text alone. Its seventeen strings existed in English only. And the
+tombstone was honoured by the series page and the reader but not by the rest of the product: OPDS feeds,
+`GET /api/books/:id/next`, *Continue reading*, the offline plan, the download manifest, the fingerprint and
+page-hash jobs, the web reader's own next/previous, and the Mihon extension all still handed out a chapter
+with no file — every one now skips it (extension 1.6.3 hides them). A chapter fetched again after a prune
+would have been deleted at the next hourly run, because everyone's progress on it still said *finished*:
+the job now judges by reads of the copy on disk — a chapter is due only when its last reader finished
+*after* the current file landed. A tombstone now forgets the page dimensions, fingerprint and page
+hashes it had cached, which described bytes that no longer exist. A downloads folder that is not there
+when the job runs — a network share not mounted right now, so every chapter it was about to look at is
+missing folder and all — stops the run and says so, where the first version would have marked five
+hundred chapters an hour as deleted while their files sat safe on the unmounted disk; a single series
+whose folder was removed by hand is still marked as gone, and a hidden series is not examined at all. And
+a reader who finished a chapter last year and is re-reading it today is left alone: a completed row that
+is not at the chapter's end counts as partway through.
+
+### Found on the way
+
+The web reader's next/previous list could walk into a deleted chapter (fixed with the rest of the
+tombstone audit above), and the series cover now follows the lowest chapter that still has a file rather
+than the lowest number, so a manual delete of chapter 1 does not take the art off the shelf. The reader's
+"finished this chapter" ping reported the last page *shown*, which with junk pages hidden is a page or two
+short of the file's end; it now reports the chapter's real last page, as the cross-into-the-next-chapter
+ping always did — without that, the cleanup above would have read every such chapter as still being read.
+The Library's select bar was painted under the phone's bottom navigation, so its chips could not be tapped
+below the first row; both select bars now sit above the bar.
+
+### The limits, stated
+
+A listing is as old as the last check; a series never checked has no grey rows at all, and *Check now* is
+how to get them. A followed source in a cooldown is not listed on that sweep, so numbers only it carries
+drop off the page until the next one. Counts keep tombstones: a chapter nobody read that an admin deletes
+stays "unread" until it is fetched again, and *Mark unread* on a live one counts as an unfinished reader,
+so the cleanup leaves it alone until it is read again. Blocked ghosts are not fetchable — unblock first.
+And the cleanup's first-run count is lower than you might expect on a downloads folder copied without its
+modification times: the mtime rule then reads every file as newer than its reads, which fails toward
+keeping, and it corrects itself as chapters are read again.
+
 ## v0.31.0 — 2026-09-13
 
 Both halves of [#35](https://github.com/AngeloSha/uchiyomi/issues/35): which group's release to keep, and

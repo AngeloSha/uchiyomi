@@ -104,6 +104,8 @@ The series page shows the cover, an ambient backdrop, genres, description, and t
 - **Download all** saves every chapter for offline reading.
 - Click any chapter to read it; the ⬇ on a chapter downloads just that one. Toggle **Oldest/Newest** to flip
   the order.
+- **Mark all read** does what it says to every chapter of the series; **Select** picks chapters one by one
+  for the actions described in *Selecting chapters* below.
 
 Progress, favorites, and history are **per-user**, so each account has its own.
 
@@ -192,6 +194,76 @@ Once a series has more than one source, the chapter row shows where a chapter ca
 the main source, "N behind" counts the chapters missing across all of the followed sources, and the
 scanlator preferences above apply to the merged list — so a group you prefer is taken from whichever
 source carries it.
+
+### Chapters the sources have that you don't
+
+The chapter list also shows, greyed out, every chapter the followed sources list that this server does not
+hold. Each grey row says why it is not here:
+
+- **Not downloaded yet** — the source lists it and nothing stands in the way; the next check will take it,
+  or *Fetch* takes it now.
+- **Waiting for a preferred group** — a copy exists, but only from a group you did not rank, and the
+  series' *patience* has not run out yet (see *Choosing a scanlation group*).
+- **Failed 3 times** — the download was attempted and gave up; the updater will not try again on its own.
+  *Fetch* resets that and tries once more.
+- **Only blocked groups released it** — every copy on offer is from a blocked group. It is shown so you know
+  it exists; unblock the group if you would rather have their copy than none. It cannot be fetched while
+  the block stands.
+- Chapters **below the "Latest N" floor** of a series added as *Latest N* are not listed one by one: they
+  collapse into a single line, `Ch. 1–40: 40 older chapters left to Find missing chapters`, which opens
+  that dialog, since that is the only path that fetches them.
+
+Nothing is asked of a source when you open the page. The listing is what the last check saw — the nightly
+sweep, or *Check now* — and the header line says how old it is: *12 on the sources but not here · as of
+2 hours ago*. A series that has never been checked shows no grey rows; *Check now* is how to get them. A
+followed source that was in a cooldown at the last check is not in that listing either, so chapters only it
+carries drop off the page until the next sweep.
+
+The **Show chapters not on this server** chip hides or shows the grey rows on this device. Members see them
+too — a grey row is how anyone can tell the difference between "the source has not released it" and "it is
+held for a group" — but only people who may download can fetch.
+
+### Selecting chapters
+
+**Select**, beside *Mark all read*, turns the chapter list into a pick list: tap rows to tick them (a grey
+row too), and the bar at the bottom shows what can be done with the selection. **Done** leaves the mode.
+
+- **Mark read** / **Mark unread** — the same as on a single row, for every ticked chapter (a grey row has
+  nothing to mark). Marking a backlog read this way does not count towards streaks, as on the Library page.
+- **Save offline** — downloads the ticked chapters to this device, skipping any already saved and any
+  the server has deleted.
+- **Fetch** — for grey rows, downloads them to the server now. Anyone who may download (the same permission
+  as *Find missing chapters*) can. A manual fetch takes the best copy the sources offer today rather than
+  waiting out the patience window, and it retries a chapter that had failed three times; it never takes a
+  blocked group's copy.
+- **Fetch again** and **Delete from server** — admins only, for chapters Uchiyomi downloaded itself. See
+  the next section.
+
+The selection is cleared when you leave the page or flip the sort order.
+
+### Deleting a chapter from the server and fetching it again
+
+An admin can free the space a chapter takes without losing the record of it. **Delete from server** removes
+the file and keeps everything else: the chapter row, marked *Deleted from the server*, everyone's reading
+progress on it, and every count — the series' unread number does not move, and nothing is pushed to
+AniList. If the chapter was the one the series' cover came from, the cover moves to the lowest chapter that
+still has a file. It is the same tombstone the scheduled cleanup in section 8 leaves, and it has the same
+two rules: **only a chapter downloaded by Uchiyomi** — one in its own downloads folder — is ever deleted,
+and **a chapter anyone has bookmarked is kept**, because the bookmark names a page inside the file. A
+chapter in a library you assembled, or one with a bookmark on it, is skipped, and the toast says how many
+were and why (*3 skipped: not downloaded by Uchiyomi*, *1 skipped: bookmarked by a reader*); a delete that
+deleted nothing says so in red rather than reporting *0 deleted* as a success. A deleted chapter is not
+fetched back by the updater; the tombstone is what tells it the chapter is accounted for.
+
+**Fetch again** is the replace that the scanlator rules deliberately never do on their own: it downloads
+the copy those rules choose *now* — the group you ranked since, from whichever followed source carries it —
+onto the same chapter row, so where everyone was in it is kept. Because it is a different group's copy, it
+may have a different page count, and a reader partway through lands on the same page number in a different
+scan. The old file is kept aside until the new one has landed; if the download fails, the old file is put
+back and the chapter is exactly as it was. Like a manual fetch, this ignores patience and the retry cap but
+never the blocklist.
+
+Both ask you to confirm, and both are written to the activity log.
 
 ---
 
@@ -415,9 +487,10 @@ files.
 
 ### Deleting chapters after they are read
 
-**Server → Settings → Delete read chapters.** Off by default, and turning it on asks you to confirm, with
-the number of chapters that would go on the first run in front of you. It is the only scheduled job in
-Uchiyomi that destroys anything.
+**Admin → Settings → Delete read chapters**. Off by default, and turning it on asks you to confirm, with
+the number of chapters that would go on the first run in front of you (and the day count it will use — an
+unsaved number in the box is saved along with the switch, so the job never runs at a value the card no
+longer shows). It is the only scheduled job in Uchiyomi that destroys anything.
 
 Once it is on, an hourly job deletes the file of any chapter that **everyone who started it has finished**,
 after however many days you set. Zero days is allowed and means the next run takes it. The wait is counted
@@ -433,11 +506,26 @@ What it will not touch:
   files are yours, and this job does not get an opinion about them.
 
 What survives: the chapter itself, and everyone's reading history. The chapter stays listed on the series
-page, marked *Deleted to free space*, and nothing is marked unread — so nothing is pushed to AniList and no
-count changes. It will **not** be downloaded again; the record of having had it is what stops the updater
-fetching it back the same night.
+page, marked *Deleted from the server* (the same mark an admin's *Delete from server* leaves — the row does
+not say which it was, and the reader who opens one is told the file was deleted by an admin or by this
+cleanup), and nothing is marked unread — so nothing is pushed to AniList and no count changes. It is
+**not** downloaded again by itself; the record of having had it is what stops the updater fetching it back
+the same night. *Fetch again* on the series page (section 4) brings it back, and a chapter fetched again is
+only deleted after someone finishes the *new* copy: the job compares each reader's finish time against the
+file on disk, so old reading history never condemns a fresh download.
 
-**Server → Tasks → Delete read chapters** shows the last run, how much it freed, and how many chapters are
+If the downloads folder is not there when the job runs — a network share that is not mounted right now, so
+every chapter it was about to look at is missing along with its folder — the run stops and says so in the
+task's result instead of marking every chapter it could not find as deleted. A single series whose files
+you removed by hand is different: with the rest of the folder present, its chapters are marked as gone and
+the run carries on. A series you have hidden is never examined at all — *Delete files* is the way to drop
+its chapters.
+
+That same comparison is why the first run takes fewer chapters than you might expect on a downloads folder
+that was copied without its modification times — every file then looks newer than the reads of it, and the
+job fails toward keeping. It corrects itself as chapters are read again.
+
+**Admin → Tasks → Delete read chapters** shows the last run, how much it freed, and how many chapters are
 waiting. **Run now** is there if you would rather not wait for the hour.
 
 **Merging duplicates** is on **Content → Health**, attached to the duplicate check that finds them: where it

@@ -38,15 +38,25 @@ test('the day count is clamped rather than trusted', () => {
 
 test('a chapter is due only when EVERY reader of it finished', () => {
   const sql = dueSql(null);
-  assert.match(sql, /bool_and\(completed\)/, 'one unfinished reader must veto the whole chapter');
-  assert.match(sql, /GROUP BY book_id/, 'the rule is per chapter across users, not per row');
+  assert.match(sql, /bool_and\(rp\.completed AND/, 'one unfinished reader must veto the whole chapter');
+  assert.match(sql, /GROUP BY rp\.book_id/, 'the rule is per chapter across users, not per row');
   // A group exists only for a chapter someone has a read_progress row for, which is what makes "nobody has
   // read it" fall out of the join rather than needing a clause of its own.
   assert.match(sql, /JOIN \(/, 'an inner join is what excludes a chapter nobody has opened');
 });
 
+test('a completed reader who is not at the end is re-reading, and vetoes the chapter', () => {
+  // A page ping never un-completes a row (lib/progress.ts keeps `completed OR EXCLUDED.completed`), so
+  // somebody re-reading a chapter they finished last year is `completed` on page 3 of 40. At zero days of
+  // grace the clock restart does not save them; only the page does. `pages <= 1` is a chapter whose page
+  // count is unknown, which keeps the plain rule because there is no end to compare against.
+  // Reintroduce by reducing the HAVING to `bool_and(rp.completed)`.
+  assert.match(dueSql(null), /bool_and\(rp\.completed AND \(lb\.pages <= 1 OR rp\.page >= lb\.pages - 1\)\)/);
+  assert.match(dueSql(null), /JOIN lib_books lb ON lb\.id = rp\.book_id/, 'the page count comes from the book row inside the aggregate');
+});
+
 test('the clock is the LAST reader to finish, not the first', () => {
-  assert.match(dueSql(null), /max\(updated_at\) <= now\(\) - make_interval\(days => \$2\)/);
+  assert.match(dueSql(null), /max\(rp\.updated_at\) <= now\(\) - make_interval\(days => \$2\)/);
 });
 
 test('only the download directory is ever considered', () => {
@@ -56,6 +66,13 @@ test('only the download directory is ever considered', () => {
 
 test('an already-pruned chapter is not reconsidered', () => {
   assert.match(dueSql(null), /b\.pruned_at IS NULL/);
+});
+
+test('a re-fetched chapter is judged by reads of the copy on disk, not the one it replaced', () => {
+  // Every reader's row stays `completed` with its old updated_at after a prune, so without this clause a
+  // chapter fetched again is due at the very next run and goes round forever: fetch, delete, fetch, delete.
+  // Reintroduce by deleting the `done.done_at >= to_timestamp(b.mtime / 1000.0)` clause from dueSql.
+  assert.match(dueSql(null), /done\.done_at >= to_timestamp\(b\.mtime \/ 1000\.0\)/);
 });
 
 test('a bookmarked chapter is never pruned', () => {

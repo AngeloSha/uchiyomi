@@ -24,6 +24,11 @@ export function taskResult(r: any): string {
     if (r.skipped) return ' \u00b7 switched off';
     const bits = [`${r.deleted} chapters deleted`, bytes(r.bytes || 0) + ' freed'];
     if (r.failed) bits.push(`${r.failed} could not be deleted`);
+    // A run that stopped because EVERY due chapter's folder was missing along with its file is the download
+    // volume not being mounted; the chapters it left are the ones still due. Without this line the result
+    // reads as a quiet "0 chapters deleted" when the only fix is to mount the share, after which the next
+    // run takes them.
+    if (r.stopped === 'unmounted') bits.push('stopped: every due chapter\'s folder is missing, is the download volume mounted?');
     return ` \u00b7 ${bits.join(', ')}`;
   }
   if (typeof r.added === 'number') {

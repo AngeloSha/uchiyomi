@@ -149,7 +149,7 @@ function LibraryInner() {
 
   return (
     <PullToRefresh onRefresh={onRefresh}>
-    <div className="min-h-screen-d">
+    <div className={`min-h-screen-d ${selecting && picked.size > 0 ? 'pb-40 lg:pb-0' : ''}`}>
       {/* Sidebar beside the grid from lg: up. `min-w-0` on the grid column is load-bearing -- a flex child
           defaults to `min-width:auto`, so without it the grid refuses to shrink and pushes the page
           sideways instead, which is the horizontal-overflow failure layout.mjs exists to catch. */}
@@ -261,8 +261,15 @@ function LibraryInner() {
       )}
         </div>
       </div>
+      {/* ⚠️ Above the phone nav, not under it. This div renders inside AppShell's `<main class="relative
+          z-[1]">` -- its own stacking context -- while <BottomNav> is main's sibling at z-40 in the root
+          context, so a `bottom-0` bar here is painted over by the nav whatever z-index it carries, and once
+          the chips wrap to a second row the lower ones cannot be tapped. 5.75rem plus the safe-area inset
+          is the nav's height (92 px measured at 390 px); from lg up the nav is hidden and the bar
+          returns to the bottom. Reintroduce with `bottom-0`: on a 390 px phone the Cancel chip is under
+          the nav. */}
       {selecting && picked.size > 0 && (
-        <div className="fixed inset-x-0 bottom-0 z-40 border-t border-ink-700 bg-ink-950/95 px-4 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3 backdrop-blur-xl">
+        <div className="fixed inset-x-0 bottom-[calc(5.75rem+env(safe-area-inset-bottom))] z-40 border-t border-ink-700 bg-ink-950/95 px-4 pb-3 pt-3 backdrop-blur-xl lg:bottom-0 lg:pb-[max(0.75rem,env(safe-area-inset-bottom))]">
           <div className="mx-auto flex max-w-3xl flex-wrap items-center gap-2">
             <span className="me-auto text-sm font-medium text-fog-100">{picked.size} selected</span>
             <button disabled={acting} onClick={() => bulk('/api/library/bulk/read', { completed: true })} className="chip text-xs disabled:opacity-50">{tr('Mark read')}</button>

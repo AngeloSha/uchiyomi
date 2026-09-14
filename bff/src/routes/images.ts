@@ -461,11 +461,24 @@ export default async function imageRoutes(app: FastifyInstance) {
       return { buffer, contentType: 'image/webp' };
     });
   };
+  // A chapter file that is not on disk -- deleted by the read-chapter cleanup or an admin (the row stays as
+  // a tombstone), or a library not mounted right now -- is a 404, not a 500. Every chapter row used to ask
+  // for its thumbnail regardless, and the ENOENT from the zip reader surfaced as a server error in the log
+  // and the browser console for each one. Reintroduce by calling cbzPageAt directly: "a deleted chapter's
+  // thumbnail is a 404, not a server error" in prunedBooks.int.test.ts sees 500.
+  const pageOrGone = async (abs: string, index: number) => {
+    try {
+      return await cbzPageAt(abs, index);
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException)?.code === 'ENOENT') throw Object.assign(new Error('no file'), { statusCode: 404 });
+      throw e;
+    }
+  };
   const serveLibBookThumb = (req: FastifyRequest, reply: FastifyReply, id: string) =>
     serveImage(req, reply, `lib-bthumb:${id}`, async () => {
       const abs = await bookFileAbs(id, vc(req));
       if (!abs) throw Object.assign(new Error('no book'), { statusCode: 404 });
-      const first = await cbzPageAt(abs, 0);
+      const first = await pageOrGone(abs, 0);
       if (!first) throw Object.assign(new Error('empty'), { statusCode: 404 });
       q('UPDATE lib_books SET pages=$1 WHERE id=$2 AND pages<>$1', [first.total, id]).catch(() => {});
       const buffer = await sharp(first.bytes).resize({ width: 400, withoutEnlargement: true }).webp({ quality: 72 }).toBuffer();
@@ -476,14 +489,14 @@ export default async function imageRoutes(app: FastifyInstance) {
     if (!abs) return reply.code(404).send({ error: 'no_book' });
     if (w && Number.isInteger(w) && w >= 64 && w <= 2000) {
       return serveImage(req, reply, `lib-page:${id}:${pageNo}:w${w}`, async () => {
-        const page = await cbzPageAt(abs, pageNo - 1);
+        const page = await pageOrGone(abs, pageNo - 1);
         if (!page) throw Object.assign(new Error('no page'), { statusCode: 404 });
         const buffer = await sharp(page.bytes).resize({ width: w, withoutEnlargement: true }).webp({ quality: 74 }).toBuffer();
         return { buffer, contentType: 'image/webp' };
       });
     }
     return serveImage(req, reply, `lib-page:${id}:${pageNo}`, async () => {
-      const page = await cbzPageAt(abs, pageNo - 1);
+      const page = await pageOrGone(abs, pageNo - 1);
       if (!page) throw Object.assign(new Error('no page'), { statusCode: 404 });
       q('UPDATE lib_books SET pages=$1 WHERE id=$2 AND pages<>$1', [page.total, id]).catch(() => {});
       return { buffer: page.bytes, contentType: libCt(page.name) };

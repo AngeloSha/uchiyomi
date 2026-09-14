@@ -17,8 +17,9 @@ import { Switch } from '@/components/Switch';
 import { ConsoleNav } from '@/components/ConsoleNav';
 import { motion, useReducedMotion } from 'framer-motion';
 import { t as tr, keys } from '@/lib/i18n';
-import type { Series, StoredPrefs } from '@/lib/types';
+import type { KnownGroup, Series, StoredPrefs } from '@/lib/types';
 import { hasGroup, normGroup, reorder, withoutGroup } from '@/lib/scanlators';
+import { suggestGroups } from '@/lib/groupSuggest';
 
 /**
  * Ten panels, grouped by what an admin is actually doing rather than by what the code is called.
@@ -1104,8 +1105,10 @@ const NO_PREFS: StoredPrefs = { priority: [], blocked: [], patienceDays: 2 };
  * Names are compared the way the server compares them, so typing "asura-scans" next to "Asura Scans" is a
  * no-op rather than a second chip the server would fold into the first on save.
  */
-function GroupChips({ label, hint, value, ordered, onChange }: {
+function GroupChips({ label, hint, value, ordered, onChange, suggestions }: {
   label: string; hint: string; value: string[]; ordered?: boolean; onChange: (next: string[]) => void;
+  /** Every group the server has seen, for the chips under the box. Absent or empty renders no chips. */
+  suggestions?: KnownGroup[];
 }) {
   const [draft, setDraft] = useState('');
   const toast = useToast();
@@ -1119,7 +1122,14 @@ function GroupChips({ label, hint, value, ordered, onChange }: {
     onChange([...value, t]);
   };
   return (
-    <div className="mt-3">
+    // ⚠️ The draft is committed when focus leaves the WHOLE control, not the input. The input's own blur
+    // fired when Tab moved focus to a suggestion chip (they are plain buttons, keyboard-reachable on
+    // purpose), so the half-typed draft landed as a chip beside the one then chosen -- "asu" next to
+    // "Asura Scans", and a save blocked a group that matches nothing. Focus moving within the control
+    // (input -> chip, chip -> chip) commits nothing; leaving it from anywhere commits the draft, so a
+    // keyboard user who tabs straight past the chips still gets their text as a chip, as before.
+    // Reintroduce by moving the onBlur back onto the input: type "asu", Tab, Enter gives two chips.
+    <div className="mt-3" onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) add(draft); }}>
       <p className="mb-1 text-xs font-semibold uppercase tracking-wider text-fog-500">{label}</p>
       <div className="flex flex-wrap gap-1.5 rounded-xl border border-ink-700 bg-ink-850 p-2">
         {value.map((g, i) => (
@@ -1140,11 +1150,37 @@ function GroupChips({ label, hint, value, ordered, onChange }: {
           onChange={(e) => (e.target.value.endsWith(',') ? add(e.target.value) : setDraft(e.target.value))}
           onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); add(draft); }
                               else if (e.key === 'Backspace' && !draft && value.length) onChange(value.slice(0, -1)); }}
-          onBlur={() => add(draft)}
           placeholder={tr('Add a group…')}
           className="min-w-[8rem] flex-1 bg-transparent px-1 py-1 text-sm text-fog-50 outline-hidden"
         />
       </div>
+      {/* Names the server has actually seen, filtered by what is being typed: the exact spelling a source
+          uses is the one thing nobody knows without looking. Plain buttons, the LibraryFilters "Find a
+          genre" pattern -- reachable by keyboard, no combobox state machine. Hidden entirely when the
+          server knows no groups at all: an empty "Known groups" heading would only raise the question. */}
+      {!!suggestions?.length && (() => {
+        const offered = suggestGroups(suggestions, draft, value);
+        return (
+          <div className="mt-2">
+            <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-fog-600">{tr('Known groups')}</p>
+            {offered.length ? (
+              <div className="flex flex-wrap gap-1.5">
+                {offered.map((g) => (
+                  // ⚠️ preventDefault on mousedown, not click: a click first moves focus off the input, whose
+                  // onBlur adds the half-typed draft as a chip, and the suggestion would then land as a
+                  // second chip beside a wrong one.
+                  <button key={g.name} type="button" data-suggest onMouseDown={(e) => e.preventDefault()} onClick={() => add(g.name)}
+                    className="chip text-xs">
+                    {g.name}<span className="ms-1 tabular-nums text-fog-600">· {g.onDisk + g.listed}</span>
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <p className="text-[11px] text-fog-500">{tr('No known group matches that.')}</p>
+            )}
+          </div>
+        );
+      })()}
       <p className="mt-1 max-w-prose text-[11px] text-fog-500">{hint}</p>
     </div>
   );
@@ -1164,15 +1200,25 @@ function ScanlatorDefaults({ data, save }: { data: any; save: (body: any, ok: st
   const cur = draft ?? stored;
   const dirty = !!draft && JSON.stringify(draft) !== JSON.stringify(stored);
   const set = (patch: Partial<StoredPrefs>) => setDraft({ ...cur, ...patch });
+  // Every group name the server has seen, on disk or in a source's listing, busiest first. Memoised on the
+  // server for 30 s and held here for the same, so typing into either box never asks again. A failure
+  // renders no chips rather than an error: the text field still works without them.
+  const { data: known } = useQuery({
+    queryKey: ['admin-scanlators'],
+    queryFn: () => api<{ content: KnownGroup[] }>('/api/admin/scanlators'),
+    staleTime: 30_000,
+    retry: false,
+  });
+  const suggestions = known?.content ?? [];
   return (
     <div className="card grad-border full p-4">
       <p className="text-sm text-fog-100">{tr('Scanlators')}</p>
       <p className="max-w-prose text-[11px] leading-relaxed text-fog-500">
         {tr('When a source lists the same chapter from more than one group, the updater takes the first group ranked here and never a blocked one. Each series can rank its own on its page; blocks made here apply to every series.')}
       </p>
-      <GroupChips label={tr('Blocked groups')} value={cur.blocked} onChange={(blocked) => set({ blocked, priority: blocked.reduce((p, g) => withoutGroup(p, g), cur.priority) })}
+      <GroupChips label={tr('Blocked groups')} value={cur.blocked} suggestions={suggestions} onChange={(blocked) => set({ blocked, priority: blocked.reduce((p, g) => withoutGroup(p, g), cur.priority) })}
         hint={tr('Never take a release from these groups, in any series. A chapter only they have released is skipped until someone else releases it.')} />
-      <GroupChips label={tr('Default priority')} ordered value={cur.priority} onChange={(priority) => set({ priority, blocked: priority.reduce((b, g) => withoutGroup(b, g), cur.blocked) })}
+      <GroupChips label={tr('Default priority')} ordered value={cur.priority} suggestions={suggestions} onChange={(priority) => set({ priority, blocked: priority.reduce((b, g) => withoutGroup(b, g), cur.blocked) })}
         hint={tr('Tried in this order. A series with its own ranking ignores this list.')} />
       <div className="mt-3 flex flex-wrap items-center gap-2">
         <label className="text-xs font-semibold uppercase tracking-wider text-fog-500" htmlFor="scanlator-patience">{tr('Patience (days)')}</label>
@@ -1242,7 +1288,7 @@ function ReadCleanup({ data, save }: { data: any; save: (body: any, ok: string) 
             : tr('Counted from the moment the last reader finished. Re-opening the chapter starts the wait again.')}
         </p>
         <p className="mt-2 max-w-prose text-[11px] leading-relaxed text-fog-600">
-          {tr('Only chapters Uchiyomi downloaded itself are removed \u2014 nothing in a library you built by hand is touched. The chapter stays listed and everyone keeps their reading history; the pages are what goes. It will not be downloaded again.')}
+          {tr('Only chapters Uchiyomi downloaded itself are removed \u2014 nothing in a library you built by hand is touched. The chapter stays listed and everyone keeps their reading history; the pages are what goes. It is not downloaded again by itself; Fetch again on the series page brings it back.')}
         </p>
         {due !== null && (
           <p className={`mt-2 text-[11px] ${due > 0 ? 'text-amber-300' : 'text-fog-500'}`}>
@@ -1257,7 +1303,7 @@ function ReadCleanup({ data, save }: { data: any; save: (body: any, ok: string) 
           title={tr('Start deleting chapters after they are read?')}
           body={(
             <>
-              <p>{tr('From now on, an hourly job will permanently delete the file of any chapter that everyone who started it has finished, once it has been finished for the number of days set here. There is no undo and no recycle bin.')}</p>
+              <p>{tr('From now on, an hourly job will permanently delete the file of any chapter that everyone who started it has finished, once it has been finished for {n} days. There is no undo and no recycle bin.', { n: cur })}</p>
               <p className="mt-2">{tr('Chapters somebody is partway through, chapters nobody has read, bookmarked chapters, and files in a library you assembled yourself are all left alone. Reading history is never deleted.')}</p>
               {due !== null && (
                 <p className={`mt-2 font-semibold ${due > 0 ? 'text-amber-300' : 'text-fog-400'}`}>
@@ -1270,7 +1316,12 @@ function ReadCleanup({ data, save }: { data: any; save: (body: any, ok: string) 
           )}
           confirmLabel={tr('Turn it on')}
           danger
-          onConfirm={() => { setConfirm(false); save({ cleanupRead: true }, 'Read chapters will be deleted'); }}
+          // ⚠️ The day count goes with the switch when it is unsaved. The dialog quotes the number in the
+          // box, so confirming it with only `cleanupRead: true` ran the job at the OLD stored value while
+          // the box kept showing the new one -- with the due count deliberately withheld in that state,
+          // there was no figure left to notice it by. Reintroduce by saving `{ cleanupRead: true }` alone:
+          // type 7 over 30, switch on, and the next run uses 30.
+          onConfirm={() => { setConfirm(false); save({ cleanupRead: true, ...(cur !== stored ? { cleanupReadDays: cur } : {}) }, 'Read chapters will be deleted'); }}
           onClose={() => setConfirm(false)}
         />
       )}

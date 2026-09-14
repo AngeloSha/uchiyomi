@@ -7,6 +7,7 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { useQuery } from '@tanstack/react-query';
 import { api, img } from '@/lib/api';
 import { chapterOutcome } from '@/lib/readerState';
+import { openableChapters } from '@/lib/chapterRows';
 import { buildFlow, startIndex, renderWindow } from '@/lib/readerFlow';
 import { Book, Page, PageInfo, Series } from '@/lib/types';
 import { chapterLabel } from '@/lib/format';
@@ -188,7 +189,13 @@ function ReaderInner() {
       // chapter list for prev/next/jump
       try {
         const list = await api<Page<Book>>(`/api/series/${first.seriesId}/books?size=1000&sort=metadata.numberSort,asc`);
-        if (alive) { setChapterRefs(list.content.map((b) => ({ id: b.id, label: chapterLabel(b) }))); setRefsFrom('live'); }
+        // ⚠️ A chapter the server's cleanup deleted is still a row in that list -- it has to be, it carries
+        // everyone's progress -- and the first cut of "Chapter deleted" only handled the failure screen, so
+        // next/prev walked straight onto the tombstone and showed it in the middle of a series that was
+        // otherwise all there. Stepped over here, EXCEPT when this device holds a copy: then the offline
+        // record is the last one anywhere, and the reader consults it before the server, so it opens fine.
+        const saved = new Set((await listSeriesDownloads(first.seriesId).catch(() => [])).map((c) => c.bookId));
+        if (alive) { setChapterRefs(openableChapters(list.content, saved).map((b) => ({ id: b.id, label: chapterLabel(b) }))); setRefsFrom('live'); }
       } catch {
         // Offline, this is the only list there is. Without it every downloaded chapter reported the end of the
         // series and prev/next were both dead, because an empty list reads as "there is no next chapter".
@@ -472,10 +479,14 @@ function ReaderInner() {
     const tag = `${ch.id}:${it.number}`;
     if (lastSent.current === tag) return;
     if (isLastOfChapter && !completedSent.current.has(ch.id)) {
-      // completion fires immediately — a debounce here loses the event when the reader moves on quickly
+      // completion fires immediately — a debounce here loses the event when the reader moves on quickly.
+      // It carries the chapter's REAL last page, not the last one shown: with junk pages hidden the flow
+      // ends a page or two early (the credit page is the common case), and the server's read-chapter
+      // cleanup takes "completed at page 38 of 40" for somebody re-reading and keeps the file forever.
+      // The cross-forward ping above already says the same thing for the same reason.
       completedSent.current.add(ch.id);
       lastSent.current = tag;
-      sendProgress(ch.id, ch.seriesId, it.number, true);
+      sendProgress(ch.id, ch.seriesId, ch.pages[ch.pages.length - 1]?.number ?? it.number, true);
       return;
     }
     const t = setTimeout(() => {
@@ -759,8 +770,11 @@ function ReaderInner() {
         {activeChapter?.seriesTitle || tr('This chapter')}
       </h2>
       <p className="mx-auto mt-3 max-w-md text-sm text-fog-400">
+        {/* Neutral about WHO deleted it: the same tombstone is left by an admin's Delete from server and
+            by the scheduled cleanup, and the reader cannot tell which. The old sentence described the
+            cleanup's policy on installs where that job is off -- which is the default. */}
         {failed === 'pruned'
-          ? tr('This server deletes chapters once everyone who started them has finished, to save space. This one is gone; the rest of the series is not affected.')
+          ? tr('The file for this chapter was deleted from the server \u2014 by an admin, or by the read-chapter cleanup. The rest of the series is not affected; an admin can fetch it again.')
           : failed === 'unreadable'
             ? tr('This chapter has no readable pages. The file may be damaged, or its library may not be mounted right now.')
             : tr('This chapter could not be loaded. It may have been removed, or the connection dropped.')}

@@ -17,6 +17,7 @@ import { writeProgress, reachedEnd } from '../lib/progress';
 import { enrichSeries, seriesSeen } from '../lib/enrich';
 import { seriesSourcesFor } from '../lib/seriesSources';
 import { readSeriesPrefs } from '../lib/scanlatorPrefs';
+import { listingFor } from '../lib/seriesListing';
 
 
 
@@ -241,6 +242,8 @@ export default async function catalogRoutes(app: FastifyInstance) {
                       (SELECT b.id FROM lib_books b
                          LEFT JOIN book_overrides bo ON bo.book_id = b.id
                          WHERE b.series_id = r.series_id
+                           -- never offer a chapter whose pages were deleted (a tombstone, lib/chapterCleanup.ts)
+                           AND b.pruned_at IS NULL
                            AND NOT EXISTS (
                              SELECT 1 FROM read_progress p2
                               WHERE p2.user_id = ${uidP} AND p2.book_id = b.id AND p2.completed
@@ -255,7 +258,10 @@ export default async function catalogRoutes(app: FastifyInstance) {
             LIMIT ${p.add(ON_DECK_LIMIT)}`,
           p.values as any[],
         );
-        const books = (await Promise.all(rows.map((r) => komga.book(vc(req), r.book_id).catch(() => null)))).filter(Boolean) as any[];
+        // The part-way-through pick above is a read_progress row, which survives a prune by design, so the
+        // resolved book is checked as well: Continue Reading must never hand someone a chapter with no pages.
+        const books = (await Promise.all(rows.map((r) => komga.book(vc(req), r.book_id).catch(() => null))))
+          .filter((b) => b && !b.pruned) as any[];
         return overlay(books, await userProgress(uid, books.map((b) => b.id)));
       })();
     }
@@ -465,6 +471,24 @@ export default async function catalogRoutes(app: FastifyInstance) {
     return { ...res, content: await booksForUser(req, res.content) };
   });
 
+  /**
+   * The chapters the sources list that this server does not hold, with the reason each is absent -- the
+   * ghost rows on the series page. Read from the listing the updater persisted at the last check, never
+   * from the sources themselves: a page open is not a reason to hit a site, and "as of the last check" is
+   * the truthful answer anyway (lib/seriesListing.ts).
+   *
+   * Resolved through the same visibility gate as the series itself: `komga.series` throws 404 for anything
+   * this viewer cannot open, so a capped member cannot learn what a walled-off series is missing. The
+   * downloader's error text names hosts and paths, so `reason` goes to admins only.
+   */
+  app.get('/api/series/:id/listing', async (req) => {
+    const { id } = req.params as { id: string };
+    await komga.series(vc(req), id);
+    const f = await one<{ chapter_floor: number | null }>('SELECT chapter_floor FROM lib_series WHERE id = $1', [id]);
+    const floor = f?.chapter_floor == null ? null : Number(f.chapter_floor);
+    return listingFor(id, { floor, admin: roleOf(req) === 'admin' });
+  });
+
   app.get('/api/books/:id', async (req) => {
     const { id } = req.params as { id: string };
     const b = await komga.book(vc(req), id);
@@ -520,7 +544,8 @@ export default async function catalogRoutes(app: FastifyInstance) {
       const raw = await komga.seriesBooks(vc(req), sid, 0, 1000, 'metadata.numberSort,asc').catch(() => null);
       if (!raw) continue;
       const books = await booksForUser(req, raw.content);
-      const unread = books.filter((b: any) => !b.readProgress?.completed).slice(0, n);
+      // A pruned chapter has no pages to download; planning it would queue a manifest that answers 410.
+      const unread = books.filter((b: any) => !b.readProgress?.completed && !b.pruned).slice(0, n);
       for (const b of unread) out.push({ bookId: b.id, seriesId: sid });
     }
     return { content: out };

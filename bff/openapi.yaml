@@ -6,7 +6,7 @@
 openapi: 3.1.0
 info:
   title: Uchiyomi API
-  version: 0.31.0
+  version: 0.32.0
   description: "Everything the web app does, it does over this API. Session JWTs are for the browser; scripts
     use a personal API token (Profile -> Account -> API tokens), sent as `Authorization: Bearer uy_...`.
     Scopes: read (every token; GET plus the library search POST, which is a query), write (anything that changes data), admin (the /api/admin surface, which also
@@ -95,6 +95,31 @@ components:
         checkedAt: { type: [string, "null"], format: date-time, description: When the updater last listed it. }
         chapters: { type: [integer, "null"], description: "For a follower, the distinct chapter numbers it listed then; for the primary, the merged count across every followed source after the release preferences (the same figure as the series' source.chapters)." }
         registered: { type: boolean, description: Whether the adapter is loaded right now; a follower whose extension was removed keeps its row so it can still be unfollowed. }
+    Ghost:
+      type: object
+      description: A chapter number the sources listed at the last check that this server has no row for.
+      required: [number, title, publishedAt, scanlator, groups, sourceId, sourceName, why]
+      properties:
+        number: { type: number }
+        title: { type: [string, "null"] }
+        publishedAt: { type: [string, "null"], format: date-time }
+        scanlator: { type: [string, "null"], description: The group on the copy the release rules chose, as the source shows it. }
+        groups: { type: array, items: { type: string }, description: Every group that released any copy of the number. }
+        sourceId: { type: string, description: The adapter the chosen copy would be fetched through. }
+        sourceName: { type: string }
+        why:
+          type: string
+          enum: [missing, held, blocked, failed, floor]
+        attempts: { type: integer, description: Only when the chapter has failed at least once. }
+        reason: { type: string, description: The downloader's last error text. Admins only. }
+    SkippedNumber:
+      type: object
+      required: [number, reason]
+      properties:
+        number: { type: number }
+        reason:
+          type: string
+          enum: [not_listed, blocked_group, already_here, source_unavailable, cooldown]
 paths:
   /livez:
     get:
@@ -790,6 +815,48 @@ paths:
           description: Not authenticated
         "404":
           description: Not found, or not visible to this account
+  /api/series/{id}/listing:
+    get:
+      tags:
+        - library
+      summary: The chapters the sources list that this server does not hold, with the reason each is absent.
+      operationId: getApiSeriesIdListing
+      description: >-
+        Read from the listing the updater persisted at the last check (the sweep, Check now), never from the
+        sources themselves, so `checkedAt` is how old the answer is. Only numbers with NO chapter row are
+        ghosts: a chapter the read-chapter cleanup deleted keeps its row (`pruned` on the Book) and is not
+        listed here. `why` is one of `missing` (not fetched yet), `held` (waiting for a preferred group),
+        `failed` (the sweep gave up after the retry cap; `attempts` says how many), `blocked` (only blocked
+        groups released it; unblock the group to fetch it), `floor` (below the series' Latest-N floor). `reason`,
+        the downloader's last error text, is present for admins only.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [checkedAt, content]
+                properties:
+                  checkedAt:
+                    type: [string, "null"]
+                    format: date-time
+                  content:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Ghost"
+        "401":
+          description: Not authenticated
+        "404":
+          description: Not found, or not visible to this account
   /api/books/{id}:
     get:
       tags:
@@ -807,10 +874,10 @@ paths:
       responses:
         "200":
           description: >-
-            The chapter. Only the fields added in v0.31.0 are described here; the rest of the shape follows
-            Komga's book DTO (id, seriesId, number, media, metadata, readProgress, ...). The same object is
-            what every other route that returns a chapter answers with (the series' chapter list, next,
-            the home shelves).
+            The chapter. Only the fields added in v0.31.0 and v0.32.0 are described here; the rest of the
+            shape follows Komga's book DTO (id, seriesId, number, media, metadata, readProgress, ...). The
+            same object is what every other route that returns a chapter answers with (the series' chapter
+            list, next, the home shelves).
           content:
             application/json:
               schema:
@@ -826,6 +893,19 @@ paths:
                   sourceId:
                     type: [string, "null"]
                     description: The adapter the file was downloaded from; null when the scanner found it.
+                  pruned:
+                    type: boolean
+                    description: >-
+                      The file was deleted by the read-chapter cleanup or an admin; the row stays so progress
+                      survives; no pages behind it. The chapter is still listed and still counts as read, but
+                      the page list is empty, next/previous step over it, and the download manifest answers
+                      410.
+                  owned:
+                    type: boolean
+                    description: >-
+                      Downloaded by this server (the file sits under the download directory); only such
+                      chapters can be deleted or fetched again. False for a chapter the scanner found in the
+                      read library.
         "401":
           description: Not authenticated
         "404":
@@ -1092,6 +1172,72 @@ paths:
           description: Not found, or not visible to this account
         "409":
           description: "Conflict: already exists, already running, or duplicate"
+  /api/sources/fetch:
+    post:
+      tags:
+        - sources
+      summary: Fetch chapters the sources list but this server lacks, by number, from the last listing.
+      operationId: postApiSourcesFetch
+      description: >-
+        The listing (GET /api/series/{id}/listing) is the authorisation: only a number the sources list can
+        be asked for, and what is fetched is the copy the release rules choose now -- the listing is refreshed
+        first (a check with no downloads); a source that does not answer leaves the last listing standing.
+        A listing row from a source the series no longer follows is `source_unavailable`. A held number is
+        fetched regardless of patience; a number only blocked groups released is refused (`blocked_group`)
+        -- unblock the group and check again. A manual fetch resets the chapter's retry cap. Same permission
+        as the fill: an account with `canDownload: false` is refused by the plugin, and a source outside the
+        account's age cap answers 403. Progress is on GET /api/sources/jobs under `folder`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [seriesId, numbers]
+              properties:
+                seriesId:
+                  type: string
+                numbers:
+                  type: array
+                  minItems: 1
+                  maxItems: 300
+                  items:
+                    type: number
+                    minimum: 0
+                    maximum: 1000000
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: "Started. `skipped` lists the numbers that were not fetchable and why."
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, started, folder, total, skipped]
+                properties:
+                  ok:
+                    type: boolean
+                  started:
+                    type: boolean
+                  folder:
+                    type: string
+                  total:
+                    type: integer
+                  skipped:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/SkippedNumber"
+        "400":
+          description: Malformed body or parameter
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+        "404":
+          description: Not found, or not visible to this account
+        "409":
+          description: "`nothing_to_fetch` (every number was skipped; `skipped` says why) or `busy` (a download for the series is running)"
   /api/sources/search-all:
     get:
       tags:
@@ -3032,7 +3178,30 @@ paths:
         - bearer: []
       responses:
         "200":
-          description: OK
+          description: >-
+            The settings row. Only the read-chapter cleanup fields are described here; the rest are the
+            snake_case columns PATCH sets (server_name, allow_registration, updater_hours, ...).
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+                properties:
+                  cleanup_read:
+                    type: boolean
+                    description: Whether the opt-in read-chapter cleanup is on. Off by default.
+                  cleanup_read_days:
+                    type: integer
+                    minimum: 0
+                    maximum: 3650
+                    description: >-
+                      Days after the last reader finishes before the file goes. 0 deletes at the next run.
+                  cleanup_read_due:
+                    type: [integer, "null"]
+                    description: >-
+                      How many chapters the cleanup would delete if it ran now, at the current day setting,
+                      whether or not it is switched on -- so the number can be seen before consenting. Memoised
+                      for half a minute; null when it could not be counted.
         "401":
           description: Not authenticated
         "403":
@@ -3131,8 +3300,12 @@ paths:
         - name: id
           in: path
           required: true
+          description: >-
+            The task. `cleanup` is the opt-in read-chapter cleanup and answers not_enabled while cleanup_read
+            is off; its run is subject to the same consent and the same vetoes as the hourly one.
           schema:
             type: string
+            enum: [scan, update, backup, fingerprint, pagehash, cleanup, extensions]
       security:
         - bearer: []
       responses:
@@ -3358,6 +3531,46 @@ paths:
           description: "Forbidden: token scope, account permission or age limit"
         "404":
           description: Not found, or not visible to this account
+  /api/admin/scanlators:
+    get:
+      tags:
+        - admin
+      summary: Every scanlation group this server knows of, busiest first, for the preferences picker.
+      operationId: getApiAdminScanlators
+      description: >-
+        Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. Names come
+        from the files on disk and from the persisted listings of every source (not from the sources
+        themselves), merged by the same group equality the release rules use; `series` is how many series the
+        group appears on. Memoised for 30 seconds.
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [content]
+                properties:
+                  content:
+                    type: array
+                    items:
+                      type: object
+                      required: [name, onDisk, listed, series]
+                      properties:
+                        name:
+                          type: string
+                        onDisk:
+                          type: integer
+                        listed:
+                          type: integer
+                        series:
+                          type: integer
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
   /api/admin/series/{id}/scanlators:
     get:
       tags:
@@ -3494,7 +3707,9 @@ paths:
       operationId: deleteApiAdminSeriesIdSourcesSourceId
       description: >-
         Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. Chapters
-        already downloaded from it stay. The primary cannot be removed this way; it is not a followed source.
+        already downloaded from it stay; the listing rows it carried are dropped at once, so nothing can be
+        fetched through it before the next check. The primary cannot be removed this way; it is not a
+        followed source.
       parameters:
         - name: id
           in: path
@@ -3792,6 +4007,154 @@ paths:
           description: "Forbidden: token scope, account permission or age limit"
         "404":
           description: Not found, or not visible to this account
+  /api/admin/series/{id}/chapters/delete:
+    post:
+      tags:
+        - admin
+      summary: Delete chosen chapters' files from the download directory, keeping their rows as tombstones.
+      operationId: postApiAdminSeriesIdChaptersDelete
+      description: >-
+        Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. Touches
+        DL_ROOT only: a chapter the scanner found in the read library is skipped (`not_owned`), on the same
+        footing as the read-chapter cleanup, and so is one somebody has a bookmark in (`bookmarked`) -- a
+        bookmark names a page inside the file. A chapter whose file AND folder are missing is skipped
+        (`unlink_failed`) rather than marked: that is the download volume not being mounted. The row survives
+        with `pruned` set so reading progress and the updater's have-set do; the cover moves to the lowest
+        live chapter. No typed confirmation -- the client confirms with the count.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [bookIds]
+              properties:
+                bookIds:
+                  type: array
+                  minItems: 1
+                  maxItems: 500
+                  items:
+                    type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, applied, bytes, skipped]
+                properties:
+                  ok:
+                    type: boolean
+                  applied:
+                    type: integer
+                    description: Chapters whose file is gone and whose row is now a tombstone.
+                  bytes:
+                    type: integer
+                  skipped:
+                    type: array
+                    items:
+                      type: object
+                      required: [id, reason]
+                      properties:
+                        id:
+                          type: string
+                        reason:
+                          type: string
+                          enum: [not_found, not_owned, already_pruned, bookmarked, outside_root, unlink_failed]
+        "400":
+          description: Malformed body or parameter
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+        "404":
+          description: Not found, or not visible to this account
+        "409":
+          description: "`refused`: the download directory is not writable; `message` and `fix` say what to do"
+  /api/admin/series/{id}/chapters/refetch:
+    post:
+      tags:
+        - admin
+      summary: Download chosen chapters again, as the copy the release rules choose now, onto the same rows.
+      operationId: postApiAdminSeriesIdChaptersRefetch
+      description: >-
+        Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. Eligible
+        only for a file this server downloaded (`not_owned` otherwise) at exactly the path the downloader
+        writes, `Chapter <n>.cbz` (`not_ours` otherwise): only that path lands back on the same row, which is
+        what keeps reading progress attached. The listing is refreshed first (a check with no downloads),
+        so the copy is the one the release rules choose now; a source that does not answer leaves the last
+        listing standing, and a listing row from a source the series no longer follows is `source_unavailable`.
+        The old file is set aside until the new one lands and put back if the download fails. A chapter the
+        cleanup deleted (`pruned`) is eligible: this is how it comes back.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [bookIds]
+              properties:
+                bookIds:
+                  type: array
+                  minItems: 1
+                  maxItems: 300
+                  items:
+                    type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: Started. Progress is on GET /api/sources/jobs under `folder`.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, started, folder, total, skipped]
+                properties:
+                  ok:
+                    type: boolean
+                  started:
+                    type: boolean
+                  folder:
+                    type: string
+                  total:
+                    type: integer
+                  skipped:
+                    type: array
+                    items:
+                      type: object
+                      required: [id, reason]
+                      properties:
+                        id:
+                          type: string
+                        reason:
+                          type: string
+                          enum: [not_found, not_owned, not_ours, not_listed, blocked_group, source_unavailable, cooldown]
+        "400":
+          description: Malformed body or parameter
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+        "404":
+          description: Not found, or not visible to this account
+        "409":
+          description: "`nothing_to_fetch` (every chapter was skipped; `skipped` says why), `busy` (a download for the series is running), or `refused` (the download directory is not writable)"
   /api/admin/series/{id}/library:
     post:
       tags:

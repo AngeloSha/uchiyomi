@@ -103,3 +103,24 @@ test('a page marked by hand does not retire the chapter from the queue', { skip 
   );
   assert.equal(rows[0]?.override, true, "the job overwrote a person's decision");
 });
+
+test('a deleted chapter is neither attempted nor counted as remaining', { skip }, async () => {
+  // A tombstone (lib/chapterCleanup.ts) loses its computed hashes with its file, so it looks exactly like a
+  // chapter the job has not reached yet. Without its own clause the job would open the missing file once
+  // per run, forever, and `remaining` would never reach zero.
+  // Reintroduce by deleting `b.pruned_at IS NULL` from the batch query or from pageHashRemaining in
+  // lib/pageHashJob.ts: the count does not drop, or the sentinel row appears.
+  const { tombstoneBooks } = await import('../src/lib/chapterCleanup');
+  const job = await import('../src/lib/pageHashJob');
+  await q('DELETE FROM page_hashes WHERE book_id = $1', [BOOK]);
+  await q('UPDATE lib_books SET pruned_at = NULL WHERE id = $1', [BOOK]);
+  const before = await job.pageHashRemaining();
+  await tombstoneBooks([BOOK]);
+  assert.equal(await job.pageHashRemaining(), before - 1, 'a tombstone must leave the queue');
+
+  // The batch is ordered by id, so a bound wide enough to reach this row is what makes the second half
+  // non-vacuous; the count above is the load-bearing assertion.
+  await job.runPageHashBackfill({ max: 50 });
+  const rows = await q('SELECT 1 FROM page_hashes WHERE book_id = $1', [BOOK]);
+  assert.equal(rows.length, 0, 'the job attempted a chapter whose file was deleted');
+});

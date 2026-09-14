@@ -132,9 +132,11 @@ export async function mergeSeries(fromId: string, intoId: string): Promise<Merge
         WHERE s.id = $1`,
       [intoId],
     );
+    // The lowest LIVE chapter, the same way persistScan picks it: a tombstone (lib/chapterCleanup.ts) has
+    // no first page for the thumbnails to fall back to.
     await qq(
       `UPDATE lib_series SET cover_book_id = (
-         SELECT id FROM lib_books WHERE series_id = $1 ORDER BY number ASC, file ASC LIMIT 1
+         SELECT id FROM lib_books WHERE series_id = $1 ORDER BY (pruned_at IS NOT NULL), number ASC, file ASC LIMIT 1
        ) WHERE id = $1`,
       [intoId],
     );

@@ -39,9 +39,15 @@ export const fpState: FingerprintProgress = {
   ms: null,
 };
 
-/** How many books still have no fingerprint attempt. Cheap enough to call from an admin endpoint. */
+/**
+ * How many books still have no fingerprint attempt. Cheap enough to call from an admin endpoint.
+ *
+ * A tombstone (lib/chapterCleanup.ts) is excluded here and in the batch query alike: its file is gone and its
+ * fp_at was cleared with it, so without the clause it would be attempted -- and fail -- on every run, forever,
+ * and the count would never reach zero.
+ */
 export async function fingerprintRemaining(): Promise<number> {
-  const rows = await q<{ n: string }>(`SELECT count(*)::text n FROM lib_books WHERE fp_at IS NULL`);
+  const rows = await q<{ n: string }>(`SELECT count(*)::text n FROM lib_books WHERE fp_at IS NULL AND pruned_at IS NULL`);
   return Number(rows[0]?.n ?? 0);
 }
 
@@ -97,7 +103,7 @@ export async function runFingerprintBackfill(opts: { max?: number } = {}): Promi
   try {
     for (;;) {
       const batch = await q<Row>(
-        `SELECT id, root, file FROM lib_books WHERE fp_at IS NULL ORDER BY id LIMIT $1`,
+        `SELECT id, root, file FROM lib_books WHERE fp_at IS NULL AND pruned_at IS NULL ORDER BY id LIMIT $1`,
         [Math.min(BATCH, Math.max(0, limit - fpState.done - fpState.failed))],
       );
       if (!batch.length) break;

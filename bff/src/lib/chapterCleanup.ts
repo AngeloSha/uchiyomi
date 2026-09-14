@@ -24,6 +24,26 @@
  *     - no rows at all                             -> nobody has read it; not this job's business
  *   The clock is `max(updated_at)` over those rows, so the grace period restarts if anyone touches it again,
  *   and the last person to finish gets the full N days rather than the first.
+ *   ⚠️ `completed` alone is not "finished": a page ping never un-completes a row (lib/progress.ts keeps
+ *   `completed OR EXCLUDED.completed`), so somebody re-reading a chapter they finished last year is on page
+ *   3 of 40 with `completed = true` and a fresh `updated_at`. With N days of grace the restart of the clock
+ *   covers them; at zero days it does not, and the first cut deleted the file out from under them. So a
+ *   completed row counts as finished only when its page is at the end of the file (reachedEnd in
+ *   lib/progressRules.ts: `page >= pages - 1`; "Mark read" writes `page = pages`, so it still qualifies), and
+ *   a chapter whose page count is unknown (`pages <= 1`) keeps the plain rule, because there is no end to
+ *   compare against.
+ *
+ * WHICH COPY THEY READ
+ *   The reads have to be of the file that is on disk NOW, not of one this file replaced: `done_at` must be
+ *   at or after the file's mtime. A prune leaves every reader's row `completed` with its old `updated_at`,
+ *   so a chapter fetched again afterwards -- by an admin's "fetch again", by a re-copy, by a restore -- was
+ *   otherwise due at the very next hourly run, and the pair of them would go round forever: fetch, delete,
+ *   fetch, delete, a chapter nobody can keep. persistScan refreshes `mtime` on every scan and clears the
+ *   mark, so a re-downloaded file always carries a fresh mtime; `mtime = 0` (stat failed) compares as 1970
+ *   and degrades to the plain rule.
+ *   The one side effect: an install whose files were copied without preserving mtimes (a `cp` without -p,
+ *   a rsync without -t) has every chapter's mtime at the copy, so chapters finished BEFORE the copy are not
+ *   due until somebody reads them again. That fails toward keeping, which is the only way this job may fail.
  *
  * ZERO DAYS IS A REAL SETTING and means "at the next run", not "off". `cleanup_read` is the off switch.
  *
@@ -36,9 +56,11 @@
  *     -- so this costs almost nothing and cannot drift, because persistScan recomputes it the same way.
  */
 import { rm, stat } from 'fs/promises';
+import { dirname, resolve } from 'path';
 import { q, one } from './db';
 import { DL_ROOT } from './library';
 import { allWritable, containedPath } from './fsGuard';
+import { REFETCH_BAK } from './fsAtomic';
 import { runtime, type CleanupResult } from './runtime';
 
 /**
@@ -70,17 +92,27 @@ interface Due { id: string; root: string; file: string }
  * of them did. HAVING rather than a WHERE on the outer query so the aggregate is filtered before the join.
  */
 export function dueSql(limit: number | null): string {
+  // lib_books is joined INTO the aggregate for its page count: a completed row whose page is not at the end
+  // is somebody re-reading, and the whole chapter is vetoed for it (see WHO COUNTS AS HAVING READ IT above).
+  // Reintroduce by reducing the HAVING to `bool_and(rp.completed)`: "a reader re-reading a chapter they
+  // finished keeps it" in chapterCleanup.int.test.ts deletes the file they are on page 3 of.
   return `SELECT b.id, b.root, b.file
             FROM lib_books b
             JOIN (
-              SELECT book_id, max(updated_at) AS done_at
-                FROM read_progress
-               GROUP BY book_id
-              HAVING bool_and(completed)
-                 AND max(updated_at) <= now() - make_interval(days => $2)
+              SELECT rp.book_id, max(rp.updated_at) AS done_at
+                FROM read_progress rp
+                JOIN lib_books lb ON lb.id = rp.book_id
+               GROUP BY rp.book_id
+              HAVING bool_and(rp.completed AND (lb.pages <= 1 OR rp.page >= lb.pages - 1))
+                 AND max(rp.updated_at) <= now() - make_interval(days => $2)
             ) done ON done.book_id = b.id
            WHERE b.root = $1
              AND b.pruned_at IS NULL
+             -- a series the admin has hidden is not this job's business: its files go through Delete files,
+             -- on purpose, and examining its read chapters every hour would only ever find folders gone
+             AND NOT EXISTS (SELECT 1 FROM lib_series hs WHERE hs.id = b.series_id AND hs.deleted_at IS NOT NULL)
+             -- the last reader finished the copy that is on disk now, not the one this file replaced
+             AND done.done_at >= to_timestamp(b.mtime / 1000.0)
              AND NOT EXISTS (SELECT 1 FROM bookmarks bm WHERE bm.book_id = b.id)
              AND NOT EXISTS (SELECT 1 FROM lib_series s WHERE s.cover_book_id = b.id)
            ORDER BY done.done_at ASC` + (limit === null ? '' : `\n           LIMIT ${limit}`);
@@ -114,6 +146,48 @@ export async function dueCountCached(days: number): Promise<number> {
 }
 
 /**
+ * A tombstone forgets everything derived from the bytes, so a file that comes back is re-measured.
+ *
+ * `page_dims` is a cache that outlives the pages, and so are the fingerprint and the size. A chapter fetched
+ * again from another group has a different page count and different page sizes; had the old dims stayed on
+ * the row, the reader would lay the new file out to the old measurements and the fingerprint would claim
+ * the new bytes were the old ones. Nulling them here means the next scan and the next backfill measure
+ * what is actually there. Computed page hashes go for the same reason; a page somebody marked by hand
+ * (`override` set) is a decision about the chapter, not a measurement of the file, and is kept.
+ *
+ * Idempotent on the pruned_at guard: a row already marked is not re-stamped, so the mark keeps the time
+ * of the deletion rather than of the last time something asked.
+ */
+export async function tombstoneBooks(ids: string[]): Promise<void> {
+  if (!ids.length) return;
+  await q(
+    `UPDATE lib_books
+        SET pruned_at = now(), page_dims = NULL, fingerprint = NULL, fp_kind = NULL, fp_at = NULL, size = NULL
+      WHERE id = ANY($1) AND pruned_at IS NULL`,
+    [ids],
+  );
+  await q('DELETE FROM page_hashes WHERE book_id = ANY($1) AND override IS NULL', [ids]);
+}
+
+/**
+ * Clear the mark on chapters whose file the boot-time reaper (reapStaleTemp in lib/fsAtomic.ts) has just
+ * put back: `files` are relative to `root` the way lib_books.file is. Called from server.ts right after the
+ * reap, because nothing else would: there is no boot scan, the sweep scans only when it added something and
+ * this job skips tombstones -- so without this the restored chapter read "deleted" until an unrelated scan
+ * happened to run. Nothing derived from the bytes is put back (the scan re-measures the file it finds).
+ * Reintroduce by dropping the UPDATE: "an interrupted refetch is put back at boot" in
+ * chapterActions.int.test.ts finds the row still marked with its file on disk.
+ */
+export async function unpruneRestored(root: string, files: string[]): Promise<number> {
+  if (!files.length) return 0;
+  const rows = await q<{ id: string }>(
+    'UPDATE lib_books SET pruned_at = NULL WHERE root = $1 AND file = ANY($2) AND pruned_at IS NOT NULL RETURNING id',
+    [root, files],
+  );
+  return rows.length;
+}
+
+/**
  * One pass. Returns what it did; never throws for a file it could not remove.
  *
  * The order per chapter is delete-then-mark, deliberately. Marking first and then failing to unlink would
@@ -142,26 +216,62 @@ export async function runCleanupOnce(): Promise<CleanupResult> {
   let deleted = 0;
   let bytes = 0;
   let failed = 0;
-  for (const b of due) {
-    if (runtime.stopping) break; // between files, never mid-unlink
+  let stopped: CleanupResult['stopped'];
+  const root = resolve(DL_ROOT);
+  // Where every due file is, looked up before anything is touched. A path that escapes its root is not
+  // something to "clean up"; it is something to leave alone and let the health page argue about. The root
+  // ITSELF is refused on the same footing: containedPath accepts it (it is "inside" trivially), and the rm
+  // below is recursive, so a row whose file resolves to `.` -- only a hand-edited row can, today -- would
+  // take the whole download directory with it. One comparison against the entire library is a cheap guard.
+  // Reintroduce by dropping the `abs === root` check: "the download root itself is never the file" in
+  // chapterCleanup.int.test.ts finds the directory gone.
+  const looked = await Promise.all(due.map(async (b) => {
     const abs = containedPath(b.root, b.file);
-    // A path that escapes its root is not something to "clean up"; it is something to leave alone and let
-    // the health page argue about. Not counted as a failure -- there is nothing to retry.
-    if (!abs) continue;
+    if (!abs || abs === root) return { b, abs: null, st: null, folder: true };
     const st = await stat(abs).catch(() => null);
-    if (st) {
-      try {
-        await rm(abs, { recursive: true, force: true });
-      } catch {
-        failed++;
-        continue;
+    const folder = st ? true : !!(await stat(dirname(abs)).catch(() => null));
+    return { b, abs, st, folder };
+  }));
+  // ⚠️ WHEN EVERY DUE CHAPTER'S FOLDER IS MISSING, THE VOLUME IS NOT THERE. A NAS share that is not mounted
+  // right now leaves an empty, writable mount point behind, so the preflight above passes and every stat
+  // fails. Marking on that evidence would tombstone up to MAX_PER_RUN chapters an hour as "deleted" while
+  // their files are fine on the unmounted disk -- hidden from every reader until some scan happened to run,
+  // and every measured page dimension and page hash thrown away for good. So nothing is marked and the run
+  // says why. It is deliberately the WHOLE batch that decides: one missing folder among present ones is a
+  // series whose files were removed (the product's own Delete files, or a hand) and its rows are honestly
+  // marked below -- the first version of this guard stopped at the first such row and, because those rows
+  // are the oldest-finished and sort first, wedged the job for good after an ordinary series removal.
+  // Reintroduce by marking rows whose folder is missing regardless of the others: "a missing download
+  // folder stops the run instead of marking chapters deleted" in chapterCleanup.int.test.ts finds pruned_at
+  // set; drop the "every" and make it per-row again: "a removed series does not wedge the cleanup" finds
+  // the live series' chapter still on disk.
+  if (looked.every((x) => x.abs && !x.st && !x.folder)) {
+    stopped = 'unmounted';
+  } else {
+    for (const { b, abs, st } of looked) {
+      if (runtime.stopping) break; // between files, never mid-unlink
+      if (!abs) continue;
+      if (st) {
+        try {
+          await rm(abs, { recursive: true, force: true });
+        } catch {
+          failed++;
+          continue;
+        }
+        bytes += st.size;
+        // A set-aside copy from a refetch the process died in (`<file>.refetch-bak` beside a landed file,
+        // which reapStaleTemp deliberately leaves alone) must not outlive this delete: at the next boot the
+        // reaper would see a bak with no original, put it back, and the chapter this job deleted would be on
+        // disk again with its space unreclaimed -- to be deleted once more an hour later, round and round.
+        await rm(`${abs}${REFETCH_BAK}`, { force: true }).catch(() => {});
       }
-      bytes += st.size;
+      // st === null means the file was already gone -- alone, or with its whole folder while other folders
+      // are present, which is a series whose files were removed. Mark it anyway: the row was claiming bytes
+      // that do not exist, and leaving it unmarked means re-examining it on every run for as long as the
+      // install lives.
+      await tombstoneBooks([b.id]);
+      deleted++;
     }
-    // st === null means the file was already gone. Mark it anyway: the row was claiming bytes that do not
-    // exist, and leaving it unmarked means re-examining it on every run for as long as the install lives.
-    await q('UPDATE lib_books SET pruned_at = now() WHERE id = $1', [b.id]);
-    deleted++;
   }
 
   // Recounted rather than derived: rows pruned above no longer qualify, and a run that stopped early for a
@@ -170,7 +280,7 @@ export async function runCleanupOnce(): Promise<CleanupResult> {
   // Warm the panel's memo with what the run just measured, so the badge is right on the next poll instead
   // of showing the pre-run backlog for another half minute.
   cached = { days: clampDays(days), at: Date.now(), n: remaining };
-  return { deleted, bytes, remaining, failed, ms: Date.now() - t0, days };
+  return { deleted, bytes, remaining, failed, ms: Date.now() - t0, days, ...(stopped ? { stopped } : {}) };
 }
 
 /**
@@ -199,7 +309,8 @@ export function runChapterCleanup(log?: { info: (m: string) => void; warn: (m: s
         ).catch(() => {});
         log?.info(summarise(r));
       }
-      if (r.failed) log?.warn(`cleanup: ${r.failed} chapter file(s) could not be deleted; they will be retried`);
+      if (r.stopped === 'unmounted') log?.warn(`cleanup: every due chapter's folder under ${DL_ROOT} is missing -- is the volume mounted? Nothing was marked; ${r.remaining} chapter(s) wait for the next run`);
+      else if (r.failed) log?.warn(`cleanup: ${r.failed} chapter file(s) could not be deleted; they will be retried`);
       return r;
     } catch (e) {
       // Never leave yesterday's healthy result standing after a run that threw -- the same reasoning as the
@@ -221,4 +332,5 @@ const summarise = (r: CleanupResult): string =>
       ? 'cleanup: stopped for shutdown'
       : `cleanup: ${r.deleted} read chapter(s) deleted, ${r.bytes} bytes freed`
         + (r.remaining ? `, ${r.remaining} still due` : '')
-        + (r.failed ? `, ${r.failed} failed` : '');
+        + (r.failed ? `, ${r.failed} failed` : '')
+        + (r.stopped === 'unmounted' ? ' (stopped: every due chapter\'s folder is missing, is the volume mounted?)' : '');
