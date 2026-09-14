@@ -5,7 +5,7 @@ import { motion } from 'framer-motion';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, img } from '@/lib/api';
-import { Book, Ghost, Listing, Page, Series, SeriesSource, StoredPrefs } from '@/lib/types';
+import { Book, Ghost, Listing, Page, Series, SeriesSource, VersionCopy, Versions } from '@/lib/types';
 import { chapterLabel, isVolumeName, relativeTime } from '@/lib/format';
 import { listDownloads, downloadChapter, deleteDownload } from '@/lib/downloads';
 import { applyCover, clearCover } from '@/lib/theme';
@@ -14,11 +14,13 @@ import { SeriesCard } from '@/components/cards';
 import { useToast } from '@/components/Toast';
 import { ConfirmDialog, Modal, msgOf } from '@/components/ConfirmDialog';
 import { useAuth, canDownload } from '@/lib/auth';
-import { IcChevronLeft, IcHeart, IcStar, IcPlay, IcDownload, IcCheck, IcTrash, IcSliders, IcMoments } from '@/components/icons';
+import { IcChevronLeft, IcHeart, IcStar, IcPlay, IcDownload, IcCloudDownload, IcCheck, IcTrash, IcSliders, IcMoments } from '@/components/icons';
 import { t as tr } from '@/lib/i18n';
 import { FindMissingDialog } from '@/components/FindMissingDialog';
-import { hasGroup, normGroup, reorder, withoutGroup } from '@/lib/scanlators';
+import { normGroup } from '@/lib/scanlators';
 import { GHOST_CAP, mergeRows, whyLabel, runLabel } from '@/lib/chapterRows';
+import { ALL_GROUPS, copySourceId, groupsOfRow, matchesGroup } from '@/lib/groupFilter';
+import { WhoScanlates, useSeriesGroups } from '@/components/WhoScanlates';
 
 // The four the scanner itself writes from ComicInfo's PublishingStatus. Kept as a suggestion list rather
 // than a hard enum, because a file can carry anything and rejecting it would reject Uchiyomi's own data.
@@ -40,165 +42,6 @@ function ArtEditor({ label, kind, busy, onUpload, onSetUrl, onReset }: { label: 
         <input value={url} onChange={(e) => setUrl(e.target.value)} placeholder={tr('…or paste an image URL')} autoCapitalize="none" className={`${fld} flex-1`} />
         <button onClick={() => { onSetUrl(kind, url); setUrl(''); }} disabled={busy || !url.trim()} className="btn-accent px-3 text-xs disabled:opacity-50">Set</button>
       </div>
-    </div>
-  );
-}
-
-interface ScanlatorGroup { name: string; onDisk: number; listed: number }
-interface ScanlatorInfo {
-  prefs: StoredPrefs | null;
-  global: StoredPrefs;
-  effective: { priority: string[]; blocked: string[]; patienceDays: number };
-  groups: ScanlatorGroup[];
-}
-interface PrefsDraft { priority: string[]; blocked: string[]; patience: string }
-
-/**
- * Which groups' releases the updater takes for this series, and how long it waits for a preferred one.
- *
- * Collapsed by default and fetched only when opened: the group list is built by asking the source for the
- * full chapter listing, which is a network call the edit dialog should not make for every "fix the title".
- *
- * The draft is seeded from the STORED override, not from the effective rules. The effective priority is
- * the server default when this series has none of its own, and seeding from it would turn "follows the
- * defaults" into a per-series copy of them on the first Save -- a copy that then stops following when the
- * defaults change. Blank patience means the same thing for the same reason.
- */
-function ScanlatorPrefs({ id, onSaved }: { id: string; onSaved: () => void }) {
-  const toast = useToast();
-  const qc = useQueryClient();
-  const [open, setOpen] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const { data, isLoading, error } = useQuery({
-    queryKey: ['series-scanlators', id],
-    queryFn: () => api<ScanlatorInfo>(`/api/admin/series/${id}/scanlators`),
-    enabled: open,
-  });
-  // `null` until the row arrives, so a half-loaded form can never save an empty ruleset over a real one.
-  const [draft, setDraft] = useState<PrefsDraft | null>(null);
-  useEffect(() => {
-    if (data && !draft) {
-      setDraft({ priority: data.prefs?.priority ?? [], blocked: data.prefs?.blocked ?? [],
-                 patience: data.prefs?.patienceDays == null ? '' : String(data.prefs.patienceDays) });
-    }
-  }, [data, draft]);
-
-  // One row per group, by the server's equality: ranked groups first in rank order, then blocked ones, then
-  // everything the source lists or the disk holds, busiest first. A group that is in the stored lists but
-  // no longer appears anywhere still gets a row, or there would be no way to un-block it.
-  const rows = useMemo(() => {
-    if (!data || !draft) return [] as ScanlatorGroup[];
-    const counts = new Map(data.groups.map((g) => [normGroup(g.name), g]));
-    const seen = new Set<string>();
-    const out: ScanlatorGroup[] = [];
-    const push = (name: string) => {
-      const k = normGroup(name);
-      if (!k || seen.has(k)) return;
-      seen.add(k);
-      const g = counts.get(k);
-      out.push({ name: g?.name ?? name, onDisk: g?.onDisk ?? 0, listed: g?.listed ?? 0 });
-    };
-    draft.priority.forEach(push);
-    draft.blocked.forEach(push);
-    [...data.groups].sort((a, b) => b.listed - a.listed || b.onDisk - a.onDisk).forEach((g) => push(g.name));
-    return out;
-  }, [data, draft]);
-
-  const rankIn = (priority: string[], name: string) => { const k = normGroup(name); return priority.findIndex((p) => normGroup(p) === k); };
-  // Preferring a group unblocks it and blocking one un-ranks it: a group in both lists would be blocked
-  // (the server takes the union) while showing a rank that can never be used.
-  const togglePrefer = (name: string) => setDraft((d) => d && (rankIn(d.priority, name) >= 0
-    ? { ...d, priority: withoutGroup(d.priority, name) }
-    : { ...d, priority: [...d.priority, name], blocked: withoutGroup(d.blocked, name) }));
-  const toggleBlock = (name: string) => setDraft((d) => d && (hasGroup(d.blocked, name)
-    ? { ...d, blocked: withoutGroup(d.blocked, name) }
-    : { ...d, blocked: [...d.blocked, name], priority: withoutGroup(d.priority, name) }));
-  const move = (name: string, dir: -1 | 1) => setDraft((d) => d && { ...d, priority: reorder(d.priority, rankIn(d.priority, name), dir) });
-
-  const patch = async (scanlatorPrefs: StoredPrefs | null) => {
-    setBusy(true);
-    try {
-      await api(`/api/admin/series/${id}`, { method: 'PATCH', json: { scanlatorPrefs } });
-      toast(tr('Saved'), 'success');
-      qc.invalidateQueries({ queryKey: ['series-scanlators', id] });
-      onSaved();
-      return true;
-    } catch (e) { toast(msgOf(e, tr('Could not save')), 'error'); return false; }
-    finally { setBusy(false); }
-  };
-  const save = () => {
-    if (!draft) return;
-    const raw = draft.patience.trim();
-    const patienceDays = raw === '' ? null : Number(raw);
-    if (patienceDays != null && (!Number.isInteger(patienceDays) || patienceDays < 0 || patienceDays > 30)) {
-      toast(tr('Patience is a whole number of days, 0 to 30'), 'error');
-      return;
-    }
-    return patch({ priority: draft.priority, blocked: draft.blocked, patienceDays });
-  };
-  const useDefaults = async () => { if (await patch(null)) setDraft({ priority: [], blocked: [], patience: '' }); };
-
-  const serverDefault = data?.global.patienceDays ?? 2;
-  return (
-    <div className="mt-3 border-t border-ink-800 pt-3">
-      <button onClick={() => setOpen((o) => !o)} className="flex w-full items-center justify-between text-start">
-        <span className="text-xs font-semibold uppercase tracking-wider text-fog-500">{tr('Scanlators')}</span>
-        <span className="text-xs text-fog-500">{open ? '▴' : '▾'}</span>
-      </button>
-      {open && isLoading && <div className="skeleton mt-2 h-16 rounded-lg" />}
-      {open && !!error && <p className="mt-2 text-xs text-rose-300">{msgOf(error, tr('Could not load the groups'))}</p>}
-      {open && data && draft && (
-        <>
-          <p className="mt-1 text-[11px] leading-relaxed text-fog-500">
-            {tr('Preferred groups are taken first, in this order; blocked groups are never taken. New chapters wait for a preferred group for the patience below, then the best available copy is fetched.')}
-          </p>
-          {!rows.length && <p className="mt-2 text-xs text-fog-500">{tr('No groups known for this series yet.')}</p>}
-          <div className="mt-2 space-y-1">
-            {rows.map((g) => {
-              const rank = rankIn(draft.priority, g.name);
-              const blocked = hasGroup(draft.blocked, g.name);
-              const serverBlocked = hasGroup(data.global.blocked, g.name);
-              return (
-                <div key={normGroup(g.name)} className="flex items-center gap-1.5 text-xs">
-                  {/* Counts under the name, not beside it: on a phone the buttons leave the name a few characters. */}
-                  <span className="min-w-0 flex-1">
-                    <span className={`block truncate ${blocked || serverBlocked ? 'text-fog-600 line-through' : 'text-fog-200'}`} title={g.name}>{g.name}</span>
-                    <span className="block text-[10px] text-fog-600">{tr('{d} on disk · {l} listed', { d: g.onDisk, l: g.listed })}</span>
-                  </span>
-                  {rank >= 0 && (
-                    <span className="flex shrink-0 items-center">
-                      <button onClick={() => move(g.name, -1)} disabled={rank === 0} aria-label={tr('Move up')} className="px-1 text-fog-400 disabled:opacity-30">▲</button>
-                      <button onClick={() => move(g.name, 1)} disabled={rank === draft.priority.length - 1} aria-label={tr('Move down')} className="px-1 text-fog-400 disabled:opacity-30">▼</button>
-                    </span>
-                  )}
-                  <button onClick={() => togglePrefer(g.name)} disabled={serverBlocked && rank < 0}
-                    className={`chip shrink-0 px-2 py-0.5 text-[10px] disabled:opacity-40 ${rank >= 0 ? 'chip-active' : ''}`}>
-                    {rank >= 0 ? `#${rank + 1}` : tr('Prefer')}
-                  </button>
-                  {serverBlocked
-                    ? <span className="shrink-0 text-[10px] text-fog-600">{tr('blocked on server')}</span>
-                    : <button onClick={() => toggleBlock(g.name)}
-                        className={`chip shrink-0 px-2 py-0.5 text-[10px] ${blocked ? 'border-rose-500/40 text-rose-300' : ''}`}>
-                        {blocked ? tr('Blocked') : tr('Block')}
-                      </button>}
-                </div>
-              );
-            })}
-          </div>
-          <div className="mt-3 flex flex-wrap items-center gap-2">
-            <label className="text-xs text-fog-400" htmlFor={`patience-${id}`}>{tr('Patience (days)')}</label>
-            <input id={`patience-${id}`} type="number" min={0} max={30} step={1} inputMode="numeric" value={draft.patience}
-              onChange={(e) => setDraft((d) => d && { ...d, patience: e.target.value })}
-              placeholder={String(serverDefault)} className={`${fld} w-20`} />
-            <span className="text-[11px] text-fog-500">{tr('Currently {n} days', { n: data.effective.patienceDays })}</span>
-          </div>
-          <p className="mt-1 text-[11px] text-fog-600">{tr('Blank uses the server default ({n}). 0 takes the best copy available at once.', { n: serverDefault })}</p>
-          <div className="mt-3 flex gap-2">
-            <button onClick={save} disabled={busy} className="btn-accent flex-1 py-2 text-xs disabled:opacity-50">{tr('Save')}</button>
-            <button onClick={useDefaults} disabled={busy || !data.prefs} className="chip text-xs disabled:opacity-50">{tr('Use server defaults')}</button>
-          </div>
-        </>
-      )}
     </div>
   );
 }
@@ -409,7 +252,10 @@ function SeriesEditModal({ id, series, onClose, onSaved }: { id: string; series:
             </div>
             <p className="mt-1.5 text-[11px] text-fog-600">{tr('Add one from Find missing chapters')}</p>
           </div>
-          <ScanlatorPrefs id={id} onSaved={onSaved} />
+          {/* The Prefer / Block / patience controls live in the Who scanlates this card on the series page now,
+              beside the statistics they are decided from. One line here so an admin who learned them in
+              this dialog is told where they went rather than left to conclude they are gone. */}
+          <p className="mt-3 border-t border-ink-800 pt-3 text-[11px] text-fog-600">{tr('Groups are ranked in Who scanlates this')}</p>
         </div>
         <ArtEditor label="Cover" kind="cover" busy={busy} onUpload={onUpload} onSetUrl={onSetUrl} onReset={onReset} />
         <ArtEditor label="Background" kind="banner" busy={busy} onUpload={onUpload} onSetUrl={onSetUrl} onReset={onReset} />
@@ -620,7 +466,86 @@ function ChapterEditModal({ book, onClose, onSaved }: { book: Book; onClose: () 
   );
 }
 
-function ChapterRow({ book, downloaded, sourceNames, primarySource, onReader, onToggleDownload, onMark, onEdit, selectable, selected, onToggle }: {
+/**
+ * The copies a chapter number has across the followed sources, one per line under its row, each with the
+ * markers that tell them apart and a "Fetch this" for the one the reader wants instead. `mayFetch` is the
+ * caller's verdict on the audience (anyone who may download for a ghost row, admins for an on-disk row);
+ * the copy already on this server gets the button disabled rather than hidden, so the line still reads as
+ * one of the choices, just the one already made.
+ */
+function VersionList({ copies, primarySource, mayFetch, onPick }: {
+  copies: VersionCopy[];
+  primarySource?: string;
+  mayFetch: boolean;
+  onPick?: (copy: VersionCopy) => void;
+}) {
+  return (
+    // One copy per line: at 390 px there is no room for columns, and a line that wraps is still one copy.
+    // The indent past the thumbnail is the strip's (VersionStrip), so the pill and the list line up.
+    <div className="mt-1 space-y-1">
+      {copies.map((c) => (
+        <div key={c.key} className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-fog-400">
+          {c.lang && <span className="rounded border border-ink-700 px-1 text-[10px] uppercase leading-4 text-fog-500">{c.lang}</span>}
+          <span className="text-fog-200">{c.groups.join(' & ') || c.scanlator || '—'}</span>
+          {c.pages != null && <span>{tr('{n} pages', { n: c.pages })}</span>}
+          {c.publishedAt && <span>{relativeTime(c.publishedAt)}</span>}
+          {/* The series' own source is the normal case, not news -- the ChapterRow badge's rule. */}
+          {c.source !== primarySource && <span className="text-fog-500">{c.sourceName}</span>}
+          {c.onDisk && <span className="rounded-full border border-ink-700 px-1.5 text-[10px] leading-4 text-fog-300">{tr('on this server')}</span>}
+          {c.chosen && <span className="rounded-full border border-ink-700 px-1.5 text-[10px] leading-4 text-fog-300">{tr('chosen')}</span>}
+          {c.blocked && <span className="rounded-full border border-rose-500/40 px-1.5 text-[10px] leading-4 text-rose-300">{tr('blocked')}</span>}
+          {mayFetch && (
+            <button type="button" onClick={() => onPick?.(c)} disabled={c.onDisk}
+              className="chip ms-auto shrink-0 px-2 py-0.5 text-[10px] disabled:opacity-40">
+              {tr('Fetch this')}
+            </button>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** The `{n} versions` pill beside a row, and the props the two row kinds share for it. */
+interface VersionProps {
+  /** Every copy of this number, when there is more than one; absent otherwise and no pill is drawn. */
+  versions?: VersionCopy[];
+  versionsOpen?: boolean;
+  onToggleVersions?: () => void;
+  /** Whether this viewer gets a Fetch this on each copy. */
+  mayFetch?: boolean;
+  onPick?: (copy: VersionCopy) => void;
+}
+/**
+ * The `{n} versions` pill and, once it is open, the list of copies: a full-width strip UNDER the row's flex
+ * line, indented past the thumbnail (w-10 + gap-3) so it reads as the row's.
+ *
+ * ⚠️ Under the line, never in it. The flex line is one non-wrapping run of shrink-0 items -- thumbnail,
+ * dot, date, the two round buttons -- and the only thing in it that can give is the opener holding the
+ * chapter label. On a desktop the list is a three-column grid of ~290 px cells, and a 63 px pill in the
+ * line took that width from the label: measured in the built page at 1280 px, "Ch. 1" was 0 px wide on
+ * every row with a pill, and a tombstone's "Deleted from the server" chip ran under it. Reintroduce by
+ * moving the pill back beside the date: the chapter number vanishes from every versioned row at 1280.
+ *
+ * ⚠️ And a SIBLING of the row's opener, not a child of it. The opener is a <button> that is `disabled`
+ * for a tombstone and for a ghost outside select mode, and a button inside a disabled button is both
+ * invalid DOM and unreliable to click. Reintroduce by moving this inside the opener: the pill on a ghost
+ * row does nothing until Select is tapped.
+ */
+function VersionStrip({ versions, versionsOpen, onToggleVersions, mayFetch, onPick, primarySource }: VersionProps & { primarySource?: string }) {
+  if (!versions) return null;
+  return (
+    <div className="-mt-1 ms-[3.25rem] pb-2">
+      <button type="button" onClick={onToggleVersions} aria-expanded={!!versionsOpen}
+        className={`rounded-full border px-1.5 text-[10px] leading-4 ${versionsOpen ? 'border-accent/40 text-accent' : 'border-ink-700 text-fog-400'}`}>
+        {tr('{n} versions', { n: versions.length })}
+      </button>
+      {versionsOpen && <VersionList copies={versions} primarySource={primarySource} mayFetch={!!mayFetch} onPick={onPick} />}
+    </div>
+  );
+}
+
+function ChapterRow({ book, downloaded, sourceNames, primarySource, onReader, onToggleDownload, onMark, onEdit, selectable, selected, onToggle, ...v }: VersionProps & {
   book: Book;
   downloaded: boolean;
   /** Select mode: the row toggles instead of opening, shows the ✓ bubble, and hides its own two controls. */
@@ -654,7 +579,9 @@ function ChapterRow({ book, downloaded, sourceNames, primarySource, onReader, on
   const pruned = book.pruned === true && !downloaded;
 
   return (
-    <div className="flex items-center gap-3 border-b border-ink-800/70 py-2.5">
+    // `id="ch-N"` is what the chapter chips in Who scanlates this scroll to.
+    <div id={`ch-${book.number}`} className="border-b border-ink-800/70">
+    <div className="flex items-center gap-3 py-2.5">
       {/* In select mode a pruned chapter is still selectable -- Mark read and Fetch again are exactly the
           things one wants for it -- so the disable only applies to opening. */}
       <button onClick={selectable ? onToggle : onReader} disabled={pruned && !selectable} aria-pressed={selectable ? !!selected : undefined}
@@ -732,6 +659,8 @@ function ChapterRow({ book, downloaded, sourceNames, primarySource, onReader, on
       </div>
       </>}
     </div>
+    <VersionStrip {...v} primarySource={primarySource} />
+    </div>
   );
 }
 
@@ -757,12 +686,19 @@ function SelectBubble({ selected }: { selected: boolean }) {
  * state. The downloader's error text rides on the pill's title for admins (the server sends `reason` to
  * nobody else).
  */
-function GhostRow({ ghost, sourceNames, primarySource, selectable, selected, onToggle }: {
+function GhostRow({ ghost, sourceNames, primarySource, selectable, selected, onToggle, onFetch, ...v }: VersionProps & {
   ghost: Ghost;
   sourceNames?: Record<string, string>;
   primarySource?: string;
   selectable?: boolean; selected?: boolean; onToggle?: () => void;
+  /**
+   * Fetch this one chapter now, for a viewer who may download; absent for everyone else and for a row only
+   * blocked groups released (the caller decides both, the row only draws the button). Select mode stays the
+   * bulk path and hides it. Asked for on #40 with a Tachimanga screenshot: a fetch icon per row, no Select.
+   */
+  onFetch?: () => Promise<void>;
 }) {
+  const [busy, setBusy] = useState(false);
   const label = whyLabel(ghost);
   // The same rule as the chapter row's badge: the series' own source is the normal case, not news. The
   // listing carries the source's name, so an id the followed list no longer resolves still gets one --
@@ -777,9 +713,13 @@ function GhostRow({ ghost, sourceNames, primarySource, selectable, selected, onT
   const title = ghost.title?.trim() || '';
   const showTitle = !!title && !/^(ch(apter)?\.?\s*)?[\d.]+$/i.test(title);
   return (
-    <div className={`flex items-center gap-3 border-b border-ink-800/70 py-2.5 ${selected ? '' : 'opacity-60'}`} aria-disabled={!selectable || undefined}>
+    <div id={`ch-${ghost.number}`} className="border-b border-ink-800/70">
+    {/* The dimming is the opener's and the date's, not the row's or the wrapper's: the fetch button at the
+        end of the line and the versions strip under it are live controls, and a child cannot undo its
+        parent's opacity. */}
+    <div className="flex items-center gap-3 py-2.5">
       <button type="button" onClick={selectable ? onToggle : undefined} disabled={!selectable} aria-pressed={selectable ? !!selected : undefined}
-        className="flex min-w-0 flex-1 items-center gap-3 text-start disabled:cursor-default">
+        className={`flex min-w-0 flex-1 items-center gap-3 text-start disabled:cursor-default ${selected ? '' : 'opacity-60'}`}>
         <div className="relative h-14 w-10 shrink-0 rounded-lg border border-dashed border-ink-600">
           {selectable && <SelectBubble selected={!!selected} />}
         </div>
@@ -801,8 +741,23 @@ function GhostRow({ ghost, sourceNames, primarySource, selectable, selected, onT
         </div>
       </button>
       {ghost.publishedAt && (
-        <span className="shrink-0 text-[11px] text-fog-500">{relativeTime(ghost.publishedAt)}</span>
+        <span className={`shrink-0 text-[11px] text-fog-500 ${selected ? '' : 'opacity-60'}`}>{relativeTime(ghost.publishedAt)}</span>
       )}
+      {/* The cloud, not the ⬇ of the row above: that arrow saves a chapter to THIS DEVICE, this one brings
+          it onto the server, and the same glyph for both would promise the wrong thing on one of them. */}
+      {onFetch && !selectable && (
+        <button type="button" aria-label={tr('Fetch')} disabled={busy}
+          onClick={async () => {
+            if (busy) return;
+            setBusy(true);
+            try { await onFetch(); } finally { setBusy(false); }
+          }}
+          className="grid h-9 w-9 shrink-0 place-items-center rounded-full border border-ink-700 text-fog-500 disabled:opacity-60">
+          {busy ? <span className="text-[10px] font-semibold text-accent">…</span> : <IcCloudDownload width={16} height={16} />}
+        </button>
+      )}
+    </div>
+    <VersionStrip {...v} primarySource={primarySource} />
     </div>
   );
 }
@@ -866,6 +821,33 @@ function SeriesInner() {
     retry: false,
   });
   const ghosts = useMemo(() => listing?.content ?? [], [listing]);
+  // The groups behind the Who scanlates this card and the group filter: one hook, the card's route for the
+  // viewer's role (WhoScanlates.tsx says which), fetched once for both.
+  const { groups, admin: adminGroups, error: groupsError, isLoading: groupsLoading, checkedAt: groupsCheckedAt } = useSeriesGroups(id, isAdmin);
+  // Every copy of every listed number, for the `{n} versions` pills and the lists under them. Fetched once
+  // per page as soon as there is a row to pin a pill on -- the pill needs the count before anyone expands
+  // anything -- and cached for a minute, because it is one request for the whole list and the sweep that
+  // changes its answer runs on the hour, not the second.
+  const { data: versionsData } = useQuery({
+    queryKey: ['series-versions', id],
+    queryFn: () => api<Versions>(`/api/series/${id}/versions`),
+    enabled: !!id && ((books?.content.length ?? 0) > 0 || ghosts.length > 0),
+    staleTime: 60_000,
+    retry: false,
+  });
+  // Only the numbers with a choice to make: one copy is not a version, it is the chapter.
+  const versionsOf = useMemo(() => {
+    const m = new Map<number, VersionCopy[]>();
+    for (const v of versionsData?.content ?? []) if (v.copies.length >= 2) m.set(v.number, v.copies);
+    return m;
+  }, [versionsData]);
+  const [openVersions, setOpenVersions] = useState<Set<number>>(new Set());
+  const toggleVersions = (n: number) => setOpenVersions((o) => { const next = new Set(o); next.has(n) ? next.delete(n) : next.add(n); return next; });
+  // The group filter beside Oldest/Newest. `ALL_GROUPS` is the sentinel for "every group" (groupFilter.ts
+  // says why a real name could not be); both reset with the series, since a group name is meaningless on
+  // the next one.
+  const [group, setGroup] = useState<string>(ALL_GROUPS);
+  useEffect(() => { setGroup(ALL_GROUPS); setOpenVersions(new Set()); }, [id]);
   const { data: similar } = useQuery({ queryKey: ['similar', id], queryFn: () => api<{ content: Series[] }>(`/api/series/${id}/similar`), enabled: !!id });
   // Saved pages and notes for this series. Both, because this door is the ONLY route to
   // `/moments/?series=<id>`, and that filtered view is the only place the note composer mounts -- the
@@ -901,8 +883,33 @@ function SeriesInner() {
     return () => clearCover();
   }, [series?.color]);
 
+  // Numbers with a chapter row here: the Who scanlates this chips are solid for these, and a ghost on one of
+  // them is a stale listing's, never a row (mergeRows applies the same rule; this keeps the filter's count
+  // honest too).
+  const allBooks = useMemo(() => books?.content ?? [], [books]);
+  const haveNumbers = useMemo(() => new Set(allBooks.map((b) => b.number)), [allBooks]);
+  // The card's solid chips are the LIVE rows only: a tombstone keeps its row (the ghost dedupe above is
+  // right to count it -- the number is not "missing", it was deleted on purpose) but has no pages, and a
+  // solid chip promises pages. Reintroduce by passing `haveNumbers` to the card: the chip for a pruned
+  // number is solid, and tapping it lands on "Deleted from the server".
+  const liveNumbers = useMemo(() => new Set(allBooks.filter((b) => !b.pruned).map((b) => b.number)), [allBooks]);
+  const visibleGhosts = useMemo(() => (showGhosts ? ghosts.filter((g) => !haveNumbers.has(g.number)) : []), [showGhosts, ghosts, haveNumbers]);
+  // The names the filter offers: the groups route's, or -- when it answered with nothing (a series scanned
+  // from disk, a route that is not there) -- whatever the chapters on disk name, so a hand-built library
+  // with tagged files still gets the filter.
+  const groupNames = useMemo(() => {
+    if (groups.length) return groups.map((g) => g.name);
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const b of allBooks) for (const g of groupsOfRow(b)) { const k = normGroup(g); if (!seen.has(k)) { seen.add(k); out.push(g); } }
+    return out;
+  }, [groups, allBooks]);
+  // The filter is applied BEFORE mergeRows, so the run rows and the "Show all" fold are computed over what
+  // is shown: a filter that hid 40 of 50 capped ghosts and still said "Show all 120" would be lying.
+  const filteredBooks = useMemo(() => (group === ALL_GROUPS ? allBooks : allBooks.filter((b) => matchesGroup(b, group))), [allBooks, group]);
+  const filteredGhosts = useMemo(() => (group === ALL_GROUPS ? visibleGhosts : visibleGhosts.filter((g) => matchesGroup(g, group))), [visibleGhosts, group]);
   // The list, in the list's direction: chapters on disk and, between them, the ghosts (see chapterRows.ts).
-  const rows = useMemo(() => mergeRows(books?.content ?? [], showGhosts ? ghosts : [], asc, showAll), [books, ghosts, showGhosts, asc, showAll]);
+  const rows = useMemo(() => mergeRows(filteredBooks, filteredGhosts, asc, showAll), [filteredBooks, filteredGhosts, asc, showAll]);
   // For the per-chapter source badge: which source each id is, and which one is the series' own. A chapter
   // fetched through "Find missing chapters" carries the adapter it came from without that source being
   // followed, so the names come from the full source list too -- never the raw id, which for an extension
@@ -984,6 +991,9 @@ function SeriesInner() {
       toast(mode === 'read' ? 'Marked read' : 'Marked unread', 'success');
     }
   };
+  // Deliberately the WHOLE list, not the group filter's subset: "Mark all read" is a statement about the
+  // series, and a reader who filtered to one group to look at it did not thereby decide the other groups'
+  // chapters are unread. Select mode is the way to mark a subset.
   const markAllRead = async () => {
     const todo = (books?.content ?? []).filter((b) => !b.readProgress?.completed);
     if (!todo.length) { toast('Everything is already read', 'success'); return; }
@@ -1033,8 +1043,11 @@ function SeriesInner() {
     // Rows that are no longer on screen cannot stay picked, or Fetch would act on what nobody can see.
     if (!next) setPickedGhosts(new Set());
   };
-  const pickedBookList = useMemo(() => (books?.content ?? []).filter((b) => pickedBooks.has(b.id)), [books, pickedBooks]);
-  const pickedGhostList = useMemo(() => ghosts.filter((g) => pickedGhosts.has(g.number)), [ghosts, pickedGhosts]);
+  // From the FILTERED lists: a pick the group filter has hidden is neither counted nor acted on, so the
+  // toolbar's "{n} selected" is the number of rows the person can see ticked. The pick itself survives in
+  // its set, and comes back when the filter is widened again.
+  const pickedBookList = useMemo(() => filteredBooks.filter((b) => pickedBooks.has(b.id)), [filteredBooks, pickedBooks]);
+  const pickedGhostList = useMemo(() => filteredGhosts.filter((g) => pickedGhosts.has(g.number)), [filteredGhosts, pickedGhosts]);
   // Each action's eligible subset. A button acts on its subset, never on the whole selection, and is
   // disabled when the subset is empty -- so picking three chapters and a ghost never makes Fetch try the
   // chapters or Mark read try the ghost.
@@ -1049,10 +1062,10 @@ function SeriesInner() {
   // delete and the server would say `already_pruned` for every one of them. Reintroduce by adding
   // `b.owned &&` back: pick a /library chapter and the delete says "0 deleted" -- or nothing.
   const deletable = pickedBookList.filter((b) => !b.pruned);
-  const pickedCount = pickedBooks.size + pickedGhosts.size;
+  const pickedCount = pickedBookList.length + pickedGhostList.length;
 
   const invalidateChapters = () => {
-    for (const k of [['series-books', id], ['series-listing', id], ['series', id], ['home'], ['source-jobs']]) qc.invalidateQueries({ queryKey: k });
+    for (const k of [['series-books', id], ['series-listing', id], ['series-versions', id], ['series-groups', id], ['series-scanlators', id], ['series', id], ['home'], ['source-jobs']]) qc.invalidateQueries({ queryKey: k });
   };
   const bulkMark = async (completed: boolean) => {
     setActing(true);
@@ -1084,7 +1097,22 @@ function SeriesInner() {
     setConfirming(null);
   };
   const bulkFetch = () => startJob('/api/sources/fetch', { seriesId: id, numbers: fetchable.map((g) => g.number) });
+  // The fetch icon on one ghost row: the bar's Fetch for a list of one, same request, same toast, same
+  // polling -- so a chapter arrives the same way whether it was picked alone or with twenty others.
+  const fetchOne = (number: number) => startJob('/api/sources/fetch', { seriesId: id, numbers: [number] });
   const bulkRefetch = () => startJob(`/api/admin/series/${id}/chapters/refetch`, { bookIds: refetchable.map((b) => b.id) });
+  // "Fetch this" on one copy. A pick names the copy by source and the source's own id (`copySourceId`, never
+  // a split on ':'), and the server takes it as an explicit choice: the group rules, blocklist included, do
+  // not apply to it. On a ghost row the copy lands as the chapter; on an on-disk row the file is replaced,
+  // which is asked about first below.
+  const pickGhost = (number: number, copy: VersionCopy) =>
+    startJob('/api/sources/fetch', { seriesId: id, picks: [{ number, source: copy.source, sourceId: copySourceId(copy) }] });
+  const [replacing, setReplacing] = useState<{ book: Book; copy: VersionCopy } | null>(null);
+  const replaceWith = async () => {
+    if (!replacing) return;
+    await startJob(`/api/admin/series/${id}/chapters/refetch`, { picks: [{ bookId: replacing.book.id, source: replacing.copy.source, sourceId: copySourceId(replacing.copy) }] });
+    setReplacing(null);
+  };
   const bulkDelete = async () => {
     setActing(true);
     try {
@@ -1149,6 +1177,10 @@ function SeriesInner() {
     setStarted(null);
     qc.invalidateQueries({ queryKey: ['series-books', id] });
     qc.invalidateQueries({ queryKey: ['series-listing', id] });
+    // The versions' `onDisk` marker and the groups' `{n} on this server` both count the files that just landed.
+    qc.invalidateQueries({ queryKey: ['series-versions', id] });
+    qc.invalidateQueries({ queryKey: ['series-groups', id] });
+    qc.invalidateQueries({ queryKey: ['series-scanlators', id] });
     qc.invalidateQueries({ queryKey: ['series', id] });
     qc.invalidateQueries({ queryKey: ['home'] });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1280,6 +1312,20 @@ function SeriesInner() {
           <button onClick={() => setAsc((a) => !a)} className="chip text-xs">
             <IcSliders width={14} height={14} /> {asc ? 'Oldest' : 'Newest'}
           </button>
+          {/* A native <select> under a chip: the phone gets its own picker, the desktop a chip that matches
+              its neighbours, and there is no popover of ours to position or to close on a tap outside.
+              Rendered only when there is a group to choose. */}
+          {groupNames.length > 0 && (
+            <label className={`chip relative cursor-pointer text-xs ${group !== ALL_GROUPS ? 'chip-active' : ''}`}>
+              <span className="max-w-[9rem] truncate">{group === ALL_GROUPS ? tr('All groups') : group}</span>
+              <span aria-hidden>▾</span>
+              <select aria-label={tr('Scanlators')} value={group} onChange={(e) => setGroup(e.target.value)}
+                className="absolute inset-0 w-full cursor-pointer opacity-0">
+                <option value={ALL_GROUPS}>{tr('All groups')}</option>
+                {groupNames.map((n) => <option key={n} value={n}>{n}</option>)}
+              </select>
+            </label>
+          )}
           {/* A mode, not a filter: the library's chip, so the two select modes are one habit. */}
           <button onClick={() => { setSelecting((v) => !v); clearPicks(); }} className={`chip text-xs whitespace-nowrap ${selecting ? 'chip-active' : ''}`}>
             {selecting ? tr('Done') : tr('Select')}
@@ -1291,6 +1337,11 @@ function SeriesInner() {
           )}
         </div>
       </div>
+      {group !== ALL_GROUPS && (
+        <p className="mb-2 text-xs text-fog-500">
+          {tr('{n} of {m} chapters match', { n: filteredBooks.length + filteredGhosts.length, m: allBooks.length + visibleGhosts.length })}
+        </p>
+      )}
       {/* Shown whether or not the ghost rows are: the count is the news, and "as of" is how old it is. */}
       {ghosts.length > 0 && (
         <p className="mb-2 text-xs text-fog-500">
@@ -1307,13 +1358,25 @@ function SeriesInner() {
                 onReader={() => router.push(`/reader/?book=${b.id}`)} onToggleDownload={() => toggleDownload(b.id)}
                 onMark={(mode) => markChapter(b, mode)}
                 onEdit={isAdmin ? () => setEditChapter(b) : undefined}
-                selectable={selecting} selected={pickedBooks.has(b.id)} onToggle={() => togglePickBook(b.id)} />
+                selectable={selecting} selected={pickedBooks.has(b.id)} onToggle={() => togglePickBook(b.id)}
+                versions={versionsOf.get(b.number)} versionsOpen={openVersions.has(b.number)} onToggleVersions={() => toggleVersions(b.number)}
+                // Replacing a file on the server is an admin's call: it changes what everyone reads -- and
+                // only a file Uchiyomi downloaded can be replaced (`refetchable` above draws the same line):
+                // the server answers `not_owned` for a /library file, so offering the button on one meant a
+                // danger dialog followed by "none of those chapters can be fetched again". `!== false`, not
+                // `=== true`: `owned` is absent on a server older than the field, and absent is not "no".
+                mayFetch={isAdmin && b.owned !== false} onPick={(copy) => setReplacing({ book: b, copy })} />
             );
           }
           if (r.kind === 'ghost') {
             return (
               <GhostRow key={`g${r.ghost.number}`} ghost={r.ghost} sourceNames={sourceNames} primarySource={primarySource}
-                selectable={selecting} selected={pickedGhosts.has(r.ghost.number)} onToggle={() => togglePickGhost(r.ghost.number)} />
+                selectable={selecting} selected={pickedGhosts.has(r.ghost.number)} onToggle={() => togglePickGhost(r.ghost.number)}
+                versions={versionsOf.get(r.ghost.number)} versionsOpen={openVersions.has(r.ghost.number)} onToggleVersions={() => toggleVersions(r.ghost.number)}
+                mayFetch={canDownload(user)} onPick={(copy) => pickGhost(r.ghost.number, copy)}
+                // Same audience and same exclusion as the bar's Fetch (`fetchable`): a row only blocked
+                // groups released cannot be fetched while the block stands, so it gets no button.
+                onFetch={canDownload(user) && r.ghost.why !== 'blocked' ? () => fetchOne(r.ghost.number) : undefined} />
             );
           }
           if (r.kind === 'run') {
@@ -1428,6 +1491,11 @@ function SeriesInner() {
         <div className="mt-7 flex flex-col gap-4 lg:mt-4">
           {Genres}
           {Summary}
+          {/* `checkedAt`: the groups route's, or the listing's when the route did not send one -- both are the
+              same `series_listing` check, so the card and the grey rows' "as of" agree. */}
+          <WhoScanlates id={id} groups={groups} admin={adminGroups} error={groupsError} isLoading={groupsLoading} haveNumbers={liveNumbers}
+            checkedAt={groupsCheckedAt ?? listing?.checkedAt ?? null}
+            onSaved={() => { for (const k of [['series', id], ['series-books', id], ['home'], ['library']]) qc.invalidateQueries({ queryKey: k }); }} />
           {Chapters}
         </div>
       </div>
@@ -1494,6 +1562,21 @@ function SeriesInner() {
           body={<p>{tr('Each file is replaced with the copy the scanlator rules choose now. A different group’s copy may have a different page count, so reading positions inside the chapter may shift.')}</p>}
           onConfirm={bulkRefetch}
           onClose={() => setConfirming(null)}
+        />
+      )}
+      {replacing && (
+        <ConfirmDialog
+          title={tr('Replace with this version?')}
+          danger
+          busy={acting}
+          confirmLabel={tr('Fetch this')}
+          // A tombstone has no file to set aside -- the cleanup already deleted it -- and a sentence that
+          // says one is set aside on a row that reads "Deleted from the server" contradicts the row.
+          body={<p>{replacing.book.pruned
+            ? tr('The chapter was deleted from the server; this copy is downloaded onto the same row and everyone’s progress stays.')
+            : tr('The current file is set aside and this copy is downloaded onto the same row. Everyone’s progress stays; the page count may differ.')}</p>}
+          onConfirm={replaceWith}
+          onClose={() => setReplacing(null)}
         />
       )}
 

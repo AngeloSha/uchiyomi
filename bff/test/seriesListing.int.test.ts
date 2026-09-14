@@ -122,7 +122,7 @@ after(async () => {
 });
 
 const listing = (tok: string) => app.inject({ method: 'GET', url: `/api/series/${S}/listing`, headers: { authorization: tok } });
-const rows = () => q('SELECT number, source_id, status, groups, scanlator, chosen FROM series_listing WHERE series_id = $1 ORDER BY number', [S]);
+const rows = () => q('SELECT number, source_id, status, groups, scanlator, chosen, copies FROM series_listing WHERE series_id = $1 ORDER BY number', [S]);
 
 test('the sweep writes what the sources listed', { skip }, async () => {
   // maxNew 0: the listing is written before the loop, and nothing here has pages to download anyway.
@@ -136,6 +136,34 @@ test('the sweep writes what the sources listed', { skip }, async () => {
   assert.equal(three.source_id, PRI);
   assert.equal(typeof three.chosen.sourceId, 'string', 'the chosen copy is stored whole, for the downloader');
   assert.ok(l.every((x: any) => x.status === 'available'), 'nothing held or blocked without preferences');
+});
+
+/**
+ * The sweep writes every copy, in the shape the versions route and a pick read back. Reintroduce by
+ * dropping `copies` from the INSERT in replaceListing (the column's default is `[]`): "every copy" reads 0.
+ * The chosen-first order and the rules' order for the rest are listingRows' own and pinned in
+ * seriesListing.test.ts.
+ */
+test('every copy of a number is kept, the chosen one first', { skip }, async () => {
+  // Chapter 3 is listed by Group A and Group B on the primary; under a priority for B the chosen copy is
+  // B's, and A's copy is still stored beside it.
+  await q(`UPDATE server_settings SET scanlator_prefs = '{"priority":["Group B"],"blocked":[],"patienceDays":2}'::jsonb WHERE id = 1`);
+  try {
+    assert.equal((await updateSeries(S, 0)).outcome, 'ok');
+  } finally {
+    await q(`UPDATE server_settings SET scanlator_prefs = '{"priority":[],"blocked":[],"patienceDays":2}'::jsonb WHERE id = 1`);
+  }
+  const three = (await rows()).find((x: any) => Number(x.number) === 3);
+  assert.equal(three.scanlator, 'Group B', 'PREMISE: B is the chosen copy');
+  assert.equal(three.copies.length, 2, `every copy: ${JSON.stringify(three.copies)}`);
+  assert.deepEqual(three.copies.map((c: any) => c.scanlator), ['Group B', 'Group A'], 'the chosen one first');
+  assert.deepEqual(three.copies[0], {
+    sourceId: 'c/3/Group B', source: PRI, groups: ['Group B'], scanlator: 'Group B', lang: null, pages: null, publishedAt: null,
+  }, 'the shape the versions route and a pick read');
+  const one = (await rows()).find((x: any) => Number(x.number) === 1);
+  assert.deepEqual(one.copies.map((c: any) => c.groups), [[]], 'a copy naming no group is stored with none');
+  // Put the listing back under no preferences for the tests after this one.
+  assert.equal((await updateSeries(S, 0)).outcome, 'ok');
 });
 
 test('the listing route returns only what this library lacks, with the reason', { skip }, async (t) => {

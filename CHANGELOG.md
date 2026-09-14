@@ -1,5 +1,101 @@
 # Changelog
 
+## v0.33.0 — 2026-09-14
+
+The rest of [#40](https://github.com/AngeloSha/uchiyomi/issues/40). v0.32.0 answered it as it had been read:
+a per-source screen, so the ghost rows, the selection bar and the picker of known groups. TIGamingTV then
+made the ask plain with a MangaDot screenshot, and it was never about a source — it was about a *series*:
+every version of a chapter, side by side, with who released it, in what language, how many pages and when;
+and a panel that says who scanlates this title and how they are doing. That is what this release is, and
+the extension carries the group along so a reader app can do the same.
+
+### Who scanlates this
+
+The series page now opens with a **Who scanlates this** card, below the description and above the chapter
+list: one row per group, with how many chapters it has released, the range it covers (*Ch. 12–84*), how
+many of its releases are on this server, when it last released, and a cadence line — *ships daily*, *ships
+weekly*, *ships monthly*, *releases irregularly* — or the thing the card exists to say, *quiet — no release
+in 34 days*. The cadence is the median gap between the group's last ten releases — uploads less than half
+a day apart are one release, so a ten-chapter batch counts once, whatever side of midnight it lands — a day and a half
+or less is daily, up to nine days weekly, up to forty monthly, anything longer irregular; *quiet* is a
+group that has been silent for three of its own intervals or two weeks, whichever is longer (or forty-five
+days for a group with no measurable interval). With fewer than two dated releases there is no rhythm
+label, only *last release {ago}* — or *quiet* after forty-five days. **Show
+chapters** lists the group's numbers as chips — solid for chapters on this server, dimmed for ones it has
+not got — and tapping one scrolls to the row.
+
+**Prefer** and **Block** live here now. They were in *Edit details* since v0.31.0, a panel most readers
+never open, and the group they applied to was a line in a list with a count beside it; they now sit on the
+row of the group whose releases you are looking at, with the ranking arrows and the patience setting, and
+*Edit details* keeps a one-line pointer. The rules have not changed, only the address. Members see the
+card too — the stats are for everyone — and only admins get the buttons (`GET /api/series/:id/groups`;
+`GET /api/admin/series/:id/scanlators` answers with the same stats plus the buttons' state).
+
+### Every version, and Fetch this
+
+The listing the sweep keeps (`series_listing`) held one copy per chapter number — the one the scanlator
+rules chose — and the names of the other groups. It now keeps **every copy**: group, language, page count,
+release date and source, with the chosen one first. A chapter row whose number exists more than once
+shows a **{n} versions** pill; tapping it opens the versions inline, one line each, marked *on this server*,
+*chosen* or *blocked* (`GET /api/series/:id/versions`). Beside each is **Fetch this**: on a grey row it
+downloads exactly that copy; on a chapter already here — admins only, after *Replace with this version?* —
+it is the *Fetch again* of v0.32.0 with the copy named, so a chapter can be swapped for the other group's
+version without losing where anyone was in it (`POST /api/sources/fetch` and `…/chapters/refetch` take
+`picks`).
+
+A pick is an explicit choice of one copy, and it is treated as one: unlike a plain *Fetch*, which follows
+the automatic rules and refuses a blocked group, *Fetch this* on a copy marked *blocked* takes it — you
+pointed at it, with the label in front of you. It still ignores patience and resets the retry cap, as every
+manual fetch does, and it still needs the copy to be in the last check's listing; a copy the listing does
+not know is refused as *not listed*, never guessed at.
+
+And a grey row no longer needs *Select* to be fetched on its own: for anyone who may download, each one
+ends in a cloud icon that fetches that chapter — asked for on #40 with a Tachimanga screenshot, where the
+fetch button sits on the row — the same request the bar's *Fetch* makes, minus the selection.
+
+### Filter the chapter list by group
+
+An **All groups** chip beside *Oldest/Newest* narrows the chapter list to one group — on-disk chapters by
+the group written on them, grey rows by the groups that released them — and a line says *{n} of {m}
+chapters match*. Select mode acts on the filtered set, so "everything Fuuscans released that is not here"
+is a filter, *Select*, *Fetch*.
+
+### On Discover, before you add
+
+The add dialog already fetched a title's chapter list to count it; the count now has company. Under it, a
+compact *Who scanlates this* — the five busiest groups with releases and cadence — and *{n} chapters have
+more than one version*, so which group carries a title, whether it is still moving, and whether the
+scanlator rules will have anything to choose between are all known before the first chapter is downloaded.
+Nothing extra is asked of the source: the list was already in hand (`GET /api/sources/detail` gains
+`groups` and `versions`).
+
+### The extension carries the group
+
+Extension **1.6.4** sets the scanlation group on each chapter it hands Mihon or Tachimanga — the field
+Uchiyomi has recorded since v0.31.0 and the extension had been dropping — so those apps' own *filter by
+group* and *sort by group* work on an Uchiyomi library exactly as they do on MangaDex.
+
+### Extensions with many languages take one card
+
+**Admin → Providers** listed a multi-language extension as one card per language, enabled or not — 3Hentai
+alone was twenty-nine boxes, and the extensions you actually use were somewhere below them. An extension
+now folds into one card: its name, *{n} languages*, how many are on, the worst health among them, and a ▾
+that opens a compact row per language with its own status, series count and Enable/Disable. The header
+counts *{n} sources in {m} providers*. An extension with one source, the built-in engines and sites added
+by URL are the plain cards they were (the source list carries `extension: { pkgName, name }` for `sw:`
+entries).
+
+### The limits, stated
+
+Groups exist where the source names them: MangaDex and the extensions that carry the information. The
+built-in engines and sites added by URL name none, so on those series the card is empty and the chapter
+list has no versions to show. Cadence is measured from the dates the source shows, and a source that shows
+none gives *unknown* rather than a guess. Every number on the card is as old as the last check — the
+nightly sweep or *Check now* — and the card says so, like the grey rows do; a title added from Discover
+gets its listing written by the add itself, so the card is there before the first sweep. On a series never
+checked whose files name no group, members see no card and admins an empty one, so patience stays settable. And a version list is the sources' word, not a promise: a copy that vanished upstream since
+the last check is refused at fetch time, not silently swapped for another.
+
 ## v0.32.0 — 2026-09-14
 
 What one reader asked for after v0.31.0 shipped ([#40](https://github.com/AngeloSha/uchiyomi/issues/40):

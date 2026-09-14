@@ -16,8 +16,11 @@ import { warmHeroBackdrops } from './images';
 import { writeProgress, reachedEnd } from '../lib/progress';
 import { enrichSeries, seriesSeen } from '../lib/enrich';
 import { seriesSourcesFor } from '../lib/seriesSources';
-import { readSeriesPrefs } from '../lib/scanlatorPrefs';
-import { listingFor } from '../lib/seriesListing';
+import { readSeriesPrefs, effectivePrefsFor } from '../lib/scanlatorPrefs';
+import { listingFor, type ListingCopy } from '../lib/seriesListing';
+import { groupStats, type StatCopy } from '../lib/groupStats';
+import { groupsOf, normGroup } from '../lib/releases';
+import { getSource } from '../lib/sources';
 
 
 
@@ -487,6 +490,115 @@ export default async function catalogRoutes(app: FastifyInstance) {
     const f = await one<{ chapter_floor: number | null }>('SELECT chapter_floor FROM lib_series WHERE id = $1', [id]);
     const floor = f?.chapter_floor == null ? null : Number(f.chapter_floor);
     return listingFor(id, { floor, admin: roleOf(req) === 'admin' });
+  });
+
+  /** When the series' sources were last listed, as the listing routes report it. */
+  const checkedAtOf = async (id: string): Promise<string | null> => {
+    const s = await one<{ source_checked_at: Date | null }>('SELECT source_checked_at FROM lib_series WHERE id = $1', [id]);
+    const v = s?.source_checked_at ?? null;
+    return v == null ? null : v instanceof Date ? v.toISOString() : new Date(v).toISOString();
+  };
+
+  /**
+   * Who scanlates this series: one entry per group with how much it released, which chapters, when the
+   * last was, its rhythm and whether it has gone quiet, and how many of its chapters are on this server.
+   *
+   * From the persisted listing's copies plus the group stamps on the files -- never from the sources on a
+   * page open, for the reason the ghost list gives. Same visibility gate as the series: `komga.series`
+   * throws 404 for anything this viewer cannot open, so a walled-off member cannot learn who releases a
+   * series they cannot see. Any viewer who can open the series may read it; ranking and blocking the
+   * groups is the admin route (GET /api/admin/series/:id/scanlators), which carries these same figures.
+   */
+  app.get('/api/series/:id/groups', async (req) => {
+    const { id } = req.params as { id: string };
+    await komga.series(vc(req), id);
+    const rows = await q<{ number: number; copies: ListingCopy[] }>('SELECT number, copies FROM series_listing WHERE series_id = $1', [id]);
+    const copies: StatCopy[] = [];
+    for (const r of rows) for (const c of r.copies ?? []) copies.push({ ...c, number: Number(r.number) });
+    // Live rows only: a tombstone's group is a file that is no longer here, and "3 on this server" has to
+    // count what a reader can open.
+    const onDisk = await q<{ number: number; scanlator: string | null }>(
+      'SELECT number, scanlator FROM lib_books WHERE series_id = $1 AND pruned_at IS NULL AND scanlator IS NOT NULL', [id]);
+    return { checkedAt: await checkedAtOf(id), content: groupStats(copies, onDisk.map((b) => ({ number: Number(b.number), scanlator: b.scanlator }))) };
+  });
+
+  /**
+   * Every version of every listed chapter: per number, each copy the sources list with its group, language,
+   * page count and date, flagged `chosen` (the copy the release rules picked), `blocked` (every group on it
+   * is blocked by the effective preferences -- shown so a person can pick it anyway) and `onDisk` (this
+   * copy is the one on this server, as far as the file's stamps can tell).
+   *
+   * `onDisk` is best effort by construction. A file is stamped with the source it came from and the group
+   * string it was released under, not with a chapter id, so a copy is "on disk" when a live row for the
+   * number came from the same source and its group stamp splits to the same set of groups; a row with no
+   * group stamp at all (a file the scanner found, or one from before v0.31.0) can only be matched to the
+   * chosen copy, which is the one the sweep would have taken -- and such a row usually has no source stamp
+   * either (setBookMeta writes both columns together, and nothing else writes them), so an unknown
+   * provenance matches the chosen copy from any source rather than none. A number listed before v0.33.0
+   * has an empty `copies` until its next check, and the client hides the versions pill for it.
+   *
+   * `chosen` is what the rules would take, so a `blocked` number -- every copy dropped, the first kept in
+   * `chosen` only for display (lib/seriesListing.ts) -- has no chosen copy at all: the rules took nothing.
+   */
+  app.get('/api/series/:id/versions', async (req) => {
+    const { id } = req.params as { id: string };
+    await komga.series(vc(req), id);
+    const rows = await q<{ number: number; source_id: string; status: string; chosen: { sourceId?: string } | null; copies: ListingCopy[] }>(
+      'SELECT number, source_id, status, chosen, copies FROM series_listing WHERE series_id = $1 ORDER BY number', [id]);
+    const books = await q<{ number: number; source_id: string | null; scanlator: string | null }>(
+      'SELECT number, source_id, scanlator FROM lib_books WHERE series_id = $1 AND pruned_at IS NULL', [id]);
+    const booksOf = new Map<number, typeof books>();
+    for (const b of books) {
+      const n = Number(b.number);
+      const list = booksOf.get(n);
+      if (list) list.push(b); else booksOf.set(n, [b]);
+    }
+    const prefs = await effectivePrefsFor(await readSeriesPrefs(id));
+    const blockedKeys = new Set(prefs.blocked.map(normGroup).filter(Boolean));
+    const keysOf = (groups: string[]) => groups.map(normGroup).filter(Boolean).sort().join('\n');
+    const names = new Map<string, string>();
+    const sourceName = (sid: string) => {
+      let n = names.get(sid);
+      if (n === undefined) { n = getSource(sid)?.name ?? sid; names.set(sid, n); }
+      return n;
+    };
+    return {
+      checkedAt: await checkedAtOf(id),
+      content: rows.map((r) => {
+        const number = Number(r.number);
+        const here = booksOf.get(number) ?? [];
+        return {
+          number,
+          copies: (r.copies ?? []).map((c) => {
+            // Reintroduce by dropping the status check: chapter 5 in groupsAndVersions.int.test.ts reads
+            // chosen AND blocked on one copy, and the page shows both pills on a version nobody chose.
+            const chosen = r.status !== 'blocked' && c.source === r.source_id && c.sourceId === r.chosen?.sourceId;
+            const keys = keysOf(c.groups ?? []);
+            return {
+              key: `${c.source}:${c.sourceId}`,
+              source: c.source,
+              sourceName: sourceName(c.source),
+              groups: c.groups ?? [],
+              scanlator: c.scanlator ?? null,
+              lang: c.lang ?? null,
+              pages: c.pages ?? null,
+              publishedAt: c.publishedAt ?? null,
+              chosen,
+              // A copy with no groups is never blocked: the blocklist names groups, and there is none to name.
+              blocked: (c.groups ?? []).length > 0 && (c.groups ?? []).every((g) => blockedKeys.has(normGroup(g))),
+              // A stamped file must match on source AND groups; an unstamped one is the chosen copy whatever
+              // its source column says, NULL included -- on an install older than v0.31.0 most files are
+              // NULL there, and requiring the source first left every one of them "not on disk".
+              // Reintroduce by requiring `b.source_id === c.source` ahead of the stamp check: chapter 7 in
+              // groupsAndVersions.int.test.ts reads [false].
+              onDisk: here.some((b) => b.scanlator
+                ? b.source_id === c.source && keysOf(groupsOf({ scanlator: b.scanlator })) === keys
+                : (b.source_id == null || b.source_id === c.source) && chosen),
+            };
+          }),
+        };
+      }),
+    };
   });
 
   app.get('/api/books/:id', async (req) => {

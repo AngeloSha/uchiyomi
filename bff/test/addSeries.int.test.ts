@@ -221,6 +221,16 @@ test('a "latest 2 of 5" add lands 4 and 5, and floors the series at 4', { skip }
     assert.deepEqual(have, [4, 5], 'the OLDEST two -- [1, 2] -- is what "first" gives and what "latest" used to be');
   });
 
+  await t.test('and the listing is written from the chapters the add fetched, without a second source call', async () => {
+    // "Who scanlates this" and the ghost rows read series_listing; before this a title opened straight from
+    // Discover showed only what was on disk until the sweep reached it. Reintroduce by dropping the
+    // replaceListing call after the lib_series UPDATE in addSeriesFromSource: zero rows.
+    const rows = await q<{ number: number; source_id: string }>(
+      `SELECT l.number, l.source_id FROM series_listing l JOIN lib_series s ON s.id = l.series_id WHERE s.folder = $1 ORDER BY l.number`, [folder]);
+    assert.deepEqual(rows.map((r) => Number(r.number)), [1, 2, 3, 4, 5], 'every chapter the source lists, not only the two that landed');
+    assert.ok(rows.every((r) => r.source_id === LATEST));
+  });
+
   await t.test('and the row carries the floor the updater will honour', async () => {
     const row = (await q(`SELECT chapter_floor FROM lib_series WHERE folder = $1`, [folder]))[0];
     assert.ok(row, 'the series row exists');

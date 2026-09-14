@@ -3,9 +3,11 @@
 //
 // The report is the part worth a real database. It merges three sets that each miss what the others have
 // -- the groups stamped on files (a group that released the early chapters and disbanded is only there),
-// the groups the sources list now (a group that just picked the title up is only there), and the names
-// already in the prefs -- and the last one is the trap: a blocked group that drops out of the listing has
-// to keep appearing, or the block can never be lifted from the page that set it.
+// the groups in the listing the updater persisted at the last check (a group that just picked the title
+// up is only there), and the names already in the prefs -- and the last one is the trap: a blocked group
+// that drops out of the listing has to keep appearing, or the block can never be lifted from the page that
+// set it. Since v0.33.0 the persisted listing (series_listing.copies) is the source of truth for the
+// report, never the sources themselves: the series page reads it on every admin visit.
 //
 // Skipped automatically unless TEST_DATABASE_URL is set (CI provides a throwaway Postgres service).
 import test, { before, after } from 'node:test';
@@ -23,7 +25,7 @@ const skip = DSN ? false : 'set TEST_DATABASE_URL to run';
 
 const SERIES = 's_sp_1', FOLDER = 'Prefs Source/Prefs Series';
 const PRIMARY = 'sp-primary';   // lists Group A, and a joint Group B & Group C release
-const EXTRA = 'sp-extra';       // a followed source that lists Group D
+const EXTRA = 'sp-extra';       // a followed source that lists Group D live, but whose PERSISTED copies name Group E
 const BROKEN = 'sp-broken';     // a followed source whose listing throws
 const USER = 'sp-admin';
 let q: any, app: any, auth: Record<string, string>, savedGlobal: any;
@@ -69,6 +71,21 @@ before(async () => {
   }
   await q(`INSERT INTO series_sources (series_id, source_id, source_series_id) VALUES ($1, $2, 'extra-s'), ($1, $3, 'broken-s')`,
     [SERIES, EXTRA, BROKEN]);
+  // What the last check persisted (lib/seriesListing.ts shape): the primary's three numbers, 3 also from
+  // the follower as Group E, and 4 from the follower alone. Deliberately NOT what the follower lists live
+  // (Group D): the report must read these rows and not ask the source.
+  const copy = (n: number, source: string, groups: string[]) =>
+    ({ sourceId: `c/${n}/${groups.join('+')}`, source, groups, scanlator: groups.join(' & '), lang: null, pages: null, publishedAt: null });
+  const rows: Array<[number, string, ReturnType<typeof copy>[]]> = [
+    [1, PRIMARY, [copy(1, PRIMARY, ['Group A'])]],
+    [2, PRIMARY, [copy(2, PRIMARY, ['Group A'])]],
+    [3, PRIMARY, [copy(3, PRIMARY, ['Group B', 'Group C']), copy(3, EXTRA, ['Group E'])]],
+    [4, EXTRA, [copy(4, EXTRA, ['Group E'])]],
+  ];
+  for (const [n, source, copies] of rows) {
+    await q(`INSERT INTO series_listing (series_id, number, source_id, chosen, status, copies) VALUES ($1, $2, $3, $4::jsonb, 'available', $5::jsonb)`,
+      [SERIES, n, source, JSON.stringify({ sourceId: copies[0].sourceId, number: n, title: `Chapter ${n}`, scanlator: copies[0].scanlator }), JSON.stringify(copies)]);
+  }
   await q('DELETE FROM users WHERE username = $1', [USER]);
   const uid = (await q(`INSERT INTO users (username, display_name, password_hash, role, auth_kind)
                         VALUES ($1,$1,'x','admin','password') RETURNING id`, [USER]))[0].id;
@@ -160,7 +177,7 @@ test('the global preferences persist through the settings route and are read bac
   }
 });
 
-test('the group report merges the disk, every registered source, and the names already in the prefs', { skip }, async (t) => {
+test('the group report merges the disk, the persisted listing, and the names already in the prefs', { skip }, async (t) => {
   await patchSeries({ scanlatorPrefs: { priority: [], blocked: ['Vanished Group'], patienceDays: null } });
   const j = await report();
   const byName = new Map<string, any>(j.groups.map((g: any) => [g.name, g]));
@@ -171,17 +188,20 @@ test('the group report merges the disk, every registered source, and the names a
     assert.equal(byName.get('Old Group')?.listed, 0);
   });
 
-  await t.test('counts from the primary listing, with a joint release counted for each group', () => {
+  await t.test('counts from the persisted primary copies, with a joint release counted for each group', () => {
     assert.equal(byName.get('Group A')?.listed, 2);
     assert.equal(byName.get('Group B')?.listed, 1, 'the joint release names Group B');
     assert.equal(byName.get('Group C')?.listed, 1, 'and Group C');
     assert.equal(byName.get('Group B')?.onDisk, 0);
   });
 
-  await t.test('counts from a followed source, and a followed source that throws counts as nothing listed', () => {
-    assert.equal(byName.get('Group D')?.listed, 2, 'the follower is asked too');
-    // The pin for the throwing follower is the 200 the report answered with above; a listing error has no
-    // path into a group name, so there is nothing else to assert about it.
+  await t.test('the report reads the persisted listing, not the sources', () => {
+    // The follower's persisted copies name Group E; what it lists LIVE is Group D, and a source that throws
+    // (BROKEN) simply has no rows. Reintroduce by listing each followed source live (seriesAndChapters) in
+    // GET /scanlators as v0.32.0 did: Group D appears with listed 2 and Group E is missing -- and every
+    // admin page open costs a listing call per followed source.
+    assert.equal(byName.get('Group E')?.listed, 2, `the follower's persisted copies count: ${JSON.stringify(j.groups.map((g: any) => g.name))}`);
+    assert.equal(byName.get('Group D'), undefined, 'a group only the live listing names is not in the report');
     assert.equal(j.groups.filter((g: any) => byName.has(g.name)).length, j.groups.length, 'every row is a named group');
   });
 

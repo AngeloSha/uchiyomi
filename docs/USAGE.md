@@ -131,13 +131,46 @@ read it this week.
   order and what gets reported to a connected tracker.
 - **Auto-update** toggles whether the updater keeps checking this one for new chapters, and **Check now**
   runs that check immediately instead of waiting for the next sweep.
-- **Scanlators**, in the same *Edit details* panel, ranks or blocks the groups that release this series, for
-  when its source lists a chapter from more than one. See *Choosing a scanlation group* below.
+- **Who scanlates this**, the card between the description and the chapter list, is where the groups that
+  release this series are ranked or blocked, for when its source lists a chapter from more than one; *Edit
+  details* only points there now. See *Who scanlates this* below.
 - **Sources**, also there, lists where the chapters come from: the source the series was added from, and any
   other you have told it to follow. See *Following a second source* below.
 - **Delete** hides the series rather than erasing it. Chapters, ratings, favourites and everyone's reading
   history stay attached, so nothing is lost and it can be put back (see section 8). A hidden series stays
   hidden when the library is rescanned instead of reappearing as a new one.
+
+### Who scanlates this
+
+Between the description and the chapter list, every series whose sources name their groups carries a
+**Who scanlates this** card: one row per scanlation group, with how many chapters it has released
+(*{n} releases · Ch. {a}–{b}*, the range those releases cover), how many of them are on this server
+(*{n} on this server*), and a cadence line. The card opens by itself when the series has two or more
+groups and folds to its header — *Who scanlates this · {n} groups* — otherwise.
+
+The cadence line is what the card is for. *ships daily*, *ships weekly* and *ships monthly* are read
+from the median gap between the group's last ten releases — uploads less than half a day apart are one
+release, so a batch counts once — a day and a half or less is daily, up
+to nine days weekly, up to forty monthly — and a longer gap is *releases irregularly*; *last release
+{ago}* (or *today*) follows it. *quiet — no release in {n} days* replaces the lot when the group has
+been silent for three of its own intervals or two weeks, whichever is longer, or for forty-five days
+when it has no measurable interval. A group with fewer than two dated releases gets no rhythm label —
+only *last release {ago}*, or *quiet — no release in {n} days* after forty-five days — rather than a
+guess. The dates are the ones the source shows, so a source that shows none leaves every group without
+one.
+
+**Show chapters** on a row lists the group's chapter numbers as chips — solid for chapters on this
+server, dimmed for ones it has not got — and tapping a chip scrolls the chapter list to that row. Members
+see the card too: the stats are for everyone. Admins also get **Prefer**, the ▲▼ ranking arrows,
+**Block** and the patience setting on each row; that is where the rules in *Choosing a scanlation group*
+are set since v0.33.0.
+
+Everything on the card is as old as the last check — the nightly sweep, or *Check now* — and the header
+says so (*· as of 2 hours ago*), like the grey rows below it. On a series never checked, the card knows only
+what the files on disk say — a group stamped on a downloaded chapter appears with what is on this server and
+no releases; a series whose files name no group shows members no card, and admins an empty one so patience
+stays settable. The built-in engines and sites added by URL
+name no groups, so on their series the card is empty.
 
 ### Choosing a scanlation group
 
@@ -146,9 +179,9 @@ sources that carry the same information, one chapter number often exists several
 group B's a day later, sometimes a link to the publisher's own site. Uchiyomi keeps one file per chapter, so
 something has to choose, and until v0.31.0 that was whichever copy the source happened to list first.
 
-Now it is yours to decide. **Scanlators**, in the series page's *Edit details* panel, shows every group
-known for the series — how many chapters on disk each one released, and how many copies each has in the
-sources' current listings — and lets you **Prefer** groups in order or **Block** them. A preferred group's
+Now it is yours to decide. **Who scanlates this** on the series page lists every group known for the
+series, with the numbers above, and lets you **Prefer** groups in order or **Block** them from the group's
+own row. A preferred group's
 copy is taken first whenever it exists; a blocked group's copy is never taken while another copy exists. A
 joint release belongs to every group listed on it: it counts as the preferred group's when any of them is
 preferred, and it is blocked only when *all* of them are. A chapter that only blocked groups have released
@@ -169,7 +202,7 @@ is not a missing chapter. The group's name is written into each new file as `<Tr
 information — the built-in engines and sites added by URL — are unaffected: nothing changes for them, and
 files downloaded before v0.31.0 show no group either.
 
-**Use server defaults** in that panel drops everything the series set for itself — ranking, blocks and
+**Use server defaults** on the card drops everything the series set for itself — ranking, blocks and
 patience; the defaults themselves live under
 **Admin → Settings → Scanlators**. The two combine sensibly: a group blocked on the server is blocked in
 every series, a series with its own ranking ignores the server's ranking, and a series with no patience of
@@ -201,7 +234,7 @@ The chapter list also shows, greyed out, every chapter the followed sources list
 hold. Each grey row says why it is not here:
 
 - **Not downloaded yet** — the source lists it and nothing stands in the way; the next check will take it,
-  or *Fetch* takes it now.
+  or *Fetch* takes it now (select the rows and *Fetch*, or tap the fetch icon on the row).
 - **Waiting for a preferred group** — a copy exists, but only from a group you did not rank, and the
   series' *patience* has not run out yet (see *Choosing a scanlation group*).
 - **Failed 3 times** — the download was attempted and gave up; the updater will not try again on its own.
@@ -221,7 +254,36 @@ carries drop off the page until the next sweep.
 
 The **Show chapters not on this server** chip hides or shows the grey rows on this device. Members see them
 too — a grey row is how anyone can tell the difference between "the source has not released it" and "it is
-held for a group" — but only people who may download can fetch.
+held for a group" — but only people who may download can fetch. For them every grey row (except one only
+blocked groups released) ends in a cloud icon: tap it and that one chapter is fetched, the same request
+the selection bar's *Fetch* makes for many. It is the cloud, not the ⬇ on the rows above — that arrow
+saves a chapter to this device, the cloud brings one onto the server.
+
+### Chapter versions and "Fetch this"
+
+Since v0.33.0 the listing keeps every copy of a chapter number the followed sources offer, not only the one
+the scanlator rules chose: the group, the language, the page count, the release date and the source. A
+chapter row whose number exists more than once carries a **{n} versions** pill; tap it and the versions
+open inline, one line each, marked *on this server* (the copy the file came from), *chosen* (what the rules
+would take) or *blocked*. **Fetch this**, beside a version, takes exactly that copy. On a grey row it is a
+download, for anyone who may download. On a chapter already here it is admins only — and only on a file
+Uchiyomi downloaded, never one from a library you built, as with *Fetch again* — asks *Replace with this
+version?*, and is the *Fetch again* below with the copy named: the file is set aside, the version you chose
+is downloaded onto the same row, and everyone's place in it is kept (on a chapter deleted from the server
+there is no file to set aside; the copy simply lands on the row).
+
+A pick is an explicit choice of one copy and is treated as one. It ignores patience and resets the retry
+cap, as every manual fetch does — and, unlike *Fetch*, it also ignores the blocklist: a version marked
+*blocked* is fetched when you press *Fetch this* on it, because you pointed at it with the label in front
+of you. What it never does is guess: a copy that is not in the last check's listing is refused as *not
+listed*, so a version that vanished upstream since the sweep is reported, not swapped for another.
+
+### Filtering by group
+
+**All groups**, the chip beside *Oldest/Newest*, narrows the chapter list to one scanlation group: chapters
+on the server by the group written on them, grey rows by the groups that released them. A line under the
+header says *{n} of {m} chapters match*. Select mode works on the filtered rows, so "everything one group
+released that is not here" is that filter, *Select*, *Fetch*. The filter is not remembered between visits.
 
 ### Selecting chapters
 
@@ -235,7 +297,8 @@ row too), and the bar at the bottom shows what can be done with the selection. *
 - **Fetch** — for grey rows, downloads them to the server now. Anyone who may download (the same permission
   as *Find missing chapters*) can. A manual fetch takes the best copy the sources offer today rather than
   waiting out the patience window, and it retries a chapter that had failed three times; it never takes a
-  blocked group's copy.
+  blocked group's copy. *Fetch this* on a single version (see *Chapter versions*) is the one manual fetch
+  that does take a blocked copy.
 - **Fetch again** and **Delete from server** — admins only, for chapters Uchiyomi downloaded itself. See
   the next section.
 
@@ -341,6 +404,10 @@ again.
   first selected chapter immediately so the series shows up right away, then grabs the rest in the
   background (with a progress bar). With **Latest N**, auto-update only fetches chapters newer than the
   ones you took; the older ones stay on the source until you ask for them with **Find missing chapters**.
+- **Before you add:** under the chapter count, the add dialog shows *Who scanlates this* — the five busiest
+  groups for the title, with how many chapters each released and whether they ship daily, weekly, monthly
+  or have gone quiet — and *{n} chapters have more than one version*, from the chapter list it already
+  fetched to count them. Sources that name no groups show nothing there.
 
 If you try to add a title you already have from another source, Uchiyomi warns you and lets you add a separate copy
 or cancel. A heads-up appears if you queue a lot of chapters at once (sources can rate-limit heavy downloads).
@@ -393,6 +460,12 @@ Each source shows a **health** badge: `ok`, `rate-limited`, `blocked`, or `off`.
 - **Clear** a temporary block (if a site rate-limited you after heavy downloading),
 - **Remove** a site you added (the built-in MangaDex can't be removed),
 - **Reload sources** to re-scan after dropping a compiled source-plugin pack into `SOURCES_DIR`.
+
+An extension that ships one source per language is one card, not one per language: the card is headed
+with the extension's name, *{n} languages*, how many are on and the worst health among them, and opens to
+a compact row per language with its own status, series count and **Enable** / **Disable**. The count
+above the list reads *{n} sources in {m} providers* for the same reason. An extension with a single source,
+the built-in engines and sites added by URL are plain cards as before.
 
 ### When a site won't work
 
@@ -610,7 +683,8 @@ the app open with no connection: it ends when that member signs out, or when the
 expired, but until then a device already holding their downloads can still read them. Signing them out
 everywhere ends it on the next occasion that device reaches the server.
 
-**Providers:** the source health + Add-a-site controls from section 7. This tab also holds **Import a list**,
+**Providers:** the source health + Add-a-site controls from section 7, with a multi-language extension
+folded into one card that opens per language. This tab also holds **Import a list**,
 for moving a library over from another app:
 
 - **Mihon / Tachiyomi backup** — pick your `.tachibk` (or `.proto.gz`) file. Only the titles are read; the
@@ -641,7 +715,7 @@ off in Settings; see [extensions.md](extensions.md).
 interval** (how often Uchiyomi checks your library for new chapters). The **Scanlators** card holds the
 server-wide defaults for choosing between scanlation groups — **Blocked groups**, which apply to every
 series, a **Default priority** for series that have no ranking of their own, and the **Patience (days)**
-before a chapter is taken from a group lower down the list; see *Choosing a scanlation group* in section 4.
+before a chapter is taken from a group lower down the list; see *Who scanlates this* in section 4.
 
 ---
 

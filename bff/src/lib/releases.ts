@@ -104,6 +104,57 @@ export interface ChooseOpts {
   sourceRank?: (source?: string) => number;
 }
 
+/** The priority list as comparison keys, minus the blocked groups, and the blocked set itself. */
+function priorityKeys(prefs: ReleasePrefs): { blocked: Set<string>; priority: string[] } {
+  const blocked = new Set(prefs.blocked.map(normGroup).filter(Boolean));
+  // A blocked group cannot be a first choice: its copies are dropped before ranking, so waiting for it
+  // would hold every number for the whole window and then settle anyway.
+  const priority = prefs.priority.map(normGroup).filter((k) => k && !blocked.has(k));
+  return { blocked, priority };
+}
+
+/**
+ * The order the release rules rank two copies of the SAME number in: hosted before external (pages === 0
+ * is MangaDex's external link; an unknown page count is not), then priority rank, then the caller's
+ * source rank, then earliest release. Zero when nothing separates them, so a caller may add its own
+ * tie-break (chooseReleases keeps the order the source listed them in).
+ *
+ * Exported because the persisted listing stores every copy of a number in this same order, chosen copy
+ * first, and a second copy of the comparator would drift from this one the first time either changed.
+ * An external copy cannot be downloaded at all, so it is never preferred over a hosted one, whatever
+ * group it carries: a top-ranked group's external link would otherwise win the number and then fail on
+ * every sweep while a readable copy sat unchosen. It is only taken when nothing hosted exists.
+ */
+export function releaseOrder(prefs: ReleasePrefs, opts: ChooseOpts = {}): (a: SourceChapter, b: SourceChapter) => number {
+  const sourceRank = opts.sourceRank ?? (() => 0);
+  const { priority } = priorityKeys(prefs);
+  const rankOf = (c: SourceChapter): number => {
+    let best = Infinity;
+    for (const k of groupsOf(c).map(normGroup)) {
+      const i = priority.indexOf(k);
+      if (i >= 0 && i < best) best = i;
+    }
+    return best;
+  };
+  const dateOf = (c: SourceChapter): number => {
+    const t = c.publishedAt ? Date.parse(c.publishedAt) : NaN;
+    return Number.isFinite(t) ? t : Infinity;
+  };
+  const external = (c: SourceChapter) => (c.pages === 0 ? 1 : 0);
+  // Memoised per object: a sort calls the comparator n log n times and groupsOf normalises every name
+  // on every call, which for a thousand-copy MangaDex listing is measurable.
+  const keys = new WeakMap<SourceChapter, { rank: number; date: number; ext: number }>();
+  const keyOf = (c: SourceChapter) => {
+    let k = keys.get(c);
+    if (!k) { k = { rank: rankOf(c), date: dateOf(c), ext: external(c) }; keys.set(c, k); }
+    return k;
+  };
+  return (a, b) => {
+    const x = keyOf(a), y = keyOf(b);
+    return x.ext - y.ext || x.rank - y.rank || sourceRank(a.source) - sourceRank(b.source) || x.date - y.date || 0;
+  };
+}
+
 /**
  * One copy per chapter number, ascending, plus the numbers that are being held for the preferred group.
  *
@@ -120,11 +171,7 @@ export function chooseReleases<T extends SourceChapter>(
   opts: ChooseOpts = {},
 ): { releases: T[]; waiting: number[] } {
   const now = opts.now ?? Date.now();
-  const sourceRank = opts.sourceRank ?? (() => 0);
-  const blocked = new Set(prefs.blocked.map(normGroup).filter(Boolean));
-  // A blocked group cannot be a first choice: its copies are dropped before ranking, so waiting for it
-  // would hold every number for the whole window and then settle anyway.
-  const priority = prefs.priority.map(normGroup).filter((k) => k && !blocked.has(k));
+  const { blocked, priority } = priorityKeys(prefs);
   const rankOf = (keys: string[]): number => {
     let best = Infinity;
     for (const k of keys) {
@@ -150,17 +197,11 @@ export function chooseReleases<T extends SourceChapter>(
     else byNumber.set(c.number, [copy]);
   });
 
-  // An external copy -- MangaDex's link to the publisher's own site, pages === 0 -- cannot be downloaded
-  // at all, so it is never preferred over a hosted one, whatever group it carries: a top-ranked group's
-  // external link would otherwise win the number and then fail on every sweep while a readable copy sat
-  // unchosen. It is only taken when nothing hosted exists.
   const external = (c: SourceChapter) => (c.pages === 0 ? 1 : 0);
-  const order = (a: Copy, b: Copy): number =>
-    external(a.c) - external(b.c) ||
-    a.rank - b.rank ||
-    sourceRank(a.c.source) - sourceRank(b.c.source) ||
-    a.date - b.date ||
-    a.idx - b.idx;
+  // The shared comparator (releaseOrder, above, which is where the hosted-before-external rule is
+  // explained), with the listing order as the final tie-break so the primary wins between equals.
+  const rules = releaseOrder(prefs, opts);
+  const order = (a: Copy, b: Copy): number => rules(a.c, b.c) || a.idx - b.idx;
 
   const releases: T[] = [];
   const waiting: number[] = [];

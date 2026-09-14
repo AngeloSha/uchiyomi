@@ -25,6 +25,13 @@ export const IcSearch = (p: P) => (
 export const IcDownload = (p: P) => (
   <svg {...base(p)}><path d="M12 3v12" /><path d="m7 11 5 5 5-5" /><path d="M5 21h14" /></svg>
 );
+// A cloud with an arrow out of it: "fetch from the source onto this server". Deliberately NOT IcDownload,
+// which every on-disk chapter row spends on "save to this device" -- the two are different promises
+// (a file arrives on the server vs. on the phone in hand), and a ghost row showing the same arrow as the
+// row above it would read as the same action.
+export const IcCloudDownload = (p: P) => (
+  <svg {...base(p)}><path d="M7 18a4.5 4.5 0 0 1-.6-8.96A6 6 0 0 1 18 8a4 4 0 0 1 1 7.9" /><path d="M12 12v9" /><path d="m8.5 17.5 3.5 3.5 3.5-3.5" /></svg>
+);
 export const IcUser = (p: P) => (
   <svg {...base(p)}><circle cx="12" cy="8" r="4" /><path d="M4 21c0-4 4-6 8-6s8 2 8 6" /></svg>
 );

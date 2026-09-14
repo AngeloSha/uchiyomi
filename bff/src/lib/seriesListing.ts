@@ -22,6 +22,21 @@ import { CHAPTER_RETRY_CAP } from './updater';
 
 export type ListingStatus = 'available' | 'held' | 'blocked';
 
+/**
+ * One copy of a number as the listing stores it: what the versions view shows, what the group panel
+ * counts, and what a pick on a fetch is authorised against. `groups` is already split (groupsOf), so a
+ * reader never has to know which source hands over structured groups and which a display string.
+ */
+export interface ListingCopy {
+  sourceId: string;
+  source: string;
+  groups: string[];
+  scanlator: string | null;
+  lang: string | null;
+  pages: number | null;
+  publishedAt: string | null;
+}
+
 export interface ListingRow {
   number: number;
   title: string | null;
@@ -32,6 +47,8 @@ export interface ListingRow {
   sourceId: string;
   /** The copy the release rules chose; for a blocked number, the first copy, kept only for display. */
   chosen: SourceChapter;
+  /** EVERY copy of the number, the chosen one first, the rest as the release rules would rank them. */
+  copies: ListingCopy[];
   status: ListingStatus;
 }
 
@@ -45,8 +62,19 @@ export interface ListingRow {
  * has to be able to name it. The chosen copy's own source wins for `sourceId`; `fallbackSource` is for a
  * copy an adapter tagged with nothing, which inside updateSeries cannot happen (it stamps every copy) but
  * costs nothing to guard.
+ *
+ * Every copy is kept in `copies`, not only the chosen one. The chapter-versions list shows each with its
+ * group, language, page count and date; the "who scanlates this" panel counts releases per group from
+ * them; and a pick -- a person asking for THAT copy by source and id -- is authorised by finding it here,
+ * the same footing the row gives a plain fetch. The chosen copy goes first so a reader of `copies[0]`
+ * reads what the sweep would take; the rest follow in `order`, the release rules' own ranking, so the
+ * list reads "best first" the way the sweep sees it rather than in whatever order the sites listed. With
+ * no `order` the listing order stands.
  */
-export function listingRows(tagged: SourceChapter[], releases: SourceChapter[], held: Set<number>, fallbackSource: string): ListingRow[] {
+export function listingRows(
+  tagged: SourceChapter[], releases: SourceChapter[], held: Set<number>, fallbackSource: string,
+  order?: (a: SourceChapter, b: SourceChapter) => number,
+): ListingRow[] {
   const chosenOf = new Map<number, SourceChapter>();
   for (const r of releases) if (Number.isFinite(r.number)) chosenOf.set(r.number, r);
   const byNumber = new Map<number, SourceChapter[]>();
@@ -71,6 +99,19 @@ export function listingRows(tagged: SourceChapter[], releases: SourceChapter[], 
         groups.push(name);
       }
     }
+    // By identity: chooseReleases returns the very objects it was given, and a number listed twice by one
+    // group (a re-upload) must not have both entries read as chosen.
+    const others = copies.filter((c) => c !== shown);
+    if (order) others.sort(order);
+    const toCopy = (c: SourceChapter): ListingCopy => ({
+      sourceId: c.sourceId,
+      source: c.source ?? fallbackSource,
+      groups: groupsOf(c),
+      scanlator: c.scanlator ?? null,
+      lang: c.lang ?? null,
+      pages: typeof c.pages === 'number' && Number.isFinite(c.pages) ? c.pages : null,
+      publishedAt: c.publishedAt && Number.isFinite(Date.parse(c.publishedAt)) ? c.publishedAt : null,
+    });
     out.push({
       number,
       title: shown.title ?? null,
@@ -79,13 +120,14 @@ export function listingRows(tagged: SourceChapter[], releases: SourceChapter[], 
       groups,
       sourceId: shown.source ?? fallbackSource,
       chosen: shown,
+      copies: [shown, ...others].map(toCopy),
       status: !chosen ? 'blocked' : held.has(number) ? 'held' : 'available',
     });
   }
   return out;
 }
 
-/** Rows per INSERT statement. Parameters are 9 per row, and Postgres takes 65,535 per statement. */
+/** Rows per INSERT statement. Parameters are 10 per row, and Postgres takes 65,535 per statement. */
 const CHUNK = 500;
 
 /**
@@ -101,19 +143,39 @@ export async function replaceListing(seriesId: string, rows: ListingRow[]): Prom
       const tuples: string[] = [];
       for (const r of rows.slice(i, i + CHUNK)) {
         const b = params.length;
-        tuples.push(`($1, $${b + 1}::real, $${b + 2}, $${b + 3}::timestamptz, $${b + 4}, $${b + 5}::text[], $${b + 6}, $${b + 7}::jsonb, $${b + 8})`);
+        tuples.push(`($1, $${b + 1}::real, $${b + 2}, $${b + 3}::timestamptz, $${b + 4}, $${b + 5}::text[], $${b + 6}, $${b + 7}::jsonb, $${b + 8}, $${b + 9}::jsonb)`);
         // An unparsable date is stored as no date rather than failing the whole listing: the source's
         // string is best-effort on scraped sites, and setBookDates already treats it that way.
         const at = r.publishedAt && Number.isFinite(Date.parse(r.publishedAt)) ? r.publishedAt : null;
-        params.push(r.number, r.title, at, r.scanlator, r.groups, r.sourceId, JSON.stringify(r.chosen), r.status);
+        params.push(r.number, r.title, at, r.scanlator, r.groups, r.sourceId, JSON.stringify(r.chosen), r.status, JSON.stringify(r.copies));
       }
       await qq(
-        `INSERT INTO series_listing (series_id, number, title, published_at, scanlator, groups, source_id, chosen, status)
+        `INSERT INTO series_listing (series_id, number, title, published_at, scanlator, groups, source_id, chosen, status, copies)
          VALUES ${tuples.join(',')}`,
         params,
       );
     }
   });
+}
+
+/**
+ * A stored copy as the downloader takes it. `groups` is the already-split list, which groupsOf reads back
+ * identically (an array is authoritative), so the file's Translator tag and the lib_books.scanlator stamp
+ * come out as they would have from the live listing. The title is the row's: a copy stores none of its
+ * own, and the number's title is the same whichever group released it.
+ */
+export function copyToChapter(copy: ListingCopy, row: { number: number; title: string | null }): SourceChapter {
+  return {
+    sourceId: copy.sourceId,
+    number: row.number,
+    title: row.title ?? undefined,
+    pages: copy.pages ?? undefined,
+    publishedAt: copy.publishedAt ?? undefined,
+    scanlator: copy.scanlator ?? undefined,
+    groups: copy.groups,
+    lang: copy.lang ?? undefined,
+    source: copy.source,
+  };
 }
 
 export type GhostWhy = 'missing' | 'held' | 'blocked' | 'failed' | 'floor';

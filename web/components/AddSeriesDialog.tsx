@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
-import { Page, Series } from '@/lib/types';
+import { GroupStat, Page, Series } from '@/lib/types';
 import { Modal, msgOf } from '@/components/ConfirmDialog';
 import { Img, ProgressBar } from '@/components/ui';
 import { sourceCover } from '@/components/cards';
@@ -12,11 +12,16 @@ import { useToast } from '@/components/Toast';
 import { IcCheck, IcChevronLeft } from '@/components/icons';
 import { t as tr } from '@/lib/i18n';
 import { normTitle } from '@/lib/normTitle';
+import { cadenceText } from '@/lib/cadence';
 
 export interface Provider { source: string; name: string; sourceId: string; title: string; coverUrl?: string }
 interface Detail {
   source: string; sourceId: string; title: string; summary: string; coverUrl: string | null;
   genres: string[]; status: string; count: number; first: number | null; last: number | null;
+  /** Who releases it, from the live chapter list (so `onDisk` is 0 -- nothing is on disk yet). Absent from an older server. */
+  groups?: GroupStat[];
+  /** How many numbers have more than one copy. */
+  versions?: number;
 }
 interface Job { folder: string; title: string; total: number; done: number; status: string }
 
@@ -233,6 +238,33 @@ export function AddSeriesDialog({ seed, sources, onClose, onAdded }: {
               {detail.count} {detail.count === 1 ? tr('chapter') : tr('chapters')}
               {detail.first != null && detail.last != null && <> · {detail.first}–{detail.last}</>}
             </p>
+            {/* The series page's Who scanlates this, compressed to what fits a dialog: the five busiest groups
+                and their rhythm, so "is this being translated" is answered before the add, not after. No
+                controls -- there is no series to set preferences on yet. */}
+            {!!detail.groups?.length && (
+              <div className="mt-1.5">
+                <p className="text-[11px] font-semibold uppercase tracking-wider text-fog-500">{tr('Who scanlates this')}</p>
+                {[...detail.groups].sort((a, b) => b.releases - a.releases).slice(0, 5).map((g) => {
+                  const cadence = cadenceText(g.cadence, g.lastReleaseAt);
+                  return (
+                    // ⚠️ No `truncate` here, and the rhythm on its own line. The column is ~290 px even on a
+                    // desktop, and one truncated line cut exactly the words this block exists for: "quiet
+                    // -- no release in 100 ..." lost the day count, "ships weekly · last release ..." lost
+                    // when. The name still gets a `title` in case it is the long part. Reintroduce by
+                    // putting the cadence back on the first line with `truncate`: the day count is gone.
+                    <div key={g.name} className="text-[11px] text-fog-500">
+                      <p className="break-words">
+                        <span className="text-fog-300" title={g.name}>{g.name}</span> · {g.releases === 1 ? tr('1 release') : tr('{n} releases', { n: g.releases })}
+                      </p>
+                      {cadence && <p className={`break-words ${g.cadence.quiet ? 'text-amber-300' : ''}`}>{cadence}</p>}
+                    </div>
+                  );
+                })}
+                {(detail.versions ?? 0) > 0 && (
+                  <p className="mt-0.5 text-[11px] text-fog-500">{detail.versions === 1 ? tr('1 chapter has more than one version') : tr('{n} chapters have more than one version', { n: detail.versions ?? 0 })}</p>
+                )}
+              </div>
+            )}
             {detail.genres.length > 0 && (
               <p className="mt-1 line-clamp-1 text-[11px] text-fog-500">{detail.genres.slice(0, 4).join(' · ')}</p>
             )}

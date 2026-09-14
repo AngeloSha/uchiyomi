@@ -25,9 +25,20 @@ export interface RemoteSource {
   isNsfw?: boolean | null;
   supportsLatest?: boolean | null;
   baseUrl?: string | null;
+  /**
+   * The installed extension (APK) this source came out of. One package can expose many sources -- 3Hentai
+   * is one extension and twenty-nine language variants -- and `pkgName` is the only thing they share that
+   * is not a guess: the display names differ by their ` (XX)` suffix and nothing else, which is exactly the
+   * kind of string comparison that breaks on the first extension with a bracket in its name. Optional and
+   * nullable on our side because the value comes from a server we do not control: a node that answers
+   * without it must register as a source with an unknown extension, never fail the whole list.
+   */
+  extension?: { pkgName?: string | null; name?: string | null } | null;
 }
 
-const SOURCES_Q = `{ sources { totalCount nodes { id name displayName lang iconUrl isNsfw supportsLatest baseUrl } } }`;
+// `extension { pkgName name }` was checked against the live engine (Suwayomi-Server v2.2.2100) before it
+// was added here; every node carried it, including the built-in local source with a fake package name.
+const SOURCES_Q = `{ sources { totalCount nodes { id name displayName lang iconUrl isNsfw supportsLatest baseUrl extension { pkgName name } } } }`;
 
 /** Every source Suwayomi currently exposes (one per source in each installed extension). */
 export async function listRemoteSources(run: Gql = defaultGql): Promise<RemoteSource[]> {

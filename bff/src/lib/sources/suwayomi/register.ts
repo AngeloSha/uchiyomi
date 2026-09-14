@@ -18,6 +18,9 @@ export interface EnabledRow {
   name: string;
   lang: string | null;
   enabled: boolean;
+  /** The extension package this source belongs to, and the extension's own name. Null when the engine did not say. */
+  pkg_name: string | null;
+  ext_name: string | null;
 }
 
 export async function enabledSourceIds(): Promise<Set<string>> {
@@ -31,9 +34,16 @@ async function remember(sources: RemoteSource[]): Promise<void> {
     await q(
       // `nsfw` is refreshed on every re-register alongside the name and language: an extension that turns
       // adult in a later version must not keep an old `false` and stay reachable by a capped account.
-      `INSERT INTO suwayomi_sources (source_id, name, lang, nsfw, enabled) VALUES ($1,$2,$3,$4,false)
-       ON CONFLICT (source_id) DO UPDATE SET name = EXCLUDED.name, lang = EXCLUDED.lang, nsfw = EXCLUDED.nsfw`,
-      [String(s.id), s.displayName?.trim() || s.name, s.lang ?? null, !!s.isNsfw],
+      // `pkg_name`/`ext_name` are refreshed the same way so the Providers page can fold one extension's
+      // language variants into one card; both are null rather than '' when the engine did not say, because
+      // '' is a real (if silly) package name and would fold every unknown source into one group.
+      `INSERT INTO suwayomi_sources (source_id, name, lang, nsfw, enabled, pkg_name, ext_name) VALUES ($1,$2,$3,$4,false,$5,$6)
+       ON CONFLICT (source_id) DO UPDATE SET name = EXCLUDED.name, lang = EXCLUDED.lang, nsfw = EXCLUDED.nsfw,
+         pkg_name = EXCLUDED.pkg_name, ext_name = EXCLUDED.ext_name`,
+      [
+        String(s.id), s.displayName?.trim() || s.name, s.lang ?? null, !!s.isNsfw,
+        s.extension?.pkgName?.trim() || null, s.extension?.name?.trim() || null,
+      ],
     ).catch(() => {});
   }
 }

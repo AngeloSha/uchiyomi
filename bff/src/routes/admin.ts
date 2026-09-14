@@ -33,13 +33,15 @@ import { ART_DIR, artFile, artOverview } from '../lib/seriesArt';
 import { writePreflight } from '../lib/fsGuard';
 // Admin stats report on the whole library by definition; this route is already behind requireAdmin.
 import { NO_LIBRARIES, SYSTEM_CTX, visibleToAll } from '../lib/visibility';
-import { addSeriesFromSource, findBestMatch, norm, seriesAndChapters, jobBusy, startDownloadJob, FILL_MAX_CHAPTERS, REFRESH_BUDGET_MS } from './sources';
+import { addSeriesFromSource, findBestMatch, norm, jobBusy, startDownloadJob, FILL_MAX_CHAPTERS, REFRESH_BUDGET_MS } from './sources';
 import { chapterFileRel } from '../lib/downloader';
 import { REFETCH_BAK } from '../lib/fsAtomic';
 import type { SourceChapter } from '../lib/sources/types';
 import { getPlan, MIN_COVERAGE } from '../lib/fill';
 import { prefsSchema, readGlobalPrefs, readSeriesPrefs, effectivePrefsFor } from '../lib/scanlatorPrefs';
 import { groupsOf, normGroup } from '../lib/releases';
+import { groupStats, emptyGroupStat, type StatCopy } from '../lib/groupStats';
+import { copyToChapter, type ListingCopy } from '../lib/seriesListing';
 import { seriesSourcesFor } from '../lib/seriesSources';
 import { titlesFromBackup } from '../lib/tachibk';
 import { linkSeries } from '../lib/trackers';
@@ -473,12 +475,23 @@ export default async function adminRoutes(app: FastifyInstance) {
    * The groups an admin can rank or block for one series, and where the current preferences stand.
    *
    * Two places know a group name: the files on disk (lib_books.scanlator, stamped as chapters land) and the
-   * listings of the series' sources, primary and followed alike. Both are read, because each misses what
-   * the other has -- a group that released the early chapters and then disbanded is only on disk, a group
-   * that just picked the title up is only in the listing. The names already in the prefs are added as a
-   * third set: a blocked group that has since vanished from the listing has to stay visible or there is no
-   * control left to unblock it with. Listing errors count as nothing listed rather than failing the page;
-   * the point is to offer names, and a source that is down still leaves the disk and the prefs to offer.
+   * listing the updater persisted at the last check, every copy from the primary and the followed sources
+   * alike (series_listing.copies). Both are read, because each misses what the other has -- a group that
+   * released the early chapters and then disbanded is only on disk, a group that just picked the title up
+   * is only in the listing. The names already in the prefs are added as a third set: a blocked group that
+   * has since vanished from the listing has to stay visible or there is no control left to unblock it with.
+   *
+   * ⚠️ The persisted listing, never the sources themselves: the series page mounts this for every admin
+   * visit, and asking each followed source live -- as v0.32.0 did, when only Edit details read it -- put a
+   * listing call per source, a FlareSolverr solve for a Cloudflare one, in front of the card on every page
+   * open, and gave the admin live figures where the docs promise "as old as the last check". The same
+   * rule GET /api/series/:id/listing gives (routes/catalog.ts). A source that is down leaves its last
+   * listing standing, so there is no error path to swallow here any more.
+   *
+   * Each entry carries the same figures as GET /api/series/:id/groups (lib/groupStats.ts, one aggregator
+   * for both) plus `listed`, kept equal to `releases` for clients written against the v0.31.0 shape: the
+   * editor is the panel with buttons, and two counts of the same thing would disagree the first time one
+   * of them changed.
    */
   app.get('/api/admin/series/:id/scanlators', async (req, reply) => {
     const { id } = req.params as { id: string };
@@ -488,36 +501,43 @@ export default async function adminRoutes(app: FastifyInstance) {
     const global = await readGlobalPrefs();
     const eff = await effectivePrefsFor(prefs);
 
-    // Deduped by normGroup, first spelling wins: the source's casing over the disk's over the prefs'.
-    const groups = new Map<string, { name: string; onDisk: number; listed: number }>();
-    const entry = (name: string) => {
-      const key = normGroup(name);
-      if (!key) return null;
-      let g = groups.get(key);
-      if (!g) { g = { name, onDisk: 0, listed: 0 }; groups.set(key, g); }
-      return g;
-    };
-    for (const src of await seriesSourcesFor(id)) {
-      if (!src.registered || !src.sourceSeriesId) continue;
-      const adapter = getSource(src.sourceId);
-      if (!adapter) continue;
-      const chapters = await seriesAndChapters(adapter, src.sourceSeriesId).then((r) => r.chapters, () => []);
-      for (const c of chapters) for (const name of groupsOf(c)) { const g = entry(name); if (g) g.listed++; }
-    }
-    const onDisk = await q<{ scanlator: string; n: number }>(
-      'SELECT scanlator, count(*)::int AS n FROM lib_books WHERE series_id = $1 AND scanlator IS NOT NULL GROUP BY 1', [id]);
-    for (const r of onDisk) for (const name of groupsOf({ scanlator: r.scanlator })) { const g = entry(name); if (g) g.onDisk += r.n; }
+    // Reintroduce by listing each followed source live (seriesAndChapters) instead: "the report reads the
+    // persisted listing, not the sources" in scanlatorPrefs.int.test.ts finds Group D, which no persisted
+    // row names, and misses Group E, which only a persisted row names.
+    const listed = await q<{ number: number; copies: ListingCopy[] }>('SELECT number, copies FROM series_listing WHERE series_id = $1', [id]);
+    const copies: StatCopy[] = [];
+    for (const r of listed) for (const c of r.copies ?? []) copies.push({ ...c, number: Number(r.number) });
+    // Live rows only, as GET /api/series/:id/groups counts them: a tombstone's group is a file that is no
+    // longer here, and the admin's "3 on this server" must be the member's.
+    // Reintroduce by dropping `pruned_at IS NULL`: "the admin editor carries the same figures" in
+    // groupsAndVersions.int.test.ts reads Group C onDisk 1 where GET /groups reads 0.
+    const onDisk = await q<{ number: number; scanlator: string }>(
+      'SELECT number, scanlator FROM lib_books WHERE series_id = $1 AND pruned_at IS NULL AND scanlator IS NOT NULL', [id]);
+    const stats = groupStats(copies, onDisk.map((b) => ({ number: Number(b.number), scanlator: b.scanlator })));
+    const have = new Set(stats.map((g) => normGroup(g.name)));
     // The effective set already holds the series' own names (a series priority replaces the global list, a
-    // series block joins it), so one pass over it covers both rows.
+    // series block joins it), so one pass over it covers both rows. A name nothing lists or holds gets a
+    // row of zeros: still a row, still a button.
     // Reintroduce by dropping this loop: "a blocked group that vanished from the listing is still offered"
     // in scanlatorPrefs.int.test.ts fails -- the name is in `blocked` and absent from `groups`.
-    for (const name of [...eff.priority, ...eff.blocked]) entry(name);
+    for (const name of [...eff.priority, ...eff.blocked]) {
+      const key = normGroup(name);
+      if (!key || have.has(key)) continue;
+      have.add(key);
+      stats.push(emptyGroupStat(name));
+    }
 
+    // How old the figures are, as GET /api/series/:id/groups reports it: the editor is the panel with
+    // buttons, and it says the same "as of" the panel does. (getSeriesRow is an explicit column list
+    // without this column -- read it here rather than widen a helper twenty routes share.)
+    const at = (await one<{ source_checked_at: Date | string | null }>('SELECT source_checked_at FROM lib_series WHERE id = $1', [id]))?.source_checked_at ?? null;
     return {
+      checkedAt: at == null ? null : at instanceof Date ? at.toISOString() : new Date(at).toISOString(),
       prefs,
       global,
       effective: { priority: eff.priority, blocked: eff.blocked, patienceDays: Math.round(eff.patienceMs / 86_400_000) },
-      groups: [...groups.values()].sort((a, b) => (b.onDisk + b.listed) - (a.onDisk + a.listed) || a.name.localeCompare(b.name)),
+      groups: stats.map((g) => ({ ...g, listed: g.releases }))
+        .sort((a, b) => (b.onDisk + b.listed) - (a.onDisk + a.listed) || a.name.localeCompare(b.name)),
     };
   });
 
@@ -929,18 +949,43 @@ export default async function adminRoutes(app: FastifyInstance) {
    * until the new one lands, and put back if it does not: a re-download that fails must never cost the
    * chapter that was there. A restart mid-refetch leaves the bak orphaned; reapStaleTemp (lib/fsAtomic.ts)
    * puts those back at boot.
+   *
+   * A pick -- `{ bookId, source, sourceId }` -- replaces the row's file with ONE named copy out of the
+   * number's stored versions rather than with the rules' choice: "this chapter, but group B's version".
+   * The row's number selects the listing row and the pick selects the copy in it (`not_listed` when no
+   * stored copy matches). As on POST /api/sources/fetch, a pick ignores the group rules including the
+   * blocklist: the versions list labels the copy blocked, and an admin who asks for it anyway has chosen
+   * that copy on purpose. Everything after the choice -- set aside, mark, settle -- is the same path.
    */
   app.post('/api/admin/series/:id/chapters/refetch', async (req, reply) => {
     const { id } = req.params as { id: string };
-    const b = z.object({ bookIds: z.array(z.string().min(1).max(64)).min(1).max(FILL_MAX_CHAPTERS) }).safeParse(req.body);
+    const bookId = z.string().min(1).max(64);
+    const b = z.object({
+      bookIds: z.array(bookId).max(FILL_MAX_CHAPTERS).optional(),
+      picks: z.array(z.object({ bookId, source: z.string().min(1).max(200), sourceId: z.string().min(1).max(200) })).max(FILL_MAX_CHAPTERS).optional(),
+    })
+      // One cap over both lists, as on the member-facing fetch: one job, one documented size.
+      .refine((v) => (v.bookIds?.length ?? 0) + (v.picks?.length ?? 0) >= 1, { message: 'nothing named' })
+      .refine((v) => (v.bookIds?.length ?? 0) + (v.picks?.length ?? 0) <= FILL_MAX_CHAPTERS, { message: 'too many' })
+      .safeParse(req.body);
     if (!b.success) return reply.code(400).send({ error: 'bad_request' });
     const s = await one<any>(
       `SELECT id, title, folder, summary, author, genres, web, status, source_id FROM lib_series WHERE id = $1`, [id]);
     if (!s) return reply.code(404).send({ error: 'not_found' });
-    const ids = [...new Set(b.data.bookIds)];
+    // First pick per row wins; a row named in both lists is fetched as its pick, the more specific ask. A
+    // second pick for the same row is reported as `duplicate`, as on POST /api/sources/fetch, rather than
+    // dropped without a word.
+    const skipped: Array<{ id: string; reason: string; source?: string; sourceId?: string }> = [];
+    const pickOf = new Map<string, { source: string; sourceId: string }>();
+    for (const pk of b.data.picks ?? []) {
+      if (!pickOf.has(pk.bookId)) pickOf.set(pk.bookId, pk);
+      // Named like the fetch route's entry: a scripted caller sending two copies for one row must be able
+      // to tell WHICH one was ignored.
+      else skipped.push({ id: pk.bookId, reason: 'duplicate', source: pk.source, sourceId: pk.sourceId });
+    }
+    const ids = [...new Set([...(b.data.bookIds ?? []), ...pickOf.keys()])];
     const rows = new Map((await chapterRows(id, ids)).map((r) => [r.id, r]));
 
-    const skipped: Array<{ id: string; reason: string }> = [];
     const eligible: Array<{ id: string; number: number; file: string; abs: string; pruned: boolean }> = [];
     const root = resolve(DL_ROOT);
     for (const bid of ids) {
@@ -973,8 +1018,8 @@ export default async function adminRoutes(app: FastifyInstance) {
     }
     // The listing is the authorisation, exactly as POST /api/sources/fetch: what is fetched is the chosen
     // copy in it, and a number the sources no longer list has nothing to fetch.
-    const listed = new Map((await q<{ number: number; source_id: string; status: string; chosen: SourceChapter }>(
-      'SELECT number, source_id, status, chosen FROM series_listing WHERE series_id = $1 AND number = ANY($2::real[])',
+    const listed = new Map((await q<{ number: number; title: string | null; source_id: string; status: string; chosen: SourceChapter; copies: ListingCopy[] }>(
+      'SELECT number, title, source_id, status, chosen, copies FROM series_listing WHERE series_id = $1 AND number = ANY($2::real[])',
       [id, eligible.map((e) => e.number)],
     )).map((r) => [Number(r.number), r]));
     // A listing row's source_id is trusted only while the series still follows that source: the primary,
@@ -1000,6 +1045,17 @@ export default async function adminRoutes(app: FastifyInstance) {
     const todo: Array<{ row: typeof eligible[number]; chapter: SourceChapter }> = [];
     for (const e of eligible) {
       const l = listed.get(e.number);
+      const pick = pickOf.get(e.id);
+      if (pick) {
+        // The named copy, and nothing about the number's status: the blocklist is the sweep's rule, not
+        // the admin's hand (the route comment). The source gate still applies to the copy's own source.
+        const copy = l?.copies?.find((c) => c.source === pick.source && c.sourceId === pick.sourceId);
+        if (!l || !copy) { skipped.push({ id: e.id, reason: 'not_listed' }); continue; }
+        const st = await stateOf(copy.source);
+        if (st !== 'ok') { skipped.push({ id: e.id, reason: st }); continue; }
+        todo.push({ row: e, chapter: copyToChapter(copy, { number: e.number, title: l.title }) });
+        continue;
+      }
       if (!l) { skipped.push({ id: e.id, reason: 'not_listed' }); continue; }
       if (l.status === 'blocked') { skipped.push({ id: e.id, reason: 'blocked_group' }); continue; }
       const st = await stateOf(l.source_id);
@@ -1026,9 +1082,10 @@ export default async function adminRoutes(app: FastifyInstance) {
     }
     await q('DELETE FROM chapter_failures WHERE series_id = $1 AND number = ANY($2::real[])',
       [id, todo.map((t) => t.row.number)]).catch(() => {});
+    const picks = todo.filter((t) => pickOf.has(t.row.id)).map((t) => ({ bookId: t.row.id, number: t.row.number, source: t.chapter.source, sourceId: t.chapter.sourceId }));
     await logAudit('series.chapters_refetch', {
       userId: userIdOf(req),
-      detail: { id, title: s.title, bookIds: todo.map((t) => t.row.id), numbers: todo.map((t) => t.row.number), skipped },
+      detail: { id, title: s.title, bookIds: todo.map((t) => t.row.id), numbers: todo.map((t) => t.row.number), ...(picks.length ? { picks } : {}), skipped },
       req,
     });
     const { total } = startDownloadJob({

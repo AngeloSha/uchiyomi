@@ -14,11 +14,13 @@ process.env.CONFIG_DIR ||= '/tmp/uchiyomi-test-config';
 // and lib/env refuses to load without DATABASE_URL. Nothing here connects -- the DSN points nowhere.
 let listingRows: typeof import('../src/lib/seriesListing')['listingRows'];
 let whyOf: typeof import('../src/lib/seriesListing')['whyOf'];
+let copyToChapter: typeof import('../src/lib/seriesListing')['copyToChapter'];
 let chooseReleases: typeof import('../src/lib/releases')['chooseReleases'];
+let releaseOrder: typeof import('../src/lib/releases')['releaseOrder'];
 let CHAPTER_RETRY_CAP: number;
 before(async () => {
-  ({ listingRows, whyOf } = await import('../src/lib/seriesListing'));
-  ({ chooseReleases } = await import('../src/lib/releases'));
+  ({ listingRows, whyOf, copyToChapter } = await import('../src/lib/seriesListing'));
+  ({ chooseReleases, releaseOrder } = await import('../src/lib/releases'));
   ({ CHAPTER_RETRY_CAP } = await import('../src/lib/updater'));
 });
 
@@ -48,6 +50,45 @@ test('one row per number, carrying every group of every copy and the chosen copy
   assert.equal(rows[2].sourceId, 'fol', 'a number only the follower lists is fetched through the follower');
   assert.equal(rows[0].sourceId, 'pri');
   assert.deepEqual(rows[0].groups, [], 'a copy naming no group contributes no group');
+});
+
+/**
+ * Reintroduce by storing `[shown].map(toCopy)` alone in listingRows: chapter 3 has one copy and "every
+ * copy" reads 1. Reintroduce the order by dropping the `others.sort(order)`: the follower's copy of 3 sits
+ * before the primary's blocked-by-nobody Group A copy, because the source listed it first.
+ */
+test('every copy of a number is kept, the chosen one first', () => {
+  // Chapter 3: the primary lists Group A, then an external link from Group B, then the follower lists
+  // Group C. Under a priority for B the rules would still take A's copy (B's is an external link, which is
+  // never preferred over a hosted one), so A is chosen; the rest follow in the rules' order -- C's hosted
+  // copy before B's external one -- rather than the order the sites listed them in.
+  const tagged = [
+    ch(3, { scanlator: 'Group A', source: 'pri', pages: 10, publishedAt: '2026-09-01T00:00:00Z' }),
+    ch(3, { scanlator: 'Group B', source: 'pri', pages: 0, publishedAt: '2026-09-02T00:00:00Z', lang: 'en' }),
+    ch(3, { scanlator: 'Group C', source: 'fol', publishedAt: 'not a date' }),
+    ch(4, { source: 'pri' }),
+  ];
+  const prefs = { ...noPrefs, priority: ['Group B'] };
+  const opts = { sourceRank: (s?: string) => (s === 'pri' ? 0 : 1) };
+  const { releases, waiting } = chooseReleases(tagged, prefs, opts);
+  const rows = listingRows(tagged, releases, new Set(waiting), 'pri', releaseOrder(prefs, opts));
+  const three = rows.find((r) => r.number === 3)!;
+  assert.equal(three.copies.length, 3, 'every copy');
+  assert.deepEqual(three.copies.map((c) => c.scanlator), ['Group A', 'Group C', 'Group B'], 'chosen first, then the rules\' order');
+  assert.deepEqual(three.copies[0], {
+    sourceId: 'c/3/Group A', source: 'pri', groups: ['Group A'], scanlator: 'Group A', lang: null, pages: 10, publishedAt: '2026-09-01T00:00:00Z',
+  });
+  assert.equal(three.copies[1].publishedAt, null, 'an unparsable date is stored as no date, as the row\'s own is');
+  assert.equal(three.copies[1].source, 'fol');
+  assert.deepEqual([three.copies[2].lang, three.copies[2].pages], ['en', 0]);
+  assert.deepEqual(rows.find((r) => r.number === 4)!.copies.map((c) => c.groups), [[]], 'a copy naming no group has no groups');
+
+  // And a stored copy comes back to the downloader as the chapter it was, with the row's title.
+  const back = copyToChapter(three.copies[2], { number: 3, title: 'Chapter 3' });
+  assert.deepEqual(back, {
+    sourceId: 'c/3/Group B', number: 3, title: 'Chapter 3', pages: 0, publishedAt: '2026-09-02T00:00:00Z',
+    scanlator: 'Group B', groups: ['Group B'], lang: 'en', source: 'pri',
+  });
 });
 
 test('a number only blocked groups released is kept as blocked, with a copy to show', () => {

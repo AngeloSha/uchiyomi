@@ -260,6 +260,16 @@ CREATE TABLE IF NOT EXISTS series_listing (
   updated_at   timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (series_id, number)
 );
+-- Every copy of the number the sources listed, not only the chosen one: v0.33.0's "who scanlates this"
+-- panel and the chapter-versions list need each copy's group, language, page count and date, and a
+-- specific-version fetch (picks on POST /api/sources/fetch and the admin refetch) is AUTHORISED against
+-- exactly these entries, the way a plain fetch is authorised against the row. Each entry is
+-- { sourceId, source, groups, scanlator, lang, pages, publishedAt }, ordered the way the release rules
+-- rank them, chosen copy first, so a client that reads copies[0] reads what the sweep would take.
+-- Size: a long MangaDex title lists about three copies for each of about a thousand numbers at about
+-- two hundred bytes each -- under a megabyte per series, rewritten whole at every check like the rest
+-- of the row. Rows written before v0.33.0 carry the empty default until the series' next check.
+ALTER TABLE series_listing ADD COLUMN IF NOT EXISTS copies jsonb NOT NULL DEFAULT '[]';
 
 -- Content identity, so a chapter can be recognised after it moves. Derived from the archive's central
 -- directory (entry names + CRC-32 + uncompressed sizes), which is cheap to read and survives recompression.
@@ -666,6 +676,12 @@ CREATE TABLE IF NOT EXISTS suwayomi_sources (
 -- API. Without it there is no way to keep an age-capped account out of an adult source, and on a real
 -- install that is not a corner case: 36 of 44 enabled sources on the one this was written for are adult.
 ALTER TABLE suwayomi_sources ADD COLUMN IF NOT EXISTS nsfw boolean NOT NULL DEFAULT false;
+-- Which installed extension (APK package) the source came out of, and that extension's own name. One
+-- package can expose dozens of sources -- 3Hentai is one extension and twenty-nine language variants --
+-- and the Providers page folds them into one card by pkg_name. NULL when the engine did not say; the API
+-- then falls back to the display name with its language suffix stripped.
+ALTER TABLE suwayomi_sources ADD COLUMN IF NOT EXISTS pkg_name text;
+ALTER TABLE suwayomi_sources ADD COLUMN IF NOT EXISTS ext_name text;
 
 
 -- OIDC identity linked to a local account. Kept alongside the password columns rather than replacing them,

@@ -12,7 +12,7 @@ import { budgetFor } from './sources/budget';
 import { notifyNewChapter } from './push';
 import { visibleToAll } from './visibility';
 import { runtime } from './runtime';
-import { chooseReleases } from './releases';
+import { chooseReleases, releaseOrder } from './releases';
 import { effectivePrefsFor, readSeriesPrefs } from './scanlatorPrefs';
 import { listingRows, replaceListing } from './seriesListing';
 
@@ -150,7 +150,8 @@ export async function updateSeries(seriesId: string, maxNew = 10): Promise<Updat
   // has something of its own, which almost none do.
   const prefs = await effectivePrefsFor(s.scanlator_prefs == null ? null : await readSeriesPrefs(seriesId));
   const rank = new Map(followed.map((f, i) => [f.source, i]));
-  const { releases, waiting: held } = chooseReleases(tagged, prefs, { sourceRank: (id) => rank.get(id ?? '') ?? followed.length });
+  const chooseOpts = { sourceRank: (id?: string) => rank.get(id ?? '') ?? followed.length };
+  const { releases, waiting: held } = chooseReleases(tagged, prefs, chooseOpts);
 
   // A series added as "latest N" carries a floor, and what the source lists below it is not this job's
   // business: the sweep exists to fetch new releases, and the oldest-first loop below would otherwise spend
@@ -193,7 +194,9 @@ export async function updateSeries(seriesId: string, maxNew = 10): Promise<Updat
   // a source that lists nothing leaves the previous listing standing, exactly like one that did not answer.
   // Reintroduce by dropping the `tagged.length` guard: "a source that answered with nothing leaves the
   // previous listing standing" in seriesListing.int.test.ts reads 0 rows.
-  if (tagged.length) await replaceListing(seriesId, listingRows(tagged, releases, heldNums, s.source_id)).catch(() => {});
+  // The copies of each number are stored in the same order the chooser ranked them (releaseOrder with
+  // the same source ranks), so the listing's "best first" is the sweep's, not a second opinion.
+  if (tagged.length) await replaceListing(seriesId, listingRows(tagged, releases, heldNums, s.source_id, releaseOrder(prefs, chooseOpts))).catch(() => {});
 
   let added = 0;
   let failed = 0;

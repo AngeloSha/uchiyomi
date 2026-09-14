@@ -20,6 +20,7 @@ import { t as tr, keys } from '@/lib/i18n';
 import type { KnownGroup, Series, StoredPrefs } from '@/lib/types';
 import { hasGroup, normGroup, reorder, withoutGroup } from '@/lib/scanlators';
 import { suggestGroups } from '@/lib/groupSuggest';
+import { groupProviders, type ProviderGroup, type ProviderSrc } from '@/lib/providerGroups';
 
 /**
  * Ten panels, grouped by what an admin is actually doing rather than by what the code is called.
@@ -587,11 +588,130 @@ function Providers() {
     catch (e: any) { toast(msgOf(e, 'Could not read that list'), 'error'); }
     setParsing(false);
   };
-  const list = srcs?.content || [];
+  const list = (srcs?.content || []) as ProviderSrc[];
+  // One card per extension PACKAGE rather than per source: a multi-language extension is one install that
+  // exposes one source per language, and 3Hentai alone put twenty-nine near-identical cards here, enabled
+  // or not. A package with a single variant, and every engine, pack and custom site, renders the card it
+  // always did. Which packages are unfolded lives here, not in storage: collapsed is the useful default and
+  // the panel is opened to look, not to keep.
+  const groups = groupProviders(list);
+  const [unfolded, setUnfolded] = useState<Set<string>>(new Set());
+  const toggleGroup = (key: string) => setUnfolded((prev) => { const n = new Set(prev); if (n.has(key)) n.delete(key); else n.add(key); return n; });
+
+  /**
+   * The diagnosis, then the fix, then the raw error last and small. The raw string was all there used to
+   * be: "timeout", truncated to one line, written by three different faults. Shared by the full card and
+   * the compact variant row, so a language variant inside a folded package can be tested and read the same way.
+   */
+  function diagnosisOf(s: ProviderSrc, st: string) {
+    const h = hmap.get(s.id) as any;
+    const t = tested.get(s.id);
+    const d = t?.diagnosis;
+    const unwell = st === 'blocked' || st === 'rate_limited' || st === 'down' || st === 'quiet';
+    if (!d && !(h?.last_error && unwell)) return null;
+    return (
+      <div className="mt-1.5 space-y-1">
+        {d && <p className="text-[12px] text-fog-200">{d.reason || 'Working normally.'}</p>}
+        {d?.fix && <p className="text-[11px] leading-relaxed text-fog-400">{d.fix}</p>}
+        {h?.last_error && unwell && (
+          <p className="truncate text-[11px] text-fog-600" title={h.last_error}>{h.consecutive}× · {h.last_error}</p>
+        )}
+      </div>
+    );
+  }
+  function testResultOf(s: ProviderSrc) {
+    const t = tested.get(s.id);
+    if (!t) return null;
+    return (
+      <div className={`mt-2 rounded-xl border p-2 ${t.ok ? 'border-emerald-600/30 bg-emerald-600/10' : 'border-amber-600/30 bg-amber-600/10'}`}>
+        {t.checks.map((c: any, i: number) => (
+          <p key={i} className="text-[11px] text-fog-300">{c.ok ? '✓' : '✗'} {c.name}: <span className="text-fog-500">{c.detail}</span></p>
+        ))}
+        {t.timedOut && <p className="text-[11px] text-amber-300">Gave up waiting. The site is slow or heavily protected.</p>}
+      </div>
+    );
+  }
+  /** Test / Clear block / Enable-Disable, plus the two custom-site buttons when the source is one. */
+  function controlsOf(s: ProviderSrc, st: string) {
+    return (
+      <>
+        <button onClick={() => testSource(s.id)} disabled={testingId === s.id} className="chip text-xs disabled:opacity-50">
+          {testingId === s.id ? 'Testing…' : tr('Test')}
+        </button>
+        {(st === 'blocked' || st === 'rate_limited' || st === 'down') && <button onClick={() => act(s.id, 'unblock', 'Cleared')} className="chip text-xs">{tr('Clear block')}</button>}
+        <button onClick={() => act(s.id, st === 'disabled' ? 'enable' : 'disable', st === 'disabled' ? 'Enabled' : 'Disabled')} className="chip text-xs">{st === 'disabled' ? 'Enable' : 'Disable'}</button>
+        {customIds.has(s.id) && tested.get(s.id)?.diagnosis?.code === 'moved' && (
+          <button onClick={() => moveSite(s.id)} className="chip text-xs text-accent">{tr('Update address')}</button>
+        )}
+        {customIds.has(s.id) && <button onClick={() => removeSite(s.id)} className="ms-auto text-xs text-red-300 hover:underline">{tr('Remove')}</button>}
+      </>
+    );
+  }
+  const statusChip = (st: string) => (
+    <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${STATUS_STYLE[st] || STATUS_STYLE.ok}`}>{st === 'rate_limited' ? 'rate-limited' : st}</span>
+  );
+
+  /** The card every source has always had: one source, its status, its diagnosis, its controls. */
+  function sourceCard(s: ProviderSrc) {
+    const st = (s.status ?? 'ok') as string;
+    return (
+      <div key={s.id} className="card grad-border p-4">
+        <div className="flex items-center gap-2">
+          <span className="flex-1 text-sm text-fog-100">{s.name}{customIds.has(s.id) && <span className="ms-2 rounded bg-ink-700 px-1.5 py-0.5 text-[10px] text-fog-400">custom</span>}</span>
+          {statusChip(st)}
+        </div>
+        {diagnosisOf(s, st)}
+        {testResultOf(s)}
+        <div className="mt-2 flex flex-wrap gap-1.5">{controlsOf(s, st)}</div>
+      </div>
+    );
+  }
+
+  /**
+   * One extension package with several language variants: a header that says how many languages, how many
+   * are on and the unhappiest status among them (so a blocked language colours the card even folded), and
+   * on unfold one compact row per variant carrying the same controls the full card has. Rows wrap rather
+   * than scroll: at 390 px the language, status and count sit on one line and the buttons drop below.
+   */
+  function packageCard(g: ProviderGroup) {
+    const isOpen = unfolded.has(g.key);
+    return (
+      <div key={g.key} className="card grad-border p-4">
+        <button type="button" onClick={() => toggleGroup(g.key)} aria-expanded={isOpen} className="flex w-full items-center gap-2 text-start">
+          <span className="min-w-0 flex-1 text-sm text-fog-100">
+            {g.name}
+            <span className="ms-2 text-[11px] text-fog-500">{tr('{n} languages', { n: g.languages.length })} · {tr('{n} on', { n: g.on })}</span>
+          </span>
+          {statusChip(g.worst)}
+          <span className="shrink-0 text-xs text-fog-500">{isOpen ? '▴' : '▾'}</span>
+        </button>
+        {isOpen && (
+          <ul className="mt-2 divide-y divide-ink-800">
+            {g.sources.map((s) => {
+              const st = (s.status ?? 'ok') as string;
+              return (
+                <li key={s.id} className="py-2">
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                    <span className="w-14 shrink-0 font-mono text-[11px] uppercase text-fog-200" title={s.name}>{s.lang || '—'}</span>
+                    {statusChip(st)}
+                    <span className="text-[11px] text-fog-500">{tr('{n} series', { n: s.used ?? 0 })}</span>
+                    <span className="ms-auto flex flex-wrap gap-1.5">{controlsOf(s, st)}</span>
+                  </div>
+                  {diagnosisOf(s, st)}
+                  {testResultOf(s)}
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div className="board">
       <div className="full flex flex-wrap items-center justify-between gap-3">
-        <p className="text-sm text-fog-400">{list.length} source{list.length === 1 ? '' : 's'} installed</p>
+        <p className="text-sm text-fog-400">{tr('{n} sources in {m} providers', { n: list.length, m: groups.length })}</p>
         <div className="flex gap-1.5">
           {/* The same sweep that runs daily on its own, so what you see here is what happens unattended. */}
           <button onClick={checkAll} disabled={checking} className="chip shrink-0 text-xs disabled:opacity-50">
@@ -712,58 +832,7 @@ function Providers() {
         </div>
       ) : (
         <>
-          {list.map((s: any) => {
-            const h = hmap.get(s.id) as any;
-            const st = s.status as string;
-            return (
-              <div key={s.id} className="card grad-border p-4">
-                <div className="flex items-center gap-2">
-                  <span className="flex-1 text-sm text-fog-100">{s.name}{customIds.has(s.id) && <span className="ms-2 rounded bg-ink-700 px-1.5 py-0.5 text-[10px] text-fog-400">custom</span>}</span>
-                  <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${STATUS_STYLE[st] || STATUS_STYLE.ok}`}>{st === 'rate_limited' ? 'rate-limited' : st}</span>
-                </div>
-                {/* The diagnosis, then the fix, then the raw error last and small. The raw string was all there
-                    used to be: "timeout", truncated to one line, written by three different faults. */}
-                {(() => {
-                  const t = tested.get(s.id);
-                  const d = t?.diagnosis;
-                  const unwell = st === 'blocked' || st === 'rate_limited' || st === 'down' || st === 'quiet';
-                  if (!d && !(h?.last_error && unwell)) return null;
-                  return (
-                    <div className="mt-1.5 space-y-1">
-                      {d && <p className="text-[12px] text-fog-200">{d.reason || 'Working normally.'}</p>}
-                      {d?.fix && <p className="text-[11px] leading-relaxed text-fog-400">{d.fix}</p>}
-                      {h?.last_error && unwell && (
-                        <p className="truncate text-[11px] text-fog-600" title={h.last_error}>{h.consecutive}× · {h.last_error}</p>
-                      )}
-                    </div>
-                  );
-                })()}
-                {(() => {
-                  const t = tested.get(s.id);
-                  if (!t) return null;
-                  return (
-                    <div className={`mt-2 rounded-xl border p-2 ${t.ok ? 'border-emerald-600/30 bg-emerald-600/10' : 'border-amber-600/30 bg-amber-600/10'}`}>
-                      {t.checks.map((c: any, i: number) => (
-                        <p key={i} className="text-[11px] text-fog-300">{c.ok ? '✓' : '✗'} {c.name}: <span className="text-fog-500">{c.detail}</span></p>
-                      ))}
-                      {t.timedOut && <p className="text-[11px] text-amber-300">Gave up waiting. The site is slow or heavily protected.</p>}
-                    </div>
-                  );
-                })()}
-                <div className="mt-2 flex flex-wrap gap-1.5">
-                  <button onClick={() => testSource(s.id)} disabled={testingId === s.id} className="chip text-xs disabled:opacity-50">
-                    {testingId === s.id ? 'Testing…' : tr('Test')}
-                  </button>
-                  {(st === 'blocked' || st === 'rate_limited' || st === 'down') && <button onClick={() => act(s.id, 'unblock', 'Cleared')} className="chip text-xs">{tr('Clear block')}</button>}
-                  <button onClick={() => act(s.id, st === 'disabled' ? 'enable' : 'disable', st === 'disabled' ? 'Enabled' : 'Disabled')} className="chip text-xs">{st === 'disabled' ? 'Enable' : 'Disable'}</button>
-                  {customIds.has(s.id) && tested.get(s.id)?.diagnosis?.code === 'moved' && (
-                    <button onClick={() => moveSite(s.id)} className="chip text-xs text-accent">{tr('Update address')}</button>
-                  )}
-                  {customIds.has(s.id) && <button onClick={() => removeSite(s.id)} className="ms-auto text-xs text-red-300 hover:underline">{tr('Remove')}</button>}
-                </div>
-              </div>
-            );
-          })}
+          {groups.map((g) => (g.sources.length === 1 ? sourceCard(g.sources[0]) : packageCard(g)))}
         </>
       )}
     </div>

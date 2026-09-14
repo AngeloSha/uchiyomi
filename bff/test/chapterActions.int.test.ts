@@ -209,6 +209,8 @@ const post = (url: string, payload: any, tok = adminTok) => app.inject({ method:
 const fetchNums = (numbers: number[], tok = adminTok, seriesId = S) => post('/api/sources/fetch', { seriesId, numbers }, tok);
 const del = (bookIds: string[], tok = adminTok, seriesId = S) => post(`/api/admin/series/${seriesId}/chapters/delete`, { bookIds }, tok);
 const refetch = (bookIds: string[], tok = adminTok) => post(`/api/admin/series/${S}/chapters/refetch`, { bookIds }, tok);
+type Pick = { number: number; source: string; sourceId: string };
+const fetchPicks = (picks: Pick[], numbers?: number[], tok = adminTok) => post('/api/sources/fetch', { seriesId: S, picks, ...(numbers ? { numbers } : {}) }, tok);
 const listing = (tok = adminTok) => app.inject({ method: 'GET', url: `/api/series/${S}/listing`, headers: { authorization: tok } });
 /** The answer comes back before the work; poll the job strip rather than guess a duration. */
 async function jobDone(folder = FOLDER): Promise<any> {
@@ -707,11 +709,15 @@ test('unfollowing a source takes its listing rows with it, and a stale row never
   });
 
   await t.test('a stale listing row never authorises a source the series does not follow', async () => {
-    // The row the unfollow should have taken is planted back, and the primary is made to not answer so
-    // the refresh the fetch runs cannot rewrite it: the only thing between a member and a download from
-    // the removed source is the check.
-    await q(`INSERT INTO series_listing (series_id, number, source_id, chosen, status) VALUES ($1, 20, $2, $3::jsonb, 'available')`,
-      [S, FOL, JSON.stringify(ch(20, 'Group A'))]);
+    // The row the unfollow should have taken is planted back -- with a stale `copies` entry from the
+    // removed source, which is what a pick is authorised against -- and the primary is made to not answer
+    // so the refresh the fetch runs cannot rewrite it: the only thing between a member and a download from
+    // the removed source is the check, on the plain path and on the pick path alike.
+    // Reintroduce the pick half by dropping `stateOf` from the pick branch of either route (taking the copy
+    // as soon as it matches): the two pick calls below read 200 and pageCalls names c/20/Group A.
+    const stale = { sourceId: 'c/20/Group A', source: FOL, groups: ['Group A'], scanlator: 'Group A', lang: null, pages: null, publishedAt: null };
+    await q(`INSERT INTO series_listing (series_id, number, source_id, chosen, status, copies) VALUES ($1, 20, $2, $3::jsonb, 'available', $4::jsonb)`,
+      [S, FOL, JSON.stringify(ch(20, 'Group A')), JSON.stringify([stale])]);
     cbz(join(DL, FOLDER, 'Chapter 20.cbz'), 'Group A');
     await q(`INSERT INTO lib_books (id, series_id, source, file, number, title, pages, root, scanlator, source_id) VALUES ('b_act_20', $1, 'T!act', $2, 20, 'Chapter 20', 1, $3, 'Group A', $4)`,
       [S, `${FOLDER}/Chapter 20.cbz`, DL, FOL]);
@@ -721,17 +727,181 @@ test('unfollowing a source takes its listing rows with it, and a stale row never
       const re = await refetch(['b_act_20']);
       assert.equal(re.statusCode, 409, re.body);
       assert.deepEqual(re.json().skipped, [{ id: 'b_act_20', reason: 'source_unavailable' }], 'fetch again');
+      const rePick = await post(`/api/admin/series/${S}/chapters/refetch`, { picks: [{ bookId: 'b_act_20', source: FOL, sourceId: 'c/20/Group A' }] });
+      assert.equal(rePick.statusCode, 409, rePick.body);
+      assert.deepEqual(rePick.json().skipped, [{ id: 'b_act_20', reason: 'source_unavailable' }], 'fetch again, as a pick');
       await q(`DELETE FROM lib_books WHERE id = 'b_act_20'`);
       rmSync(join(DL, FOLDER, 'Chapter 20.cbz'), { force: true });
       const r = await fetchNums([20]);
       assert.equal(r.statusCode, 409, r.body);
       assert.deepEqual(r.json().skipped, [{ number: 20, reason: 'source_unavailable' }], 'fetch');
+      const pick = await fetchPicks([{ number: 20, source: FOL, sourceId: 'c/20/Group A' }]);
+      assert.equal(pick.statusCode, 409, pick.body);
+      assert.deepEqual(pick.json().skipped, [{ number: 20, reason: 'source_unavailable', source: FOL, sourceId: 'c/20/Group A' }], 'fetch, as a pick');
       assert.deepEqual(pageCalls, [], 'nothing was asked of the removed source');
     } finally {
       listThrows = false;
+      // A refused pick starts no job, but a REGRESSION here would (200 with a running download) -- drain it
+      // so the failure is reported once, by this test, not as `busy` by the next two.
+      await jobDone().catch(() => {});
       await q(`DELETE FROM lib_books WHERE id = 'b_act_20'`);
       await q('DELETE FROM series_listing WHERE series_id = $1 AND source_id = $2', [S, FOL]);
       rmSync(join(DL, FOLDER, 'Chapter 20.cbz'), { force: true });
     }
   });
+});
+
+/**
+ * A pick names ONE stored copy, and the group rules -- the blocklist included -- do not apply to it: the
+ * versions list labels the copy blocked, and a person who taps Fetch on it anyway has chosen that copy. The
+ * number here is the strongest case: chapter 5 was released by Spam Group alone, so the NUMBER is
+ * `blocked` and a plain fetch of it is refused above ("a number only blocked groups released is refused").
+ * Reintroduce by adding `if (row?.status === 'blocked') { skipped.push({ number: n, reason: 'blocked_group' }); continue; }`
+ * at the top of the pick branch in POST /api/sources/fetch: the first call reads 409.
+ */
+test('a pick fetches that copy and no other, blocklist or not', { skip }, async (t) => {
+  assert.equal((await fetchNums([5])).statusCode, 409, 'PREMISE: the number itself is refused');
+  pageCalls.length = 0;
+  const r = await fetchPicks([{ number: 5, source: SRC, sourceId: 'c/5/Spam Group' }]);
+  assert.equal(r.statusCode, 200, r.body);
+  assert.deepEqual({ total: r.json().total, skipped: r.json().skipped }, { total: 1, skipped: [] });
+  const job = await jobDone();
+  assert.equal(job?.status, 'done', JSON.stringify(job));
+  assert.deepEqual(pageCalls, ['c/5/Spam Group'], 'the picked copy, and only it, was downloaded');
+  assert.equal(translator(join(DL, FOLDER, 'Chapter 5.cbz')), 'Spam Group', 'the file says who released it');
+  const minted = await q('SELECT scanlator, source_id FROM lib_books WHERE series_id = $1 AND number = 5', [S]);
+  assert.deepEqual(minted, [{ scanlator: 'Spam Group', source_id: SRC }]);
+  const audit = await q(`SELECT detail FROM audit_log WHERE event = 'series.chapters_fetch' ORDER BY at DESC LIMIT 1`);
+  assert.deepEqual(audit[0]?.detail?.picks, [{ number: 5, source: SRC, sourceId: 'c/5/Spam Group' }], 'the audit line names the pick');
+
+  await t.test('but never a number that is already here', async () => {
+    // A live row means the action is the admin's "fetch again": a member must not replace a file by
+    // naming another copy of it. Reintroduce by dropping the `here.has(n)` check from the pick branch: 200.
+    const again = await fetchPicks([{ number: 5, source: SRC, sourceId: 'c/5/Spam Group' }]);
+    assert.equal(again.statusCode, 409, again.body);
+    assert.deepEqual(again.json().skipped, [{ number: 5, reason: 'already_here', source: SRC, sourceId: 'c/5/Spam Group' }]);
+  });
+  await t.test('a number named in both lists is fetched as its pick, once', async () => {
+    // 8 is not on disk (its pages fail above). Naming it as a number AND as a pick must not queue it twice.
+    failPages.add('c/8/Group A');
+    try {
+      const r2 = await fetchPicks([{ number: 8, source: SRC, sourceId: 'c/8/Group A' }], [8]);
+      assert.equal(r2.statusCode, 200, r2.body);
+      assert.equal(r2.json().total, 1, 'one chapter, not two');
+      const j2 = await jobDone();
+      assert.equal(j2?.status, 'error', JSON.stringify(j2));
+    } finally {
+      failPages.delete('c/8/Group A');
+    }
+  });
+});
+
+/**
+ * A pick is authorised by the stored copy it names, exactly as a number is authorised by its row: a pick
+ * that matches no copy -- a made-up id, a copy from another series, a number never listed -- has nothing
+ * to fetch from, and the answer says which pick. Reintroduce by falling back to the row's `chosen` copy when
+ * no stored copy matches the pick: the first call reads 200 and downloads a copy nobody asked for.
+ */
+test('a pick that matches no stored copy is refused', { skip }, async () => {
+  pageCalls.length = 0;
+  const r = await fetchPicks([
+    { number: 8, source: SRC, sourceId: 'c/8/Nobody' },      // listed number, unknown copy
+    { number: 50, source: SRC, sourceId: 'c/50/Group A' },   // another series' listing
+    { number: 777, source: SRC, sourceId: 'c/777/Group A' }, // never listed
+  ]);
+  assert.equal(r.statusCode, 409, r.body);
+  assert.equal(r.json().error, 'nothing_to_fetch');
+  assert.deepEqual(r.json().skipped, [
+    { number: 8, reason: 'not_listed', source: SRC, sourceId: 'c/8/Nobody' },
+    { number: 50, reason: 'not_listed', source: SRC, sourceId: 'c/50/Group A' },
+    { number: 777, reason: 'not_listed', source: SRC, sourceId: 'c/777/Group A' },
+  ]);
+  assert.deepEqual(pageCalls, [], 'nothing was asked of the source');
+});
+
+/**
+ * Two picks for one number: the first is the ask, and the second is answered, not swallowed -- a scripted
+ * caller that names two copies of chapter 8 would otherwise see one fetched and hear nothing about the
+ * other. Reintroduce by dropping the `else` branch that records the duplicate in POST /api/sources/fetch
+ * (and the refetch route): `skipped` reads [] with the same total of 1.
+ */
+test('a second pick for the same number is skipped as a duplicate', { skip }, async () => {
+  // 8 is not on disk (its pages fail), so the first pick is accepted and the job ends in error as above.
+  failPages.add('c/8/Group A');
+  try {
+    const r = await fetchPicks([{ number: 8, source: SRC, sourceId: 'c/8/Group A' }, { number: 8, source: SRC, sourceId: 'c/8/Group A' }]);
+    assert.equal(r.statusCode, 200, r.body);
+    assert.deepEqual({ total: r.json().total, skipped: r.json().skipped },
+      { total: 1, skipped: [{ number: 8, reason: 'duplicate', source: SRC, sourceId: 'c/8/Group A' }] });
+    const job = await jobDone();
+    assert.equal(job?.status, 'error', JSON.stringify(job));
+  } finally {
+    // Drained even when an assertion above threw: a job left running answers `busy` to the next tests and
+    // turns one failure into three with the wrong two named.
+    await jobDone().catch(() => {});
+    failPages.delete('c/8/Group A');
+  }
+  // The refetch route says the same; a row nobody has is not_found, so nothing is touched.
+  const re = await post(`/api/admin/series/${S}/chapters/refetch`, { picks: [
+    { bookId: 'b_act_none', source: SRC, sourceId: 'c/8/Group A' }, { bookId: 'b_act_none', source: SRC, sourceId: 'c/8/Group B' },
+  ] });
+  assert.equal(re.statusCode, 409, re.body);
+  assert.deepEqual(re.json().skipped, [{ id: 'b_act_none', reason: 'duplicate', source: SRC, sourceId: 'c/8/Group B' }, { id: 'b_act_none', reason: 'not_found' }]);
+});
+
+/**
+ * The admin half: a pick on a row that is on disk replaces its file with the named copy, on the same row,
+ * through the same set-aside / mark / settle path as a plain refetch. The rules here would choose Group A
+ * (ranked) and Group B is BLOCKED; the pick names B's copy and gets it. Reintroduce by checking
+ * `l.status === 'blocked'` ahead of the pick branch in the refetch route (it never fires here, 2 has an A
+ * copy) -- or, the real one, by taking `l.chosen` instead of the picked copy: pageCalls reads A's id.
+ */
+test('a pick on an on-disk chapter replaces it with that copy', { skip }, async () => {
+  assert.equal((await row(B.two)).scanlator, 'Group A', 'PREMISE: A\'s copy is on disk');
+  await q(`UPDATE server_settings SET scanlator_prefs = '{"priority":["Group A"],"blocked":["Group B","Spam Group"],"patienceDays":2}'::jsonb WHERE id = 1`);
+  try {
+    pageCalls.length = 0;
+    const r = await post(`/api/admin/series/${S}/chapters/refetch`, { picks: [{ bookId: B.two, source: SRC, sourceId: 'c/2/Group B' }] });
+    assert.equal(r.statusCode, 200, r.body);
+    assert.deepEqual({ total: r.json().total, skipped: r.json().skipped }, { total: 1, skipped: [] });
+    const job = await jobDone();
+    assert.equal(job?.status, 'done', JSON.stringify(job));
+    assert.deepEqual(pageCalls, ['c/2/Group B'], 'B\'s copy, blocked and unranked, is what the pick downloaded');
+    const rows = await q('SELECT id, scanlator, pruned_at FROM lib_books WHERE series_id = $1 AND number = 2', [S]);
+    assert.equal(rows.length, 1, 'the same row, not a second beside it');
+    assert.deepEqual(rows[0], { id: B.two, scanlator: 'Group B', pruned_at: null });
+    assert.equal(translator(join(DL, FOLDER, 'Chapter 2.cbz')), 'Group B');
+    assert.ok(!files().some((f) => f.endsWith('.refetch-bak')), `no bak left: ${files()}`);
+    const audit = await q(`SELECT detail FROM audit_log WHERE event = 'series.chapters_refetch' ORDER BY at DESC LIMIT 1`);
+    assert.deepEqual(audit[0]?.detail?.picks, [{ bookId: B.two, number: 2, source: SRC, sourceId: 'c/2/Group B' }]);
+    // A pick naming a copy the number does not have is not_listed, and a member cannot pick at all.
+    const bad = await post(`/api/admin/series/${S}/chapters/refetch`, { picks: [{ bookId: B.two, source: SRC, sourceId: 'c/2/Nobody' }] });
+    assert.equal(bad.statusCode, 409, bad.body);
+    assert.deepEqual(bad.json().skipped, [{ id: B.two, reason: 'not_listed' }]);
+    assert.equal((await post(`/api/admin/series/${S}/chapters/refetch`, { picks: [{ bookId: B.two, source: SRC, sourceId: 'c/2/Group B' }] }, memberTok)).statusCode, 403);
+  } finally {
+    await q(`UPDATE server_settings SET scanlator_prefs = '{"priority":["Group B"],"blocked":["Spam Group"],"patienceDays":2}'::jsonb WHERE id = 1`);
+  }
+});
+
+/**
+ * One cap over both lists: 300 numbers plus 300 picks would be a 600-chapter job through a route documented
+ * as 300. Reintroduce by dropping the combined-size refine from POST /api/sources/fetch (or the refetch
+ * route): the first call reads 409 -- the job was accepted and every number skipped -- instead of 400.
+ */
+test('picks and numbers together stay under the cap', { skip }, async () => {
+  const numbers = Array.from({ length: 150 }, (_, i) => 1000 + i);
+  const picks = (n: number) => Array.from({ length: n }, (_, i) => ({ number: 2000 + i, source: SRC, sourceId: `c/${2000 + i}/x` }));
+  const over = await fetchPicks(picks(151), numbers);
+  assert.equal(over.statusCode, 400, over.body);
+  assert.equal(over.json().error, 'bad_request');
+  const at = await fetchPicks(picks(150), numbers);
+  assert.equal(at.statusCode, 409, `300 combined is accepted by the schema: ${at.body}`);
+  assert.equal(at.json().error, 'nothing_to_fetch');
+  assert.equal((await post('/api/sources/fetch', { seriesId: S })).statusCode, 400, 'neither list is a bad request');
+  assert.equal((await post('/api/sources/fetch', { seriesId: S, numbers: [], picks: [] })).statusCode, 400, 'two empty lists too');
+  const ids = Array.from({ length: 150 }, (_, i) => `b_act_x${i}`);
+  const rePicks = (n: number) => Array.from({ length: n }, (_, i) => ({ bookId: `b_act_y${i}`, source: SRC, sourceId: 'c/1/x' }));
+  assert.equal((await post(`/api/admin/series/${S}/chapters/refetch`, { bookIds: ids, picks: rePicks(151) })).statusCode, 400, 'the refetch route shares the cap');
+  assert.equal((await post(`/api/admin/series/${S}/chapters/refetch`, {})).statusCode, 400);
 });

@@ -159,6 +159,68 @@ export interface Listing {
   content: Ghost[];
 }
 
+/** How often a group ships, read off the median gap of its last dated releases. `unknown` with fewer than two dates. */
+export type CadenceKind = 'daily' | 'weekly' | 'monthly' | 'irregular' | 'unknown';
+export interface Cadence {
+  kind: CadenceKind;
+  /** The median gap in days, or null when there were not enough dates to take one. */
+  intervalDays: number | null;
+  /** Days since the newest dated release, or null when none was dated. */
+  daysSince: number | null;
+  /** The group has gone quiet by its own standard: longer than three intervals (at least a fortnight), or 45 days. */
+  quiet: boolean;
+}
+
+/**
+ * One scanlation group's record on a series: what it released, how fast, and how much of it this server
+ * holds. `chapters` is the group's numbers ascending; `first`/`last` are null when it released nothing dated
+ * or numbered. Served by `GET /api/series/:id/groups` to any viewer, and by the admin scanlators route with
+ * the prefs alongside.
+ */
+export interface GroupStat {
+  name: string;
+  releases: number;
+  first: number | null;
+  last: number | null;
+  lastReleaseAt: string | null;
+  cadence: Cadence;
+  onDisk: number;
+  chapters: number[];
+  langs: string[];
+}
+
+export interface SeriesGroups {
+  checkedAt: string | null;
+  content: GroupStat[];
+}
+
+/**
+ * One copy of a chapter number as a source lists it. ⚠️ There is no `sourceId` field: `key` is
+ * `${source}:${sourceId}` and a source id can itself contain `:` (`ext:fake`), so the id is recovered by
+ * stripping the known `source` prefix (`copySourceId` in lib/groupFilter.ts), never by splitting on `:`.
+ */
+export interface VersionCopy {
+  key: string;
+  source: string;
+  sourceName: string;
+  groups: string[];
+  scanlator: string | null;
+  lang: string | null;
+  pages: number | null;
+  publishedAt: string | null;
+  /** The copy the scanlator rules would take. */
+  chosen: boolean;
+  /** Every group of this copy is blocked by the effective prefs. Still fetchable by an explicit pick. */
+  blocked: boolean;
+  /** The file on this server for the number came from this copy. */
+  onDisk: boolean;
+}
+
+export interface Versions {
+  checkedAt: string | null;
+  content: { number: number; copies: VersionCopy[] }[];
+}
+
 /** A group name the server has seen anywhere, with how busy it is: chapters on disk and numbers listed by the sources. */
 export interface KnownGroup {
   name: string;

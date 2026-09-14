@@ -88,6 +88,39 @@ test('extension source registration', { skip: DSN ? false : 'set TEST_DATABASE_U
     assert.equal(adapter!.lang, 'en', 'the language must reach the adapter too, or it joins every group');
   });
 
+  await t.test('which extension a source came out of is remembered, refreshed, and tolerated when missing', async () => {
+    // One package can expose dozens of sources (3Hentai: twenty-nine language variants) and `pkgName` is
+    // the only thing they share that is not a guess; the Providers page folds them into one card by it.
+    // The engine answers `extension { pkgName name }` on every node today, but the value is nullable on
+    // our side on purpose: a node without it must still register, with the columns null rather than ''.
+    // Reintroduce by dropping pkg_name/ext_name from the upsert's DO UPDATE SET (keep the INSERT columns):
+    // "a re-list refreshes the package" fails -- the row keeps the old package.
+    reset();
+    await q('DELETE FROM suwayomi_sources');
+    const ext = { pkgName: 'eu.kanade.tachiyomi.extension.all.hentai3', name: '3Hentai' };
+    await reg.loadSuwayomiSources(async () => [
+      { id: '30', name: '3Hentai', displayName: '3Hentai (EN)', lang: 'en', extension: ext },
+      { id: '31', name: '3Hentai', displayName: '3Hentai (JA)', lang: 'ja', extension: ext },
+      { id: '32', name: 'Bare', lang: 'en' },
+      { id: '33', name: 'Blank', lang: 'en', extension: { pkgName: '  ', name: '' } },
+    ]);
+    const rows = await q<{ source_id: string; pkg_name: string | null; ext_name: string | null }>(
+      `SELECT source_id, pkg_name, ext_name FROM suwayomi_sources WHERE source_id IN ('30','31','32','33') ORDER BY source_id`,
+    );
+    assert.deepEqual(rows, [
+      { source_id: '30', pkg_name: ext.pkgName, ext_name: '3Hentai' },
+      { source_id: '31', pkg_name: ext.pkgName, ext_name: '3Hentai' },
+      { source_id: '32', pkg_name: null, ext_name: null },
+      { source_id: '33', pkg_name: null, ext_name: null },
+    ], 'two variants of one package share pkg_name; a node without one stores null, never the empty string');
+
+    await reg.loadSuwayomiSources(async () => [
+      { id: '32', name: 'Bare', lang: 'en', extension: { pkgName: 'eu.kanade.tachiyomi.extension.en.bare', name: 'Bare' } },
+    ]);
+    const after = await q<{ pkg_name: string | null }>(`SELECT pkg_name FROM suwayomi_sources WHERE source_id = '32'`);
+    assert.equal(after[0].pkg_name, 'eu.kanade.tachiyomi.extension.en.bare', 'a re-list refreshes the package');
+  });
+
   await t.test('the cap is enforced, and what it dropped is reported', async () => {
     reset();
     const { env } = await import('../src/env');
