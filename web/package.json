@@ -28,7 +28,7 @@
     "tailwindcss": "^4.1.18",
     "typescript": "^7.0.2",
     "tsx": "^4.23.13",
-    "puppeteer": "^24.0.0",
+    "puppeteer": "^25.10.0",
     "fake-indexeddb": "^6.0.0"
   },
   "overrides": {
