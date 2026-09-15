@@ -93,7 +93,7 @@ test('dependencies and actions are watched weekly, grouped so CI is not run thir
 });
 
 test('the Unraid template names every volume, the ports, and the ids, and stops gracefully', () => {
-  const x = read('deploy/unraid/uchiyomi.xml');
+  const x = read('templates/uchiyomi.xml');
   assert.match(x, /<Repository>ghcr\.io\/angelosha\/uchiyomi<\/Repository>/);
   assert.match(x, /<WebUI>http:\/\/\[IP\]:\[PORT:3000\]\/<\/WebUI>/, 'the WebUI link does not map the container port');
   for (const target of ['/library', '/data', '/config', '/library-dl', '/cache', '/backups']) {
