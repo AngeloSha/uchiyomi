@@ -9,7 +9,12 @@ import { Img, ProgressBar } from '@/components/ui';
 import { sourceCover } from '@/components/cards';
 import { Switch } from '@/components/Switch';
 import { useToast } from '@/components/Toast';
-import { IcCheck, IcChevronLeft } from '@/components/icons';
+import { IcCheck } from '@/components/icons';
+import { SourceIcon } from '@/components/SourcePicker';
+import { GroupAvatar } from '@/components/GroupAvatar';
+import { ActivityDots } from '@/components/ActivityDots';
+import { activityStatus, weeksOf } from '@/lib/activity';
+import { relativeTime } from '@/lib/format';
 import { t as tr } from '@/lib/i18n';
 import { normTitle } from '@/lib/normTitle';
 import { cadenceText } from '@/lib/cadence';
@@ -34,8 +39,13 @@ export type AddSeed =
  * What the chapter <select> holds. Sources list chapters ascending, so "First N" has always meant the OLDEST
  * N -- right for a title you are starting, wrong for one you are catching up on. "Latest N" is the other
  * end, and the server puts a floor under the series so auto-update fetches new releases only.
+ *
+ * `none` is "Nothing yet -- pick chapters later" (#40): the series is created with a listing and a floor
+ * above its newest chapter, nothing is fetched, and auto-update takes releases from here on. It is also the
+ * only option that survives a source listing zero chapters -- `All (0)` posts a count the server refuses
+ * with `no_chapters` -- so it is the default and the only choice then.
  */
-type ChapterPick = 'all' | `first:${number}` | `latest:${number}`;
+type ChapterPick = 'all' | 'none' | `first:${number}` | `latest:${number}`;
 const CHAPTER_PRESETS = [10, 25, 50, 100, 200];
 
 /** Never render a swept-up <style>/<script> block as a description. The BFF guards this too. */
@@ -74,7 +84,7 @@ export function AddSeriesDialog({ seed, sources, onClose, onAdded }: {
   const [autoUpdate, setAutoUpdate] = useState(true);
   const [adding, setAdding] = useState(false);
   const [dup, setDup] = useState<string | null>(null);
-  const [done, setDone] = useState<{ title: string; folder: string; chapters: number; started?: boolean } | null>(null);
+  const [done, setDone] = useState<{ title: string; folder: string; chapters: number; started?: boolean; nothing?: boolean } | null>(null);
   const [opening, setOpening] = useState(false);
   const title = seed.kind === 'result' ? seed.provider.title : seed.title;
 
@@ -96,30 +106,33 @@ export function AddSeriesDialog({ seed, sources, onClose, onAdded }: {
     const mine = ++want.current;
     setLoading(true); setDetail(null);
     api<Detail>(`/api/sources/detail?source=${encodeURIComponent(picked.source)}&sourceId=${encodeURIComponent(picked.sourceId)}`)
-      .then((d) => { if (mine === want.current) { setDetail(d); setPick('all'); } })
+      .then((d) => { if (mine === want.current) { setDetail(d); setPick(d.count === 0 ? 'none' : 'all'); } })
       .catch(() => { if (mine === want.current) setDetail(null); })
       .finally(() => { if (mine === want.current) setLoading(false); });
   }, [picked]);
 
-  // Only while the dialog is showing a live download.
+  // Only while the dialog is showing a live download. A "nothing yet" add starts no job, so there is
+  // nothing to poll for.
   const { data: jobs } = useQuery({
     queryKey: ['source-jobs'],
     queryFn: () => api<{ content: Job[] }>('/api/sources/jobs'),
-    enabled: !!done,
+    enabled: !!done && !done.nothing,
     refetchInterval: 2000,
   });
   const job = done ? (jobs?.content ?? []).find((j) => j.folder === done.folder) : undefined;
 
   // Derived, not stored: the payload, the rate-limit warning and the "latest" hint all read these.
-  const chapterCount = pick === 'all' ? undefined : Number(pick.slice(pick.indexOf(':') + 1));
-  const chapterFrom: 'oldest' | 'newest' = pick.startsWith('latest:') ? 'newest' : 'oldest';
-  const count = chapterCount ?? detail?.count ?? 0;
+  // `none` sends no count at all -- `chapterFrom: 'none'` is the whole instruction -- and counts as zero
+  // for the rate-limit warning, since nothing is grabbed.
+  const chapterCount = pick === 'all' || pick === 'none' ? undefined : Number(pick.slice(pick.indexOf(':') + 1));
+  const chapterFrom: 'oldest' | 'newest' | 'none' = pick === 'none' ? 'none' : pick.startsWith('latest:') ? 'newest' : 'oldest';
+  const count = pick === 'none' ? 0 : chapterCount ?? detail?.count ?? 0;
 
   const add = async (force = false) => {
     if (!picked) return;
     setAdding(true); setDup(null);
     try {
-      const r = await api<{ title: string; folder: string; chapters: number; started?: boolean }>('/api/sources/add', {
+      const r = await api<{ title: string; folder: string; chapters: number; started?: boolean; nothing?: boolean }>('/api/sources/add', {
         json: { source: picked.source, sourceId: picked.sourceId, chapterCount, chapterFrom, autoUpdate, force },
         // The client has never set a timeout anywhere, so the only bound was the proxy's 120s -- which
         // turned a slow-but-working add into "Add failed. Try another source." while the download carried
@@ -160,10 +173,14 @@ export function AddSeriesDialog({ seed, sources, onClose, onAdded }: {
           <div>
             <p className="font-display text-base font-semibold text-fog-50">{done.title}</p>
             <p className="mt-0.5 text-sm text-fog-400">
-              {done.chapters > 0 ? tr('Downloading {n} chapters', { n: done.chapters }) : tr('Already in your library')}
+              {/* "Fetching", the server-side word: the chapters land on the server for everyone, which is not
+                  what "download" means on this device. `nothing` is a nothing-yet add: no job, no bar. */}
+              {done.nothing ? tr('Added — new chapters will be fetched as they come out')
+                : done.chapters > 0 ? tr('Fetching {n} chapters', { n: done.chapters })
+                : tr('Already in your library')}
             </p>
           </div>
-          {done.chapters > 0 && (
+          {done.chapters > 0 && !done.nothing && (
             <>
               <ProgressBar value={job && job.total ? job.done / job.total : 0.02} />
               <p className="text-xs tabular-nums text-fog-500">{job ? `${job.done}/${job.total}` : '…'}</p>
@@ -198,10 +215,15 @@ export function AddSeriesDialog({ seed, sources, onClose, onAdded }: {
                   <Img src={sourceCover(p.source, p.coverUrl)} alt="" fallbackSrc={p.coverUrl}
                     className="h-14 w-10 shrink-0 rounded" />
                   <span className="min-w-0 flex-1">
-                    <span className="block truncate text-sm text-fog-100">{p.name}</span>
+                    <span className="flex items-center gap-1.5 text-sm text-fog-100">
+                      <SourceIcon id={p.source} name={p.name} size={20} />
+                      <span className="truncate">{p.name}</span>
+                    </span>
                     <span className="block truncate text-[11px] text-fog-500">{p.title}</span>
                   </span>
-                  {i === 0 && <span className="chip shrink-0 text-[10px]">{tr('preferred')}</span>}
+                  {/* The page's own rank: health first, then what the library actually came from. "Most used"
+                      is what that is; "preferred" made it sound like a setting someone had chosen. */}
+                  {i === 0 && <span className="chip shrink-0 text-[10px]">{tr('most used')}</span>}
                 </button>
               ))}
             </div>
@@ -229,34 +251,57 @@ export function AddSeriesDialog({ seed, sources, onClose, onAdded }: {
               className="aspect-[2/3] w-28 rounded-xl border border-ink-700 sm:w-40" />
           </div>
           <div className="min-w-0 flex-1">
-            {providers && providers.length > 1 && (
-              <button onClick={() => { setPicked(null); setDetail(null); }} className="chip mb-2 text-xs">
-                <IcChevronLeft width={13} height={13} />{tr('Change source')}
-              </button>
-            )}
+            {/* Where it comes from, named with its favicon, before anything else about it -- and the way
+                back to the other providers as a small chip, only when there are any. */}
+            <p className="mb-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-fog-500">
+              <span className="inline-flex items-center gap-1.5">
+                {tr('From')}
+                <SourceIcon id={detail.source} name={picked.name} size={16} />
+                <span className="text-fog-200">{picked.name}</span>
+              </span>
+              {providers && providers.length > 1 && (
+                <button type="button" onClick={() => { setPicked(null); setDetail(null); }} className="chip py-0.5 text-[11px]">
+                  {tr('Change')}
+                </button>
+              )}
+            </p>
             <p className="text-xs text-fog-500">
               {detail.count} {detail.count === 1 ? tr('chapter') : tr('chapters')}
               {detail.first != null && detail.last != null && <> · {detail.first}–{detail.last}</>}
             </p>
-            {/* The series page's Who scanlates this, compressed to what fits a dialog: the five busiest groups
-                and their rhythm, so "is this being translated" is answered before the add, not after. No
-                controls -- there is no series to set preferences on yet. */}
+            {/* The series page's Translated by section, compressed to what fits a dialog: the five busiest
+                groups and their rhythm, so "is this being translated" is answered before the add, not after.
+                No controls -- there is no series to set preferences on yet. */}
             {!!detail.groups?.length && (
               <div className="mt-1.5">
-                <p className="text-[11px] font-semibold uppercase tracking-wider text-fog-500">{tr('Who scanlates this')}</p>
+                <p className="text-[11px] font-semibold uppercase tracking-wider text-fog-500">{tr('Translated by')}</p>
                 {[...detail.groups].sort((a, b) => b.releases - a.releases).slice(0, 5).map((g) => {
                   const cadence = cadenceText(g.cadence, g.lastReleaseAt);
+                  // The twelve-week strip when there is anything to draw (lib/activity.ts says when there is
+                  // not: an older server, or a group silent for twelve weeks -- every group of a finished
+                  // series), else words: the quiet sentence, amber only while the series is still running,
+                  // or when the last release was.
+                  const weeks = weeksOf(g);
+                  const status = activityStatus(g, detail.status);
                   return (
                     // ⚠️ No `truncate` here, and the rhythm on its own line. The column is ~290 px even on a
                     // desktop, and one truncated line cut exactly the words this block exists for: "quiet
                     // -- no release in 100 ..." lost the day count, "ships weekly · last release ..." lost
                     // when. The name still gets a `title` in case it is the long part. Reintroduce by
                     // putting the cadence back on the first line with `truncate`: the day count is gone.
-                    <div key={g.name} className="text-[11px] text-fog-500">
-                      <p className="break-words">
-                        <span className="text-fog-300" title={g.name}>{g.name}</span> · {g.releases === 1 ? tr('1 release') : tr('{n} releases', { n: g.releases })}
+                    <div key={g.name} className="mt-0.5 text-[11px] text-fog-500">
+                      <p className="flex flex-wrap items-center gap-x-1.5 break-words">
+                        <GroupAvatar name={g.name} size={16} />
+                        <span className="text-fog-300" title={g.name}>{g.name}</span>
+                        <span>· {g.releases === 1 ? tr('1 release') : tr('{n} releases', { n: g.releases })}</span>
                       </p>
-                      {cadence && <p className={`break-words ${g.cadence.quiet ? 'text-amber-300' : ''}`}>{cadence}</p>}
+                      {weeks ? (
+                        <p className="mt-0.5"><ActivityDots weeks={weeks} status={status} label={cadence || g.name} /></p>
+                      ) : g.cadence.quiet ? (
+                        <p className={`break-words ${status === 'quiet' ? 'text-amber-300' : ''}`}>{cadence}</p>
+                      ) : g.lastReleaseAt ? (
+                        <p>{tr('last release {ago}', { ago: relativeTime(g.lastReleaseAt) })}</p>
+                      ) : null}
                     </div>
                   );
                 })}
@@ -270,15 +315,23 @@ export function AddSeriesDialog({ seed, sources, onClose, onAdded }: {
             )}
             {summary && <p className="mt-2 line-clamp-4 text-xs leading-relaxed text-fog-400">{summary}</p>}
 
-            <label className="mb-1 mt-4 block text-xs font-semibold uppercase tracking-wider text-fog-500">{tr('Chapters to download')}</label>
+            {/* "Fetch now", not "download": the chapters land on the server, and the server side of the app
+                is called fetching everywhere else. With nothing listed, "Nothing yet" is the only option that
+                can succeed, so it is the only one offered. */}
+            <label className="mb-1 mt-4 block text-xs font-semibold uppercase tracking-wider text-fog-500">{tr('Chapters to fetch now')}</label>
             <select value={pick} onChange={(e) => setPick(e.target.value as ChapterPick)} className="field">
-              <option value="all">{tr('All ({n})', { n: detail.count })}</option>
+              {detail.count > 0 && <option value="all">{tr('All ({n})', { n: detail.count })}</option>}
               {presets.map((n) => <option key={`first:${n}`} value={`first:${n}`}>{tr('First {n}', { n })}</option>)}
               {presets.map((n) => <option key={`latest:${n}`} value={`latest:${n}`}>{tr('Latest {n}', { n })}</option>)}
+              <option value="none">{tr('Nothing yet — pick chapters later')}</option>
             </select>
-            {chapterFrom === 'newest' && (
+            {pick === 'none' ? (
               <p className="mt-1.5 text-[11px] text-fog-500">
-                {tr('Older chapters are not fetched by auto-update; use Find missing chapters if you want them later.')}
+                {tr('Nothing is fetched now. New chapters arrive with auto-update; older ones can be fetched from the series page.')}
+              </p>
+            ) : chapterFrom === 'newest' && (
+              <p className="mt-1.5 text-[11px] text-fog-500">
+                {tr('Older chapters are not fetched by auto-update; fetch them from the series page when you want them.')}
               </p>
             )}
 

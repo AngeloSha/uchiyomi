@@ -1,5 +1,219 @@
 # Changelog
 
+## v0.34.0 — 2026-09-15
+
+The owner's verdict on v0.33.0, the evening it went live: the *Who scanlates this* card sitting open by
+default on every manga page — "that's not cool for the UX" — and all the sources-and-extensions business,
+on the series page and on Discover both, "is ruining the UX with too much text and unclear info on how it
+works and what it does". He was right, and the numbers say so: at phone width, as an admin, the card alone
+put about 115 words between *Start reading* and the first chapter, every chapter row carried up to three
+bordered pills plus a *2 versions* pill on a line of its own, the chapter header ran five chips over two
+rows, and the page used the word *download* for two different things. Every established reader — Mihon,
+Kotatsu, Suwayomi, MangaDex, Comick, Paperback — does the opposite: the source is one tappable line in the
+header, the group is a muted caption on the chapter row, and versions, filters and rules live behind a tap.
+So that is what this release does. Nothing that v0.33.0 could tell you has gone; it has all moved one tap
+away, and the page that is left says about half as much (≈235 words → ≈110 as admin on the same series,
+≈174 → ≈105 as a member).
+
+### One line instead of a card
+
+The card is gone. In its place, between the title block and the buttons, one muted line: on a phone
+*MangaDex · (AS)(FC)(JG) Asura Scans +2 · 4 not here yet ›* — the source's favicon and name, a stack of
+three group avatars with the busiest group's name, and how many listed chapters this server lacks; on a
+desktop the same line has room for *Translated by Asura Scans, Flame Comics (+1)* and *checked 2h ago*.
+When a phone is too narrow for all of it — *Mangakakalot (Manganato)* as the source, say — the source's
+name is the first thing cut short and the group's name the second; the count and the chevron never give,
+and when even the busiest group's name will not fit, the avatars and *+n* stand alone. A shortened source
+name is still the truth; a shortened count would not be.
+The line knows its states rather than going blank: *not checked yet* on a series no sweep has seen,
+*auto-update off* in place of the count when the updater is not watching this one, *Source not installed*
+when the source it was added from is no longer on the server (never the raw source id), *Added from disk ·
+no source* for admins on a series that was scanned in rather than added, and *{n} chapters listed · none
+fetched yet* on a series with no chapter on disk at all (see *Nothing yet* below). A series with no source
+and no group named on its files shows members no line at all. Sources that name no groups — the built-in
+engines and sites added by URL — simply have no group segment.
+
+Tapping the line opens **Sources & translations**, a sheet from the bottom of the screen with everything the
+card had and the *Sources* list that used to be inside *Edit details*. Under **Sources**, one row per source
+the series is checked against: favicon, name, *main* or *also checked*, *{n} chapters listed*, *checked
+{ago}*, and *not installed* dimmed when it is. Admins get an × to stop following a source that is not the
+main one, and two chips under the rows: **Check now** — one for the series rather than one per row, since a
+check visits every followed source — and **Add one from Find missing chapters**, which closes the sheet and
+opens that dialog — the only way in stays the only way in. Under **Translated by**, one row per
+group in the order the card used (ranked first, then busiest, blocked last): the group's avatar and name, *{n}
+releases · Ch. {a}–{b} · {n} on server*, its activity strip (next section), and **Show chapters**, which now
+closes the sheet before it scrolls the list to the chip you tapped. **Prefer**, the ▲▼ arrows and **Block**
+are on the rows, and they **apply on the tap**: each one is saved as you press it, with a *Saved* toast, so
+there is no draft to lose by tapping the backdrop — the v0.33.0 card's "toggled Block and left the page"
+trap is closed. Patience is the one thing still typed, so it lives in the sheet's footer, which stays in
+view while the rows scroll, as one compact row: **Patience** and its number of days, the value the series
+currently uses, **Save** for that field alone, and **Use server defaults**. The two sentences that used to
+sit around the field — preferred groups first, blocked ones never; blank means the server default, 0 takes
+the best copy at once — are the input's tooltip and a line of the (i) explainer instead: with them the
+footer ran to 172 px and pushed every *Translated by* row off a small phone. Members see the two sections
+and no controls. *Edit details* keeps only the auto-update switch and a pointer: *Translation groups are
+ranked in Sources & translations*.
+
+Nothing on the series page is open by default any more. The rules themselves — a preferred group's copy is
+taken first, a blocked group's never while another exists, a new chapter waits for a preferred group for the
+patience — have not changed at all.
+
+### Rows say less
+
+A chapter row's second line is now one muted caption instead of a row of pills: *(AS) Asura Scans · via
+MangaPark · 2 versions* — the group as a small avatar and its name, *via {source}* only when the chapter came
+from a source other than the main one, *{n} versions* as plain text when the number exists more than once.
+*Deleted from the server* stays a small chip, because it is a state and not a description. Grey rows say why
+in the same voice, and say more than they did: **not here yet · (AS) Asura Scans** (the group that has it),
+**waiting for Asura Scans · 2 days left** — with the preferred group named and the patience counted down
+from the oldest copy a group you have not blocked posted (a blocked group's older copy never shortens the
+wait: it was never a candidate, and counting from it would read *0 days left* on a row the sweep still
+held), where v0.32.0 said *Waiting for a preferred group* and left both to the imagination; *waiting for a
+preferred group* is kept only for a hold whose group the server cannot name — **failed 3 times** in amber,
+and **only a blocked group has it · Junk Group**. The countdown is judged with today's rules against a hold
+decided at the last check, so after a patience change it can read *0 days left* on a row that stays held
+until the next sweep; the sheet's *checked {ago}* is the caveat. The *{n} versions* pill and the inline
+version list are gone; a grey row, which nothing happened on before, now opens the chapter's sheet when
+tapped, and a chapter on disk reaches the same sheet from its ⋯ menu.
+
+That sheet is titled with the chapter (*Ch. 12*, and its title when it has a real one) and lists every copy
+the last check saw: avatar and group, language, *{n} pages*, release date, the source with its favicon, and
+one state chip — *on server* for the copy the file came from, *server's pick* for the one the rules would take,
+*blocked group*. On a grey row each copy has **Fetch**, for anyone who may download, and it takes exactly
+that copy — a blocked copy included, because you pointed at it with the label in front of you, as *Fetch
+this* did. On a chapter already here it is **Replace…**, for admins, on files Uchiyomi downloaded itself,
+disabled on the copy already on disk: the sheet closes, *Replace with this version?* asks, and **Replace**
+does what *Fetch again* does with the copy named. A chapter that failed shows admins *Last error: {reason}* at
+the top — the hover title that a phone could never reach. A book row's ⋯ menu has **Versions** to open the
+same sheet.
+
+The chapter header is four plain chips on one row, at phone width too: **Mark all read · Newest · Filter ·
+Select**. **Filter** carries a small numeral for how many filters are on and opens **Filter chapters**: under
+*Translated by*, *All* and one chip per group, and a switch, **Show chapters not on the server yet**, which is
+the old toggle chip remembered per device. The *All groups* dropdown, the long toggle chip and the line *{n}
+on the sources but not here · as of {ago}* are gone — the supply line carries both facts — and *{n} of {m}
+chapters match* stays when a group is chosen.
+
+### Fetch is the server, Save offline is this device
+
+The page used *download* for bringing a chapter onto the server and for copying it to your phone —
+*Download all* on the one hand, *Downloading {n} chapters* on the other. From now on the server side is
+**Fetch**, with the cloud icon (☁), everywhere: *Fetch* and *Fetch again* in the selection bar carry it, as
+every grey row already did, the downloads pill reads *Fetching {n} chapters*, a stalled one *Fetch stopped.
+Try another source or wait.*, and a finished Discover job *Fetched*. The device side is **Save offline**,
+with the arrow (⬇): *Download all* is **Save all offline**, the row's ⬇ is *Save offline* or *Remove from
+this device*, and the toasts say *Saving {n} chapters offline…*. The explainer below says the same in one
+line. The *Offline* tab keeps its name — it is the device side. Confirmation texts that said *scanlator
+rules* now say *translation rules*; the UI says **Translated by** wherever it named a group, and
+"scanlation group" survives only in the docs.
+
+### Faces for groups
+
+A group is now a small circle with its initials on a colour that never changes — *AS* for Asura Scans —
+in the supply line, the sheets, the chapter rows and the add dialog, so the same group is recognised across
+them without being read. The colour is taken from the name the server normalises groups by, so the *Asura
+Scans* stamped in a file and the *asura-scans* a source lists get one circle, not two. Beside each group in
+the sources sheet and the add dialog is a strip of twelve squares, one per week, filled where the group
+released, and a dot: green for a group still going, amber for one the cadence rule calls quiet, grey for the
+same silence on a series that is completed or ended — quiet is a warning on a running title and a plain fact
+on a finished one — and grey again for a group with no dated release. The strip is drawn only when at least
+one of the twelve weeks has something in it; a group with nothing that recent gets a sentence instead —
+*quiet — no release in {n} days* when the cadence rule calls it quiet, in amber on a running title and grey
+on a finished one, otherwise *last release {ago}* — so a finished series is not a wall of empty squares
+with warning dots. Twelve silent weeks is longer than the quiet threshold for a daily or weekly group, so the
+quiet sentence is the usual one; *last release {ago}* is what a monthly or irregular group reads until its
+own three intervals have passed. *ships weekly · last release 5d ago* is still there, as the strip's hover
+title and its name for a screen reader. Sources get their
+favicons the same way: in the supply line, the sheets, the chapter sheet, the corner of a Discover card and
+the add dialog.
+
+### Older chapters, one tap
+
+The first half of TIGamingTV's follow-up on [#40](https://github.com/AngeloSha/uchiyomi/issues/40). The
+chapters below a *Latest N* floor used to fold into one sentence pointing at *Find missing chapters*. The line
+is still one line — *Ch. 7–301 · 295 older chapters not here yet* — but **Show** expands it into real grey
+rows, each with the ☁ and the chapter sheet like any other, folded past fifty by the same *Show all* as the
+rest, and **Fetch all {n}** on the line takes the whole run for anyone who may download. A run longer than
+300 goes to the server in batches of 300, one after another: the server runs one fetch job per series at a
+time and answers *busy* to a second, so the page waits for each batch's job to finish before it sends the
+next, under one toast for the whole run — *Fetching {n} chapters…* — and stops at the first batch that
+fails, with its message. *Find missing chapters* under the cover is unchanged.
+
+### Nothing yet
+
+The second half. The add dialog's chapter choice, now labelled **Chapters to fetch now**, ends with
+**Nothing yet — pick chapters later**: the series lands with no chapters, its listing written, its cover
+fetched, and a chapter floor set just above the newest number the source lists, so auto-update follows new
+releases only and every chapter that existed at the time of the add sits under the expandable line above —
+*Show* and *Fetch all* are how to take them when you want them. The helper says as much: *Nothing is fetched
+now. New chapters arrive with auto-update; older ones can be fetched from the series page.* A title the source
+lists no chapters for at all can be added the same way (it is the default there, and the only choice); with
+nothing to put a floor above, it gets none, and every chapter that appears is fetched. On such a series the
+primary button reads *Nothing to read yet*, *Save all offline* is hidden, the supply line says *{n} chapters
+listed · none fetched yet*, and the older-chapters run starts open, since it is the page's only content. The
+add counts as the series' first check, because it has just asked the source: the line reads *{n} chapters
+listed · none fetched yet* the moment the page opens, and the *Sources* row in the sheet carries the count
+and the time of that check, rather than *not checked yet* until the next sweep comes round. Adding a title
+this way that you had removed from the library earlier puts the same series back — the same row, with
+everyone's history on it — as re-adding one with chapters always has. The dialog's last step says *Added —
+new chapters will be fetched as they come out* rather than *Already in your library*. The floor is a
+convention worth stating: it sits a thousandth above the newest listed number, so a chapter numbered between
+the two would count as older — no real numbering does that.
+
+### Discover breathes
+
+The wall of source chips under Newest/Popular — up to twelve, with a note line or two under them — is one
+chip: three stacked favicons, **All sources**, *{n} sources*, and *{n} with issues* in amber when any source
+is rate-limited or blocked. The number is every source that can answer the listing you are on — Newest, or
+Popular for the sources that rank one — and is not disabled, not the handful the wall is asking at this
+moment; the sheet says which is which. It opens a **Sources** sheet with one row per source — favicon,
+name, a health dot, the server's note (or *Could not be reached right now.* when it gave none) and *back in
+~{n} min* — with *Asking {n} of {m} · tap a source to browse it alone* in its footer, and tapping a row
+browses that source alone; the chip then shows its favicon and name with an × to go back to all of them.
+A source in a cooldown browsed alone says so in place of the wall — its reason and *back in ~{n} min*, in
+amber — rather than the *Nothing new from these sources right now* that would have been a lie about it.
+The card corners that spelled the source's
+name now show its favicon; a title several sources carry says *{n} sources* instead of a bare number. In
+the add dialog, step one lists sources with their favicons and marks the first *most used* (it was
+*preferred*, which sounded like a setting); step two opens with *From [favicon] MangaDex · Change*, the
+groups sit under **Translated by** with avatars and activity strips, and the progress step reads *Fetching
+{n} chapters*.
+
+### What these words mean
+
+Nobody had ever said, inside the app, what a source, an extension or a translation group is. A small (i)
+now does, in five lines: **Source** (a website Uchiyomi reads manga from: MangaDex, or a site an admin
+added), **Extension** (a plug-in from the Mihon catalogue that teaches Uchiyomi one site; one extension can
+add several sources, one per language), **Site by URL** (a site added by pasting its address, read with the
+built-in reader, so it cannot say which group translated a chapter), **Translated by** (the fan group that
+translated a chapter; a chapter often has several versions, the server keeps one, taking a preferred group
+first, never a blocked one, and waiting for a preferred group for the patience you set) and **Fetch vs Save
+offline** (☁ brings a chapter onto the server for everyone, ⬇ copies it to this device). The (i) sits
+wherever the words are used: in the header of the *Sources & translations* sheet, in Discover's *Sources*
+sheet, and beside *Add a site* on **Admin → Providers**.
+
+### Also
+
+- Markdown is stripped from descriptions: a MangaDex summary no longer reads `**Year:** 1997 ---` — on
+  Discover's add dialog, on the series that add creates, and, at read time, on every series already in the
+  library that was written before this release, so nothing needs re-adding.
+- Members with no sources were told *Add one in Admin → Providers*, a console they cannot open; they now
+  read *No sources are set up yet. Ask whoever runs this server.*
+- Discover's heading said *Newest from your sources* whichever toggle was on; it says *Popular on your
+  sources* when that is what it is showing.
+- *Popular* on Discover was the one toggle with no translation; it has one now, as do *Updated {ago}*,
+  *Continue*, *Start reading*, *Oldest* and the chapter row's menu items, which had been English in every
+  language.
+- The series page no longer asks the server for the source list on behalf of members who may not download;
+  it was a 403 on every visit that nothing needed.
+
+For the API, all of it additive: `GroupStat` gains `weeks`, twelve booleans oldest first, on
+`GET /api/series/:id/groups`, the admin scanlators route and `GET /api/sources/detail`; a held `Ghost` in
+`GET /api/series/:id/listing` carries `waitingFor` and `waitDaysLeft`; `POST /api/sources/add` accepts
+`chapterFrom: "none"` and answers `nothing: true` for it; `summary` on `/api/sources/detail` and
+`GET /api/series/:id` is plain text, HTML and markdown removed. No route was added or removed, and the
+Mihon extension is unaffected.
+
 ## v0.33.0 — 2026-09-14
 
 The rest of [#40](https://github.com/AngeloSha/uchiyomi/issues/40). v0.32.0 answered it as it had been read:

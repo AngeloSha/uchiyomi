@@ -10,7 +10,8 @@ import { bytes, relativeTime } from '@/lib/format';
 import { useToast } from '@/components/Toast';
 import { ConfirmDialog, Modal, msgOf } from '@/components/ConfirmDialog';
 import { Avatar } from '@/components/Avatar';
-import { IcChevronLeft, IcTrash, IcPlus, IcRefresh } from '@/components/icons';
+import { IcChevronLeft, IcTrash, IcPlus, IcRefresh, IcInfo } from '@/components/icons';
+import { SourcesExplainer } from '@/components/SourcesExplainer';
 import { Backdrop, Img } from '@/components/ui';
 import { SeriesCard } from '@/components/cards';
 import { Switch } from '@/components/Switch';
@@ -478,6 +479,9 @@ function Providers() {
   };
   const inval = () => { qc.invalidateQueries({ queryKey: ['sources'] }); qc.invalidateQueries({ queryKey: ['admin-sources'] }); qc.invalidateQueries({ queryKey: ['admin-custom'] }); };
   const [eng, setEng] = useState<'auto' | 'madara' | 'manganato' | 'mangathemesia'>('auto');
+  // The (i) beside "Add a site": what a source, an extension and a site by URL are, in the explainer the
+  // reader-facing sheets share. This panel is where the words are first met by whoever runs the server.
+  const [explaining, setExplaining] = useState(false);
   const [sname, setSname] = useState('');
   const [sbase, setSbase] = useState('');
   const [adding, setAdding] = useState(false);
@@ -739,7 +743,16 @@ function Providers() {
 
       {/* Add a site (Madara / Manganato engines — most manga aggregators) */}
       <div className="card grad-border wide p-4">
-        <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-fog-500">{tr('Add a site')}</p>
+        <div className="mb-2 flex items-center gap-1.5">
+          <p className="text-xs font-semibold uppercase tracking-wider text-fog-500">{tr('Add a site')}</p>
+          {/* 32px to tap, the same as the sheets' (i); the negative margins keep the eyebrow row 20px tall so
+              the label does not drop. At h-5 this was a 20px target on a phone, a quarter the size of the
+              (i) one tap away in the Sources sheet. */}
+          <button type="button" onClick={() => setExplaining(true)} aria-label={tr('What are sources and extensions?')}
+            className="-my-1.5 grid h-8 w-8 place-items-center rounded-full text-fog-500 transition hover:text-fog-200">
+            <IcInfo width={14} height={14} />
+          </button>
+        </div>
         <div className="flex flex-wrap gap-2">
           <select value={eng} onChange={(e) => setEng(e.target.value as any)} className="field w-auto">
             <option value="auto">{tr('Auto-detect')}</option>
@@ -835,6 +848,8 @@ function Providers() {
           {groups.map((g) => (g.sources.length === 1 ? sourceCard(g.sources[0]) : packageCard(g)))}
         </>
       )}
+
+      {explaining && <SourcesExplainer onClose={() => setExplaining(false)} />}
     </div>
   );
 }

@@ -19,6 +19,7 @@ import { q, one, tx } from './db';
 import { getSource, type SourceChapter } from './sources';
 import { groupsOf, normGroup } from './releases';
 import { CHAPTER_RETRY_CAP } from './updater';
+import { effectivePrefsFor, readSeriesPrefs } from './scanlatorPrefs';
 
 export type ListingStatus = 'available' | 'held' | 'blocked';
 
@@ -193,6 +194,14 @@ export interface Ghost {
   attempts?: number;
   /** The downloader's last error text. Admins only: it names hosts and paths. */
   reason?: string;
+  /**
+   * Only when `why` is `held`, and only when a priority group survives the blocklist: the effective first
+   * choice the number is being held for, so the row can say "waiting for Asura Scans" rather than
+   * "waiting for a preferred group". Spelt as the preference names it.
+   */
+  waitingFor?: string;
+  /** Only with `waitingFor`: whole days (never below 0) until the patience window closes and the sweep settles. */
+  waitDaysLeft?: number;
 }
 
 /**
@@ -216,6 +225,27 @@ export function whyOf(status: ListingStatus, number: number, floor: number | nul
 interface GhostRow {
   number: number; title: string | null; published_at: Date | null; scanlator: string | null;
   groups: string[]; source_id: string; status: ListingStatus; attempts: number | null; reason: string | null;
+  copies: ListingCopy[] | null;
+}
+
+const DAY_MS = 86_400_000;
+
+/**
+ * How many whole days a held number has left to wait, by the rule chooseReleases holds it under: the
+ * OLDEST hosted copy's date plus the patience window, against the clock. Hosted only -- an external link
+ * (pages === 0) is not a release anyone could read here, and the chooser ignores it for the same reason.
+ * Null when no hosted copy is dated, which is a row the chooser could never have held; the caller then
+ * says nothing rather than inventing a count. Never negative: the window can have closed since the last
+ * sweep decided `held`, and "0 days left" is the honest reading until the next check settles the number.
+ */
+export function waitDaysLeftOf(copies: ListingCopy[], patienceMs: number, now = Date.now()): number | null {
+  const dates = copies
+    .filter((c) => c.pages !== 0 && c.publishedAt)
+    .map((c) => Date.parse(c.publishedAt!))
+    .filter((t) => Number.isFinite(t));
+  if (!dates.length) return null;
+  const oldest = Math.min(...dates);
+  return Math.max(0, Math.ceil((oldest + patienceMs - now) / DAY_MS));
 }
 
 /**
@@ -229,7 +259,7 @@ interface GhostRow {
 export async function listingFor(seriesId: string, opts: { floor: number | null; admin: boolean }): Promise<{ checkedAt: string | null; content: Ghost[] }> {
   const s = await one<{ source_checked_at: Date | null }>('SELECT source_checked_at FROM lib_series WHERE id = $1', [seriesId]);
   const rows = await q<GhostRow>(
-    `SELECT l.number, l.title, l.published_at, l.scanlator, l.groups, l.source_id, l.status, f.attempts, f.reason
+    `SELECT l.number, l.title, l.published_at, l.scanlator, l.groups, l.source_id, l.status, l.copies, f.attempts, f.reason
        FROM series_listing l
        LEFT JOIN chapter_failures f ON f.series_id = l.series_id AND f.number = l.number
       WHERE l.series_id = $1
@@ -237,6 +267,16 @@ export async function listingFor(seriesId: string, opts: { floor: number | null;
       ORDER BY l.number`,
     [seriesId],
   );
+  // The effective preferences, read once per listing and not per row: who a held number is waiting for
+  // is the first priority group the blocklist leaves standing (priorityKeys in releases.ts drops a blocked
+  // group from the priority list before the chooser ever ranks by it, so naming one here would promise a
+  // group the sweep will never take). Read NOW rather than stored with the row, because a preference
+  // change should show on the page at once and the row's `held` was decided at the last sweep. Absent
+  // when nothing survives, and the page falls back to "waiting for a preferred group".
+  const prefs = await effectivePrefsFor(await readSeriesPrefs(seriesId));
+  const blocked = new Set(prefs.blocked.map(normGroup).filter(Boolean));
+  const waitingFor = prefs.priority.find((p) => normGroup(p) && !blocked.has(normGroup(p)));
+  const now = Date.now();
   const iso = (v: Date | string | null): string | null => (v == null ? null : v instanceof Date ? v.toISOString() : new Date(v).toISOString());
   return {
     checkedAt: iso(s?.source_checked_at ?? null),
@@ -254,6 +294,22 @@ export async function listingFor(seriesId: string, opts: { floor: number | null;
       };
       if (attempts > 0) g.attempts = attempts;
       if (opts.admin && r.reason) g.reason = r.reason;
+      // Both fields or neither: a name with no end date, or a count with no name, is half a caption.
+      if (g.why === 'held' && waitingFor) {
+        // ⚠️ Only the copies the chooser RANKS. `copies` holds every copy of the number, blocked groups'
+        // included (listingRows keeps them so the page can name who released what), but chooseReleases
+        // drops a copy whose every known group is blocked before it takes the oldest date. Counted from
+        // all of them, the caption undercounted: the blocked group is typically the fast MTL group that
+        // posts first, so its copy is usually the oldest, and a row the sweep would hold for two more
+        // days read "0 days left". A copy naming no group is never blocked, as in the chooser, and the
+        // keys are taken through groupsOf as the chooser takes them, so the two agree on every spelling.
+        const ranked = (r.copies ?? []).filter((c) => {
+          const keys = groupsOf({ groups: c.groups, scanlator: c.scanlator ?? undefined }).map(normGroup);
+          return !(keys.length && keys.every((k) => blocked.has(k)));
+        });
+        const days = waitDaysLeftOf(ranked, prefs.patienceMs, now);
+        if (days != null) { g.waitingFor = waitingFor; g.waitDaysLeft = days; }
+      }
       return g;
     }),
   };

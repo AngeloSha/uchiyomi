@@ -5,6 +5,7 @@ import { api } from '@/lib/api';
 import { useAuth, canDownload } from '@/lib/auth';
 import { ProgressBar } from '@/components/ui';
 import { t as tr } from '@/lib/i18n';
+import { chaptersLeft } from '@/lib/chapterRows';
 
 interface Job { folder: string; title: string; total: number; done: number; status: string; reason?: string }
 
@@ -47,8 +48,13 @@ export function DownloadsIndicator() {
     qc.invalidateQueries({ queryKey: ['source-jobs'] });
   };
 
+  // "Fetching", not "downloading": these are server jobs (☁), and "download" is the word the Offline tab
+  // uses for copies on this device. Counted in chapters STILL TO COME across the running jobs (`chaptersLeft`,
+  // where a test can reach it), falling back to the job count while a job has not sized itself yet. ⚠️ It
+  // used to sum each job's `total`: a 300-chapter job at 290/300 read "Fetching 300 chapters" over its own
+  // `290/300` line.
   const label = active.length
-    ? tr('{n} downloading', { n: active.length })
+    ? tr('Fetching {n} chapters', { n: chaptersLeft(active) })
     : tr('{n} failed', { n: failed.length });
 
   return (
@@ -67,7 +73,7 @@ export function DownloadsIndicator() {
                 <div className="mt-1 flex items-start gap-2">
                   {/* The reason has always been recorded and never shown; the strip said only "Download
                       stopped." for every cause there is. */}
-                  <p className="flex-1 text-[11px] leading-relaxed text-amber-300">{j.reason || tr('Download stopped. Try another source or wait.')}</p>
+                  <p className="flex-1 text-[11px] leading-relaxed text-amber-300">{j.reason || tr('Fetch stopped. Try another source or wait.')}</p>
                   <button onClick={() => dismiss(j.folder)} className="shrink-0 text-[11px] text-fog-500 hover:text-fog-200">
                     {tr('Dismiss')}
                   </button>

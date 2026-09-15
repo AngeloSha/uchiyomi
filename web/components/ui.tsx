@@ -73,9 +73,18 @@ export function useRtl(): boolean {
  * `data-lenis-prevent` on the scroller is not optional: Lenis drives smooth scrolling for the whole app, and
  * without it a flick inside the sheet scrolls the chapter behind it instead.
  */
-export function Sheet({ title, onClose, overBottomNav, children }: {
+export function Sheet({ title, onClose, overBottomNav, action, footer, children }: {
   title: string;
   onClose: () => void;
+  /** Something small beside the close button: the (i) that opens the explainer, for instance. */
+  action?: ReactNode;
+  /**
+   * A row pinned under the scrolling body -- a form's Save, for one. It lives OUTSIDE the scroller on
+   * purpose: a `sticky bottom-0` inside it sticks to the scrollport's edge, which on a phone is exactly
+   * the band the bottom nav paints over (the nav is a root-level sibling above `main`), so a sticky Save
+   * was permanently hidden there. Out here the same `overBottomNav` rule pads it clear of the bar.
+   */
+  footer?: ReactNode;
   /**
    * Clear the bottom nav bar as well as the safe area.
    *
@@ -102,25 +111,34 @@ export function Sheet({ title, onClose, overBottomNav, children }: {
   return (
     <div className="fixed inset-0 z-[60] flex items-end justify-center bg-black/70 backdrop-blur-xs"
       role="dialog" aria-modal="true" aria-label={title} onClick={onClose}>
+      {/* The panel is a column: header, the one scroller, then the optional footer. Only the middle scrolls, so
+          the footer stays put and the padding that clears the bottom nav is applied to whichever of the two
+          is last. A sheet WITH a footer may take 85vh rather than 75: the footer's rows come out of the
+          scroller's share, and at 390×667 the admin sources sheet's footer plus the nav padding left the
+          scroller 179 px -- its second section began below the fold. */}
       <div
-        ref={bodyRef}
         onClick={(e) => e.stopPropagation()}
-        data-lenis-prevent
-        className={`glass max-h-[75vh] w-full overflow-y-auto rounded-t-3xl border border-ink-700 p-4
-                   sm:mb-6 sm:max-w-xl sm:rounded-3xl ${
+        className={`glass flex w-full flex-col rounded-t-3xl border border-ink-700 pt-4
+                   sm:mb-6 sm:max-w-xl sm:rounded-3xl ${footer ? 'max-h-[85vh]' : 'max-h-[75vh]'} ${
                      overBottomNav
                        ? 'pb-[calc(5.5rem+env(safe-area-inset-bottom))] sm:pb-[max(1rem,env(safe-area-inset-bottom))]'
                        : 'pb-[max(1rem,env(safe-area-inset-bottom))]'
                    }`}
       >
-        <div className="mb-3 flex items-center justify-between gap-3">
-          <h2 className="font-display text-base font-semibold text-fog-50">{title}</h2>
-          <button onClick={onClose} aria-label={tr('Close')}
-            className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-ink-800/80 text-fog-300">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><path d="M6 6l12 12M18 6 6 18" /></svg>
-          </button>
+        <div className="mb-3 flex items-center justify-between gap-3 px-4">
+          <h2 className="min-w-0 truncate font-display text-base font-semibold text-fog-50">{title}</h2>
+          <span className="flex shrink-0 items-center gap-2">
+            {action}
+            <button onClick={onClose} aria-label={tr('Close')}
+              className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-ink-800/80 text-fog-300">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><path d="M6 6l12 12M18 6 6 18" /></svg>
+            </button>
+          </span>
         </div>
-        {children}
+        <div ref={bodyRef} data-lenis-prevent className="min-h-0 flex-1 overflow-y-auto px-4">
+          {children}
+        </div>
+        {footer && <div className="border-t border-ink-800/70 px-4 pt-3">{footer}</div>}
       </div>
     </div>
   );

@@ -5,23 +5,12 @@ import { api } from '@/lib/api';
 
 export type { Src, SrcState } from '@/lib/sourceGroups';
 export { budgetFor } from '@/lib/sourceGroups';
-import { noteFor, retryIn, sourceIcon, iconTint, type ListMode } from '@/lib/sourceGroups';
+import { noteFor, sourceIcon, iconTint, type ListMode } from '@/lib/sourceGroups';
 import { t as tr } from '@/lib/i18n';
 import type { Src } from '@/lib/sourceGroups';
 import type { SrcState } from '@/lib/sourceGroups';
-
-// Keyed on what `noteFor` decided, not on the raw state, because "empty" is two different things and the
-// server is the only one who knows which. `loading` and `off` used to be in here and nothing ever set them.
-//
-// Now a ring around the icon rather than a separate dot: the icon is the thing you look at, so the health
-// belongs on it. Emerald is deliberately absent -- a working source needs no decoration, and ringing all
-// twelve green would make the one amber one harder to find, not easier.
-const RING = {
-  ok: '',
-  warn: 'ring-2 ring-amber-400/80',
-  quiet: 'ring-1 ring-fog-600/60',
-  idle: 'ring-1 ring-ink-600',
-};
+import { SourceListSheet } from '@/components/SourceListSheet';
+import { SourcesExplainer } from '@/components/SourcesExplainer';
 
 /**
  * A source's icon.
@@ -33,9 +22,22 @@ const RING = {
  *
  * `onError` therefore only fires if the request itself fails, and is kept as a last resort.
  */
-function SourceIcon({ id, name, ring }: { id: string; name: string; ring: string }) {
-  const [failed, setFailed] = useState(false);
-  const cls = `h-5 w-5 shrink-0 overflow-hidden rounded-[6px] ${ring}`;
+export function SourceIcon({ id, name, ring = '', size = 20, registered = true }: {
+  id: string;
+  name: string;
+  ring?: string;
+  /** 16 for a caption or a chip, 20 for a row in the add dialog, 24 for a sheet row. */
+  size?: 16 | 20 | 24;
+  /**
+   * `false` for a source the server no longer loads (an extension removed since the series was added):
+   * the image route answers 404 for it, so the lettered tile is drawn straight away rather than after a
+   * failed request per visit.
+   */
+  registered?: boolean;
+}) {
+  const [failed, setFailed] = useState(!registered);
+  const box = size === 16 ? 'h-4 w-4 rounded-[4px]' : size === 24 ? 'h-6 w-6 rounded-[7px]' : 'h-5 w-5 rounded-[6px]';
+  const cls = `${box} shrink-0 overflow-hidden ${ring}`;
   if (failed) {
     return (
       <span aria-hidden className={`${cls} grid place-items-center text-[10px] font-bold text-fog-200`}
@@ -45,15 +47,20 @@ function SourceIcon({ id, name, ring }: { id: string; name: string; ring: string
     );
   }
   // eslint-disable-next-line @next/next/no-img-element
-  return <img src={sourceIcon(id)} alt="" width={20} height={20} loading="lazy" decoding="async"
+  return <img src={sourceIcon(id)} alt="" width={size} height={size} loading="lazy" decoding="async"
     onError={() => setFailed(true)} className={`${cls} bg-ink-700 object-cover`} />;
 }
 
 /**
- * Which sources are being asked, and how each one answered.
+ * Which sources are being asked, and how each one answered -- as one chip, with the list behind it.
  *
  * This is the whole filter surface. There was a language rail above it once, which is gone: it made the wall
- * restartable mid-load, and a restart was what stalled it.
+ * restartable mid-load, and a restart was what stalled it. Then there was a wall of up to twelve chips with
+ * two note lines under it, which is gone too: on a phone it was more text than the covers it introduced,
+ * and the owner's complaint was exactly that -- "all this sources business is ruining the UX". One chip
+ * says "All sources · 8 sources · 1 with issues"; tapping it opens `SourceListSheet`, where each source has
+ * its health and the server's reason, and a tap there browses that source alone. With one selected the chip
+ * becomes its name (tap: the sheet again) beside a × that clears.
  *
  * Filtering here is display-only -- `onSelect` changes which of the ALREADY-LOADED covers are shown and
  * nothing else. Every budgeted source keeps loading regardless. That is what makes tapping instant, and it
@@ -62,11 +69,20 @@ function SourceIcon({ id, name, ring }: { id: string; name: string; ring: string
  * Changing MODE is the one thing here that needs new data, and the parent handles it by namespacing its
  * state per mode rather than clearing anything. See the warning on SourceLatest.
  */
-export function SourcePicker({ sources, states, settled, total, selected, onSelect, mode, onMode }: {
+export function SourcePicker({ sources, states, settled, total, count, selected, onSelect, mode, onMode }: {
   sources: Src[];
   states: Record<string, SrcState>;
   settled: number;
   total: number;
+  /**
+   * The number the chip says: every source that can answer this listing, not `sources.length`. The budget
+   * the parent passes as `sources` starts at six and widens by one for every source that answers with
+   * nothing, so a count taken from it would tick upward while the wall loads -- a number that changes by
+   * itself reads as a bug. Nor the parent's ranked list, which is capped at twelve: "12 sources" over a
+   * 14-source install was the first thing a reviewer read off the chip. The sheet still lists only the
+   * sources actually being asked, and its footer says "Asking {n} of {m}" so the two surfaces agree.
+   */
+  count: number;
   /** The source being shown alone, or null for all of them. */
   selected: string | null;
   onSelect: (id: string | null) => void;
@@ -75,14 +91,20 @@ export function SourcePicker({ sources, states, settled, total, selected, onSele
 }) {
   const shown = sources.slice(0, 12);
   // The parent namespaces its bookkeeping by listing mode, so a bare id finds nothing here. Getting this
-  // wrong is silent: every chip would simply read as "not asked yet" and sit permanently dimmed.
+  // wrong is silent: every row would simply read as "not asked yet" and sit permanently dimmed.
   const stateOf = (id: string): SrcState => states[`${mode}:${id}`] ?? 'idle';
-  // Sources that are actually broken, as opposed to merely having nothing new. Two at most: this is a hint
-  // under a wall of covers, not an incident report, and the full story lives in Admin.
-  const troubled = shown
-    .map((s) => ({ s, ...noteFor(s, stateOf(s.id)) }))
-    .filter((x) => !!x.note)
-    .slice(0, 2);
+  // Sources that are actually broken, as opposed to merely having nothing new. A count on the chip, in
+  // amber; the sentences themselves live in the sheet, and the full story in Admin. Counted by the DOT the
+  // sheet lights, not by whether a sentence exists: the two used to differ (a failure without a server note
+  // had the dot and no sentence), so the chip said "2 with issues" over three amber rows.
+  const troubled = shown.filter((s) => noteFor(s, stateOf(s.id)).dot === 'warn').length;
+  // `selected` always names a budgeted source (the parent clears it on a mode change and the budget only
+  // grows), but the × must stay reachable even if it ever did not, or the wall could not be un-filtered.
+  const current = selected ? sources.find((s) => s.id === selected) ?? { id: selected, name: selected } : null;
+  // Which sheet is up. The explainer REPLACES the list rather than stacking on it: both are `Sheet`s at the
+  // same z-index, each with its own Escape listener, so stacked they would close together on one key and
+  // their two backdrops would sit near-black. Closing the explainer brings the list back.
+  const [sheet, setSheet] = useState<'list' | 'explainer' | null>(null);
 
   return (
     <div className="mt-4 space-y-2.5">
@@ -91,7 +113,7 @@ export function SourcePicker({ sources, states, settled, total, selected, onSele
           one-pixel tolerance. A rail would also be picked up as "the first scrolling element" by the
           end-to-end arrow test, which means for the trending rail below. */}
       <div className="flex flex-wrap items-center gap-2">
-        {/* Which listing, before which sources -- it changes what the chips beside it can even offer. */}
+        {/* Which listing, before which sources -- it changes what the chip beside it can even offer. */}
         <div className="flex items-center gap-1.5 pe-1">
           {(['newest', 'popular'] as const).map((m) => (
             <button key={m} type="button" onClick={() => onMode(m)} aria-pressed={mode === m}
@@ -102,49 +124,49 @@ export function SourcePicker({ sources, states, settled, total, selected, onSele
           <span aria-hidden className="mx-0.5 h-4 w-px bg-ink-700" />
         </div>
 
-        {shown.map((s) => {
-          const st = stateOf(s.id);
-          const { dot, note } = noteFor(s, st);
-          const on = selected === s.id;
-          return (
-            <button
-              key={s.id}
-              type="button"
-              // Tapping the source already shown clears the filter, matching every other chip in the app.
-              onClick={() => onSelect(on ? null : s.id)}
-              aria-pressed={on}
-              title={note ? `${s.name} — ${note}` : s.name}
-              className={`chip max-w-[46vw] text-xs sm:max-w-none ${on ? 'chip-active' : ''} ${st === 'idle' && !on ? 'opacity-55' : ''}`}
-            >
-              <SourceIcon id={s.id} name={s.name} ring={RING[dot]} />
-              <span className="truncate">{s.name}</span>
+        {current ? (
+          // Two SIBLING buttons, never a × inside the chip: a button inside a button is invalid DOM, and on
+          // a touchscreen the inner one is unreachable half the time.
+          <span className="inline-flex items-center gap-1">
+            <button type="button" onClick={() => setSheet('list')} aria-haspopup="dialog" aria-pressed
+              className="chip chip-active max-w-[46vw] text-xs sm:max-w-none">
+              <SourceIcon id={current.id} name={current.name} size={16} />
+              <span className="truncate">{current.name}</span>
             </button>
-          );
-        })}
-
-        {selected && (
-          <button type="button" onClick={() => onSelect(null)} className="chip text-xs">
-            {tr('Show all')} ×
+            <button type="button" onClick={() => onSelect(null)} aria-label={tr('Show all')}
+              className="chip chip-active px-2.5 text-xs">
+              ×
+            </button>
+          </span>
+        ) : shown.length > 0 && (
+          <button type="button" onClick={() => setSheet('list')} aria-haspopup="dialog" className="chip text-xs">
+            {/* Three favicons stacked, the way the group avatars stack on a series page: recognisable as
+                "several", without naming any. The ring is the chip's own ground so the overlap reads. */}
+            <span className="inline-flex items-center">
+              {shown.slice(0, 3).map((s, i) => (
+                <span key={s.id} className={`inline-flex ${i > 0 ? '-ms-1.5' : ''}`}>
+                  <SourceIcon id={s.id} name={s.name} size={16} ring="ring-1 ring-ink-900" />
+                </span>
+              ))}
+            </span>
+            <span>{tr('All sources')}</span>
+            <span className="text-fog-500">· {tr('{n} sources', { n: count })}</span>
+            {troubled > 0 && <span className="text-amber-300">· {tr('{n} with issues', { n: troubled })}</span>}
           </button>
         )}
       </div>
-
-      {/* `title` is invisible on a touchscreen, which is most of this app's use, so the reason also has to
-          exist as text. Without this the amber dot would be one more colour nobody can interpret. */}
-      {troubled.map(({ s, note }) => {
-        const when = retryIn(s);
-        return (
-          <p key={s.id} className="text-[11px] leading-relaxed text-fog-500">
-            <span className="text-fog-400">{s.name}</span>: {note}{when ? ` (${when})` : ''}
-          </p>
-        );
-      })}
 
       {settled < total && (
         <div className="h-px w-full overflow-hidden bg-ink-700">
           <div className="h-full bg-accent transition-all duration-500" style={{ width: `${(settled / Math.max(1, total)) * 100}%` }} />
         </div>
       )}
+
+      {sheet === 'list' && (
+        <SourceListSheet sources={shown} total={count} stateOf={stateOf} selected={selected} onSelect={onSelect}
+          onExplain={() => setSheet('explainer')} onClose={() => setSheet(null)} />
+      )}
+      {sheet === 'explainer' && <SourcesExplainer onClose={() => setSheet('list')} />}
     </div>
   );
 }

@@ -3,6 +3,7 @@
 import { q, one } from './db';
 import { cbzPageDims, DL_ROOT, LIBRARY_ROOT, persistScan } from './library';
 import { ViewCtx, Params, visible, browsable, ADULT_RATING } from './visibility';
+import { cleanDescription } from './htmlText';
 
 interface Page<T> { content: T[]; totalElements: number; totalPages: number; number: number; size: number; first: boolean; last: boolean }
 function page<T>(content: T[], total: number, p: number, size: number): Page<T> {
@@ -82,7 +83,14 @@ const SERIES_TITLE_JOIN = 'JOIN lib_series s ON s.id = %col% LEFT JOIN series_ov
 
 function seriesDto(r: any) {
   const genres: string[] = r.genres ?? [];
-  const summary: string = r.summary ?? '';
+  // Cleaned on the way OUT, whatever wrote the column. The add path has stripped Markdown since v0.34.0,
+  // but every MangaDex series added before it still holds `**Year:** 1997 ---` in lib_series.summary
+  // (the scanner copied the ComicInfo Summary verbatim, and the ComicInfo was written from the raw
+  // description), and a migration over free text would have to guess which rows were Markdown. The
+  // strip is idempotent, so a clean row costs a regex pass and changes nothing. Reintroduce by reading
+  // `r.summary ?? ''` here: "a summary stored with Markdown is answered as plain text" in
+  // addSeries.int.test.ts sees the asterisks.
+  const summary: string = cleanDescription(r.summary);
   const count: number = r.books_count ?? 0;
   return {
     id: r.id,

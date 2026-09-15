@@ -6,7 +6,7 @@
 openapi: 3.1.0
 info:
   title: Uchiyomi API
-  version: 0.33.0
+  version: 0.34.0
   description: "Everything the web app does, it does over this API. Session JWTs are for the browser; scripts
     use a personal API token (Profile -> Account -> API tokens), sent as `Authorization: Bearer uy_...`.
     Scopes: read (every token; GET plus the library search POST, which is a query), write (anything that changes data), admin (the /api/admin surface, which also
@@ -112,6 +112,8 @@ components:
           enum: [missing, held, blocked, failed, floor]
         attempts: { type: integer, description: Only when the chapter has failed at least once. }
         reason: { type: string, description: The downloader's last error text. Admins only. }
+        waitingFor: { type: string, description: "Only when why is held, and only when a priority group survives the blocklist: the effective first-choice group (the series' own priority over the global one) the chapter is being held for, spelt as the preference names it." }
+        waitDaysLeft: { type: integer, minimum: 0, description: "Only with waitingFor: whole days until the patience window closes, counted as the sweep counts it -- from the oldest hosted copy that is not from a blocked group, under today's preferences (so 0 when the window has closed since the last check)." }
     SkippedNumber:
       type: object
       required: [number, reason]
@@ -158,7 +160,7 @@ components:
         One scanlation group's figures for a series. Groups are merged by the same equality the release
         rules use (case, spaces and punctuation ignored); the name is the first spelling seen on disk, else
         the first listed. A joint release counts once for each of its groups.
-      required: [name, releases, first, last, lastReleaseAt, cadence, onDisk, chapters, langs]
+      required: [name, releases, first, last, lastReleaseAt, cadence, onDisk, chapters, langs, weeks]
       properties:
         name: { type: string }
         releases: { type: integer, description: Chapters the group released -- distinct numbers across every followed source; a second copy of a number is not a second release. }
@@ -170,6 +172,12 @@ components:
         onDisk: { type: integer, description: Live chapters on this server stamped with the group. }
         chapters: { type: array, items: { type: number }, description: The numbers it released, ascending, each once. }
         langs: { type: array, items: { type: string }, description: The languages its copies are in, sorted. }
+        weeks:
+          type: array
+          minItems: 12
+          maxItems: 12
+          items: { type: boolean }
+          description: "One flag per week for the last twelve, oldest first, newest last (index 11 is the seven days ending now): true when the group released in that week, from the same per-number release dates the cadence is judged on. A release dated ahead of the server's clock counts as this week."
     Copy:
       type: object
       description: One version of a listed chapter number, as the sources list it.
@@ -927,7 +935,7 @@ paths:
     get:
       tags:
         - library
-      summary: Who scanlates this series, with releases, chapter range, last release, rhythm and how much is on this server.
+      summary: Who translates this series, with releases, chapter range, last release, rhythm, weekly activity and how much is on this server.
       operationId: getApiSeriesIdGroups
       description: >-
         From the copies persisted at the last check (every version the sources listed, not only the chosen
@@ -1614,7 +1622,7 @@ paths:
                   source: { type: string }
                   sourceId: { type: string }
                   title: { type: string }
-                  summary: { type: string }
+                  summary: { type: string, description: "Plain text: HTML and Markdown (MangaDex describes in Markdown) are stripped, link text kept." }
                   coverUrl: { type: [string, "null"] }
                   genres: { type: array, items: { type: string } }
                   status: { type: string }
@@ -1656,10 +1664,19 @@ paths:
                   description: How many chapters to take; omit for all.
                 chapterFrom:
                   type: string
-                  enum: [oldest, newest]
+                  enum: [oldest, newest, none]
                   default: oldest
-                  description: Which end chapterCount counts from. Either way the selection is downloaded
-                    ascending. With newest, a chapter floor is set so auto-update fetches new releases only.
+                  description: >-
+                    Which end chapterCount counts from. Either way the selection is downloaded ascending.
+                    With newest, a chapter floor is set so auto-update fetches new releases only. `none`
+                    adds the series with no chapters at all: the row is created and followed, the listing
+                    is written, no download starts, and a chapter floor is set just above the newest listed
+                    number (max + 0.001, so every number listed today is below it and the next release is
+                    not; null when the source lists nothing) so auto-update follows new releases only --
+                    older chapters can be fetched from the series page. The row is stamped as checked (the
+                    add just asked the source), so `checkedAt` and the source's chapter count are set from
+                    the start; a series removed from the library and added back this way is revived under
+                    its old id. `chapterCount` is ignored, and an empty listing is not `no_chapters`.
                 autoUpdate:
                   type: boolean
                 force:
@@ -1669,6 +1686,18 @@ paths:
       responses:
         "200":
           description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, title, folder, chapters, started, nothing]
+                properties:
+                  ok: { type: boolean }
+                  title: { type: string }
+                  folder: { type: string }
+                  chapters: { type: integer, description: How many chapters the add will fetch; 0 when already in the library or for a `none` add. }
+                  started: { type: boolean, description: The download is running now. }
+                  nothing: { type: boolean, description: "A `none` add: the series was created and floored and nothing was fetched or queued. Tells that outcome from `already in library`, which also answers chapters 0 and started false." }
         "400":
           description: Malformed body or parameter
         "401":

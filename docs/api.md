@@ -106,6 +106,19 @@ a partial add always reads as a coherent run. With `newest`, the chapters below 
 sweep fetches new releases only, instead of backfilling the whole back catalogue five per night with each
 new chapter queued behind it. `autoUpdate` enrols it in the scheduled updater.
 
+`chapterFrom: "none"` (since v0.34.0) adds the series with **no chapters at all** — the dialog's "Nothing
+yet — pick chapters later". The row is created and followed, the listing is written so the series page can
+show what the source has, nothing is downloaded, and the chapter floor is set just above the newest listed
+number (`max + 0.001`: every number the source lists today is below it, the next release is not; no floor
+when the source lists nothing), so auto-update takes only chapters released after the add. Older ones can
+be fetched from the series page. The row is stamped as checked — the add just asked the source — so the
+series' `checkedAt` and the source's chapter count are set from the start rather than after the first
+sweep, and a series removed from the library and added back this way is revived under its old id (its
+favourites, notes and read marks with it). `chapterCount` is ignored, and an empty listing is not
+`no_chapters` — an announced title with nothing out yet is what this is for. The answer is `{ok, title,
+folder, chapters: 0, started: false, nothing: true}`; `nothing` is what tells it from "already in library",
+which also answers `chapters: 0`.
+
 `GET /api/sources` lists what you can reach: each entry carries `id`, `name`, `lang` (null when the source
 declares no single language, which means it belongs to every language group), `latest` (whether it can be
 browsed without a query), `popular` (whether it can offer its own popularity ranking), `used` (how many
@@ -315,18 +328,23 @@ is listed by `GET /api/series/:id/books` (with the flag) and skipped everywhere 
 **Chapters the sources have that you don't.** `GET /api/series/:id/listing` answers
 `{checkedAt, content: [Ghost]}`: every chapter number the series' sources listed at the last check (the
 sweep, or **Check now**) that this server has no row for, each with the reason —
-`Ghost = {number, title, publishedAt, scanlator, groups, sourceId, sourceName, why, attempts?, reason?}`,
-`why` one of `missing` (not fetched yet), `held` (waiting for a preferred group under the release
-preferences), `failed` (the sweep gave up after the retry cap; `attempts` says how many tries), `blocked`
-(only blocked groups have released it), `floor` (below the series' Latest-N floor). The listing is read
-from what the updater persisted, never from the sources on a page open, so `checkedAt` is how old the
-answer is; a source that failed to answer leaves the previous listing standing. `reason`, the downloader's
-last error text, is present for admins only. A tombstone is a row, so it is never a ghost.
+`Ghost = {number, title, publishedAt, scanlator, groups, sourceId, sourceName, why, attempts?, reason?,
+waitingFor?, waitDaysLeft?}`, `why` one of `missing` (not fetched yet), `held` (waiting for a preferred
+group under the release preferences), `failed` (the sweep gave up after the retry cap; `attempts` says how
+many tries), `blocked` (only blocked groups have released it), `floor` (below the series' Latest-N floor).
+A `held` ghost also carries `waitingFor` (since v0.34.0) — the effective first-choice group it is being
+held for, the series' own priority over the global one, minus anything blocked — and `waitDaysLeft`, the
+whole days until the patience window closes, counted as the sweep counts it: from the oldest hosted copy
+that is not from a blocked group, under today's preferences (so it can read 0 on a row the last sweep held
+before a preference change; both are absent when no priority group survives the blocklist). The listing is read from what the updater
+persisted, never from the sources on a page open, so `checkedAt` is how old the answer is; a source that
+failed to answer leaves the previous listing standing. `reason`, the downloader's last error text, is
+present for admins only. A tombstone is a row, so it is never a ghost.
 
-**Who scanlates this.** `GET /api/series/:id/groups` answers `{checkedAt, content: [GroupStat]}`, one entry
+**Translated by.** `GET /api/series/:id/groups` answers `{checkedAt, content: [GroupStat]}`, one entry
 per scanlation group, sorted by releases descending:
 `GroupStat = {name, releases, first, last, lastReleaseAt, cadence: {kind, intervalDays, daysSince, quiet},
-onDisk, chapters, langs}`. `releases` counts the chapters the group released — distinct numbers across every
+onDisk, chapters, langs, weeks}`. `releases` counts the chapters the group released — distinct numbers across every
 followed source, so a second copy of a number (a follower listing it too, a re-upload) is not a second release,
 while a joint release counts once for each of its groups; `chapters` are the numbers it released, ascending, with
 `first`/`last` the ends of that list; `onDisk` is how many live chapters on this server are stamped with the
@@ -334,12 +352,14 @@ group; `langs` the languages its copies are in. `cadence.kind` comes from the me
 last ten release *days* (a day with several chapters is one release day, so a group that ships two at a time
 is weekly, not daily) — `daily` (≤ 1.5 days), `weekly` (≤ 9), `monthly` (≤ 40), `irregular`, or `unknown`
 with fewer than two distinct dated days — and `quiet` is true when the silence since `lastReleaseAt` exceeds
-three intervals (never less than 14 days), or 45 days when the rhythm is unknown. Groups are merged by the
-same equality the release rules use; the name shown is the first spelling seen on disk, else the first
-listed. Since v0.33.0 the listing keeps *every* copy the sources list, not only the chosen one, and this is
-read from those copies plus the file stamps — never from the sources on a page open, so `checkedAt` is how
-old the answer is. Any account that can open the series may read it; ranking and blocking is the admin route
-below.
+three intervals (never less than 14 days), or 45 days when the rhythm is unknown. `weeks` (since v0.34.0)
+is twelve booleans, oldest first, newest last — index 11 is the seven days ending now — true for each week
+the group released in, from the same dates; the series page draws them as an activity strip. Groups are
+merged by the same equality the release rules use; the name shown is the first spelling seen on disk, else
+the first listed. Since v0.33.0 the listing keeps *every* copy the sources list, not only the chosen one,
+and this is read from those copies plus the file stamps — never from the sources on a page open, so
+`checkedAt` is how old the answer is. Any account that can open the series may read it; ranking and blocking
+is the admin route below.
 
 **Chapter versions.** `GET /api/series/:id/versions` answers `{checkedAt, content: [{number, copies: [Copy]}]}`
 for every listed number, `Copy = {key, source, sourceName, groups, scanlator, lang, pages, publishedAt,
@@ -377,8 +397,12 @@ chosen under the series' release preferences with the patience switched off, so 
 file even when the source lists chapter `n` from three groups. `GET /api/sources/detail` counts the same
 way, under the server-wide preferences, so the "120 chapters" the add dialog shows is the 120 the add would
 land and not the 200 rows the source listed. Since v0.33.0 the detail also carries `groups: [GroupStat]`
-(who scanlates it, from the same chapter list — no second source call, `onDisk` 0) and `versions`, how many
-numbers the source lists in more than one copy.
+(who translates it, from the same chapter list — no second source call, `onDisk` 0) and `versions`, how many
+numbers the source lists in more than one copy. Its `summary` is plain text: HTML and Markdown are stripped
+(MangaDex describes in Markdown), link text kept. The same strip is applied to the description an add
+writes into the ComicInfo and, since v0.34.0, to every series' `metadata.summary` on the way out of
+`GET /api/series/:id` and the listings — so a series added before v0.34.0 whose stored summary still holds
+`**Year:** 1997 ---` reads clean without a migration.
 
 **Fetching ghost chapters.** `POST /api/sources/fetch {seriesId, numbers?[], picks?[]}` (at least one of
 the two, at most 300 combined; numbers 0–1,000,000) fetches chapters from the listing above. What authorises a fetch is the *listing*: a client
@@ -500,7 +524,8 @@ GET    /api/admin/import/status
 ```
 
 The bulk importer's body takes `titles`, `autoUpdate`, `chapterCount` and `chapterFrom`, with the same
-meaning as on `/api/sources/add` (`chapterFrom: "newest"` takes the latest N and floors the series).
+meaning as on `/api/sources/add` (`chapterFrom: "newest"` takes the latest N and floors the series; the
+importer accepts `oldest` and `newest` only — `none` is the add dialog's).
 
 **Scanlation groups.** When a source lists the same chapter from more than one group (MangaDex does, and
 so do extension sources that carry Mihon's scanlator column), the server keeps one file per number and the

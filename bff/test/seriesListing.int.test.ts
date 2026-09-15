@@ -292,3 +292,77 @@ test('the failure reason is shown to admins only', { skip }, async () => {
   assert.equal(m.attempts, CHAPTER_RETRY_CAP, 'and how many times');
   assert.ok(!('reason' in m), `the member must not see the text: ${JSON.stringify(m)}`);
 });
+
+/**
+ * A held ghost says WHO it waits for and for HOW LONG. Members used to read "waiting for a preferred
+ * group" with no name and no end, which is a row that explains nothing. The name is the effective first
+ * choice -- the series' own priority over the global one, minus anything blocked -- and the days are
+ * counted by the chooser's own rule: the oldest hosted copy's date plus the patience window.
+ *
+ * Reintroduce by dropping the prefs read in listingFor (`const prefs = { priority: [], blocked: [],
+ * patienceMs: 0 }`): `waitingFor` is undefined on every held ghost and "names the global first choice"
+ * fails. Reintroduce the blocklist rule by naming `prefs.priority[0]` outright: "a first choice the
+ * blocklist removes names nobody" sees `Blocked Group`.
+ */
+test('a held ghost names the group it waits for and the days left', { skip }, async (t) => {
+  const DAY = 86_400_000;
+  // A held row the sweep could have written: chapter 8 from Group A, hosted, released a day ago, while
+  // the server prefers Group B and waits three days for it.
+  const copy = { sourceId: 'c/8/Group A', source: PRI, groups: ['Group A'], scanlator: 'Group A', lang: 'en', pages: 12,
+                 publishedAt: new Date(Date.now() - DAY).toISOString() };
+  await q(`INSERT INTO series_listing (series_id, number, title, published_at, scanlator, groups, source_id, chosen, status, copies)
+           VALUES ($1, 8, 'Chapter 8', $2, 'Group A', '{"Group A"}', $3, $4::jsonb, 'held', $5::jsonb)
+           ON CONFLICT (series_id, number) DO UPDATE SET status = 'held', copies = EXCLUDED.copies, published_at = EXCLUDED.published_at`,
+    [S, copy.publishedAt, PRI, JSON.stringify({ sourceId: copy.sourceId, number: 8, scanlator: 'Group A', source: PRI }), JSON.stringify([copy])]);
+  await q(`UPDATE server_settings SET scanlator_prefs = '{"priority":["Group B"],"blocked":["Blocked Group"],"patienceDays":3}'::jsonb WHERE id = 1`);
+  const eight = async (tok: string) => (await listing(tok)).json().content.find((g: any) => g.number === 8);
+  try {
+    await t.test('names the global first choice and counts the days from the oldest hosted copy', async () => {
+      const g = await eight(memberTok);
+      assert.equal(g?.why, 'held', `PREMISE: chapter 8 is a held ghost: ${JSON.stringify(g)}`);
+      assert.equal(g.waitingFor, 'Group B', 'the first priority group, spelt as the preference names it');
+      assert.equal(g.waitDaysLeft, 2, 'released a day ago under three days of patience: two whole days to go');
+    });
+    await t.test('the series\' own priority replaces the global one', async () => {
+      await q(`UPDATE lib_series SET scanlator_prefs = '{"priority":["Group A"],"blocked":[],"patienceDays":null}'::jsonb WHERE id = $1`, [S]);
+      try {
+        assert.equal((await eight(adminTok)).waitingFor, 'Group A', 'the effective prefs, not the global row');
+      } finally {
+        await q('UPDATE lib_series SET scanlator_prefs = NULL WHERE id = $1', [S]);
+      }
+    });
+    await t.test('a first choice the blocklist removes names nobody', async () => {
+      // The chooser drops a blocked group from the priority list before ranking, so it can never be the
+      // group a number waits for; naming it here would promise a copy the sweep will never take.
+      await q(`UPDATE server_settings SET scanlator_prefs = '{"priority":["Blocked Group"],"blocked":["Blocked Group"],"patienceDays":3}'::jsonb WHERE id = 1`);
+      const g = await eight(adminTok);
+      assert.equal(g.why, 'held', 'still held as the sweep left it');
+      assert.ok(!('waitingFor' in g) && !('waitDaysLeft' in g), `neither field: ${JSON.stringify(g)}`);
+    });
+    await t.test('the window can have closed since the sweep held it: never a negative count', async () => {
+      await q(`UPDATE server_settings SET scanlator_prefs = '{"priority":["Group B"],"blocked":[],"patienceDays":0}'::jsonb WHERE id = 1`);
+      const g = await eight(adminTok);
+      assert.equal(g.waitingFor, 'Group B');
+      assert.equal(g.waitDaysLeft, 0, 'zero, not minus one');
+    });
+    await t.test('a blocked group\'s older copy does not shorten the wait', async () => {
+      // `copies` keeps every copy, the blocked group's included, but the chooser drops a copy whose every
+      // group is blocked BEFORE it takes the oldest date -- so the sweep holds this number from Group A's
+      // half-day-old copy, not from the MTL group's 2.5-day-old one. The blocked group is typically the
+      // fast one that posts first, so its copy is usually the oldest: counted from all copies the caption
+      // read "1 day left" on a row the sweep would hold for three. Reintroduce by passing `r.copies ?? []`
+      // straight into waitDaysLeftOf in listingFor (dropping the `ranked` filter): 1, not 3.
+      const mtl = { sourceId: 'c/8/MTL Group', source: PRI, groups: ['MTL Group'], scanlator: 'MTL Group', lang: 'en', pages: 10,
+                    publishedAt: new Date(Date.now() - 2.5 * DAY).toISOString() };
+      const fresh = { ...copy, publishedAt: new Date(Date.now() - 0.5 * DAY).toISOString() };
+      await q(`UPDATE series_listing SET copies = $2::jsonb WHERE series_id = $1 AND number = 8`, [S, JSON.stringify([fresh, mtl])]);
+      await q(`UPDATE server_settings SET scanlator_prefs = '{"priority":["Group B"],"blocked":["MTL Group"],"patienceDays":3}'::jsonb WHERE id = 1`);
+      const g = await eight(adminTok);
+      assert.equal(g.waitingFor, 'Group B', `PREMISE: still held for Group B: ${JSON.stringify(g)}`);
+      assert.equal(g.waitDaysLeft, 3, 'half a day into three days of patience, counted from the unblocked copy: three whole days, not one');
+    });
+  } finally {
+    await q('DELETE FROM series_listing WHERE series_id = $1 AND number = 8', [S]);
+    await q(`UPDATE server_settings SET scanlator_prefs = '{"priority":["Group B"],"blocked":["Blocked Group"],"patienceDays":2}'::jsonb WHERE id = 1`);
+  }
+});

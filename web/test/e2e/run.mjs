@@ -344,12 +344,12 @@ try {
     await page.goto(BASE + seriesHref, { waitUntil: 'networkidle2', timeout: 60000 });
     await sleep(2500);
     const started = await page.evaluate(() => {
-      const b = [...document.querySelectorAll('button')].find((x) => /download all/i.test(x.innerText || ''));
+      const b = [...document.querySelectorAll('button')].find((x) => /save all offline/i.test(x.innerText || ''));
       if (!b) return false;
       b.click();
       return true;
     });
-    if (!started) bad('the series page has no "Download all" button');
+    if (!started) bad('the series page has no "Save all offline" button');
     else {
       await sleep(20000);   // three tiny seeded chapters; the button reads "Saving…" while it works
       await page.goto(`${BASE}/downloads`, { waitUntil: 'networkidle2', timeout: 60000 });

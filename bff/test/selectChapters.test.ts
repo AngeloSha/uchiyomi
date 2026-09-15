@@ -26,3 +26,13 @@ test('no count, a zero count, or an oversize count means everything', () => {
   assert.deepEqual(selectChapters(ten, 50, 'newest'), ten);
   assert.deepEqual(selectChapters(ten, 50, 'oldest'), ten);
 });
+
+// Reintroduce by moving the `from === 'none'` return in selectChapters below the count line: with no count,
+// or a count past the list, "nothing" reads as "everything" and the first assertion sees all ten.
+test('none selects nothing whatever the count', () => {
+  assert.deepEqual(selectChapters(ten, undefined, 'none'), []);
+  assert.deepEqual(selectChapters(ten, 0, 'none'), []);
+  assert.deepEqual(selectChapters(ten, 3, 'none'), []);
+  assert.deepEqual(selectChapters(ten, 50, 'none'), []);
+  assert.deepEqual(selectChapters([], undefined, 'none'), []);
+});

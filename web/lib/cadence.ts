@@ -1,6 +1,6 @@
 // The cadence line under a group's name -- "ships weekly · last release 3d ago" -- with no React in it.
 //
-// Shared by the Who scanlates this card on the series page and the compact list in the add dialog, so the
+// Shared by the group rows in the Sources & translations sheet and the compact list in the add dialog, so the
 // two say the same thing about the same group. The server decides the cadence (`groupStats` in the bff);
 // this only turns its verdict into words, and lives here so a test can check every branch without a browser.
 

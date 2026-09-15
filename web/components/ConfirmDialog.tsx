@@ -44,14 +44,21 @@ export function Modal({
     return () => document.removeEventListener('keydown', onKey);
   }, []);
 
+  // ⚠️ Clear of the phone's bottom nav. The nav is a root-level sibling above `main` (z-40 over this
+  // z-50-inside-main), so it paints over the bottom 5.5 rem of anything here: with a panel capped at 88vh
+  // the last row of a tall dialog -- the add dialog's "Add to library", scrolled to the end -- sat under
+  // the bar, with 9 to 20 px of the button reachable at 390×740 and the bar's own link under its centre at
+  // 667. Below `lg` (where BottomNav.tsx hides itself) the backdrop keeps the bar's band free and the panel
+  // is capped at the viewport minus that band and the top padding (7.5 rem = 5.5 + 1 + 1); from `lg` up it
+  // is the centred 88vh dialog it always was. The same 5.5 rem the Sheet's `overBottomNav` uses.
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-ink-950/70 p-4 backdrop-blur-xs" onClick={onClose}>
+    <div className="fixed inset-0 z-50 grid place-items-center bg-ink-950/70 p-4 pb-[calc(5.5rem+env(safe-area-inset-bottom))] backdrop-blur-xs lg:pb-4" onClick={onClose}>
       <div
         ref={ref}
         role="dialog"
         aria-modal="true"
         aria-label={title}
-        className={`glass max-h-[88vh] w-full ${wide ? 'max-w-lg' : 'max-w-md'} overflow-y-auto rounded-2xl border border-ink-700 p-5`}
+        className={`glass max-h-[calc(100dvh-7.5rem-env(safe-area-inset-bottom))] w-full lg:max-h-[88vh] ${wide ? 'max-w-lg' : 'max-w-md'} overflow-y-auto rounded-2xl border border-ink-700 p-5`}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="mb-3 flex items-start justify-between gap-3">

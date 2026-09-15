@@ -5,6 +5,7 @@ import { junkPagesFor, setPageOverride } from '../lib/junkPages';
 import { komgaImage } from '../lib/komga';
 import { content as komga, NATIVE_PROGRESS } from '../lib/backend';
 import { UnsupportedFilter } from '../lib/ownedCatalog';
+import { cleanDescription } from '../lib/htmlText';
 import { viewCtxFor, SYSTEM_CTX, type ViewCtx, hideAdult, browsableIds, browsable, Params } from '../lib/visibility';
 
 /** The viewer attached by the preHandler above. */
@@ -364,7 +365,12 @@ export default async function catalogRoutes(app: FastifyInstance) {
     );
     if (ov) {
       if (ov.title) { out.name = ov.title; if (out.metadata) out.metadata.title = ov.title; }
-      if (ov.summary != null) { if (out.metadata) out.metadata.summary = ov.summary; if (out.booksMetadata) out.booksMetadata.summary = ov.summary; }
+      // Through the same strip seriesDto applies to a stored summary: this assignment runs AFTER the DTO was
+      // built, so an override pasted with Markdown (a MangaDex blurb copied into Edit details) reached the
+      // page raw while the un-overridden summary next to it was clean. The editor still seeds from
+      // `out.overrides` below, which keeps the text as typed. Reintroduce by assigning `ov.summary` here:
+      // "an overridden summary is stripped like a stored one" reads the asterisks back.
+      if (ov.summary != null) { const clean = cleanDescription(ov.summary); if (out.metadata) out.metadata.summary = clean; if (out.booksMetadata) out.booksMetadata.summary = clean; }
       out.artVersion = Math.floor(Number(ov.v)) || 0;
       // the edit modal seeds from these, so every overridable field has to come back or a save would
       // write back a blank and clear the very override the user opened the modal to keep

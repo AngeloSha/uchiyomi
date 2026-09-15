@@ -10,6 +10,10 @@
 // cost the server a full timeout and then wrote a multi-minute cooldown against the source. Ranking survived
 // the removal because ranking was the useful half.
 
+// `t as tr`, as every component does: the string extractor scans for `tr(` with a literal, and a bare `t(`
+// would leave this key out of every locale file while the app compiled and rendered it in English.
+import { t as tr } from './i18n';
+
 export interface Src {
   id: string;
   name: string;
@@ -75,21 +79,53 @@ export function budgetFor(sources: Src[], max = 6): Src[] {
  *
  * Amber, not red: a source in a cooldown heals by itself, and the sources here are third-party websites
  * whose being down is ordinary rather than alarming.
+ *
+ * Every amber dot comes with a sentence. A request that FAILED (`blocked`) used to carry the server's note
+ * or nothing, and "nothing" was common: a 429 written this minute has a cooldown but no note yet. The sheet
+ * then lit an amber dot with no line under it, and the chip's "{n} with issues" -- which counted sentences --
+ * said two while three rows glowed. The default here is what makes the dot and the count agree.
  */
 export function noteFor(src: Src, state: SrcState): { dot: 'ok' | 'warn' | 'idle' | 'quiet'; note: string | null } {
   if (state === 'ok') return { dot: 'ok', note: null };
-  if (state === 'blocked') return { dot: 'warn', note: src.note ?? null };
+  if (state === 'blocked') return { dot: 'warn', note: src.note ?? tr('Could not be reached right now.') };
   // The case this exists for: the request succeeded and came back empty. Only the server knows whether that
   // means "nothing new" or "I could not read the page", and `note` is how it says so.
   if (state === 'empty') return src.note ? { dot: 'warn', note: src.note } : { dot: 'quiet', note: null };
   return { dot: 'idle', note: null };
 }
 
-/** "back in ~12 min", or null when there is no cooldown to wait out. */
+/**
+ * "back in ~12 min", or null when there is no cooldown to wait out.
+ *
+ * Translated here rather than by the caller because the caller renders it as a whole: it used to be the one
+ * hardcoded English sentence on a Discover page that was otherwise translated, and the string extractor
+ * cannot see a template literal.
+ */
 export function retryIn(src: Src, now = Date.now()): string | null {
   if (!src.blockedUntil) return null;
   const mins = Math.ceil((new Date(src.blockedUntil).getTime() - now) / 60000);
-  return mins > 0 ? `back in ~${mins} min` : null;
+  return mins > 0 ? tr('back in ~{n} min', { n: mins }) : null;
+}
+
+/**
+ * What the empty card says when ONE source is being browsed alone and it produced nothing.
+ *
+ * The page's sentence for the whole wall ("nothing new from these sources") is wrong for a single source
+ * that is rate-limited: before v0.34.0 the note lines under the chip wall said "Rate-limited … · back in
+ * ~12 min" on the page itself; those lines went into the sheet, and browsing that source alone then read as
+ * "nothing new" while the sheet, one tap away, said why. So the card says what the sheet row says --
+ * `warn` is the caller's cue to paint it amber -- and only a source with nothing wrong falls through to the
+ * quiet sentence. The reached-nothing branch is for a failure `noteFor` gives no sentence to; today it
+ * always gives one, but the card must never read "nothing new" for a request that did not succeed.
+ */
+export function aloneEmpty(src: Src, state: SrcState, now = Date.now()): { text: string; warn: boolean } {
+  const { note } = noteFor(src, state);
+  if (note) {
+    const when = retryIn(src, now);
+    return { text: when ? `${note} · ${when}` : note, warn: true };
+  }
+  if (state === 'blocked') return { text: tr('No source could be reached right now.'), warn: true };
+  return { text: tr('Nothing new from these sources right now.'), warn: false };
 }
 
 /** Which listing the wall is showing. The source's own ranking, never one we compute. */

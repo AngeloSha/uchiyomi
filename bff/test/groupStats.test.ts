@@ -235,6 +235,38 @@ test('a group nothing lists or holds is a row of zeros', () => {
   assert.deepEqual(emptyGroupStat('Vanished Group'), {
     name: 'Vanished Group', releases: 0, first: null, last: null, lastReleaseAt: null,
     cadence: { kind: 'unknown', intervalDays: null, daysSince: null, quiet: false },
-    onDisk: 0, chapters: [], langs: [],
+    onDisk: 0, chapters: [], langs: [], weeks: Array(12).fill(false),
+  });
+});
+
+/**
+ * The activity strip: one flag per week for the last twelve, OLDEST FIRST, so the rightmost dot is this
+ * week. Reintroduce by indexing from the oldest end in weeksOf (`weeks[w] = true` instead of
+ * `weeks[WEEKS - 1 - w]`): "one and three weeks ago light indexes 10 and 8" reads indexes 1 and 3 set
+ * instead. Reintroduce the fold by dropping the `Math.max(0, …)`: the future-dated release computes a
+ * negative week, lands nowhere, and "a date just ahead of the clock counts as this week" reads false.
+ */
+test('weeks: twelve flags, newest last', async (t) => {
+  await t.test('one and three weeks ago light indexes 10 and 8, twenty weeks ago is off the strip', () => {
+    const stats = groupStats([
+      { number: 1, scanlator: 'Group A', publishedAt: iso(NOW - 20 * 7 * DAY), source: 'pri' },
+      { number: 2, scanlator: 'Group A', publishedAt: iso(NOW - 3 * 7 * DAY), source: 'pri' },
+      { number: 3, scanlator: 'Group A', publishedAt: iso(NOW - 7 * DAY), source: 'pri' },
+    ], [], NOW);
+    const weeks = stats[0].weeks;
+    assert.equal(weeks.length, 12, 'twelve weeks, always');
+    const lit = weeks.map((on, i) => (on ? i : -1)).filter((i) => i >= 0);
+    assert.deepEqual(lit, [8, 10], 'index 11 is this week, 10 is last week, 8 is three weeks ago; twenty weeks ago is past the strip');
+  });
+  await t.test('a date just ahead of the clock counts as this week', () => {
+    const stats = groupStats([
+      { number: 1, scanlator: 'Group A', publishedAt: iso(NOW + 2 * DAY), source: 'pri' },
+    ], [], NOW);
+    assert.equal(stats[0].weeks[11], true, 'folded into this week, not dropped');
+    assert.equal(stats[0].weeks.filter(Boolean).length, 1);
+  });
+  await t.test('a group with no dated release has an empty strip', () => {
+    const stats = groupStats([{ number: 1, scanlator: 'Group A', source: 'pri' }], [], NOW);
+    assert.deepEqual(stats[0].weeks, Array(12).fill(false));
   });
 });

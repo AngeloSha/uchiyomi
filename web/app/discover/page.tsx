@@ -13,7 +13,7 @@ import { SourceCard, SourceItem } from '@/components/cards';
 import { ScrollRail } from '@/components/ScrollRail';
 import { DiscoverHero, TrendingCard, Trending } from '@/components/DiscoverHero';
 import { SourcePicker, SourceLatest, Src, SrcState } from '@/components/SourcePicker';
-import { budgetForMode, type ListMode } from '@/lib/sourceGroups';
+import { aloneEmpty, budgetForMode, type ListMode } from '@/lib/sourceGroups';
 import { normTitle } from '@/lib/normTitle';
 import { foldByTitle, type WallProvider } from '@/lib/wall';
 import { AddSeriesDialog, AddSeed } from '@/components/AddSeriesDialog';
@@ -98,10 +98,16 @@ export default function DiscoverPage() {
   const [seed, setSeed] = useState<AddSeed | null>(null);
   const [added, setAdded] = useState<Set<string>>(new Set());
 
+  // Every source that can answer this listing, best first. A source that cannot answer the chosen listing is
+  // not in the pool at all, the same way one without `latest` has never been. Popular is universal among
+  // extensions but absent from a few site engines.
+  //
+  // The pool is what the chip COUNTS. It used to count the ranked list below, and that list is capped at
+  // twelve, so a 14-source install read "All sources · 12 sources" over a sheet listing nine -- three numbers
+  // for one pool. The cap is a fetch budget, not a fact about the install.
+  const pool = useMemo(() => budgetForMode(sources, listMode, Infinity), [sources, listMode]);
   // Ranked once; how many of them are actually asked grows as answers come back.
-  // A source that cannot answer the chosen listing is not ranked at all, the same way one without `latest`
-  // has never been. Popular is universal among extensions but absent from a few site engines.
-  const ranked = useMemo(() => budgetForMode(sources, listMode, 12), [sources, listMode]);
+  const ranked = useMemo(() => pool.slice(0, 12), [pool]);
 
   // Nothing resets the wall any more. That reset -- and specifically resetting it WITHOUT remounting the
   // children, which kept their React keys and their cached queries -- is what left the page counting sources
@@ -180,6 +186,14 @@ export default function DiscoverPage() {
   }, [mode, listMode, selected, searchHits, order, byId, nameOf, rankOf]);
 
   const pending = mode === 'newest' ? Math.max(0, budget.length - settled) : (searching ? 3 : 0);
+
+  // The empty card for ONE source browsed alone says that source's own reason and wait, the way its sheet
+  // row does -- "Rate-limited … · back in ~12 min", not the wall's "nothing new". `selected` names a
+  // budgeted source (the picker clears it on a mode change), but the row is looked up defensively for the
+  // same reason the picker's × is: a missing row must degrade to a sentence, not a crash.
+  const alone = mode === 'newest' && selected
+    ? aloneEmpty(budget.find((s) => s.id === selected) ?? { id: selected, name: selected, lang: null }, states[kOf(selected)] ?? 'idle')
+    : null;
 
   const search = async (e?: React.FormEvent) => {
     e?.preventDefault();
@@ -292,7 +306,8 @@ export default function DiscoverPage() {
         <div className="flex flex-wrap items-end justify-between gap-x-4 gap-y-3">
           <div className="min-w-0">
             <h1 className="font-display text-2xl font-bold tracking-tight lg:text-3xl">{tr('Discover')}</h1>
-            <p className="mt-0.5 text-sm text-fog-400">{tr('Newest from your sources')}</p>
+            {/* Follows the listing, or the toggle below says Popular while the page says Newest. */}
+            <p className="mt-0.5 text-sm text-fog-400">{listMode === 'popular' ? tr('Popular on your sources') : tr('Newest from your sources')}</p>
           </div>
           <form onSubmit={search} className="flex w-full items-center gap-2 sm:w-auto">
             <div className="field flex min-w-0 flex-1 items-center gap-2 py-0 sm:w-72 lg:w-80">
@@ -315,6 +330,10 @@ export default function DiscoverPage() {
       {mode === 'newest' && (
         <SourcePicker
           sources={budget} states={states} settled={settled} total={budget.length}
+          // The chip's number is the whole pool, not the budget and not the ranked list: the budget widens
+          // as sources answer empty, and a count that ticks upward on its own reads as a bug; the ranked
+          // list is capped at twelve, and "12 sources" on a 14-source install is simply false.
+          count={pool.length}
           selected={selected} onSelect={setSelected}
           mode={listMode}
           onMode={(m) => { setListMode(m); setSelected(null); setPage(1); }}
@@ -345,9 +364,9 @@ export default function DiscoverPage() {
                 // line used to show the same sentence whatever had actually happened.
                 // A download killed by a rate-limit used to vanish from this strip entirely, taking its
                 // reason with it: the row was filtered to `downloading` and `reason` was never declared.
-                <p className="mt-1 text-[11px] text-amber-300">{j.reason || tr('Download stopped. Try another source or wait.')}</p>
+                <p className="mt-1 text-[11px] text-amber-300">{j.reason || tr('Fetch stopped. Try another source or wait.')}</p>
               ) : (
-                <p className="mt-1 text-[11px] text-emerald-400">{tr('Downloaded')}</p>
+                <p className="mt-1 text-[11px] text-emerald-400">{tr('Fetched')}</p>
               )}
             </div>
           ))}
@@ -356,7 +375,7 @@ export default function DiscoverPage() {
 
       <div className="mb-3 mt-6 flex items-baseline justify-between gap-3">
         <h2 className="font-display text-lg font-semibold tracking-tight text-fog-50 lg:text-xl">
-          {mode === 'search' ? tr('Results across your sources') : tr('Newest from your sources')}
+          {mode === 'search' ? tr('Results across your sources') : listMode === 'popular' ? tr('Popular on your sources') : tr('Newest from your sources')}
         </h2>
         {mode === 'search' ? (
           <button onClick={backToNewest} className="chip shrink-0 text-xs">
@@ -382,9 +401,12 @@ export default function DiscoverPage() {
 
       {!wall.items.length && !pending && (
         <div className="card col-span-full mt-2 p-8 text-center">
-          <p className="text-sm text-fog-400">
+          <p className={`text-sm ${alone?.warn ? 'text-amber-300' : 'text-fog-400'}`}>
             {mode === 'search' ? tr('No results across your sources — try another title.')
-              : budget.length === 0 ? tr('No sources are set up yet. Add one in Admin \u2192 Providers.')
+              // Only an admin can act on the first sentence; a member told to open Admin has nowhere to go.
+              : budget.length === 0 ? (isAdmin ? tr('No sources are set up yet. Add one in Admin \u2192 Providers.') : tr('No sources are set up yet. Ask whoever runs this server.'))
+              // One source alone: its reason, amber, before any sentence about the wall as a whole.
+              : alone ? alone.text
               : Object.values(states).every((s) => s === 'blocked')
                 ? tr('No source could be reached right now.')
                 : tr('Nothing new from these sources right now.')}

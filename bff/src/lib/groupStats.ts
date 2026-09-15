@@ -44,6 +44,13 @@ export interface GroupStat {
   chapters: number[];
   /** The languages its copies are in, sorted; empty when the source names none. */
   langs: string[];
+  /**
+   * One flag per week for the last twelve, OLDEST FIRST: index 11 is the seven days ending now, index 0
+   * the week that began 84 days ago. True when the group released a chapter in that window. The series
+   * page draws these as an activity strip, which is the whole reason they are flags and not dates: twelve
+   * booleans per group is smaller than any date list and the strip needs nothing more.
+   */
+  weeks: boolean[];
 }
 
 /** One listed copy, as the listing stores it or as an adapter lists it live. */
@@ -57,6 +64,9 @@ export interface StatCopy {
 }
 
 const DAY_MS = 86_400_000;
+const WEEK_MS = 7 * DAY_MS;
+/** How many weeks the activity strip covers. */
+const WEEKS = 12;
 /** How many of the newest release days the rhythm is judged from: enough to smooth one late week, few enough to notice a group that slowed down this year. */
 /** Uploads closer together than this are one release (a batch), whatever the calendar says. */
 const RELEASE_GAP_MS = 12 * 60 * 60 * 1000;
@@ -118,8 +128,28 @@ export function emptyGroupStat(name: string): GroupStat {
   return {
     name, releases: 0, first: null, last: null, lastReleaseAt: null,
     cadence: { kind: 'unknown', intervalDays: null, daysSince: null, quiet: false },
-    onDisk: 0, chapters: [], langs: [],
+    onDisk: 0, chapters: [], langs: [], weeks: Array<boolean>(WEEKS).fill(false),
   };
+}
+
+/**
+ * Which of the last WEEKS weeks had a release, from the same per-number dates the cadence is judged on.
+ *
+ * Newest LAST, so the strip reads left to right like a calendar and the rightmost dot is this week; the
+ * flag is written at `WEEKS - 1 - w` where `w` is whole weeks ago. A scrape can carry a date a little
+ * ahead of this server's clock (a site's timezone, a scheduled release stamped early), and `Math.max(0, …)`
+ * folds that into this week rather than dropping the group's newest release from its own strip.
+ * Reintroduce by writing `weeks[w]` instead: "weeks: twelve flags, newest last" reads the strip backwards
+ * (index 1 and 3 set instead of 10 and 8).
+ */
+export function weeksOf(dates: number[], now = Date.now()): boolean[] {
+  const weeks = Array<boolean>(WEEKS).fill(false);
+  for (const t of dates) {
+    if (!Number.isFinite(t)) continue;
+    const w = Math.max(0, Math.floor((now - t) / WEEK_MS));
+    if (w < WEEKS) weeks[WEEKS - 1 - w] = true;
+  }
+  return weeks;
 }
 
 interface Acc {
@@ -182,6 +212,7 @@ export function groupStats(copies: StatCopy[], onDisk: Array<{ number: number; s
       onDisk: a.onDisk,
       chapters,
       langs: [...a.langs].sort(),
+      weeks: weeksOf(dates, now),
     });
   }
   return out.sort((x, y) => y.releases - x.releases || x.name.localeCompare(y.name));

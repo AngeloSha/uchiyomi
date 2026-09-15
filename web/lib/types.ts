@@ -151,6 +151,13 @@ export interface Ghost {
   attempts?: number;
   /** The downloader's last error text. Admins only; absent for everyone else. */
   reason?: string;
+  /**
+   * Only on `held`: the preferred group the chapter is waiting for, and whole days of patience left. Absent
+   * when no preferred group survives the blocklist (the caption then says "a preferred group") and on a
+   * server older than v0.34.0.
+   */
+  waitingFor?: string;
+  waitDaysLeft?: number;
 }
 
 export interface Listing {
@@ -187,6 +194,11 @@ export interface GroupStat {
   onDisk: number;
   chapters: number[];
   langs: string[];
+  /**
+   * Twelve flags, oldest week first, newest (this week) last: true when the group released in that week.
+   * The activity strip is drawn from it. Absent from a server older than v0.34.0, in which case no strip.
+   */
+  weeks?: boolean[];
 }
 
 export interface SeriesGroups {

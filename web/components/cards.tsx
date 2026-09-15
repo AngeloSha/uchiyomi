@@ -8,6 +8,7 @@ import { deviceId } from '@/lib/device';
 import { coverTriplet } from '@/lib/theme';
 import { Img, ProgressBar } from './ui';
 import { IcHeart, IcPlay, IcPlus, IcWifiOff } from './icons';
+import { SourceIcon } from './SourcePicker';
 import { useOfflineSeries } from '@/lib/useOfflineSeries';
 import { t as tr } from '@/lib/i18n';
 
@@ -245,7 +246,12 @@ export interface SourceItem {
  */
 export function SourceCard({ item, sourceName, onAdd, eager }: {
   item: SourceItem;
-  /** shown as a corner chip, because a wall merged from several sources otherwise hides where a title came from */
+  /**
+   * Shown as the source's favicon in a corner box, because a wall merged from several sources otherwise
+   * hides where a title came from. The name itself is the hover title only: as a text chip it was the
+   * loudest thing on the wall -- a dozen "MangaDex" labels over artwork -- and the add dialog names the
+   * source in words before anything is fetched.
+   */
   sourceName?: string;
   onAdd: () => void;
   eager?: boolean;
@@ -266,13 +272,15 @@ export function SourceCard({ item, sourceName, onAdd, eager }: {
           className="h-full w-full" imgClassName="transition-transform duration-500 group-hover:scale-[1.07]" />
 
         {sourceName && (
-          <span className="absolute end-1.5 top-1.5 z-10 max-w-[85%] truncate rounded-md bg-ink-950/80 px-1.5 py-0.5 text-[10px] font-medium text-fog-200 backdrop-blur">
-            {sourceName}
+          <span title={sourceName} className="absolute end-1.5 top-1.5 z-10 grid place-items-center rounded-md bg-ink-950/80 p-1 backdrop-blur">
+            <SourceIcon id={item.source} name={sourceName} size={16} />
           </span>
         )}
+        {/* A bare "3" in a corner said nothing; the word makes it the fact it is: the same title on three
+            sources, and the add dialog will offer the choice. */}
         {(item.providerCount ?? 0) > 1 && !owned && (
           <span className="absolute start-1.5 top-1.5 z-10 rounded-md bg-ink-950/80 px-1.5 py-0.5 text-[10px] font-semibold text-accent backdrop-blur">
-            {item.providerCount}
+            {tr('{n} sources', { n: item.providerCount ?? 0 })}
           </span>
         )}
 

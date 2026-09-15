@@ -24,7 +24,9 @@ import { SOLVER_CONCURRENCY } from '../lib/sources/flaresolverr';
 const SCAN_CONCURRENCY = Math.max(1, Number(process.env.SCAN_CONCURRENCY || SOLVER_CONCURRENCY));
 const SCAN_ENOUGH = Math.max(1, Number(process.env.SCAN_ENOUGH || 3));
 const SCAN_SEARCH_MS = Number(process.env.SCAN_SEARCH_MS) || 45_000;
-import { persistScan, setBookDates, setBookMeta } from '../lib/library';
+import { persistScan, setBookDates, setBookMeta, libraryIdFor, type LibraryRow } from '../lib/library';
+import { newSeriesId } from '../lib/ids';
+import { cleanDescription } from '../lib/htmlText';
 import { updateSeries } from '../lib/updater';
 import { chooseReleases, groupsOf, releaseOrder } from '../lib/releases';
 import { effectivePrefsFor, readSeriesPrefs } from '../lib/scanlatorPrefs';
@@ -394,6 +396,8 @@ export interface AddResult {
   existing?: { title: string; source: string }; blockStatus?: string;
   /** The download was started rather than completed. Absent when the series was already in the library. */
   started?: boolean;
+  /** A "nothing yet" add: the series was created and floored, and no chapter was fetched or queued. */
+  nothing?: boolean;
 }
 
 /** Add one series from a source to the library (downloads chapter 1 synchronously, the rest in background).
@@ -461,9 +465,86 @@ export async function addSeriesFromSource(opts: {
   // often the group nobody wanted as the one they did -- would be locked in for the life of the series.
   const prefs = await effectivePrefsFor(null, 0);
   const { releases: chosen } = chooseReleases(chapters, prefs);
+  // The description as the page will show it: MangaDex writes Markdown, and this is what goes into every
+  // ComicInfo the downloader writes and, through the scanner, into lib_series.summary.
+  const meta = { series: title, summary: cleanDescription(series?.summary), author: series?.author, genres: series?.genres, url: series?.url, status: series?.status };
+
+  /**
+   * "Nothing yet": the series is created and followed, and no chapter is fetched.
+   *
+   * ⚠️ The row has to be written HERE. Every other add lets persistScan mint it from the first chapter's
+   * folder, but findSeriesDirs only registers a directory that directly holds chapters (library.ts), so a
+   * folder with nothing in it -- there is not even a folder yet -- would never become a row, and the add
+   * would have created nothing to follow. The columns are the ones persistScan writes plus the routing
+   * stamps the normal path adds afterwards; `library_id` is the same `libraryIdFor` answer persistScan would
+   * pick for a brand-new folder, so when the first chapter arrives its `ON CONFLICT (library_id, folder)`
+   * lands on THIS row and updates it in place rather than minting a second id -- and so the row sits in
+   * the library its folder says it is in, as every scanned row does.
+   *
+   * The floor is a hair ABOVE the newest listed number, not at it: `chapter_floor` is inclusive from below
+   * (`number < floor` is below, seriesListing.ts; `number >= floor` is wanted, updater.ts), so a floor of
+   * `max + 0.001` puts every number the source lists today below the sweep's scope and the next release --
+   * `max + 0.5`, `max + 1` -- inside it. A chapter numbered between `max` and `max + 0.001` would read as
+   * older; no real numbering does that, and the openapi description says so. NULL when the source lists
+   * nothing: there is nothing to be above, and every future chapter is wanted. An empty listing is not
+   * `no_chapters` here -- an announced title with no chapters yet is the one this add exists for.
+   *
+   * No job, no download, no persistScan: the listing and the cover are written as the normal path writes
+   * them, and the AniList art call runs as it does for every add. Re-adding hits the `existing` check above.
+   * The next sweep (or a person fetching from the series page) creates the folder through the downloader's
+   * mkdir, and persistScan then finds the row by folder.
+   *
+   * ⚠️ A row this folder already has is REVIVED, not shadowed. `existing` reaches this point only when the
+   * row was deleted and the check above has just un-deleted it -- and the unique index is (library_id,
+   * folder), so a plain INSERT answered 23505 for a series removed from the library and added back as
+   * "nothing yet", AFTER the un-delete had already put it back: the dialog read "Add failed. Try another
+   * source." for a series that was in the library again, and the next tap read "already in library". The
+   * conflict lands on that row and refreshes its routing in place, so its id -- and every favourite, note
+   * and read mark hung on it -- survives, as persistScan's own upsert keeps them across a rescan. The
+   * library has to be the row's OWN for the conflict to find it: an admin can move a series to a library
+   * its path would not pick (a deliberate UPDATE, library.ts), and `libraryIdFor` would then mint a second
+   * row of the same folder one library over, which is exactly the stranding the index exists to stop.
+   * Only a brand-new folder is assigned by path, as persistScan assigns one.
+   *
+   * Stamped as CHECKED, as stampChecked in updater.ts stamps a row after every sweep: this add has just
+   * asked the source. Left NULL, the series page read `not checked yet` above a run row that listed the
+   * very chapters this check had found, and the sources sheet showed no count and no "checked {ago}",
+   * until the first sweep reached the row. `source_chapters` is the chooser's count -- one per number,
+   * what the sweep stamps -- and `source_missing` is 0: every listed number is below the floor, so the
+   * sweep wants none of them.
+   */
+  if (chapterFrom === 'none') {
+    const floor = chosen.length ? Math.max(...chosen.map((c) => c.number)) + 0.001 : null;
+    const libs = await q<LibraryRow>('SELECT id, path FROM libraries ORDER BY length(path) DESC');
+    const libraryId = existing
+      ? (await one<{ library_id: string }>('SELECT library_id FROM lib_series WHERE id = $1', [existing.id]))?.library_id ?? libraryIdFor(folder, libs)
+      : libraryIdFor(folder, libs);
+    const { id } = (await q<{ id: string }>(
+      `INSERT INTO lib_series (id, source, title, summary, author, status, genres, web, folder, books_count, library_id, scanned_at,
+                               auto_update, source_id, source_series_id, chapter_floor, source_checked_at, source_chapters, source_missing)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,0,$10,now(),$11,$12,$13,$14,now(),$15,0)
+       ON CONFLICT (library_id, folder) DO UPDATE SET
+         auto_update = EXCLUDED.auto_update, source_id = EXCLUDED.source_id, source_series_id = EXCLUDED.source_series_id,
+         chapter_floor = EXCLUDED.chapter_floor, scanned_at = now(), deleted_at = NULL,
+         source_checked_at = now(), source_chapters = EXCLUDED.source_chapters, source_missing = EXCLUDED.source_missing
+       RETURNING id`,
+      [newSeriesId(), src.name, title, meta.summary || null, meta.author ?? null, meta.status ?? null, meta.genres ?? [], meta.url ?? null,
+       folder, libraryId, autoUpdate !== false, source, sourceId, floor, chosen.length],
+    ))[0];
+    await replaceListing(id, listingRows(chapters.map((c) => ({ ...c, source: source! })), chosen, new Set(), source!, releaseOrder(prefs))).catch(() => {});
+    if (series?.coverUrl) {
+      await q(`INSERT INTO series_art (series_id, cover) VALUES ($1, $2)
+        ON CONFLICT (series_id) DO UPDATE SET cover = COALESCE(series_art.cover, EXCLUDED.cover)`, [id, series.coverUrl]).catch(() => {});
+    }
+    fetchAniListArt(title)
+      .then((a) => q(`INSERT INTO series_art (series_id, banner, cover) VALUES ($1, $2, $3)
+        ON CONFLICT (series_id) DO UPDATE SET banner = COALESCE(series_art.banner, EXCLUDED.banner), cover = COALESCE(series_art.cover, EXCLUDED.cover)`, [id, a.banner, a.cover]))
+      .catch(() => {});
+    return { ok: true, status: 200, title, folder, chapters: 0, started: false, nothing: true };
+  }
+
   if (!chosen.length) return { ok: false, status: 404, error: 'no_chapters', message: 'No readable chapters for this title on this source. Try a different source.' };
   const selected = selectChapters(chosen, chapterCount, chapterFrom);
-  const meta = { series: title, summary: series?.summary, author: series?.author, genres: series?.genres, url: series?.url, status: series?.status };
   jobs.set(folder, { title, total: selected.length, done: 0, status: 'downloading' });
 
   /**
@@ -1340,7 +1421,8 @@ export default async function sourceRoutes(app: FastifyInstance) {
     for (const n of perNumber.values()) if (n > 1) versions++;
     return {
       source, sourceId,
-      title: series?.title || '', summary: series?.summary || '', coverUrl: series?.coverUrl || null,
+      // Plain text: MangaDex describes in Markdown, and the dialog shows this as prose.
+      title: series?.title || '', summary: cleanDescription(series?.summary), coverUrl: series?.coverUrl || null,
       genres: series?.genres || [], status: series?.status || '',
       count: chosen.length, first: nums.length ? Math.min(...nums) : null, last: nums.length ? Math.max(...nums) : null,
       groups: groupStats(chapters.map((c) => ({ number: c.number, groups: groupsOf(c), scanlator: c.scanlator, publishedAt: c.publishedAt, lang: c.lang, source })), []),
@@ -1353,7 +1435,7 @@ export default async function sourceRoutes(app: FastifyInstance) {
     // misspelt `chapterFrom` would have meant "oldest". A missing source or sourceId is still the same 400.
     const b = z.object({
       source: z.string(), sourceId: z.string(), force: z.boolean().optional(),
-      chapterCount: z.number().int().positive().optional(), chapterFrom: z.enum(['oldest', 'newest']).optional(),
+      chapterCount: z.number().int().positive().optional(), chapterFrom: z.enum(['oldest', 'newest', 'none']).optional(),
       autoUpdate: z.boolean().optional(),
     }).safeParse(req.body ?? {});
     if (!b.success) return reply.code(400).send({ error: 'bad_request' });
@@ -1369,6 +1451,8 @@ export default async function sourceRoutes(app: FastifyInstance) {
     // Audited here rather than after the download, so a slow or failing download does not delay the record
     // of who asked for it. What actually landed is the job's business.
     logAudit('download.add', { userId: (req as any).user?.sub, detail: { title: r.title, source, chapters: r.chapters }, req });
-    return { ok: true, title: r.title, folder: r.folder, chapters: r.chapters, started: !!r.started };
+    // `nothing` is how the dialog tells "added, chapters will come" from "already in your library": both
+    // answer `chapters: 0, started: false`, and before this flag the second wording was the only one.
+    return { ok: true, title: r.title, folder: r.folder, chapters: r.chapters, started: !!r.started, nothing: !!r.nothing };
   });
 }
