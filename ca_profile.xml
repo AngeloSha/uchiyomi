@@ -1,0 +1,10 @@
+<?xml version="1.0"?>
+<CommunityApplications>
+  <Profile>
+    A self-hosted manga and manhwa reader.
+  </Profile>
+
+  <Icon>https://raw.githubusercontent.com/AngeloSha/uchiyomi/main/logo-options/option-3-CHOSEN.png</Icon>
+
+  <WebPage>https://github.com/AngeloSha/uchiyomi</WebPage>
+</CommunityApplications>
