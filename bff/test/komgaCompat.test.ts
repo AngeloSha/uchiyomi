@@ -44,6 +44,89 @@ test('series status maps Uchiyomi vocabulary to Komga vocabulary', async () => {
   assert.ok(mod.default, 'route plugin must have a default export');
 });
 
+test('the series DTO carries every field the Mihon Komga DTOs require', async () => {
+  // Mihon's Komga extension (KomgaSource) deserializes SeriesDto → SeriesMetadataDto, and the built-in
+  // Komga tracker deserializes SeriesDto → SeriesMetadataDto with kotlinx.serialization. ALL of these are
+  // required non-null Kotlin fields. When one is missing the whole decode dies with a
+  // "Fields [<missing>] are required ..." error — exactly the failure reported against this API.
+  // The lock booleans especially look pointless (the extension never reads them), but they are required.
+  const { toSeriesDto } = await import('../src/routes/komgaCompat');
+  const row = {
+    id: 's1', library_id: 'lib', title: 'Some Series', status: 'ongoing',
+    summary: 'A summary', genres: ['Action'], age_rating: 16,
+    books_count: 5, created_at: new Date(0).toISOString(), latest_mtime: 0,
+  };
+  const dto = toSeriesDto(row, { read: 3, started: 1 });
+
+  // Top-level fields the Mihon built-in Komga tracker's SeriesDto requires:
+  assert.deepEqual(
+    [dto.booksReadCount, dto.booksUnreadCount, dto.booksInProgressCount],
+    [3, 1, 1],
+    'a user who read 3 of 5 chapters (1 in progress) must report 3 read / 1 unread / 1 in progress',
+  );
+
+  // Every field SeriesMetadataDto declares (extension and tracker variants), incl. the lock booleans:
+  for (const key of ['status', 'created', 'lastModified', 'title', 'titleSort', 'summary', 'readingDirection',
+                     'publisher', 'ageRating', 'language', 'genres', 'tags', 'totalBookCount']) {
+    assert.ok(key in dto.metadata, `series metadata must contain ${key}`);
+  }
+  assert.equal(dto.metadata.status, 'ONGOING');
+  assert.equal(dto.metadata.readingDirection, 'VERTICAL');
+
+  for (const lock of ['statusLock', 'titleLock', 'titleSortLock', 'summaryLock', 'readingDirectionLock',
+                      'publisherLock', 'ageRatingLock', 'languageLock', 'genresLock', 'tagsLock', 'totalBookCountLock']) {
+    assert.ok(lock in dto.metadata, `series metadata must contain ${lock}`);
+    assert.equal(dto.metadata[lock], false);
+  }
+  // Ready reading-direction enum: LTR | RTL | VERTICAL | WEBTOON
+  assert.ok(['LTR', 'RTL', 'VERTICAL', 'WEBTOON'].includes(dto.metadata.readingDirection));
+});
+
+test('without read progress the series counts are zeros, not the chapter total', async () => {
+  const { toSeriesDto } = await import('../src/routes/komgaCompat');
+  const dto = toSeriesDto({ id: 's1', title: 'T', books_count: 12, latest_mtime: 0 });
+  assert.deepEqual(
+    [dto.booksReadCount, dto.booksUnreadCount, dto.booksInProgressCount],
+    [0, 12, 0],
+    'a series nobody has touched must read as all-unread, never "every chapter read"',
+  );
+});
+
+test('the book DTO carries the lock fields the Komga extension requires', async () => {
+  // BookMetadataDto in the Komga extension is another strict set of required fields — including the
+  // `*Lock` booleans — plus authors/releaseDate. A missing key kills the chapter-list decode.
+  const { toBookDto } = await import('../src/routes/komgaCompat');
+  const dto = toBookDto({
+    id: 'b1', series_id: 's1', series_title: 'T', title: 'Ch 1', number: 1,
+    file: 'c1.cbz', pages: 20, size: 2048, mtime: 0,
+  });
+  for (const key of ['title', 'titleLock', 'summary', 'summaryLock', 'number', 'numberLock',
+                     'numberSort', 'numberSortLock', 'releaseDate', 'releaseDateLock',
+                     'authors', 'authorsLock']) {
+    assert.ok(key in dto.metadata, `book metadata must contain ${key}`);
+  }
+  for (const lock of ['titleLock', 'summaryLock', 'numberLock', 'numberSortLock', 'releaseDateLock', 'authorsLock']) {
+    assert.equal(dto.metadata[lock], false);
+  }
+  assert.equal(dto.metadata.numberSort, 1);
+  assert.ok(Array.isArray(dto.metadata.authors));
+  assert.equal(typeof dto.media.pagesCount, 'number');
+  assert.equal(typeof dto.number, 'number');
+});
+
+test('the spring-page envelope includes empty and numberOfElements', async () => {
+  // PageWrapperDto<T>, which the extension parses every list with, requires `empty` and `numberOfElements`
+  // in addition to content/totalElements/totalPages/number/size/first/last.
+  const { springPage } = await import('../src/routes/komgaCompat');
+  const p0 = springPage(['a', 'b'], 5, 0, 2);
+  assert.equal(p0.empty, false);
+  assert.equal(p0.numberOfElements, 2);
+
+  const empty = springPage([], 0, 0, 20);
+  assert.equal(empty.empty, true);
+  assert.equal(empty.numberOfElements, 0);
+});
+
 test('⚠️ the page number in the read-progress DTO is 1-based (Komga) not 0-based (Uchiyomi)', () => {
   // The Komga extension's tracker reads `readProgress.page` and maps it to Mihon's chapter progress.
   // Sending 0 makes Komga reject the PATCH outright (@Positive); a reader on the first page shows as

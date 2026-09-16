@@ -477,7 +477,8 @@ Point the Mihon Komga extension at Uchiyomi's URL, and use a personal API token 
 Profile → Account → Tokens) as the API key. Auth is `X-API-Key` header or HTTP Basic.
 ```
 GET    /api/v1/libraries
-GET    /api/v1/series            GET    /api/v1/series/{id}
+GET    /api/v1/series            GET    /api/v1/series/latest
+GET    /api/v1/series/{id}
 GET    /api/v1/series/{id}/books GET    /api/v1/series/{id}/thumbnail
 GET    /api/v1/books/{id}        GET    /api/v1/books/{id}/pages
 GET    /api/v1/books/{id}/pages/{page}

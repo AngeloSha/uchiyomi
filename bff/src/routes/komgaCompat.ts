@@ -11,6 +11,7 @@
 // Endpoints:
 //   GET  /api/v1/libraries                              library list (credentials check)
 //   GET  /api/v1/series                                 series listing, search, filter, sort, page
+//   GET  /api/v1/series/latest                          latest-added series (the extension's "Latest" tab)
 //   GET  /api/v1/series/:id                             series detail
 //   GET  /api/v1/series/:id/books                       chapters for a series
 //   GET  /api/v1/series/:id/thumbnail                   cover image
@@ -65,35 +66,78 @@ function komgaStatus(s: string | null | undefined): string {
 }
 
 /** Spring-style page envelope that Komga returns for every list. */
-function springPage<T>(content: T[], total: number, pageNum: number, size: number) {
+export function springPage<T>(content: T[], total: number, pageNum: number, size: number) {
   const totalPages = Math.max(1, Math.ceil(total / size));
-  return { content, totalElements: total, totalPages, number: pageNum, size, first: pageNum === 0, last: pageNum >= totalPages - 1 };
+  return {
+    content,
+    totalElements: total,
+    totalPages,
+    number: pageNum,
+    size,
+    first: pageNum === 0,
+    last: pageNum >= totalPages - 1,
+    // The Mihon Komga extension's PageWrapperDto also serializes `empty` and `numberOfElements`.
+    // Both are required fields on the Kotlin side, so omitting them fails the whole page decode.
+    empty: total === 0,
+    numberOfElements: content.length,
+  };
 }
 
-function toSeriesDto(r: any) {
+/**
+ * The Komga-shaped series DTO. `readStats` carries this user's per-series read counts so the
+ * booksReadCount/booksUnreadCount/booksInProgressCount fields can be truthful instead of hardcoded 0
+ * (the Mihon built-in Komga tracker parses these, and booksUnreadCount drives its READ/UNREAD status).
+ *
+ * The `*Lock` booleans on `metadata` may look redundant — the extension never uses them — but Mihon's
+ * Komga-source extension keeps them as REQUIRED, non-null Kotlin fields. Omitting them aborts the whole
+ * decode with "Fields [summaryLock, readingDirectionLock, publisherLock, ageRatingLock, languageLock,
+ * genresLock, tagsLock] are required". Every field listed here is emitted on purpose.
+ */
+export function toSeriesDto(r: any, readStats?: { read: number; started: number } | null) {
   const mtime = Number(r.latest_mtime);
   const mtimeIso = mtime > 0 ? new Date(mtime).toISOString() : (r.created_at ? new Date(r.created_at).toISOString() : new Date(0).toISOString());
+  const createdIso = r.created_at ? new Date(r.created_at).toISOString() : new Date(0).toISOString();
+  const total = Number(r.books_count ?? 0);
+  const read = readStats?.read ?? 0;
+  const started = readStats?.started ?? 0;
+  const unread = Math.max(0, total - read - started);
   return {
     id: r.id,
     libraryId: r.library_id ?? 'lib',
     name: r.title,
     url: r.id,           // Komga compat: not a real URL, Mihon doesn't use this field
-    created:      r.created_at ? new Date(r.created_at).toISOString() : new Date(0).toISOString(),
+    created:      createdIso,
     lastModified: mtimeIso,
     fileLastModified: mtimeIso,
-    booksCount: r.books_count ?? 0,
+    booksCount: total,
+    booksReadCount: read,
+    booksUnreadCount: unread,
+    booksInProgressCount: started,
     metadata: {
       status: komgaStatus(r.status),
+      statusLock: false,
+      created: createdIso,
+      lastModified: mtimeIso,
       title: r.title,
+      titleLock: false,
       titleSort: r.title,
+      titleSortLock: false,
       summary: r.summary ?? '',
+      summaryLock: false,
       readingDirection: 'VERTICAL',
+      readingDirectionLock: false,
       publisher: '',
+      publisherLock: false,
       ageRating: r.age_rating ?? null,
+      ageRatingLock: false,
       language: 'en',
+      languageLock: false,
       genres: r.genres ?? [],
+      genresLock: false,
       tags: [],
+      tagsLock: false,
       totalBookCount: null,
+      totalBookCountLock: false,
     },
     booksMetadata: {
       authors: r.author ? [{ name: r.author, role: 'writer' }] : [],
@@ -101,14 +145,14 @@ function toSeriesDto(r: any) {
       releaseDate: null,
       summary: r.summary ?? '',
       summaryNumber: '',
-      created: r.created_at ? new Date(r.created_at).toISOString() : new Date(0).toISOString(),
+      created: createdIso,
       lastModified: mtimeIso,
     },
     deleted: false,
   };
 }
 
-function toBookDto(r: any, readProgress?: { page: number | null; completed: boolean; updated_at: string | null } | null) {
+export function toBookDto(r: any, readProgress?: { page: number | null; completed: boolean; updated_at: string | null } | null) {
   const num = Number(r.number ?? 0);
   const mtime = Number(r.mtime ?? 0);
   const created  = r.published_at ? new Date(r.published_at).toISOString() : (mtime > 0 ? new Date(mtime).toISOString() : new Date(0).toISOString());
@@ -136,12 +180,17 @@ function toBookDto(r: any, readProgress?: { page: number | null; completed: bool
     },
     metadata: {
       title: r.title ?? '',
+      titleLock: false,
       summary: '',
+      summaryLock: false,
       number: String(num),
+      numberLock: false,
       numberSort: num,
+      numberSortLock: false,
       releaseDate: r.published_at ? new Date(r.published_at).toISOString().slice(0, 10) : null,
+      releaseDateLock: false,
       authors: [],
-      tags: [],
+      authorsLock: false,
     },
     readProgress: readProgress != null ? {
       page: Math.max(1, (readProgress.page ?? 0) + 1),  // 0-based → 1-based
@@ -162,6 +211,26 @@ function toBookDto(r: any, readProgress?: { page: number | null; completed: bool
 //
 // Called TWICE per listing request (once for COUNT, once for data) with a fresh Params each time, so
 // the two queries are fully independent and expectedParams() validates each one independently.
+
+/**
+ * Per-user read counts (finished / in-progress chapters) for a set of series.
+ *
+ * One grouped query against read_progress (a row per opened chapter with a `completed` flag), the same
+ * shape the rest of the app uses in lib/enrich.ts. booksUnread is derived as booksCount - read - started.
+ */
+async function seriesReadStats(userId: string, seriesIds: string[]): Promise<Map<string, { read: number; started: number }>> {
+  if (!seriesIds.length) return new Map();
+  const rows = await q<{ series_id: string; read: number; started: number }>(
+    `SELECT series_id,
+            count(*) FILTER (WHERE completed)::int      AS read,
+            count(*) FILTER (WHERE NOT completed)::int  AS started
+       FROM read_progress
+      WHERE user_id = $1 AND series_id = ANY($2)
+      GROUP BY series_id`,
+    [userId, seriesIds],
+  );
+  return new Map(rows.map((r) => [r.series_id, { read: r.read, started: r.started }]));
+}
 
 interface SeriesFilter {
   search?: string | null;
@@ -281,7 +350,34 @@ export default async function komgaCompatRoutes(app: FastifyInstance) {
       [...dw.values, size, pageNum * size] as any[],
     );
 
-    return springPage(rows.map(toSeriesDto), totalRow?.n ?? 0, pageNum, size);
+    const readStats = await seriesReadStats(user.userId, rows.map((r) => r.id));
+    return springPage(rows.map((r) => toSeriesDto(r, readStats.get(r.id))), totalRow?.n ?? 0, pageNum, size);
+  }));
+
+  // ---- /api/v1/series/latest -------------------------------------------------
+  // The extension's "Latest" tab. Same envelope as the listing, newest first.
+  app.get('/api/v1/series/latest', withAuth(async (req, reply, user) => {
+    const qs = req.query as Record<string, string | undefined>;
+    const pageNum = Math.max(0, Number(qs.page) || 0);
+    const size    = Math.max(1, Math.min(500, Number(qs.size) || 20));
+
+    const p = new Params();
+    const rows = await q<any>(
+      `SELECT ${SERIES_SELECT} FROM ${SERIES_FROM}
+        WHERE ${browsable('s', user.ctx, p)}
+        ORDER BY s.latest_mtime DESC, s.id DESC
+        LIMIT $${p.values.length + 1} OFFSET $${p.values.length + 2}`,
+      [...p.values, size, pageNum * size] as any[],
+    );
+
+    const pCount = new Params();
+    const total = await one<{ n: number }>(
+      `SELECT count(*)::int AS n FROM ${SERIES_FROM} WHERE ${browsable('s', user.ctx, pCount)}`,
+      pCount.values as any[],
+    );
+
+    const readStats = await seriesReadStats(user.userId, rows.map((r) => r.id));
+    return springPage(rows.map((r) => toSeriesDto(r, readStats.get(r.id))), total?.n ?? 0, pageNum, size);
   }));
 
   // ---- /api/v1/series/:id ---------------------------------------------------
@@ -294,7 +390,8 @@ export default async function komgaCompatRoutes(app: FastifyInstance) {
       p.values as any[],
     );
     if (!row) return reply.code(404).send({ error: 'not_found' });
-    return toSeriesDto(row);
+    const readStats = await seriesReadStats(user.userId, [row.id]);
+    return toSeriesDto(row, readStats.get(row.id));
   }));
 
   // ---- /api/v1/series/:id/books ---------------------------------------------
@@ -341,7 +438,10 @@ export default async function komgaCompatRoutes(app: FastifyInstance) {
         : null,
     ));
 
-    if (unpaged) return { content: books, totalElements: books.length, totalPages: 1, number: 0, size: books.length, first: true, last: true };
+    if (unpaged) return {
+      content: books, totalElements: books.length, totalPages: 1, number: 0, size: books.length,
+      first: true, last: true, empty: books.length === 0, numberOfElements: books.length,
+    };
     return springPage(books, books.length, pageNum, size);
   }));
 
@@ -556,7 +656,8 @@ export default async function komgaCompatRoutes(app: FastifyInstance) {
       pCount.values as any[],
     );
 
-    return springPage(rows.map(toSeriesDto), total?.n ?? 0, pageNum, size);
+    const readStats = await seriesReadStats(user.userId, rows.map((r) => r.id));
+    return springPage(rows.map((r) => toSeriesDto(r, readStats.get(r.id))), total?.n ?? 0, pageNum, size);
   }));
 
   // ---- /api/v1/readlists ----------------------------------------------------

@@ -5455,6 +5455,13 @@ paths:
       operationId: getApiV1Series
       security: [{bearer: []}, {komgaApiKey: []}, {komgaBasic: []}]
       responses: {"200": {description: OK}, "401": {description: Not authenticated}}
+  /api/v1/series/latest:
+    get:
+      tags: [mihon]
+      summary: Latest-added series, newest first. The "Latest" tab in the Komga extension.
+      operationId: getApiV1SeriesLatest
+      security: [{bearer: []}, {komgaApiKey: []}, {komgaBasic: []}]
+      responses: {"200": {description: OK}, "401": {description: Not authenticated}}
   /api/v1/series/{id}:
     get:
       tags: [mihon]
