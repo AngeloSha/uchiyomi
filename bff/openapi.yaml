@@ -21,6 +21,8 @@ servers:
 tags:
   - name: health
     description: Liveness and readiness
+  - name: mihon
+    description: "Komga-compatible API for the Mihon Komga extension (X-API-Key or Basic auth)"
   - name: auth
     description: Authentication, sessions, two-factor, single sign-on, first-run setup
   - name: library
@@ -53,6 +55,17 @@ components:
       in: cookie
       name: yomi_img
       description: Set at login so <img> tags can authenticate.
+    komgaApiKey:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: A personal API token (uy_...) from Profile → Account → Tokens, for the Komga-compat API.
+    komgaBasic:
+      type: http
+      scheme: basic
+      description: >-
+        Uchiyomi username + password, or username + API token as password, for the Komga-compat API.
+        API token (uy_...) is strongly preferred — it is revocable and never tied to your password.
   schemas:
     ScanlatorPrefs:
       type: object
@@ -5428,3 +5441,149 @@ paths:
           description: "Forbidden: token scope, account permission or age limit"
         "404":
           description: Not found, or not visible to this account
+  /api/v1/libraries:
+    get:
+      tags: [mihon]
+      summary: Library list. Also the credentials-check the Komga extension performs when you press Save.
+      operationId: getApiV1Libraries
+      security: [{bearer: []}, {komgaApiKey: []}, {komgaBasic: []}]
+      responses: {"200": {description: OK}, "401": {description: Not authenticated}}
+  /api/v1/series:
+    get:
+      tags: [mihon]
+      summary: Series listing, search, filter and sort. Handles Popular, Latest and Search in the extension.
+      operationId: getApiV1Series
+      security: [{bearer: []}, {komgaApiKey: []}, {komgaBasic: []}]
+      responses: {"200": {description: OK}, "401": {description: Not authenticated}}
+  /api/v1/series/{id}:
+    get:
+      tags: [mihon]
+      summary: Series detail. Also called by the Mihon Komga tracker to bind a manga.
+      operationId: getApiV1SeriesId
+      parameters: [{name: id, in: path, required: true, schema: {type: string}}]
+      security: [{bearer: []}, {komgaApiKey: []}, {komgaBasic: []}]
+      responses: {"200": {description: OK}, "401": {description: Not authenticated}, "404": {description: Not found}}
+  /api/v1/series/{id}/books:
+    get:
+      tags: [mihon]
+      summary: Chapter list for a series. Supports unpaged=true for the full list.
+      operationId: getApiV1SeriesIdBooks
+      parameters: [{name: id, in: path, required: true, schema: {type: string}}]
+      security: [{bearer: []}, {komgaApiKey: []}, {komgaBasic: []}]
+      responses: {"200": {description: OK}, "401": {description: Not authenticated}, "404": {description: Not found}}
+  /api/v1/series/{id}/thumbnail:
+    get:
+      tags: [mihon]
+      summary: Cover image for a series (first page of the cover chapter, resized).
+      operationId: getApiV1SeriesIdThumbnail
+      parameters: [{name: id, in: path, required: true, schema: {type: string}}]
+      security: [{bearer: []}, {komgaApiKey: []}, {komgaBasic: []}]
+      responses: {"200": {description: JPEG image}, "401": {description: Not authenticated}, "404": {description: Not found}}
+  /api/v1/books/{id}:
+    get:
+      tags: [mihon]
+      summary: Book/chapter detail including read progress for the authenticated user.
+      operationId: getApiV1BooksId
+      parameters: [{name: id, in: path, required: true, schema: {type: string}}]
+      security: [{bearer: []}, {komgaApiKey: []}, {komgaBasic: []}]
+      responses: {"200": {description: OK}, "401": {description: Not authenticated}, "404": {description: Not found}}
+  /api/v1/books/{id}/pages:
+    get:
+      tags: [mihon]
+      summary: Page list for a chapter (number + filename + MIME type per page, 1-based).
+      operationId: getApiV1BooksIdPages
+      parameters: [{name: id, in: path, required: true, schema: {type: string}}]
+      security: [{bearer: []}, {komgaApiKey: []}, {komgaBasic: []}]
+      responses: {"200": {description: OK}, "401": {description: Not authenticated}, "404": {description: Not found}}
+  /api/v1/books/{id}/pages/{page}:
+    get:
+      tags: [mihon]
+      summary: Raw page image. Page number is 1-based (Komga convention). Accepts ?convert=png.
+      operationId: getApiV1BooksIdPagesPage
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}}
+        - {name: page, in: path, required: true, schema: {type: integer, minimum: 1}}
+      security: [{bearer: []}, {komgaApiKey: []}, {komgaBasic: []}]
+      responses: {"200": {description: Image bytes}, "401": {description: Not authenticated}, "404": {description: Not found}}
+  /api/v1/books/{id}/thumbnail:
+    get:
+      tags: [mihon]
+      summary: Chapter thumbnail (first page, resized to ~300 px).
+      operationId: getApiV1BooksIdThumbnail
+      parameters: [{name: id, in: path, required: true, schema: {type: string}}]
+      security: [{bearer: []}, {komgaApiKey: []}, {komgaBasic: []}]
+      responses: {"200": {description: JPEG image}, "401": {description: Not authenticated}, "404": {description: Not found}}
+  /api/v1/genres:
+    get:
+      tags: [mihon]
+      summary: All distinct genres in the visible library, for the filter screen.
+      operationId: getApiV1Genres
+      security: [{bearer: []}, {komgaApiKey: []}, {komgaBasic: []}]
+      responses: {"200": {description: String array}, "401": {description: Not authenticated}}
+  /api/v1/tags:
+    get:
+      tags: [mihon]
+      summary: Tag list (same as genres in Uchiyomi).
+      operationId: getApiV1Tags
+      security: [{bearer: []}, {komgaApiKey: []}, {komgaBasic: []}]
+      responses: {"200": {description: String array}, "401": {description: Not authenticated}}
+  /api/v1/publishers:
+    get:
+      tags: [mihon]
+      summary: Publisher list (empty; Uchiyomi does not model publishers).
+      operationId: getApiV1Publishers
+      security: [{bearer: []}, {komgaApiKey: []}, {komgaBasic: []}]
+      responses: {"200": {description: Empty array}, "401": {description: Not authenticated}}
+  /api/v1/authors:
+    get:
+      tags: [mihon]
+      summary: Author list for the filter screen.
+      operationId: getApiV1Authors
+      security: [{bearer: []}, {komgaApiKey: []}, {komgaBasic: []}]
+      responses: {"200": {description: OK}, "401": {description: Not authenticated}}
+  /api/v1/collections:
+    get:
+      tags: [mihon]
+      summary: The authenticated user's collections, for the Collection filter drop-down.
+      operationId: getApiV1Collections
+      security: [{bearer: []}, {komgaApiKey: []}, {komgaBasic: []}]
+      responses: {"200": {description: OK}, "401": {description: Not authenticated}}
+  /api/v1/collections/{id}/series:
+    get:
+      tags: [mihon]
+      summary: Series belonging to one collection.
+      operationId: getApiV1CollectionsIdSeries
+      parameters: [{name: id, in: path, required: true, schema: {type: string}}]
+      security: [{bearer: []}, {komgaApiKey: []}, {komgaBasic: []}]
+      responses: {"200": {description: OK}, "401": {description: Not authenticated}, "404": {description: Not found}}
+  /api/v1/readlists:
+    get:
+      tags: [mihon]
+      summary: Read lists (always empty; Uchiyomi has no read-list concept).
+      operationId: getApiV1Readlists
+      security: [{bearer: []}, {komgaApiKey: []}, {komgaBasic: []}]
+      responses: {"200": {description: Empty page}, "401": {description: Not authenticated}}
+  /api/v2/series/{id}/read-progress/tachiyomi:
+    get:
+      tags: [mihon]
+      summary: "Mihon tracker: progress overview for one series (chapter counts, continuous mark)."
+      operationId: getApiV2SeriesIdReadProgressTachiyomi
+      parameters: [{name: id, in: path, required: true, schema: {type: string}}]
+      security: [{bearer: []}, {komgaApiKey: []}, {komgaBasic: []}]
+      responses: {"200": {description: OK}, "401": {description: Not authenticated}, "404": {description: Not found}}
+    put:
+      tags: [mihon]
+      summary: "Mihon tracker: mark every chapter up to lastBookNumberSortRead as read in Uchiyomi."
+      operationId: putApiV2SeriesIdReadProgressTachiyomi
+      parameters: [{name: id, in: path, required: true, schema: {type: string}}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [lastBookNumberSortRead]
+              properties:
+                lastBookNumberSortRead: {type: number}
+      security: [{bearer: []}, {komgaApiKey: []}, {komgaBasic: []}]
+      responses: {"204": {description: No content}, "401": {description: Not authenticated}, "404": {description: Not found}}

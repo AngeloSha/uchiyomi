@@ -36,6 +36,7 @@ import personalRoutes from './routes/personal';
 import downloadRoutes from './routes/downloads';
 import sourceRoutes from './routes/sources';
 import opdsRoutes from './routes/opds';
+import komgaCompatRoutes from './routes/komgaCompat';
 
 async function main() {
   await migrate();
@@ -144,6 +145,10 @@ async function main() {
   await app.register(downloadRoutes);
   await app.register(sourceRoutes);
   await app.register(opdsRoutes);
+  // The Komga-compatibility API: exposes /api/v1 and /api/v2 endpoints so the Mihon Komga extension
+  // can point directly at Uchiyomi. Auth is via X-API-Key (personal API token) or Basic auth.
+  // Only active in owned mode — in komga-backend mode Komga already is the server.
+  if (process.env.LIBRARY_BACKEND !== 'komga') await app.register(komgaCompatRoutes);
   // The interactive API reference, BEFORE the web root: registerWebRoot installs the not-found handler that
   // serves the app shell for any unknown path, and a route added after it would still work, but its
   // static assets under /api/docs/ would not be found by the UI in the same way. Unauthenticated on

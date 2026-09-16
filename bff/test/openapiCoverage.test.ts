@@ -45,7 +45,7 @@ async function registeredRoutes(): Promise<Set<string>> {
   await app.register(jwt, { secret: process.env.JWT_SECRET! });
   // In server.ts's order. server.ts itself is not importable here (it starts listening on load), so its two
   // inline routes are added by hand below and pinned by a separate assertion.
-  for (const mod of ['auth', 'admin', 'catalog', 'images', 'personal', 'downloads', 'sources', 'opds']) {
+  for (const mod of ['auth', 'admin', 'catalog', 'images', 'personal', 'downloads', 'sources', 'opds', 'komgaCompat']) {
     await app.register((await import(`../src/routes/${mod}`)).default);
   }
   await app.ready();

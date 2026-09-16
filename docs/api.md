@@ -471,6 +471,25 @@ GET    /api/push/key              POST   /api/push/subscribe
 POST   /api/push/unsubscribe
 ```
 
+### Mihon Komga extension compatibility (Komga-shaped API)
+
+Point the Mihon Komga extension at Uchiyomi's URL, and use a personal API token (`uy_...` from
+Profile → Account → Tokens) as the API key. Auth is `X-API-Key` header or HTTP Basic.
+```
+GET    /api/v1/libraries
+GET    /api/v1/series            GET    /api/v1/series/{id}
+GET    /api/v1/series/{id}/books GET    /api/v1/series/{id}/thumbnail
+GET    /api/v1/books/{id}        GET    /api/v1/books/{id}/pages
+GET    /api/v1/books/{id}/pages/{page}
+GET    /api/v1/books/{id}/thumbnail
+GET    /api/v1/genres            GET    /api/v1/tags
+GET    /api/v1/publishers        GET    /api/v1/authors
+GET    /api/v1/collections       GET    /api/v1/collections/{id}/series
+GET    /api/v1/readlists
+GET    /api/v2/series/{id}/read-progress/tachiyomi
+PUT    /api/v2/series/{id}/read-progress/tachiyomi
+```
+
 ### Offline downloads
 ```
 GET    /api/downloads             POST   /api/downloads

@@ -15,12 +15,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 const DSN = process.env.TEST_DATABASE_URL;
-if (DSN) {
-  process.env.DATABASE_URL = DSN;
-  process.env.JWT_SECRET = process.env.JWT_SECRET || 'test-secret-at-least-16-chars';
-  process.env.CONFIG_DIR = process.env.CONFIG_DIR || '/tmp/uchiyomi-test-config';
-  process.env.LIBRARY_BACKEND = 'owned';
-}
+if (DSN) process.env.DATABASE_URL = DSN;
+process.env.DATABASE_URL ||= 'postgres://unused:unused@127.0.0.1:1/unused';
+process.env.JWT_SECRET ||= 'test-secret-at-least-16-chars';
+process.env.CONFIG_DIR ||= '/tmp/uchiyomi-test-config';
+process.env.LIBRARY_BACKEND ||= 'owned';
 const skip = DSN ? false : 'set TEST_DATABASE_URL to run';
 
 const SERIES = 's_trk_multi';
