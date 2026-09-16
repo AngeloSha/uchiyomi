@@ -78,6 +78,11 @@ test('the series DTO carries every field the Mihon Komga DTOs require', async ()
     assert.ok(lock in dto.metadata, `series metadata must contain ${lock}`);
     assert.equal(dto.metadata[lock], false);
   }
+  // The full real-Komga SeriesMetadataDto also carries sharingLabel(+lock) and links.
+  for (const key of ['sharingLabel', 'sharingLabelLock', 'links']) {
+    assert.ok(key in dto.metadata, `series metadata must contain ${key}`);
+  }
+  assert.ok(Array.isArray(dto.metadata.links));
   // Ready reading-direction enum: LTR | RTL | VERTICAL | WEBTOON
   assert.ok(['LTR', 'RTL', 'VERTICAL', 'WEBTOON'].includes(dto.metadata.readingDirection));
 });
@@ -95,21 +100,25 @@ test('without read progress the series counts are zeros, not the chapter total',
 test('the book DTO carries the lock fields the Komga extension requires', async () => {
   // BookMetadataDto in the Komga extension is another strict set of required fields — including the
   // `*Lock` booleans — plus authors/releaseDate. A missing key kills the chapter-list decode.
+  // Some extension builds additionally mark tags/tagsLock (and isbn/isbnLock/summaryNumber) as required;
+  // real Komga emits all of them, so emit them here too.
   const { toBookDto } = await import('../src/routes/komgaCompat');
   const dto = toBookDto({
     id: 'b1', series_id: 's1', series_title: 'T', title: 'Ch 1', number: 1,
     file: 'c1.cbz', pages: 20, size: 2048, mtime: 0,
   });
-  for (const key of ['title', 'titleLock', 'summary', 'summaryLock', 'number', 'numberLock',
-                     'numberSort', 'numberSortLock', 'releaseDate', 'releaseDateLock',
-                     'authors', 'authorsLock']) {
+  const required = ['title', 'titleLock', 'summary', 'summaryLock', 'number', 'numberLock',
+                    'numberSort', 'numberSortLock', 'releaseDate', 'releaseDateLock',
+                    'authors', 'authorsLock', 'tags', 'tagsLock', 'isbn', 'isbnLock', 'summaryNumber'];
+  for (const key of required) {
     assert.ok(key in dto.metadata, `book metadata must contain ${key}`);
   }
-  for (const lock of ['titleLock', 'summaryLock', 'numberLock', 'numberSortLock', 'releaseDateLock', 'authorsLock']) {
+  for (const lock of ['titleLock', 'summaryLock', 'numberLock', 'numberSortLock', 'releaseDateLock', 'authorsLock', 'tagsLock', 'isbnLock']) {
     assert.equal(dto.metadata[lock], false);
   }
   assert.equal(dto.metadata.numberSort, 1);
   assert.ok(Array.isArray(dto.metadata.authors));
+  assert.ok(Array.isArray(dto.metadata.tags));
   assert.equal(typeof dto.media.pagesCount, 'number');
   assert.equal(typeof dto.number, 'number');
 });

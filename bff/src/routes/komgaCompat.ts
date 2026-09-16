@@ -33,6 +33,7 @@
 // Komga IS the library, and exposing a second Komga-shaped layer over it would just be confusing.
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { join } from 'path';
+import { readFile } from 'fs/promises';
 import sharp from 'sharp';
 import { q, one } from '../lib/db';
 import { resolveKomgaUser } from '../lib/komgaCompatAuth';
@@ -41,6 +42,8 @@ import { cbzPageAt, cbzPageDims, LIBRARY_ROOT } from '../lib/library';
 import { visibleBookFile } from '../lib/visibility';
 import { writeProgress } from '../lib/progress';
 import { pushSeriesProgressAsync } from '../lib/trackers';
+import { fetchCoverImage } from './images';
+import { artFile } from '../lib/seriesArt';
 
 // ---- helpers ---------------------------------------------------------------
 
@@ -138,6 +141,9 @@ export function toSeriesDto(r: any, readStats?: { read: number; started: number 
       tagsLock: false,
       totalBookCount: null,
       totalBookCountLock: false,
+      sharingLabel: null,
+      sharingLabelLock: false,
+      links: [],
     },
     booksMetadata: {
       authors: r.author ? [{ name: r.author, role: 'writer' }] : [],
@@ -191,6 +197,14 @@ export function toBookDto(r: any, readProgress?: { page: number | null; complete
       releaseDateLock: false,
       authors: [],
       authorsLock: false,
+      // The full Komga BookMetadataDto. Some extension builds (and the Mihon built-in tracker) mark
+      // tags/tagsLock as REQUIRED, and far-future ones add isbn/isbnLock/summaryNumber. Real Komga
+      // emits all of them, so a JSON parser that works against Komga sees these as normal.
+      tags: [],
+      tagsLock: false,
+      isbn: '',
+      isbnLock: false,
+      summaryNumber: '',
     },
     readProgress: readProgress != null ? {
       page: Math.max(1, (readProgress.page ?? 0) + 1),  // 0-based → 1-based
@@ -273,11 +287,9 @@ function parseSort(raw?: string | null): string {
 
 // ---- thumbnail serving -------------------------------------------------------
 
-async function serveThumbnail(reply: FastifyReply, abs: string): Promise<void> {
-  const first = await cbzPageAt(abs, 0);
-  if (!first) return reply.code(404).send();
+async function sendThumb(reply: FastifyReply, bytes: Buffer, contentType: string): Promise<void> {
   try {
-    const thumb = await sharp(first.bytes)
+    const thumb = await sharp(bytes)
       .resize({ width: 300, withoutEnlargement: true })
       .jpeg({ quality: 80 })
       .toBuffer();
@@ -285,10 +297,16 @@ async function serveThumbnail(reply: FastifyReply, abs: string): Promise<void> {
     reply.header('cache-control', 'private, max-age=3600');
     return reply.send(thumb);
   } catch {
-    reply.header('content-type', mime(first.name));
+    reply.header('content-type', contentType);
     reply.header('cache-control', 'private, max-age=3600');
-    return reply.send(first.bytes);
+    return reply.send(bytes);
   }
+}
+
+async function serveThumbnail(reply: FastifyReply, abs: string): Promise<void> {
+  const first = await cbzPageAt(abs, 0);
+  if (!first) return reply.code(404).send();
+  return sendThumb(reply, first.bytes, mime(first.name));
 }
 
 async function bookAbs(bookId: string, ctx: ViewCtx): Promise<string | null> {
@@ -446,14 +464,38 @@ export default async function komgaCompatRoutes(app: FastifyInstance) {
   }));
 
   // ---- /api/v1/series/:id/thumbnail -----------------------------------------
+  // The cover must be the series' real key art, not a page from a chapter inside it. Webtoon chapters
+  // start at page 1 with no cover, so the "first page of the cover book" fallback shows a chapter page and
+  // the tile looks wrong. Same precedence as the app's own /img/lib/series/:id/thumb:
+  //   admin override (uploaded file / pasted URL) → series_art (AniList/source key art) → chapter page.
   app.get('/api/v1/series/:id/thumbnail', withAuth(async (req, reply, user) => {
     const { id } = req.params as { id: string };
     const p = new Params();
-    const row = await one<{ cover_book_id: string | null }>(
-      `SELECT s.cover_book_id FROM ${SERIES_FROM} WHERE s.id = ${p.add(id)} AND ${browsable('s', user.ctx, p)}`,
+    const row = await one<{ cover_book_id: string | null; source_id: string | null }>(
+      `SELECT s.cover_book_id, s.source_id FROM ${SERIES_FROM} WHERE s.id = ${p.add(id)} AND ${browsable('s', user.ctx, p)}`,
       p.values as any[],
     );
     if (!row) return reply.code(404).send();
+
+    const ovr = await one<{ cover: string | null }>('SELECT cover FROM series_overrides WHERE series_id = $1', [id]);
+    if (ovr?.cover) {
+      let input: Buffer | null = null;
+      if (ovr.cover === 'upload') {
+        try { input = await readFile(artFile(id, 'cover')); } catch { input = null; }
+      } else {
+        try { input = await fetchCoverImage(ovr.cover); } catch { input = null; }
+      }
+      if (input && input.length) return sendThumb(reply, input, 'image/jpeg');
+    }
+
+    const art = await one<{ cover: string | null }>('SELECT cover FROM series_art WHERE series_id = $1', [id]);
+    if (art?.cover) {
+      try {
+        const input = await fetchCoverImage(art.cover, row.source_id || undefined);
+        if (input.length) return sendThumb(reply, input, 'image/jpeg');
+      } catch { /* any failure falls through to the book page */ }
+    }
+
     const bookId = row.cover_book_id;
     if (!bookId) return reply.code(404).send();
     const abs = await bookAbs(bookId, user.ctx);
