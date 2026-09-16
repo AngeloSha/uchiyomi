@@ -17,6 +17,7 @@ import type { FastifyRequest } from 'fastify';
 import { one } from './db';
 import { resolveApiToken } from './auth';
 import { viewCtxFor, type ViewCtx } from './visibility';
+import { env } from '../env';
 
 export interface KomgaCompatUser {
   userId: string;
@@ -66,6 +67,27 @@ export async function resolveKomgaUser(req: FastifyRequest): Promise<KomgaCompat
   return null;
 }
 
+/**
+ * Resolve the user for the Mihon built-in Komga tracker.
+ *
+ * The tracker has NO login of its own: it treats the server as a credential-less Komga (User-Agent only),
+ * derives the URL from the manga, and cannot be pointed at a token. So a credential-less request from it
+ * can never name a user on its own. When the operator whitelists KOMGA_TRACKER_USER, those requests fall
+ * through to that account — and only on the tracker endpoints the client actually calls. With the env var
+ * unset this returns null and the request is a plain 401, so turning the sync on is an explicit choice.
+ */
+export async function resolveTrackerUser(req: FastifyRequest): Promise<KomgaCompatUser | null> {
+  const authed = await resolveKomgaUser(req);
+  if (authed) return authed;
+
+  const username = env.KOMGA_TRACKER_USER.trim();
+  if (!username) return null;
+  // Same local-account-only rule as the Basic password path: password_hash IS NOT NULL skips OIDC-only
+  // accounts, locked accounts are rejected, disabled accounts are rejected.
+  const row = await byUser(username);
+  return row ? build(row.id, row.role) : null;
+}
+
 // ---- private helpers -------------------------------------------------------
 
 async function build(userId: string, role: string): Promise<KomgaCompatUser> {
@@ -74,16 +96,23 @@ async function build(userId: string, role: string): Promise<KomgaCompatUser> {
 }
 
 async function byPassword(username: string, password: string): Promise<KomgaCompatUser | null> {
-  // `password_hash IS NOT NULL` skips OIDC-only accounts that have no local credential.
-  const row = await one<{ id: string; password_hash: string; role: string; disabled: boolean }>(
-    `SELECT id, password_hash, role, disabled
-       FROM users
-      WHERE username = $1 AND password_hash IS NOT NULL
-        AND (locked_until IS NULL OR locked_until < now())`,
-    [username],
-  ).catch(() => null);
-  if (!row || row.disabled) return null;
+  const row = await byUser(username);
+  if (!row) return null;
   const ok = await verify(row.password_hash, password).catch(() => false);
   if (!ok) return null;
   return build(row.id, row.role);
+}
+
+interface LocalUserRow { id: string; password_hash: string; role: string }
+
+/** Local account lookup: skips OIDC-only accounts (no local credential), locked accounts, disabled accounts. */
+async function byUser(username: string): Promise<LocalUserRow | null> {
+  return one<LocalUserRow>(
+    `SELECT id, password_hash, role
+       FROM users
+      WHERE username = $1 AND password_hash IS NOT NULL
+        AND NOT disabled
+        AND (locked_until IS NULL OR locked_until < now())`,
+    [username],
+  ).catch(() => null);
 }

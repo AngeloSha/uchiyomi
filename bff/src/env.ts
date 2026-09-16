@@ -77,6 +77,13 @@ const schema = z.object({
   DATABASE_URL: z.string().min(1),
   KOMGA_BASE_URL: z.string().url().default('http://komga:25600'),
   KOMGA_API_KEY: z.string().default(''), // only needed when LIBRARY_BACKEND=komga; owned mode ignores it
+  // The Uchiyomi account the Mihon built-in Komga tracker acts as. The tracker has no login of its own —
+  // it derives the URL from the manga and sends only a User-Agent — so a credential-less request cannot be
+  // tied to a token. Whitelist one username to accept tracker traffic for it: series detail, thumbnail and
+  // the two read-progress/tachiyomi endpoints become reachable WITHOUT auth, attributed to this account.
+  // Empty = tracker requests are rejected with 401, i.e. Uchiyomi-to-Mihon sync is off. This is a read of
+  // reading state plus mark-chapters-read for ONE account, so it is opt-in rather than a default.
+  KOMGA_TRACKER_USER: z.string().default(''),
   JWT_SECRET: z.string().min(16),
   // Optional: legacy pre-seed of the admin (base64 argon2 hash). If unset, the first-run web setup creates the
   // admin instead. argon2 hashes contain '$' which breaks compose ${} interpolation -> carried base64-encoded.
