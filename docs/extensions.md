@@ -29,6 +29,42 @@ because every one of them is searched together. If you have more switched on tha
 an amber banner and **Content → Health** lists it under *Extension source limit*; hiding languages is the
 cheap way under it, raising the limit is the other.
 
+## Komga
+
+Uchiyomi can act as a Komga server itself, so the Mihon Komga extension can connect to Uchiyomi directly
+and browse your manga library just like it would browse a real Komga. No separate Komga instance required.
+
+### Connecting Mihon to Uchiyomi
+
+1. **Generate a personal API token** in Uchiyomi: Profile → Account → Tokens → New token. Copy it.
+2. In Mihon, **install the Komga extension** from the extension catalogue if you haven't already.
+3. In the extension settings (Sources → Komga → the gear icon), set:
+   - **Address**: your Uchiyomi URL, e.g. `https://uchiyomi.example.com`
+   - **API key**: paste the token from step 1 (looks like `uy_...`)
+4. The extension will verify and load your library. Series appear in Discover → Komga.
+
+Mihon's built-in **Komga tracker** (Settings → Tracking → Komga) binds automatically once you add a series
+through the extension. Reading a chapter in Mihon writes progress to Uchiyomi; reading in Uchiyomi is
+reflected in Mihon's chapter list the next time it refreshes.
+
+### What works
+
+- **Browse your Uchiyomi library in Mihon**: Popular, Latest, Search, genre/status filters, collections.
+- **Read chapters**: pages are served directly from Uchiyomi's own files.
+- **Progress sync** (requires the Komga tracker to be bound in Mihon): reading in either app updates the
+  other. Mihon marks chapters read; Uchiyomi's chapter list shows them as read on the next refresh.
+- **Multiple accounts**: each household member generates their own token; their progress is separate.
+
+### What does not sync
+
+- **Marking something unread**. Both apps spell "unread" as the absence of a record, which carries no
+  timestamp. An absent record loses to a present one rather than deleting it. Un-mark each app separately.
+
+### HTTPS requirement
+
+Mihon requires HTTPS for extension connections. Uchiyomi must be served behind a reverse proxy with a valid
+certificate; plain HTTP will not work.
+
 ## Automatic updates
 
 Uchiyomi checks your repositories **every 6 hours** and installs new versions of the extensions you have
