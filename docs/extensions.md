@@ -51,15 +51,8 @@ reflected in Mihon's chapter list the next time it refreshes.
 
 - **Browse your Uchiyomi library in Mihon**: Popular, Latest, Search, genre/status filters, collections.
 - **Read chapters**: pages are served directly from Uchiyomi's own files.
-- **Progress sync** (requires the Komga tracker to be bound in Mihon, and `KOMGA_TRACKER_USER` set to the
-  account whose progress the tracker should read and write): reading in either app updates the other.
-  Mihon marks chapters read; Uchiyomi's chapter list shows them as read on the next refresh.
-
-Mihon's Komga tracker has no login of its own — it sends only a User-Agent, exactly like a real Komga
-server sees. Set `KOMGA_TRACKER_USER` in the server's environment to the Uchiyomi account it should act as;
-unset, the tracker's requests are rejected and sync stays off. The tracker then reaches only the four
-endpoints it needs (series detail, thumbnail, and `read-progress/tachiyomi` GET/PUT), all attributed to
-that one account.
+- **Progress sync** (requires the Komga tracker to be bound in Mihon): reading in either app updates the
+  other. Mihon marks chapters read; Uchiyomi's chapter list shows them as read on the next refresh.
 - **Multiple accounts**: each household member generates their own token; their progress is separate.
 
 ### What does not sync

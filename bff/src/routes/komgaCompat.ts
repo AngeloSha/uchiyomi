@@ -36,7 +36,7 @@ import { join } from 'path';
 import { readFile } from 'fs/promises';
 import sharp from 'sharp';
 import { q, one } from '../lib/db';
-import { resolveKomgaUser, resolveTrackerUser } from '../lib/komgaCompatAuth';
+import { resolveKomgaUser } from '../lib/komgaCompatAuth';
 import { visible, browsable, Params, type ViewCtx } from '../lib/visibility';
 import { cbzPageAt, cbzPageDims, LIBRARY_ROOT } from '../lib/library';
 import { visibleBookFile } from '../lib/visibility';
@@ -325,17 +325,6 @@ function withAuth(fn: (req: FastifyRequest, reply: FastifyReply, user: import('.
   };
 }
 
-// The Mihon built-in Komga tracker has no login field — it sends only a User-Agent — so it cannot present a
-// token. These routes accept it anyway, attributed to the account the operator whitelisted via
-// KOMGA_TRACKER_USER; with that env var unset they reject anonymous traffic like every other route.
-function withTrackerAuth(fn: (req: FastifyRequest, reply: FastifyReply, user: import('../lib/komgaCompatAuth').KomgaCompatUser) => Promise<unknown>) {
-  return async (req: FastifyRequest, reply: FastifyReply) => {
-    const user = await resolveTrackerUser(req).catch(() => null);
-    if (!user) return reply.code(401).send({ error: 'unauthorized', message: 'No API key and no KOMGA_TRACKER_USER account configured for the Komga tracker.' });
-    return fn(req, reply, user);
-  };
-}
-
 // ============================================================================
 
 export default async function komgaCompatRoutes(app: FastifyInstance) {
@@ -410,8 +399,7 @@ export default async function komgaCompatRoutes(app: FastifyInstance) {
   }));
 
   // ---- /api/v1/series/:id ---------------------------------------------------
-  // Reached by the Mihon built-in Komga tracker too (match/bind/refresh), which has no credentials.
-  app.get('/api/v1/series/:id', withTrackerAuth(async (req, reply, user) => {
+  app.get('/api/v1/series/:id', withAuth(async (req, reply, user) => {
     const { id } = req.params as { id: string };
     const p = new Params();
     const row = await one<any>(
@@ -480,7 +468,7 @@ export default async function komgaCompatRoutes(app: FastifyInstance) {
   // start at page 1 with no cover, so the "first page of the cover book" fallback shows a chapter page and
   // the tile looks wrong. Same precedence as the app's own /img/lib/series/:id/thumb:
   //   admin override (uploaded file / pasted URL) → series_art (AniList/source key art) → chapter page.
-  app.get('/api/v1/series/:id/thumbnail', withTrackerAuth(async (req, reply, user) => {
+  app.get('/api/v1/series/:id/thumbnail', withAuth(async (req, reply, user) => {
     const { id } = req.params as { id: string };
     const p = new Params();
     const row = await one<{ cover_book_id: string | null; source_id: string | null }>(
@@ -721,7 +709,7 @@ export default async function komgaCompatRoutes(app: FastifyInstance) {
 
   // ---- /api/v2/series/:id/read-progress/tachiyomi ---------------------------
   // GET: Mihon's tracker reads the current progress overview.
-  app.get('/api/v2/series/:id/read-progress/tachiyomi', withTrackerAuth(async (req, reply, user) => {
+  app.get('/api/v2/series/:id/read-progress/tachiyomi', withAuth(async (req, reply, user) => {
     const { id } = req.params as { id: string };
     // Confirm the series is visible to this user
     const p0 = new Params();
@@ -778,7 +766,7 @@ export default async function komgaCompatRoutes(app: FastifyInstance) {
 
   // ---- /api/v2/series/:id/read-progress/tachiyomi ---------------------------
   // PUT: Mihon's tracker writes progress — "mark everything up to this chapter number as read".
-  app.put('/api/v2/series/:id/read-progress/tachiyomi', withTrackerAuth(async (req, reply, user) => {
+  app.put('/api/v2/series/:id/read-progress/tachiyomi', withAuth(async (req, reply, user) => {
     const { id } = req.params as { id: string };
     const body = req.body as { lastBookNumberSortRead?: number } | null;
     const upTo = Number(body?.lastBookNumberSortRead ?? 0);

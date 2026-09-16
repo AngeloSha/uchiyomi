@@ -202,16 +202,6 @@ test('API token prefix is required — a bare string is not accepted as a key', 
   assert.ok(sample.startsWith('uy_'), 'generated tokens start with the prefix');
 });
 
-test('the Komga tracker is credential-less, and stays OFF until whitelisted', async () => {
-  // Mihon's built-in Komga tracker never sends a token or password — just a User-Agent. Against this API
-  // that resolves to nothing, so syncing must FAIL CLOSED: without KOMGA_TRACKER_USER the anonymous
-  // fallback returns null and every tracker request receives the same 401 as any other unauthenticated
-  // call. This test pins the default (secure) state; the int test covers the whitelisted state.
-  const { resolveTrackerUser } = await import('../src/lib/komgaCompatAuth');
-  const anon = { headers: {} } as Parameters<typeof resolveTrackerUser>[0];
-  assert.equal(await resolveTrackerUser(anon), null, 'nothing to fall back to without KOMGA_TRACKER_USER');
-});
-
 test('the Mihon Komga extension URL structure maps to Fastify route params', () => {
   // SManga.url = "$baseUrl/api/v1/series/$id"
   // SChapter.url = "$baseUrl/api/v1/books/$id"

@@ -24,10 +24,6 @@ The Komga tracker's `lastReadContinuousNumberSort` is computed as the highest ch
 chapter up to N is read, not just the maximum completed chapter. This prevents "mark as read up to 50"
 from marking chapters 30-49 read when the user skipped them.
 
-The tracker itself never sends a token (Mihon has no field for one — it treats the server like a
-credential-less Komga), so two-way sync also needs `KOMGA_TRACKER_USER` set to the account it should act
-as. Unset, the tracker's requests are rejected and sync stays off.
-
 Marking something **unread** does not cross, in either direction: both apps spell unread as the absence of
 a row, which has no timestamp, so a missing row loses to a present one.
 

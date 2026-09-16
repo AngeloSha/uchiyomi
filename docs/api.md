@@ -475,11 +475,6 @@ POST   /api/push/unsubscribe
 
 Point the Mihon Komga extension at Uchiyomi's URL, and use a personal API token (`uy_...` from
 Profile → Account → Tokens) as the API key. Auth is `X-API-Key` header or HTTP Basic.
-
-Mihon's built-in Komga tracker (the two-way reading sync) carries no credentials at all, so the four
-endpoints it uses — series detail, series thumbnail, and the two `read-progress/tachiyomi` operations —
-are additionally reachable without auth when `KOMGA_TRACKER_USER` names an account; they then act as that
-account. Without that env var they return 401 like every other route.
 ```
 GET    /api/v1/libraries
 GET    /api/v1/series            GET    /api/v1/series/latest
