@@ -803,9 +803,21 @@ for moving a library over from another app:
 Uchiyomi matches every title against your sources in the background — preferring the exact source a backup
 entry came from when you have it installed — then shows you the whole list before anything is added. Each
 row carries its pick and how confident the match is; **Change** opens a manual search (grouped by source, so
-you can see exactly which provider a pick would come from) to correct it or skip that title outright. Rows
-already in your library default to skipped, visibly, and can be un-skipped. Nothing is added until you press
-**Continue**, which adds only the rows left on an accepted match. Matching a long list can take a few
+you can see exactly which provider a pick would come from) to correct it or skip that title outright — it
+also shows the cover, title and chapter count of the row's current pick before you type anything, and of
+whatever you tap next, so a mismatch between the two is visible before you commit to it. Rows already in
+your library default to skipped, visibly, and can be un-skipped.
+
+Nothing is added until you check some rows and press **Import selected**. **Select all** marks every row
+(a skipped or still-unmatched one is a harmless no-op if you press Import anyway); **Select ready to
+import** marks only the rows that actually found a match. Every import here is "nothing yet" — titles are
+added to your library with no chapter downloaded, so a few hundred titles is seconds of database work, not
+hours of fetching. New chapters arrive the normal way, through auto-update, or fetch older ones by hand from
+each series page.
+
+Whatever did not find a match stays in the list — filter to **Needs attention**, fix each one with
+**Change**, then **Select ready to import** and **Import selected** again; rows already imported are never
+re-added, so running it a second time only picks up what is newly ready. Matching a long list can take a few
 minutes; you can leave the page and come back (`/admin/import/?batch=<id>`), and a batch interrupted by a
 server restart offers **Resume**.
 

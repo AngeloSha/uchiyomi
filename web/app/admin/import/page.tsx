@@ -83,19 +83,35 @@ function ResolvingCard({ batch, onResume }: { batch: ImportBatch; onResume: () =
   );
 }
 
-function ReviewRow({ c, sourceName, onEdit }: {
+/** A row can be selected for bulk import only while it has a match and has not already been run. */
+const isReady = (c: ImportCandidate): boolean => (c.decision === 'auto' || c.decision === 'manual') && !!c.match_source_id && !c.status;
+
+function ReviewRow({ c, sourceName, selected, onToggle, onEdit }: {
   c: ImportCandidate;
   sourceName: (id: string | null) => string;
+  selected: boolean;
+  onToggle: (id: string) => void;
   onEdit: (c: ImportCandidate) => void;
 }) {
   const matched = (c.decision === 'auto' || c.decision === 'manual') && !!c.match_title;
+  const ready = isReady(c);
   return (
     <div className="flex items-center gap-3 rounded-xl border border-ink-800 bg-ink-900/40 p-2.5">
+      {ready ? (
+        <input type="checkbox" checked={selected} onChange={() => onToggle(c.id)}
+          className="size-4 shrink-0 rounded border-ink-600 bg-ink-800 accent-accent" aria-label={tr('Select for import')} />
+      ) : (
+        <span className="size-4 shrink-0" aria-hidden />
+      )}
       <Img src={c.match_cover ? sourceCover(c.match_source || undefined, c.match_cover) : ''} alt=""
         fallbackSrc={c.match_cover || undefined} className="h-14 w-10 shrink-0 rounded" />
       <div className="min-w-0 flex-1">
         <p className="truncate text-sm text-fog-100">{c.backup_title}</p>
-        {c.decision === 'skip' ? (
+        {c.status ? (
+          <p className={`text-[11px] ${c.status === 'added' ? 'text-emerald-400' : c.status === 'already' ? 'text-fog-500' : 'text-red-400'}`}>
+            {c.status === 'added' ? tr('Added to your library') : c.status === 'already' ? tr('Already in your library') : tr('Failed — {reason}', { reason: c.status })}
+          </p>
+        ) : c.decision === 'skip' ? (
           <p className="text-[11px] text-fog-500">{c.in_library ? tr('Already in your library') : tr('Skipped')}</p>
         ) : matched ? (
           <p className="flex flex-wrap items-center gap-x-1.5 text-[11px] text-fog-400">
@@ -108,24 +124,35 @@ function ReviewRow({ c, sourceName, onEdit }: {
           <p className="text-[11px] text-amber-400">{tr('No match found')}</p>
         )}
       </div>
-      <button onClick={() => onEdit(c)} className="chip shrink-0 text-xs">{tr('Change')}</button>
+      {!c.status && <button onClick={() => onEdit(c)} className="chip shrink-0 text-xs">{tr('Change')}</button>}
     </div>
   );
 }
 
-function ReviewCard({ items, allCount, attentionCount, skippedCount, importCount, filter, setFilter, q, setQ, onEdit, onRun, running, sourceName }: {
+function ReviewCard({
+  items, allCount, attentionCount, skippedCount, readyCount, selectedIds,
+  filter, setFilter, q, setQ, onEdit, onToggle, onSelectAll, onSelectReady, onClearSelection, onRun, running, sourceName,
+}: {
   items: ImportCandidate[];
-  allCount: number; attentionCount: number; skippedCount: number; importCount: number;
+  allCount: number; attentionCount: number; skippedCount: number; readyCount: number;
+  selectedIds: Set<string>;
   filter: Filter; setFilter: (f: Filter) => void;
   q: string; setQ: (v: string) => void;
   onEdit: (c: ImportCandidate) => void;
+  onToggle: (id: string) => void;
+  onSelectAll: () => void;
+  onSelectReady: () => void;
+  onClearSelection: () => void;
   onRun: () => void;
   running: boolean;
   sourceName: (id: string | null) => string;
 }) {
   return (
     <div className="card grad-border wide p-4">
-      <p className="mb-3 text-sm font-semibold text-fog-100">{tr('{n} titles matched', { n: allCount })}</p>
+      <p className="mb-1 text-sm font-semibold text-fog-100">{tr('{n} titles matched', { n: allCount })}</p>
+      <p className="mb-3 text-[11px] text-fog-500">
+        {tr('Selected titles are added to your library only — no chapters are downloaded. New releases arrive through auto-update, or fetch older ones from the series page.')}
+      </p>
 
       <div className="mb-2 flex flex-wrap gap-2">
         <button onClick={() => setFilter('all')} className={`chip text-xs ${filter === 'all' ? 'chip-active' : ''}`}>{tr('All')} · {allCount}</button>
@@ -134,15 +161,28 @@ function ReviewCard({ items, allCount, attentionCount, skippedCount, importCount
       </div>
       <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={tr('Filter by title…')} className="field mb-3" />
 
+      {/* Bulk actions. "Select all" marks every row, including a skipped or still-unmatched one — Import
+          selected then quietly imports only what is actually ready, so it is never a mistake to press. */}
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <button onClick={onSelectAll} className="chip text-xs">{tr('Select all')}</button>
+        <button onClick={onSelectReady} className="chip text-xs">{tr('Select ready to import')} · {readyCount}</button>
+        {selectedIds.size > 0 && (
+          <button onClick={onClearSelection} className="chip text-xs">{tr('Clear selection')}</button>
+        )}
+        <span className="ms-auto text-[11px] text-fog-500">{tr('{n} selected', { n: selectedIds.size })}</span>
+      </div>
+
       <div className="space-y-1.5">
         {items.length === 0 ? (
           <p className="py-8 text-center text-sm text-fog-500">{tr('Nothing here.')}</p>
-        ) : items.map((c) => <ReviewRow key={c.id} c={c} sourceName={sourceName} onEdit={onEdit} />)}
+        ) : items.map((c) => (
+          <ReviewRow key={c.id} c={c} sourceName={sourceName} selected={selectedIds.has(c.id)} onToggle={onToggle} onEdit={onEdit} />
+        ))}
       </div>
 
       <div className="sticky bottom-[calc(5.5rem+env(safe-area-inset-bottom))] z-10 mt-4 lg:bottom-4">
-        <button onClick={onRun} disabled={running || importCount === 0} className="btn-accent w-full py-2.5 text-sm shadow-lift disabled:opacity-50">
-          {running ? tr('Starting…') : tr('Continue — import {n}', { n: importCount })}
+        <button onClick={onRun} disabled={running || selectedIds.size === 0} className="btn-accent w-full py-2.5 text-sm shadow-lift disabled:opacity-50">
+          {running ? tr('Starting…') : tr('Import selected — {n}', { n: selectedIds.size })}
         </button>
       </div>
     </div>
@@ -242,6 +282,10 @@ function ImportWizardInner() {
   const [q, setQ] = useState('');
   const [editing, setEditing] = useState<ImportCandidate | null>(null);
   const [running, setRunning] = useState(false);
+  // Bulk-import selection: candidate ids about to be sent to /run. Empty by default -- picking what to
+  // import is a deliberate act via "Select all" / "Select ready to import" / a row's own checkbox, not a
+  // default the admin has to opt out of.
+  const [selected, setSelected] = useState<Set<string>>(new Set());
 
   const filtered = items.filter((c) => {
     if (filter === 'attention' && !needsAttention(c)) return false;
@@ -251,21 +295,28 @@ function ImportWizardInner() {
   });
   const attentionCount = items.filter(needsAttention).length;
   const skippedCount = items.filter((c) => c.decision === 'skip').length;
-  const importCount = items.filter((c) => c.decision === 'auto' || c.decision === 'manual').length;
+  const readyCount = items.filter(isReady).length;
 
   const resume = async () => {
     if (!batchId) return;
     try { await api(`/api/admin/import/batches/${batchId}/resume`, { method: 'POST' }); refetch(); }
     catch (e: any) { toast(msgOf(e, tr('Could not resume')), 'error'); }
   };
+  const toggleSelected = (id: string) => setSelected((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+  const selectAll = () => setSelected(new Set(items.map((c) => c.id)));
+  const selectReady = () => setSelected(new Set(items.filter(isReady).map((c) => c.id)));
+  const clearSelection = () => setSelected(new Set());
   const runImport = async () => {
-    if (!batchId) return;
+    if (!batchId || selected.size === 0) return;
     setRunning(true);
-    try { await api(`/api/admin/import/batches/${batchId}/run`, { method: 'POST' }); refetch(); }
-    catch (e: any) { toast(msgOf(e, tr('Could not start the import')), 'error'); }
+    try {
+      await api(`/api/admin/import/batches/${batchId}/run`, { method: 'POST', json: { candidateIds: [...selected] } });
+      setSelected(new Set());
+      refetch();
+    } catch (e: any) { toast(msgOf(e, tr('Could not start the import')), 'error'); }
     setRunning(false);
   };
-  const startOver = () => { setBatchId(null); setMdUrl(''); setPasted(''); router.replace('/admin/import/'); };
+  const startOver = () => { setBatchId(null); setMdUrl(''); setPasted(''); setSelected(new Set()); router.replace('/admin/import/'); };
   const closeEditor = () => { setEditing(null); qc.invalidateQueries({ queryKey: ['import-batch', batchId] }); };
 
   if (!isAdmin) return <div className="flex min-h-screen-d items-center justify-center text-fog-400">{tr('Admins only.')}</div>;
@@ -286,8 +337,9 @@ function ImportWizardInner() {
         <ResolvingCard batch={batch} onResume={resume} />
       ) : batch.state === 'review' ? (
         <ReviewCard items={filtered} allCount={items.length} attentionCount={attentionCount} skippedCount={skippedCount}
-          importCount={importCount} filter={filter} setFilter={setFilter} q={q} setQ={setQ}
-          onEdit={setEditing} onRun={runImport} running={running} sourceName={sourceName} />
+          readyCount={readyCount} selectedIds={selected} filter={filter} setFilter={setFilter} q={q} setQ={setQ}
+          onEdit={setEditing} onToggle={toggleSelected} onSelectAll={selectAll} onSelectReady={selectReady}
+          onClearSelection={clearSelection} onRun={runImport} running={running} sourceName={sourceName} />
       ) : (
         <RunCard batch={batch} items={items} onStartOver={startOver} />
       )}

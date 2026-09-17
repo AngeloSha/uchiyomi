@@ -5348,9 +5348,18 @@ paths:
     post:
       tags:
         - admin
-      summary: "Continue: add every accepted (auto or manual) row of a reviewed batch."
+      summary: "Import selected: add matched, not-yet-imported rows. Never downloads a chapter."
       operationId: postApiAdminImportBatchesIdRun
-      description: Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
+      description: >-
+        Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
+        Adds every eligible row (decision `auto`/`manual`, has a match, not already run) named in
+        `candidateIds`, or every eligible row in the batch if `candidateIds` is omitted. A skipped or
+        still-unresolved id in `candidateIds` is silently left out rather than erroring the request. Every
+        add uses the "nothing yet" path — the series is created and followed, no chapter is fetched — so a
+        bulk import is a catalogue move, not a bulk download; chapters arrive through auto-update or a
+        manual fetch afterwards. Safe to call more than once on the same batch: a row already imported by an
+        earlier call is never re-added, which is how a "second import try" for rows found by hand later
+        works. The batch returns to `review` (not `done`) while anything importable is still waiting.
       parameters:
         - name: id
           in: path
@@ -5366,19 +5375,18 @@ paths:
               properties:
                 autoUpdate:
                   type: boolean
-                chapterCount:
-                  type: integer
-                  minimum: 1
-                chapterFrom:
-                  type: string
-                  enum: [oldest, newest]
+                candidateIds:
+                  type: array
+                  items:
+                    type: string
+                  description: Which candidate rows to import. Omit to import every eligible row in the batch.
       security:
         - bearer: []
       responses:
         "200":
           description: OK
         "400":
-          description: "Bad request: nothing accepted to import"
+          description: "Bad request: nothing selected is ready to import"
         "401":
           description: Not authenticated
         "403":
@@ -5386,7 +5394,7 @@ paths:
         "404":
           description: Not found
         "409":
-          description: "Conflict: still resolving, already importing, or already done"
+          description: "Conflict: still resolving, or already importing"
   /api/admin/import/candidates/{cid}:
     patch:
       tags:

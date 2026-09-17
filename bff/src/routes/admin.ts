@@ -2260,14 +2260,21 @@ export default async function adminRoutes(app: FastifyInstance) {
     return { ok: true };
   });
 
-  // ---- "Continue" — add every accepted (auto or manual) row. Skipped and still-unmatched rows are left out. ----
+  // ---- "Import selected" — add every selected, matched, not-yet-imported row. Adds only: chapterFrom is
+  // forced to 'none' so this never downloads anything, the same "nothing yet" path the add dialog offers —
+  // the batch is a bulk catalogue move, not a bulk download, and hundreds of full downloads back to back is
+  // exactly the "hammer the sites you're pulling from" scenario the docs warn a big import risks. Chapters
+  // arrive afterwards through auto-update (or a manual fetch from the series page), same as any other title
+  // added "nothing yet". ----
   app.post('/api/admin/import/batches/:id/run', async (req, reply) => {
     const { id } = req.params as { id: string };
     const b = z
       .object({
         autoUpdate: z.boolean().optional(),
-        chapterCount: z.number().int().positive().optional(),
-        chapterFrom: z.enum(['oldest', 'newest']).optional(),
+        // Which rows to add. Omitted means "every matched, not-yet-imported row" (the whole-batch shortcut
+        // the one-shot importer always did); the review screen's bulk actions pass an explicit list so a
+        // row that is only *selected*, not skipped, can still be left for later without erroring.
+        candidateIds: z.array(z.string()).optional(),
       })
       .safeParse(req.body ?? {});
     if (!b.success) return reply.code(400).send({ error: 'bad_request' });
@@ -2275,28 +2282,37 @@ export default async function adminRoutes(app: FastifyInstance) {
     const batch = await one<{ id: string; state: string }>('SELECT id, state FROM import_batches WHERE id = $1', [id]);
     if (!batch) return reply.code(404).send({ error: 'not_found' });
     if (batch.state === 'importing') return reply.code(409).send({ error: 'busy', message: 'This batch is already importing.' });
-    if (batch.state === 'done') return reply.code(409).send({ error: 'already_done', message: 'This batch has already been imported.' });
     if (batch.state === 'resolving') return reply.code(409).send({ error: 'still_resolving', message: 'Wait for matching to finish first.' });
 
+    // Gated on decision + a match id + not already run, regardless of what the caller selected: a skipped
+    // or still-unresolved row in `candidateIds` (an admin who pressed "Select all" rather than "Select ready
+    // to import") is silently left out rather than erroring the whole request, and a row this same endpoint
+    // already imported on an earlier call is never re-added. That is what makes calling this a SECOND time
+    // on the same batch -- after fixing the rows an admin found manually -- safe: it only ever picks up
+    // what is newly ready.
     const rows = await q<{ id: string; match_source: string; match_source_id: string }>(
-      `SELECT id, match_source, match_source_id FROM import_candidates
-       WHERE batch_id = $1 AND decision IN ('auto','manual') AND match_source_id IS NOT NULL ORDER BY ord`,
-      [id],
+      b.data.candidateIds
+        ? `SELECT id, match_source, match_source_id FROM import_candidates
+           WHERE batch_id = $1 AND decision IN ('auto','manual') AND match_source_id IS NOT NULL AND status IS NULL
+             AND id = ANY($2) ORDER BY ord`
+        : `SELECT id, match_source, match_source_id FROM import_candidates
+           WHERE batch_id = $1 AND decision IN ('auto','manual') AND match_source_id IS NOT NULL AND status IS NULL ORDER BY ord`,
+      b.data.candidateIds ? [id, b.data.candidateIds] : [id],
     );
-    if (!rows.length) return reply.code(400).send({ error: 'nothing_to_import', message: 'Nothing is selected to import.' });
+    if (!rows.length) return reply.code(400).send({ error: 'nothing_to_import', message: 'Nothing selected is ready to import.' });
 
     await q(`UPDATE import_batches SET state = 'importing', updated_at = now() WHERE id = $1`, [id]);
     await logAudit('import.batch.run', { userId: userIdOf(req), detail: { batchId: id, count: rows.length }, req });
-    // Fire-and-forget, same as the one-shot /import route: adding hundreds of series (each downloading a
-    // first chapter inline, see addSeriesFromSource) is far too slow to hold a request open for.
+    // Fire-and-forget, same as the one-shot /import route: adding hundreds of series is too slow to hold a
+    // request open for, even with no chapter downloaded per title.
     void (async () => {
       for (const row of rows) {
         try {
-          const r = await addSeriesFromSource({
-            source: row.match_source, sourceId: row.match_source_id,
-            autoUpdate: b.data.autoUpdate, chapterCount: b.data.chapterCount, chapterFrom: b.data.chapterFrom,
-          });
-          if (r.ok && (r.chapters ?? 0) > 0) {
+          const r = await addSeriesFromSource({ source: row.match_source, sourceId: row.match_source_id, autoUpdate: b.data.autoUpdate, chapterFrom: 'none' });
+          // `nothing: true` is the 'none' path's own signal for "a fresh row was created" (routes/sources.ts)
+          // -- `chapters` is always 0 under chapterFrom:'none', so the old `chapters > 0` test that told a
+          // fresh add from an existing one would have called EVERY add here "already", including the first.
+          if (r.ok && r.nothing) {
             await q(`UPDATE import_candidates SET status = 'added' WHERE id = $1`, [row.id]);
             await q(`UPDATE import_batches SET added = added + 1, updated_at = now() WHERE id = $1`, [id]);
           } else if (r.ok) {
@@ -2311,7 +2327,14 @@ export default async function adminRoutes(app: FastifyInstance) {
           await q(`UPDATE import_batches SET failed = failed + 1, updated_at = now() WHERE id = $1`, [id]).catch(() => {});
         }
       }
-      await q(`UPDATE import_batches SET state = 'done', updated_at = now() WHERE id = $1`, [id]).catch(() => {});
+      // 'review', not 'done', while anything could still become an import: a still-unresolved row a person
+      // can go find manually (the "second import try"), or a matched row that was left unselected on
+      // purpose. Only once nothing is left waiting does the batch read as finished.
+      const remaining = await one<{ n: number }>(
+        `SELECT count(*)::int AS n FROM import_candidates WHERE batch_id = $1 AND status IS NULL AND decision <> 'skip'`, [id],
+      );
+      const nextState = (remaining?.n ?? 0) > 0 ? 'review' : 'done';
+      await q(`UPDATE import_batches SET state = $2, updated_at = now() WHERE id = $1`, [id, nextState]).catch(() => {});
     })();
     return { ok: true, total: rows.length };
   });

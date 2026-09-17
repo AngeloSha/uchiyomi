@@ -541,10 +541,15 @@ first cross-source hit with no review and stays for scripted callers. `POST .../
 `resolving`, an `unresolved` row means "no match found" rather than "not looked at yet". `PATCH
 /api/admin/import/candidates/:cid` accepts `{decision:'manual', source, sourceId, title, coverUrl?}` to
 override a pick, `{decision:'skip'}`, or `{decision:'auto'}` to restore the resolve pass's own suggestion
-after an override. `POST .../batches/:id/run` adds every `auto`/`manual` row (same `autoUpdate`,
-`chapterCount`, `chapterFrom` body as above); `DELETE .../batches/:id` discards a batch outright. A batch
-left `resolving` by a server restart reads back with `stale: true`; `POST .../batches/:id/resume` restarts
-matching for whatever is still unresolved.
+after an override. `POST .../batches/:id/run` takes `{candidateIds?, autoUpdate?}` — with `candidateIds` it
+adds only those rows (a skipped or still-unresolved id is silently left out rather than erroring), omitted
+means every eligible row in the batch. Every add is "nothing yet": the series is created and followed, no
+chapter is downloaded, matching the bulk-select UI's promise that "Import selected" only moves titles into
+the library. Safe to call again later on the same batch — a row already imported is never re-added, which is
+how importing the matched rows now and the rest (found by hand afterwards) later both work; the batch state
+reads `review`, not `done`, while anything importable is still waiting. `DELETE .../batches/:id` discards a
+batch outright. A batch left `resolving` by a server restart reads back with `stale: true`; `POST
+.../batches/:id/resume` restarts matching for whatever is still unresolved.
 
 **Scanlation groups.** When a source lists the same chapter from more than one group (MangaDex does, and
 so do extension sources that carry Mihon's scanlator column), the server keeps one file per number and the
