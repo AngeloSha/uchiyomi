@@ -5,7 +5,7 @@ import { q, one, tx } from '../lib/db';
 import { content as komga } from '../lib/backend';
 import { cacheBytes } from '../lib/imageCache';
 import { runtime } from '../lib/runtime';
-import { persistScan, libraryIdFor, LIBRARY_ROOT, DL_ROOT, setBookDates, setBookMeta } from '../lib/library';
+import { persistScan, reconcileLibrary, libraryIdFor, LIBRARY_ROOT, DL_ROOT, setBookDates, setBookMeta } from '../lib/library';
 import { containedPath, allWritable } from '../lib/fsGuard';
 import { deleteSeries, restoreSeries, mergeSeries, getSeriesRow, deleteSeriesFiles, renameSeriesFolder } from '../lib/libraryAdmin';
 import { runFingerprintBackfill, fingerprintRemaining, fpState } from '../lib/fingerprintJob';
@@ -82,8 +82,15 @@ export default async function adminRoutes(app: FastifyInstance) {
   app.addHook('preHandler', authenticate);
   app.addHook('preHandler', requireAdmin);
 
-  // Owned-library scan (Phase 1): walk the CBZ folder and upsert lib_series/lib_books.
-  app.post('/api/admin/library/scan', async () => persistScan());
+  // Owned-library scan (Phase 1): walk the CBZ folder and upsert lib_series/lib_books. Reconciliation runs
+  // right after: a scan only ever confirms files that ARE there, so it is the natural place to also ask
+  // about the rows it did NOT just confirm -- see reconcileLibrary's own comment for why that matters after
+  // restoring a database-only backup.
+  app.post('/api/admin/library/scan', async () => {
+    const scan = await persistScan();
+    const reconciled = await reconcileLibrary().catch(() => null);
+    return { ...scan, ...(reconciled ? { reconciled } : {}) };
+  });
 
   // Owned downloader/updater (Phase 2): pull new chapters from the source for one series or the whole library.
   app.post('/api/admin/update/:id', async (req) => updateSeries((req.params as { id: string }).id, Number((req.body as any)?.maxNew) || 10));
@@ -264,7 +271,11 @@ export default async function adminRoutes(app: FastifyInstance) {
   app.post('/api/admin/tasks/:id/run', async (req) => {
     const { id } = req.params as { id: string };
     await logAudit('task.run', { userId: userIdOf(req), detail: { task: id }, req });
-    if (id === 'scan') return { ok: true, ...(await persistScan()) };
+    if (id === 'scan') {
+      const scan = await persistScan();
+      const reconciled = await reconcileLibrary().catch(() => null);
+      return { ok: true, ...scan, ...(reconciled ? { reconciled } : {}) };
+    }
     if (id === 'update') {
       // Never awaited: a sweep is minutes to hours, and the caller is an admin clicking a button. runSweep
       // marks it running, keeps the result, logs the summary and refuses to start on top of another one --

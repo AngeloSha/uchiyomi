@@ -9,7 +9,7 @@ import { env } from './env';
 import { pool, q, one } from './lib/db';
 import { runtime } from './lib/runtime';
 import { reapStaleTemp } from './lib/fsAtomic';
-import { DL_ROOT } from './lib/library';
+import { DL_ROOT, reconcileLibrary } from './lib/library';
 import { migrate } from './lib/migrate';
 import { loadSources, loadCustomSites, loadBuiltins, listSources, loadSuwayomiSources, scheduleSuwayomiRetry, suwayomiConfigured } from './lib/sources';
 import { scheduleFingerprintBackfill } from './lib/fingerprintJob';
@@ -409,6 +409,15 @@ async function main() {
       const n = await unpruneRestored(DL_ROOT, restored).catch(() => 0);
       app.log.info(`put back ${restored.length} chapter(s) left aside by an interrupted refetch; ${n} row(s) un-marked`);
     }
+    // A database restored from a backup (docs/USAGE.md's own restore steps end in "restart the container")
+    // can carry rows for chapter files that were never part of that backup -- DL_ROOT never is, on purpose,
+    // see reconcileLibrary's comment. Without this those rows sit there reporting "up to date" forever, to
+    // the sweep, "Check now" and "Download newest" alike. Runs after the reap above so an interrupted
+    // refetch gets its file back before this decides the row is missing one. Best effort, never fatal.
+    const r = await reconcileLibrary().catch((e) => { app.log.error(e as any, 'reconcile: failed'); return null; });
+    if (!r) return;
+    if (r.skipped === 'unmounted') { app.log.warn('reconcile: every series folder was missing -- is a volume unmounted? nothing changed'); return; }
+    if (r.deleted || r.tombstoned) app.log.info(`reconcile: ${r.deleted} stale row(s) removed, ${r.tombstoned} marked pruned (of ${r.checked} checked) -- missing chapters will be re-fetched on the next check`);
   });
 
   // Stop at a boundary, and say so. Before this there was no handler at all: `docker compose up -d` in the

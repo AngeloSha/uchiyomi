@@ -10,6 +10,7 @@ import { fingerprintChapter } from './fingerprint';
 import { findRematch, applyRematch, logRematch, MIN_BOOKS } from './rematch';
 import { numFromName, naturalCmp } from './naming';
 import { parseComicInfoAgeRating } from './ageRating';
+import { containedPath } from './fsGuard';
 
 // node-stream-zip reads the central directory only (cheap) and can stream a single entry.
 // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -634,5 +635,108 @@ export async function setBookMeta(folder: string, landed: Array<{ number: number
        AND (b.scanlator IS DISTINCT FROM v.grp OR b.source_id IS DISTINCT FROM v.src)`,
     params,
   );
+}
+
+export interface ReconcileResult {
+  checked: number;
+  deleted: number;
+  tombstoned: number;
+  skipped?: 'unmounted';
+}
+
+/**
+ * Find lib_books rows that claim a file which is not actually there, and stop trusting them.
+ *
+ * persistScan only ever ADDS or refreshes a row for a file it just found; nothing ever took the opposite
+ * step of noticing a row whose file went away by some means other than the read-cleanup job (which always
+ * tombstones what it deletes). A database restored from a backup is the sharpest case: backups never
+ * include DL_ROOT -- "downloaded chapter files ... those are large and re-downloadable" (docs/USAGE.md) --
+ * so restoring one produces exactly a pile of un-pruned rows whose files were never brought back. The
+ * updater's have-set (lib/updater.ts) trusts any such row at face value, so those chapter numbers report
+ * "up to date" forever, to the sweep, "Check now" and "Download newest" alike, with no error and nothing to
+ * fetch. A tombstone would not fix that on its own -- the have-set counts a pruned row exactly the same as
+ * a live one, on purpose, so the read-cleanup's tombstones stick -- so a row with no reading history behind
+ * it is removed outright: read_progress.book_id is ON DELETE RESTRICT precisely so this can never take
+ * anyone's history with it, and a row that FK refuses is tombstoned instead, honest about having no bytes
+ * even though it cannot come all the way out.
+ *
+ * One stat per (root, series folder) first, not one per chapter: the common shape of a restore is the WHOLE
+ * folder missing, not a hole punched in an otherwise-present one, and a library with tens of thousands of
+ * chapters should not cost tens of thousands of stats to find that out.
+ *
+ * ⚠️ UNMOUNTED VOLUME GUARD, but not chapterCleanup's own version of it: "every series folder checked is
+ * missing" is exactly what a genuine mass-orphaning from a restore looks like too -- that is the case this
+ * function exists for -- so treating it as the unmounted signal would refuse to do the one thing it was
+ * written to do. What actually distinguishes the two is the ROOT itself: a real mount that vanished takes
+ * the mount point with it (writePreflight/fsGuard.ts stats it the same way to decide if it can write), where
+ * a library whose chapters never made it back from a backup still has its volume, just with less in it.
+ * So the check is the roots the affected rows actually live under, stat'ed once each, not their folders.
+ */
+export async function reconcileLibrary(): Promise<ReconcileResult> {
+  const rows = await q<{ id: string; series_id: string; root: string | null; file: string; folder: string }>(
+    `SELECT b.id, b.series_id, b.root, b.file, s.folder
+       FROM lib_books b JOIN lib_series s ON s.id = b.series_id
+      WHERE b.pruned_at IS NULL AND s.deleted_at IS NULL AND s.merged_into IS NULL`,
+  );
+  if (!rows.length) return { checked: 0, deleted: 0, tombstoned: 0 };
+
+  const roots = [...new Set(rows.map((r) => r.root || LIBRARY_ROOT))];
+  const rootsOk = await Promise.all(roots.map((r) => stat(r).then(() => true).catch(() => false)));
+  if (rootsOk.some((ok) => !ok)) return { checked: rows.length, deleted: 0, tombstoned: 0, skipped: 'unmounted' };
+
+  const folderOk = new Map<string, boolean>();
+  const folderExists = async (root: string, folder: string): Promise<boolean> => {
+    const key = `${root}\u0000${folder}`;
+    const cached = folderOk.get(key);
+    if (cached !== undefined) return cached;
+    const abs = containedPath(root, folder);
+    const ok = !!abs && (await stat(abs).then(() => true).catch(() => false));
+    folderOk.set(key, ok);
+    return ok;
+  };
+
+  const missing: typeof rows = [];
+  for (const r of rows) {
+    const root = r.root || LIBRARY_ROOT;
+    if (!(await folderExists(root, r.folder))) { missing.push(r); continue; }
+    const abs = containedPath(root, r.file);
+    const ok = !!abs && (await stat(abs).then(() => true).catch(() => false));
+    if (!ok) missing.push(r);
+  }
+
+  if (!missing.length) return { checked: rows.length, deleted: 0, tombstoned: 0 };
+
+  const ids = missing.map((r) => r.id);
+  const hasProgress = new Set(
+    (await q<{ book_id: string }>('SELECT DISTINCT book_id FROM read_progress WHERE book_id = ANY($1)', [ids])).map((r) => r.book_id),
+  );
+  const toDelete = ids.filter((id) => !hasProgress.has(id));
+  const toTombstone = ids.filter((id) => hasProgress.has(id));
+
+  if (toDelete.length) await q('DELETE FROM lib_books WHERE id = ANY($1)', [toDelete]);
+  if (toTombstone.length) await q('UPDATE lib_books SET pruned_at = now() WHERE id = ANY($1) AND pruned_at IS NULL', [toTombstone]);
+
+  // Counts and covers over just the series this pass actually changed. A correlated subquery per row,
+  // not persistScan's own GROUP BY join: that join has no row at all for a series left with zero books, so
+  // it silently keeps a stale non-zero count -- fine for a scan, which never removes the LAST book of a
+  // series a folder still holds, but this function's whole job is a series losing every book it had.
+  const seriesIds = [...new Set(missing.map((r) => r.series_id))];
+  if (seriesIds.length) {
+    await q(
+      `UPDATE lib_series s SET
+         books_count = (SELECT count(*) FROM lib_books b WHERE b.series_id = s.id),
+         latest_mtime = COALESCE((SELECT max(mtime) FROM lib_books b WHERE b.series_id = s.id), 0)
+       WHERE s.id = ANY($1)`,
+      [seriesIds],
+    );
+    await q(
+      `UPDATE lib_series SET cover_book_id = (
+         SELECT id FROM lib_books WHERE series_id = lib_series.id ORDER BY (pruned_at IS NOT NULL), number ASC, file ASC LIMIT 1
+       ) WHERE id = ANY($1)`,
+      [seriesIds],
+    );
+  }
+
+  return { checked: rows.length, deleted: toDelete.length, tombstoned: toTombstone.length };
 }
 
