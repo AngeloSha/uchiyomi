@@ -521,11 +521,30 @@ POST   /api/admin/art/backfill    GET    /api/admin/art/backfill/status
 POST   /api/admin/trackers/relink GET    /api/admin/trackers/relink/status
 POST   /api/admin/import          POST   /api/admin/import/parse
 GET    /api/admin/import/status
+POST   /api/admin/import/batches
+GET    /api/admin/import/batches/:id DELETE /api/admin/import/batches/:id
+POST   /api/admin/import/batches/:id/resume
+POST   /api/admin/import/batches/:id/run
+PATCH  /api/admin/import/candidates/:cid
 ```
 
 The bulk importer's body takes `titles`, `autoUpdate`, `chapterCount` and `chapterFrom`, with the same
 meaning as on `/api/sources/add` (`chapterFrom: "newest"` takes the latest N and floors the series; the
 importer accepts `oldest` and `newest` only — `none` is the add dialog's).
+
+**Reviewable import** (`/api/admin/import/batches*`, `/api/admin/import/candidates/:cid`) is the same idea
+with a match-review step in between, and is what the admin UI uses — the plain importer above adds the
+first cross-source hit with no review and stays for scripted callers. `POST .../batches` takes the same
+`dataUrl`/`mangadexList`/`titles` intake as `/api/admin/import/parse`, starts matching in the background
+(one batch resolves at a time server-wide) and returns a `batchId`. `GET .../batches/:id` polls
+`{batch, items}` — each item's `decision` is `unresolved | auto | manual | skip` and, once the batch leaves
+`resolving`, an `unresolved` row means "no match found" rather than "not looked at yet". `PATCH
+/api/admin/import/candidates/:cid` accepts `{decision:'manual', source, sourceId, title, coverUrl?}` to
+override a pick, `{decision:'skip'}`, or `{decision:'auto'}` to restore the resolve pass's own suggestion
+after an override. `POST .../batches/:id/run` adds every `auto`/`manual` row (same `autoUpdate`,
+`chapterCount`, `chapterFrom` body as above); `DELETE .../batches/:id` discards a batch outright. A batch
+left `resolving` by a server restart reads back with `stale: true`; `POST .../batches/:id/resume` restarts
+matching for whatever is still unresolved.
 
 **Scanlation groups.** When a source lists the same chapter from more than one group (MangaDex does, and
 so do extension sources that carry Mihon's scanlator column), the server keeps one file per number and the

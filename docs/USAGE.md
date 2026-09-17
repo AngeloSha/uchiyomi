@@ -792,16 +792,27 @@ everywhere ends it on the next occasion that device reaches the server.
 folded into one card that opens per language. This tab also holds **Import a list**,
 for moving a library over from another app:
 
-- **Mihon / Tachiyomi backup** — pick your `.tachibk` (or `.proto.gz`) file. Only the titles are read; the
-  file never leaves your server, and nothing about your Mihon sources or accounts is used.
+- **Mihon / Tachiyomi backup** — pick your `.tachibk` (or `.proto.gz`) file. Only each entry's title, plus
+  which Mihon source it came from (used only to match it against that same source here, if you have it
+  installed), is read; the file never leaves your server, and no Mihon account is used.
 - **MangaDex list** — paste the link to a **public** custom list. Private follows would need a MangaDex
   login, which Uchiyomi never asks for; make a list public and share that instead.
 - **Paste titles** — one per line, from anywhere.
 
-Whichever you use, the titles land in the box for you to review first. Anything already in your library is
-removed from the list automatically, so you can delete lines you don't want before starting. Uchiyomi then
-searches your configured sources for each title and adds the best match, showing live progress and a
-per-title result (added / already had / not found / failed).
+**Import and review matches** is the recommended way in: press it after picking your source above, and
+Uchiyomi matches every title against your sources in the background — preferring the exact source a backup
+entry came from when you have it installed — then shows you the whole list before anything is added. Each
+row carries its pick and how confident the match is; **Change** opens a manual search (grouped by source, so
+you can see exactly which provider a pick would come from) to correct it or skip that title outright. Rows
+already in your library default to skipped, visibly, and can be un-skipped. Nothing is added until you press
+**Continue**, which adds only the rows left on an accepted match. Matching a long list can take a few
+minutes; you can leave the page and come back (`/admin/import/?batch=<id>`), and a batch interrupted by a
+server restart offers **Resume**.
+
+The plain **paste box** below it still works the old way for a quick, unreviewed import: titles land in the
+box for you to trim, anything already in your library is removed automatically, and pressing **Import**
+searches your sources and adds the first good match for each title directly — live progress, and a per-title
+result (added / already had / not found / failed), but no chance to correct a wrong pick before it lands.
 
 Importing hundreds of titles takes a while on purpose: downloads are paced so a big import doesn't hammer
 the sites you're pulling from and get your server blocked.

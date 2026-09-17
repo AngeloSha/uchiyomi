@@ -33,7 +33,7 @@ import { ART_DIR, artFile, artOverview } from '../lib/seriesArt';
 import { writePreflight } from '../lib/fsGuard';
 // Admin stats report on the whole library by definition; this route is already behind requireAdmin.
 import { NO_LIBRARIES, SYSTEM_CTX, visibleToAll } from '../lib/visibility';
-import { addSeriesFromSource, findBestMatch, norm, jobBusy, startDownloadJob, FILL_MAX_CHAPTERS, REFRESH_BUDGET_MS } from './sources';
+import { addSeriesFromSource, findBestMatch, resolveCandidate, norm, jobBusy, startDownloadJob, FILL_MAX_CHAPTERS, REFRESH_BUDGET_MS } from './sources';
 import { chapterFileRel } from '../lib/downloader';
 import { REFETCH_BAK } from '../lib/fsAtomic';
 import type { SourceChapter } from '../lib/sources/types';
@@ -43,10 +43,10 @@ import { groupsOf, normGroup } from '../lib/releases';
 import { groupStats, emptyGroupStat, type StatCopy } from '../lib/groupStats';
 import { copyToChapter, type ListingCopy } from '../lib/seriesListing';
 import { seriesSourcesFor } from '../lib/seriesSources';
-import { titlesFromBackup } from '../lib/tachibk';
+import { titlesFromBackup, entriesFromBackup, type BackupEntry } from '../lib/tachibk';
 import { linkSeries } from '../lib/trackers';
 import { runHealthChecks } from '../lib/health';
-import { titlesFromMangadexList } from '../lib/mangadexList';
+import { titlesFromMangadexList, entriesFromMangadexList } from '../lib/mangadexList';
 import { fetchAniListArt, fetchAniListCandidates, fetchAnimeBanner } from '../lib/anilist';
 import { fetchKitsuBanner } from '../lib/kitsu';
 import { randomBytes } from 'crypto';
@@ -55,6 +55,82 @@ import { PING_URL, buildPayload, installFacts, monthlyId, newSecret, sendForget 
 
 type ImportJob = { running: boolean; total: number; done: number; added: number; already: number; notFound: number; failed: number; startedAt: number; details: Array<{ title: string; status: string; source?: string }> };
 let importJob: ImportJob | null = null;
+
+/**
+ * Reviewable import (backup / MangaDex list / paste → per-title match review → add), the fix for "import
+ * forces an entry with no way to correct it". Unlike `importJob` above, this has a human in the middle who
+ * may take a long time, so state lives in `import_batches`/`import_candidates` (migrate.ts) rather than in
+ * memory — a restart or a closed tab must not throw away a finished resolve pass or a reviewer's picks.
+ *
+ * `resolvingBatch` is still an in-memory guard, same idea as `importJob.running`: it caps the SEARCH FAN-OUT
+ * to one batch at a time server-wide (matching or resuming another batch while this one is mid-resolve would
+ * double the outbound request rate to every source). It does not gate `/run` — adding series after review is
+ * cheap to run concurrently with a second batch's resolve pass, and gating it too would only serve to make
+ * reviewing batch A slower while batch B imports.
+ */
+let resolvingBatch: string | null = null;
+const RESOLVE_CONCURRENCY = 3;
+
+interface ImportBatchRow {
+  id: string; user_id: string; origin: string; state: string;
+  total: number; resolved: number; added: number; already: number; failed: number;
+  created_at: string; updated_at: string;
+}
+interface ImportCandidateRow {
+  id: string; batch_id: string; ord: number; backup_title: string;
+  backup_source_id_unsigned: string | null; backup_source_id_signed: string | null; backup_url: string | null;
+  in_library: boolean; decision: string; confidence: string | null;
+  match_source: string | null; match_source_id: string | null; match_title: string | null; match_cover: string | null;
+  auto_source: string | null; auto_source_id: string | null; auto_title: string | null; auto_cover: string | null; auto_confidence: string | null;
+  status: string | null;
+}
+
+/**
+ * Resolve every still-unresolved, non-skipped row of a batch against the user's sources, `RESOLVE_CONCURRENCY`
+ * at a time, writing each result as it lands so `GET .../batches/:id` fills in progressively under a 2s poll
+ * instead of staying empty for the whole pass. Rows the resolve pass can't match are left `unresolved` — once
+ * the batch flips to `review` that means "no match found" rather than "not looked at yet", which is exactly
+ * the ambiguity the batch's own `state` exists to remove (see the column comment in migrate.ts).
+ */
+async function resolveBatch(batchId: string): Promise<void> {
+  resolvingBatch = batchId;
+  try {
+    const rows = await q<ImportCandidateRow>(
+      `SELECT * FROM import_candidates WHERE batch_id = $1 AND decision = 'unresolved' ORDER BY ord`,
+      [batchId],
+    );
+    let next = 0;
+    const worker = async () => {
+      for (;;) {
+        const row = rows[next++];
+        if (!row) return;
+        try {
+          const m = await resolveCandidate({
+            title: row.backup_title,
+            sourceIdUnsigned: row.backup_source_id_unsigned ?? undefined,
+            sourceIdSigned: row.backup_source_id_signed ?? undefined,
+          });
+          if (m) {
+            await q(
+              `UPDATE import_candidates SET decision = 'auto', confidence = $2,
+                 match_source = $3, match_source_id = $4, match_title = $5, match_cover = $6,
+                 auto_source = $3, auto_source_id = $4, auto_title = $5, auto_cover = $6, auto_confidence = $2
+               WHERE id = $1`,
+              [row.id, m.confidence, m.source, m.sourceId, m.title, m.coverUrl ?? null],
+            );
+          }
+        } catch { /* leave unresolved — surfaces as "no match found" once the batch reaches review */ }
+        await q(`UPDATE import_batches SET resolved = resolved + 1, updated_at = now() WHERE id = $1`, [batchId]).catch(() => {});
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(RESOLVE_CONCURRENCY, rows.length) || 1 }, worker));
+    // Only from 'resolving': a batch deleted mid-pass (DELETE cascades the rows away) or already moved on
+    // must not be resurrected by a resolve loop that started before either happened.
+    await q(`UPDATE import_batches SET state = 'review', updated_at = now() WHERE id = $1 AND state = 'resolving'`, [batchId]).catch(() => {});
+  } finally {
+    if (resolvingBatch === batchId) resolvingBatch = null;
+  }
+}
 
 type ArtJob = { running: boolean; total: number; done: number; banners: number; covers: number; misses: number; startedAt: number };
 let artJob: ArtJob | null = null;
@@ -2041,6 +2117,213 @@ export default async function adminRoutes(app: FastifyInstance) {
     return { ok: true, total: titles.length };
   });
   app.get('/api/admin/import/status', async () => ({ job: importJob }));
+
+  // ---- reviewable import: parse into a batch, resolve matches in the background, let the admin correct
+  // them, THEN add. Same three intakes as /import/parse above, but every title gets its own row that the
+  // admin can inspect, override with a manual search, or skip — instead of silently taking the first
+  // cross-source hit above the confidence threshold. See migrate.ts for the two tables this uses. ----
+  app.post('/api/admin/import/batches', { bodyLimit: 12 * 1024 * 1024 }, async (req, reply) => {
+    if (resolvingBatch) return reply.code(409).send({ error: 'busy', message: 'An import is already resolving. Wait for it to finish, or cancel it.' });
+    const b = z
+      .object({
+        dataUrl: z.string().optional(),
+        mangadexList: z.string().optional(),
+        titles: z.array(z.string()).optional(),
+      })
+      .safeParse(req.body);
+    if (!b.success) return reply.code(400).send({ error: 'bad_request' });
+
+    let entries: BackupEntry[] = [];
+    let origin: 'backup' | 'mangadex' | 'paste';
+    try {
+      if (b.data.dataUrl) {
+        const m = /^data:[^;]*;base64,(.+)$/s.exec(b.data.dataUrl);
+        if (!m) return reply.code(400).send({ error: 'bad_request', message: 'Could not read that file.' });
+        entries = entriesFromBackup(Buffer.from(m[1], 'base64'));
+        origin = 'backup';
+      } else if (b.data.mangadexList) {
+        entries = await entriesFromMangadexList(b.data.mangadexList);
+        origin = 'mangadex';
+      } else if (b.data.titles?.length) {
+        // same bullet-stripping + dedupe as the one-shot /import route, so pasted lists behave identically
+        const seen = new Set<string>();
+        for (const raw of b.data.titles) {
+          const title = raw.replace(/^[-*•\d.\s]+/, '').trim();
+          if (!title) continue;
+          const k = norm(title);
+          if (seen.has(k)) continue;
+          seen.add(k);
+          entries.push({ title });
+        }
+        origin = 'paste';
+      } else {
+        return reply.code(400).send({ error: 'bad_request', message: 'Provide a backup file, a MangaDex list, or at least one title.' });
+      }
+    } catch (e) {
+      return reply.code(422).send({ error: 'parse_failed', message: (e as Error)?.message || 'Could not read that.' });
+    }
+    if (!entries.length) return reply.code(400).send({ error: 'bad_request', message: 'No titles found.' });
+
+    const truncated = entries.length > 500;
+    entries = entries.slice(0, 500);
+
+    // flag what's already here up front so the review screen can default those rows to skipped, visibly
+    const have = new Set((await q<{ title: string }>('SELECT title FROM lib_series')).map((r) => norm(r.title)));
+    const inLib = entries.map((e) => have.has(norm(e.title)));
+    const initialResolved = inLib.filter(Boolean).length; // already-owned rows never enter the resolve loop
+
+    const batch = await one<{ id: string }>(
+      `INSERT INTO import_batches (user_id, origin, state, total, resolved) VALUES ($1,$2,'resolving',$3,$4) RETURNING id`,
+      [userIdOf(req), origin, entries.length, initialResolved],
+    );
+    const batchId = batch!.id;
+    // One round trip for up to 500 rows via unnest, rather than 500 sequential INSERTs.
+    await q(
+      `INSERT INTO import_candidates (batch_id, ord, backup_title, backup_source_id_unsigned, backup_source_id_signed, backup_url, in_library, decision)
+       SELECT $1, o, t, su, ss, u, il, CASE WHEN il THEN 'skip' ELSE 'unresolved' END
+       FROM unnest($2::int[], $3::text[], $4::text[], $5::text[], $6::text[], $7::boolean[]) AS x(o, t, su, ss, u, il)`,
+      [
+        batchId,
+        entries.map((_, i) => i),
+        entries.map((e) => e.title),
+        entries.map((e) => e.sourceIdUnsigned ?? null),
+        entries.map((e) => e.sourceIdSigned ?? null),
+        entries.map((e) => e.url ?? null),
+        inLib,
+      ],
+    );
+    await logAudit('import.batch.start', { userId: userIdOf(req), detail: { batchId, origin, count: entries.length }, req });
+    void resolveBatch(batchId).catch(() => {});
+    return { batchId, total: entries.length, truncated };
+  });
+
+  app.get('/api/admin/import/batches/:id', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const batch = await one<ImportBatchRow>('SELECT * FROM import_batches WHERE id = $1', [id]);
+    if (!batch) return reply.code(404).send({ error: 'not_found' });
+    const items = await q<ImportCandidateRow>('SELECT * FROM import_candidates WHERE batch_id = $1 ORDER BY ord', [id]);
+    // A batch stuck in 'resolving' with nobody actually resolving it (this process restarted mid-pass) is
+    // stale: the UI offers Resume instead of a progress bar that will never move again.
+    const stale = batch.state === 'resolving' && resolvingBatch !== id;
+    return { batch: { ...batch, stale }, items };
+  });
+
+  app.post('/api/admin/import/batches/:id/resume', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    if (resolvingBatch && resolvingBatch !== id) return reply.code(409).send({ error: 'busy', message: 'Another import is already resolving.' });
+    const batch = await one<{ id: string; state: string }>('SELECT id, state FROM import_batches WHERE id = $1', [id]);
+    if (!batch) return reply.code(404).send({ error: 'not_found' });
+    if (batch.state !== 'resolving') return reply.code(409).send({ error: 'not_resolving', message: 'This batch is not waiting to resolve.' });
+    if (resolvingBatch === id) return { ok: true }; // already running in this process, nothing to resume
+    void resolveBatch(id).catch(() => {});
+    return { ok: true };
+  });
+
+  app.patch('/api/admin/import/candidates/:cid', async (req, reply) => {
+    const { cid } = req.params as { cid: string };
+    const b = z
+      .discriminatedUnion('decision', [
+        z.object({ decision: z.literal('manual'), source: z.string().min(1), sourceId: z.string().min(1), title: z.string().min(1), coverUrl: z.string().optional() }),
+        z.object({ decision: z.literal('skip') }),
+        z.object({ decision: z.literal('auto') }),
+      ])
+      .safeParse(req.body);
+    if (!b.success) return reply.code(400).send({ error: 'bad_request' });
+
+    const row = await one<{ id: string; batch_id: string; auto_source_id: string | null }>(
+      'SELECT id, batch_id, auto_source_id FROM import_candidates WHERE id = $1',
+      [cid],
+    );
+    if (!row) return reply.code(404).send({ error: 'not_found' });
+
+    if (b.data.decision === 'skip') {
+      await q(`UPDATE import_candidates SET decision = 'skip' WHERE id = $1`, [cid]);
+    } else if (b.data.decision === 'auto') {
+      // "use the auto match" after a manual override — restores what the resolve pass actually found,
+      // never a fresh search, so this can't disagree with what the review row showed before it was edited.
+      if (!row.auto_source_id) return reply.code(409).send({ error: 'no_auto_match', message: 'There is no automatic match for this title.' });
+      await q(
+        `UPDATE import_candidates SET decision = 'auto', confidence = auto_confidence,
+           match_source = auto_source, match_source_id = auto_source_id, match_title = auto_title, match_cover = auto_cover
+         WHERE id = $1`,
+        [cid],
+      );
+    } else {
+      await q(
+        `UPDATE import_candidates SET decision = 'manual', confidence = NULL,
+           match_source = $2, match_source_id = $3, match_title = $4, match_cover = $5
+         WHERE id = $1`,
+        [cid, b.data.source, b.data.sourceId, b.data.title, b.data.coverUrl ?? null],
+      );
+    }
+    await q(`UPDATE import_batches SET updated_at = now() WHERE id = $1`, [row.batch_id]).catch(() => {});
+    return { ok: true };
+  });
+
+  // ---- "Continue" — add every accepted (auto or manual) row. Skipped and still-unmatched rows are left out. ----
+  app.post('/api/admin/import/batches/:id/run', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const b = z
+      .object({
+        autoUpdate: z.boolean().optional(),
+        chapterCount: z.number().int().positive().optional(),
+        chapterFrom: z.enum(['oldest', 'newest']).optional(),
+      })
+      .safeParse(req.body ?? {});
+    if (!b.success) return reply.code(400).send({ error: 'bad_request' });
+
+    const batch = await one<{ id: string; state: string }>('SELECT id, state FROM import_batches WHERE id = $1', [id]);
+    if (!batch) return reply.code(404).send({ error: 'not_found' });
+    if (batch.state === 'importing') return reply.code(409).send({ error: 'busy', message: 'This batch is already importing.' });
+    if (batch.state === 'done') return reply.code(409).send({ error: 'already_done', message: 'This batch has already been imported.' });
+    if (batch.state === 'resolving') return reply.code(409).send({ error: 'still_resolving', message: 'Wait for matching to finish first.' });
+
+    const rows = await q<{ id: string; match_source: string; match_source_id: string }>(
+      `SELECT id, match_source, match_source_id FROM import_candidates
+       WHERE batch_id = $1 AND decision IN ('auto','manual') AND match_source_id IS NOT NULL ORDER BY ord`,
+      [id],
+    );
+    if (!rows.length) return reply.code(400).send({ error: 'nothing_to_import', message: 'Nothing is selected to import.' });
+
+    await q(`UPDATE import_batches SET state = 'importing', updated_at = now() WHERE id = $1`, [id]);
+    await logAudit('import.batch.run', { userId: userIdOf(req), detail: { batchId: id, count: rows.length }, req });
+    // Fire-and-forget, same as the one-shot /import route: adding hundreds of series (each downloading a
+    // first chapter inline, see addSeriesFromSource) is far too slow to hold a request open for.
+    void (async () => {
+      for (const row of rows) {
+        try {
+          const r = await addSeriesFromSource({
+            source: row.match_source, sourceId: row.match_source_id,
+            autoUpdate: b.data.autoUpdate, chapterCount: b.data.chapterCount, chapterFrom: b.data.chapterFrom,
+          });
+          if (r.ok && (r.chapters ?? 0) > 0) {
+            await q(`UPDATE import_candidates SET status = 'added' WHERE id = $1`, [row.id]);
+            await q(`UPDATE import_batches SET added = added + 1, updated_at = now() WHERE id = $1`, [id]);
+          } else if (r.ok) {
+            await q(`UPDATE import_candidates SET status = 'already' WHERE id = $1`, [row.id]);
+            await q(`UPDATE import_batches SET already = already + 1, updated_at = now() WHERE id = $1`, [id]);
+          } else {
+            await q(`UPDATE import_candidates SET status = $2 WHERE id = $1`, [row.id, r.error || 'failed']);
+            await q(`UPDATE import_batches SET failed = failed + 1, updated_at = now() WHERE id = $1`, [id]);
+          }
+        } catch {
+          await q(`UPDATE import_candidates SET status = 'error' WHERE id = $1`, [row.id]).catch(() => {});
+          await q(`UPDATE import_batches SET failed = failed + 1, updated_at = now() WHERE id = $1`, [id]).catch(() => {});
+        }
+      }
+      await q(`UPDATE import_batches SET state = 'done', updated_at = now() WHERE id = $1`, [id]).catch(() => {});
+    })();
+    return { ok: true, total: rows.length };
+  });
+
+  app.delete('/api/admin/import/batches/:id', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    // Does not wait on an in-flight resolve loop: its remaining writes target rows the CASCADE just removed
+    // and silently affect zero rows, same as any other "the thing I was updating got deleted" race here.
+    if (resolvingBatch === id) resolvingBatch = null;
+    await q('DELETE FROM import_batches WHERE id = $1', [id]);
+    return { ok: true };
+  });
 
   // ---- provider/source health control ----
   app.get('/api/admin/sources', async () => ({ content: await healthAll() }));

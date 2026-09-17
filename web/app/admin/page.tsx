@@ -458,6 +458,7 @@ function Members() {
 }
 
 function Providers() {
+  const router = useRouter();
   const toast = useToast();
   const qc = useQueryClient();
   const { data: srcs } = useQuery({ queryKey: ['sources'], queryFn: () => api<{ content: any[] }>('/api/sources') });
@@ -792,6 +793,15 @@ function Providers() {
       <div className="card grad-border wide p-4">
         <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-fog-500">{tr('Import a list')}</p>
         <p className="mb-2 text-[11px] text-fog-500">Bring your library over from another app. Uchiyomi searches your sources for each title and adds the best match.</p>
+
+        {/* The reviewable flow (issue #48): every title's match is shown before anything is added, and a
+            wrong pick can be corrected with a manual search or skipped outright. Its own page — this card's
+            textarea path below still adds the FIRST cross-source hit with no review, kept for a quick "I
+            trust the matcher" import and for anything still calling POST /api/admin/import directly. */}
+        <button onClick={() => router.push('/admin/import/')} className="btn-accent mb-3 w-full py-2 text-sm">
+          {tr('Import and review matches →')}
+        </button>
+        <p className="mb-3 text-[11px] text-fog-600">{tr('or, without a review step:')}</p>
 
         {/* file / MangaDex intake — parsed into a reviewable list before anything is added */}
         <div className="mb-2 flex flex-wrap items-center gap-2">

@@ -56,3 +56,12 @@ export async function titlesFromMangadexList(input: string): Promise<string[]> {
   if (!titles.length) throw new Error('Could not read any titles from that list.');
   return [...new Set(titles)];
 }
+
+/**
+ * Same list, shaped like `BackupEntry` (title only — MangaDex ids don't map onto anyone else's source
+ * registry) so the import-batch intake in routes/admin.ts can treat every origin identically. This is also
+ * the shape a future tracker-list intake (AniList/MAL) should return.
+ */
+export async function entriesFromMangadexList(input: string): Promise<Array<{ title: string }>> {
+  return (await titlesFromMangadexList(input)).map((title) => ({ title }));
+}
