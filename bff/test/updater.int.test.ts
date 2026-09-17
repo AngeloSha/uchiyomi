@@ -560,6 +560,45 @@ test('a floored series fetches the chapter above what it holds, not the ones bel
   assert.equal(st.c, 6, 'while source_chapters still says what the source said');
 });
 
+/**
+ * "Download newest" ignores the floor, because a follow-only series is floored above everything.
+ *
+ * The Mihon-backup import wizard (and the add dialog's "Nothing yet") creates every row with
+ * chapterFrom 'none', and sources.ts writes chapter_floor = the newest listed number + 0.001 for it. The
+ * sweep correctly fetches nothing below that floor, but the toolbar's explicit "Download newest" must still
+ * reach the latest release -- otherwise a freshly imported, chapterless series answers "already at latest"
+ * forever with nothing to fetch and no error. Reintroduce by choosing the newest from `missing` (the
+ * floor-honouring set) instead of from `releases`: the second add reads 0 and asked stays empty.
+ */
+test('download newest reaches the latest release of a "nothing yet" series floored above its catalogue', { skip }, async () => {
+  const { registerAdapter } = await import('../src/lib/sources');
+  const SRC_LATEST = 'upd-latest';
+  const asked: number[] = [];
+  registerAdapter({
+    id: SRC_LATEST, name: SRC_LATEST,
+    async search() { return []; },
+    async getSeries(sid: string) { return { sourceId: sid, source: SRC_LATEST, title: sid }; },
+    async listChapters() { return [1, 2, 3, 4, 5, 6].map((n) => ({ number: n, title: `Chapter ${n}`, sourceId: `c${n}` })); },
+    async getPageUrls(chId: string) { asked.push(Number(chId.slice(1))); return ['https://example.invalid/page.png']; },
+    async latest() { return []; },
+  } as any);
+  await mkSeries('latest', SRC_LATEST);
+  // Exactly as sources.ts writes it for chapterFrom:'none': a hair above the newest listed number, on a
+  // series with no books at all.
+  await q('UPDATE lib_series SET chapter_floor = 6.001 WHERE id = $1', [S('latest')]);
+  await q('DELETE FROM lib_books WHERE series_id = $1', [S('latest')]);
+  await q('DELETE FROM source_health WHERE source_id = $1', [SRC_LATEST]);
+  globalThis.fetch = (async () => png()) as typeof fetch;
+
+  const sweep = await updateSeries(S('latest'), 5);
+  assert.equal(sweep.added, 0, 'the sweep honours the floor: nothing below it is backfilled');
+
+  const latest = await updateSeries(S('latest'), 1, true);
+  assert.equal(latest.added, 1, 'download newest fetches the latest release even under a floor');
+  assert.deepEqual(asked, [6], 'and only asks for that one newest chapter');
+  assert.ok(onDisk('latest', 6), 'the chapter landed');
+});
+
 
 // ---- v0.31.0: which copy of a chapter, from which group, from which source ----------------------------
 //
