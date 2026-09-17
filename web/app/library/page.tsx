@@ -159,6 +159,39 @@ function LibraryInner() {
     setActing(false);
   };
 
+  /**
+   * Fetch the single newest missing chapter for every chosen series. Not the generic bulk() path: the
+   * server answers one result per series with a reason worth saying (already at latest, source unwell,
+   * no longer exists), and this is a fetch, not the flip of a toggle.
+   */
+  const downloadNewest = async () => {
+    setActing(true);
+    try {
+      const r = await api<{ applied: number; skipped: { id: string; reason?: string }[] }>('/api/library/bulk/newest', {
+        json: { seriesIds: [...picked] },
+      });
+      const count = (reason: string | undefined) => r.skipped.filter((s) => s.reason === reason).length;
+      const latest = count('up_to_date');
+      const gone = count('gone');
+      const failed = count('failed');
+      const unwell = count('blocked') + count('source_error');
+      const rest = r.skipped.length - latest - gone - failed - unwell;
+      const parts: string[] = [];
+      if (r.applied) parts.push(`${r.applied} downloaded`);
+      if (latest) parts.push(`${latest} already at latest`);
+      if (gone) parts.push(`${gone} no longer exist`);
+      if (failed) parts.push(`${failed} failed`);
+      if (unwell) parts.push(`${unwell} source unwell`);
+      if (rest) parts.push(`${rest} skipped`);
+      toast(parts.length ? parts.join(', ') : 'Nothing to download', 'success');
+      setSelecting(false);
+      setPicked(new Set());
+      qc.invalidateQueries({ queryKey: ['library'] });
+      qc.invalidateQueries({ queryKey: ['home'] });
+    } catch { toast('Could not fetch the newest chapters', 'error'); }
+    setActing(false);
+  };
+
   const sentinel = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const el = sentinel.current;
@@ -240,6 +273,14 @@ function LibraryInner() {
             className={`chip whitespace-nowrap ${selecting ? 'chip-active' : ''}`}>
             {selecting ? tr('Done') : tr('Select')}
           </button>
+          {/* Selects what is loaded, not the whole filtered library: the grid is an infinite scroll over a
+              search that caps 100 per page, and silently sweeping thousands of series into a pick would
+              surprise more than the loaded-pages boundary that the count besides it makes visible. */}
+          {selecting && (
+            <button onClick={() => setPicked(new Set(items.map((s) => s.id)))} className="chip whitespace-nowrap text-xs">
+              {tr('Select all')}
+            </button>
+          )}
         </div>
         {/* Active filters are always visible, so a short library is never mysterious. */}
         {activeCount > 0 && (
@@ -304,6 +345,9 @@ function LibraryInner() {
             <button disabled={acting} onClick={() => bulk('/api/library/bulk/read', { completed: true })} className="chip text-xs disabled:opacity-50">{tr('Mark read')}</button>
             <button disabled={acting} onClick={() => bulk('/api/library/bulk/read', { completed: false })} className="chip text-xs disabled:opacity-50">{tr('Mark unread')}</button>
             <button disabled={acting} onClick={() => bulk('/api/favorites/bulk', { favorite: true })} className="chip text-xs disabled:opacity-50">{tr('Favourite')}</button>
+            {canDownload(user) && (
+              <button disabled={acting} onClick={downloadNewest} className="chip text-xs disabled:opacity-50">{tr('Download newest')}</button>
+            )}
             {isAdmin && <button disabled={acting} onClick={() => setMoving(true)} className="chip text-xs disabled:opacity-50">{tr('Move to library')}</button>}
             {isAdmin && (
               <button disabled={acting} onClick={() => setDeleting(true)}

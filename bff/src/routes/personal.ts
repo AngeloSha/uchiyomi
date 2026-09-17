@@ -5,6 +5,7 @@ import { q, one } from '../lib/db';
 // `lib/komga` import silently nulled every series lookup here after the owned-library cutover.
 import { content as komga } from '../lib/backend';
 import { viewCtxFor, visible, browsable, browsableIds, Params, type ViewCtx, hideAdult } from '../lib/visibility';
+import { updateSeries } from '../lib/updater';
 import { authenticate, userIdOf, roleOf, issueOpdsToken, issueApiToken, listApiTokens, revokeApiToken, API_SCOPES, revokeOpdsToken, opdsTokenStatus, setOpdsShowAdult, OPDS_TOKEN_DAYS } from '../lib/auth';
 import { enrichSeries } from '../lib/enrich';
 import { env } from '../env';
@@ -651,6 +652,36 @@ export default async function personalRoutes(app: FastifyInstance) {
       await q(`DELETE FROM favorites WHERE user_id = $1 AND series_id = ANY($2)`, [uid, live]);
     }
     return { ok: true, applied: live.length, skipped: skippedOf(b.data.seriesIds, live) };
+  });
+
+  app.post('/api/library/bulk/newest', async (req, reply) => {
+    const b = bulkBody.safeParse(req.body);
+    if (!b.success) return reply.code(400).send({ error: 'bad_request' });
+    // This route fetches bytes from sources, so it sits under the same canDownload gate as sources.ts.
+    // Without it the button's permission is cosmetic: a denied account could still drive downloads by id.
+    const me = await one<{ role: string; perms: { canDownload?: boolean } | null }>(
+      'SELECT role, perms FROM users WHERE id = $1', [userIdOf(req)]).catch(() => null);
+    if (!me) return reply.code(403).send({ error: 'forbidden', message: 'Could not check your permissions.' });
+    if (me.role !== 'admin' && me.perms?.canDownload === false) {
+      return reply.code(403).send({ error: 'forbidden', message: "You don't have permission to download chapters." });
+    }
+    const live = await liveSeries(b.data.seriesIds, vc(req));
+    const skipped: { id: string; reason: string }[] = [];
+    let applied = 0;
+    for (const id of live) {
+      try {
+        // updateSeries does the listing, the stamps and the per-source back-off; newestOnly cuts its queue
+        // to the single newest missing chapter, which is the whole point of this button. Sequential and
+        // awaited like the read/favourite bulks: the source health system paces the network, and a source in
+        // a back-off parks its own series rather than the batch.
+        const r = await updateSeries(id, 1, true);
+        if (r.added > 0) { applied++; continue; }
+        skipped.push({ id, reason: r.outcome !== 'ok' ? r.outcome : r.failed ? 'failed' : 'up_to_date' });
+      } catch {
+        skipped.push({ id, reason: 'error' });
+      }
+    }
+    return { ok: true, applied, skipped };
   });
 
   app.post('/api/collections/:id/items/bulk', async (req, reply) => {

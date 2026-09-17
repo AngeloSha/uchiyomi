@@ -93,7 +93,7 @@ export interface UpdateResult {
 const nothing = (title: string, outcome: UpdateOutcome): UpdateResult =>
   ({ title, added: 0, available: 0, outcome, failed: 0, waiting: 0, landed: [] });
 
-export async function updateSeries(seriesId: string, maxNew = 10): Promise<UpdateResult> {
+export async function updateSeries(seriesId: string, maxNew = 10, newestOnly = false): Promise<UpdateResult> {
   const s = await one<any>(`SELECT id,title,source_id,source_series_id,web,folder,summary,author,genres,status,chapter_floor,scanlator_prefs FROM lib_series s WHERE s.id=$1 AND ${visibleToAll('s')}`, [seriesId]);
   if (!s) return nothing('', 'gone');
 
@@ -176,6 +176,12 @@ export async function updateSeries(seriesId: string, maxNew = 10): Promise<Updat
   const eligible = missing.filter((c) => !cappedNums.has(c.number) && !heldNums.has(c.number));
   const capped = missing.filter((c) => cappedNums.has(c.number)).length;
   const waiting = missing.filter((c) => heldNums.has(c.number)).length;
+  // "Download newest" (the library toolbar) queues ONLY the newest missing chapter. The sweep's oldest-first
+  // order is for backfilling; this action is named for the latest release, so the newest takes the queue.
+  // Neither the retry cap nor a hold filters it: an explicit click is the series page's manual-fetch
+  // precedent, and those guards exist to hold back the unattended sweep, not a person. Everything else
+  // (stamps, clearance, the refusal break) is this same loop with one row in the queue.
+  const queue = newestOnly ? missing.slice(-1) : eligible;
 
   // What the sources listed, kept for the series page and for manual fetches (lib/seriesListing.ts).
   // Persisted BEFORE the download loop so a listing survives a run the budget or the disk cuts short --
@@ -210,7 +216,7 @@ export async function updateSeries(seriesId: string, maxNew = 10): Promise<Updat
   const refusing = new Set<string>();
   // oldest-missing-first: a partial "first N" add fills forward coherently, and new releases (all > our max)
   // are still the only gap once a series is fully downloaded.
-  for (const ch of eligible) {
+  for (const ch of queue) {
     if (attempts >= maxNew) break;
     if (runtime.stopping) break; // between chapters, never mid-write
     const via = ch.source ?? (s.source_id as string);
