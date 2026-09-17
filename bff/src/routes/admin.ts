@@ -2043,8 +2043,10 @@ export default async function adminRoutes(app: FastifyInstance) {
       return reply.code(422).send({ error: 'parse_failed', message: (e as Error)?.message || 'Could not read that.' });
     }
 
-    // flag what's already here so the admin isn't re-importing their own library
-    const have = new Set((await q<{ title: string }>('SELECT title FROM lib_series')).map((r) => norm(r.title)));
+    // flag what's already here so the admin isn't re-importing their own library. A deleted series does
+    // not count: re-adding it is how you undo a delete, and the add flow revives the row -- so flagging it
+    // here drops it from the review list and the delete can never be undone by import.
+    const have = new Set((await q<{ title: string }>('SELECT title FROM lib_series WHERE deleted_at IS NULL')).map((r) => norm(r.title)));
     const items = titles.slice(0, 500).map((title) => ({ title, inLibrary: have.has(norm(title)) }));
     return { origin, total: titles.length, truncated: titles.length > 500, items };
   });
