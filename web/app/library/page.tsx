@@ -11,7 +11,7 @@ import { IcSearch, IcSparkle, IcPlus } from '@/components/icons';
 import { PullToRefresh } from '@/components/PullToRefresh';
 import { triggerRefresh } from '@/lib/refresh';
 import { useToast } from '@/components/Toast';
-import { Modal } from '@/components/ConfirmDialog';
+import { Modal, ConfirmDialog, msgOf } from '@/components/ConfirmDialog';
 import { useAuth, canDownload } from '@/lib/auth';
 import { AdultToggle, useAdultShown, useLibraries } from '@/components/AdultToggle';
 import { LibraryFilters, SORTS, READ_STATES, STATUSES } from '@/components/LibraryFilters';
@@ -57,6 +57,7 @@ function LibraryInner() {
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [acting, setActing] = useState(false);
   const [moving, setMoving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const { isAdmin, user } = useAuth();
   useEffect(() => { setSelecting(false); setPicked(new Set()); }, [read, status, genres.join(','), sortKey, lib]);
   const togglePick = (id: string) =>
@@ -127,6 +128,34 @@ function LibraryInner() {
       qc.invalidateQueries({ queryKey: ['library'] });
       qc.invalidateQueries({ queryKey: ['home'] });
     } catch { toast('Could not apply that', 'error'); }
+    setActing(false);
+  };
+
+  /**
+   * Permanently delete the selection: hides every chosen series (same step "Remove from library" does on
+   * the series page) and deletes its files from disk. Admin-only, irreversible, and gated by the typed
+   * "DELETE" in the confirm dialog rather than the bulk() helper above -- this is not a toggle that can be
+   * flipped back, so it gets its own path and its own wording on failure.
+   */
+  const doDelete = async () => {
+    setActing(true);
+    try {
+      const r = await api<{ applied: number; files: number; skipped: { id: string; reason?: string }[] }>(
+        '/api/admin/series/bulk/delete',
+        { json: { seriesIds: [...picked], confirm: 'DELETE' } },
+      );
+      toast(
+        r.skipped.length ? `${r.applied} deleted, ${r.skipped.length} could not be removed` : `${r.applied} deleted`,
+        'success',
+      );
+      setDeleting(false);
+      setSelecting(false);
+      setPicked(new Set());
+      qc.invalidateQueries({ queryKey: ['library'] });
+      qc.invalidateQueries({ queryKey: ['home'] });
+    } catch (e) {
+      toast(msgOf(e, 'Could not delete those'), 'error');
+    }
     setActing(false);
   };
 
@@ -276,6 +305,12 @@ function LibraryInner() {
             <button disabled={acting} onClick={() => bulk('/api/library/bulk/read', { completed: false })} className="chip text-xs disabled:opacity-50">{tr('Mark unread')}</button>
             <button disabled={acting} onClick={() => bulk('/api/favorites/bulk', { favorite: true })} className="chip text-xs disabled:opacity-50">{tr('Favourite')}</button>
             {isAdmin && <button disabled={acting} onClick={() => setMoving(true)} className="chip text-xs disabled:opacity-50">{tr('Move to library')}</button>}
+            {isAdmin && (
+              <button disabled={acting} onClick={() => setDeleting(true)}
+                className="chip text-xs text-rose-300 hover:border-rose-500/40 disabled:opacity-50">
+                {tr('Delete')}
+              </button>
+            )}
             <button onClick={() => { setSelecting(false); setPicked(new Set()); }} className="chip text-xs text-fog-500">{tr('Cancel')}</button>
           </div>
         </div>
@@ -289,6 +324,21 @@ function LibraryInner() {
             setMoving(false);
             await bulk('/api/admin/series/library', { libraryId });
           }}
+        />
+      )}
+      {deleting && (
+        <ConfirmDialog
+          title={tr('Delete {n} series?', { n: picked.size })}
+          danger
+          busy={acting}
+          confirmLabel={tr('Delete')}
+          confirmText="DELETE"
+          body={<>
+            <p><strong className="text-fog-100">{tr('This cannot be undone.')}</strong> {tr('Every chapter file for the selected series is permanently deleted from disk, and their entries are removed from the library.')}</p>
+            <p className="mt-2">{tr("Everyone's reading progress, history, favourites and ratings for these series are lost with them.")}</p>
+          </>}
+          onConfirm={doDelete}
+          onClose={() => setDeleting(false)}
         />
       )}
       {/* The same panel, in the app's real Sheet -- not the hand-rolled copy that used to live in this

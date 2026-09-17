@@ -836,6 +836,46 @@ export default async function adminRoutes(app: FastifyInstance) {
     return r;
   });
 
+  // Bulk, permanent delete for the library page's multi-select toolbar: hide + delete files for every
+  // chosen series in one request. A typed literal ("DELETE") gates it instead of each series' exact title
+  // -- that per-item match is right for a single deliberate click, but is not something anyone retypes N
+  // times for a batch, so the word is the confirmation surface here instead. Per-id failures (already
+  // gone, merged away, files not writable) are reported rather than aborting the whole batch, the same
+  // choice made for the read/favourite bulk routes.
+  app.post('/api/admin/series/bulk/delete', async (req, reply) => {
+    const b = z.object({
+      seriesIds: z.array(z.string()).min(1).max(500),
+      confirm: z.string(),
+    }).safeParse(req.body);
+    if (!b.success) return reply.code(400).send({ error: 'bad_request' });
+    if (b.data.confirm.trim().toUpperCase() !== 'DELETE') {
+      return reply.code(400).send({ error: 'confirm_mismatch', message: 'Type DELETE to confirm.' });
+    }
+
+    const results: { id: string; ok: boolean; reason?: string }[] = [];
+    let files = 0;
+    let bytes = 0;
+    for (const id of b.data.seriesIds) {
+      const row = await getSeriesRow(id);
+      if (!row) { results.push({ id, ok: false, reason: 'not_found' }); continue; }
+      if (row.merged_into) { results.push({ id, ok: false, reason: 'merged' }); continue; }
+      if (!row.deleted_at) await deleteSeries(id);
+      const r = await deleteSeriesFiles(id);
+      if (!r.ok) { results.push({ id, ok: false, reason: r.reason }); continue; }
+      files += r.files;
+      bytes += r.bytes;
+      results.push({ id, ok: true });
+    }
+
+    const applied = results.filter((r) => r.ok).length;
+    await logAudit('series.bulk_delete', {
+      userId: userIdOf(req),
+      detail: { seriesIds: b.data.seriesIds, applied, files, bytes },
+      req,
+    });
+    return { ok: true, applied, files, bytes, skipped: results.filter((r) => !r.ok) };
+  });
+
   // ---- chapter-level file operations ----
   //
   // Both touch DL_ROOT only, on the same footing as the read-chapter cleanup (lib/chapterCleanup.ts): a
