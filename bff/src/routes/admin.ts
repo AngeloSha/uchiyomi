@@ -86,9 +86,13 @@ export default async function adminRoutes(app: FastifyInstance) {
   // right after: a scan only ever confirms files that ARE there, so it is the natural place to also ask
   // about the rows it did NOT just confirm -- see reconcileLibrary's own comment for why that matters after
   // restoring a database-only backup.
-  app.post('/api/admin/library/scan', async () => {
+  // Logged, not silently swallowed: a reconcile that throws on every scan would otherwise be invisible,
+  // and the symptom it exists to cure (chapters reporting "up to date" forever) looks exactly like it
+  // working. Still never fatal -- the scan's own result is the answer.
+  app.post('/api/admin/library/scan', async (req) => {
     const scan = await persistScan();
-    const reconciled = await reconcileLibrary().catch(() => null);
+    const reconciled = await reconcileLibrary()
+      .catch((e) => { req.log.error(e as any, 'reconcile: failed after scan'); return null; });
     return { ...scan, ...(reconciled ? { reconciled } : {}) };
   });
 
@@ -273,7 +277,8 @@ export default async function adminRoutes(app: FastifyInstance) {
     await logAudit('task.run', { userId: userIdOf(req), detail: { task: id }, req });
     if (id === 'scan') {
       const scan = await persistScan();
-      const reconciled = await reconcileLibrary().catch(() => null);
+      const reconciled = await reconcileLibrary()
+        .catch((e) => { req.log.error(e as any, 'reconcile: failed after scan'); return null; });
       return { ok: true, ...scan, ...(reconciled ? { reconciled } : {}) };
     }
     if (id === 'update') {
@@ -2057,7 +2062,21 @@ export default async function adminRoutes(app: FastifyInstance) {
     // flag what's already here so the admin isn't re-importing their own library. A deleted series does
     // not count: re-adding it is how you undo a delete, and the add flow revives the row -- so flagging it
     // here drops it from the review list and the delete can never be undone by import.
-    const have = new Set((await q<{ title: string }>('SELECT title FROM lib_series WHERE deleted_at IS NULL')).map((r) => norm(r.title)));
+    //
+    // Two halves, both through visible() (lib/visibility.ts) rather than a hand-written predicate. The
+    // second is not decoration: a merged-away row keeps deleted_at NULL and its own title (lib/libraryAdmin
+    // mergeSeries points it at the survivor instead of deleting it, because its folder is still on disk), and
+    // that title is often the alternate spelling the merge existed to fold in. Dropping those from `have`
+    // would offer every absorbed title back as "not in library", i.e. offer to re-add exactly what an admin
+    // just merged. It counts as held only while its survivor is itself visible, so a merge into a series that
+    // was later deleted can still be re-added.
+    const have = new Set(
+      (await q<{ title: string }>(
+        `SELECT s.title FROM lib_series s WHERE ${visibleToAll('s')}
+         UNION
+         SELECT m.title FROM lib_series m JOIN lib_series t ON t.id = m.merged_into WHERE ${visibleToAll('t')}`,
+      )).map((r) => norm(r.title)),
+    );
     const items = titles.slice(0, 500).map((title) => ({ title, inLibrary: have.has(norm(title)) }));
     return { origin, total: titles.length, truncated: titles.length > 500, items };
   });

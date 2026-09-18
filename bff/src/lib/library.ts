@@ -11,6 +11,7 @@ import { findRematch, applyRematch, logRematch, MIN_BOOKS } from './rematch';
 import { numFromName, naturalCmp } from './naming';
 import { parseComicInfoAgeRating } from './ageRating';
 import { containedPath } from './fsGuard';
+import { visibleToAll } from './visibility';
 
 // node-stream-zip reads the central directory only (cheap) and can stream a single entry.
 // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -676,7 +677,7 @@ export async function reconcileLibrary(): Promise<ReconcileResult> {
   const rows = await q<{ id: string; series_id: string; root: string | null; file: string; folder: string }>(
     `SELECT b.id, b.series_id, b.root, b.file, s.folder
        FROM lib_books b JOIN lib_series s ON s.id = b.series_id
-      WHERE b.pruned_at IS NULL AND s.deleted_at IS NULL AND s.merged_into IS NULL`,
+      WHERE b.pruned_at IS NULL AND ${visibleToAll('s')}`,
   );
   if (!rows.length) return { checked: 0, deleted: 0, tombstoned: 0 };
 

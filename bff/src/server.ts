@@ -416,7 +416,7 @@ async function main() {
     // refetch gets its file back before this decides the row is missing one. Best effort, never fatal.
     const r = await reconcileLibrary().catch((e) => { app.log.error(e as any, 'reconcile: failed'); return null; });
     if (!r) return;
-    if (r.skipped === 'unmounted') { app.log.warn('reconcile: every series folder was missing -- is a volume unmounted? nothing changed'); return; }
+    if (r.skipped === 'unmounted') { app.log.warn('reconcile: a library root could not be stat\'ed -- is a volume unmounted? nothing changed'); return; }
     if (r.deleted || r.tombstoned) app.log.info(`reconcile: ${r.deleted} stale row(s) removed, ${r.tombstoned} marked pruned (of ${r.checked} checked) -- missing chapters will be re-fetched on the next check`);
   });
 
