@@ -704,26 +704,40 @@ export async function mihonSourceToAdapter(ids: { sourceIdUnsigned?: string; sou
 export interface ResolvedCandidate { source: string; sourceId: string; title: string; coverUrl?: string; confidence: MatchConfidence }
 
 /**
+ * A Mihon manga url and a Suwayomi `path` for the same entry can differ by a leading or trailing slash
+ * (extensions are inconsistent about both), and by nothing else -- so that is all this forgives. Anything
+ * looser (case, query string, host) would let two different entries compare equal, which is the one
+ * mistake the url exists to rule out.
+ */
+export const normPath = (p: string) => p.trim().replace(/^\/+/, '').replace(/\/+$/, '');
+
+/**
  * Best cross-source match for one import-batch title, source-id-aware.
  *
  * If the backup entry says which Mihon source it came from and that source is installed here, THAT source
- * is searched first and a hit there is trusted at `same_source` confidence even if the title string is a
- * loose match — the backup told us this literally is the same catalogue entry, just possibly retitled by
- * the site since. Otherwise (no source id, source not installed, or no hit there) falls through to the
- * existing preferred-order title search, same as `findBestMatch`.
+ * is searched first. A hit there is `same_source` ONLY when its extension-relative `path` equals the url
+ * the backup stored for the manga: source id + url is Mihon's identity for a manga, so that pair proves
+ * "the same catalogue entry" even after the site retitled it. Without that proof a home-source hit is
+ * judged by title like any other source's (`pickBestScored`'s own tiers), and then the preferred-order
+ * search across every other source runs, same as `findBestMatch`.
+ *
+ * ⚠️ NEVER take the home source's first result when nothing matched: a source's first result for a title it
+ * lacks is an unrelated manga (the "wrong manga" bug `pickBest` exists to prevent), and here it would have
+ * carried the top confidence tier, rendered green, and been hidden from "Needs attention". No confident
+ * hit anywhere means `null`, and the row stays `unresolved` for a person to search by hand.
  */
-export async function resolveCandidate(entry: { title: string; sourceIdUnsigned?: string; sourceIdSigned?: string }): Promise<ResolvedCandidate | null> {
+export async function resolveCandidate(entry: { title: string; url?: string; sourceIdUnsigned?: string; sourceIdSigned?: string }): Promise<ResolvedCandidate | null> {
   const home = await mihonSourceToAdapter(entry);
   if (home) {
     const src = getSource(home);
     if (src) {
       try {
         const raw = await withTimeout(src.search(entry.title), budgetFor(src, 20000));
-        if (raw.length) {
-          const best = pickBestScored(raw, entry.title);
-          const pick = best?.item ?? raw[0]; // same source as the backup: a same-catalogue hit beats nothing
-          if (pick?.sourceId) return { source: home, sourceId: pick.sourceId, title: pick.title, coverUrl: pick.coverUrl, confidence: 'same_source' };
-        }
+        const want = entry.url ? normPath(entry.url) : '';
+        const byUrl = want ? raw.find((r) => !!r.sourceId && !!r.path && normPath(r.path) === want) : undefined;
+        if (byUrl) return { source: home, sourceId: byUrl.sourceId, title: byUrl.title, coverUrl: byUrl.coverUrl, confidence: 'same_source' };
+        const best = pickBestScored(raw, entry.title);
+        if (best?.item.sourceId) return { source: home, sourceId: best.item.sourceId, title: best.item.title, coverUrl: best.item.coverUrl, confidence: best.confidence };
       } catch { /* fall through to cross-source search */ }
     }
   }

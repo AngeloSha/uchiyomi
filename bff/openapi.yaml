@@ -6,7 +6,7 @@
 openapi: 3.1.0
 info:
   title: Uchiyomi API
-  version: 0.34.0
+  version: 0.35.0
   description: "Everything the web app does, it does over this API. Session JWTs are for the browser; scripts
     use a personal API token (Profile -> Account -> API tokens), sent as `Authorization: Bearer uy_...`.
     Scopes: read (every token; GET plus the library search POST, which is a query), write (anything that changes data), admin (the /api/admin surface, which also
@@ -5229,6 +5229,30 @@ paths:
         "403":
           description: "Forbidden: token scope, account permission or age limit"
   /api/admin/import/batches:
+    get:
+      tags:
+        - admin
+      summary: Every import batch, newest first, with its counts — the "Open imports" list.
+      operationId: getApiAdminImportBatches
+      description: >-
+        Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. Up to 50
+        batches in every state, newest first, as `{content: [{id, origin, state, total, resolved, added,
+        already, failed, created_at, updated_at, stale}]}`. `stale` means what it means on GET
+        /api/admin/import/batches/{id}: the batch reads `resolving` while nobody in this process is resolving
+        it (a restart mid-pass), so the list can say "interrupted" rather than "matching" for it. The
+        candidate rows are not included — a batch can carry 500 of them; GET /api/admin/import/batches/{id}
+        has them. Every admin sees every batch. A batch stays
+        listed until the daily sweep removes it: seven days after it last changed once `done`, thirty days for
+        one still `resolving`, `review` or `importing` (every review action moves that deadline).
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
     post:
       tags:
         - admin
@@ -5239,7 +5263,12 @@ paths:
         POST /api/admin/import, nothing is added yet: each title gets matched against the user's sources in
         the background (GET the batch to watch progress), and only rows accepted via PATCH
         /api/admin/import/candidates/{cid} or left on their auto match are added once
-        /api/admin/import/batches/{id}/run is called. One batch resolves at a time server-wide.
+        /api/admin/import/batches/{id}/run is called. One batch resolves at a time server-wide, and the
+        guard is taken before the request is parsed, so two simultaneous POSTs start one batch. A row's
+        `confidence` is `same_source` only when the backup entry's own Mihon source is installed here (a
+        Suwayomi extension) and a hit's extension-relative path equals the url the backup stored — Mihon's
+        identity for a manga — else `exact`/`contains`/`fuzzy` from the title alone; a title with no confident
+        hit anywhere stays `unresolved`, never the first search result.
       requestBody:
         required: true
         content:
@@ -5272,14 +5301,23 @@ paths:
         "409":
           description: "Conflict: another batch is already resolving"
         "422":
-          description: "Unprocessable: the file/list could not be parsed"
+          description: "Unprocessable: the file/list could not be parsed, or a gzipped file inflates past 256 MB (no real backup does)"
   /api/admin/import/batches/{id}:
     get:
       tags:
         - admin
       summary: A batch's state and every candidate row.
       operationId: getApiAdminImportBatchesId
-      description: Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
+      description: >-
+        Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. A batch
+        that reads `resolving` while nobody in this process is resolving it (a restart mid-pass) comes back
+        with `stale: true` — call /resume. One that reads `importing` while no add loop here is running it
+        was stranded by a restart mid-run and is handed back on this call: `review` (the rows never reached
+        have no status and are still ready, so /run again imports just those) or `done` when every row had
+        been processed and only the final write was lost — persisted, not just reported. A `review` batch a
+        run has been through that has nothing left waiting (every remaining row skipped) is closed to `done`
+        on this call too, the same rule PATCH .../candidates/{cid} applies after a skip; a batch nothing was
+        ever imported through (every title already owned) stays `review`. A malformed id is 404.
       parameters:
         - name: id
           in: path
@@ -5302,7 +5340,11 @@ paths:
         - admin
       summary: Discard a batch (and every candidate row, cascading).
       operationId: deleteApiAdminImportBatchesId
-      description: Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
+      description: >-
+        Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. A resolve
+        or add loop still running for the batch stops before its next row (the row in flight finishes; its
+        writes then hit nothing), and the one-batch-at-a-time guard is released at once. Nothing is written
+        as `cancelled`: the batch is gone. Idempotent for an id that no longer exists; a malformed id is 404.
       parameters:
         - name: id
           in: path
@@ -5318,13 +5360,19 @@ paths:
           description: Not authenticated
         "403":
           description: "Forbidden: token scope, account permission or age limit"
+        "404":
+          description: "Not found: the id is not a uuid"
   /api/admin/import/batches/{id}/resume:
     post:
       tags:
         - admin
       summary: Resume matching for a batch left stuck 'resolving' by a server restart.
       operationId: postApiAdminImportBatchesIdResume
-      description: Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
+      description: >-
+        Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. Takes the
+        one-batch-at-a-time guard before looking the batch up, the way POST /api/admin/import/batches does,
+        so a /resume and a POST at the same instant start one resolve loop and the other answers 409 `busy`.
+        Resuming a batch this process is already resolving answers 200 (idempotent).
       parameters:
         - name: id
           in: path
@@ -5359,7 +5407,13 @@ paths:
         bulk import is a catalogue move, not a bulk download; chapters arrive through auto-update or a
         manual fetch afterwards. Safe to call more than once on the same batch: a row already imported by an
         earlier call is never re-added, which is how a "second import try" for rows found by hand later
-        works. The batch returns to `review` (not `done`) while anything importable is still waiting.
+        works. The batch returns to `review` (not `done`) while anything importable is still waiting. The
+        state flip to `importing` is one conditional UPDATE, so two simultaneous calls import once and the
+        other answers 409 busy. Each row's `status` afterwards is `added`, `already` (the library has the
+        title — the same folder, or the same title from another source, which the up-front `in_library`
+        check misses when the backup spells it differently) or the add's error code (`no_title`, `no_chapters`,
+        `disabled`, `blocked`, `undownloadable`, `disk_full`, `bad_request`, `error`); `already` counts
+        under `already`, an error code under `failed`.
       parameters:
         - name: id
           in: path
@@ -5377,16 +5431,21 @@ paths:
                   type: boolean
                 candidateIds:
                   type: array
+                  maxItems: 500
                   items:
                     type: string
-                  description: Which candidate rows to import. Omit to import every eligible row in the batch.
+                    format: uuid
+                  description: >-
+                    Which candidate rows to import. Omit to import every eligible row in the batch. An entry
+                    that is not a uuid, or more than 500 of them, is 400 bad_request (a batch never holds more
+                    rows than that).
       security:
         - bearer: []
       responses:
         "200":
           description: OK
         "400":
-          description: "Bad request: nothing selected is ready to import"
+          description: "Bad request: nothing selected is ready to import, or a candidateIds entry is not a uuid"
         "401":
           description: Not authenticated
         "403":

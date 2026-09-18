@@ -1,5 +1,103 @@
 # Changelog
 
+## v0.35.0 — 2026-09-18
+
+Two contributions, three days after v0.34.0, both taken through the same pipeline as everything else:
+[PR #52](https://github.com/AngeloSha/uchiyomi/pull/52) by TIGamingTV, the review step that
+[#48](https://github.com/AngeloSha/uchiyomi/issues/48) asked for when a library is brought over from
+another app, and [PR #50](https://github.com/AngeloSha/uchiyomi/pull/50) by hawwwwwk, which found that the
+Unraid template could not be installed by anyone and laid the repository out so Community Applications can
+list it. Both are below, each with what was fixed on top before shipping, plainly.
+
+### Check each match before it lands
+
+From [PR #52](https://github.com/AngeloSha/uchiyomi/pull/52) by TIGamingTV, and the right design. Until
+now *Import a list* read the titles out of a Mihon backup, a MangaDex list or a pasted list, searched your
+sources for each one and added the first good hit — with no chance to see whether it had picked the right
+manga before it was in your library. Mihon's own *Bulk Migration* screen does the obvious thing instead, and
+so does Uchiyomi now: *Import a list* on **Admin → Providers** opens its own page, `/admin/import/`, which
+matches every title against your sources in the background — a backup entry on the very source it came
+from, when that source is installed here — and saves what it found in the database, so a closed tab or a
+restarted server does not throw away the work. Then the review: one row per title, its pick and how
+confident the match is, **Change** to open a manual search — one sideways-scrolling rail of results per
+source, so you can see which provider a pick would come from, with the cover, title and chapter count of the
+current pick beside whatever you tap — or **Skip this one**; rows already in your library start skipped,
+visibly. **Needs attention** filters to the rows that want a look. **Select ready to import** and **Import
+selected — {n}** do the adding, and every add is a *Nothing yet* add from v0.34.0: the title lands with its
+listing and no chapter downloaded, so a few hundred titles is a few minutes of look-ups rather than hours of
+fetching, and new chapters arrive through auto-update. Rows already imported are never re-added, so fixing
+the leftovers and pressing *Import selected* again picks up only what is newly ready; once nothing is left —
+every row imported or skipped — the batch is done on its own, and a batch a restart interrupted offers
+**Resume**.
+
+What was fixed on top before shipping. The one thing that could not go out as written was the matching: on the
+same-source path, a title the source did not recognise was given the source's *first search result* — the
+exact "wrong manga" fallback v0.34.0's matcher forbids — and labelled with the highest confidence, *same
+source as before*, which kept it out of *Needs attention*. The backup carries each entry's catalogue address,
+and the extension engine already returns it on every search result, so that is now the proof: only a result at
+the backup's own address counts as the same entry; otherwise the usual title rules decide, and a title none of
+them is confident about stays unmatched rather than becoming somebody else's manga. A batch interrupted while
+importing was stranded for good — no resume, no cancel, nothing that ever cleaned it up — and deleting a batch
+mid-match kept the server searching sources for it: an *importing* batch nobody is running now reads as ready
+for review again, both loops stop when their batch is discarded, there is a **Discard** button at every stage,
+batches left in review are dropped after thirty days, and the intake card lists the **open imports** — every
+admin's, on an install with more than one, an interrupted batch marked as such — so none is orphaned by a
+closed tab. A batch with a row left over, one title no source carries, say, could never finish: it sat in
+that list for the thirty days with *Discard* as the only way out; now it closes on its own once every row is
+imported or skipped. A title the library already held under another spelling was reported as *Failed —
+duplicate*, in red, and counted as a failure: it reads *Already in your library*, and a row that could not be
+added says why in words rather than as an error code. The review row never showed what a title had been
+matched *to*, so a wrong pick was invisible without opening each row: it now carries a second line, *→
+{matched title}*, dimmed when the two are the same, and a match that only *contains* your title, where the
+names differ by more than an edition tag or the longer one looks like a season, part or novel of the other, is
+listed under *Needs attention* too. Sixty-two of the page's seventy-six strings existed in English only; all
+eight languages have them. Two batches could slip through the *one at a time* gate if started together, and
+*Import* could be pressed twice on one batch: the gate now closes before the first thing it waits on, and the
+second press is refused by the database itself. The intake text promised that nothing lands "until you press
+Continue" while the button said *Import selected*, and "seconds of database work" was not true — each add
+still asks the source — so the copy says what the button says and *a few minutes*. And the old one-shot
+import, the textarea that added the first hit with no review, is gone from the page: the reviewed flow is the
+only way in from the UI, and `POST /api/admin/import` stays for scripts.
+
+### An Unraid template that installs, from a repository Community Applications can read
+
+From [PR #50](https://github.com/AngeloSha/uchiyomi/pull/50) by hawwwwwk, who had already sent the report
+behind v0.21.0's *Unraid instructions that work*. Those instructions were right; the file they pointed at was
+not. The comment at the top of the template, rewritten in that same release, said "never read `--`
+downloadTemplates() returns", and two dashes inside an XML comment are illegal — so from v0.21.0 to v0.34.0
+any XML parser, Unraid's included, refused the file at line nine, before the first setting, and nobody who
+copied it onto their server could have installed anything from it. Every check on the template passed the
+whole time, because none of them parsed it. He fixed the comment and laid the repository out the way Community
+Applications expects a template repository to look — the template at `templates/uchiyomi.xml`, a
+`ca_profile.xml` at the root with the description and icon — so the app can be submitted to CA from this
+repository and installed from the **Apps** tab like anything else; until it is listed there, copying the file
+into `/boot/config/plugins/dockerMan/templates-user/` works — with a file that now parses.
+
+On top: the profile's icon now points at the app's own icon, the one the template shows, rather than a
+logo option; the template's `TemplateURL` points at this repository, so Unraid refreshes it from here;
+the install guide and README name the new path; the separate `unraid-templates` repository is kept only
+so old links keep working and says so; and the release test now reads every comment in the template the
+way a parser would, so a `--` can never ship again.
+
+### Not in this release
+
+TIGamingTV's other pull request, [PR #51](https://github.com/AngeloSha/uchiyomi/pull/51), a Komga-compatible
+API so Mihon and Tachimanga can sync read status with a server they know by name, is not merged: its goal
+is the right one and its shape is the spec for the version that will ship, but as written the sync cannot
+work (Mihon's Komga tracker relies on a session cookie the server never set), its password login bypasses
+two-factor, lockout, rate limiting and the audit log, and read-only tokens could write. It is being rebuilt
+on the catalogue the OPDS feed already exposes, with the PR as the specification and his credit on it. The
+first half of [#48](https://github.com/AngeloSha/uchiyomi/issues/48) — importing a reading list straight
+from an AniList, MyAnimeList or Kitsu account into the same review — and the automatic following of extra
+sources asked for in [#49](https://github.com/AngeloSha/uchiyomi/issues/49) (the shared chapter pool it
+describes has existed since v0.31.0; only the following is manual) are the next release.
+
+For the API: `POST /api/admin/import/batches` (intake, starts matching), `GET /api/admin/import/batches`
+(the open-imports list), `GET`/`DELETE /api/admin/import/batches/:id`, `POST .../:id/resume`, `POST
+.../:id/run` and `PATCH /api/admin/import/candidates/:cid` are new, admin-only; a candidate carries
+`match_title`; a non-UUID `:id` or `:cid` is a 404 rather than a 500. `POST /api/admin/import` is unchanged.
+The Mihon extension is unaffected.
+
 ## v0.34.0 — 2026-09-15
 
 The owner's verdict on v0.33.0, the evening it went live: the *Who scanlates this* card sitting open by

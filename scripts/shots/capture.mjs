@@ -230,6 +230,10 @@ async function main() {
   if (want('admin-libraries')) { await adminTab('Library'); await adminShot('admin-libraries', 'Libraries'); }
   if (want('admin-members')) { await adminTab('Members'); await adminShot('admin-members'); }
   if (want('admin-settings')) { await adminTab('Settings'); await adminShot('admin-settings'); }
+  // The reviewable import (v0.35.0) is its own route, reached from the Providers card. Its intake card is
+  // the shot: what the docs describe first, and the one state a capture-only account can always reach (a
+  // batch in review needs titles this instance's sources answer for).
+  if (want('admin-import')) { await go('/admin/import/', 600); await shot(page, 'admin-import'); }
 
   if (want('profile-stats')) { await go('/profile/', 900); await shot(page, 'profile-stats'); }
   if (want('profile-security')) {

@@ -111,8 +111,14 @@ for (const code of LOCALES) {
   // checked in a browser where a variable and a literal look the same.
   //
   // Both consoles are visited. Checking only /admin is exactly how /profile shipped an English tab row.
+  //
+  // The import page is its own route off Admin → Providers, so neither console's tab row covers it; PR #52
+  // shipped it with 62 of its strings in no locale file and the check here saw nothing, because it never
+  // went there. The words are from the intake card's sentences, not its eyebrow (uppercase in CSS, and
+  // innerText reports text as rendered), and not "Mihon" (a name, the same in every language).
   const CONSOLES = [
     ['/admin', ['Overview', 'Members', 'Settings', 'Providers', 'Server', 'People', 'Content', 'Sources']],
+    ['/admin/import', ['review matches', 'matches each title', 'Start matching', 'backup stays on your server', 'nothing lands in your library']],
     ['/profile', ['Reading', 'Account', 'Settings', 'Badges', 'Language', 'Accent']],
   ];
   if (code !== 'en') {
@@ -124,7 +130,7 @@ for (const code of LOCALES) {
       if (english.length >= 3) problems.push(`${path} still in English: ${english.join(', ')}`);
       const over = await p.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
       if (over > 4) problems.push(`${path}: ${over}px of horizontal overflow`);
-      await p.screenshot({ path: `${OUT}/${code}-${path.slice(1)}.png` });
+      await p.screenshot({ path: `${OUT}/${code}-${path.slice(1).replace(/\//g, '-')}.png` });
     }
   }
 

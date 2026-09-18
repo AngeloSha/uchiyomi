@@ -105,6 +105,10 @@ function toSeries(m: RemoteManga, adapterId: string): SourceSeries | null {
     // Suwayomi proxies covers through itself, so make the path absolute against its origin.
     coverUrl: m.thumbnailUrl ? suwayomiUrl(m.thumbnailUrl) : undefined,
     url: m.realUrl || undefined,
+    // The extension-relative url (what a Mihon backup stores for this manga), kept apart from the web
+    // link above: the import review proves "same entry as the backup" by comparing this, and `realUrl`
+    // is absolute and site-shaped, so the two never compare equal.
+    path: m.url || undefined,
   };
 }
 

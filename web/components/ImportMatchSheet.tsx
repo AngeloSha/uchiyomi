@@ -142,9 +142,64 @@ export function ImportMatchSheet({ batchId, candidate, onClose }: {
 
   const groups = data?.content ?? [];
 
+  // The pick comparison and its buttons live in the Sheet's pinned FOOTER, not in the scroller. They used to
+  // sit in one sticky block with the search field, and at 390 px that block was 250-330 px of a 75 vh sheet:
+  // the rails had a third of the panel, and -- the cards being positioned for their badges -- they painted
+  // OVER the transparent sticky block as the list scrolled. Search stays at the top (opaque, above the rails);
+  // what is being compared, and Use this pick / Skip, stay at the bottom, clear of the phone nav.
+  const footer = (
+    <div className="space-y-2">
+      {candidate.match_source && candidate.match_source_id ? (
+        <MiniCard label={tr('Currently selected')} title={candidate.match_title || candidate.backup_title}
+          coverUrl={candidate.match_cover} sourceId={candidate.match_source!} sourceLabel={sourceName(candidate.match_source)}
+          count={currentDetail.data?.count} loading={currentDetail.isFetching} />
+      ) : (
+        <div className="rounded-xl border border-dashed border-ink-700 px-3 py-2.5 text-center text-[11px] text-fog-500">
+          {candidate.decision === 'skip' ? tr('Skipped — nothing will be imported for this title.') : tr('No match yet — pick one from the search results.')}
+        </div>
+      )}
+
+      {pending ? (
+        <>
+          <MiniCard label={tr('New pick')} title={pending.title} coverUrl={pending.coverUrl}
+            sourceId={pending.source} sourceLabel={sourceName(pending.source)}
+            count={pendingDetail.data?.count} loading={pendingDetail.isFetching} />
+          {delta != null && (
+            <p className={`text-center text-[11px] ${delta === 0 ? 'text-fog-500' : delta > 0 ? 'text-emerald-400' : 'text-amber-400'}`}>
+              {delta === 0 ? tr('Same chapter count as the current pick')
+                : delta > 0 ? tr('+{n} chapters vs the current pick', { n: delta })
+                : tr('{n} fewer chapters than the current pick', { n: Math.abs(delta) })}
+            </p>
+          )}
+          <div className="flex gap-2">
+            <button onClick={() => setPending(null)} disabled={busy === '__confirm'} className="chip flex-1 py-1.5 text-xs disabled:opacity-50">
+              {tr('Cancel')}
+            </button>
+            <button onClick={confirmPending} disabled={busy === '__confirm'} className="btn-accent flex-1 py-1.5 text-xs disabled:opacity-50">
+              {busy === '__confirm' ? tr('Working…') : tr('Use this pick')}
+            </button>
+          </div>
+        </>
+      ) : (
+        <div className="flex gap-2">
+          <button onClick={skip} disabled={!!busy} className="chip flex-1 py-1.5 text-xs disabled:opacity-50">
+            {busy === '__skip' ? tr('Working…') : tr('Skip this one')}
+          </button>
+          {candidate.auto_source_id && candidate.decision !== 'auto' && (
+            <button onClick={useAuto} disabled={!!busy} className="chip flex-1 py-1.5 text-xs disabled:opacity-50">
+              {busy === '__auto' ? tr('Working…') : tr('Use the auto match')}
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+
   return (
-    <Sheet title={candidate.backup_title} onClose={onClose} overBottomNav>
-      <div className="sticky top-0 -mx-4 mb-3 bg-ink-950/0 px-4 pb-2 pt-1 backdrop-blur-xs">
+    <Sheet title={candidate.backup_title} onClose={onClose} overBottomNav footer={footer}>
+      {/* z-10 and an opaque ground: the result cards below are positioned (for their badges) and would
+          otherwise paint over this as the rails scroll under it. */}
+      <div className="sticky top-0 z-10 -mx-4 mb-3 bg-ink-950/90 px-4 pb-2 pt-1 backdrop-blur-xs">
         <div className="flex items-center gap-2 rounded-xl border border-ink-700 bg-ink-900/60 px-3 py-2 focus-within:border-accent">
           <IcSearch width={17} height={17} className="text-fog-500" />
           <input
@@ -159,51 +214,6 @@ export function ImportMatchSheet({ batchId, candidate, onClose }: {
             <button onClick={() => setTerm('')} className="text-fog-500" aria-label={tr('Clear')}>
               <IcX width={15} height={15} />
             </button>
-          )}
-        </div>
-        <div className="mt-2.5 space-y-2">
-          {candidate.match_source && candidate.match_source_id ? (
-            <MiniCard label={tr('Currently selected')} title={candidate.match_title || candidate.backup_title}
-              coverUrl={candidate.match_cover} sourceId={candidate.match_source!} sourceLabel={sourceName(candidate.match_source)}
-              count={currentDetail.data?.count} loading={currentDetail.isFetching} />
-          ) : (
-            <div className="rounded-xl border border-dashed border-ink-700 px-3 py-2.5 text-center text-[11px] text-fog-500">
-              {candidate.decision === 'skip' ? tr('Skipped — nothing will be imported for this title.') : tr('No match yet — pick one below.')}
-            </div>
-          )}
-
-          {pending ? (
-            <>
-              <MiniCard label={tr('New pick')} title={pending.title} coverUrl={pending.coverUrl}
-                sourceId={pending.source} sourceLabel={sourceName(pending.source)}
-                count={pendingDetail.data?.count} loading={pendingDetail.isFetching} />
-              {delta != null && (
-                <p className={`text-center text-[11px] ${delta === 0 ? 'text-fog-500' : delta > 0 ? 'text-emerald-400' : 'text-amber-400'}`}>
-                  {delta === 0 ? tr('Same chapter count as the current pick')
-                    : delta > 0 ? tr('+{n} chapters vs the current pick', { n: delta })
-                    : tr('{n} fewer chapters than the current pick', { n: Math.abs(delta) })}
-                </p>
-              )}
-              <div className="flex gap-2">
-                <button onClick={() => setPending(null)} disabled={busy === '__confirm'} className="chip flex-1 py-1.5 text-xs disabled:opacity-50">
-                  {tr('Cancel')}
-                </button>
-                <button onClick={confirmPending} disabled={busy === '__confirm'} className="btn-accent flex-1 py-1.5 text-xs disabled:opacity-50">
-                  {busy === '__confirm' ? tr('Working…') : tr('Use this pick')}
-                </button>
-              </div>
-            </>
-          ) : (
-            <div className="flex gap-2">
-              <button onClick={skip} disabled={!!busy} className="chip flex-1 py-1.5 text-xs disabled:opacity-50">
-                {busy === '__skip' ? tr('Working…') : tr('Skip this one')}
-              </button>
-              {candidate.auto_source_id && candidate.decision !== 'auto' && (
-                <button onClick={useAuto} disabled={!!busy} className="chip flex-1 py-1.5 text-xs disabled:opacity-50">
-                  {busy === '__auto' ? tr('Working…') : tr('Use the auto match')}
-                </button>
-              )}
-            </div>
           )}
         </div>
       </div>
@@ -233,7 +243,12 @@ export function ImportMatchSheet({ batchId, candidate, onClose }: {
                 <SourceIcon id={g.source} name={g.name} size={16} />
                 <span className="truncate">{g.name}{g.lang ? ` (${g.lang.toUpperCase()})` : ''}</span>
               </p>
-              <ScrollRail className="hide-scrollbar gap-2.5 pb-1">
+              {/* `flex` is what makes this a rail: ScrollRail only adds `overflow-x-auto`, and without it the
+                  cards sat as inline-blocks -- edge to edge (gap does nothing on a block), baseline-aligned
+                  so a two-line title lifted its cover 14 px, wrapping into a 730 px block at 390 px with
+                  nothing to scroll. `pb-3`, not `hide-scrollbar`: ScrollRail stops hiding the bar on purpose
+                  (see its header) and wants room for it under the cards. */}
+              <ScrollRail className="flex gap-2.5 pb-3">
                 {g.results.map((r) => {
                   const selected = pending?.source === g.source && pending?.sourceId === r.sourceId;
                   return (

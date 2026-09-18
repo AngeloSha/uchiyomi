@@ -67,9 +67,28 @@ let importJob: ImportJob | null = null;
  * double the outbound request rate to every source). It does not gate `/run` — adding series after review is
  * cheap to run concurrently with a second batch's resolve pass, and gating it too would only serve to make
  * reviewing batch A slower while batch B imports.
+ *
+ * `importingBatches` is the same kind of witness for `/run`: the batches whose add loops THIS process is
+ * running -- a set, not one id, precisely because `/run` is not serialised across batches and a second
+ * batch's run must not make the first look abandoned. A batch that reads `importing` in the database while
+ * nobody here is importing it was stranded by a restart mid-run; GET flips it back to `review` (its rows
+ * without a status are still ready, and `/run` only ever picks up rows it has not processed, so running
+ * again is safe). Without that, such a batch polled "Importing…" forever: `/run` answered busy, `/resume`
+ * answered not-resolving, the sweep skipped it.
+ *
+ * `aborted` is how DELETE reaches a loop already in flight. Both loops check it before picking up their next
+ * row, so discarding a batch mid-resolve stops the searching (the fan-out the guard above exists to cap --
+ * before this, clearing `resolvingBatch` let a NEW batch start while the old loop kept searching) and
+ * discarding mid-run stops adding series for a batch that no longer exists. The row in flight finishes;
+ * its writes then target rows the CASCADE removed and affect nothing.
  */
 let resolvingBatch: string | null = null;
+const importingBatches = new Set<string>();
+const aborted = new Set<string>();
 const RESOLVE_CONCURRENCY = 3;
+/** Batches nobody is reviewing any more: a finished batch a week on, an unfinished one a month on. */
+const SWEEP_DONE_DAYS = 7;
+const SWEEP_OPEN_DAYS = 30;
 
 interface ImportBatchRow {
   id: string; user_id: string; origin: string; state: string;
@@ -99,14 +118,20 @@ async function resolveBatch(batchId: string): Promise<void> {
       `SELECT * FROM import_candidates WHERE batch_id = $1 AND decision = 'unresolved' ORDER BY ord`,
       [batchId],
     );
+    // `resolved` restarts from the rows this pass will NOT touch (already owned, matched, picked or skipped),
+    // not from where the previous pass left it: a resumed batch re-queues every row that got no match the
+    // first time, and counting those a second time pushed the progress bar past its total.
+    await q(`UPDATE import_batches SET resolved = total - $2, updated_at = now() WHERE id = $1`, [batchId, rows.length]).catch(() => {});
     let next = 0;
     const worker = async () => {
       for (;;) {
+        if (aborted.has(batchId)) return; // discarded mid-pass: do not pick up another row
         const row = rows[next++];
         if (!row) return;
         try {
           const m = await resolveCandidate({
             title: row.backup_title,
+            url: row.backup_url ?? undefined,
             sourceIdUnsigned: row.backup_source_id_unsigned ?? undefined,
             sourceIdSigned: row.backup_source_id_signed ?? undefined,
           });
@@ -129,7 +154,54 @@ async function resolveBatch(batchId: string): Promise<void> {
     await q(`UPDATE import_batches SET state = 'review', updated_at = now() WHERE id = $1 AND state = 'resolving'`, [batchId]).catch(() => {});
   } finally {
     if (resolvingBatch === batchId) resolvingBatch = null;
+    aborted.delete(batchId);
   }
+}
+
+/**
+ * Close a `review` batch that has nothing left to import: every row is either skipped or carries a
+ * status. Returns the batch when it was closed, null when it was left alone.
+ *
+ * `/run`'s tail applies this rule, but only at the end of a run. A batch whose leftovers -- a title no
+ * source carries, a matched row left unselected -- were skipped AFTERWARDS never got a second run (`/run`
+ * refuses with `nothing_to_import`), so it read "Ready to review" in the Open imports list for the thirty
+ * days until the sweep, and the only exit was Discard, whose dialog says the review is thrown away.
+ * Called after a skip (the act that makes a batch leftover-free) and on every GET of a `review` batch (a
+ * batch closed under the old rule by someone else's tab, or left half-done by a version without this).
+ *
+ * ⚠️ Only a batch a run has been through (`EXISTS ... status IS NOT NULL`). A backup whose every title
+ * is already in the library skips every row up front and is leftover-free from its first second; closing
+ * it here would show "Done — 0 added · 0 already had" on first view and hide the one thing that batch has
+ * to say, which is that every row is already owned. Its exit stays Discard.
+ */
+async function closeBatchIfSettled(batchId: string): Promise<ImportBatchRow | null> {
+  return one<ImportBatchRow>(
+    `UPDATE import_batches SET state = 'done', updated_at = now()
+      WHERE id = $1 AND state = 'review'
+        AND EXISTS (SELECT 1 FROM import_candidates WHERE batch_id = $1 AND status IS NOT NULL)
+        AND NOT EXISTS (SELECT 1 FROM import_candidates WHERE batch_id = $1 AND status IS NULL AND decision <> 'skip')
+      RETURNING *`,
+    [batchId],
+  ).catch(() => null);
+}
+
+/**
+ * Drop import batches nobody will come back to. Called daily from server.ts. Finished and discarded batches
+ * go after `SWEEP_DONE_DAYS`: the series they added are their own lib_series rows, and each batch carries up
+ * to 500 candidate rows. Batches still `resolving`/`review`/`importing` get `SWEEP_OPEN_DAYS` -- long enough
+ * for a person genuinely working through 500 rows over a few evenings, short enough that a batch whose tab
+ * was closed and forgotten does not sit in the "Open imports" list for ever. `updated_at`, not `created_at`,
+ * so every review action pushes the deadline out.
+ */
+export async function sweepImportBatches(): Promise<{ removed: number }> {
+  const rows = await q<{ id: string }>(
+    `DELETE FROM import_batches
+      WHERE (state IN ('done','cancelled') AND updated_at < now() - make_interval(days => $1))
+         OR (state IN ('resolving','review','importing') AND updated_at < now() - make_interval(days => $2))
+      RETURNING id`,
+    [SWEEP_DONE_DAYS, SWEEP_OPEN_DAYS],
+  );
+  return { removed: rows.length };
 }
 
 type ArtJob = { running: boolean; total: number; done: number; banners: number; covers: number; misses: number; startedAt: number };
@@ -2122,85 +2194,144 @@ export default async function adminRoutes(app: FastifyInstance) {
   // them, THEN add. Same three intakes as /import/parse above, but every title gets its own row that the
   // admin can inspect, override with a manual search, or skip — instead of silently taking the first
   // cross-source hit above the confidence threshold. See migrate.ts for the two tables this uses. ----
+
+  // Both id columns are uuid, and Postgres answers `WHERE id = 'abc'` with 22P02, which the error handler
+  // reads as a 500. A malformed id is a client's not-found, so it is checked before any query.
+  const uuidParam = z.string().uuid();
+  const batchIdOf = (req: { params: unknown }, reply: FastifyReply): string | null => {
+    const r = uuidParam.safeParse((req.params as { id?: string }).id);
+    if (!r.success) { reply.code(404).send({ error: 'not_found' }); return null; }
+    return r.data;
+  };
+
+  // Newest first, every state: the web's "Open imports" list is how a batch whose tab was closed is found
+  // again (a `review` batch is otherwise reachable only by its own URL), and a finished one stays listed
+  // until the sweep removes it so the admin can still read its counts. Rows are not returned -- a batch
+  // can carry 500 of them and this is a summary; GET /batches/:id has them.
+  app.get('/api/admin/import/batches', async () => {
+    const rows = await q<ImportBatchRow>(
+      `SELECT id, origin, state, total, resolved, added, already, failed, created_at, updated_at
+         FROM import_batches ORDER BY created_at DESC LIMIT 50`,
+    );
+    // The same `stale` GET /batches/:id reports, for the same reason: a batch left `resolving` by a
+    // restart otherwise read "Matching… 12/40" on the intake card when nobody was matching anything, and
+    // only opening it revealed the Resume button. In-memory, no query -- the guard is this process's.
+    return { content: rows.map((r) => ({ ...r, stale: r.state === 'resolving' && resolvingBatch !== r.id })) };
+  });
+
   app.post('/api/admin/import/batches', { bodyLimit: 12 * 1024 * 1024 }, async (req, reply) => {
     if (resolvingBatch) return reply.code(409).send({ error: 'busy', message: 'An import is already resolving. Wait for it to finish, or cancel it.' });
-    const b = z
-      .object({
-        dataUrl: z.string().optional(),
-        mangadexList: z.string().optional(),
-        titles: z.array(z.string()).optional(),
-      })
-      .safeParse(req.body);
-    if (!b.success) return reply.code(400).send({ error: 'bad_request' });
-
-    let entries: BackupEntry[] = [];
-    let origin: 'backup' | 'mangadex' | 'paste';
+    // Claimed synchronously, right after the check: everything below awaits (file parse, lib_series read,
+    // two INSERTs), and two POSTs inside that window -- a double-tap on "Start matching", or a file and a
+    // paste from two tabs -- both passed the check and both resolved, doubling the outbound search rate the
+    // guard exists to cap. `resolveBatch` replaces the placeholder with the real id before its first await;
+    // every other way out of this handler (a 4xx, a throw) releases it in the `finally`.
+    resolvingBatch = 'pending';
+    let started = false;
     try {
-      if (b.data.dataUrl) {
-        const m = /^data:[^;]*;base64,(.+)$/s.exec(b.data.dataUrl);
-        if (!m) return reply.code(400).send({ error: 'bad_request', message: 'Could not read that file.' });
-        entries = entriesFromBackup(Buffer.from(m[1], 'base64'));
-        origin = 'backup';
-      } else if (b.data.mangadexList) {
-        entries = await entriesFromMangadexList(b.data.mangadexList);
-        origin = 'mangadex';
-      } else if (b.data.titles?.length) {
-        // same bullet-stripping + dedupe as the one-shot /import route, so pasted lists behave identically
-        const seen = new Set<string>();
-        for (const raw of b.data.titles) {
-          const title = raw.replace(/^[-*•\d.\s]+/, '').trim();
-          if (!title) continue;
-          const k = norm(title);
-          if (seen.has(k)) continue;
-          seen.add(k);
-          entries.push({ title });
+      const b = z
+        .object({
+          dataUrl: z.string().optional(),
+          mangadexList: z.string().optional(),
+          titles: z.array(z.string()).optional(),
+        })
+        .safeParse(req.body);
+      if (!b.success) return reply.code(400).send({ error: 'bad_request' });
+
+      let entries: BackupEntry[] = [];
+      let origin: 'backup' | 'mangadex' | 'paste';
+      try {
+        if (b.data.dataUrl) {
+          const m = /^data:[^;]*;base64,(.+)$/s.exec(b.data.dataUrl);
+          if (!m) return reply.code(400).send({ error: 'bad_request', message: 'Could not read that file.' });
+          entries = entriesFromBackup(Buffer.from(m[1], 'base64'));
+          origin = 'backup';
+        } else if (b.data.mangadexList) {
+          entries = await entriesFromMangadexList(b.data.mangadexList);
+          origin = 'mangadex';
+        } else if (b.data.titles?.length) {
+          // same bullet-stripping + dedupe as the one-shot /import route, so pasted lists behave identically
+          const seen = new Set<string>();
+          for (const raw of b.data.titles) {
+            const title = raw.replace(/^[-*•\d.\s]+/, '').trim();
+            if (!title) continue;
+            const k = norm(title);
+            if (seen.has(k)) continue;
+            seen.add(k);
+            entries.push({ title });
+          }
+          origin = 'paste';
+        } else {
+          return reply.code(400).send({ error: 'bad_request', message: 'Provide a backup file, a MangaDex list, or at least one title.' });
         }
-        origin = 'paste';
-      } else {
-        return reply.code(400).send({ error: 'bad_request', message: 'Provide a backup file, a MangaDex list, or at least one title.' });
+      } catch (e) {
+        return reply.code(422).send({ error: 'parse_failed', message: (e as Error)?.message || 'Could not read that.' });
       }
-    } catch (e) {
-      return reply.code(422).send({ error: 'parse_failed', message: (e as Error)?.message || 'Could not read that.' });
+      if (!entries.length) return reply.code(400).send({ error: 'bad_request', message: 'No titles found.' });
+
+      const truncated = entries.length > 500;
+      entries = entries.slice(0, 500);
+
+      // flag what's already here up front so the review screen can default those rows to skipped, visibly
+      const have = new Set((await q<{ title: string }>('SELECT title FROM lib_series')).map((r) => norm(r.title)));
+      const inLib = entries.map((e) => have.has(norm(e.title)));
+      const initialResolved = inLib.filter(Boolean).length; // already-owned rows never enter the resolve loop
+
+      const batch = await one<{ id: string }>(
+        `INSERT INTO import_batches (user_id, origin, state, total, resolved) VALUES ($1,$2,'resolving',$3,$4) RETURNING id`,
+        [userIdOf(req), origin, entries.length, initialResolved],
+      );
+      const batchId = batch!.id;
+      // One round trip for up to 500 rows via unnest, rather than 500 sequential INSERTs.
+      await q(
+        `INSERT INTO import_candidates (batch_id, ord, backup_title, backup_source_id_unsigned, backup_source_id_signed, backup_url, in_library, decision)
+         SELECT $1, o, t, su, ss, u, il, CASE WHEN il THEN 'skip' ELSE 'unresolved' END
+         FROM unnest($2::int[], $3::text[], $4::text[], $5::text[], $6::text[], $7::boolean[]) AS x(o, t, su, ss, u, il)`,
+        [
+          batchId,
+          entries.map((_, i) => i),
+          entries.map((e) => e.title),
+          entries.map((e) => e.sourceIdUnsigned ?? null),
+          entries.map((e) => e.sourceIdSigned ?? null),
+          entries.map((e) => e.url ?? null),
+          inLib,
+        ],
+      );
+      await logAudit('import.batch.start', { userId: userIdOf(req), detail: { batchId, origin, count: entries.length }, req });
+      void resolveBatch(batchId).catch(() => {});
+      started = true;
+      return { batchId, total: entries.length, truncated };
+    } finally {
+      if (!started && resolvingBatch === 'pending') resolvingBatch = null;
     }
-    if (!entries.length) return reply.code(400).send({ error: 'bad_request', message: 'No titles found.' });
-
-    const truncated = entries.length > 500;
-    entries = entries.slice(0, 500);
-
-    // flag what's already here up front so the review screen can default those rows to skipped, visibly
-    const have = new Set((await q<{ title: string }>('SELECT title FROM lib_series')).map((r) => norm(r.title)));
-    const inLib = entries.map((e) => have.has(norm(e.title)));
-    const initialResolved = inLib.filter(Boolean).length; // already-owned rows never enter the resolve loop
-
-    const batch = await one<{ id: string }>(
-      `INSERT INTO import_batches (user_id, origin, state, total, resolved) VALUES ($1,$2,'resolving',$3,$4) RETURNING id`,
-      [userIdOf(req), origin, entries.length, initialResolved],
-    );
-    const batchId = batch!.id;
-    // One round trip for up to 500 rows via unnest, rather than 500 sequential INSERTs.
-    await q(
-      `INSERT INTO import_candidates (batch_id, ord, backup_title, backup_source_id_unsigned, backup_source_id_signed, backup_url, in_library, decision)
-       SELECT $1, o, t, su, ss, u, il, CASE WHEN il THEN 'skip' ELSE 'unresolved' END
-       FROM unnest($2::int[], $3::text[], $4::text[], $5::text[], $6::text[], $7::boolean[]) AS x(o, t, su, ss, u, il)`,
-      [
-        batchId,
-        entries.map((_, i) => i),
-        entries.map((e) => e.title),
-        entries.map((e) => e.sourceIdUnsigned ?? null),
-        entries.map((e) => e.sourceIdSigned ?? null),
-        entries.map((e) => e.url ?? null),
-        inLib,
-      ],
-    );
-    await logAudit('import.batch.start', { userId: userIdOf(req), detail: { batchId, origin, count: entries.length }, req });
-    void resolveBatch(batchId).catch(() => {});
-    return { batchId, total: entries.length, truncated };
   });
 
   app.get('/api/admin/import/batches/:id', async (req, reply) => {
-    const { id } = req.params as { id: string };
-    const batch = await one<ImportBatchRow>('SELECT * FROM import_batches WHERE id = $1', [id]);
+    const id = batchIdOf(req, reply);
+    if (!id) return;
+    let batch = await one<ImportBatchRow>('SELECT * FROM import_batches WHERE id = $1', [id]);
     if (!batch) return reply.code(404).send({ error: 'not_found' });
+    // An `importing` batch this process is not importing was stranded by a restart mid-run. Back to
+    // `review`: the rows /run never reached still have no status and are still ready, and /run only ever
+    // picks up rows without one, so the admin can simply press Import again -- or to `done` when every
+    // row was in fact processed and only the loop's final write was lost, the same rule the loop's own
+    // tail applies. Persisted, not just reported, so /run's own state check agrees with what the page shows.
+    if (batch.state === 'importing' && !importingBatches.has(id)) {
+      const flipped = await one<ImportBatchRow>(
+        `UPDATE import_batches SET updated_at = now(), state = CASE
+           WHEN EXISTS (SELECT 1 FROM import_candidates WHERE batch_id = $1 AND status IS NULL AND decision <> 'skip') THEN 'review'
+           ELSE 'done' END
+         WHERE id = $1 AND state = 'importing' RETURNING *`, [id],
+      );
+      if (flipped) batch = flipped;
+    }
+    // A `review` batch with nothing left waiting is finished (closeBatchIfSettled says why here and not
+    // only at the end of a run). Persisted before the rows are read, so the page never shows a review
+    // list for a batch the list card already calls done.
+    if (batch.state === 'review') {
+      const closed = await closeBatchIfSettled(id);
+      if (closed) batch = closed;
+    }
     const items = await q<ImportCandidateRow>('SELECT * FROM import_candidates WHERE batch_id = $1 ORDER BY ord', [id]);
     // A batch stuck in 'resolving' with nobody actually resolving it (this process restarted mid-pass) is
     // stale: the UI offers Resume instead of a progress bar that will never move again.
@@ -2209,18 +2340,33 @@ export default async function adminRoutes(app: FastifyInstance) {
   });
 
   app.post('/api/admin/import/batches/:id/resume', async (req, reply) => {
-    const { id } = req.params as { id: string };
-    if (resolvingBatch && resolvingBatch !== id) return reply.code(409).send({ error: 'busy', message: 'Another import is already resolving.' });
-    const batch = await one<{ id: string; state: string }>('SELECT id, state FROM import_batches WHERE id = $1', [id]);
-    if (!batch) return reply.code(404).send({ error: 'not_found' });
-    if (batch.state !== 'resolving') return reply.code(409).send({ error: 'not_resolving', message: 'This batch is not waiting to resolve.' });
+    const id = batchIdOf(req, reply);
+    if (!id) return;
     if (resolvingBatch === id) return { ok: true }; // already running in this process, nothing to resume
-    void resolveBatch(id).catch(() => {});
-    return { ok: true };
+    if (resolvingBatch) return reply.code(409).send({ error: 'busy', message: 'Another import is already resolving.' });
+    // Claimed synchronously, the way POST /batches claims `'pending'`: the SELECT below is one await, and a
+    // /resume and a POST inside that window both passed their checks and both resolved -- two search loops
+    // at once, the exact fan-out the guard caps. Claimed as the batch's own id rather than `'pending'` so
+    // a double-tap on Resume reads as the idempotent `ok` above, not as "another import is resolving".
+    // Every way out that does not start the loop (404, not_resolving, a throw) releases it in the `finally`.
+    resolvingBatch = id;
+    let started = false;
+    try {
+      const batch = await one<{ id: string; state: string }>('SELECT id, state FROM import_batches WHERE id = $1', [id]);
+      if (!batch) return reply.code(404).send({ error: 'not_found' });
+      if (batch.state !== 'resolving') return reply.code(409).send({ error: 'not_resolving', message: 'This batch is not waiting to resolve.' });
+      void resolveBatch(id).catch(() => {});
+      started = true;
+      return { ok: true };
+    } finally {
+      if (!started && resolvingBatch === id) resolvingBatch = null;
+    }
   });
 
   app.patch('/api/admin/import/candidates/:cid', async (req, reply) => {
-    const { cid } = req.params as { cid: string };
+    const cidParsed = uuidParam.safeParse((req.params as { cid?: string }).cid);
+    if (!cidParsed.success) return reply.code(404).send({ error: 'not_found' });
+    const cid = cidParsed.data;
     const b = z
       .discriminatedUnion('decision', [
         z.object({ decision: z.literal('manual'), source: z.string().min(1), sourceId: z.string().min(1), title: z.string().min(1), coverUrl: z.string().optional() }),
@@ -2238,6 +2384,9 @@ export default async function adminRoutes(app: FastifyInstance) {
 
     if (b.data.decision === 'skip') {
       await q(`UPDATE import_candidates SET decision = 'skip' WHERE id = $1`, [cid]);
+      // Skipping the last open row is how a batch with leftovers gets finished: nothing else will run
+      // over it again (`/run` answers nothing_to_import), so the batch closes here or not at all.
+      await closeBatchIfSettled(row.batch_id);
     } else if (b.data.decision === 'auto') {
       // "use the auto match" after a manual override — restores what the resolve pass actually found,
       // never a fresh search, so this can't disagree with what the review row showed before it was edited.
@@ -2267,14 +2416,19 @@ export default async function adminRoutes(app: FastifyInstance) {
   // arrive afterwards through auto-update (or a manual fetch from the series page), same as any other title
   // added "nothing yet". ----
   app.post('/api/admin/import/batches/:id/run', async (req, reply) => {
-    const { id } = req.params as { id: string };
+    const id = batchIdOf(req, reply);
+    if (!id) return;
     const b = z
       .object({
         autoUpdate: z.boolean().optional(),
         // Which rows to add. Omitted means "every matched, not-yet-imported row" (the whole-batch shortcut
         // the one-shot importer always did); the review screen's bulk actions pass an explicit list so a
         // row that is only *selected*, not skipped, can still be left for later without erroring.
-        candidateIds: z.array(z.string()).optional(),
+        // `.uuid()` for the same reason `batchIdOf` exists: the ids go into `id = ANY($2)` on a uuid column,
+        // and one malformed entry made Postgres raise 22P02, which the error handler answered as a 500
+        // carrying the raw database message. A batch never holds more than 500 rows, so a longer list is
+        // a client bug too. ⚠️ Not a 404 like the path params: the body is malformed, not a thing missing.
+        candidateIds: z.array(z.string().uuid()).max(500).optional(),
       })
       .safeParse(req.body ?? {});
     if (!b.success) return reply.code(400).send({ error: 'bad_request' });
@@ -2301,50 +2455,81 @@ export default async function adminRoutes(app: FastifyInstance) {
     );
     if (!rows.length) return reply.code(400).send({ error: 'nothing_to_import', message: 'Nothing selected is ready to import.' });
 
-    await q(`UPDATE import_batches SET state = 'importing', updated_at = now() WHERE id = $1`, [id]);
+    // The state checks above are advisory; THIS is the guard. Two /run requests that both read `review`
+    // before either wrote (a double-tap, two tabs) each selected the same rows and each ran its own add
+    // loop over them. The conditional UPDATE is atomic in Postgres: the second one finds `importing` and
+    // gets no row back, and answers busy instead of adding everything twice.
+    const claimed = await one<{ id: string }>(
+      `UPDATE import_batches SET state = 'importing', updated_at = now()
+        WHERE id = $1 AND state NOT IN ('importing','resolving') RETURNING id`, [id],
+    );
+    if (!claimed) return reply.code(409).send({ error: 'busy', message: 'This batch is already importing.' });
+    importingBatches.add(id);
     await logAudit('import.batch.run', { userId: userIdOf(req), detail: { batchId: id, count: rows.length }, req });
     // Fire-and-forget, same as the one-shot /import route: adding hundreds of series is too slow to hold a
     // request open for, even with no chapter downloaded per title.
     void (async () => {
-      for (const row of rows) {
-        try {
-          const r = await addSeriesFromSource({ source: row.match_source, sourceId: row.match_source_id, autoUpdate: b.data.autoUpdate, chapterFrom: 'none' });
-          // `nothing: true` is the 'none' path's own signal for "a fresh row was created" (routes/sources.ts)
-          // -- `chapters` is always 0 under chapterFrom:'none', so the old `chapters > 0` test that told a
-          // fresh add from an existing one would have called EVERY add here "already", including the first.
-          if (r.ok && r.nothing) {
-            await q(`UPDATE import_candidates SET status = 'added' WHERE id = $1`, [row.id]);
-            await q(`UPDATE import_batches SET added = added + 1, updated_at = now() WHERE id = $1`, [id]);
-          } else if (r.ok) {
-            await q(`UPDATE import_candidates SET status = 'already' WHERE id = $1`, [row.id]);
-            await q(`UPDATE import_batches SET already = already + 1, updated_at = now() WHERE id = $1`, [id]);
-          } else {
-            await q(`UPDATE import_candidates SET status = $2 WHERE id = $1`, [row.id, r.error || 'failed']);
-            await q(`UPDATE import_batches SET failed = failed + 1, updated_at = now() WHERE id = $1`, [id]);
+      try {
+        for (const row of rows) {
+          if (aborted.has(id)) return; // discarded mid-run: the batch is gone, stop adding for it
+          try {
+            const r = await addSeriesFromSource({ source: row.match_source, sourceId: row.match_source_id, autoUpdate: b.data.autoUpdate, chapterFrom: 'none' });
+            // `nothing: true` is the 'none' path's own signal for "a fresh row was created" (routes/sources.ts)
+            // -- `chapters` is always 0 under chapterFrom:'none', so the old `chapters > 0` test that told a
+            // fresh add from an existing one would have called EVERY add here "already", including the first.
+            if (r.ok && r.nothing) {
+              await q(`UPDATE import_candidates SET status = 'added' WHERE id = $1`, [row.id]);
+              await q(`UPDATE import_batches SET added = added + 1, updated_at = now() WHERE id = $1`, [id]);
+            } else if (r.ok || r.error === 'duplicate') {
+              // `ok` without `nothing` is "this exact folder is already here"; `duplicate` (409 from
+              // addSeriesFromSource) is "this title is already here from another source" -- the backup
+              // spelled it differently, so the up-front in_library check missed it and the resolve pass
+              // matched it anyway. Both mean the library has the title, which is what the row should say;
+              // before, the second read "Failed — duplicate" in red and counted against the batch.
+              await q(`UPDATE import_candidates SET status = 'already' WHERE id = $1`, [row.id]);
+              await q(`UPDATE import_batches SET already = already + 1, updated_at = now() WHERE id = $1`, [id]);
+            } else {
+              // The code, not a sentence: the web maps each code (`no_chapters`, `disabled`, `blocked`…)
+              // to its own wording, and the rows are its only reader.
+              await q(`UPDATE import_candidates SET status = $2 WHERE id = $1`, [row.id, r.error || 'failed']);
+              await q(`UPDATE import_batches SET failed = failed + 1, updated_at = now() WHERE id = $1`, [id]);
+            }
+          } catch {
+            await q(`UPDATE import_candidates SET status = 'error' WHERE id = $1`, [row.id]).catch(() => {});
+            await q(`UPDATE import_batches SET failed = failed + 1, updated_at = now() WHERE id = $1`, [id]).catch(() => {});
           }
-        } catch {
-          await q(`UPDATE import_candidates SET status = 'error' WHERE id = $1`, [row.id]).catch(() => {});
-          await q(`UPDATE import_batches SET failed = failed + 1, updated_at = now() WHERE id = $1`, [id]).catch(() => {});
         }
+        // 'review', not 'done', while anything could still become an import: a still-unresolved row a person
+        // can go find manually (the "second import try"), or a matched row that was left unselected on
+        // purpose. Only once nothing is left waiting does the batch read as finished.
+        const remaining = await one<{ n: number }>(
+          `SELECT count(*)::int AS n FROM import_candidates WHERE batch_id = $1 AND status IS NULL AND decision <> 'skip'`, [id],
+        );
+        const nextState = (remaining?.n ?? 0) > 0 ? 'review' : 'done';
+        // Only from 'importing': a batch discarded during the loop must not be written back into existence
+        // by its own tail, and a GET that already flipped a stranded run to 'review' is left alone.
+        await q(`UPDATE import_batches SET state = $2, updated_at = now() WHERE id = $1 AND state = 'importing'`, [id, nextState]).catch(() => {});
+      } finally {
+        importingBatches.delete(id);
+        aborted.delete(id);
       }
-      // 'review', not 'done', while anything could still become an import: a still-unresolved row a person
-      // can go find manually (the "second import try"), or a matched row that was left unselected on
-      // purpose. Only once nothing is left waiting does the batch read as finished.
-      const remaining = await one<{ n: number }>(
-        `SELECT count(*)::int AS n FROM import_candidates WHERE batch_id = $1 AND status IS NULL AND decision <> 'skip'`, [id],
-      );
-      const nextState = (remaining?.n ?? 0) > 0 ? 'review' : 'done';
-      await q(`UPDATE import_batches SET state = $2, updated_at = now() WHERE id = $1`, [id, nextState]).catch(() => {});
     })();
     return { ok: true, total: rows.length };
   });
 
+  // Discard. Nothing is written as 'cancelled' -- the row is removed, so the state has no reader. It stays
+  // in the sweep's IN-list only because the column comment in migrate.ts still names it.
   app.delete('/api/admin/import/batches/:id', async (req, reply) => {
-    const { id } = req.params as { id: string };
-    // Does not wait on an in-flight resolve loop: its remaining writes target rows the CASCADE just removed
-    // and silently affect zero rows, same as any other "the thing I was updating got deleted" race here.
+    const id = batchIdOf(req, reply);
+    if (!id) return;
+    // Does not wait on an in-flight loop: the row it is on finishes (its writes target rows the CASCADE just
+    // removed and affect nothing) and the loop stops before the next one, because both check `aborted`.
+    // `resolvingBatch` is released now rather than when that loop notices, so the admin can start the next
+    // batch without waiting out a search timeout.
+    if (resolvingBatch === id || importingBatches.has(id)) aborted.add(id);
     if (resolvingBatch === id) resolvingBatch = null;
-    await q('DELETE FROM import_batches WHERE id = $1', [id]);
+    const gone = await q<{ id: string }>('DELETE FROM import_batches WHERE id = $1 RETURNING id', [id]);
+    if (gone.length) await logAudit('import.batch.discard', { userId: userIdOf(req), detail: { batchId: id }, req });
     return { ok: true };
   });
 

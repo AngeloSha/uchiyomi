@@ -521,7 +521,7 @@ POST   /api/admin/art/backfill    GET    /api/admin/art/backfill/status
 POST   /api/admin/trackers/relink GET    /api/admin/trackers/relink/status
 POST   /api/admin/import          POST   /api/admin/import/parse
 GET    /api/admin/import/status
-POST   /api/admin/import/batches
+GET    /api/admin/import/batches  POST   /api/admin/import/batches
 GET    /api/admin/import/batches/:id DELETE /api/admin/import/batches/:id
 POST   /api/admin/import/batches/:id/resume
 POST   /api/admin/import/batches/:id/run
@@ -538,18 +538,41 @@ first cross-source hit with no review and stays for scripted callers. `POST .../
 `dataUrl`/`mangadexList`/`titles` intake as `/api/admin/import/parse`, starts matching in the background
 (one batch resolves at a time server-wide) and returns a `batchId`. `GET .../batches/:id` polls
 `{batch, items}` — each item's `decision` is `unresolved | auto | manual | skip` and, once the batch leaves
-`resolving`, an `unresolved` row means "no match found" rather than "not looked at yet". `PATCH
+`resolving`, an `unresolved` row means "no match found" rather than "not looked at yet". A row's
+`confidence` is `same_source` only when the backup entry's own Mihon source is installed here (a Suwayomi
+extension) and a hit's extension-relative path equals the url the backup stored -- Mihon's identity for a
+manga, which survives a retitle -- otherwise `exact | contains | fuzzy` from the title alone; a title with no
+confident hit anywhere stays `unresolved`, and the first search result is never taken. `PATCH
 /api/admin/import/candidates/:cid` accepts `{decision:'manual', source, sourceId, title, coverUrl?}` to
 override a pick, `{decision:'skip'}`, or `{decision:'auto'}` to restore the resolve pass's own suggestion
-after an override. `POST .../batches/:id/run` takes `{candidateIds?, autoUpdate?}` — with `candidateIds` it
-adds only those rows (a skipped or still-unresolved id is silently left out rather than erroring), omitted
-means every eligible row in the batch. Every add is "nothing yet": the series is created and followed, no
-chapter is downloaded, matching the bulk-select UI's promise that "Import selected" only moves titles into
-the library. Safe to call again later on the same batch — a row already imported is never re-added, which is
-how importing the matched rows now and the rest (found by hand afterwards) later both work; the batch state
-reads `review`, not `done`, while anything importable is still waiting. `DELETE .../batches/:id` discards a
-batch outright. A batch left `resolving` by a server restart reads back with `stale: true`; `POST
-.../batches/:id/resume` restarts matching for whatever is still unresolved.
+after an override; skipping the last open row of a batch a run has been through closes the batch (`done`).
+`POST .../batches/:id/run` takes `{candidateIds?, autoUpdate?}` — with `candidateIds` it adds only those
+rows (a skipped or still-unresolved id is silently left out rather than erroring; an entry that is not a
+uuid, or more than 500 of them, is **400** `bad_request`), omitted means every eligible row in the batch.
+Each row's `status` afterwards is `added`, `already` (the library has the title — the same folder, or the
+same title from another source under a spelling the up-front `in_library` check missed) or the add's error
+code (`no_title`, `no_chapters`, `disabled`, `blocked`, `undownloadable`, `disk_full`, `bad_request`, `error`);
+`already` counts under the batch's `already`, an error code under `failed`. Every add is "nothing yet": the
+series is created and followed, no chapter is downloaded, matching the bulk-select UI's promise that "Import
+selected" only moves titles into the library. Safe to call again later on the same batch — a row already
+imported is never re-added, which is how importing the matched rows now and the rest (found by hand
+afterwards) later both work; the batch state reads `review`, not `done`, while anything importable is still
+waiting; the flip to `importing` is one conditional UPDATE, so two simultaneous calls import once (the other
+answers **409** `busy`). `DELETE .../batches/:id` discards a batch outright and stops a resolve or add loop
+still running for it before its next row; no batch is ever written as `cancelled`. A batch left `resolving`
+by a server restart reads back with `stale: true`; `POST .../batches/:id/resume` restarts matching for
+whatever is still unresolved (the progress counter restarts from the rows already settled) and takes the
+one-batch guard before looking the batch up, so a `/resume` and a `POST .../batches` at the same instant
+start one loop (the other answers **409** `busy`). One left `importing` by a restart is handed back on the
+next GET -- `review` with its unreached rows still ready, or `done` when every row had been processed; a
+`review` batch a run has been through with nothing left waiting (every remaining row skipped) is closed to
+`done` on GET as well, while one nothing was ever imported through (every title already owned) stays
+`review`. `GET /api/admin/import/batches` lists every batch newest first (`{content: [{id, origin, state,
+total, resolved, added, already, failed, created_at, updated_at, stale}]}`, no rows; `stale` as on the single
+GET, so the "Open imports" card can call an interrupted batch interrupted rather than matching); a batch is
+swept seven days after it last changed once `done`, thirty days while still open. A batch or candidate id
+that is not a uuid answers **404**. A gzipped backup that inflates past 256 MB (no real one does) is
+**422** `parse_failed` like any unreadable file.
 
 **Scanlation groups.** When a source lists the same chapter from more than one group (MangaDex does, and
 so do extension sources that carry Mihon's scanlator column), the server keeps one file per number and the

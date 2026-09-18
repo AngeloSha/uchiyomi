@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, ApiError, img } from '@/lib/api';
@@ -551,48 +551,6 @@ function Providers() {
 
   const removeSite = async (id: string) => { try { await api(`/api/admin/sources/custom/${id}`, { method: 'DELETE' }); toast('Removed', 'success'); inval(); } catch { toast('Failed', 'error'); } };
 
-  type ImportJob = { running: boolean; total: number; done: number; added: number; already: number; notFound: number; failed: number; details: Array<{ title: string; status: string; source?: string }> };
-  const [imp, setImp] = useState('');
-  const [importing, setImporting] = useState(false);
-  const { data: importStatus, refetch: refetchImport } = useQuery({ queryKey: ['admin-import'], queryFn: () => api<{ job: ImportJob | null }>('/api/admin/import/status'), refetchInterval: 2000 });
-  const job = importStatus?.job;
-  const runImport = async () => {
-    const titles = imp.split('\n').map((t) => t.trim()).filter(Boolean);
-    if (!titles.length) return;
-    setImporting(true);
-    try { await api('/api/admin/import', { json: { titles } }); toast(`Importing ${titles.length} title${titles.length === 1 ? '' : 's'}…`, 'success'); refetchImport(); }
-    catch (e: any) { toast(msgOf(e, 'Import failed to start'), 'error'); }
-    setImporting(false);
-  };
-
-  // --- intake: parse a backup/list into the textarea for review, importing nothing yet ---
-  type ParseResult = { origin: string; total: number; truncated: boolean; items: Array<{ title: string; inLibrary: boolean }> };
-  const backupRef = useRef<HTMLInputElement>(null);
-  const [mdUrl, setMdUrl] = useState('');
-  const [parsing, setParsing] = useState(false);
-  const [parsed, setParsed] = useState<{ total: number; already: number; truncated: boolean } | null>(null);
-  const applyParsed = (r: ParseResult) => {
-    // pre-filter what's already here: re-importing your own library is just a slow no-op
-    const fresh = r.items.filter((i) => !i.inLibrary).map((i) => i.title);
-    setImp(fresh.join('\n'));
-    setParsed({ total: r.total, already: r.items.length - fresh.length, truncated: r.truncated });
-    toast(fresh.length ? `${fresh.length} titles ready to review` : 'Everything in that list is already in your library', fresh.length ? 'success' : undefined);
-  };
-  const parseBackup = async (f: File) => {
-    if (f.size > 10 * 1024 * 1024) { toast('That file is unusually large (max ~10 MB)', 'error'); return; }
-    setParsing(true);
-    try {
-      const dataUrl = await new Promise<string>((res, rej) => { const rd = new FileReader(); rd.onload = () => res(String(rd.result)); rd.onerror = () => rej(new Error('read')); rd.readAsDataURL(f); });
-      applyParsed(await api<ParseResult>('/api/admin/import/parse', { json: { dataUrl } }));
-    } catch (e: any) { toast(msgOf(e, 'Could not read that backup'), 'error'); }
-    setParsing(false);
-  };
-  const parseMangadex = async () => {
-    setParsing(true);
-    try { applyParsed(await api<ParseResult>('/api/admin/import/parse', { json: { mangadexList: mdUrl.trim() } })); }
-    catch (e: any) { toast(msgOf(e, 'Could not read that list'), 'error'); }
-    setParsing(false);
-  };
   const list = (srcs?.content || []) as ProviderSrc[];
   // One card per extension PACKAGE rather than per source: a multi-language extension is one install that
   // exposes one source per language, and 3Hentai alone put twenty-nine near-identical cards here, enabled
@@ -789,63 +747,17 @@ function Providers() {
       {/* Extension sources, from an optional Suwayomi server running Mihon/Tachiyomi extensions */}
       <Extensions span="full" />
 
-      {/* Import a list of titles */}
+      {/* Import a list of titles. One entry point, the reviewed flow on its own page: the textarea that used
+          to sit under it here added the FIRST cross-source hit with no review, which is the "wrong manga" an
+          admin then had to find and remove. POST /api/admin/import still exists for scripts (docs/api.md). */}
       <div className="card grad-border wide p-4">
         <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-fog-500">{tr('Import a list')}</p>
-        <p className="mb-2 text-[11px] text-fog-500">Bring your library over from another app. Uchiyomi searches your sources for each title and adds the best match.</p>
-
-        {/* The reviewable flow (issue #48): every title's match is shown before anything is added, and a
-            wrong pick can be corrected with a manual search or skipped outright. Its own page — this card's
-            textarea path below still adds the FIRST cross-source hit with no review, kept for a quick "I
-            trust the matcher" import and for anything still calling POST /api/admin/import directly. */}
-        <button onClick={() => router.push('/admin/import/')} className="btn-accent mb-3 w-full py-2 text-sm">
+        <p className="mb-3 text-[11px] text-fog-500">
+          {tr('Bring your library over from another app: import a list → review matches → add. A Mihon / Tachiyomi backup, a public MangaDex list, or pasted titles; every match is shown before anything is added.')}
+        </p>
+        <button onClick={() => router.push('/admin/import/')} className="btn-accent w-full py-2 text-sm">
           {tr('Import and review matches →')}
         </button>
-        <p className="mb-3 text-[11px] text-fog-600">{tr('or, without a review step:')}</p>
-
-        {/* file / MangaDex intake — parsed into a reviewable list before anything is added */}
-        <div className="mb-2 flex flex-wrap items-center gap-2">
-          <input ref={backupRef} type="file" accept=".tachibk,.proto.gz,.gz" className="hidden"
-            onChange={(e) => { const f = e.target.files?.[0]; if (f) parseBackup(f); e.currentTarget.value = ''; }} />
-          <button onClick={() => backupRef.current?.click()} disabled={parsing} className="btn-ghost px-3 py-1.5 text-xs disabled:opacity-50">
-            {parsing ? 'Reading…' : 'Mihon / Tachiyomi backup'}
-          </button>
-          <span className="text-[11px] text-fog-600">or</span>
-          <input value={mdUrl} onChange={(e) => setMdUrl(e.target.value)} placeholder={tr('public MangaDex list link')} autoCapitalize="none" className="field min-w-0 flex-1" />
-          <button onClick={() => parseMangadex()} disabled={parsing || !mdUrl.trim()} className="chip text-xs disabled:opacity-50">{tr('Load')}</button>
-        </div>
-        <p className="mb-2 text-[10px] text-fog-600">A .tachibk backup stays on your server — only the titles are read. MangaDex lists must be public; private follows need a MangaDex login, which Uchiyomi doesn&apos;t ask for.</p>
-
-        <textarea value={imp} onChange={(e) => setImp(e.target.value)} rows={4} placeholder={'…or paste titles, one per line'} className="field resize-y" />
-        {parsed && (
-          <div className="mt-2 rounded-xl border border-ink-700 bg-ink-900/50 p-2.5 text-xs">
-            <p className="text-fog-300">{tr('Found')}<strong className="text-fog-100">{parsed.total}</strong> titles
-              {parsed.already > 0 && <> · <span className="text-fog-500">{parsed.already} already in your library (skipped)</span></>}
-              {parsed.truncated && <> · <span className="text-amber-400">capped at 500</span></>}
-            </p>
-            <p className="mt-1 text-[11px] text-fog-500">{tr('Loaded into the box above — edit or delete lines before importing.')}</p>
-          </div>
-        )}
-        <button onClick={runImport} disabled={importing || job?.running || !imp.trim()} className="btn-accent mt-2 w-full py-2 text-sm disabled:opacity-50">
-          {job?.running ? `Importing… ${job.done}/${job.total}` : importing ? 'Starting…' : `Import ${imp.trim() ? imp.trim().split('\n').filter((l) => l.trim()).length + ' ' : ''}titles`}
-        </button>
-        {job && (
-          <div className="mt-2.5 rounded-xl border border-ink-700 bg-ink-900/50 p-2.5 text-xs">
-            <p className="mb-1.5 font-semibold text-fog-300">{job.running ? `Working… ${job.done}/${job.total}` : `Done — ${job.added} added · ${job.already} already had · ${job.notFound} not found · ${job.failed} failed`}</p>
-            <div className="mb-2 h-1.5 overflow-hidden rounded-full bg-ink-700"><div className="h-full bg-accent transition-all" style={{ width: `${job.total ? (job.done / job.total) * 100 : 0}%` }} /></div>
-            <ul className="max-h-40 space-y-0.5 overflow-y-auto">
-              {(job.details || []).slice(-40).reverse().map((d, i) => (
-                <li key={i} className="flex items-center gap-2">
-                  <span className={d.status === 'added' ? 'text-emerald-400' : d.status === 'already' ? 'text-fog-500' : d.status === 'not_found' ? 'text-amber-400' : 'text-red-400'}>
-                    {d.status === 'added' ? '✓' : d.status === 'already' ? '·' : d.status === 'not_found' ? '?' : '✗'}
-                  </span>
-                  <span className="min-w-0 flex-1 truncate text-fog-200">{d.title}</span>
-                  {d.source && <span className="shrink-0 text-fog-500">{d.source}</span>}
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
       </div>
 
       {list.length === 0 ? (

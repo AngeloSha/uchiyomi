@@ -789,45 +789,54 @@ expired, but until then a device already holding their downloads can still read 
 everywhere ends it on the next occasion that device reaches the server.
 
 **Providers:** the source health + Add-a-site controls from section 7, with a multi-language extension
-folded into one card that opens per language. This tab also holds **Import a list**,
-for moving a library over from another app:
+folded into one card that opens per language. This tab also holds **Import a list**, for moving a library
+over from another app. It is one path: import a list → review the matches → add. Pressing it opens the
+import page (`/admin/import/`), which takes the list three ways:
 
-- **Mihon / Tachiyomi backup** — pick your `.tachibk` (or `.proto.gz`) file. Only each entry's title, plus
-  which Mihon source it came from (used only to match it against that same source here, if you have it
-  installed), is read; the file never leaves your server, and no Mihon account is used.
+- **Mihon / Tachiyomi backup** — pick your `.tachibk` (or `.proto.gz`) file. Only each entry's title, its
+  source and its address on that source are read: the source to look the title up on that same source here,
+  if you have it installed, and the address as the proof that a result there is that exact entry rather than
+  a namesake. The file never leaves your server, and no Mihon account is used.
 - **MangaDex list** — paste the link to a **public** custom list. Private follows would need a MangaDex
   login, which Uchiyomi never asks for; make a list public and share that instead.
 - **Paste titles** — one per line, from anywhere.
 
-**Import and review matches** is the recommended way in: press it after picking your source above, and
-Uchiyomi matches every title against your sources in the background — preferring the exact source a backup
-entry came from when you have it installed — then shows you the whole list before anything is added. Each
-row carries its pick and how confident the match is; **Change** opens a manual search (grouped by source, so
-you can see exactly which provider a pick would come from) to correct it or skip that title outright — it
-also shows the cover, title and chapter count of the row's current pick before you type anything, and of
-whatever you tap next, so a mismatch between the two is visible before you commit to it. Rows already in
-your library default to skipped, visibly, and can be un-skipped.
+**Start matching** looks every title up against your sources in the background — a backup entry is matched
+on the source it came from first, when you have that source installed, and only a result whose catalogue
+address is the backup's own counts as that exact entry; otherwise the usual title rules decide, and a title
+none of them is confident about stays unmatched rather than being given the first thing the source
+answered. Matching a long list takes a few minutes, because each title is looked up on its source; you can
+leave the page and come back (the batch is saved, and the intake card lists the **open imports** — every
+admin's, on an install with more than one — so none is lost when the tab closes). A batch a server restart
+interrupted reads *Interrupted — resume* on that card and offers **Resume** when opened. **Discard** throws
+the batch away at any point, and one that sits in review for 30 days is dropped on its own.
 
-Nothing is added until you check some rows and press **Import selected**. **Select all** marks every row
-(a skipped or still-unmatched one is a harmless no-op if you press Import anyway); **Select ready to
-import** marks only the rows that actually found a match. Every import here is "nothing yet" — titles are
-added to your library with no chapter downloaded, so a few hundred titles is seconds of database work, not
-hours of fetching. New chapters arrive the normal way, through auto-update, or fetch older ones by hand from
-each series page.
+The review is the point. Every row shows the title you brought and, on a second line, the title it matched
+(*→ {title}*, dimmed when the two are the same) with how confident the match is; **Change** opens a manual
+search, its results in one sideways-scrolling rail per source so you can see which provider a pick would
+come from, with the cover, title and chapter count of the current pick beside whatever you tap next, so a
+mismatch is visible before you commit to it — or **Skip this one** drops the title. Rows already in your
+library default to skipped, visibly, and can be un-skipped. **Needs attention** filters to what wants a
+look: anything unmatched, every *possible match*, and a *close match* that only contains your title where
+the two names differ by more than an edition tag such as *(Official)* or *Colored* — or where the longer
+name looks like a season, part, novel or spin-off of the shorter one, *Solo Leveling: Ragnarok* for *Solo
+Leveling*, which is a different work under a familiar name.
 
-Whatever did not find a match stays in the list — filter to **Needs attention**, fix each one with
-**Change**, then **Select ready to import** and **Import selected** again; rows already imported are never
-re-added, so running it a second time only picks up what is newly ready. Matching a long list can take a few
-minutes; you can leave the page and come back (`/admin/import/?batch=<id>`), and a batch interrupted by a
-server restart offers **Resume**.
+Nothing is added until you check some rows and press **Import selected — {n}**. **Select all** marks every
+row (a skipped or still-unmatched one is a harmless no-op); **Select ready to import** marks only the rows
+that found a match. Every import here is a *Nothing yet* add — the title lands in your library with its
+listing and no chapter downloaded — so a few hundred titles is a few minutes of look-ups, not hours of
+fetching; new chapters arrive the normal way through auto-update, or fetch older ones by hand from each
+series page. Each row then says what happened: *Added to your library*; *Already in your library* when the
+library already held the title, under whatever spelling; or, in words rather than a code, why the add did
+not go through. Rows already imported are never re-added, so fixing the leftovers with **Change** and
+pressing **Import selected** again only picks up what is newly ready — and once nothing is left, every row
+imported or skipped, the batch is done and drops off the open-imports list by itself.
 
-The plain **paste box** below it still works the old way for a quick, unreviewed import: titles land in the
-box for you to trim, anything already in your library is removed automatically, and pressing **Import**
-searches your sources and adds the first good match for each title directly — live progress, and a per-title
-result (added / already had / not found / failed), but no chance to correct a wrong pick before it lands.
-
-Importing hundreds of titles takes a while on purpose: downloads are paced so a big import doesn't hammer
-the sites you're pulling from and get your server blocked.
+The unreviewed import — search your sources for each title and add the first good match directly — is no
+longer offered on the page; it survives as `POST /api/admin/import` for scripts (see
+[api.md](api.md)), and it is paced on purpose: a big import must not hammer the sites you're pulling from
+and get your server blocked.
 
 **Tasks:** run the **library scan**, **check-for-new-chapters** or **extension updates** on demand, and see
 when each last ran and what it did. Extension updates run every 6 hours on their own and can be switched

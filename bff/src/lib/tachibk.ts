@@ -75,7 +75,12 @@ export interface BackupEntry {
    */
   sourceIdUnsigned?: string;
   sourceIdSigned?: string;
-  /** The manga's on-site url in Mihon. Display/dedupe only — never a usable `source_series_id` here. */
+  /**
+   * The manga's extension-relative url in Mihon. Never a routable `source_series_id` here, but source id +
+   * url IS Mihon's identity for a manga: `resolveCandidate` (routes/sources.ts) compares it, as a
+   * normalised path, against each Suwayomi search hit's `path` to prove the same catalogue entry after a
+   * retitle -- the `same_source` tier rests on this field and on nothing else.
+   */
   url?: string;
 }
 
@@ -116,13 +121,35 @@ function entryOfManga(sub: Buffer): BackupEntry | null {
 }
 
 /**
+ * How far a gzipped upload may inflate before it is refused. A real Mihon backup is tens of MB raw (a
+ * few thousand manga with their chapter lists and history); 256 MB is an order of magnitude above the
+ * biggest seen. Without a cap the 12 MB body limit on the upload routes was no limit at all: gzip packs
+ * runs of zeros ~1000:1, so a 9 MB body could ask for 9 GB of heap before the parser saw a byte. Admin-only
+ * routes, so the uploader is the admin bombing their own server -- still one option to rule it out.
+ */
+export const MAX_INFLATED_BYTES = 256 * 1024 * 1024;
+
+/**
  * Extract library entries (title + Mihon source id + url) from a .tachibk / .proto.gz buffer (plain
  * protobuf also accepted). Titles are trimmed and de-duplicated case-insensitively, first occurrence wins,
- * backup order preserved. Throws if the buffer isn't parseable as a backup.
+ * backup order preserved. Throws if the buffer isn't parseable as a backup, or inflates past
+ * `maxInflatedBytes` (a parameter only so a test can prove the cap without a 256 MB fixture).
  */
-export function entriesFromBackup(file: Buffer): BackupEntry[] {
+export function entriesFromBackup(file: Buffer, maxInflatedBytes = MAX_INFLATED_BYTES): BackupEntry[] {
   // gzip magic — Mihon always gzips, but accept a raw protobuf too
-  const buf = file.length > 2 && file[0] === 0x1f && file[1] === 0x8b ? gunzipSync(file) : file;
+  let buf = file;
+  if (file.length > 2 && file[0] === 0x1f && file[1] === 0x8b) {
+    try {
+      buf = gunzipSync(file, { maxOutputLength: maxInflatedBytes });
+    } catch (e) {
+      // zlib's RangeError reads "Cannot create a Buffer larger than N bytes" -- a sentence about a Buffer,
+      // shown to the admin as the parse failure. Say what was actually wrong with the file instead.
+      if ((e as NodeJS.ErrnoException)?.code === 'ERR_BUFFER_TOO_LARGE') {
+        throw new Error(`this file inflates to more than ${Math.round(maxInflatedBytes / (1024 * 1024))} MB, which no Mihon/Tachiyomi backup does`);
+      }
+      throw e;
+    }
+  }
 
   const entries: BackupEntry[] = [];
   const seen = new Set<string>();

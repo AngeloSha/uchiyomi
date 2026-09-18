@@ -109,6 +109,29 @@ test('the Unraid template names every volume, the ports, and the ids, and stops 
   // Well-formed enough: every <Config ...> is closed on its own line.
   const opens = (x.match(/<Config /g) || []).length, closes = (x.match(/<\/Config>/g) || []).length;
   assert.equal(opens, closes, 'an unclosed <Config> element');
+  // ⚠️ `--` inside an XML comment is illegal (XML 1.0 §2.5), and Unraid's dockerMan parses the template with
+  // a real parser. The v0.21.0 rewrite of the header comment -- the one that fixed the install steps after
+  // hawwwwwk's first report -- wrote "never read -- so", and from then until v0.34.0 the file could not be
+  // installed by anyone: the parse fails at the comment, before the first <Config>. Every check above passed
+  // the whole time, because none of them parsed. hawwwwwk found that too (PR #50). There is no XML parser
+  // among the dependencies, so the comment bodies are checked by hand, the way a parser would refuse them.
+  // Reintroduce by writing `--` back into the header comment: this names the offending comment.
+  for (const m of x.matchAll(/<!--([\s\S]*?)-->/g)) {
+    assert.ok(!m[1].includes('--'), `"--" inside an XML comment, which no parser accepts: ${m[1].trim().slice(0, 60)}…`);
+  }
+  // The same parser would also refuse a comment that never closes, or a `-` glued to the closing `-->`.
+  assert.equal((x.match(/<!--/g) || []).length, (x.match(/-->/g) || []).length, 'an XML comment that never closes');
+  assert.ok(!/--->/.test(x), 'a comment ending in "--->" is malformed');
+  // Both files CA moderators read must start with the XML declaration and carry one root element each.
+  assert.match(x, /^<\?xml version="1\.0"\?>\n/, 'the template lacks the XML declaration');
+  const ca = read('ca_profile.xml');
+  assert.match(ca, /^<\?xml version="1\.0"\?>\n<CommunityApplications>[\s\S]*<\/CommunityApplications>\s*$/, 'ca_profile.xml is not a CommunityApplications document');
+  // The icon must be the app's own icon, the same file the template shows; the CA listing reads ca_profile.
+  assert.match(ca, /<Icon>https:\/\/raw\.githubusercontent\.com\/AngeloSha\/uchiyomi\/main\/web\/public\/icons\/icon-512\.png<\/Icon>/, 'the CA profile icon is not the app icon');
+  assert.ok(existsSync(join(REPO, 'web/public/icons/icon-512.png')), 'the icon both files point at is not in the repo');
+  // The main repo is the CA template repository now; a TemplateURL at the old unraid-templates repo would
+  // have Unraid refresh the template from a file that is only kept for old links.
+  assert.match(x, /<TemplateURL>https:\/\/raw\.githubusercontent\.com\/AngeloSha\/uchiyomi\/main\/templates\/uchiyomi\.xml<\/TemplateURL>/, 'TemplateURL does not point at this repo');
 });
 
 test('the Umbrel package is the one under review: proxy block, PUID, digest pin, data under app-data', () => {
@@ -155,7 +178,10 @@ test('an Unraid or Umbrel user can still get from the README to their manifest',
   const r = read('README.md');
   assert.match(r, /docs\/INSTALL\.md/, 'the README no longer points anywhere for platform installs');
   const i = read('docs/INSTALL.md');
-  assert.match(i, /deploy\/unraid\/uchiyomi\.xml/, 'the install guide does not point Unraid users at the template');
+  // `templates/uchiyomi.xml` since PR #50: the layout Community Applications reads from the main repo.
+  assert.match(i, /templates\/uchiyomi\.xml/, 'the install guide does not point Unraid users at the template');
+  assert.ok(!/deploy\/unraid\//.test(i), 'the install guide still names the pre-#50 template path, which no longer exists');
+  assert.ok(existsSync(join(REPO, 'templates/uchiyomi.xml')), 'the Unraid template moved');
   assert.match(i, /deploy\/umbrel\/uchiyomi/, 'the install guide does not point Umbrel users at the manifest');
   assert.ok(existsSync(join(REPO, 'deploy/casaos/docker-compose.yml')), 'the CasaOS manifest moved');
 });

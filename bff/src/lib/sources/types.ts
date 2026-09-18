@@ -11,6 +11,14 @@ export interface SourceSeries {
   coverUrl?: string; // remote cover image
   url?: string; // canonical web url
   updatedAt?: string; // ISO timestamp of the source's last update to this series (when the source exposes it)
+  /**
+   * The entry's path inside the source's OWN catalogue, exactly as the extension stores it (Mihon's
+   * `manga.url`, e.g. `/manga/solo-leveling`), when the adapter has one. Only Suwayomi supplies it. It is
+   * the identity a Mihon backup carries for a manga (source id + url), so it is the one thing that can
+   * prove a search hit IS the backed-up entry after the site retitled it -- a title comparison cannot.
+   * Never a routable id here (`sourceId` is), and never shown to a reader (`url` is the web link).
+   */
+  path?: string;
 }
 
 export interface SourceChapter {

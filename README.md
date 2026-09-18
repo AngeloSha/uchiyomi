@@ -139,9 +139,13 @@ That image is drawn from GitHub's contributors graph, which only counts the auth
 arrives as a report or a diagnosis that lands as someone else's commit, and is invisible there — so it is
 named here instead:
 
-- **Unraid install instructions** — [@hawwwwwk](https://github.com/hawwwwwk), who spotted that Unraid had
-  removed the *Template repositories* field the docs told people to use, and opened pull requests against
-  both this repo and [`unraid-templates`](https://github.com/AngeloSha/unraid-templates).
+- **Unraid install instructions, and a template that installs** — [@hawwwwwk](https://github.com/hawwwwwk),
+  who spotted that Unraid had removed the *Template repositories* field the docs told people to use, and
+  opened pull requests against both this repo and [`unraid-templates`](https://github.com/AngeloSha/unraid-templates);
+  then came back with [PR #50](https://github.com/AngeloSha/uchiyomi/pull/50), which found that the very
+  fix for that report had left the template invalid XML (a `--` inside a comment, so nothing could install
+  it), fixed it, and laid this repository out as the Community Applications template repository
+  (`templates/uchiyomi.xml`, `ca_profile.xml`). `unraid-templates` is now only a pointer here.
 - **The scanner finding zero series in a Tranga library** — [@ThomasRunting](https://github.com/ThomasRunting),
   who did not stop at the bug report: they read the scanner, found the early return that made a cover image
   turn a whole series folder into a "chapter of the root", proved it against their own 38-series library,

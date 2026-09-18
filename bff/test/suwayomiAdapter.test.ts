@@ -35,7 +35,7 @@ test('search maps a source manga list onto series', async () => {
   const { makeSuwayomiAdapter } = await load();
   const a = makeSuwayomiAdapter(LOCAL, fakeGql({
     fetchSourceManga: { fetchSourceManga: { mangas: [
-      { id: 1, title: 'Bridge Test Manga', thumbnailUrl: '/api/v1/manga/1/thumbnail', realUrl: null,
+      { id: 1, title: 'Bridge Test Manga', thumbnailUrl: '/api/v1/manga/1/thumbnail', realUrl: null, url: '/manga/bridge-test',
         description: 'A fixture.', author: 'Someone', genre: ['Action', 'Drama'], status: 'ONGOING' },
     ] } },
   }));
@@ -48,6 +48,12 @@ test('search maps a source manga list onto series', async () => {
   assert.equal(s.status, 'Ongoing');
   // covers come back server-relative and must be absolute for the image proxy to fetch them
   assert.equal(s.coverUrl, 'http://suwayomi.test:4567/api/v1/manga/1/thumbnail');
+  // The extension-relative url is what a Mihon backup stores for the manga, and the import review's
+  // same-source proof compares it (routes/sources.ts resolveCandidate); without it every backup entry
+  // silently falls back to title matching and nothing else in the suite notices.
+  // Reintroduce by dropping `path: m.url || undefined` from toSeries.
+  assert.equal(s.path, '/manga/bridge-test');
+  assert.equal(s.url, undefined, 'realUrl is the web link and stays separate from the path');
 });
 
 test('adapter ids are namespaced so they can never collide with a built-in or custom site', async () => {

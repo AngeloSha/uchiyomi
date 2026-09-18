@@ -29,7 +29,7 @@ import { registerApiDocs } from './lib/apiDocs';
 import { appVersion } from './lib/appVersion';
 import { buildPayload, installFacts, sendPing } from './lib/installPing';
 import authRoutes from './routes/auth';
-import adminRoutes from './routes/admin';
+import adminRoutes, { sweepImportBatches } from './routes/admin';
 import catalogRoutes from './routes/catalog';
 import imageRoutes, { authorizeImageRequest } from './routes/images';
 import personalRoutes from './routes/personal';
@@ -298,16 +298,16 @@ async function main() {
     setTimeout(tick, 10 * 60 * 1000).unref();
   }
 
-  // Drop finished/discarded import batches (routes/admin.ts) a week after they last changed. They hold
-  // nothing anyone needs once done -- the series they added already exist as their own lib_series rows --
-  // and each one carries up to 500 candidate rows. `updated_at` rather than `created_at` so a batch that was
-  // reviewed slowly (a person genuinely working through 500 rows over several days) is not swept mid-review;
-  // only the resolving/review states are left out of the WHERE, and those never age out on their own.
+  // Drop import batches nobody will come back to (`sweepImportBatches` in routes/admin.ts owns the rule:
+  // finished ones after a week, unfinished ones after a month). Daily, first run fifteen minutes after
+  // boot so a restart loop cannot turn it into a churn. A batch left `resolving`/`review`/`importing` used
+  // to be exempt for ever, which meant a forgotten batch and its up-to-500 candidate rows never went away.
   {
     const DAY = 24 * 60 * 60 * 1000;
     const tick = async () => {
       try {
-        await q(`DELETE FROM import_batches WHERE state IN ('done','cancelled') AND updated_at < now() - interval '7 days'`);
+        const r = await sweepImportBatches();
+        if (r.removed) app.log.info(`import batches: swept ${r.removed}`);
       } catch (e) {
         app.log.error(e as any);
       }

@@ -50,14 +50,19 @@ as a custom app and it appears with an icon like any store app. That manifest le
 engine, so Mihon/Tachiyomi extensions are off there; add `uchiyomi-suwayomi` from
 [`deploy/docker-compose.yml`](../deploy/docker-compose.yml) and set `SUWAYOMI_URL` if you want them.
 
-**On Unraid?** Copy [`deploy/unraid/uchiyomi.xml`](../deploy/unraid/uchiyomi.xml) to
+**On Unraid?** The template is [`templates/uchiyomi.xml`](../templates/uchiyomi.xml) in this repository,
+which is laid out as a Community Applications template repository (`templates/` plus the `ca_profile.xml`
+at the root) and is being submitted to Community Applications. Once it is listed there, install it from the
+**Apps** tab like anything else. Until it shows up, copy the file to
 `/boot/config/plugins/dockerMan/templates-user/` on the server, then *Docker → Add Container* and pick
-*uchiyomi* under **User templates** (a Community Applications listing is requested). One container,
-database included; set PUID/PGID to the owner of your library for renames.
+*uchiyomi* under **User templates**, as before. One container, database included; set PUID/PGID to the
+owner of your library for renames.
 
 Unraid removed the *Template repositories* field in 6.10, and since 7.3 the file behind it is not read at
 all, so pointing Unraid at a template repository URL no longer works on any current version — the template
-file itself has to be on the server.
+file itself has to be on the server, or come through Community Applications. The
+[`unraid-templates`](https://github.com/AngeloSha/unraid-templates) repository is kept only so old links
+keep working; it points here.
 
 **On Umbrel?** Uchiyomi is [submitted to the Umbrel App Store](https://github.com/getumbrel/umbrel-apps/pull/6055); until it is listed, the package at
 [`deploy/umbrel/uchiyomi`](../deploy/umbrel/uchiyomi) is the exact one under review. It runs the database inside

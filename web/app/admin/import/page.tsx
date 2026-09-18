@@ -1,43 +1,94 @@
 'use client';
 // The reviewable import wizard (issue #48): backup / MangaDex list / paste → match each title against a
-// source → show the pick → let the admin change it or skip it → Continue adds only what was accepted.
+// source → show the pick → let the admin change it or skip it → "Import selected" adds only what was
+// accepted. Since v0.35.0 this is the ONLY import path in the UI: the one-shot textarea on Admin → Providers,
+// which added the first cross-source hit with no review, is gone (POST /api/admin/import stays for scripts).
 //
-// A dedicated route rather than a Sheet off the admin Providers card (which still has the older one-shot
-// /import): this is a multi-step flow that can run for minutes and needs room for hundreds of rows on a
-// phone, and admin/page.tsx is already one very large client component. `/admin/import/` — trailing slash
-// is load-bearing, see next.config.mjs (`trailingSlash: true`, static export).
-import { Suspense, useEffect, useRef, useState } from 'react';
+// A dedicated route rather than a Sheet off the admin Providers card: this is a multi-step flow that can run
+// for minutes and needs room for hundreds of rows on a phone, and admin/page.tsx is already one very large
+// client component. `/admin/import/` — trailing slash is load-bearing, see next.config.mjs
+// (`trailingSlash: true`, static export).
+import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { api } from '@/lib/api';
+import { api, ApiError } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { useToast } from '@/components/Toast';
-import { msgOf } from '@/components/ConfirmDialog';
+import { ConfirmDialog, msgOf } from '@/components/ConfirmDialog';
 import { Img, ProgressBar } from '@/components/ui';
 import { SourceIcon } from '@/components/SourcePicker';
 import { sourceCover } from '@/components/cards';
 import { ImportMatchSheet } from '@/components/ImportMatchSheet';
 import { IcChevronLeft } from '@/components/icons';
+import { relativeTime } from '@/lib/format';
 import { t as tr } from '@/lib/i18n';
 import type { Src } from '@/lib/sourceGroups';
-import { needsAttention, confidenceLabel, confidenceColor, type ImportBatch, type ImportCandidate } from '@/lib/importBatch';
+import {
+  needsAttention, confidenceLabel, confidenceColor, matchTitleDiffers, openBatches, batchStateLabel, batchOriginLabel,
+  runStatusLabel, runStatusColor,
+  type ImportBatch, type ImportBatchSummary, type ImportCandidate,
+} from '@/lib/importBatch';
 
 type Filter = 'all' | 'attention' | 'skipped';
 
-function IntakeCard({ backupRef, mdUrl, setMdUrl, pasted, setPasted, starting, onFile, onMangadex, onPaste }: {
+/**
+ * Batches that were started and not finished, each a tap away.
+ *
+ * A review batch used to be reachable only through `?batch=<id>` in the address bar: close the tab during a
+ * two-hundred-row review and the rows were still in the database with no way back to them short of the
+ * sweep deleting them a month later. Listed on the intake card, where the next visit lands.
+ */
+function OpenImports({ batches, onOpen }: { batches: ImportBatchSummary[]; onOpen: (id: string) => void }) {
+  if (!batches.length) return null;
+  return (
+    <div className="mb-4 rounded-xl border border-ink-700 bg-ink-900/50 p-2.5">
+      <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-fog-500">{tr('Open imports')}</p>
+      <ul className="space-y-1">
+        {batches.map((b) => {
+          const counts = b.state === 'resolving'
+            ? tr('{done}/{total} matched', { done: b.resolved, total: b.total })
+            : b.state === 'importing'
+              ? tr('{done}/{total} added', { done: b.added + b.failed, total: b.total })
+              : b.total === 1 ? tr('1 title') : tr('{n} titles', { n: b.total });
+          return (
+            <li key={b.id}>
+              <button onClick={() => onOpen(b.id)} className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-start hover:bg-ink-800/60">
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-sm text-fog-100">{batchOriginLabel(b.origin)} · {counts}</span>
+                  {/* `stale` is the list route's word for "resolving, and nobody is": after a restart the raw
+                      state read "Matching… 12/40" on the intake card while nothing was matching. */}
+                  <span className="block truncate text-[11px] text-fog-500">{b.stale ? tr('Interrupted — resume') : batchStateLabel(b.state)} · {relativeTime(b.created_at)}</span>
+                </span>
+                <span className="chip shrink-0 text-xs">{tr('Open')}</span>
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
+
+function IntakeCard({ backupRef, mdUrl, setMdUrl, pasted, setPasted, starting, open, onOpen, onFile, onMangadex, onPaste }: {
   backupRef: React.RefObject<HTMLInputElement | null>;
   mdUrl: string; setMdUrl: (v: string) => void;
   pasted: string; setPasted: (v: string) => void;
   starting: boolean;
+  open: ImportBatchSummary[];
+  onOpen: (id: string) => void;
   onFile: (f: File) => void;
   onMangadex: () => void;
   onPaste: () => void;
 }) {
   return (
     <div className="card grad-border wide p-4">
+      <OpenImports batches={open} onOpen={onOpen} />
+
       <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-fog-500">{tr('Bring your library over')}</p>
+      {/* Names the button that commits, not a "Continue" this page never shows -- the wording was written
+          before the button was, and a promise about a control that does not exist is not a promise. */}
       <p className="mb-3 text-[11px] text-fog-500">
-        {tr('Uchiyomi matches each title against your sources and shows you the pick before anything is added — nothing lands in your library until you press Continue.')}
+        {tr('Uchiyomi matches each title against your sources and shows you the pick before anything is added — nothing lands in your library until you press Import selected.')}
       </p>
 
       <div className="mb-2 flex flex-wrap items-center gap-2">
@@ -47,12 +98,14 @@ function IntakeCard({ backupRef, mdUrl, setMdUrl, pasted, setPasted, starting, o
           {tr('Mihon / Tachiyomi backup')}
         </button>
         <span className="text-[11px] text-fog-600">{tr('or')}</span>
+        {/* A floor on the link field so it wraps to its own row on a phone: `min-w-0 flex-1` let it shrink to
+            55 px beside the backup button at 390 px, showing "publi" of its placeholder. */}
         <input value={mdUrl} onChange={(e) => setMdUrl(e.target.value)} placeholder={tr('public MangaDex list link')}
-          autoCapitalize="none" className="field min-w-0 flex-1" />
+          autoCapitalize="none" className="field min-w-44 flex-1" />
         <button onClick={onMangadex} disabled={starting || !mdUrl.trim()} className="chip text-xs disabled:opacity-50">{tr('Load')}</button>
       </div>
       <p className="mb-2 text-[10px] text-fog-600">
-        {tr('A .tachibk backup stays on your server — only the titles (and, where available, which source they came from) are read.')}
+        {tr('A .tachibk backup stays on your server — only each entry\'s title, its source and its address on that source are read.')}
       </p>
 
       <textarea value={pasted} onChange={(e) => setPasted(e.target.value)} rows={4}
@@ -95,6 +148,7 @@ function ReviewRow({ c, sourceName, selected, onToggle, onEdit }: {
 }) {
   const matched = (c.decision === 'auto' || c.decision === 'manual') && !!c.match_title;
   const ready = isReady(c);
+  const attention = needsAttention(c);
   return (
     <div className="flex items-center gap-3 rounded-xl border border-ink-800 bg-ink-900/40 p-2.5">
       {ready ? (
@@ -107,18 +161,34 @@ function ReviewRow({ c, sourceName, selected, onToggle, onEdit }: {
         fallbackSrc={c.match_cover || undefined} className="h-14 w-10 shrink-0 rounded" />
       <div className="min-w-0 flex-1">
         <p className="truncate text-sm text-fog-100">{c.backup_title}</p>
-        {c.status ? (
-          <p className={`text-[11px] ${c.status === 'added' ? 'text-emerald-400' : c.status === 'already' ? 'text-fog-500' : 'text-red-400'}`}>
-            {c.status === 'added' ? tr('Added to your library') : c.status === 'already' ? tr('Already in your library') : tr('Failed — {reason}', { reason: c.status })}
+        {/* What the title was matched TO, on every matched row. Without it "Solo Leveling · MangaDex · close
+            match" read the same whether the pick was Solo Leveling or Solo Leveling: Ragnarok, and the only
+            hint was a 40-px cover -- a wrong pick was invisible without opening the row. Dim when it is the
+            backup title under another spelling, so the line only stands out where it says something new.
+            Two lines, not `truncate`: the column is 140 px on a phone, and a one-line ellipsis cut every
+            real pair exactly where it differed ("→ The Beginning After…" for the (Novel) pick), so the line
+            said nothing on the rows it exists for. Equal titles are dim and short, so the extra 14 px lands
+            only where the title is worth reading. */}
+        {matched && (
+          <p className={`line-clamp-2 break-words text-[12px] ${matchTitleDiffers(c) ? 'text-fog-200' : 'text-fog-600'}`} data-match-title>
+            <span aria-hidden className="inline-block rtl:rotate-180">→</span> {c.match_title}
           </p>
+        )}
+        {c.status ? (
+          <p className={`text-[11px] ${runStatusColor(c.status)}`}>{runStatusLabel(c.status)}</p>
         ) : c.decision === 'skip' ? (
           <p className="text-[11px] text-fog-500">{c.in_library ? tr('Already in your library') : tr('Skipped')}</p>
         ) : matched ? (
           <p className="flex flex-wrap items-center gap-x-1.5 text-[11px] text-fog-400">
             <SourceIcon id={c.match_source!} name={sourceName(c.match_source)} size={16} />
             <span className="truncate text-fog-300">{sourceName(c.match_source)}</span>
-            <span className={confidenceColor(c.confidence)}>· {confidenceLabel(c.confidence)}</span>
-            {c.decision === 'manual' && <span className="text-fog-500">· {tr('manual')}</span>}
+            {/* A manual pick has no confidence tier (the server clears it), and a person just chose it: say so,
+                rather than "unmatched" in amber, which is what the null tier read as. Otherwise amber whenever
+                the row is under Needs attention, whatever tier the server gave it: a `contains` hit that
+                diverges from the backup title is listed there and must look like it. */}
+            {c.decision === 'manual'
+              ? <span className="text-fog-300">· {tr('picked by hand')}</span>
+              : <span className={attention ? 'text-amber-400' : confidenceColor(c.confidence)}>· {confidenceLabel(c.confidence)}</span>}
           </p>
         ) : (
           <p className="text-[11px] text-amber-400">{tr('No match found')}</p>
@@ -150,8 +220,11 @@ function ReviewCard({
   return (
     <div className="card grad-border wide p-4">
       <p className="mb-1 text-sm font-semibold text-fog-100">{tr('{n} titles matched', { n: allCount })}</p>
+      {/* "A few minutes", not "seconds": adding a title with nothing downloaded still asks its source for the
+          series and its chapter list, one title at a time, so two hundred rows is minutes, not a database
+          write. */}
       <p className="mb-3 text-[11px] text-fog-500">
-        {tr('Selected titles are added to your library only — no chapters are downloaded. New releases arrive through auto-update, or fetch older ones from the series page.')}
+        {tr('Selected titles are added to your library only — no chapters are downloaded, but each title is looked up on its source, so a long list takes a few minutes. New releases arrive through auto-update, or fetch older ones from the series page.')}
       </p>
 
       <div className="mb-2 flex flex-wrap gap-2">
@@ -189,10 +262,25 @@ function ReviewCard({
   );
 }
 
-function RunCard({ batch, items, onStartOver }: { batch: ImportBatch; items: ImportCandidate[]; onStartOver: () => void }) {
-  const targeted = items.filter((c) => c.decision === 'auto' || c.decision === 'manual');
-  const done = batch.added + batch.already + batch.failed;
-  const total = targeted.length;
+function RunCard({ batch, items, runIds, runTotal, onStartOver }: {
+  batch: ImportBatch; items: ImportCandidate[];
+  /** The candidate ids this tab sent to /run, or null when the run was started elsewhere (a reload, another tab). */
+  runIds: Set<string> | null;
+  /** `total` from the /run answer: how many of those ids the server accepted as ready. */
+  runTotal: number | null;
+  onStartOver: () => void;
+}) {
+  // Only the rows this run is over. The card used to list every auto/manual row and count the batch's
+  // cumulative added/already/failed against that: select 2 of 8 and it read "Importing… 2/8" with six
+  // pending "…" rows that were never sent, then flipped back to review. Without the sent ids (the run was
+  // started from another tab, or this page reloaded mid-run) the settled rows plus the still-ready ones are
+  // the best reading -- a row left unselected on purpose shows as pending there, which is the old picture,
+  // but only on a page that did not start the run.
+  const targeted = runIds
+    ? items.filter((c) => runIds.has(c.id))
+    : items.filter((c) => !!c.status || isReady(c));
+  const done = targeted.filter((c) => !!c.status).length;
+  const total = runTotal ?? targeted.length;
   return (
     <div className="card grad-border wide p-4">
       <p className="mb-1.5 text-sm font-semibold text-fog-100">
@@ -200,6 +288,11 @@ function RunCard({ batch, items, onStartOver }: { batch: ImportBatch; items: Imp
           ? tr('Importing… {done}/{total}', { done, total })
           : tr('Done — {added} added · {already} already had · {failed} failed', { added: batch.added, already: batch.already, failed: batch.failed })}
       </p>
+      {batch.state === 'importing' && (
+        <p className="mb-3 text-[11px] text-fog-500">
+          {tr('Each title is looked up on its source, so a long list takes a few minutes. You can leave this page; your progress is saved.')}
+        </p>
+      )}
       <ProgressBar value={total ? done / total : 0} />
       <ul className="mt-3 max-h-96 space-y-1 overflow-y-auto">
         {targeted.map((c) => (
@@ -266,36 +359,87 @@ function ImportWizardInner() {
   });
   const sourceName = (id: string | null): string => (id && sourcesData?.content.find((s) => s.id === id)?.name) || id || '';
 
-  const { data, refetch } = useQuery({
+  // Only on the intake card: once a batch is open the page is about that batch.
+  const { data: batchList } = useQuery({
+    queryKey: ['import-batches'],
+    queryFn: () => api<{ content: ImportBatchSummary[] }>('/api/admin/import/batches'),
+    enabled: !batchId,
+    staleTime: 10_000,
+  });
+  const open = openBatches(batchList?.content ?? []);
+
+  const { data, refetch, error: batchError } = useQuery({
     queryKey: ['import-batch', batchId],
     queryFn: () => api<{ batch: ImportBatch; items: ImportCandidate[] }>(`/api/admin/import/batches/${batchId}`),
     enabled: !!batchId,
+    // A 404 is an answer, not a hiccup -- the batch was discarded from another tab or swept -- and the
+    // default retry only held the intake card back by a couple of seconds. Everything else keeps it.
+    retry: (n, e) => !(e instanceof ApiError && e.status === 404) && n < 1,
+    // Polls only while the server is working. An `importing` batch nobody is running (the server restarted
+    // mid-run) comes back from GET already flipped to `review`, and the review card below renders in its
+    // place with the imported rows marked -- so this never sits on a progress bar that will not move.
     refetchInterval: (q) => {
       const st = q.state.data?.batch.state;
       return st === 'resolving' || st === 'importing' ? 1500 : false;
     },
   });
   const batch = data?.batch;
-  const items = data?.items ?? [];
+  // ⚠️ Referentially stable, or the page loops. `data?.items ?? []` minted a NEW empty array on every render
+  // while no batch was loaded -- the intake card -- and the selection-prune effect below keys on `items`:
+  // each keystroke in the paste box re-rendered the page, the effect saw a "changed" dependency, called
+  // setSelected, React rendered again, and after fifty rounds threw "Maximum update depth exceeded" (React
+  // error #185) out of the textarea's onChange. Only sometimes: React's eager same-state bail-out hides it
+  // when the fiber is idle, which is why one walk passed and the next did not with the same page. One
+  // memoised value per query result, and the effect fires once per fetch, as intended. Reintroduce by
+  // writing `data?.items ?? []` again: typing three lines into the paste box throws in the console.
+  const items = useMemo(() => data?.items ?? [], [data]);
 
   const [filter, setFilter] = useState<Filter>('all');
   const [q, setQ] = useState('');
   const [editing, setEditing] = useState<ImportCandidate | null>(null);
   const [running, setRunning] = useState(false);
+  const [discarding, setDiscarding] = useState(false);
+  const [discardBusy, setDiscardBusy] = useState(false);
   // Bulk-import selection: candidate ids about to be sent to /run. Empty by default -- picking what to
   // import is a deliberate act via "Select all" / "Select ready to import" / a row's own checkbox, not a
   // default the admin has to opt out of.
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  // What THIS tab last sent to /run and how many of it the server accepted, for the importing card's
+  // count and list. Null until a run is started here; a reload mid-run lands on the card without them.
+  const [runIds, setRunIds] = useState<Set<string> | null>(null);
+  const [runTotal, setRunTotal] = useState<number | null>(null);
+
+  // The selection follows the rows: a row skipped from the sheet, or added by a run, is no longer ready
+  // and drops out of the state on the next refetch ("6 selected" used to keep a row that Change → Skip had
+  // just removed, and Import selected sent six ids of which the server took five). `selectedReady` below
+  // is the render-time half of the same rule; this keeps the state from carrying dead ids between
+  // refetches. Same Set back when nothing changed, so the effect settles instead of re-rendering per poll.
+  useEffect(() => {
+    setSelected((s) => {
+      if (!s.size) return s;
+      const ready = new Set(items.filter(isReady).map((c) => c.id));
+      const kept = new Set([...s].filter((id) => ready.has(id)));
+      return kept.size === s.size ? s : kept;
+    });
+  }, [items]);
 
   const filtered = items.filter((c) => {
     if (filter === 'attention' && !needsAttention(c)) return false;
     if (filter === 'skipped' && c.decision !== 'skip') return false;
-    if (q.trim() && !c.backup_title.toLowerCase().includes(q.trim().toLowerCase())) return false;
+    // Backup title OR matched title: a row that reads "Naruto → Boruto: Naruto Next Generations" is the
+    // one a person types "Boruto" to find, and the filter found nothing.
+    const needle = q.trim().toLowerCase();
+    if (needle && !c.backup_title.toLowerCase().includes(needle) && !(c.match_title || '').toLowerCase().includes(needle)) return false;
     return true;
   });
   const attentionCount = items.filter(needsAttention).length;
   const skippedCount = items.filter((c) => c.decision === 'skip').length;
   const readyCount = items.filter(isReady).length;
+  // The selection as it will be sent: only ready rows have a checkbox, so an id "Select all" put in for a
+  // skipped or unmatched row is invisible on the list and must not be counted -- "8 selected" over five
+  // checkboxes, then "Importing… 0/5", was the mismatch. One Set for the checkboxes, the count and /run.
+  const readyIds = new Set(items.filter(isReady).map((c) => c.id));
+  const selectedReady = new Set([...selected].filter((id) => readyIds.has(id)));
 
   const resume = async () => {
     if (!batchId) return;
@@ -307,44 +451,105 @@ function ImportWizardInner() {
   const selectReady = () => setSelected(new Set(items.filter(isReady).map((c) => c.id)));
   const clearSelection = () => setSelected(new Set());
   const runImport = async () => {
-    if (!batchId || selected.size === 0) return;
+    if (!batchId || selectedReady.size === 0) return;
+    // Only the ready rows among the selection go: "Select all" marks every row, and the server would drop
+    // the rest anyway -- sending exactly what it will take makes its `total` the card's denominator.
+    const ids = items.filter((c) => selectedReady.has(c.id)).map((c) => c.id);
     setRunning(true);
     try {
-      await api(`/api/admin/import/batches/${batchId}/run`, { method: 'POST', json: { candidateIds: [...selected] } });
+      const r = await api<{ ok: boolean; total: number }>(`/api/admin/import/batches/${batchId}/run`, { method: 'POST', json: { candidateIds: ids } });
+      setRunIds(new Set(ids));
+      setRunTotal(typeof r?.total === 'number' ? r.total : ids.length);
       setSelected(new Set());
       refetch();
     } catch (e: any) { toast(msgOf(e, tr('Could not start the import')), 'error'); }
     setRunning(false);
   };
-  const startOver = () => { setBatchId(null); setMdUrl(''); setPasted(''); setSelected(new Set()); router.replace('/admin/import/'); };
+  const startOver = () => {
+    setBatchId(null); setMdUrl(''); setPasted(''); setSelected(new Set()); setFilter('all'); setQ('');
+    setRunIds(null); setRunTotal(null);
+    qc.invalidateQueries({ queryKey: ['import-batches'] });
+    router.replace('/admin/import/');
+  };
+  // A ?batch= link to a batch that no longer exists (swept after 30 days, discarded from another tab): the
+  // page used to render the intake card with the dead id still in the address bar and, because the list
+  // query is `enabled: !batchId`, no Open imports list -- the one situation that list is for. Back to the
+  // intake proper, with a word about why.
+  useEffect(() => {
+    if (batchError instanceof ApiError && batchError.status === 404) {
+      toast(tr('That import is gone'), 'info');
+      startOver();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- runs once per error, not per render of startOver
+  }, [batchError]);
+  // DELETE, then back to the intake card. The server stops the resolve or run loop this batch had going and
+  // drops its rows; a title already added by this batch stays in the library -- discarding the review is
+  // not removing series, and the dialog says so.
+  const discard = async () => {
+    if (!batchId) return;
+    setDiscardBusy(true);
+    try {
+      await api(`/api/admin/import/batches/${batchId}`, { method: 'DELETE' });
+      qc.removeQueries({ queryKey: ['import-batch', batchId] });
+      toast(tr('Import discarded'), 'success');
+      setDiscarding(false);
+      startOver();
+    } catch (e: any) { toast(msgOf(e, tr('Could not discard this import')), 'error'); }
+    setDiscardBusy(false);
+  };
+  const openBatch = (id: string) => { setBatchId(id); router.replace(`/admin/import/?batch=${id}`); };
   const closeEditor = () => { setEditing(null); qc.invalidateQueries({ queryKey: ['import-batch', batchId] }); };
 
   if (!isAdmin) return <div className="flex min-h-screen-d items-center justify-center text-fog-400">{tr('Admins only.')}</div>;
 
+  const canDiscard = !!batch && batch.state !== 'done' && batch.state !== 'cancelled';
+
   return (
     <div className="min-h-screen-d px-4 pb-10 pt-4 lg:px-0">
       <div className="mb-4 flex items-center gap-2">
-        <button onClick={() => router.push('/admin/')} className="grid h-8 w-8 place-items-center rounded-full text-fog-400 hover:text-fog-100" aria-label={tr('Back')}>
+        <button onClick={() => router.push('/admin/')} className="grid h-8 w-8 shrink-0 place-items-center rounded-full text-fog-400 hover:text-fog-100" aria-label={tr('Back')}>
           <IcChevronLeft width={18} height={18} className="rtl:rotate-180" />
         </button>
-        <h1 className="font-display text-lg font-semibold text-fog-50">{tr('Import & review matches')}</h1>
+        <h1 className="min-w-0 truncate font-display text-lg font-semibold text-fog-50">{tr('Import & review matches')}</h1>
+        {/* One Discard for all three live states (matching, review, importing): the same batch, the same
+            DELETE, one place to look for it. Absent once the batch is done -- there is nothing to stop. */}
+        {canDiscard && (
+          <button onClick={() => setDiscarding(true)} className="chip ms-auto shrink-0 text-xs">{tr('Discard')}</button>
+        )}
       </div>
 
       {!batch ? (
         <IntakeCard backupRef={backupRef} mdUrl={mdUrl} setMdUrl={setMdUrl} pasted={pasted} setPasted={setPasted}
-          starting={starting} onFile={startFromFile} onMangadex={startFromMangadex} onPaste={startFromPaste} />
+          starting={starting} open={open} onOpen={openBatch} onFile={startFromFile} onMangadex={startFromMangadex} onPaste={startFromPaste} />
       ) : batch.state === 'resolving' ? (
         <ResolvingCard batch={batch} onResume={resume} />
       ) : batch.state === 'review' ? (
         <ReviewCard items={filtered} allCount={items.length} attentionCount={attentionCount} skippedCount={skippedCount}
-          readyCount={readyCount} selectedIds={selected} filter={filter} setFilter={setFilter} q={q} setQ={setQ}
+          readyCount={readyCount} selectedIds={selectedReady} filter={filter} setFilter={setFilter} q={q} setQ={setQ}
           onEdit={setEditing} onToggle={toggleSelected} onSelectAll={selectAll} onSelectReady={selectReady}
           onClearSelection={clearSelection} onRun={runImport} running={running} sourceName={sourceName} />
       ) : (
-        <RunCard batch={batch} items={items} onStartOver={startOver} />
+        <RunCard batch={batch} items={items} runIds={runIds} runTotal={runTotal} onStartOver={startOver} />
       )}
 
       {editing && batchId && <ImportMatchSheet batchId={batchId} candidate={editing} onClose={closeEditor} />}
+
+      {/* Never open while the match sheet is: ConfirmDialog is a z-50 Modal and the Sheet is z-60, so the
+          dialog would paint under it. The Discard button lives in the page header, behind the sheet's
+          backdrop, so the two cannot be open at once. */}
+      {discarding && batch && (
+        <ConfirmDialog
+          title={tr('Discard this import?')}
+          body={batch.added > 0
+            ? tr('The list and every match you reviewed are thrown away. Anything this import already added ({n} so far) stays in your library.', { n: batch.added })
+            : tr('The list and every match you reviewed are thrown away. Nothing has been added to your library yet, so nothing else changes.')}
+          confirmLabel={tr('Discard')}
+          danger
+          busy={discardBusy}
+          onConfirm={discard}
+          onClose={() => setDiscarding(false)}
+        />
+      )}
     </div>
   );
 }

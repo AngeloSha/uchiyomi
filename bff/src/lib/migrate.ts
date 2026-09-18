@@ -799,7 +799,10 @@ CREATE TABLE IF NOT EXISTS import_candidates (
   status                    text,
   UNIQUE (batch_id, ord)
 );
-CREATE INDEX IF NOT EXISTS import_candidates_batch_idx ON import_candidates (batch_id, ord);
+-- The UNIQUE above already is a (batch_id, ord) btree; the PR that added the table also created this
+-- second, identical index. DROP rather than delete the line: installs that booted on that build have the
+-- index, and IF EXISTS keeps this idempotent for everyone else.
+DROP INDEX IF EXISTS import_candidates_batch_idx;
 
 -- Ledger for run-once DATA migrations. The DDL string above stays the home for everything idempotent
 -- (CREATE / ALTER ... IF NOT EXISTS, which can safely run on every boot). Anything that would corrupt data
