@@ -135,8 +135,11 @@ async function sweep(opts: { autoFix?: boolean }): Promise<WatchdogResult> {
     const smoke = await smokeTest(src);
     // The adapter's own result and whether this source is solver-fronted are both live evidence, and both
     // outrank a bare homepage request. Without them a Cloudflare-protected site that works perfectly reads
-    // as a 403 block, because the probe deliberately does not use the solver.
-    const probe = bare && { ...bare, adapterOk: smoke.ok, needsSolver: !!src.requiresCloudflare };
+    // as a 403 block, because the probe deliberately does not use the solver. `bare` stays undefined for
+    // adapters with no `base` to probe (every Suwayomi/extension source: the engine talks to the site, not
+    // this server) -- but `adapterOk` must still reach `diagnose`, or a source that just passed every live
+    // check falls through to whatever stale error `last_error` happened to hold and never clears.
+    const probe = { httpStatus: 0, ...bare, adapterOk: smoke.ok, needsSolver: !!src.requiresCloudflare };
     const parsedNothing = smoke.checks[0]?.ok === false && /no results/.test(smoke.checks[0]?.detail || '');
     let d = diagnose(
       {
