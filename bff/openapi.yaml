@@ -1445,12 +1445,24 @@ paths:
         - sources
       summary: Search every enabled source at once.
       operationId: getApiSourcesSearchAll
+      description: >-
+        By default groups results by normalized title (one card, every provider that has it — what Discover
+        uses). With `groupBy=source`, groups by provider instead (one rail per source, mirroring Mihon's
+        global search) — used by the import review sheet's manual-search screen, where which specific source
+        a pick comes from matters more than which other sources also carry the same title.
       parameters:
         - name: q
           in: query
           required: false
           schema:
             type: string
+        - name: groupBy
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [source]
+          description: Omit for the default title-grouped shape.
       security:
         - bearer: []
       responses:
@@ -5216,6 +5228,231 @@ paths:
           description: Not authenticated
         "403":
           description: "Forbidden: token scope, account permission or age limit"
+  /api/admin/import/batches:
+    post:
+      tags:
+        - admin
+      summary: Start a reviewable import — parse a backup/MangaDex list/paste and match each title in the background.
+      operationId: postApiAdminImportBatches
+      description: >-
+        Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. Unlike
+        POST /api/admin/import, nothing is added yet: each title gets matched against the user's sources in
+        the background (GET the batch to watch progress), and only rows accepted via PATCH
+        /api/admin/import/candidates/{cid} or left on their auto match are added once
+        /api/admin/import/batches/{id}/run is called. One batch resolves at a time server-wide.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                dataUrl:
+                  type: string
+                  description: A .tachibk/.proto.gz backup as a data URL (no multipart plugin; mirrors the art upload).
+                mangadexList:
+                  type: string
+                  description: A public MangaDex list URL or id.
+                titles:
+                  type: array
+                  items:
+                    type: string
+                  description: Pasted titles, one per entry. Exactly one of dataUrl/mangadexList/titles must be given.
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: "Bad request: no titles found, or none of dataUrl/mangadexList/titles given"
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+        "409":
+          description: "Conflict: another batch is already resolving"
+        "422":
+          description: "Unprocessable: the file/list could not be parsed"
+  /api/admin/import/batches/{id}:
+    get:
+      tags:
+        - admin
+      summary: A batch's state and every candidate row.
+      operationId: getApiAdminImportBatchesId
+      description: Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+        "404":
+          description: Not found
+    delete:
+      tags:
+        - admin
+      summary: Discard a batch (and every candidate row, cascading).
+      operationId: deleteApiAdminImportBatchesId
+      description: Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+  /api/admin/import/batches/{id}/resume:
+    post:
+      tags:
+        - admin
+      summary: Resume matching for a batch left stuck 'resolving' by a server restart.
+      operationId: postApiAdminImportBatchesIdResume
+      description: Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+        "404":
+          description: Not found
+        "409":
+          description: "Conflict: not in the resolving state, or another batch is resolving"
+  /api/admin/import/batches/{id}/run:
+    post:
+      tags:
+        - admin
+      summary: "Import selected: add matched, not-yet-imported rows. Never downloads a chapter."
+      operationId: postApiAdminImportBatchesIdRun
+      description: >-
+        Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
+        Adds every eligible row (decision `auto`/`manual`, has a match, not already run) named in
+        `candidateIds`, or every eligible row in the batch if `candidateIds` is omitted. A skipped or
+        still-unresolved id in `candidateIds` is silently left out rather than erroring the request. Every
+        add uses the "nothing yet" path — the series is created and followed, no chapter is fetched — so a
+        bulk import is a catalogue move, not a bulk download; chapters arrive through auto-update or a
+        manual fetch afterwards. Safe to call more than once on the same batch: a row already imported by an
+        earlier call is never re-added, which is how a "second import try" for rows found by hand later
+        works. The batch returns to `review` (not `done`) while anything importable is still waiting.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                autoUpdate:
+                  type: boolean
+                candidateIds:
+                  type: array
+                  items:
+                    type: string
+                  description: Which candidate rows to import. Omit to import every eligible row in the batch.
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: "Bad request: nothing selected is ready to import"
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+        "404":
+          description: Not found
+        "409":
+          description: "Conflict: still resolving, or already importing"
+  /api/admin/import/candidates/{cid}:
+    patch:
+      tags:
+        - admin
+      summary: Accept, override or skip one row of a batch under review.
+      operationId: patchApiAdminImportCandidatesCid
+      description: Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
+      parameters:
+        - name: cid
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - type: object
+                  required: [decision, source, sourceId, title]
+                  properties:
+                    decision:
+                      type: string
+                      enum: [manual]
+                    source:
+                      type: string
+                    sourceId:
+                      type: string
+                    title:
+                      type: string
+                    coverUrl:
+                      type: string
+                - type: object
+                  required: [decision]
+                  properties:
+                    decision:
+                      type: string
+                      enum: [skip]
+                - type: object
+                  required: [decision]
+                  properties:
+                    decision:
+                      type: string
+                      enum: [auto]
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+        "404":
+          description: Not found
+        "409":
+          description: "Conflict: decision:'auto' requested but the resolve pass found no match for this row"
   /api/admin/sources:
     get:
       tags:

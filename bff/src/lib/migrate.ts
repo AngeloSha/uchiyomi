@@ -738,6 +738,69 @@ CREATE TABLE IF NOT EXISTS page_hashes (
 );
 CREATE INDEX IF NOT EXISTS page_hashes_hash_idx ON page_hashes (hash);
 
+-- Bulk import (backup / MangaDex list / pasted titles) → match review → add. Unlike importJob/artJob/
+-- relinkJob (in-memory singletons in admin.ts), this survives a restart on purpose: matching is a
+-- cross-source search pass that can run for minutes, and a human then has to look at every uncertain row,
+-- which can take much longer than that. Losing either the resolve pass or the reviewer's picks to a
+-- container restart or an accidentally-closed tab would mean redoing potentially hundreds of manual calls.
+--   state  resolving = matching titles against sources, review = waiting on the admin, importing = adding
+--          picked series, done = finished, cancelled = discarded before/without running.
+CREATE TABLE IF NOT EXISTS import_batches (
+  id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id     uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  origin      text NOT NULL, -- 'backup' | 'mangadex' | 'paste'
+  state       text NOT NULL DEFAULT 'resolving',
+  total       int  NOT NULL DEFAULT 0,
+  resolved    int  NOT NULL DEFAULT 0,
+  added       int  NOT NULL DEFAULT 0,
+  already     int  NOT NULL DEFAULT 0,
+  failed      int  NOT NULL DEFAULT 0,
+  created_at  timestamptz NOT NULL DEFAULT now(),
+  updated_at  timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS import_batches_user_idx ON import_batches (user_id, created_at DESC);
+
+-- One row per title in the batch.
+--   decision        unresolved = still matching / no match found, auto = accepted the best cross-source
+--                    match as-is, manual = the admin picked a specific source/series in the review sheet,
+--                    skip = leave this one out (includes the "already in your library" default).
+--   confidence       same_source = matched on the extension the backup entry itself came from (Mihon's
+--                    source id resolved to an installed adapter), exact/contains/fuzzy = pickBestScored's
+--                    title-only tiers, null = unresolved or skipped.
+--   match_*          the CURRENT effective pick — what /run will add. Equals auto_* while decision='auto',
+--                    the review sheet's choice while decision='manual', meaningless while 'unresolved'/'skip'.
+--   auto_*           the resolve pass's own suggestion, frozen once written and never overwritten by a
+--                    manual pick. Kept so "use the auto match" in the review sheet can restore it after a
+--                    person has overridden it, without re-running the cross-source search.
+--   status           set once /run has processed the row: 'added' | 'already' | 'not_found' | 'error' | a
+--                    source's own failure message. Null until then.
+CREATE TABLE IF NOT EXISTS import_candidates (
+  id                        uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  batch_id                  uuid NOT NULL REFERENCES import_batches(id) ON DELETE CASCADE,
+  ord                       int  NOT NULL,
+  backup_title              text NOT NULL,
+  -- Both renderings of Mihon's source id are kept (see BackupEntry in lib/tachibk.ts) so a resumed batch
+  -- can redo the same signed/unsigned lookup against suwayomi_sources without re-parsing the original file.
+  backup_source_id_unsigned text,
+  backup_source_id_signed   text,
+  backup_url                text,
+  in_library                boolean NOT NULL DEFAULT false,
+  decision                  text NOT NULL DEFAULT 'unresolved',
+  confidence                text,
+  match_source              text,
+  match_source_id           text,
+  match_title               text,
+  match_cover               text,
+  auto_source               text,
+  auto_source_id            text,
+  auto_title                text,
+  auto_cover                text,
+  auto_confidence           text,
+  status                    text,
+  UNIQUE (batch_id, ord)
+);
+CREATE INDEX IF NOT EXISTS import_candidates_batch_idx ON import_candidates (batch_id, ord);
+
 -- Ledger for run-once DATA migrations. The DDL string above stays the home for everything idempotent
 -- (CREATE / ALTER ... IF NOT EXISTS, which can safely run on every boot). Anything that would corrupt data
 -- by running twice goes through runOnce() instead, which stamps this table IN THE SAME TRANSACTION as its

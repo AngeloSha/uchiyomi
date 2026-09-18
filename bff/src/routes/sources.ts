@@ -3,7 +3,7 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { authenticate, userIdOf, roleOf } from '../lib/auth';
-import { getSource, listSources, isSwAdapterId, SW_PREFIX, withTimeout } from '../lib/sources';
+import { getSource, listSources, isSwAdapterId, SW_PREFIX, swAdapterId, withTimeout } from '../lib/sources';
 import type { SourceAdapter, SourceSeries, SourceChapter } from '../lib/sources/types';
 import { downloadChapter, sanitize, type DownloadInput } from '../lib/downloader';
 import { selectChapters, type ChapterFrom } from '../lib/selectChapters';
@@ -200,15 +200,22 @@ function findOrder(): string[] {
   return listSources().slice().sort((a, b) => (a.preferredOrder ?? 999) - (b.preferredOrder ?? 999)).map((s) => s.id);
 }
 const STOP = new Set(['the', 'a', 'an', 'of', 'and', 'to', 'in', 'is', 'no', 'my', 'i', 'on', 'with', 'for']);
+
+/** Title-match confidence tiers, best first. Exposed to callers that show the pick to a person (import review). */
+export type MatchConfidence = 'same_source' | 'exact' | 'contains' | 'fuzzy';
+
 // Best title-match for a provider, or null if it doesn't really carry the title. NEVER fall back to list[0]
 // — a provider's first result for a title it lacks is an unrelated manga (the "wrong manga" bug).
-function pickBest<T extends { title: string }>(list: T[], term: string): T | null {
+// Scored version used where the caller (or a human) needs to know HOW GOOD the match is, not just what it
+// is. Kept separate from `pickBest` below rather than changing its signature: fifteen existing call sites
+// only ever wanted the item.
+function pickBestScored<T extends { title: string }>(list: T[], term: string): { item: T; confidence: MatchConfidence } | null {
   if (!list.length) return null;
   const n = norm(term);
   const exact = list.find((r) => norm(r.title) === n);
-  if (exact) return exact;
+  if (exact) return { item: exact, confidence: 'exact' };
   const sub = list.find((r) => { const t = norm(r.title); return t.length > 2 && (t.includes(n) || n.includes(t)); });
-  if (sub) return sub;
+  if (sub) return { item: sub, confidence: 'contains' };
   // token overlap: most meaningful query words must appear in the title
   const qw = term.toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length > 2 && !STOP.has(w));
   if (qw.length) {
@@ -219,9 +226,12 @@ function pickBest<T extends { title: string }>(list: T[], term: string): T | nul
       const hit = qw.filter((w) => tw.has(w)).length / qw.length;
       if (hit > score) { score = hit; best = r; }
     }
-    if (score >= 0.7) return best;
+    if (score >= 0.7 && best) return { item: best, confidence: 'fuzzy' };
   }
   return null;
+}
+function pickBest<T extends { title: string }>(list: T[], term: string): T | null {
+  return pickBestScored(list, term)?.item ?? null;
 }
 
 /**
@@ -668,18 +678,72 @@ export async function addSeriesFromSource(opts: {
   return { ok: true, status: 200, title, folder, chapters: selected.length, started: true };
 }
 
-/** Best single cross-source match for a title (searches sources in preferred order, returns the first real hit). */
-export async function findBestMatch(term: string): Promise<{ source: string; sourceId: string; title: string } | null> {
+/**
+ * Map a Mihon backup entry's source id to an installed, enabled Suwayomi extension adapter, if any.
+ *
+ * Suwayomi stores the very same 64-bit Mihon source id in `suwayomi_sources.source_id` (written by
+ * `remember()` in lib/sources/suwayomi/register.ts), as a decimal string. Whether that string is the signed
+ * or unsigned rendering of the id depends on how the source plugin computed its hash, so both forms parsed
+ * out of the backup (`BackupEntry.sourceIdUnsigned` / `sourceIdSigned`) are checked. Only Suwayomi-backed
+ * sources can match here — MangaDex, engine sites and custom sites have no Mihon source id to compare
+ * against, and fall through to title search in `resolveCandidate` below like they always did.
+ */
+export async function mihonSourceToAdapter(ids: { sourceIdUnsigned?: string; sourceIdSigned?: string }): Promise<string | null> {
+  const candidates = [...new Set([ids.sourceIdUnsigned, ids.sourceIdSigned].filter((x): x is string => !!x))];
+  if (!candidates.length) return null;
+  const rows = await q<{ source_id: string }>(
+    'SELECT source_id FROM suwayomi_sources WHERE source_id = ANY($1) AND enabled = true',
+    [candidates],
+  ).catch(() => []);
+  if (!rows.length) return null;
+  const id = swAdapterId(rows[0].source_id);
+  if (await isDisabled(id).catch(() => false)) return null;
+  return getSource(id) ? id : null;
+}
+
+export interface ResolvedCandidate { source: string; sourceId: string; title: string; coverUrl?: string; confidence: MatchConfidence }
+
+/**
+ * Best cross-source match for one import-batch title, source-id-aware.
+ *
+ * If the backup entry says which Mihon source it came from and that source is installed here, THAT source
+ * is searched first and a hit there is trusted at `same_source` confidence even if the title string is a
+ * loose match — the backup told us this literally is the same catalogue entry, just possibly retitled by
+ * the site since. Otherwise (no source id, source not installed, or no hit there) falls through to the
+ * existing preferred-order title search, same as `findBestMatch`.
+ */
+export async function resolveCandidate(entry: { title: string; sourceIdUnsigned?: string; sourceIdSigned?: string }): Promise<ResolvedCandidate | null> {
+  const home = await mihonSourceToAdapter(entry);
+  if (home) {
+    const src = getSource(home);
+    if (src) {
+      try {
+        const raw = await withTimeout(src.search(entry.title), budgetFor(src, 20000));
+        if (raw.length) {
+          const best = pickBestScored(raw, entry.title);
+          const pick = best?.item ?? raw[0]; // same source as the backup: a same-catalogue hit beats nothing
+          if (pick?.sourceId) return { source: home, sourceId: pick.sourceId, title: pick.title, coverUrl: pick.coverUrl, confidence: 'same_source' };
+        }
+      } catch { /* fall through to cross-source search */ }
+    }
+  }
   for (const id of findOrder()) {
+    if (id === home) continue; // already tried above
     const src = getSource(id);
     if (!src) continue;
     if (await isDisabled(id).catch(() => false)) continue;
     try {
-      const best = pickBest(await withTimeout(src.search(term), budgetFor(src, 20000)), term);
-      if (best?.sourceId) return { source: id, sourceId: best.sourceId, title: best.title };
+      const best = pickBestScored(await withTimeout(src.search(entry.title), budgetFor(src, 20000)), entry.title);
+      if (best?.item.sourceId) return { source: id, sourceId: best.item.sourceId, title: best.item.title, coverUrl: best.item.coverUrl, confidence: best.confidence };
     } catch { /* try next source */ }
   }
   return null;
+}
+
+/** Best single cross-source match for a title (searches sources in preferred order, returns the first real hit). */
+export async function findBestMatch(term: string): Promise<{ source: string; sourceId: string; title: string } | null> {
+  const r = await resolveCandidate({ title: term });
+  return r ? { source: r.source, sourceId: r.sourceId, title: r.title } : null;
 }
 
 export default async function sourceRoutes(app: FastifyInstance) {
@@ -1219,18 +1283,41 @@ export default async function sourceRoutes(app: FastifyInstance) {
   });
 
   app.get('/api/sources/search-all', async (req) => {
-    const term = ((req.query as { q?: string }).q || '').trim();
+    const { q: rawQ, groupBy } = req.query as { q?: string; groupBy?: string };
+    const term = (rawQ || '').trim();
     if (!term) return { content: [] };
     // Filtered rather than rejected: a fan-out has no single source to refuse, and a capped account asking
     // for a title that only exists on adult sources should get "nobody has it", not a partial denial.
     const allowed = new Set(reachable(req).map((x) => x.id));
-    const per = await Promise.all(findOrder().filter((id) => allowed.has(id)).map(async (id) => {
+    const ids = findOrder().filter((id) => allowed.has(id));
+    const per = await Promise.all(ids.map(async (id) => {
       const src = getSource(id);
       if (!src) return [];
       if (await isDisabled(id).catch(() => false)) return [];
       try { return (await withTimeout(src.search(term), budgetFor(src, 20000))).slice(0, 12).map((r) => ({ ...r, name: src.name })); }
       catch { return []; }
     }));
+
+    // Same fan-out either way; only the shaping differs. groupBy=source mirrors Mihon's global-search
+    // screen (one rail per provider) for the import-review "search manually" sheet — the title-grouped
+    // shape below groups all providers of the SAME title into one card instead, which is what Discover
+    // wants but hides which specific source a manual pick would come from.
+    if (groupBy === 'source') {
+      const have = await inLibrary(per.flat().map((r) => r.title));
+      const bySource = ids
+        .map((id, i) => {
+          const src = getSource(id);
+          const list = per[i] || [];
+          if (!src || !list.length) return null;
+          return {
+            source: id, name: src.name, lang: src.lang ?? null,
+            results: list.filter((r) => !!r.sourceId).map((r) => ({ ...r, inLibrary: have.has(norm(r.title)) })),
+          };
+        })
+        .filter((g): g is NonNullable<typeof g> => !!g);
+      return { content: bySource };
+    }
+
     // group by normalized title → one card that carries every provider offering it (preferred order preserved)
     const groups = new Map<string, { title: string; coverUrl?: string; updatedAt?: string; providers: { source: string; name: string; sourceId: string; coverUrl?: string; title: string }[] }>();
     for (const list of per) for (const r of list) {
