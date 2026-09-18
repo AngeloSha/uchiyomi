@@ -437,10 +437,23 @@ carries `picks`.
 ```
 POST   /api/library/bulk/read     POST   /api/favorites/bulk
 POST   /api/collections/:id/items/bulk
+POST   /api/library/bulk/newest
 ```
 Each takes `{ seriesIds: [...] }`, up to 500. An id that no longer exists is reported in `skipped` rather
 than failing the batch. Marking read deliberately writes no reading events, so importing a backlog does not
 inflate streaks or the leaderboard.
+
+`POST /api/library/bulk/newest` fetches the **single newest missing chapter** of each series. It downloads
+bytes, so it sits behind the same `canDownload` permission as the source routes rather than behind library
+visibility alone — without that the button's permission would be cosmetic, since a denied account could
+still drive downloads by id. The series' chapter floor is **ignored** here on purpose: the floor exists to
+stop the unattended sweep walking a back catalogue, and a follow-only series (a "Nothing yet" add, or a row
+from the Mihon-backup wizard) is floored above everything its source lists, so it would otherwise answer
+"already at latest" while holding no chapters at all. `{n} behind` on the series page still counts only what
+the sweep would take. Neither the chapter retry cap nor a group hold filters the one queued chapter — both
+guard the sweep, not a person who clicked. Each entry in `skipped` carries a reason: `up_to_date`, `gone`,
+`failed`, `blocked`, `source_error`, `unrouted` or `error`. One library scan runs after the batch, not one
+per series, so what landed becomes readable rows instead of files no chapter row points at.
 
 ### Personal
 ```
@@ -508,6 +521,7 @@ POST   /api/admin/series/:id/library
 POST   /api/admin/series/library
 GET    /api/admin/library/writable
 POST   /api/admin/series/:id/delete-files
+POST   /api/admin/series/bulk/delete
 POST   /api/admin/series/:id/rename-folder
 POST   /api/admin/series/:id/chapters/delete POST   /api/admin/series/:id/chapters/refetch
 PUT    /api/admin/books/:id/meta
@@ -558,6 +572,15 @@ editor is the panel with buttons); `listed` is kept and equals `releases`.
 gathered from the files on disk and from the persisted listings of every source (not from the sources
 themselves; this is one call for the whole library), merged by the same group equality the release rules
 use, `series` counting the series the group appears on. Memoised for 30 seconds.
+
+**Deleting many series at once.** `POST /api/admin/series/bulk/delete {seriesIds[], confirm}` (1–500) is
+the library page's multi-select toolbar: each series is hidden (the same step `DELETE /api/admin/series/:id`
+takes) and then its files are deleted from disk. `confirm` must be the literal `DELETE` — the single-series
+flow asks for that series' exact title, which is right for one deliberate click and is not something anyone
+retypes N times, so the word is the confirmation surface for a batch. A series that cannot be removed is
+reported rather than aborting the run: `skipped: [{id, reason}]` with `reason` one of `not_found`, `merged`,
+or whatever `delete-files` refused with. It answers `{ok, applied, files, bytes, skipped}` and writes a
+`series.bulk_delete` audit line.
 
 **Deleting a chapter from the server, and fetching it again.** Both are admin actions on chosen chapters,
 and both touch the download directory only: a chapter the scanner found in the read library is never

@@ -2513,6 +2513,40 @@ paths:
           description: Malformed body or parameter
         "401":
           description: Not authenticated
+  /api/library/bulk/newest:
+    post:
+      tags:
+        - personal
+      summary: Fetch the single newest missing chapter for many series (up to 500).
+      operationId: postApiLibraryBulkNewest
+      description: >-
+        Downloads bytes, so it is gated by the same `canDownload` permission as the source routes, not by
+        library visibility alone. The series' chapter floor is deliberately ignored: the floor exists to
+        stop the unattended sweep backfilling a back catalogue, and a follow-only series would otherwise
+        answer "already at latest" while holding nothing. One result per series in `skipped`, with a reason
+        (`up_to_date`, `gone`, `failed`, `blocked`, `source_error`, `unrouted`, `error`).
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                seriesIds:
+                  type: array
+                  items:
+                    type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: Malformed body or parameter
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: this account may not download chapters"
   /api/favorites/bulk:
     post:
       tags:
@@ -4264,6 +4298,47 @@ paths:
           description: "Forbidden: token scope, account permission or age limit"
         "404":
           description: Not found, or not visible to this account
+  /api/admin/series/bulk/delete:
+    post:
+      tags:
+        - admin
+      summary: Hide and delete the files of many series at once (up to 500, irreversible).
+      operationId: postApiAdminSeriesBulkDelete
+      description: >-
+        Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
+        Gated by the literal string "DELETE" in `confirm` rather than each series' own title, which is
+        not something anyone retypes per item. A series that cannot be removed (already gone, merged
+        away, files not writable) is reported in `skipped` rather than failing the batch.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - seriesIds
+                - confirm
+              properties:
+                seriesIds:
+                  type: array
+                  minItems: 1
+                  maxItems: 500
+                  items:
+                    type: string
+                confirm:
+                  type: string
+                  description: Must be "DELETE" (case-insensitive, trimmed).
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: Malformed body, or `confirm` was not "DELETE"
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
   /api/admin/series/{id}/chapters/delete:
     post:
       tags:
