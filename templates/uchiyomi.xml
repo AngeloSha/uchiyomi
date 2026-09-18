@@ -6,8 +6,8 @@
   uchiyomi under "User templates".
 
   NOT by adding a template repository URL. Unraid deleted that field in 6.10, and since 7.3 the file it
-  wrote (/boot/config/plugins/dockerMan/template-repos) is never read -- downloadTemplates() returns
-  before it gets there -- so appending to it is a no-op. getTemplates() scans templates-user, which is
+  wrote (/boot/config/plugins/dockerMan/template-repos) is never read - - downloadTemplates() returns
+  before it gets there, so appending to it is a no-op. getTemplates() scans templates-user, which is
   why dropping the file there is what works.
 -->
 <Container version="2">
