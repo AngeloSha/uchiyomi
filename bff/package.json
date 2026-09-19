@@ -23,7 +23,7 @@
     "@fastify/swagger": "^9.8.1",
     "@fastify/swagger-ui": "^6.1.1",
     "@node-rs/argon2": "^2.2.1",
-    "adm-zip": "^0.6.0",
+    "adm-zip": "^0.6.1",
     "fastify": "^5.12.4",
     "mupdf": "^1.28.1",
     "node-stream-zip": "^1.15.0",
