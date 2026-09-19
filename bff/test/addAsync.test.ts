@@ -28,7 +28,12 @@ test('THE WAIT: the route does not hold the reply for the download', () => {
   const t = code(read('routes', 'sources.ts'));
   const at = t.indexOf("app.post('/api/sources/add'");
   assert.ok(at > 0, 'the add route is gone');
-  const route = t.slice(at, at + 900);
+  // The whole route, to its closing brace: a fixed byte window silently shrank to "the first N characters"
+  // as the body schema grew (the alsoFollow line of v0.36.0 pushed the call past it) and the guard failed
+  // for a reason that was never the wait.
+  const end = t.indexOf('\n  });', at);
+  assert.ok(end > at, 'the add route has no closing brace');
+  const route = t.slice(at, end);
   assert.match(route, /addSeriesFromSource\([^)]*wait:\s*false/, 'the add route awaits the download again');
 });
 

@@ -143,7 +143,12 @@ function SourceRow({ s, onUnfollow, unfollowing }: { s: SeriesSource; onUnfollow
       <span className="min-w-0 flex-1">
         <span className="flex min-w-0 items-center gap-1.5">
           <span className={`truncate ${s.registered ? 'text-fog-100' : 'text-fog-500'}`}>{unknown ? tr('Source not installed') : s.name}</span>
-          <span className="chip shrink-0 px-2 py-0.5 text-[10px]">{s.primary ? tr('main') : tr('also checked')}</span>
+          {/* ONE chip carries the role. A follower the add itself judged in (v0.36.0, `auto`) reads
+              "followed for you" in the same chip, never as a third span: at 390 px the name line is ~316 px,
+              and "also checked" + "followed automatically" + × left ~90 px for the name -- "MangaKakalot"
+              truncated on exactly the row whose name you need to read before pressing ×. The × keeps its
+              plain "Stop following {s}" label; undoing an automatic follow is the same act. */}
+          <span className="chip shrink-0 px-2 py-0.5 text-[10px]">{s.primary ? tr('main') : s.auto ? tr('followed for you') : tr('also checked')}</span>
           {!s.registered && !unknown && <span className="shrink-0 text-[11px] text-fog-600">{tr('not installed')}</span>}
         </span>
         <span className="block truncate text-[11px] text-fog-500">

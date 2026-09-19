@@ -581,6 +581,9 @@ CREATE TABLE IF NOT EXISTS tracker_progress (
   pushed_at timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (user_id, series_id, provider)
 );
+-- pushed_at NULL = a floor seeded from the tracker's own entry at import time (v0.36.0), nothing sent yet:
+-- pushOne skips quietly below such a floor instead of recording a refusal.
+ALTER TABLE tracker_progress ALTER COLUMN pushed_at DROP NOT NULL;
 -- The high-water mark we have already told a tracker about, per user and series.
 --
 -- AniList accepts a LOWER progress and rewrites the entry, and there is no undo from here. So anything that
@@ -748,7 +751,7 @@ CREATE INDEX IF NOT EXISTS page_hashes_hash_idx ON page_hashes (hash);
 CREATE TABLE IF NOT EXISTS import_batches (
   id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id     uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  origin      text NOT NULL, -- 'backup' | 'mangadex' | 'paste'
+  origin      text NOT NULL, -- 'backup' | 'mangadex' | 'paste' | 'tracker'
   state       text NOT NULL DEFAULT 'resolving',
   total       int  NOT NULL DEFAULT 0,
   resolved    int  NOT NULL DEFAULT 0,
@@ -803,6 +806,30 @@ CREATE TABLE IF NOT EXISTS import_candidates (
 -- second, identical index. DROP rather than delete the line: installs that booted on that build have the
 -- index, and IF EXISTS keeps this idempotent for everyone else.
 DROP INDEX IF EXISTS import_candidates_batch_idx;
+
+-- Tracker intake (v0.36.0): a batch read from someone's AniList / MyAnimeList / Kitsu list. The batch keeps
+-- which service ('anilist' | 'myanimelist' | 'kitsu', NULL for the other intakes), and each row keeps what
+-- the list said about the entry, because both later steps need it without re-reading the list:
+--   external_id  the id on that service -- what /run (and the intake itself, for a title the library
+--                already holds) writes to series_trackers so progress sync works from the first chapter.
+--   alt_titles   the other spellings (romaji, synonyms) the resolve pass searches when the English title
+--                finds nothing; matched_via names the one that found the match, NULL when the search title
+--                did, so the review row can say "matched under its other name".
+--   progress     how far the person got on the tracker. Seeded into tracker_progress with every link:
+--                without it the first chapter finished here pushes chapter 1 over an entry at chapter 150.
+ALTER TABLE import_batches    ADD COLUMN IF NOT EXISTS tracker     text;
+ALTER TABLE import_candidates ADD COLUMN IF NOT EXISTS tracker     text;
+ALTER TABLE import_candidates ADD COLUMN IF NOT EXISTS external_id text;
+ALTER TABLE import_candidates ADD COLUMN IF NOT EXISTS alt_titles  text[] NOT NULL DEFAULT '{}';
+ALTER TABLE import_candidates ADD COLUMN IF NOT EXISTS matched_via text;
+ALTER TABLE import_candidates ADD COLUMN IF NOT EXISTS progress    int;
+-- What the intake had to say about the read, kept on the batch so the note survives the tab that started
+-- it: the POST's answer was the only carrier of "12 novels skipped" / "only the first 500 kept", and a reload
+-- or an Open-imports tap mid-batch showed a done line with no trace of either.
+--   skipped_novels  light novels dropped from a tracker read (0 for the other intakes).
+--   truncated       the intake kept 500 of a longer list (any origin), or a tracker read stopped at its cap.
+ALTER TABLE import_batches    ADD COLUMN IF NOT EXISTS skipped_novels int     NOT NULL DEFAULT 0;
+ALTER TABLE import_batches    ADD COLUMN IF NOT EXISTS truncated      boolean NOT NULL DEFAULT false;
 
 -- Ledger for run-once DATA migrations. The DDL string above stays the home for everything idempotent
 -- (CREATE / ALTER ... IF NOT EXISTS, which can safely run on every boot). Anything that would corrupt data

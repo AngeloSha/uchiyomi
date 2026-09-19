@@ -402,8 +402,8 @@ function ChapterEditModal({ book, onClose, onSaved }: { book: Book; onClose: () 
         {completed && (
           <p className="mt-3 rounded-lg border border-amber-500/30 bg-amber-500/10 p-2.5 text-[11px] leading-relaxed text-amber-200">
             You have finished this chapter. Changing its number changes what gets reported to a connected
-            tracker. Progress never moves backwards on its own, so if the new number is lower you will need
-            to resync that series deliberately.
+            tracker. Progress never moves backwards on its own: if the new number is lower, the tracker keeps
+            the higher one until an admin imports your list again under Admin → Import (From your tracker).
           </p>
         )}
         <div className="mt-4 flex gap-2">

@@ -1,9 +1,9 @@
 'use client';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
-import { GroupStat, Page, Series } from '@/lib/types';
+import { AutoFollow, AutoFollowResult, FollowWhy, GroupStat, Page, Series } from '@/lib/types';
 import { Modal, msgOf } from '@/components/ConfirmDialog';
 import { Img, ProgressBar } from '@/components/ui';
 import { sourceCover } from '@/components/cards';
@@ -28,12 +28,60 @@ interface Detail {
   /** How many numbers have more than one copy. */
   versions?: number;
 }
-interface Job { folder: string; title: string; total: number; done: number; status: string }
+interface Job {
+  folder: string; title: string; total: number; done: number; status: string;
+  /** The add-time auto-follow (v0.36.0), once the server has judged the other sources. See lib/types.ts. */
+  autoFollow?: AutoFollow;
+}
 
 export type AddSeed =
   | { kind: 'trending'; title: string }
   | { kind: 'result'; provider: Provider }
   | { kind: 'group'; title: string; providers: Provider[] };
+
+/**
+ * Per-device memory of the "Also check the other sources" switch. A device setting, not an account one: it
+ * is about how this person adds, and the server has nothing to store for a choice the dialog makes at add
+ * time. Off until switched on.
+ */
+const ALSO_FOLLOW_KEY = 'uchiyomi.alsoFollow';
+/** At most this many candidates ride with an add: the server judges each with two outbound calls, under one wall budget. */
+const ALSO_FOLLOW_MAX = 6;
+
+/**
+ * The server's reason a candidate source was not followed, as a person would say it. Every branch is a
+ * literal so the locale-parity test sees each; a code this list does not know is printed as it came, so a
+ * new reason is at least visible rather than silently "not followed".
+ */
+export function autoFollowWhy(why: FollowWhy | string): string {
+  switch (why) {
+    case 'numbering_differs': return tr('numbering differs');
+    case 'title_differs': return tr('different title');
+    case 'unreachable': return tr('could not be reached');
+    case 'too_few_listed': return tr('lists too few chapters');
+    case 'not_tried': return tr('not checked — it took too long');
+    case 'cap': return tr('already following two');
+    case 'unavailable': return tr('not available');
+    default: return why;
+  }
+}
+
+/**
+ * One candidate's line on the done step: what was followed, under which title there, or why not. The
+ * percent sign is glued to its number after translation: at 390 px "· 95 %" broke with a lone "%" on the
+ * next line. Done on the output rather than in the keys so no locale file carries an invisible character;
+ * a language that writes "95٪" or "95%" has no space to glue.
+ */
+function autoFollowLine(r: AutoFollowResult): string {
+  const pct = Math.round((r.coverage ?? 0) * 100);
+  if (r.followed) {
+    const line = r.theirTitle
+      ? tr('Followed {name} — listed there as “{theirTitle}” · {pct} %', { name: r.name, theirTitle: r.theirTitle, pct })
+      : tr('Followed {name} · {pct} %', { name: r.name, pct });
+    return line.replace(/(\d) %/, '$1 %');
+  }
+  return tr('Not followed: {name} — {why}', { name: r.name, why: autoFollowWhy(r.why) });
+}
 
 /**
  * What the chapter <select> holds. Sources list chapters ascending, so "First N" has always meant the OLDEST
@@ -63,10 +111,16 @@ const looksCss = (s: string) =>
  * The server returns `folder`, which is the key into `/api/sources/jobs`, so the dialog can stay open and
  * show the real download rather than dismissing itself and hoping.
  */
-export function AddSeriesDialog({ seed, sources, onClose, onAdded }: {
+export function AddSeriesDialog({ seed, sources, mayFollow, onClose, onAdded }: {
   seed: AddSeed;
   /** Which sources to look in. Unscoped, one tap is an outbound request to every source on the server. */
   sources: string[];
+  /**
+   * Whether this person may have the other sources followed (an admin). The manual follow route and the
+   * sheet's × are admin-only, so a member who was shown the switch could follow two sources and never undo
+   * it; for them the switch is not rendered and no `alsoFollow` is sent, whatever the device remembers.
+   */
+  mayFollow: boolean;
   onClose: () => void;
   onAdded: (r: { title: string; folder: string; chapters: number }) => void;
 }) {
@@ -87,6 +141,34 @@ export function AddSeriesDialog({ seed, sources, onClose, onAdded }: {
   const [done, setDone] = useState<{ title: string; folder: string; chapters: number; started?: boolean; nothing?: boolean } | null>(null);
   const [opening, setOpening] = useState(false);
   const title = seed.kind === 'result' ? seed.provider.title : seed.title;
+
+  // ---- also follow the other sources (v0.36.0, #49) ----
+  // The candidates are the sources this dialog ALREADY found for the title (a trending search, or the
+  // wall's fold): no new search is ever run for them, one per source, the picked one left out, at most six.
+  // ⚠️ A `result` seed (a Discover-wall tap on a single-source tile) has no list at all -- `providers` stays
+  // null -- so it gets no switch and sends nothing; the series page's Find missing chapters is its way in.
+  // Reintroduce by seeding `others` from a search here: every wall tap becomes a fan-out to every source.
+  const others = useMemo(() => {
+    if (!picked || !providers) return [];
+    const seen = new Set<string>([picked.source]);
+    const out: Provider[] = [];
+    for (const p of providers) {
+      if (seen.has(p.source)) continue;
+      seen.add(p.source);
+      out.push(p);
+    }
+    return out.slice(0, ALSO_FOLLOW_MAX);
+  }, [providers, picked]);
+  const [alsoFollow, setAlsoFollowState] = useState<boolean>(() => {
+    try { return typeof localStorage !== 'undefined' && localStorage.getItem(ALSO_FOLLOW_KEY) === '1'; } catch { return false; }
+  });
+  const setAlsoFollow = (v: boolean) => {
+    setAlsoFollowState(v);
+    try { localStorage.setItem(ALSO_FOLLOW_KEY, v ? '1' : '0'); } catch { /* private mode: the switch still works for this dialog */ }
+  };
+  // How many candidates rode with the add, so the done step knows whether to look for results on the job
+  // card and what "Checking {n} sources" counts. Zero when the switch was off or there was nobody to check.
+  const [sentFollow, setSentFollow] = useState(0);
 
   // Which request the state belongs to. Picking source A then B and having A land last used to overwrite B.
   const want = useRef(0);
@@ -111,13 +193,21 @@ export function AddSeriesDialog({ seed, sources, onClose, onAdded }: {
       .finally(() => { if (mine === want.current) setLoading(false); });
   }, [picked]);
 
-  // Only while the dialog is showing a live download. A "nothing yet" add starts no job, so there is
-  // nothing to poll for.
+  // Only while the dialog is showing a live download -- or, since v0.36.0, while an auto-follow it asked
+  // for is still being judged: a "nothing yet" add starts no download, but with candidates sent the server
+  // leaves a finished job entry on the card carrying `autoFollow`, and this same poll is how the results
+  // reach the done step. That poll stops the moment `autoFollow.done` is true; the download case keeps its
+  // 2 s rhythm as before.
   const { data: jobs } = useQuery({
     queryKey: ['source-jobs'],
     queryFn: () => api<{ content: Job[] }>('/api/sources/jobs'),
-    enabled: !!done && !done.nothing,
-    refetchInterval: 2000,
+    enabled: !!done && (!done.nothing || sentFollow > 0),
+    refetchInterval: (q) => {
+      if (!done) return false;
+      if (!done.nothing) return 2000;
+      const j = (q.state.data?.content ?? []).find((x) => x.folder === done.folder);
+      return j?.autoFollow?.done ? false : 2000;
+    },
   });
   const job = done ? (jobs?.content ?? []).find((j) => j.folder === done.folder) : undefined;
 
@@ -131,14 +221,21 @@ export function AddSeriesDialog({ seed, sources, onClose, onAdded }: {
   const add = async (force = false) => {
     if (!picked) return;
     setAdding(true); setDup(null);
+    // Only the identity of each candidate goes: the server looks each up itself and judges it against the
+    // listing it has just written, so a stale title or cover from the search cannot steer the match.
+    const alsoFollowBody = mayFollow && alsoFollow && others.length ? others.map(({ source, sourceId }) => ({ source, sourceId })) : undefined;
     try {
       const r = await api<{ title: string; folder: string; chapters: number; started?: boolean; nothing?: boolean }>('/api/sources/add', {
-        json: { source: picked.source, sourceId: picked.sourceId, chapterCount, chapterFrom, autoUpdate, force },
+        json: { source: picked.source, sourceId: picked.sourceId, chapterCount, chapterFrom, autoUpdate, force, alsoFollow: alsoFollowBody },
         // The client has never set a timeout anywhere, so the only bound was the proxy's 120s -- which
         // turned a slow-but-working add into "Add failed. Try another source." while the download carried
-        // on. The request now answers in seconds, so this is a backstop rather than the usual path.
+        // on. The request now answers in seconds, so this is a backstop rather than the usual path. The
+        // auto-follow is judged behind the reply too (on the job card), never inside this request.
         signal: AbortSignal.timeout(45_000),
       });
+      // The judgement only happens for a series the add created (a download, or nothing-yet); "already in
+      // your library" answers with neither flag and the server does nothing with the candidates.
+      setSentFollow(alsoFollowBody && (r.started || r.nothing) ? alsoFollowBody.length : 0);
       setDone(r);
       onAdded(r);
     } catch (e: any) {
@@ -164,6 +261,48 @@ export function AddSeriesDialog({ seed, sources, onClose, onAdded }: {
 
   // ---------------------------------------------------------------- done
   if (done) {
+    // What the other sources came to, as the job card reports it. A `result` seed never had a list, so it
+    // is pointed at Find missing chapters rather than told "no other source carries it" -- nothing was
+    // checked. A list with nobody else on it says exactly that: "none of the sources CHECKED", because a
+    // trending search asks the page's budgeted sources and the wall's fold holds whoever listed it lately,
+    // never every source. Off switch: nothing to say.
+    const af = job?.autoFollow;
+    const fresh = !!done.started || !!done.nothing;
+    const followBlock = (() => {
+      if (seed.kind === 'result') return <p className="text-start text-[11px] text-fog-500">{tr('Other sources: Find missing chapters on the series page.')}</p>;
+      if (!providers || !fresh) return null;
+      // A member never had the switch, so there are no results to show and nothing was "checked": one dim
+      // line naming who can, and where.
+      if (!mayFollow) return <p className="text-start text-[11px] text-fog-500">{tr('Other sources: an admin can follow them from Sources & translations.')}</p>;
+      if (others.length === 0) return <p className="text-start text-[11px] text-fog-500">{tr('None of the other sources checked lists this title.')}</p>;
+      if (!sentFollow) return null;
+      if (!af || !af.done) {
+        // A download that died before its listing existed has no judgement to wait for.
+        if (job?.status === 'error') return null;
+        return (
+          <p className="text-start text-[11px] text-fog-500" data-auto-follow="checking">
+            {sentFollow === 1
+              ? tr('Checking this source…')
+              : tr('Checking {n} sources — this can take a minute. You can close this; anything followed shows under Sources & translations.', { n: sentFollow })}
+          </p>
+        );
+      }
+      if (!af.results.length) return null;
+      const followed = af.results.filter((r) => r.followed).length;
+      const m = af.results.length;
+      return (
+        <div className="space-y-1 text-start text-[11px]" data-auto-follow="done">
+          {af.results.map((r) => (
+            <p key={r.source} className={`break-words ${r.followed ? 'text-emerald-400' : 'text-fog-500'}`}>{autoFollowLine(r)}</p>
+          ))}
+          <p className="text-fog-300">
+            {m === 1
+              ? (followed === 1 ? tr('Followed the other source') : tr('Not followed'))
+              : tr('Followed {n} of {m}', { n: followed, m })}
+          </p>
+        </div>
+      );
+    })();
     return (
       <Modal title={tr('Added to your library')} onClose={onClose}>
         <div className="space-y-4 text-center">
@@ -186,6 +325,7 @@ export function AddSeriesDialog({ seed, sources, onClose, onAdded }: {
               <p className="text-xs tabular-nums text-fog-500">{job ? `${job.done}/${job.total}` : '…'}</p>
             </>
           )}
+          {followBlock}
           <div className="flex gap-2">
             <button onClick={onClose} className="btn-ghost flex-1 py-2.5 text-sm">{tr('Done')}</button>
             <button onClick={openIt} disabled={opening} className="btn-accent flex-1 py-2.5 text-sm disabled:opacity-50">
@@ -339,6 +479,21 @@ export function AddSeriesDialog({ seed, sources, onClose, onAdded }: {
               <span className="text-sm text-fog-200">{tr('Auto-update new chapters')}</span>
               <Switch on={autoUpdate} onChange={setAutoUpdate} label={tr('Auto-update new chapters')} />
             </div>
+
+            {/* Only for an admin, and only when the dialog holds other sources for this title (a trending
+                search, a wall fold). The helper leads with why anyone would: the benefit is the reason #49
+                was filed. "Up to two per series" is the total, not two of these. */}
+            {mayFollow && others.length > 0 && (
+              <div className="mt-3" data-also-follow>
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-sm text-fog-200">{tr('Also check the other sources that carry this title')}</span>
+                  <Switch on={alsoFollow} onChange={setAlsoFollow} label={tr('Also check the other sources that carry this title')} />
+                </div>
+                <p className="mt-1 text-[11px] text-fog-500">
+                  {tr('Following one means new chapters are taken from whichever source has them first. Each is checked against this title\'s chapter list — only a source listing at least 90 % of the same numbers is followed, up to two per series.')}
+                </p>
+              </div>
+            )}
 
             {count > 40 && (
               <p className="mt-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-2.5 py-1.5 text-[11px] text-amber-300">

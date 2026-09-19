@@ -1,6 +1,7 @@
 'use client';
-import { useEffect, useMemo, useState } from 'react';
+import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import { motion, useReducedMotion } from 'framer-motion';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
@@ -105,12 +106,35 @@ function GoalRing({ value, goal, size = 64 }: { value: number; goal: number; siz
   );
 }
 
+const isTab = (v: string | null): v is Tab => typeof v === 'string' && (PROFILE_GROUPS[0].tabs as readonly string[]).includes(v);
+
+/**
+ * `useSearchParams` needs a Suspense boundary above it in a statically exported app (the import page does
+ * the same), so the page proper is one level down. `?tab=Reading` opens that tab, and `&card=tracking`
+ * scrolls its Progress tracking card into view: the import page's tracker line sends people to that card,
+ * which is the fifth card of the Reading tab -- without the query every link to "Profile" landed on You,
+ * five cards away from the thing it pointed at, and with the tab alone the card sat ~430 px below the fold
+ * at phone width, under the hero, the rail and four other cards. `?tab=` alone still just opens the tab.
+ */
 export default function ProfilePage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen-d" />}>
+      <ProfileInner />
+    </Suspense>
+  );
+}
+
+function ProfileInner() {
   const { user, isAdmin } = useAuth();
   const qc = useQueryClient();
   const toast = useToast();
   const still = useReducedMotion();
-  const [tab, setTab] = useState<Tab>('You');
+  const params = useSearchParams();
+  // Read once, on mount: the tab is page state after that, and a person tapping the rail must not be
+  // snapped back to the query's tab on the next render.
+  const [tab, setTab] = useState<Tab>(() => { const t = params.get('tab'); return isTab(t) ? t : 'You'; });
+  // Read once too: the card is scrolled to on arrival, never again on a re-render or a tab change.
+  const [focusTracking] = useState<boolean>(() => params.get('card') === 'tracking');
   const [goalOpen, setGoalOpen] = useState(false);
 
   const year = new Date().getFullYear();
@@ -216,7 +240,7 @@ export default function ProfilePage() {
       <OfflineCard />
       <SmartDownloadsCard />
       <NotificationsCard />
-      <TrackerCard span="wide" />
+      <TrackerCard span="wide" focus={focusTracking && tab === 'Reading'} />
     </>
   ) : tab === 'Settings' ? (
     <>
@@ -697,13 +721,27 @@ interface TrackerStatus {
  *
  * The card renders nothing at all when the server offers no providers. The old page put the heading outside
  * this component, so an empty list left an orphan "Progress tracking" over blank space.
+ *
+ * `focus` (from `?card=tracking`, the import page's "connect one under Profile" line) scrolls the card into
+ * view once, after the trackers query has settled -- the card does not exist before that (it returns null
+ * while the list is empty), and its height depends on the answer. `block: 'start'` with a scroll margin
+ * for the sticky desktop top bar; instant under reduced motion. Only ever once per arrival: a person who
+ * then scrolls away must not be pulled back by a refetch.
  */
-function TrackerCard({ span = '' }: { span?: string }) {
-  const { data, refetch } = useQuery({ queryKey: ['trackers'], queryFn: () => api<{ content: TrackerStatus[] }>('/api/trackers') });
+function TrackerCard({ span = '', focus = false }: { span?: string; focus?: boolean }) {
+  const { data, refetch, isPending } = useQuery({ queryKey: ['trackers'], queryFn: () => api<{ content: TrackerStatus[] }>('/api/trackers') });
+  const still = useReducedMotion();
+  const ref = useRef<HTMLDivElement>(null);
+  const scrolled = useRef(false);
+  useEffect(() => {
+    if (!focus || isPending || scrolled.current || !ref.current) return;
+    scrolled.current = true;
+    ref.current.scrollIntoView({ block: 'start', behavior: still ? 'auto' : 'smooth' });
+  }, [focus, isPending, still]);
   const all = data?.content || [];
   if (!all.length) return null;
   return (
-    <div className={`${CARD} ${span}`}>
+    <div ref={ref} id="progress-tracking" className={`${CARD} ${span} scroll-mt-4 lg:scroll-mt-20`}>
       <h2 className="mb-3 font-display text-base font-semibold">{tr('Progress tracking')}</h2>
       <div className="space-y-3">
         {all.map((t) => <TrackerRow key={t.provider} t={t} refetch={refetch} />)}

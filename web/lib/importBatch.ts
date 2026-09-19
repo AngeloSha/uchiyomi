@@ -1,11 +1,14 @@
-// Shapes for the reviewable import (backup / MangaDex list / paste → match review → add). Mirrors
-// import_batches / import_candidates in bff/src/lib/migrate.ts field for field — these come straight off
-// `SELECT *`, so the server sends its column names as-is (same convention as e.g. `u.display_name` in the
-// admin members list) rather than translating to camelCase.
+// Shapes for the reviewable import (backup / MangaDex list / paste / tracker list → match review → add).
+// Mirrors import_batches / import_candidates in bff/src/lib/migrate.ts field for field — these come straight
+// off `SELECT *`, so the server sends its column names as-is (same convention as e.g. `u.display_name` in
+// the admin members list) rather than translating to camelCase.
 import { t as tr } from './i18n';
 import { normTitle } from './normTitle';
 
-export type ImportOrigin = 'backup' | 'mangadex' | 'paste';
+/** `tracker` (v0.36.0) is the reading list of an AniList / MyAnimeList / Kitsu account connected under Profile. */
+export type ImportOrigin = 'backup' | 'mangadex' | 'paste' | 'tracker';
+/** The tracker a `tracker` batch was read from; the same ids `GET /api/trackers` uses. */
+export type TrackerId = 'anilist' | 'myanimelist' | 'kitsu';
 export type ImportBatchState = 'resolving' | 'review' | 'importing' | 'done' | 'cancelled';
 export type ImportDecision = 'unresolved' | 'auto' | 'manual' | 'skip';
 export type MatchConfidence = 'same_source' | 'exact' | 'contains' | 'fuzzy';
@@ -14,6 +17,8 @@ export interface ImportBatch {
   id: string;
   user_id: string;
   origin: ImportOrigin;
+  /** Which tracker a `tracker` batch came from; null on the other origins, absent from an older server. */
+  tracker?: TrackerId | string | null;
   state: ImportBatchState;
   total: number;
   resolved: number;
@@ -24,12 +29,20 @@ export interface ImportBatch {
   updated_at: string;
   /** Computed by the GET route, not a DB column: `resolving` with nobody actually resolving it. */
   stale?: boolean;
+  /**
+   * What the tracker intake dropped or cut (v0.36.0), on the batch row so a reload or an Open-imports tap
+   * still says "2 novels skipped (first 500 kept)" -- the intake's answer used to be the only carrier, and
+   * a closed tab lost the note. Absent from an older server, 0 / false on the other origins.
+   */
+  skippedNovels?: number;
+  truncated?: boolean;
 }
 
 /** One row of GET /api/admin/import/batches: enough to name a batch on the intake card and open it. */
 export interface ImportBatchSummary {
   id: string;
   origin: ImportOrigin;
+  tracker?: TrackerId | string | null;
   state: ImportBatchState;
   total: number;
   resolved: number;
@@ -69,7 +82,24 @@ export interface ImportCandidate {
   auto_cover: string | null;
   auto_confidence: MatchConfidence | null;
   status: string | null;
+  // ---- tracker rows (v0.36.0). Null on backup / MangaDex / paste rows; absent from an older server. ----
+  /** The tracker this entry came from, and its id there -- what `/run` links the added series to. */
+  tracker?: TrackerId | string | null;
+  external_id?: string | null;
+  /** The other spellings the tracker knows (romaji, synonyms; at most 3), searched when the title misses. */
+  alt_titles?: string[] | null;
+  /** The term the match was found under: the search title, or one of `alt_titles`. */
+  matched_via?: string | null;
+  /**
+   * Set on an `in_library` row the intake linked to the tracker entry on the spot, so progress sync works
+   * for the titles a person already holds -- the common case for an established library.
+   */
+  linked?: boolean | null;
 }
+
+/** Every spelling a row may legitimately have been matched under: the backup title first, then the tracker's alternates. */
+const titleVariants = (c: ImportCandidate): string[] =>
+  [c.backup_title, ...(c.alt_titles ?? [])].filter((t) => !!t && !!t.trim());
 
 /**
  * The bits of a trailing qualifier that make it a DIFFERENT WORK rather than another spelling of the same
@@ -132,22 +162,63 @@ export function containsDiverges(backupTitle: string, matchTitle: string | null)
   return extra.length > short.length;
 }
 
-/** A row worth a second look: no match at all, or one uncertain enough that a person should confirm it. */
+/**
+ * A row worth a second look: no match at all, or one uncertain enough that a person should confirm it.
+ *
+ * A `contains` hit is judged against EVERY spelling the row carries and the calmest verdict wins. A tracker
+ * row has the English title as `backup_title` and the romaji or synonyms in `alt_titles`; the server
+ * searches the alternates when the title misses, and rightly grants `contains` for "Shingeki no Kyojin
+ * (Official)" against the romaji. Judged against the English title alone that hit has no overlap at all,
+ * so every alt-title match -- the feature's whole point -- landed under Needs attention, in amber.
+ * ⚠️ Reintroduce by testing `containsDiverges(c.backup_title, c.match_title)` alone.
+ */
 export function needsAttention(c: ImportCandidate): boolean {
   if (c.decision === 'skip') return false;
   if (c.decision === 'unresolved') return true; // once the batch is out of 'resolving', this means "no match found"
   if (c.decision !== 'auto') return false; // a manual pick was already looked at by a person
   if (c.confidence === 'fuzzy') return true;
-  return c.confidence === 'contains' && containsDiverges(c.backup_title, c.match_title);
+  return c.confidence === 'contains' && titleVariants(c).every((t) => containsDiverges(t, c.match_title));
 }
 
 /**
  * Whether the review row should print the matched title on its own line. Hidden when it is the backup
  * title under another spelling -- case, punctuation -- so the line only ever says something the first line
- * does not, and a list of two hundred correct rows is not two hundred repeated titles.
+ * does not, and a list of two hundred correct rows is not two hundred repeated titles. A tracker row's
+ * alternates count as its spellings too: "Attack on Titan → Shingeki no Kyojin · exact match" in bright
+ * text read as a wrong pick, when it is the same title under the name the source uses; that row gets the
+ * dim `matched under its other name` line instead (`matchedViaAlt`).
  */
 export const matchTitleDiffers = (c: ImportCandidate): boolean =>
-  !!c.match_title && normTitle(c.match_title) !== normTitle(c.backup_title);
+  !!c.match_title && !titleVariants(c).some((t) => normTitle(c.match_title!) === normTitle(t));
+
+/**
+ * Whether the match was found under one of the tracker's other spellings rather than the title on the
+ * row. The server records the term that matched in `matched_via`; when it is the row's own title there is
+ * nothing to say. Compared normalised, because the server may store the term as it searched it.
+ *
+ * Only for the automatic match: `matched_via` belongs to the pick the server made, and a hand-picked row
+ * used to keep it, so "Attack on Titan → Berserk of Gluttony · matched under its other name · picked by
+ * hand" explained a match that no longer existed as if it were a statement about the person's own pick.
+ * The server clears the field on a manual pick too; an older server does not, hence the check here.
+ */
+export const matchedViaAlt = (c: ImportCandidate): boolean =>
+  c.decision === 'auto' && !!c.matched_via && !!c.matched_via.trim() && normTitle(c.matched_via) !== normTitle(c.backup_title);
+
+/**
+ * How many rows the intake linked to their tracker entry without adding anything: an in-library title on a
+ * tracker list gets its `series_trackers` row at intake, status `already`, and the run never touches it.
+ * A batch of nothing but those closes to `done` on its first read, so the review row's "linked for progress
+ * sync" is never seen -- the done card has to say it, or an established library that connects its tracker
+ * reads "0 added · 5 already had · 0 failed" and concludes nothing happened.
+ */
+export const linkedCount = (items: ImportCandidate[]): number =>
+  items.filter((c) => c.status === 'already' && !!c.linked).length;
+
+/** The done headline's aside for `linkedCount`, singular by hand (the i18n layer has no plural rules); null for none. */
+export function linkedLine(n: number): string | null {
+  if (n <= 0) return null;
+  return n === 1 ? tr('1 linked for progress sync') : tr('{n} linked for progress sync', { n });
+}
 
 /** Where a batch stands, in words, for the "Open imports" list. Every call site passes a literal state. */
 export function batchStateLabel(state: ImportBatchState): string {
@@ -160,11 +231,23 @@ export function batchStateLabel(state: ImportBatchState): string {
   }
 }
 
-/** Where a batch came from, in words, for the "Open imports" list. */
-export function batchOriginLabel(origin: ImportOrigin): string {
+/**
+ * Where a batch came from, in words, for the "Open imports" list. A tracker batch is named after its
+ * tracker -- "AniList list", not "Tracker list" -- because a person with two connected may have started
+ * one from each. Every branch is a literal, so the locale-parity test sees each label; the service names
+ * are proper nouns and stay as they are in every language.
+ */
+export function batchOriginLabel(origin: ImportOrigin, tracker?: string | null): string {
   switch (origin) {
     case 'backup': return tr('Backup file');
     case 'mangadex': return tr('MangaDex list');
+    case 'tracker':
+      switch (tracker) {
+        case 'anilist': return tr('AniList list');
+        case 'myanimelist': return tr('MyAnimeList list');
+        case 'kitsu': return tr('Kitsu list');
+        default: return tr('Tracker list');
+      }
     default: return tr('Pasted titles');
   }
 }
@@ -190,7 +273,12 @@ export function confidenceLabel(c: MatchConfidence | null): string {
  * visible rather than silently "failed". Every branch passes a literal, like confidenceLabel above, so the
  * locale-parity test sees each sentence.
  */
-export function runStatusLabel(status: string): string {
+export function runStatusLabel(status: string, linked = false): string {
+  // ⚠️ An owned row of a tracker intake is written with status `already` the moment it is linked, so it
+  // reaches THIS label, never the `decision === 'skip'` branch that spelled out the link. The release walk
+  // caught the review row reading a bare "Already in your library" beside a series_trackers row that was
+  // already there -- the one sentence the intake exists to say for those rows.
+  if (status === 'already' && linked) return tr('Already in your library — linked for progress sync');
   switch (status) {
     case 'added': return tr('Added to your library');
     case 'already':

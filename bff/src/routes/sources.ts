@@ -51,6 +51,7 @@ export const FILL_MAX_CHAPTERS = 300;
 /** How long a Fetch waits for the listing refresh before the stale listing serves (see /api/sources/fetch). */
 export const REFRESH_BUDGET_MS = 10_000;
 import { logAudit } from '../lib/audit';
+import { autoFollow, refusals, MAX_AUTO_CANDIDATES, type FollowCandidate, type FollowResult } from '../lib/autoFollow';
 import { env } from '../env';
 import { runtime } from '../lib/runtime';
 // The "already in library" annotation is deliberately library-wide: it answers "would adding this be a
@@ -66,6 +67,14 @@ interface Job {
   reason?: string;
   /** When it stopped, so a finished one can age out. A FAILED one never does: it is the only record. */
   finishedAt?: number;
+  /**
+   * What became of the other sources the add named in `alsoFollow` (#49, lib/autoFollow.ts). On the card
+   * and not on the add's answer, because the judgement needs the listing, which on the download path is
+   * written after the first chapter lands -- long after the dialog was answered -- and the dialog polls
+   * this card every two seconds anyway. `done: false` with no results while the sources are being asked;
+   * a nothing-yet add, which has no download, gets a card with `total: 0` just to carry this.
+   */
+  autoFollow?: { done: boolean; results: FollowResult[] };
 }
 const jobs = new Map<string, Job>();
 
@@ -410,6 +419,45 @@ export interface AddResult {
   nothing?: boolean;
 }
 
+/**
+ * Judge an add's `alsoFollow` candidates against the listing just written, onto the series' job card.
+ *
+ * Detached, and never awaited by the add or by its download loop: the judgement is up to six sources
+ * under the scan's slots with a 90-second wall (lib/autoFollow.ts), and the download loop can run for
+ * hours. Run CONCURRENTLY with the loop rather than after it, because the person is watching the dialog
+ * now -- the results are wanted within the minute, not when chapter 300 lands -- and the candidates are
+ * OTHER sources, so the judgement neither competes for the primary's rate limit nor delays its pages; it
+ * shares only the solver's slots, which the scan's concurrency already bounds. The card is marked `done`
+ * whatever happens, or the dialog would read "Checking…" for good; a nothing-yet card (`total: 0`, no
+ * loop to stamp it) is stamped finished here so the sweep can age it out. And it is marked done WITH a
+ * line per candidate even when the judgement itself threw (a database error before any source was
+ * asked, say): lib/autoFollow.ts answers every failure of a candidate's own as a value, so a rejection
+ * here is the one failure that would otherwise leave the card reading done with an empty report -- and
+ * the dialog prints nothing at all for an empty report, so the person would be told neither "followed"
+ * nor why not. `not_tried` is the honest word: no source was asked.
+ */
+function judgeAlsoFollow(folder: string, seriesId: string, opts: {
+  alsoFollow?: FollowCandidate[]; userId?: string | null; req?: FastifyRequest; sourceAllowed?: (source: string) => boolean;
+}): void {
+  const j = jobs.get(folder);
+  if (!j || !opts.alsoFollow?.length) return;
+  const candidates = opts.alsoFollow;
+  j.autoFollow = { done: false, results: [] };
+  void autoFollow(seriesId, candidates, { userId: opts.userId, req: opts.req, allowed: opts.sourceAllowed })
+    .then((results) => { const card = jobs.get(folder); if (card?.autoFollow) card.autoFollow.results = results; })
+    .catch((e) => {
+      console.warn(`[add] auto-follow failed for ${folder}: ${(e as Error)?.message || e}`);
+      const card = jobs.get(folder);
+      if (card?.autoFollow) card.autoFollow.results = refusals(candidates, 'not_tried');
+    })
+    .finally(() => {
+      const card = jobs.get(folder);
+      if (!card) return;
+      if (card.autoFollow) card.autoFollow.done = true;
+      if (card.status !== 'downloading' && !card.finishedAt) card.finishedAt = Date.now();
+    });
+}
+
 /** Add one series from a source to the library (downloads chapter 1 synchronously, the rest in background).
  *  Shared by POST /api/sources/add and the bulk importer. Returns a result instead of touching the reply. */
 export async function addSeriesFromSource(opts: {
@@ -425,6 +473,16 @@ export async function addSeriesFromSource(opts: {
    * had in fact already started. Defaults to true so every existing caller is unchanged.
    */
   wait?: boolean;
+  /**
+   * Other sources the dialog found carrying this title, to be judged and followed once the listing exists
+   * (lib/autoFollow.ts). Results land on the job card, never on this answer. Only the add route passes it.
+   */
+  alsoFollow?: FollowCandidate[];
+  /** Who is adding, for the follow audit lines; the follower rows themselves are written as automatic. */
+  userId?: string | null;
+  req?: FastifyRequest;
+  /** Which sources THIS viewer may reach; a candidate outside it is reported `unavailable` and never asked. */
+  sourceAllowed?: (source: string) => boolean;
 }): Promise<AddResult> {
   const { source, sourceId, force, chapterCount, chapterFrom, autoUpdate } = opts;
   const src = source ? getSource(source) : null;
@@ -542,6 +600,14 @@ export async function addSeriesFromSource(opts: {
        folder, libraryId, autoUpdate !== false, source, sourceId, floor, chosen.length],
     ))[0];
     await replaceListing(id, listingRows(chapters.map((c) => ({ ...c, source: source! })), chosen, new Set(), source!, releaseOrder(prefs))).catch(() => {});
+    // The other sources are judged only now, against the listing above: it is what stands in for "what
+    // we hold" on a series that holds nothing. A nothing-yet add has no download and so no card, so one
+    // is minted purely to carry the results to the dialog's poll -- and only when there is something to
+    // judge, as "nothing was fetched, queued or created" is what a plain nothing-yet add promises.
+    if (opts.alsoFollow?.length) {
+      jobs.set(folder, { title, total: 0, done: 0, status: 'done' });
+      judgeAlsoFollow(folder, id, opts);
+    }
     if (series?.coverUrl) {
       await q(`INSERT INTO series_art (series_id, cover) VALUES ($1, $2)
         ON CONFLICT (series_id) DO UPDATE SET cover = COALESCE(series_art.cover, EXCLUDED.cover)`, [id, series.coverUrl]).catch(() => {});
@@ -619,9 +685,16 @@ export async function addSeriesFromSource(opts: {
     // already fetched -- no second call to the source -- so a title opened straight from Discover shows
     // its groups and versions at once instead of only what is on disk until the sweep reaches it. Held is
     // empty on purpose: the add ran with patience 0. Best effort, like every stamp above.
-    await q<{ id: string }>('SELECT id FROM lib_series WHERE folder = $1', [folder])
-      .then((rows) => rows[0] && replaceListing(rows[0].id, listingRows(chapters.map((c) => ({ ...c, source: source! })), chosen, new Set(), source!, releaseOrder(prefs))))
-      .catch(() => {});
+    const seriesId = (await q<{ id: string }>('SELECT id FROM lib_series WHERE folder = $1', [folder]).catch(() => []))[0]?.id;
+    if (seriesId) {
+      await replaceListing(seriesId, listingRows(chapters.map((c) => ({ ...c, source: source! })), chosen, new Set(), source!, releaseOrder(prefs))).catch(() => {});
+      // Only once the listing is written, and only from here: the row did not exist when the dialog was
+      // answered (persistScan minted it from chapter 1 above), and the judgement measures against this
+      // listing -- against `lib_books` it would see one chapter and refuse everything as `too_few_listed`
+      // (autoFollow.int.test.ts, "a download add carries the results on its job card"). Detached; the
+      // loop below does not wait for it.
+      judgeAlsoFollow(folder, seriesId, opts);
+    }
     if (series?.coverUrl) {
       await q(`INSERT INTO series_art (series_id, cover) SELECT id, $1 FROM lib_series WHERE folder = $2
         ON CONFLICT (series_id) DO UPDATE SET cover = COALESCE(series_art.cover, EXCLUDED.cover)`, [series.coverUrl, folder]).catch(() => {});
@@ -701,7 +774,14 @@ export async function mihonSourceToAdapter(ids: { sourceIdUnsigned?: string; sou
   return getSource(id) ? id : null;
 }
 
-export interface ResolvedCandidate { source: string; sourceId: string; title: string; coverUrl?: string; confidence: MatchConfidence }
+export interface ResolvedCandidate {
+  source: string; sourceId: string; title: string; coverUrl?: string; confidence: MatchConfidence;
+  /** The alternate title the match was found under; null when the search title itself found it. */
+  matchedVia: string | null;
+}
+
+/** How many of an entry's other names one resolve tries: each is one more outbound search per source that misses. */
+const RESOLVE_ALT_TITLES = 3;
 
 /**
  * A Mihon manga url and a Suwayomi `path` for the same entry can differ by a leading or trailing slash
@@ -725,31 +805,69 @@ export const normPath = (p: string) => p.trim().replace(/^\/+/, '').replace(/\/+
  * lacks is an unrelated manga (the "wrong manga" bug `pickBest` exists to prevent), and here it would have
  * carried the top confidence tier, rendered green, and been hidden from "Needs attention". No confident
  * hit anywhere means `null`, and the row stays `unresolved` for a person to search by hand.
+ *
+ * `altTitles` (a tracker entry's romaji title and synonyms) are searched AFTER the search title, in order,
+ * and the first confident tier under any of them wins: a source that carries "Attack on Titan" only as
+ * "Shingeki no Kyojin" is the same match, and without the second try every such row sat in "no match
+ * found". Each hit is scored against the term that was searched, and `matchedVia` says which alternate
+ * found it (null for the search title) so the review row can say so instead of flagging a romaji hit as a
+ * wrong pick. Capped at `RESOLVE_ALT_TITLES`: every alternate is one more outbound search on every source
+ * that misses, and the batch already runs several rows in parallel.
+ *
+ * ⚠️ The TERM loop is the outer one in the cross-source pass: the title on every source, then the first
+ * alternate on every source, and so on. Nested the other way (every term on source 1, then source 2), an
+ * alternate's weak `contains` hit on the first source pre-empted an exact hit for the title on the second
+ * -- AniList synonyms are user-contributed ("AoT", "Atak Tytanów"), and "AoT" on a site that lacks the
+ * series answered "Chaotic Love Story" while the next site carried "Attack on Titan" exactly and was never
+ * asked. The home source keeps its own block above: a backup names its own source and carries no alternates,
+ * so there is nothing to interleave.
  */
-export async function resolveCandidate(entry: { title: string; url?: string; sourceIdUnsigned?: string; sourceIdSigned?: string }): Promise<ResolvedCandidate | null> {
+export async function resolveCandidate(entry: { title: string; altTitles?: string[]; url?: string; sourceIdUnsigned?: string; sourceIdSigned?: string }): Promise<ResolvedCandidate | null> {
+  // The search title first, then each distinct alternate; an alternate that normalises to the title (or to
+  // an earlier alternate) would only repeat a search that already missed.
+  const terms: string[] = [entry.title];
+  for (const a of entry.altTitles ?? []) {
+    if (terms.length - 1 >= RESOLVE_ALT_TITLES) break;
+    const t = a.trim();
+    if (t && !terms.some((x) => norm(x) === norm(t))) terms.push(t);
+  }
+  const viaOf = (term: string): string | null => (term === entry.title ? null : term);
+
   const home = await mihonSourceToAdapter(entry);
   if (home) {
     const src = getSource(home);
     if (src) {
-      try {
-        const raw = await withTimeout(src.search(entry.title), budgetFor(src, 20000));
-        const want = entry.url ? normPath(entry.url) : '';
-        const byUrl = want ? raw.find((r) => !!r.sourceId && !!r.path && normPath(r.path) === want) : undefined;
-        if (byUrl) return { source: home, sourceId: byUrl.sourceId, title: byUrl.title, coverUrl: byUrl.coverUrl, confidence: 'same_source' };
-        const best = pickBestScored(raw, entry.title);
-        if (best?.item.sourceId) return { source: home, sourceId: best.item.sourceId, title: best.item.title, coverUrl: best.item.coverUrl, confidence: best.confidence };
-      } catch { /* fall through to cross-source search */ }
+      for (const term of terms) {
+        try {
+          const raw = await withTimeout(src.search(term), budgetFor(src, 20000));
+          // The url proof only against the search title's results: a backup names ONE entry, and its
+          // alternates (none today -- backups carry no synonyms) would prove nothing more.
+          const want = term === entry.title && entry.url ? normPath(entry.url) : '';
+          const byUrl = want ? raw.find((r) => !!r.sourceId && !!r.path && normPath(r.path) === want) : undefined;
+          if (byUrl) return { source: home, sourceId: byUrl.sourceId, title: byUrl.title, coverUrl: byUrl.coverUrl, confidence: 'same_source', matchedVia: null };
+          const best = pickBestScored(raw, term);
+          if (best?.item.sourceId) return { source: home, sourceId: best.item.sourceId, title: best.item.title, coverUrl: best.item.coverUrl, confidence: best.confidence, matchedVia: viaOf(term) };
+        } catch { /* fall through to the next term, then the cross-source search */ }
+      }
     }
   }
+  // The sources to ask, settled once: with the terms outside, the disabled check would otherwise run once
+  // per term per source.
+  const order: Array<{ id: string; src: NonNullable<ReturnType<typeof getSource>> }> = [];
   for (const id of findOrder()) {
     if (id === home) continue; // already tried above
     const src = getSource(id);
     if (!src) continue;
     if (await isDisabled(id).catch(() => false)) continue;
-    try {
-      const best = pickBestScored(await withTimeout(src.search(entry.title), budgetFor(src, 20000)), entry.title);
-      if (best?.item.sourceId) return { source: id, sourceId: best.item.sourceId, title: best.item.title, coverUrl: best.item.coverUrl, confidence: best.confidence };
-    } catch { /* try next source */ }
+    order.push({ id, src });
+  }
+  for (const term of terms) {
+    for (const { id, src } of order) {
+      try {
+        const best = pickBestScored(await withTimeout(src.search(term), budgetFor(src, 20000)), term);
+        if (best?.item.sourceId) return { source: id, sourceId: best.item.sourceId, title: best.item.title, coverUrl: best.item.coverUrl, confidence: best.confidence, matchedVia: viaOf(term) };
+      } catch { /* try the next source, then the next term */ }
+    }
   }
   return null;
 }
@@ -1432,8 +1550,11 @@ export default async function sourceRoutes(app: FastifyInstance) {
     const j = jobs.get(folder);
     if (!j) return reply.code(404).send({ error: 'not_found' });
     // Only something that has stopped. Dropping a running job would orphan a download that is still going
-    // and leave no way to see it again.
-    if (j.status === 'downloading') return reply.code(409).send({ error: 'running' });
+    // and leave no way to see it again. A judgement still running counts the same way: a nothing-yet
+    // carrier card is `done` from birth, and dropping it mid-judgement would let the follows land (the
+    // judgement does not read the card) while the report they belong to was gone -- and the dialog, which
+    // polls this card until it reads `autoFollow.done`, would show "Checking…" until closed.
+    if (j.status === 'downloading' || (j.autoFollow && !j.autoFollow.done)) return reply.code(409).send({ error: 'running' });
     jobs.delete(folder);
     return { ok: true };
   });
@@ -1534,20 +1655,41 @@ export default async function sourceRoutes(app: FastifyInstance) {
   app.post('/api/sources/add', async (req, reply) => {
     // A plain cast let anything through: `chapterCount: "abc"` became NaN and quietly meant "all", and a
     // misspelt `chapterFrom` would have meant "oldest". A missing source or sourceId is still the same 400.
+    // `alsoFollow` (#49): the other (source, id) pairs the dialog already found for this title, judged
+    // server-side once the listing exists and followed when they qualify (lib/autoFollow.ts). Bounded at
+    // the candidate cap so the body cannot name more sources than will ever be asked; the strings are
+    // bounded as every source id and series id is elsewhere in this file. No search runs for them.
     const b = z.object({
       source: z.string(), sourceId: z.string(), force: z.boolean().optional(),
       chapterCount: z.number().int().positive().optional(), chapterFrom: z.enum(['oldest', 'newest', 'none']).optional(),
       autoUpdate: z.boolean().optional(),
+      alsoFollow: z.array(z.object({ source: z.string().min(1).max(200), sourceId: z.string().min(1).max(200) })).max(MAX_AUTO_CANDIDATES).optional(),
     }).safeParse(req.body ?? {});
     if (!b.success) return reply.code(400).send({ error: 'bad_request' });
     const { source, sourceId, force, chapterCount, chapterFrom, autoUpdate } = b.data;
     if (!source || !sourceId) return reply.code(400).send({ error: 'bad_request' });
+    // Following stays an admin act. The manual follow route (POST /api/admin/series/:id/sources) and the
+    // sheet's unfollow are admin-only, so a member whose add followed two sources could never undo it --
+    // and a follower decides what the sweep downloads for everyone. A member's `alsoFollow` is therefore
+    // dropped here, before the add, rather than refused: the add itself is theirs to make, and it goes
+    // through exactly as if the switch had been off (no judgement, no carrier card). The dialog hides the
+    // switch from members; this is the server's half of that.
+    const alsoFollow = roleOf(req) === 'admin' ? b.data.alsoFollow : undefined;
     // canDownload is now checked for the whole plugin in the preHandler above, including this route.
     if (!sourceAllowedFor(getSource(source), vc(req).maxAgeRating)) return denySource(reply);
     // `wait: false` -- answer once the decision is made and download afterwards. Everything that decides
     // what to tell the caller (disabled, already present, duplicate, no chapters) still happens inline and
-    // still gets its proper status code; only the fetching moves behind the reply.
-    const r = await addSeriesFromSource({ source, sourceId, force, chapterCount, chapterFrom, autoUpdate, wait: false });
+    // still gets its proper status code; only the fetching moves behind the reply. The auto-follow runs
+    // behind it too, onto the job card: a candidate this viewer may not reach (the age cap, as for the
+    // primary above) is reported `unavailable` there rather than refused here, so the rest still go. An
+    // admin is exempt from the cap (lib/visibility.ts), so with `alsoFollow` admin-only this guard never
+    // fires today; it stays wired because the lib honours it, so the day the switch is offered to a
+    // capped account again nothing has to be remembered here.
+    const maxAge = vc(req).maxAgeRating;
+    const r = await addSeriesFromSource({
+      source, sourceId, force, chapterCount, chapterFrom, autoUpdate, wait: false,
+      alsoFollow, userId: userIdOf(req), req, sourceAllowed: (s) => sourceAllowedFor(getSource(s), maxAge),
+    });
     if (!r.ok) return reply.code(r.status).send({ error: r.error, message: r.message, existing: r.existing, status: r.blockStatus });
     // Audited here rather than after the download, so a slow or failing download does not delay the record
     // of who asked for it. What actually landed is the job's business.

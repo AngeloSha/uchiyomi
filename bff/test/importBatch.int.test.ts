@@ -79,9 +79,17 @@ const FAKE_TITLES: Record<string, { sourceId: string; title: string }> = {
   // FAKE carries the Suwayomi fake's title too, and runs FIRST in preferred order: that is what makes the
   // source-id shortcut test below a real proof (an unscoped title search would land here, not there).
   'sw match title': { sourceId: 'fm-sw', title: 'Sw Match Title' },
+  // The tracker-intake fixtures. 'Shingeki no Kyojin' is carried under its romaji title ONLY: the English
+  // search title "Attack on Titan" misses here, so a match proves the alt-title search ran.
+  'tracker manga one': { sourceId: 'fm-t1', title: 'Tracker Manga One' },
+  'shingeki no kyojin': { sourceId: 'fm-snk', title: 'Shingeki no Kyojin' },
+  // Answered for the alternate "Contains Probe" at the `contains` tier only -- the weak hit on the FIRST
+  // source that the search-order test needs to lose to an exact hit on LATER.
+  'contains probe': { sourceId: 'fm-cp', title: 'Contains Probe Extended' },
 };
 /** Every source_series_id a test here can create, for the before/after cleanup. */
-const FAKE_IDS = [...Object.values(FAKE_TITLES).map((v) => v.sourceId), 'sw-1'];
+const FAKE_IDS = [...Object.values(FAKE_TITLES).map((v) => v.sourceId), 'sw-1', 'lt-1'];
+const LATER = 'importbatch-later';       // asked after FAKE in preferred order
 function fakeAdapter() {
   return {
     id: FAKE, name: 'Fake Source', preferredOrder: 0,
@@ -128,6 +136,25 @@ function swAdapter() {
   };
 }
 
+/**
+ * A second ordinary source, asked after FAKE: carries exactly one title, exactly, and answers nothing for
+ * anything else, so it can only ever win a row by the search reaching it with the right term.
+ */
+function laterAdapter() {
+  return {
+    id: LATER, name: 'Later Source', preferredOrder: 5,
+    async search(term: string) {
+      return term.toLowerCase() === 'later source title'
+        ? [{ sourceId: 'lt-1', source: LATER, title: 'Later Source Title', coverUrl: 'https://example.invalid/lt.jpg' }]
+        : [];
+    },
+    async getSeries(sid: string) { return { sourceId: sid, source: LATER, title: 'Later Source Title', summary: '' }; },
+    async listChapters() { return [{ number: 1, title: 'Chapter 1', sourceId: 'c1', pages: 1 }]; },
+    async getPageUrls() { pageCalls++; return ['https://example.invalid/p1.png']; },
+    async latest() { return [] as any[]; },
+  };
+}
+
 // --- minimal protobuf writer, just the fields entriesFromBackup reads (see tachibk.test.ts for the exhaustive version) ---
 const varint = (n: number): Buffer => { const out: number[] = []; while (n > 127) { out.push((n & 127) | 128); n = Math.floor(n / 128); } out.push(n); return Buffer.from(out); };
 const tag = (field: number, wire: number) => varint((field << 3) | wire);
@@ -155,6 +182,7 @@ before(async () => {
   const { registerAdapter } = await import('../src/lib/sources');
   registerAdapter(fakeAdapter() as any);
   registerAdapter(swAdapter() as any);
+  registerAdapter(laterAdapter() as any);
   await q('INSERT INTO suwayomi_sources (source_id, name, lang, nsfw, enabled) VALUES ($1,$2,$3,$4,$5) ON CONFLICT (source_id) DO UPDATE SET enabled = true',
     [SW_ID, 'Suwayomi Fake', 'en', false, true]);
 });
@@ -1043,6 +1071,612 @@ test('the list marks a batch left resolving by a restart as stale, and a live on
   } finally {
     searchDelayMs = 0;
     for (const id of ids) await q('DELETE FROM import_batches WHERE id = $1', [id]);
+    await app.close();
+  }
+});
+
+// ---- Tracker intake (v0.36.0, issue #48.1): the reading list of the AniList / MyAnimeList / Kitsu account
+// connected under Profile becomes a batch, and every row is linked to the tracker so progress sync works
+// from the first chapter -- with the tracker's own count as the floor, so that first chapter never rewinds
+// the entry. The adapter's `listLibrary` is swapped for a fake on the shared ADAPTERS object (the very
+// object the route reads), so nothing here depends on how a provider is spoken to, only on what the intake
+// does with what it answers. Every tracker id a test here writes carries `T!i36`. ----
+
+type LibEntry = import('../src/lib/trackerProviders').LibraryEntry;
+const T36 = 'T!i36';
+const entry = (externalId: string, title: string, extra: Partial<LibEntry> = {}): LibEntry =>
+  ({ externalId: `${T36}-${externalId}`, title, altTitles: [], status: 'reading', progress: 0, format: 'manga', ...extra });
+const pixelFetch = (async () => new Response(PIXEL, { status: 200, headers: { 'content-type': 'image/png' } })) as typeof fetch;
+
+/** What the fake `listLibrary` was asked: proves the intake read the caller's own token and the statuses asked for. */
+let listCalls: Array<{ token: string; statuses: string[]; max: number }> = [];
+
+async function stubAniList(fn: (token: string, opts: { statuses: string[]; max: number }) => Promise<LibEntry[]>): Promise<() => void> {
+  const { ADAPTERS } = await import('../src/lib/trackerProviders');
+  const orig = ADAPTERS.anilist.listLibrary;
+  ADAPTERS.anilist.listLibrary = async (token, opts) => {
+    listCalls.push({ token, statuses: [...opts.statuses], max: opts.max });
+    return fn(token, opts);
+  };
+  return () => { ADAPTERS.anilist.listLibrary = orig; };
+}
+
+async function connectAniList(uid: string) {
+  const { saveConnection } = await import('../src/lib/trackers');
+  await saveConnection(uid, 'anilist', `tok-${T36}`, 'Someone', null);
+}
+
+/** The user row goes with boot()'s DELETE, but series_trackers is keyed per series and outlives it. */
+async function cleanupTracker(uid: string) {
+  await q(`DELETE FROM series_trackers WHERE external_id LIKE $1`, [`${T36}-%`]);
+  await q(`DELETE FROM tracker_progress WHERE user_id = $1`, [uid]);
+  await q(`DELETE FROM user_trackers WHERE user_id = $1`, [uid]);
+}
+
+const trackerIntake = (app: any, headers: any, payload: Record<string, unknown> = {}) =>
+  app.inject({ method: 'POST', url: '/api/admin/import/batches', headers, payload: { origin: 'tracker', tracker: 'anilist', ...payload } });
+
+test('a tracker list becomes a batch: novels skipped, duplicates folded, alt titles carried', { skip }, async (t) => {
+  // Reintroduce by dropping the `format === 'novel'` skip in readTrackerList (routes/admin.ts): total reads 4
+  // and skippedNovels 0. Reintroduce the fold by deduping on the search title only (drop the alt names from
+  // `names`): the romaji row of Attack on Titan becomes a fourth row.
+  const { app, headers, uid } = await boot();
+  const restore = await stubAniList(async () => [
+    entry('1', 'Tracker Manga One', { altTitles: ['Torakka Manga Wan'], progress: 12 }),
+    // An alt that IS the title (and a re-spelling of an earlier alt) is noise, not another name.
+    entry('2', 'Attack on Titan', { altTitles: ['Shingeki no Kyojin', 'Attack on Titan', ' shingeki-no-kyojin '], status: 'plan_to_read' }),
+    entry('3', 'Some Light Novel', { format: 'novel', progress: 5 }),
+    // The same work under its romaji title: one row, or the batch adds it twice from two source titles.
+    entry('4', 'Shingeki no Kyojin', { altTitles: ['Attack on Titan'], status: 'completed', progress: 139 }),
+    // The same id again (a custom list repeating an entry): one row.
+    entry('1', 'Tracker Manga One (again)'),
+    // Quotes, backslashes and non-ASCII: the alt titles ride the INSERT as jsonb[] and must come back exact.
+    entry('5', 'Quote "Test" \\ Title', { altTitles: ['Alt with "quotes" \\ and é', 'Zweiter Name'] }),
+  ]);
+  const batchIds: string[] = [];
+  try {
+    await connectAniList(uid);
+    listCalls = [];
+    const r = await trackerIntake(app, headers, { statuses: ['reading', 'plan_to_read'] });
+    assert.equal(r.statusCode, 200, r.body);
+    batchIds.push(r.json().batchId);
+    assert.deepEqual([r.json().total, r.json().skippedNovels, r.json().truncated], [3, 1, false]);
+    assert.deepEqual(listCalls, [{ token: `tok-${T36}`, statuses: ['reading', 'plan_to_read'], max: 501 }], 'the saved token, unsealed, and exactly the lists asked for');
+    const batch = (await q('SELECT origin, tracker FROM import_batches WHERE id = $1', [batchIds[0]]))[0];
+    assert.deepEqual([batch.origin, batch.tracker], ['tracker', 'anilist']);
+    const rows = await q('SELECT backup_title, tracker, external_id, alt_titles, progress FROM import_candidates WHERE batch_id = $1 ORDER BY ord', [batchIds[0]]);
+    assert.deepEqual(rows.map((x: any) => x.backup_title), ['Tracker Manga One', 'Attack on Titan', 'Quote "Test" \\ Title']);
+    assert.deepEqual(rows.map((x: any) => [x.tracker, x.external_id, x.progress]), [['anilist', `${T36}-1`, 12], ['anilist', `${T36}-2`, 0], ['anilist', `${T36}-5`, 0]]);
+    assert.deepEqual(rows[0].alt_titles, ['Torakka Manga Wan']);
+    assert.deepEqual(rows[1].alt_titles, ['Shingeki no Kyojin'], 'the alt equal to the title, and the re-spelling of an alt, are dropped');
+    assert.deepEqual(rows[2].alt_titles, ['Alt with "quotes" \\ and é', 'Zweiter Name'], 'quotes, backslashes and non-ASCII survive the jsonb[] ride');
+    await waitForState(app, headers, batchIds[0], ['review']); // the busy guard would refuse the POSTs below while this resolves
+
+    await t.test('the lists default to Reading + Plan to read; an empty list, an unknown tracker and a nameless intake are refused', async () => {
+      // Reintroduce by dropping `.min(1)` from `statuses`: an empty list is accepted and reads nothing.
+      assert.equal((await trackerIntake(app, headers, { statuses: [] })).statusCode, 400);
+      assert.equal((await trackerIntake(app, headers, { tracker: 'bogus' })).statusCode, 400);
+      assert.equal((await trackerIntake(app, headers, { statuses: ['reading', 'bogus'] })).statusCode, 400);
+      const nameless = await app.inject({ method: 'POST', url: '/api/admin/import/batches', headers, payload: { origin: 'tracker' } });
+      assert.equal(nameless.statusCode, 400, nameless.body);
+      assert.match(nameless.json().message, /which tracker/);
+      listCalls = [];
+      const dflt = await trackerIntake(app, headers);
+      assert.equal(dflt.statusCode, 200, dflt.body);
+      batchIds.push(dflt.json().batchId);
+      assert.deepEqual(listCalls.map((c) => c.statuses), [['reading', 'plan_to_read']]);
+      await waitForState(app, headers, batchIds[1], ['review']);
+    });
+
+    await t.test('a read that hit the cap keeps 500 rows and says so, even when novels brought it under', async () => {
+      // Reintroduce by computing `truncated` from the kept rows alone (`entries.length > 500`): 501 read with one
+      // novel among them keeps 500 and claims the list was read whole.
+      restore();
+      const big = await stubAniList(async () => Array.from({ length: 501 }, (_, i) => entry(`bulk-${i}`, `Bulk Title ${i}`, i === 7 ? { format: 'novel' } : {})));
+      try {
+        const r2 = await trackerIntake(app, headers);
+        assert.equal(r2.statusCode, 200, r2.body);
+        assert.deepEqual([r2.json().total, r2.json().truncated, r2.json().skippedNovels], [500, true, 1]);
+        // Discard at once: DELETE stops the resolve loop before its next row, and 500 searches are not the point.
+        await app.inject({ method: 'DELETE', url: `/api/admin/import/batches/${r2.json().batchId}`, headers });
+      } finally { big(); }
+    });
+  } finally {
+    restore();
+    for (const id of batchIds) await q('DELETE FROM import_batches WHERE id = $1', [id]);
+    await cleanupTracker(uid);
+    await app.close();
+  }
+});
+
+test('an entry already in the library is linked and floored at intake, and reads linked', { skip }, async () => {
+  // Reintroduce by dropping the `seedTrackerFloor` call from linkImportedSeries (routes/admin.ts): the floor
+  // rows are missing and the first chapter finished here would push chapter 1 over an entry at 150.
+  // Reintroduce the link by dropping the `linkSeries` call: `linked` reads false and series_trackers is empty.
+  const { app, headers, uid } = await boot();
+  const { newSeriesId } = await import('../src/lib/ids');
+  const ownedExact = newSeriesId();
+  const ownedAlt = newSeriesId();
+  const restore = await stubAniList(async () => [
+    entry('owned', 'Owned Tracker Title', { progress: 150 }),
+    // Owned under its OTHER name: the library spells it the way the source that added it does.
+    entry('alt', 'English Owned Title', { altTitles: ['Romaji Owned Title'], progress: 3 }),
+    entry('fresh', 'Tracker Manga One', { progress: 12 }),
+  ]);
+  let batchId = '';
+  try {
+    await q(`INSERT INTO lib_series (id, source, title, folder, books_count) VALUES ($1,'Other','Owned Tracker Title',$1,1), ($2,'Other','Romaji Owned Title',$2,1)`, [ownedExact, ownedAlt]);
+    await connectAniList(uid);
+    const r = await trackerIntake(app, headers);
+    assert.equal(r.statusCode, 200, r.body);
+    batchId = r.json().batchId;
+    const body = await waitForState(app, headers, batchId, ['review']);
+    const owned = body.items.find((i: any) => i.backup_title === 'Owned Tracker Title');
+    const alt = body.items.find((i: any) => i.backup_title === 'English Owned Title');
+    const fresh = body.items.find((i: any) => i.backup_title === 'Tracker Manga One');
+    assert.deepEqual([owned.in_library, owned.decision, owned.status, owned.linked], [true, 'skip', 'already', true]);
+    assert.deepEqual([alt.in_library, alt.decision, alt.status, alt.linked], [true, 'skip', 'already', true], 'owned under its other name counts as owned, and is linked');
+    assert.deepEqual([fresh.in_library, fresh.status, fresh.linked], [false, null, false], 'a title not here yet is linked at /run, not now');
+    assert.equal(body.batch.already, 2, 'linked-at-intake rows count as already had');
+
+    const links = await q('SELECT series_id, external_id, title, linked_by FROM series_trackers WHERE series_id = ANY($1) AND provider = $2 ORDER BY external_id', [[ownedExact, ownedAlt], 'anilist']);
+    assert.deepEqual(links, [
+      { series_id: ownedAlt, external_id: `${T36}-alt`, title: 'English Owned Title', linked_by: uid },
+      { series_id: ownedExact, external_id: `${T36}-owned`, title: 'Owned Tracker Title', linked_by: uid },
+    ], 'linked_by is the admin: an id off a person\'s own list is a human choice');
+    const floors = await q('SELECT series_id, chapters, pushed_at FROM tracker_progress WHERE user_id = $1 AND provider = $2 ORDER BY chapters', [uid, 'anilist']);
+    assert.deepEqual(floors, [
+      { series_id: ownedAlt, chapters: 3, pushed_at: null },
+      { series_id: ownedExact, chapters: 150, pushed_at: null },
+    ], 'the tracker\'s own count is the floor, with nothing sent yet');
+  } finally {
+    restore();
+    if (batchId) await q('DELETE FROM import_batches WHERE id = $1', [batchId]);
+    await q('DELETE FROM lib_series WHERE id = ANY($1)', [[ownedExact, ownedAlt]]);
+    await cleanupTracker(uid);
+    await app.close();
+  }
+});
+
+test('a row matched under its other name records which', { skip }, async () => {
+  // Reintroduce by searching `entry.title` alone in resolveCandidate (routes/sources.ts, drop the `terms`
+  // loop): Attack on Titan stays unresolved, because FAKE carries it only as Shingeki no Kyojin.
+  // Reintroduce the record by writing `matched_via = NULL` in resolveBatch's UPDATE: the row cannot say why
+  // its match title differs from its own.
+  const { app, headers, uid } = await boot();
+  const restore = await stubAniList(async () => [
+    entry('aot', 'Attack on Titan', { altTitles: ['Shingeki no Kyojin'] }),
+    entry('t1', 'Tracker Manga One', { altTitles: ['Torakka Manga Wan'] }),
+  ]);
+  let batchId = '';
+  try {
+    await connectAniList(uid);
+    const r = await trackerIntake(app, headers);
+    assert.equal(r.statusCode, 200, r.body);
+    batchId = r.json().batchId;
+    const body = await waitForState(app, headers, batchId, ['review']);
+    const aot = body.items.find((i: any) => i.backup_title === 'Attack on Titan');
+    const t1 = body.items.find((i: any) => i.backup_title === 'Tracker Manga One');
+    assert.deepEqual(
+      [aot.decision, aot.confidence, aot.match_source_id, aot.match_title, aot.matched_via],
+      ['auto', 'exact', 'fm-snk', 'Shingeki no Kyojin', 'Shingeki no Kyojin'],
+      'found under the romaji title, scored against it, and the row says so',
+    );
+    assert.deepEqual([t1.decision, t1.match_source_id, t1.matched_via], ['auto', 'fm-t1', null], 'a search-title hit records no alternate');
+  } finally {
+    restore();
+    if (batchId) await q('DELETE FROM import_batches WHERE id = $1', [batchId]);
+    await cleanupTracker(uid);
+    await app.close();
+  }
+});
+
+test('an imported title is linked and floored at run', { skip }, async () => {
+  // Reintroduce by dropping the `if (row.tracker && (r.ok || r.error === 'duplicate'))` block from the /run
+  // loop (routes/admin.ts): the series is added, nothing links it, `linked` reads false.
+  globalThis.fetch = pixelFetch;
+  const { app, headers, uid } = await boot();
+  const restore = await stubAniList(async () => [entry('run', 'Tracker Manga One', { progress: 12 })]);
+  let batchId = '';
+  try {
+    await connectAniList(uid);
+    const r = await trackerIntake(app, headers);
+    assert.equal(r.statusCode, 200, r.body);
+    batchId = r.json().batchId;
+    const review = await waitForState(app, headers, batchId, ['review']);
+    assert.equal(review.items[0].linked, false, 'PREMISE: nothing is linked before the series exists');
+    const run = await app.inject({ method: 'POST', url: `/api/admin/import/batches/${batchId}/run`, headers });
+    assert.equal(run.statusCode, 200, run.body);
+    const done = await waitForState(app, headers, batchId, ['done']);
+    assert.deepEqual([done.items[0].status, done.items[0].linked], ['added', true]);
+
+    const series = (await q(`SELECT id FROM lib_series WHERE source_series_id = 'fm-t1'`))[0];
+    assert.ok(series, 'the series was added');
+    const link = (await q('SELECT external_id, title, linked_by FROM series_trackers WHERE series_id = $1 AND provider = $2', [series.id, 'anilist']))[0];
+    assert.deepEqual(link, { external_id: `${T36}-run`, title: 'Tracker Manga One', linked_by: uid }, 'linked to the entry it came from, by the account whose list was read');
+    const floor = (await q('SELECT chapters, pushed_at FROM tracker_progress WHERE user_id = $1 AND series_id = $2 AND provider = $3', [uid, series.id, 'anilist']))[0];
+    assert.deepEqual(floor, { chapters: 12, pushed_at: null }, 'the floor is the tracker\'s count and nothing has been pushed');
+  } finally {
+    restore();
+    if (batchId) await q('DELETE FROM import_batches WHERE id = $1', [batchId]);
+    await q(`DELETE FROM lib_series WHERE source_series_id = 'fm-t1'`);
+    await cleanupTracker(uid);
+    await app.close();
+  }
+});
+
+test('a rejected tracker token disables the connection with the same message as a push', { skip }, async (t) => {
+  // Reintroduce by answering `tracker_unavailable` for an `authFailed` throw too (drop the `err.authFailed`
+  // branch in readTrackerList): the connection stays enabled with no message, and every push after it fails
+  // the same way for ever. Reintroduce the sentence by writing any other wording: Profile then shows two
+  // different explanations of one problem.
+  const { app, headers, uid } = await boot();
+  const { ADAPTERS } = await import('../src/lib/trackerProviders');
+  const { pushSeriesProgress, linkSeries } = await import('../src/lib/trackers');
+  const { newSeriesId } = await import('../src/lib/ids');
+  const sid = newSeriesId();
+  const bookId = `${T36}-book`;
+  const origSetProgress = ADAPTERS.anilist.setProgress;
+  const authFail = (): never => { throw Object.assign(new Error('Invalid token'), { authFailed: true }); };
+  const connection = async () => (await q('SELECT enabled, last_error FROM user_trackers WHERE user_id = $1 AND provider = $2', [uid, 'anilist']))[0];
+  let restore = () => {};
+  const batchIds: string[] = [];
+  try {
+    // A real push through pushOne, with the adapter refusing the token: what the sentence is compared to.
+    await q(`INSERT INTO lib_series (id, source, title, folder, books_count) VALUES ($1,'Other','Push Rejected Title',$1,1)`, [sid]);
+    await q(`INSERT INTO lib_books (id, series_id, source, file, title, number) VALUES ($1,$2,'Other',$3,'Chapter 1',1)`, [bookId, sid, `/x/${bookId}.cbz`]);
+    await q(`INSERT INTO read_progress (user_id, book_id, series_id, page, completed) VALUES ($1,$2,$3,1,true)`, [uid, bookId, sid]);
+    await connectAniList(uid);
+    await linkSeries(sid, `${T36}-push`, 'Push Rejected Title', uid, 'anilist');
+    ADAPTERS.anilist.setProgress = async () => authFail();
+    await pushSeriesProgress(uid, sid);
+    const afterPush = await connection();
+    assert.equal(afterPush.enabled, false, 'PREMISE: a rejected push disables the connection');
+    assert.ok(afterPush.last_error, 'PREMISE: and says why');
+
+    await t.test('the intake disables it with that very sentence', async () => {
+      await connectAniList(uid); // reconnect: enabled again, no error
+      restore = await stubAniList(async () => authFail());
+      const r = await trackerIntake(app, headers);
+      assert.equal(r.statusCode, 422, r.body);
+      assert.equal(r.json().error, 'tracker_rejected');
+      assert.match(r.json().message, /AniList/);
+      const afterIntake = await connection();
+      assert.equal(afterIntake.enabled, false);
+      assert.equal(afterIntake.last_error, afterPush.last_error, 'one sentence for both, so Profile explains it once');
+    });
+
+    await t.test('a tracker that merely did not answer leaves the connection alone', async () => {
+      // Reintroduce by disabling on every throw: a timeout or a 500 switches someone\'s sync off.
+      await connectAniList(uid);
+      restore();
+      restore = await stubAniList(async () => { throw new Error('HTTP 500'); });
+      const r = await trackerIntake(app, headers);
+      assert.equal(r.statusCode, 502, r.body);
+      assert.equal(r.json().error, 'tracker_unavailable');
+      assert.deepEqual(await connection(), { enabled: true, last_error: null });
+    });
+
+    await t.test('either failure releases the one-batch guard', async () => {
+      // Reintroduce by returning from the tracker branch without reaching the handler\'s `finally`.
+      const r = await app.inject({ method: 'POST', url: '/api/admin/import/batches', headers, payload: { titles: ['Nobody Has This One'] } });
+      assert.equal(r.statusCode, 200, r.body);
+      batchIds.push(r.json().batchId);
+      await waitForState(app, headers, batchIds[0], ['review']);
+    });
+  } finally {
+    ADAPTERS.anilist.setProgress = origSetProgress;
+    restore();
+    for (const id of batchIds) await q('DELETE FROM import_batches WHERE id = $1', [id]);
+    await q('DELETE FROM read_progress WHERE book_id = $1', [bookId]);
+    await q('DELETE FROM lib_series WHERE id = $1', [sid]); // cascades to lib_books
+    await cleanupTracker(uid);
+    await app.close();
+  }
+});
+
+test('another admin cannot import from my tracker', { skip }, async () => {
+  // Reintroduce by dropping `user_id = $1` from readTrackerList's SELECT (routes/admin.ts): the other admin's
+  // request finds my row -- the only one -- and reads my list.
+  const { app, headers, uid } = await boot();
+  const OTHER = 'importbatch-other-admin';
+  await q('DELETE FROM users WHERE username = $1', [OTHER]);
+  const uid2 = (await q<{ id: string }>(
+    `INSERT INTO users (username, display_name, password_hash, role, auth_kind, perms, max_age_rating)
+     VALUES ($1,$1,'x','admin','password','{}',NULL) RETURNING id`, [OTHER]))[0].id;
+  const headers2 = { authorization: `Bearer ${app.jwt.sign({ sub: uid2, role: 'admin' })}` };
+  const restore = await stubAniList(async () => [entry('mine', 'Tracker Manga One')]);
+  let batchId = '';
+  try {
+    await connectAniList(uid); // only USER is connected
+    listCalls = [];
+    const theirs = await trackerIntake(app, headers2);
+    assert.equal(theirs.statusCode, 404, theirs.body);
+    assert.equal(theirs.json().error, 'not_connected');
+    assert.equal(listCalls.length, 0, 'my token is never read for someone else\'s request');
+
+    // My own connection, switched off by a rejected token, reads the same: nothing to import from.
+    await q('UPDATE user_trackers SET enabled = false WHERE user_id = $1 AND provider = $2', [uid, 'anilist']);
+    const off = await trackerIntake(app, headers);
+    assert.equal(off.statusCode, 404, off.body);
+    assert.equal(listCalls.length, 0);
+
+    await q('UPDATE user_trackers SET enabled = true WHERE user_id = $1 AND provider = $2', [uid, 'anilist']);
+    const mine = await trackerIntake(app, headers);
+    assert.equal(mine.statusCode, 200, mine.body);
+    batchId = mine.json().batchId;
+    assert.equal(listCalls.length, 1);
+    assert.equal((await q('SELECT user_id FROM import_batches WHERE id = $1', [batchId]))[0].user_id, uid);
+    await waitForState(app, headers, batchId, ['review']);
+  } finally {
+    restore();
+    if (batchId) await q('DELETE FROM import_batches WHERE id = $1', [batchId]);
+    await cleanupTracker(uid);
+    await q('DELETE FROM users WHERE username = $1', [OTHER]);
+    await app.close();
+  }
+});
+
+// ---- The v0.36.0 fix pass: what the three reviews found the intake and the run doing wrong. ----
+
+test('another admin running my tracker batch floors me, not them', { skip }, async () => {
+  // Reintroduce by passing `userIdOf(req)` again (instead of the batch's `user_id`) to linkImportedSeries in
+  // /run (routes/admin.ts): the floor lands on the RUNNER's tracker_progress, `linked_by` is the runner, and
+  // the owner -- whose list it was -- gets nothing, so their first chapter here pushes 1 over their 150.
+  globalThis.fetch = pixelFetch;
+  const { app, headers, uid } = await boot();
+  const OTHER = 'importbatch-other-runner';
+  await q('DELETE FROM users WHERE username = $1', [OTHER]);
+  const uid2 = (await q<{ id: string }>(
+    `INSERT INTO users (username, display_name, password_hash, role, auth_kind, perms, max_age_rating)
+     VALUES ($1,$1,'x','admin','password','{}',NULL) RETURNING id`, [OTHER]))[0].id;
+  const headers2 = { authorization: `Bearer ${app.jwt.sign({ sub: uid2, role: 'admin' })}` };
+  const restore = await stubAniList(async () => [entry('twoadmin', 'Tracker Manga One', { progress: 150 })]);
+  let batchId = '';
+  try {
+    await connectAniList(uid); // the OWNER is connected; the runner never was
+    const r = await trackerIntake(app, headers);
+    assert.equal(r.statusCode, 200, r.body);
+    batchId = r.json().batchId;
+    await waitForState(app, headers, batchId, ['review']);
+    const run = await app.inject({ method: 'POST', url: `/api/admin/import/batches/${batchId}/run`, headers: headers2 });
+    assert.equal(run.statusCode, 200, run.body);
+    const done = await waitForState(app, headers2, batchId, ['done']);
+    assert.deepEqual([done.items[0].status, done.items[0].linked], ['added', true]);
+
+    const series = (await q(`SELECT id FROM lib_series WHERE source_series_id = 'fm-t1'`))[0];
+    assert.ok(series, 'the series was added');
+    const link = (await q('SELECT linked_by FROM series_trackers WHERE series_id = $1 AND provider = $2', [series.id, 'anilist']))[0];
+    assert.deepEqual(link, { linked_by: uid }, 'the link is the owner\'s: the id came off THEIR list');
+    const floors = await q('SELECT user_id, chapters, pushed_at FROM tracker_progress WHERE series_id = $1 AND provider = $2', [series.id, 'anilist']);
+    assert.deepEqual(floors, [{ user_id: uid, chapters: 150, pushed_at: null }], 'the floor is the owner\'s, and the runner carries none');
+    const audit = (await q(`SELECT user_id, detail FROM audit_log WHERE event = 'import.batch.run' AND detail->>'batchId' = $1`, [batchId]))[0];
+    assert.equal(audit?.user_id, uid2, 'the runner is still who the audit row names');
+    assert.equal(audit?.detail?.owner, uid, 'and the row says whose list it was');
+  } finally {
+    restore();
+    if (batchId) await q('DELETE FROM import_batches WHERE id = $1', [batchId]);
+    await q(`DELETE FROM lib_series WHERE source_series_id = 'fm-t1'`);
+    await q('DELETE FROM tracker_progress WHERE user_id = $1', [uid2]);
+    await cleanupTracker(uid);
+    await q('DELETE FROM users WHERE username = $1', [OTHER]);
+    await app.close();
+  }
+});
+
+test('an exact hit for the title on a later source beats an alt-title contains hit on an earlier one', { skip }, async () => {
+  // Reintroduce by nesting the terms inside the source loop again in resolveCandidate's cross-source pass
+  // (routes/sources.ts): FAKE is asked the title (miss) and then the alternate, whose `contains` hit on
+  // "Contains Probe Extended" wins before LATER -- which carries "Later Source Title" exactly -- is asked.
+  const { app, headers, uid } = await boot();
+  const restore = await stubAniList(async () => [entry('order', 'Later Source Title', { altTitles: ['Contains Probe'] })]);
+  let batchId = '';
+  try {
+    await connectAniList(uid);
+    const r = await trackerIntake(app, headers);
+    assert.equal(r.statusCode, 200, r.body);
+    batchId = r.json().batchId;
+    const body = await waitForState(app, headers, batchId, ['review']);
+    const row = body.items[0];
+    assert.deepEqual(
+      [row.decision, row.match_source, row.match_source_id, row.match_title, row.confidence, row.matched_via],
+      ['auto', LATER, 'lt-1', 'Later Source Title', 'exact', null],
+      'the title is tried on every source before any alternate is tried anywhere',
+    );
+  } finally {
+    restore();
+    if (batchId) await q('DELETE FROM import_batches WHERE id = $1', [batchId]);
+    await cleanupTracker(uid);
+    await app.close();
+  }
+});
+
+test('a deleted namesake does not count as owned; an alt-owned row records matched_via', { skip }, async () => {
+  // Reintroduce the tombstone half by scanning every lib_series row again (drop the `deleted_at IS NULL AND
+  // merged_into IS NULL` WHERE from the `have` query in POST /batches): both hidden namesakes read "already
+  // in your library", are linked, and get a floor on a series nobody can open. Reintroduce the record by
+  // dropping `mv` from the candidates INSERT: the alt-owned row cannot say which name it was linked under.
+  const { app, headers, uid } = await boot();
+  const { newSeriesId } = await import('../src/lib/ids');
+  const deleted = newSeriesId();
+  const merged = newSeriesId();
+  const survivor = newSeriesId();
+  const ownedAlt = newSeriesId();
+  const ownedExact = newSeriesId();
+  const restore = await stubAniList(async () => [
+    entry('del', 'Deleted Namesake Title', { progress: 9 }),
+    entry('mrg', 'Merged Namesake Title', { progress: 4 }),
+    entry('alt', 'English Owned Title', { altTitles: ['Romaji Owned Title'], progress: 3 }),
+    entry('own', 'Owned Tracker Title', { altTitles: ['Some Other Name'], progress: 150 }),
+  ]);
+  let batchId = '';
+  try {
+    await q(
+      `INSERT INTO lib_series (id, source, title, folder, books_count, deleted_at, merged_into) VALUES
+         ($1,'Other','Deleted Namesake Title',$1,1, now(), NULL),
+         ($2,'Other','Merged Namesake Title',$2,1, NULL, $3),
+         ($3,'Other','Merge Survivor Title',$3,1, NULL, NULL),
+         ($4,'Other','Romaji Owned Title',$4,1, NULL, NULL),
+         ($5,'Other','Owned Tracker Title',$5,1, NULL, NULL)`,
+      [deleted, merged, survivor, ownedAlt, ownedExact],
+    );
+    await connectAniList(uid);
+    const r = await trackerIntake(app, headers);
+    assert.equal(r.statusCode, 200, r.body);
+    batchId = r.json().batchId;
+    // `done` too: a batch whose every row reads owned closes on first view, and that is exactly what the
+    // tombstone bug produces -- the rows, not the state, are what this test is about.
+    const body = await waitForState(app, headers, batchId, ['review', 'done']);
+    const by = (t: string) => body.items.find((i: any) => i.backup_title === t);
+    for (const t of ['Deleted Namesake Title', 'Merged Namesake Title']) {
+      const row = by(t);
+      assert.deepEqual([row.in_library, row.status, row.linked, row.matched_via], [false, null, false, null], `${t}: a hidden series is not "already in your library"`);
+    }
+    assert.equal(body.batch.already, 2, 'only the two live namesakes count as already had');
+    const alt = by('English Owned Title');
+    assert.deepEqual([alt.in_library, alt.status, alt.linked, alt.matched_via], [true, 'already', true, 'Romaji Owned Title'], 'owned under its other name, and the row says which');
+    const own = by('Owned Tracker Title');
+    assert.deepEqual([own.in_library, own.status, own.linked, own.matched_via], [true, 'already', true, null], 'owned under its own title records no alternate');
+
+    const links = await q('SELECT series_id FROM series_trackers WHERE series_id = ANY($1) AND provider = $2 ORDER BY series_id', [[deleted, merged, survivor, ownedAlt, ownedExact], 'anilist']);
+    assert.deepEqual(links.map((l: any) => l.series_id).sort(), [ownedAlt, ownedExact].sort(), 'no link lands on a hidden series');
+    const floors = await q('SELECT series_id, chapters FROM tracker_progress WHERE user_id = $1 AND provider = $2 ORDER BY chapters', [uid, 'anilist']);
+    assert.deepEqual(floors, [{ series_id: ownedAlt, chapters: 3 }, { series_id: ownedExact, chapters: 150 }], 'and no floor either');
+  } finally {
+    restore();
+    if (batchId) await q('DELETE FROM import_batches WHERE id = $1', [batchId]);
+    await q('DELETE FROM lib_series WHERE id = ANY($1)', [[deleted, merged, survivor, ownedAlt, ownedExact]]);
+    await cleanupTracker(uid);
+    await app.close();
+  }
+});
+
+test('an expired token answers 422 and leaves the connection enabled', { skip }, async (t) => {
+  // Reintroduce by dropping the `expires_at` branch from readTrackerList (routes/admin.ts): the service is
+  // called with the lapsed token (listCalls 1), and -- since MyAnimeList answers a lapsed token with 401 --
+  // the `authFailed` branch then switches the connection off as "rejected", the one condition a push
+  // reports as "expired" with the connection kept.
+  const { app, headers, uid } = await boot();
+  const { saveConnection, pushSeriesProgress, linkSeries } = await import('../src/lib/trackers');
+  const { newSeriesId } = await import('../src/lib/ids');
+  const sid = newSeriesId();
+  const bookId = `${T36}-expired-book`;
+  const connection = async () => (await q('SELECT enabled, last_error FROM user_trackers WHERE user_id = $1 AND provider = $2', [uid, 'anilist']))[0];
+  const yesterday = new Date(Date.now() - 86_400_000);
+  const restore = await stubAniList(async () => [entry('exp', 'Tracker Manga One')]);
+  let batchId = '';
+  try {
+    // A real push with a lapsed connection: the sentence pushOne leaves, for the intake's to be compared to.
+    await q(`INSERT INTO lib_series (id, source, title, folder, books_count) VALUES ($1,'Other','Expired Push Title',$1,1)`, [sid]);
+    await q(`INSERT INTO lib_books (id, series_id, source, file, title, number) VALUES ($1,$2,'Other',$3,'Chapter 1',1)`, [bookId, sid, `/x/${bookId}.cbz`]);
+    await q(`INSERT INTO read_progress (user_id, book_id, series_id, page, completed) VALUES ($1,$2,$3,1,true)`, [uid, bookId, sid]);
+    await saveConnection(uid, 'anilist', `tok-${T36}`, 'Someone', yesterday);
+    await linkSeries(sid, `${T36}-expired`, 'Expired Push Title', uid, 'anilist');
+    await pushSeriesProgress(uid, sid);
+    const afterPush = await connection();
+    assert.equal(afterPush.enabled, true, 'PREMISE: a push with a lapsed token keeps the connection');
+    assert.match(afterPush.last_error ?? '', /expired/, 'PREMISE: and says it expired');
+
+    await saveConnection(uid, 'anilist', `tok-${T36}`, 'Someone', yesterday); // reconnect: same lapsed expiry, no error yet
+    listCalls = [];
+    const r = await trackerIntake(app, headers);
+    assert.equal(r.statusCode, 422, r.body);
+    assert.equal(r.json().error, 'token_expired');
+    assert.match(r.json().message, /AniList.*expired/);
+    assert.equal(listCalls.length, 0, 'the service is not asked with a token known to have lapsed');
+    const afterIntake = await connection();
+    assert.equal(afterIntake.enabled, true, 'reported, not disabled');
+    assert.equal(afterIntake.last_error, afterPush.last_error, 'one sentence for both, so Profile explains it once');
+
+    await t.test('a token that has not lapsed is read as usual', async () => {
+      await saveConnection(uid, 'anilist', `tok-${T36}`, 'Someone', new Date(Date.now() + 86_400_000));
+      const ok = await trackerIntake(app, headers);
+      assert.equal(ok.statusCode, 200, ok.body);
+      batchId = ok.json().batchId;
+      assert.equal(listCalls.length, 1);
+      await waitForState(app, headers, batchId, ['review']);
+    });
+  } finally {
+    restore();
+    if (batchId) await q('DELETE FROM import_batches WHERE id = $1', [batchId]);
+    await q('DELETE FROM read_progress WHERE book_id = $1', [bookId]);
+    await q('DELETE FROM lib_series WHERE id = $1', [sid]); // cascades to lib_books
+    await cleanupTracker(uid);
+    await app.close();
+  }
+});
+
+test('a hand-picked match forgets the automatic match\'s alt-title note', { skip }, async () => {
+  // Reintroduce by dropping `matched_via = NULL` from the manual branch of PATCH /candidates/:cid
+  // (routes/admin.ts): the row keeps "Shingeki no Kyojin" under a title a person chose by hand, and reads
+  // "matched under its other name" about a match that no longer exists.
+  const { app, headers, uid } = await boot();
+  const restore = await stubAniList(async () => [entry('via', 'Attack on Titan', { altTitles: ['Shingeki no Kyojin'] })]);
+  let batchId = '';
+  try {
+    await connectAniList(uid);
+    const r = await trackerIntake(app, headers);
+    assert.equal(r.statusCode, 200, r.body);
+    batchId = r.json().batchId;
+    const body = await waitForState(app, headers, batchId, ['review']);
+    const cid = body.items[0].id;
+    assert.equal(body.items[0].matched_via, 'Shingeki no Kyojin', 'PREMISE: the auto match was found under the alternate');
+    const via = async () => (await q('SELECT decision, matched_via, match_source_id FROM import_candidates WHERE id = $1', [cid]))[0];
+
+    // "Use the auto match" leaves the note alone: it belongs to the match it restores.
+    assert.equal((await app.inject({ method: 'PATCH', url: `/api/admin/import/candidates/${cid}`, headers, payload: { decision: 'auto' } })).statusCode, 200);
+    assert.deepEqual(await via(), { decision: 'auto', matched_via: 'Shingeki no Kyojin', match_source_id: 'fm-snk' });
+
+    const pick = await app.inject({ method: 'PATCH', url: `/api/admin/import/candidates/${cid}`, headers, payload: { decision: 'manual', source: FAKE, sourceId: 'fm-1', title: 'Fake Manga' } });
+    assert.equal(pick.statusCode, 200, pick.body);
+    assert.deepEqual(await via(), { decision: 'manual', matched_via: null, match_source_id: 'fm-1' }, 'a person\'s pick was found by nobody\'s alternate');
+  } finally {
+    restore();
+    if (batchId) await q('DELETE FROM import_batches WHERE id = $1', [batchId]);
+    await cleanupTracker(uid);
+    await app.close();
+  }
+});
+
+test('the novel count survives a reload (it is on the batch row)', { skip }, async (t) => {
+  // Reintroduce by dropping `skipped_novels, truncated` from the import_batches INSERT in POST /batches
+  // (routes/admin.ts): the POST still answers the counts, and every later GET reads the column defaults
+  // (0, false) -- the reloaded page shows a done line with no novel count and no 500 hint.
+  const { app, headers, uid } = await boot();
+  let restore = await stubAniList(async () => [
+    entry('n1', 'Tracker Manga One'),
+    entry('n2', 'Some Light Novel', { format: 'novel' }),
+    entry('n3', 'Another Light Novel', { format: 'novel' }),
+  ]);
+  const batchIds: string[] = [];
+  try {
+    await connectAniList(uid);
+    const r = await trackerIntake(app, headers);
+    assert.equal(r.statusCode, 200, r.body);
+    batchIds.push(r.json().batchId);
+    assert.deepEqual([r.json().skippedNovels, r.json().truncated], [2, false], 'PREMISE: the POST answers the counts');
+    const got = await waitForState(app, headers, batchIds[0], ['review']);
+    assert.deepEqual([got.batch.skippedNovels, got.batch.truncated], [2, false], 'a GET after the fact carries them too');
+    assert.equal('skipped_novels' in got.batch, false, 'under the POST\'s name, not the column\'s as a second copy');
+    const listed = (await app.inject({ method: 'GET', url: '/api/admin/import/batches', headers })).json().content.find((b: any) => b.id === batchIds[0]);
+    assert.deepEqual([listed.skippedNovels, listed.truncated], [2, false], 'and so does the Open-imports list');
+
+    await t.test('a read cut at the cap is remembered as truncated', async () => {
+      restore();
+      restore = await stubAniList(async () => Array.from({ length: 501 }, (_, i) => entry(`cap-${i}`, `Cap Title ${i}`)));
+      const r2 = await trackerIntake(app, headers);
+      assert.equal(r2.statusCode, 200, r2.body);
+      batchIds.push(r2.json().batchId);
+      const g2 = await app.inject({ method: 'GET', url: `/api/admin/import/batches/${batchIds[1]}`, headers });
+      assert.equal(g2.statusCode, 200, g2.body);
+      assert.deepEqual([g2.json().batch.skippedNovels, g2.json().batch.truncated], [0, true]);
+      // Discard at once: DELETE stops the resolve loop before its next row, and 500 searches are not the point.
+      await app.inject({ method: 'DELETE', url: `/api/admin/import/batches/${batchIds[1]}`, headers });
+    });
+  } finally {
+    restore();
+    for (const id of batchIds) await q('DELETE FROM import_batches WHERE id = $1', [id]);
+    await cleanupTracker(uid);
     await app.close();
   }
 });

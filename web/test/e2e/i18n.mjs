@@ -115,10 +115,12 @@ for (const code of LOCALES) {
   // The import page is its own route off Admin → Providers, so neither console's tab row covers it; PR #52
   // shipped it with 62 of its strings in no locale file and the check here saw nothing, because it never
   // went there. The words are from the intake card's sentences, not its eyebrow (uppercase in CSS, and
-  // innerText reports text as rendered), and not "Mihon" (a name, the same in every language).
+  // innerText reports text as rendered), and not "Mihon" (a name, the same in every language). "bring your
+  // list over" is the tracker box's not-connected line (v0.36.0) -- the state an e2e instance is in --
+  // and NOT its eyebrow "From your tracker", which `\bFrom your tracker\b` could never match in uppercase.
   const CONSOLES = [
     ['/admin', ['Overview', 'Members', 'Settings', 'Providers', 'Server', 'People', 'Content', 'Sources']],
-    ['/admin/import', ['review matches', 'matches each title', 'Start matching', 'backup stays on your server', 'nothing lands in your library']],
+    ['/admin/import', ['review matches', 'matches each title', 'Start matching', 'backup stays on your server', 'nothing lands in your library', 'bring your list over']],
     ['/profile', ['Reading', 'Account', 'Settings', 'Badges', 'Language', 'Accent']],
   ];
   if (code !== 'en') {

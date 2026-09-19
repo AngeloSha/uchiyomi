@@ -1,5 +1,147 @@
 # Changelog
 
+## v0.36.0 — 2026-09-19
+
+The two things v0.35.0 said were next, both asked for by TIGamingTV: the first half of
+[#48](https://github.com/AngeloSha/uchiyomi/issues/48) — bringing a reading list over from the AniList,
+MyAnimeList or Kitsu account already connected under Profile, through the review that release built — and
+[#49](https://github.com/AngeloSha/uchiyomi/issues/49), letting a freshly added series follow the other
+sources that carry it, which until now meant opening *Find missing chapters* on every series by hand. The
+shared chapter pool #49 describes has existed since v0.31.0; what was missing was the following.
+
+### Bring your tracker list over
+
+Uchiyomi pushes reading progress to AniList, MyAnimeList and Kitsu, and had never read anything back — so
+the list that already knew everything you follow was no help in filling a new library. Now it is. On the
+import page (**Admin → Providers** → *Import a list*), above the intake, a box lists every tracker you have
+connected under **Profile → Reading → Progress tracking**, with five boxes for the lists to bring over —
+*Reading* and *Plan to read* on by default, *Finished*, *On hold* and *Dropped* off — and **Load list** reads
+that account's manga list with the token you already gave it and drops the titles into the same review as a
+Mihon backup or a pasted list: matched against your sources in the background, one row per title with its
+pick and how confident the match is, *Change* and *Skip this one*, and nothing added until you press *Import
+selected*. Each entry is searched under the English title the service carries, on every source, and only
+when that misses everywhere under its romaji and synonyms — a row that matched that way says *matched under
+its other name*, so the second name is in view before you commit. Abbreviations the service lists as
+synonyms (*AoT*, *SnK*, *MHA*) are never used as search terms: three letters are contained in almost any
+title, and one such synonym matched a wrong series on the first source that lacked the right one. Light
+novels are left out: all three services keep novels on the "manga" list, and a novel would match its own
+adaptation and then be linked to the wrong work; the done line counts them, *· {n} novels skipped*. The
+review keeps 500 rows, as every intake does, and a longer list says *(first 500 kept)* — the five boxes are
+there so a large account can come over one list at a time. Nothing is written
+to the tracker by the import, and nobody else's connection is read: the intake uses the connection of the
+account that presses the button, and a token the service rejects switches that connection off and says so,
+the same way a failed push does. A token that has merely lapsed is not sent anywhere: the intake says so
+before asking the service, and leaves the connection in place with the same note a push would leave. Open
+imports name the origin, *AniList list*, *MyAnimeList list*, *Kitsu list*, and a batch survives a closed
+tab like any other — the novel count and the *(first 500 kept)* hint are on the batch itself, so a reload or
+an *Open imports* tap shows them too. Batches are shared between admins, and a tracker batch stays its
+owner's whoever presses *Import selected*: the links and the floors below are recorded for the account
+whose list was read, never for the admin who happened to run it.
+
+Every title that comes in is linked to its tracker entry, so the first chapter you finish syncs without a
+visit to the series page — and so are the titles you already had. For anyone with an established library that
+is most of the list, and it would have been the one outcome the import produced nothing for: those rows
+start skipped, as before, but now read *Already in your library — linked for progress sync*, and the link is
+made at intake, before the review, so it holds whether or not you import a single row. A list your library
+already held in full skips the review and closes as done at once, and its done card says what happened
+rather than *0 added*: the headline counts *· {n} linked for progress sync* and each such row reads *{title}
+— linked for progress sync*. A title you had deleted earlier is not "already in your library": it resolves
+like any other, and importing it puts the same series back, as adding it would. Which raised the one
+thing that had to be right before any of it could ship: your list says you are at chapter 150, the first
+chapter you open here is chapter 1, and a tracker accepts a lower number and rewrites the entry, with no
+undo. So the import records what the tracker already says about each series for the account
+whose list was read — a floor — and a chapter finished at or below it is skipped quietly, nothing sent and
+nothing marked as an error, because nothing went wrong: the tracker is simply ahead, or already there. Only
+once you pass it does a push go out. Every *Load list* takes the tracker's current number for each entry,
+whatever stood there before, so a correction made on the tracker — a mis-click fixed from 150 down to 20 —
+is taken by loading the list again, and pushes resume from 21; nothing is ever lowered on the tracker by
+this app on its own. One case the floor cannot see: a *Finished* entry the tracker holds at chapter 0 gets
+no floor, and the first chapter finished here may set it back to Reading. The first chapter you finish here
+never rewinds your tracker's chapter count.
+
+Kitsu links, on the way, became per person. Kitsu's push had always addressed one library entry by its id,
+and a library entry belongs to a single account; no code path had ever created a Kitsu link, so nothing had
+noticed that the first household with two Kitsu users would have had the second one's push land on the first
+one's entry, be refused, and switch their connection off with a message blaming their token. The stored id is
+now the manga's, and a push looks up — or creates — the pushing account's own entry for it. Three environment
+variables, `ANILIST_API_URL`, `MYANIMELIST_API_URL` and `KITSU_API_URL`, point the adapters somewhere else;
+they exist so a test instance can talk to a stub, and are documented as that.
+
+### A new series can follow the other sources
+
+Since v0.31.0 a series can follow more than one source, and the sweep takes each missing chapter from
+whichever source has it first. Getting there was a detour: add the series, open it, run *Find missing
+chapters*, wait for the scan, press *Also follow this source* on each candidate — for a title the add dialog
+had found on four sources thirty seconds earlier. Now the dialog offers to do it at the add. When it already
+holds the list of sources that carry the title — a *Trending* pick, which it searches your sources for; a
+search result; a wall card that several of your sources published, the one with the *{n} sources* chip — the
+options step shows, under the auto-update switch, **Also check the other sources that carry this title**,
+remembered on this device once you set it. The switch is for admins: following a source is an admin act,
+as it is on the series page, and a member's add goes through as if the switch were off — their done step
+says an admin can follow the other sources from *Sources & translations*. A wall card only one source had
+gives the dialog no list, so no switch: one dim line points at *Find missing chapters*, because searching
+every source again behind each add
+is exactly the load on other people's sites this app tries not to be. Nothing new is searched either way; the
+sources the dialog already found are asked for the title's own page and chapter list, and that is all.
+
+The judgement is the server's, not the dialog's, and it starts from the one *Find missing chapters* makes.
+Once the series' own listing is written — right after the add on a *Nothing yet* add, once the
+first chapter has landed on a download — each candidate is checked, at most six, within ninety seconds for
+the lot; what does not fit reads *not checked — it took too long*. Two checks stand in for the human that
+*Find missing chapters* has looking at each candidate. The candidate's own title must be the series' title —
+exact, or one containing the other, other names allowed — or it reads *different title*. Then its numbering
+must line up with the main source's listing, which must carry at least three numbers or there is nothing to
+measure against: with an exact title and a listing of at least ten numbers, the candidate must list at least
+90 % of them, and a copy that runs on past this one still follows; with a containing title, or a listing
+shorter than ten, the numbering must agree both ways — at least 90 % of these numbers listed there, and at
+least 90 % of its numbers listed here — because coverage one way cannot tell a dense sequel from the series
+it continues: *Tokyo Ghoul:re* lists every chapter of *Tokyo Ghoul* and forty more, and a same-named work
+three hundred chapters long covers a five-chapter listing entirely. Both read *numbering differs*, with the
+lower of the two shares as the percentage, while *(Official)* at 22 chapters for 20 still follows. A source
+that passes both is followed, up to two per series, and from then on the sweep takes new chapters from
+whichever of them has them first. The done step shows the check as it runs — *Checking {n} sources — this
+can take a minute. You can close this; anything followed shows under Sources & translations.* — then one
+line per source, *Followed {name} — listed there as “{title}” · {pct} %* or *Not followed: {name} —
+numbering differs* (or *different title*, *could not be reached*, *lists too few chapters*, *already
+following two*), and *Followed {n} of {m}* under them. Closing the dialog loses nothing: the results ride on
+the add's job card, and the *Sources & translations* sheet shows each follower with *followed for you* in
+place of *also checked*, the × to stop following it as before. On Discover's strip of running fetches, a
+*Nothing yet* add that asked for the other sources shows as *Checking other sources…* and then *Checked
+other sources*, never as *Fetched*, and that card cannot be dismissed while the check runs. Should the check
+itself fail before any source was asked, every candidate reads *not checked* rather than the dialog going
+quiet. When the dialog's list held no other source, it says so — *None of the other sources checked lists
+this title.* — never "no other source carries it", which it cannot know.
+
+The user guide and the API reference used to say that a *Find missing chapters* plan was "deliberately the
+only way in" to following. Both now say what is true: two ways in — a plan, or the add's own candidates — and
+one judgement, made on the server either way; never a bare follow.
+
+### Not in this release
+
+A nightly pass that would do the same for every series already in the library is designed and not built, on
+purpose: it would be one search on every source for every series, the exact load the add-time version
+avoids by asking only what the dialog already found, and a wrong follow puts the wrong book's chapters under
+the right name. The second half of [#48](https://github.com/AngeloSha/uchiyomi/issues/48) shipped in
+v0.35.0; the Komga-compatible API from [PR #51](https://github.com/AngeloSha/uchiyomi/pull/51) is still
+being rebuilt on the OPDS catalogue, as that release said.
+
+For the API: `POST /api/admin/import/batches` takes a fourth intake, `{origin: 'tracker', tracker:
+'anilist' | 'myanimelist' | 'kitsu', statuses: [reading | plan_to_read | completed | on_hold | dropped]}`,
+reads the requesting admin's own connection, answers **422** `token_expired` for a lapsed token without
+calling the service, and answers `skippedNovels` and `truncated` besides — both also on the batch row that
+`GET /api/admin/import/batches` and `GET .../batches/:id` return; a candidate row carries `tracker`,
+`external_id`, `alt_titles`, `matched_via` (the other name a match was found under; cleared by a manual pick)
+and `linked`. `POST .../batches/:id/run` links and floors for the batch's owner, not the caller. `POST
+/api/trackers/:provider/resync/:seriesId` now takes every provider (**404** `unknown_provider` otherwise)
+and clears that provider's floor only; a 403 from a tracker is a sync error to retry, never a token verdict.
+`POST /api/sources/add` takes `alsoFollow: [{source, sourceId}]`, at most six, from an admin (a member's is
+ignored), judged after the listing is written; the add's job card on `GET /api/sources/jobs` carries
+`autoFollow: {done, results: [{source, name, theirTitle, followed, coverage, why}]}`, a *Nothing yet* add
+with `alsoFollow` leaves a finished job card so the results have somewhere to live, and `DELETE
+/api/sources/jobs/:folder` answers **409** `running` while that judgement runs. `series.sources[]` gains
+`auto` — true for a source followed at add time, false once a person confirms it. `GET /api/trackers` is
+unchanged. The Mihon extension is unaffected.
+
 ## v0.35.0 — 2026-09-18
 
 Two contributions, three days after v0.34.0, both taken through the same pipeline as everything else:

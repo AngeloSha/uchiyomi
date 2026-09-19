@@ -23,6 +23,15 @@ export interface SeriesSource {
    * something the admin can remove, rather than silently dropping it from the list.
    */
   registered: boolean;
+  /**
+   * Followed by the add-time auto-follow rather than by a person (lib/autoFollow.ts). The sheet reads it
+   * as "followed for you", which is the one thing a reader needs to know before pressing × on a source
+   * nobody in the house chose. `added_by` has only ever been written as the admin who confirmed a plan,
+   * so NULL is the automatic path -- the same convention as `series_trackers.linked_by`. A human
+   * re-following the same source through a plan clears it (the follow route's COALESCE). Always false for
+   * the primary: it was added, not followed.
+   */
+  auto: boolean;
 }
 
 const iso = (v: string | Date | null | undefined): string | null =>
@@ -44,10 +53,11 @@ export async function seriesSourcesFor(seriesId: string): Promise<SeriesSource[]
       checkedAt: iso(s.source_checked_at),
       chapters: s.source_chapters ?? null,
       registered: !!getSource(s.source_id),
+      auto: false,
     });
   }
-  const extras = await q<{ source_id: string; source_series_id: string; checked_at: string | null; chapters: number | null }>(
-    'SELECT source_id, source_series_id, checked_at, chapters FROM series_sources WHERE series_id = $1 ORDER BY created_at, source_id',
+  const extras = await q<{ source_id: string; source_series_id: string; checked_at: string | null; chapters: number | null; added_by: string | null }>(
+    'SELECT source_id, source_series_id, checked_at, chapters, added_by FROM series_sources WHERE series_id = $1 ORDER BY created_at, source_id',
     [seriesId],
   );
   for (const r of extras) {
@@ -62,6 +72,7 @@ export async function seriesSourcesFor(seriesId: string): Promise<SeriesSource[]
       checkedAt: iso(r.checked_at),
       chapters: r.chapters ?? null,
       registered: !!getSource(r.source_id),
+      auto: r.added_by == null,
     });
   }
   return out;

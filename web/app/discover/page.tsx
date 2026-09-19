@@ -18,8 +18,13 @@ import { normTitle } from '@/lib/normTitle';
 import { foldByTitle, type WallProvider } from '@/lib/wall';
 import { AddSeriesDialog, AddSeed } from '@/components/AddSeriesDialog';
 import { IcChevronLeft, IcSearch, IcSparkle, IcX } from '@/components/icons';
+import type { AutoFollow } from '@/lib/types';
 
-interface Job { folder: string; title: string; total: number; done: number; status: string; reason?: string }
+interface Job {
+  folder: string; title: string; total: number; done: number; status: string; reason?: string;
+  /** The add-time auto-follow (v0.36.0) riding on the card; the only job a nothing-yet add leaves behind. */
+  autoFollow?: AutoFollow;
+}
 interface SearchGroup { title: string; coverUrl?: string; inLibrary?: boolean; updatedAt?: string; providers: { source: string; name: string; sourceId: string; title: string; coverUrl?: string }[] }
 
 /**
@@ -365,6 +370,11 @@ export default function DiscoverPage() {
                 // A download killed by a rate-limit used to vanish from this strip entirely, taking its
                 // reason with it: the row was filtered to `downloading` and `reason` was never declared.
                 <p className="mt-1 text-[11px] text-amber-300">{j.reason || tr('Fetch stopped. Try another source or wait.')}</p>
+              ) : j.total === 0 && j.autoFollow ? (
+                // A "Nothing yet" add that asked for the other sources leaves a card with no chapters on it,
+                // only the judgement: it is not a fetch and must not read as one. "Fetched" in emerald sat
+                // under the series a person had just declined to fetch, for five minutes.
+                <p className="mt-1 text-[11px] text-fog-500">{j.autoFollow.done ? tr('Checked other sources') : tr('Checking other sources…')}</p>
               ) : (
                 <p className="mt-1 text-[11px] text-emerald-400">{tr('Fetched')}</p>
               )}
@@ -441,6 +451,9 @@ export default function DiscoverPage() {
         <AddSeriesDialog
           seed={seed}
           sources={budgetIds}
+          // Following a source is an admin act, like the manual follow route and the sheet's ×: a member
+          // who may add must not be able to follow two sources they could never unfollow.
+          mayFollow={isAdmin}
           onClose={() => setSeed(null)}
           onAdded={(r) => {
             setAdded((prev) => new Set(prev).add(normTitle(r.title)));

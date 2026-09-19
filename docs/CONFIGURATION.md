@@ -61,6 +61,28 @@ to anything.
 Set `UCHIYOMI_PING_URL` to point the count somewhere else — at your own collector if you run a fork — or to
 an empty string to make sure it can never send anything regardless of the setting.
 
+### Progress trackers
+
+The tracker calls are the only ones this server makes **with your token**: AniList, MyAnimeList and Kitsu,
+each connected by you under **Profile → Reading → Progress tracking**, and only for reading your list (the
+import) and reporting what you finished. Nothing carrying a token goes to a tracker you have not connected.
+
+Two of those services are also asked **without** any token, by title, whether or not anyone has connected
+them. Every series added gets its title sent to AniList (`graphql.anilist.co`) once, for banner and cover
+art; a series with no art on record is looked up the same way the first time its art is requested, and that
+match also records the AniList id progress sync writes against. The admin panel's **Cover & banner health**
+card — its *Backfill*, and picking art for one series by hand — asks AniList again and, for wide cover art,
+Kitsu (`kitsu.io`), and `POST /api/admin/trackers/relink` asks AniList for every unlinked series. Discover's
+*Trending* rail is AniList's own trending list, fetched at most once every six hours. These lookups carry
+your server's IP address and the title asked for, and nothing else; they are not moved by the knobs below,
+which point only the token-bearing tracker calls elsewhere.
+
+`ANILIST_API_URL`, `MYANIMELIST_API_URL` and `KITSU_API_URL` are **test knobs**: they point an adapter at a
+stand-in server instead of the real service (the defaults are `https://graphql.anilist.co`,
+`https://api.myanimelist.net/v2` and `https://kitsu.app/api/edge`). They exist so the browser tests can
+drive a tracker import without a real account, and there is no reason to set them on an install you read on
+— a wrong value here makes every tracker call fail, or worse, sends your token somewhere else.
+
 ## Sources
 
 This section covers one of the two fetch routes: the **generic engines**. The other, and the one most people

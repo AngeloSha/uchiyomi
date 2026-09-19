@@ -160,6 +160,25 @@ server-wide), **409** `duplicate` (with the "add anyway" message), and **200** w
 for a title already in the library. A successful reply now carries `started: true`, which is what
 distinguishes "downloading now" from "already had it" — previously only `chapters === 0` said so.
 
+The body may also name `alsoFollow: [{source, sourceId}]` (at most six): other sources the add dialog
+already found carrying the title, to be followed for the new series when they qualify. **Admins only**: a
+member's `alsoFollow` is dropped before the add, which then proceeds exactly as with none given (no
+judgement, no card) — following is an admin act, as `POST /api/admin/series/:id/sources` is. No search runs
+for them. Each is judged on the server once the listing exists — at once for a `chapterFrom: "none"` add,
+after the first chapter lands on a download — by two rules that stand in for the plan's human
+confirmation. The candidate's own title must match this series' (exact or containing, after normalisation,
+alt titles included), else `title_differs`. Then its numbering: the primary must list at least three
+numbers (`too_few_listed` otherwise); with an **exact** title and a primary listing at least ten, the
+candidate must list at least 90% of the primary's numbers (the fill-scan rule — a copy that runs on past
+the primary still qualifies); with a containing title, or a primary listing fewer than ten, the numbering
+must agree **both ways** — at least 90% of the primary's numbers listed by the candidate and at least 90%
+of the candidate's listed by the primary — else `numbering_differs`, so a sequel that continues past the
+primary ("Tokyo Ghoul:re" 1..60 for "Tokyo Ghoul" 1..20) is refused although it lists every number, while
+"(Official)" 1..22 for 1..20 (20 of 22 = 0.91) follows. The `coverage` reported for a two-way judgement is
+the lower of the two shares. At most two sources are followed per series, in the order given; a follower
+this path wrote has no author and reads `auto: true` on the series' sources. The results are not in the
+add's answer: they land on the series' job card (below), which a `none` add gets minted for the purpose.
+
 One response is deliberately gone: the **429** `blocked` for a source refusing downloads. That can only be
 known after the download is attempted, so it now arrives as a failed job carrying its reason. This is also
 strictly better than before, where the 429 came back only after the whole chapter attempt had burned its
@@ -168,7 +187,19 @@ budget.
 `GET /api/sources/jobs` lists downloads in progress. A finished job is swept a few minutes after it ends; a
 **failed** one is never swept, because it is the only record that the download did not work, and it carries
 a `reason` naming the source and how far it got. `DELETE /api/sources/jobs/<folder>` dismisses a job that
-has stopped, and answers **409** for one still running.
+has stopped, and answers **409** `running` for one still downloading — or one whose auto-follow judgement
+is still running (`autoFollow.done === false`), since the follows would still land while the report they
+belong to was gone. A card whose add named `alsoFollow` candidates carries `autoFollow: {done, results}` —
+`done: false` with no results while the other sources are asked, then one entry per candidate in the order
+given, `{source, name, theirTitle, followed, coverage, why}`, with `why` one of `followed`,
+`numbering_differs` (under 90% of the primary's numbers listed there or, when judged both ways, under 90%
+of its numbers listed here — the rule above), `title_differs`, `unreachable` (threw or timed out — never
+mistaken for "lists nothing"), `too_few_listed` (the primary lists under three numbers; nothing was
+asked), `not_tried` (the 90-second wall ran out first, or the judgement itself failed before any source
+was asked — every candidate then reads so, rather than the card finishing with an empty list), `cap`
+(already following two) or `unavailable` (the primary itself, disabled, in a cooldown, not loaded, or
+outside the caller's age cap). A `none` add with candidates gets a card with `total: 0, status: "done"`
+just to carry this; it lives a few minutes after the judgement ends, so a closed dialog loses nothing.
 
 `GET /api/sources/popular?source=<id>&page=<n>` is the same listing sorted by the source's OWN popularity,
 not by anything this server computes: it is the page each site already publishes, reached with a different
@@ -309,8 +340,10 @@ GET    /api/series/:id/groups        GET    /api/series/:id/versions
 
 **Where a series and its chapters came from.** `GET /api/series/:id` carries `sources`, primary first, then
 any source the series has been followed on (`POST /api/admin/series/:id/sources`, below); each entry is
-`{sourceId, name, sourceSeriesId, primary, checkedAt, chapters, registered}`, where `registered` says whether
-that adapter is loaded right now. Admins additionally get `scanlatorPrefs`: the series' own release
+`{sourceId, name, sourceSeriesId, primary, checkedAt, chapters, registered, auto}`, where `registered` says
+whether that adapter is loaded right now and `auto` whether the add-time auto-follow chose it rather than a
+person (always `false` for the primary; a person confirming the same source through a plan turns it
+`false`). Admins additionally get `scanlatorPrefs`: the series' own release
 preferences, or `null` when it has none and the server-wide ones apply. Every chapter object (this route's
 `books`, `GET /api/books/:id`, `next`, the home shelves) carries `scanlator` — the group that released the
 file on disk, as the source showed it, a joint release reading `"A & B"` — and `sourceId`, the adapter it was
@@ -471,6 +504,23 @@ GET    /api/push/key              POST   /api/push/subscribe
 POST   /api/push/unsubscribe
 ```
 
+**Progress trackers.** `GET /api/trackers` is the caller's own connections, every provider listed connected
+or not; `POST /api/trackers/:provider/connect` takes a pasted token and `DELETE /api/trackers/:provider`
+drops it. A push goes out for the caller alone when they finish a chapter of a linked series, never below
+the floor `tracker_progress` holds for them (see the reviewable import under Admin, `/run`). Only a **401**
+from the service — or AniList's "Invalid token" **400** — is a verdict on the token, and disables the
+connection with `last_error` = `the tracker rejected the saved token -- reconnect to resume syncing`; a
+**403** (Cloudflare in front of AniList, MyAnimeList's request block, a forbidden Kitsu action) is recorded
+as a plain sync error and retried on the next chapter, the connection kept. A token past its `expires_at`
+is not sent: `last_error` reads `the access token has expired -- reconnect to resume syncing`, connection
+kept. `POST /api/trackers/:provider/resync/:seriesId` is the one deliberate way **down**: it deletes the
+caller's floor for that series on **that provider** only (`anilist`, `myanimelist` or `kitsu` — any other
+name is **404** `unknown_provider`) and pushes the current local count at once, lower or not. No web
+control calls it; the app's own repair for a floor the tracker has since corrected is to read the list
+again. A local count that drops below a number this app already sent is refused with `last_error` =
+`not syncing: this series now works out to chapter N, below the M already sent. Import your list again under
+Admin → Import (From your tracker) to take the tracker's current number, or ask an admin to.`
+
 ### Offline downloads
 ```
 GET    /api/downloads             POST   /api/downloads
@@ -536,23 +586,62 @@ importer accepts `oldest` and `newest` only — `none` is the add dialog's).
 with a match-review step in between, and is what the admin UI uses — the plain importer above adds the
 first cross-source hit with no review and stays for scripted callers. `POST .../batches` takes the same
 `dataUrl`/`mangadexList`/`titles` intake as `/api/admin/import/parse`, starts matching in the background
-(one batch resolves at a time server-wide) and returns a `batchId`. `GET .../batches/:id` polls
-`{batch, items}` — each item's `decision` is `unresolved | auto | manual | skip` and, once the batch leaves
-`resolving`, an `unresolved` row means "no match found" rather than "not looked at yet". A row's
+(one batch resolves at a time server-wide) and returns `{batchId, total, truncated, skippedNovels}`. A
+fourth intake, `{origin: 'tracker', tracker: 'anilist' | 'myanimelist' | 'kitsu', statuses?: ('reading' |
+'plan_to_read' | 'completed' | 'on_hold' | 'dropped')[]}`, reads the requesting admin's OWN connected
+account (the connection `GET /api/trackers` shows for them, never another member's; `statuses` defaults to
+reading + plan_to_read) — up to 501 entries, of which the batch keeps 500 (`truncated` when the read hit the
+cap); light novels are dropped and counted as `skippedNovels` — both figures are also stored on the batch
+row, as `skippedNovels` and `truncated` on every batch `GET` returns; entries are deduped by their id and
+by the normalised form of every name they go by, and each row carries `tracker`, `external_id`,
+`alt_titles` (romaji and synonyms, at most three, never an abbreviation whose normalised form is shorter
+than five characters — "AoT", "SnK", "MHA" — since such a term contains-matches almost any title) and
+`progress`. The resolve pass searches the English search title on every source first, then the first
+alternate on every source, and so on, so an exact hit for the title on a later source beats a weaker hit
+for an alternate on an earlier one; a row matched under an alternate records it as `matched_via`. A
+tracker row whose title the library already holds (under the search title or any alt — `matched_via` says
+which alt, when one did) is linked at intake, for the requesting admin, and starts `decision: skip`,
+`status: already`; a series that is deleted (`deleted_at`) or merged into another never counts as held, for
+any intake, so such a title resolves and `/run` puts the same series back. Its errors: **404**
+`not_connected` (no enabled connection to that tracker), **422** `token_expired` (the connection's
+`expires_at` has passed: the service is not called, the connection stays enabled, and `last_error` on it
+reads `the access token has expired -- reconnect to resume syncing`, the sentence a push leaves), **422**
+`tracker_rejected` (the service refused the saved token; the connection is disabled with the same sentence
+a rejected push leaves — 422 rather than 401 because a 401 is retried after a session refresh and would
+then read `not_connected`; the same code, without disabling, when the stored token cannot be unsealed),
+**502** `tracker_unavailable` (no answer; nothing changed — a 400 or a 403 from the service never disables
+anything: only a 401, or AniList's "Invalid token" 400, is a verdict on the token).
+`GET .../batches/:id` polls `{batch, items}` — each item's `decision` is `unresolved | auto | manual | skip`
+and, once the batch leaves `resolving`, an `unresolved` row means "no match found" rather than "not looked
+at yet"; a tracker row reads `linked: true` when a `series_trackers` row carries its id (read live, not
+remembered). A row's
 `confidence` is `same_source` only when the backup entry's own Mihon source is installed here (a Suwayomi
 extension) and a hit's extension-relative path equals the url the backup stored -- Mihon's identity for a
 manga, which survives a retitle -- otherwise `exact | contains | fuzzy` from the title alone; a title with no
 confident hit anywhere stays `unresolved`, and the first search result is never taken. `PATCH
 /api/admin/import/candidates/:cid` accepts `{decision:'manual', source, sourceId, title, coverUrl?}` to
-override a pick, `{decision:'skip'}`, or `{decision:'auto'}` to restore the resolve pass's own suggestion
-after an override; skipping the last open row of a batch a run has been through closes the batch (`done`).
+override a pick — this clears `matched_via`, since a hand-picked match was found by nobody's alternate —
+`{decision:'skip'}`, or `{decision:'auto'}` to restore the resolve pass's own suggestion after an override
+(`matched_via` is left as it is, so an auto → manual → auto detour loses the note); skipping the last open
+row of a batch a run has been through closes the batch (`done`).
 `POST .../batches/:id/run` takes `{candidateIds?, autoUpdate?}` — with `candidateIds` it adds only those
 rows (a skipped or still-unresolved id is silently left out rather than erroring; an entry that is not a
 uuid, or more than 500 of them, is **400** `bad_request`), omitted means every eligible row in the batch.
 Each row's `status` afterwards is `added`, `already` (the library has the title — the same folder, or the
 same title from another source under a spelling the up-front `in_library` check missed) or the add's error
 code (`no_title`, `no_chapters`, `disabled`, `blocked`, `undownloadable`, `disk_full`, `bad_request`, `error`);
-`already` counts under the batch's `already`, an error code under `failed`. Every add is "nothing yet": the
+`already` counts under the batch's `already`, an error code under `failed`. A tracker row that ends `added`
+or `already` is linked to its tracker entry (`series_trackers`, `linked_by` = **the account whose list was
+read**, the batch's `user_id` — batches are shared between admins, and whoever calls `/run`, the link and
+the floor are the owner's; the caller appears only in the `import.batch.run` audit row, whose `detail`
+carries `owner`) and the owner's `tracker_progress` for it is set to the entry's `progress` with
+`pushed_at` NULL — set, not raised: every read of the list replaces the floor with the tracker's current
+number and clears the stamp, whatever this app had pushed before, so re-reading the list is how a downward
+correction made on the tracker reaches this app. A push then goes out once the local count **exceeds** the
+floor; equal to an unstamped floor is skipped quietly (the tracker already holds that number, and a push
+would say `CURRENT` over a `COMPLETED` entry), equal to a stamped one — a number this app sent — still
+pushes. A `progress` of 0 seeds nothing. Every add is
+"nothing yet": the
 series is created and followed, no chapter is downloaded, matching the bulk-select UI's promise that "Import
 selected" only moves titles into the library. Safe to call again later on the same batch — a row already
 imported is never re-added, which is how importing the matched rows now and the rest (found by hand
@@ -567,8 +656,12 @@ start one loop (the other answers **409** `busy`). One left `importing` by a res
 next GET -- `review` with its unreached rows still ready, or `done` when every row had been processed; a
 `review` batch a run has been through with nothing left waiting (every remaining row skipped) is closed to
 `done` on GET as well, while one nothing was ever imported through (every title already owned) stays
-`review`. `GET /api/admin/import/batches` lists every batch newest first (`{content: [{id, origin, state,
-total, resolved, added, already, failed, created_at, updated_at, stale}]}`, no rows; `stale` as on the single
+`review`. `GET /api/admin/import/batches` lists every batch newest first (`{content: [{id, origin, tracker,
+state, total, resolved, added, already, failed, skippedNovels, truncated, created_at, updated_at, stale}]}`,
+no rows; `tracker` names the service a tracker batch was read from, null otherwise; `skippedNovels` (the
+novels a tracker read dropped, 0 for the other origins) and `truncated` (the intake kept 500 of a longer
+list, or the tracker read hit its cap) are the intake's own answer, kept on the row so a later view of the
+batch — `GET .../batches/:id` carries them on `batch` too — still shows them; `stale` as on the single
 GET, so the "Open imports" card can call an interrupted batch interrupted rather than matching); a batch is
 swept seven days after it last changed once `done`, thirty days while still open. A batch or candidate id
 that is not a uuid answers **404**. A gzipped backup that inflates past 256 MB (no real one does) is
@@ -639,12 +732,17 @@ audit line carries `picks`.
 the updater merge that source's chapter list with the primary's on every check; it answers `{ok, sources}`
 with the series' full source list, primary first. The candidate must come from a `POST /api/sources/fill/scan`
 plan for this series and the plan must have found it followable — at least 90% of the chapter numbers
-already held listed there, with a verdict of `ok` or `nothing_to_fill` — because the plan is the only place
-the "same series?" judgement is made, and a bare pair would let a client follow anything it could name.
-Refusals: **409** `plan_stale` (scan again), `is_primary`, `source_unavailable` (adapter not loaded or
-disabled); **400** `not_in_plan`, `not_followable` (with `reason` and `coverage`), or `bad_request` when the
-plan belongs to another series; **404** for an unknown series. Following the same source again updates its
-series id and coverage. `DELETE /api/admin/series/:id/sources/:sourceId` stops following it (**404** when
+already held listed there, with a verdict of `ok` or `nothing_to_fill`. There are two ways into a follow —
+this route, and `alsoFollow` on `POST /api/sources/add`, both admin-only — and both make the "same series?"
+judgement on the server, starting from that rule (`followable()` in `lib/fill.ts`): here from a plan, with
+the admin looking at each candidate; there from the add's own listing plus the candidate's title, and the
+numbering both ways unless the title is exact on a listing of at least ten (`lib/autoFollow.ts`, described
+under the add route). Neither takes a bare pair on trust, which would let a client follow anything it
+could name. Refusals: **409** `plan_stale` (scan again), `is_primary`, `source_unavailable` (adapter not
+loaded or disabled); **400** `not_in_plan`, `not_followable` (with `reason` and `coverage`), or
+`bad_request` when the plan belongs to another series; **404** for an unknown series. Following the same source again updates its
+series id and coverage, and makes a follower the add-time path chose the confirming admin's (`auto:
+false`). `DELETE /api/admin/series/:id/sources/:sourceId` stops following it (**404** when
 the series was not) and answers the remaining list; chapters already downloaded from it stay, but the
 listing rows it carried go at once, so its ghosts leave the series page and nothing can be fetched through
 it before the next check.

@@ -173,7 +173,8 @@ part.
 Tap the line and the **Sources & translations** sheet opens. It has two sections, and members see both:
 
 - **Sources** — one row per source the series is checked against: favicon, name, *main* for the source it
-  was added from or *also checked* for one it follows, *{n} chapters listed* as of the last check, and
+  was added from, *also checked* for one an admin followed, or *followed for you* for one the add dialog
+  followed on its own (see *Following a second source*), *{n} chapters listed* as of the last check, and
   *checked {ago}*. A source that is no longer installed is dimmed and says *not installed*. A series with
   no source says *No source — the chapters were scanned from disk.* Admins also get an × on a followed source
   to stop following it, and two chips under the list: **Check now**, one for the series since a check
@@ -265,15 +266,35 @@ stops carrying a title, an admin can **follow** a second source for the same ser
 updater merges both chapter lists and takes each missing chapter from whichever source has it, so a series
 whose main source is in a cooldown still updates from the other one.
 
-Following starts from **Find missing chapters** on the series page. Every source it scans and finds to line
-up with the chapters you already hold — at least 90% of your chapter numbers listed there, and the numbering
-agreeing — is offered with **Also follow this source**; one that is already followed says so. That check
-is deliberately the only way in: a source that numbers a different story 1..N would look right in every
-listing, and each "new chapter" from it would be the wrong book. The **Sources** list at the top of *Sources
+There are two ways in, and both go through the same judgement, made on the server — never a bare "follow
+this": a source that numbers a different story 1..N would look right in every listing, and each "new
+chapter" from it would be the wrong book.
+
+- **Find missing chapters** on the series page. Every source it scans and finds to line up with the
+  chapters you already hold — at least 90% of your chapter numbers listed there, and the numbering
+  agreeing — is offered with **Also follow this source**; one that is already followed says so. You are
+  looking at each candidate, so the title's spelling on the other source is yours to judge.
+- **The add dialog**, at the moment an admin adds a series (section 6). When it already holds the list of
+  sources that carry the title, the options step offers **Also check the other sources that carry this
+  title**; with the switch on, the sources it found are checked once the series' own listing is written,
+  each against that listing rather than against files on disk — a fresh add has none — and two rules stand
+  in for the person who is not looking. The candidate's own title must be the series' title (exact, or one
+  containing the other, other names allowed), or it reads *different title*. Then the numbering: with an
+  exact title and a listing of at least ten numbers, the candidate must list at least 90% of them — the
+  same 90% rule — and a copy that runs on past this one still follows; with a containing title, or a
+  listing shorter than ten, the numbering must agree **both ways**, at least 90% of these numbers listed
+  there and at least 90% of its numbers listed here, because coverage one way cannot tell a dense sequel
+  from the series it continues — *Tokyo Ghoul:re* lists every chapter of *Tokyo Ghoul* and forty more, and
+  a same-named work three hundred chapters long covers a five-chapter listing entirely; both read
+  *numbering differs*, with the lower of the two shares as the percentage shown, while *(Official)* at 22
+  chapters for 20 still follows. Up to two sources are followed per series. Nothing is searched for this;
+  only the sources the dialog already found are asked, each for its page and chapter list.
+
+The **Sources** list at the top of *Sources
 & translations* shows what is followed — *main* for the source the series was added from, *also checked*
-for the others — with the chapter count each last showed, when it was checked, and, for admins, an × to stop
-following it; chapters already downloaded stay when a source is dropped. *Edit details* keeps only the
-auto-update switch.
+for one you followed yourself, *followed for you* for one the add dialog followed — with the chapter count
+each last showed, when it was checked, and, for admins, an × to stop following it, whichever way it came in;
+chapters already downloaded stay when a source is dropped. *Edit details* keeps only the auto-update switch.
 
 Once a series has more than one source, a chapter's caption says *via {source}* when it did not come from
 the main one, the line's *{n} not here yet* counts the chapters missing across all of the followed sources,
@@ -508,6 +529,31 @@ again.
   cadence rule calls the group quiet, otherwise *last release {ago}*) — and *{n} chapters have more than one
   version*, from the chapter list it already fetched to count them. Sources that name no groups show nothing
   there.
+- **Also check the other sources that carry this title** (admins only — following a source is an admin
+  act, as it is on the series page, and a member's add goes through as if the switch were off; their done
+  step says *Other sources: an admin can follow them from Sources & translations.*): when the dialog
+  already holds the list of sources that carry the title — a Trending pick, which it searches your sources
+  for; a search result; a wall card that several of your sources published, the one with the *{n} sources*
+  chip — a switch under *auto-update* asks the server to check the others once the series' own listing is
+  written, and follow those that pass: a source whose own title is this title and whose chapter list lines
+  up with the main source's — at least 90% of the main source's numbers listed there and, unless the title
+  is exact and the main source lists at least ten, at least 90% of its numbers listed here too — up to two
+  per series (the rule in full is in section 4, *Following a second source*). The switch is remembered on
+  this device. The done step shows the check as it runs — *Checking {n} sources — this can take a minute.
+  You can close this; anything followed shows under Sources & translations.* — then one line per source,
+  *Followed {name} — listed there as “{title}” · {pct} %* or *Not followed: {name} — numbering differs* (or
+  *different title*, *could not be reached*, *lists too few chapters*, *not checked — it took too long*,
+  *already following two*), and *Followed {n} of {m}*. Closing
+  the dialog early loses nothing; the *Sources & translations* sheet shows each one as *followed for you*,
+  with the × to undo it, and on Discover's strip of running fetches a *Nothing yet* add that asked for the
+  other sources shows as *Checking other sources…*, then *Checked other sources* — never *Fetched* — and
+  cannot be dismissed while the check runs. Should the check itself fail before any source was asked, every
+  candidate reads *not checked* rather than the dialog going quiet. A wall card only one source had gives
+  the dialog no list, so there is no switch —
+  one dim line points at *Find missing chapters* on the series page — because searching every source again
+  behind each add would be a load on the sites you read from; nothing new is searched either way, only the
+  sources the dialog already found are asked. When the list held no other source the done step says
+  *None of the other sources checked lists this title.*
 
 If you try to add a title you already have from another source, Uchiyomi warns you and lets you add a separate copy
 or cancel. A heads-up appears if you queue a lot of chapters at once (sources can rate-limit heavy downloads).
@@ -791,7 +837,7 @@ everywhere ends it on the next occasion that device reaches the server.
 **Providers:** the source health + Add-a-site controls from section 7, with a multi-language extension
 folded into one card that opens per language. This tab also holds **Import a list**, for moving a library
 over from another app. It is one path: import a list → review the matches → add. Pressing it opens the
-import page (`/admin/import/`), which takes the list three ways:
+import page (`/admin/import/`), which takes the list four ways:
 
 - **Mihon / Tachiyomi backup** — pick your `.tachibk` (or `.proto.gz`) file. Only each entry's title, its
   source and its address on that source are read: the source to look the title up on that same source here,
@@ -800,6 +846,21 @@ import page (`/admin/import/`), which takes the list three ways:
 - **MangaDex list** — paste the link to a **public** custom list. Private follows would need a MangaDex
   login, which Uchiyomi never asks for; make a list public and share that instead.
 - **Paste titles** — one per line, from anywhere.
+- **From your tracker** — the box above the intake lists every AniList, MyAnimeList or Kitsu account you
+  have connected under **Profile → Reading → Progress tracking**; when none is, one line says so and links
+  there, landing on that card. Pick the account, tick the lists to bring over — *Reading* and *Plan to
+  read* are on by default, *Finished*, *On hold* and *Dropped* off — and **Load list** reads that account's
+  manga list with the token you already gave it. What is read is each entry's id on the service, its titles
+  and how far you got; the English title is searched on every source first and, only when it misses
+  everywhere, the romaji and synonyms the service knows — except abbreviations (*AoT*, *SnK*, *MHA*), which
+  are never used as search terms, because three letters are contained in almost any title. Light novels
+  are skipped — every tracker keeps them on the "manga" list, and a novel would match its own adaptation —
+  and the done line counts them (*· {n} novels skipped*). The review keeps 500 rows; a longer list says
+  *(first 500 kept)*, so bring a large account over one list at a time; both notes are kept on the batch,
+  so a reload or *Open imports* shows them too. Nothing is written to the tracker, and only your own
+  connection is read, never another admin's. A token the service rejects switches that connection off and
+  says so, exactly as a failed push does; a token that has merely lapsed is reported before the service is
+  asked and the connection is left in place. Either way, reconnect under Profile and load again.
 
 **Start matching** looks every title up against your sources in the background — a backup entry is matched
 on the source it came from first, when you have that source installed, and only a result whose catalogue
@@ -815,8 +876,17 @@ The review is the point. Every row shows the title you brought and, on a second 
 (*→ {title}*, dimmed when the two are the same) with how confident the match is; **Change** opens a manual
 search, its results in one sideways-scrolling rail per source so you can see which provider a pick would
 come from, with the cover, title and chapter count of the current pick beside whatever you tap next, so a
-mismatch is visible before you commit to it — or **Skip this one** drops the title. Rows already in your
-library default to skipped, visibly, and can be un-skipped. **Needs attention** filters to what wants a
+mismatch is visible before you commit to it — or **Skip this one** drops the title. A tracker row that was
+found under one of its other names says *matched under its other name*, dimmed, so the second name is in
+view before you commit; a pick you make by hand drops the note, since it explained a match that is no
+longer there. Rows already in your library default to skipped, visibly, and can be un-skipped; on a
+tracker import they read *Already in your library — linked for progress sync*, because the link to your
+tracker entry is made at intake, before the review, for the titles you already hold — for an established
+library that is most of the list, and the part that matters for sync. A title you deleted earlier does not
+count as held: it resolves like any other, and importing it puts the same series back, as adding it would.
+A list your library already held in full has nothing to review and closes as done at once; its done card
+then counts *· {n} linked for progress sync* and each such row reads *{title} — linked for progress sync*,
+so it never looks as if nothing happened. **Needs attention** filters to what wants a
 look: anything unmatched, every *possible match*, and a *close match* that only contains your title where
 the two names differ by more than an edition tag such as *(Official)* or *Colored* — or where the longer
 name looks like a season, part, novel or spin-off of the shorter one, *Solo Leveling: Ragnarok* for *Solo
@@ -832,6 +902,17 @@ library already held the title, under whatever spelling; or, in words rather tha
 not go through. Rows already imported are never re-added, so fixing the leftovers with **Change** and
 pressing **Import selected** again only picks up what is newly ready — and once nothing is left, every row
 imported or skipped, the batch is done and drops off the open-imports list by itself.
+
+A title that came from a tracker is linked to its entry there the moment it is added — the ones you already
+held were linked at intake — so the first chapter you finish syncs without a visit to the series page. The
+link, and the floor below, are the list owner's: batches are shared between admins, and whoever presses
+*Import selected* on yours, the entries are linked for you, not for them. And that first chapter never
+rewinds your tracker: the import records how far the tracker already says you are in each series, for the
+account whose list was read, and a chapter finished at or below that is skipped quietly — nothing is sent
+and nothing is marked as an error, the tracker is simply ahead, or already there. Once you pass it a push
+goes out as usual. Every **Load list** takes the tracker's current number for each entry, whatever stood
+there before, so a correction you made on the tracker itself is taken by loading the list again; nothing
+is ever lowered on the tracker by this app on its own. See section 10.
 
 The unreviewed import — search your sources for each title and add the first good match directly — is no
 longer offered on the page; it survives as `POST /api/admin/import` for scripts (see
@@ -886,13 +967,31 @@ token on a non-admin account still can't reach the admin API. See [docs/api.md](
 
 ## 10. Tracking: AniList sync
 
-Connect your AniList account once under **Profile → Progress tracking** and finishing a chapter here updates
-your AniList list on its own.
+Connect your AniList account once under **Profile → Reading → Progress tracking** and finishing a chapter
+here updates your AniList list on its own.
 
 Paste an access token from AniList's developer settings. Progress is the highest chapter you have **finished**,
 so re-reading an old chapter never rewinds your list, and AniList being slow or down can never delay or block
-your reading. If your token expires or is rejected, Uchiyomi disables the connection and says so rather than
-failing silently. Disconnect at any time.
+your reading. If the service rejects your token, Uchiyomi disables the connection and says so on the card
+rather than failing silently; a token that has lapsed is noted on the card too, but the connection is left
+in place until you paste a new one. A service that is blocking or rate-limiting the server is a sync
+error to retry on the next chapter, never a verdict on the token, so it does not disconnect anything.
+Disconnect at any time. MyAnimeList and Kitsu connect the same way, on the same card, and more than one can
+be connected at once; each syncs on its own.
+
+**Bringing your list over.** The same connection reads in the other direction, once: on the import page
+(section 8, *Providers → Import a list*) the *From your tracker* box loads the account's manga list — the
+lists you tick — into the reviewed import, and every title that comes in, or that you already had, is linked
+to its tracker entry, so the first chapter you finish syncs. The import also records how far the tracker
+already says you are in each of those series, for the account whose list was read, and a chapter finished
+at or below that number is skipped quietly — nothing sent, no error — because the tracker is simply ahead,
+or already there; once you pass it, pushes resume. Loading the list again takes the tracker's current
+number for every entry, higher or lower, which is how a correction made on the tracker reaches this app:
+if you have since finished a chapter above the old mark here, the next one you finish pushes as usual. A
+*not syncing* note the card picked up before that stays until the next chapter that pushes clears it.
+Nothing is written to the tracker by the import. One thing the mark cannot see is status: a *Finished*
+entry the tracker holds at chapter 0 gets no mark, and the first chapter finished here may set it back to
+Reading.
 
 ![AniList sync](shots/crop-anilist.webp)
 

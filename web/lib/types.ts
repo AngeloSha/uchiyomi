@@ -22,8 +22,10 @@ export interface SeriesMetadata {
 
 /**
  * One place the updater asks about a series. The row it was added from is `primary`; the rest were followed
- * later from Find missing chapters. `registered` is false when the adapter is no longer installed -- the row
- * is kept so the choice survives a reinstall, but nothing can be fetched from it meanwhile.
+ * later from Find missing chapters, or by the add itself (`auto`, v0.36.0: the dialog's "Also check the
+ * other sources" switch, judged server-side by the same 90 % rule). `registered` is false when the adapter
+ * is no longer installed -- the row is kept so the choice survives a reinstall, but nothing can be fetched
+ * from it meanwhile.
  */
 export interface SeriesSource {
   sourceId: string;
@@ -33,6 +35,55 @@ export interface SeriesSource {
   checkedAt: string | null;
   chapters: number | null;
   registered: boolean;
+  /** Followed by the add, not by a person (`added_by IS NULL`). Absent from an older server. */
+  auto?: boolean;
+}
+
+/**
+ * One row of `GET /api/trackers` (bff/src/lib/trackers.ts `statusFor`): every provider the server knows,
+ * connected or not, for the requesting person. `label` / `tokenHelp` come from the server so the UI never
+ * hardcodes the provider list. The import page reads this to offer a tracker list; app/profile/page.tsx
+ * keeps its own local copy of the same shape (its card predates this file's) -- left as it is rather than
+ * widen the v0.36.0 change, and worth folding into this one when that page is next edited.
+ */
+export interface TrackerStatus {
+  label?: string;
+  tokenHelp?: string;
+  provider: string;
+  connected: boolean;
+  accountName: string | null;
+  expiresAt: string | null;
+  expiringSoon: boolean;
+  lastSyncAt: string | null;
+  lastError: string | null;
+}
+
+/**
+ * Why a candidate source was or was not followed at add time. `followed` is the one good answer; the rest
+ * are the server's reasons, each of which the dialog turns into a sentence (`autoFollowWhy` in
+ * AddSeriesDialog.tsx) -- a code this list does not know is printed as-is so it is at least visible.
+ */
+export type FollowWhy = 'followed' | 'numbering_differs' | 'title_differs' | 'unreachable' | 'too_few_listed' | 'not_tried' | 'cap' | 'unavailable';
+
+export interface AutoFollowResult {
+  source: string;
+  name: string;
+  /** How the candidate source titles it, so a person can see the two sides of the match. */
+  theirTitle: string | null;
+  followed: boolean;
+  /** Share of the primary listing's numbers the candidate also lists, 0..1; null when it was never compared. */
+  coverage: number | null;
+  why: FollowWhy;
+}
+
+/**
+ * The add-time auto-follow, as it lands on the download job card (`GET /api/sources/jobs`). `done` flips once
+ * every candidate has an answer; the dialog polls the card every 2 s anyway, and a closed dialog loses
+ * nothing because the Sources & translations sheet shows whatever was followed.
+ */
+export interface AutoFollow {
+  done: boolean;
+  results: AutoFollowResult[];
 }
 
 /**

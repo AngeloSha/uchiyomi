@@ -730,15 +730,19 @@ export default async function personalRoutes(app: FastifyInstance) {
 
   // Allow the next push for one series to go DOWN.
   //
-  // Progress is otherwise monotonic, because AniList accepts a lower number and rewrites the entry with no
+  // Progress is otherwise monotonic, because a tracker accepts a lower number and rewrites the entry with no
   // undo. That is the right default, but it is wrong in one case: the tracker is ahead because the old
   // chapter number was wrong and the correction is the smaller one. Lowering a number on someone's real
   // account should be a deliberate act, so it is this route and not a side effect of anything else.
+  // Every provider, not only AniList: the floor is kept per provider, and answering 400 for MAL and Kitsu
+  // left their floors permanent -- a stamped floor on those two had no way down at all. An unknown name is
+  // a 404 like the other :provider routes. ⚠️ Reintroduce by clearing without the provider: the default
+  // argument is 'anilist', so a MAL resync would wipe the AniList floor and leave the MAL one standing.
   app.post('/api/trackers/:provider/resync/:seriesId', async (req, reply) => {
     const { provider, seriesId } = req.params as { provider: string; seriesId: string };
-    if (provider !== 'anilist') return reply.code(400).send({ error: 'unknown_provider' });
+    if (!isProvider(provider)) return reply.code(404).send({ error: 'unknown_provider' });
     const uid = userIdOf(req);
-    await clearTrackerFloor(uid, seriesId);
+    await clearTrackerFloor(uid, seriesId, provider);
     await pushSeriesProgress(uid, seriesId).catch(() => {});
     return { ok: true };
   });

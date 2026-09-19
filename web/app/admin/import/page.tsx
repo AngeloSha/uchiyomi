@@ -1,14 +1,18 @@
 'use client';
-// The reviewable import wizard (issue #48): backup / MangaDex list / paste → match each title against a
-// source → show the pick → let the admin change it or skip it → "Import selected" adds only what was
-// accepted. Since v0.35.0 this is the ONLY import path in the UI: the one-shot textarea on Admin → Providers,
-// which added the first cross-source hit with no review, is gone (POST /api/admin/import stays for scripts).
+// The reviewable import wizard (issue #48): backup / MangaDex list / paste / a tracker's reading list →
+// match each title against a source → show the pick → let the admin change it or skip it → "Import
+// selected" adds only what was accepted. Since v0.35.0 this is the ONLY import path in the UI: the one-shot
+// textarea on Admin → Providers, which added the first cross-source hit with no review, is gone
+// (POST /api/admin/import stays for scripts). Since v0.36.0 the fourth way in is the AniList / MyAnimeList /
+// Kitsu list of an account connected under Profile → Reading → Progress tracking (#48 point 1): the same
+// review, and every title that lands is linked to its tracker entry so progress sync works from day one.
 //
 // A dedicated route rather than a Sheet off the admin Providers card: this is a multi-step flow that can run
 // for minutes and needs room for hundreds of rows on a phone, and admin/page.tsx is already one very large
 // client component. `/admin/import/` — trailing slash is load-bearing, see next.config.mjs
 // (`trailingSlash: true`, static export).
 import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
+import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, ApiError } from '@/lib/api';
@@ -21,15 +25,126 @@ import { sourceCover } from '@/components/cards';
 import { ImportMatchSheet } from '@/components/ImportMatchSheet';
 import { IcChevronLeft } from '@/components/icons';
 import { relativeTime } from '@/lib/format';
-import { t as tr } from '@/lib/i18n';
+import { t as tr, keys } from '@/lib/i18n';
 import type { Src } from '@/lib/sourceGroups';
+import type { TrackerStatus } from '@/lib/types';
 import {
-  needsAttention, confidenceLabel, confidenceColor, matchTitleDiffers, openBatches, batchStateLabel, batchOriginLabel,
-  runStatusLabel, runStatusColor,
+  needsAttention, confidenceLabel, confidenceColor, matchTitleDiffers, matchedViaAlt, openBatches, batchStateLabel, batchOriginLabel,
+  runStatusLabel, runStatusColor, linkedCount, linkedLine,
   type ImportBatch, type ImportBatchSummary, type ImportCandidate,
 } from '@/lib/importBatch';
 
 type Filter = 'all' | 'attention' | 'skipped';
+
+/**
+ * The tracker's list buckets, in the order the checkboxes show them, each with its read-state word.
+ * `Reading` and `Finished` are the library filter's own read-state keys (LibraryFilters.tsx `READ_LABELS`),
+ * so the same idea reads the same everywhere. ⚠️ Never `Completed` for the third one: that key is the
+ * SERIES' publication status ("serialisation ended", ja 完結), and English being the key, one string can
+ * only carry one sense -- a box labelled 完結 next to 読書 would read as "series that ended", not "I finished
+ * reading it". `keys()` puts the labels in front of the translation extractor; they render as `tr(label)`.
+ */
+const LIST_STATUS_LABELS = keys('Reading', 'Plan to read', 'Finished', 'On hold', 'Dropped');
+const LIST_STATUSES = [
+  { id: 'reading', label: LIST_STATUS_LABELS[0], on: true },
+  { id: 'plan_to_read', label: LIST_STATUS_LABELS[1], on: true },
+  { id: 'completed', label: LIST_STATUS_LABELS[2], on: false },
+  { id: 'on_hold', label: LIST_STATUS_LABELS[3], on: false },
+  { id: 'dropped', label: LIST_STATUS_LABELS[4], on: false },
+] as const;
+type ListStatus = (typeof LIST_STATUSES)[number]['id'];
+
+/**
+ * What the intake dropped or cut: how many light novels the tracker list held (they are skipped -- a novel
+ * would resolve to its manga adaptation and be linked to the wrong entry), and whether the list was cut at
+ * the batch's 500. The batch row carries both (`skippedNovels` / `truncated` on GET /batches/:id), so a
+ * reload or an Open-imports tap keeps the line; the intake's own answer only seeds the first render, before
+ * the batch has been read. The toast says the cut once.
+ */
+interface IntakeNote { skippedNovels: number; truncated: boolean }
+
+/** The dim sentence of the not-connected state; also what a `not_connected` refusal falls back to. */
+const NOT_CONNECTED = () =>
+  tr('Have an AniList, MyAnimeList or Kitsu account? Connect it under Profile → Reading → Progress tracking to bring your list over.');
+
+/**
+ * The tracker intake: the reading list of an account connected under Profile, brought in as a batch.
+ *
+ * A nested box in the style of Open imports, between that list and the card's eyebrow -- NOT a fourth full
+ * block with its own accent button. The intake card's shape is "entrances, one accent button": backup and
+ * MangaDex start on their own small control and the paste box uses the accent button; a second full-width
+ * accent button ~150 px under the first made two primary CTAs on one phone card. So this starts on a ghost
+ * control like the MangaDex "Load", and the card still ends on its one accent button.
+ *
+ * With nothing connected it is one dim line -- the state nearly every admin sees -- linking straight to the
+ * Progress tracking card of Profile (`?tab=Reading&card=tracking`: the profile page opens the tab and scrolls
+ * the card into view once the trackers have loaded). "Open Profile" used to land on the You tab, five cards
+ * away from it; `?tab=Reading` alone opened the right tab with the card ~430 px below the fold on a phone.
+ */
+function TrackerIntake({ starting, onStart }: {
+  starting: boolean;
+  onStart: (tracker: string, statuses: ListStatus[]) => void;
+}) {
+  const { data, isPending } = useQuery({
+    queryKey: ['trackers'],
+    queryFn: () => api<{ content: TrackerStatus[] }>('/api/trackers'),
+    staleTime: 30_000,
+  });
+  const connected = (data?.content ?? []).filter((t) => t.connected);
+  const [tracker, setTracker] = useState<string | null>(null);
+  const [statuses, setStatuses] = useState<Set<ListStatus>>(() => new Set(LIST_STATUSES.filter((s) => s.on).map((s) => s.id)));
+  // The first connected provider is the pick until a chip is tapped; a provider disconnected meanwhile
+  // (from another tab) falls back to whatever is still connected rather than a chip that is no longer there.
+  const sel = connected.find((t) => t.provider === tracker) ?? connected[0] ?? null;
+  const toggle = (id: ListStatus) => setStatuses((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+  const chosen = LIST_STATUSES.map((s) => s.id).filter((id) => statuses.has(id));
+
+  // Nothing until the server has answered: the box would otherwise flash "connect one under Profile" at a
+  // person whose AniList chip is about to appear. A failed read shows the not-connected line, which is
+  // still the truthful next step. (Open imports pops in the same way, after its own fetch.)
+  if (isPending) return null;
+
+  return (
+    <div className="mb-4 rounded-xl border border-ink-700 bg-ink-900/50 p-2.5" data-tracker-intake>
+      <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-fog-500">{tr('From your tracker')}</p>
+      {!connected.length ? (
+        <Link href="/profile/?tab=Reading&card=tracking" className="block text-[11px] text-fog-500 underline decoration-ink-600 underline-offset-2 hover:text-fog-300">
+          {NOT_CONNECTED()}
+        </Link>
+      ) : (
+        <>
+          {/* One chip per connected provider, single-select. Shown even when it is the only one: the chip
+              names the account the list is read from, which is the thing a person with two accounts checks. */}
+          <div className="mb-2 flex flex-wrap gap-1.5">
+            {connected.map((t) => (
+              <button key={t.provider} type="button" onClick={() => setTracker(t.provider)}
+                className={`chip text-xs ${sel?.provider === t.provider ? 'chip-active' : ''}`} aria-pressed={sel?.provider === t.provider}>
+                {t.label || t.provider}
+                {t.accountName && <span className="ms-1 text-fog-500">{t.accountName}</span>}
+              </button>
+            ))}
+          </div>
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+            {/* `min-h-7 py-1`: the box is 14 px and the text 16 px, so the label was a 16 px tap target on
+                the one new phone control while every chip around it is ≥ 26 px. The padding widens what a
+                thumb can hit without changing how the row looks. */}
+            {LIST_STATUSES.map((s) => (
+              <label key={s.id} className="inline-flex min-h-7 items-center gap-1.5 py-1 text-xs text-fog-300">
+                <input type="checkbox" checked={statuses.has(s.id)} onChange={() => toggle(s.id)}
+                  className="size-3.5 rounded border-ink-600 bg-ink-800 accent-accent" />
+                {tr(s.label)}
+              </label>
+            ))}
+            <button type="button" onClick={() => sel && onStart(sel.provider, chosen)} disabled={starting || !sel || !chosen.length}
+              className="btn-ghost ms-auto px-3 py-1 text-xs disabled:opacity-50">
+              {starting ? tr('Starting…') : tr('Load list')}
+            </button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
 
 /**
  * Batches that were started and not finished, each a tap away.
@@ -54,7 +169,7 @@ function OpenImports({ batches, onOpen }: { batches: ImportBatchSummary[]; onOpe
             <li key={b.id}>
               <button onClick={() => onOpen(b.id)} className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-start hover:bg-ink-800/60">
                 <span className="min-w-0 flex-1">
-                  <span className="block truncate text-sm text-fog-100">{batchOriginLabel(b.origin)} · {counts}</span>
+                  <span className="block truncate text-sm text-fog-100">{batchOriginLabel(b.origin, b.tracker)} · {counts}</span>
                   {/* `stale` is the list route's word for "resolving, and nobody is": after a restart the raw
                       state read "Matching… 12/40" on the intake card while nothing was matching. */}
                   <span className="block truncate text-[11px] text-fog-500">{b.stale ? tr('Interrupted — resume') : batchStateLabel(b.state)} · {relativeTime(b.created_at)}</span>
@@ -69,7 +184,7 @@ function OpenImports({ batches, onOpen }: { batches: ImportBatchSummary[]; onOpe
   );
 }
 
-function IntakeCard({ backupRef, mdUrl, setMdUrl, pasted, setPasted, starting, open, onOpen, onFile, onMangadex, onPaste }: {
+function IntakeCard({ backupRef, mdUrl, setMdUrl, pasted, setPasted, starting, open, onOpen, onFile, onMangadex, onPaste, onTracker }: {
   backupRef: React.RefObject<HTMLInputElement | null>;
   mdUrl: string; setMdUrl: (v: string) => void;
   pasted: string; setPasted: (v: string) => void;
@@ -79,10 +194,12 @@ function IntakeCard({ backupRef, mdUrl, setMdUrl, pasted, setPasted, starting, o
   onFile: (f: File) => void;
   onMangadex: () => void;
   onPaste: () => void;
+  onTracker: (tracker: string, statuses: ListStatus[]) => void;
 }) {
   return (
     <div className="card grad-border wide p-4">
       <OpenImports batches={open} onOpen={onOpen} />
+      <TrackerIntake starting={starting} onStart={onTracker} />
 
       <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-fog-500">{tr('Bring your library over')}</p>
       {/* Names the button that commits, not a "Continue" this page never shows -- the wording was written
@@ -117,12 +234,27 @@ function IntakeCard({ backupRef, mdUrl, setMdUrl, pasted, setPasted, starting, o
   );
 }
 
-function ResolvingCard({ batch, onResume }: { batch: ImportBatch; onResume: () => void }) {
+/**
+ * The intake note as one dim phrase: "3 novels skipped (first 500 kept)". Singular by hand -- the i18n
+ * layer has no plural rules, so every count in the app carries its own one-form key.
+ */
+function noteText(n: IntakeNote | null): string | null {
+  if (!n) return null;
+  const parts: string[] = [];
+  if (n.skippedNovels > 0) parts.push(n.skippedNovels === 1 ? tr('1 novel skipped') : tr('{n} novels skipped', { n: n.skippedNovels }));
+  if (n.truncated) parts.push(tr('(first 500 kept)'));
+  return parts.length ? parts.join(' ') : null;
+}
+
+/** The note, appended to a card's headline in the headline's own size but dim, so it reads as an aside. */
+const Note = ({ note }: { note: string | null }) => note ? <span className="font-normal text-fog-500"> · {note}</span> : null;
+
+function ResolvingCard({ batch, note, onResume }: { batch: ImportBatch; note: string | null; onResume: () => void }) {
   const pct = batch.total ? Math.round((batch.resolved / batch.total) * 100) : 0;
   return (
     <div className="card grad-border wide p-4">
       <p className="mb-1 text-sm font-semibold text-fog-100">
-        {batch.stale ? tr('Matching was interrupted') : tr('Matching your titles…')}
+        {batch.stale ? tr('Matching was interrupted') : tr('Matching your titles…')}<Note note={note} />
       </p>
       <p className="mb-3 text-[11px] text-fog-500">
         {batch.stale
@@ -174,10 +306,21 @@ function ReviewRow({ c, sourceName, selected, onToggle, onEdit }: {
             <span aria-hidden className="inline-block rtl:rotate-180">→</span> {c.match_title}
           </p>
         )}
+        {/* A tracker row found under its romaji or a synonym: "Attack on Titan → Shingeki no Kyojin" is the
+            same title under the name the source uses, and without this line a reviewer reads it as a wrong
+            pick. Dim, because it explains the line above rather than adding to it. */}
+        {matched && matchedViaAlt(c) && (
+          <p className="text-[11px] text-fog-600" data-matched-via>{tr('matched under its other name')}</p>
+        )}
         {c.status ? (
-          <p className={`text-[11px] ${runStatusColor(c.status)}`}>{runStatusLabel(c.status)}</p>
+          <p className={`text-[11px] ${runStatusColor(c.status)}`}>{runStatusLabel(c.status, !!c.linked)}</p>
         ) : c.decision === 'skip' ? (
-          <p className="text-[11px] text-fog-500">{c.in_library ? tr('Already in your library') : tr('Skipped')}</p>
+          // A title the library already holds is skipped at intake; a tracker intake links it to the tracker
+          // entry on the spot, so progress sync covers the titles a person actually reads -- and the row
+          // says so, or "0 added · N already had" would look like nothing happened for exactly those.
+          <p className="text-[11px] text-fog-500">
+            {c.in_library && c.linked ? tr('Already in your library — linked for progress sync') : c.in_library ? tr('Already in your library') : tr('Skipped')}
+          </p>
         ) : matched ? (
           <p className="flex flex-wrap items-center gap-x-1.5 text-[11px] text-fog-400">
             <SourceIcon id={c.match_source!} name={sourceName(c.match_source)} size={16} />
@@ -200,11 +343,12 @@ function ReviewRow({ c, sourceName, selected, onToggle, onEdit }: {
 }
 
 function ReviewCard({
-  items, allCount, attentionCount, skippedCount, readyCount, selectedIds,
+  items, allCount, attentionCount, skippedCount, readyCount, selectedIds, note,
   filter, setFilter, q, setQ, onEdit, onToggle, onSelectAll, onSelectReady, onClearSelection, onRun, running, sourceName,
 }: {
   items: ImportCandidate[];
   allCount: number; attentionCount: number; skippedCount: number; readyCount: number;
+  note: string | null;
   selectedIds: Set<string>;
   filter: Filter; setFilter: (f: Filter) => void;
   q: string; setQ: (v: string) => void;
@@ -219,7 +363,7 @@ function ReviewCard({
 }) {
   return (
     <div className="card grad-border wide p-4">
-      <p className="mb-1 text-sm font-semibold text-fog-100">{tr('{n} titles matched', { n: allCount })}</p>
+      <p className="mb-1 text-sm font-semibold text-fog-100">{tr('{n} titles matched', { n: allCount })}<Note note={note} /></p>
       {/* "A few minutes", not "seconds": adding a title with nothing downloaded still asks its source for the
           series and its chapter list, one title at a time, so two hundred rows is minutes, not a database
           write. */}
@@ -262,12 +406,13 @@ function ReviewCard({
   );
 }
 
-function RunCard({ batch, items, runIds, runTotal, onStartOver }: {
+function RunCard({ batch, items, runIds, runTotal, note, onStartOver }: {
   batch: ImportBatch; items: ImportCandidate[];
   /** The candidate ids this tab sent to /run, or null when the run was started elsewhere (a reload, another tab). */
   runIds: Set<string> | null;
   /** `total` from the /run answer: how many of those ids the server accepted as ready. */
   runTotal: number | null;
+  note: string | null;
   onStartOver: () => void;
 }) {
   // Only the rows this run is over. The card used to list every auto/manual row and count the batch's
@@ -281,12 +426,19 @@ function RunCard({ batch, items, runIds, runTotal, onStartOver }: {
     : items.filter((c) => !!c.status || isReady(c));
   const done = targeted.filter((c) => !!c.status).length;
   const total = runTotal ?? targeted.length;
+  // The rows the intake linked to their tracker entry (in the library already, nothing to add). Counted
+  // over the whole batch like the headline's other numbers, and said on the done card, because a batch of
+  // nothing but those never reaches the review: the server closes it to `done` on its first read, and
+  // "0 added · 5 already had · 0 failed" was all an established library saw of the thing it came for.
+  const linked = batch.state === 'done' ? linkedLine(linkedCount(items)) : null;
   return (
     <div className="card grad-border wide p-4">
       <p className="mb-1.5 text-sm font-semibold text-fog-100">
         {batch.state === 'importing'
           ? tr('Importing… {done}/{total}', { done, total })
           : tr('Done — {added} added · {already} already had · {failed} failed', { added: batch.added, already: batch.already, failed: batch.failed })}
+        <Note note={linked} />
+        <Note note={note} />
       </p>
       {batch.state === 'importing' && (
         <p className="mb-3 text-[11px] text-fog-500">
@@ -300,7 +452,15 @@ function RunCard({ batch, items, runIds, runTotal, onStartOver }: {
             <span className={c.status === 'added' ? 'text-emerald-400' : c.status === 'already' ? 'text-fog-500' : c.status ? 'text-red-400' : 'text-fog-600'}>
               {c.status === 'added' ? '✓' : c.status === 'already' ? '·' : c.status ? '✗' : '…'}
             </span>
-            <span className="min-w-0 flex-1 truncate text-fog-200">{c.backup_title}</span>
+            {c.status === 'already' && c.linked ? (
+              // Two lines rather than `truncate`: the suffix is long in German and Russian, and a one-line
+              // ellipsis would cut the title to make room for the words that explain it.
+              <span className="min-w-0 flex-1 line-clamp-2 break-words text-fog-200" data-linked-row>
+                {c.backup_title} <span className="text-fog-500">— {tr('linked for progress sync')}</span>
+              </span>
+            ) : (
+              <span className="min-w-0 flex-1 truncate text-fog-200">{c.backup_title}</span>
+            )}
           </li>
         ))}
       </ul>
@@ -323,17 +483,31 @@ function ImportWizardInner() {
   const [mdUrl, setMdUrl] = useState('');
   const [pasted, setPasted] = useState('');
   const [starting, setStarting] = useState(false);
+  const [intakeNote, setIntakeNote] = useState<IntakeNote | null>(null);
 
   const start = async (body: Record<string, unknown>) => {
     setStarting(true);
     try {
-      const r = await api<{ batchId: string; total: number; truncated: boolean }>('/api/admin/import/batches', { json: body });
+      const r = await api<{ batchId: string; total: number; truncated: boolean; skippedNovels?: number }>('/api/admin/import/batches', { json: body });
       if (r.truncated) toast(tr('Only the first 500 titles were kept.'), 'info');
+      setIntakeNote({ skippedNovels: r.skippedNovels ?? 0, truncated: !!r.truncated });
       setBatchId(r.batchId);
       router.replace(`/admin/import/?batch=${r.batchId}`);
-    } catch (e: any) { toast(msgOf(e, tr('Could not start the import')), 'error'); }
+    } catch (e: any) {
+      // The tracker intake's own refusals, each in the person's words rather than the server's. A rejected
+      // token is the one that needs a trip to Profile; a service that did not answer is a retry; a
+      // connection dropped since the card loaded (another tab disconnected it) is the not-connected line
+      // again, and the box re-reads the trackers so its chips agree with what the server just said.
+      let body: any = {};
+      try { body = JSON.parse(e?.body || '{}'); } catch { /* not JSON */ }
+      if (body.error === 'tracker_rejected') toast(tr('The tracker rejected the saved token — reconnect it under Profile'), 'error');
+      else if (body.error === 'tracker_unavailable') toast(tr('Could not read your list right now'), 'error');
+      else if (body.error === 'not_connected') { qc.invalidateQueries({ queryKey: ['trackers'] }); toast(NOT_CONNECTED(), 'info'); }
+      else toast(msgOf(e, tr('Could not start the import')), 'error');
+    }
     setStarting(false);
   };
+  const startFromTracker = (tracker: string, statuses: ListStatus[]) => start({ origin: 'tracker', tracker, statuses });
   const startFromFile = async (f: File) => {
     if (f.size > 10 * 1024 * 1024) { toast(tr('That file is unusually large (max ~10 MB)'), 'error'); return; }
     try {
@@ -467,7 +641,7 @@ function ImportWizardInner() {
   };
   const startOver = () => {
     setBatchId(null); setMdUrl(''); setPasted(''); setSelected(new Set()); setFilter('all'); setQ('');
-    setRunIds(null); setRunTotal(null);
+    setRunIds(null); setRunTotal(null); setIntakeNote(null);
     qc.invalidateQueries({ queryKey: ['import-batches'] });
     router.replace('/admin/import/');
   };
@@ -497,12 +671,18 @@ function ImportWizardInner() {
     } catch (e: any) { toast(msgOf(e, tr('Could not discard this import')), 'error'); }
     setDiscardBusy(false);
   };
-  const openBatch = (id: string) => { setBatchId(id); router.replace(`/admin/import/?batch=${id}`); };
+  const openBatch = (id: string) => { setIntakeNote(null); setBatchId(id); router.replace(`/admin/import/?batch=${id}`); };
   const closeEditor = () => { setEditing(null); qc.invalidateQueries({ queryKey: ['import-batch', batchId] }); };
 
   if (!isAdmin) return <div className="flex min-h-screen-d items-center justify-center text-fog-400">{tr('Admins only.')}</div>;
 
   const canDiscard = !!batch && batch.state !== 'done' && batch.state !== 'cancelled';
+  // From the batch row, so a reload or an Open imports tap keeps the line; the intake's answer stands in only
+  // until the first GET has landed (and for an older server that does not send the fields). `intakeNote` is
+  // cleared on every batch switch, so a note from a previous batch never follows the person to the next one.
+  const note = noteText(batch
+    ? { skippedNovels: batch.skippedNovels ?? intakeNote?.skippedNovels ?? 0, truncated: batch.truncated ?? intakeNote?.truncated ?? false }
+    : null);
 
   return (
     <div className="min-h-screen-d px-4 pb-10 pt-4 lg:px-0">
@@ -520,16 +700,17 @@ function ImportWizardInner() {
 
       {!batch ? (
         <IntakeCard backupRef={backupRef} mdUrl={mdUrl} setMdUrl={setMdUrl} pasted={pasted} setPasted={setPasted}
-          starting={starting} open={open} onOpen={openBatch} onFile={startFromFile} onMangadex={startFromMangadex} onPaste={startFromPaste} />
+          starting={starting} open={open} onOpen={openBatch} onFile={startFromFile} onMangadex={startFromMangadex} onPaste={startFromPaste}
+          onTracker={startFromTracker} />
       ) : batch.state === 'resolving' ? (
-        <ResolvingCard batch={batch} onResume={resume} />
+        <ResolvingCard batch={batch} note={note} onResume={resume} />
       ) : batch.state === 'review' ? (
         <ReviewCard items={filtered} allCount={items.length} attentionCount={attentionCount} skippedCount={skippedCount}
-          readyCount={readyCount} selectedIds={selectedReady} filter={filter} setFilter={setFilter} q={q} setQ={setQ}
+          readyCount={readyCount} selectedIds={selectedReady} note={note} filter={filter} setFilter={setFilter} q={q} setQ={setQ}
           onEdit={setEditing} onToggle={toggleSelected} onSelectAll={selectAll} onSelectReady={selectReady}
           onClearSelection={clearSelection} onRun={runImport} running={running} sourceName={sourceName} />
       ) : (
-        <RunCard batch={batch} items={items} runIds={runIds} runTotal={runTotal} onStartOver={startOver} />
+        <RunCard batch={batch} items={items} runIds={runIds} runTotal={runTotal} note={note} onStartOver={startOver} />
       )}
 
       {editing && batchId && <ImportMatchSheet batchId={batchId} candidate={editing} onClose={closeEditor} />}

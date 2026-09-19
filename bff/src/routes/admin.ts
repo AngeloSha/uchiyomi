@@ -37,14 +37,16 @@ import { addSeriesFromSource, findBestMatch, resolveCandidate, norm, jobBusy, st
 import { chapterFileRel } from '../lib/downloader';
 import { REFETCH_BAK } from '../lib/fsAtomic';
 import type { SourceChapter } from '../lib/sources/types';
-import { getPlan, MIN_COVERAGE } from '../lib/fill';
+import { getPlan, followable } from '../lib/fill';
 import { prefsSchema, readGlobalPrefs, readSeriesPrefs, effectivePrefsFor } from '../lib/scanlatorPrefs';
 import { groupsOf, normGroup } from '../lib/releases';
 import { groupStats, emptyGroupStat, type StatCopy } from '../lib/groupStats';
 import { copyToChapter, type ListingCopy } from '../lib/seriesListing';
 import { seriesSourcesFor } from '../lib/seriesSources';
 import { titlesFromBackup, entriesFromBackup, type BackupEntry } from '../lib/tachibk';
-import { linkSeries } from '../lib/trackers';
+import { linkSeries, seedTrackerFloor } from '../lib/trackers';
+import { ADAPTERS, PROVIDERS, LIST_STATUSES, TRACKER_LIST_MAX, type Provider, type LibraryEntry } from '../lib/trackerProviders';
+import { open as unseal } from '../lib/secretbox';
 import { runHealthChecks } from '../lib/health';
 import { titlesFromMangadexList, entriesFromMangadexList } from '../lib/mangadexList';
 import { fetchAniListArt, fetchAniListCandidates, fetchAnimeBanner } from '../lib/anilist';
@@ -92,8 +94,21 @@ const SWEEP_OPEN_DAYS = 30;
 
 interface ImportBatchRow {
   id: string; user_id: string; origin: string; state: string;
+  /** Which service a `tracker` batch was read from; null for the other intakes. */
+  tracker: string | null;
   total: number; resolved: number; added: number; already: number; failed: number;
+  /** The intake's note about the read (migrate.ts): novels dropped, and whether the list was cut at 500. */
+  skipped_novels: number; truncated: boolean;
   created_at: string; updated_at: string;
+}
+/**
+ * A batch as the routes answer it: the intake note under the names the POST already answers with
+ * (`skippedNovels`, `truncated`), so the page reads one shape whether it came from the POST or from a later
+ * GET, and the snake-case column does not ride along as a second copy of the same number.
+ */
+function batchDto<T extends ImportBatchRow>(row: T): Omit<T, 'skipped_novels'> & { skippedNovels: number } {
+  const { skipped_novels: skippedNovels, ...rest } = row;
+  return { ...rest, skippedNovels };
 }
 interface ImportCandidateRow {
   id: string; batch_id: string; ord: number; backup_title: string;
@@ -102,6 +117,141 @@ interface ImportCandidateRow {
   match_source: string | null; match_source_id: string | null; match_title: string | null; match_cover: string | null;
   auto_source: string | null; auto_source_id: string | null; auto_title: string | null; auto_cover: string | null; auto_confidence: string | null;
   status: string | null;
+  /** Tracker rows only (migrate.ts says what each is for); null / empty on the other intakes. */
+  tracker: string | null; external_id: string | null; alt_titles: string[]; matched_via: string | null; progress: number | null;
+}
+
+/**
+ * One entry as the intakes hand it to the batch: a backup entry, plus what a tracker's list knows that a
+ * backup does not. Local to this file rather than widening `BackupEntry` in lib/tachibk.ts, which is the
+ * shape of ONE file format and should not grow fields no backup carries.
+ */
+type IntakeEntry = BackupEntry & {
+  altTitles?: string[];
+  tracker?: Provider;
+  externalId?: string;
+  progress?: number;
+};
+
+/**
+ * Link an imported (or already-owned) series to the tracker entry its row came from, and record how far
+ * the person is there. `userId` is the account whose list was read -- the batch's owner, which at intake is
+ * the caller and at /run may not be -- and it is `linked_by`, not null: the id came off THEIR list, which
+ * is a human's choice and must not be overwritten by the art path's automatic AniList match
+ * (routes/images.ts links with linked_by NULL and leaves a human's link alone). ⚠️ The floor is not
+ * optional, and it is the owner's for the same reason: `seedTrackerFloor` is what
+ * keeps the first chapter finished here from pushing chapter 1 over an entry at chapter 150 -- the failure
+ * lib/trackers.ts calls unrepairable. Both writes swallow their own errors, so a tracker hiccup never fails
+ * the import.
+ */
+async function linkImportedSeries(
+  row: { tracker: string | null; external_id: string | null; backup_title: string; progress: number | null },
+  seriesId: string,
+  userId: string,
+): Promise<boolean> {
+  if (!row.tracker || !row.external_id || !PROVIDERS.includes(row.tracker as Provider)) return false;
+  const provider = row.tracker as Provider;
+  await linkSeries(seriesId, row.external_id, row.backup_title, userId, provider);
+  await seedTrackerFloor(userId, seriesId, provider, row.progress ?? 0);
+  return true;
+}
+
+/** How a tracker read ends: entries for the batch, or an answer the route sends as-is. */
+type TrackerRead =
+  | { entries: IntakeEntry[]; skippedNovels: number; capped: boolean }
+  | { status: 404 | 422 | 502; error: 'not_connected' | 'tracker_rejected' | 'token_expired' | 'tracker_unavailable'; message: string };
+
+/** The sentence a rejected token leaves on the connection -- pushOne's (lib/trackers.ts), word for word. */
+const TOKEN_REJECTED_ERROR = 'the tracker rejected the saved token -- reconnect to resume syncing';
+/** The sentence a lapsed token leaves on the connection -- pushOne's again, word for word. */
+const TOKEN_EXPIRED_ERROR = 'the access token has expired -- reconnect to resume syncing';
+const CONNECT_HINT = 'Profile → Reading → Progress tracking';
+
+/**
+ * Read the requesting admin's OWN list from a tracker, as batch entries. Only their own `user_trackers` row
+ * is consulted: an admin cannot import from another member's account, whatever the request names.
+ *
+ * Failures are answers rather than throws because each means something different to the person: no
+ * connection (404 `not_connected`); a token the service refused (422 `tracker_rejected` -- and the
+ * connection is disabled with the same sentence a rejected push writes, since a token the service refuses
+ * will refuse every future chapter too, and Profile then shows one message for both); a service that did
+ * not answer (502 `tracker_unavailable`, nothing changed); a token past its `expires_at` (422
+ * `token_expired`, answered BEFORE the service is called and without disabling -- the same note a push
+ * leaves, because MyAnimeList answers a lapsed token with 401, which the branch below would otherwise read
+ * as a refusal and switch the connection off, so one condition got two explanations and one of them killed
+ * sync). ⚠️ Only `authFailed` disables: the adapters promise a plain error for anything else, and a 400 or
+ * a timeout must never switch someone's sync off.
+ * ⚠️ 422, not 401, for the refused token: the web's `api()` answers a 401 by refreshing the session and
+ * retrying the request once, and that retry would find the connection just disabled and read
+ * `not_connected` -- the person would never see why.
+ *
+ * Light novels are dropped and counted: tracker "manga" lists carry them, and a novel resolves to its
+ * manga adaptation on every source, so importing one would link the NOVEL entry to the manga and push
+ * manga chapter counts into it. Entries are deduped by their id and by the normalised form of EVERY name
+ * they go by, because an English row and a romaji row of one work otherwise resolve to two source titles
+ * and both get added.
+ */
+async function readTrackerList(userId: string, provider: Provider, statuses: (typeof LIST_STATUSES)[number][]): Promise<TrackerRead> {
+  const label = ADAPTERS[provider].label;
+  const conn = await one<{ access_token: string; enabled: boolean; expires_at: string | null }>(
+    'SELECT access_token, enabled, expires_at FROM user_trackers WHERE user_id = $1 AND provider = $2', [userId, provider],
+  );
+  if (!conn || !conn.enabled) {
+    return { status: 404, error: 'not_connected', message: `Connect ${label} under ${CONNECT_HINT} first.` };
+  }
+  if (conn.expires_at && new Date(conn.expires_at).getTime() < Date.now()) {
+    // Reported, not disabled, and the service is not asked: a lapsed token is a known condition with a
+    // known repair, and pushOne (lib/trackers.ts) already says so on the connection in these words.
+    await q('UPDATE user_trackers SET last_error = $3 WHERE user_id = $1 AND provider = $2',
+      [userId, provider, TOKEN_EXPIRED_ERROR]).catch(() => {});
+    return { status: 422, error: 'token_expired', message: `The ${label} token has expired — reconnect it under ${CONNECT_HINT}.` };
+  }
+  const token = unseal(conn.access_token);
+  if (!token) {
+    // Not a refusal by the service, so the connection stays enabled; the same note pushOne leaves.
+    await q('UPDATE user_trackers SET last_error = $3 WHERE user_id = $1 AND provider = $2',
+      [userId, provider, 'stored token could not be read -- reconnect to resume syncing']).catch(() => {});
+    return { status: 422, error: 'tracker_rejected', message: `The saved ${label} token could not be read — reconnect it under ${CONNECT_HINT}.` };
+  }
+  let list: LibraryEntry[];
+  try {
+    list = await ADAPTERS[provider].listLibrary(token, { statuses, max: TRACKER_LIST_MAX });
+  } catch (e) {
+    const err = e as Error & { authFailed?: boolean };
+    if (err.authFailed) {
+      await q('UPDATE user_trackers SET enabled=false, last_error=$3 WHERE user_id=$1 AND provider=$2',
+        [userId, provider, TOKEN_REJECTED_ERROR]).catch(() => {});
+      return { status: 422, error: 'tracker_rejected', message: `${label} rejected the saved token — reconnect it under ${CONNECT_HINT}.` };
+    }
+    return { status: 502, error: 'tracker_unavailable', message: `${label} did not answer just now. Try again in a moment.` };
+  }
+
+  const entries: IntakeEntry[] = [];
+  let skippedNovels = 0;
+  const seenIds = new Set<string>();
+  const seenNames = new Set<string>();
+  for (const e of list) {
+    if (e.format === 'novel') { skippedNovels++; continue; }
+    const title = (e.title ?? '').trim();
+    if (!title || !e.externalId) continue;
+    if (seenIds.has(e.externalId)) continue;
+    const titleKey = norm(title);
+    const altTitles: string[] = [];
+    for (const raw of e.altTitles ?? []) {
+      const a = raw.trim();
+      const k = norm(a);
+      if (!a || !k || k === titleKey || altTitles.some((x) => norm(x) === k)) continue;
+      altTitles.push(a);
+    }
+    const names = [titleKey, ...altTitles.map(norm)].filter(Boolean);
+    if (names.some((n) => seenNames.has(n))) continue;
+    seenIds.add(e.externalId);
+    for (const n of names) seenNames.add(n);
+    entries.push({ title, altTitles, tracker: provider, externalId: e.externalId, progress: Math.max(0, Math.floor(e.progress || 0)) });
+  }
+  // `capped`: the read stopped at the cap, so the list may hold more than was seen -- reported as
+  // truncated even when novels and duplicates brought the kept rows under 500.
+  return { entries, skippedNovels, capped: list.length >= TRACKER_LIST_MAX };
 }
 
 /**
@@ -131,17 +281,23 @@ async function resolveBatch(batchId: string): Promise<void> {
         try {
           const m = await resolveCandidate({
             title: row.backup_title,
+            // A tracker row's other names (romaji, synonyms): searched only after the English title finds
+            // nothing, because a source that carries the work under its romaji title is the same match.
+            altTitles: row.alt_titles?.length ? row.alt_titles : undefined,
             url: row.backup_url ?? undefined,
             sourceIdUnsigned: row.backup_source_id_unsigned ?? undefined,
             sourceIdSigned: row.backup_source_id_signed ?? undefined,
           });
           if (m) {
+            // `matched_via` is the alternate that found it (null for the search title), so the review row
+            // can say "matched under its other name" instead of flagging a romaji hit as a wrong pick.
             await q(
               `UPDATE import_candidates SET decision = 'auto', confidence = $2,
                  match_source = $3, match_source_id = $4, match_title = $5, match_cover = $6,
-                 auto_source = $3, auto_source_id = $4, auto_title = $5, auto_cover = $6, auto_confidence = $2
+                 auto_source = $3, auto_source_id = $4, auto_title = $5, auto_cover = $6, auto_confidence = $2,
+                 matched_via = $7
                WHERE id = $1`,
-              [row.id, m.confidence, m.source, m.sourceId, m.title, m.coverUrl ?? null],
+              [row.id, m.confidence, m.source, m.sourceId, m.title, m.coverUrl ?? null, m.matchedVia ?? null],
             );
           }
         } catch { /* leave unresolved — surfaces as "no match found" once the batch reaches review */ }
@@ -693,12 +849,15 @@ export default async function adminRoutes(app: FastifyInstance) {
    * Follow another source for a series: its chapter list is merged with the primary's on every check, so a
    * chapter the primary lacks, or lists only from a blocked group, can come from here instead.
    *
-   * The candidate must come from a fill-scan plan, and the plan must have found it followable -- coverage
-   * at or over MIN_COVERAGE with a verdict that says the numbering lines up. The plan is the only place the
-   * "same series?" judgement is made (lib/fill.ts explains why it is a judgement and not a proof), and
-   * taking a bare (source, id) pair here would let a client follow anything it could name, which for a
-   * source that numbers a different story 1..N means every "new chapter" is the wrong book. The primary
-   * is refused as well: following it would list the same chapters twice.
+   * The candidate must come from a fill-scan plan, and the plan must have found it followable -- the one
+   * rule in lib/fill.ts followable(): coverage at or over MIN_COVERAGE with a verdict that says the
+   * numbering lines up. There are two ways into a follow, this route and the add-time auto-follow
+   * (POST /api/sources/add `alsoFollow`, lib/autoFollow.ts), and both make the "same series?" judgement on
+   * the SERVER (lib/fill.ts explains why it is a judgement and not a proof): here from the plan, there from
+   * the listing the add just wrote plus the candidate's own title. Neither takes a bare (source, id) pair
+   * on trust, which would let a client follow anything it could name -- for a source that numbers a
+   * different story 1..N, every "new chapter" is the wrong book. The primary is refused as well: following
+   * it would list the same chapters twice.
    */
   app.post('/api/admin/series/:id/sources', async (req, reply) => {
     const { id } = req.params as { id: string };
@@ -715,12 +874,13 @@ export default async function adminRoutes(app: FastifyInstance) {
     const cand = plan.candidates.find((c) => c.source === source && c.sourceSeriesId === sourceSeriesId);
     if (!cand) return reply.code(400).send({ error: 'not_in_plan', message: 'That source was not one of the options.' });
     if (cand.pinned) return reply.code(409).send({ error: 'is_primary', message: 'That is already the series’ own source.' });
-    // The verdict already folds coverage in (lib/fill.ts verdict()), so the explicit bound is a belt for
-    // the day the verdict grows a case that does not; both halves fall together.
+    // The one rule, shared with the add-time auto-follow (lib/fill.ts followable(): coverage at or over
+    // MIN_COVERAGE with a verdict that says the numbering lines up), so the two paths cannot disagree
+    // about what may be followed.
     // Reintroduce by deleting this guard: "a source with a different story is refused" in
     // seriesSources.int.test.ts fails with 200 -- the plan carries the WRONG fixture with its refusal
     // attached, and nothing else between the plan and the INSERT reads it.
-    if (!(cand.coverage >= MIN_COVERAGE && (cand.why === 'ok' || cand.why === 'nothing_to_fill'))) {
+    if (!followable(cand)) {
       // The reason is the scan's own verdict; only a numbering mismatch is a fault of the source, the rest is
       // a source that could not be judged this time (in a cooldown, unreachable, not tried).
       const message = cand.why === 'numbering_mismatch' || cand.why === 'ok' || cand.why === 'nothing_to_fill'
@@ -734,11 +894,16 @@ export default async function adminRoutes(app: FastifyInstance) {
     }
     const row = await getSeriesRow(id);
     if (!row) return reply.code(404).send({ error: 'not_found' });
+    // `added_by` is who chose the source: NULL means the add-time auto-follow did (lib/autoFollow.ts), and
+    // the sheet reads that as "followed for you". A person confirming the same source through a plan is a
+    // human choice and must be recorded as one, so the upsert keeps the newest non-null author rather than
+    // the row's -- and the automatic path, whose EXCLUDED.added_by is NULL, can never demote a human's.
     await q(
       `INSERT INTO series_sources (series_id, source_id, source_series_id, title, coverage, added_by)
        VALUES ($1, $2, $3, $4, $5, $6)
        ON CONFLICT (series_id, source_id) DO UPDATE SET source_series_id = EXCLUDED.source_series_id,
-         title = EXCLUDED.title, coverage = EXCLUDED.coverage`,
+         title = EXCLUDED.title, coverage = EXCLUDED.coverage,
+         added_by = COALESCE(EXCLUDED.added_by, series_sources.added_by)`,
       [id, source, sourceSeriesId, cand.title || null, cand.coverage, userIdOf(req)],
     );
     await logAudit('series.follow_source', { userId: userIdOf(req), detail: { id, title: row.title, source, sourceSeriesId, coverage: cand.coverage }, req });
@@ -2210,13 +2375,13 @@ export default async function adminRoutes(app: FastifyInstance) {
   // can carry 500 of them and this is a summary; GET /batches/:id has them.
   app.get('/api/admin/import/batches', async () => {
     const rows = await q<ImportBatchRow>(
-      `SELECT id, origin, state, total, resolved, added, already, failed, created_at, updated_at
+      `SELECT id, origin, tracker, state, total, resolved, added, already, failed, skipped_novels, truncated, created_at, updated_at
          FROM import_batches ORDER BY created_at DESC LIMIT 50`,
     );
     // The same `stale` GET /batches/:id reports, for the same reason: a batch left `resolving` by a
     // restart otherwise read "Matching… 12/40" on the intake card when nobody was matching anything, and
     // only opening it revealed the Resume button. In-memory, no query -- the guard is this process's.
-    return { content: rows.map((r) => ({ ...r, stale: r.state === 'resolving' && resolvingBatch !== r.id })) };
+    return { content: rows.map((r) => ({ ...batchDto(r), stale: r.state === 'resolving' && resolvingBatch !== r.id })) };
   });
 
   app.post('/api/admin/import/batches', { bodyLimit: 12 * 1024 * 1024 }, async (req, reply) => {
@@ -2234,14 +2399,33 @@ export default async function adminRoutes(app: FastifyInstance) {
           dataUrl: z.string().optional(),
           mangadexList: z.string().optional(),
           titles: z.array(z.string()).optional(),
+          // The fourth intake: `origin: 'tracker'` names it, `tracker` says which service, `statuses` which
+          // of the person's lists to read (at least one; Reading + Plan to read when omitted, the two a
+          // reader most wants brought over).
+          origin: z.literal('tracker').optional(),
+          tracker: z.enum(PROVIDERS as [Provider, ...Provider[]]).optional(),
+          statuses: z.array(z.enum(LIST_STATUSES)).min(1).max(LIST_STATUSES.length).optional(),
         })
         .safeParse(req.body);
       if (!b.success) return reply.code(400).send({ error: 'bad_request' });
 
-      let entries: BackupEntry[] = [];
-      let origin: 'backup' | 'mangadex' | 'paste';
+      const userId = userIdOf(req);
+      let entries: IntakeEntry[] = [];
+      let origin: 'backup' | 'mangadex' | 'paste' | 'tracker';
+      let tracker: Provider | null = null;
+      let skippedNovels = 0;
+      let capped = false;
       try {
-        if (b.data.dataUrl) {
+        if (b.data.origin === 'tracker' || b.data.tracker) {
+          if (!b.data.tracker) return reply.code(400).send({ error: 'bad_request', message: 'Say which tracker to read: anilist, myanimelist or kitsu.' });
+          tracker = b.data.tracker;
+          const read = await readTrackerList(userId, tracker, b.data.statuses ?? ['reading', 'plan_to_read']);
+          if ('error' in read) return reply.code(read.status).send({ error: read.error, message: read.message });
+          entries = read.entries;
+          skippedNovels = read.skippedNovels;
+          capped = read.capped;
+          origin = 'tracker';
+        } else if (b.data.dataUrl) {
           const m = /^data:[^;]*;base64,(.+)$/s.exec(b.data.dataUrl);
           if (!m) return reply.code(400).send({ error: 'bad_request', message: 'Could not read that file.' });
           entries = entriesFromBackup(Buffer.from(m[1], 'base64'));
@@ -2269,24 +2453,62 @@ export default async function adminRoutes(app: FastifyInstance) {
       }
       if (!entries.length) return reply.code(400).send({ error: 'bad_request', message: 'No titles found.' });
 
-      const truncated = entries.length > 500;
+      const truncated = capped || entries.length > 500;
       entries = entries.slice(0, 500);
 
-      // flag what's already here up front so the review screen can default those rows to skipped, visibly
-      const have = new Set((await q<{ title: string }>('SELECT title FROM lib_series')).map((r) => norm(r.title)));
-      const inLib = entries.map((e) => have.has(norm(e.title)));
+      // Flag what's already here up front so the review screen can default those rows to skipped, visibly.
+      // The map carries the series id because a tracker row the library already holds is LINKED right here
+      // (below): an existing reader connecting AniList gets sync for the titles they have, which is the most
+      // valuable thing this intake does for them, and /run never sees a skipped row. ⚠️ Live rows only: a
+      // deleted series is hidden, not gone (migrate.ts), and a merged one lives on under its survivor, so
+      // a namesake in either state is NOT "already in your library" -- it used to read so, and a tracker
+      // row then got a link and a floor on a series nobody can open, while the add path would have revived
+      // it. Left unowned, the row resolves and /run adds (revives) it like any other title.
+      const have = new Map<string, string>();
+      for (const r of await q<{ id: string; title: string }>(`SELECT s.id, s.title FROM lib_series s WHERE ${visibleToAll('s')}`)) {
+        const k = norm(r.title);
+        if (k && !have.has(k)) have.set(k, r.id);
+      }
+      // A title the library holds under one of the entry's OTHER names counts as owned too: the same
+      // work, spelled the way the source that added it spells it. Which name it was is kept (`via`), the
+      // way the resolve pass keeps `matched_via`: an AniList synonym is user-contributed and can be a generic
+      // word, so a row linked through one must be able to say "matched under its other name" rather than
+      // present the link as self-evident.
+      const ownedBy = (e: IntakeEntry): { id: string; via: string | null } | null => {
+        const exact = have.get(norm(e.title));
+        if (exact) return { id: exact, via: null };
+        for (const a of e.altTitles ?? []) {
+          const id = have.get(norm(a));
+          if (id) return { id, via: a };
+        }
+        return null;
+      };
+      const owned = entries.map(ownedBy);
+      const inLib = owned.map((o) => !!o);
       const initialResolved = inLib.filter(Boolean).length; // already-owned rows never enter the resolve loop
+      // An owned tracker row is finished the moment it is linked: it reads `already`, the batch counts it
+      // under `already`, and the review row can say "linked for progress sync". Owned rows of the other
+      // intakes keep a NULL status, so a backup whose every title is owned still stays open to be looked at.
+      const linkedAtIntake = entries.map((e, i) => !!(tracker && e.externalId && owned[i]));
 
+      // `skipped_novels` and `truncated` ride on the row, not only in this answer: the page that started
+      // the intake is not always the page that shows its done line (a reload, an Open-imports tap).
       const batch = await one<{ id: string }>(
-        `INSERT INTO import_batches (user_id, origin, state, total, resolved) VALUES ($1,$2,'resolving',$3,$4) RETURNING id`,
-        [userIdOf(req), origin, entries.length, initialResolved],
+        `INSERT INTO import_batches (user_id, origin, tracker, state, total, resolved, already, skipped_novels, truncated)
+         VALUES ($1,$2,$3,'resolving',$4,$5,$6,$7,$8) RETURNING id`,
+        [userId, origin, tracker, entries.length, initialResolved, linkedAtIntake.filter(Boolean).length, skippedNovels, truncated],
       );
       const batchId = batch!.id;
-      // One round trip for up to 500 rows via unnest, rather than 500 sequential INSERTs.
+      // One round trip for up to 500 rows via unnest, rather than 500 sequential INSERTs. ⚠️ `alt_titles`
+      // rides as `jsonb[]` (one JSON array per row) unpacked per row in the SELECT: `unnest` over a `text[][]`
+      // flattens it, and a plain `jsonb` cannot yield one array per row.
       await q(
-        `INSERT INTO import_candidates (batch_id, ord, backup_title, backup_source_id_unsigned, backup_source_id_signed, backup_url, in_library, decision)
-         SELECT $1, o, t, su, ss, u, il, CASE WHEN il THEN 'skip' ELSE 'unresolved' END
-         FROM unnest($2::int[], $3::text[], $4::text[], $5::text[], $6::text[], $7::boolean[]) AS x(o, t, su, ss, u, il)`,
+        `INSERT INTO import_candidates (batch_id, ord, backup_title, backup_source_id_unsigned, backup_source_id_signed, backup_url, in_library, decision,
+                                        tracker, external_id, alt_titles, progress, status, matched_via)
+         SELECT $1, o, t, su, ss, u, il, CASE WHEN il THEN 'skip' ELSE 'unresolved' END,
+                tr, ex, ARRAY(SELECT jsonb_array_elements_text(x.al))::text[], pr, st, mv
+         FROM unnest($2::int[], $3::text[], $4::text[], $5::text[], $6::text[], $7::boolean[],
+                     $8::text[], $9::text[], $10::jsonb[], $11::int[], $12::text[], $13::text[]) AS x(o, t, su, ss, u, il, tr, ex, al, pr, st, mv)`,
         [
           batchId,
           entries.map((_, i) => i),
@@ -2295,12 +2517,28 @@ export default async function adminRoutes(app: FastifyInstance) {
           entries.map((e) => e.sourceIdSigned ?? null),
           entries.map((e) => e.url ?? null),
           inLib,
+          entries.map((e) => e.tracker ?? null),
+          entries.map((e) => e.externalId ?? null),
+          entries.map((e) => JSON.stringify(e.altTitles ?? [])),
+          entries.map((e) => (e.tracker ? e.progress ?? 0 : null)),
+          linkedAtIntake.map((l) => (l ? 'already' : null)),
+          owned.map((o) => o?.via ?? null),
         ],
       );
-      await logAudit('import.batch.start', { userId: userIdOf(req), detail: { batchId, origin, count: entries.length }, req });
+      let linked = 0;
+      for (let i = 0; i < entries.length; i++) {
+        if (!linkedAtIntake[i]) continue;
+        const e = entries[i];
+        await linkImportedSeries({ tracker: e.tracker!, external_id: e.externalId!, backup_title: e.title, progress: e.progress ?? null }, owned[i]!.id, userId);
+        linked++;
+      }
+      await logAudit('import.batch.start', {
+        userId, req,
+        detail: { batchId, origin, count: entries.length, ...(tracker ? { tracker, statuses: b.data.statuses ?? ['reading', 'plan_to_read'], skippedNovels, linked } : {}) },
+      });
       void resolveBatch(batchId).catch(() => {});
       started = true;
-      return { batchId, total: entries.length, truncated };
+      return { batchId, total: entries.length, truncated, skippedNovels };
     } finally {
       if (!started && resolvingBatch === 'pending') resolvingBatch = null;
     }
@@ -2332,11 +2570,19 @@ export default async function adminRoutes(app: FastifyInstance) {
       const closed = await closeBatchIfSettled(id);
       if (closed) batch = closed;
     }
-    const items = await q<ImportCandidateRow>('SELECT * FROM import_candidates WHERE batch_id = $1 ORDER BY ord', [id]);
+    // `linked` is read from series_trackers rather than remembered on the row, so it says what is true now:
+    // a tracker row whose series carries this entry's id (linked at intake for an owned title, at /run for
+    // an added one) reads "linked for progress sync"; a row whose link failed, or that was never run, does
+    // not claim it.
+    const items = await q<ImportCandidateRow & { linked: boolean }>(
+      `SELECT c.*, (c.tracker IS NOT NULL AND c.external_id IS NOT NULL AND EXISTS (
+                 SELECT 1 FROM series_trackers st WHERE st.provider = c.tracker AND st.external_id = c.external_id)) AS linked
+         FROM import_candidates c WHERE c.batch_id = $1 ORDER BY c.ord`, [id],
+    );
     // A batch stuck in 'resolving' with nobody actually resolving it (this process restarted mid-pass) is
     // stale: the UI offers Resume instead of a progress bar that will never move again.
     const stale = batch.state === 'resolving' && resolvingBatch !== id;
-    return { batch: { ...batch, stale }, items };
+    return { batch: { ...batchDto(batch), stale }, items };
   });
 
   app.post('/api/admin/import/batches/:id/resume', async (req, reply) => {
@@ -2398,8 +2644,12 @@ export default async function adminRoutes(app: FastifyInstance) {
         [cid],
       );
     } else {
+      // `matched_via` names the alternate that found the CURRENT match, and a hand-picked one was found by
+      // a person: left in place, the row read "matched under its other name" about a match that no longer
+      // exists. (The auto branch above leaves it alone -- it belongs to the auto match, and a pick made after
+      // a manual detour simply loses the note; the amber verdict never depended on it.)
       await q(
-        `UPDATE import_candidates SET decision = 'manual', confidence = NULL,
+        `UPDATE import_candidates SET decision = 'manual', confidence = NULL, matched_via = NULL,
            match_source = $2, match_source_id = $3, match_title = $4, match_cover = $5
          WHERE id = $1`,
         [cid, b.data.source, b.data.sourceId, b.data.title, b.data.coverUrl ?? null],
@@ -2433,7 +2683,8 @@ export default async function adminRoutes(app: FastifyInstance) {
       .safeParse(req.body ?? {});
     if (!b.success) return reply.code(400).send({ error: 'bad_request' });
 
-    const batch = await one<{ id: string; state: string }>('SELECT id, state FROM import_batches WHERE id = $1', [id]);
+    // `user_id` rides along because it is the account the tracker rows belong to (see `owner` below).
+    const batch = await one<{ id: string; state: string; user_id: string }>('SELECT id, state, user_id FROM import_batches WHERE id = $1', [id]);
     if (!batch) return reply.code(404).send({ error: 'not_found' });
     if (batch.state === 'importing') return reply.code(409).send({ error: 'busy', message: 'This batch is already importing.' });
     if (batch.state === 'resolving') return reply.code(409).send({ error: 'still_resolving', message: 'Wait for matching to finish first.' });
@@ -2444,12 +2695,14 @@ export default async function adminRoutes(app: FastifyInstance) {
     // already imported on an earlier call is never re-added. That is what makes calling this a SECOND time
     // on the same batch -- after fixing the rows an admin found manually -- safe: it only ever picks up
     // what is newly ready.
-    const rows = await q<{ id: string; match_source: string; match_source_id: string }>(
+    // `tracker`, `external_id`, `backup_title` and `progress` ride along so a tracker row can be linked
+    // (and floored) once its series exists, without a second read per row.
+    const rows = await q<{ id: string; match_source: string; match_source_id: string; tracker: string | null; external_id: string | null; backup_title: string; progress: number | null }>(
       b.data.candidateIds
-        ? `SELECT id, match_source, match_source_id FROM import_candidates
+        ? `SELECT id, match_source, match_source_id, tracker, external_id, backup_title, progress FROM import_candidates
            WHERE batch_id = $1 AND decision IN ('auto','manual') AND match_source_id IS NOT NULL AND status IS NULL
              AND id = ANY($2) ORDER BY ord`
-        : `SELECT id, match_source, match_source_id FROM import_candidates
+        : `SELECT id, match_source, match_source_id, tracker, external_id, backup_title, progress FROM import_candidates
            WHERE batch_id = $1 AND decision IN ('auto','manual') AND match_source_id IS NOT NULL AND status IS NULL ORDER BY ord`,
       b.data.candidateIds ? [id, b.data.candidateIds] : [id],
     );
@@ -2465,7 +2718,30 @@ export default async function adminRoutes(app: FastifyInstance) {
     );
     if (!claimed) return reply.code(409).send({ error: 'busy', message: 'This batch is already importing.' });
     importingBatches.add(id);
-    await logAudit('import.batch.run', { userId: userIdOf(req), detail: { batchId: id, count: rows.length }, req });
+    // Captured here: the loop below outlives the request, and `req` must not be read from it.
+    const userId = userIdOf(req);
+    // ⚠️ The tracker link and its floor belong to the account whose LIST was read -- the batch's owner --
+    // never to whoever pressed Import. Batches are shared between admins, and when another admin ran a
+    // tracker batch the floor landed on THEIR tracker_progress: the owner's first chapter here then pushed
+    // chapter 1 over their entry at 150 (the rewind seedTrackerFloor exists to prevent), and the runner
+    // carried a silent 150 floor on a list that was never theirs. The runner stays in the audit row only.
+    const owner = batch.user_id;
+    await logAudit('import.batch.run', { userId, detail: { batchId: id, count: rows.length, owner }, req });
+    /**
+     * The series an add answered about, for the tracker link. The add hands back its folder (a fresh row,
+     * or the same folder already here) or, for `duplicate`, the title+source it found the work under; the
+     * id is looked up the way addSeriesFromSource itself found the row. Null when neither is known, and
+     * then nothing is linked -- a link must never be guessed.
+     */
+    const seriesIdOf = async (r: { folder?: string; existing?: { title: string; source: string } }): Promise<string | null> => {
+      if (r.folder) {
+        return (await one<{ id: string }>(`SELECT s.id FROM lib_series s WHERE s.folder = $1 ORDER BY (${visibleToAll('s')}) DESC LIMIT 1`, [r.folder]))?.id ?? null;
+      }
+      if (r.existing) {
+        return (await one<{ id: string }>(`SELECT s.id FROM lib_series s WHERE s.title = $1 AND s.source = $2 AND ${visibleToAll('s')} LIMIT 1`, [r.existing.title, r.existing.source]))?.id ?? null;
+      }
+      return null;
+    };
     // Fire-and-forget, same as the one-shot /import route: adding hundreds of series is too slow to hold a
     // request open for, even with no chapter downloaded per title.
     void (async () => {
@@ -2493,6 +2769,15 @@ export default async function adminRoutes(app: FastifyInstance) {
               // to its own wording, and the rows are its only reader.
               await q(`UPDATE import_candidates SET status = $2 WHERE id = $1`, [row.id, r.error || 'failed']);
               await q(`UPDATE import_batches SET failed = failed + 1, updated_at = now() WHERE id = $1`, [id]);
+            }
+            // Added, or the library had it: either way the series exists now, so a tracker row is linked to
+            // the entry it came from and the OWNER's progress there becomes the owner's floor -- sync from
+            // the first chapter, and never a push below what the tracker already holds.
+            if (row.tracker && (r.ok || r.error === 'duplicate')) {
+              try {
+                const sid = await seriesIdOf(r);
+                if (sid) await linkImportedSeries(row, sid, owner);
+              } catch { /* the add stands and is already counted; the row simply reads unlinked */ }
             }
           } catch {
             await q(`UPDATE import_candidates SET status = 'error' WHERE id = $1`, [row.id]).catch(() => {});

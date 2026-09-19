@@ -132,6 +132,22 @@ export function verdict(a: Assessment, theirsCount: number): Refusal {
   return 'ok';
 }
 
+/**
+ * The ONE rule for "may this source be followed": it answered, and its numbering lines up with ours.
+ *
+ * Two paths follow a source -- the manual route, from a candidate a fill-scan plan found, and the add-time
+ * auto-follow (lib/autoFollow.ts), from a candidate judged against the listing the add just wrote -- and
+ * they must agree, or the sheet would show a follower one path refused. `nothing_to_fill` is a pass on
+ * purpose: a fresh series has no gaps, so a source listing everything we hold has nothing to FILL and is
+ * exactly the source worth following for what comes next. The verdict already folds MIN_COVERAGE in; the
+ * explicit bound is a belt for the day the verdict grows a case that does not, and both halves fall
+ * together. Coverage alone is never enough here -- lib/fill.ts's header says why -- so neither caller may
+ * test it without the verdict.
+ */
+export function followable(c: { coverage: number; why: Refusal }): boolean {
+  return c.coverage >= MIN_COVERAGE && (c.why === 'ok' || c.why === 'nothing_to_fill');
+}
+
 // ---- the plan store ---------------------------------------------------------
 //
 // A scan hands out a plan id; a fill quotes it back. The chapter URLs live ONLY here, never in a response and

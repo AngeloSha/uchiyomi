@@ -6,8 +6,8 @@
 //  * AniList tokens last a year and there are NO refresh tokens. Silent expiry is the failure mode users
 //    hate most, so expiry is stored and surfaced, and an auth failure disables the connection loudly.
 //  * `provider` is carried everywhere so MAL/Kitsu could be added without a migration. They since were, and
-//    that held: no schema changed. What was NOT abstracted was the two calls that talk to a service, which
-//    now live in trackerProviders.ts behind one adapter each.
+//    that held: no schema changed. What was NOT abstracted was the calls that talk to a service, which now
+//    live in trackerProviders.ts behind one adapter each (prove a token, push progress, read the list).
 //  * A user may connect SEVERAL trackers at once, so every push fans out over their enabled connections.
 //    One failing service must not stop the others, and each keeps its own error and its own high-water mark.
 import { q, one } from './db';
@@ -116,6 +116,35 @@ export async function linkSeries(
   ).catch(() => {});
 }
 
+/**
+ * Record what a tracker already says about a series for this person, so the first push after an import can
+ * never rewind their real entry: an import from a list at chapter 150 followed by reading chapter 1 here
+ * would otherwise send "1" -- the one failure pushOne calls unrepairable, because the tracker takes a lower
+ * number and rewrites the history. `pushed_at` stays NULL: nothing was sent, the tracker is simply ahead,
+ * and pushOne treats such a floor as a quiet skip rather than a refusal worth an error.
+ *
+ * A fresh read REPLACES the floor, whatever stood there and whether or not a push had stamped it. The number
+ * came from the tracker itself seconds ago, so it IS the entry's state: import at 150 (floor 150) → the
+ * person fixes a mis-click on the site down to 20 → reads chapter 21 here → `21 < 150`, and with a floor
+ * that could only ever rise, every chapter up to 150 was skipped quietly (no error by design, so the card
+ * said "sync works" while the tracker never moved) and pressing Load list again did not help either, because
+ * the new 20 lost to GREATEST. Load list again is the repair, so the seed must take the tracker's word. The
+ * stamp goes too: a stamped floor meant "a number this app sent", and after a re-import the floor is the
+ * tracker's, not ours -- unstamped is the truthful state, and below it pushOne skips quietly instead of
+ * writing a refusal about a number nobody sent. ⚠️ Reintroduce by GREATEST(tracker_progress.chapters,
+ * EXCLUDED.chapters), or by leaving pushed_at alone: the mis-click sequence above comes back.
+ */
+export async function seedTrackerFloor(userId: string, seriesId: string, provider: Provider, chapters: number): Promise<void> {
+  if (!(chapters > 0)) return;
+  await q(
+    `INSERT INTO tracker_progress (user_id, series_id, provider, chapters, pushed_at)
+     VALUES ($1, $2, $3, $4, NULL)
+     ON CONFLICT (user_id, series_id, provider)
+       DO UPDATE SET chapters = EXCLUDED.chapters, pushed_at = NULL`,
+    [userId, seriesId, provider, Math.floor(chapters)],
+  ).catch(() => {});
+}
+
 // ---- AniList calls ---------------------------------------------------------
 
 
@@ -210,17 +239,30 @@ async function pushOne(
   // Never push a number lower than the last one we sent. A tracker takes a lower progress and rewrites the
   // entry, so a merge, a renumbered chapter or a bulk mark-unread would quietly walk someone's real reading
   // history backwards on an account this app does not own and cannot repair. Going forward is always safe;
-  // going backwards needs a person to ask for it, which is what the resync endpoint is for.
-  const floor = await one<{ chapters: number }>(
-    `SELECT chapters FROM tracker_progress WHERE user_id = $1 AND series_id = $2 AND provider = $3`,
+  // going backwards needs a person to ask for it: re-importing their list (seedTrackerFloor takes the
+  // tracker's current number) or the resync endpoint.
+  const floor = await one<{ chapters: number; pushed_at: string | null }>(
+    `SELECT chapters, pushed_at FROM tracker_progress WHERE user_id = $1 AND series_id = $2 AND provider = $3`,
     [userId, seriesId, conn.provider],
   );
+  // A floor with no timestamp was seeded from the tracker's own entry when the series was imported or
+  // linked: nothing was ever sent, the tracker is simply ahead of (or level with) what has been read here,
+  // and someone reading chapter 1 of a title they are at chapter 150 on is not an error worth a banner on
+  // their profile. Pass quietly; the first count that passes the floor pushes and stamps it.
+  // ⚠️ EQUAL skips too, for an unstamped floor only: the tracker already holds this exact number, so there
+  // is nothing new to say -- and a push would say it with `status: CURRENT` unless every local chapter is
+  // read, flipping a COMPLETED entry to reading because the person re-read its last chapter here. A stamped
+  // floor keeps the strict `<` below: equal to a number this app sent is a no-op push, not a refusal.
+  // Reintroduce by `chapters < floor.chapters` here: the re-read of the tracker's last chapter pushes.
+  if (floor && floor.pushed_at == null && chapters <= floor.chapters) return;
   if (floor && chapters < floor.chapters) {
+    // ⚠️ Reintroduce by dropping the unstamped return above: every chapter finished below an imported floor
+    // writes last_error.
     await markError(
       userId,
       conn.provider,
       `not syncing: this series now works out to chapter ${chapters}, below the ${floor.chapters} already sent. ` +
-        'Resync from the series page if the lower number is the correct one.',
+        'Import your list again under Admin → Import (From your tracker) to take the tracker\'s current number, or ask an admin to.',
     );
     return;
   }
