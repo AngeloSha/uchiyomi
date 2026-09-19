@@ -1,5 +1,194 @@
 # Changelog
 
+## v0.37.0 — 2026-09-19
+
+The inbox after v0.36.0, all of it from TIGamingTV: [PR #53](https://github.com/AngeloSha/uchiyomi/pull/53),
+bulk actions for the Library page, rebuilt here under the house rules rather than merged as written;
+[PR #56](https://github.com/AngeloSha/uchiyomi/pull/56), a correct diagnosis of why an extension source kept
+reporting an error it no longer had, merged with fixes on top; [#54](https://github.com/AngeloSha/uchiyomi/issues/54),
+the extension that stayed *unhealthy*, whose real cause turned out to be a compose file; and
+[#55](https://github.com/AngeloSha/uchiyomi/issues/55), which asked for more control over the database and
+over deletion, and gets the honest answer — the control exists, the docs hid it, and one delete was quietly
+wrong. Plus four CodeQL findings and a Dependabot bump, each closed by a change rather than a dismissal where a
+change was possible.
+
+### The Library page can act on many series at once
+
+**Select** on the Library page has a **Select all** chip beside *Done* now — it takes every series loaded so
+far, since the grid loads as you scroll; scroll further and tap it again for more, and the bar's count says how
+many are in hand. Two chips joined the bar. **Fetch newest**, for anyone who may download, grabs for each
+selected series the newest chapter its sources list, if it is not on the shelf yet: one chapter per series,
+whatever the series' *latest N* floor says, and without moving that floor — nothing below it is ever fetched,
+so a caught-up series answers *up to date* instead of quietly back-filling its catalogue one chapter per tap.
+It runs on the server as a job: the bar counts it up, you can leave the page (*Cancel* stays live and only
+stops watching), and the toast at the end says what happened — *Fetched 3 chapters · 8 up to date · 1
+skipped* — with a reason for every series that was skipped (its source disabled or cooling down, the chapter
+held for your preferred group, a download already running for it, or the chapter deleted from this server on
+purpose, where *Fetch again* on the series page is the way back) or failed (the source did not answer, the
+chapter could not be saved). A source the admin disabled is never asked, and only a series whose source was
+actually asked pays the pause between series. While the run is inside a series, that one series' own
+*Fetch* answers *busy*, and no other. If the page loses the run — three status polls in a row unanswered —
+it says *Lost track of the fetch* rather than summing up a run that is still going. A *Nothing yet* series,
+and one that came in from a Mihon backup or a tracker list, are what this is for: the nightly check follows
+them without fetching, and *Fetch newest* is how their latest chapter lands. **Remove from library**, for
+admins (behind **More** on a phone, so the bar stays two rows), is the series page's *Delete* over a
+selection and nothing more: it asks *Remove {n} series from the library?*, says in the dialog that **no files
+are deleted** and everyone's progress, favourites and ratings are kept, hides them, and writes one audit line
+per series with its title; a series already hidden or merged away is skipped and counted, and a selection
+that hid nothing says *Nothing removed · 1 skipped* and keeps the selection so it can be corrected. Deleting
+files stays what it was — one title at a time, only after a remove, against the typed title, on Content →
+Library.
+
+What PR #53 proposed, and what was redone: its *Select all* survives as it was. Its bulk delete hid and deleted
+files in one request behind a typed `DELETE`, walked the read library too, and told the person their progress
+was lost — it is now hide only. Its *download newest* fetched the newest chapter *missing anywhere*, which on
+a caught-up Latest-N series is the highest chapter below the floor — it now takes the newest listed release or
+nothing, honours group holds, disabled sources and age limits, and runs as a detached job with a status route
+instead of holding one HTTP request open across up to five hundred downloads and a full scan. Its
+reconcile-at-boot, which hard-deleted every chapter row whose file it could not see, is the verify task below,
+which marks instead of deleting and never runs by itself. Its import fix landed on a route the app no longer
+calls; the idea in it — a title merged into another series should read *already in your library* — is now in
+the batch importer, mapped to the surviving series so a tracker link lands on the series that holds the
+chapters.
+
+### Verify chapter files, and a delete that told the truth only half the time
+
+A backup holds the database and the config, never the chapter files, and a database restored onto a disk that
+does not have them all came up with every chapter row intact and no bytes behind some of them — the updater
+trusted the rows, so those chapters read *up to date* forever while the reader could not open them.
+**Admin → Tasks → Verify chapter files** is the repair: it looks for every chapter's file and marks the ones
+Uchiyomi downloaded that are gone as *deleted from the server* — the row and everyone's history stay — with a reason the updater does not
+count as held, so the next sweep, or *Fetch newest*, downloads them again onto the same rows and nobody's place
+moves. It marks only chapters Uchiyomi downloaded (under the download folder), because a re-fetch lands
+there and nowhere else; a file missing from the read library is counted on the Tasks line and left alone,
+for you or the engine to put back. It never runs at start-up or on a schedule, because a volume that is not
+mounted looks exactly like a library with every file missing; for the same reason a folder with no file at
+all behind its chapters, or with more than nine in ten of them missing, is reported as *looked unmounted and
+was left alone*, never marked — an empty folder is not proof of a mount, since the downloader creates
+folders while a share is down. It starts in the background — the toast says so — and the Tasks line shows
+what it found when it is done, the unmounted warning first, and keeps it across restarts; the activity feed
+records the counts.
+
+Reading that code turned up the half-truth in *Delete files*: it removed the bytes and left the chapter rows
+as live rows claiming them, so *Put back* afterwards restored a series whose every chapter 404'd, the updater
+never fetched them again, and a second *Delete files* reported *Deleted N file(s)* for rows it had not touched.
+Each row whose file it actually removes is now marked *deleted from the server*, the same mark the chapter-level
+delete leaves — the Removed list says *files deleted* first on such a row's caption, a second line explains
+that *Put back* lists the chapters as deleted from the server and that *Fetch again* on the series page brings
+back the ones Uchiyomi downloaded (a read-library file is yours to put back by hand), the button stays a
+plain **Put back**, and a second *Delete files* is not offered; the dialog counts the files it would actually
+delete, not the chapter rows. A file that is already gone is left alone and not counted.
+
+### The database was never hidden; the docs were
+
+#55 asked for control over which database is used. That control has been one variable since v0.18.0 —
+`DATABASE_URL` unset means the container runs its own Postgres, set means it talks to yours — and
+**Admin → Overview** has said *embedded database* or *external database* in its header line all along. What was true is
+that CONFIGURATION.md never mentioned the variable although it calls `.env.example` the authoritative list,
+`.env.example` did not list it either, and the restore instructions in the user guide still piped into a
+`uchiyomi-db` container that the default install has not had since v0.18.0. All three are fixed: a *Database*
+entry in CONFIGURATION.md and `.env.example` that says where the switch is actually thrown (the compose file,
+not `.env`), and a restore section written for the embedded layout first — over the socket, with a psql shell
+and a scratch-database rehearsal — and the external one second. A new section, *Where your data lives and how
+to delete for good*, states plainly what each delete keeps: *Delete* and *Remove from library* hide and keep
+everything, and re-adding the same title revives the same row; *Delete from server*, the cleanup and *Delete
+files* remove bytes and keep rows; a merge is one-way; and nothing today erases a series' rows from the
+database, on purpose, because reading progress hangs off the chapter row and a delete must never take
+someone's history with it. Whether that last one should become a button is the question back to the issue.
+"How restricted the database should be" is not a knob and does not become one: admin-only, hide first, type
+the title, never half-apply are the safety model, not a preference.
+
+### The extension engine could never get past Cloudflare — and said so
+
+#54 reported an extension stuck *unhealthy*. PR #56 found a real bug in the diagnosis: for an extension
+source the live test result was thrown away before the verdict, so a source that had once stored a
+Cloudflare-flavoured error kept reporting it on every sweep and every *Test* click, `ok: true` next to a
+Cloudflare diagnosis, forever. Merged, with three things fixed on top: the probe no longer invents a status
+of `0` for a homepage it never asked for (it has no `httpStatus` at all, and `0` keeps meaning "asked, no
+answer"); both callers build the probe through one helper, with a test that reads both and fails if either
+stops; and the Health page applies the same rule — a stored error older than the source's last success is
+history, not a fix to go and apply, and no longer hides the live finding.
+
+But the source in #54 was failing live, and the words in its log, `Cloudflare bypass currently disabled`, are
+the engine's own: Suwayomi has no browser and has to be told about a FlareSolverr, and its bypass is off by
+default — no compose file ever pointed it at the solver that was running beside it the whole time. Every
+compose file now sets `FLARESOLVERR_ENABLED` and `FLARESOLVERR_URL` on the engine's container (the split
+layout's engine also joins the app network, where the solver's name resolves), so an upgrade that recreates the
+engine is the fix; the Unraid template's `SUWAYOMI_URL` note, extensions.md and CONFIGURATION.md say to set
+both on any engine you run yourself, and that error string now diagnoses as a Cloudflare challenge whose admin
+fix names the engine's switch rather than Uchiyomi's solver — by the names the shipped compose files use
+(`uchiyomi-suwayomi`, `http://uchiyomi-flaresolverr:8191`), not the development stack's, since the admins
+who read it are exactly the ones whose engine was not recreated from those files. The docs used to say the
+engine solved Cloudflare itself. It does not, and they no longer say so. While there: the *Test* button and
+the daily source check never read a source's slow streak, so *This source answers, but more slowly than it
+is given* could only ever be reached from Discover's health view; both read it now, and the fix sentence
+names the configured `SOURCE_LATEST_TIMEOUT_MS` budget.
+
+### Security
+
+The cover proxy's exemption for the extension engine is now one path shape, not one origin. `GET
+/img/sources/cover?u=` fetches every URL through the SSRF guard except the engine's own covers, which live on
+a private address by design — and since v0.26.2 that exemption was the whole engine origin, any path, fetched
+with the engine's credentials, so any signed-in reader could make the server issue an authenticated GET to any
+engine endpoint, and the difference between a 502 and a 500 said whether a path existed (CodeQL #24, critical).
+Only `/api/v1/manga/<id>/thumbnail` is fetched now, rebuilt from the operator's `SUWAYOMI_URL` and the numeric
+id, accepted only if it round-trips to exactly what the caller named; the caller's string itself is never
+what goes on the wire, redirects from it stay refused, and the test that used to assert *anything at all on
+the engine origin* is allowed now asserts the opposite. Extension covers are no longer refused by the cover
+proxy when `SUWAYOMI_URL` ends in `//` or carries a query or fragment; the engine base is normalised once
+for both the stored cover URL and the proxy's check. Two test-only findings were fixed in kind rather than
+dismissed: an exponential regex over the docs' console paths (#26; 9 s at 28 arrows, now linear) and an XML
+comment scan that an HTML rule kept misreading (#28; now a plain walk). #25 was dismissed: a 256-bit random
+API token stored as its sha256 is not a password hash. Dependabot's adm-zip 0.6.1 ([PR #57](https://github.com/AngeloSha/uchiyomi/pull/57),
+CVE-2026-77301) is merged; the advisory was not reachable here — adm-zip is only ever constructed empty to
+*build* archives, and untrusted archives are read by another library — and the guard test now asserts exactly
+that premise, so the next advisory is answered by a test rather than by re-reading the tree. CI installs with
+`npm ci` instead of `npm install`, so a lockfile bump is what CI actually verifies, and every job has a timeout
+(the Tests job's is set from its measured 38–39 minutes, not a guess); a test pins both.
+
+### Also
+
+The v0.36.0 release push went red on one test that passed locally every time: the add-time auto-follow's wall
+and a candidate's remaining budget were measured on two clocks that disagree by a millisecond or two, so a
+source handed a sliver of the wall could finish inside it and be followed past the deadline. A candidate now
+needs at least two seconds of wall left to be tried at all, and reads *not checked* otherwise.
+
+Merging is transitive now. When a series that has itself absorbed others is merged, everything it absorbed
+is re-pointed at the new survivor in the same transaction, so a title folded in two merges ago still counts
+as owned by the final survivor — on the scan, where its folder's chapters keep filing under the survivor,
+and in the batch importer, where a backup or tracker entry with that spelling reads *already in your
+library* instead of being added again through another source. The German and Russian select-bar chips
+are shorter (*Als gelesen*, *Прочитано*, *Новые главы*) so the bar is two rows on a 390 px phone in every
+language.
+
+### Not in this release
+
+A *Forget series* action that would erase a hidden series' rows — its chapters, and every member's progress on
+them — for good. It is the one thing #55 names that is genuinely impossible today, and it is possible to
+build; it is not built until the issue says that is the ask, because the honest dialog has to warn that it
+deletes everyone's reading history on that title. The Komga-compatible API from
+[PR #51](https://github.com/AngeloSha/uchiyomi/pull/51) moves to v0.38.0.
+
+For the API: `POST /api/library/bulk/newest {ids}` (1–500) starts the Fetch newest job — **202** `{ok, total}`,
+**403** `forbidden` without the download permission, **409** `busy` while one runs — and `GET
+/api/library/bulk/newest` answers `{running, done, total, startedAt, results: [{id, title, outcome, reason?}]}`,
+results for the starter and admins only; a newest chapter held only as a cleanup or Delete-files tombstone
+is `skipped` with *Chapter N was deleted from this server on purpose. Fetch again on the series page brings it
+back.*, and *Chapter N is already here.* means a live row holds it. While the run is inside a series,
+`POST /api/sources/fetch`, `/api/sources/fill` and `/api/admin/series/:id/chapters/refetch` answer **409**
+`busy` for that one series only. `POST /api/admin/series/bulk/hide {ids}` answers `{ok, hidden,
+skipped: [{id, reason: merged | already_hidden | not_found}]}` with one `series.delete` audit row per series.
+`POST /api/admin/tasks/verify/run` is detached like `update`: it answers `{ok: true, started: true}`
+(`{ok: false, error: 'busy'}` while one runs) and the counts land on `GET /api/admin/tasks`, which always
+lists `verify` with `lastResult: {ok, checked, missing, readLibraryMissing, unmounted, roots, ms, stopped?}`,
+persisted in `server_settings.verify_last_run` / `verify_last_result` across restarts; the audit row
+`library.verify` carries `{checked, missing, readLibraryMissing, unmounted, ms}`. `GET /api/admin/series/deleted` rows
+carry `live_books` and `pruned_books`. `lib_books` gains `pruned_reason` (`null` = cleanup or pre-v0.37.0,
+`'deleted'` = Delete files, `'missing'` = the verify task; only `'missing'` is not held by the updater), and
+`POST /api/admin/series/:id/delete-files` marks the rows it unlinks. `POST /api/admin/sources/:id/test` always
+carries `probe`, with `httpStatus` absent for a source that has no homepage, and its `diagnosis` can now be
+`too_slow`. The Mihon extension is unaffected.
+
 ## v0.36.0 — 2026-09-19
 
 The two things v0.35.0 said were next, both asked for by TIGamingTV: the first half of

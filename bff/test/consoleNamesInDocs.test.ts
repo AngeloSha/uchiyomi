@@ -48,14 +48,28 @@ function consoleNames(): Set<string> {
   return names;
 }
 
-/** `**Profile → Account → API tokens**` → ['profile', 'account', 'api tokens']; both arrow spellings. */
+/**
+ * `**Profile → Account → API tokens**` → ['profile', 'account', 'api tokens']; both arrow spellings.
+ *
+ * ⚠️ The bold span is matched with `[^*]*` and the arrows are handled by `split`, deliberately in two steps.
+ * The first version did both in one regex, `(?:\s*(?:→|->)\s*[^*→>]+)+`, and that is exponential: `[^*→>]+`
+ * also matches spaces and `-`, so it overlaps the `\s*` and the `->` around it, and a line like `**Admin→ a) →
+ * a) → …` with no closing `**` makes the engine try every split of every space run before failing -- 9 s at
+ * 28 arrows, measured (CodeQL js/redos #26). Only repo docs are scanned, so nobody could feed it that line,
+ * but a test that can hang the suite on an unlucky edit is still wrong. `[^*]*` cannot overlap `\*\*`, so the
+ * match is linear; "at least one arrow, no empty segment" restores the old meaning (plain `**Admin panel**` is
+ * skipped, as before). Reintroduce the backtracking by putting `\s*` on both sides of the arrow inside a
+ * repeated group again -- the same 44 paths are found either way, so only the timing shows it.
+ */
 function documentedPaths(): Array<{ file: string; line: number; text: string; segments: string[] }> {
   const out: Array<{ file: string; line: number; text: string; segments: string[] }> = [];
   const files = ['README.md', 'CHANGELOG.md', 'bff/openapi.yaml', ...readdirSync(join(REPO, 'docs')).filter((f) => f.endsWith('.md')).map((f) => `docs/${f}`)];
   for (const f of files) {
     read(f).split('\n').forEach((line, i) => {
-      for (const m of line.matchAll(/\*\*((?:Profile|Admin)(?:\s*(?:→|->)\s*[^*→>]+)+)\*\*/g)) {
-        out.push({ file: f, line: i + 1, text: m[1], segments: m[1].split(/\s*(?:→|->)\s*/).map(norm) });
+      for (const m of line.matchAll(/\*\*((?:Profile|Admin)[^*]*)\*\*/g)) {
+        const segs = m[1].split(/\s*(?:→|->)\s*/);
+        if (segs.length < 2 || segs.some((s) => !s.trim())) continue;
+        out.push({ file: f, line: i + 1, text: m[1], segments: segs.map(norm) });
       }
     });
   }

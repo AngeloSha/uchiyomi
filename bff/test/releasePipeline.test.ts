@@ -92,6 +92,24 @@ test('dependencies and actions are watched weekly, grouped so CI is not run thir
   assert.equal(cq.permissions['security-events'], 'write');
 });
 
+test('every CI job has a timeout, and installs from the lockfile', () => {
+  const y = read('.github/workflows/ci.yml');
+  const ci = parseYaml(y);
+  // release.yml had a timeout on every job since v0.19.0 and ci.yml had one only on e2e, so a hung
+  // integration test sat for GitHub's 360-minute default with the whole queue behind it. Reintroduce by
+  // removing timeout-minutes from the test job: this names it.
+  for (const j of Object.keys(ci.jobs)) assert.ok(ci.jobs[j]['timeout-minutes'], `ci.yml job "${j}" has no timeout`);
+  // And not a timeout the job cannot meet: Tests takes 38-39 minutes on every green run.
+  assert.ok(ci.jobs.test['timeout-minutes'] >= 45, 'the test job timeout is below what a green run needs');
+  // `npm install` may resolve differently from package-lock.json and rewrites it on the runner, so a
+  // Dependabot lockfile bump was never what CI tested; `npm ci` refuses a lockfile that disagrees.
+  // Reintroduce by changing one `npm ci` back to `npm install`: this names the step.
+  const steps = Object.values(ci.jobs).flatMap((j: any) => (j.steps ?? []).map((st: any) => ({ job: j.name, name: st.name, run: String(st.run ?? '') })));
+  const installs = steps.filter((st) => /\bnpm (install|ci)\b/.test(st.run));
+  assert.ok(installs.length >= 3, 'the install steps went missing');
+  for (const st of installs) assert.ok(!/\bnpm install\b/.test(st.run), `${st.job} / ${st.name} uses npm install instead of npm ci`);
+});
+
 test('the Unraid template names every volume, the ports, and the ids, and stops gracefully', () => {
   const x = read('templates/uchiyomi.xml');
   assert.match(x, /<Repository>ghcr\.io\/angelosha\/uchiyomi<\/Repository>/);
@@ -116,11 +134,22 @@ test('the Unraid template names every volume, the ports, and the ids, and stops 
   // the whole time, because none of them parsed. hawwwwwk found that too (PR #50). There is no XML parser
   // among the dependencies, so the comment bodies are checked by hand, the way a parser would refuse them.
   // Reintroduce by writing `--` back into the header comment: this names the offending comment.
-  for (const m of x.matchAll(/<!--([\s\S]*?)-->/g)) {
-    assert.ok(!m[1].includes('--'), `"--" inside an XML comment, which no parser accepts: ${m[1].trim().slice(0, 60)}…`);
+  //
+  // Walked with indexOf rather than a `<!--([\s\S]*?)-->` regex: this is XML, where `--!>` is not a
+  // terminator and `--` in the body is the actual fault, but CodeQL's js/bad-tag-filter (#28) reads any
+  // comment regex as an HTML sanitiser and re-fires on every edit of the line. A plain scan says the same
+  // thing without giving the rule a regex to misjudge, and a comment that never closes fails here by name
+  // instead of as a mismatch of two counts.
+  for (let at = 0; ; ) {
+    const s = x.indexOf('<!--', at);
+    if (s < 0) break;
+    const e = x.indexOf('-->', s + 4);
+    assert.ok(e >= 0, `an XML comment that never closes: ${x.slice(s, s + 60).trim()}…`);
+    const body = x.slice(s + 4, e);
+    assert.ok(!body.includes('--'), `"--" inside an XML comment, which no parser accepts: ${body.trim().slice(0, 60)}…`);
+    at = e + 3;
   }
-  // The same parser would also refuse a comment that never closes, or a `-` glued to the closing `-->`.
-  assert.equal((x.match(/<!--/g) || []).length, (x.match(/-->/g) || []).length, 'an XML comment that never closes');
+  // The same parser would also refuse a `-` glued to the closing `-->`.
   assert.ok(!/--->/.test(x), 'a comment ending in "--->" is malformed');
   // Both files CA moderators read must start with the XML declaration and carry one root element each.
   assert.match(x, /^<\?xml version="1\.0"\?>\n/, 'the template lacks the XML declaration');

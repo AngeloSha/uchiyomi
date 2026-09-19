@@ -118,6 +118,11 @@ services:
       # did not.
       AUTO_DOWNLOAD_CHAPTERS: "false"
       DOWNLOAD_AS_CBZ: "true"
+      # The engine shares the bundled Cloudflare solver. Suwayomi has no browser of its own: a challenged
+      # site makes it throw "Cloudflare bypass currently disabled" unless it is pointed at a FlareSolverr,
+      # and it ships with that off. The image maps exactly these two variables into its server.conf.
+      FLARESOLVERR_ENABLED: "true"
+      FLARESOLVERR_URL: http://uchiyomi-flaresolverr:8191
     volumes:
       - uchiyomi_suwayomi:/home/suwayomi/.local/share/Tachidesk
     networks: [uchiyomi_app]

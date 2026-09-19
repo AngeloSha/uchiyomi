@@ -11,6 +11,7 @@
 import { classify } from './sourceHealth';
 import { env } from '../env';
 import type { SourceAdapter } from './sources/types';
+import type { Probe } from './sourceDiagnosis';
 import { coverSanity } from './sources/imgAttr';
 
 export interface Check { name: string; ok: boolean; detail: string }
@@ -118,4 +119,25 @@ export async function probeBase(url: string, timeoutMs = 8000): Promise<ProbeRes
     const code = e?.cause?.code || e?.code || (e?.name === 'TimeoutError' ? 'timeout' : '') || 'fetch failed';
     return { httpStatus: 0, transport: String(code) };
   }
+}
+
+/**
+ * The live evidence `diagnose` is handed, assembled in ONE place for the scheduled sweep and the admin Test
+ * button, so the two can never disagree about what counts.
+ *
+ * `bare` is undefined whenever there was no homepage to ask: every Suwayomi/extension source, because the
+ * engine talks to the site and this server never does. Until PR #56 both callers built the probe as
+ * `bare && {...}`, which threw `adapterOk` away for exactly those sources, and `diagnose` then fell through
+ * to whatever stale string `last_error` last held. `reportOk` never clears that string, so an extension
+ * source that had once seen a Cloudflare error went on reporting "protected by a check we could not get
+ * past" on every sweep and every Test click while all four live checks passed (issue #54's second half).
+ * The adapter's own result and whether the source is solver-fronted are live facts in their own right and
+ * must reach `diagnose` whether or not a bare request happened; `httpStatus` is simply absent when none did.
+ */
+export function buildProbe(
+  bare: ProbeResult | undefined,
+  smoke: { ok: boolean },
+  src: { requiresCloudflare?: boolean },
+): Probe {
+  return { ...bare, adapterOk: smoke.ok, needsSolver: !!src.requiresCloudflare };
 }

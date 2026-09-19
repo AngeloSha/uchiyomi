@@ -560,6 +560,252 @@ test('a floored series fetches the chapter above what it holds, not the ones bel
   assert.equal(st.c, 6, 'while source_chapters still says what the source said');
 });
 
+// ---- v0.37.0: "Fetch newest" -- the newest LISTED release, floor ignored for that one number ----------
+//
+// A "Nothing yet" add and a Mihon-backup import both write chapter_floor = the newest listed number + 0.001
+// (routes/sources.ts), so the sweep correctly fetches nothing for them -- and so would any button that
+// filtered by the floor: a chapterless series answering "already at latest" forever. PR #53's fix took the
+// newest MISSING number from the whole listing instead, which is chapter max for that series and the
+// highest chapter BELOW the floor for a caught-up Latest-N series: Latest-25 of 200 with 176-200 on disk
+// "fetched" 175, then 174 on the next click, reporting each as a new release. The rule is max(listed).
+
+/** A six-chapter source whose page asks are recorded, so a test can say exactly what was fetched. */
+function sixChapterSource(id: string, asked: number[]) {
+  return {
+    id, name: id,
+    async search() { return []; },
+    async getSeries(sid: string) { return { sourceId: sid, source: id, title: sid }; },
+    async listChapters() { return [1, 2, 3, 4, 5, 6].map((n) => ({ number: n, title: `Chapter ${n}`, sourceId: `c${n}` })); },
+    async getPageUrls(chId: string) { asked.push(Number(chId.slice(1))); return ['https://example.invalid/page.png']; },
+    async latest() { return []; },
+  };
+}
+const floorOf = async (key: string) => Number((await q('SELECT chapter_floor FROM lib_series WHERE id = $1', [S(key)]))[0].chapter_floor);
+/** A book row the way a "latest N" add leaves one behind: a row, not a file (see the floor test above). */
+const book = (key: string, n: number) =>
+  q(`INSERT INTO lib_books (id, series_id, source, file, number, title, pages) VALUES ($1, $2, 'T!upd', $3, $4, $5, 1)`,
+    [`${S(key)}_b${n}`, S(key), `${S(key)}/Chapter ${n}.cbz`, n, `Chapter ${n}`]);
+
+/**
+ * Reintroduce by filtering the newest out of `wanted` (the floor-honouring set) instead of `releases`:
+ * `newest.state` reads `unlisted`, added reads 0 and nothing is asked for.
+ */
+test('fetch newest reaches the latest release of a "nothing yet" series floored above its catalogue, and leaves the floor alone', { skip }, async () => {
+  const { registerAdapter } = await import('../src/lib/sources');
+  const asked: number[] = [];
+  registerAdapter(sixChapterSource('upd-newest-none', asked) as any);
+  await mkSeries('newestnone', 'upd-newest-none');
+  // Exactly as sources.ts writes it for chapterFrom:'none': a hair above the newest listed number, on a
+  // series with no books at all.
+  await q('UPDATE lib_series SET chapter_floor = 6.001 WHERE id = $1', [S('newestnone')]);
+  await q('DELETE FROM lib_books WHERE series_id = $1', [S('newestnone')]);
+  await q('DELETE FROM source_health WHERE source_id = $1', ['upd-newest-none']);
+  globalThis.fetch = (async () => png()) as typeof fetch;
+
+  const sweep = await updateSeries(S('newestnone'), 5);
+  assert.equal(sweep.added, 0, 'the sweep honours the floor: nothing is backfilled');
+
+  const r = await updateSeries(S('newestnone'), 1, { newestOnly: true });
+  assert.deepEqual(r.newest, { number: 6, state: 'queued' }, 'the newest listed number is the one queued');
+  assert.equal(r.added, 1, 'and it landed');
+  assert.deepEqual(asked, [6], 'only that one chapter was asked for');
+  assert.ok(onDisk('newestnone', 6));
+  assert.equal(await floorOf('newestnone'), 6.001, 'the floor is not moved: the next sweep still wants only what is above it');
+});
+
+/**
+ * THE TRAP. Reintroduce by selecting the newest MISSING number -- `releases.filter((c) => !have.has(c.number))`
+ * and taking its last element -- instead of max(listed): `newest.state` reads `queued` for chapter 3,
+ * added reads 1, and Chapter 3.cbz appears on disk below the floor.
+ */
+test('a caught-up Latest-N series answers up to date, and nothing below its floor is fetched', { skip }, async () => {
+  const { registerAdapter } = await import('../src/lib/sources');
+  const asked: number[] = [];
+  registerAdapter(sixChapterSource('upd-newest-caught', asked) as any);
+  await mkSeries('newestcaught', 'upd-newest-caught');
+  // Latest-3 of 6: floor 4, and 4..6 on the shelf. 1..3 are missing below the floor, on purpose.
+  await q('UPDATE lib_series SET chapter_floor = 4 WHERE id = $1', [S('newestcaught')]);
+  await q('DELETE FROM lib_books WHERE series_id = $1', [S('newestcaught')]);
+  for (const n of [4, 5, 6]) await book('newestcaught', n);
+  await q('DELETE FROM source_health WHERE source_id = $1', ['upd-newest-caught']);
+  globalThis.fetch = (async () => png()) as typeof fetch;
+
+  const r = await updateSeries(S('newestcaught'), 1, { newestOnly: true });
+  assert.deepEqual(r.newest, { number: 6, state: 'up_to_date' }, 'we hold the newest listed number, so the series is up to date');
+  assert.equal(r.added, 0);
+  assert.deepEqual(asked, [], 'nothing was asked for: not chapter 3, not anything under the floor');
+  assert.ok(!onDisk('newestcaught', 3) && !onDisk('newestcaught', 1), 'and nothing under the floor is on disk');
+  assert.equal(await floorOf('newestcaught'), 4);
+
+  // The have-set is the sweep's: a chapter the read-cleanup let go still counts as held (the person read it
+  // and chose to have it cleaned) -- not fetched, and told apart from a live row (the `deleted` test
+  // below) -- while one the verify task found MISSING does not: its file is gone without anyone deciding
+  // so, and "Fetch newest" is exactly how it comes back.
+  await q(`UPDATE lib_books SET pruned_at = now(), pruned_reason = NULL WHERE id = $1`, [`${S('newestcaught')}_b6`]);
+  const cleaned = await updateSeries(S('newestcaught'), 1, { newestOnly: true });
+  assert.equal(cleaned.newest?.state, 'deleted', 'a cleanup tombstone of the newest number is held, and says it was deleted');
+  assert.deepEqual(asked, [], 'and is not fetched back');
+  await q(`UPDATE lib_books SET pruned_at = now(), pruned_reason = 'missing' WHERE id = $1`, [`${S('newestcaught')}_b6`]);
+  const missing = await updateSeries(S('newestcaught'), 1, { newestOnly: true });
+  assert.equal(missing.newest?.state, 'queued', 'a "missing" tombstone of the newest number is fetched again');
+  assert.deepEqual(asked, [6]);
+});
+
+/**
+ * Reintroduce by queueing `eligible` (the sweep's oldest-first list) when newestOnly is set: `asked` reads
+ * [6] still -- but with maxNew 5 it reads [6] only because nothing else is above the floor; set the floor to
+ * 1 in the fixture and it reads [1, 2, 3, 6]. The assertion that pins the rule is `newest.number === 6`
+ * together with `asked` being exactly one number.
+ */
+test('a Latest-N series that is behind fetches the newest listed release and only that, with its floor unchanged', { skip }, async () => {
+  const { registerAdapter } = await import('../src/lib/sources');
+  const { CHAPTER_RETRY_CAP } = await import('../src/lib/updater');
+  const asked: number[] = [];
+  registerAdapter(sixChapterSource('upd-newest-behind', asked) as any);
+  await mkSeries('newestbehind', 'upd-newest-behind');
+  // Latest-2 taken when the source listed five: floor 4, chapters 4 and 5 on the shelf, 6 released since.
+  await q('UPDATE lib_series SET chapter_floor = 4 WHERE id = $1', [S('newestbehind')]);
+  await q('DELETE FROM lib_books WHERE series_id = $1', [S('newestbehind')]);
+  for (const n of [4, 5]) await book('newestbehind', n);
+  await q('DELETE FROM source_health WHERE source_id = $1', ['upd-newest-behind']);
+  // A stale cap on chapter 6 from an earlier failed sweep: a person asking for it on purpose resets it,
+  // exactly as the series page's Fetch does.
+  await q('DELETE FROM chapter_failures WHERE series_id = $1', [S('newestbehind')]);
+  await q(`INSERT INTO chapter_failures (series_id, number, source_id, status, reason, attempts) VALUES ($1, 6, 'upd-newest-behind', 'incomplete', 'x', $2)`,
+    [S('newestbehind'), CHAPTER_RETRY_CAP]);
+  globalThis.fetch = (async () => png()) as typeof fetch;
+
+  const r = await updateSeries(S('newestbehind'), 5, { newestOnly: true });
+  assert.deepEqual(r.newest, { number: 6, state: 'queued' });
+  assert.deepEqual(asked, [6], 'one number, the newest, whatever maxNew allows');
+  assert.equal(r.added, 1);
+  assert.ok(onDisk('newestbehind', 6));
+  assert.equal(await floorOf('newestbehind'), 4, 'the floor stays where Latest-N put it');
+  const ledger = await q('SELECT 1 FROM chapter_failures WHERE series_id = $1 AND number = 6', [S('newestbehind')]);
+  assert.equal(ledger.length, 0, 'the retry cap was reset for that number and the landed chapter left no ledger row');
+});
+
+/**
+ * The gates the fetch route applies, applied here so a bulk button cannot reach past them: a source the
+ * admin disabled fetches nothing, and an adult source on a capped account fetches nothing -- each says so,
+ * and neither asks the source for a page. Reintroduce by dropping BOTH `isDisabled` checks (the filter
+ * before the listing and the verdict branch: the first verdict reads `queued` and asked reads [6]) or the
+ * `sourceAllowed` branch (the second does).
+ */
+test('fetch newest honours a disabled source and the viewer\'s age gate, and says which stopped it', { skip }, async () => {
+  const { registerAdapter } = await import('../src/lib/sources');
+  const { setDisabled } = await import('../src/lib/sourceHealth');
+  const asked: number[] = [];
+  registerAdapter(sixChapterSource('upd-newest-gate', asked) as any);
+  await mkSeries('newestgate', 'upd-newest-gate');
+  await q('DELETE FROM lib_books WHERE series_id = $1', [S('newestgate')]);
+  await q('DELETE FROM source_health WHERE source_id = $1', ['upd-newest-gate']);
+  globalThis.fetch = (async () => png()) as typeof fetch;
+
+  await setDisabled('upd-newest-gate', true);
+  try {
+    const off = await updateSeries(S('newestgate'), 1, { newestOnly: true });
+    // No number: the disabled source was never asked what it lists (the test below pins that).
+    assert.deepEqual(off.newest, { number: null, state: 'disabled' });
+    assert.equal(off.added, 0);
+  } finally {
+    await setDisabled('upd-newest-gate', false);
+  }
+  const capped = await updateSeries(S('newestgate'), 1, { newestOnly: true, sourceAllowed: () => false });
+  assert.deepEqual(capped.newest, { number: 6, state: 'denied' });
+  assert.deepEqual(asked, [], 'neither gate let a page be asked for');
+  assert.ok(!onDisk('newestgate', 6));
+});
+
+/**
+ * After Delete files + Put back every row of the series is a tombstone with pruned_reason 'deleted', and
+ * the series page shows the chapter as deleted from the server. Select it and press Fetch newest: the
+ * have-set rightly holds the number (the sweep must not undo a deliberate deletion every night), but the
+ * old verdict was `up_to_date` and the person read "Chapter 6 is already here." over a row with no pages
+ * behind it -- for the very chapter they pressed the button to get back. A tombstone with no live row
+ * beside it is now `deleted`; a live row beside a tombstone of the same number is what it always was.
+ * Reintroduce by answering `up_to_date` for every held number (dropping the `live.has` test in the
+ * newestOnly verdict): the first assertion reads up_to_date.
+ */
+test('a newest chapter deleted on purpose is told apart from one we hold, and is not fetched back', { skip }, async () => {
+  const { registerAdapter } = await import('../src/lib/sources');
+  const asked: number[] = [];
+  registerAdapter(sixChapterSource('upd-newest-del', asked) as any);
+  await mkSeries('newestdel', 'upd-newest-del');
+  await q('DELETE FROM lib_books WHERE series_id = $1', [S('newestdel')]);
+  for (const n of [4, 5, 6]) await book('newestdel', n);
+  await q('DELETE FROM source_health WHERE source_id = $1', ['upd-newest-del']);
+  globalThis.fetch = (async () => png()) as typeof fetch;
+
+  // Exactly as deleteSeriesFiles (lib/libraryAdmin.ts) leaves the row.
+  await q(`UPDATE lib_books SET pruned_at = now(), pruned_reason = 'deleted' WHERE id = $1`, [`${S('newestdel')}_b6`]);
+  const del = await updateSeries(S('newestdel'), 1, { newestOnly: true });
+  assert.deepEqual(del.newest, { number: 6, state: 'deleted' }, 'a Delete-files tombstone of the newest number is "deleted", not "already here"');
+  assert.equal(del.added, 0);
+  assert.deepEqual(asked, [], 'and it is not fetched: the deletion was on purpose, and Fetch again is the way back');
+
+  // The cleanup's tombstone (reason NULL) is the same decision, made by a setting rather than a button.
+  await q(`UPDATE lib_books SET pruned_reason = NULL WHERE id = $1`, [`${S('newestdel')}_b6`]);
+  const cleaned = await updateSeries(S('newestdel'), 1, { newestOnly: true });
+  assert.equal(cleaned.newest?.state, 'deleted');
+
+  // A live row for the number beside the tombstone -- the chapter was fetched again into a fresh row
+  // while the old one kept its mark -- is a chapter we hold. Live wins.
+  await q(`INSERT INTO lib_books (id, series_id, source, file, number, title, pages) VALUES ($1, $2, 'T!upd', $3, 6, 'Chapter 6', 1)`,
+    [`${S('newestdel')}_b6again`, S('newestdel'), `${S('newestdel')}/Chapter 6 - again.cbz`]);
+  const again = await updateSeries(S('newestdel'), 1, { newestOnly: true });
+  assert.deepEqual(again.newest, { number: 6, state: 'up_to_date' }, 'a live row beside the tombstone means we have it');
+  assert.deepEqual(asked, []);
+  assert.ok(!onDisk('newestdel', 6));
+});
+
+/**
+ * The verdict's `isDisabled` check sits after the listing, which for the sweep is the right place (a
+ * disabled adapter stays loaded and the listing keeps the series page's ghost rows current). A bulk
+ * button over 500 series on one disabled source would ask that source for 500 listings, 1.5 s apiece,
+ * to say "disabled" 500 times. Fetch newest filters a disabled source out before the listing loop; a
+ * series whose every source is disabled is its verdict with no network call, and a series that also
+ * follows a live source is asked on that one only.
+ * Reintroduce by dropping the newestOnly filter over `followed` before the listing loop: the first
+ * assertion below counts one listing call (the verdict still reads disabled, from the later check).
+ */
+test('a disabled source is never asked for its listing by fetch newest; a live follower still is', { skip }, async () => {
+  const { registerAdapter } = await import('../src/lib/sources');
+  const { setDisabled } = await import('../src/lib/sourceHealth');
+  const listed: string[] = [];
+  const counting = (id: string) => ({
+    ...sixChapterSource(id, []),
+    async listChapters() { listed.push(id); return [1, 2, 3, 4, 5, 6].map((n) => ({ number: n, title: `Chapter ${n}`, sourceId: `c${n}` })); },
+  });
+  registerAdapter(counting('upd-newest-off') as any);
+  registerAdapter(counting('upd-newest-off-ext') as any);
+  await mkSeries('newestoff', 'upd-newest-off');
+  await q('DELETE FROM lib_books WHERE series_id = $1', [S('newestoff')]);
+  await q('DELETE FROM source_health WHERE source_id = ANY($1::text[])', [['upd-newest-off', 'upd-newest-off-ext']]);
+  globalThis.fetch = (async () => png()) as typeof fetch;
+
+  await setDisabled('upd-newest-off', true);
+  try {
+    const off = await updateSeries(S('newestoff'), 1, { newestOnly: true });
+    assert.equal(listed.filter((id) => id === 'upd-newest-off').length, 0, 'the disabled source was never asked for its listing');
+    assert.deepEqual(off.newest, { number: null, state: 'disabled' });
+    assert.equal(off.asked, false, 'and the run says no source was asked, so the bulk job does not pace for it');
+
+    // Followed on a second, live source as well: that one is asked, the disabled one still is not, and
+    // the newest release comes through it.
+    await q(`INSERT INTO series_sources (series_id, source_id, source_series_id) VALUES ($1, 'upd-newest-off-ext', 'ext-off') ON CONFLICT DO NOTHING`, [S('newestoff')]);
+    const viaExt = await updateSeries(S('newestoff'), 1, { newestOnly: true });
+    assert.deepEqual(listed, ['upd-newest-off-ext'], 'only the live follower was asked');
+    assert.deepEqual(viaExt.newest, { number: 6, state: 'queued' });
+    assert.equal(viaExt.added, 1);
+    assert.equal(viaExt.asked, true);
+    assert.ok(onDisk('newestoff', 6));
+  } finally {
+    await setDisabled('upd-newest-off', false);
+    await q('DELETE FROM series_sources WHERE series_id = $1', [S('newestoff')]).catch(() => {});
+  }
+});
+
 
 // ---- v0.31.0: which copy of a chapter, from which group, from which source ----------------------------
 //

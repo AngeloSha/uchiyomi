@@ -11,12 +11,13 @@ import { IcSearch, IcSparkle, IcPlus } from '@/components/icons';
 import { PullToRefresh } from '@/components/PullToRefresh';
 import { triggerRefresh } from '@/lib/refresh';
 import { useToast } from '@/components/Toast';
-import { Modal } from '@/components/ConfirmDialog';
+import { Modal, ConfirmDialog, msgOf } from '@/components/ConfirmDialog';
 import { useAuth, canDownload } from '@/lib/auth';
 import { AdultToggle, useAdultShown, useLibraries } from '@/components/AdultToggle';
 import { LibraryFilters, SORTS, READ_STATES, STATUSES } from '@/components/LibraryFilters';
 import { Sheet } from '@/components/ui';
 import { t as tr } from '@/lib/i18n';
+import { followBulkNewest, BULK_NEWEST_POLL_MS, type BulkNewestStatus } from '@/lib/bulkNewest';
 
 /** Build the condition tree from the URL. Empty means no condition at all, which needs no user context. */
 function conditionFrom(read: string, status: string, genres: string[], lib: string) {
@@ -57,6 +58,13 @@ function LibraryInner() {
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [acting, setActing] = useState(false);
   const [moving, setMoving] = useState(false);
+  const [removing, setRemoving] = useState(false);
+  // The phone's overflow for the two admin actions (see the bar below).
+  const [more, setMore] = useState(false);
+  // The Fetch newest job as last polled, while it runs: what the bar's label counts up with.
+  const [fetching, setFetching] = useState<{ done: number; total: number } | null>(null);
+  // Set while a Fetch newest run is being followed: calling it stops the polling (the bar's Cancel chip).
+  const stopFollowing = useRef<(() => void) | null>(null);
   const { isAdmin, user } = useAuth();
   useEffect(() => { setSelecting(false); setPicked(new Set()); }, [read, status, genres.join(','), sortKey, lib]);
   const togglePick = (id: string) =>
@@ -114,6 +122,14 @@ function LibraryInner() {
     qc.invalidateQueries({ queryKey: ['library'] });
   };
 
+  /** Leave select mode and show the shelf as it now is. */
+  const settle = () => {
+    setSelecting(false);
+    setPicked(new Set());
+    qc.invalidateQueries({ queryKey: ['library'] });
+    qc.invalidateQueries({ queryKey: ['home'] });
+  };
+
   const bulk = async (path: string, extra: Record<string, unknown>) => {
     setActing(true);
     try {
@@ -122,11 +138,85 @@ function LibraryInner() {
       });
       // Say what was skipped rather than silently applying to fewer than were selected.
       toast(r.skipped.length ? `${r.applied} updated, ${r.skipped.length} no longer exist` : `${r.applied} updated`, 'success');
-      setSelecting(false);
-      setPicked(new Set());
-      qc.invalidateQueries({ queryKey: ['library'] });
-      qc.invalidateQueries({ queryKey: ['home'] });
+      settle();
     } catch { toast('Could not apply that', 'error'); }
+    setActing(false);
+  };
+
+  /**
+   * Fetch the newest listed release for every chosen series that does not have it yet.
+   *
+   * A detached job on the server (POST starts it, GET reports it), not one request per series: the loop
+   * downloads and can run for minutes over a big selection, and a request held open that long dies at the
+   * proxy while the server keeps going. So this starts it, then reads the status every 2 s until `running`
+   * drops, the way the series page waits on a source job. The server answers 409 while one is already
+   * running, from this tab or another; its sentence is the toast. `acting` holds for the whole run, so the
+   * chip cannot be tapped into a 409 of its own, and the bar's label counts the job up meanwhile. Cancel
+   * alone stays live: it stops the polling and leaves select mode, and the run completes server-side.
+   *
+   * The loop itself is lib/bulkNewest.ts. Only a `finished` run is summarised: a `lost` one (three polls
+   * unanswered) may hold a partial status that still said running, and summarising that reports a run
+   * still going as done. A cancelled one says nothing at all.
+   */
+  const fetchNewest = async () => {
+    setActing(true);
+    try {
+      const start = await api<{ ok: true; total: number }>('/api/library/bulk/newest', { method: 'POST', json: { ids: [...picked] } });
+      setFetching({ done: 0, total: start.total });
+      let cancelled = false;
+      let wake: (() => void) | null = null;
+      // Cancel flips the flag AND ends the current wait, so `acting` clears at once rather than up to 2 s
+      // later, when the bar might already be showing a new selection with every chip greyed out.
+      stopFollowing.current = () => { cancelled = true; wake?.(); };
+      const end = await followBulkNewest({
+        poll: () => api<BulkNewestStatus>('/api/library/bulk/newest'),
+        onProgress: (st) => setFetching({ done: st.done, total: st.total }),
+        wait: () => new Promise<void>((r) => { wake = r; setTimeout(r, BULK_NEWEST_POLL_MS); }),
+        cancelled: () => cancelled,
+      });
+      stopFollowing.current = null;
+      if (end.outcome === 'lost') { toast(tr('Lost track of the fetch. Check the library in a moment.'), 'error'); }
+      else if (end.outcome === 'finished') {
+        const last = end.status!;
+        const n = (o: BulkNewestStatus['results'][number]['outcome']) => last.results.filter((r) => r.outcome === o).length;
+        const [got, same, skipped, failed] = [n('downloaded'), n('up_to_date'), n('skipped'), n('failed')];
+        const parts: string[] = [];
+        if (got) parts.push(got === 1 ? tr('Fetched 1 chapter') : tr('Fetched {n} chapters', { n: got }));
+        if (same) parts.push(same === 1 ? tr('1 up to date') : tr('{n} up to date', { n: same }));
+        if (skipped) parts.push(skipped === 1 ? tr('1 skipped') : tr('{n} skipped', { n: skipped }));
+        if (failed) parts.push(failed === 1 ? tr('1 failed') : tr('{n} failed', { n: failed }));
+        toast(parts.length ? parts.join(' · ') : tr('Nothing to fetch'), failed && !got ? 'error' : 'success');
+      }
+      // Cancel already left select mode; settling here would wipe a selection made since.
+      if (end.outcome !== 'cancelled') settle();
+    } catch (e) { toast(msgOf(e, tr('Could not start the fetch')), 'error'); }
+    stopFollowing.current = null;
+    setFetching(null);
+    setActing(false);
+  };
+
+  /**
+   * Remove the selection from the library: the series page's "Remove from library", once per series,
+   * and nothing more. Hide only -- the server route never touches a file, and the dialog says so in the
+   * series page's words. A series the server would not hide (merged away, already hidden, gone) is
+   * counted as skipped rather than failing the batch. When NOTHING was hidden the toast says so in error
+   * tone and the selection stays: "Removed 0 series · 1 skipped" in success tone, with the bar gone as if
+   * something had happened, is what a selection of merged-away rows used to get.
+   */
+  const removeSelected = async () => {
+    setActing(true);
+    try {
+      const r = await api<{ ok: true; hidden: number; skipped: { id: string; reason: string }[] }>('/api/admin/series/bulk/hide', { json: { ids: [...picked] } });
+      setRemoving(false);
+      if (r.hidden === 0) {
+        toast(r.skipped.length === 1 ? tr('Nothing removed · 1 skipped') : tr('Nothing removed · {n} skipped', { n: r.skipped.length }), 'error');
+      } else {
+        const parts = [r.hidden === 1 ? tr('Removed 1 series') : tr('Removed {n} series', { n: r.hidden })];
+        if (r.skipped.length) parts.push(r.skipped.length === 1 ? tr('1 skipped') : tr('{n} skipped', { n: r.skipped.length }));
+        toast(parts.join(' · '), 'success');
+        settle();
+      }
+    } catch (e) { toast(msgOf(e, tr('Could not remove those')), 'error'); }
     setActing(false);
   };
 
@@ -211,6 +301,14 @@ function LibraryInner() {
             className={`chip whitespace-nowrap ${selecting ? 'chip-active' : ''}`}>
             {selecting ? tr('Done') : tr('Select')}
           </button>
+          {/* Selects what is LOADED, not the whole filtered library: the grid is an infinite scroll over a
+              paged search, and silently sweeping two thousand series into a pick would surprise more than
+              the loaded-pages boundary the count beside it makes visible. Scroll further, tap again. */}
+          {selecting && (
+            <button onClick={() => setPicked(new Set(items.map((s) => s.id)))} className="chip whitespace-nowrap">
+              {tr('Select all')}
+            </button>
+          )}
         </div>
         {/* Active filters are always visible, so a short library is never mysterious. */}
         {activeCount > 0 && (
@@ -269,16 +367,67 @@ function LibraryInner() {
           returns to the bottom. Reintroduce with `bottom-0`: on a 390 px phone the Cancel chip is under
           the nav. */}
       {selecting && picked.size > 0 && (
-        <div className="fixed inset-x-0 bottom-[calc(5.75rem+env(safe-area-inset-bottom))] z-40 border-t border-ink-700 bg-ink-950/95 px-4 pb-3 pt-3 backdrop-blur-xl lg:bottom-0 lg:pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+        <div className="fixed inset-x-0 bottom-[calc(5.75rem+env(safe-area-inset-bottom))] z-40 border-t border-ink-700 bg-ink-950/95 px-4 pb-8 pt-3 backdrop-blur-xl lg:bottom-0 lg:pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+          {/* ⚠️ Two rows at 390 px, no more: a third row covers a third of the grid. Seven chips plus the
+              count do not fit in two, so on a phone the two admin actions live behind `More` (a Sheet);
+              from lg up there is room and they are chips like the rest. The series page reserves `pe-36`
+              for the downloads pill (fixed bottom-20 end-3, floating over this bar's lower band while a
+              fetch runs); here that end padding costs two whole rows at 390 px, so the bar pads its BOTTOM
+              instead (`pb-8`, the pill's top is ~35 px above the nav) and the last row stays clear of it. */}
           <div className="mx-auto flex max-w-3xl flex-wrap items-center gap-2">
-            <span className="me-auto text-sm font-medium text-fog-100">{picked.size} selected</span>
+            <span className="me-auto text-sm font-medium text-fog-100">
+              {fetching ? tr('Fetching {done} of {total}…', { done: fetching.done, total: fetching.total }) : tr('{n} selected', { n: picked.size })}
+            </span>
             <button disabled={acting} onClick={() => bulk('/api/library/bulk/read', { completed: true })} className="chip text-xs disabled:opacity-50">{tr('Mark read')}</button>
             <button disabled={acting} onClick={() => bulk('/api/library/bulk/read', { completed: false })} className="chip text-xs disabled:opacity-50">{tr('Mark unread')}</button>
             <button disabled={acting} onClick={() => bulk('/api/favorites/bulk', { favorite: true })} className="chip text-xs disabled:opacity-50">{tr('Favourite')}</button>
-            {isAdmin && <button disabled={acting} onClick={() => setMoving(true)} className="chip text-xs disabled:opacity-50">{tr('Move to library')}</button>}
-            <button onClick={() => { setSelecting(false); setPicked(new Set()); }} className="chip text-xs text-fog-500">{tr('Cancel')}</button>
+            {/* Server-side fetch, so it follows the same permission as the Add button and the series
+                page's Fetch: a member who may not download does not see it. */}
+            {canDownload(user) && <button disabled={acting} onClick={fetchNewest} className="chip text-xs disabled:opacity-50">{tr('Fetch newest')}</button>}
+            {isAdmin && <button disabled={acting} onClick={() => setMoving(true)} className="chip hidden text-xs disabled:opacity-50 lg:inline-flex">{tr('Move to library')}</button>}
+            {isAdmin && <button disabled={acting} onClick={() => setRemoving(true)} className="chip hidden text-xs text-rose-300 disabled:opacity-50 lg:inline-flex">{tr('Remove from library')}</button>}
+            {isAdmin && <button disabled={acting} onClick={() => setMore(true)} className="chip text-xs disabled:opacity-50 lg:hidden" aria-haspopup="dialog">{tr('More')}</button>}
+            {/* Live during a Fetch newest run, unlike the other chips: a 500-series run is minutes of pacing plus
+                downloads, and a bar frozen for all of it left navigating away as the only way out. Cancel stops
+                the polling and leaves select mode; the run completes server-side. Reintroduce with a plain
+                `disabled={acting}`: "Cancel stays live while a Fetch newest run is followed" in library.test.ts. */}
+            <button disabled={acting && !fetching} onClick={() => { stopFollowing.current?.(); setSelecting(false); setPicked(new Set()); }} className="chip text-xs text-fog-500 disabled:opacity-50">{tr('Cancel')}</button>
           </div>
         </div>
+      )}
+      {/* ⚠️ The Sheet (z-60) paints over a Modal (z-50), so each row closes the sheet BEFORE it opens its
+          dialog; opened the other way round the dialog is underneath and cannot be tapped. */}
+      {more && (
+        <Sheet title={tr('{n} selected', { n: picked.size })} onClose={() => setMore(false)} overBottomNav>
+          {/* `pb-2`: the sheet's nav clearance is 4 px short of the nav's measured height (see the series
+              page), and the last row here would otherwise end 3 px under it. */}
+          <div className="space-y-1 pb-2">
+            <button onClick={() => { setMore(false); setMoving(true); }}
+              className="block w-full rounded-lg px-2.5 py-2.5 text-start text-sm text-fog-100 hover:bg-ink-800/60">
+              {tr('Move to library')}
+            </button>
+            <button onClick={() => { setMore(false); setRemoving(true); }}
+              className="block w-full rounded-lg px-2.5 py-2.5 text-start text-sm text-rose-300 hover:bg-ink-800/60">
+              {tr('Remove from library')}
+            </button>
+          </div>
+        </Sheet>
+      )}
+      {removing && (
+        <ConfirmDialog
+          title={picked.size === 1 ? tr('Remove 1 series from the library?') : tr('Remove {n} series from the library?', { n: picked.size })}
+          danger
+          busy={acting}
+          confirmLabel={tr('Remove')}
+          body={
+            <>
+              <p><strong className="text-fog-100">{tr('No files are deleted.')}</strong> {tr('The chapters stay exactly where they are on disk, and nothing in your library folder is touched.')}</p>
+              <p className="mt-2">{tr("Everyone's reading progress, history, favourites and ratings are kept, so you can put them back at any time from Admin → Library.")}</p>
+            </>
+          }
+          onConfirm={removeSelected}
+          onClose={() => setRemoving(false)}
+        />
       )}
       {moving && (
         <MoveToLibrary

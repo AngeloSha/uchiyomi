@@ -22,6 +22,9 @@
 // Skipped automatically unless TEST_DATABASE_URL is set (CI provides a throwaway Postgres service).
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { mkdtempSync, mkdirSync, writeFileSync, existsSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 const DSN = process.env.TEST_DATABASE_URL;
 if (DSN) {
@@ -458,5 +461,127 @@ test('library management', { skip }, async (t) => {
   } finally {
     await app.close();
     await cleanup(q);
+  }
+});
+
+// ---- Bulk hide (v0.37.0, the safe half of PR #53's bulk delete) ----
+//
+// The library page's select bar can remove a whole selection from the library. That MUST be the single
+// DELETE /api/admin/series/:id once per id and nothing more: hide only, per-series audit, skips with reasons.
+// Files are never touched here -- deleting them is the irreversible step behind the per-title typed confirm
+// on Content → Library, and a bulk that did both would let "Select all" plus one tap wipe hand-curated
+// folders with no undo.
+const BH = ['s_bh_a', 's_bh_b', 's_bh_c', 's_bh_merged', 's_bh_hidden'] as const;
+
+test('bulk hide', { skip }, async (t) => {
+  const { migrate } = await import('../src/lib/migrate');
+  const { q } = await import('../src/lib/db');
+  const adminRoutes = (await import('../src/routes/admin')).default;
+  const Fastify = (await import('fastify')).default;
+  const jwt = (await import('@fastify/jwt')).default;
+  await migrate();
+  const wipe = async () => {
+    await q('DELETE FROM lib_books WHERE series_id = ANY($1)', [BH]).catch(() => {});
+    await q('DELETE FROM series_trackers WHERE series_id = ANY($1)', [BH]).catch(() => {});
+    await q('DELETE FROM lib_series WHERE id = ANY($1)', [BH]).catch(() => {});
+    await q(`DELETE FROM audit_log WHERE event = 'series.delete' AND detail->>'id' = ANY($1)`, [BH]).catch(() => {});
+    await q(`DELETE FROM users WHERE username LIKE 'bh-%'`).catch(() => {});
+  };
+  await wipe();
+  // Real files under a real, writable root: deleteSeriesFiles refuses a series with nothing on disk, so
+  // without these the "hide only" assertions below would pass against a route that deleted files too.
+  const root = mkdtempSync(join(tmpdir(), 'yomi-bulkhide-'));
+  for (const id of BH) {
+    mkdirSync(join(root, id), { recursive: true });
+    writeFileSync(join(root, id, 'ch1.cbz'), 'not really a zip');
+    await q(`INSERT INTO lib_series (id, source, title, folder, books_count) VALUES ($1,'T!bh','Title ' || $1,$1,1)`, [id]);
+    await q(`INSERT INTO lib_books (id, series_id, source, root, file, number, title) VALUES ($1,$2,'T!bh',$3,$4,1,'Chapter 1')`, [`b_${id}`, id, root, `${id}/ch1.cbz`]);
+  }
+  await q('UPDATE lib_series SET merged_into = $2 WHERE id = $1', ['s_bh_merged', 's_bh_a']);
+  await q('UPDATE lib_series SET deleted_at = now() WHERE id = $1', ['s_bh_hidden']);
+  // A tracker link on one of them: deleteSeries drops it (it is what the duplicate check matches on), and
+  // the bulk path must go through deleteSeries rather than flip deleted_at itself.
+  await q(`INSERT INTO series_trackers (series_id, provider, external_id) VALUES ('s_bh_b','anilist','T!bh-1')`);
+  const mk = async (name: string, role: string) => (await q<{ id: string }>(
+    `INSERT INTO users (username, display_name, password_hash, role, auth_kind) VALUES ($1,$1,'x',$2,'password') RETURNING id`, [name, role]))[0].id;
+  const admin = await mk('bh-admin', 'admin');
+  const member = await mk('bh-member', 'user');
+  const app = Fastify();
+  await app.register(jwt, { secret: process.env.JWT_SECRET! });
+  await app.register(adminRoutes);
+  await app.ready();
+  const as = (sub: string, role: string) => ({ authorization: `Bearer ${app.jwt.sign({ sub, role })}` });
+  const hide = (ids: string[], who = as(admin, 'admin')) =>
+    app.inject({ method: 'POST', url: '/api/admin/series/bulk/hide', headers: who, payload: { ids } });
+
+  try {
+    await t.test('a member cannot hide anything', async () => {
+      // Reintroduce by mounting the route outside the admin plugin (before its requireAdmin hook).
+      const r = await hide(['s_bh_a'], as(member, 'user'));
+      assert.equal(r.statusCode, 403);
+      const rows = await q<{ deleted_at: string | null }>('SELECT deleted_at FROM lib_series WHERE id = $1', ['s_bh_a']);
+      assert.equal(rows[0].deleted_at, null, 'a 403 must not have hidden it first');
+    });
+
+    await t.test('hides three, skips a merged one, a hidden one and an unknown one, each with its reason', async () => {
+      // Reintroduce the skips by dropping the three `if (row...)` lines: the merged row is hidden under its
+      // survivor's feet (the merge page can no longer find it), the already-hidden one is counted a second
+      // time, and an unknown id is a 500 from deleteSeries instead of a reason. Reintroduce the "hide only"
+      // rule by calling deleteSeriesFiles after deleteSeries: the lib_books rows below gain pruned_at.
+      const r = await hide(['s_bh_a', 's_bh_b', 's_bh_c', 's_bh_merged', 's_bh_hidden', 's_bh_nope', 's_bh_b']);
+      assert.equal(r.statusCode, 200, r.body);
+      const body = r.json();
+      assert.equal(body.ok, true);
+      assert.equal(body.hidden, 3, 'three live series, hidden once each (s_bh_b is listed twice and counts once)');
+      assert.deepEqual(body.skipped, [
+        { id: 's_bh_merged', reason: 'merged' },
+        { id: 's_bh_hidden', reason: 'already_hidden' },
+        { id: 's_bh_nope', reason: 'not_found' },
+      ], 'every series that was not hidden is named, with why');
+
+      const rows = await q<{ id: string; deleted_at: string | null; merged_into: string | null }>(
+        'SELECT id, deleted_at, merged_into FROM lib_series WHERE id = ANY($1) ORDER BY id', [BH]);
+      const at = Object.fromEntries(rows.map((x) => [x.id, x.deleted_at !== null]));
+      assert.deepEqual(at, { s_bh_a: true, s_bh_b: true, s_bh_c: true, s_bh_hidden: true, s_bh_merged: false },
+        'the three live ones are hidden; the merged one is left as it was');
+      assert.equal(rows.find((x) => x.id === 's_bh_merged')!.merged_into, 's_bh_a', 'the merge pointer survives');
+
+      // Hide only: every chapter row is still a live, unpruned book.
+      const books = await q<{ pruned_at: string | null }>('SELECT pruned_at FROM lib_books WHERE series_id = ANY($1)', [BH]);
+      assert.equal(books.length, BH.length, 'no book row was deleted');
+      assert.ok(books.every((b) => b.pruned_at === null), 'no book was pruned: a bulk remove never touches files');
+      for (const id of BH) assert.ok(existsSync(join(root, id, 'ch1.cbz')), `${id}'s chapter file is gone: a bulk remove deleted files`);
+      // ...and the tracker link went with the hide, as the single route's deleteSeries does.
+      assert.equal((await q('SELECT 1 FROM series_trackers WHERE series_id = $1', ['s_bh_b'])).length, 0,
+        'the bulk path bypassed deleteSeries and left the tracker link in place');
+    });
+
+    await t.test('one series.delete audit row per hidden series, carrying its title', async () => {
+      // Reintroduce by logging once per batch with the id list (what PR #53 did): the audit page shows one
+      // opaque line for 200 series and no title to search for.
+      const rows = await q<{ detail: { id: string; title: string; books: number }; user_id: string }>(
+        `SELECT detail, user_id FROM audit_log WHERE event = 'series.delete' AND detail->>'id' = ANY($1) ORDER BY detail->>'id'`, [BH]);
+      assert.deepEqual(rows.map((x) => [x.detail.id, x.detail.title, x.detail.books]),
+        [['s_bh_a', 'Title s_bh_a', 1], ['s_bh_b', 'Title s_bh_b', 1], ['s_bh_c', 'Title s_bh_c', 1]],
+        'exactly the three hidden series, one row each, titled, no row for a skipped one');
+      assert.ok(rows.every((x) => x.user_id === admin), 'attributed to the admin who did it');
+    });
+
+    await t.test('a second pass over the same selection hides nothing and says so', async () => {
+      const r = await hide(['s_bh_a', 's_bh_b']);
+      assert.equal(r.statusCode, 200);
+      assert.equal(r.json().hidden, 0);
+      assert.deepEqual(r.json().skipped.map((s: any) => s.reason), ['already_hidden', 'already_hidden']);
+    });
+
+    await t.test('an empty or oversized list is a bad request, not a server error', async () => {
+      assert.equal((await hide([])).statusCode, 400);
+      assert.equal((await hide(Array.from({ length: 501 }, (_, i) => `x${i}`))).statusCode, 400);
+      assert.equal((await app.inject({ method: 'POST', url: '/api/admin/series/bulk/hide', headers: as(admin, 'admin'), payload: {} })).statusCode, 400);
+    });
+  } finally {
+    await app.close();
+    await wipe();
+    rmSync(root, { recursive: true, force: true });
   }
 });

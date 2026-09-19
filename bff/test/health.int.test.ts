@@ -291,6 +291,44 @@ test('a source hidden by language is turned off too, however stale its health ro
   }
 });
 
+test('a stored error older than the last success is history, not a fix to go and apply', { skip: DSN ? false : 'set TEST_DATABASE_URL to run' }, async () => {
+  // `reportOk` never clears `last_error`, so a source that saw a Cloudflare challenge on Monday and has
+  // answered fine since still carries Monday's words. This check lists it for its empty streak (a live
+  // fact), diagnoses it from the stored string (a stale one), and the stored rules run before the
+  // empty-streak one -- so the page told the operator to go and fix a solver problem that ended days ago
+  // and hid the finding that is actually current. When the last success is newer than the last failure,
+  // the error must not be diagnosed at all.
+  //
+  // Reintroduce by passing `r.last_error` to diagnose() unconditionally in sourceTrouble(): the `stale`
+  // assertion fails with the Cloudflare fix text in the detail.
+  const { migrate } = await import('../src/lib/migrate');
+  const { q } = await import('../src/lib/db');
+  const { runHealthChecks } = await import('../src/lib/health');
+  await migrate();
+  const STALE = 'hl-stale-cf', FRESH = 'hl-fresh-cf';
+  await q('DELETE FROM source_health WHERE source_id = ANY($1::text[])', [[STALE, FRESH]]);
+  // Both rows hold the same challenge string (verbatim from a production last_error). STALE succeeded after
+  // it was written; FRESH failed after its last success, so for FRESH the string is the current truth.
+  await q(
+    `INSERT INTO source_health (source_id, status, empty_streak, last_error, last_fail_at, last_ok_at) VALUES
+       ($1, 'ok', 3, 'Just a moment...', now() - interval '2 days', now() - interval '1 hour'),
+       ($2, 'blocked', 0, 'Just a moment...', now() - interval '1 hour', now() - interval '2 days')`,
+    [STALE, FRESH],
+  );
+  try {
+    const c = (await runHealthChecks()).checks.find((x: any) => x.id === 'sources');
+    const stale = c.items.find((i: any) => i.title === STALE);
+    assert.ok(stale, 'still listed: the empty streak is a live fact');
+    assert.doesNotMatch(stale.detail, /Cloudflare interstitial|re-test/, `stale: an error older than the last success must not become a fix (${stale.detail})`);
+    assert.match(stale.detail, /returns nothing/, 'what remains is the live finding, the empty streak');
+    const fresh = c.items.find((i: any) => i.title === FRESH);
+    assert.ok(fresh, 'listed: it is blocked');
+    assert.match(fresh.detail, /Cloudflare interstitial/, 'fresh: an error newer than the last success is still diagnosed');
+  } finally {
+    await q('DELETE FROM source_health WHERE source_id = ANY($1::text[])', [[STALE, FRESH]]);
+  }
+});
+
 /**
  * The prune that runs when an extension is uninstalled must keep the health row of a source that still
  * has series. That row is the only record the source ever existed, and those series are frozen, not gone.

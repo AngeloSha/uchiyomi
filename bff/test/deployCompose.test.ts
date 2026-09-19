@@ -129,3 +129,38 @@ test('every documented extension knob is passed through by every deploy file', (
     }
   }
 });
+
+/**
+ * Issue #54: Mangaball via a keiyoushi extension failed every search with `java.io.IOException: Cloudflare
+ * bypass currently disabled`, while a manual curl through the bundled FlareSolverr worked. Suwayomi-Server
+ * has no browser of its own; its CloudflareInterceptor needs a FlareSolverr and ships with that integration
+ * OFF. Every compose file ran the engine next to a perfectly good solver and never introduced the two. The
+ * image's startup script maps exactly FLARESOLVERR_ENABLED and FLARESOLVERR_URL into server.conf (verified
+ * against the running v2.3.2243 image, lines 124-125), so these two lines are the whole fix.
+ *
+ * The URL must name the solver service of THAT file (yomi-flaresolverr in the dev file, uchiyomi-flaresolverr
+ * in deploy/), and the engine must share a network with it -- the split file had the engine on the database
+ * network only, where the solver's name does not resolve and the setting would have been theatre.
+ *
+ * Reintroduce by removing FLARESOLVERR_ENABLED from the engine service: the assertion names the file.
+ */
+test('the bundled engine is pointed at the bundled solver', () => {
+  for (const file of FILES) {
+    const src = readFileSync(join(REPO, file), 'utf8');
+    const block = instructions(suwayomiBlock(file));
+    assert.match(block, /FLARESOLVERR_ENABLED:\s*"true"/,
+      `${file}: the engine's Cloudflare bypass is off, so every Cloudflare-protected extension source fails its search`);
+    const solver = src.match(/^ {2}([a-z-]*flaresolverr):$/m)?.[1];
+    assert.ok(solver, `${file} has no flaresolverr service for the engine to use`);
+    assert.match(block, new RegExp(`FLARESOLVERR_URL:\\s*http://${solver}:8191`),
+      `${file}: FLARESOLVERR_URL must name this file's own solver service (${solver}) on its port`);
+    // Same network, or the name above does not resolve. The solver's block is read the same way.
+    const solverStart = src.search(new RegExp(`^ {2}${solver}:$`, 'm'));
+    const solverRest = src.slice(src.indexOf('\n', solverStart) + 1);
+    const solverEnd = solverRest.search(/^ {0,2}[a-z][a-z-]*:$/m);
+    const solverBlock = instructions(solverRest.slice(0, solverEnd < 0 ? undefined : solverEnd));
+    const nets = (b: string) => (b.match(/networks:\s*(\[[^\]]*\]|(?:\n\s+-\s*\S+)+)/)?.[1] || '').match(/[a-z_]+/g) || [];
+    const shared = nets(block).filter((n) => nets(solverBlock).includes(n));
+    assert.ok(shared.length, `${file}: the engine (${nets(block)}) and the solver (${nets(solverBlock)}) share no network, so FLARESOLVERR_URL cannot resolve`);
+  }
+});

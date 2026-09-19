@@ -138,6 +138,46 @@ test('THE RULE: deleting files keeps the chapter rows and everyone\'s progress',
   }
 });
 
+test('delete files marks the rows pruned with reason deleted, and only the rows whose file it removed', { skip }, async () => {
+  // Until v0.37.0 the rows were left live after their bytes went: Put back then listed every chapter as
+  // openable and each one 404'd, and the have-set counted them as held so nothing was ever fetched again.
+  // The mark is the same one the chapter-level delete leaves (tombstoneBooks), with the reason that keeps it
+  // held -- a deliberate deletion is not the verify task's 'missing'. Reintroduce by dropping the
+  // tombstoneBooks call at the end of deleteSeriesFiles: pruned_at below reads null.
+  await seed(true);
+  await q('UPDATE lib_series SET deleted_at = now() WHERE id = $1', [S]);
+  const r = await deleteSeriesFiles(S);
+  assert.equal(r.ok, true);
+  const rows = await q<{ id: string; pruned_at: string | null; pruned_reason: string | null }>(
+    'SELECT id, pruned_at, pruned_reason FROM lib_books WHERE series_id = $1 ORDER BY id', [S]);
+  assert.equal(rows.length, 2, 'the rows must survive (everyone\'s progress hangs off them)');
+  for (const row of rows) {
+    assert.ok(row.pruned_at, `${row.id} still claims bytes that are gone`);
+    assert.equal(row.pruned_reason, 'deleted', `${row.id} must say WHY, or the sweep cannot tell it from a missing file`);
+  }
+});
+
+test('delete files leaves an absent file\'s row alone', { skip }, async () => {
+  // ⚠️ A file that is not there is not a file this removed: on an unmounted share every stat fails while
+  // every file is fine on the disk that is not here, and "Delete files" must not turn that into a library
+  // of tombstones. Missing files are the verify task's business. `files` counts unlinks, not rows, for the
+  // same reason: a second press used to report "Deleted 2 file(s)" for rows it had not touched.
+  // Reintroduce by tombstoning every row of the root regardless of `st` (or by counting `files++` before
+  // the stat): the download-root row below reads pruned, or `files` reads 2.
+  await seed(true);
+  await q('UPDATE lib_series SET deleted_at = now() WHERE id = $1', [S]);
+  await rm(join(DL, FOLDER, 'ch2.cbz'));
+  const r = await deleteSeriesFiles(S);
+  assert.equal(r.ok, true);
+  assert.equal(r.files, 1, 'only the file that was actually there counts as deleted');
+  const [lib, dl] = await Promise.all([
+    q<{ pruned_at: string | null }>('SELECT pruned_at FROM lib_books WHERE id = $1', ['b_fo_1']),
+    q<{ pruned_at: string | null }>('SELECT pruned_at FROM lib_books WHERE id = $1', ['b_fo_2']),
+  ]);
+  assert.ok(lib[0].pruned_at, 'the row whose file was removed is marked');
+  assert.equal(dl[0].pruned_at, null, 'a row whose file was already absent must not be marked by a delete');
+});
+
 // ---- rename ----
 
 test('a rename moves the folder in every root and rewrites the paths', { skip }, async () => {

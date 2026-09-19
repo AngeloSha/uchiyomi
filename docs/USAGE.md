@@ -125,9 +125,40 @@ chips under the header with a count, and they live in the URL, so the back butto
 filtered view.
 
 **Doing something to many series at once.** Hit **Select** on the Library page, tap the ones you want, and the
-bar at the bottom can mark them read or unread, favourite them, or file them into a collection. Marking a
-backlog read deliberately does not count towards streaks or the household leaderboard, since you did not
-read it this week.
+bar at the bottom shows what can be done with them. **Select all**, beside *Done*, takes every series loaded
+so far — the grid loads as you scroll, so scroll further and tap it again for more; the count on the bar
+says how many are in hand. The chips:
+
+- **Mark read** / **Mark unread** and **Favourite** — for everyone. Marking a backlog read deliberately does
+  not count towards streaks or the household leaderboard, since you did not read it this week.
+- **Fetch newest** — for anyone who may download (the same permission as the series page's *Fetch*). For each
+  selected series it grabs the newest chapter its sources list, if that one is not on the shelf yet: one
+  chapter per series, whatever the series' *latest N* floor says, and without moving that floor — nothing
+  below the floor is ever fetched, and a series that already holds its newest listed chapter answers *up to
+  date*. It runs on the server: the bar counts it up (*Fetching 3 of 12…*), you can leave the page, and when
+  it finishes a toast sums it up — *Fetched 3 chapters · 8 up to date · 1 skipped · 1 failed*, only the
+  non-zero parts, or *Nothing to fetch*. A series is *skipped* when its source is disabled or in a cooldown,
+  when the chapter is being held for your preferred group (pick a copy on the series page to take it now),
+  when a download is already running for it, when it is not in your library, or when the chapter was
+  deleted from this server on purpose — by the read-chapter cleanup, *Delete from server* or *Delete
+  files* — in which case *Fetch again* on the series page brings it back; it *fails* when the source did
+  not answer or the chapter could not be saved — the Health page has the details. A source the admin
+  disabled is never asked. One run at a time for the whole server; while the run is inside a series, that
+  one series' own *Fetch* answers *busy*, and no other. If the page stops hearing from the server — three
+  status checks in a row unanswered — the toast says *Lost track of the fetch. Check the library in a
+  moment.* rather than summing up: the run itself carries on. A *Nothing yet* series and one
+  imported from a Mihon backup or a tracker list are exactly what this is for: the nightly check follows
+  them without fetching, and *Fetch newest* is how their latest chapter lands.
+- **Move to library** and **Remove from library** — admins only; on a phone they sit behind **More**.
+  *Remove from library* asks *Remove {n} series from the library?* and says what it does not do: **no files
+  are deleted**, the chapters stay exactly where they are on disk, and everyone's reading progress, history,
+  favourites and ratings are kept, so any of them can be put back at any time from **Admin → Library**. It
+  is the series page's *Delete* over a selection, nothing more; a series that was merged into another, or is
+  already hidden, is skipped and counted (*Removed 11 series · 1 skipped*). A selection that hid nothing
+  says *Nothing removed · 1 skipped* and keeps the selection so it can be corrected. Deleting files stays a
+  separate, per-title step on **Content → Library** — see section 8.
+- **Cancel** leaves select mode. It stays live during a *Fetch newest* run: tapping it stops watching the
+  run and leaves select mode, and the fetch itself finishes on the server.
 
 **If you are an admin**, the series page also carries the controls for that series:
 
@@ -149,7 +180,9 @@ read it this week.
   from, and any other you have told it to follow. See *Following a second source* below.
 - **Delete** hides the series rather than erasing it. Chapters, ratings, favourites and everyone's reading
   history stay attached, so nothing is lost and it can be put back (see section 8). A hidden series stays
-  hidden when the library is rescanned instead of reappearing as a new one.
+  hidden when the library is rescanned instead of reappearing as a new one, and adding the same title again
+  from a source puts the same series back, history and all. What each kind of delete does and does not
+  erase is spelled out in section 12, *Where your data lives and how to delete for good*.
 
 ### Sources & translations
 
@@ -674,15 +707,24 @@ it cannot see. Hit **Re-check** to run them again.
 
 A source you turned off yourself -- one at a time on Providers, or a whole language at once on Extensions --
 is listed greyed under *Source health* so the count stays visible, but it never makes the check amber: it is
-your decision, not a fault. The same greying marks the advisory rows, such as a solver or Uchiyomi version
+your decision, not a fault. A source whose last success is newer than its last failure is not diagnosed from
+the words of that old failure any more: since v0.37.0 the row shows only what is live (an empty streak, say)
+instead of sending you to fix a Cloudflare problem that ended days ago, and the same holds for the *Test*
+button on Providers, which no longer keeps an extension source's stale verdict once its live checks pass. The same greying marks the advisory rows, such as a solver or Uchiyomi version
 that is merely behind. When an extension server is configured there is one more check, *Extension source
 limit*, which goes amber when more sources are switched on than `SUWAYOMI_MAX_SOURCES` allows to register.
 
 ![Library health](shots/admin-health.webp)
 
-**Content → Library** also lists every series you have deleted, with **Restore** to put one back exactly as
-it was. Deleting happens on the series page itself (section 4); this is where hidden series go and how you
-get them back.
+**Content → Library** also lists every series you have removed, with **Put back** to restore one exactly as
+it was. Removing happens on the series page itself (section 4) or over a selection on the Library page
+(section 3); this is where hidden series go and how you get them back. A row whose files you have since
+deleted says so — its caption leads with *files deleted*, and a second line under it reads: *The chapter
+files are gone. Put back lists them as deleted from the server; Fetch again on the series page brings back
+the ones Uchiyomi downloaded.* The button is the same **Put back** and still works: the series comes back
+with those chapters listed as *Deleted from the server*, where *Fetch again* brings each one that
+Uchiyomi downloaded (under the download folder) back onto the same row (section 4); a file that lived in
+your read library is yours to put back by hand. *Delete files* is not offered twice.
 
 ### Renaming folders and deleting files
 
@@ -707,7 +749,14 @@ them would leave the old name in place for the next scan to pick up as a second,
 **Delete files** is on **Content → Library**, and only for a series you have already removed. The reversible
 step always comes first, and the irreversible one asks you to type the title. It deletes the chapter files
 and keeps every chapter row and every progress row, so the record of having read something survives the
-files.
+files: each row whose file it removed is marked *deleted from the server*, the same mark the chapter-level
+delete and the read-chapter cleanup leave, so the updater never fetches those chapters back on its own and
+*Put back* afterwards is honest about what comes back. The dialog counts the files it would actually delete
+(*This deletes N chapter file(s)*), not the chapter rows. The count it reports is files actually removed —
+a file that was already gone is left alone and not counted, because on a share that is not mounted every
+file looks gone (the *Verify chapter files* task in section 12 is the place for missing files). There is
+no bulk form of this on purpose: *Select all* plus one tap must never be able to wipe a hand-curated
+folder.
 
 ### Deleting chapters after they are read
 
@@ -756,7 +805,16 @@ waiting. **Run now** is there if you would rather not wait for the hour.
 reports the same title sitting in your library twice, **Merge** folds one into the other. Every chapter and
 every progress row moves to the survivor. Chapters that look like duplicates are **kept**, not removed --
 dropping one would mean folding two progress rows into one, and getting that wrong marks chapters unread and
-then pushes that to your AniList account, where it cannot be undone.
+then pushes that to your AniList account, where it cannot be undone. **A merge is one-way.** The absorbed
+series cannot be un-merged, removed or deleted afterwards (the routes refuse it as *merged*), because the
+progress rows were re-keyed to the survivor and the list of what moved is not kept; its folder stays on disk
+and keeps being scanned into the survivor. The batch importer knows about it: a title that was merged away
+reads *already in your library* and links to the survivor, rather than being offered for adding again as a
+duplicate. Merging is transitive: when a series that has itself absorbed others is merged, everything it
+absorbed is re-pointed at the new survivor in the same transaction, so a title folded in two merges ago
+still counts as owned by the final survivor — on the scan (its folder's chapters keep filing under the
+survivor) and in the batch importer (a backup or tracker entry with that spelling reads *already in your
+library* rather than being re-added via another source).
 
 **Libraries:** split one collection into several, then choose per member which ones they can open. This lives
 on **Content → Library**.
@@ -921,7 +979,10 @@ and get your server blocked.
 
 **Tasks:** run the **library scan**, **check-for-new-chapters** or **extension updates** on demand, and see
 when each last ran and what it did. Extension updates run every 6 hours on their own and can be switched
-off in Settings; see [extensions.md](extensions.md).
+off in Settings; see [extensions.md](extensions.md). **Verify chapter files** is the one task that never
+runs by itself: it is the repair for a database restored without its chapter files, and section 12 says
+when to run it and what it will not do. Like the sweep, it starts in the background and its line shows what
+it found when it is done.
 
 **Activity:** the audit feed, every login (success and failure), user change, settings change, source action.
 
@@ -1070,17 +1131,53 @@ Tune with `BACKUP_KEEP` (how many runs to retain, default 14) and the backup hou
 
 ### Restoring
 
-Each backup folder is named by timestamp and holds `db.sql.gz` and `config.tar.gz`. The dump is plain SQL, so
-any `psql` can restore it — no matching tool versions required.
+Each backup folder is named by timestamp and holds `db.sql.gz` and `config.tar.gz`. The dump is plain SQL
+written with `--clean --if-exists`, so any `psql` can restore it — no matching tool versions required — and
+restoring it over a live database drops and recreates every table before loading, which is why the app
+should be restarted straight after.
 
-Restore the database into a **fresh, empty** database first and check it looks right before touching your real
-one:
+**Which database you have** decides the command: **Admin → Overview** says *embedded database* or *external
+database* in its header line, and it is the same answer as "is `DATABASE_URL` set on the app container?"
+(see [CONFIGURATION.md](CONFIGURATION.md#environment-variables)).
 
+**The default install — the embedded database.** Postgres runs inside the `uchiyomi` container on a unix
+socket, with no network listener and no password, so everything goes through `docker compose exec` on that
+one container:
+
+```bash
+# restore last night's dump into the running database, then restart so the app sees it
+docker compose exec -T uchiyomi sh -c 'gunzip -c /backups/20260819-030000/db.sql.gz' \
+  | docker compose exec -T uchiyomi psql -q "postgres://yomi@/yomi?host=/run/postgresql"
+docker compose restart uchiyomi
+
+# a psql shell on it, for looking around
+docker compose exec uchiyomi psql "postgres://yomi@/yomi?host=/run/postgresql"
 ```
-docker exec uchiyomi sh -c 'gunzip -c /backups/20260819-030000/db.sql.gz' | docker exec -i -e PGPASSWORD="$DB_PASSWORD" uchiyomi-db psql -U yomi -h 127.0.0.1 -d yomi
+
+To try a restore into a **scratch** database first — do this at least once, while nothing is on fire —
+create one over the same socket, load the dump into it, look around, drop it:
+
+```bash
+docker compose exec uchiyomi createdb -h /run/postgresql -U yomi scratch
+docker compose exec -T uchiyomi sh -c 'gunzip -c /backups/20260819-030000/db.sql.gz' \
+  | docker compose exec -T uchiyomi psql -q "postgres://yomi@/scratch?host=/run/postgresql"
+docker compose exec uchiyomi psql "postgres://yomi@/scratch?host=/run/postgresql" -c '\dt' -c 'select count(*) from lib_series'
+docker compose exec uchiyomi dropdb -h /run/postgresql -U yomi scratch
 ```
 
-Then restore the config files (custom sites, uploaded cover art, the JWT secret):
+**An external database** (`DATABASE_URL` set; the `docker-compose.external-db.yml` and split layouts, with
+their `uchiyomi-db` container). The dump is still made by the app container; the database is the other one:
+
+```bash
+docker compose exec -T uchiyomi sh -c 'gunzip -c /backups/20260819-030000/db.sql.gz' \
+  | docker compose exec -T uchiyomi-db psql -q -U yomi -d yomi
+docker compose restart uchiyomi
+
+# a psql shell on it
+docker compose exec uchiyomi-db psql -U yomi -d yomi
+```
+
+Then, on either layout, restore the config files (custom sites, uploaded cover art, the JWT secret):
 
 ```
 docker exec -i uchiyomi sh -c 'tar -xzf - -C /config' < config.tar.gz
@@ -1089,14 +1186,72 @@ docker exec -i uchiyomi sh -c 'tar -xzf - -C /config' < config.tar.gz
 Restart the app afterwards (`docker compose restart uchiyomi`). If you restore the database *without* the
 config archive, any admin-uploaded cover art will be missing even though the database still references it.
 
-> Container names above are the shipped install: one app container named `uchiyomi`, plus `uchiyomi-db`.
-> On the deprecated split layout the app container is `uchiyomi-bff`; if you cloned the repo and run the
-> development stack, they are `yomi-bff` and `yomi-db`. Substitute accordingly.
-> (The development stack also runs Postgres 15 rather than 16; the dumps are plain SQL, so they restore either
-> way, but don't expect the two data directories to be interchangeable.)
+> Container names above are the shipped install: one app container named `uchiyomi`, plus `uchiyomi-db` on
+> the external-database layouts only. On the deprecated split layout the app container is `uchiyomi-bff`; if
+> you cloned the repo and run the development stack, they are `yomi-bff` and `yomi-db`. Substitute
+> accordingly. (The development stack also runs Postgres 15 rather than 16; the dumps are plain SQL, so they
+> restore either way, but don't expect the two data directories to be interchangeable.)
 
 > Test your restore at least once, into a scratch database, while nothing is on fire. An untested backup is
 > a guess.
+
+**After a database-only restore: Verify chapter files.** A backup holds the database and the config, never
+the chapter files. A database restored onto a disk that does not have them all — a new disk, or one that lost
+a folder — comes up with every chapter row intact and no bytes behind some of them, and nothing repairs that
+by itself: the updater trusts the rows, so every such chapter reads *up to date* forever while the reader
+cannot open it. Run **Admin → Tasks → Verify chapter files**. It starts in the background — the toast says
+so — and the Tasks line shows what it found when it is done (and keeps it across restarts): *one folder
+looked unmounted and was left alone: /library-dl, 4000 checked, 312 missing, marked for the next sweep, 7
+missing in the read library, not marked*. It looks for every chapter's file and marks the ones Uchiyomi
+downloaded that are gone as *deleted from the server* — the row and everyone's reading history stay — and the next update sweep
+(or *Fetch newest* on the Library page) downloads them again onto the same rows, so nobody's place moves.
+
+- It marks only chapters Uchiyomi downloaded (under the download folder). Files missing from the read
+  library are counted on the line and left alone: put the files back by hand or through the engine;
+  Uchiyomi re-fetches only what it downloaded itself, because a re-fetch lands in the download folder and
+  could not land on a read-library row.
+- It never runs by itself — not at start-up, not on a schedule — because a volume that is not mounted looks
+  exactly like a library with every file missing, and marking a whole library on a boot with the NAS still
+  asleep would be the worst thing it could do.
+- For the same reason, a folder (`/library` or `/library-dl`) with no file behind any of its chapters, or
+  with more than 90 % of them missing, is reported as *looked unmounted and was left alone* with nothing
+  marked under it — an empty folder is not proof of a mount, since the downloader creates folders while a
+  share is down, and one stray download on a bare mount must not turn "unmounted" into "mark everything
+  else". Check the mount and run it again. If the disk really is empty, add the series again from a source,
+  or use *Fetch again* on the series page.
+- Chapters the read-chapter cleanup, *Delete from server* or *Delete files* removed are not touched by this:
+  they were let go on purpose and are not fetched back.
+- A chapter below a series' *latest N* floor — one you fetched through the fill dialog's *older* — comes back
+  through *Fetch again* on the series page, not the sweep, which never reaches below the floor.
+
+### Where your data lives and how to delete for good
+
+Everything Uchiyomi knows lives in the database — accounts, progress, history, favourites, ratings, the
+catalogue, art overrides, custom sites — and the chapter files live in your library folder and in Uchiyomi's
+own downloads folder (`/library-dl`). The backup holds the first and not the second (section 12, above). Every
+delete in the app is deliberately smaller than it sounds, so here is exactly what each one does:
+
+- **Delete on the series page, and *Remove from library* on the Library page** hide the series. Nothing is
+  erased: the chapter rows, the files, everyone's progress, favourites and ratings stay, the series sits in
+  the Removed list on **Content → Library**, and *Put back* restores it exactly as it was. Adding the same
+  title again from a source revives the same series rather than making a second one — history and all.
+- ***Delete from server* on a chapter, the read-chapter cleanup, and *Delete files* on a removed series**
+  remove the bytes and keep the rows. Each row is marked *deleted from the server*, everyone's reading
+  history on it survives, and the updater does not fetch it back on its own; *Fetch again* can, for the
+  chapters Uchiyomi downloaded (under the download folder) — a file that lived in your read library is yours
+  to put back by hand, and a chapter below a series' *latest N* floor comes back through *Fetch again* only,
+  never the sweep. *Delete
+  files* is admin-only, only after a remove, asks for the title, and refuses rather than half-applying when
+  the folder is not writable (that is `PUID`/`PGID` unset — the refusal names the fix) or when the series has
+  no files on disk.
+- **Merge** is one-way, and an absorbed series can neither be un-merged nor removed afterwards (section 8).
+- **Nothing today erases a series' rows from the database for good.** There is no code path that deletes a
+  series row or a chapter row; reading progress is attached to the chapter row on purpose, so a delete can
+  never quietly take a person's history with it — that is the one loss with no undo, and the one that syncs
+  outward to AniList. A hidden series therefore stays in the Removed list until it is put back. If you need
+  a series gone from the database entirely, that is a `psql` job on the layout above, and it means deleting
+  every member's progress on it first; ask on the tracker if you want this as a button, and say why, because
+  the honest version has to warn that it erases everyone's history on that title.
 
 ## 13. Troubleshooting & FAQ
 
@@ -1113,6 +1268,22 @@ screen lets you create the admin. If an admin already exists, reset the password
 Uchiyomi auto-detects the engine (Madara, MangaThemesia, Manganato); Cloudflare-protected sites are handled
 automatically by the bundled FlareSolverr. A ⛔/⚠ badge on a source means it's temporarily blocked or
 rate-limited — wait a bit, or try another source.
+
+**An extension source says `Cloudflare bypass currently disabled`.** The extension engine has no browser of
+its own and has to be told about a FlareSolverr; the compose files set `FLARESOLVERR_ENABLED` and
+`FLARESOLVERR_URL` on its container since v0.37.0, so `docker compose up -d` (which recreates the engine)
+is the fix. The admin *Test* button and the Health page say the same, in these words: *The extension
+engine's own Cloudflare bypass is switched off. On the Suwayomi engine's container (uchiyomi-suwayomi in
+the shipped compose files) set FLARESOLVERR_ENABLED=true and FLARESOLVERR_URL to the same solver address
+Uchiyomi uses (http://uchiyomi-flaresolverr:8191 in the shipped files), then recreate it. The v0.37.0
+compose files already set both, so an upgrade that recreates the engine is the fix there.* Running the
+engine yourself? Set both on that container — see
+[CONFIGURATION.md](CONFIGURATION.md#environment-variables).
+
+**A source says it answers, but more slowly than it is given.** The source is up but keeps taking longer
+than `SOURCE_LATEST_TIMEOUT_MS` (8 s by default) to return its newest page. Since v0.37.0 the *Test* button
+and the daily source check report this too, not only Discover's health view. Raise the budget if the wait is
+acceptable; otherwise the site itself, or the Cloudflare solver in front of it, is the slow part.
 
 **Behind a reverse proxy, login/cookies don't stick.** Set `PUBLIC_ORIGIN` to the exact public URL you use (e.g.
 `https://manga.example.com`) so cookies and CORS match, and serve it over HTTPS.

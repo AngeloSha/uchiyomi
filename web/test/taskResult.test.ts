@@ -52,6 +52,36 @@ test('a cleanup that stopped at a missing folder says the volume is missing, not
   assert.doesNotMatch(taskResult({ deleted: 2, bytes: 9, failed: 0 }), /mounted/, 'a run that did not stop says nothing about volumes');
 });
 
+test('a verify run that skipped an unmounted folder says so, first, instead of reading as none missing', () => {
+  // Every chapter under a skipped root is still claiming bytes, and "0 missing" is exactly what the admin
+  // would conclude the task had found. Reintroduce by dropping the `unmounted` line: the first result below
+  // reads "4,000 checked, none missing" with /library-dl never mentioned.
+  const r = taskResult({ checked: 4000, missing: 0, unmounted: ['/library-dl'] });
+  assert.match(r, /4000 checked/);
+  assert.match(r, /unmounted/, 'the skipped root is named as unmounted');
+  assert.match(r, /\/library-dl/);
+  // ⚠️ And it comes FIRST. The task is detached, so this line is where its result lives, and on a phone a
+  // 900 px line shows its first clause and nothing after: with the warning last, a run that skipped the
+  // whole download root read "4000 checked, 312 missing, marked…" -- a clean run. Reintroduce by pushing
+  // the unmounted clause after the counts: the index below is greater.
+  const both = taskResult({ checked: 4000, missing: 312, unmounted: ['/library-dl'] });
+  assert.ok(both.indexOf('unmounted') < both.indexOf('4000 checked'), `the unmounted warning must lead the line: ${both}`);
+  assert.equal(both, ' · one folder looked unmounted and was left alone: /library-dl, 4000 checked, 312 missing, marked for the next sweep');
+  assert.match(taskResult({ checked: 12, missing: 3, unmounted: [] }), /3 missing, marked for the next sweep/);
+  assert.doesNotMatch(taskResult({ checked: 12, missing: 0, unmounted: [] }), /unmounted/, 'a run that skipped nothing says nothing about volumes');
+});
+
+test('a verify run that found read-library files gone says so, without claiming to have marked them', () => {
+  // The read library is not Uchiyomi's to re-fetch (a re-fetch lands under the download folder, on a new
+  // row), so the task counts those and leaves them alone -- and must say so, or "12 checked, none missing"
+  // over a read library with three files gone reads as "the read library is fine". Reintroduce by dropping
+  // the `readLibraryMissing` line.
+  const r = taskResult({ checked: 12, missing: 0, readLibraryMissing: 3, unmounted: [] });
+  assert.match(r, /none missing/);
+  assert.match(r, /3 missing in the read library, not marked/);
+  assert.doesNotMatch(taskResult({ checked: 12, missing: 0, readLibraryMissing: 0, unmounted: [] }), /read library/, 'nothing missing there says nothing about it');
+});
+
 test('a backup that measured nothing says so instead of showing a contented size', () => {
   assert.match(taskResult({ bytes: 1048576 }), /1(\.0)? ?MB/i);
   assert.match(taskResult({ bytes: 0, sizeUnknown: true }), /size unknown/);

@@ -548,12 +548,19 @@ test('at most two followers: three good candidates follow two, and two adds raci
 test('a source that outruns the wall is not_tried; one that outruns its own budget is unreachable', { skip }, async (t) => {
   const { id } = await addNothing(PRIMARY);
   await t.test('the wall: the hanging source and the one queued behind it are both "not checked"', async () => {
-    // Reintroduce by dropping the `remaining <= 0` check and the outer withTimeout in autoFollow: the add
-    // waits the hanging source's whole 20 s budget out, and THIRD is then judged and followed.
-    const before = asks[THIRD] ?? 0;
-    const results = await autoFollow(id, [{ source: HANG, sourceId: 'h-1' }, { source: THIRD, sourceId: '3-1' }], { wallMs: 300, concurrency: 1 });
+    // Reintroduce by dropping the `remaining < MIN_TRY_MS` check and the outer withTimeout in autoFollow:
+    // the add waits the hanging source's whole 20 s budget out, and THIRD is then judged and followed.
+    // The wall is MIN_TRY_MS plus a little, not 300 ms: HANG must be started (the wall is measured
+    // mid-flight, at the cut), and THIRD must then find less than MIN_TRY_MS left whatever the clocks say
+    // -- at 300 ms the two clocks' 1-2 ms disagreement let THIRD through on CI, and this test went red on
+    // the release push while passing locally every time.
+    const beforeThird = asks[THIRD] ?? 0;
+    const t0 = Date.now();
+    const results = await autoFollow(id, [{ source: HANG, sourceId: 'h-1' }, { source: THIRD, sourceId: '3-1' }], { wallMs: 2_500, concurrency: 1 });
+    const took = Date.now() - t0;
+    assert.ok(took >= 2_000 && took < 10_000, `HANG was started and cut at the wall, not refused up front or waited out: ${took} ms`);
     assert.deepEqual(results.map((r: any) => [r.source, r.why, r.followed]), [[HANG, 'not_tried', false], [THIRD, 'not_tried', false]], JSON.stringify(results));
-    assert.equal(asks[THIRD] ?? 0, before, 'THIRD never got its turn');
+    assert.equal(asks[THIRD] ?? 0, beforeThird, 'THIRD never got its turn');
     assert.equal((await followers(id)).length, 0);
   });
   await t.test('the per-source budget: a hanging source alone reads unreachable', async () => {

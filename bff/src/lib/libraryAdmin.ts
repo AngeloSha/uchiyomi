@@ -15,6 +15,7 @@ import { rm, rename, realpath, stat } from 'fs/promises';
 import { q, one, tx } from './db';
 import { artFile } from './seriesArt';
 import { allWritable, containedPath } from './fsGuard';
+import { tombstoneBooks } from './chapterCleanup';
 import { join, dirname } from 'path';
 
 export interface SeriesRow {
@@ -123,6 +124,16 @@ export async function mergeSeries(fromId: string, intoId: string): Promise<Merge
     // Point the absorbed row at its survivor instead of deleting it: its folder still exists on disk, and
     // persistScan needs this to keep putting those files under the merged series.
     await qq(`UPDATE lib_series SET merged_into = $2 WHERE id = $1`, [fromId, intoId]);
+    // Flatten the chain: anything `fromId` had absorbed EARLIER now points at the final survivor too. Both
+    // readers of `merged_into` follow exactly one hop and stop -- persistScan (lib/library.ts) files a
+    // merged folder's chapters under `known.merged_into`, and the batch importer's `have` map joins the
+    // absorbed title to its survivor `WHERE visibleToAll(survivor)`. After m→t then t→u, a chain left as
+    // m→t→u has m's chapters rescanned under the now-invisible t, and m's title reads "not in your
+    // library" so /run adds a second copy of a series the admin folded together twice. ⚠️ The merge route
+    // refuses a source or target that is itself merged, but not a target that has absorbed others, so the
+    // chain is reachable from the UI. Reintroduce by dropping this UPDATE: "a title absorbed two merges ago
+    // still reads owned by the final survivor" in importBatch.int.test.ts finds m still pointing at t.
+    await qq(`UPDATE lib_series SET merged_into = $2 WHERE merged_into = $1`, [fromId, intoId]);
     await qq(`DELETE FROM series_trackers WHERE series_id = $1`, [fromId]);
 
     // The survivor's rollups are now wrong
@@ -182,6 +193,18 @@ export interface FileOpRefusal { ok: false; reason: string; fix?: string }
  * so that removing a chapter cannot silently delete what someone read of it, which is the one loss with no
  * undo and which syncs outward to AniList. A later scan neither resurrects them (the folder is gone) nor
  * prunes them (there is no prune path).
+ *
+ * The rows whose file this removed are marked pruned with reason 'deleted' (tombstoneBooks, the same mark
+ * the chapter-level delete leaves). Until v0.37.0 they were left as live rows claiming bytes that were
+ * gone: Put back then listed every chapter as openable and each one 404'd, the updater's have-set counted
+ * them as held so nothing was ever fetched again, and a second Delete files reported "Deleted N file(s)"
+ * for rows it had not touched (`files` counted rows, not unlinks). With the mark, a series put back after
+ * this shows its chapters as "Deleted from the server", which is the truth, and Fetch again works on them.
+ * ⚠️ Only a file that was actually there is marked. A row whose file is already absent is left alone: on an
+ * unmounted share every stat fails and every file is fine on the disk that is not there, and "Delete
+ * files" must not turn that into a library of tombstones. The verify task is the place for missing files.
+ * Reintroduce by tombstoning every row of the root regardless of `st`: "delete files leaves an absent
+ * file's row alone" in fileOps.int.test.ts finds it marked.
  */
 export async function deleteSeriesFiles(id: string): Promise<{ ok: true; files: number; bytes: number } | FileOpRefusal> {
   const row = await one<{ folder: string; deleted_at: string | null }>(
@@ -200,6 +223,7 @@ export async function deleteSeriesFiles(id: string): Promise<{ ok: true; files: 
 
   let files = 0;
   let bytes = 0;
+  const removed: string[] = [];
   for (const root of roots) {
     // Containment, then realpath, then compare again: a symlinked folder inside a library is not
     // hypothetical on a NAS, and a lexical check alone would follow it out of the tree.
@@ -209,15 +233,29 @@ export async function deleteSeriesFiles(id: string): Promise<{ ok: true; files: 
     if (!real || !containedPath(root, real.slice(root.length + 1) || '.')) {
       if (real && real !== target) return { ok: false, reason: 'That folder resolves outside the library.' };
     }
-    for (const b of await q<{ file: string }>('SELECT file FROM lib_books WHERE series_id = $1 AND root = $2', [id, root])) {
+    for (const b of await q<{ id: string; file: string }>('SELECT id, file FROM lib_books WHERE series_id = $1 AND root = $2', [id, root])) {
       const abs = containedPath(root, b.file);
       if (!abs) continue;
       const st = await stat(abs).catch(() => null);
-      if (st) bytes += st.size;
-      await rm(abs, { recursive: true, force: true }).catch(() => {});
+      if (!st) continue; // absent already -- or on a volume that is not here; either way not ours to mark
+      // Unlink first, mark second: a row marked for a file that is still on disk is an invisible leak,
+      // the same order the read-chapter cleanup keeps.
+      try { await rm(abs, { recursive: true, force: true }); } catch { continue; }
+      bytes += st.size;
       files++;
+      removed.push(b.id);
     }
     await rm(target, { recursive: true, force: true }).catch(() => {});
+  }
+  await tombstoneBooks(removed, 'deleted');
+  // The cover follows the lowest LIVE chapter, the way persistScan and the chapter delete pick it: every
+  // thumbnail falls back to the cover chapter's first page, and a tombstone has none. With every row marked
+  // this still lands on a tombstone, and the series page's dashed placeholder is the honest rendering.
+  if (removed.length) {
+    await q(
+      `UPDATE lib_series SET cover_book_id = (
+         SELECT id FROM lib_books WHERE series_id = $1 ORDER BY (pruned_at IS NOT NULL), number ASC, file ASC LIMIT 1
+       ) WHERE id = $1`, [id]);
   }
   return { ok: true, files, bytes };
 }

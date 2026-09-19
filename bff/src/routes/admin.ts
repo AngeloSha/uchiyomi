@@ -13,10 +13,11 @@ import { runPageHashBackfill, pageHashRemaining, phState } from '../lib/pageHash
 import { runBackup } from '../lib/backup';
 import { runUpdateAll, updateSeries, runSweep } from '../lib/updater';
 import { runChapterCleanup, cleanupSettings, dueCountCached, tombstoneBooks } from '../lib/chapterCleanup';
+import { runVerify, verifyState } from '../lib/verifyFiles';
 import { authenticate, requireAdmin, userIdOf, revokeAllSessions, revokeRefreshTokenById, passwordError } from '../lib/auth';
 import { logAudit, recentAudit } from '../lib/audit';
 import { healthAll, setDisabled, clearBlock, SourceHealth, pruneOrphanedHealth, isDisabled, blockedNow } from '../lib/sourceHealth';
-import { smokeTest, probeBase } from '../lib/sourceProbe';
+import { smokeTest, probeBase, buildProbe } from '../lib/sourceProbe';
 import { runSourceCheck, checkRunning } from '../lib/sourceWatchdog';
 import { runExtensionMonitor, runExtensionCheck, extState } from '../lib/extensionMonitor';
 import { diagnose } from '../lib/sourceDiagnosis';
@@ -505,10 +506,11 @@ export default async function adminRoutes(app: FastifyInstance) {
 
   // ---- scheduled tasks ----
   app.get('/api/admin/tasks', async () => {
-    const s = await one<{ updater_hours: number; backup_hour: number; backup_last_run: string | null; backup_last_result: any; extension_hours: number; extension_auto_update: boolean; extension_last_run: string | null; extension_last_result: any; cleanup_read: boolean; cleanup_read_days: number; cleanup_read_last_run: string | null; cleanup_read_last_result: any }>(
+    const s = await one<{ updater_hours: number; backup_hour: number; backup_last_run: string | null; backup_last_result: any; extension_hours: number; extension_auto_update: boolean; extension_last_run: string | null; extension_last_result: any; cleanup_read: boolean; cleanup_read_days: number; cleanup_read_last_run: string | null; cleanup_read_last_result: any; verify_last_run: string | null; verify_last_result: any }>(
       `SELECT updater_hours, backup_hour, backup_last_run, backup_last_result,
               extension_hours, extension_auto_update, extension_last_run, extension_last_result,
-              cleanup_read, cleanup_read_days, cleanup_read_last_run, cleanup_read_last_result
+              cleanup_read, cleanup_read_days, cleanup_read_last_run, cleanup_read_last_result,
+              verify_last_run, verify_last_result
          FROM server_settings WHERE id = 1`,
     );
     // the backup's last run is persisted, so prefer the DB value over the in-memory one (which resets on restart)
@@ -536,6 +538,20 @@ export default async function adminRoutes(app: FastifyInstance) {
           : null,
         running: phState.running,
         remaining: await pageHashRemaining().catch(() => null),
+      },
+      // On demand only, and never at boot (the header of lib/verifyFiles.ts says why): the repair for a
+      // database restored without its chapter files. Listed always, because the moment it is needed is the
+      // moment after a restore, when nobody remembers a task that only appears under some setting.
+      {
+        id: 'verify',
+        name: 'Verify chapter files',
+        schedule: 'on demand \u00b7 after a database-only restore',
+        // Persisted like the cleanup's, so a restart keeps the last run. Memory wins once this process has
+        // run it -- including a run that threw (finishedAt set, lastResult null): falling through to the
+        // stored row there would put an older healthy result back on the panel over a walk that died.
+        lastRun: verifyState.finishedAt || (s?.verify_last_run ? new Date(s.verify_last_run).getTime() : null),
+        lastResult: verifyState.finishedAt ? verifyState.lastResult : (s?.verify_last_result ?? null),
+        running: verifyState.running,
       },
       // Only when it is switched on -- same rule as the extension task below. This one additionally must
       // not be listed while it is off because a "Run now" button beside a job an admin has not consented to
@@ -569,6 +585,24 @@ export default async function adminRoutes(app: FastifyInstance) {
     const { id } = req.params as { id: string };
     await logAudit('task.run', { userId: userIdOf(req), detail: { task: id }, req });
     if (id === 'scan') return { ok: true, ...(await persistScan()) };
+    if (id === 'verify') {
+      // ⚠️ Never awaited, like the sweep and the cleanup. One stat per row over a network share is minutes
+      // on a large library, and the first cut of this route awaited it: the reverse proxy cut the request
+      // at 60-120 s, the page toasted "Failed", and the walk went on marking rows behind a toast that said
+      // it had not. The Tasks panel polls `running` and shows the persisted result. runVerify refuses a
+      // second walk on top of a first. Audited with its counts when the walk ends: marking hundreds of
+      // rows "missing" is a library-wide change and the Activity feed must show who did it and what it
+      // found. Reintroduce by awaiting `run` here: "the verify button answers started and the panel shows
+      // the run" in verifyFiles.int.test.ts finds the counts in the answer instead of `started`.
+      const run = runVerify(app.log);
+      if (!run) return { ok: false, error: 'busy' };
+      const userId = userIdOf(req);
+      run.then(
+        (r) => logAudit('library.verify', { userId, detail: { checked: r.checked, missing: r.missing, readLibraryMissing: r.readLibraryMissing, unmounted: r.unmounted, ms: r.ms }, req }),
+        () => {}, // runVerify logs it and clears the result; this only stops an unhandled rejection
+      );
+      return { ok: true, started: true };
+    }
     if (id === 'update') {
       // Never awaited: a sweep is minutes to hours, and the caller is an admin clicking a button. runSweep
       // marks it running, keeps the result, logs the summary and refuses to start on top of another one --
@@ -984,6 +1018,33 @@ export default async function adminRoutes(app: FastifyInstance) {
     return r;
   });
 
+  // The library page's "Remove from library" over a selection: the single DELETE above, once per id, and
+  // nothing more. ⚠️ Hide ONLY -- never the files. Deleting files is the irreversible step, it walks the
+  // person's own read library too (libraryAdmin.ts), and it stays behind the per-title typed confirm on
+  // Content → Library; a bulk that did both would let "Select all" plus one tap wipe hand-curated folders
+  // with no undo. A series that cannot be hidden is SKIPPED with the reason the single route would have
+  // answered, rather than failing the whole batch: the rest of the selection is still what the person
+  // asked for. One `series.delete` audit row per series, with its title, exactly as the single route
+  // writes it -- the audit page then reads the same whichever way it was done, and a batch of 200 is not
+  // one opaque line of ids.
+  app.post('/api/admin/series/bulk/hide', async (req, reply) => {
+    const b = z.object({ ids: z.array(z.string().min(1).max(64)).min(1).max(500) }).safeParse(req.body);
+    if (!b.success) return reply.code(400).send({ error: 'bad_request', message: 'Which series should be removed?' });
+    let hidden = 0;
+    const skipped: Array<{ id: string; reason: 'merged' | 'already_hidden' | 'not_found' }> = [];
+    // One id listed twice is one series: the second pass would read `already_hidden` and mislabel it.
+    for (const id of new Set(b.data.ids)) {
+      const row = await getSeriesRow(id);
+      if (!row) { skipped.push({ id, reason: 'not_found' }); continue; }
+      if (row.deleted_at) { skipped.push({ id, reason: 'already_hidden' }); continue; }
+      if (row.merged_into) { skipped.push({ id, reason: 'merged' }); continue; }
+      const r = await deleteSeries(id);
+      hidden++;
+      await logAudit('series.delete', { userId: userIdOf(req), detail: { id, title: row.title, books: r.books }, req });
+    }
+    return { ok: true, hidden, skipped };
+  });
+
   app.post('/api/admin/series/:id/restore', async (req, reply) => {
     const { id } = req.params as { id: string };
     const row = await getSeriesRow(id);
@@ -994,11 +1055,21 @@ export default async function adminRoutes(app: FastifyInstance) {
     return { ok: true };
   });
 
-  /** Hidden series, so the admin can see and undo what was deleted. */
+  /**
+   * Hidden series, so the admin can see and undo what was deleted.
+   *
+   * `live_books` / `pruned_books` are counted from lib_books rather than trusting books_count, which the
+   * scan wrote before anything was deleted: they are how the panel knows a series whose files Delete files
+   * has already removed (every row pruned) and says so on its Put back, instead of offering a restore that
+   * lists chapters which 404 -- and how it knows there is nothing left for a second Delete files to do.
+   */
   app.get('/api/admin/series/deleted', async () => ({
     content: await q(
-      `SELECT id, title, folder, books_count, deleted_at FROM lib_series
-        WHERE deleted_at IS NOT NULL ORDER BY deleted_at DESC`,
+      `SELECT s.id, s.title, s.folder, s.books_count, s.deleted_at,
+              (SELECT count(*)::int FROM lib_books b WHERE b.series_id = s.id AND b.pruned_at IS NULL) AS live_books,
+              (SELECT count(*)::int FROM lib_books b WHERE b.series_id = s.id AND b.pruned_at IS NOT NULL) AS pruned_books
+         FROM lib_series s
+        WHERE s.deleted_at IS NOT NULL ORDER BY s.deleted_at DESC`,
     ),
   }));
 
@@ -2459,13 +2530,26 @@ export default async function adminRoutes(app: FastifyInstance) {
       // Flag what's already here up front so the review screen can default those rows to skipped, visibly.
       // The map carries the series id because a tracker row the library already holds is LINKED right here
       // (below): an existing reader connecting AniList gets sync for the titles they have, which is the most
-      // valuable thing this intake does for them, and /run never sees a skipped row. ⚠️ Live rows only: a
-      // deleted series is hidden, not gone (migrate.ts), and a merged one lives on under its survivor, so
-      // a namesake in either state is NOT "already in your library" -- it used to read so, and a tracker
-      // row then got a link and a floor on a series nobody can open, while the add path would have revived
-      // it. Left unowned, the row resolves and /run adds (revives) it like any other title.
+      // valuable thing this intake does for them, and /run never sees a skipped row. ⚠️ A DELETED namesake
+      // is not owned: a deleted series is hidden, not gone (migrate.ts), and it used to read as owned, so a
+      // tracker row got a link and a floor on a series nobody can open, while the add path would have
+      // revived it. Left unowned, the row resolves and /run adds (revives) it like any other title.
+      // A MERGED-away title is the opposite case and IS owned, under its SURVIVOR's id: mergeSeries moves
+      // the chapters across and leaves the absorbed row's own title behind, so a backup or tracker list
+      // that still carries that spelling would otherwise be offered back as "not in your library", and
+      // /run -- whose duplicate check (addSeriesFromSource) also sees only visible rows -- would add a
+      // second copy, via another source, of the series the admin had just folded together. Mapping to the
+      // survivor, not the absorbed id, is what puts the tracker link and floor on the series that actually
+      // holds the chapters; and only while the survivor is itself visible, because a survivor hidden since
+      // is the deleted case above under another name. The rank column keeps the survivor's own title
+      // ahead of a merged title that happens to normalise the same (the first hit wins below).
       const have = new Map<string, string>();
-      for (const r of await q<{ id: string; title: string }>(`SELECT s.id, s.title FROM lib_series s WHERE ${visibleToAll('s')}`)) {
+      for (const r of await q<{ id: string; title: string }>(
+        `SELECT s.id, s.title, 0 AS rank FROM lib_series s WHERE ${visibleToAll('s')}
+         UNION ALL
+         SELECT t.id, m.title, 1 AS rank FROM lib_series m JOIN lib_series t ON t.id = m.merged_into WHERE ${visibleToAll('t')}
+         ORDER BY rank`,
+      )) {
         const k = norm(r.title);
         if (k && !have.has(k)) have.set(k, r.id);
       }
@@ -2872,21 +2956,24 @@ export default async function adminRoutes(app: FastifyInstance) {
     if (testing.has(id)) return reply.code(409).send({ error: 'busy', message: 'That source is already being tested.' });
     testing.add(id);
     try {
+      // ⚠️ `slow_streak` must stay in this list: diagnose() reads it before any stored-error rule, and
+      // without the column the streak reads as 0 and `too_slow` can never come out of this button (it did
+      // not for two releases; only Discover, via healthAll(), could say it). The sweep's SELECT matches.
       const h = await one<SourceHealth>(
         `SELECT source_id, status, consecutive, last_error, last_fail_at, last_ok_at, blocked_until, disabled,
-                empty_streak, last_empty_at, updated_at FROM source_health WHERE source_id = $1`,
+                empty_streak, last_empty_at, slow_streak, updated_at FROM source_health WHERE source_id = $1`,
         [id],
       ).catch(() => null);
       // The site first, and without the solver: when the solver is the broken part, asking it tells us
       // nothing. This one request separates "moved", "refused" and "solver down" from each other. Not every
       // adapter has a `base` to probe this way -- Suwayomi/extension sources never do, since the engine, not
-      // this server, talks to the site -- so `bare` stays undefined for those and only the httpStatus-derived
-      // rules below are skipped; `adapterOk` must still be carried, or an extension source that just passed
-      // every live check falls through to whatever stale error `last_error` happened to hold.
+      // this server, talks to the site -- so `bare` stays undefined for those and the homepage-status rules
+      // simply do not apply; `buildProbe` is what still carries `adapterOk`, without which an extension
+      // source that just passed every live check falls through to whatever stale error `last_error` holds.
       const bare = src.base ? await probeBase(src.base) : undefined;
       const smoke = await smokeTest(src);
-      // Same evidence the scheduled sweep uses, so the button and the schedule cannot disagree.
-      const probe = { httpStatus: 0, ...bare, adapterOk: smoke.ok, needsSolver: !!src.requiresCloudflare };
+      // The same helper the scheduled sweep uses, so the button and the schedule cannot disagree.
+      const probe = buildProbe(bare, smoke, src);
       const facts = {
         status: h?.status ?? 'ok',
         lastError: h?.last_error ?? null,
@@ -2895,6 +2982,8 @@ export default async function adminRoutes(app: FastifyInstance) {
         emptyStreak: h?.empty_streak ?? 0,
         blockedUntil: h?.blocked_until ?? null,
         slowStreak: h?.slow_streak ?? 0,
+        // The same budget Discover's latestPage runs out of, so the too_slow sentence names a real number.
+        budgetMs: env.SOURCE_LATEST_TIMEOUT_MS,
         disabled: !!h?.disabled,
       };
       // A search that returns nothing without throwing IS the markup-drift signature, so let the live result

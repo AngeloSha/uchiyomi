@@ -1493,19 +1493,17 @@ test('an exact hit for the title on a later source beats an alt-title contains h
 
 test('a deleted namesake does not count as owned; an alt-owned row records matched_via', { skip }, async () => {
   // Reintroduce the tombstone half by scanning every lib_series row again (drop the `deleted_at IS NULL AND
-  // merged_into IS NULL` WHERE from the `have` query in POST /batches): both hidden namesakes read "already
-  // in your library", are linked, and get a floor on a series nobody can open. Reintroduce the record by
-  // dropping `mv` from the candidates INSERT: the alt-owned row cannot say which name it was linked under.
+  // merged_into IS NULL` WHERE from the first arm of the `have` query in POST /batches): the hidden
+  // namesake reads "already in your library", is linked, and gets a floor on a series nobody can open.
+  // Reintroduce the record by dropping `mv` from the candidates INSERT: the alt-owned row cannot say which
+  // name it was linked under.
   const { app, headers, uid } = await boot();
   const { newSeriesId } = await import('../src/lib/ids');
   const deleted = newSeriesId();
-  const merged = newSeriesId();
-  const survivor = newSeriesId();
   const ownedAlt = newSeriesId();
   const ownedExact = newSeriesId();
   const restore = await stubAniList(async () => [
     entry('del', 'Deleted Namesake Title', { progress: 9 }),
-    entry('mrg', 'Merged Namesake Title', { progress: 4 }),
     entry('alt', 'English Owned Title', { altTitles: ['Romaji Owned Title'], progress: 3 }),
     entry('own', 'Owned Tracker Title', { altTitles: ['Some Other Name'], progress: 150 }),
   ]);
@@ -1514,11 +1512,9 @@ test('a deleted namesake does not count as owned; an alt-owned row records match
     await q(
       `INSERT INTO lib_series (id, source, title, folder, books_count, deleted_at, merged_into) VALUES
          ($1,'Other','Deleted Namesake Title',$1,1, now(), NULL),
-         ($2,'Other','Merged Namesake Title',$2,1, NULL, $3),
-         ($3,'Other','Merge Survivor Title',$3,1, NULL, NULL),
-         ($4,'Other','Romaji Owned Title',$4,1, NULL, NULL),
-         ($5,'Other','Owned Tracker Title',$5,1, NULL, NULL)`,
-      [deleted, merged, survivor, ownedAlt, ownedExact],
+         ($2,'Other','Romaji Owned Title',$2,1, NULL, NULL),
+         ($3,'Other','Owned Tracker Title',$3,1, NULL, NULL)`,
+      [deleted, ownedAlt, ownedExact],
     );
     await connectAniList(uid);
     const r = await trackerIntake(app, headers);
@@ -1528,24 +1524,135 @@ test('a deleted namesake does not count as owned; an alt-owned row records match
     // tombstone bug produces -- the rows, not the state, are what this test is about.
     const body = await waitForState(app, headers, batchId, ['review', 'done']);
     const by = (t: string) => body.items.find((i: any) => i.backup_title === t);
-    for (const t of ['Deleted Namesake Title', 'Merged Namesake Title']) {
-      const row = by(t);
-      assert.deepEqual([row.in_library, row.status, row.linked, row.matched_via], [false, null, false, null], `${t}: a hidden series is not "already in your library"`);
-    }
-    assert.equal(body.batch.already, 2, 'only the two live namesakes count as already had');
+    const row = by('Deleted Namesake Title');
+    assert.deepEqual([row.in_library, row.status, row.linked, row.matched_via], [false, null, false, null], 'a hidden series is not "already in your library"');
+    assert.equal(body.batch.already, 2, 'only the two live titles count as already had');
     const alt = by('English Owned Title');
     assert.deepEqual([alt.in_library, alt.status, alt.linked, alt.matched_via], [true, 'already', true, 'Romaji Owned Title'], 'owned under its other name, and the row says which');
     const own = by('Owned Tracker Title');
     assert.deepEqual([own.in_library, own.status, own.linked, own.matched_via], [true, 'already', true, null], 'owned under its own title records no alternate');
 
-    const links = await q('SELECT series_id FROM series_trackers WHERE series_id = ANY($1) AND provider = $2 ORDER BY series_id', [[deleted, merged, survivor, ownedAlt, ownedExact], 'anilist']);
+    const links = await q('SELECT series_id FROM series_trackers WHERE series_id = ANY($1) AND provider = $2 ORDER BY series_id', [[deleted, ownedAlt, ownedExact], 'anilist']);
     assert.deepEqual(links.map((l: any) => l.series_id).sort(), [ownedAlt, ownedExact].sort(), 'no link lands on a hidden series');
     const floors = await q('SELECT series_id, chapters FROM tracker_progress WHERE user_id = $1 AND provider = $2 ORDER BY chapters', [uid, 'anilist']);
     assert.deepEqual(floors, [{ series_id: ownedAlt, chapters: 3 }, { series_id: ownedExact, chapters: 150 }], 'and no floor either');
   } finally {
     restore();
     if (batchId) await q('DELETE FROM import_batches WHERE id = $1', [batchId]);
-    await q('DELETE FROM lib_series WHERE id = ANY($1)', [[deleted, merged, survivor, ownedAlt, ownedExact]]);
+    await q('DELETE FROM lib_series WHERE id = ANY($1)', [[deleted, ownedAlt, ownedExact]]);
+    await cleanupTracker(uid);
+    await app.close();
+  }
+});
+
+test('an absorbed title reads already owned and links to its survivor', { skip }, async () => {
+  // mergeSeries moves the chapters and leaves the absorbed row behind under its own title, not deleted,
+  // not visible. A tracker list (or a backup) that still spells the series the absorbed way used to read
+  // "not in your library": the row went into the resolve queue, and /run would have added a second copy of
+  // a series the admin had just folded together. Reintroduce by dropping the second arm (the `UNION ALL`
+  // over `merged_into`) of the `have` query in POST /batches: the absorbed title reads unowned and nothing
+  // is linked. Reintroduce the WRONG target by selecting `m.id` instead of `t.id` in that arm: the link
+  // and the floor land on the absorbed row, which holds no chapters and which nobody can open. Reintroduce
+  // the survivor guard by dropping that arm's `visibleToAll('t')`: the title behind a hidden survivor
+  // reads owned again, which is the deleted-namesake case this file already forbids.
+  const { app, headers, uid } = await boot();
+  const { newSeriesId } = await import('../src/lib/ids');
+  const merged = newSeriesId();
+  const survivor = newSeriesId();
+  const orphan = newSeriesId();        // absorbed into a survivor that was hidden afterwards
+  const hiddenSurvivor = newSeriesId();
+  const restore = await stubAniList(async () => [
+    entry('mrg', 'Merged Namesake Title', { progress: 4 }),
+    entry('orp', 'Orphaned Merge Title', { progress: 2 }),
+  ]);
+  let batchId = '';
+  try {
+    await q(
+      `INSERT INTO lib_series (id, source, title, folder, books_count, deleted_at, merged_into) VALUES
+         ($1,'Other','Merged Namesake Title',$1,0, NULL, $2),
+         ($2,'Other','Merge Survivor Title',$2,1, NULL, NULL),
+         ($3,'Other','Orphaned Merge Title',$3,0, NULL, $4),
+         ($4,'Other','Hidden Survivor Title',$4,1, now(), NULL)`,
+      [merged, survivor, orphan, hiddenSurvivor],
+    );
+    await connectAniList(uid);
+    const r = await trackerIntake(app, headers);
+    assert.equal(r.statusCode, 200, r.body);
+    batchId = r.json().batchId;
+    const body = await waitForState(app, headers, batchId, ['review', 'done']);
+    const by = (t: string) => body.items.find((i: any) => i.backup_title === t);
+    const abs = by('Merged Namesake Title');
+    assert.deepEqual([abs.in_library, abs.decision, abs.status, abs.linked], [true, 'skip', 'already', true], 'the absorbed spelling is owned: its chapters live on under the survivor');
+    const orp = by('Orphaned Merge Title');
+    assert.deepEqual([orp.in_library, orp.status, orp.linked], [false, null, false], 'absorbed into a survivor hidden since: nobody can open it, so it is not owned');
+    assert.equal(body.batch.already, 1);
+
+    const links = await q('SELECT series_id FROM series_trackers WHERE series_id = ANY($1) AND provider = $2', [[merged, survivor, orphan, hiddenSurvivor], 'anilist']);
+    assert.deepEqual(links.map((l: any) => l.series_id), [survivor], 'the tracker link lands on the series that holds the chapters, not on the absorbed row');
+    const floors = await q('SELECT series_id, chapters FROM tracker_progress WHERE user_id = $1 AND provider = $2', [uid, 'anilist']);
+    assert.deepEqual(floors, [{ series_id: survivor, chapters: 4 }], 'and so does the floor');
+  } finally {
+    restore();
+    if (batchId) await q('DELETE FROM import_batches WHERE id = $1', [batchId]);
+    await q('DELETE FROM lib_series WHERE id = ANY($1)', [[merged, survivor, orphan, hiddenSurvivor]]);
+    await cleanupTracker(uid);
+    await app.close();
+  }
+});
+
+test('a title absorbed two merges ago still reads owned by the final survivor', { skip }, async () => {
+  // The real mergeSeries, twice: m into t, then t into u. The merge route allows the second merge (t is
+  // not merged itself, it has merely absorbed m), and every reader of `merged_into` follows ONE hop, so a
+  // chain left as m→t→u ends at t -- invisible now -- and m's title falls out of the importer's `have`
+  // map: the review row reads "not in your library" and /run adds a second copy via another source of
+  // the series the admin folded together twice. mergeSeries flattens the chain inside its transaction so
+  // m points straight at u. Reintroduce by dropping the `UPDATE lib_series SET merged_into = $2 WHERE
+  // merged_into = $1` line from mergeSeries (lib/libraryAdmin.ts): the chain assertion finds m still
+  // pointing at t, and past it m's row reads unowned and the link and floor never land on u.
+  const { app, headers, uid } = await boot();
+  const { newSeriesId } = await import('../src/lib/ids');
+  const { mergeSeries } = await import('../src/lib/libraryAdmin');
+  const m = newSeriesId();
+  const t = newSeriesId();
+  const u = newSeriesId();
+  const restore = await stubAniList(async () => [entry('chain', 'Twice Absorbed Title', { progress: 6 })]);
+  let batchId = '';
+  try {
+    await q(
+      `INSERT INTO lib_series (id, source, title, folder, books_count) VALUES
+         ($1,'Other','Twice Absorbed Title',$1,1),
+         ($2,'Other','Middle Survivor Title',$2,1),
+         ($3,'Other','Final Survivor Title',$3,1)`,
+      [m, t, u],
+    );
+    for (const id of [m, t, u]) {
+      await q(`INSERT INTO lib_books (id, series_id, source, file, title, number) VALUES ($1,$2,'Other',$3,'Chapter 1',1)`,
+        [`${id}-b1`, id, `/x/${id}/ch1.cbz`]);
+    }
+    await mergeSeries(m, t);
+    await mergeSeries(t, u);
+    const chain = await q('SELECT id, merged_into FROM lib_series WHERE id = ANY($1)', [[m, t]]);
+    assert.deepEqual(Object.fromEntries(chain.map((r: any) => [r.id, r.merged_into])), { [m]: u, [t]: u },
+      'both absorbed rows point straight at the final survivor, not one at the other');
+    assert.equal((await q('SELECT count(*)::int n FROM lib_books WHERE series_id = $1', [u]))[0].n, 3, 'u holds every chapter of the three');
+
+    await connectAniList(uid);
+    const r = await trackerIntake(app, headers);
+    assert.equal(r.statusCode, 200, r.body);
+    batchId = r.json().batchId;
+    const body = await waitForState(app, headers, batchId, ['review', 'done']);
+    const row = body.items.find((i: any) => i.backup_title === 'Twice Absorbed Title');
+    assert.deepEqual([row.in_library, row.decision, row.status, row.linked], [true, 'skip', 'already', true],
+      'the spelling absorbed two merges ago is still owned: its chapters live on under the final survivor');
+    const links = await q('SELECT series_id FROM series_trackers WHERE series_id = ANY($1) AND provider = $2', [[m, t, u], 'anilist']);
+    assert.deepEqual(links.map((l: any) => l.series_id), [u], 'the tracker link lands on the final survivor, not on either absorbed row');
+    const floors = await q('SELECT series_id, chapters FROM tracker_progress WHERE user_id = $1 AND provider = $2', [uid, 'anilist']);
+    assert.deepEqual(floors, [{ series_id: u, chapters: 6 }], 'and so does the floor');
+  } finally {
+    restore();
+    if (batchId) await q('DELETE FROM import_batches WHERE id = $1', [batchId]);
+    await q('DELETE FROM lib_books WHERE series_id = ANY($1)', [[m, t, u]]);
+    await q('DELETE FROM lib_series WHERE id = ANY($1)', [[m, t, u]]);
     await cleanupTracker(uid);
     await app.close();
   }

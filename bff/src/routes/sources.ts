@@ -28,6 +28,7 @@ import { persistScan, setBookDates, setBookMeta, libraryIdFor, type LibraryRow }
 import { newSeriesId } from '../lib/ids';
 import { cleanDescription } from '../lib/htmlText';
 import { updateSeries } from '../lib/updater';
+import { busyFolders } from '../lib/bulkNewest';
 import { chooseReleases, groupsOf, releaseOrder } from '../lib/releases';
 import { effectivePrefsFor, readSeriesPrefs } from '../lib/scanlatorPrefs';
 import { copyToChapter, listingRows, replaceListing, type ListingCopy } from '../lib/seriesListing';
@@ -88,9 +89,16 @@ function sweepJobs(now = Date.now()): void {
   }
 }
 
-/** Is a download running for this series folder right now. Jobs are keyed by folder, as lib_series.folder is. */
+/**
+ * Is a download running for this series folder right now. Jobs are keyed by folder, as lib_series.folder is.
+ * The bulk "Fetch newest" run (lib/bulkNewest.ts) is a writer too, and one this map never sees: it goes
+ * through updateSeries, not startDownloadJob. Its own set says which folder it is inside, so a Fetch on
+ * that series page is refused rather than doubled while the run is on it -- the same 409 the strip's jobs
+ * earn. Reintroduce by dropping the `busyFolders` test: "a series-page fetch during the run is refused as
+ * busy" in bulkNewest.int.test.ts starts the second download.
+ */
 export function jobBusy(folder: string): boolean {
-  return jobs.get(folder)?.status === 'downloading';
+  return jobs.get(folder)?.status === 'downloading' || busyFolders.has(folder);
 }
 
 export interface DownloadJobInput {

@@ -6,7 +6,7 @@ import { q, one } from './db';
 import { getSource, SourceChapter, withTimeout } from './sources';
 import { downloadChapter } from './downloader';
 import { persistScan, setBookDates, setBookMeta } from './library';
-import { blockedNow } from './sourceHealth';
+import { blockedNow, isDisabled } from './sourceHealth';
 import { noteChapterFailure } from './chapterFailures';
 import { budgetFor } from './sources/budget';
 import { notifyNewChapter } from './push';
@@ -15,6 +15,7 @@ import { runtime } from './runtime';
 import { chooseReleases, releaseOrder } from './releases';
 import { effectivePrefsFor, readSeriesPrefs } from './scanlatorPrefs';
 import { listingRows, replaceListing } from './seriesListing';
+import { heldBooks } from './chapterCleanup';
 
 /**
  * Why a series produced nothing this run.
@@ -88,12 +89,55 @@ export interface UpdateResult {
   /** The chosen copy per number, ascending: what setBookDates is stamped from after the scan. */
   chapters?: SourceChapter[];
   diskFull?: boolean;
+  /**
+   * Whether at least one followed source was asked for its listing this run. False on every early return
+   * (gone, unrouted, every source in a cooldown, every source disabled): those cost no network call, and
+   * a caller that paces between series for the sources' sake (lib/bulkNewest.ts) has nothing to pace for.
+   */
+  asked: boolean;
+  /** Only with `newestOnly`: what became of the newest listed release. See `NewestVerdict`. */
+  newest?: NewestVerdict;
+}
+
+/**
+ * The verdict on the one number a "Fetch newest" run cares about (lib/bulkNewest.ts).
+ *
+ * `queued`: it was not on disk and went through the download loop -- `added` / `failed` say how that went.
+ * `on_disk`: the row was missing but the file was already there (a download nobody scanned), so nothing
+ * was fetched and a scan is what the caller owes. The rest fetched nothing, each for a reason the person
+ * is told: `up_to_date` (a live row holds it, or the series is Latest-N and caught up), `deleted` (we hold
+ * it only as a tombstone the read-chapter cleanup or Delete files left -- the bytes went on purpose, and
+ * "already here" would send the person to a row with no pages behind it; the series page's Fetch again is
+ * the deliberate way back), `held` (its preferred group has not released it yet -- a person who wants this
+ * copy anyway picks it on the series page), `disabled` (the admin switched its source off; `number` is
+ * null when every followed source was disabled, because none was asked for a listing), `denied` (an adult
+ * source on a capped account), `unlisted` (the sources answered with no chapters at all).
+ */
+export type NewestVerdict = {
+  number: number | null;
+  state: 'queued' | 'on_disk' | 'up_to_date' | 'deleted' | 'held' | 'disabled' | 'denied' | 'unlisted';
+};
+
+export interface UpdateOpts {
+  /**
+   * Take the newest LISTED release and nothing else, ignoring `chapter_floor` for that one number only.
+   *
+   * ⚠️ Not "the newest MISSING number". A series added as Latest-25 of 200 that is fully caught up has
+   * chapters 1..175 missing under its floor, and "newest missing" is 175: the button would backfill the
+   * back catalogue one chapter per click and report each as a download. The rule here is max(listed);
+   * if the have-set holds it the series is up to date, whatever sits below the floor. The floor itself
+   * is not moved, so the next sweep still wants >= floor, and a "Nothing yet" series (floored a hair above
+   * everything its source lists) behaves the same as before once its newest chapter has landed.
+   */
+  newestOnly?: boolean;
+  /** The viewer's age gate for the newest copy's source (visibility.sourceAllowedFor). Absent = allowed. */
+  sourceAllowed?: (sourceId: string) => boolean;
 }
 
 const nothing = (title: string, outcome: UpdateOutcome): UpdateResult =>
-  ({ title, added: 0, available: 0, outcome, failed: 0, waiting: 0, landed: [] });
+  ({ title, added: 0, available: 0, outcome, failed: 0, waiting: 0, landed: [], asked: false });
 
-export async function updateSeries(seriesId: string, maxNew = 10): Promise<UpdateResult> {
+export async function updateSeries(seriesId: string, maxNew = 10, opts: UpdateOpts = {}): Promise<UpdateResult> {
   const s = await one<any>(`SELECT id,title,source_id,source_series_id,web,folder,summary,author,genres,status,chapter_floor,scanlator_prefs FROM lib_series s WHERE s.id=$1 AND ${visibleToAll('s')}`, [seriesId]);
   if (!s) return nothing('', 'gone');
 
@@ -108,12 +152,29 @@ export async function updateSeries(seriesId: string, maxNew = 10): Promise<Updat
   const extras = await q<{ source_id: string; source_series_id: string }>(
     'SELECT source_id, source_series_id FROM series_sources WHERE series_id = $1 ORDER BY created_at, source_id', [seriesId],
   ).catch(() => []);
-  const followed = [
+  let followed = [
     ...(s.source_id && s.source_series_id && getSource(s.source_id)
       ? [{ source: s.source_id as string, ref: s.source_series_id as string, primary: true }] : []),
     ...extras.filter((e) => e.source_id !== s.source_id && getSource(e.source_id)).map((e) => ({ source: e.source_id, ref: e.source_series_id, primary: false })),
   ];
   if (!followed.length) return nothing(s.title, 'unrouted');
+
+  // "Fetch newest" does not ask a source the admin has switched off, for anything. The verdict below
+  // gates only the DOWNLOAD on isDisabled, which for the sweep is the right place (a disabled adapter
+  // stays loaded, and the sweep's listing keeps the series page's ghost rows current); but a bulk button
+  // over 500 series on one disabled source would ask that source for 500 listings, 1.5 s apiece, to say
+  // "disabled" 500 times. Filtered out of `followed` here so the listing loop, the source ranks and the
+  // refusal set below all see only sources that may be asked; a series with nothing left is its verdict
+  // with no network call (`asked: false`, so bulkNewest does not pace for it either). A source disabled
+  // between this filter and the verdict still meets the check below.
+  // Reintroduce by dropping this filter: "a disabled source is never asked for its listing" in
+  // updater.int.test.ts counts one listing call.
+  if (opts.newestOnly) {
+    const askable: typeof followed = [];
+    for (const f of followed) if (!(await isDisabled(f.source).catch(() => false))) askable.push(f);
+    if (!askable.length) return { ...nothing(s.title, 'ok'), newest: { number: null, state: 'disabled' } };
+    followed = askable;
+  }
 
   // A throw and an empty list are NOT the same answer, and collapsing them is what made a broken source
   // indistinguishable from a series with nothing new. routes/sources.ts already separates these two, with a
@@ -142,7 +203,7 @@ export async function updateSeries(seriesId: string, maxNew = 10): Promise<Updat
   // Stamped on every path where a source was ASKED, so a dead source's series still rotate to the back of
   // the queue instead of sitting at its front forever. Not stamped on the cooldown path: never asked.
   if (blocked === followed.length) return nothing(s.title, 'blocked');
-  if (!answered) { await stampChecked(seriesId, null, null); return nothing(s.title, 'source_error'); }
+  if (!answered) { await stampChecked(seriesId, null, null); return { ...nothing(s.title, 'source_error'), asked: true }; }
 
   // One copy per number out of everything listed, by the release preferences: the series' own over the
   // global ones, with the series' patience in force -- this is the sweep, and "Check now" runs the same
@@ -162,7 +223,17 @@ export async function updateSeries(seriesId: string, maxNew = 10): Promise<Updat
   const wanted = releases.filter((c) => c.number >= floor);
   // What is on disk is never replaced, whoever released it: a copy from a better-ranked group appearing
   // later is not a missing chapter. (A deliberate "replace with the preferred group" would be its own path.)
-  const have = new Set((await q<{ number: number }>('SELECT number FROM lib_books WHERE series_id=$1', [seriesId])).map((r) => Number(r.number)));
+  // "On disk" includes the tombstones the library keeps on purpose -- a chapter the read-chapter cleanup
+  // or Delete files removed is not fetched back every night -- but NOT a row the verify task marked
+  // `missing`: that file is gone without anyone deciding so (a database-only restore), and fetching it
+  // again is the recovery. heldBooks in lib/chapterCleanup.ts is that rule, in one place.
+  // Reintroduce by dropping the heldBooks predicate: "the sweep fetches a chapter the verify task marked
+  // missing" in verifyFiles.int.test.ts asks for nothing.
+  const heldRows = await q<{ number: number; pruned_at: string | null }>(`SELECT number, pruned_at FROM lib_books WHERE series_id=$1 AND ${heldBooks()}`, [seriesId]);
+  const have = new Set(heldRows.map((r) => Number(r.number)));
+  // The held numbers a LIVE row stands behind. The sweep needs only `have`; "Fetch newest" tells a
+  // number we hold as pages apart from one we hold only as a deliberate tombstone (see the verdict below).
+  const live = new Set(heldRows.filter((r) => r.pruned_at == null).map((r) => Number(r.number)));
   const missing = wanted.filter((c) => !have.has(c.number)).sort((a, b) => a.number - b.number);
   await stampChecked(seriesId, releases.length, missing.length);
   // Chapters that have already failed CHAPTER_RETRY_CAP times are not attempted again by the sweep.
@@ -176,6 +247,44 @@ export async function updateSeries(seriesId: string, maxNew = 10): Promise<Updat
   const eligible = missing.filter((c) => !cappedNums.has(c.number) && !heldNums.has(c.number));
   const capped = missing.filter((c) => cappedNums.has(c.number)).length;
   const waiting = missing.filter((c) => heldNums.has(c.number)).length;
+
+  // "Fetch newest" (lib/bulkNewest.ts) replaces the sweep's queue with the newest LISTED release, floor
+  // ignored for that one number -- see UpdateOpts.newestOnly for why it is max(listed) and never "the
+  // newest missing", which turns a caught-up Latest-N series into a reverse back-catalogue backfill.
+  // `have` is the same set the sweep trusts, so a tombstone the verify task marked `missing` counts as
+  // not held here too. The retry cap is reset for that number, as a manual fetch on the series page is:
+  // "try it again on purpose" is what the cap leaves room for. A hold is honoured: this is a bulk button
+  // over many series, not the series page's explicit pick of one copy, and the copy on offer is by
+  // definition not the one the person asked to wait for. The source gates are the fetch route's: a
+  // disabled source and an adult source on a capped account fetch nothing and say which it was.
+  // Reintroduce by selecting the newest MISSING number (`releases.filter((c) => !have.has(c.number))`
+  // and taking its last element): "a caught-up Latest-N series answers up to date" in updater.int.test.ts
+  // downloads a chapter below the floor.
+  //
+  // A number that is held but has no live row is a tombstone the cleanup or Delete files left on purpose
+  // -- which is exactly where "Put back" sends a person, and where they then press Fetch newest to get the
+  // chapter back. The have-set is right not to fetch it (the sweep must not undo a deliberate deletion
+  // every night), but "Chapter N is already here." over a row the series page shows as deleted from the
+  // server is a lie: told apart as `deleted`, so the sentence can point at the way back (Fetch again on
+  // the series page). A live row beside a tombstone of the same number is simply held: live wins.
+  // Reintroduce by answering `up_to_date` for every held number (dropping the `live.has` test): "a newest
+  // chapter deleted on purpose is told apart from one we hold" in updater.int.test.ts reads up_to_date.
+  let queue = eligible;
+  let newest: NewestVerdict | undefined;
+  if (opts.newestOnly) {
+    const top = releases.reduce<SourceChapter | null>((best, c) => (best && best.number >= c.number ? best : c), null);
+    const via = top ? (top.source ?? (s.source_id as string)) : '';
+    if (!top) newest = { number: null, state: 'unlisted' };
+    else if (have.has(top.number)) newest = { number: top.number, state: live.has(top.number) ? 'up_to_date' : 'deleted' };
+    else if (heldNums.has(top.number)) newest = { number: top.number, state: 'held' };
+    else if (await isDisabled(via).catch(() => false)) newest = { number: top.number, state: 'disabled' };
+    else if (opts.sourceAllowed && !opts.sourceAllowed(via)) newest = { number: top.number, state: 'denied' };
+    else {
+      newest = { number: top.number, state: 'queued' };
+      await q('DELETE FROM chapter_failures WHERE series_id = $1 AND number = $2::real', [seriesId, top.number]).catch(() => {});
+    }
+    queue = newest.state === 'queued' && top ? [top] : [];
+  }
 
   // What the sources listed, kept for the series page and for manual fetches (lib/seriesListing.ts).
   // Persisted BEFORE the download loop so a listing survives a run the budget or the disk cuts short --
@@ -209,8 +318,8 @@ export async function updateSeries(seriesId: string, maxNew = 10): Promise<Updat
   // refusal, as before -- so each source still costs at most one strike per run.
   const refusing = new Set<string>();
   // oldest-missing-first: a partial "first N" add fills forward coherently, and new releases (all > our max)
-  // are still the only gap once a series is fully downloaded.
-  for (const ch of eligible) {
+  // are still the only gap once a series is fully downloaded. (`queue` is `eligible` unless newestOnly.)
+  for (const ch of queue) {
     if (attempts >= maxNew) break;
     if (runtime.stopping) break; // between chapters, never mid-write
     const via = ch.source ?? (s.source_id as string);
@@ -224,6 +333,9 @@ export async function updateSeries(seriesId: string, maxNew = 10): Promise<Updat
         meta: { series: s.title, summary: s.summary, author: s.author, genres: s.genres, url: s.web, status: s.status },
       });
       if (!res.skipped) { added++; landed.push({ number: ch.number, scanlator: ch.scanlator, source: via }); }
+      // The file was there but no row was: a download nobody scanned. Told apart from `queued` so "Fetch
+      // newest" scans the folder and reports the chapter as already here rather than as a failed fetch.
+      else if (newest && newest.number === ch.number) newest = { ...newest, state: 'on_disk' };
     } catch (e: any) {
       // The library disk is at its floor: not this chapter's fault, not the source's, and pointless to try
       // the next one. Stop here and let the sweep say so.
@@ -247,7 +359,7 @@ export async function updateSeries(seriesId: string, maxNew = 10): Promise<Updat
   // Provenance goes only onto what LANDED, never onto the whole listing: the chosen copy for a number can
   // change between runs, and the file on disk does not change with it.
   await setBookMeta(s.folder, landed).catch(() => {});
-  return { title: s.title, added, available: releases.length, outcome: 'ok', failed, waiting, landed, capped, folder: s.folder, chapters: releases, diskFull };
+  return { title: s.title, added, available: releases.length, outcome: 'ok', failed, waiting, landed, capped, folder: s.folder, chapters: releases, diskFull, asked: true, ...(newest ? { newest } : {}) };
 }
 
 /**

@@ -8,8 +8,10 @@ app stores, what each container is for, keeping it up to date, and putting it be
 <details>
 <summary>Prefer to run Postgres yourself?</summary>
 
-Set `DATABASE_URL` and the same image talks to your database instead of starting its own; that one variable
-is the whole switch. [`deploy/docker-compose.external-db.yml`](../deploy/docker-compose.external-db.yml) is
+Set `DATABASE_URL` on the app container and the same image talks to your database instead of starting its
+own; that one variable is the whole switch (it is documented under *Database* in
+[docs/CONFIGURATION.md](CONFIGURATION.md#environment-variables), and **Admin → Overview** says which one is in
+use). [`deploy/docker-compose.external-db.yml`](../deploy/docker-compose.external-db.yml) is
 that layout ready to use, with a Postgres container beside the app -- it is what the install instructions
 used before v0.18.0, and an existing install keeps working on it unchanged. Moving between the two is a
 dump and a restore, written down in both directions in **[docs/MIGRATING.md](MIGRATING.md)**.
@@ -74,8 +76,8 @@ extension engine is not part of it.
 | Container | Role |
 |---|---|
 | `uchiyomi` | the app: the API, the PWA it serves, and the embedded Postgres database |
-| `uchiyomi-flaresolverr` | Cloudflare solver — **started automatically**; sources that need it use it with no config |
-| `uchiyomi-suwayomi` | the extension engine, so Mihon / Tachiyomi extensions work ([docs](extensions.md)) |
+| `uchiyomi-flaresolverr` | Cloudflare solver — **started automatically**; sources that need it use it with no config, and since v0.37.0 so does the extension engine |
+| `uchiyomi-suwayomi` | the extension engine, so Mihon / Tachiyomi extensions work ([docs](extensions.md)); the compose file points it at the solver above (`FLARESOLVERR_ENABLED` / `FLARESOLVERR_URL` on this container) |
 
 ```bash
 docker compose logs -f uchiyomi  # watch it boot

@@ -18,11 +18,12 @@
 import { q } from './db';
 import { getSource, listSources, reloadAll } from './sources';
 import { readSites, writeSites } from './sources/customSites';
-import { smokeTest, probeBase } from './sourceProbe';
+import { smokeTest, probeBase, buildProbe } from './sourceProbe';
 import { diagnose, Diagnosis } from './sourceDiagnosis';
 import { clearBlock, SourceHealth } from './sourceHealth';
 import { notifyAdmins } from './push';
 import { logAudit } from './audit';
+import { env } from '../env';
 
 export interface SourceVerdict {
   id: string;
@@ -48,10 +49,17 @@ const ACTIONABLE = new Set<Diagnosis['code']>([
   'markup_drift', 'unreachable', 'upstream_down',
 ]);
 
+/**
+ * ⚠️ `slow_streak` has to be in this list. diagnose() reads `slowStreak` before any stored-error rule, and
+ * for two releases neither this SELECT nor the Test button's carried the column, so `h.slow_streak` was
+ * undefined, the streak read as 0, and `too_slow` -- the verdict written for the source that vanished for a
+ * day -- was reachable only from the Discover route, never from the sweep or the button. The budget goes
+ * with it, because the fix sentence names the number of seconds the source keeps running out of.
+ */
 async function healthOf(id: string): Promise<SourceHealth | null> {
   return q<SourceHealth>(
     `SELECT source_id, status, consecutive, last_error, last_fail_at, last_ok_at, blocked_until, disabled,
-            empty_streak, last_empty_at, updated_at FROM source_health WHERE source_id = $1`,
+            empty_streak, last_empty_at, slow_streak, updated_at FROM source_health WHERE source_id = $1`,
     [id],
   ).then((r) => r[0] ?? null).catch(() => null);
 }
@@ -136,10 +144,10 @@ async function sweep(opts: { autoFix?: boolean }): Promise<WatchdogResult> {
     // The adapter's own result and whether this source is solver-fronted are both live evidence, and both
     // outrank a bare homepage request. Without them a Cloudflare-protected site that works perfectly reads
     // as a 403 block, because the probe deliberately does not use the solver. `bare` stays undefined for
-    // adapters with no `base` to probe (every Suwayomi/extension source: the engine talks to the site, not
-    // this server) -- but `adapterOk` must still reach `diagnose`, or a source that just passed every live
-    // check falls through to whatever stale error `last_error` happened to hold and never clears.
-    const probe = { httpStatus: 0, ...bare, adapterOk: smoke.ok, needsSolver: !!src.requiresCloudflare };
+    // adapters with no `base` to probe (every Suwayomi/extension source) -- `buildProbe` is what keeps
+    // `adapterOk` reaching `diagnose` regardless, and the Test button goes through the same helper, so the
+    // schedule and the button cannot disagree. ⚠️ Do not inline this as `bare && {...}`: that is the bug.
+    const probe = buildProbe(bare, smoke, src);
     const parsedNothing = smoke.checks[0]?.ok === false && /no results/.test(smoke.checks[0]?.detail || '');
     let d = diagnose(
       {
@@ -150,6 +158,7 @@ async function sweep(opts: { autoFix?: boolean }): Promise<WatchdogResult> {
         emptyStreak: parsedNothing ? Math.max(h?.empty_streak ?? 0, 3) : (h?.empty_streak ?? 0),
         blockedUntil: h?.blocked_until ?? null,
         slowStreak: h?.slow_streak ?? 0,
+        budgetMs: env.SOURCE_LATEST_TIMEOUT_MS,
         disabled: false,
       },
       probe,

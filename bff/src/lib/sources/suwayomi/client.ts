@@ -12,11 +12,39 @@ export interface GqlError extends Error {
   status?: number;
 }
 
+/**
+ * The operator's engine base, normalised ONCE for everything that builds a URL on it: scheme + host + port +
+ * path, trailing slashes collapsed, no query, no fragment (userinfo dropped too -- fetch refuses a URL that
+ * carries credentials, and the engine's are SUWAYOMI_USERNAME / SUWAYOMI_PASSWORD).
+ *
+ * Two readers build URLs on `SUWAYOMI_URL`: `suwayomiUrl` here, which turns the engine's server-relative
+ * thumbnail and page paths into the absolute URLs that get STORED, and routes/images.ts `engineCoverUrl`,
+ * which rebuilds the one thumbnail URL the cover proxy may fetch un-guarded and accepts a stored cover only if
+ * it round-trips to exactly that. ⚠️ Both used to strip one trailing slash from the raw env string and call
+ * it a base, so any value that was not already clean made them disagree: `http://engine:4567//` stored
+ * `//api/v1/manga/1/thumbnail` (an empty path segment the shape check cannot match), and `...:4567/?q` or
+ * `...:4567#f` put the query or fragment in front of the path. Every extension cover then fell through to the
+ * SSRF guard, resolved private, and came back as the grey placeholder with nothing logged (R1's v0.37.0
+ * review). Reading the same normalised base from one place is what keeps the two in agreement.
+ *
+ * A value `new URL` cannot parse, or that is not http(s), is handed back with only its trailing slashes
+ * removed: normalising it would invent something (a scheme-less `engine:4567` parses with origin "null"), and
+ * `suwayomiConfigured` / `isEngineOrigin` already treat such a value as no engine. `raw` is a parameter, not
+ * read from `env` inside, because env is parsed once at module load and a test could not vary it otherwise.
+ */
+export function suwayomiBase(raw: string | undefined = env.SUWAYOMI_URL): string {
+  const s = (raw || '').trim();
+  if (!s) return '';
+  let u: URL;
+  try { u = new URL(s); } catch { return s.replace(/\/+$/, ''); }
+  if (u.protocol !== 'http:' && u.protocol !== 'https:') return s.replace(/\/+$/, '');
+  return u.origin + u.pathname.replace(/\/+$/, '');
+}
+
 /** Absolute URL for a path Suwayomi returned (thumbnails and pages come back server-relative). */
 export function suwayomiUrl(path: string): string {
-  const base = env.SUWAYOMI_URL.replace(/\/$/, '');
   if (/^https?:\/\//i.test(path)) return path;
-  return `${base}/${path.replace(/^\//, '')}`;
+  return `${suwayomiBase()}/${path.replace(/^\//, '')}`;
 }
 
 /** Headers for fetching an image back off Suwayomi (it proxies covers and pages through itself). */

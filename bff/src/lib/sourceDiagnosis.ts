@@ -48,8 +48,15 @@ export interface HealthFacts {
 
 /** Live evidence. Optional by design: most callers have only what is in the table. */
 export interface Probe {
-  /** 0 when no HTTP answer was ever received. */
-  httpStatus: number;
+  /**
+   * What the site's homepage answered to a bare request. 0 when a request was made and no HTTP answer ever
+   * came back (the transport failed; see `transport`). ABSENT when no request was made at all: an adapter
+   * with no `base` to probe, which is every Suwayomi/extension source, because the engine talks to the
+   * site and this server never does. The two must stay distinct. PR #56 first encoded "not asked" as 0,
+   * and while no rule happened to fire on it, a status of 0 reads as "the site is unreachable" to the next
+   * person who adds a rule keyed on it -- and every extension source would then diagnose as down.
+   */
+  httpStatus?: number;
   /** After redirects, so a moved domain shows up as a different host. */
   finalUrl?: string;
   /** 'ENOTFOUND' | 'ECONNREFUSED' | 'timeout' | ... when the transport failed before HTTP. */
@@ -124,6 +131,22 @@ const RULES: Array<[RegExp, () => Diagnosis]> = [
       'The site presented a Cloudflare challenge the solver could not finish in time. Often transient, so re-test first. If it persists, the site has raised its protection.',
       'admin')],
 
+  // Suwayomi's own CloudflareInterceptor throws exactly these words when the ENGINE's FlareSolverr
+  // integration is off, which is its default (issue #54: Mangaball via keiyoushi, `java.io.IOException:
+  // Cloudflare bypass currently disabled` on every search). The generic rule below would send the admin to
+  // check Uchiyomi's solver, which is not involved: extension sources never go through it. The engine talks
+  // to the site itself and has to be pointed at the solver by its own env. Must sit ABOVE the generic
+  // cf_challenge rule, which matches the same string on the word "cloudflare".
+  // ⚠️ The sentence must stay name-agnostic. Its first version named the development stack's containers
+  // (yomi-suwayomi / yomi-flaresolverr), which exist on exactly one install; every shipped compose file says
+  // uchiyomi-*, the Unraid template runs no engine at all, and the admins who will actually read this are
+  // the ones whose engine was NOT recreated from the v0.37.0 files -- so a hard-coded name is wrong for
+  // precisely the people it is for. Name the shipped names as examples and point at the value they have.
+  [/cloudflare bypass currently disabled/i, () =>
+    D('cf_challenge', 'This source is protected by a check we could not get past.',
+      "The extension engine's own Cloudflare bypass is switched off. On the Suwayomi engine's container (uchiyomi-suwayomi in the shipped compose files) set FLARESOLVERR_ENABLED=true and FLARESOLVERR_URL to the same solver address Uchiyomi uses (http://uchiyomi-flaresolverr:8191 in the shipped files), then recreate it. The v0.37.0 compose files already set both, so an upgrade that recreates the engine is the fix there.",
+      'admin')],
+
   [/just a moment|cf-chl|cf_clearance|cloudflare|challenge/i, () =>
     D('cf_challenge', 'This source is protected by a check we could not get past.',
       'A Cloudflare interstitial was served and not solved. Confirm the solver is healthy, then re-test.',
@@ -192,30 +215,36 @@ export function diagnose(f: HealthFacts, probe?: Probe, baseUrl?: string): Diagn
       return D('unreachable', 'This source is not answering right now.',
         `The address could not be reached (${probe.transport}). Check the URL. The site may be gone.`, 'admin');
     }
-    // Only meaningful for a source that does NOT go through the solver. For one that does, this is just the
-    // challenge page and says nothing about whether the source works.
-    if (probe.httpStatus === 403 && !probe.needsSolver) {
-      return D('edge_403', 'This source is blocking this server right now.',
-        "The site's CDN answered 403 to a direct request. A challenge solver cannot fix that; it is usually a datacentre-IP block.",
-        'admin');
-    }
-    if (probe.httpStatus === 429) {
-      return D('rate_limited', 'This source asked us to slow down.',
-        'Nothing to do. The cooldown widens automatically and clears itself.', 'wait');
-    }
-    // The inference that matters most: the site answered us fine from this very container, so whatever the
-    // stored error blames, the broken component is the solver and not the site.
-    if (probe.httpStatus === 200 && /flaresolverr/i.test(err)) {
-      const hit = RULES.find(([re]) => re.test(err))?.[1]();
-      if (hit && hit.code.startsWith('solver_')) return hit;
-      return D('solver_down', NEEDS_ADMIN,
-        'The site answers fine from this server, so the Cloudflare solver is the broken part. Check that container.',
-        'admin');
-    }
-    if (probe.httpStatus === 200 && probe.looksHtml && suspect) {
-      return D('markup_drift', MARKUP_DRIFT,
-        'The site answers, but its listing no longer matches the parser, so the site changed its markup. Re-add it with auto-detect to re-pick the engine.',
-        'admin', { silent: true });
+    // Everything below reads the homepage's status, so it only applies when a homepage was actually asked.
+    // For an extension source nothing was (the engine talks to the site, not this server), and a rule that
+    // read an absent status as anything at all would be inventing evidence: the live facts such a source
+    // brings are `adapterOk` above and nothing else, and its verdict comes from the stored rules below.
+    if (probe.httpStatus != null) {
+      // Only meaningful for a source that does NOT go through the solver. For one that does, this is just
+      // the challenge page and says nothing about whether the source works.
+      if (probe.httpStatus === 403 && !probe.needsSolver) {
+        return D('edge_403', 'This source is blocking this server right now.',
+          "The site's CDN answered 403 to a direct request. A challenge solver cannot fix that; it is usually a datacentre-IP block.",
+          'admin');
+      }
+      if (probe.httpStatus === 429) {
+        return D('rate_limited', 'This source asked us to slow down.',
+          'Nothing to do. The cooldown widens automatically and clears itself.', 'wait');
+      }
+      // The inference that matters most: the site answered us fine from this very container, so whatever
+      // the stored error blames, the broken component is the solver and not the site.
+      if (probe.httpStatus === 200 && /flaresolverr/i.test(err)) {
+        const hit = RULES.find(([re]) => re.test(err))?.[1]();
+        if (hit && hit.code.startsWith('solver_')) return hit;
+        return D('solver_down', NEEDS_ADMIN,
+          'The site answers fine from this server, so the Cloudflare solver is the broken part. Check that container.',
+          'admin');
+      }
+      if (probe.httpStatus === 200 && probe.looksHtml && suspect) {
+        return D('markup_drift', MARKUP_DRIFT,
+          'The site answers, but its listing no longer matches the parser, so the site changed its markup. Re-add it with auto-detect to re-pick the engine.',
+          'admin', { silent: true });
+      }
     }
   }
 

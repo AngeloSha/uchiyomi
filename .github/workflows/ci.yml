@@ -21,10 +21,10 @@ permissions:
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   # Pull requests: cancel superseded runs, since only the latest push matters.
-  # main: never cancel. The Tests job runs ~18 minutes (integration tests are serial against a real
-  # Postgres on purpose), so two commits landing inside that window used to kill the earlier run mid-job --
-  # and GitHub renders a *cancelled* run as a red "failing" badge even when every job that finished had
-  # passed. That badge is the first line of the README.
+  # main: never cancel. The Tests job runs 38-39 minutes, see the test job (integration tests are serial
+  # against a real Postgres on purpose), so two commits landing inside that window used to kill the earlier
+  # run mid-job -- and GitHub renders a *cancelled* run as a red "failing" badge even when every job that
+  # finished had passed. That badge is the first line of the README.
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
@@ -34,6 +34,7 @@ jobs:
   build-bff:
     name: Build BFF
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
       - name: Build the BFF image
@@ -42,6 +43,7 @@ jobs:
   build-web:
     name: Build Web
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
       - name: Build the web image
@@ -50,6 +52,7 @@ jobs:
   build-aio:
     name: Build All-in-one
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
       - name: Build the single-container image
@@ -69,7 +72,7 @@ jobs:
           node-version: 24
       - name: Install browser tooling
         working-directory: ./web
-        run: npm install --no-audit --no-fund
+        run: npm ci --no-audit --no-fund
       - name: Bring it up and drive it
         working-directory: ./web
         run: KEEP=1 npm run test:e2e
@@ -100,6 +103,10 @@ jobs:
   test:
     name: Tests
     runs-on: ubuntu-latest
+    # ⚠️ The integration tests run serially and the job takes 38-39 minutes on every green run (measured over
+    # the last five, 2026-09-17..19), so this is 1.5x that, not a round number: a hung test used to sit for
+    # GitHub's 360-minute default. Pinned by releasePipeline.test.ts, together with the build jobs' timeouts.
+    timeout-minutes: 60
     services:
       postgres:
         image: postgres:16-alpine
@@ -123,13 +130,15 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: 24
+      # `npm ci`, not `npm install`: install may resolve differently from package-lock.json and rewrites it on
+      # the runner, so a Dependabot lockfile bump (#57) was never what CI actually tested. ci fails instead.
       - name: BFF tests
         working-directory: ./bff
         run: |
-          npm install --no-audit --no-fund
+          npm ci --no-audit --no-fund
           npm test
       - name: Web tests
         working-directory: ./web
         run: |
-          npm install --no-audit --no-fund
+          npm ci --no-audit --no-fund
           npm test

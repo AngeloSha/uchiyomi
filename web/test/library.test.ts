@@ -236,3 +236,143 @@ test('the library filter state is still the URL, with one writer', () => {
   assert.equal((page.match(/router\.replace\(/g) ?? []).length, 2,
     'expected exactly two URL writers in the library: setParam and clearAll');
 });
+
+// ---- The select bar's bulk actions (v0.37.0, rebuilt from PR #53) ----
+
+test('the select bar removes by hiding, never by deleting files', () => {
+  // ⚠️ PR #53's bulk Delete hid AND deleted files in one request over up to 500 series, behind a typed
+  // DELETE: "Select all" plus one word wiped hand-curated folders in the READ library with no undo. The
+  // rebuilt chip posts to the hide-only route and says so in the series page's own words. Reintroduce by
+  // pointing the chip at a route that deletes files (or by dropping the 'No files are deleted.' line from
+  // the dialog): the dialog would then promise what the route does not keep.
+  const src = code(read('app/library/page.tsx'));
+  assert.match(src, /'\/api\/admin\/series\/bulk\/hide'/, 'the bulk remove no longer calls the hide-only route');
+  assert.doesNotMatch(src, /bulk\/delete|delete-files|\/files'/, 'the library bar reaches a file-deleting route');
+  assert.match(src, /tr\('No files are deleted\.'\)/, 'the confirm dialog lost the sentence that makes it honest');
+  assert.doesNotMatch(src, /confirmText=/, 'a typed confirmation came back: a count-confirm is the whole point of hide-only');
+  assert.match(src, /Remove \{n\} series from the library\?/, 'the dialog title no longer carries the count');
+});
+
+test('Fetch newest starts a job and polls it, rather than holding one request open', () => {
+  // The server loop downloads and can run for minutes over a big selection; a request held open that long
+  // dies at the proxy while the server keeps going, and a re-tap starts a second loop. Reintroduce by
+  // awaiting a single POST and reading the results off its answer: no GET, no 2 s poll.
+  const src = code(read('app/library/page.tsx'));
+  assert.match(src, /api<\{ ok: true; total: number \}>\('\/api\/library\/bulk\/newest', \{ method: 'POST'/, 'the chip no longer starts the job');
+  assert.match(src, /followBulkNewest\(\{/, 'the chip no longer follows the job through lib/bulkNewest');
+  assert.match(src, /api<BulkNewestStatus>\('\/api\/library\/bulk\/newest'\)/, 'the chip no longer polls the job');
+  assert.match(src, /setTimeout\(r, BULK_NEWEST_POLL_MS\)/, 'the poll interval is not the shared one');
+  const lib = code(read('lib/bulkNewest.ts'));
+  assert.match(lib, /BULK_NEWEST_POLL_MS = 2000/, 'the poll interval is not the 2 s the series page uses');
+  assert.match(lib, /if \(!st\.running\) return \{ outcome: 'finished'/, 'the poll does not stop when the job does');
+});
+
+/** Drives lib/bulkNewest with a scripted GET: each entry is one poll's answer, `null` an unanswered one. */
+async function follow(answers: (Partial<import('../lib/bulkNewest').BulkNewestStatus> | null)[], cancelAfterPoll?: number) {
+  const { followBulkNewest } = await import('../lib/bulkNewest');
+  let polls = 0;
+  let cancelled = false;
+  const progress: number[] = [];
+  const end = await followBulkNewest({
+    poll: async () => {
+      const a = answers[polls++];
+      if (polls === cancelAfterPoll) cancelled = true;
+      if (a === null || a === undefined) throw new Error('502');
+      return { running: false, done: 0, total: 0, results: [], ...a };
+    },
+    onProgress: (s) => progress.push(s.done),
+    wait: async () => {},
+    cancelled: () => cancelled,
+  });
+  return { end, polls, progress };
+}
+
+test('one poll answered then three misses is a lost run, not a summary', async () => {
+  // ⚠️ The lost-track toast used to fire only when NO poll had ever answered; a run that answered once with
+  // `running: true` and then went dark fell through to the summary, which reported "Fetched 1 chapter" in
+  // success tone for a run still going, and ended select mode as if it were done. Reintroduce by returning
+  // `'finished'` whenever `status` is non-null after the miss cap (`return { outcome: last ? 'finished' :
+  // 'lost', status: last }` at the end of followBulkNewest).
+  const partial = { running: true, done: 1, total: 3, results: [{ id: 's0', outcome: 'downloaded' as const }] };
+  const { end, polls } = await follow([partial, null, null, null]);
+  assert.equal(end.outcome, 'lost', 'a run that went dark after a partial answer is lost, not finished');
+  assert.equal(polls, 4, 'one answer plus the three-miss cap');
+  assert.equal(end.status?.running, true, 'the partial status is handed back, but marked as still running');
+  // And the page shows the lost-track toast for that outcome, never the summary.
+  const src = code(read('app/library/page.tsx'));
+  assert.match(src, /if \(end\.outcome === 'lost'\) \{ toast\(tr\('Lost track of the fetch\. Check the library in a moment\.'\), 'error'\)/, 'the page no longer toasts lost-track for a lost run');
+  assert.match(src, /else if \(end\.outcome === 'finished'\)/, 'the summary is no longer gated on a finished run');
+
+  // The two neighbours of that case, so the fix is not "everything is lost now".
+  assert.equal((await follow([null, null, null])).end.outcome, 'lost', 'never answered is still lost');
+  const done = await follow([partial, { running: false, done: 3, total: 3, results: [] }]);
+  assert.equal(done.end.outcome, 'finished');
+  assert.equal(done.end.status?.done, 3);
+  const flaky = await follow([partial, null, null, { running: false, done: 3, total: 3, results: [] }]);
+  assert.equal(flaky.end.outcome, 'finished', 'two misses then an answer is a hiccup, not a lost run');
+  assert.deepEqual(flaky.progress, [1, 3], 'every answered poll reports progress');
+});
+
+test('Cancel stays live while a Fetch newest run is followed', async () => {
+  // A 500-series run is minutes of pacing plus downloads, and every chip -- Cancel included -- was disabled
+  // for all of it: the only way out of the frozen bar was to navigate away. Cancel now stops the polling
+  // and leaves select mode; the run completes server-side. Reintroduce by putting `disabled={acting}` back
+  // on the Cancel chip, or by dropping the `cancelled()` checks from followBulkNewest.
+  const src = code(read('app/library/page.tsx'));
+  const cancel = /<button[^>]*onClick=\{\(\) => \{ stopFollowing\.current\?\.\(\); setSelecting\(false\); setPicked\(new Set\(\)\); \}\}[^>]*>\{tr\('Cancel'\)\}/.exec(src)?.[0] ?? '';
+  assert.ok(cancel, 'the Cancel chip no longer stops the follow before leaving select mode');
+  assert.match(cancel, /disabled=\{acting && !fetching\}/, 'Cancel is disabled for the whole run again');
+  assert.match(src, /stopFollowing\.current = \(\) => \{ cancelled = true; wake\?\.\(\); \}/, 'Cancel no longer ends the current wait');
+  assert.match(src, /if \(end\.outcome !== 'cancelled'\) settle\(\)/, 'a cancelled run settles, wiping a selection made since');
+
+  const running = { running: true, done: 1, total: 5, results: [] };
+  const { end, polls } = await follow([running, running, running, running], 2);
+  assert.equal(end.outcome, 'cancelled', 'the follow does not stop on cancel');
+  assert.equal(polls, 2, 'polling went on after cancel');
+});
+
+test('a remove that hid nothing says so, in error tone, and keeps the selection', () => {
+  // "Removed 0 series · 1 skipped" in success tone, with select mode ended as if something had happened, is
+  // what a selection of merged-away rows used to get. Reintroduce by dropping the `r.hidden === 0` branch.
+  const src = code(read('app/library/page.tsx'));
+  assert.match(src, /if \(r\.hidden === 0\) \{\s*toast\(r\.skipped\.length === 1 \? tr\('Nothing removed · 1 skipped'\) : tr\('Nothing removed · \{n\} skipped', \{ n: r\.skipped\.length \}\), 'error'\);\s*\}/, 'the nothing-hidden toast is gone, or not in error tone');
+  const branch = /if \(r\.hidden === 0\) \{[\s\S]*?\} else \{([\s\S]*?)\n\s*\}/.exec(src);
+  assert.ok(branch, 'the success path is no longer the else of the nothing-hidden check');
+  assert.doesNotMatch(/if \(r\.hidden === 0\) \{[\s\S]*?\} else/.exec(src)![0], /settle\(\)/, 'a remove that hid nothing leaves select mode');
+  assert.match(branch![1], /settle\(\)/, 'a remove that hid something no longer settles');
+});
+
+test('the select bar fits two rows on a phone: admin actions fold behind More', () => {
+  // ⚠️ Seven chips plus the count wrap to three rows at 390 px (series/page.tsx warns about exactly this),
+  // and a third row covers a third of the grid. The two admin chips are `hidden lg:inline-flex` and a `More`
+  // chip (`lg:hidden`) opens them in a Sheet instead. Reintroduce by showing the admin chips at every width:
+  // measure36-style puppeteer at 390 px shows three rows of chips.
+  const src = read('app/library/page.tsx');
+  const bar = /bottom-\[calc\(5\.75rem\+env\(safe-area-inset-bottom\)\)\][\s\S]*?<\/div>\s*<\/div>\s*\)\}/.exec(src)?.[0] ?? '';
+  assert.ok(bar.length > 200, 'could not find the select bar');
+  const chips = [...bar.matchAll(/className=\{?[`"]chip[^`"]*[`"]\}?/g)].map((m) => m[0]);
+  const phoneOnly = chips.filter((c) => /\blg:hidden\b/.test(c));
+  const wideOnly = chips.filter((c) => /\bhidden\b.*\blg:inline-flex\b/.test(c));
+  assert.equal(phoneOnly.length, 1, 'expected exactly one phone-only More chip');
+  assert.equal(wideOnly.length, 2, 'expected the two admin chips to be wide-screen only');
+  const phoneChips = chips.length - wideOnly.length;
+  assert.ok(phoneChips <= 6, `${phoneChips} chips reach the phone bar; more than six wraps to a third row at 390 px`);
+  // And the sheet closes before either dialog opens: a Sheet (z-60) paints over a Modal (z-50).
+  assert.match(code(src), /setMore\(false\); setMoving\(true\)/, 'Move to library opens its modal under the sheet');
+  assert.match(code(src), /setMore\(false\); setRemoving\(true\)/, 'Remove opens its dialog under the sheet');
+});
+
+test('every string the select bar renders is in the locale files, singulars included', () => {
+  // Reintroduce by dropping any one of these from es.json (the parity test then catches the other seven).
+  const es = JSON.parse(read('public/locales/es.json'));
+  for (const label of ['Select all', 'Fetch newest', 'More', 'Remove from library', 'Remove 1 series from the library?',
+                       'Remove {n} series from the library?', 'Removed 1 series', 'Removed {n} series', '1 skipped', '{n} skipped',
+                       '1 failed', '{n} failed', 'Fetched 1 chapter', 'Fetched {n} chapters', '1 up to date', '{n} up to date',
+                       'Nothing to fetch', 'Fetching {done} of {total}…', 'Could not start the fetch', 'Could not remove those',
+                       'Lost track of the fetch. Check the library in a moment.', '{n} selected', 'No files are deleted.',
+                       'Nothing removed · 1 skipped', 'Nothing removed · {n} skipped',
+                       'The chapters stay exactly where they are on disk, and nothing in your library folder is touched.',
+                       "Everyone's reading progress, history, favourites and ratings are kept, so you can put them back at any time from Admin → Library."]) {
+    assert.ok(label in es, `"${label}" renders through tr() but is in no locale file`);
+  }
+});

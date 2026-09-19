@@ -58,6 +58,15 @@ export const ONE_WAY_MIN_LISTED = 10;
  * "not checked -- it took too long", and Find missing chapters on the series page is a tap away.
  */
 export const AUTO_FOLLOW_WALL_MS = 90_000;
+/**
+ * The least of the wall a candidate is started with. A judgement is two site round trips, so a source
+ * handed a sliver of the wall cannot answer -- and, worse, the sliver is where the wall was not a wall:
+ * `setTimeout` and `Date.now()` do not share a clock, so the cut of a hanging source could land while
+ * `deadline - Date.now()` still read 1 or 2 ms, and the next candidate was started with that. A fake
+ * adapter that answers in microtasks then finished inside it and was FOLLOWED past the wall (CI, the
+ * v0.36.0 push -- never once locally). Below this the candidate is `not_tried`, honestly.
+ */
+export const MIN_TRY_MS = 2_000;
 /** What one candidate's two lookups get, before budgetFor raises it for a source behind the solver. */
 export const AUTO_FOLLOW_LOOKUP_MS = 20_000;
 /**
@@ -363,7 +372,7 @@ export async function autoFollow(seriesId: string, candidates: FollowCandidate[]
     await slot();
     try {
       const remaining = deadline - Date.now();
-      if (remaining <= 0) { judged[i] = { ...base, why: 'not_tried' }; return; }
+      if (remaining < MIN_TRY_MS) { judged[i] = { ...base, why: 'not_tried' }; return; }
       // judgeCandidate answers every failure of its own as a value, so a throw out of this race is the
       // wall's -- the candidate WAS asked, but the add stopped waiting for it -- which the person is told
       // as "not checked", never as a verdict on the source.

@@ -13,6 +13,24 @@ import { bytes } from './format';
  */
 export function taskResult(r: any): string {
   if (!r) return '';
+  // "Verify chapter files". A root it skipped as unmounted is the one thing that must not read as a quiet
+  // run: every chapter under it is still claiming bytes, and "0 missing" is exactly what the admin would
+  // conclude the task had found. `checked` is the key: no other job reports one.
+  // ⚠️ The unmounted clause comes FIRST. The task runs detached, so this line is the only place its result
+  // is ever shown, and a clause at the end of a long line is the clause that is off the edge of a phone.
+  // Reintroduce by pushing it after the counts: "a verify run that skipped an unmounted folder says so"
+  // finds the counts before the warning.
+  if (typeof r.checked === 'number') {
+    const bits: string[] = [];
+    if (r.unmounted?.length) bits.push(`${r.unmounted.length === 1 ? 'one folder' : `${r.unmounted.length} folders`} looked unmounted and ${r.unmounted.length === 1 ? 'was' : 'were'} left alone: ${r.unmounted.join(', ')}`);
+    bits.push(`${r.checked} checked`, r.missing ? `${r.missing} missing, marked for the next sweep` : 'none missing');
+    // The read library is not Uchiyomi's to re-fetch (a re-fetch lands under the download folder, on a new
+    // row), so those are counted for the admin and left alone -- and said, or the count above would be
+    // read as "the read library is fine".
+    if (r.readLibraryMissing) bits.push(`${r.readLibraryMissing} missing in the read library, not marked`);
+    if (r.stopped === 'shutdown') bits.push('stopped for a restart');
+    return ` \u00b7 ${bits.join(', ')}`;
+  }
   // ⚠️ BEFORE the backup branch. The read-chapter cleanup also reports `bytes`, so keying on that first
   // would render "freed 4 GB" as a backup archive size and lose the chapter count entirely.
   if (typeof r.deleted === 'number') {

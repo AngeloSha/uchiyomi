@@ -144,6 +144,33 @@ test('delete: restoring brings it back exactly as it was', { skip }, async () =>
   assert.equal(back.booksCount, 1);
 });
 
+test('delete: put back after delete files shows the chapters as deleted from the server', { skip }, async () => {
+  // Delete files is the irreversible step after the reversible one, and a series put back afterwards must
+  // not pretend otherwise: its rows are tombstones now, so the catalog lists each chapter with `pruned`
+  // (the series page renders "Deleted from the server", refuses to open it, and offers Fetch again), and a
+  // rescan finds no folder to resurrect them from. Before v0.37.0 the same put-back listed openable
+  // chapters that 404'd. Reintroduce by dropping the tombstoneBooks call in deleteSeriesFiles: `pruned`
+  // below reads false on every chapter.
+  await chapter('Purged', 'Chapter 1.cbz', 'p-1');
+  await chapter('Purged', 'Chapter 2.cbz', 'p-2');
+  await persistScan();
+  const s = await row('Purged');
+  const { deleteSeriesFiles, restoreSeries } = await import('../src/lib/libraryAdmin');
+
+  await q(`UPDATE lib_series SET deleted_at = now() WHERE id = $1`, [s.id]);
+  const r = await deleteSeriesFiles(s.id);
+  assert.equal(r.ok, true, r.ok ? '' : r.reason);
+  await restoreSeries(s.id);
+  await persistScan(); // the scan that would resurrect anything it could find; the folder is gone
+
+  const back = await owned.series(SYSTEM_CTX, s.id);
+  assert.equal(back.id, s.id, 'put back must return the same row, with its history');
+  const books = await owned.seriesBooks(SYSTEM_CTX, s.id);
+  assert.equal(books.content.length, 2, 'the chapter rows are listed still: they are what the history hangs off');
+  assert.ok(books.content.every((b: any) => b.pruned === true), 'every chapter must read as deleted from the server');
+  assert.deepEqual(await owned.bookPages(SYSTEM_CTX, books.content[0].id), [], 'a deleted chapter has no pages to offer');
+});
+
 test('merge: stays merged across a rescan — the books do not migrate back', { skip }, async () => {
   await chapter('Keep', 'Chapter 1.cbz', 'k-1');
   await chapter('Absorb', 'Chapter 2.cbz', 'a-2');

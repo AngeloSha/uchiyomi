@@ -10,7 +10,7 @@ import { LIBRARY_ROOT, cbzPageAt } from '../lib/library';
 import { cfSession } from '../lib/sources/flaresolverr';
 import { getSource } from '../lib/sources';
 import { assertPublicHost, isBlockedHost, BlockedAddress } from '../lib/ssrfGuard';
-import { suwayomiUrl, suwayomiImageHeaders } from '../lib/sources/suwayomi/client';
+import { suwayomiUrl, suwayomiBase, suwayomiImageHeaders } from '../lib/sources/suwayomi/client';
 import { env } from '../env';
 import { join } from 'path';
 import { readFile } from 'fs/promises';
@@ -90,6 +90,42 @@ export function isEngineOrigin(u: string, engine: string | undefined = env.SUWAY
   return want !== null && got !== null && got === want;
 }
 
+/**
+ * The ONE engine URL the cover proxy may fetch without the SSRF guard, rebuilt from the operator's base, or
+ * null.
+ *
+ * Suwayomi hands the adapter a server-relative thumbnail path and `suwayomiUrl` makes it absolute, so every
+ * extension cover this server ever stores has exactly one shape: `<SUWAYOMI_URL>/api/v1/manga/<id>/thumbnail`
+ * (sources.ts `toSeries`, pinned by suwayomiAdapter.test.ts; every stored engine cover on the live install
+ * matched it). That is the whole exemption. Being on the engine's origin is necessary but NOT sufficient: the
+ * engine fetch carries the engine's Basic credentials, and `?u=` is caller-supplied, so "any path on the
+ * origin" let any signed-in reader make this server issue an authenticated GET to any engine endpoint --
+ * GETs with side effects on its legacy REST API, and 502-versus-500 as an oracle for which paths exist there.
+ *
+ * ⚠️ THE CALLER'S STRING IS NEVER FETCHED. The only thing taken from it is the numeric manga id; the URL that
+ * goes on the wire is `engine base + fixed path + that id`, and it is accepted only if it round-trips to
+ * exactly the origin+path the caller named (so a base with a sub-path still works, and a caller cannot smuggle
+ * a prefix, a query or a fragment past the shape check). Exported so coverProxy.test.ts asserts the shipped
+ * rule rather than a restatement of it; `engine` is a parameter because `env` is parsed once at module load.
+ *
+ * ⚠️ The base is `suwayomiBase(engine)`, the SAME normalisation `suwayomiUrl` stores covers with -- never the
+ * raw env string with one slash trimmed. The round-trip below only succeeds when the two sides were built
+ * from the same base, so an operator value that is not already clean (`http://engine:4567//`, `...:4567/?q`,
+ * `...:4567#f`) used to make this refuse every cover the adapter had just produced, silently.
+ */
+export function engineCoverUrl(u: string, engine: string | undefined = env.SUWAYOMI_URL): URL | null {
+  if (!isEngineOrigin(u, engine)) return null;
+  let parsed: URL;
+  try { parsed = new URL(u); } catch { return null; }
+  const m = /^(?:\/[^/]+)*\/api\/v1\/manga\/(\d+)\/thumbnail$/.exec(parsed.pathname);
+  if (!m) return null;
+  let target: URL;
+  try { target = new URL(`${suwayomiBase(engine)}/api/v1/manga/${m[1]}/thumbnail`); } catch { return null; }
+  // Rebuilt, then compared: the caller named the engine's thumbnail for this id, or nothing is fetched.
+  if (target.origin + target.pathname !== parsed.origin + parsed.pathname) return null;
+  return target;
+}
+
 /** Thrown for a cover value that could never be fetched, so callers can tell it from a transient failure. */
 export class UnfetchableCoverUrl extends Error {
   readonly statusCode = 400;
@@ -108,23 +144,32 @@ export async function fetchCoverImage(u: string, source?: string): Promise<Buffe
   // `srccover:` is stored immutable. Extension ICONS never had the problem only because their route fetches
   // the engine directly and never consults the guard at all.
   //
-  // The exemption is ONE ORIGIN, matched exactly, and that distinction is the whole safety argument: `?u=` is
+  // The exemption is ONE PATH SHAPE on ONE ORIGIN, and both halves are the safety argument. `?u=` is
   // caller-supplied, so a rule like "allow private addresses" would hand back the very thing v0.21.0 removed --
   // any signed-in reader could point this at yomi-db or the cloud metadata service. `SUWAYOMI_URL` is
-  // operator-configured, is where we already send credentials, and is the same trust the icon route assumes.
-  // Redirects are not followed here: if the engine ever answered a redirect, it would leave this origin and
-  // deserve the full guard, so a non-2xx simply fails.
+  // operator-configured and is where we already send credentials. But the origin alone was not enough either:
+  // for three releases this branch fetched WHATEVER PATH the caller named on that origin, with the engine's
+  // Basic credentials attached, so a reader could make this server issue an authenticated GET to any engine
+  // endpoint (its legacy REST API has GETs with side effects), and the 502 for a non-2xx against the 500 for
+  // a body sharp cannot decode was a two-state oracle for which engine paths exist. `engineCoverUrl` closes
+  // the first and shrinks the second to "is there a manga with this id", which the source search already
+  // answers: the only shape it accepts is the thumbnail the adapter produces, and the URL on the wire is
+  // rebuilt from the operator base plus the numeric id -- the caller's string is never what gets fetched.
   //
-  // ⚠️ `redirect: 'error'` IS WHAT MAKES THAT SENTENCE TRUE. It was written, and believed, while the fetch
-  // below used the default -- which FOLLOWS redirects. So the one origin this exemption trusts could have
-  // handed back a 302 to anywhere, private addresses included, and the guard would never have looked at
-  // the hop. CodeQL flagged the line (js/request-forgery) for the caller-supplied url; it cannot see
-  // `isEngineOrigin`, but it did prompt the re-read that found the comment and the code disagreeing.
+  // Redirects are not followed here: if the engine ever answered a redirect, it would leave this origin and
+  // deserve the full guard, so a non-2xx simply fails. ⚠️ `redirect: 'error'` IS WHAT MAKES THAT SENTENCE
+  // TRUE. It was written, and believed, while the fetch used the default -- which FOLLOWS redirects -- so the
+  // one origin this exemption trusts could have handed back a 302 to anywhere. CodeQL flags this line
+  // (js/request-forgery) because it cannot see either predicate; it did prompt the re-read that found the
+  // comment and the code disagreeing.
+  //
   // Reintroduce by allowing any private address instead of this one origin: the guard is gone and
-  // `coverProxy.int.test.ts` fails on yomi-db, the metadata service and an unrelated private host. Or by
-  // dropping `redirect: 'error'`: the same file's redirect case is followed instead of refused.
-  if (isEngineOrigin(u)) {
-    const r = await fetch(u, { headers: suwayomiImageHeaders(), redirect: 'error', signal: AbortSignal.timeout(20000) })
+  // `coverProxy.test.ts` fails on yomi-db, the metadata service and an unrelated private host. Or by
+  // matching the origin alone: the same file's "anything at all on the engine origin" case is fetched. Or
+  // by dropping `redirect: 'error'`: engineRedirect.test.ts's redirect case is followed instead of refused.
+  const engineTarget = engineCoverUrl(u);
+  if (engineTarget) {
+    const r = await fetch(engineTarget, { headers: suwayomiImageHeaders(), redirect: 'error', signal: AbortSignal.timeout(20000) })
       .catch(() => { throw Object.assign(new Error('cover'), { statusCode: 502 }); });
     if (!r.ok) throw Object.assign(new Error('cover'), { statusCode: 502 });
     return Buffer.from(await r.arrayBuffer());

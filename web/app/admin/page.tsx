@@ -926,7 +926,7 @@ function Tasks() {
   const { data } = useQuery({ queryKey: ['admin-tasks'], queryFn: () => api<{ content: any[] }>('/api/admin/tasks'), refetchInterval: 5000 });
   const run = async (id: string) => {
     try {
-      const r = await api<{ ok?: boolean; error?: string; series?: number; books?: number }>(`/api/admin/tasks/${id}/run`, { method: 'POST' });
+      const r = await api<{ ok?: boolean; error?: string; started?: boolean; series?: number; books?: number }>(`/api/admin/tasks/${id}/run`, { method: 'POST' });
       // A refusal is a 200 with ok:false (the task is already running), and used to toast "Started" too.
       // `not_enabled` is reachable in one narrow window: this list polls every five seconds, so a task
       // switched off in Settings is still on screen for a moment afterwards. "Failed" would be a lie about
@@ -939,6 +939,11 @@ function Tasks() {
       else if (typeof r?.series === 'number') {
         toast(r.series ? `Scan done: ${r.series} series, ${r.books ?? 0} chapters` : 'Scan done: nothing found — check the folder layout', r.series ? 'success' : 'error');
       }
+      // The verify task is detached (one stat per chapter over a share is minutes, and a request that long
+      // dies at the proxy while the walk goes on), so its counts cannot be in this answer. The one place
+      // they appear is the Tasks line, which this panel polls -- and the admin who just restored a database
+      // is told exactly that, or "Started" followed by nothing is a button that did nothing (#34).
+      else if (id === 'verify' && r?.started) toast(tr('Started — the Tasks line shows what it found when it is done.'), 'success');
       else toast('Started', 'success');
       qc.invalidateQueries({ queryKey: ['admin-tasks'] });
     } catch { toast('Failed', 'error'); }
@@ -955,7 +960,10 @@ function Tasks() {
             {/* ⚠️ `remaining` is shown because the backlog is the one number that tells you whether a task is
                 keeping up. The server has always sent it and nothing displayed it, so a job that had quietly
                 stopped picking up new work looked identical to one with nothing to do. */}
-            <p className="col-start-1 row-start-2 min-w-0 truncate text-[11px] text-fog-500 lg:col-start-2 lg:row-start-1">
+            {/* Wraps rather than truncates: a task's result is the only record of a detached run, and the
+                verify line ("one folder looked unmounted…: /library-dl, 4000 checked, 312 missing…") is
+                900 px wide -- truncated, it read as a clean run on every width. */}
+            <p className="col-start-1 row-start-2 min-w-0 break-words text-[11px] text-fog-500 lg:col-start-2 lg:row-start-1">
               {t.schedule} · {t.lastRun ? `last run ${relativeTime(new Date(t.lastRun).toISOString())}` : 'not run yet'}{taskResult(t.lastResult)}
               {typeof t.remaining === 'number' && t.remaining > 0 && (
                 <span className="text-amber-300"> · {t.remaining.toLocaleString()} waiting</span>
@@ -1407,7 +1415,13 @@ const HEALTH_TONE: Record<HealthCheck['status'], string> = {
 const HEALTH_LABEL: Record<HealthCheck['status'], string> = { problem: 'Needs attention', warn: 'Worth a look', ok: 'All good' };
 
 /** Read-only audit of the library: gaps, truncated downloads, duplicates, and failing sources. */
-interface DeletedRow { id: string; title: string; folder: string; books_count: number; deleted_at: string }
+interface DeletedRow {
+  id: string; title: string; folder: string; books_count: number; deleted_at: string;
+  /** Counted from lib_books: a row whose files Delete files removed has every chapter pruned and none live. */
+  live_books: number; pruned_books: number;
+}
+/** Delete files has already been through this one: nothing on disk, every chapter row a tombstone. */
+const filesGone = (r: DeletedRow) => r.live_books === 0 && r.pruned_books > 0;
 
 /** What has been removed from the library, and the way back. Removing never touches files, so this is
  *  always reversible -- the series keeps its id, and with it everyone's progress, favourites and ratings. */
@@ -1911,7 +1925,9 @@ function LibraryPanel() {
           title={`Delete the files for "${purge.title}"?`}
           body={
             <>
-              <p><strong className="text-fog-100">This deletes {purge.books_count} chapter file(s) from your
+              {/* `live_books`, not books_count: the scan wrote books_count before anything was pruned, and a
+                  series with two files left and three tombstones would be told "this deletes 5". */}
+              <p><strong className="text-fog-100">This deletes {purge.live_books} chapter file(s) from your
                 disk.</strong>{tr('It cannot be undone from here.')}</p>
               <p className="mt-2">Everyone&rsquo;s reading progress and history are kept, so the record of
                 having read it survives even though the files do not.</p>
@@ -1940,15 +1956,31 @@ function LibraryPanel() {
             {rows.map((r) => (
               <div key={r.id} className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1.5 px-4 py-3 lg:grid-cols-[minmax(0,24rem)_minmax(0,1fr)_auto]">
                 <p className="col-start-1 row-start-1 min-w-0 truncate text-sm text-fog-100">{r.title}</p>
+                {/* The state LEADS the caption: at 390 px the caption truncates after ~130 px, and "files
+                    deleted" at its end was exactly the part cut off. The explanation is a visible second
+                    line, not a title= tooltip -- a phone never shows one. The button stays "Put back": a
+                    longer label ("Put back (files were deleted)") squeezed the title to "Gone F…" in German. */}
                 <p className="col-start-1 row-start-2 min-w-0 truncate text-[11px] text-fog-500 lg:col-start-2 lg:row-start-1">
-                  {r.books_count} chapter{r.books_count === 1 ? '' : 's'} · removed {relativeTime(r.deleted_at)} · {r.folder}
+                  {filesGone(r) ? `${tr('files deleted')} · ` : ''}{r.books_count} chapter{r.books_count === 1 ? '' : 's'} · removed {relativeTime(r.deleted_at)} · {r.folder}
                 </p>
+                {filesGone(r) && (
+                  <p className="col-span-2 col-start-1 row-start-3 min-w-0 text-[11px] text-fog-400 lg:col-span-1 lg:col-start-2 lg:row-start-2">
+                    {tr('The chapter files are gone. Put back lists them as deleted from the server; Fetch again on the series page brings back the ones Uchiyomi downloaded.')}
+                  </p>
+                )}
                 <div className="col-start-2 row-span-2 row-start-1 flex shrink-0 gap-1.5 justify-self-end lg:col-start-3 lg:row-span-1">
+                  {/* After Delete files the button still works -- the series comes back with every chapter
+                      marked "Deleted from the server", which is where Fetch again lives -- and the caption
+                      above says so: an unmarked "Put back" here used to restore a series whose chapters all
+                      404'd. */}
                   <button onClick={() => restore(r)} disabled={busy === r.id} className="chip shrink-0 text-xs disabled:opacity-50">
                     {busy === r.id ? 'Restoring\u2026' : 'Put back'}
                   </button>
-                  {/* The escalation, and only ever after the reversible step. Hiding is undoable; this is not. */}
-                  <button onClick={() => setPurge(r)} className="chip shrink-0 text-xs hover:border-rose-500/50 hover:text-rose-400">{tr('Delete files')}</button>
+                  {/* The escalation, and only ever after the reversible step. Hiding is undoable; this is not.
+                      Not offered twice: with every file gone it would only report "Deleted 0 file(s)". */}
+                  {!filesGone(r) && (
+                    <button onClick={() => setPurge(r)} className="chip shrink-0 text-xs hover:border-rose-500/50 hover:text-rose-400">{tr('Delete files')}</button>
+                  )}
                 </div>
               </div>
             ))}

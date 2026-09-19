@@ -133,12 +133,30 @@ reporting `ok` and kept being fetched first.
 never contains a hostname, a component name or any part of the recorded error. The operator-facing half of
 the diagnosis, which does name containers and config files, is only on the admin routes.
 
-`POST /api/admin/sources/:id/test` (admin) probes a source right now: it fetches the site's own homepage
-directly, without the Cloudflare solver, and then exercises the adapter (search, series, chapters, pages),
-returning per-step `checks`, the `probe` result and a `diagnosis`. It ignores any cooldown, which is the
+`POST /api/admin/sources/:id/test` (admin) probes a source right now: for a source that has a homepage of
+its own it fetches that homepage directly, without the Cloudflare solver, and then exercises the adapter
+(search, series, chapters, pages), returning per-step `checks`, the `probe` result and a `diagnosis`.
+Extension sources have no homepage to ask (the engine talks to the site, not this server), so for them the
+homepage step is skipped and `probe` carries no `httpStatus`: only the adapter's own result. It ignores any cooldown, which is the
 point, and it deliberately writes no health of its own: a diagnostic that changed the diagnosis would let
 repeated clicks drive a source's cooldown to its ceiling. A pass reports `canClear` rather than clearing the
-block itself, because the smoke test stops at listing page URLs and never fetches an image byte.
+block itself, because the smoke test stops at listing page URLs and never fetches an image byte. The
+`probe` is always present: `{httpStatus?, finalUrl?, transport?, looksHtml?, adapterOk, needsSolver}`,
+where `httpStatus` is absent when no homepage request was made and `0` when one was made and no HTTP answer
+came back — and a live `adapterOk: true` outranks whatever the stored error says, so an extension source
+that passes its checks no longer carries a Cloudflare verdict from an earlier afternoon (PR #56). The same
+rule reaches the Health page's *Source health* check: a stored error older than the source's last success is
+history, not a fix to go and apply, and such a row shows only its live finding. A stored `Cloudflare bypass
+currently disabled` diagnoses as `cf_challenge` (public `reason` *This source is protected by a check we
+could not get past.*) with an admin `fix` that names the engine's own switch rather than Uchiyomi's solver,
+by the names the shipped compose files use, never the development stack's: *The extension engine's own
+Cloudflare bypass is switched off. On the Suwayomi engine's container (uchiyomi-suwayomi in the shipped
+compose files) set FLARESOLVERR_ENABLED=true and FLARESOLVERR_URL to the same solver address Uchiyomi uses
+(http://uchiyomi-flaresolverr:8191 in the shipped files), then recreate it. The v0.37.0 compose files
+already set both, so an upgrade that recreates the engine is the fix there.* Since v0.37.0 this route and
+the scheduled source check also read the source's slow streak, so `diagnosis.code` can be `too_slow`
+(*This source answers, but more slowly than it is given.*) from both, not only from Discover's health view;
+its `fix` names the configured `SOURCE_LATEST_TIMEOUT_MS` budget in seconds (*longer than 8s*).
 
 `POST /api/admin/sources/check` (admin) runs the source watchdog immediately instead of waiting for its
 daily sweep. It probes every enabled source and smoke-tests its adapter, one at a time because they share a
@@ -450,7 +468,10 @@ unblock the group and check again. A manual fetch resets the chapter's retry cap
 **Check for new chapters** first), `blocked_group`, `already_here` (a live chapter, not a tombstone),
 `source_unavailable` (adapter not loaded or disabled, or a source the series no longer follows), `cooldown`;
 **409** `nothing_to_fetch` (with `skipped`) when nothing is fetchable, **409** `busy` while a download for
-that series is running, **404** for a series the caller cannot see. Same permission gate as the fill:
+that series is running — since v0.37.0 that includes the series a bulk *Fetch newest* run is currently
+inside, for that one series and only while the run is on it (the same test guards `/api/sources/fill` and
+the admin `chapters/refetch`); the rest of the library is not locked — **404** for a series the caller
+cannot see. Same permission gate as the fill:
 `canDownload: false` is refused by the whole `/api/sources` surface, and a source outside the account's
 age cap answers **403**. Progress is on `GET /api/sources/jobs` under the series' `folder`.
 
@@ -470,10 +491,62 @@ carries `picks`.
 ```
 POST   /api/library/bulk/read     POST   /api/favorites/bulk
 POST   /api/collections/:id/items/bulk
+POST   /api/library/bulk/newest   GET    /api/library/bulk/newest
 ```
-Each takes `{ seriesIds: [...] }`, up to 500. An id that no longer exists is reported in `skipped` rather
-than failing the batch. Marking read deliberately writes no reading events, so importing a backlog does not
-inflate streaks or the leaderboard.
+The first three take `{ seriesIds: [...] }`, up to 500. An id that no longer exists is reported in `skipped`
+rather than failing the batch. Marking read deliberately writes no reading events, so importing a backlog
+does not inflate streaks or the leaderboard.
+
+**Fetch newest** (since v0.37.0) is the one bulk action that fetches bytes from sources, so it is a detached
+job rather than a request that waits, and it carries the download gate the whole of `/api/sources` sits
+behind. `POST /api/library/bulk/newest {ids: [...]}` — 1 to 500 series ids of 1–64 characters, duplicates
+counted once — starts it and answers **202** `{ok: true, total}` at once (`total` = distinct ids asked). A
+member whose `canDownload` permission is off (or whose account row cannot be read — it fails closed; admins
+are exempt, an absent permission allows) gets **403** `forbidden` *You don't have permission to download
+chapters.*; a body that is not `ids` (the old `seriesIds` key included) is **400** `bad_request` *ids: one to
+five hundred series ids.*; while a run is going, **409** `busy` *A Fetch newest run is already going. Wait
+for it to finish.* — one run per server, never queued. Ids the caller cannot see (hidden, merged, in a
+library they are not granted, nonexistent) are not an error: they go into the run as `skipped` *Not in your
+library.* and count towards `total`. One `download.bulk_newest` audit row per start, `{count, asked}`. The
+run is not refused while the nightly sweep is going (a sweep can take hours); the downloader skips a file
+already on disk, so the worst overlap is one listing asked twice.
+
+The rule, per series: take the **newest release the series' sources list** (the maximum across every
+followed source, chosen by the release preferences) and nothing else. If a live row holds it the series is
+`up_to_date`; if the shelf holds it only as a tombstone the read-chapter cleanup, *Delete from server* or
+*Delete files* left (`pruned_reason` NULL or `'deleted'`, no live row beside it) the series is `skipped` —
+those bytes went by someone's decision, and the reason names the way back — while a `'missing'` tombstone
+from the verify task is not held and is fetched; otherwise that one number is fetched with the series'
+*latest N* floor ignored for it alone (the floor is never moved, and nothing below it is fetched, so a
+caught-up Latest-N series answers up to date rather than back-filling), the retry-cap ledger for that number
+cleared first as the series page's *Fetch* does. A number held for a preferred group is honoured, not
+overridden (a bulk button is not a per-copy pick); a source the account's age limit excludes, a source in a
+cooldown, and a source listing nothing are each skipped with their reason. A source the admin disabled is
+never asked for its listing: a series whose every source is disabled is skipped at once with no network
+call, and one that also follows a live source is asked on that one only. A file already on disk without a
+row is scanned in and reads up to date. Only after a source was actually asked does the job pause the
+sweep's 1.5 s before the next series — ids not in the library, disabled sources and cooldowns are not
+paced; one library scan runs at the end, then dates and provenance are stamped on every landed chapter.
+While the run is inside a series, that series' folder reads busy to `POST /api/sources/fetch`,
+`/api/sources/fill` and the admin `chapters/refetch` (**409** `busy`), and to nothing else.
+
+`GET /api/library/bulk/newest` always answers **200** `{running, done, total, startedAt, results:
+[{id, title, outcome, reason?}]}` — the current run, or the last one (in memory: a restart forgets it; before
+any run everything is zero, `startedAt` null, `results` empty). `outcome` is `downloaded`, `up_to_date`,
+`skipped` or `failed`; `reason` is a sentence, present on every outcome but `downloaded` (*Chapter 12 is
+already here.* — a live row holds it; *Chapter 12 was already on disk and is in the library now.*; *Chapter
+12 was deleted from this server on purpose. Fetch again on the series page brings it back.* — `skipped`, the
+newest chapter is a cleanup or Delete-files tombstone with no live row, nothing is fetched and the tombstone
+is untouched; *Chapter 12 is being held for the preferred group. Pick a copy on the series page to take it
+now.*, *Its source is disabled by the admin.*, *That source is not available on this account.*, *Its source
+lists no chapters.*, *No source is installed for this series.*, *Its source is in a cooldown. Try again
+later.*, *Not in your library.*, *A download for that series is already running.*, *The server is shutting
+down.*, *Its source did not answer.*, *Chapter 12 could not be saved. The Health page has the details.*, *The
+library disk is full.*); `title` is `""` for an id outside the caller's library. `results` are in the order
+the ids were given, which is the order they were started, and they are returned only to the account that
+started the run and to admins — every other member gets the counts with `results: []`, since a title from a
+library they were not granted must not leak through someone else's selection. A server shutdown ends the run
+between series; the rest read `skipped` *The server is shutting down.*
 
 ### Personal
 ```
@@ -548,6 +621,7 @@ POST   /api/admin/sources/custom  DELETE /api/admin/sources/custom/:id
 PATCH  /api/admin/sources/custom/:id
 PUT    /api/admin/series/:id/art  PUT    /api/admin/series/:id/meta
 PATCH  /api/admin/series/:id      DELETE /api/admin/series/:id
+POST   /api/admin/series/bulk/hide
 GET    /api/admin/series/:id/scanlators GET    /api/admin/scanlators
 POST   /api/admin/series/:id/sources DELETE /api/admin/series/:id/sources/:sourceId
 GET    /api/admin/libraries       POST   /api/admin/libraries
@@ -601,8 +675,13 @@ alternate on every source, and so on, so an exact hit for the title on a later s
 for an alternate on an earlier one; a row matched under an alternate records it as `matched_via`. A
 tracker row whose title the library already holds (under the search title or any alt — `matched_via` says
 which alt, when one did) is linked at intake, for the requesting admin, and starts `decision: skip`,
-`status: already`; a series that is deleted (`deleted_at`) or merged into another never counts as held, for
-any intake, so such a title resolves and `/run` puts the same series back. Its errors: **404**
+`status: already`; a series that is deleted (`deleted_at`) never counts as held, for any intake, so such a
+title resolves and `/run` puts the same series back — whereas a title merged into another **is** held,
+under its survivor's id (since v0.37.0): the row reads `already`, and the tracker link and floor land on
+the series that holds the chapters, not on the absorbed row. Merging is transitive — a title absorbed two
+merges ago is re-pointed at the final survivor in the same transaction as the second merge — so a backup or
+tracker entry with that spelling still reads `already` rather than being re-added via another source (a
+survivor hidden since is the deleted case above under another name). Its errors: **404**
 `not_connected` (no enabled connection to that tracker), **422** `token_expired` (the connection's
 `expires_at` has passed: the service is not called, the connection stays enabled, and `last_error` on it
 reads `the access token has expired -- reconnect to resume syncing`, the sentence a push leaves), **422**
@@ -713,9 +792,12 @@ chapter. It answers `{ok, applied, bytes, skipped: [{id, reason}]}` with `reason
 `message` and `fix`) when the download directory is not writable.
 `POST /api/admin/series/:id/chapters/refetch {bookIds?[], picks?[]}` (at least one, at most 300 combined)
 downloads the chapters again as the copy the release rules choose *now* — after a change of priority, or a follow, that may be another group's —
-onto the **same rows**, so progress stays attached. Only a file at exactly the path the downloader writes
-(`Chapter <n>.cbz` in the series folder) is eligible (`not_ours` otherwise), because only that path lands
-back on the same row. The listing is refreshed first, as for `POST /api/sources/fetch`, so the copy is the
+onto the **same rows**, so progress stays attached. Only a row under the download folder (`not_owned`
+otherwise — a read-library chapter is not Uchiyomi's to re-fetch, so a *Delete files* tombstone there has no
+way back but a hand copy) at exactly the path the downloader writes (`Chapter <n>.cbz` in the series
+folder; `not_ours` otherwise) is eligible, because only that path lands back on the same row. This is also
+the only path back for a tombstoned chapter below a series' `chapter_floor`, which the sweep never wants
+and *Fetch newest* takes only if it is the newest listed. The listing is refreshed first, as for `POST /api/sources/fetch`, so the copy is the
 one the rules choose *now*, with the same `not_listed` / `blocked_group` / `source_unavailable` (including
 a source the series no longer follows) / `cooldown` skips; the old file is set aside until
 the new one lands and put back if the download fails, so a failed re-download never costs the chapter that
@@ -727,6 +809,70 @@ the listing row, the pick selects the copy in it (`not_listed` when none matches
 `POST /api/sources/fetch` a pick ignores the group rules including the blocklist — an explicit choice. A row
 named in both lists is fetched as its pick, a second pick for the same row is skipped as `duplicate`; the
 audit line carries `picks`.
+
+**Removing a series, and what each step keeps.** `DELETE /api/admin/series/:id` hides: `deleted_at` is set,
+the tracker link dropped, and every chapter row, file, progress row, favourite and rating stays; **400**
+`already_deleted` for a hidden one, **400** `merged` for a series merged into another (a merge is one-way —
+there is no un-merge, and the absorbed row can neither be hidden nor have its files deleted; see
+`/merge`). `POST /api/admin/series/:id/restore` undoes it. `POST /api/admin/series/bulk/hide {ids: [...]}`
+(since v0.37.0; 1 to 500 ids of 1–64 characters, duplicates once) is that same single delete once per id —
+the Library page's *Remove from library* over a selection — and **only** that: it never touches files. It
+answers `{ok: true, hidden, skipped: [{id, reason}]}` with `reason` one of `merged`, `already_hidden`,
+`not_found`; an id that cannot be hidden is skipped with its reason and the rest still apply. One
+`series.delete` audit row per hidden series, carrying `{id, title, books}`, exactly as the single route
+writes it, nothing for skipped ids; **400** `bad_request` *Which series should be removed?* for a body that
+is not `ids`. `GET /api/admin/series/deleted` lists the hidden ones, newest first, and since v0.37.0 each row
+carries `live_books` and `pruned_books` (counted from the chapter rows; `books_count` is the scan's figure
+and may be stale) — `live_books === 0 && pruned_books > 0` is how the panel knows the files are already gone.
+
+`POST /api/admin/series/:id/delete-files {confirm}` — `confirm` is the series' exact title, **400**
+`confirm_mismatch` otherwise — is the irreversible step and only ever after the hide: it removes the series'
+chapter files from every root it occupies (the read library included, which is why it takes the typed
+title) and keeps every row. Since v0.37.0 each row whose file it actually removed is marked
+pruned with `pruned_reason = 'deleted'` — the same tombstone `chapters/delete` and the cleanup leave — so a
+restore afterwards lists those chapters as `pruned` (*Deleted from the server*, where `chapters/refetch`
+brings one back onto the same row — for the rows under the download folder; a read-library row is
+`not_owned` there and its file is the admin's to put back) instead of as openable chapters that 404, the updater's have-set keeps
+counting them as held, and `files` in the answer `{ok, files, bytes}` counts real unlinks, not rows (a
+second call reports 0). A row whose file was already absent is left alone and not counted: on a share that
+is not mounted every file looks absent, and this must never turn that into a library of tombstones. It
+refuses, **409** `refused` `{message, fix}`, rather than half-applying: the series is not hidden yet, it has
+no files on disk, or a root is not writable (`PUID`/`PGID` unset; `fix` names it). Nothing in the API
+deletes a series row or a chapter row: `read_progress.book_id` is `ON DELETE RESTRICT` on purpose.
+
+**Verify chapter files.** `POST /api/admin/tasks/verify/run` (since v0.37.0; the Tasks panel's *Verify
+chapter files*) is the repair for a database restored without its chapter files. It is **detached**, like
+`update` and `cleanup`: one stat per row over a network share is minutes on a large library, and a request
+held open that long dies at the reverse proxy while the walk keeps going. It answers **200** `{ok: true,
+started: true}` at once, or `{ok: false, error: 'busy'}` while a walk is already going; the counts are not in
+the answer — they land on `GET /api/admin/tasks` (the panel polls every 5 s) as the `verify` entry's
+`lastResult`, and in the audit row `library.verify {checked, missing, readLibraryMissing, unmounted, ms}`
+written when the walk ends, beside the usual `task.run {task: 'verify'}` at the press. Per root it stats
+every un-pruned row (both roots are walked and counted), but **only rows under the download folder**
+(`/library-dl`) are marked, as pruned with `pruned_reason = 'missing'` (rows never deleted; the cover moves to
+the lowest live chapter): a re-fetch lands there on the same row, whereas a read-library (`/library`) row
+marked missing would be "fetched again" into a different row, the tombstone would never clear and the
+number would be listed twice. A read-library row whose file is gone is counted in `readLibraryMissing` and
+never marked — those files are the engine's or the admin's to put back. Per root, the **whole-batch rule**
+from the read-chapter cleanup decides what a missing root means: a root where no checked row's *file* is
+present — an empty folder is not proof of a mount, the downloader creates folders while a share is down —
+or that cannot be read at all, is a volume that is not mounted (or an empty disk, which looks identical
+from inside the container), so it marks nothing and is reported in `unmounted` as its bare path; and by
+the **90 % rule** a root where more than nine rows in ten have no file is refused the same way, reported as
+`"<root> (95 % of 20 chapter files missing)"`, so one stray download on a bare mount cannot turn "unmounted"
+into "mark everything else" (exactly 90 % is still marked). `'missing'` is the one `pruned_reason` the
+updater does **not** count as held (`pruned_at IS NULL OR pruned_reason IS DISTINCT FROM 'missing'`; NULL
+is the cleanup and anything marked before v0.37.0, `'deleted'` is *Delete files*), so the next sweep — and
+Fetch newest — download those chapters again onto the same rows and the scan clears the mark; a row below a
+series' `chapter_floor` is outside the sweep's want-list and comes back through `chapters/refetch` only. A
+row the cleanup already marked keeps its reason. It never runs at boot or on a schedule. `GET /api/admin/tasks`
+always lists it: `{id: 'verify', name: 'Verify chapter files', schedule: 'on demand · after a database-only
+restore', lastRun: number | null, lastResult: {ok: true, checked, missing, readLibraryMissing, unmounted:
+string[], roots, ms, stopped?: 'shutdown'} | null, running}` — `checked` is rows whose file was looked for
+under roots that were not skipped (both roots), `missing` the download-root rows marked this run. `lastRun`
+and `lastResult` are persisted in `server_settings.verify_last_run` / `verify_last_result`, so a restart does
+not turn the last run into "not run yet"; a run that threw stores a NULL result, so no stale healthy line
+comes back. A shutdown stops it between batches; what it had marked stays marked, because it was true.
 
 **Following a second source.** `POST /api/admin/series/:id/sources {planId, source, sourceSeriesId}` makes
 the updater merge that source's chapter list with the primary's on every check; it answers `{ok, sources}`
@@ -818,6 +964,20 @@ them:
 
 `<updated>` is honest: a series carries its newest chapter's time, a chapter its own, and a feed the newest
 of its entries. It used to be "now" on every fetch, which defeated readers' change detection.
+
+**The cover proxy.** `GET /img/sources/cover?u=<url>&source=<id>&w=400|800|1600` fetches a remote cover
+same-origin, resized to WebP, so a Discover tile never loads a third-party image in the browser. `u` is
+caller-supplied and is fetched through the SSRF guard: a value that is not an `http(s)` URL, or that
+resolves to a private, loopback, link-local or otherwise blocked address at any redirect hop (four at most),
+is answered with the grey placeholder image (**200**, not cached) rather than an error, since a bad value
+cannot be retried into working; a missing `u` is **400**; a genuine upstream failure is **502**, so the
+client can retry the direct URL itself. The only URL fetched **without** that guard is the extension
+engine's own thumbnail, `<SUWAYOMI_URL>/api/v1/manga/<id>/thumbnail` — the engine's origin is a private
+address on purpose, and its covers are proxied through it. Since v0.37.0 that exemption is one path shape,
+not one origin: the URL on the wire is rebuilt from the configured engine base plus the numeric manga id,
+and it is fetched only if it round-trips to exactly the origin and path the caller named, so no other path
+on the engine (and nothing on any other host) is ever fetched with the engine's credentials, and a redirect
+from it is refused rather than followed.
 ```
 GET    /img/series/:id/thumb      GET    /img/series/:id/backdrop
 GET    /img/extensions/icon/:pkgName

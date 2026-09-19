@@ -134,8 +134,14 @@ function toChapter(c: RemoteChapter): SourceChapter | null {
 /**
  * Build the Uchiyomi adapter for one Suwayomi source.
  *
- * `requiresCloudflare` is deliberately false: Suwayomi solves Cloudflare itself with an embedded browser, so
- * these sources skip our FlareSolverr entirely. Images do need Suwayomi's auth header, which is declared via
+ * `requiresCloudflare` is deliberately false: the engine talks to the site, this server never does, so
+ * routing these sources through our FlareSolverr would solve a challenge for a request we do not make.
+ * ⚠️ That does NOT mean the engine solves Cloudflare on its own. Suwayomi-Server is a headless JVM with no
+ * browser; its CloudflareInterceptor hands challenged requests to a FlareSolverr of ITS OWN, and that
+ * integration is OFF by default -- every challenged request then throws `Cloudflare bypass currently
+ * disabled` (issue #54). The compose files point the bundled engine at the bundled solver with
+ * FLARESOLVERR_ENABLED / FLARESOLVERR_URL; an external engine needs the same two settings. Images do need
+ * Suwayomi's auth header, which is declared via
  * `imageHeaders` rather than special-cased on the id, so the core keeps consulting capabilities not names.
  * The same goes for pacing: `pageConcurrency` and `pageGapMs` say that page URLs here are the engine's own
  * proxy paths, rate-limited by the engine towards the site, so the downloader may overlap them instead of

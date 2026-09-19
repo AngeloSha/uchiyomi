@@ -2,7 +2,7 @@
   "_meta": {
     "language": "fr",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 840
+    "strings": 865
   },
   "1 check found something": "1 vérification a trouvé quelque chose",
   "1 member": "1 membre",
@@ -843,5 +843,30 @@
   "1 linked for progress sync": "1 lié pour la synchronisation de progression",
   "{n} linked for progress sync": "{n} liés pour la synchronisation de progression",
   "linked for progress sync": "lié pour la synchronisation de progression",
-  "Other sources: an admin can follow them from Sources & translations.": "Autres sources : un administrateur peut les suivre depuis Sources et traductions."
+  "Other sources: an admin can follow them from Sources & translations.": "Autres sources : un administrateur peut les suivre depuis Sources et traductions.",
+  "Fetch newest": "Récupérer le plus récent",
+  "More": "Plus",
+  "Remove 1 series from the library?": "Retirer 1 série de la bibliothèque ?",
+  "Remove {n} series from the library?": "Retirer {n} séries de la bibliothèque ?",
+  "The chapters stay exactly where they are on disk, and nothing in your library folder is touched.": "Les chapitres restent exactement là où ils sont sur le disque, et rien n'est touché dans votre dossier de bibliothèque.",
+  "Everyone's reading progress, history, favourites and ratings are kept, so you can put them back at any time from Admin → Library.": "La progression de lecture, l'historique, les favoris et les notes de tout le monde sont conservés : vous pouvez les remettre à tout moment depuis Administration → Bibliothèque.",
+  "Removed 1 series": "1 série retirée",
+  "Removed {n} series": "{n} séries retirées",
+  "1 skipped": "1 ignorée",
+  "{n} skipped": "{n} ignorées",
+  "1 failed": "1 en échec",
+  "Fetched 1 chapter": "1 chapitre récupéré",
+  "Fetched {n} chapters": "{n} chapitres récupérés",
+  "1 up to date": "1 à jour",
+  "{n} up to date": "{n} à jour",
+  "Nothing to fetch": "Rien à récupérer",
+  "Fetching {done} of {total}…": "Récupération de {done} sur {total}…",
+  "Could not start the fetch": "Impossible de lancer la récupération",
+  "Could not remove those": "Impossible de les retirer",
+  "Lost track of the fetch. Check the library in a moment.": "La récupération a été perdue de vue. Vérifiez la bibliothèque dans un instant.",
+  "files deleted": "fichiers supprimés",
+  "The chapter files are gone. Put back lists them as deleted from the server; Fetch again on the series page brings back the ones Uchiyomi downloaded.": "Les fichiers des chapitres ont disparu. « Put back » les affiche comme supprimés du serveur ; « Récupérer à nouveau » sur la page de la série ramène ceux qu’Uchiyomi avait téléchargés.",
+  "Started — the Tasks line shows what it found when it is done.": "Démarré — la ligne des Tâches affichera ce qui a été trouvé une fois terminé.",
+  "Nothing removed · 1 skipped": "Rien de retiré · 1 ignorée",
+  "Nothing removed · {n} skipped": "Rien de retiré · {n} ignorées"
 }

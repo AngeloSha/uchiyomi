@@ -2,7 +2,7 @@
   "_meta": {
     "language": "es",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 840
+    "strings": 865
   },
   "1 check found something": "1 comprobación encontró algo",
   "1 member": "1 miembro",
@@ -843,5 +843,30 @@
   "1 linked for progress sync": "1 vinculado para sincronizar el progreso",
   "{n} linked for progress sync": "{n} vinculados para sincronizar el progreso",
   "linked for progress sync": "vinculado para sincronizar el progreso",
-  "Other sources: an admin can follow them from Sources & translations.": "Otras fuentes: un administrador puede seguirlas desde Fuentes y traducciones."
+  "Other sources: an admin can follow them from Sources & translations.": "Otras fuentes: un administrador puede seguirlas desde Fuentes y traducciones.",
+  "Fetch newest": "Obtener lo más nuevo",
+  "More": "Más",
+  "Remove 1 series from the library?": "¿Quitar 1 serie de la biblioteca?",
+  "Remove {n} series from the library?": "¿Quitar {n} series de la biblioteca?",
+  "The chapters stay exactly where they are on disk, and nothing in your library folder is touched.": "Los capítulos se quedan exactamente donde están en el disco y no se toca nada en tu carpeta de biblioteca.",
+  "Everyone's reading progress, history, favourites and ratings are kept, so you can put them back at any time from Admin → Library.": "El progreso de lectura, el historial, los favoritos y las valoraciones de todos se conservan, así que puedes recuperarlas en cualquier momento desde Administración → Biblioteca.",
+  "Removed 1 series": "1 serie quitada",
+  "Removed {n} series": "{n} series quitadas",
+  "1 skipped": "1 omitida",
+  "{n} skipped": "{n} omitidas",
+  "1 failed": "1 con error",
+  "Fetched 1 chapter": "1 capítulo obtenido",
+  "Fetched {n} chapters": "{n} capítulos obtenidos",
+  "1 up to date": "1 al día",
+  "{n} up to date": "{n} al día",
+  "Nothing to fetch": "Nada que obtener",
+  "Fetching {done} of {total}…": "Obteniendo {done} de {total}…",
+  "Could not start the fetch": "No se pudo iniciar la obtención",
+  "Could not remove those": "No se pudieron quitar",
+  "Lost track of the fetch. Check the library in a moment.": "Se perdió el rastro de la obtención. Revisa la biblioteca en un momento.",
+  "files deleted": "archivos eliminados",
+  "The chapter files are gone. Put back lists them as deleted from the server; Fetch again on the series page brings back the ones Uchiyomi downloaded.": "Los archivos de los capítulos ya no están. «Put back» los muestra como eliminados del servidor; «Obtener de nuevo» en la página de la serie recupera los que Uchiyomi descargó.",
+  "Started — the Tasks line shows what it found when it is done.": "Iniciado — la línea de Tareas muestra lo que encontró cuando termine.",
+  "Nothing removed · 1 skipped": "Nada quitado · 1 omitida",
+  "Nothing removed · {n} skipped": "Nada quitado · {n} omitidas"
 }

@@ -4,7 +4,12 @@ import { q, one } from '../lib/db';
 // backend-agnostic content client: the owned library in owned mode, Komga otherwise. The old direct
 // `lib/komga` import silently nulled every series lookup here after the owned-library cutover.
 import { content as komga } from '../lib/backend';
-import { viewCtxFor, visible, browsable, browsableIds, Params, type ViewCtx, hideAdult } from '../lib/visibility';
+import { viewCtxFor, visible, browsable, browsableIds, Params, type ViewCtx, hideAdult, sourceAllowedFor } from '../lib/visibility';
+import { getSource } from '../lib/sources';
+import { startBulkNewest, bulkNewestState } from '../lib/bulkNewest';
+// The download strip's "is a job running for this folder" lives with the strip, in routes/sources.ts, and
+// routes/admin.ts imports it from there too.
+import { jobBusy } from './sources';
 import { authenticate, userIdOf, roleOf, issueOpdsToken, issueApiToken, listApiTokens, revokeApiToken, API_SCOPES, revokeOpdsToken, opdsTokenStatus, setOpdsShowAdult, OPDS_TOKEN_DAYS } from '../lib/auth';
 import { enrichSeries } from '../lib/enrich';
 import { env } from '../env';
@@ -670,6 +675,50 @@ export default async function personalRoutes(app: FastifyInstance) {
     );
     return { ok: true, applied: live.length, skipped: skippedOf(b.data.seriesIds, live) };
   });
+
+  // ---- "Fetch newest": the newest listed release of each selected series, as one detached job ----
+  //
+  // The one bulk action here that fetches bytes from sources, so it carries the gate the whole of
+  // routes/sources.ts sits behind: `canDownload: false` denies, an absent permission allows, admins are
+  // exempt, and an unreadable user row denies (a database blip must not open the one bulk route that
+  // writes to disk). Without it the button's permission is cosmetic: a denied account could still drive
+  // downloads by id. Same shape as that file's hook, not a call to it: the hook is plugin-wide there.
+  // Reintroduce by dropping this check: "a member without canDownload is refused" in
+  // bulkNewest.int.test.ts reads 202.
+  //
+  // Detached: POST starts the job and answers 202 with the total; GET reports progress and per-series
+  // outcomes. A second POST while one runs is 409 `busy` (lib/bulkNewest.ts says why it is not queued).
+  const newestBody = z.object({ ids: z.array(z.string().min(1).max(64)).min(1).max(500) });
+  const canDownload = async (req: any): Promise<boolean> => {
+    const me = await one<{ role: string; perms: { canDownload?: boolean } | null }>(
+      'SELECT role, perms FROM users WHERE id = $1', [userIdOf(req)]).catch(() => null);
+    if (!me) return false;
+    return me.role === 'admin' || me.perms?.canDownload !== false;
+  };
+
+  app.post('/api/library/bulk/newest', async (req, reply) => {
+    const b = newestBody.safeParse(req.body);
+    if (!b.success) return reply.code(400).send({ error: 'bad_request', message: 'ids: one to five hundred series ids.' });
+    if (!(await canDownload(req))) {
+      return reply.code(403).send({ error: 'forbidden', message: "You don't have permission to download chapters." });
+    }
+    // Every id goes into the job so the person sees each one settled; only the live ones are ever asked
+    // about. An id the viewer cannot see is "not in your library" whether it exists or not -- the same
+    // fail-closed answer liveSeries gives every other bulk action.
+    const ids = [...new Set(b.data.ids)];
+    const live = new Set(await liveSeries(ids, vc(req)));
+    const maxAge = vc(req).maxAgeRating;
+    const started = startBulkNewest({
+      ids, live, busy: jobBusy, userId: userIdOf(req),
+      sourceAllowed: (sourceId) => sourceAllowedFor(getSource(sourceId), maxAge),
+    });
+    if (!started) return reply.code(409).send({ error: 'busy', message: 'A Fetch newest run is already going. Wait for it to finish.' });
+    await logAudit('download.bulk_newest', { userId: userIdOf(req), detail: { count: live.size, asked: ids.length }, req });
+    return reply.code(202).send({ ok: true, total: started.total });
+  });
+
+  // Counts for everyone, results for the starter and admins (lib/bulkNewest.ts says why).
+  app.get('/api/library/bulk/newest', async (req) => bulkNewestState({ userId: userIdOf(req), admin: roleOf(req) === 'admin' }));
 
   // ---- external progress trackers (AniList) ----
   app.get('/api/trackers', async (req) => ({ content: await statusFor(userIdOf(req)) }));

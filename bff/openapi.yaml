@@ -6,7 +6,7 @@
 openapi: 3.1.0
 info:
   title: Uchiyomi API
-  version: 0.36.0
+  version: 0.37.0
   description: "Everything the web app does, it does over this API. Session JWTs are for the browser; scripts
     use a personal API token (Profile -> Account -> API tokens), sent as `Authorization: Bearer uy_...`.
     Scopes: read (every token; GET plus the library search POST, which is a query), write (anything that changes data), admin (the /api/admin surface, which also
@@ -1439,7 +1439,7 @@ paths:
         "404":
           description: Not found, or not visible to this account
         "409":
-          description: "`nothing_to_fetch` (every number was skipped; `skipped` says why) or `busy` (a download for the series is running)"
+          description: "`nothing_to_fetch` (every number was skipped; `skipped` says why) or `busy` (a download for the series is running -- since v0.37.0 that includes a bulk Fetch newest run being inside this series, for this series only and only while it is on it)"
   /api/sources/search-all:
     get:
       tags:
@@ -2640,6 +2640,119 @@ paths:
           description: Not authenticated
         "404":
           description: Not found, or not visible to this account
+  /api/library/bulk/newest:
+    post:
+      tags:
+        - personal
+      summary: "Fetch newest: start a detached run that fetches, for each selected series, the newest chapter its
+        sources list if it is not on the shelf yet. 202 with the total; 409 busy while one runs."
+      operationId: postApiLibraryBulkNewest
+      description: >-
+        Since v0.37.0. The one bulk action that fetches bytes from sources, so it is a job rather than a request
+        that waits, and it carries the download gate the /api/sources surface sits behind: a member whose
+        `canDownload` permission is off is refused (an absent permission allows, admins are exempt, an
+        unreadable account row fails closed). Per series the rule is the newest release the series' sources
+        list and nothing else: a live row holding it answers `up_to_date`; a number held only as a cleanup /
+        Delete-files tombstone (no live row beside it) is `skipped` with "Chapter N was deleted from this
+        server on purpose. Fetch again on the series page brings it back." and nothing is fetched (a
+        'missing' tombstone from the verify task is not held and IS fetched); otherwise that one number is
+        fetched with the series' Latest-N floor ignored for it alone -- the floor is never moved and nothing
+        below it is fetched -- and the retry cap for that number reset as the series page's Fetch does. A
+        number held for a preferred group is honoured, not overridden; a source the account's age limit
+        excludes, one in a cooldown, one listing nothing, and a series with a download already running are
+        each skipped with a reason. A source the admin disabled is never asked for its listing: a series whose
+        every source is disabled is skipped at once with no network call, one that also follows a live source
+        is asked on that one only. Ids the caller cannot see are not an error: they are reported skipped ("Not
+        in your library.") and count towards `total`. Only after a source was actually asked does the run
+        pause 1.5 s before the next series (cooldowns, disabled sources and ids not in the library are not
+        paced); one library scan runs at the end. While the run is inside a series that series answers 409
+        busy to POST /api/sources/fetch, /api/sources/fill and the admin chapters/refetch, and only then. One
+        run per server, never queued; a restart forgets it. Audit: `download.bulk_newest` {count, asked}.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [ids]
+              properties:
+                ids:
+                  type: array
+                  minItems: 1
+                  maxItems: 500
+                  description: Series ids, 1-64 characters each; duplicates count once.
+                  items:
+                    type: string
+      security:
+        - bearer: []
+      responses:
+        "202":
+          description: "Started: { ok: true, total } where total is the number of distinct ids asked."
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                  total:
+                    type: integer
+        "400":
+          description: "bad_request: the body is not { ids } of one to five hundred series ids."
+        "401":
+          description: Not authenticated
+        "403":
+          description: "forbidden: this account may not download chapters."
+        "409":
+          description: "busy: a Fetch newest run is already going; wait for it to finish."
+    get:
+      tags:
+        - personal
+      summary: "Fetch newest: the current run, or the last one -- counts for every signed-in viewer, per-series
+        results for the account that started it and for admins."
+      operationId: getApiLibraryBulkNewest
+      description: >-
+        Since v0.37.0. Always 200. `results` are in the order the ids were given (the order they were started);
+        `reason` is a sentence, present on every outcome but `downloaded`; `title` is empty for an id outside
+        the caller's library. Any member other than the starter (or an admin) gets the counts with `results:
+        []`, so a title from a library they were not granted cannot leak through someone else's selection.
+        Before any run: zeros, `startedAt` null, `results` empty. In memory: a restart forgets it.
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: The run's state.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  running:
+                    type: boolean
+                  done:
+                    type: integer
+                    description: Series settled so far, the ones skipped before any source was asked included.
+                  total:
+                    type: integer
+                  startedAt:
+                    type: [string, "null"]
+                  results:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id:
+                          type: string
+                        title:
+                          type: string
+                        outcome:
+                          type: string
+                          enum: [downloaded, up_to_date, skipped, failed]
+                        reason:
+                          type: string
+                          description: A sentence; present on every outcome but `downloaded`.
+        "401":
+          description: Not authenticated
   /api/trackers:
     get:
       tags:
@@ -3152,6 +3265,14 @@ paths:
         - images
       summary: A remote cover proxied same-origin; a value that is not a URL gets a placeholder rather than an error.
       operationId: getImgSourcesCover
+      description: >-
+        `u` is fetched through the SSRF guard (private, loopback, link-local and blocked addresses refused at
+        every redirect hop, four at most); an unfetchable value answers the placeholder image, uncached, and a
+        genuine upstream failure 502. The one URL fetched without the guard is the extension engine's own
+        thumbnail, `<SUWAYOMI_URL>/api/v1/manga/<id>/thumbnail`; since v0.37.0 that exemption is one path
+        shape, not one origin -- the URL on the wire is rebuilt from the configured engine base plus the
+        numeric id and fetched only if it round-trips to exactly the origin and path the caller named -- and a
+        redirect from it is refused.
       parameters:
         - name: u
           in: query
@@ -3605,7 +3726,18 @@ paths:
         - admin
       summary: Scheduled tasks with last run, last result and whether one is running.
       operationId: getApiAdminTasks
-      description: Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
+      description: >-
+        Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. Since
+        v0.37.0 the list always carries `verify` ("Verify chapter files", schedule "on demand · after a
+        database-only restore") with `lastRun` (epoch ms or null) and `lastResult` {ok, checked, missing,
+        readLibraryMissing, unmounted: string[], roots, ms, stopped?: 'shutdown'} or null -- it never runs by
+        itself, so it is listed even when it never has. Its run is detached (see the run route), so this
+        entry is where the counts appear: `checked` is rows whose file was looked for under roots that were
+        not skipped (both roots), `missing` the download-root rows marked this run, `readLibraryMissing` the
+        read-library rows whose file is gone (counted, never marked), `unmounted` the roots left alone (a
+        bare path: no file at all under it; "<root> (95 % of 20 chapter files missing)": the 90 % rule).
+        Both are persisted in server_settings (verify_last_run / verify_last_result) and survive a restart;
+        a run that threw stores a null result rather than an older healthy one.
       security:
         - bearer: []
       responses:
@@ -3619,20 +3751,39 @@ paths:
     post:
       tags:
         - admin
-      summary: Start a scheduled task now (scan, update, backup, fingerprint, pagehash, cleanup, extensions).
+      summary: Start a scheduled task now (scan, update, backup, fingerprint, pagehash, cleanup, extensions, verify).
         {ok:false,error:busy} while it runs, {ok:false,error:not_enabled} for a task that is switched off.
       operationId: postApiAdminTasksIdRun
-      description: Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
+      description: >-
+        Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. `scan` is
+        awaited and answers with its result; the others, `verify` included, start in the background and
+        answer {ok: true, started: true} ({ok: false, error: 'busy'} while one runs). `verify` (since v0.37.0,
+        "Verify chapter files") is detached because one stat per row over a network share is minutes on a
+        large library and a request that long dies at the reverse proxy while the walk goes on; its counts
+        land on GET /api/admin/tasks as the `verify` entry's `lastResult`, persisted across restarts. It stats
+        every un-pruned chapter row under both roots but marks ONLY rows under the download folder
+        (/library-dl) as pruned with `pruned_reason = 'missing'` -- the one reason the updater does not count
+        as held, so the next sweep (and Fetch newest) download them again onto the same rows; a read-library
+        row whose file is gone is counted in `readLibraryMissing` and never marked, because a re-fetch could
+        not land on that row. Per root it applies the read-chapter cleanup's whole-batch rule: a root where no
+        checked row's FILE is present (an empty folder is not proof of a mount), or that cannot be read, is a
+        volume that is not mounted (or an empty disk, which looks the same from inside the container), so it
+        marks nothing there and names the bare root in `unmounted`; and a root with more than 90 % of its
+        checked files missing is refused the same way, named as "<root> (N % of M chapter files missing)".
+        Rows are never deleted; a row the cleanup already marked keeps its reason. Never runs at boot or on a
+        schedule. Audit: `task.run` {task: 'verify'} at the press and `library.verify` {checked, missing,
+        readLibraryMissing, unmounted, ms} when the walk ends.
       parameters:
         - name: id
           in: path
           required: true
           description: >-
             The task. `cleanup` is the opt-in read-chapter cleanup and answers not_enabled while cleanup_read
-            is off; its run is subject to the same consent and the same vetoes as the hourly one.
+            is off; its run is subject to the same consent and the same vetoes as the hourly one. `verify` is
+            the repair for a database restored without its chapter files.
           schema:
             type: string
-            enum: [scan, update, backup, fingerprint, pagehash, cleanup, extensions]
+            enum: [scan, update, backup, fingerprint, pagehash, cleanup, extensions, verify]
       security:
         - bearer: []
       responses:
@@ -3858,6 +4009,65 @@ paths:
           description: "Forbidden: token scope, account permission or age limit"
         "404":
           description: Not found, or not visible to this account
+  /api/admin/series/bulk/hide:
+    post:
+      tags:
+        - admin
+      summary: "Remove from library over a selection: the single soft-delete once per id, files never touched."
+      operationId: postApiAdminSeriesBulkHide
+      description: >-
+        Since v0.37.0. Requires an admin account and a token carrying the admin scope. Scopes only ever
+        restrict. Exactly DELETE /api/admin/series/{id} once per id -- deleted_at set, tracker link dropped,
+        chapter rows, files, progress, favourites and ratings kept, restorable from the Removed list -- and
+        nothing more: deleting files stays the per-title, typed-confirmation step on
+        /api/admin/series/{id}/delete-files, so Select all plus one tap can never wipe a folder. An id that
+        cannot be hidden is skipped with its reason and the rest still apply. One `series.delete` audit row
+        per hidden series carrying {id, title, books}, as the single route writes it; nothing for skipped ids.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [ids]
+              properties:
+                ids:
+                  type: array
+                  minItems: 1
+                  maxItems: 500
+                  description: Series ids, 1-64 characters each; duplicates count once.
+                  items:
+                    type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: "{ ok: true, hidden, skipped: [{ id, reason }] }"
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                  hidden:
+                    type: integer
+                  skipped:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id:
+                          type: string
+                        reason:
+                          type: string
+                          enum: [merged, already_hidden, not_found]
+        "400":
+          description: "bad_request: the body is not { ids } of one to five hundred series ids."
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
   /api/admin/scanlators:
     get:
       tags:
@@ -4178,9 +4388,14 @@ paths:
     get:
       tags:
         - admin
-      summary: Soft-deleted series.
+      summary: Soft-deleted series, newest first, each with how many of its chapter rows are live and how many pruned.
       operationId: getApiAdminSeriesDeleted
-      description: Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
+      description: >-
+        Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. Each row:
+        {id, title, folder, books_count, deleted_at, live_books, pruned_books}; the last two (since v0.37.0)
+        are counted from the chapter rows, while `books_count` is the scan's figure and may be stale. Every
+        row pruned and none live means Delete files has already run: the panel then labels Put back
+        accordingly and offers no second Delete files.
       security:
         - bearer: []
       responses:
@@ -4194,9 +4409,18 @@ paths:
     post:
       tags:
         - admin
-      summary: Merge another series into this one.
+      summary: Merge this series into another one (the body names the survivor).
       operationId: postApiAdminSeriesIdMerge
-      description: Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
+      description: >-
+        Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. Merges
+        {id} INTO the series named by `into`: every chapter and progress row moves to the survivor, nothing is
+        de-duplicated and no chapter row is deleted, so no reading progress can be lost; the absorbed row
+        stays, pointed at the survivor, and a merge is one-way (400 `merged` for a source or target that is
+        itself merged, 400 `deleted` for a hidden one, 400 `same_series` for itself). Since v0.37.0 merging is
+        transitive: anything the absorbed series had itself absorbed earlier is re-pointed at the new
+        survivor in the same transaction, so a title folded in two merges ago still files its folder's
+        chapters under the final survivor on the scan and reads "already in your library" in the batch
+        importer instead of being re-added via another source.
       parameters:
         - name: id
           in: path
@@ -4204,14 +4428,16 @@ paths:
           schema:
             type: string
       requestBody:
-        required: false
+        required: true
         content:
           application/json:
             schema:
               type: object
+              required: [into]
               properties:
-                fromId:
+                into:
                   type: string
+                  description: The id of the series that survives; {id} is absorbed into it.
       security:
         - bearer: []
       responses:
@@ -4329,26 +4555,50 @@ paths:
     post:
       tags:
         - admin
-      summary: Delete a series' files from disk (irreversible).
+      summary: Delete a hidden series' files from disk (irreversible); the rows stay, marked deleted from the server.
       operationId: postApiAdminSeriesIdDeleteFiles
-      description: Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
+      description: >-
+        Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. Only ever
+        after the hide, and against the typed title, because it walks every root the series occupies, the
+        read library included. Every row stays (read_progress.book_id is ON DELETE RESTRICT); since v0.37.0
+        each row whose file was actually removed is marked pruned with `pruned_reason = 'deleted'` -- the
+        tombstone chapters/delete and the cleanup leave -- so a restore lists those chapters as pruned
+        ("Deleted from the server", where chapters/refetch brings one back onto the same row), the updater
+        keeps counting them as held, and `files` counts real unlinks rather than rows (a second call reports
+        0). A row whose file is already absent is left alone and not counted: on an unmounted share every
+        file looks absent. Refuses rather than half-applies.
       parameters:
         - name: id
           in: path
           required: true
           schema:
             type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [confirm]
+              properties:
+                confirm:
+                  type: string
+                  description: The series' exact title.
       security:
         - bearer: []
       responses:
         "200":
-          description: OK
+          description: "{ ok: true, files, bytes } -- files actually unlinked this call."
+        "400":
+          description: "bad_request, or confirm_mismatch when `confirm` is not the series' title."
         "401":
           description: Not authenticated
         "403":
           description: "Forbidden: token scope, account permission or age limit"
         "404":
           description: Not found, or not visible to this account
+        "409":
+          description: "refused { message, fix }: not hidden yet, no files on disk, or a root that is not writable (PUID/PGID unset; fix names it)."
   /api/admin/series/{id}/chapters/delete:
     post:
       tags:
@@ -5705,7 +5955,19 @@ paths:
         - admin
       summary: Probe one source right now, ignoring its cooldown, and diagnose it; writes no health.
       operationId: postApiAdminSourcesIdTest
-      description: Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
+      description: >-
+        Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. Answers
+        {ok, timedOut, checks, probe, diagnosis, canClear}. `probe` is always present: {httpStatus?, finalUrl?,
+        transport?, looksHtml?, adapterOk, needsSolver}. For a source with a homepage the homepage is fetched
+        first and `httpStatus` is its status (0 when a request was made and no HTTP answer came back); an
+        extension source has no homepage to ask, so that step is skipped and `httpStatus` is absent, not 0
+        (since v0.37.0). A live `adapterOk: true` outranks the stored error, so a passing extension source no
+        longer carries an old Cloudflare verdict. `diagnosis` is {code, reason, fix, actor, silent, needsProbe}: the `fix` for a
+        stored "Cloudflare bypass currently disabled" (code `cf_challenge`) names the engine's own switch by
+        the shipped compose names (uchiyomi-suwayomi, http://uchiyomi-flaresolverr:8191), never the
+        development stack's; and since v0.37.0 this route reads the source's slow streak, so `code` can be
+        `too_slow` ("This source answers, but more slowly than it is given.") here as well as from Discover's
+        health view, with a `fix` naming the configured SOURCE_LATEST_TIMEOUT_MS budget in seconds.
       parameters:
         - name: id
           in: path

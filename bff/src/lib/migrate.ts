@@ -292,6 +292,17 @@ CREATE INDEX IF NOT EXISTS lib_books_fp_idx ON lib_books (fingerprint) WHERE fin
 -- persistScan clears it if the file ever comes back, so a manual re-copy or re-download undoes the mark.
 ALTER TABLE lib_books  ADD COLUMN IF NOT EXISTS pruned_at   timestamptz;
 CREATE INDEX IF NOT EXISTS lib_books_pruned_idx ON lib_books (pruned_at) WHERE pruned_at IS NOT NULL;
+-- WHY the bytes are gone, meaningful only while pruned_at is set (persistScan clears the mark and leaves
+-- this stale, harmlessly: every reader tests pruned_at first).
+--   NULL       the read-chapter cleanup, or a row marked before v0.37.0
+--   'deleted'  the admin's Delete files removed it (lib/libraryAdmin.ts deleteSeriesFiles)
+--   'missing'  the admin's "Verify chapter files" task found no file behind the row (lib/verifyFiles.ts):
+--              a database-only restore, since chapter files are never in a backup
+-- ⚠️ The updater's have-set reads this. A cleanup or Delete-files tombstone still counts as HELD -- "we let
+-- the bytes go on purpose, do not fetch it again" is the whole point of those marks -- while a 'missing'
+-- one does not, so the next sweep fetches it again. That is what makes a restore recover its chapters
+-- without turning the cleanup into a fetch-delete loop (heldBooks in lib/chapterCleanup.ts).
+ALTER TABLE lib_books  ADD COLUMN IF NOT EXISTS pruned_reason text;
 
 -- breadcrumb for a series that gets rematched to a new folder, so a wrong match can be reversed
 ALTER TABLE lib_series ADD COLUMN IF NOT EXISTS folder_prev text;
@@ -462,6 +473,13 @@ ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS cleanup_read          boole
 ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS cleanup_read_days     int     NOT NULL DEFAULT 30;
 ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS cleanup_read_last_run timestamptz;
 ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS cleanup_read_last_result jsonb;
+
+-- The on-demand "Verify chapter files" task (lib/verifyFiles.ts): the last run and what it found, persisted
+-- like the cleanup's so the Tasks panel still shows it after a restart. It runs detached from its route --
+-- a walk over a network share is minutes -- so the panel line is the only place the admin sees its result,
+-- and a deploy right after a restore must not turn that into "not run yet".
+ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS verify_last_run    timestamptz;
+ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS verify_last_result jsonb;
 
 -- What the repositories offered and what was installed, as of the last check. This is what makes "new
 -- upstream", "dropped upstream" and "installed outside Uchiyomi" answerable at all, and what lets a wiped

@@ -7,6 +7,12 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { diagnose, HealthFacts, DiagnosisCode } from '../src/lib/sourceDiagnosis';
 
+// The engine's own words, as an extension source stores them: suwayomi/client.ts prefixes every GraphQL
+// error with `suwayomi: ` and the tail is the exception text verbatim from issue #54's log. A `flaresolverr:`
+// prefix is impossible here -- that comes only from Uchiyomi's own solver client, which extension sources
+// never call -- and a fixture wearing it would let the rules drift from what the table really holds.
+const ENGINE_BYPASS_OFF = 'suwayomi: java.io.IOException: Cloudflare bypass currently disabled';
+
 const facts = (p: Partial<HealthFacts> = {}): HealthFacts => ({
   status: 'down', lastError: null, consecutive: 1, lastOkAt: null,
   emptyStreak: 0, blockedUntil: null, disabled: false, ...p,
@@ -178,19 +184,68 @@ test('a working adapter outranks anything the homepage says', () => {
 
 test('THE BASELESS ADAPTER: a working extension source outranks its own stale error, even with no homepage to probe', () => {
   // Suwayomi/extension sources never set `base` -- the engine talks to the site, not this server -- so
-  // `probeBase` is never even called for them (see admin.ts and sourceWatchdog.ts: `src.base ? probeBase(...)
-  // : undefined`). A caller that only builds a `Probe` when the bare request happened loses `adapterOk`
-  // entirely for every one of these sources, and `diagnose` falls through to whatever Cloudflare-flavored
-  // string `last_error` last held -- reporting "protected by a check we could not get past" on a source
-  // whose search, series, chapters and pages all just passed live (Mangaball via Suwayomi, issue #54).
+  // `probeBase` is never called for them and their Probe carries no `httpStatus` at all. `reportOk` never
+  // clears `last_error`, so the stored string can be weeks old. The adapter's own live pass must still win
+  // over it, status or no status (Mangaball via Suwayomi, issue #54: all four checks green, verdict
+  // "protected by a check we could not get past" on every click).
   //
-  // Reintroduce by only passing a `Probe` when a bare probe ran: this must stay `ok`, not `cf_challenge`.
-  const d = diagnose(
-    facts({ lastError: 'flaresolverr: Cloudflare bypass currently disabled' }),
-    { httpStatus: 0, adapterOk: true, needsSolver: false },
-  );
+  // This pins diagnose()'s half. The callers' half -- that both actually hand this evidence over through
+  // buildProbe rather than dropping it when no bare probe ran, which is what PR #56 fixed and what its own
+  // test could not see -- is guarded in sourceWatchdog.test.ts ('THE DROPPED VERDICT').
+  //
+  // Reintroduce by gating the `adapterOk` short-circuit on a present `httpStatus` (moving it inside the
+  // `probe.httpStatus != null` block): this reads `cf_challenge`.
+  const d = diagnose(facts({ lastError: ENGINE_BYPASS_OFF }), { adapterOk: true, needsSolver: false });
   assert.equal(d.code, 'ok');
   assert.equal(d.reason, '');
+  // ...and one that is genuinely failing right now still gets the stored verdict, not a shrug.
+  assert.equal(diagnose(facts({ lastError: ENGINE_BYPASS_OFF }), { adapterOk: false, needsSolver: false }).code, 'cf_challenge');
+});
+
+test('an absent homepage status is not evidence of anything', () => {
+  // A Probe without `httpStatus` means no request was made, which is a different fact from "a request was
+  // made and got no answer" (0). PR #56 first encoded both as 0. No rule happened to fire on 0 that day,
+  // but "no answer" is one `if (!probe.httpStatus)` away from "unreachable", and every extension source
+  // would then be reported as a dead host for a request nobody made. The status-derived rules live behind
+  // a presence guard, and an absent status must leave the verdict to the stored evidence alone.
+  //
+  // Reintroduce by treating a missing status as a failed request -- e.g. `if (!probe.httpStatus)` returning
+  // `unreachable` ahead of the guard: the stored `timeout` below stops being 'timeout' (undecided,
+  // needsProbe) and becomes 'unreachable'.
+  const none = { adapterOk: false, needsSolver: false };
+  const t = diagnose(facts({ lastError: 'timeout' }), none, undefined);
+  assert.equal(t.code, 'timeout', 'nothing was asked, so nothing was learned; the stored shrug stands');
+  assert.equal(t.needsProbe, true);
+  // The stored solver rule still decides, and the fix must not claim a homepage that was never fetched
+  // "answers fine from this server" (that inference keys on a real 200).
+  const d = diagnose(facts({ lastError: POOL }), none, undefined);
+  assert.equal(d.code, 'solver_down');
+  assert.doesNotMatch(d.fix, /answers fine from this server/, 'no homepage was asked, so it cannot have answered');
+  // And the transport-failure encoding still means what it always did.
+  const u = diagnose(facts({ lastError: 'timeout' }), { httpStatus: 0, transport: 'ENOTFOUND', adapterOk: false }, 'https://gone.example');
+  assert.equal(u.code, 'unreachable');
+});
+
+test('THE WRONG KNOB: the engine saying its own bypass is off names the engine\'s setting, not our solver', () => {
+  // Issue #54, verbatim: Suwayomi's CloudflareInterceptor throws "Cloudflare bypass currently disabled"
+  // because the ENGINE's FlareSolverr integration is off by default. The generic cf_challenge rule matches
+  // the word "cloudflare" in the same string and tells the admin to "confirm the solver is healthy" -- and
+  // Uchiyomi's solver was perfectly healthy; it is simply not involved. The reporter spent a day on that.
+  //
+  // Reintroduce by moving this rule below the generic cf_challenge one (or deleting it): the code stays
+  // cf_challenge but the fix stops naming FLARESOLVERR_ENABLED and the Suwayomi container. Or by writing the
+  // development stack's `yomi-suwayomi` / `yomi-flaresolverr` back into the sentence: the last assertion
+  // fails, because that name exists on one install and the shipped compose files all say `uchiyomi-*`.
+  const d = diagnose(facts({ lastError: ENGINE_BYPASS_OFF }));
+  assert.equal(d.code, 'cf_challenge', 'to readers it is still a check we could not get past');
+  assert.match(d.fix, /FLARESOLVERR_ENABLED=true/, 'the admin fix must name the engine\'s own switch');
+  assert.match(d.fix, /FLARESOLVERR_URL/, 'and the address knob that points the engine at a solver');
+  assert.match(d.fix, /uchiyomi-suwayomi/, 'on the engine container as the shipped compose files name it, not ours');
+  assert.doesNotMatch(d.fix, /(^|[^a-z-])yomi-suwayomi|(^|[^a-z-])yomi-flaresolverr/i,
+    'the development stack\'s container names must not leak into a sentence every public install reads');
+  assert.doesNotMatch(d.reason, /suwayomi|flaresolverr|FLARESOLVERR/i, 'the public sentence names no component');
+  // The upstream_down rule (`^suwayomi`) sits below cf_challenge and must not have swallowed it either.
+  assert.notEqual(d.code, 'upstream_down');
 });
 
 test('THE DESIGN FLAW: being slower than our budget is not the same as being refused', () => {

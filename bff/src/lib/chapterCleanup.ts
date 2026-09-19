@@ -156,18 +156,44 @@ export async function dueCountCached(days: number): Promise<number> {
  * (`override` set) is a decision about the chapter, not a measurement of the file, and is kept.
  *
  * Idempotent on the pruned_at guard: a row already marked is not re-stamped, so the mark keeps the time
- * of the deletion rather than of the last time something asked.
+ * of the deletion rather than of the last time something asked -- and keeps its REASON, so a verify run
+ * over a library the cleanup has pruned cannot relabel a deliberate deletion as a missing file.
+ *
+ * `reason` says why the bytes are gone (the column note in lib/migrate.ts): this job passes nothing, the
+ * admin's Delete files passes 'deleted', the verify task passes 'missing'. Only 'missing' changes what the
+ * updater does -- see heldBooks below.
  */
-export async function tombstoneBooks(ids: string[]): Promise<void> {
+export type PrunedReason = 'deleted' | 'missing';
+
+export async function tombstoneBooks(ids: string[], reason: PrunedReason | null = null): Promise<void> {
   if (!ids.length) return;
   await q(
     `UPDATE lib_books
-        SET pruned_at = now(), page_dims = NULL, fingerprint = NULL, fp_kind = NULL, fp_at = NULL, size = NULL
+        SET pruned_at = now(), pruned_reason = $2, page_dims = NULL, fingerprint = NULL, fp_kind = NULL, fp_at = NULL, size = NULL
       WHERE id = ANY($1) AND pruned_at IS NULL`,
-    [ids],
+    [ids, reason],
   );
   await q('DELETE FROM page_hashes WHERE book_id = ANY($1) AND override IS NULL', [ids]);
 }
+
+/**
+ * SQL predicate for the rows the library still counts as HELD -- the updater's have-set, and the one
+ * place the meaning of a tombstone's reason is spelled out.
+ *
+ * A live row is held. A cleanup tombstone (reason NULL) and a Delete-files tombstone ('deleted') are held
+ * too: the bytes went on purpose, and the whole point of keeping the row (the note on pruned_at in
+ * lib/migrate.ts) is that the sweep does not fetch them back every night. A 'missing' tombstone is NOT
+ * held: the verify task wrote it because the file was simply not there -- a database restored without its
+ * chapter files -- and fetching it again is exactly what the person wants.
+ * ⚠️ `IS DISTINCT FROM`, not `<>`: a NULL reason compared with `<>` is NULL, which reads as false, and
+ * every cleanup tombstone would silently become "missing".
+ * Reintroduce by returning `${col}pruned_at IS NULL`: "a cleanup tombstone is still held, so the sweep
+ * does not fetch it back" in verifyFiles.int.test.ts downloads the chapter the cleanup deleted.
+ */
+export const heldBooks = (alias = ''): string => {
+  const col = alias ? `${alias}.` : '';
+  return `(${col}pruned_at IS NULL OR ${col}pruned_reason IS DISTINCT FROM 'missing')`;
+};
 
 /**
  * Clear the mark on chapters whose file the boot-time reaper (reapStaleTemp in lib/fsAtomic.ts) has just

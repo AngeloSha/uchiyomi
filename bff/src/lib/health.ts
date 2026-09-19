@@ -272,6 +272,7 @@ async function sourceTrouble(): Promise<HealthCheck> {
   const rows = await q<{
     source_id: string; status: string; consecutive: number; disabled: boolean;
     blocked_until: string | null; last_error: string | null; empty_streak: number; last_ok_at: string | null;
+    last_fail_at: string | null; last_slow_at: string | null;
     series: number;
   }>(
     `SELECT sh.source_id, sh.status, sh.consecutive,
@@ -282,6 +283,9 @@ async function sourceTrouble(): Promise<HealthCheck> {
                                       WHERE 'sw:' || ss.source_id = sh.source_id AND NOT ss.enabled)) AS disabled,
             sh.blocked_until, sh.last_error,
             sh.empty_streak, sh.last_ok_at,
+            -- When the stored error was written, so a success that came AFTER it can be told apart from one
+            -- that came before (reportFail and reportSlow stamp these; nothing ever clears last_error).
+            sh.last_fail_at, sh.last_slow_at,
             -- ls.source_id, NOT ls.source: the former is the adapter id ('aqua'), the latter is the
             -- display name as it was at add time ('Aqua Manga (EN)'). This compared a name to an id, so it
             -- matched nothing and every row of this check has always reported "0 series use it".
@@ -320,8 +324,16 @@ async function sourceTrouble(): Promise<HealthCheck> {
             : r.status;
       // The plain-language cause and its fix, rather than the raw string. This page is admin-only, so it
       // gets the operator half of the diagnosis, which is the half that names what to actually go and do.
+      //
+      // `last_error` outlives the failure it describes: `reportOk` never clears it, so a source listed here
+      // for an empty streak, with a success more recent than its last failure, would otherwise be diagnosed
+      // from the words of its last bad afternoon and the operator sent to fix a Cloudflare problem that ended
+      // days ago. The stored-error rules run before the empty-streak one, so the stale string would even
+      // hide the live finding. When the last success is newer than the last failure, the error is history.
+      const at = (t: string | null) => (t ? new Date(t).getTime() : 0);
+      const errorIsHistory = at(r.last_ok_at) > Math.max(at(r.last_fail_at), at(r.last_slow_at));
       const d = diagnose({
-        status: r.status as any, lastError: r.last_error, consecutive: r.consecutive,
+        status: r.status as any, lastError: errorIsHistory ? null : r.last_error, consecutive: r.consecutive,
         lastOkAt: r.last_ok_at, emptyStreak: r.empty_streak ?? 0,
         blockedUntil: r.blocked_until, disabled: r.disabled,
       });

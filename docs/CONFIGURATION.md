@@ -15,6 +15,16 @@ The ones worth knowing:
 - `WEB_PORT`: host port the app is published on — `8080` everywhere. (`SPLIT_WEB_PORT`, default `8081`, is
   the split's own port under `--profile split`, so both can run side by side.)
 - `PUBLIC_ORIGIN`: the URL the app is served from (match your domain behind a reverse proxy).
+- **Database** — `DATABASE_URL`, on the app container. **Unset** (the shipped one-container file leaves it
+  unset on purpose): the container runs its own Postgres 16 in `/data/pg` (the `uchiyomi_data` volume), on a
+  unix socket only — no network listener, no password — and the nightly task dumps it into `/backups` like
+  any other. **Set**: the same image talks to the Postgres you name instead, and starts none of its own;
+  [`deploy/docker-compose.external-db.yml`](../deploy/docker-compose.external-db.yml) is that layout ready
+  to use, with a `uchiyomi-db` container beside the app (its password is `DB_PASSWORD`). That one variable
+  is the whole switch; **Admin → Overview** says which is in use (*embedded database* / *external
+  database*), and moving between the two is a dump and a restore, written down in both directions in
+  [MIGRATING.md](MIGRATING.md). How to open a `psql` shell on either, and how to restore, is in
+  [USAGE §12](USAGE.md#12-backups--restore).
 
 
 ## What leaves your server
@@ -124,6 +134,27 @@ ever hit.
   pack site. A chapter is 110-130 images; fetching them back to back at ~1.9 pages a second is exactly what
   earned the 429s on mangakakalot and natomanga, and a quarter second between pages costs about 30 seconds
   per chapter against a 75-minute cooldown. Extension sources ignore this: see the next knob.
+- `FLARESOLVERR_ENABLED` / `FLARESOLVERR_URL` **on the extension engine's container** (not on Uchiyomi):
+  the bundled Suwayomi has no browser of its own and cannot get past Cloudflare by itself; these two are
+  Suwayomi-Server's own settings and point it at the bundled solver. Every compose file sets them on the
+  engine service since v0.37.0 (`FLARESOLVERR_ENABLED: "true"`, `FLARESOLVERR_URL:
+  http://uchiyomi-flaresolverr:8191` in the `deploy/` files, `http://yomi-flaresolverr:8191` in the
+  development stack), so an upgrade that recreates the engine container is the fix for
+  [#54](https://github.com/AngeloSha/uchiyomi/issues/54). If you run the engine yourself — an existing
+  Suwayomi named in `SUWAYOMI_URL`, the Unraid template — set both on **that** container and recreate it, or
+  every Cloudflare-protected extension source fails its search with `Cloudflare bypass currently disabled`.
+  The admin *Test* button and Health then say, in these words: *The extension engine's own Cloudflare
+  bypass is switched off. On the Suwayomi engine's container (uchiyomi-suwayomi in the shipped compose
+  files) set FLARESOLVERR_ENABLED=true and FLARESOLVERR_URL to the same solver address Uchiyomi uses
+  (http://uchiyomi-flaresolverr:8191 in the shipped files), then recreate it. The v0.37.0 compose files
+  already set both, so an upgrade that recreates the engine is the fix there.* — the shipped names are
+  examples; use whatever your engine's container and solver are called. Uchiyomi's own `FLARESOLVERR_URL`
+  (in the tuning list of `.env.example`) is a different setting: it is the solver the built-in engines use.
+- `SUWAYOMI_URL` (see [extensions.md](extensions.md#settings)): where the extension engine is; empty turns
+  the feature off. A trailing slash (or two), a query string or a fragment on this value is ignored; the
+  scheme, host, port and any sub-path are what count — the same normalised base is used for the covers the
+  engine hands over and for the cover proxy's check of them, so a stray `//` no longer turns every
+  extension cover into a placeholder.
 - `SUWAYOMI_PAGE_CONCURRENCY` (default `4`, 1-8): pages fetched at once from the extension engine. An
   extension source's page URLs are the engine's own proxy paths, and the engine has its own client and its
   own rate limits towards the site, so the one-at-a-time pacing above was only slowing extension downloads

@@ -71,7 +71,9 @@ Node server, and there is no converter — "porting" them would mean rewriting h
 
 [Suwayomi](https://github.com/Suwayomi/Suwayomi-Server) is the one project that solved this. It converts an
 extension's Android bytecode to JVM bytecode and supplies a fake Android runtime so the extension believes it
-is on a phone, right down to a headless browser for the ones that need to get past Cloudflare.
+is on a phone. What it does not supply is a browser: for the sources that need to get past Cloudflare it
+leans on a FlareSolverr it has been told about, which is why the compose files point it at the bundled one
+(below).
 
 So Uchiyomi runs Suwayomi as an **extension engine** and nothing else. It starts with the rest of the stack,
 Uchiyomi configures itself to talk to it, and you never open it. Uchiyomi keeps owning your library, reader,
@@ -84,7 +86,18 @@ The cost is honest: it is a JVM and sits around 800 MB of RAM once running.
 
 - **Uchiyomi does the downloading.** Chapters land in your own library as CBZ files exactly like every other
   source, so there is one library, one updater and one set of files.
-- **Cloudflare is the engine's problem, not ours.** These sources skip Uchiyomi's FlareSolverr entirely.
+- **Cloudflare is the engine's problem, and the engine cannot solve it alone.** These sources never go through
+  Uchiyomi's own FlareSolverr calls, because the engine, not Uchiyomi, talks to the site. But Suwayomi has no
+  browser of its own: it hands challenged requests to a FlareSolverr it has been told about, and that is off
+  by default. The compose files set `FLARESOLVERR_ENABLED=true` and `FLARESOLVERR_URL=http://uchiyomi-flaresolverr:8191`
+  (`yomi-flaresolverr` in the development stack) on the engine's container so it shares the bundled solver.
+  If you run the engine yourself, set those two on it too; otherwise every Cloudflare-protected extension
+  source fails its search with `Cloudflare bypass currently disabled` and the admin Test button says so, in
+  these words: *The extension engine's own Cloudflare bypass is switched off. On the Suwayomi engine's
+  container (uchiyomi-suwayomi in the shipped compose files) set FLARESOLVERR_ENABLED=true and
+  FLARESOLVERR_URL to the same solver address Uchiyomi uses (http://uchiyomi-flaresolverr:8191 in the
+  shipped files), then recreate it. The v0.37.0 compose files already set both, so an upgrade that recreates
+  the engine is the fix there.*
 - **If the engine is down, Uchiyomi is fine.** It boots normally, the built-in engines keep working, the panel
   says it is unreachable, and extension-backed series simply do not update until it is back.
 - **Series stay routed** by the source they came from, so the scheduled updater keeps pulling new chapters.
@@ -108,14 +121,14 @@ reclaim the RAM as well, `docker compose stop uchiyomi-suwayomi` (`yomi-suwayomi
 
 | Variable | Default | What it does |
 | --- | --- | --- |
-| `SUWAYOMI_URL` | the bundled engine | Where the extension engine is. Empty turns the feature off. |
+| `SUWAYOMI_URL` | the bundled engine | Where the extension engine is. Empty turns the feature off. A trailing slash (or two), a query string or a fragment on this value is ignored; the scheme, host, port and any sub-path are what count. |
 | `SUWAYOMI_USERNAME` / `SUWAYOMI_PASSWORD` | empty | Only if your engine has authentication enabled. |
 | `SUWAYOMI_MAX_SOURCES` | `25` | Ceiling on how many extension sources register at once. |
 | `SUWAYOMI_PAGE_CONCURRENCY` | `4` | Pages of one chapter fetched from the engine at once (1-8). The engine rate-limits the site itself, so extension downloads skip the one-at-a-time pacing that scraped sites need; a 429 from the engine drops back to one for the rest of the chapter. |
+| `SOURCE_LATEST_TIMEOUT_MS` | `8000` | How long one source gets to answer "what's new" on Discover before it is given up on and marked unhealthy. A source that keeps overrunning it is diagnosed *answers, but more slowly than it is given* — since v0.37.0 by the admin *Test* button and the daily source check too, not only Discover's health view — and the fix sentence names this budget. |
 
 The update check's own settings live in **Admin → Server → Settings**, not here: *Update extensions
 automatically* (on by default) and *Extension check interval* (6 hours).
-| `SOURCE_LATEST_TIMEOUT_MS` | `8000` | How long one source gets to answer "what's new" on Discover before it is given up on and marked unhealthy. |
 
 **Adult sources.** Extensions declare whether they are adult, and Uchiyomi records that per source. A member
 whose age limit is set below 18 cannot reach one: it is left out of their source list entirely, and the

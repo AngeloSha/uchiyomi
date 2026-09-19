@@ -2,7 +2,7 @@
   "_meta": {
     "language": "zh",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 840
+    "strings": 865
   },
   "1 check found something": "1 项检查发现问题",
   "1 member": "1 位成员",
@@ -843,5 +843,30 @@
   "1 linked for progress sync": "已关联 1 个用于进度同步",
   "{n} linked for progress sync": "已关联 {n} 个用于进度同步",
   "linked for progress sync": "已关联用于进度同步",
-  "Other sources: an admin can follow them from Sources & translations.": "其他来源：管理员可在“来源与翻译”中追踪它们。"
+  "Other sources: an admin can follow them from Sources & translations.": "其他来源：管理员可在“来源与翻译”中追踪它们。",
+  "Fetch newest": "获取最新",
+  "More": "更多",
+  "Remove 1 series from the library?": "要从书库中移除 1 部作品吗？",
+  "Remove {n} series from the library?": "要从书库中移除 {n} 部作品吗？",
+  "The chapters stay exactly where they are on disk, and nothing in your library folder is touched.": "章节会原样留在磁盘上，你的书库文件夹不会被改动。",
+  "Everyone's reading progress, history, favourites and ratings are kept, so you can put them back at any time from Admin → Library.": "所有人的阅读进度、历史、收藏和评分都会保留，你随时可以在管理 → 书库中把它们放回来。",
+  "Removed 1 series": "已移除 1 部作品",
+  "Removed {n} series": "已移除 {n} 部作品",
+  "1 skipped": "跳过 1",
+  "{n} skipped": "跳过 {n}",
+  "1 failed": "失败 1",
+  "Fetched 1 chapter": "已获取 1 章",
+  "Fetched {n} chapters": "已获取 {n} 章",
+  "1 up to date": "1 部已是最新",
+  "{n} up to date": "{n} 部已是最新",
+  "Nothing to fetch": "没有可获取的内容",
+  "Fetching {done} of {total}…": "正在获取 {done}/{total}…",
+  "Could not start the fetch": "无法开始获取",
+  "Could not remove those": "无法移除这些作品",
+  "Lost track of the fetch. Check the library in a moment.": "跟丢了这次获取。请稍后再查看书库。",
+  "files deleted": "文件已删除",
+  "The chapter files are gone. Put back lists them as deleted from the server; Fetch again on the series page brings back the ones Uchiyomi downloaded.": "章节文件已不存在。「Put back」会把它们列为已从服务器删除；在系列页面点「重新获取」可找回 Uchiyomi 下载过的章节。",
+  "Started — the Tasks line shows what it found when it is done.": "已开始 — 完成后，任务行会显示检查结果。",
+  "Nothing removed · 1 skipped": "未移除任何作品 · 跳过 1",
+  "Nothing removed · {n} skipped": "未移除任何作品 · 跳过 {n}"
 }
