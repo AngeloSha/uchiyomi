@@ -176,6 +176,23 @@ test('a working adapter outranks anything the homepage says', () => {
   assert.equal(d.reason, '');
 });
 
+test('THE BASELESS ADAPTER: a working extension source outranks its own stale error, even with no homepage to probe', () => {
+  // Suwayomi/extension sources never set `base` -- the engine talks to the site, not this server -- so
+  // `probeBase` is never even called for them (see admin.ts and sourceWatchdog.ts: `src.base ? probeBase(...)
+  // : undefined`). A caller that only builds a `Probe` when the bare request happened loses `adapterOk`
+  // entirely for every one of these sources, and `diagnose` falls through to whatever Cloudflare-flavored
+  // string `last_error` last held -- reporting "protected by a check we could not get past" on a source
+  // whose search, series, chapters and pages all just passed live (Mangaball via Suwayomi, issue #54).
+  //
+  // Reintroduce by only passing a `Probe` when a bare probe ran: this must stay `ok`, not `cf_challenge`.
+  const d = diagnose(
+    facts({ lastError: 'flaresolverr: Cloudflare bypass currently disabled' }),
+    { httpStatus: 0, adapterOk: true, needsSolver: false },
+  );
+  assert.equal(d.code, 'ok');
+  assert.equal(d.reason, '');
+});
+
 test('THE DESIGN FLAW: being slower than our budget is not the same as being refused', () => {
   // The bug this exists for, in full. Aqua Manga answered correctly in ~11.5s through the Cloudflare
   // solver; the wall allowed 8s. `withTimeout` threw "timeout", `classify` read that as `down`, and
