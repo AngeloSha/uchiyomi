@@ -136,7 +136,7 @@ export function SessionsCard({ span = '' }: { span?: string }) {
   );
 }
 
-interface ApiToken { id: string; name: string; scopes: string[]; createdAt: string; lastSeen: string | null; expiresAt: string | null; expired: boolean }
+interface ApiToken { id: string; name: string; scopes: string[]; createdAt: string; lastSeen: string | null; expiresAt: string | null; expired: boolean; showAdult?: boolean }
 
 /** Long-lived tokens for scripts and integrations. Shown once on creation, revocable at any time. */
 export function TokensCard({ span = '' }: { span?: string }) {
@@ -148,6 +148,9 @@ export function TokensCard({ span = '' }: { span?: string }) {
   const [write, setWrite] = useState(false);
   const [admin, setAdmin] = useState(false);
   const [confirmAdmin, setConfirmAdmin] = useState(false);
+  // Off by default, like the OPDS link: a token in a script or another app is a second door into the
+  // library, and the age cap should not open with it unless its owner said so at mint time.
+  const [adult, setAdult] = useState(false);
   // Same as the recovery codes: the server sends this token once and stores only a hash of it.
   const [fresh, setFreshState] = useState<string | null>(() => readShownOnce<string>('apiToken.fresh'));
   const setFresh = (v: string | null) => { writeShownOnce('apiToken.fresh', v); setFreshState(v); };
@@ -158,9 +161,9 @@ export function TokensCard({ span = '' }: { span?: string }) {
   const create = async () => {
     const scopes = ['read', ...(write ? ['write'] : []), ...(admin ? ['admin'] : [])];
     try {
-      const r = await api<{ token: string }>('/api/tokens', { json: { name: name.trim(), scopes } });
+      const r = await api<{ token: string }>('/api/tokens', { json: { name: name.trim(), scopes, showAdult: adult } });
       setFresh(r.token);
-      setName(''); setWrite(false); setAdmin(false); setOpen(false);
+      setName(''); setWrite(false); setAdmin(false); setAdult(false); setOpen(false);
       qc.invalidateQueries({ queryKey: ['api-tokens'] });
     } catch (e: any) { toast(msgOf(e, tr('Could not create the token')), 'error'); }
   };
@@ -197,6 +200,10 @@ export function TokensCard({ span = '' }: { span?: string }) {
             <label className="flex items-center gap-2 text-xs text-fog-300">
               <input type="checkbox" checked={admin} onChange={(e) => setAdmin(e.target.checked)} className="accent-accent" />{tr('Allow server administration')}</label>
           )}
+          {/* Mirrors the OPDS link's switch. The Komga-compatible API (Mihon, Tachimanga) reads the library
+              through a token, and without this the 18+ libraries are simply absent from it. */}
+          <label className="flex items-center gap-2 text-xs text-fog-300">
+            <input type="checkbox" checked={adult} onChange={(e) => setAdult(e.target.checked)} className="accent-accent" />{tr('Include 18+ libraries')}</label>
           <div className="flex gap-2 pt-1">
             {/* An admin-scoped token never expires and can do anything its owner can, so it costs one more
                 deliberate step. The rest of the form is unchanged. */}
@@ -215,6 +222,7 @@ export function TokensCard({ span = '' }: { span?: string }) {
               </p>
               <p className="truncate text-xs text-fog-500">
                 {t.scopes.includes('admin') ? tr('admin') : t.scopes.includes('write') ? tr('read + write') : tr('read only')}
+                {t.showAdult ? ` · ${tr('18+')}` : ''}
                 {' · '}{t.lastSeen ? tr('last used {when}', { when: relativeTime(t.lastSeen) }) : tr('never used')}
               </p>
             </div>

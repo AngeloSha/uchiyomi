@@ -2,7 +2,7 @@
   "_meta": {
     "language": "fr",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 865
+    "strings": 880
   },
   "1 check found something": "1 vérification a trouvé quelque chose",
   "1 member": "1 membre",
@@ -347,7 +347,6 @@
   "Two-factor authentication": "Authentification à deux facteurs",
   "Two-factor disabled": "Double authentification désactivée",
   "Two-factor enabled": "Double authentification activée",
-  "Type": "Type",
   "Type any folder under your library root, or browse below. Libraries may sit inside one another — the most specific one wins.": "Saisissez n'importe quel dossier sous la racine de votre bibliothèque, ou parcourez ci-dessous. Les bibliothèques peuvent être imbriquées — la plus spécifique l'emporte.",
   "Uchiyomi · personal reader for your Komga library": "Uchiyomi · lecteur personnel pour votre bibliothèque Komga",
   "Up Next": "À suivre",
@@ -865,8 +864,24 @@
   "Could not remove those": "Impossible de les retirer",
   "Lost track of the fetch. Check the library in a moment.": "La récupération a été perdue de vue. Vérifiez la bibliothèque dans un instant.",
   "files deleted": "fichiers supprimés",
-  "The chapter files are gone. Put back lists them as deleted from the server; Fetch again on the series page brings back the ones Uchiyomi downloaded.": "Les fichiers des chapitres ont disparu. « Put back » les affiche comme supprimés du serveur ; « Récupérer à nouveau » sur la page de la série ramène ceux qu’Uchiyomi avait téléchargés.",
+  "The chapter files are gone. Put back lists them as deleted from the server; Fetch again on the series page brings back the ones Uchiyomi downloaded.": "Les fichiers des chapitres ont disparu. « Remettre » les affiche comme supprimés du serveur ; « Récupérer à nouveau » sur la page de la série ramène ceux qu’Uchiyomi avait téléchargés.",
   "Started — the Tasks line shows what it found when it is done.": "Démarré — la ligne des Tâches affichera ce qui a été trouvé une fois terminé.",
   "Nothing removed · 1 skipped": "Rien de retiré · 1 ignorée",
-  "Nothing removed · {n} skipped": "Rien de retiré · {n} ignorées"
+  "Nothing removed · {n} skipped": "Rien de retiré · {n} ignorées",
+  "Forget": "Oublier",
+  "Forget \"{title}\" for good?": "Oublier « {title} » pour de bon ?",
+  "This erases the series and everyone's reading history on it — progress, bookmarks, notes, ratings, favourites, tracker links.": "Cela efface la série et tout l’historique de lecture de chacun sur celle-ci : progression, signets, notes, évaluations, favoris, liens vers les trackers.",
+  "Stats and Wrapped change. If the files ever reappear it comes back as a new series with no history. This cannot be undone.": "Les statistiques et Wrapped changent. Si les fichiers réapparaissent un jour, elle revient comme une nouvelle série sans historique. C’est irréversible.",
+  "Forgotten. Nobody had read it.": "Oubliée. Personne ne l’avait lue.",
+  "Forgotten. 1 member's history on it is gone.": "Oubliée. L’historique d’1 membre sur celle-ci a disparu.",
+  "Forgotten. {n} members' history on it is gone.": "Oubliée. L’historique de {n} membres sur celle-ci a disparu.",
+  "Could not forget it": "Impossible de l’oublier",
+  "Include 18+ libraries": "Inclure les bibliothèques 18+",
+  "18+": "18+",
+  "Type {title} to confirm": "Saisissez {title} pour confirmer",
+  "Put back": "Remettre",
+  "Restoring…": "Remise en place…",
+  "1 chapter · removed {when}": "1 chapitre · retirée {when}",
+  "{n} chapters · removed {when}": "{n} chapitres · retirée {when}",
+  "Removing a series hides it from the library, search and the updater. Its files are left exactly where they are, and everyone’s reading progress is kept, so putting it back changes nothing else.": "Retirer une série la masque de la bibliothèque, de la recherche et des mises à jour. Ses fichiers restent exactement où ils sont et la progression de lecture de chacun est conservée ; la remettre ne change donc rien d’autre."
 }

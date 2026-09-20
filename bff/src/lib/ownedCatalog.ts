@@ -66,7 +66,7 @@ const browseSrc = (ctx: ViewCtx, p: Params, alias = 'sv') => seriesSrcWith(brows
  */
 const booksSrc = (ctx: ViewCtx, p: Params, alias = 'bv') => `(
   SELECT b.id, b.series_id, b.source, b.file, b.root, b.pages, b.mtime, b.published_at, b.page_dims,
-         b.updated_at, b.fingerprint, b.scanlator, b.source_id, b.pruned_at,
+         b.updated_at, b.fingerprint, b.scanlator, b.source_id, b.pruned_at, b.size,
          COALESCE(ov.number, b.number) AS number,
          COALESCE(ov.title,  b.title)  AS title
     FROM lib_books b
@@ -155,6 +155,11 @@ function bookDto(r: any) {
     // explicit column list above: a name dropped there does not error, it silently reads as null here.
     scanlator: r.scanlator ?? null,
     sourceId: r.source_id ?? null,
+    // The file's size on disk (lib_books.size, stamped by the scanner and the downloader). A bigint reaches
+    // node as a STRING, so it is numbered here once rather than by every reader; null when never stamped.
+    // The Komga-compatible chapter list shows it -- the extension's default chapter name is
+    // `{number} - {title} ({size})`, and before this column rode along every chapter read "(0 B)".
+    sizeBytes: r.size == null ? null : Number(r.size),
     // The file was deleted by the read-chapter cleanup and the row kept as a tombstone (lib/chapterCleanup).
     // The chapter must still be LISTED -- it is part of the series, it is read, and everyone's progress and
     // counts refer to it -- but nothing may offer to open or download it, because there are no pages behind

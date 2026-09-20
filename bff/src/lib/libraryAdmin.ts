@@ -16,6 +16,7 @@ import { q, one, tx } from './db';
 import { artFile } from './seriesArt';
 import { allWritable, containedPath } from './fsGuard';
 import { tombstoneBooks } from './chapterCleanup';
+import { LIBRARY_ROOT, DL_ROOT, listChapters } from './library';
 import { join, dirname } from 'path';
 
 export interface SeriesRow {
@@ -117,9 +118,29 @@ export async function mergeSeries(fromId: string, intoId: string): Promise<Merge
 
     // Keyed on book_id, so the books moving is enough — no collision is possible, and every progress row
     // and every reading event survives untouched. This is the whole reason merge does not de-duplicate.
-    for (const t of ['read_progress', 'reading_events', 'notes', 'offline_downloads']) {
+    // ⚠️ bookmarks belong in this list. Until v0.38.0 they were left behind with the absorbed id: the
+    // bookmark itself still resolved (the bookmarks route joins lib_books, whose row had moved), but
+    // anything keyed on the series -- and above all Forget, which erases everything filed under an
+    // absorbed id -- saw a live bookmark on a chapter the reader could still open as belonging to a dead
+    // series. Reintroduce by dropping 'bookmarks' here: "merge: a bookmark follows its chapter to the
+    // survivor" in forgetSeries.int.test.ts finds it still filed under the absorbed id.
+    for (const t of ['read_progress', 'reading_events', 'notes', 'offline_downloads', 'bookmarks']) {
       await qq(`UPDATE ${t} SET series_id = $2 WHERE series_id = $1`, [fromId, intoId]);
     }
+    // The tracker high-water mark is keyed (user, series, provider) with no book to follow, so it carries
+    // over like a favourite: insert if absent, and where both series had one the survivor keeps the HIGHER
+    // count -- the mark only ever moves forward, because a lower one silently rewinds someone's real
+    // AniList entry on the next push (the column's note in lib/migrate.ts). Reintroduce by dropping the
+    // GREATEST (or this whole statement): "merge: the tracker floor carries to the survivor and never goes
+    // backwards" in forgetSeries.int.test.ts reads the smaller count, or none.
+    await qq(
+      `INSERT INTO tracker_progress (user_id, series_id, provider, chapters, pushed_at)
+       SELECT user_id, $2, provider, chapters, pushed_at FROM tracker_progress WHERE series_id = $1
+       ON CONFLICT (user_id, series_id, provider) DO UPDATE
+         SET chapters = GREATEST(tracker_progress.chapters, EXCLUDED.chapters)`,
+      [fromId, intoId],
+    );
+    await qq(`DELETE FROM tracker_progress WHERE series_id = $1`, [fromId]);
 
     // Point the absorbed row at its survivor instead of deleting it: its folder still exists on disk, and
     // persistScan needs this to keep putting those files under the merged series.
@@ -166,6 +187,307 @@ export async function mergeSeries(fromId: string, intoId: string): Promise<Merge
   });
 }
 
+// ---- forget ----
+//
+// The third step, after Remove (hides, undoable) and Delete files (the bytes go, the rows and everyone's
+// history stay). Forget is the only code path in the app that hard-deletes a series row, and with it the
+// only one that erases reading history across users: progress, events, bookmarks, notes, ratings,
+// favourites, tracker floors. That retroactively rewrites stats, streaks, the leaderboard and Wrapped for
+// everyone who read it, which is why it is a separate, typed-confirmation step and never a shortcut.
+//
+// Two invariants the preconditions protect:
+//   1. Nothing forgotten may come back. persistScan skips a folder only while a deleted_at / merged_into row
+//      exists for it (lib/library.ts), so once the row is gone any folder still on disk is rescanned as a
+//      brand-new series under a new id -- with no history, next to the history that was just erased. So
+//      the folder must be absent on every root, and no chapter row may still claim a file.
+//   2. Nothing that lives on may be erased. After a merge the absorbed row's chapters belong to the survivor,
+//      while rows keyed by (book, series) can still carry the absorbed series_id (older merges left
+//      bookmarks and tracker floors behind; an offline outbox replays whatever series_id the phone had). Every
+//      per-user table is therefore re-pointed to the book's CURRENT series before anything is deleted, deletes
+//      are keyed on the book ids this series actually owns, and an assertion refuses the whole transaction if
+//      a progress row or bookmark on someone else's chapter is still filed here.
+
+/** Every table with a per-user row keyed on a book, and so re-pointed to the book's current series first. */
+const BOOK_KEYED_USER_TABLES = ['read_progress', 'reading_events', 'bookmarks', 'notes', 'offline_downloads'] as const;
+/** Every table with a per-book row, deleted strictly by the ids of the books this series owns. */
+const BOOK_KEYED_TABLES = [...BOOK_KEYED_USER_TABLES, 'book_overrides', 'page_hashes'] as const;
+/** Every table keyed on the series id. lib_books and lib_series themselves come last, on their own. */
+const SERIES_KEYED_TABLES = [
+  'favorites', 'collection_items', 'ratings', 'series_colors', 'series_art', 'series_seen', 'series_trackers',
+  'series_overrides', 'notes', 'series_sources', 'series_listing', 'chapter_failures', 'tracker_progress',
+  'reading_events', 'offline_downloads', 'bookmarks',
+] as const;
+
+export interface ForgetRefusal {
+  ok: false;
+  refused: 'not_found' | 'live' | 'live_books' | 'missing_files' | 'folder_present' | 'stranded';
+  message: string;
+  fix?: string;
+}
+export interface ForgetResult {
+  ok: true;
+  /** Chapter rows erased, the absorbed rows' included (they own none after a merge, but the count is honest). */
+  books: number;
+  /** Rows that had been merged INTO this one and went with it. */
+  absorbed: number;
+  /** Distinct members who lost something: a progress row, an event, a bookmark, a note, a rating, a favourite, a tracker floor. */
+  users: number;
+  /** Rows erased per table, for the audit entry. */
+  rowsByTable: Record<string, number>;
+  title: string;
+  folder: string;
+  /** The absorbed rows' ids, so the caller can name them and the art sweep can reach them. */
+  absorbedIds: string[];
+}
+
+/** Carries the assertion's refusal out of the transaction so it rolls back instead of committing. */
+class Stranded extends Error {
+  constructor(public readonly refusal: ForgetRefusal) { super(refusal.message); }
+}
+
+/** Roots a folder could sit under: the two the scanner walks, plus any root a chapter row recorded. */
+async function allRoots(seriesIds: string[]): Promise<string[]> {
+  const rows = await q<{ root: string }>(
+    'SELECT DISTINCT root FROM lib_books WHERE series_id = ANY($1) AND root IS NOT NULL', [seriesIds],
+  );
+  return [...new Set([LIBRARY_ROOT, DL_ROOT, ...rows.map((r) => r.root)].filter(Boolean))];
+}
+
+/**
+ * Erase a series, and everything anyone ever recorded about it, for good.
+ *
+ * Refuses (the caller answers 409 with `message` + `fix`) while the row is live, while any chapter row still
+ * claims a file, while a root cannot be stat'ed, or while the folder still holds chapters on any root.
+ *
+ * ⚠️ An unmounted share is caught by the LIVE-ROW refusal, not by a tombstone. Nothing in the app marks a
+ * row whose file it cannot see: the verify task refuses a root with no present file (its whole-batch rule)
+ * and deleteSeriesFiles reconciles only under the same proof, so a share that is not there leaves every row
+ * live, and live rows refuse here. A 'missing' tombstone is the opposite case -- verify PROVED the root was
+ * mounted and the file was not on it -- so it must not refuse: until v0.38.0's fix pass it did, and a series
+ * whose files a restore had lost dead-ended on "mount the library" with the library mounted (R3's probe P3).
+ * "a series whose chapters went missing on a mounted share can be forgotten" in forgetSeries.int.test.ts
+ * pins that; "forget refuses while a root it would have to check is not there" pins the stat refusal.
+ *
+ * ⚠️ "The folder exists" means "the folder has chapters", the scanner's own rule: findSeriesDirs
+ * (lib/library.ts) lists a directory only when listChapters finds something in it, and descends otherwise,
+ * so an empty directory cannot be rescanned into a series. Delete files unlinks every chapter and then
+ * rm's the folder, but a merge survivor's Delete files ran the per-book loop over the absorbed row's files
+ * (they moved to the survivor) while only rm'ing the survivor's folder, and the absorbed folder -- empty --
+ * refused Forget forever with the Delete files chip already hidden (R3's probe P2). Both ends are fixed:
+ * deleteSeriesFiles rm's the absorbed folders too, and this check ignores a folder with no chapters.
+ * Reintroduce by refusing on `realpath` alone: "forget of a survivor after Delete files is not refused on
+ * the absorbed row's empty folder" in forgetSeries.int.test.ts reads folder_present.
+ *
+ * Rows this series absorbed (`merged_into = id`) go with it in the same transaction, under the same rules.
+ * Leaving them would be worse than deleting them: `merged_into` is ON DELETE SET NULL, so deleting only the
+ * survivor flips every absorbed row to live -- a series with no books, a stale books_count and a folder the
+ * next scan repopulates under its old id, next to history that was just purged.
+ */
+export async function forgetSeries(id: string): Promise<ForgetResult | ForgetRefusal> {
+  const result = await tx(async (qq): Promise<ForgetResult | ForgetRefusal> => {
+    const [row] = await qq<SeriesRow>(
+      'SELECT id, title, folder, deleted_at, merged_into FROM lib_series WHERE id = $1 FOR UPDATE', [id],
+    );
+    if (!row) return { ok: false, refused: 'not_found', message: 'That series no longer exists.' };
+    if (!row.deleted_at && !row.merged_into) {
+      return {
+        ok: false,
+        refused: 'live',
+        message: 'Remove the series first. Forgetting it is a third, separate step.',
+        fix: 'Content → Library → Remove, then Delete files, then Forget.',
+      };
+    }
+
+    // The closure of rows merged into this one (mergeSeries flattens chains, so one hop is the norm; the
+    // loop is for a chain a scan or an older version left behind). Locked, so a concurrent merge cannot
+    // point a new row at a series that is about to vanish from under it.
+    const absorbed: SeriesRow[] = [];
+    let frontier = [id];
+    while (frontier.length) {
+      const more = await qq<SeriesRow>(
+        `SELECT id, title, folder, deleted_at, merged_into FROM lib_series
+          WHERE merged_into = ANY($1) AND id <> ALL($2) FOR UPDATE`,
+        [frontier, [id, ...absorbed.map((a) => a.id)]],
+      );
+      absorbed.push(...more);
+      frontier = more.map((m) => m.id);
+    }
+    const ids = [id, ...absorbed.map((a) => a.id)];
+
+    // Precondition over every chapter row of every id being erased: a live row is a file we have not seen
+    // go -- deleted on purpose, or sitting on a share that is not mounted right now; the message says
+    // "claims", because the row is the only witness either way. Delete files settles it on a mounted root
+    // (the header of deleteSeriesFiles); on an unmounted one it leaves the rows live, and this refusal is
+    // what stops the forget.
+    const books = await qq<{ id: string; pruned_at: string | null }>(
+      'SELECT id, pruned_at FROM lib_books WHERE series_id = ANY($1)', [ids],
+    );
+    const live = books.filter((b) => !b.pruned_at).length;
+    if (live) {
+      return {
+        ok: false,
+        refused: 'live_books',
+        message: `${live} chapter row${live === 1 ? ' still claims' : 's still claim'} a file on disk. Delete the files ` +
+                 'first, or the next scan brings the series back under a new id with none of its history.',
+        fix: 'Delete files, then Forget.',
+      };
+    }
+
+    // The folder must hold no chapters on any root, checked the way deleteSeriesFiles resolves it
+    // (contained, then realpath), for this row and every absorbed one: a merged folder is still filed under
+    // the survivor by the scanner, so it too would come back. A root that cannot be stat'ed at all is the
+    // unmounted case, and "absent" is not an answer it can give.
+    const roots = await allRoots(ids);
+    for (const root of roots) {
+      if (!(await stat(root).catch(() => null))) {
+        return {
+          ok: false,
+          refused: 'missing_files',
+          message: `${root} is not there right now, so nothing can be checked against it.`,
+          fix: 'Mount the library and delete the files first.',
+        };
+      }
+      for (const r of [row, ...absorbed]) {
+        const target = containedPath(root, r.folder);
+        if (!target) continue; // a folder that resolves outside the library cannot be rescanned from it
+        const real = await realpath(target).catch(() => null);
+        if (!real) continue;
+        // The scanner's rule (the header): only a folder with chapters in it is a series to persistScan.
+        if (!(await listChapters(real)).length) continue;
+        return {
+          ok: false,
+          refused: 'folder_present',
+          message: `The folder "${r.folder}" still holds chapters under ${root}. Forgetting the series now would only ` +
+                   'have the next scan bring it back under a new id, with none of its history.',
+          fix: 'Delete files first, or remove the folder by hand and rescan.',
+        };
+      }
+    }
+
+    const bookIds = books.map((b) => b.id);
+    const rowsByTable: Record<string, number> = {};
+    const count = (t: string, n: number) => { rowsByTable[t] = (rowsByTable[t] ?? 0) + n; };
+
+    // (1) Re-point before deleting. A row keyed on a book that now belongs to another series is someone's
+    // live history filed under a dead id; it moves to where the book is. ⚠️ Ordering is the guard: a delete
+    // keyed on series_id before this step erases it. Reintroduce by moving the series-keyed deletes above
+    // this loop, or by deleting bookmarks by series_id: "forget keeps a bookmark and progress on a chapter
+    // that moved to the survivor" in forgetSeries.int.test.ts finds them gone.
+    for (const t of BOOK_KEYED_USER_TABLES) {
+      const moved = await qq(
+        `UPDATE ${t} t SET series_id = b.series_id FROM lib_books b
+          WHERE t.book_id = b.id AND t.series_id = ANY($1) AND b.series_id <> ALL($1) RETURNING 1`,
+        [ids],
+      );
+      if (moved.length) count(`${t}:repointed`, moved.length);
+    }
+    // A tracker floor has no book to follow. For a row merged away it carries to the survivor, the higher
+    // count winning (a lower one would rewind someone's AniList entry on the next push); a hidden row's
+    // floor has nowhere to go and is erased with the rest. `uncarried` is the second kind, for the count
+    // below.
+    const uncarried: string[] = [];
+    for (const r of [row, ...absorbed]) {
+      if (!r.merged_into || ids.includes(r.merged_into)) { uncarried.push(r.id); continue; }
+      await qq(
+        `INSERT INTO tracker_progress (user_id, series_id, provider, chapters, pushed_at)
+         SELECT user_id, $2, provider, chapters, pushed_at FROM tracker_progress WHERE series_id = $1
+         ON CONFLICT (user_id, series_id, provider) DO UPDATE
+           SET chapters = GREATEST(tracker_progress.chapters, EXCLUDED.chapters)`,
+        [r.id, r.merged_into],
+      );
+    }
+
+    // Who loses HISTORY, counted before anything goes and after the re-point, so a row that just moved to
+    // the survivor is not "lost". ⚠️ Not series_seen: it is the NEW-badge counter ("how many chapters had
+    // you seen on the shelf"), so a member who only ever opened the series page was toasted as "1 member's
+    // history on it is gone" (R3's probe P8). And a tracker floor only for the rows whose floor is erased
+    // -- an absorbed row's floor was carried to its survivor two statements up, not lost. Reintroduce by
+    // adding series_seen back, or by counting tracker_progress over every id: "users counts members who
+    // lose history, not a NEW badge or a carried tracker floor" in forgetSeries.int.test.ts reads 1 too many.
+    const [{ n: users }] = await qq<{ n: number }>(
+      `SELECT count(DISTINCT user_id)::int AS n FROM (
+         SELECT user_id FROM read_progress     WHERE book_id = ANY($2)
+         UNION SELECT user_id FROM reading_events   WHERE book_id = ANY($2) OR series_id = ANY($1)
+         UNION SELECT user_id FROM bookmarks        WHERE book_id = ANY($2) OR series_id = ANY($1)
+         UNION SELECT user_id FROM notes            WHERE book_id = ANY($2) OR series_id = ANY($1)
+         UNION SELECT user_id FROM offline_downloads WHERE book_id = ANY($2) OR series_id = ANY($1)
+         UNION SELECT user_id FROM favorites        WHERE series_id = ANY($1)
+         UNION SELECT user_id FROM ratings          WHERE series_id = ANY($1)
+         UNION SELECT user_id FROM tracker_progress WHERE series_id = ANY($3)
+         UNION SELECT c.user_id FROM collection_items ci JOIN collections c ON c.id = ci.collection_id
+                WHERE ci.series_id = ANY($1)
+       ) u`,
+      [ids, bookIds, uncarried],
+    );
+
+    // (2) Per-book rows, strictly by the books this series owns. Never by series_id here: that is the
+    // clause that erased live bookmarks on a survivor's chapters.
+    if (bookIds.length) {
+      for (const t of BOOK_KEYED_TABLES) {
+        const gone = await qq(`DELETE FROM ${t} WHERE book_id = ANY($1) RETURNING 1`, [bookIds]);
+        count(t, gone.length);
+      }
+    }
+    // (4) The assertion, before any series-keyed delete can touch the two tables that matter most: a
+    // progress row or bookmark still filed here whose chapter belongs to ANOTHER series is history step (1)
+    // failed to carry, and read_progress.series_id CASCADEs from lib_series, so going on would erase it
+    // silently. Refuse the whole thing instead. (A row whose book no longer exists at all is a dangling
+    // leftover of this series and is swept below.)
+    for (const t of ['read_progress', 'bookmarks']) {
+      const stranded = await qq(
+        `SELECT 1 FROM ${t} t JOIN lib_books b ON b.id = t.book_id
+          WHERE t.series_id = ANY($1) AND b.series_id <> ALL($1) LIMIT 1`,
+        [ids],
+      );
+      if (stranded.length) {
+        // ⚠️ Thrown, not returned: a value returned from the tx callback COMMITS, and step (2) has already
+        // deleted this series' own per-book rows. The throw rolls those back and forgetSeries turns it into
+        // the refusal below the transaction. Unreachable while step (1) runs in the same transaction (it
+        // re-points exactly these rows), so no data test can trip it; "the assertion leaves the transaction
+        // by throwing" in forgetSeries.int.test.ts pins the shape instead. Reintroduce by `return`ing here.
+        throw new Stranded({
+          ok: false,
+          refused: 'stranded',
+          message: `Someone's ${t === 'bookmarks' ? 'bookmark' : 'reading progress'} on a chapter that now belongs ` +
+                   'to another series is still filed under this one. Nothing was changed.',
+          fix: 'Report this: it means a merge left history behind.',
+        });
+      }
+    }
+    // (3) Series-keyed rows. Everything with an FK would cascade anyway; deleting explicitly gives the
+    // audit its counts and covers the tables that deliberately have none.
+    for (const t of SERIES_KEYED_TABLES) {
+      const gone = await qq(`DELETE FROM ${t} WHERE series_id = ANY($1) RETURNING 1`, [ids]);
+      count(t, gone.length);
+    }
+    // (5) The rows themselves. One statement for every id: `merged_into` is ON DELETE SET NULL, and an
+    // absorbed row left standing for even one statement would be flipped live by its survivor's delete.
+    const b = await qq('DELETE FROM lib_books WHERE series_id = ANY($1) RETURNING 1', [ids]);
+    count('lib_books', b.length);
+    const s = await qq('DELETE FROM lib_series WHERE id = ANY($1) RETURNING 1', [ids]);
+    count('lib_series', s.length);
+
+    return {
+      ok: true as const,
+      books: b.length,
+      absorbed: absorbed.length,
+      users,
+      rowsByTable,
+      title: row.title,
+      folder: row.folder,
+      absorbedIds: absorbed.map((a) => a.id),
+    };
+  }).catch((e: unknown) => {
+    if (e instanceof Stranded) return e.refusal;
+    throw e;
+  });
+  if (!result.ok) return result;
+  // Outside the transaction: filesystem work must not hold it open, and the art files are the one thing on
+  // disk nothing else ever sweeps.
+  for (const sid of [id, ...result.absorbedIds]) await dropArt(sid);
+  return result;
+}
+
 
 // ---- file operations ----
 //
@@ -200,11 +522,33 @@ export interface FileOpRefusal { ok: false; reason: string; fix?: string }
  * them as held so nothing was ever fetched again, and a second Delete files reported "Deleted N file(s)"
  * for rows it had not touched (`files` counted rows, not unlinks). With the mark, a series put back after
  * this shows its chapters as "Deleted from the server", which is the truth, and Fetch again works on them.
- * ⚠️ Only a file that was actually there is marked. A row whose file is already absent is left alone: on an
- * unmounted share every stat fails and every file is fine on the disk that is not there, and "Delete
- * files" must not turn that into a library of tombstones. The verify task is the place for missing files.
- * Reintroduce by tombstoning every row of the root regardless of `st`: "delete files leaves an absent
- * file's row alone" in fileOps.int.test.ts finds it marked.
+ *
+ * ⚠️ A ROW WHOSE FILE IS ALREADY ABSENT IS RECONCILED ONLY UNDER PROOF THAT THE ROOT IS MOUNTED. On an
+ * unmounted share every stat fails and every file is fine on the disk that is not there, and "Delete files"
+ * must not turn that into a library of tombstones -- but a series whose folder the admin rm -rf'd on the NAS
+ * (#55's own scenario) has live rows and no files, nothing else in the app ever marks a read-library row,
+ * and until v0.38.0's fix pass it could never be forgotten: Delete files did nothing, the Removed row never
+ * offered Forget, and the route said "2 chapter files are still on disk" while nothing was (R3's probe P11).
+ * The proof is the verify task's own (lib/verifyFiles.ts, the whole-batch rule): a root is mounted when
+ * stat(root) works AND at least one chapter file of ANY series is present under it -- a present file, never
+ * a folder, because the downloader mkdir -p's series folders on a bare mount point -- and not when more than
+ * nine looked-at rows in ten have no file, verify's 90 % rule against the one stray download that landed in
+ * the overlay while the share was down. The rows this series has on the root are what we stat anyway; when
+ * none of them is present, up to `PROOF_SAMPLE` live rows of other series on the same root are stat'ed too,
+ * so a one-series scratch root can never be proven (that is the test's "empty readable root"). Under proof,
+ * a live row whose file is absent is marked 'deleted', and a 'missing' tombstone (verify's mark) becomes
+ * 'deleted' too -- the file is not coming back by itself and the sweep must stop trying to fetch it. On an
+ * unproven root every row is left exactly as it was, which is what keeps Forget's live-row refusal standing
+ * for a share that is merely not here. Reintroduce by tombstoning the absent rows without the proof (or by
+ * counting a present FOLDER as proof): "Delete files on an empty readable root marks nothing" in
+ * fileOps.int.test.ts finds the rows marked; "a read-library series whose folder was removed by hand can be
+ * forgotten after Delete files" in forgetSeries.int.test.ts is the other half.
+ *
+ * ⚠️ The folders of rows merged INTO this series are removed as well. Their chapter rows moved to the
+ * survivor at merge time, so the per-book loop unlinks their files, but the directories used to be left
+ * standing (empty) and Forget refused on them forever with the Delete files chip already hidden (R3's probe
+ * P2). Reintroduce by rm'ing `row.folder` only: "delete files removes the folder of a row merged into the
+ * series" in fileOps.int.test.ts finds the absorbed directory still there.
  */
 export async function deleteSeriesFiles(id: string): Promise<{ ok: true; files: number; bytes: number } | FileOpRefusal> {
   const row = await one<{ folder: string; deleted_at: string | null }>(
@@ -221,23 +565,48 @@ export async function deleteSeriesFiles(id: string): Promise<{ ok: true; files: 
   const w = await allWritable(roots);
   if (!w.ok) return { ok: false, reason: w.reason, fix: w.fix };
 
+  // This row's folder and every absorbed row's: the scanner files a merged folder under the survivor, so
+  // the survivor's Delete files owns it.
+  const absorbed = await q<{ folder: string }>('SELECT folder FROM lib_series WHERE merged_into = $1', [id]);
+  const folders = [row.folder, ...absorbed.map((a) => a.folder)];
+
+  // Every folder resolved on every root BEFORE anything is unlinked, so a refusal is a refusal and not a
+  // half-applied delete. Containment, then realpath, then compare again: a symlinked folder inside a
+  // library is not hypothetical on a NAS, and a lexical check alone would follow it out of the tree.
+  const targets: Array<{ root: string; abs: string }> = [];
+  for (const root of roots) {
+    for (const folder of folders) {
+      const target = containedPath(root, folder);
+      if (!target) return { ok: false, reason: 'That folder path is not inside the library.' };
+      const real = await realpath(target).catch(() => null);
+      if (!real || !containedPath(root, real.slice(root.length + 1) || '.')) {
+        if (real && real !== target) return { ok: false, reason: 'That folder resolves outside the library.' };
+      }
+      targets.push({ root, abs: target });
+    }
+  }
+
   let files = 0;
   let bytes = 0;
   const removed: string[] = [];
+  const reconciled: string[] = [];
   for (const root of roots) {
-    // Containment, then realpath, then compare again: a symlinked folder inside a library is not
-    // hypothetical on a NAS, and a lexical check alone would follow it out of the tree.
-    const target = containedPath(root, row.folder);
-    if (!target) return { ok: false, reason: 'That folder path is not inside the library.' };
-    const real = await realpath(target).catch(() => null);
-    if (!real || !containedPath(root, real.slice(root.length + 1) || '.')) {
-      if (real && real !== target) return { ok: false, reason: 'That folder resolves outside the library.' };
-    }
-    for (const b of await q<{ id: string; file: string }>('SELECT id, file FROM lib_books WHERE series_id = $1 AND root = $2', [id, root])) {
+    const rows = await q<{ id: string; file: string; pruned_at: string | null; pruned_reason: string | null }>(
+      'SELECT id, file, pruned_at, pruned_reason FROM lib_books WHERE series_id = $1 AND root = $2', [id, root],
+    );
+    let present = 0;
+    let absent = 0;
+    const absentLive: string[] = [];
+    for (const b of rows) {
       const abs = containedPath(root, b.file);
       if (!abs) continue;
       const st = await stat(abs).catch(() => null);
-      if (!st) continue; // absent already -- or on a volume that is not here; either way not ours to mark
+      if (!st) {
+        absent++;
+        if (!b.pruned_at) absentLive.push(b.id);
+        continue;
+      }
+      present++;
       // Unlink first, mark second: a row marked for a file that is still on disk is an invisible leak,
       // the same order the read-chapter cleanup keeps.
       try { await rm(abs, { recursive: true, force: true }); } catch { continue; }
@@ -245,19 +614,59 @@ export async function deleteSeriesFiles(id: string): Promise<{ ok: true; files: 
       files++;
       removed.push(b.id);
     }
-    await rm(target, { recursive: true, force: true }).catch(() => {});
+    for (const t of targets) if (t.root === root) await rm(t.abs, { recursive: true, force: true }).catch(() => {});
+
+    // The reconciliation, under the proof (the header). Nothing to reconcile is the common case and costs
+    // no extra stat.
+    const stale = rows.some((b) => b.pruned_reason === 'missing');
+    if (!absentLive.length && !stale) continue;
+    if (!(await rootProven(root, id, present, absent))) continue;
+    reconciled.push(...absentLive);
+    if (stale) {
+      await q(
+        `UPDATE lib_books SET pruned_reason = 'deleted' WHERE series_id = $1 AND root = $2 AND pruned_reason = 'missing'`,
+        [id, root],
+      );
+    }
   }
-  await tombstoneBooks(removed, 'deleted');
+  await tombstoneBooks([...removed, ...reconciled], 'deleted');
   // The cover follows the lowest LIVE chapter, the way persistScan and the chapter delete pick it: every
   // thumbnail falls back to the cover chapter's first page, and a tombstone has none. With every row marked
   // this still lands on a tombstone, and the series page's dashed placeholder is the honest rendering.
-  if (removed.length) {
+  if (removed.length || reconciled.length) {
     await q(
       `UPDATE lib_series SET cover_book_id = (
          SELECT id FROM lib_books WHERE series_id = $1 ORDER BY (pruned_at IS NOT NULL), number ASC, file ASC LIMIT 1
        ) WHERE id = $1`, [id]);
   }
   return { ok: true, files, bytes };
+}
+
+/** How many live rows of OTHER series are stat'ed for the mount proof when none of this series' own is present. */
+const PROOF_SAMPLE = 200;
+/** verify's threshold (lib/verifyFiles.ts REFUSE_ABOVE): above this share of absent files a root is not proof of anything. */
+const PROOF_REFUSE_ABOVE = 0.9;
+
+/**
+ * Is `root` demonstrably mounted? `present` / `absent` are what deleteSeriesFiles already stat'ed of this
+ * series' own rows on it; when none was present, a bounded sample of other series' live rows is looked at.
+ * A file that is there is proof; a folder is not (the header of deleteSeriesFiles); and a root where more
+ * than 90 % of what was looked at is gone is refused the way the verify task refuses it.
+ */
+async function rootProven(root: string, seriesId: string, present: number, absent: number): Promise<boolean> {
+  if (!present) {
+    const others = await q<{ file: string }>(
+      `SELECT file FROM lib_books WHERE root = $1 AND series_id <> $2 AND pruned_at IS NULL ORDER BY random() LIMIT $3`,
+      [root, seriesId, PROOF_SAMPLE],
+    );
+    for (const o of others) {
+      const abs = containedPath(root, o.file);
+      if (!abs) continue;
+      if (await stat(abs).catch(() => null)) present++;
+      else absent++;
+    }
+  }
+  return present > 0 && absent <= (present + absent) * PROOF_REFUSE_ABOVE;
 }
 
 /**

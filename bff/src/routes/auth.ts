@@ -31,6 +31,7 @@ import {
 import { generateRecoveryCodes, generateSecret, otpauthURL, sha256, verifyTotp } from '../lib/totp';
 import { oidcEnabled, oidcName, beginLogin, completeLogin, isAdminByGroup, type OidcClaims } from '../lib/oidc';
 import { randomBytes } from 'crypto';
+import { SESSION_COOKIE as KOMGA_SESSION_COOKIE } from '../lib/komgaSession';
 
 const loginBody = z.object({
   username: z.string().max(64).optional(),
@@ -358,6 +359,13 @@ export default async function authRoutes(app: FastifyInstance) {
     if (token) await revokeRefreshToken(token);
     reply.clearCookie(REFRESH_COOKIE, { path: '/' });
     reply.clearCookie(IMG_COOKIE, { path: '/' });
+    // The Komga-compatible API mints its seven-day UCHIYOMI-SESSION cookie on every credentialed request, and a
+    // BROWSER gets one too the moment it calls /api/v1/* with an X-API-Key -- the API reference's "try it", a
+    // same-origin fetch. Signing out must not leave a cookie behind that still opens the compat routes as
+    // that token until it expires. Same attributes as the mint (path '/'), or the browser keeps the old one.
+    // Reintroduce by dropping this line: "signing out clears the Komga session cookie too" in
+    // komgaCompat.int.test.ts sees no Set-Cookie for it.
+    reply.clearCookie(KOMGA_SESSION_COOKIE, { path: '/' });
     return reply.send({ ok: true });
   });
 

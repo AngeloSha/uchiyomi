@@ -6,15 +6,18 @@
 openapi: 3.1.0
 info:
   title: Uchiyomi API
-  version: 0.37.0
+  version: 0.38.0
   description: "Everything the web app does, it does over this API. Session JWTs are for the browser; scripts
     use a personal API token (Profile -> Account -> API tokens), sent as `Authorization: Bearer uy_...`.
     Scopes: read (every token; GET plus the library search POST, which is a query), write (anything that changes data), admin (the /api/admin surface, which also
     needs an admin account). /img/* takes the yomi_img cookie, an API token as a Bearer, or the OPDS token
     over HTTP Basic -- so a third-party client needs ONE credential for the JSON and the pictures alike;
-    /opds/* takes the OPDS token over HTTP Basic only. List endpoints answer { content: [...] };
-    errors answer a non-2xx status with { error, message }. The prose guide with worked examples is
-    docs/api.md."
+    /opds/* takes the OPDS token over HTTP Basic only. /api/v1/* and /api/v2/* are the Komga-compatible
+    surface for Mihon's Komga extension and tracker (since v0.38.0): an API token as `X-API-Key`, as
+    `Authorization: Bearer`, or as the HTTP Basic password, and the UCHIYOMI-SESSION cookie those requests
+    mint -- never a password, never an OPDS token, never a session JWT. List endpoints answer { content: [...] } (the Komga routes answer
+    Spring's page envelope); errors answer a non-2xx status with { error, message }. The prose guide with
+    worked examples is docs/api.md."
 servers:
   - url: /
     description: This server
@@ -37,6 +40,8 @@ tags:
     description: OPDS catalogue for external readers (HTTP Basic)
   - name: admin
     description: Administration (admin account and admin scope)
+  - name: komga
+    description: "Komga-compatible API for Mihon's Komga extension and tracker (API token as X-API-Key, Bearer or Basic password, or the UCHIYOMI-SESSION cookie)"
 components:
   securitySchemes:
     bearer:
@@ -47,13 +52,269 @@ components:
     opdsBasic:
       type: http
       scheme: basic
-      description: HTTP Basic where the password is the OPDS token from POST /api/opds/token.
+      description: >-
+        HTTP Basic where the password is the OPDS token from POST /api/opds/token. Refused (401) while the
+        account is disabled, like every other credential of a disabled account; the token is not revoked and
+        works again once the account is re-enabled.
     imgCookie:
       type: apiKey
       in: cookie
       name: yomi_img
       description: Set at login so <img> tags can authenticate.
+    komgaApiKey:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: >-
+        A personal API token (uy_...) as the Komga extension's "API key" field sends it, on every request.
+        Only on /api/v1/* and /api/v2/*. Read-only tokens browse; the tracker's PUT needs the write scope
+        (403 otherwise). A token whose account is disabled, that has expired or that was revoked is a 401.
+        Wins over an Authorization header, and any presented credential wins over the cookie. Ten failed
+        credentials from one client address in five minutes (the /auth/login budget) and every further
+        request from that address that presents a credential is 429 too_many_requests with Retry-After until
+        the window ends; a request with no credential and a cookie-only request are neither counted nor
+        blocked, and a valid key never counts.
+    komgaBasic:
+      type: http
+      scheme: basic
+      description: >-
+        HTTP Basic where the PASSWORD is a personal API token (uy_...) and the username is ignored -- what
+        the Komga extension sends after a 401 when no API key is configured. Account passwords are refused
+        here on purpose: this protocol has no channel for a two-factor code, and a password path would
+        bypass 2FA and the lockout. OPDS tokens and session JWTs are refused too. Because the extension only
+        presents the password after a 401, a changed password is not noticed while the previous
+        UCHIYOMI-SESSION cookie is valid (up to 7 days): revoke the old token, or use the API key field,
+        which is sent on every request. Counted against the same failed-credential limit as komgaApiKey.
+    komgaBearer:
+      type: http
+      scheme: bearer
+      description: >-
+        `Authorization: Bearer uy_...` -- a personal API token the way the rest of the API takes it, accepted
+        on /api/v1/* and /api/v2/* since the v0.38.0 fix pass so a script can use one header for everything.
+        API tokens only: a session JWT here is 401 ("Account sessions are not accepted here"), never
+        outranked by a remembered cookie. Precedence X-API-Key, then Bearer, then Basic, then the cookie;
+        counted against the same failed-credential limit as komgaApiKey.
+    komgaSession:
+      type: apiKey
+      in: cookie
+      name: UCHIYOMI-SESSION
+      description: >-
+        Minted by every request /api/v1/* or /api/v2/* authenticated with komgaApiKey or komgaBasic (HttpOnly;
+        SameSite=Lax; Path=/; Secure only over HTTPS; Max-Age = min(7 days, the token's remaining life); no
+        Domain), re-minted when absent, invalid, past half its life, or minted for another token, never on a
+        401. Honoured ONLY by the Komga routes, for the requests Mihon's tracker sends with no credential at
+        all. Its value names the API token row, which is re-read on every use, so revoking the token, letting
+        it expire or disabling the account ends the cookie too. A cookie that does not verify counts as no
+        cookie, never as a refusal -- and only the canonical value the server minted verifies
+        (`v1.<tokenId>.<exp>.<mac>`, decimal exp with no leading zeros; any other spelling is no cookie).
+        Named UCHIYOMI-SESSION rather than KOMGA-SESSION so a real Komga on the same host does not
+        overwrite it in the phone's cookie jar. POST /auth/logout clears it from a browser too.
   schemas:
+    KomgaPage:
+      type: object
+      description: >-
+        Spring's page envelope, every one of the nine keys always present (the Kotlin client refuses a
+        missing one). `number` is 0-based; `size` is 1..500 (default 20); `totalPages` is 0 for an empty
+        result and `last` is true on the final page and on an empty one. An `unpaged=true` chapter list is
+        the one answer that is not a page: `size` is the row count (at least 1, no 500 cap), `number` 0,
+        `first` and `last` true, `totalPages` 1 (0 for an empty series).
+      required: [content, empty, first, last, number, numberOfElements, size, totalElements, totalPages]
+      properties:
+        content: { type: array, items: {} }
+        empty: { type: boolean }
+        first: { type: boolean }
+        last: { type: boolean }
+        number: { type: integer, minimum: 0 }
+        numberOfElements: { type: integer }
+        size: { type: integer, minimum: 1, description: "1..500 on a page; the row count on an unpaged chapter list." }
+        totalElements: { type: integer }
+        totalPages: { type: integer }
+    KomgaDateTime:
+      type: string
+      description: >-
+        `yyyy-MM-ddTHH:mm:ss`, UTC, no zone letter and no milliseconds: the extension parses chapter dates
+        strictly (LocalDateTime.parse) and a trailing `Z` or `.sss` would date every chapter at the epoch.
+        A required date that is not known is `1970-01-01T00:00:00`.
+      example: "2026-09-20T12:34:56"
+    KomgaAuthor:
+      type: object
+      required: [name, role]
+      properties:
+        name: { type: string }
+        role: { type: string, description: "`writer` for a series author; `translator` for a chapter's scanlation group (what the extension turns back into `scanlator`)." }
+    KomgaLibrary:
+      type: object
+      required: [id, name, root, unavailable]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        root: { type: string, description: Always empty; the on-disk path is not disclosed. }
+        unavailable: { type: boolean, description: Always false. }
+    KomgaSeries:
+      type: object
+      description: >-
+        Komga's SeriesDto as both the extension and Mihon's tracker decode it, every non-null field padded.
+        `metadata.status` is ENDED | ONGOING | ABANDONED | HIATUS for the statuses this server knows
+        (Completed, Ongoing, On Hiatus, Cancelled and their synonyms) and otherwise the stored value
+        upper-cased, which the client shows as UNKNOWN. `readingDirection` is one of LEFT_TO_RIGHT |
+        RIGHT_TO_LEFT | VERTICAL | WEBTOON. The three read counts are real on GET /api/v1/series/{id}
+        (Mihon derives UNREAD / READING / COMPLETED from them) and zero read / all unread in listings.
+      required: [id, libraryId, name, url, fileLastModified, booksCount, booksReadCount, booksUnreadCount, booksInProgressCount, deleted, oneshot, metadata, booksMetadata]
+      properties:
+        id: { type: string }
+        libraryId: { type: string }
+        name: { type: string }
+        url: { type: string, description: Always empty. }
+        created: { oneOf: [ { $ref: "#/components/schemas/KomgaDateTime" }, { type: "null" } ] }
+        lastModified: { oneOf: [ { $ref: "#/components/schemas/KomgaDateTime" }, { type: "null" } ] }
+        fileLastModified: { $ref: "#/components/schemas/KomgaDateTime" }
+        booksCount: { type: integer }
+        booksReadCount: { type: integer }
+        booksUnreadCount: { type: integer }
+        booksInProgressCount: { type: integer }
+        deleted: { type: boolean, description: Always false; a hidden series is a 404 here. }
+        oneshot: { type: boolean, description: Always false. }
+        metadata:
+          type: object
+          required: [status, statusLock, title, titleLock, titleSort, titleSortLock, summary, summaryLock, readingDirection, readingDirectionLock, publisher, publisherLock, ageRatingLock, language, languageLock, genres, genresLock, tags, tagsLock, totalBookCountLock]
+          properties:
+            status: { type: string }
+            statusLock: { type: boolean }
+            created: { oneOf: [ { $ref: "#/components/schemas/KomgaDateTime" }, { type: "null" } ] }
+            lastModified: { oneOf: [ { $ref: "#/components/schemas/KomgaDateTime" }, { type: "null" } ] }
+            title: { type: string }
+            titleLock: { type: boolean }
+            titleSort: { type: string }
+            titleSortLock: { type: boolean }
+            summary: { type: string }
+            summaryLock: { type: boolean }
+            readingDirection: { type: string, enum: [LEFT_TO_RIGHT, RIGHT_TO_LEFT, VERTICAL, WEBTOON] }
+            readingDirectionLock: { type: boolean }
+            publisher: { type: string }
+            publisherLock: { type: boolean }
+            ageRating: { type: [integer, "null"] }
+            ageRatingLock: { type: boolean }
+            language: { type: string }
+            languageLock: { type: boolean }
+            genres: { type: array, items: { type: string } }
+            genresLock: { type: boolean }
+            tags: { type: array, items: { type: string } }
+            tagsLock: { type: boolean }
+            totalBookCount: { type: [integer, "null"], description: Always null. }
+            totalBookCountLock: { type: boolean }
+        booksMetadata:
+          type: object
+          required: [authors, authorsLock, tags, tagsLock, summary, summaryNumber, created, lastModified]
+          properties:
+            authors: { type: array, items: { $ref: "#/components/schemas/KomgaAuthor" } }
+            authorsLock: { type: boolean }
+            tags: { type: array, items: { type: string } }
+            tagsLock: { type: boolean }
+            releaseDate: { type: [string, "null"], description: Always null. }
+            summary: { type: string, description: The series summary again; the extension falls back to it. }
+            summaryNumber: { type: string, description: Always empty. }
+            created: { $ref: "#/components/schemas/KomgaDateTime" }
+            lastModified: { $ref: "#/components/schemas/KomgaDateTime" }
+    KomgaBook:
+      type: object
+      description: >-
+        Komga's BookDto for one chapter. `number`, `metadata.numberSort` and the progress endpoint's numbers
+        are ONE quantity, the override-aware chapter number, unrounded: the extension makes it the chapter
+        number, and Mihon compares and PUTs it back in that unit. `metadata.number` is the display string.
+        `name` is the chapter title or empty, never null. `media.status` is READY for a chapter whose file
+        is on the server and ERROR for a tombstone (deleted from the server). `sizeBytes` is the file's size
+        on disk (lib_books.size; 0 when never stamped) and `size` is Komga's text for it ("1.5 KiB", "0 B"),
+        which the extension shows in its default chapter name `{number} - {title} ({size})`.
+      required: [id, seriesId, seriesTitle, name, url, number, fileLastModified, sizeBytes, size, media, metadata, deleted, oneshot]
+      properties:
+        id: { type: string }
+        seriesId: { type: string }
+        seriesTitle: { type: string }
+        name: { type: string }
+        url: { type: string, description: Always empty. }
+        number: { type: number }
+        created: { oneOf: [ { $ref: "#/components/schemas/KomgaDateTime" }, { type: "null" } ] }
+        lastModified: { oneOf: [ { $ref: "#/components/schemas/KomgaDateTime" }, { type: "null" } ] }
+        fileLastModified: { $ref: "#/components/schemas/KomgaDateTime" }
+        sizeBytes: { type: integer, description: The file size on disk; 0 when never stamped. }
+        size: { type: string, description: "Komga's text for sizeBytes (\"1.5 KiB\")." }
+        media:
+          type: object
+          required: [status, mediaType, pagesCount, mediaProfile, epubDivinaCompatible, comment]
+          properties:
+            status: { type: string, enum: [READY, ERROR] }
+            mediaType: { type: string }
+            pagesCount: { type: integer }
+            mediaProfile: { type: string, description: Always DIVINA. }
+            epubDivinaCompatible: { type: boolean, description: Always false. }
+            comment: { type: string }
+        metadata:
+          type: object
+          required: [title, titleLock, summary, summaryLock, number, numberLock, numberSort, numberSortLock, releaseDateLock, authors, authorsLock, tags, tagsLock, isbn, isbnLock, links, linksLock]
+          properties:
+            title: { type: string }
+            titleLock: { type: boolean }
+            summary: { type: string }
+            summaryLock: { type: boolean }
+            number: { type: string }
+            numberLock: { type: boolean }
+            numberSort: { type: number }
+            numberSortLock: { type: boolean }
+            releaseDate: { type: [string, "null"], description: "`yyyy-MM-dd` (the source's chapter date, else the file's time) or null." }
+            releaseDateLock: { type: boolean }
+            authors: { type: array, items: { $ref: "#/components/schemas/KomgaAuthor" }, description: The scanlation group, if any, as role `translator`. }
+            authorsLock: { type: boolean }
+            tags: { type: array, items: { type: string } }
+            tagsLock: { type: boolean }
+            isbn: { type: string }
+            isbnLock: { type: boolean }
+            links: { type: array, items: {} }
+            linksLock: { type: boolean }
+        deleted: { type: boolean }
+        oneshot: { type: boolean }
+    KomgaPageDto:
+      type: object
+      required: [number, fileName, mediaType]
+      properties:
+        number: { type: integer, minimum: 1, description: 1-based, as Komga numbers pages and as the extension puts it in the image URL. }
+        fileName: { type: string }
+        mediaType: { type: string }
+        width: { type: [integer, "null"] }
+        height: { type: [integer, "null"] }
+    KomgaReadProgressV2:
+      type: object
+      description: >-
+        What Mihon's Komga tracker reads. Over EVERY chapter of the series, tombstones included (members'
+        history refers to them). `lastReadContinuousNumberSort` is the number of the last chapter in the
+        LEADING run of completed chapters ordered by the override-aware number (chapters 1, 2 and 4 read
+        reports 2; nothing read reports 0, and so does a run that ends on -- or starts with an unread --
+        number-0 chapter); `maxNumberSort` is the highest chapter number. Mihon truncates the latter to its chapter total and derives UNREAD / READING /
+        COMPLETED from the counts.
+      required: [booksCount, booksReadCount, booksUnreadCount, booksInProgressCount, lastReadContinuousNumberSort, maxNumberSort]
+      properties:
+        booksCount: { type: integer }
+        booksReadCount: { type: integer }
+        booksUnreadCount: { type: integer }
+        booksInProgressCount: { type: integer }
+        lastReadContinuousNumberSort: { type: number }
+        maxNumberSort: { type: number }
+    KomgaUser:
+      type: object
+      required: [id, email, roles, sharedAllLibraries, sharedLibrariesIds, labelsAllow, labelsExclude]
+      properties:
+        id: { type: string }
+        email: { type: string, description: The username (the extension calls the field the account email). }
+        roles: { type: array, items: { type: string }, description: "[USER], or [ADMIN, USER] for an admin." }
+        sharedAllLibraries: { type: boolean, description: True when the account has no per-library grants. }
+        sharedLibrariesIds: { type: array, items: { type: string } }
+        labelsAllow: { type: array, items: { type: string }, description: Always empty. }
+        labelsExclude: { type: array, items: { type: string }, description: Always empty. }
+        ageRestriction:
+          type: [object, "null"]
+          description: "`{ age, restriction: ALLOW_ONLY }` from the account's max_age_rating, or null when it has none."
+          properties:
+            age: { type: integer }
+            restriction: { type: string }
     ScanlatorPrefs:
       type: object
       description: >-
@@ -361,7 +622,7 @@ paths:
     post:
       tags:
         - auth
-      summary: End this session and clear its cookies.
+      summary: End this session and clear its cookies (yomi_rt, yomi_img and, since v0.38.0, UCHIYOMI-SESSION).
       operationId: postAuthLogout
       security:
         - bearer: []
@@ -1848,7 +2109,7 @@ paths:
         - bearer: []
       responses:
         "200":
-          description: OK
+          description: "{ content: [{ id, name, scopes, createdAt, lastSeen, expiresAt, expired, showAdult }] } -- showAdult (since v0.38.0) is whether the Komga-compatible API lists 18+ libraries to this token."
         "401":
           description: Not authenticated
     post:
@@ -1871,11 +2132,20 @@ paths:
                     type: string
                 expiresInDays:
                   type: integer
+                showAdult:
+                  type: boolean
+                  default: false
+                  description: >-
+                    Since v0.38.0. Whether the Komga-compatible API (/api/v1, /api/v2 -- Mihon's Komga
+                    extension) lists 18+ libraries to this token; the extension has no reveal button of its
+                    own, so the preference lives on the credential like the OPDS token's, off by default.
+                    A surfacing preference, not a permission: the account's age cap still applies whatever
+                    this says. The web app's own listings are unaffected.
       security:
         - bearer: []
       responses:
         "200":
-          description: OK
+          description: "{ id, token } -- the token is shown once."
         "400":
           description: Malformed body or parameter
         "401":
@@ -4565,8 +4835,16 @@ paths:
         tombstone chapters/delete and the cleanup leave -- so a restore lists those chapters as pruned
         ("Deleted from the server", where chapters/refetch brings one back onto the same row), the updater
         keeps counting them as held, and `files` counts real unlinks rather than rows (a second call reports
-        0). A row whose file is already absent is left alone and not counted: on an unmounted share every
-        file looks absent. Refuses rather than half-applies.
+        0). A row whose file is already absent is reconciled only when the root is provably mounted --
+        stat(root) works, at least one chapter file of any series is present under it (a present folder is
+        not proof), and no more than 90 % of what was looked at is absent, the verify task's own rule; up to
+        200 other series' live rows on the root are stat'ed when none of this series' own is present. Under
+        that proof a live row with no file is marked `pruned_reason = 'deleted'` and a `'missing'` tombstone
+        becomes `'deleted'`; on an unproven root every row is left as it was (an unmounted share leaves
+        live rows, which Forget refuses on). `files` still counts unlinks only, so a series whose folder was
+        removed by hand answers `files: 0` and its Removed row then offers Forget (`live_books` 0). Delete
+        files on a merge survivor also removes the folders of the rows merged into it, and every folder is
+        resolved on every root before anything is unlinked. Refuses rather than half-applies.
       parameters:
         - name: id
           in: path
@@ -4583,12 +4861,12 @@ paths:
               properties:
                 confirm:
                   type: string
-                  description: The series' exact title.
+                  description: The series' title, compared trimmed and NFC-normalised on both sides.
       security:
         - bearer: []
       responses:
         "200":
-          description: "{ ok: true, files, bytes } -- files actually unlinked this call."
+          description: "{ ok: true, files, bytes } -- files actually unlinked this call (0 for a series whose files were removed by hand; its absent rows are marked when the root is provably mounted)."
         "400":
           description: "bad_request, or confirm_mismatch when `confirm` is not the series' title."
         "401":
@@ -4598,7 +4876,64 @@ paths:
         "404":
           description: Not found, or not visible to this account
         "409":
-          description: "refused { message, fix }: not hidden yet, no files on disk, or a root that is not writable (PUID/PGID unset; fix names it)."
+          description: "refused { message, fix }: not hidden yet, no chapter rows on any root, a folder that resolves outside the library, or a root that is not writable (PUID/PGID unset; fix names it)."
+  /api/admin/series/{id}/forget:
+    post:
+      tags:
+        - admin
+      summary: "Forget a removed series for good: erase its rows and everyone's reading history on it (irreversible; since v0.38.0)."
+      operationId: postApiAdminSeriesIdForget
+      description: >-
+        Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. The third
+        step after Remove and Delete files, and the only call that hard-deletes a series row. In one
+        transaction it erases the series' chapter rows and, for every member, their reading progress,
+        reading events, bookmarks, notes, ratings, favourites, collection entries, tracker floors and
+        links, plus the series' overrides, art, sources, listing and failure ledger -- so stats, streaks,
+        the leaderboard and Wrapped change retroactively, and the AniList/MAL/Kitsu floor for it is gone.
+        Rows this series absorbed by merge are forgotten with it (leaving them would flip them live). History
+        on chapters that moved to a merge survivor is re-pointed to the survivor first, never erased; if a
+        progress row or bookmark on another series' chapter is still filed here after that, the whole
+        transaction rolls back (409 `stranded`). Refuses, rather than half-applies, while the series is still
+        in the library (Remove first), while any chapter row still claims a file (Delete files first, which
+        on a provably mounted root also marks rows whose files were removed by hand), while a root cannot be
+        stat'ed at all (mount it first), or while the folder still holds chapters under any root (an empty
+        folder does not count: the scanner never turns one into a series). A 'missing' tombstone from the
+        verify task does not refuse: nothing in Uchiyomi marks a chapter row whose file it cannot see, so an
+        unmounted share leaves every row live and the live-row refusal is what stops it, whereas 'missing'
+        means verify proved the root was mounted and the file was not on it. There is no Put back. Audit:
+        `series.forget` { id, title, folder, books, absorbed, absorbedIds, users, rowsByTable }.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [confirm]
+              properties:
+                confirm:
+                  type: string
+                  description: The series' title, compared trimmed and NFC-normalised on both sides (a macOS-written NFD title is confirmed by an NFC keyboard).
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: "{ ok: true, books, absorbed, users } -- chapter rows erased, absorbed series rows that went with it, and distinct members who lose history (progress, reading events, bookmarks, notes, favourites, ratings, collection entries, or a tracker floor erased rather than carried to a merge survivor; opening the series page, the NEW-badge counter, does not count)."
+        "400":
+          description: "bad_request for a body without `confirm`; confirm_mismatch { message: 'Type the series title exactly to confirm.' } when it is not the title."
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+        "404":
+          description: Not found
+        "409":
+          description: "refused { message, fix }, one of: live -- still in the library (fix: Content -> Library -> Remove, then Delete files, then Forget); live_books -- N chapter row(s) still claim(s) a file on disk (fix: Delete files, then Forget); missing_files -- a root is not there right now, so nothing can be checked against it (fix: Mount the library and delete the files first); folder_present -- the folder still holds chapters under a root (fix: Delete files first, or remove the folder by hand and rescan); or stranded -- history from an older merge (nothing was changed; fix: report it)."
   /api/admin/series/{id}/chapters/delete:
     post:
       tags:
@@ -6136,5 +6471,707 @@ paths:
           description: Not authenticated
         "403":
           description: "Forbidden: token scope, account permission or age limit"
+        "404":
+          description: Not found, or not visible to this account
+  # ---- Komga-compatible API (routes/komgaCompat.ts, since v0.38.0) ------------------------------------------
+  # Every operation below takes komgaApiKey, komgaBearer, komgaBasic or komgaSession and nothing else; no
+  # credential is 401 with `WWW-Authenticate: Basic realm="Uchiyomi"` (what makes the extension send Basic), a
+  # presented credential that does not resolve is 401 even beside a valid cookie, the eleventh failed
+  # credential from one address in five minutes is 429 with Retry-After, a read-only token on a PUT is 403,
+  # and anything the token's account may not see is 404, never 403. JSON answers carry
+  # `Cache-Control: no-store` because both clients send a max-age request directive against a disk cache.
+  /api/v1/libraries:
+    get:
+      tags:
+        - komga
+      summary: The libraries this token may open (the extension's log-in probe and its Libraries filter).
+      operationId: getApiV1Libraries
+      description: >-
+        The library grants and the age cap apply; an 18+ library is listed only to a token minted with
+        `showAdult`, because the extension shows every library it is told about and has no reveal of its own.
+        `root` is always empty and `unavailable` always false.
+      security:
+        - komgaApiKey: []
+        - komgaBearer: []
+        - komgaBasic: []
+        - komgaSession: []
+      responses:
+        "200":
+          description: An array of KomgaLibrary.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/KomgaLibrary" }
+        "401":
+          description: Not authenticated
+        "429":
+          description: "too_many_requests { message } with Retry-After -- ten failed credentials from this client address in five minutes; a request with no credential or with only the cookie is never counted."
+  /api/v1/series:
+    get:
+      tags:
+        - komga
+      summary: "Browse series: the extension's Popular (sort=metadata.titleSort,asc), Latest (sort=lastModifiedDate,desc) and search."
+      operationId: getApiV1Series
+      description: >-
+        A Spring page of KomgaSeries over the series this token may browse (an 18+ library is left out unless
+        the token has `showAdult`; the age cap and library grants apply). Filters arrive either comma-joined in
+        one parameter (`library_id=a,b`) or repeated (`read_status=UNREAD&read_status=IN_PROGRESS`); both
+        forms are accepted for every list parameter and flattened. `tag` filters genres and `publisher` the
+        author field, since that is where the DTO presents them; `author` is `name,role` and the role is
+        dropped. `status=ENDED` also matches Completed / Complete / Finished, ABANDONED matches Cancelled /
+        Dropped, HIATUS matches On Hiatus / Paused. `relevance` and any unknown sort are title order; `unread`
+        and `favourites` are not offered. `unpaged=true` answers the largest page (500). A filter the query
+        cannot express is refused rather than widened.
+      parameters:
+        - { name: search, in: query, required: false, schema: { type: string }, description: Title search; empty means none. }
+        - { name: page, in: query, required: false, schema: { type: integer, minimum: 0 }, description: 0-based. }
+        - { name: size, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 500 }, description: Default 20. }
+        - { name: unpaged, in: query, required: false, schema: { type: boolean } }
+        - { name: sort, in: query, required: false, schema: { type: string }, description: "metadata.titleSort | name | createdDate | lastModifiedDate | relevance | random, then `,asc` or `,desc`." }
+        - { name: library_id, in: query, required: false, schema: { type: string }, description: Comma-joined or repeated. }
+        - { name: status, in: query, required: false, schema: { type: string }, description: "ENDED | ONGOING | ABANDONED | HIATUS, comma-joined or repeated." }
+        - { name: genre, in: query, required: false, schema: { type: string }, description: Comma-joined or repeated. }
+        - { name: tag, in: query, required: false, schema: { type: string }, description: Comma-joined or repeated; matched against genres. }
+        - { name: publisher, in: query, required: false, schema: { type: string }, description: Comma-joined or repeated; matched against the author. }
+        - { name: author, in: query, required: false, schema: { type: string }, description: "`name,role`, repeated; the role is ignored." }
+        - { name: read_status, in: query, required: false, schema: { type: string }, description: "UNREAD | IN_PROGRESS | READ, repeated or comma-joined." }
+        - { name: deleted, in: query, required: false, schema: { type: boolean }, description: Accepted and ignored; hidden series are never listed. }
+      security:
+        - komgaApiKey: []
+        - komgaBearer: []
+        - komgaBasic: []
+        - komgaSession: []
+      responses:
+        "200":
+          description: A KomgaPage whose content is KomgaSeries.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KomgaPage"
+        "400":
+          description: "unsupported_filter { message } -- a filter the query cannot express."
+        "401":
+          description: Not authenticated
+        "429":
+          description: "too_many_requests { message } with Retry-After -- ten failed credentials from this client address in five minutes; a request with no credential or with only the cookie is never counted."
+  /api/v1/series/latest:
+    get:
+      tags:
+        - komga
+      summary: "Alias of /api/v1/series with sort forced to lastModifiedDate,desc (PR #51 exposed it; the extension itself never calls it)."
+      operationId: getApiV1SeriesLatest
+      parameters:
+        - { name: search, in: query, required: false, schema: { type: string } }
+        - { name: page, in: query, required: false, schema: { type: integer, minimum: 0 } }
+        - { name: size, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 500 } }
+        - { name: library_id, in: query, required: false, schema: { type: string } }
+      security:
+        - komgaApiKey: []
+        - komgaBearer: []
+        - komgaBasic: []
+        - komgaSession: []
+      responses:
+        "200":
+          description: A KomgaPage whose content is KomgaSeries.
+        "400":
+          description: "unsupported_filter { message }"
+        "401":
+          description: Not authenticated
+        "429":
+          description: "too_many_requests { message } with Retry-After -- ten failed credentials from this client address in five minutes; a request with no credential or with only the cookie is never counted."
+  /api/v1/series/{id}:
+    get:
+      tags:
+        - komga
+      summary: One series, with this account's real read / unread / in-progress counts (the tracker binds through this).
+      operationId: getApiV1SeriesId
+      description: >-
+        Visible rather than browsable: a series in an 18+ library the token does not list is still answered
+        by id, exactly as the web API resolves one id you already hold. Mihon's tracker reads
+        booksCount versus booksReadCount / booksUnreadCount to decide UNREAD / READING / COMPLETED, so the
+        counts here are the same the progress endpoint reports, over every chapter including tombstones.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - komgaApiKey: []
+        - komgaBearer: []
+        - komgaBasic: []
+        - komgaSession: []
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KomgaSeries"
+        "401":
+          description: Not authenticated
+        "429":
+          description: "too_many_requests { message } with Retry-After -- ten failed credentials from this client address in five minutes; a request with no credential or with only the cookie is never counted."
+        "404":
+          description: Not found, or not visible to this account
+  /api/v1/series/{id}/books:
+    get:
+      tags:
+        - komga
+      summary: "The chapter list (the extension asks `unpaged=true&media_status=READY&deleted=false`)."
+      operationId: getApiV1SeriesIdBooks
+      description: >-
+        A Spring page of KomgaBook ordered by the override-aware chapter number, then file. `unpaged=true` is
+        one page of everything with no 500 cap: `size` is the chapter count (at least 1), `number` 0, `first`
+        and `last` true, `totalPages` 1 (0 for an empty series); the paged form (`page`, `size`) stays capped
+        at 500. `media_status=READY` leaves tombstones -- chapters
+        deleted from the server, whose page list is empty -- out of the LIST only; they still count for the
+        progress endpoints. `sort` honours the direction only (`metadata.numberSort,asc|desc`).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - { name: unpaged, in: query, required: false, schema: { type: boolean } }
+        - { name: media_status, in: query, required: false, schema: { type: string }, description: READY excludes tombstones. }
+        - { name: page, in: query, required: false, schema: { type: integer, minimum: 0 } }
+        - { name: size, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 500 } }
+        - { name: sort, in: query, required: false, schema: { type: string } }
+        - { name: deleted, in: query, required: false, schema: { type: boolean }, description: Accepted and ignored. }
+      security:
+        - komgaApiKey: []
+        - komgaBearer: []
+        - komgaBasic: []
+        - komgaSession: []
+      responses:
+        "200":
+          description: A KomgaPage whose content is KomgaBook.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KomgaPage"
+        "401":
+          description: Not authenticated
+        "429":
+          description: "too_many_requests { message } with Retry-After -- ten failed credentials from this client address in five minutes; a request with no credential or with only the cookie is never counted."
+        "404":
+          description: Not found, or not visible to this account
+  /api/v1/series/{id}/thumbnail:
+    get:
+      tags:
+        - komga
+      summary: The series cover (WebP), the same bytes and cache as /img/lib/series/{id}/thumb.
+      operationId: getApiV1SeriesIdThumbnail
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: w
+          in: query
+          required: false
+          schema:
+            type: integer
+          description: 800 or 1600 for a larger poster; anything else is 400.
+      security:
+        - komgaApiKey: []
+        - komgaBearer: []
+        - komgaBasic: []
+        - komgaSession: []
+      responses:
+        "200":
+          description: "image/webp; Cache-Control: private."
+        "304":
+          description: Not modified
+        "401":
+          description: Not authenticated
+        "429":
+          description: "too_many_requests { message } with Retry-After -- ten failed credentials from this client address in five minutes; a request with no credential or with only the cookie is never counted."
+        "404":
+          description: Not found, or not visible to this account
+  /api/v1/books:
+    get:
+      tags:
+        - komga
+      summary: "The extension's Books search type. Always an empty page: this library has no chapter-level search."
+      operationId: getApiV1Books
+      parameters:
+        - { name: search, in: query, required: false, schema: { type: string } }
+        - { name: page, in: query, required: false, schema: { type: integer, minimum: 0 } }
+        - { name: size, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 500 } }
+      security:
+        - komgaApiKey: []
+        - komgaBearer: []
+        - komgaBasic: []
+        - komgaSession: []
+      responses:
+        "200":
+          description: An empty KomgaPage (content [], last true).
+        "401":
+          description: Not authenticated
+        "429":
+          description: "too_many_requests { message } with Retry-After -- ten failed credentials from this client address in five minutes; a request with no credential or with only the cookie is never counted."
+  /api/v1/books/{id}:
+    get:
+      tags:
+        - komga
+      summary: One chapter as a KomgaBook.
+      operationId: getApiV1BooksId
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - komgaApiKey: []
+        - komgaBearer: []
+        - komgaBasic: []
+        - komgaSession: []
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KomgaBook"
+        "401":
+          description: Not authenticated
+        "429":
+          description: "too_many_requests { message } with Retry-After -- ten failed credentials from this client address in five minutes; a request with no credential or with only the cookie is never counted."
+        "404":
+          description: Not found, or not visible to this account
+  /api/v1/books/{id}/pages:
+    get:
+      tags:
+        - komga
+      summary: The chapter's pages, numbered from 1; an empty list for a tombstone.
+      operationId: getApiV1BooksIdPages
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - komgaApiKey: []
+        - komgaBearer: []
+        - komgaBasic: []
+        - komgaSession: []
+      responses:
+        "200":
+          description: An array of KomgaPageDto.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/KomgaPageDto" }
+        "401":
+          description: Not authenticated
+        "429":
+          description: "too_many_requests { message } with Retry-After -- ten failed credentials from this client address in five minutes; a request with no credential or with only the cookie is never counted."
+        "404":
+          description: Not found, or not visible to this account
+  /api/v1/books/{id}/pages/{n}:
+    get:
+      tags:
+        - komga
+      summary: "One page's original bytes, n 1-based (the same bytes and cache as /img/lib/books/{id}/page/{n}); ?convert=png is accepted and ignored."
+      operationId: getApiV1BooksIdPagesN
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: n
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+        - name: convert
+          in: query
+          required: false
+          schema:
+            type: string
+          description: The extension appends `png` for media types it cannot decode; every page here is one it can, so it is ignored.
+      security:
+        - komgaApiKey: []
+        - komgaBearer: []
+        - komgaBasic: []
+        - komgaSession: []
+      responses:
+        "200":
+          description: "The page bytes with the file's content type; Cache-Control: private, max-age=31536000, immutable."
+        "304":
+          description: Not modified
+        "400":
+          description: "bad_page -- n below 1 or not an integer."
+        "401":
+          description: Not authenticated
+        "429":
+          description: "too_many_requests { message } with Retry-After -- ten failed credentials from this client address in five minutes; a request with no credential or with only the cookie is never counted."
+        "404":
+          description: Not found, not visible to this account, or past the last page
+  /api/v1/books/{id}/thumbnail:
+    get:
+      tags:
+        - komga
+      summary: The chapter thumbnail (WebP), the same bytes and cache as /img/lib/books/{id}/thumb.
+      operationId: getApiV1BooksIdThumbnail
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - komgaApiKey: []
+        - komgaBearer: []
+        - komgaBasic: []
+        - komgaSession: []
+      responses:
+        "200":
+          description: "image/webp; Cache-Control: private."
+        "304":
+          description: Not modified
+        "401":
+          description: Not authenticated
+        "429":
+          description: "too_many_requests { message } with Retry-After -- ten failed credentials from this client address in five minutes; a request with no credential or with only the cookie is never counted."
+        "404":
+          description: Not found, or not visible to this account
+  /api/v1/genres:
+    get:
+      tags:
+        - komga
+      summary: Every genre over the series this token may browse, for the extension's filter sheet.
+      operationId: getApiV1Genres
+      security:
+        - komgaApiKey: []
+        - komgaBearer: []
+        - komgaBasic: []
+        - komgaSession: []
+      responses:
+        "200":
+          description: An array of strings.
+        "401":
+          description: Not authenticated
+        "429":
+          description: "too_many_requests { message } with Retry-After -- ten failed credentials from this client address in five minutes; a request with no credential or with only the cookie is never counted."
+  /api/v1/tags:
+    get:
+      tags:
+        - komga
+      summary: Always an empty array (tags ride with genres here).
+      operationId: getApiV1Tags
+      security:
+        - komgaApiKey: []
+        - komgaBearer: []
+        - komgaBasic: []
+        - komgaSession: []
+      responses:
+        "200":
+          description: "[]"
+        "401":
+          description: Not authenticated
+        "429":
+          description: "too_many_requests { message } with Retry-After -- ten failed credentials from this client address in five minutes; a request with no credential or with only the cookie is never counted."
+  /api/v1/publishers:
+    get:
+      tags:
+        - komga
+      summary: Always an empty array (there is no publisher field).
+      operationId: getApiV1Publishers
+      security:
+        - komgaApiKey: []
+        - komgaBearer: []
+        - komgaBasic: []
+        - komgaSession: []
+      responses:
+        "200":
+          description: "[]"
+        "401":
+          description: Not authenticated
+        "429":
+          description: "too_many_requests { message } with Retry-After -- ten failed credentials from this client address in five minutes; a request with no credential or with only the cookie is never counted."
+  /api/v1/authors:
+    get:
+      tags:
+        - komga
+      summary: Every distinct author over the series this token may browse, each as role `writer`.
+      operationId: getApiV1Authors
+      security:
+        - komgaApiKey: []
+        - komgaBearer: []
+        - komgaBasic: []
+        - komgaSession: []
+      responses:
+        "200":
+          description: An array of KomgaAuthor.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/KomgaAuthor" }
+        "401":
+          description: Not authenticated
+        "429":
+          description: "too_many_requests { message } with Retry-After -- ten failed credentials from this client address in five minutes; a request with no credential or with only the cookie is never counted."
+  /api/v1/collections:
+    get:
+      tags:
+        - komga
+      summary: "Always an empty page: a collection would name series this credential's cap or grants hide, and an id is a disclosure."
+      operationId: getApiV1Collections
+      parameters:
+        - { name: unpaged, in: query, required: false, schema: { type: boolean } }
+        - { name: page, in: query, required: false, schema: { type: integer, minimum: 0 } }
+        - { name: size, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 500 } }
+      security:
+        - komgaApiKey: []
+        - komgaBearer: []
+        - komgaBasic: []
+        - komgaSession: []
+      responses:
+        "200":
+          description: An empty KomgaPage.
+        "401":
+          description: Not authenticated
+        "429":
+          description: "too_many_requests { message } with Retry-After -- ten failed credentials from this client address in five minutes; a request with no credential or with only the cookie is never counted."
+  /api/v1/collections/{id}/series:
+    get:
+      tags:
+        - komga
+      summary: Always an empty page (see /api/v1/collections).
+      operationId: getApiV1CollectionsIdSeries
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - komgaApiKey: []
+        - komgaBearer: []
+        - komgaBasic: []
+        - komgaSession: []
+      responses:
+        "200":
+          description: An empty KomgaPage.
+        "401":
+          description: Not authenticated
+        "429":
+          description: "too_many_requests { message } with Retry-After -- ten failed credentials from this client address in five minutes; a request with no credential or with only the cookie is never counted."
+  /api/v1/readlists:
+    get:
+      tags:
+        - komga
+      summary: Always an empty page (there are no read lists here).
+      operationId: getApiV1Readlists
+      parameters:
+        - { name: unpaged, in: query, required: false, schema: { type: boolean } }
+        - { name: page, in: query, required: false, schema: { type: integer, minimum: 0 } }
+        - { name: size, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 500 } }
+      security:
+        - komgaApiKey: []
+        - komgaBearer: []
+        - komgaBasic: []
+        - komgaSession: []
+      responses:
+        "200":
+          description: An empty KomgaPage.
+        "401":
+          description: Not authenticated
+        "429":
+          description: "too_many_requests { message } with Retry-After -- ten failed credentials from this client address in five minutes; a request with no credential or with only the cookie is never counted."
+  /api/v1/readlists/{id}:
+    get:
+      tags:
+        - komga
+      summary: Always 404 (there are no read lists here).
+      operationId: getApiV1ReadlistsId
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - komgaApiKey: []
+        - komgaBearer: []
+        - komgaBasic: []
+        - komgaSession: []
+      responses:
+        "401":
+          description: Not authenticated
+        "429":
+          description: "too_many_requests { message } with Retry-After -- ten failed credentials from this client address in five minutes; a request with no credential or with only the cookie is never counted."
+        "404":
+          description: "not_found"
+  /api/v1/readlists/{id}/read-progress/tachiyomi:
+    get:
+      tags:
+        - komga
+      summary: Always 404 (the tracker only asks for a read list it was bound to, and none is ever listed).
+      operationId: getApiV1ReadlistsIdReadProgressTachiyomi
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - komgaApiKey: []
+        - komgaBearer: []
+        - komgaBasic: []
+        - komgaSession: []
+      responses:
+        "401":
+          description: Not authenticated
+        "429":
+          description: "too_many_requests { message } with Retry-After -- ten failed credentials from this client address in five minutes; a request with no credential or with only the cookie is never counted."
+        "404":
+          description: "not_found"
+    put:
+      tags:
+        - komga
+      summary: Always 404 (there are no read lists here); a read-only token is 403 first.
+      operationId: putApiV1ReadlistsIdReadProgressTachiyomi
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - komgaApiKey: []
+        - komgaBearer: []
+        - komgaBasic: []
+        - komgaSession: []
+      responses:
+        "401":
+          description: Not authenticated
+        "429":
+          description: "too_many_requests { message } with Retry-After -- ten failed credentials from this client address in five minutes; a request with no credential or with only the cookie is never counted."
+        "403":
+          description: "forbidden -- the token is read-only."
+        "404":
+          description: "not_found"
+  /api/v2/users/me:
+    get:
+      tags:
+        - komga
+      summary: Komga's UserDto for the token's account.
+      operationId: getApiV2UsersMe
+      security:
+        - komgaApiKey: []
+        - komgaBearer: []
+        - komgaBasic: []
+        - komgaSession: []
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KomgaUser"
+        "401":
+          description: Not authenticated
+        "429":
+          description: "too_many_requests { message } with Retry-After -- ten failed credentials from this client address in five minutes; a request with no credential or with only the cookie is never counted."
+  /api/v2/series/{id}/read-progress/tachiyomi:
+    get:
+      tags:
+        - komga
+      summary: This account's reading progress on the series, as Mihon's Komga tracker reads it.
+      operationId: getApiV2SeriesIdReadProgressTachiyomi
+      description: >-
+        Over every chapter of the series, tombstones included. `lastReadContinuousNumberSort` is the number of
+        the last chapter in the leading run of completed chapters (chapters 1, 2 and 4 read reports 2; nothing
+        read reports 0, and so does a run that ends on -- or starts with an unread -- number-0 chapter),
+        `maxNumberSort` the highest chapter number, and the counts split the chapters into
+        read / in progress / unread. 404 unless the series is visible to the token's account (visible, not
+        browsable: the 18+ hide is a surfacing preference and progress is data).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - komgaApiKey: []
+        - komgaBearer: []
+        - komgaBasic: []
+        - komgaSession: []
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KomgaReadProgressV2"
+        "401":
+          description: Not authenticated
+        "429":
+          description: "too_many_requests { message } with Retry-After -- ten failed credentials from this client address in five minutes; a request with no credential or with only the cookie is never counted."
+        "404":
+          description: Not found, or not visible to this account
+    put:
+      tags:
+        - komga
+      summary: "Mark every chapter up to a number read, as Komga does: forward-only, idempotent, never un-marks."
+      operationId: putApiV2SeriesIdReadProgressTachiyomi
+      description: >-
+        Body `{ lastBookNumberSortRead: n }`. Every not-yet-completed chapter whose override-aware number is
+        <= n becomes completed in one statement (page moves to the chapter's page count, never backwards;
+        chapters already completed are untouched; nothing is ever un-marked -- the protocol has no unread).
+        No reading event is written, so streaks, the leaderboard and Wrapped are unaffected; AniList / MAL /
+        Kitsu are pushed once, only when something changed. `n <= 0` is a no-op 204: Mihon PUTs
+        max(remote, local) on every bind and refresh, which is 0.0 for a freshly bound series, and a chapter
+        numbered 0 ("Extra", "Oneshot" -- any file without a digit) must not be marked read by that; the first
+        real sync (n >= 1) marks a number-0 chapter read on both sides, as Komga does. `n` must be finite and
+        at most 1000000000 (it is bound as a Postgres real; 1e300 used to be a 500), else 400. Needs the
+        write scope. 404 unless the series is visible to the token's account.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [lastBookNumberSortRead]
+              properties:
+                lastBookNumberSortRead:
+                  type: number
+                  minimum: 0
+                  maximum: 1000000000
+                  description: Finite, 0 to 1000000000, in the same unit as KomgaBook.number / metadata.numberSort.
+      security:
+        - komgaApiKey: []
+        - komgaBearer: []
+        - komgaBasic: []
+        - komgaSession: []
+      responses:
+        "204":
+          description: Marked (or nothing to do).
+        "400":
+          description: "bad_request -- lastBookNumberSortRead must be a finite number between 0 and 1000000000."
+        "401":
+          description: Not authenticated
+        "429":
+          description: "too_many_requests { message } with Retry-After -- ten failed credentials from this client address in five minutes; a request with no credential or with only the cookie is never counted."
+        "403":
+          description: "forbidden -- the token is read-only."
         "404":
           description: Not found, or not visible to this account

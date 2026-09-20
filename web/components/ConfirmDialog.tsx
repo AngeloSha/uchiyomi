@@ -92,14 +92,25 @@ export function ConfirmDialog({
   onClose: () => void;
 }) {
   const [typed, setTyped] = useState('');
-  const ready = !confirmText || typed.trim() === confirmText.trim();
+  // Compared the way a person types: trimmed and in NFC. A title read off a macOS-written share is NFD
+  // ("Cafe" + a combining accent) while every keyboard produces the precomposed "Café", and byte for byte
+  // those never match -- the button never enabled and the route (which normalises the same way) was never
+  // reached. Reintroduce by comparing `.trim()` alone: "the typed confirmation compares in NFC" in
+  // forgetSeries.test.ts.
+  const ready = !confirmText || typed.trim().normalize('NFC') === confirmText.trim().normalize('NFC');
+  // ONE sentence with the title inside it, split around the placeholder so the title can carry its own
+  // colour. `tr('Type')` + title + a literal " to confirm" read "TYPGONE FOR GOOD TO CONFIRM" in German
+  // and "النوعGONE…" in Arabic: 'Type' translated as the noun (Typ, النوع = "the kind"), no space before
+  // the title, and the tail in English regardless of language. A sentence key translates as a sentence.
+  const [before, after] = tr('Type {title} to confirm').split('{title}');
 
   return (
     <Modal title={title} onClose={onClose}>
       <div className="text-sm leading-relaxed text-fog-300">{body}</div>
       {confirmText && (
         <>
-          <label className="mb-1 mt-4 block text-xs font-semibold uppercase tracking-wider text-fog-500">{tr('Type')}<span className="text-fog-200">{confirmText}</span> to confirm
+          <label className="mb-1 mt-4 block text-xs font-semibold uppercase tracking-wider text-fog-500">
+            {before}<span className="text-fog-200">{confirmText}</span>{after}
           </label>
           <input
             value={typed}
@@ -118,7 +129,7 @@ export function ConfirmDialog({
             danger ? 'bg-rose-500/90 text-white hover:bg-rose-500' : 'btn-accent'
           }`}
         >
-          {busy ? 'Working…' : confirmLabel}
+          {busy ? tr('Working…') : confirmLabel}
         </button>
       </div>
     </Modal>

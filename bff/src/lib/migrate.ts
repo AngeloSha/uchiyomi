@@ -726,6 +726,11 @@ CREATE TABLE IF NOT EXISTS api_tokens (
   expires_at timestamptz
 );
 CREATE INDEX IF NOT EXISTS api_tokens_user_idx ON api_tokens (user_id);
+-- Whether the Komga-compatible API (/api/v1, /api/v2 -- Mihon's Komga extension) lists 18+ libraries to
+-- this token. Mirrors opds_tokens.show_adult for the same reason: that client cannot press the web app's
+-- reveal button, so the preference lives on the credential, off by default. The age cap is a permission and
+-- is unaffected; a capped account never sees the shelf whatever this says.
+ALTER TABLE api_tokens ADD COLUMN IF NOT EXISTS show_adult boolean NOT NULL DEFAULT false;
 
 -- web-push subscriptions for new-chapter notifications (one row per browser/device endpoint)
 CREATE TABLE IF NOT EXISTS push_subscriptions (

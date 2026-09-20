@@ -103,9 +103,15 @@ export async function resolveOpdsBasic(authHeader?: string): Promise<OpdsIdentit
   if (!pass) return null;
   // The expiry is checked in SQL rather than in JS so there is no window where a token that has just
   // expired still resolves because two clocks disagree about which one is authoritative.
+  //
+  // `NOT u.disabled`, like TOKEN_SELECT below: disabling an account revoked its refresh sessions and (since
+  // v0.38.0) its API tokens, but the OPDS token -- the one credential with no scopes, typed once into an
+  // e-reader and never looked at again -- kept opening /opds and every /img byte route for as long as it
+  // lived. A disabled account must lose every credential at once. Reintroduce by dropping the JOIN and the
+  // clause: "a disabled owner's OPDS token opens neither the feed nor a page" in opdsToken.int.test.ts sees 200.
   const row = await one<{ user_id: string; show_adult: boolean }>(
-    `SELECT user_id, show_adult FROM opds_tokens
-      WHERE token_hash = $1 AND (expires_at IS NULL OR expires_at > now())`,
+    `SELECT t.user_id, t.show_adult FROM opds_tokens t JOIN users u ON u.id = t.user_id
+      WHERE NOT u.disabled AND t.token_hash = $1 AND (t.expires_at IS NULL OR t.expires_at > now())`,
     [sha256(pass)],
   );
   // Stamped fire-and-forget, so authenticating a reader never waits on bookkeeping -- but scoped to the
@@ -321,20 +327,28 @@ export interface ApiTokenRow {
   lastSeen: string | null;
   expiresAt: string | null;
   expired: boolean;
+  /** Whether the Komga-compatible API lists 18+ libraries to this token. See `show_adult` in migrate.ts. */
+  showAdult: boolean;
 }
 
-/** Mint a token. The raw value is returned once and never stored; only its hash is kept. */
+/**
+ * Mint a token. The raw value is returned once and never stored; only its hash is kept.
+ *
+ * `showAdult` mirrors the OPDS token's flag: the Komga-compatible API is another feed a client cannot filter,
+ * so whether 18+ libraries appear in its listings is decided on the credential, off by default.
+ */
 export async function issueApiToken(
   userId: string,
   name: string,
   scopes: ApiScope[],
   expiresAt: Date | null,
+  showAdult = false,
 ): Promise<{ id: string; token: string }> {
   const token = API_TOKEN_PREFIX + randomBytes(32).toString('base64url');
   const rows = await q<{ id: string }>(
-    `INSERT INTO api_tokens (user_id, name, token_hash, scopes, expires_at)
-     VALUES ($1,$2,$3,$4,$5) RETURNING id`,
-    [userId, name, sha256(token), scopes, expiresAt],
+    `INSERT INTO api_tokens (user_id, name, token_hash, scopes, expires_at, show_adult)
+     VALUES ($1,$2,$3,$4,$5,$6) RETURNING id`,
+    [userId, name, sha256(token), scopes, expiresAt, showAdult],
   );
   return { id: rows[0].id, token };
 }
@@ -342,9 +356,9 @@ export async function issueApiToken(
 export async function listApiTokens(userId: string): Promise<ApiTokenRow[]> {
   const rows = await q<{
     id: string; name: string; scopes: string[]; created_at: string;
-    last_seen: string | null; expires_at: string | null;
+    last_seen: string | null; expires_at: string | null; show_adult: boolean;
   }>(
-    `SELECT id, name, scopes, created_at, last_seen, expires_at
+    `SELECT id, name, scopes, created_at, last_seen, expires_at, show_adult
        FROM api_tokens WHERE user_id = $1 ORDER BY created_at DESC`,
     [userId],
   );
@@ -357,6 +371,7 @@ export async function listApiTokens(userId: string): Promise<ApiTokenRow[]> {
     lastSeen: r.last_seen ? new Date(r.last_seen).toISOString() : null,
     expiresAt: r.expires_at ? new Date(r.expires_at).toISOString() : null,
     expired: !!r.expires_at && new Date(r.expires_at).getTime() < now,
+    showAdult: !!r.show_adult,
   }));
 }
 
@@ -369,20 +384,57 @@ export async function revokeApiToken(userId: string, id: string): Promise<boolea
   return rows.length > 0;
 }
 
-interface ResolvedToken { id: string; userId: string; role: string; scopes: string[] }
+export interface ResolvedToken {
+  id: string;
+  userId: string;
+  role: string;
+  scopes: string[];
+  /** The token's own 18+ listing preference (api_tokens.show_adult); a surfacing choice, not a permission. */
+  showAdult: boolean;
+  /** When the row expires, so a session cookie derived from it can be capped to the same instant. */
+  expiresAt: Date | null;
+}
 
-export async function resolveApiToken(raw: string): Promise<ResolvedToken | null> {
-  const row = await one<{ id: string; user_id: string; scopes: string[]; expires_at: string | null; role: string }>(
-    `SELECT t.id, t.user_id, t.scopes, t.expires_at, u.role
+type TokenRow = { id: string; user_id: string; scopes: string[]; expires_at: string | null; role: string; show_adult: boolean };
+
+/**
+ * The one SELECT behind both resolvers, so the two can never disagree about what makes a token usable.
+ *
+ * `AND NOT u.disabled`: disabling an account revokes its refresh sessions and nothing else, so its API tokens
+ * -- and now the Komga session cookies minted from them -- kept working for as long as they lived. A disabled
+ * account must lose every credential at once; this is the one place API tokens are turned into a subject
+ * (OPDS tokens have their own SELECT in resolveOpdsBasic above, with the same clause for the same reason).
+ * Reintroduce by dropping the clause: "a disabled account's token and cookie both stop working" in
+ * komgaCompat.int.test.ts sees 200.
+ */
+const TOKEN_SELECT = `SELECT t.id, t.user_id, t.scopes, t.expires_at, t.show_adult, u.role
        FROM api_tokens t JOIN users u ON u.id = t.user_id
-      WHERE t.token_hash = $1`,
-    [sha256(raw)],
-  );
+      WHERE NOT u.disabled AND `;
+
+function resolved(row: TokenRow | null): ResolvedToken | null {
   if (!row) return null;
   if (row.expires_at && new Date(row.expires_at).getTime() < Date.now()) return null;
   // best-effort; a failed last_seen write must not fail the request
   q('UPDATE api_tokens SET last_seen = now() WHERE id = $1', [row.id]).catch(() => {});
-  return { id: row.id, userId: row.user_id, role: row.role, scopes: row.scopes };
+  return {
+    id: row.id, userId: row.user_id, role: row.role, scopes: row.scopes, showAdult: !!row.show_adult,
+    expiresAt: row.expires_at ? new Date(row.expires_at) : null,
+  };
+}
+
+export async function resolveApiToken(raw: string): Promise<ResolvedToken | null> {
+  return resolved(await one<TokenRow>(`${TOKEN_SELECT} t.token_hash = $1`, [sha256(raw)]));
+}
+
+/**
+ * The same resolution by row id, for the Komga session cookie (lib/komgaSession.ts), which names the row
+ * rather than carrying the secret. Re-read on EVERY cookie use: that is what makes revoking the token, letting
+ * it expire, or disabling the account end the cookie too, with no session table and no revocation list.
+ */
+export async function resolveApiTokenById(id: string): Promise<ResolvedToken | null> {
+  // A uuid column; anything else is a cast error in Postgres, and a malformed id is simply not a token.
+  if (!/^[0-9a-f-]{36}$/i.test(id)) return null;
+  return resolved(await one<TokenRow>(`${TOKEN_SELECT} t.id = $1`, [id]));
 }
 
 /** Preflight guard usable as a route preHandler. */
@@ -408,6 +460,16 @@ export async function authenticate(request: FastifyRequest, reply: FastifyReply)
   try {
     await request.jwtVerify();
   } catch {
-    reply.code(401).send({ error: 'unauthorized' });
+    return reply.code(401).send({ error: 'unauthorized' });
+  }
+  // ⚠️ A verified signature is not enough. Every JWT this server signs uses the same secret, and only the
+  // ACCESS token is meant to open /api/*: the `yomi_img` cookie ({ sub, typ: 'img' }, routes/auth.ts) and the
+  // OIDC ticket ({ typ: 'oidc', ... }) verified here just as well, so a seven-day httpOnly image cookie
+  // pasted into an Authorization header was a full API session. Access tokens carry no `typ` claim
+  // (signAccess in routes/auth.ts), so any payload that has one was minted for something else.
+  // Reintroduce by dropping this check: "a yomi_img cookie value is not an API session" in
+  // komgaCompat.int.test.ts sees 200.
+  if ((request.user as { typ?: unknown })?.typ !== undefined) {
+    return reply.code(401).send({ error: 'unauthorized' });
   }
 }

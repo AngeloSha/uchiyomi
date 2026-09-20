@@ -142,6 +142,87 @@ whose it is.
 The image is pinned rather than tracking `:stable`, because `:stable` is older than the extension API today's
 repository indexes require and would show an empty catalogue.
 
+## Komga-compatible API
+
+The other direction, since v0.38.0: **Mihon reading Uchiyomi**, with reading progress flowing **back**. The
+[Uchiyomi extension](https://github.com/AngeloSha/uchiyomi-extension) already adds your library as a source
+in Mihon, Tachimanga and Suwayomi, but an extension cannot report what you read — Mihon only lets a
+*tracker* do that, and its trackers are built into the app. One of them, the **Komga tracker**, binds to
+the keiyoushi **Komga** extension and nothing else, and speaks a small, fixed set of Komga's endpoints. So
+Uchiyomi now answers those endpoints (`/api/v1/*`, `/api/v2/*`), enough for the Komga extension to browse
+and read the library and for the Komga tracker to sync progress in both directions, forward-only. The wire
+contract is in [api.md](api.md#komga-compatible-api-mihons-komga-extension-and-tracker); this is the setup and
+the limits.
+
+### Setting Mihon up
+
+1. In Uchiyomi, mint an API token under **Profile → Account → API tokens** (tap *Manage*, then *New token*)
+   with **read + write** — tick *Allow changes*. A read-only token browses and reads, but nothing syncs in
+   either direction: Mihon retries a failed push a few times with backoff, then gives up quietly until the
+   next chapter read. Tick **Include 18+ libraries** if you want those shelves listed on the phone; the
+   account's age limit still applies whatever the token says.
+2. In Mihon, install the **Komga** extension from the keiyoushi repository (it ships three copies — *Komga*,
+   *Komga (2)*, *Komga (3)* — for people with more than one server). In its settings, **Address** is your
+   Uchiyomi URL exactly as you reach it — scheme, host, port, no trailing slash — and **API key** is the
+   token. (Username and password are only shown while the API key field is empty; if you use them instead,
+   put the token in **Password** and anything in **Username** — account passwords are refused on purpose,
+   see below. Prefer the API key field: it is sent on every request, so changing the key moves the tracker
+   with it, whereas the extension only presents the password after a 401, so a changed password is not
+   noticed while the previous cookie is valid, up to 7 days.) The extension checks the login against the
+   library list straight away.
+3. Enable the Komga tracker in Mihon under **Settings → Tracking** *before* adding series. Mihon binds the
+   tracker to a series when the series is added to the library; a series you added before the tracker was on
+   has no link, and needs re-adding or a manual bind from its tracking sheet.
+
+From then on, reading a chapter in Mihon marks it read in Uchiyomi for that account, and chapters read in
+Uchiyomi (or on any other device) are marked read in Mihon on its next refresh of the series. Tachimanga
+(iOS) runs the same Komga extension and its *enhanced tracking* is reported by a contributor to sync against
+this API as well; it is closed source and was not tested here — a report either way is welcome.
+
+### What the sync is, and is not
+
+- **It is continuous progress, forward only.** The protocol carries one number per series: the highest
+  chapter in the unbroken run of read chapters from the start. Chapters 1, 2 and 4 read reads as *2*, and
+  Mihon marks everything up to it. Mihon only ever pushes a higher number, and the Komga protocol has no
+  "unread" — marking a chapter unread on either side does not travel. Reads synced from the phone do not
+  count towards streaks, the leaderboard or Wrapped, exactly like the app's own bulk mark-read; AniList,
+  MyAnimeList and Kitsu are pushed once, only when something actually changed.
+- **One Uchiyomi account per phone.** The tracker's own requests carry no credential; they ride on a cookie
+  the extension's traffic leaves in the phone's cookie jar, which Android keys by host and cookie name — the
+  port is ignored. Two Komga instances on one phone pointed at the same host with two accounts' tokens fight
+  over that cookie, and the credential-less sync lands on whichever was minted last. With the API key field
+  the cookie is re-minted whenever a request authenticates as a different token, so switching the key moves
+  the tracker with it. With username/password the extension only presents the password after a 401, so a
+  changed password is not noticed while the previous cookie is valid (up to 7 days) — revoke the old token,
+  or use the API key field, which is sent on every request. And do not point the phone at a host where an
+  untrusted service also answers: the phone's cookie jar is shared per hostname and ignores the port, so any
+  service on the same hostname can plant a session cookie of its own that the tracker's credential-less
+  requests would then carry; the extension re-mints the cookie on its next credentialed request, but until
+  then those writes land on whoever planted it. Real Komga has both limits.
+- **A real Komga on the same host coexists.** Uchiyomi's cookie is named `UCHIYOMI-SESSION`, not
+  `KOMGA-SESSION`, precisely so a Komga on another port of the same machine does not overwrite it — the
+  migration case. Anything else on that host also sees the cookie (it is scoped to the host, not the port),
+  which is why it is a value only these routes can verify and that nothing else on the server accepts.
+- **The address is the identity.** Mihon stores each series and each tracker link under the absolute URL you
+  typed. Changing the address later — `http://nas:8080` to `https://nas`, say — gives every series a new
+  identity in Mihon and orphans every tracker entry. Pick the address you will keep.
+- **Passwords are refused, on purpose.** The extension offers username + password; here the password must be
+  an API token. An account password would have walked around two-factor authentication and the lockout
+  counter, and this protocol has no place to type a 2FA code. Revoking the token, letting it expire or
+  disabling the account ends the phone's session on its next request.
+- **What the phone sees** is what the token's account may see: library grants, the age limit and hidden
+  series apply, and an 18+ library is listed only when the token was minted with *Include 18+ libraries*
+  (the extension has no reveal button of its own). Collections and read lists are always empty there, so
+  that no id from a shelf the account cannot open is disclosed. Chapters deleted from the server are left
+  out of the phone's chapter list but still count for progress. A fresh bind sends *0* as its progress, and
+  that is treated as nothing rather than as "chapter 0 read", so a chapter numbered 0 (*Extra*, *Oneshot*,
+  any file without a digit) is not marked read just by binding the series; the first real sync (n ≥ 1) marks
+  a number-0 chapter read on both sides, as Komga does — only the bind-time 0 is ignored. In the other
+  direction the server reports the leading run of read chapters: nothing read reports 0, and so does a run
+  that ends on — or starts with an unread — number-0 chapter, so an unread *Extra* at the head keeps the run
+  behind it from reaching the phone until it is read.
+- Plain HTTP on a LAN works; the cookie is marked Secure only over HTTPS.
+
 ## Where the line is
 
 Uchiyomi's code contains **no scraper, no site name, and no repository URL**. The catalogue you browse comes

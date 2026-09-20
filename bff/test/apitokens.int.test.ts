@@ -121,6 +121,44 @@ test('personal API tokens', { skip: DSN ? false : 'set TEST_DATABASE_URL to run'
     assert.equal((await app.inject({ method: 'GET', url: '/api/who', headers: bearer(token) })).statusCode, 401);
   });
 
+  await t.test("a disabled account's token is refused until the account is enabled again", async () => {
+    // Disabling used to revoke refresh sessions and nothing else, so a token kept working for as long as it
+    // lived. Reintroduce by dropping `NOT u.disabled` from TOKEN_SELECT in auth.ts: the middle request is 200.
+    const { token } = await auth.issueApiToken(userId, 'paused', ['read'], null);
+    assert.equal((await app.inject({ method: 'GET', url: '/api/who', headers: bearer(token) })).statusCode, 200);
+    await q(`UPDATE users SET disabled = true WHERE id = $1`, [userId]);
+    try {
+      assert.equal((await app.inject({ method: 'GET', url: '/api/who', headers: bearer(token) })).statusCode, 401);
+    } finally {
+      await q(`UPDATE users SET disabled = false WHERE id = $1`, [userId]);
+    }
+    assert.equal((await app.inject({ method: 'GET', url: '/api/who', headers: bearer(token) })).statusCode, 200);
+  });
+
+  await t.test('resolving by id (the Komga session cookie path) applies the same rules as resolving by secret', async () => {
+    const { id } = await auth.issueApiToken(userId, 'by-id', ['read', 'write'], null);
+    const byId = await auth.resolveApiTokenById(id);
+    assert.ok(byId);
+    assert.deepEqual({ id: byId!.id, userId: byId!.userId, scopes: byId!.scopes, showAdult: byId!.showAdult, expiresAt: byId!.expiresAt },
+      { id, userId, scopes: ['read', 'write'], showAdult: false, expiresAt: null });
+    const { id: staleId } = await auth.issueApiToken(userId, 'stale-id', ['read'], new Date(Date.now() - 1000));
+    assert.equal(await auth.resolveApiTokenById(staleId), null, 'an expired token does not resolve by id either');
+    assert.equal(await auth.revokeApiToken(userId, id), true);
+    assert.equal(await auth.resolveApiTokenById(id), null, 'a revoked token does not resolve by id');
+    // A uuid column: a malformed id is simply not a token, never a cast error surfacing as a 500.
+    assert.equal(await auth.resolveApiTokenById('not-a-uuid'), null);
+    assert.equal(await auth.resolveApiTokenById(''), null);
+  });
+
+  await t.test('the 18+ listing flag is stored per token and shown in the listing', async () => {
+    const { id: onId } = await auth.issueApiToken(userId, 'mihon-adult', ['read'], null, true);
+    const { id: offId } = await auth.issueApiToken(userId, 'mihon-plain', ['read'], null);
+    const rows = await auth.listApiTokens(userId);
+    assert.equal(rows.find((r) => r.id === onId)?.showAdult, true);
+    assert.equal(rows.find((r) => r.id === offId)?.showAdult, false);
+    assert.equal((await auth.resolveApiTokenById(onId))?.showAdult, true);
+  });
+
   await t.test('one user cannot revoke another user\'s token', async () => {
     const { id } = await auth.issueApiToken(adminId, 'not-yours', ['read'], null);
     assert.equal(await auth.revokeApiToken(userId, id), false);

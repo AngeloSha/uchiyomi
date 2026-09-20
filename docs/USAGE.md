@@ -675,16 +675,40 @@ is in [docs/extensions.md](extensions.md).
 
 ### The other direction: Uchiyomi *inside* Mihon or Tachimanga
 
-If you would rather keep reading in Mihon (Android), a Tachiyomi fork, Tachimanga (iOS) or Suwayomi, there is
-an extension that adds your Uchiyomi library as a source there. Add the store URL from
+If you would rather keep reading in Mihon (Android), a Tachiyomi fork, Tachimanga (iOS) or Suwayomi, there
+are two ways to add your Uchiyomi library as a source there, and they differ in one thing: whether what you
+read on the phone comes back.
+
+**The Uchiyomi extension** — add the store URL from
 [AngeloSha/uchiyomi-extension](https://github.com/AngeloSha/uchiyomi-extension) as an extension repo,
 install **Uchiyomi**, and give it your server address and a **read**-scoped API token (**Profile → Account →
-API tokens**, tap *Manage* then *New token*; leave *Allow changes* unticked). Favourites come first under *Popular*, recently updated under *Latest*, and search takes the
-same genre / status / read-state / library filters as the web app.
+API tokens**, tap *Manage* then *New token*; leave *Allow changes* unticked). Favourites come first under
+*Popular*, recently updated under *Latest*, and search takes the same genre / status / read-state / library
+filters as the web app. Its honest limit: **reading progress does not flow back to Uchiyomi** from there.
+The Mihon family only lets a *tracker* built into the app report reads, so an extension cannot; what you
+read in Mihon stays marked in Mihon. Needs Uchiyomi v0.29.0 or newer.
 
-One honest limit: **reading progress does not flow back to Uchiyomi** from there. The Mihon family only
-lets a *tracker* built into the app report reads, so an extension cannot; what you read in Mihon stays
-marked in Mihon. Needs Uchiyomi v0.29.0 or newer.
+**The Komga extension, with the Komga tracker** (since v0.38.0) — Mihon's built-in **Komga tracker** binds
+to the keiyoushi *Komga* extension and speaks a small set of Komga's endpoints, and Uchiyomi now answers
+them. Mint a token with **read + write** (tick *Allow changes*; a read-only token browses and reads, but
+nothing syncs in either direction: Mihon retries a failed push a few times with backoff, then gives up
+quietly until the next chapter read), tick **Include 18+ libraries** on it if those shelves should show on
+the phone, then in Mihon install the **Komga** extension, set its **Address** to your
+Uchiyomi URL exactly as you reach it (no trailing slash) and its **API key** to the token, and switch the
+Komga tracker on under **Settings → Tracking** *before* adding series — a series added earlier has no link
+and needs re-adding or a manual bind from its tracking sheet. Reading a chapter in Mihon then marks it read
+here for that account, and chapters read here are marked read in Mihon on its next refresh. Two things to
+know before you rely on it: the sync carries the highest chapter in the unbroken run from the start and only
+ever moves forward — chapters 1, 2 and 4 read reads as *2*, and marking something unread on either side does
+not travel — and Mihon stores each series under the exact address you typed, so changing the address later
+orphans every entry. One Uchiyomi account per phone: the tracker rides on a cookie the extension leaves
+behind, and two Komga instances on one phone against the same host fight over it. Prefer the **API key**
+field over username/password: the key is sent on every request, so changing it moves the tracker with it,
+whereas the extension only presents the password after a 401, so a changed password is not noticed while the
+previous cookie is valid (up to 7 days) — revoke the old token instead. Reads synced from the phone
+do not count towards streaks or Wrapped. Tachimanga's *enhanced tracking* is reported by a contributor to
+work against this too; it was not tested here. The full list of what is and is not carried is in
+[docs/extensions.md](extensions.md#komga-compatible-api).
 
 ![The extension browser](shots/admin-extensions.webp)
 
@@ -724,7 +748,8 @@ files are gone. Put back lists them as deleted from the server; Fetch again on t
 the ones Uchiyomi downloaded.* The button is the same **Put back** and still works: the series comes back
 with those chapters listed as *Deleted from the server*, where *Fetch again* brings each one that
 Uchiyomi downloaded (under the download folder) back onto the same row (section 4); a file that lived in
-your read library is yours to put back by hand. *Delete files* is not offered twice.
+your read library is yours to put back by hand. *Delete files* is not offered twice. Once the files are gone
+the row offers **Forget** instead (section 12) — the one step here that cannot be undone.
 
 ### Renaming folders and deleting files
 
@@ -752,11 +777,15 @@ and keeps every chapter row and every progress row, so the record of having read
 files: each row whose file it removed is marked *deleted from the server*, the same mark the chapter-level
 delete and the read-chapter cleanup leave, so the updater never fetches those chapters back on its own and
 *Put back* afterwards is honest about what comes back. The dialog counts the files it would actually delete
-(*This deletes N chapter file(s)*), not the chapter rows. The count it reports is files actually removed —
-a file that was already gone is left alone and not counted, because on a share that is not mounted every
-file looks gone (the *Verify chapter files* task in section 12 is the place for missing files). There is
-no bulk form of this on purpose: *Select all* plus one tap must never be able to wipe a hand-curated
-folder.
+(*This deletes N chapter file(s)*), not the chapter rows. The count it reports is files actually removed.
+A chapter whose file was already gone is marked *deleted from the server* too, but only when that root is
+provably mounted — the same proof the *Verify chapter files* task in section 12 uses: at least one chapter
+file of any series is present under it (a folder is not proof) and no more than nine in ten of the files
+looked at are absent. That is what lets a series whose folder you removed by hand on the NAS be forgotten:
+the toast says *Deleted 0 file(s)*, and the row offers *Forget*. On a share that is not mounted every file looks gone,
+nothing is marked, and every row stays as it was. Deleting a merge survivor's files also removes the
+folders of the series merged into it. There is no bulk form of this on purpose: *Select all* plus one tap
+must never be able to wipe a hand-curated folder.
 
 ### Deleting chapters after they are read
 
@@ -1020,6 +1049,10 @@ Uchiyomi also locks an account after repeated failed logins and records everythi
 A normal sign-in expires every 15 minutes, which is fine for a browser and useless for a script. Under
 **Profile → Account → API tokens** (the card is collapsed — tap **Manage**, then **New token**) you can create a
 long-lived token instead, scoped to **read**, **write** or **admin**, with an optional expiry. The token is shown once, so copy it then, and you can revoke it at any time.
+**Include 18+ libraries** (since v0.38.0, off by default) decides whether the Komga-compatible API — Mihon's
+Komga extension, section 7 — lists your 18+ libraries to that token, since that app has no reveal button of
+its own; the list marks such a token *18+*. Your age limit still applies whatever the box says, and the web
+app is unaffected.
 
 Scopes only ever restrict: a read-only token gets a 403 on anything that changes data, and an admin-scoped
 token on a non-admin account still can't reach the admin API. See [docs/api.md](api.md) for the endpoints.
@@ -1243,15 +1276,29 @@ delete in the app is deliberately smaller than it sounds, so here is exactly wha
   never the sweep. *Delete
   files* is admin-only, only after a remove, asks for the title, and refuses rather than half-applying when
   the folder is not writable (that is `PUID`/`PGID` unset — the refusal names the fix) or when the series has
-  no files on disk.
+  no chapter rows on any root (*That series has no files on disk*). On a mounted library it also marks
+  chapters whose files were removed by hand (section 8), so a series deleted on the NAS can still reach
+  *Forget*.
 - **Merge** is one-way, and an absorbed series can neither be un-merged nor removed afterwards (section 8).
-- **Nothing today erases a series' rows from the database for good.** There is no code path that deletes a
-  series row or a chapter row; reading progress is attached to the chapter row on purpose, so a delete can
-  never quietly take a person's history with it — that is the one loss with no undo, and the one that syncs
-  outward to AniList. A hidden series therefore stays in the Removed list until it is put back. If you need
-  a series gone from the database entirely, that is a `psql` job on the layout above, and it means deleting
-  every member's progress on it first; ask on the tracker if you want this as a button, and say why, because
-  the honest version has to warn that it erases everyone's history on that title.
+  Since v0.38.0 a merge also carries bookmarks and the tracker floor to the survivor.
+- **Forget** (since v0.38.0) is the third step, after Remove and Delete files, and the only thing in
+  Uchiyomi that erases a series from the database for good. It is offered on a Removed row on
+  **Content → Library** once no chapter row claims a file any more, asks for the title, and it takes
+  everyone's history on that title with it: reading progress, reading events, bookmarks, notes, ratings,
+  favourites, collection entries and tracker floors, for every member. Stats, streaks, the leaderboard and
+  Wrapped change retroactively — a day whose only reads were on that series disappears from a streak. There
+  is no Put back. It refuses, and says why and what to do, while the series is still in the library, while
+  any chapter row still claims a file (*Delete files* first — on a mounted library that also marks the
+  chapters whose files were removed by hand, section 8), while a root cannot be reached at all (mount it
+  first: nothing in Uchiyomi marks a chapter it cannot see, so an unmounted share leaves every row live and
+  the previous refusal is what stops it — chapters the verify task marked *missing* on a mounted share do
+  not refuse), or while the folder still holds chapters under any root (a rescan would bring it back as a
+  new series with no history; an empty folder does not count, since the scanner never turns one into a
+  series). The typed title is compared trimmed and Unicode-normalised, so a name written on a Mac confirms
+  from any keyboard. A series that absorbed others by merge takes those rows with it. History on chapters that moved
+  to a merge survivor is kept under the survivor, never erased. Reading progress is still attached to the
+  chapter row on purpose: this is the one place a delete takes a person's history, it says so in the dialog,
+  and every other delete in this list keeps it.
 
 ## 13. Troubleshooting & FAQ
 

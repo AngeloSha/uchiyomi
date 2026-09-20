@@ -2,7 +2,7 @@
   "_meta": {
     "language": "ru",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 865
+    "strings": 880
   },
   "1 check found something": "1 проверка нашла проблему",
   "1 member": "1 участник",
@@ -347,7 +347,6 @@
   "Two-factor authentication": "Двухфакторная аутентификация",
   "Two-factor disabled": "Двухфакторная отключена",
   "Two-factor enabled": "Двухфакторная включена",
-  "Type": "Тип",
   "Type any folder under your library root, or browse below. Libraries may sit inside one another — the most specific one wins.": "Введите любую папку внутри корня библиотеки или выберите ниже. Библиотеки могут вкладываться друг в друга — побеждает самая конкретная.",
   "Uchiyomi · personal reader for your Komga library": "Uchiyomi · личная читалка для вашей библиотеки Komga",
   "Up Next": "Далее",
@@ -865,8 +864,24 @@
   "Could not remove those": "Не удалось их убрать",
   "Lost track of the fetch. Check the library in a moment.": "Загрузка потерялась из виду. Загляните в библиотеку чуть позже.",
   "files deleted": "файлы удалены",
-  "The chapter files are gone. Put back lists them as deleted from the server; Fetch again on the series page brings back the ones Uchiyomi downloaded.": "Файлы глав удалены. «Put back» покажет их как удалённые с сервера; «Загрузить заново» на странице серии вернёт те, что скачал Uchiyomi.",
+  "The chapter files are gone. Put back lists them as deleted from the server; Fetch again on the series page brings back the ones Uchiyomi downloaded.": "Файлы глав удалены. «Вернуть» покажет их как удалённые с сервера; «Загрузить заново» на странице серии вернёт те, что скачал Uchiyomi.",
   "Started — the Tasks line shows what it found when it is done.": "Запущено — строка в Задачах покажет результат, когда всё закончится.",
   "Nothing removed · 1 skipped": "Ничего не убрано · 1 пропущена",
-  "Nothing removed · {n} skipped": "Ничего не убрано · пропущено: {n}"
+  "Nothing removed · {n} skipped": "Ничего не убрано · пропущено: {n}",
+  "Forget": "Забыть",
+  "Forget \"{title}\" for good?": "Забыть «{title}» навсегда?",
+  "This erases the series and everyone's reading history on it — progress, bookmarks, notes, ratings, favourites, tracker links.": "Это удалит серию и всю историю чтения всех участников по ней: прогресс, закладки, заметки, оценки, избранное, привязки к трекерам.",
+  "Stats and Wrapped change. If the files ever reappear it comes back as a new series with no history. This cannot be undone.": "Статистика и Wrapped изменятся. Если файлы когда-нибудь появятся снова, серия вернётся как новая, без истории. Отменить это нельзя.",
+  "Forgotten. Nobody had read it.": "Забыта. Её никто не читал.",
+  "Forgotten. 1 member's history on it is gone.": "Забыта. История 1 участника по ней удалена.",
+  "Forgotten. {n} members' history on it is gone.": "Забыта. История {n} участников по ней удалена.",
+  "Could not forget it": "Не удалось забыть",
+  "Include 18+ libraries": "Включить библиотеки 18+",
+  "18+": "18+",
+  "Type {title} to confirm": "Введите {title} для подтверждения",
+  "Put back": "Вернуть",
+  "Restoring…": "Возвращаем…",
+  "1 chapter · removed {when}": "1 глава · убрана {when}",
+  "{n} chapters · removed {when}": "{n} глав · убрана {when}",
+  "Removing a series hides it from the library, search and the updater. Its files are left exactly where they are, and everyone’s reading progress is kept, so putting it back changes nothing else.": "Если убрать серию, она скроется из библиотеки, поиска и обновлений. Её файлы остаются ровно там, где были, а прогресс чтения всех участников сохраняется, поэтому возврат ничего больше не меняет."
 }

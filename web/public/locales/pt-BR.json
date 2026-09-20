@@ -2,7 +2,7 @@
   "_meta": {
     "language": "pt-BR",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 865
+    "strings": 880
   },
   "1 check found something": "1 verificação encontrou algo",
   "1 member": "1 membro",
@@ -347,7 +347,6 @@
   "Two-factor authentication": "Autenticação em duas etapas",
   "Two-factor disabled": "Dois fatores desativado",
   "Two-factor enabled": "Dois fatores ativado",
-  "Type": "Tipo",
   "Type any folder under your library root, or browse below. Libraries may sit inside one another — the most specific one wins.": "Digite qualquer pasta dentro da raiz da sua biblioteca, ou navegue abaixo. Bibliotecas podem ficar dentro umas das outras — a mais específica vence.",
   "Uchiyomi · personal reader for your Komga library": "Uchiyomi · leitor pessoal para a sua biblioteca Komga",
   "Up Next": "A seguir",
@@ -865,8 +864,24 @@
   "Could not remove those": "Não foi possível removê-las",
   "Lost track of the fetch. Check the library in a moment.": "Perdemos o rastro da busca. Confira a biblioteca daqui a pouco.",
   "files deleted": "arquivos excluídos",
-  "The chapter files are gone. Put back lists them as deleted from the server; Fetch again on the series page brings back the ones Uchiyomi downloaded.": "Os arquivos dos capítulos se foram. «Put back» os lista como excluídos do servidor; «Buscar de novo» na página da série traz de volta os que o Uchiyomi baixou.",
+  "The chapter files are gone. Put back lists them as deleted from the server; Fetch again on the series page brings back the ones Uchiyomi downloaded.": "Os arquivos dos capítulos se foram. «Restaurar» os lista como excluídos do servidor; «Buscar de novo» na página da série traz de volta os que o Uchiyomi baixou.",
   "Started — the Tasks line shows what it found when it is done.": "Iniciado — a linha de Tarefas mostra o que foi encontrado quando terminar.",
   "Nothing removed · 1 skipped": "Nada removido · 1 ignorada",
-  "Nothing removed · {n} skipped": "Nada removido · {n} ignoradas"
+  "Nothing removed · {n} skipped": "Nada removido · {n} ignoradas",
+  "Forget": "Esquecer",
+  "Forget \"{title}\" for good?": "Esquecer “{title}” de vez?",
+  "This erases the series and everyone's reading history on it — progress, bookmarks, notes, ratings, favourites, tracker links.": "Isso apaga a série e todo o histórico de leitura de todos sobre ela: progresso, marcadores, notas, avaliações, favoritos, vínculos com trackers.",
+  "Stats and Wrapped change. If the files ever reappear it comes back as a new series with no history. This cannot be undone.": "Estatísticas e Wrapped mudam. Se os arquivos reaparecerem um dia, ela volta como uma série nova, sem histórico. Isso não pode ser desfeito.",
+  "Forgotten. Nobody had read it.": "Esquecida. Ninguém a tinha lido.",
+  "Forgotten. 1 member's history on it is gone.": "Esquecida. O histórico de 1 membro sobre ela se foi.",
+  "Forgotten. {n} members' history on it is gone.": "Esquecida. O histórico de {n} membros sobre ela se foi.",
+  "Could not forget it": "Não foi possível esquecê-la",
+  "Include 18+ libraries": "Incluir bibliotecas 18+",
+  "18+": "18+",
+  "Type {title} to confirm": "Digite {title} para confirmar",
+  "Put back": "Restaurar",
+  "Restoring…": "Restaurando…",
+  "1 chapter · removed {when}": "1 capítulo · removida {when}",
+  "{n} chapters · removed {when}": "{n} capítulos · removida {when}",
+  "Removing a series hides it from the library, search and the updater. Its files are left exactly where they are, and everyone’s reading progress is kept, so putting it back changes nothing else.": "Remover uma série a esconde da biblioteca, da busca e do atualizador. Seus arquivos ficam exatamente onde estão e o progresso de leitura de todos é mantido, então restaurá-la não muda mais nada."
 }

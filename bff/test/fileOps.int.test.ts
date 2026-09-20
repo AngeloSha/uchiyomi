@@ -36,6 +36,10 @@ let renameSeriesFolder: any;
 
 const S = 's_fo_series';
 const FOLDER = 'T!fo/Berserk';
+// A neighbour whose present file is the proof that a root is mounted, and a row merged into S.
+const N = 's_fo_neighbour';
+const M = 's_fo_merged';
+const ALL = [S, N, M];
 
 const exists = (p: string) => stat(p).then(() => true).catch(() => false);
 
@@ -76,8 +80,8 @@ before(async () => {
 
 beforeEach(async () => {
   if (!DSN) return;
-  await q('DELETE FROM lib_books WHERE series_id = $1', [S]).catch(() => {});
-  await q('DELETE FROM lib_series WHERE id = $1', [S]).catch(() => {});
+  await q('DELETE FROM lib_books WHERE series_id = ANY($1)', [ALL]).catch(() => {});
+  await q('DELETE FROM lib_series WHERE id = ANY($1)', [ALL]).catch(() => {});
   await chmod(ROOT, 0o755).catch(() => {});
   await chmod(DL, 0o755).catch(() => {});
   await rm(ROOT, { recursive: true, force: true }).catch(() => {});
@@ -89,8 +93,8 @@ beforeEach(async () => {
 after(async () => {
   if (!DSN) return;
   await chmod(ROOT, 0o755).catch(() => {});
-  await q('DELETE FROM lib_books WHERE series_id = $1', [S]).catch(() => {});
-  await q('DELETE FROM lib_series WHERE id = $1', [S]).catch(() => {});
+  await q('DELETE FROM lib_books WHERE series_id = ANY($1)', [ALL]).catch(() => {});
+  await q('DELETE FROM lib_series WHERE id = ANY($1)', [ALL]).catch(() => {});
   await rm(ROOT, { recursive: true, force: true }).catch(() => {});
   await rm(DL, { recursive: true, force: true }).catch(() => {});
 });
@@ -160,10 +164,11 @@ test('delete files marks the rows pruned with reason deleted, and only the rows 
 test('delete files leaves an absent file\'s row alone', { skip }, async () => {
   // ⚠️ A file that is not there is not a file this removed: on an unmounted share every stat fails while
   // every file is fine on the disk that is not here, and "Delete files" must not turn that into a library
-  // of tombstones. Missing files are the verify task's business. `files` counts unlinks, not rows, for the
-  // same reason: a second press used to report "Deleted 2 file(s)" for rows it had not touched.
-  // Reintroduce by tombstoning every row of the root regardless of `st` (or by counting `files++` before
-  // the stat): the download-root row below reads pruned, or `files` reads 2.
+  // of tombstones. The download root here has NOTHING present -- not this series' file, not anyone's --
+  // which is exactly what an absent volume looks like, so its row stays as it was. `files` counts unlinks,
+  // not rows, for the same reason: a second press used to report "Deleted 2 file(s)" for rows it had not
+  // touched. Reintroduce by tombstoning every row of the root regardless of `st` (or by counting `files++`
+  // before the stat): the download-root row below reads pruned, or `files` reads 2.
   await seed(true);
   await q('UPDATE lib_series SET deleted_at = now() WHERE id = $1', [S]);
   await rm(join(DL, FOLDER, 'ch2.cbz'));
@@ -176,6 +181,85 @@ test('delete files leaves an absent file\'s row alone', { skip }, async () => {
   ]);
   assert.ok(lib[0].pruned_at, 'the row whose file was removed is marked');
   assert.equal(dl[0].pruned_at, null, 'a row whose file was already absent must not be marked by a delete');
+});
+
+/** A neighbouring series on `root`, with (or without) its one chapter file on disk. */
+async function neighbour(root: string, present: boolean) {
+  await q(`INSERT INTO lib_series (id, source, title, folder, books_count) VALUES ($1,'T!fo','Neighbour','T!fo/Neighbour',1)
+           ON CONFLICT (id) DO NOTHING`, [N]);
+  await q(`INSERT INTO lib_books (id, series_id, source, file, number, title, root) VALUES ($1,$2,'T!fo','T!fo/Neighbour/ch1.cbz',1,'Chapter 1',$3)`,
+    [`b_fo_n_${root === DL ? 'dl' : 'lib'}`, N, root]);
+  if (present) {
+    await mkdir(join(root, 'T!fo/Neighbour'), { recursive: true });
+    await writeFile(join(root, 'T!fo/Neighbour/ch1.cbz'), 'neighbour');
+  }
+}
+
+test('Delete files on an empty readable root marks nothing', { skip }, async () => {
+  // ⚠️ THE PROOF. An empty, readable directory is what a share that is not mounted leaves behind (and what
+  // the image ships /library as), so a root where no chapter file of ANY series is present proves nothing
+  // about any single row -- verify's whole-batch rule, applied here. The series' own rows are absent on
+  // both roots; the neighbour's row on the download root is absent too (its file is not there either); the
+  // neighbour's folder EXISTS but is empty, which must not count (the downloader mkdir -p's folders on a
+  // bare mount point). Reintroduce by dropping the present-file proof in deleteSeriesFiles (tombstoning
+  // `absentLive` without rootProven, or counting a present folder as proof): both rows below read pruned.
+  await seed(true);
+  await q('UPDATE lib_series SET deleted_at = now() WHERE id = $1', [S]);
+  await rm(join(ROOT, FOLDER, 'ch1.cbz'));
+  await rm(join(DL, FOLDER, 'ch2.cbz'));
+  await neighbour(DL, false);
+  await mkdir(join(DL, 'T!fo/Neighbour'), { recursive: true });
+  const r = await deleteSeriesFiles(S);
+  assert.equal(r.ok, true, r.ok ? '' : r.reason);
+  assert.equal(r.files, 0);
+  const rows = await q<{ id: string; pruned_at: string | null }>('SELECT id, pruned_at FROM lib_books WHERE series_id = $1 ORDER BY id', [S]);
+  for (const row of rows) assert.equal(row.pruned_at, null, `${row.id} was marked on a root nothing proves is mounted`);
+});
+
+test('Delete files reconciles absent rows and missing tombstones on a root another series proves mounted', { skip }, async () => {
+  // The other half of the proof: one present file of any series on the root is the volume being there, so a
+  // row of THIS series whose file is absent was deleted by hand, and a 'missing' tombstone (verify's mark,
+  // written only on a proven root) is a file that is not coming back by itself -- both become 'deleted', the
+  // mark the sweep does not fetch back and the Removed row counts as files-gone (live_books 0), which is what
+  // lets #55's hand-deleted series reach Forget. On the read library too: verify never marks a read-library
+  // row, so this is the ONLY place such a row is ever reconciled. Reintroduce by dropping `reconciled` (or
+  // the 'missing' UPDATE): a row below reads live, or still 'missing'.
+  await seed(true);
+  await q('UPDATE lib_series SET deleted_at = now() WHERE id = $1', [S]);
+  await q(`INSERT INTO lib_books (id, series_id, source, file, number, title, root, pruned_at, pruned_reason)
+           VALUES ('b_fo_3',$1,'T!fo',$2,3,'Chapter 3',$3, now(), 'missing')`, [S, `${FOLDER}/ch3.cbz`, DL]);
+  await rm(join(ROOT, FOLDER, 'ch1.cbz'));
+  await rm(join(DL, FOLDER, 'ch2.cbz'));
+  await neighbour(ROOT, true);
+  await neighbour(DL, true);
+  const r = await deleteSeriesFiles(S);
+  assert.equal(r.ok, true, r.ok ? '' : r.reason);
+  assert.equal(r.files, 0, 'nothing of this series was on disk to unlink');
+  const rows = await q<{ id: string; pruned_at: string | null; pruned_reason: string | null }>(
+    'SELECT id, pruned_at, pruned_reason FROM lib_books WHERE series_id = $1 ORDER BY id', [S]);
+  assert.deepEqual(rows.map((x) => [x.id, !!x.pruned_at, x.pruned_reason]),
+    [['b_fo_1', true, 'deleted'], ['b_fo_2', true, 'deleted'], ['b_fo_3', true, 'deleted']]);
+  const n = await q<{ pruned_at: string | null }>('SELECT pruned_at FROM lib_books WHERE series_id = $1', [N]);
+  assert.ok(n.every((x) => x.pruned_at === null), "the neighbour's rows were marked");
+  assert.ok(await exists(join(ROOT, 'T!fo/Neighbour/ch1.cbz')), "the neighbour's file was deleted");
+});
+
+test('delete files removes the folder of a row merged into the series', { skip }, async () => {
+  // A merge moves the absorbed row's chapters to the survivor but their files stay under the absorbed
+  // folder, so the survivor's Delete files unlinks them there -- and used to leave that directory standing,
+  // empty, for Forget to refuse on forever (R3's probe P2). Reintroduce by rm'ing `row.folder` only: the
+  // absorbed directory below still exists.
+  await seed(false);
+  await q('UPDATE lib_series SET deleted_at = now() WHERE id = $1', [S]);
+  await q(`INSERT INTO lib_series (id, source, title, folder, books_count, merged_into) VALUES ($1,'T!fo','Berserk (dup)','T!fo/Berserk dup',1,$2)`, [M, S]);
+  await q(`INSERT INTO lib_books (id, series_id, source, file, number, title, root) VALUES ('b_fo_m1',$1,'T!fo','T!fo/Berserk dup/ch1.cbz',1,'Chapter 1',$2)`, [S, ROOT]);
+  await mkdir(join(ROOT, 'T!fo/Berserk dup'), { recursive: true });
+  await writeFile(join(ROOT, 'T!fo/Berserk dup/ch1.cbz'), 'dup');
+  const r = await deleteSeriesFiles(S);
+  assert.equal(r.ok, true, r.ok ? '' : r.reason);
+  assert.equal(r.files, 2, "the absorbed row's file was not unlinked");
+  assert.equal(await exists(join(ROOT, FOLDER)), false);
+  assert.equal(await exists(join(ROOT, 'T!fo/Berserk dup')), false, 'the absorbed folder was left standing');
 });
 
 // ---- rename ----

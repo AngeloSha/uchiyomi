@@ -80,6 +80,9 @@ export default async function personalRoutes(app: FastifyInstance) {
         name: z.string().trim().min(1).max(60),
         scopes: z.array(z.enum(API_SCOPES)).min(1),
         expiresInDays: z.number().int().min(1).max(3650).nullable().optional(),
+        // Whether the Komga-compatible API lists 18+ libraries to this token (Mihon has no reveal button).
+        // A surfacing preference on the credential, like the OPDS token's; the age cap still applies.
+        showAdult: z.boolean().optional(),
       })
       .safeParse(req.body);
     if (!b.success) return reply.code(400).send({ error: 'bad_request', message: 'Give the token a name and at least one scope.' });
@@ -93,8 +96,9 @@ export default async function personalRoutes(app: FastifyInstance) {
     if (!scopes.includes('read')) scopes.push('read');
 
     const expires = b.data.expiresInDays ? new Date(Date.now() + b.data.expiresInDays * 86400000) : null;
-    const { id, token } = await issueApiToken(userIdOf(req), b.data.name, scopes, expires);
-    await logAudit('token.create', { userId: userIdOf(req), detail: { id, name: b.data.name, scopes }, req });
+    const showAdult = b.data.showAdult === true;
+    const { id, token } = await issueApiToken(userIdOf(req), b.data.name, scopes, expires, showAdult);
+    await logAudit('token.create', { userId: userIdOf(req), detail: { id, name: b.data.name, scopes, showAdult }, req });
     return { id, token };
   });
 

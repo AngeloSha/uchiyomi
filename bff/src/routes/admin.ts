@@ -7,7 +7,7 @@ import { cacheBytes } from '../lib/imageCache';
 import { runtime } from '../lib/runtime';
 import { persistScan, libraryIdFor, LIBRARY_ROOT, DL_ROOT, setBookDates, setBookMeta } from '../lib/library';
 import { containedPath, allWritable } from '../lib/fsGuard';
-import { deleteSeries, restoreSeries, mergeSeries, getSeriesRow, deleteSeriesFiles, renameSeriesFolder } from '../lib/libraryAdmin';
+import { deleteSeries, restoreSeries, mergeSeries, getSeriesRow, deleteSeriesFiles, renameSeriesFolder, forgetSeries } from '../lib/libraryAdmin';
 import { runFingerprintBackfill, fingerprintRemaining, fpState } from '../lib/fingerprintJob';
 import { runPageHashBackfill, pageHashRemaining, phState } from '../lib/pageHashJob';
 import { runBackup } from '../lib/backup';
@@ -1205,19 +1205,60 @@ export default async function adminRoutes(app: FastifyInstance) {
     return { content: checks, ok: checks.every((c) => c.ok) };
   });
 
+  /**
+   * The typed confirmation, compared the way a person types: trimmed and in NFC. A title read off a
+   * macOS-written share or a ComicInfo.xml can be NFD ("Cafe" + a combining accent), while every phone and
+   * desktop keyboard produces the precomposed "Café"; byte-for-byte those never match, so the series could
+   * never be confirmed (R3's probe P6). ConfirmDialog.tsx normalises the same way before enabling the
+   * button. Reintroduce by comparing `.trim()` alone: "route: a typed NFC title confirms an NFD one" in
+   * forgetSeries.int.test.ts reads confirm_mismatch.
+   */
+  const sameTitle = (typed: string, title: string) => typed.trim().normalize('NFC') === title.trim().normalize('NFC');
+
   app.post('/api/admin/series/:id/delete-files', async (req, reply) => {
     const { id } = req.params as { id: string };
     const b = z.object({ confirm: z.string() }).safeParse(req.body);
     if (!b.success) return reply.code(400).send({ error: 'bad_request' });
     const row = await getSeriesRow(id);
     if (!row) return reply.code(404).send({ error: 'not_found' });
-    if (b.data.confirm.trim() !== row.title.trim()) {
+    if (!sameTitle(b.data.confirm, row.title)) {
       return reply.code(400).send({ error: 'confirm_mismatch', message: 'Type the series title exactly to confirm.' });
     }
     const r = await deleteSeriesFiles(id);
     if (!r.ok) return reply.code(409).send({ error: 'refused', message: r.reason, fix: r.fix });
     await logAudit('series.delete_files', { userId: userIdOf(req), detail: { id, files: r.files, bytes: r.bytes }, req });
     return r;
+  });
+
+  /**
+   * The third step after Remove and Delete files: erase the series row and everyone's history on it.
+   *
+   * Same typed confirmation as Delete files, for a larger blast radius: this is the one action in the app
+   * that rewrites other members' stats, streaks, leaderboard and Wrapped, and it has no Put back. Every
+   * precondition (live row, a chapter row still claiming a file, a root that is not there, a folder that
+   * still holds chapters) is checked inside forgetSeries' transaction and answered here as 409 with the
+   * reason and the fix, exactly as Delete files refuses; the client shows both.
+   */
+  app.post('/api/admin/series/:id/forget', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const b = z.object({ confirm: z.string() }).safeParse(req.body);
+    if (!b.success) return reply.code(400).send({ error: 'bad_request' });
+    const row = await getSeriesRow(id);
+    if (!row) return reply.code(404).send({ error: 'not_found' });
+    if (!sameTitle(b.data.confirm, row.title)) {
+      return reply.code(400).send({ error: 'confirm_mismatch', message: 'Type the series title exactly to confirm.' });
+    }
+    const r = await forgetSeries(id);
+    if (!r.ok) {
+      if (r.refused === 'not_found') return reply.code(404).send({ error: 'not_found' });
+      return reply.code(409).send({ error: 'refused', message: r.message, fix: r.fix });
+    }
+    await logAudit('series.forget', {
+      userId: userIdOf(req),
+      detail: { id, title: r.title, folder: r.folder, books: r.books, absorbed: r.absorbed, absorbedIds: r.absorbedIds, users: r.users, rowsByTable: r.rowsByTable },
+      req,
+    });
+    return { ok: true, books: r.books, absorbed: r.absorbed, users: r.users };
   });
 
   // ---- chapter-level file operations ----

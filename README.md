@@ -49,6 +49,8 @@ enable, and you are responsible for using it in line with those sites' terms and
 - **OPDS** — read from Panels, Chunky or KOReader, page by page over OPDS-PSE.
 - **A Mihon / Tachimanga extension** — read your library from Mihon, any Tachiyomi fork, Tachimanga (iOS)
   or Suwayomi with one API token: [uchiyomi-extension](https://github.com/AngeloSha/uchiyomi-extension).
+- **A Komga-compatible API** — point Mihon's Komga extension at Uchiyomi instead and its built-in Komga
+  tracker syncs reading progress back in both directions, forward-only: [how to set it up](docs/extensions.md#komga-compatible-api).
 - **Progress sync** to AniList, MyAnimeList and Kitsu.
 - **Nothing phones home.** An update check reads GitHub's public releases page and sends nothing about your
   server; it can be turned off. An anonymous install count exists and is **off unless you turn it on**, and

@@ -403,9 +403,16 @@ export async function authorizeImageRequest(
   const token = req.cookies?.[IMG_COOKIE];
   if (token) {
     try {
-      const claims = app.jwt.verify(token) as { sub?: string };
-      (req as any).viewCtx = await viewCtxFor(claims.sub ?? null);
-      return;
+      const claims = app.jwt.verify(token) as { sub?: string; typ?: string };
+      // ⚠️ Only the image cookie itself. Every JWT this server signs verifies under the same secret, so
+      // without this an ACCESS token -- or any other signed payload that names a `sub` -- pasted into the
+      // yomi_img cookie was an image session for that account. The cookie is minted with `typ: 'img'`
+      // (routes/auth.ts) and nothing else is. Reintroduce by dropping the typ condition: "an access token in
+      // the yomi_img cookie does not open images" in komgaCompat.int.test.ts sees 200.
+      if (claims.typ === 'img') {
+        (req as any).viewCtx = await viewCtxFor(claims.sub ?? null);
+        return;
+      }
     } catch { /* fall through to OPDS auth */ }
   }
   // A third-party client -- the Mihon extension -- holds ONE credential, an API token, and needs it to
@@ -432,6 +439,126 @@ export async function authorizeImageRequest(
   return reply.code(401).send({ error: 'unauthorized' });
 }
 
+// ---- owned library image helpers: serve thumbnails + pages straight from the CBZ files ----
+//
+// Module-level and EXPORTED, not closures inside imageRoutes as they were until v0.38.0. The Komga-compatible
+// API (routes/komgaCompat.ts) serves the same bytes under /api/v1/series/:id/thumbnail and
+// /api/v1/books/:id/pages/:n, and a redirect to /img/* was not an option: authorizeImageRequest takes the
+// yomi_img cookie, a Bearer token or OPDS Basic, none of which that client sends on an image hop. Sharing the
+// producers shares the cache keys too (lib-sthumb/lib-bthumb/lib-page), so nothing is decoded twice.
+//
+// ⚠️ Every one of these reads the viewer from `req.viewCtx` and trusts it. The caller's hook binds it; the
+// /img/ root guard in server.ts does NOT cover any other prefix (see authorizeImageRequest).
+
+/** The viewer bound by whichever hook authorised this request. */
+const vc = (req: FastifyRequest): ViewCtx => (req as any).viewCtx as ViewCtx;
+
+const libCt = (name: string): string => {
+  const e = name.toLowerCase().split('.').pop() || '';
+  return e === 'png' ? 'image/png' : e === 'webp' ? 'image/webp' : e === 'gif' ? 'image/gif' : e === 'avif' ? 'image/avif' : 'image/jpeg';
+};
+const storeColor = (id: string, input: Buffer) =>
+  dominantHex(input)
+    .then((hex) => q(`INSERT INTO series_colors (series_id, color) VALUES ($1,$2)
+      ON CONFLICT (series_id) DO UPDATE SET color=EXCLUDED.color, updated_at=now()`, [id, hex]))
+    .catch(() => {});
+// Hi-res poster variants: covers default to 400px (cards), the detail poster + hero request 800/1600.
+// Only whitelisted widths are honored so the cache can't be spammed with arbitrary sizes.
+const thumbWidth = (req: FastifyRequest): number => {
+  const w = Number((req.query as any)?.w);
+  return w === 800 || w === 1600 ? w : 400;
+};
+// Series cover: prefer the real cover art (AniList, cached in series_art.cover); fall back to the first
+// page of chapter 1. Distinct cache variants so it upgrades to the real cover once one is known.
+export const serveLibSeriesThumb = async (req: FastifyRequest, reply: FastifyReply, id: string) => {
+  // The series-level art routes read lib_series and series_art by id, so they need the check that
+  // bookFileAbs now carries for chapters. Without it a hidden series' cover still renders, which is
+  // how a deleted series has always kept its thumbnail.
+  if (!(await seriesVisible(id, vc(req)))) return reply.code(404).send({ error: 'not_found' });
+  const w = thumbWidth(req);
+  const wk = w === 400 ? '' : `:w${w}`; // 400 keeps the legacy cache key so existing entries stay warm
+  // admin override wins (uploaded file or pasted URL); variant carries updated_at so edits bust the cache
+  const ovr = await one<{ cover: string | null; v: string }>('SELECT cover, EXTRACT(EPOCH FROM updated_at) * 1000 AS v FROM series_overrides WHERE series_id = $1', [id]);
+  if (ovr?.cover) {
+    return serveImage(req, reply, `lib-sthumb:${id}:ov:${Math.floor(Number(ovr.v))}${wk}`, async () => {
+      let input: Buffer;
+      if (ovr.cover === 'upload') input = await readFile(artFile(id, 'cover'));
+      else { try { input = await fetchCoverImage(ovr.cover!); } catch { input = await firstPageInput(id, vc(req)); } }
+      storeColor(id, input);
+      const buffer = await sharp(input).resize({ width: w, withoutEnlargement: true }).webp({ quality: 80 }).toBuffer();
+      return { buffer, contentType: 'image/webp' };
+    });
+  }
+  const art = await one<{ cover: string | null; source_id: string | null }>(
+    'SELECT a.cover, s.source_id FROM series_art a LEFT JOIN lib_series s ON s.id = a.series_id WHERE a.series_id = $1', [id]);
+  if (art?.cover) {
+    return serveImage(req, reply, `lib-sthumb:${id}:c${wk}`, async () => {
+      // remote cover first; on ANY failure (hotlink CDN, dead link, timeout) fall back to the first page
+      let input: Buffer;
+      try { input = await fetchCoverImage(art.cover!, art.source_id || undefined); }
+      catch { input = await firstPageInput(id, vc(req)); }
+      storeColor(id, input);
+      const buffer = await sharp(input).resize({ width: w, withoutEnlargement: true }).webp({ quality: 80 }).toBuffer();
+      return { buffer, contentType: 'image/webp' };
+    });
+  }
+  return serveImage(req, reply, `lib-sthumb:${id}:p${wk}`, async () => {
+    const input = await firstPageInput(id, vc(req));
+    storeColor(id, input);
+    const buffer = await sharp(input).resize({ width: w, withoutEnlargement: true }).webp({ quality: 72 }).toBuffer();
+    return { buffer, contentType: 'image/webp' };
+  });
+};
+// A chapter file that is not on disk -- deleted by the read-chapter cleanup or an admin (the row stays as
+// a tombstone), or a library not mounted right now -- is a 404, not a 500. Every chapter row used to ask
+// for its thumbnail regardless, and the ENOENT from the zip reader surfaced as a server error in the log
+// and the browser console for each one. Reintroduce by calling cbzPageAt directly: "a deleted chapter's
+// thumbnail is a 404, not a server error" in prunedBooks.int.test.ts sees 500.
+const pageOrGone = async (abs: string, index: number) => {
+  try {
+    return await cbzPageAt(abs, index);
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException)?.code === 'ENOENT') throw Object.assign(new Error('no file'), { statusCode: 404 });
+    throw e;
+  }
+};
+export const serveLibBookThumb = async (req: FastifyRequest, reply: FastifyReply, id: string) => {
+  // ⚠️ The visibility check runs BEFORE the cache, not inside the producer. getOrFetch answers a warm key
+  // without ever calling the producer, and `lib-bthumb:<id>` carries no viewer -- so once anyone allowed had
+  // warmed a chapter's thumbnail, a capped or ungranted member (or a request for a deleted series) was handed
+  // the bytes by the cache. The series thumb and the page route already checked first; this one did not.
+  // Reintroduce by moving the bookFileAbs call back inside the producer: "a capped member gets 404 on a
+  // warmed book thumbnail" in komgaCompat.int.test.ts sees 200.
+  const abs = await bookFileAbs(id, vc(req));
+  if (!abs) return reply.code(404).send({ error: 'not_found' });
+  return serveImage(req, reply, `lib-bthumb:${id}`, async () => {
+    const first = await pageOrGone(abs, 0);
+    if (!first) throw Object.assign(new Error('empty'), { statusCode: 404 });
+    q('UPDATE lib_books SET pages=$1 WHERE id=$2 AND pages<>$1', [first.total, id]).catch(() => {});
+    const buffer = await sharp(first.bytes).resize({ width: 400, withoutEnlargement: true }).webp({ quality: 72 }).toBuffer();
+    return { buffer, contentType: 'image/webp' };
+  });
+};
+/** One page of a chapter, 1-based. `w` in 64..2000 answers a webp downscale; anything else the original bytes. */
+export const serveLibBookPage = async (req: FastifyRequest, reply: FastifyReply, id: string, pageNo: number, w: number) => {
+  const abs = await bookFileAbs(id, vc(req));
+  if (!abs) return reply.code(404).send({ error: 'no_book' });
+  if (w && Number.isInteger(w) && w >= 64 && w <= 2000) {
+    return serveImage(req, reply, `lib-page:${id}:${pageNo}:w${w}`, async () => {
+      const page = await pageOrGone(abs, pageNo - 1);
+      if (!page) throw Object.assign(new Error('no page'), { statusCode: 404 });
+      const buffer = await sharp(page.bytes).resize({ width: w, withoutEnlargement: true }).webp({ quality: 74 }).toBuffer();
+      return { buffer, contentType: 'image/webp' };
+    });
+  }
+  return serveImage(req, reply, `lib-page:${id}:${pageNo}`, async () => {
+    const page = await pageOrGone(abs, pageNo - 1);
+    if (!page) throw Object.assign(new Error('no page'), { statusCode: 404 });
+    q('UPDATE lib_books SET pages=$1 WHERE id=$2 AND pages<>$1', [page.total, id]).catch(() => {});
+    return { buffer: page.bytes, contentType: libCt(page.name) };
+  });
+};
+
 export default async function imageRoutes(app: FastifyInstance) {
   // Belt and braces. server.ts guards the whole /img/ prefix at the root -- that is the protection that
   // cannot be opted out of, and it is what covers a future plugin serving bytes under /img/. This second
@@ -444,109 +571,6 @@ export default async function imageRoutes(app: FastifyInstance) {
     if ((req as any).viewCtx) return;
     await authorizeImageRequest(app, req, reply);
   });
-
-
-  /** The viewer bound above. */
-  const vc = (req: FastifyRequest): ViewCtx => (req as any).viewCtx as ViewCtx;
-
-  // ---- owned library image helpers: serve thumbnails + pages straight from the CBZ files ----
-  const libCt = (name: string): string => {
-    const e = name.toLowerCase().split('.').pop() || '';
-    return e === 'png' ? 'image/png' : e === 'webp' ? 'image/webp' : e === 'gif' ? 'image/gif' : e === 'avif' ? 'image/avif' : 'image/jpeg';
-  };
-  const storeColor = (id: string, input: Buffer) =>
-    dominantHex(input)
-      .then((hex) => q(`INSERT INTO series_colors (series_id, color) VALUES ($1,$2)
-        ON CONFLICT (series_id) DO UPDATE SET color=EXCLUDED.color, updated_at=now()`, [id, hex]))
-      .catch(() => {});
-  // Hi-res poster variants: covers default to 400px (cards), the detail poster + hero request 800/1600.
-  // Only whitelisted widths are honored so the cache can't be spammed with arbitrary sizes.
-  const thumbWidth = (req: FastifyRequest): number => {
-    const w = Number((req.query as any)?.w);
-    return w === 800 || w === 1600 ? w : 400;
-  };
-  // Series cover: prefer the real cover art (AniList, cached in series_art.cover); fall back to the first
-  // page of chapter 1. Distinct cache variants so it upgrades to the real cover once one is known.
-  const serveLibSeriesThumb = async (req: FastifyRequest, reply: FastifyReply, id: string) => {
-    // The series-level art routes read lib_series and series_art by id, so they need the check that
-    // bookFileAbs now carries for chapters. Without it a hidden series' cover still renders, which is
-    // how a deleted series has always kept its thumbnail.
-    if (!(await seriesVisible(id, vc(req)))) return reply.code(404).send({ error: 'not_found' });
-    const w = thumbWidth(req);
-    const wk = w === 400 ? '' : `:w${w}`; // 400 keeps the legacy cache key so existing entries stay warm
-    // admin override wins (uploaded file or pasted URL); variant carries updated_at so edits bust the cache
-    const ovr = await one<{ cover: string | null; v: string }>('SELECT cover, EXTRACT(EPOCH FROM updated_at) * 1000 AS v FROM series_overrides WHERE series_id = $1', [id]);
-    if (ovr?.cover) {
-      return serveImage(req, reply, `lib-sthumb:${id}:ov:${Math.floor(Number(ovr.v))}${wk}`, async () => {
-        let input: Buffer;
-        if (ovr.cover === 'upload') input = await readFile(artFile(id, 'cover'));
-        else { try { input = await fetchCoverImage(ovr.cover!); } catch { input = await firstPageInput(id, vc(req)); } }
-        storeColor(id, input);
-        const buffer = await sharp(input).resize({ width: w, withoutEnlargement: true }).webp({ quality: 80 }).toBuffer();
-        return { buffer, contentType: 'image/webp' };
-      });
-    }
-    const art = await one<{ cover: string | null; source_id: string | null }>(
-      'SELECT a.cover, s.source_id FROM series_art a LEFT JOIN lib_series s ON s.id = a.series_id WHERE a.series_id = $1', [id]);
-    if (art?.cover) {
-      return serveImage(req, reply, `lib-sthumb:${id}:c${wk}`, async () => {
-        // remote cover first; on ANY failure (hotlink CDN, dead link, timeout) fall back to the first page
-        let input: Buffer;
-        try { input = await fetchCoverImage(art.cover!, art.source_id || undefined); }
-        catch { input = await firstPageInput(id, vc(req)); }
-        storeColor(id, input);
-        const buffer = await sharp(input).resize({ width: w, withoutEnlargement: true }).webp({ quality: 80 }).toBuffer();
-        return { buffer, contentType: 'image/webp' };
-      });
-    }
-    return serveImage(req, reply, `lib-sthumb:${id}:p${wk}`, async () => {
-      const input = await firstPageInput(id, vc(req));
-      storeColor(id, input);
-      const buffer = await sharp(input).resize({ width: w, withoutEnlargement: true }).webp({ quality: 72 }).toBuffer();
-      return { buffer, contentType: 'image/webp' };
-    });
-  };
-  // A chapter file that is not on disk -- deleted by the read-chapter cleanup or an admin (the row stays as
-  // a tombstone), or a library not mounted right now -- is a 404, not a 500. Every chapter row used to ask
-  // for its thumbnail regardless, and the ENOENT from the zip reader surfaced as a server error in the log
-  // and the browser console for each one. Reintroduce by calling cbzPageAt directly: "a deleted chapter's
-  // thumbnail is a 404, not a server error" in prunedBooks.int.test.ts sees 500.
-  const pageOrGone = async (abs: string, index: number) => {
-    try {
-      return await cbzPageAt(abs, index);
-    } catch (e) {
-      if ((e as NodeJS.ErrnoException)?.code === 'ENOENT') throw Object.assign(new Error('no file'), { statusCode: 404 });
-      throw e;
-    }
-  };
-  const serveLibBookThumb = (req: FastifyRequest, reply: FastifyReply, id: string) =>
-    serveImage(req, reply, `lib-bthumb:${id}`, async () => {
-      const abs = await bookFileAbs(id, vc(req));
-      if (!abs) throw Object.assign(new Error('no book'), { statusCode: 404 });
-      const first = await pageOrGone(abs, 0);
-      if (!first) throw Object.assign(new Error('empty'), { statusCode: 404 });
-      q('UPDATE lib_books SET pages=$1 WHERE id=$2 AND pages<>$1', [first.total, id]).catch(() => {});
-      const buffer = await sharp(first.bytes).resize({ width: 400, withoutEnlargement: true }).webp({ quality: 72 }).toBuffer();
-      return { buffer, contentType: 'image/webp' };
-    });
-  const serveLibBookPage = async (req: FastifyRequest, reply: FastifyReply, id: string, pageNo: number, w: number) => {
-    const abs = await bookFileAbs(id, vc(req));
-    if (!abs) return reply.code(404).send({ error: 'no_book' });
-    if (w && Number.isInteger(w) && w >= 64 && w <= 2000) {
-      return serveImage(req, reply, `lib-page:${id}:${pageNo}:w${w}`, async () => {
-        const page = await pageOrGone(abs, pageNo - 1);
-        if (!page) throw Object.assign(new Error('no page'), { statusCode: 404 });
-        const buffer = await sharp(page.bytes).resize({ width: w, withoutEnlargement: true }).webp({ quality: 74 }).toBuffer();
-        return { buffer, contentType: 'image/webp' };
-      });
-    }
-    return serveImage(req, reply, `lib-page:${id}:${pageNo}`, async () => {
-      const page = await pageOrGone(abs, pageNo - 1);
-      if (!page) throw Object.assign(new Error('no page'), { statusCode: 404 });
-      q('UPDATE lib_books SET pages=$1 WHERE id=$2 AND pages<>$1', [page.total, id]).catch(() => {});
-      return { buffer: page.bytes, contentType: libCt(page.name) };
-    });
-  };
 
   // Series cover thumbnail -> webp (400px default; ?w=800|1600 for the detail poster / hero).
   app.get('/img/series/:id/thumb', async (req, reply) => {

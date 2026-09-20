@@ -122,10 +122,16 @@ export async function serveImage(
   // ⚠️ Not written, so not served as if it were the real thing either. A placeholder standing in for a cover
   // that could not be fetched must expire quickly: the cover may be fine in a minute, and the alternative --
   // what this used to do -- is a year of grey under the real cover's key with no way to invalidate it.
+  // ⚠️ `private`, every branch below too. Every image served here is authorised per viewer (the age cap, the
+  // library grants, soft delete), and `public` told any shared cache in front -- a proxy, a CDN, a corporate
+  // gateway -- that the bytes were the same for everyone: a capped member's 404 and an allowed member's cover
+  // would have been interchangeable there. `private` keeps the browser's own cache and every max-age exactly
+  // as before; only caches that serve more than one person are told to keep their hands off. Reintroduce by
+  // writing `public` here: "image bytes are cached privately" in komgaCompat.int.test.ts fails.
   if (transient) {
     return reply
       .header('content-type', meta.contentType)
-      .header('cache-control', 'public, max-age=60')
+      .header('cache-control', 'private, max-age=60')
       .send(transient);
   }
   const { bin } = pathsFor(key);
@@ -136,14 +142,14 @@ export async function serveImage(
   // hero backdrops: content changes only when the art itself changes (rare; admin overrides bust via ?av=)
   // → let browsers hold them a day so the carousel doesn't refetch on every visit.
   const cacheControl = immutable
-    ? 'public, max-age=31536000, immutable'
+    ? 'private, max-age=31536000, immutable'
     : variant.startsWith('artw7h')
-      ? 'public, max-age=86400, stale-while-revalidate=604800'
+      ? 'private, max-age=86400, stale-while-revalidate=604800'
       // A day, not five minutes. The url is stable while its content can change (panel art -> real
       // cover, an AniList refresh, an admin override), but every one of those already busts the url
       // via `?av=<artVersion>`, so the short max-age bought nothing. Measured live: 2,139 of 2,695
       // cover requests were 304s -- round trips that bought the user a byte-identical image.
-      : 'public, max-age=86400, stale-while-revalidate=604800';
+      : 'private, max-age=86400, stale-while-revalidate=604800';
   return serveFromDisk(request, reply, bin, meta, cacheControl);
 }
 

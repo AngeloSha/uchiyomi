@@ -2,7 +2,7 @@
   "_meta": {
     "language": "zh",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 865
+    "strings": 880
   },
   "1 check found something": "1 项检查发现问题",
   "1 member": "1 位成员",
@@ -347,7 +347,6 @@
   "Two-factor authentication": "两步验证",
   "Two-factor disabled": "已关闭两步验证",
   "Two-factor enabled": "已开启两步验证",
-  "Type": "类型",
   "Type any folder under your library root, or browse below. Libraries may sit inside one another — the most specific one wins.": "输入库根目录下的任意文件夹，或在下方浏览。库可以互相嵌套 — 最具体的那个优先。",
   "Uchiyomi · personal reader for your Komga library": "Uchiyomi · 你的 Komga 书库的私人阅读器",
   "Up Next": "接下来",
@@ -865,8 +864,24 @@
   "Could not remove those": "无法移除这些作品",
   "Lost track of the fetch. Check the library in a moment.": "跟丢了这次获取。请稍后再查看书库。",
   "files deleted": "文件已删除",
-  "The chapter files are gone. Put back lists them as deleted from the server; Fetch again on the series page brings back the ones Uchiyomi downloaded.": "章节文件已不存在。「Put back」会把它们列为已从服务器删除；在系列页面点「重新获取」可找回 Uchiyomi 下载过的章节。",
+  "The chapter files are gone. Put back lists them as deleted from the server; Fetch again on the series page brings back the ones Uchiyomi downloaded.": "章节文件已不存在。「放回」会把它们列为已从服务器删除；在系列页面点「重新获取」可找回 Uchiyomi 下载过的章节。",
   "Started — the Tasks line shows what it found when it is done.": "已开始 — 完成后，任务行会显示检查结果。",
   "Nothing removed · 1 skipped": "未移除任何作品 · 跳过 1",
-  "Nothing removed · {n} skipped": "未移除任何作品 · 跳过 {n}"
+  "Nothing removed · {n} skipped": "未移除任何作品 · 跳过 {n}",
+  "Forget": "彻底遗忘",
+  "Forget \"{title}\" for good?": "彻底遗忘“{title}”？",
+  "This erases the series and everyone's reading history on it — progress, bookmarks, notes, ratings, favourites, tracker links.": "这会抹去该系列以及所有人在它上面的阅读记录：进度、书签、笔记、评分、收藏、追踪器关联。",
+  "Stats and Wrapped change. If the files ever reappear it comes back as a new series with no history. This cannot be undone.": "统计和 Wrapped 会随之改变。如果文件日后重新出现，它会作为一个没有任何记录的新系列回来。此操作无法撤销。",
+  "Forgotten. Nobody had read it.": "已遗忘。没有人读过它。",
+  "Forgotten. 1 member's history on it is gone.": "已遗忘。1 位成员在它上面的记录已清除。",
+  "Forgotten. {n} members' history on it is gone.": "已遗忘。{n} 位成员在它上面的记录已清除。",
+  "Could not forget it": "无法遗忘",
+  "Include 18+ libraries": "包含 18+ 书库",
+  "18+": "18+",
+  "Type {title} to confirm": "输入 {title} 以确认",
+  "Put back": "放回",
+  "Restoring…": "正在放回…",
+  "1 chapter · removed {when}": "1 话 · 移除于 {when}",
+  "{n} chapters · removed {when}": "{n} 话 · 移除于 {when}",
+  "Removing a series hides it from the library, search and the updater. Its files are left exactly where they are, and everyone’s reading progress is kept, so putting it back changes nothing else.": "移除系列会将其从库、搜索和更新器中隐藏。文件原地保留，所有人的阅读进度也会保留，因此放回后不会改变其他任何内容。"
 }

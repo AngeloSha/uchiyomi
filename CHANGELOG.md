@@ -1,5 +1,168 @@
 # Changelog
 
+## v0.38.0 — 2026-09-20
+
+Two things TIGamingTV asked for. [PR #51](https://github.com/AngeloSha/uchiyomi/pull/51) proposed a
+Komga-compatible API so that Mihon's built-in Komga tracker could sync reading progress back to Uchiyomi —
+the one thing the Uchiyomi extension cannot do, because Mihon lets only a tracker report reads. The PR was
+not merged as written (its layer never set the cookie the tracker's credential-less requests ride on, so
+Mihon could browse but never bind, and its username-and-password fallback reached an account with the
+password alone, past two-factor and the lockout), but it was the spec for what is here, and the credit for
+the idea and the endpoint list is his. And [#55](https://github.com/AngeloSha/uchiyomi/issues/55), answered
+in v0.37.0 with the question "should erasing a series for good become a button?", got its answer: yes, with
+a typed confirmation and a dialog that says what it costs. Both ship.
+
+### Read Uchiyomi in Mihon, and have what you read come back
+
+Point the keiyoushi **Komga** extension at your Uchiyomi address with an API token as its API key, switch
+Mihon's **Komga tracker** on under Settings → Tracking, and from then on a chapter read on the phone is
+marked read here for that account, and a chapter read here is marked read in Mihon on its next refresh.
+Uchiyomi answers exactly the Komga endpoints that extension and that tracker call — libraries, the series
+list with its filters and sorts, a series, its chapters, pages numbered from one, covers and thumbnails, the
+filter sheet's genres and authors, the account, and the tracker's two progress calls — with every field the
+Kotlin client requires present, every date in the one format its strict parser accepts, and Spring's page
+envelope complete, because one missing key or one `null` fails the decode of the whole list it sits in.
+Collections and read lists are always empty there, on purpose: a personal collection can name a series the
+token's account cannot open, and an id is a disclosure.
+
+The sync is what the Komga protocol can carry and no more, and the docs say so plainly instead of promising
+two-way sync: one number per series, the highest chapter in the unbroken run of read chapters from the
+start — chapters 1, 2 and 4 read reads as *2* — moving forward only; there is no "unread" in the protocol,
+so un-marking on either side does not travel. Mihon sends that number on every bind and every refresh, not
+only after reading, so the server side is one set-based statement that skips chapters already complete,
+writes no reading event (a sync from the phone is not reading in the app, and does not count towards
+streaks, the leaderboard or Wrapped, like the app's own bulk mark-read) and pushes to AniList, MyAnimeList
+or Kitsu once, only when something actually changed — otherwise a library update of two hundred bound series
+was two hundred remote mutations. A fresh bind sends *0*, and in this library chapter 0 is not rare
+(*Extra*, *Oneshot*, any file without a digit), so *0* is a no-op rather than a mark; nothing is lost, since
+Mihon never reports a chapter it read as 0. Chapters deleted from the server stay out of the phone's chapter
+list but keep counting for progress, because members' history refers to them.
+
+The tracker itself sends no credential at all — only a User-Agent — and relies on whatever cookie the
+extension's traffic left in the phone's cookie jar. So every request the extension authenticates leaves an
+`UCHIYOMI-SESSION` cookie behind, and the tracker's requests are honoured on it. That cookie is built with
+care, because the naive version was a hole: signed with the app's own JWT secret it would have verified as
+a Bearer token for the whole API and as an image cookie, turning a read-only token into a seven-day write
+session that survived revoking the token — and the phone replays the cookie to every port on the host. It
+is instead a keyed MAC under its own derived key that nothing else on the server can verify, honoured only
+by the Komga routes, naming the token row rather than the account, and the row is re-read on every use, so
+revoking the token, letting it expire or disabling the account ends the phone's session on its next request.
+It is not called `KOMGA-SESSION`: the phone's jar is keyed by host and name and ignores the port, so a real
+Komga on the same machine — the migration case — would have overwritten ours and we theirs, both trackers
+silently broken. With the API key field the cookie is re-minted whenever a request authenticates as a
+different token, so switching the key moves the tracker with it instead of leaving the credential-less sync
+writing the old account's progress; with username/password the extension only presents the password after
+a 401, so a changed password is not noticed while the previous cookie is valid (up to 7 days) — revoke the
+old token, or use the API key field, which is sent on every request. One Uchiyomi account per phone is the
+inherent limit, shared with real Komga, and the docs say so, along with the other things a person should
+know before relying on it: the token needs the **write** scope (a read-only token browses and reads, but
+nothing syncs in either direction — Mihon retries a failed push a few times with backoff, then gives up
+quietly until the next chapter read), the tracker must be on *before* a series is added, changing the
+address later orphans every entry, the phone should not be pointed at a host where an untrusted service
+also answers (the jar is shared per hostname, port ignored), and Tachimanga's *enhanced tracking* is
+reported by a contributor to work against this API but was not tested here.
+
+Only API tokens are accepted — as `X-API-Key`, as a `Bearer` token or as the Basic password, username
+ignored — never an account password, never an OPDS token, never a session JWT; any presented credential
+outranks a remembered cookie, no credential is a 401 with `WWW-Authenticate: Basic`, because that is the
+one answer the extension's authenticator reacts to, and ten failed credentials from one address in five
+minutes are answered 429 with `Retry-After` from then on, the budget the login form has. What the phone
+sees is what the token's account may see: the library grants, the age limit and hidden series apply,
+anything it may not see is a 404 rather than a 403, and an 18+ library is listed only to a token minted
+with the new **Include 18+ libraries** checkbox (the extension has no reveal button of its own; the age
+limit applies regardless, and the web app is unaffected). The sync was verified with a scripted client replaying the exact request
+sequence the keiyoushi extension and Mihon's tracker make — cookie-jar semantics, strict Kotlin-style
+decoding, the tracker's credential-less GET and PUT, a second account's key, a read-only token — against a
+real instance; a report from a real device is welcome.
+
+### Forget a series
+
+**Content → Library**'s Removed list gains a third step after *Remove* and *Delete files*: **Forget**,
+offered once no chapter row claims a file any more, behind the typed title, in rose. It is the one action in
+Uchiyomi that erases a series from the database for good, and the dialog says exactly what that means:
+*This erases the series and everyone's reading history on it — progress, bookmarks, notes, ratings,
+favourites, tracker links. Stats and Wrapped change. If the files ever reappear it comes back as a new series
+with no history. This cannot be undone.* The toast afterwards says how many members lost history on it.
+
+It refuses, and says why and what to do, in every case where it would do harm: while the series is still in
+the library; while any chapter row still claims a file (*Delete files* first); while a root cannot be read
+at all (mount it first: nothing in Uchiyomi marks a chapter row whose file it cannot see — the verify task
+refuses a root with no present file and *Delete files* reconciles only under the same proof — so an
+unmounted share leaves every row live, and the live-row refusal is what stops a forget that would only have
+the next scan bring the folder back as a new series, next to the history that was just erased); and while
+the folder still holds chapters under any root. A chapter the verify task marked *missing* does not refuse:
+that mark means verify proved the root was mounted and the file was not on it. A series that had absorbed
+others by merge takes those rows with it in the same transaction, because leaving them would have flipped them live with no
+chapters and a folder the next scan repopulates. History on chapters that moved to a merge survivor is never
+erased: every per-member table is re-pointed to the chapter's current series first, deletes are keyed on the
+chapters this series actually owns, and if a progress row or bookmark on someone else's chapter is still
+filed here after that, the whole transaction rolls back and says so. Reading that code found that a merge
+had been leaving **bookmarks** behind under the absorbed id since merge shipped (they still resolved, through
+the chapter row, but were filed under a dead series) and dropping one side's tracker floor: a merge now
+carries bookmarks to the survivor and keeps the higher of the two floors, so it never rewinds someone's real
+AniList entry on the next push.
+
+The review of this release found the step that made #55's own scenario impossible: a series whose folder
+was removed by hand on the NAS had live chapter rows and no files, *Delete files* touched nothing, the
+Removed row never offered *Forget*, and the route said the files were still on disk while nothing was. So
+*Delete files* now reconciles a removed series' rows with the disk when the root is provably mounted — at
+least one chapter file of any series is present under it, a present folder is not proof, and no more than
+90 % of what was looked at is absent, the verify task's own rule — marking a live row with no file
+*deleted from the server* and turning a *missing* mark into *deleted*; on a root that cannot be proven every
+row is left exactly as it was. A hand-deleted folder can finally be forgotten. A merge survivor's *Delete
+files* also removes the folders of the series merged into it, which used to stand empty and refuse
+*Forget* forever with the *Delete files* chip already gone. The *users* count in the toast names members who
+actually lose history, not someone who only opened the series page or whose tracker floor was carried to a
+survivor. Typed confirmations compare trimmed and Unicode-normalised, so a title written on a Mac confirms
+from any keyboard. And the typed-confirmation label is one translated sentence — it read *TYPGONE FOR GOOD
+TO CONFIRM* in German — the Removed row is fully translated, and a long title wraps to two lines on a phone
+instead of being cut.
+
+### Security
+
+Three findings from reading the token code for the cookie, all fixed. An access token, or any other JWT this
+server signs, pasted into the `yomi_img` image cookie was an image session for that account, and the image
+cookie pasted into an `Authorization` header was a full API session for seven days: every JWT verified under
+the same secret with no check of what it was minted for. `authenticate()` now refuses a verified token that
+carries a `typ` claim (access tokens have none; the image cookie and the OIDC ticket do), and the image
+guard honours only a cookie whose `typ` is `img`. A disabled account's API tokens kept working — disabling
+revoked the browser sessions and nothing else — and now stop with the account. And the image cache served
+every image with `Cache-Control: public`, telling any shared cache in front that bytes authorised per viewer
+were the same for everyone; it is `private` now, with every max-age exactly as before. While there, a
+chapter thumbnail already warm in the cache was handed to a member whose age limit or library grants should
+have hidden it, because the visibility check ran inside the producer the cache had already skipped; the
+check now runs first. The review of the release added six more, all small: a disabled account's OPDS token
+kept opening the feed and every page under `/img/*`, and now stops with the account like its API tokens; a
+`Bearer` token on the Komga-compatible routes was ignored, so a remembered cookie for another token silently
+answered in its place — it is now a credential there, and any `Authorization` header that does not resolve
+is refused rather than outranked by a cookie; failed API keys on those routes are rate-limited per address
+(ten in five minutes, then 429 with `Retry-After`; valid keys, cookie-only requests and requests with no
+credential are never counted); signing out of the web app clears the `UCHIYOMI-SESSION` cookie too; the
+session cookie accepts exactly one encoding of its expiry (a leading zero used to verify under the same
+MAC); and the tracker's PUT refuses a number above 1 000 000 000 with a 400 instead of a 500 from Postgres.
+
+### For the API
+
+`/api/v1/*` and `/api/v2/*` are the Komga-compatible surface — twenty-four operations, each in
+[docs/api.md](docs/api.md) and the served spec under the `komga` tag with four security schemes
+(`komgaApiKey`, `komgaBearer`, `komgaBasic`, `komgaSession`), every one answering **429**
+`too_many_requests` with `Retry-After` after ten failed credentials from one address in five minutes.
+`GET /api/v1/series/:id/books?unpaged=true` is one page with no 500 cap (`size` = the chapter count, at
+least 1, `number` 0, `first`/`last` true, `totalPages` 1 or 0), and `KomgaBook.sizeBytes`/`size` are the
+real file size (`lib_books.size`; 0 / `0 B` when never stamped) rather than a padded zero, so the
+extension's default chapter name no longer reads *(0 B)*. `PUT /api/v2/series/:id/read-progress/tachiyomi`
+takes `0 ≤ lastBookNumberSortRead ≤ 1000000000`, else **400** `bad_request`. `POST /auth/logout` also
+clears `UCHIYOMI-SESSION`. `POST /api/tokens` takes `showAdult` (default false) and `GET /api/tokens`
+rows carry it. `POST /api/admin/series/:id/delete-files {confirm}` reconciles absent rows under the mount
+proof and answers `files: 0` for a hand-deleted series; `POST /api/admin/series/:id/forget {confirm}`
+answers `{ok: true, books, absorbed, users}`, **400** `confirm_mismatch`, **404**, or **409** `refused
+{message, fix}` with one of `live`, `live_books`, `missing_files` (a root that cannot be stat'ed),
+`folder_present` (a folder that still holds chapters) or `stranded`; both compare `confirm` trimmed and
+NFC-normalised; it writes one `series.forget` audit row with `{id, title, folder, books, absorbed,
+absorbedIds, users, rowsByTable}`. `api_tokens` gains `show_adult`. Every image under `/img/*` is
+`Cache-Control: private`. The Uchiyomi Mihon extension is unaffected; the two can be installed side by
+side.
+
 ## v0.37.0 — 2026-09-19
 
 The inbox after v0.36.0, all of it from TIGamingTV: [PR #53](https://github.com/AngeloSha/uchiyomi/pull/53),

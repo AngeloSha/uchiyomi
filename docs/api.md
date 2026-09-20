@@ -50,7 +50,29 @@ also accepts an OPDS token over HTTP Basic, so an OPDS reader can load covers an
 credentials it uses for the feed, **and, since v0.29.0, an API token as a Bearer**, so a third-party client
 such as the Mihon extension needs one credential for the JSON and the pictures alike. A `read`-scoped token
 is enough for images. `/opds/*` uses HTTP Basic with your OPDS token as the password (**Profile → External
-readers**) and does not accept API tokens.
+readers**) and does not accept API tokens. A disabled account's OPDS token is refused (**401**) on the feed
+and on `/img/*` alike, like every other credential of a disabled account, and works again once the account
+is re-enabled — the token itself is not revoked.
+
+### The Komga-compatible surface
+
+`/api/v1/*` and `/api/v2/*` (since v0.38.0) speak Komga's API for Mihon's Komga extension and its Komga
+tracker, and take an API token three ways: `X-API-Key: uy_…` on every request (the extension's API key
+field), `Authorization: Bearer uy_…` (the way the rest of the API takes it), or `Authorization: Basic` with
+the token as the **password** and any username (what the extension sends after a 401 when no key is set) —
+in that order of precedence, and any presented credential outranks a remembered cookie. No credential is
+**401** with `WWW-Authenticate: Basic` — the extension's Basic authenticator fires on a 401 and on nothing
+else. Account passwords are refused there on purpose, right or wrong: the protocol has no channel for a
+two-factor code, and a password path would have walked around 2FA and the lockout. OPDS tokens and session
+JWTs are refused too. Ten failed credentials from one address in five minutes (the budget `/auth/login`
+has) and every further request from that address that presents a credential is **429** `too_many_requests`
+with `Retry-After` until the window ends; a request with no credential and a cookie-only request are
+neither counted nor blocked, and a valid key never counts. A credentialed request also sets an
+`UCHIYOMI-SESSION` cookie, honoured **only by those routes**, for the tracker's requests, which carry no
+credential at all; the cookie names the token row, which is re-read on every use, so revoking the token,
+letting it expire or disabling the account ends the cookie on the next request, and signing out of the
+web app (`POST /auth/logout`) clears it from a browser alongside the other cookies. Details under
+[Komga-compatible API](#komga-compatible-api-mihons-komga-extension-and-tracker) in the route list.
 
 ## Conventions
 
@@ -300,11 +322,23 @@ Chapter downloads and page streaming work either way; the age cap is a permissio
 `GET /api/libraries` reports `adult: true` for such a library so a client can offer the reveal, and drops
 any library rated above the caller's own `max_age_rating` entirely.
 
+The Komga-compatible API cannot pass the parameter either, so the same preference lives on the **API
+token**: `POST /api/tokens { …, "showAdult": true }` (since v0.38.0; the *Include 18+ libraries* checkbox in
+the mint dialog, off by default; `GET /api/tokens` rows carry `showAdult`). It decides whether 18+ libraries
+appear in `/api/v1/libraries` and the series listings for that token; `/api/v1/series/:id`, its chapters,
+pages and progress resolve by id whatever it says, and the age cap is a permission and is unaffected. The
+flag changes nothing on `/api/*` proper, where `?adult=1` remains the reveal.
+
 ## Rate limiting
 
-The API isn't rate-limited for authenticated users, but the *sources* it fetches from are. Endpoints that
-reach out to a manga site (`/api/sources/*`, `/api/admin/update`) queue behind a per-source limiter, so a
-burst of requests will be slow rather than refused. Don't poll them in a tight loop.
+The API isn't rate-limited for authenticated users; the limits are on getting in. `POST /auth/login` takes
+ten attempts per address per five minutes, `POST /api/setup` and `POST /auth/register` five per ten minutes,
+and the Komga-compatible routes count failed credentials on the login budget — ten per address per five
+minutes, then **429** `too_many_requests` `{message}` with `Retry-After` for every further request from that
+address that presents a credential, until the window ends; requests with no credential, cookie-only
+requests and valid keys are not counted. The *sources* the server fetches from are limited too: endpoints
+that reach out to a manga site (`/api/sources/*`, `/api/admin/update`) queue behind a per-source limiter, so
+a burst of requests will be slow rather than refused. Don't poll them in a tight loop.
 
 ## Full route list
 
@@ -632,6 +666,7 @@ POST   /api/admin/series/:id/library
 POST   /api/admin/series/library
 GET    /api/admin/library/writable
 POST   /api/admin/series/:id/delete-files
+POST   /api/admin/series/:id/forget
 POST   /api/admin/series/:id/rename-folder
 POST   /api/admin/series/:id/chapters/delete POST   /api/admin/series/:id/chapters/refetch
 PUT    /api/admin/books/:id/meta
@@ -825,7 +860,8 @@ is not `ids`. `GET /api/admin/series/deleted` lists the hidden ones, newest firs
 carries `live_books` and `pruned_books` (counted from the chapter rows; `books_count` is the scan's figure
 and may be stale) — `live_books === 0 && pruned_books > 0` is how the panel knows the files are already gone.
 
-`POST /api/admin/series/:id/delete-files {confirm}` — `confirm` is the series' exact title, **400**
+`POST /api/admin/series/:id/delete-files {confirm}` — `confirm` is the series' title, compared trimmed and
+NFC-normalised on both sides (a macOS-written NFD title is confirmed by an NFC keyboard), **400**
 `confirm_mismatch` otherwise — is the irreversible step and only ever after the hide: it removes the series'
 chapter files from every root it occupies (the read library included, which is why it takes the typed
 title) and keeps every row. Since v0.37.0 each row whose file it actually removed is marked
@@ -834,11 +870,56 @@ restore afterwards lists those chapters as `pruned` (*Deleted from the server*, 
 brings one back onto the same row — for the rows under the download folder; a read-library row is
 `not_owned` there and its file is the admin's to put back) instead of as openable chapters that 404, the updater's have-set keeps
 counting them as held, and `files` in the answer `{ok, files, bytes}` counts real unlinks, not rows (a
-second call reports 0). A row whose file was already absent is left alone and not counted: on a share that
-is not mounted every file looks absent, and this must never turn that into a library of tombstones. It
-refuses, **409** `refused` `{message, fix}`, rather than half-applying: the series is not hidden yet, it has
-no files on disk, or a root is not writable (`PUID`/`PGID` unset; `fix` names it). Nothing in the API
-deletes a series row or a chapter row: `read_progress.book_id` is `ON DELETE RESTRICT` on purpose.
+second call reports 0). A row whose file is already absent is reconciled only when the root is provably
+mounted — `stat(root)` works, at least one chapter file of any series is present under it (a present folder
+is not proof: the downloader `mkdir -p`s series folders on a bare mount point), and no more than 90 % of
+what was looked at is absent, the verify task's own rule; up to 200 other series' live rows on the root are
+stat'ed when none of this series' own is present. Under that proof a live row with no file is marked
+`pruned_reason = 'deleted'` and a `'missing'` tombstone becomes `'deleted'`; on an unproven root every row
+is left as it was, so an unmounted share leaves live rows, which Forget refuses on. `files` still counts
+unlinks only, so a series whose folder was removed by hand answers `files: 0` and its Removed row then
+offers Forget (`live_books` 0). Delete files on a merge survivor also removes the folders of the rows
+merged into it, and every folder is resolved on every root before anything is unlinked. It refuses,
+**409** `refused` `{message, fix}`, rather than half-applying: the series is not hidden yet, it has no
+chapter rows on any root (*That series has no files on disk.*), a folder resolves outside the library, or a
+root is not writable (`PUID`/`PGID` unset; `fix` names it). Nothing here deletes a series row or a chapter
+row: `read_progress.book_id` is `ON DELETE RESTRICT` on purpose. The one route that does is the third step
+below.
+
+**Forget: Remove → Delete files → Forget.** `POST /api/admin/series/:id/forget {confirm}` (since v0.38.0;
+`confirm` is the series' title, compared trimmed and NFC-normalised on both sides — **400**
+`confirm_mismatch` *Type the series title exactly to confirm.* otherwise, **400** `bad_request` without a
+body) is the only call that hard-deletes a
+series row. It erases every member's progress, reading events, bookmarks, notes, ratings, favourites, tracker
+floors and collection entries on it, so stats, streaks, the leaderboard and Wrapped change retroactively, and
+answers `{ok: true, books, absorbed, users}` — chapter rows erased, series rows that had been merged into
+this one and went with it, and distinct members who lose history: progress, reading events, bookmarks,
+notes, favourites, ratings, collection entries, or a tracker floor that is erased rather than carried to a
+merge survivor (opening the series page, the NEW-badge counter, does not count). Rows the series absorbed
+by merge are forgotten with it in the same transaction (leaving them would flip them live: `merged_into` is `ON DELETE
+SET NULL`). History on chapters that moved to a merge survivor is kept under the survivor: every per-user
+table is re-pointed to the chapter's current series first, deletes are keyed on the chapter ids this series
+actually owns, and if a progress row or bookmark on another series' chapter is still filed here after that
+the whole transaction rolls back — **409** `refused` `stranded`, nothing changed. It refuses, **409**
+`refused` `{message, fix}`, in exactly four other cases: `live`, while the series is still in the library
+(*Remove the series first. Forgetting it is a third, separate step.*, fix *Content → Library → Remove, then
+Delete files, then Forget.*); `live_books`, while any chapter row still claims a file (*N chapter row(s)
+still claim(s) a file on disk. Delete the files first, or the next scan brings the series back under a new
+id with none of its history.*, fix *Delete files, then Forget.*); `missing_files`, only for a root that
+cannot be stat'ed (*<root> is not there right now, so nothing can be checked against it.*, fix *Mount the
+library and delete the files first.*); and `folder_present`, while the folder still holds chapters under
+any root (*The folder "…" still holds chapters under <root>. Forgetting the series now would only have the
+next scan bring it back under a new id, with none of its history.*, fix *Delete files first, or remove the
+folder by hand and rescan.* — an empty folder does not refuse, since the scanner never turns one into a
+series). A `'missing'` tombstone from the verify task does not refuse: nothing in Uchiyomi marks a chapter
+row whose file it cannot see — verify refuses a root with no present file, and Delete files reconciles only
+under the same proof — so an unmounted share leaves every row live and the `live_books` refusal is what
+stops it, whereas a `'missing'` mark means verify proved the root was mounted and the file was not on it.
+There is no Put back. Audit row
+`series.forget {id, title, folder, books, absorbed, absorbedIds, users, rowsByTable}`. Since the same
+release, a merge also carries **bookmarks** to the survivor (they used to keep the absorbed id) and the
+tracker floor keeps the higher of the two counts, so a merge made now never leaves history for Forget to
+strand.
 
 **Verify chapter files.** `POST /api/admin/tasks/verify/run` (since v0.37.0; the Tasks panel's *Verify
 chapter files*) is the repair for a database restored without its chapter files. It is **detached**, like
@@ -989,6 +1070,140 @@ GET    /opds/series/:id           GET    /opds/search
 GET    /opds/opensearch.xml       GET    /opds/book/:id/file
 GET    /opds/book/:id/page/:n
 ```
+
+### Komga-compatible API (Mihon's Komga extension and tracker)
+```
+GET    /api/v1/libraries          GET    /api/v1/series
+GET    /api/v1/series/latest      GET    /api/v1/series/:id
+GET    /api/v1/series/:id/books   GET    /api/v1/series/:id/thumbnail
+GET    /api/v1/books              GET    /api/v1/books/:id
+GET    /api/v1/books/:id/pages    GET    /api/v1/books/:id/pages/:n
+GET    /api/v1/books/:id/thumbnail
+GET    /api/v1/genres             GET    /api/v1/tags
+GET    /api/v1/publishers         GET    /api/v1/authors
+GET    /api/v1/collections        GET    /api/v1/collections/:id/series
+GET    /api/v1/readlists          GET    /api/v1/readlists/:id
+GET    /api/v1/readlists/:id/read-progress/tachiyomi
+PUT    /api/v1/readlists/:id/read-progress/tachiyomi
+GET    /api/v2/users/me
+GET    /api/v2/series/:id/read-progress/tachiyomi
+PUT    /api/v2/series/:id/read-progress/tachiyomi
+```
+Since v0.38.0. Enough of Komga's API for the keiyoushi **Komga** extension to browse and read this library
+and for Mihon's **Komga tracker** to sync reading progress back — the set of `GET`s the current extension
+actually calls (it uses none of Komga's newer `POST …/list` forms), plus the two tracker calls. How to set
+the phone up, and what the sync can and cannot do, is in [USAGE.md](USAGE.md#the-other-direction-uchiyomi-inside-mihon-or-tachimanga)
+and [extensions.md](extensions.md#komga-compatible-api); this is the wire contract.
+
+**Authentication** is the one described under *The Komga-compatible surface* above: `X-API-Key`, then
+`Authorization: Bearer`, then Basic with the token as the password, else the `UCHIYOMI-SESSION` cookie those
+requests mint. Explicit beats remembered: a presented credential that does not resolve is **401** even
+beside a valid cookie — `X-API-Key` *The API key is not a valid Uchiyomi API token.*, Bearer *The bearer
+token is not a valid Uchiyomi API token. Account sessions are not accepted here.*, Basic *Use an Uchiyomi API
+token as the password. Account passwords are not accepted here.*, any other `Authorization` scheme or no
+credential *Send an Uchiyomi API token as X-API-Key, as a Bearer token, or as the HTTP Basic password.*; after
+ten such failures from one address in five minutes every request from it that presents a credential is
+**429** `too_many_requests` *Too many failed API keys from this address. Try again in a few minutes.* with
+`Retry-After` until the window ends (no-credential and cookie-only requests are neither counted nor blocked).
+A cookie that does not verify (a real Komga's `KOMGA-SESSION`, a tampered or expired value, any spelling other
+than the one the server minted — `v1.<tokenId>.<exp>.<mac>`, decimal, no leading zeros) is simply "no
+cookie", never a refusal on its own; a cookie that verifies but names a token that is gone — revoked,
+expired, owner disabled — is **401** *This session's API token is no longer valid.* A token without `write`
+browses and reads but gets **403** `forbidden` on the two `PUT`s, which is what a read-only token in the
+extension looks like: nothing syncs in either direction, because Mihon retries a failed push a few times
+with backoff, then gives up quietly until the next chapter read. Anything the token's account may not see
+is **404**, never **403**. The cookie is set `HttpOnly; SameSite=Lax; Path=/`, `Secure` only over HTTPS (a
+LAN install is plain HTTP and the WebView refuses a Secure cookie set over it), `Max-Age` = min(7 days, the
+token's remaining life), no `Domain`; it is re-minted when absent, invalid, minted for another token (the
+extension's key was changed to another account's — otherwise the tracker's credential-less `PUT` would keep
+landing on the old account) or past half its life, and never on a 401. That re-mint needs a credentialed
+request, which the API key field sends every time; with username/password the extension only presents the
+password after a 401, so a changed password is not noticed while the previous cookie is valid (up to 7
+days) — revoke the old token, or use the API key field. `POST /auth/logout` clears the cookie from a
+browser too. Every JSON answer carries `Cache-Control: no-store`, because both clients send `max-age=600`
+as a request directive against a disk cache and a cached progress `GET` could follow a `PUT`.
+
+**Shapes.** Lists are Spring's page envelope with all nine keys — `content, empty, first, last, number`
+(0-based)`, numberOfElements, size` (1–500, default 20)`, totalElements, totalPages` — because the Kotlin
+client refuses a missing one, and `last` is true on the final page and on an empty one. Every DTO is padded
+with every field Komga's classes declare without a default (the `*Lock` booleans, `titleSort`,
+`fileLastModified`, `mediaProfile: 'DIVINA'`, …), and every string that could be null upstream is `''`:
+one JSON `null` in a non-nullable field fails the decode of the whole list it sits in. On a chapter,
+`sizeBytes` is the file's size on disk (`lib_books.size`; 0 when never stamped) and `size` is Komga's text
+for it (`1.5 KiB`, `0 B`), which the extension shows in its default chapter name `{number} - {title}
+({size})`.
+Every date-time is `yyyy-MM-ddTHH:mm:ss` in UTC with no zone letter and no milliseconds — the extension
+parses chapter dates strictly and a trailing `Z` or `.sss` would date every chapter at the epoch — a
+required date that is not known is `1970-01-01T00:00:00`, and `releaseDate` is `yyyy-MM-dd` or null.
+`metadata.status` maps the stored value, case-insensitively: *Completed*, *Complete*, *Finished*,
+*Publishing finished* and *Ended* → `ENDED`; *Cancelled*, *Canceled*, *Dropped*, *Abandoned* → `ABANDONED`;
+*On hiatus*, *Hiatus*, *Paused* → `HIATUS`; *Ongoing*, *Publishing*, *Releasing* → `ONGOING`; anything else
+goes out upper-cased with spaces as underscores (empty stays empty), which the extension shows as *Unknown* —
+never a guessed *Ongoing*. The `status` filter runs the same table the other way, so `status=ENDED` finds a
+series stored as *Completed*. On a chapter, `number`, `metadata.numberSort` and
+the progress endpoint's numbers are **one quantity**, the override-aware chapter number, unrounded: the
+extension makes it the chapter number and Mihon compares and `PUT`s it back in that unit; `metadata.number`
+is the display string. The scanlation group rides as an author with role `translator`, which the extension
+turns back into the scanlator. `media.status` is `READY` for a chapter whose file is on the server and
+`ERROR` for a tombstone. The full field lists are in [`openapi.yaml`](../bff/openapi.yaml) under
+`KomgaSeries`, `KomgaBook`, `KomgaPageDto`, `KomgaReadProgressV2` and `KomgaUser`, and
+`bff/test/komgaContract.test.ts` pins the required-field lists copied from the two clients' sources.
+
+**Browsing.** `GET /api/v1/libraries` is the extension's log-in probe and its Libraries filter — the grants
+and the age cap apply, and an 18+ library is listed only to a token minted with `showAdult` (`root` is empty,
+`unavailable` false). `GET /api/v1/series` takes `search` (empty = none), `page` (0-based), `size`,
+`unpaged`, `sort` (`metadata.titleSort | name | createdDate | lastModifiedDate | relevance | random`, then
+`,asc|desc`; the extension's Popular is `metadata.titleSort,asc` and its Latest `lastModifiedDate,desc`;
+`relevance` and anything unknown are title order), and the filters `library_id`, `status`, `genre`, `tag`,
+`publisher` (the extension joins several values with commas in one parameter), `read_status`
+(`UNREAD | IN_PROGRESS | READ`, repeated) and `author` (`name,role`, repeated) — both the comma-joined and
+the repeated form are accepted for every one of them and flattened. `tag` filters genres and `publisher` the
+author field, since that is where the DTO presents them; `status=ENDED` also matches *Completed* and
+friends. A filter the query cannot express is **400** `unsupported_filter`, never silently widened.
+`/api/v1/series/latest` is that list with the sort forced (PR #51 exposed it; the extension never calls it).
+`GET /api/v1/series/:id` resolves by id — visible, not browsable, so a series in an 18+ library the token
+does not list still answers — and carries the account's real `booksReadCount / booksUnreadCount /
+booksInProgressCount`, which Mihon turns into *Unread / Reading / Completed*. `GET /api/v1/series/:id/books`
+is the chapter list, ordered by the override-aware number then file; the extension asks
+`unpaged=true&media_status=READY&deleted=false`, where `unpaged` is one page of everything — `size` is the
+chapter count (at least 1), `number` 0, `first` and `last` true, `totalPages` 1 (0 for an empty series), and
+no 500 cap, so a 600-chapter series comes back whole; the paged form (`page`, `size`) stays capped at 500 —
+and `media_status=READY` leaves tombstones — chapters deleted from the server, whose page list is empty —
+out of the **list** only; they still count for progress. `GET /api/v1/books/:id/pages`
+numbers pages from **1**, as Komga does and as the extension puts them in the image URL, and
+`GET /api/v1/books/:id/pages/:n` serves the original bytes (**400** `bad_page` below 1; `?convert=png` is
+accepted and ignored), the same bytes and cache as `/img/lib/books/:id/page/:n`; the two thumbnails are the
+same bytes as their `/img/lib/…/thumb` twins (`?w=800|1600` on the series cover). Every image is served
+`Cache-Control: private` — the whole image cache is, since this release, because those bytes are authorised
+per viewer and `public` told a shared proxy they were the same for everyone. `GET /api/v1/books` (the
+extension's Books search type) is always an empty page: there is no chapter-level search. `genres` and
+`authors` (each `{name, role: 'writer'}`) are real over the browsable series; `tags` and `publishers` are
+`[]`; `collections`, `collections/:id/series` and `readlists` are **empty pages** on purpose — a collection
+would name series this credential's cap or grants hide, and an id is a disclosure — and `readlists/:id` and
+its progress are **404** in both directions. `GET /api/v2/users/me` is Komga's UserDto for the token's
+account: `email` is the username, `roles` `['USER']` or `['ADMIN', 'USER']`, `sharedAllLibraries` /
+`sharedLibrariesIds` from the grants, `ageRestriction` `{age, restriction: 'ALLOW_ONLY'}` from the cap or
+null.
+
+**Progress.** `GET /api/v2/series/:id/read-progress/tachiyomi` counts every chapter of the series (tombstones
+included — members' history refers to them), reports `lastReadContinuousNumberSort`, the number of the last
+chapter in the **leading** run of completed chapters ordered by the override-aware number (chapters 1, 2 and
+4 read reports 2; nothing read reports 0, and so does a run that ends on — or starts with an unread —
+number-0 chapter, which the protocol cannot express), and `maxNumberSort`, the highest chapter number;
+**404** unless the series is visible to the token's account. `PUT` with `{"lastBookNumberSortRead": n}` (a
+finite number from 0 to 1 000 000 000, else **400** `bad_request` *lastBookNumberSortRead must be a finite
+number between 0 and 1000000000.* — the value is bound as a Postgres `real`, and 1e300 used to be a 500)
+marks every not-yet-completed chapter whose number is ≤ n completed in one statement —
+page moves to the chapter's page count and never backwards, chapters already completed are untouched and
+nothing is ever un-marked, because the protocol has no unread — answers **204**, is idempotent, and pushes to
+AniList / MyAnimeList / Kitsu once, only when something changed (Mihon `PUT`s on every bind and refresh, so a
+library update of two hundred bound series would otherwise have been two hundred remote mutations). `n ≤ 0`
+is a no-op **204**: a fresh bind sends `0.0`, and a chapter numbered 0 (*Extra*, *Oneshot* — any file without
+a digit) must not be marked read by it; Mihon never reports a chapter it read as 0, so nothing is lost. The
+first real sync (n ≥ 1) marks a number-0 chapter read on both sides, as Komga does; only the bind-time 0 is
+ignored. No
+reading event is written, so a sync from the phone does not count towards streaks, the leaderboard or
+Wrapped, exactly like the app's own bulk mark-read. Needs the `write` scope.
 
 ---
 

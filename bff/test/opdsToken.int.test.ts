@@ -13,12 +13,18 @@
 // Skipped automatically unless TEST_DATABASE_URL is set (CI provides a throwaway Postgres service).
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'fs';
+import { tmpdir } from 'os';
+import { join } from 'path';
 
 const DSN = process.env.TEST_DATABASE_URL;
+const TMP = DSN ? mkdtempSync(join(tmpdir(), 'uchiyomi-opdstok-')) : '';
 if (DSN) {
   process.env.DATABASE_URL = DSN;
   process.env.JWT_SECRET = process.env.JWT_SECRET || 'test-secret-at-least-16-chars';
   process.env.CONFIG_DIR = process.env.CONFIG_DIR || '/tmp/uchiyomi-test-config';
+  process.env.CACHE_DIR = join(TMP, 'cache'); // the image routes write resized variants here; never the live cache
+  process.env.LIBRARY_BACKEND = 'owned';
 }
 const skip = DSN ? false : 'set TEST_DATABASE_URL to run';
 
@@ -154,5 +160,75 @@ test('OPDS tokens', { skip }, async (t) => {
     });
   } finally {
     await q('DELETE FROM users WHERE username = $1', [USER]).catch(() => {});
+  }
+});
+
+/**
+ * The disabled-account case, over HTTP, because it is the byte routes that matter: an OPDS token is the one
+ * credential with no scopes and no session, typed once into an e-reader, and until v0.38.0 disabling its
+ * owner revoked their refresh sessions and API tokens and left THIS one opening /opds and every /img route.
+ * Driven through the real OPDS and image plugins with a real CBZ on disk, since resolveOpdsBasic is called
+ * from both and a unit assertion on the resolver would not prove the page route follows it.
+ */
+test("a disabled owner's OPDS token opens neither the feed nor a page", { skip }, async () => {
+  const OWNER = 'opds-token-disabled', LIB = 'lib_opdstok', SID = 's_opdstok_1', BID = 'b_opdstok_1';
+  const { migrate } = await import('../src/lib/migrate');
+  const { q } = await import('../src/lib/db');
+  const auth = await import('../src/lib/auth');
+  const Fastify = (await import('fastify')).default;
+  const cookie = (await import('@fastify/cookie')).default;
+  const jwt = (await import('@fastify/jwt')).default;
+  const opdsRoutes = (await import('../src/routes/opds')).default;
+  const imageRoutes = (await import('../src/routes/images')).default;
+  const sharp = (await import('sharp')).default;
+  const AdmZip = require('adm-zip');
+
+  await migrate();
+  await q('DELETE FROM users WHERE username = $1', [OWNER]);
+  await q(`DELETE FROM lib_series WHERE id = $1`, [SID]);
+  await q(`DELETE FROM libraries WHERE id = $1`, [LIB]);
+  const owner = (await q<{ id: string }>(
+    `INSERT INTO users (username, display_name, password_hash, role, auth_kind, disabled)
+     VALUES ($1,$1,'x','user','password',false) RETURNING id`, [OWNER],
+  ))[0].id;
+  // One real page, so the page route serves genuine bytes rather than a placeholder.
+  mkdirSync(join(TMP, 'lib'), { recursive: true });
+  const zip = new AdmZip();
+  zip.addFile('001.png', await sharp({ create: { width: 300, height: 450, channels: 3, background: '#224466' } }).png().toBuffer());
+  writeFileSync(join(TMP, 'lib', 'one.cbz'), zip.toBuffer());
+  await q(`INSERT INTO libraries (id, name, path, sort_order) VALUES ($1,'Shelf','/opdstok/shelf',0)`, [LIB]);
+  await q(`INSERT INTO lib_series (id, source, title, folder, books_count, library_id)
+           VALUES ($1,'T!opdstok','Opds Token Title',$2,1,$3)`, [SID, `T!opdstok/${SID}`, LIB]);
+  await q(`INSERT INTO lib_books (id, series_id, source, file, number, title, pages, root, updated_at)
+           VALUES ($1,$2,'T!opdstok','one.cbz',1,'Chapter 1',1,$3,'2026-01-02T03:04:05Z')`, [BID, SID, join(TMP, 'lib')]);
+  await q(`UPDATE lib_series SET cover_book_id = $2 WHERE id = $1`, [SID, BID]);
+
+  const app = Fastify();
+  await app.register(cookie);
+  await app.register(jwt, { secret: process.env.JWT_SECRET! });
+  await app.register(opdsRoutes);
+  await app.register(imageRoutes);
+  await app.ready();
+  const token = await auth.issueOpdsToken(owner);
+  const get = (url: string) => app.inject({ method: 'GET', url, headers: { authorization: basic(OWNER, token) } });
+  try {
+    assert.equal((await get('/opds')).statusCode, 200, 'the feed opens while the account is live');
+    assert.equal((await get(`/img/lib/books/${BID}/page/1`)).statusCode, 200, 'and so does a page');
+
+    // Reintroduce by dropping the users JOIN and `NOT u.disabled` from resolveOpdsBasic: both are 200.
+    await q('UPDATE users SET disabled = true WHERE id = $1', [owner]);
+    assert.equal((await get('/opds')).statusCode, 401, 'a disabled owner\'s token must not open the feed');
+    assert.equal((await get(`/img/lib/books/${BID}/page/1`)).statusCode, 401, 'nor a page');
+
+    // Re-enabling is the reverse: the token was not revoked, the account was paused.
+    await q('UPDATE users SET disabled = false WHERE id = $1', [owner]);
+    assert.equal((await get('/opds')).statusCode, 200);
+    assert.equal((await get(`/img/lib/books/${BID}/page/1`)).statusCode, 200);
+  } finally {
+    await app.close();
+    await q('DELETE FROM users WHERE username = $1', [OWNER]).catch(() => {});
+    await q(`DELETE FROM lib_series WHERE id = $1`, [SID]).catch(() => {});
+    await q(`DELETE FROM libraries WHERE id = $1`, [LIB]).catch(() => {});
+    rmSync(TMP, { recursive: true, force: true });
   }
 });

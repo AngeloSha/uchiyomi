@@ -114,7 +114,9 @@ test('the backdrop route is gated like every other image route', { skip }, async
       const res = await app.inject({
         method: 'GET',
         url: `/img/series/${S_SHUT}/backdrop?style=hero`,
-        cookies: { yomi_img: app.jwt.sign({ sub: uid, kind: 'img' }) },
+        // `typ: 'img'` is what routes/auth.ts mints; since v0.38.0 the image guard refuses any other shape, so a
+        // fixture with the old `kind` claim reads 401 and never reaches the visibility rule this test is about.
+        cookies: { yomi_img: app.jwt.sign({ sub: uid, typ: 'img' }) },
       });
       assert.equal(res.statusCode, 404, 'key art for a walled-off series must not render');
     });
@@ -123,7 +125,7 @@ test('the backdrop route is gated like every other image route', { skip }, async
       const res = await app.inject({
         method: 'GET',
         url: `/img/series/${S_SHUT}/thumb`,
-        cookies: { yomi_img: app.jwt.sign({ sub: uid, kind: 'img' }) },
+        cookies: { yomi_img: app.jwt.sign({ sub: uid, typ: 'img' }) },
       });
       assert.equal(res.statusCode, 404);
     });

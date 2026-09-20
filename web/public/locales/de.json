@@ -2,7 +2,7 @@
   "_meta": {
     "language": "de",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 865
+    "strings": 880
   },
   "1 check found something": "1 Prüfung hat etwas gefunden",
   "1 member": "1 Mitglied",
@@ -347,7 +347,6 @@
   "Two-factor authentication": "Zwei-Faktor-Authentifizierung",
   "Two-factor disabled": "Zwei-Faktor deaktiviert",
   "Two-factor enabled": "Zwei-Faktor aktiviert",
-  "Type": "Typ",
   "Type any folder under your library root, or browse below. Libraries may sit inside one another — the most specific one wins.": "Gib einen beliebigen Ordner unterhalb deiner Bibliotheks-Wurzel ein oder stöbere unten. Bibliotheken dürfen ineinander liegen — die spezifischste gewinnt.",
   "Uchiyomi · personal reader for your Komga library": "Uchiyomi · persönlicher Leser für deine Komga-Bibliothek",
   "Up Next": "Als Nächstes",
@@ -865,8 +864,24 @@
   "Could not remove those": "Konnte sie nicht entfernen",
   "Lost track of the fetch. Check the library in a moment.": "Das Holen ist aus dem Blick geraten. Sieh gleich in der Bibliothek nach.",
   "files deleted": "Dateien gelöscht",
-  "The chapter files are gone. Put back lists them as deleted from the server; Fetch again on the series page brings back the ones Uchiyomi downloaded.": "Die Kapiteldateien sind weg. „Put back“ führt sie als vom Server gelöscht auf; „Erneut holen“ auf der Serienseite bringt die zurück, die Uchiyomi heruntergeladen hat.",
+  "The chapter files are gone. Put back lists them as deleted from the server; Fetch again on the series page brings back the ones Uchiyomi downloaded.": "Die Kapiteldateien sind weg. „Zurücklegen“ führt sie als vom Server gelöscht auf; „Erneut holen“ auf der Serienseite bringt die zurück, die Uchiyomi heruntergeladen hat.",
   "Started — the Tasks line shows what it found when it is done.": "Gestartet — die Zeile unter Aufgaben zeigt, was gefunden wurde, sobald es fertig ist.",
   "Nothing removed · 1 skipped": "Nichts entfernt · 1 übersprungen",
-  "Nothing removed · {n} skipped": "Nichts entfernt · {n} übersprungen"
+  "Nothing removed · {n} skipped": "Nichts entfernt · {n} übersprungen",
+  "Forget": "Vergessen",
+  "Forget \"{title}\" for good?": "„{title}“ endgültig vergessen?",
+  "This erases the series and everyone's reading history on it — progress, bookmarks, notes, ratings, favourites, tracker links.": "Das löscht die Serie und den gesamten Leseverlauf aller Mitglieder dazu — Fortschritt, Lesezeichen, Notizen, Bewertungen, Favoriten, Tracker-Verknüpfungen.",
+  "Stats and Wrapped change. If the files ever reappear it comes back as a new series with no history. This cannot be undone.": "Statistiken und Wrapped ändern sich. Tauchen die Dateien je wieder auf, kommt die Serie als neue Serie ohne Verlauf zurück. Das lässt sich nicht rückgängig machen.",
+  "Forgotten. Nobody had read it.": "Vergessen. Niemand hatte sie gelesen.",
+  "Forgotten. 1 member's history on it is gone.": "Vergessen. Der Verlauf von 1 Mitglied dazu ist weg.",
+  "Forgotten. {n} members' history on it is gone.": "Vergessen. Der Verlauf von {n} Mitgliedern dazu ist weg.",
+  "Could not forget it": "Konnte sie nicht vergessen",
+  "Include 18+ libraries": "18+-Bibliotheken einschließen",
+  "18+": "18+",
+  "Type {title} to confirm": "Gib {title} ein, um zu bestätigen",
+  "Put back": "Zurücklegen",
+  "Restoring…": "Wird zurückgelegt…",
+  "1 chapter · removed {when}": "1 Kapitel · entfernt {when}",
+  "{n} chapters · removed {when}": "{n} Kapitel · entfernt {when}",
+  "Removing a series hides it from the library, search and the updater. Its files are left exactly where they are, and everyone’s reading progress is kept, so putting it back changes nothing else.": "Eine Serie zu entfernen blendet sie aus Bibliothek, Suche und Updater aus. Ihre Dateien bleiben genau, wo sie sind, und der Lesefortschritt aller bleibt erhalten — sie zurückzulegen ändert also nichts weiter."
 }

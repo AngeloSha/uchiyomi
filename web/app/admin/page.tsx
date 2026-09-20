@@ -1907,6 +1907,31 @@ function LibraryPanel() {
   });
   const rows = data?.content || [];
 
+  // The third step. Remove hides, Delete files lets the bytes go, Forget erases the row and everyone's
+  // history on it -- the one action here that rewrites other members' stats and Wrapped, and the one with
+  // no Put back. The server refuses (409) while anything could bring the series back: a live chapter row
+  // (which is what an unmounted share leaves behind), a root that is not there, a folder that still holds
+  // chapters. The refusal carries the fix.
+  const [forget, setForget] = useState<DeletedRow | null>(null);
+  const [forgetting, setForgetting] = useState(false);
+  const forgetSeries = async (r: DeletedRow) => {
+    setForgetting(true);
+    try {
+      const res = await api<{ books: number; absorbed: number; users: number }>(`/api/admin/series/${r.id}/forget`,
+        { method: 'POST', json: { confirm: r.title } });
+      toast(res.users === 0 ? tr('Forgotten. Nobody had read it.')
+        : res.users === 1 ? tr("Forgotten. 1 member's history on it is gone.")
+        : tr("Forgotten. {n} members' history on it is gone.", { n: res.users }), 'success');
+      setForget(null);
+      qc.invalidateQueries({ queryKey: ['admin-deleted'] });
+    } catch (e: any) {
+      let msg = msgOf(e, tr('Could not forget it'));
+      try { const b = JSON.parse(e?.body || '{}'); if (b.fix) msg = `${b.message} ${b.fix}`; } catch {}
+      toast(msg, 'error');
+    }
+    setForgetting(false);
+  };
+
   const restore = async (r: DeletedRow) => {
     setBusy(r.id);
     try {
@@ -1931,7 +1956,9 @@ function LibraryPanel() {
                 disk.</strong>{tr('It cannot be undone from here.')}</p>
               <p className="mt-2">Everyone&rsquo;s reading progress and history are kept, so the record of
                 having read it survives even though the files do not.</p>
-              <p className="mt-2 text-fog-500">Folder: {purge.folder}</p>
+              {/* The path is LTR text whatever the UI direction: unmarked, Arabic moved its leading slash
+                  to the far end ("library-dl/mangadex/gone-for-good/"). */}
+              <p className="mt-2 text-fog-500">{tr('Folder')}: <span dir="ltr">{purge.folder}</span></p>
             </>
           }
           confirmLabel="Delete files"
@@ -1942,10 +1969,30 @@ function LibraryPanel() {
           onClose={() => setPurge(null)}
         />
       )}
+      {forget && (
+        <ConfirmDialog
+          title={tr('Forget "{title}" for good?', { title: forget.title })}
+          body={
+            <>
+              {/* The opposite of the Delete-files reassurance above, on purpose: that dialog promises the
+                  history survives, and this is the step that takes it. Named per kind so nobody reads
+                  "history" as "just the progress bar". */}
+              <p><strong className="text-fog-100">{tr("This erases the series and everyone's reading history on it — progress, bookmarks, notes, ratings, favourites, tracker links.")}</strong></p>
+              <p className="mt-2">{tr('Stats and Wrapped change. If the files ever reappear it comes back as a new series with no history. This cannot be undone.')}</p>
+              <p className="mt-2 text-fog-500">{tr('Folder')}: <span dir="ltr">{forget.folder}</span></p>
+            </>
+          }
+          confirmLabel={tr('Forget')}
+          confirmText={forget.title}
+          danger
+          busy={forgetting}
+          onConfirm={() => forgetSeries(forget)}
+          onClose={() => setForget(null)}
+        />
+      )}
       <div className="full space-y-3">
         <p className="max-w-prose text-xs text-fog-500">
-          Removing a series hides it from the library, search and the updater. Its files are left exactly where
-          they are, and everyone&rsquo;s reading progress is kept, so putting it back changes nothing else.
+          {tr('Removing a series hides it from the library, search and the updater. Its files are left exactly where they are, and everyone’s reading progress is kept, so putting it back changes nothing else.')}
         </p>
         {isLoading ? (
           <div className="card grad-border p-4 text-sm text-fog-500">{tr('Loading…')}</div>
@@ -1955,13 +2002,22 @@ function LibraryPanel() {
           <div className="card grad-border divide-y divide-ink-800/70 overflow-hidden">
             {rows.map((r) => (
               <div key={r.id} className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1.5 px-4 py-3 lg:grid-cols-[minmax(0,24rem)_minmax(0,1fr)_auto]">
-                <p className="col-start-1 row-start-1 min-w-0 truncate text-sm text-fog-100">{r.title}</p>
+                {/* Two lines on a phone, one with an ellipsis and a tooltip on a desktop: a real title
+                    ("Kaguya-sama: Love Is War – The First Kiss That Never Ends") measured 506 px against a
+                    168 px column at 390, and two long-prefix titles were indistinguishable in the list. The
+                    typed step in the dialog carries the full title either way. `lg:block` first, so the
+                    -webkit-box the clamp needs gives way to the nowrap ellipsis. */}
+                <p className="col-start-1 row-start-1 min-w-0 line-clamp-2 text-sm text-fog-100 lg:block lg:truncate" title={r.title}>{r.title}</p>
                 {/* The state LEADS the caption: at 390 px the caption truncates after ~130 px, and "files
                     deleted" at its end was exactly the part cut off. The explanation is a visible second
                     line, not a title= tooltip -- a phone never shows one. The button stays "Put back": a
                     longer label ("Put back (files were deleted)") squeezed the title to "Gone F…" in German. */}
                 <p className="col-start-1 row-start-2 min-w-0 truncate text-[11px] text-fog-500 lg:col-start-2 lg:row-start-1">
-                  {filesGone(r) ? `${tr('files deleted')} · ` : ''}{r.books_count} chapter{r.books_count === 1 ? '' : 's'} · removed {relativeTime(r.deleted_at)} · {r.folder}
+                  {filesGone(r) ? `${tr('files deleted')} · ` : ''}
+                  {r.books_count === 1
+                    ? tr('1 chapter · removed {when}', { when: relativeTime(r.deleted_at) })
+                    : tr('{n} chapters · removed {when}', { n: r.books_count, when: relativeTime(r.deleted_at) })}
+                  {' · '}{r.folder}
                 </p>
                 {filesGone(r) && (
                   <p className="col-span-2 col-start-1 row-start-3 min-w-0 text-[11px] text-fog-400 lg:col-span-1 lg:col-start-2 lg:row-start-2">
@@ -1974,12 +2030,24 @@ function LibraryPanel() {
                       above says so: an unmarked "Put back" here used to restore a series whose chapters all
                       404'd. */}
                   <button onClick={() => restore(r)} disabled={busy === r.id} className="chip shrink-0 text-xs disabled:opacity-50">
-                    {busy === r.id ? 'Restoring\u2026' : 'Put back'}
+                    {busy === r.id ? tr('Restoring…') : tr('Put back')}
                   </button>
                   {/* The escalation, and only ever after the reversible step. Hiding is undoable; this is not.
-                      Not offered twice: with every file gone it would only report "Deleted 0 file(s)". */}
-                  {!filesGone(r) && (
+                      Only while a chapter row still claims a file: with every file gone it would only report
+                      "Deleted 0 file(s)", and a row that never had a chapter is refused outright ("no files
+                      on disk"). ⚠️ `live_books > 0`, the exact complement of Forget's `=== 0` below, so a
+                      row never carries both and never a third chip: at 390 px three chips squeezed "Never
+                      Had Chapters" to 21 px of title. */}
+                  {r.live_books > 0 && (
                     <button onClick={() => setPurge(r)} className="chip shrink-0 text-xs hover:border-rose-500/50 hover:text-rose-400">{tr('Delete files')}</button>
+                  )}
+                  {/* The third step, and only once nothing is left on disk to bring the series back: the
+                      files-gone row, or a row that never had a chapter. Painted rose outright rather than
+                      on hover -- the other two chips are recoverable, this one is not. The server refuses
+                      on its own if a folder still holds chapters or a root is not there, and the toast
+                      carries its fix. */}
+                  {r.live_books === 0 && (
+                    <button onClick={() => setForget(r)} className="chip shrink-0 border-rose-500/40 text-xs text-rose-300 hover:border-rose-500/70 hover:text-rose-200">{tr('Forget')}</button>
                   )}
                 </div>
               </div>

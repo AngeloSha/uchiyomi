@@ -2,7 +2,7 @@
   "_meta": {
     "language": "ja",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 865
+    "strings": 880
   },
   "1 check found something": "1 件のチェックで問題を検出",
   "1 member": "メンバー 1 人",
@@ -347,7 +347,6 @@
   "Two-factor authentication": "2段階認証",
   "Two-factor disabled": "二段階認証を無効にしました",
   "Two-factor enabled": "二段階認証を有効にしました",
-  "Type": "種類",
   "Type any folder under your library root, or browse below. Libraries may sit inside one another — the most specific one wins.": "ライブラリのルート以下の任意のフォルダーを入力するか、下から選んでください。ライブラリは入れ子にできます — もっとも具体的なものが優先されます。",
   "Uchiyomi · personal reader for your Komga library": "Uchiyomi · あなたの Komga ライブラリのための個人リーダー",
   "Up Next": "次に読む",
@@ -865,8 +864,24 @@
   "Could not remove those": "削除できませんでした",
   "Lost track of the fetch. Check the library in a moment.": "取得の状況を見失いました。しばらくしてからライブラリを確認してください。",
   "files deleted": "ファイル削除済み",
-  "The chapter files are gone. Put back lists them as deleted from the server; Fetch again on the series page brings back the ones Uchiyomi downloaded.": "章ファイルはもうありません。「Put back」ではサーバーから削除済みとして一覧され、シリーズページの「再取得」で Uchiyomi がダウンロードしたものを戻せます。",
+  "The chapter files are gone. Put back lists them as deleted from the server; Fetch again on the series page brings back the ones Uchiyomi downloaded.": "章ファイルはもうありません。「元に戻す」ではサーバーから削除済みとして一覧され、シリーズページの「再取得」で Uchiyomi がダウンロードしたものを戻せます。",
   "Started — the Tasks line shows what it found when it is done.": "開始しました — 完了するとタスクの行に結果が表示されます。",
   "Nothing removed · 1 skipped": "削除なし · スキップ 1",
-  "Nothing removed · {n} skipped": "削除なし · スキップ {n}"
+  "Nothing removed · {n} skipped": "削除なし · スキップ {n}",
+  "Forget": "完全に削除",
+  "Forget \"{title}\" for good?": "「{title}」を完全に削除しますか？",
+  "This erases the series and everyone's reading history on it — progress, bookmarks, notes, ratings, favourites, tracker links.": "このシリーズと、全員のこのシリーズに関する読書履歴（進捗、ブックマーク、メモ、評価、お気に入り、トラッカー連携）を消去します。",
+  "Stats and Wrapped change. If the files ever reappear it comes back as a new series with no history. This cannot be undone.": "統計と Wrapped が変わります。ファイルが再び現れた場合、履歴のない新しいシリーズとして戻ってきます。元に戻すことはできません。",
+  "Forgotten. Nobody had read it.": "削除しました。読んだ人はいませんでした。",
+  "Forgotten. 1 member's history on it is gone.": "削除しました。1 人のメンバーのこのシリーズの履歴が消えました。",
+  "Forgotten. {n} members' history on it is gone.": "削除しました。{n} 人のメンバーのこのシリーズの履歴が消えました。",
+  "Could not forget it": "削除できませんでした",
+  "Include 18+ libraries": "18+ ライブラリを含める",
+  "18+": "18+",
+  "Type {title} to confirm": "確認のため {title} と入力してください",
+  "Put back": "元に戻す",
+  "Restoring…": "戻しています…",
+  "1 chapter · removed {when}": "1話 · {when}に削除",
+  "{n} chapters · removed {when}": "{n}話 · {when}に削除",
+  "Removing a series hides it from the library, search and the updater. Its files are left exactly where they are, and everyone’s reading progress is kept, so putting it back changes nothing else.": "シリーズを削除すると、ライブラリ・検索・更新から非表示になります。ファイルはそのままの場所に残り、全員の読書進捗も保持されるため、元に戻しても他には何も変わりません。"
 }

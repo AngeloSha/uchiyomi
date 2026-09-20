@@ -36,6 +36,7 @@ import personalRoutes from './routes/personal';
 import downloadRoutes from './routes/downloads';
 import sourceRoutes from './routes/sources';
 import opdsRoutes from './routes/opds';
+import komgaCompatRoutes from './routes/komgaCompat';
 
 async function main() {
   await migrate();
@@ -144,6 +145,9 @@ async function main() {
   await app.register(downloadRoutes);
   await app.register(sourceRoutes);
   await app.register(opdsRoutes);
+  // The Komga-compatible API for Mihon's Komga extension + tracker. Its own auth hook (API tokens and the
+  // UCHIYOMI-SESSION cookie), encapsulated like OPDS: the cookie is honoured by these routes and nowhere else.
+  await app.register(komgaCompatRoutes);
   // The interactive API reference, BEFORE the web root: registerWebRoot installs the not-found handler that
   // serves the app shell for any unknown path, and a route added after it would still work, but its
   // static assets under /api/docs/ would not be found by the UI in the same way. Unauthenticated on
