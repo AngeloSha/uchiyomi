@@ -119,11 +119,12 @@ test('every string on the Removed row and in the two dialogs is translated, and 
   assert.ok(gone.includes(es['Put back']) && !gone.includes('Put back'), 'the files-gone caption still says «Put back» in English beside a translated chip');
 });
 
-test('the token dialog offers 18+ libraries, off by default, and sends it as showAdult', () => {
+test('the token form offers 18+ libraries, off by default, and sends it as showAdult', () => {
   // Without the flag a token -- and so the Komga-compatible API behind Mihon -- never sees the capped
   // libraries, which is the safe default and must stay the default. Reintroduce by `useState(true)`, by
   // dropping `showAdult` from the POST body, or by dropping the list-line marker.
-  const src = code(read('components/SecurityPanel.tsx'));
+  // Since v0.39.0 the form is the inline one under Profile → Connections → API tokens (ProfileConnections.tsx).
+  const src = code(read('components/ProfileConnections.tsx'));
   assert.match(src, /const \[adult, setAdult\] = useState\(false\)/, 'the checkbox must start unchecked');
   assert.match(src, /json: \{ name: name\.trim\(\), scopes, showAdult: adult \}/, 'showAdult is not sent with the mint');
   assert.match(src, /checked=\{adult\}[\s\S]{0,140}?\/>\{tr\('Include 18\+ libraries'\)\}/, 'the checkbox has no label');

@@ -47,6 +47,10 @@ const KEY = 'yomi_reader_prefs';
 const SYNC_DELAY = 1500;
 const SERIES_CAP = 300; // per-series memory is unbounded otherwise — a big library would bloat the settings row
 let syncTimer: ReturnType<typeof setTimeout> | null = null;
+/** How many PUTs are in flight, from the moment a debounce fires until its PUT has settled. A count, not a
+ *  flag: two saves more than 1.5 s apart can have two PUTs out at once, and the first one landing must not
+ *  open the window while the second is still on its way. See `syncPrefsFromServer`. */
+let pushing = 0;
 
 /**
  * Fill in what a stored object is missing, and reconcile the setting with the boolean it replaced.
@@ -100,15 +104,30 @@ function queueSync() {
   if (syncTimer) clearTimeout(syncTimer);
   syncTimer = setTimeout(() => {
     syncTimer = null;
+    pushing++;
     void import('./api')
       .then(({ api }) => api('/api/settings', { method: 'PUT', json: { reader: loadPrefs(), readerSeries: allSeriesPrefs() } }))
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => { pushing--; });
   }, SYNC_DELAY);
 }
 
-/** Pull server-side reader settings on sign-in and adopt them locally. Returns the effective prefs. */
+/**
+ * Pull server-side reader settings on sign-in and adopt them locally. Returns the effective prefs.
+ *
+ * ⚠️ A pull YIELDS to a pending push. Once `savePrefs` has written locally, the local copy is newer than
+ * anything the server can answer until the debounced PUT has landed -- and the server's answer is the OLD
+ * value for that whole window. Adopting it here put the old value back into localStorage, and the timer
+ * then read `loadPrefs()` and PUT the old value up as if it were the new one: a theme picked on Profile →
+ * Settings read "✓ Saved" and was gone from the row, the store and the server 1.5 s later whenever the
+ * section remounted in between (a tab away and back, a Language chip on the same page -- I18nProvider
+ * remounts everything). The same holds while the PUT is in flight (`pushing`): a GET racing it can still
+ * answer the pre-PUT row. Reintroduce by deleting the guard line: readerPrefs.test.ts "a pull while a
+ * push is pending keeps the local value" fails.
+ */
 export async function syncPrefsFromServer(): Promise<ReaderPrefs> {
   if (typeof window === 'undefined') return DEFAULT_PREFS;
+  if (syncTimer || pushing) return loadPrefs();
   try {
     const { api } = await import('./api');
     const s = await api<{ reader?: Partial<ReaderPrefs>; readerSeries?: Record<string, SeriesPrefs> }>('/api/settings');

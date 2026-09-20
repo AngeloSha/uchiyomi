@@ -1,5 +1,5 @@
 'use client';
-import { useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { motion } from 'framer-motion';
 import { t as tr } from '@/lib/i18n';
 
@@ -90,8 +90,11 @@ export function ConsoleNav<T extends string>({
               </button>
             )}
             <div className="-me-4 flex gap-1.5 overflow-x-auto pe-4 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+              {/* On a phone this row is the only tab navigation, so the active pill says so the way the
+                  desktop rail does -- the fill alone is invisible to a screen reader. */}
               {group.tabs.map((t) => (
                 <button key={t} onClick={() => onTab(t)}
+                  aria-current={tab === t ? 'page' : undefined}
                   className={`shrink-0 rounded-full px-3.5 py-1.5 text-sm font-medium transition ${
                     tab === t ? 'bg-accent text-white' : 'bg-ink-800 text-fog-300'
                   }`}>{tr(t)}</button>
@@ -122,6 +125,11 @@ export function ConsoleNav<T extends string>({
  *
  * A bottom sheet rather than a dropdown, matching the library's Filters drawer -- an idiom this app already
  * has, so it is one pattern rather than two.
+ *
+ * It says `role="dialog" aria-modal`, so it behaves like one (the Modal in ConfirmDialog.tsx is the
+ * pattern): focus moves inside when it opens -- onto the chip of the current tab, so a keyboard starts
+ * where the person is -- Escape closes it, and focus goes back to the group button that opened it when it
+ * goes. Before this, Enter on that button opened a sheet nobody could reach without a pointer.
  */
 function GroupSheet<T extends string>({ groups, ariaLabel, current, footer, onPick, onClose }: {
   groups: ReadonlyArray<NavGroup<T>>;
@@ -131,9 +139,21 @@ function GroupSheet<T extends string>({ groups, ariaLabel, current, footer, onPi
   onPick: (t: T) => void;
   onClose: () => void;
 }) {
+  const ref = useRef<HTMLDivElement>(null);
+  // Through a ref so the effect runs once: the caller's `onClose` is a new function on every render.
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
+  useEffect(() => {
+    const opener = document.activeElement as HTMLElement | null;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') closeRef.current(); };
+    document.addEventListener('keydown', onKey);
+    const first = ref.current?.querySelector<HTMLElement>('button.chip-active') ?? ref.current?.querySelector<HTMLElement>('button.chip');
+    first?.focus();
+    return () => { document.removeEventListener('keydown', onKey); opener?.focus(); };
+  }, []);
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-ink-950/70 backdrop-blur-xs sm:items-center" onClick={onClose}>
-      <div className="glass max-h-[80vh] w-full overflow-y-auto rounded-t-2xl border border-ink-700 p-5 pb-[calc(5.5rem+env(safe-area-inset-bottom))] sm:pb-[max(1.25rem,env(safe-area-inset-bottom))] sm:max-w-md sm:rounded-2xl"
+      <div ref={ref} className="glass max-h-[80vh] w-full overflow-y-auto rounded-t-2xl border border-ink-700 p-5 pb-[calc(5.5rem+env(safe-area-inset-bottom))] sm:pb-[max(1.25rem,env(safe-area-inset-bottom))] sm:max-w-md sm:rounded-2xl"
         role="dialog" aria-modal="true" aria-label={ariaLabel} onClick={(e) => e.stopPropagation()}>
         <div className="mb-4 flex items-start justify-between gap-3">
           <h3 className="font-display text-lg font-semibold leading-tight">{ariaLabel}</h3>

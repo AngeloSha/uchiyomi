@@ -34,14 +34,20 @@ export function Modal({
   // match in document order is the ✕ in the header, not the first field. So the first keystroke landed, the
   // rest went to the close button, and the first SPACE activated it and threw the dialog away mid-sentence.
   // Every modal in the app with a text field had this.
+  //
+  // And focus goes BACK when the dialog goes: the element that opened it is read before the first field
+  // takes focus, and re-focused in the cleanup. Without that, Escape or Cancel on the "Delete read
+  // chapters" confirm left focus on <body>, and the next Tab started from the top of the admin console. An
+  // opener the confirm action has since removed (a revoked row) ignores the call, which is the right answer.
   useEffect(() => {
+    const opener = document.activeElement as HTMLElement | null;
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') closeRef.current(); };
     document.addEventListener('keydown', onKey);
     // A field if there is one; the close button only when there is nothing to type into.
     const first = ref.current?.querySelector<HTMLElement>('input, textarea, select')
       ?? ref.current?.querySelector<HTMLElement>('button');
     first?.focus();
-    return () => document.removeEventListener('keydown', onKey);
+    return () => { document.removeEventListener('keydown', onKey); opener?.focus(); };
   }, []);
 
   // ⚠️ Clear of the phone's bottom nav. The nav is a root-level sibling above `main` (z-40 over this

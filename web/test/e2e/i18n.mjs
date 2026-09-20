@@ -118,10 +118,19 @@ for (const code of LOCALES) {
   // innerText reports text as rendered), and not "Mihon" (a name, the same in every language). "bring your
   // list over" is the tracker box's not-connected line (v0.36.0) -- the state an e2e instance is in --
   // and NOT its eyebrow "From your tracker", which `\bFrom your tracker\b` could never match in uppercase.
+  //
+  // v0.39.0 gave both consoles `?tab=` addresses and rebuilt the admin Settings tab and the profile's
+  // Settings tab out of new sections, so those two are visited directly -- the tab rows above only ever
+  // saw each console's FIRST tab. Every word in the new lists is one whose es/de/fr translation differs
+  // from the English: a word that is the same in French ("Badges", "Moments") reads as a leak on a
+  // correctly translated page, and three of those would fail a page that is fine. ("Server" in the older
+  // /admin list is German too; it sits alone under the >= 3 threshold.)
   const CONSOLES = [
     ['/admin', ['Overview', 'Members', 'Settings', 'Providers', 'Server', 'People', 'Content', 'Sources']],
+    ['/admin/?tab=Settings', ['Open registration', 'Check for updates', 'Delete read chapters', 'Library housekeeping', 'Backup time']],
     ['/admin/import', ['review matches', 'matches each title', 'Start matching', 'backup stays on your server', 'nothing lands in your library', 'bring your list over']],
-    ['/profile', ['Reading', 'Account', 'Settings', 'Badges', 'Language', 'Accent']],
+    ['/profile', ['Connections', 'Account', 'Settings', 'Reading studio', 'Lists', 'Sign out']],
+    ['/profile/?tab=Settings', ['Appearance', 'Weekly goal', 'Repeated pages', 'Language', 'Accent', 'Offline downloads']],
   ];
   if (code !== 'en') {
     for (const [path, words] of CONSOLES) {
@@ -132,7 +141,8 @@ for (const code of LOCALES) {
       if (english.length >= 3) problems.push(`${path} still in English: ${english.join(', ')}`);
       const over = await p.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
       if (over > 4) problems.push(`${path}: ${over}px of horizontal overflow`);
-      await p.screenshot({ path: `${OUT}/${code}-${path.slice(1).replace(/\//g, '-')}.png` });
+      // `?tab=Settings` is part of the path now: the query characters are folded into the file name too.
+      await p.screenshot({ path: `${OUT}/${code}-${path.slice(1).replace(/[/?=&]/g, '-')}.png` });
     }
   }
 

@@ -40,6 +40,8 @@ interface AuthCtx {
   logout: () => Promise<void>;
   setSettings: (partial: Record<string, any>) => void;
   setAvatar: (avatar: Avatar) => void;
+  /** Written the moment 2FA is enabled or disabled, see the note beside its definition. */
+  setTotpEnabled: (v: boolean) => void;
 }
 
 const Ctx = createContext<AuthCtx>(null as any);
@@ -271,8 +273,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const setAvatar = (avatar: Avatar) => setUser((u) => (u ? { ...u, avatar } : u));
 
+  // ⚠️ `user` is otherwise re-read only by `revalidate` -- every 12 minutes and on visibilitychange -- and the
+  // Account tab initialises its 2FA state from `user.totpEnabled` on every mount. Without this, enabling 2FA
+  // and then leaving the tab and coming back showed "Set up 2FA" over a live secret, and pressing it ran a
+  // setup that rotated that secret while the recovery codes were still on screen.
+  const setTotpEnabled = (v: boolean) => setUser((u) => (u ? { ...u, totpEnabled: v } : u));
+
   return (
-    <Ctx.Provider value={{ status, user, isAdmin: user?.role === 'admin', login, firstRunSetup, logout, setSettings, setAvatar }}>
+    <Ctx.Provider value={{ status, user, isAdmin: user?.role === 'admin', login, firstRunSetup, logout, setSettings, setAvatar, setTotpEnabled }}>
       {children}
     </Ctx.Provider>
   );

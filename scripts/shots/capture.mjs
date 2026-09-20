@@ -218,8 +218,10 @@ async function main() {
     await settle(page, 1400);
     await shot(page, 'admin-health');
   }
+  // Extensions is its own tab since v0.39.0: Providers used to render the whole Extensions panel a second
+  // time under its own cards (and the search field with it); it now shows a link row instead.
   if (want('admin-extensions') || want('crop-extensions') || want('ext-strip-1')) {
-    await adminTab('Providers');
+    await adminTab('Extensions');
     const f = await page.$('input[placeholder*="Search extensions"]');
     if (f) { await f.type('manga'); await sleep(2500); await settle(page); }
     if (want('admin-extensions')) await adminShot('admin-extensions', 'Extensions');
@@ -229,7 +231,9 @@ async function main() {
   // and nothing pictured it.
   if (want('admin-libraries')) { await adminTab('Library'); await adminShot('admin-libraries', 'Libraries'); }
   if (want('admin-members')) { await adminTab('Members'); await adminShot('admin-members'); }
-  if (want('admin-settings')) { await adminTab('Settings'); await adminShot('admin-settings'); }
+  // By address rather than by tab button: `?tab=` is the tab's URL since v0.39.0, and the shot doubles as a
+  // check that the deep link opens the rebuilt Settings tab (Server first, then the other three sections).
+  if (want('admin-settings')) { await go('/admin/?tab=Settings', 1000); await adminShot('admin-settings'); }
   // The reviewable import (v0.35.0) is its own route, reached from the Providers card. Its intake card is
   // the shot: what the docs describe first, and the one state a capture-only account can always reach (a
   // batch in review needs titles this instance's sources answer for).
@@ -237,9 +241,11 @@ async function main() {
 
   if (want('profile-stats')) { await go('/profile/', 900); await shot(page, 'profile-stats'); }
   if (want('profile-security')) {
-    await go('/profile/', 600);
+    // The Account tab of v0.39.0: Signed in as, Two-factor authentication, Active sessions, Sign out. There
+    // is no "Security" heading any more; the 2FA section is the one that reads as security in a picture.
+    await go('/profile/?tab=Account', 600);
     await page.evaluate(() => {
-      const el = [...document.querySelectorAll('h2,h3')].find((e) => /security/i.test(e.textContent || ''));
+      const el = [...document.querySelectorAll('h2,h3')].find((e) => /two-factor/i.test(e.textContent || ''));
       el?.scrollIntoView({ block: 'start', behavior: 'instant' });
     });
     await settle(page, 700);
@@ -265,14 +271,16 @@ async function main() {
   };
 
   if (want('crop-anilist') || want('crop-tokens')) {
-    await go('/profile/', 900);
+    // Both live on the Connections tab since v0.39.0 (trackers, OPDS readers, API tokens); `.card` is kept
+    // by the Section primitive, so `cropCard` still finds the section around the heading.
+    await go('/profile/?tab=Connections', 900);
     await cropCard('crop-anilist', 'Sync your reading to AniList');
     await cropCard('crop-tokens', 'API tokens');
   }
   if (want('crop-health')) { await adminTab('Health'); await cropCard('crop-health', 'Suspiciously short chapters'); }
-  if (want('crop-addsite') || want('crop-extensions') || want('ext-strip-1')) {
-    await adminTab('Providers');
-    await cropCard('crop-addsite', 'Add a site');
+  if (want('crop-addsite')) { await adminTab('Providers'); await cropCard('crop-addsite', 'Add a site'); }
+  if (want('crop-extensions') || want('ext-strip-1')) {
+    await adminTab('Extensions');
     const f = await page.$('input[placeholder*="Search extensions"]');
     if (f) { await f.type('scans'); await sleep(2500); await settle(page); }
     await cropCard('crop-extensions', 'Extensions');

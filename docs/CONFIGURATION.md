@@ -30,7 +30,7 @@ The ones worth knowing:
 ## What leaves your server
 
 Two things can, they are separate switches, and they go to different places. Both live in
-**Admin → Settings**.
+**Admin → Settings → Server** (`/admin/?tab=Settings`), each with a fold that spells out what it sends.
 
 **Check for updates** — *on by default.* Once a day the server asks GitHub whether a newer Uchiyomi has been
 released and shows the answer under Admin → Health. It is a `GET` of a public releases page: GitHub sees your
@@ -74,7 +74,7 @@ an empty string to make sure it can never send anything regardless of the settin
 ### Progress trackers
 
 The tracker calls are the only ones this server makes **with your token**: AniList, MyAnimeList and Kitsu,
-each connected by you under **Profile → Reading → Progress tracking**, and only for reading your list (the
+each connected by you under **Profile → Connections → Progress tracking**, and only for reading your list (the
 import) and reporting what you finished. Nothing carrying a token goes to a tracker you have not connected.
 
 Two of those services are also asked **without** any token, by title, whether or not anyone has connected
@@ -166,7 +166,7 @@ ever hit.
 ## Deleting chapters after they are read
 
 Off, and there is deliberately **no environment variable that turns it on**. It is switched on in
-**Admin → Settings → Delete read chapters**, behind a confirmation, because an install that upgraded into a
+**Admin → Settings → Library housekeeping → Delete read chapters**, behind a confirmation, because an install that upgraded into a
 file-deleting job because of a line in a compose file would be indefensible. See
 [USAGE](USAGE.md#deleting-chapters-after-they-are-read) for what it will and will not touch.
 
@@ -177,7 +177,8 @@ file-deleting job because of a line in a compose file would be indefensible. See
 ## Push notifications
 
 Nothing to configure. The server generates a VAPID key pair on first boot and keeps it in `/config`, the
-same way it does the session secret, so new-chapter notifications work on a stock install. Set
+same way it does the session secret, so new-chapter notifications work on a stock install (the switch is
+**Profile → Settings → This device → New-chapter alerts**). Set
 `VAPID_PUBLIC_KEY` and `VAPID_PRIVATE_KEY` yourself only if you already have a pair you want to keep —
 explicit values always win.
 

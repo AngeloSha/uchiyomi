@@ -5,9 +5,9 @@
 // trade and it is fine for every screen except three, where a value is shown EXACTLY ONCE and cannot be
 // retrieved again:
 //
-//   * the OPDS password, on /profile
-//   * a freshly minted API token, in SecurityPanel
-//   * the 2FA recovery codes, in SecurityPanel
+//   * the OPDS password, in ProfileConnections
+//   * a freshly minted API token, in ProfileConnections
+//   * the 2FA recovery codes, in ProfileAccount
 //
 // Tap a language chip while any of those is on screen and it is destroyed permanently, along with a
 // half-finished 2FA enrolment mid-QR-scan. Nothing warns, and the value is genuinely unrecoverable: the

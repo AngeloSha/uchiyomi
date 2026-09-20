@@ -93,8 +93,13 @@ test('every route the browser tests navigate to actually exists', () => {
   for (const m of read('test/e2e/run.mjs').matchAll(/\['[a-z]+', '(\/[a-z/]*)'\]/g)) listed.add(m[1]);
   assert.ok(listed.size >= 6, `only ${listed.size} routes scanned — the scan itself is broken`);
 
+  // `/profile/?tab=Settings` is the same route as `/profile` with a tab picked (v0.39.0): the query is
+  // stripped before the path is mapped to a page file, or the four `?tab=` entries would each look like
+  // a route that does not exist.
+  assert.ok([...listed].some((p) => p.includes('?tab=')), 'no ?tab= page is measured — the settings grids of v0.39.0 are not covered');
   for (const p of listed) {
-    const f = p === '/' ? 'app/page.tsx' : `app${p.replace(/\/$/, '')}/page.tsx`;
+    const route = p.replace(/\?.*$/, '');
+    const f = route === '/' ? 'app/page.tsx' : `app${route.replace(/\/$/, '')}/page.tsx`;
     assert.ok(existsSync(join(ROOT, f)), `${p} is in an e2e page list but ${f} does not exist — that test measures a 404`);
   }
 });

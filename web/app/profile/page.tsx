@@ -1,91 +1,55 @@
 'use client';
-import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
+import { Suspense, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { motion, useReducedMotion } from 'framer-motion';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
-import { requestPersist, storageEstimate } from '@/lib/downloads';
-import { deviceId } from '@/lib/device';
-import { bytes, relativeTime } from '@/lib/format';
-import { readShownOnce, writeShownOnce } from '@/lib/shownOnce';
-import { Avatar, AVATAR_EMOJIS, AVATAR_COLORS } from '@/components/Avatar';
-import { PasswordCard, TotpCard, SessionsCard, TokensCard } from '@/components/SecurityPanel';
+import { relativeTime } from '@/lib/format';
+import { useTabParam } from '@/lib/useTabParam';
+import { Avatar } from '@/components/Avatar';
 import { ConsoleNav } from '@/components/ConsoleNav';
 import { HouseBoard } from '@/components/HouseBoard';
 import { SpineWall } from '@/components/SpineWall';
 import { TraceStrip } from '@/components/TraceStrip';
-import { SettingsCard } from '@/components/SettingsCard';
-import { Switch } from '@/components/Switch';
 import { Modal, msgOf } from '@/components/ConfirmDialog';
-import { Backdrop, ProgressBar } from '@/components/ui';
+import { Backdrop } from '@/components/ui';
 import { useToast } from '@/components/Toast';
-import { IcDownload, IcSparkle, IcCheck, IcChevronRight, IcPlay, IcRefresh, IcSettings, IcLogOut, IcMoments } from '@/components/icons';
-import { Heatmap } from '@/components/charts/Heatmap';
-import { Pace } from '@/components/charts/Pace';
-import { Bars } from '@/components/charts/Bars';
-import { t as tr, LOCALES, keys } from '@/lib/i18n';
-import { useT } from '@/lib/I18nProvider';
+import { IcSparkle, IcChevronRight, IcPlay, IcRefresh, IcSettings, IcLogOut, IcMoments } from '@/components/icons';
+import { BadgesCard, ListsCard, StudioCard, type Stats } from '@/components/ProfileYou';
+import { ProfileSettings } from '@/components/ProfileSettings';
+import { ProfileConnections } from '@/components/ProfileConnections';
+import { ProfileAccount } from '@/components/ProfileAccount';
+import { t as tr, keys } from '@/lib/i18n';
 
 /**
  * One group, four entries, so `flat` drops the group eyebrow and the phone group sheet: profile has an index,
  * not an information architecture. The seventeen sections underneath used to be one 5000px column.
+ *
+ * You is the person (badges, the reading studio, lists); Settings is how the app behaves for them
+ * (appearance, reader defaults, downloads, this device); Connections is everything that talks to another
+ * service (trackers, OPDS readers, API tokens); Account is who they are here (password, 2FA, sessions,
+ * sign out). Until v0.39.0 the second tab was "Reading" and held device settings plus one chart, Settings
+ * held two cards, and Account held eight -- the same identity shown three times and the secrets behind
+ * three identical "Manage" chips.
  */
 const PROFILE_GROUPS = [
   // `keys()` is the identity function; it exists so these reach the translation extractor. ConsoleNav
   // renders them as `tr(tab)`, which a scan for inline tr() calls cannot see. See lib/i18n.ts.
-  { id: 'you', label: 'You', tabs: keys('You', 'Reading', 'Settings', 'Account') },
+  { id: 'you', label: 'You', tabs: keys('You', 'Settings', 'Connections', 'Account') },
 ] as const;
-type Tab = (typeof PROFILE_GROUPS)[number]['tabs'][number];
-
-/** Every board card wears the same chrome. `.grad-border` is what makes a wall of dark cards read as a console. */
-const CARD = 'card grad-border p-4';
+const PROFILE_TABS = PROFILE_GROUPS[0].tabs;
+type Tab = (typeof PROFILE_TABS)[number];
 
 /** 12.3k rather than 12345: six digits overflow a stat pill, and nobody reads the last three anyway. */
 const compact = (n: number): string =>
   n < 10_000 ? String(n) : n < 1_000_000 ? `${(n / 1000).toFixed(1)}k` : `${(n / 1_000_000).toFixed(1)}M`;
 
-function urlB64ToUint8(s: string): Uint8Array {
-  const pad = '='.repeat((4 - (s.length % 4)) % 4);
-  const b64 = (s + pad).replace(/-/g, '+').replace(/_/g, '/');
-  const raw = atob(b64);
-  return Uint8Array.from([...raw].map((c) => c.charCodeAt(0)));
-}
-
-// Rendered as `tr(a.name)`, so the names are declared rather than inline. See lib/i18n.ts.
-const ACCENT_NAMES = keys('Violet', 'Cyan', 'Emerald', 'Rose', 'Amber', 'Azure');
-const ACCENTS = ['#7c5cff', '#22d3ee', '#34d399', '#fb7185', '#f59e0b', '#60a5fa']
-  .map((hex, i) => ({ name: ACCENT_NAMES[i], hex }));
-
-interface Stats {
-  chapters_completed: number;
-  days?: number;
-  first_read_at?: string | null;
-  series_touched: number;
-  last_read_at: string | null;
-  byDay: { day: string; chapters: number }[];
-  currentStreak: number;
-  longestStreak: number;
-  weekChapters: number;
-  weeklyGoal: number;
-}
 interface HistoryRow { series_id: string; series_title: string; completed: boolean; created_at: string }
 interface LeaderRow { id: string; display_name: string; avatar?: { emoji?: string; color?: string } | null; week: number; total: number }
-interface CollectionRow { id: string; name: string; item_count: number }
 interface HomePayload { onDeck: { id: string; seriesId: string }[]; new: { id: string; name: string }[] }
 interface Wrapped { topSeries: { id: string; title: string }[] }
-
-// Rendered as `tr(b.label)`, so the labels are declared. See lib/i18n.ts.
-const BADGE_LABELS = keys('Reader', 'Bookworm', 'On a roll', 'Centurion', 'Devoted', 'Legend');
-const BADGES = [
-  { emoji: '📖', label: BADGE_LABELS[0], test: (s: Stats) => s.chapters_completed >= 10 },
-  { emoji: '🐛', label: BADGE_LABELS[1], test: (s: Stats) => s.chapters_completed >= 50 },
-  { emoji: '🔥', label: BADGE_LABELS[2], test: (s: Stats) => s.longestStreak >= 7 },
-  { emoji: '💯', label: BADGE_LABELS[3], test: (s: Stats) => s.chapters_completed >= 100 },
-  { emoji: '🌙', label: BADGE_LABELS[4], test: (s: Stats) => s.longestStreak >= 30 },
-  { emoji: '👑', label: BADGE_LABELS[5], test: (s: Stats) => s.chapters_completed >= 500 },
-];
 
 function GoalRing({ value, goal, size = 64 }: { value: number; goal: number; size?: number }) {
   const pct = goal > 0 ? Math.min(1, value / goal) : 0;
@@ -106,15 +70,14 @@ function GoalRing({ value, goal, size = 64 }: { value: number; goal: number; siz
   );
 }
 
-const isTab = (v: string | null): v is Tab => typeof v === 'string' && (PROFILE_GROUPS[0].tabs as readonly string[]).includes(v);
-
 /**
  * `useSearchParams` needs a Suspense boundary above it in a statically exported app (the import page does
- * the same), so the page proper is one level down. `?tab=Reading` opens that tab, and `&card=tracking`
- * scrolls its Progress tracking card into view: the import page's tracker line sends people to that card,
- * which is the fifth card of the Reading tab -- without the query every link to "Profile" landed on You,
- * five cards away from the thing it pointed at, and with the tab alone the card sat ~430 px below the fold
- * at phone width, under the hero, the rail and four other cards. `?tab=` alone still just opens the tab.
+ * the same), so the page proper is one level down. `?tab=Connections` opens that tab, and `&card=tracking`
+ * scrolls its Progress tracking section into view: the import page's tracker line sends people to that
+ * section -- without the query every link to "Profile" landed on You, a tab away from the thing it pointed
+ * at, and with the tab alone the section could sit below the fold at phone width, under the hero and the
+ * rail. `?tab=` alone still just opens the tab, and every tab tap writes it back (lib/useTabParam.ts), so
+ * a refresh, the back button and a language change all keep the tab.
  */
 export default function ProfilePage() {
   return (
@@ -130,10 +93,8 @@ function ProfileInner() {
   const toast = useToast();
   const still = useReducedMotion();
   const params = useSearchParams();
-  // Read once, on mount: the tab is page state after that, and a person tapping the rail must not be
-  // snapped back to the query's tab on the next render.
-  const [tab, setTab] = useState<Tab>(() => { const t = params.get('tab'); return isTab(t) ? t : 'You'; });
-  // Read once too: the card is scrolled to on arrival, never again on a re-render or a tab change.
+  const [tab, setTab] = useTabParam<Tab>(PROFILE_TABS, 'You');
+  // Read once: the card is scrolled to on arrival, never again on a re-render or a tab change.
   const [focusTracking] = useState<boolean>(() => params.get('card') === 'tracking');
   const [goalOpen, setGoalOpen] = useState(false);
 
@@ -145,15 +106,6 @@ function ProfileInner() {
   const { data: wrapped } = useQuery({ queryKey: ['wrapped', year], queryFn: () => api<Wrapped>(`/api/wrapped?year=${year}`), staleTime: 30 * 60_000 });
   // Last-resort hero art, so a library with series but no reading still opens washed in its own covers.
   const { data: rnd } = useQuery({ queryKey: ['profile-hero-art'], queryFn: () => api<{ seriesId: string | null }>('/api/random'), staleTime: 30 * 60_000 });
-
-  // The OPDS password lives on the page rather than in its card because the language picker two tabs away
-  // has to know a secret is on screen -- and because I18nProvider remounts this whole subtree on a language
-  // change, which would otherwise destroy a token the server only ever sends once. See lib/shownOnce.ts.
-  const [opdsLink, setOpdsLinkState] = useState<OpdsLink | null>(() => readShownOnce<OpdsLink>('opds.link'));
-  const setOpdsLink = (v: OpdsLink | null) => { writeShownOnce('opds.link', v); setOpdsLinkState(v); };
-  // Read at render time: the API token and the recovery codes are held by their own cards, and any tab switch
-  // re-renders this component, so the guard is current by the time the Settings tab can be reached.
-  const secretOnScreen = !!opdsLink?.token || !!readShownOnce('apiToken.fresh') || !!readShownOnce('totp.recovery');
 
   // The single worst string on the old page was an <h1> reading "Your reading". A person's own name, or the
   // handle they log in with -- never a label describing the page they are already looking at.
@@ -227,38 +179,22 @@ function ProfileInner() {
     } catch (e: any) { toast(msgOf(e, tr('Could not change that')), 'error'); }
   };
 
-  const cards = tab === 'You' ? (
-    <>
+  // Only You is a `.board` of cards (every row is wide + 1, so the auto-fill columns pair up). The other
+  // three are settings and render their own SETTINGS_GRID: a board of `null`-returning cards reflowed per
+  // install, and its `align-items: start` left ragged heights beside each other.
+  const panel = tab === 'You' ? (
+    <div className="board">
       <HouseBoard span="wide" members={lb?.content ?? []} youId={user?.id ?? ''} weekCovers={week.ids} weekTitles={week.titles} />
       <BadgesCard stats={stats} />
-      <AvatarCard span="wide" />
-      <ListsCard />
-    </>
-  ) : tab === 'Reading' ? (
-    <>
       <StudioCard span="wide" />
-      <OfflineCard />
-      <SmartDownloadsCard />
-      <NotificationsCard />
-      <TrackerCard span="wide" focus={focusTracking && tab === 'Reading'} />
-    </>
+      <ListsCard />
+    </div>
   ) : tab === 'Settings' ? (
-    <>
-      <AccentCard />
-      <LanguageCard span="wide" locked={secretOnScreen} />
-      <InstallCard />
-    </>
+    <ProfileSettings weeklyGoal={stats?.weeklyGoal ?? 0} />
+  ) : tab === 'Connections' ? (
+    <ProfileConnections focusTracking={focusTracking && tab === 'Connections'} />
   ) : (
-    <>
-      <SignedInCard />
-      <PasswordCard />
-      <TotpCard />
-      <SessionsCard span="wide" />
-      <TokensCard />
-      <OpdsCard link={opdsLink} setLink={setOpdsLink} />
-      {isAdmin && <AdminCard seriesId={rnd?.seriesId ?? undefined} />}
-      <SignOutCard />
-    </>
+    <ProfileAccount />
   );
 
   return (
@@ -391,12 +327,14 @@ function ProfileInner() {
         </div>
       </header>
 
-      {/* ------------------------------ INDEX + BOARD ------------------------------ */}
+      {/* ------------------------------ INDEX + PANEL ------------------------------ */}
       {/* The two things people actually come to this page to do were both at the bottom of the Account tab,
-          behind a board of eight cards. They belong to the person, not to a panel, so they live on the rail. */}
-      <ConsoleNav groups={PROFILE_GROUPS} tab={tab} onTab={setTab} ariaLabel={tr('You')} flat
+          behind a board of eight cards. They belong to the person, not to a panel, so they live on the rail.
+          The nav is labelled "Profile", not "You": that was the first tab's name doubling as the name of the
+          whole list, which read as "You › You" to a screen reader and in the phone sheet's heading. */}
+      <ConsoleNav groups={PROFILE_GROUPS} tab={tab} onTab={setTab} ariaLabel={tr('Profile')} flat
         footer={<RailActions isAdmin={isAdmin} />}>
-        <div className="board">{cards}</div>
+        {panel}
       </ConsoleNav>
 
       {goalOpen && (
@@ -407,12 +345,12 @@ function ProfileInner() {
 }
 
 /**
- * Admin and Sign out, pinned to the console rail.
+ * Admin, Support and Sign out, pinned to the console rail.
  *
- * Both already exist as cards on the Account tab and stay there -- this is a second way to reach them, not a
- * move, because someone who knows where they are should not have to relearn the page. Styled as rail items
- * rather than as buttons so the column still reads as one list, with Sign out in the app's destructive red
- * and set apart from the link above it.
+ * Sign out also has a row on the Account tab; Admin has no other door on this page since v0.39.0 (the art
+ * card it used to have on Account said the same thing this rail item says, one tab away). Styled as rail
+ * items rather than as buttons so the column still reads as one list, with Sign out in the app's
+ * destructive red and set apart from the link above it.
  */
 function RailActions({ isAdmin }: { isAdmin: boolean }) {
   const { logout } = useAuth();
@@ -421,7 +359,8 @@ function RailActions({ isAdmin }: { isAdmin: boolean }) {
   // three full-width bars above the content.
   const row = 'flex items-center gap-2 rounded-full border border-ink-700 px-3 py-1.5 text-start text-sm transition ' +
     'lg:w-full lg:rounded-lg lg:border-0';
-  const chev = 'ms-auto hidden shrink-0 opacity-60 lg:block';
+  // Mirrored under RTL like LinkRow's: in Arabic the rail's chevrons pointed away from the door.
+  const chev = 'ms-auto hidden shrink-0 opacity-60 lg:block rtl:-scale-x-100';
   return (
     <>
       {isAdmin && (
@@ -473,696 +412,5 @@ function GoalModal({ current, onClose, onSave }: { current: number; onClose: () 
         <button onClick={() => onSave(n)} disabled={!n || n < 1} className="btn-accent flex-1 py-2 text-sm disabled:opacity-50">{tr('Save')}</button>
       </div>
     </Modal>
-  );
-}
-
-/* ================================== You ================================== */
-
-/**
- * What you have earned, plus the single next thing.
- *
- * It used to render all six at once with five of them greyed out, which is a wall of things you have not
- * done sitting on your own profile.
- */
-function BadgesCard({ stats, span = '' }: { stats?: Stats; span?: string }) {
-  if (!stats) return <div className={`card skeleton h-32 ${span}`} />;
-  const earned = BADGES.filter((b) => b.test(stats));
-  const next = BADGES.find((b) => !b.test(stats));
-  return (
-    <div className={`${CARD} ${span}`}>
-      <h2 className="mb-3 font-display text-base font-semibold">{tr('Badges')}</h2>
-      <div className="flex flex-wrap gap-2">
-        {earned.map((b) => (
-          <span key={b.label} className="inline-flex items-center gap-1.5 rounded-full border border-accent/40 bg-accent-soft px-3 py-1.5 text-xs text-fog-100">
-            <span>{b.emoji}</span>{tr(b.label)}
-          </span>
-        ))}
-        {next && (
-          <span key={next.label} className="inline-flex items-center gap-1.5 rounded-full border border-ink-700 px-3 py-1.5 text-xs text-ink-500 opacity-60">
-            <span>{next.emoji}</span>{tr(next.label)}
-          </span>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function AvatarCard({ span = '' }: { span?: string }) {
-  const { user, setAvatar } = useAuth();
-  const qc = useQueryClient();
-  const av = user?.avatar ?? {};
-  const save = async (next: { emoji?: string; color?: string }) => {
-    const merged = { ...av, ...next };
-    setAvatar(merged);
-    try { await api('/api/settings', { method: 'PUT', json: { avatar: merged } }); } catch { /* the optimistic change stands; the next load re-reads the server */ }
-    qc.invalidateQueries({ queryKey: ['leaderboard'] });
-  };
-  return (
-    <div className={`${CARD} ${span}`}>
-      <h2 className="mb-3 font-display text-base font-semibold">{tr('Your avatar')}</h2>
-      <div className="flex items-center gap-4">
-        <Avatar avatar={av} size={56} />
-        <div className="flex flex-wrap gap-1.5">
-          {AVATAR_COLORS.map((c) => (
-            <button key={c} onClick={() => save({ color: c })} className="h-7 w-7 rounded-full"
-              style={{ background: c, outline: av.color === c ? '2px solid white' : 'none', outlineOffset: 2 }} />
-          ))}
-        </div>
-      </div>
-      <div className="mt-4 flex flex-wrap gap-2">
-        {AVATAR_EMOJIS.map((e) => (
-          <button key={e} onClick={() => save({ emoji: e })}
-            className={`grid h-10 w-10 place-items-center rounded-xl border text-xl ${av.emoji === e ? 'border-accent bg-accent-soft' : 'border-ink-700'}`}>
-            {e}
-          </button>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function ListsCard({ span = '' }: { span?: string }) {
-  const { data } = useQuery({ queryKey: ['collections'], queryFn: () => api<{ content: CollectionRow[] }>('/api/collections'), staleTime: 300_000 });
-  const rows = data?.content ?? [];
-  return (
-    <div className={`${CARD} ${span}`}>
-      <h2 className="mb-3 font-display text-base font-semibold">{tr('Lists')}</h2>
-      {rows.length ? (
-        <div className="space-y-1.5">
-          {rows.slice(0, 6).map((c) => (
-            <Link key={c.id} href={`/collection/?id=${encodeURIComponent(c.id)}`}
-              className="flex items-center justify-between gap-3 rounded-xl border border-ink-700/70 bg-ink-850/50 px-3 py-2">
-              <span className="min-w-0 truncate text-sm text-fog-100">{c.name}</span>
-              <span className="shrink-0 text-xs tabular-nums text-fog-500">{tr('{n} series', { n: c.item_count })}</span>
-            </Link>
-          ))}
-        </div>
-      ) : (
-        <p className="text-xs text-fog-500">{tr('No collections yet')}</p>
-      )}
-      <Link href="/collections/" className="chip mt-3 text-xs">{tr('See all')}<IcChevronRight width={14} height={14} /></Link>
-    </div>
-  );
-}
-
-/* ================================ Reading ================================ */
-
-/**
- * Everything about bytes on this device, in one card.
- *
- * It replaces three separate rows: a link to /downloads (which is already a bottom-nav tab, so this was its
- * third door), a size readout, and an unlabelled full-width button that silently called
- * `navigator.storage.persist()` and reported absolutely nothing back.
- */
-function OfflineCard({ span = '' }: { span?: string }) {
-  const toast = useToast();
-  const [usage, setUsage] = useState({ usage: 0, quota: 0 });
-  const [persisted, setPersisted] = useState(false);
-
-  useEffect(() => {
-    storageEstimate().then(setUsage);
-    navigator.storage?.persisted?.().then(setPersisted).catch(() => {});
-  }, []);
-
-  const ask = async () => {
-    const ok = await requestPersist();
-    setPersisted(ok);
-    toast(ok ? tr('Protected from eviction') : tr('The browser did not grant it.'), ok ? 'success' : 'error');
-  };
-
-  return (
-    <div className={`${CARD} ${span}`}>
-      <h2 className="font-display text-base font-semibold">{tr('Offline')}</h2>
-      <p className="mt-2 font-display text-2xl font-bold tabular-nums text-fog-50">{bytes(usage.usage)}</p>
-      <div className="mt-2"><ProgressBar value={usage.quota ? Math.min(1, usage.usage / usage.quota) : 0} /></div>
-
-      <Link href="/downloads/" className="mt-3 flex items-center justify-between gap-3 rounded-xl border border-ink-700/70 bg-ink-850/50 px-3 py-2">
-        <span className="flex min-w-0 items-center gap-2 text-sm text-fog-200">
-          <IcDownload className="shrink-0 text-accent" width={18} height={18} /><span className="truncate">{tr('Offline downloads')}</span>
-        </span>
-        <IcChevronRight className="shrink-0 text-fog-500" width={16} height={16} />
-      </Link>
-
-      <p className="mt-3 text-xs text-fog-500">
-        {persisted ? tr('Protected from eviction') : tr('Tap to ask the browser to protect your downloads from eviction.')}
-      </p>
-      {!persisted && <button onClick={ask} className="btn-ghost mt-2 px-4 py-2 text-sm">{tr('Protect downloads')}</button>}
-    </div>
-  );
-}
-
-function SmartDownloadsCard({ span = '' }: { span?: string }) {
-  const { user, setSettings } = useAuth();
-  const so = (user?.settings?.smartOffline ?? {}) as { enabled?: boolean; perSeries?: number };
-  const set = async (partial: { enabled?: boolean; perSeries?: number }) => {
-    const next = { enabled: !!so.enabled, perSeries: so.perSeries || 3, ...partial };
-    setSettings({ smartOffline: next });
-    try { await api('/api/settings', { method: 'PUT', json: { smartOffline: next } }); } catch { /* optimistic; re-read on next load */ }
-  };
-  return (
-    <div className={`${CARD} ${span}`}>
-      <h2 className="mb-3 font-display text-base font-semibold">{tr('Smart downloads')}</h2>
-      <div className="flex items-center justify-between gap-3">
-        <div className="min-w-0">
-          <p className="text-sm text-fog-100">{tr('Keep favorites offline')}</p>
-          <p className="text-xs text-fog-500">{tr('Auto-download the latest unread chapters of your favorites.')}</p>
-        </div>
-        <Switch on={!!so.enabled} onChange={(next) => set({ enabled: next })} label={tr('Keep favorites offline')} />
-      </div>
-      {so.enabled && (
-        <div className="mt-3 flex items-center gap-2">
-          <span className="text-xs text-fog-400">{tr('Per series:')}</span>
-          {[3, 5, 10].map((n) => (
-            <button key={n} onClick={() => set({ perSeries: n })} className={`chip text-xs ${(so.perSeries || 3) === n ? 'chip-active' : ''}`}>{n}</button>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function NotificationsCard({ span = '' }: { span?: string }) {
-  const [supported] = useState(() => typeof window !== 'undefined' && 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window);
-  const [enabledSrv, setEnabledSrv] = useState(false);
-  const [key, setKey] = useState('');
-  const [on, setOn] = useState(false);
-  const [busy, setBusy] = useState(false);
-
-  useEffect(() => {
-    (async () => {
-      try {
-        const k = await api<{ enabled: boolean; key: string }>('/api/push/key');
-        setEnabledSrv(k.enabled); setKey(k.key);
-        if (k.enabled && typeof navigator !== 'undefined' && 'serviceWorker' in navigator) {
-          const reg = await navigator.serviceWorker.ready;
-          setOn(!!(await reg.pushManager.getSubscription()));
-        }
-      } catch { /* no VAPID key configured; the card stays unmounted */ }
-    })();
-  }, []);
-
-  const toggle = async () => {
-    if (!supported) return;
-    setBusy(true);
-    try {
-      const reg = await navigator.serviceWorker.ready;
-      if (on) {
-        const sub = await reg.pushManager.getSubscription();
-        if (sub) { await api('/api/push/unsubscribe', { json: { endpoint: sub.endpoint } }).catch(() => {}); await sub.unsubscribe().catch(() => {}); }
-        setOn(false);
-      } else {
-        const perm = await Notification.requestPermission();
-        if (perm === 'granted') {
-          const sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: urlB64ToUint8(key) as unknown as BufferSource });
-          const j = sub.toJSON() as { endpoint?: string; keys?: { p256dh: string; auth: string } };
-          if (j.endpoint && j.keys) { await api('/api/push/subscribe', { json: { endpoint: j.endpoint, keys: j.keys, deviceId: deviceId() } }); setOn(true); }
-        }
-      }
-    } catch { /* permission denied or the SW is not ready; the switch snaps back to the real state */ }
-    setBusy(false);
-  };
-
-  // No server key means push is not configured at all: the board reflows rather than showing a dead switch.
-  if (!enabledSrv) return null;
-
-  return (
-    <div className={`${CARD} ${span}`}>
-      <h2 className="mb-3 font-display text-base font-semibold">{tr('Notifications')}</h2>
-      <div className="flex items-center justify-between gap-3">
-        <div className="min-w-0">
-          <p className="text-sm text-fog-100">{tr('New-chapter alerts')}</p>
-          <p className="text-xs text-fog-500">
-            {supported ? tr('Get a push notification when one of your favorites gets a new chapter.') : tr('Not supported on this browser.')}
-          </p>
-        </div>
-        <Switch on={on} onChange={toggle} disabled={!supported || busy} label={tr('New-chapter alerts')} />
-      </div>
-    </div>
-  );
-}
-
-interface TrackerStatus {
-  /** Sent by the server so the UI never hardcodes the provider list. */
-  label?: string;
-  tokenHelp?: string;
-  provider: string; connected: boolean; accountName: string | null;
-  expiresAt: string | null; expiringSoon: boolean; lastSyncAt: string | null; lastError: string | null;
-}
-
-/**
- * Connect one or more trackers so finished chapters push automatically.
- *
- * The provider list comes from the server rather than being written here: each one reports its own name and
- * where a token comes from, so adding a fourth service is a backend change alone.
- *
- * Token-paste rather than an OAuth round-trip, for all of them. A real OAuth flow would need every
- * self-hoster to register an application with each service and keep its secret in their compose file, which
- * is a worse trade for a household app than copying a token once.
- *
- * The card renders nothing at all when the server offers no providers. The old page put the heading outside
- * this component, so an empty list left an orphan "Progress tracking" over blank space.
- *
- * `focus` (from `?card=tracking`, the import page's "connect one under Profile" line) scrolls the card into
- * view once, after the trackers query has settled -- the card does not exist before that (it returns null
- * while the list is empty), and its height depends on the answer. `block: 'start'` with a scroll margin
- * for the sticky desktop top bar; instant under reduced motion. Only ever once per arrival: a person who
- * then scrolls away must not be pulled back by a refetch.
- */
-function TrackerCard({ span = '', focus = false }: { span?: string; focus?: boolean }) {
-  const { data, refetch, isPending } = useQuery({ queryKey: ['trackers'], queryFn: () => api<{ content: TrackerStatus[] }>('/api/trackers') });
-  const still = useReducedMotion();
-  const ref = useRef<HTMLDivElement>(null);
-  const scrolled = useRef(false);
-  useEffect(() => {
-    if (!focus || isPending || scrolled.current || !ref.current) return;
-    scrolled.current = true;
-    ref.current.scrollIntoView({ block: 'start', behavior: still ? 'auto' : 'smooth' });
-  }, [focus, isPending, still]);
-  const all = data?.content || [];
-  if (!all.length) return null;
-  return (
-    <div ref={ref} id="progress-tracking" className={`${CARD} ${span} scroll-mt-4 lg:scroll-mt-20`}>
-      <h2 className="mb-3 font-display text-base font-semibold">{tr('Progress tracking')}</h2>
-      <div className="space-y-3">
-        {all.map((t) => <TrackerRow key={t.provider} t={t} refetch={refetch} />)}
-      </div>
-    </div>
-  );
-}
-
-function TrackerRow({ t, refetch }: { t: TrackerStatus; refetch: () => void }) {
-  const toast = useToast();
-  const [token, setToken] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [open, setOpen] = useState(false);
-  // A service's own name is a proper noun: it is passed as a placeholder rather than translated.
-  const label = t.label || t.provider;
-  const row = 'rounded-xl border border-ink-700/70 bg-ink-850/50 p-3';
-
-  const connect = async () => {
-    if (!token.trim()) return;
-    setBusy(true);
-    try {
-      const r = await api<{ account: string }>(`/api/trackers/${t.provider}/connect`, { json: { token: token.trim() } });
-      toast(tr('Connected to {name} as {account}', { name: label, account: r.account }), 'success');
-      setToken('');
-      setOpen(false);
-      refetch();
-      // Only AniList has a backfill endpoint today; the others start syncing from the next chapter read.
-      if (t.provider === 'anilist') {
-        const b = await api<{ series: number }>('/api/trackers/anilist/backfill', { json: {} });
-        if (b.series) toast(tr('Syncing {n} series you have already finished…', { n: b.series }));
-      }
-    } catch (e: any) { toast(msgOf(e, tr('{name} did not accept that token', { name: label })), 'error'); }
-    setBusy(false);
-  };
-
-  const disconnect = async () => {
-    try { await api(`/api/trackers/${t.provider}`, { method: 'DELETE' }); toast(tr('Disconnected'), 'success'); refetch(); }
-    catch { toast(tr('Could not disconnect'), 'error'); }
-  };
-
-  if (t.connected) {
-    return (
-      <div className={row}>
-        <div className="flex items-center justify-between gap-3">
-          <div className="min-w-0">
-            <p className="text-sm text-fog-100">{label} · <span className="text-accent">{t.accountName}</span></p>
-            <p className="mt-0.5 text-xs text-fog-500">
-              {tr('Finished chapters sync automatically')}
-              {t.lastSyncAt && <> · {tr('last synced {when}', { when: relativeTime(t.lastSyncAt) })}</>}
-            </p>
-          </div>
-          <button onClick={disconnect} className="chip shrink-0 text-xs">{tr('Disconnect')}</button>
-        </div>
-        {t.expiringSoon && (
-          <p className="mt-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-2.5 py-1.5 text-xs text-amber-300">
-            {tr('This {name} token expires {when}. None of these services can refresh a token silently, so reconnect before then to keep syncing.',
-              { name: label, when: t.expiresAt ? relativeTime(t.expiresAt) : tr('soon') })}
-          </p>
-        )}
-        {t.lastError && (
-          <p className="mt-2 rounded-lg border border-red-500/30 bg-red-500/10 px-2.5 py-1.5 text-xs text-red-300">{t.lastError}</p>
-        )}
-      </div>
-    );
-  }
-
-  return (
-    <div className={row}>
-      <div className="flex items-center justify-between gap-3">
-        <p className="min-w-0 text-sm text-fog-100">{tr('Sync your reading to {name}', { name: label })}</p>
-        <button onClick={() => setOpen((v) => !v)} className="chip shrink-0 text-xs">{open ? tr('Cancel') : tr('Connect')}</button>
-      </div>
-      {open && (
-        <>
-          {t.tokenHelp && <p className="mt-2 text-xs text-fog-500">{t.tokenHelp}</p>}
-          <p className="mt-1 max-w-prose text-[11px] text-fog-600">
-            {tr('The token carries access to your {name} account and cannot be scoped. It is stored encrypted here, and you can disconnect at any time.', { name: label })}
-          </p>
-          <div className="mt-3 flex gap-2">
-            <input value={token} onChange={(e) => setToken(e.target.value)} type="password"
-              placeholder={tr('{name} access token', { name: label })} autoCapitalize="none" autoCorrect="off" className="field flex-1" />
-            <button onClick={connect} disabled={busy || !token.trim()} className="btn-accent shrink-0 px-4 text-sm disabled:opacity-50">
-              {busy ? tr('Working…') : tr('Connect')}
-            </button>
-          </div>
-        </>
-      )}
-      {t.lastError && <p className="mt-2 text-xs text-red-300">{t.lastError}</p>}
-    </div>
-  );
-}
-
-/* ================================ Settings ================================ */
-
-function AccentCard({ span = '' }: { span?: string }) {
-  const { user, setSettings } = useAuth();
-  const [accent, setAccent] = useState<string>(user?.settings?.accent || '#7c5cff');
-  const pick = async (hex: string) => {
-    setAccent(hex);
-    setSettings({ accent: hex });
-    try { await api('/api/settings', { method: 'PUT', json: { accent: hex } }); } catch { /* optimistic; re-read on next load */ }
-  };
-  return (
-    <div className={`${CARD} ${span}`}>
-      <h2 className="mb-3 font-display text-base font-semibold">{tr('Accent')}</h2>
-      <div className="flex flex-wrap gap-3">
-        {ACCENTS.map((a) => (
-          <button key={a.hex} onClick={() => pick(a.hex)} className="relative h-11 w-11 rounded-full"
-            style={{ background: a.hex }} aria-label={tr(a.name)}>
-            {accent.toLowerCase() === a.hex.toLowerCase() && (
-              <span className="absolute inset-0 grid place-items-center text-black"><IcCheck width={18} height={18} /></span>
-            )}
-          </button>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-/**
- * Choose a language.
- *
- * Written to the server so it follows you to another device, and mirrored to localStorage so the login
- * screen -- which nobody is signed in to -- is already translated.
- *
- * `locked` is not politeness. I18nProvider remounts its entire subtree on a language change, so tapping a
- * chip while a once-only secret is on screen destroys it permanently -- the server keeps only a hash -- and
- * kills a half-finished 2FA enrolment mid-QR-scan. The reason is stated inline rather than in a toast that
- * arrives after the damage.
- *
- * The note about machine assistance is shown rather than buried in a commit message: someone reading their
- * own language deserves to know how it got there, and it is what makes "this is wrong" an invitation
- * instead of a complaint.
- */
-function LanguageCard({ span = '', locked }: { span?: string; locked: boolean }) {
-  const { lang, setLang } = useT();
-  return (
-    <div className={`${CARD} ${span}`}>
-      <h2 className="mb-3 font-display text-base font-semibold">{tr('Language')}</h2>
-      <div className="flex flex-wrap gap-1.5">
-        {LOCALES.map((l) => (
-          <button key={l.code} onClick={() => setLang(l.code)} disabled={locked}
-            className={`chip text-xs disabled:opacity-40 ${lang === l.code ? 'chip-active' : ''}`}>
-            {l.name}
-          </button>
-        ))}
-      </div>
-      {locked && (
-        <p className="mt-2 max-w-prose text-[11px] text-amber-300">
-          {tr('Copy what is on screen first. Changing language reloads this page, and the code is shown only once.')}
-        </p>
-      )}
-      <p className="mt-3 max-w-prose text-[11px] text-fog-500">
-        {tr('Translations other than English are machine-assisted and have not been checked by a native speaker. If something reads wrong, the language files are one JSON each — corrections are welcome.')}
-      </p>
-    </div>
-  );
-}
-
-function InstallCard({ span = '' }: { span?: string }) {
-  const [canInstall, setCanInstall] = useState(false);
-  const [isIOS, setIsIOS] = useState(false);
-  const [standalone, setStandalone] = useState(false);
-
-  useEffect(() => {
-    setCanInstall(!!(window as any).__yomiInstall);
-    setIsIOS(/iphone|ipad|ipod/i.test(navigator.userAgent));
-    setStandalone(window.matchMedia('(display-mode: standalone)').matches || (navigator as any).standalone === true);
-  }, []);
-
-  const install = async () => {
-    const e = (window as any).__yomiInstall;
-    if (!e) return;
-    e.prompt();
-    await e.userChoice;
-    (window as any).__yomiInstall = null;
-    setCanInstall(false);
-  };
-
-  // Already installed: the card is about installing, so it unmounts rather than congratulating you.
-  if (standalone) return null;
-
-  return (
-    <div className={`${CARD} ${span}`}>
-      <h2 className="mb-3 font-display text-base font-semibold">{tr('Install Uchiyomi')}</h2>
-      {canInstall ? (
-        <button onClick={install} className="btn-accent w-full py-2.5 text-sm">
-          <IcDownload width={18} height={18} />{tr('Add to home screen')}
-        </button>
-      ) : isIOS ? (
-        <div className="text-sm text-fog-300">
-          <p className="mb-1 font-medium text-fog-100">{tr('Add to your iPhone')}</p>
-          <p>{tr('Tap Share in Safari, then Add to Home Screen.')}</p>
-          <p className="mt-2 text-xs text-fog-500">{tr('On iOS, offline downloads may be cleared by the system under storage pressure.')}</p>
-        </div>
-      ) : (
-        <p className="text-sm text-fog-400">{tr('Open in Chrome/Edge and use “Install app” from the menu.')}</p>
-      )}
-    </div>
-  );
-}
-
-/* ================================ Account ================================ */
-
-function SignedInCard({ span = '' }: { span?: string }) {
-  const { user, isAdmin } = useAuth();
-  return (
-    <div className={`${CARD} ${span}`}>
-      <h2 className="mb-3 font-display text-base font-semibold">{tr('Signed in as')}</h2>
-      <div className="flex items-center gap-3">
-        <Avatar avatar={user?.avatar} size={44} />
-        <div className="min-w-0">
-          <p className="truncate text-sm font-medium text-fog-50">{user?.displayName}</p>
-          {user?.username && <p className="truncate text-xs text-fog-500">@{user.username}</p>}
-        </div>
-        {isAdmin && (
-          <span className="ms-auto shrink-0 rounded bg-accent/20 px-1.5 py-0.5 text-[10px] font-semibold text-accent">{tr('Admin')}</span>
-        )}
-      </div>
-    </div>
-  );
-}
-
-interface OpdsLink { token: string; url: string; expiresInDays?: number }
-/** The token that already exists, if any. The raw password is shown once, so this is the only way to see
- *  whether one is out there, when it expires, and whether a reader is still using it. */
-interface OpdsStatus { exists: boolean; createdAt?: string; expiresAt?: string; lastSeen?: string | null; expired?: boolean; showAdult?: boolean }
-
-function OpdsCard({ span = '', link, setLink }: { span?: string; link: OpdsLink | null; setLink: (v: OpdsLink | null) => void }) {
-  const { user } = useAuth();
-  const toast = useToast();
-  const [st, setSt] = useState<OpdsStatus | null>(null);
-  const [busy, setBusy] = useState(false);
-
-  const load = () => api<OpdsStatus>('/api/opds/token').then(setSt).catch(() => {});
-  useEffect(() => { load(); }, []);
-
-  const gen = async () => {
-    setBusy(true);
-    try { setLink(await api<OpdsLink>('/api/opds/token', { method: 'POST' })); await load(); }
-    catch (e: any) { toast(msgOf(e, tr('Could not change that')), 'error'); }
-    setBusy(false);
-  };
-  const revoke = async () => {
-    setBusy(true);
-    try { await api('/api/opds/token', { method: 'DELETE' }); setLink(null); await load(); }
-    catch (e: any) { toast(msgOf(e, tr('Could not change that')), 'error'); }
-    setBusy(false);
-  };
-  // On the token, not the account: the phone in a pocket and the e-reader on the shelf are different
-  // audiences, and an OPDS app has no button of its own for the reveal the Library page offers.
-  const setAdult = async (on: boolean) => {
-    try { setSt(await api<OpdsStatus>('/api/opds/token', { method: 'PATCH', json: { showAdult: on } })); }
-    catch (e: any) { toast(msgOf(e, tr('Could not change that')), 'error'); }
-  };
-
-  const summary = st?.exists
-    ? `${st.expired ? tr('Expired') : tr('A link is active')} · ${st.lastSeen ? tr('last used {when}', { when: relativeTime(st.lastSeen) }) : tr('never used')}`
-    : tr('No link yet.');
-
-  return (
-    <SettingsCard
-      title={tr('External readers (OPDS)')}
-      summary={summary}
-      // A password shown once must never be behind a collapsed card, including after a remount.
-      defaultOpen={!!link}
-      span={span}
-    >
-      <p className="text-sm text-fog-100">{tr('Read Uchiyomi in another app')}</p>
-      <p className="mt-1 max-w-prose text-xs text-fog-500">
-        {tr('Add Uchiyomi as an OPDS catalog in readers like Panels, Chunky, KOReader or Moon+. Generate a personal link, then enter the URL and credentials below in your reader.')}
-      </p>
-
-      {st?.exists && !link && (
-        <div className="mt-3 rounded-xl border border-ink-700/70 bg-ink-850/50 p-3 text-xs">
-          <div className="flex items-center justify-between gap-3">
-            <span className={st.expired ? 'text-rose-300' : 'text-fog-200'}>{st.expired ? tr('Expired') : tr('A link is active')}</span>
-            <button onClick={revoke} disabled={busy}
-              className="chip shrink-0 text-[11px] hover:border-rose-500/50 hover:text-rose-400 disabled:opacity-50">{tr('Revoke')}</button>
-          </div>
-          <p className="mt-1 text-fog-500">
-            {st.lastSeen ? tr('last used {when}', { when: relativeTime(st.lastSeen) }) : tr('never used')}
-            {st.expiresAt && <> · {st.expired
-              ? tr('expired {when}', { when: relativeTime(st.expiresAt) })
-              : tr('expires {when}', { when: relativeTime(st.expiresAt) })}</>}
-          </p>
-        </div>
-      )}
-
-      {st?.exists && (
-        <div className="mt-3 flex items-center justify-between gap-3 rounded-xl border border-ink-700/70 bg-ink-850/50 p-3">
-          <div className="min-w-0">
-            <p className="text-xs text-fog-100">{tr('Include 18+ libraries in this reader')}</p>
-            <p className="max-w-prose text-[11px] text-fog-500">
-              {tr('Off by default. Your age limit, if you have one, still applies whatever this says.')}
-            </p>
-          </div>
-          <Switch on={!!st.showAdult} disabled={busy} label={tr('Include 18+ libraries in this reader')} onChange={setAdult} />
-        </div>
-      )}
-
-      {!link ? (
-        <button onClick={gen} disabled={busy} className="btn-accent mt-3 w-full py-2 text-sm disabled:opacity-50">
-          {busy ? tr('Working…') : st?.exists ? tr('Generate a new link') : tr('Generate OPDS link')}
-        </button>
-      ) : (
-        <div className="mt-3 space-y-2 text-xs">
-          <div>
-            <span className="text-fog-500">{tr('Catalog URL')}</span>
-            <div className="mt-0.5 break-all rounded-lg border border-ink-700 bg-ink-900/60 px-2 py-1.5 font-mono text-fog-100">{link.url}</div>
-          </div>
-          <div>
-            <span className="text-fog-500">{tr('Username')}</span>
-            <div className="mt-0.5 rounded-lg border border-ink-700 bg-ink-900/60 px-2 py-1.5 font-mono text-fog-100">{user?.username || 'me'}</div>
-          </div>
-          <div>
-            <span className="text-fog-500">{tr('Password (shown once, copy it now)')}</span>
-            <div className="mt-0.5 break-all rounded-lg border border-ink-700 bg-ink-900/60 px-2 py-1.5 font-mono text-accent">{link.token}</div>
-          </div>
-          <p className="max-w-prose text-[11px] text-fog-500">
-            {tr('Generating again replaces the previous token.')}
-            {link.expiresInDays != null && <> {tr('This one stops working in {n} days. You can revoke it sooner.', { n: link.expiresInDays })}</>}
-          </p>
-          <button onClick={() => setLink(null)} className="text-xs text-fog-400 hover:underline">{tr('Done')}</button>
-        </div>
-      )}
-    </SettingsCard>
-  );
-}
-
-/** Admins only, washed in real library art so the one door out of the profile does not look like a form row. */
-function AdminCard({ seriesId, span = '' }: { seriesId?: string; span?: string }) {
-  return (
-    <Link href="/admin/" className={`card grad-border relative isolate block overflow-hidden ${span}`}>
-      <div className="relative h-24 lg:h-28">
-        {seriesId && <Backdrop seriesId={seriesId} className="absolute inset-0" />}
-        <div aria-hidden className="absolute inset-0 bg-linear-to-r from-ink-950 via-ink-950/80 to-transparent rtl:bg-linear-to-l" />
-        <div className="absolute inset-0 flex items-center justify-between gap-3 px-4">
-          <span className="min-w-0 font-display text-sm font-semibold text-fog-50">{tr('Admin and server settings')}</span>
-          <IcChevronRight className="shrink-0 text-fog-400" width={18} height={18} />
-        </div>
-      </div>
-    </Link>
-  );
-}
-
-function SignOutCard({ span = '' }: { span?: string }) {
-  const { logout } = useAuth();
-  return (
-    <div className={`${CARD} ${span}`}>
-      <button onClick={logout} className="btn-ghost w-full py-2.5 text-sm text-red-300">{tr('Sign out')}</button>
-      <p className="mt-3 flex items-center justify-center gap-1 text-center text-[11px] text-fog-600">
-        <IcSparkle width={12} height={12} />{tr('Uchiyomi · personal reader for your Komga library')}
-      </p>
-    </div>
-  );
-}
-
-/**
- * The Reading tab used to hold four settings cards and no reading. This is the reading.
- *
- * One request, three views of it: the calendar, the trend, and the week. `/api/stats` already computed a
- * dense daily series and simply had nowhere to be drawn at more than 90 days.
- */
-function StudioCard({ span = '' }: { span?: string }) {
-  const [days, setDays] = useState(90);
-  const { data, isLoading } = useQuery({
-    queryKey: ['stats', days],
-    queryFn: () => api<Stats>(`/api/stats?days=${days}`),
-  });
-
-  const series = data?.byDay ?? [];
-  const counts = series.map((d) => d.chapters);
-  const total = counts.reduce((a, b) => a + b, 0);
-
-  // Sunday-first, matching the heatmap's rows and `Date.getUTCDay()`. Bucketed on the client because the
-  // window is already here -- asking the server for the same numbers a second way is how two endpoints
-  // start disagreeing.
-  const dow = [0, 0, 0, 0, 0, 0, 0];
-  for (const d of series) {
-    const t = Date.parse(`${d.day}T00:00:00Z`);
-    if (!Number.isNaN(t)) dow[new Date(t).getUTCDay()] += d.chapters;
-  }
-  const DOW = keys('Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat');
-
-  if (isLoading && !data) return <div className={`card skeleton h-64 ${span}`} />;
-
-  return (
-    <div className={`${CARD} ${span}`}>
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-        <h2 className="font-display text-base font-semibold">{tr('Reading studio')}</h2>
-        <div className="flex gap-1.5">
-          {[90, 180, 365].map((d) => (
-            <button key={d} onClick={() => setDays(d)} aria-pressed={days === d}
-              className={`chip text-[11px] ${days === d ? 'border-accent/50 text-accent' : 'text-fog-400'}`}>
-              {tr('{n} days', { n: d })}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {total === 0 ? (
-        <p className="py-6 text-center text-sm text-fog-500">{tr('Nothing read in this window yet.')}</p>
-      ) : (
-        <div className="space-y-5">
-          <div>
-            <p className="mb-1.5 text-[11px] uppercase tracking-widest text-fog-500">
-              {tr('{n} chapters', { n: total })}
-            </p>
-            {series.length > 0 && <Heatmap values={counts} start={series[0].day} />}
-          </div>
-          <div>
-            <p className="mb-1 text-[11px] uppercase tracking-widest text-fog-500">{tr('Pace')}</p>
-            <Pace values={counts} />
-          </div>
-          <div>
-            <p className="mb-2 text-[11px] uppercase tracking-widest text-fog-500">{tr('By weekday')}</p>
-            <Bars items={dow.map((v, i) => ({ label: tr(DOW[i]), value: v }))} />
-          </div>
-        </div>
-      )}
-    </div>
   );
 }

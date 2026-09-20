@@ -1,6 +1,8 @@
 'use client';
-import { useEffect, useState } from 'react';
+import { Suspense, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { useTabParam } from '@/lib/useTabParam';
+import { AdminSettings } from '@/components/AdminSettings';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, ApiError, img } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
@@ -10,17 +12,14 @@ import { bytes, relativeTime } from '@/lib/format';
 import { useToast } from '@/components/Toast';
 import { ConfirmDialog, Modal, msgOf } from '@/components/ConfirmDialog';
 import { Avatar } from '@/components/Avatar';
-import { IcChevronLeft, IcTrash, IcPlus, IcRefresh, IcInfo } from '@/components/icons';
+import { IcChevronLeft, IcChevronRight, IcTrash, IcPlus, IcRefresh, IcInfo } from '@/components/icons';
 import { SourcesExplainer } from '@/components/SourcesExplainer';
 import { Backdrop, Img } from '@/components/ui';
 import { SeriesCard } from '@/components/cards';
-import { Switch } from '@/components/Switch';
 import { ConsoleNav } from '@/components/ConsoleNav';
 import { motion, useReducedMotion } from 'framer-motion';
 import { t as tr, keys } from '@/lib/i18n';
-import type { KnownGroup, Series, StoredPrefs } from '@/lib/types';
-import { hasGroup, normGroup, reorder, withoutGroup } from '@/lib/scanlators';
-import { suggestGroups } from '@/lib/groupSuggest';
+import type { Series } from '@/lib/types';
 import { groupProviders, type ProviderGroup, type ProviderSrc } from '@/lib/providerGroups';
 
 /**
@@ -53,10 +52,25 @@ const STATUS_STYLE: Record<string, string> = {
   quiet: 'bg-fog-600/20 text-fog-300',
 };
 
+/**
+ * The tab lives in the URL (`?tab=Settings`), read through `useSearchParams`, which a statically exported
+ * page may only call under a Suspense boundary -- the build fails without one. The fallback keeps the
+ * page's height so the shell does not jump when the boundary resolves.
+ */
 export default function AdminPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen-d" />}>
+      <AdminInner />
+    </Suspense>
+  );
+}
+
+function AdminInner() {
   const { isAdmin } = useAuth();
   const router = useRouter();
-  const [tab, setTab] = useState<Tab>('Overview');
+  // In the URL rather than in state: a refresh, the back button and every deep link used to land on
+  // Overview, and `/admin/?tab=Settings` is the address the docs can now give (lib/useTabParam.ts).
+  const [tab, setTab] = useTabParam<Tab>(TABS, 'Overview');
 
   if (!isAdmin) return <div className="flex min-h-screen-d items-center justify-center text-fog-400">{tr('Admins only.')}</div>;
 
@@ -64,7 +78,7 @@ export default function AdminPage() {
     <>
       {tab === 'Overview' && <Overview onTab={setTab} />}
       {tab === 'Members' && <Members />}
-      {tab === 'Providers' && <Providers />}
+      {tab === 'Providers' && <Providers onTab={setTab} />}
       {tab === 'Extensions' && <div className="board"><Extensions span="full" /></div>}
       {tab === 'Art' && <ArtReview />}
       {tab === 'Health' && <Health />}
@@ -72,7 +86,7 @@ export default function AdminPage() {
       {tab === 'Tasks' && <Tasks />}
       {tab === 'Activity' && <Activity />}
       {tab === 'Sessions' && <Sessions />}
-      {tab === 'Settings' && <Settings />}
+      {tab === 'Settings' && <AdminSettings />}
     </>
   );
 
@@ -457,7 +471,7 @@ function Members() {
   );
 }
 
-function Providers() {
+function Providers({ onTab }: { onTab: (t: Tab) => void }) {
   const router = useRouter();
   const toast = useToast();
   const qc = useQueryClient();
@@ -744,8 +758,10 @@ function Providers() {
         )}
       </div>
 
-      {/* Extension sources, from an optional Suwayomi server running Mihon/Tachiyomi extensions */}
-      <Extensions span="full" />
+      {/* Extension sources live on their own tab; this is the door to it. The whole Extensions card used to
+          render here as well as there, so the catalogue's search field, its language list and its 1,400 rows
+          appeared twice in the console and the `Search extensions` field sat on the Providers tab. */}
+      <ExtensionsLink onTab={onTab} />
 
       {/* Import a list of titles. One entry point, the reviewed flow on its own page: the textarea that used
           to sit under it here added the FIRST cross-source hit with no review, which is the "wrong manga" an
@@ -773,6 +789,30 @@ function Providers() {
 
       {explaining && <SourcesExplainer onClose={() => setExplaining(false)} />}
     </div>
+  );
+}
+
+/**
+ * The Providers tab's door to the Extensions tab: one line of status and a chevron, the whole card a
+ * button. It reads the same status query the Extensions tab does (same key, same url), so the count here
+ * is the count there, and a click is a tab switch rather than a navigation -- the `?tab=` in the URL
+ * follows it.
+ */
+function ExtensionsLink({ onTab }: { onTab: (t: Tab) => void }) {
+  const { data: status } = useQuery({ queryKey: ['ext-status'], queryFn: () => api<ExtStatus>('/api/admin/extensions/status') });
+  const sub = !status ? tr('Loading…')
+    : !status.configured || !status.reachable ? tr('The extension engine isn’t running')
+    : status.enabled === 1 ? tr('1 source enabled')
+    : tr('{n} sources enabled', { n: status.enabled ?? 0 });
+  return (
+    <button type="button" onClick={() => onTab('Extensions')}
+      className="card grad-border wide flex w-full items-center gap-3 p-4 text-start transition hover:bg-ink-800/60">
+      <span className="min-w-0 flex-1">
+        <span className="block text-xs font-semibold uppercase tracking-wider text-fog-500">{tr('Extensions')}</span>
+        <span className="block text-sm text-fog-200">{sub}</span>
+      </span>
+      <IcChevronRight width={18} height={18} aria-hidden className="shrink-0 text-fog-500 rtl:-scale-x-100" />
+    </button>
   );
 }
 
@@ -1039,365 +1079,6 @@ function Sessions() {
         ))}
         {!data?.content?.length && <p className="px-4 py-8 text-center text-sm text-fog-500">{tr('No active sessions.')}</p>}
       </div>
-    </div>
-  );
-}
-
-/**
- * The update check, and the opt-in install count.
- *
- * ⚠️ TWO CARDS BECAUSE THEY ARE TWO DIFFERENT PROMISES. The first reads a public GitHub url and tells
- * nobody anything, which is why it may be on by default. The second sends a small payload to a server the
- * project runs, and is off until somebody says otherwise. Merging them into one "telemetry" switch would
- * make the honest option -- updates yes, counting no -- impossible to express.
- *
- * ⚠️ THE PAYLOAD IS SHOWN, NOT DESCRIBED. It is fetched from the endpoint that produces the real thing, so
- * this cannot drift into being a flattering summary of something else. Written prose here would have been
- * easier and would have been the wrong shape: what an admin agrees to should be the literal object.
- */
-function UpdateAndCount({ data, save }: { data: any; save: (body: any, ok: string) => void }) {
-  const on = !!data.install_ping;
-  // Fetched whether or not it is on: seeing exactly what WOULD be sent is the point of the preview, and
-  // asking someone to consent first in order to find out would be backwards.
-  const { data: preview } = useQuery({
-    queryKey: ['install-ping-preview'],
-    queryFn: () => api<{ url: string; payload: Record<string, unknown>; sample: boolean }>('/api/admin/install-ping/preview'),
-    staleTime: 60_000,
-  });
-
-  return (
-    <>
-      <div className="card grad-border flex items-center justify-between gap-3 p-4">
-        <div className="min-w-0">
-          <p className="text-sm text-fog-100">{tr('Check for updates')}</p>
-          <p className="max-w-prose text-[11px] text-fog-500">
-            {tr('Ask GitHub once a day whether a newer Uchiyomi has been released, and show it under Health. Nothing about this server is sent — it is the same public page you could open yourself.')}
-          </p>
-        </div>
-        <Switch on={data.update_check !== false} label={tr('Check for updates')}
-          onChange={(next) => save({ updateCheck: next }, next ? 'Update checks on' : 'Update checks off')} />
-      </div>
-
-      <div className="card grad-border full p-4">
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <p className="text-sm text-fog-100">{tr('Count this server in the anonymous install count')}</p>
-            <p className="max-w-prose text-[11px] leading-relaxed text-fog-500">
-              {tr('Off by default. Nobody can see how many people self-host this, which makes it hard to know whether a release reached anyone. If you turn this on, once a day your server sends the few facts below — and nothing else — to uchiyomi.com.')}
-            </p>
-          </div>
-          <Switch on={on} label={tr('Count this server in the anonymous install count')}
-            onChange={(next) => save({ installPing: next }, next ? 'Thank you — counted' : 'No longer counted')} />
-        </div>
-
-        {preview && (
-          <div className="mt-3 rounded-xl border border-ink-700 bg-ink-950/60 p-3">
-            <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-fog-500">
-              {on ? tr('What is sent, once a day') : tr('What would be sent, once a day')}
-            </p>
-            <pre className="overflow-x-auto text-[11px] leading-relaxed text-fog-300">
-              <code>{`POST ${preview.url}\n${JSON.stringify(preview.payload, null, 2)}`}</code>
-            </pre>
-          </div>
-        )}
-
-        <ul className="mt-3 space-y-1 text-[11px] leading-relaxed text-fog-500">
-          {/* The id is the part that needs explaining, so it goes first and in plain words. */}
-          <li>{tr('The id changes every month and is a hash of a secret that never leaves this server, so two months of pings cannot be connected to each other.')}</li>
-          <li>{tr('No library, no titles, no accounts, no address, no hostname. The list above is the whole of it.')}</li>
-          <li>{tr('Turning this off deletes the secret and asks for this month to be forgotten. A new id is made if you ever turn it back on.')}</li>
-        </ul>
-      </div>
-    </>
-  );
-}
-
-const NO_PREFS: StoredPrefs = { priority: [], blocked: [], patienceDays: 2 };
-
-/**
- * A row of group names as chips, with a box to add one. `ordered` adds the arrows that make the row a ranking.
- * Names are compared the way the server compares them, so typing "asura-scans" next to "Asura Scans" is a
- * no-op rather than a second chip the server would fold into the first on save.
- */
-function GroupChips({ label, hint, value, ordered, onChange, suggestions }: {
-  label: string; hint: string; value: string[]; ordered?: boolean; onChange: (next: string[]) => void;
-  /** Every group the server has seen, for the chips under the box. Absent or empty renders no chips. */
-  suggestions?: KnownGroup[];
-}) {
-  const [draft, setDraft] = useState('');
-  const toast = useToast();
-  const add = (raw: string) => {
-    const t = raw.trim().replace(/,$/, '').trim();
-    setDraft('');
-    if (!t || hasGroup(value, t)) return;
-    // The server refuses both of these; refusing them here says why instead of a chip that never lands.
-    if (t.length > 80) { toast('A group name is at most 80 characters', 'error'); return; }
-    if (!normGroup(t)) { toast('A group name needs at least one letter or digit', 'error'); return; }
-    onChange([...value, t]);
-  };
-  return (
-    // ⚠️ The draft is committed when focus leaves the WHOLE control, not the input. The input's own blur
-    // fired when Tab moved focus to a suggestion chip (they are plain buttons, keyboard-reachable on
-    // purpose), so the half-typed draft landed as a chip beside the one then chosen -- "asu" next to
-    // "Asura Scans", and a save blocked a group that matches nothing. Focus moving within the control
-    // (input -> chip, chip -> chip) commits nothing; leaving it from anywhere commits the draft, so a
-    // keyboard user who tabs straight past the chips still gets their text as a chip, as before.
-    // Reintroduce by moving the onBlur back onto the input: type "asu", Tab, Enter gives two chips.
-    <div className="mt-3" onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) add(draft); }}>
-      <p className="mb-1 text-xs font-semibold uppercase tracking-wider text-fog-500">{label}</p>
-      <div className="flex flex-wrap gap-1.5 rounded-xl border border-ink-700 bg-ink-850 p-2">
-        {value.map((g, i) => (
-          <span key={g} className="inline-flex items-center gap-1 rounded-full bg-ink-800 px-2.5 py-1 text-xs text-fog-200">
-            {ordered && <span className="text-fog-500">{i + 1}.</span>}
-            {g}
-            {ordered && (
-              <>
-                <button type="button" onClick={() => onChange(reorder(value, i, -1))} disabled={i === 0} aria-label={tr('Move up')} className="text-fog-500 hover:text-fog-200 disabled:opacity-30">▲</button>
-                <button type="button" onClick={() => onChange(reorder(value, i, 1))} disabled={i === value.length - 1} aria-label={tr('Move down')} className="text-fog-500 hover:text-fog-200 disabled:opacity-30">▼</button>
-              </>
-            )}
-            <button type="button" onClick={() => onChange(withoutGroup(value, g))} aria-label={`Remove ${g}`} className="text-fog-500 hover:text-rose-400">×</button>
-          </span>
-        ))}
-        <input
-          value={draft}
-          onChange={(e) => (e.target.value.endsWith(',') ? add(e.target.value) : setDraft(e.target.value))}
-          onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); add(draft); }
-                              else if (e.key === 'Backspace' && !draft && value.length) onChange(value.slice(0, -1)); }}
-          placeholder={tr('Add a group…')}
-          className="min-w-[8rem] flex-1 bg-transparent px-1 py-1 text-sm text-fog-50 outline-hidden"
-        />
-      </div>
-      {/* Names the server has actually seen, filtered by what is being typed: the exact spelling a source
-          uses is the one thing nobody knows without looking. Plain buttons, the LibraryFilters "Find a
-          genre" pattern -- reachable by keyboard, no combobox state machine. Hidden entirely when the
-          server knows no groups at all: an empty "Known groups" heading would only raise the question. */}
-      {!!suggestions?.length && (() => {
-        const offered = suggestGroups(suggestions, draft, value);
-        return (
-          <div className="mt-2">
-            <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-fog-600">{tr('Known groups')}</p>
-            {offered.length ? (
-              <div className="flex flex-wrap gap-1.5">
-                {offered.map((g) => (
-                  // ⚠️ preventDefault on mousedown, not click: a click first moves focus off the input, whose
-                  // onBlur adds the half-typed draft as a chip, and the suggestion would then land as a
-                  // second chip beside a wrong one.
-                  <button key={g.name} type="button" data-suggest onMouseDown={(e) => e.preventDefault()} onClick={() => add(g.name)}
-                    className="chip text-xs">
-                    {g.name}<span className="ms-1 tabular-nums text-fog-600">· {g.onDisk + g.listed}</span>
-                  </button>
-                ))}
-              </div>
-            ) : (
-              <p className="text-[11px] text-fog-500">{tr('No known group matches that.')}</p>
-            )}
-          </div>
-        );
-      })()}
-      <p className="mt-1 max-w-prose text-[11px] text-fog-500">{hint}</p>
-    </div>
-  );
-}
-
-/**
- * The scanlator defaults every series starts from. A series can rank its own groups and block more, but it
- * cannot un-block one that is blocked here: the server takes the union, so this list is the one place a
- * group is refused everywhere at once.
- */
-function ScanlatorDefaults({ data, save }: { data: any; save: (body: any, ok: string) => void }) {
-  // `null` until the admin touches something, so the card shows what is stored until then. The draft is
-  // kept after a save rather than cleared: clearing it would show the old values for the moment between
-  // the PATCH and the refetch landing, and the button goes quiet on its own once the two agree.
-  const [draft, setDraft] = useState<StoredPrefs | null>(null);
-  const stored: StoredPrefs = { ...NO_PREFS, ...(data.scanlator_prefs ?? {}) };
-  const cur = draft ?? stored;
-  const dirty = !!draft && JSON.stringify(draft) !== JSON.stringify(stored);
-  const set = (patch: Partial<StoredPrefs>) => setDraft({ ...cur, ...patch });
-  // Every group name the server has seen, on disk or in a source's listing, busiest first. Memoised on the
-  // server for 30 s and held here for the same, so typing into either box never asks again. A failure
-  // renders no chips rather than an error: the text field still works without them.
-  const { data: known } = useQuery({
-    queryKey: ['admin-scanlators'],
-    queryFn: () => api<{ content: KnownGroup[] }>('/api/admin/scanlators'),
-    staleTime: 30_000,
-    retry: false,
-  });
-  const suggestions = known?.content ?? [];
-  return (
-    <div className="card grad-border full p-4">
-      <p className="text-sm text-fog-100">{tr('Scanlators')}</p>
-      <p className="max-w-prose text-[11px] leading-relaxed text-fog-500">
-        {tr('When a source lists the same chapter from more than one group, the updater takes the first group ranked here and never a blocked one. Each series can rank its own on its page; blocks made here apply to every series.')}
-      </p>
-      <GroupChips label={tr('Blocked groups')} value={cur.blocked} suggestions={suggestions} onChange={(blocked) => set({ blocked, priority: blocked.reduce((p, g) => withoutGroup(p, g), cur.priority) })}
-        hint={tr('Never take a release from these groups, in any series. A chapter only they have released is skipped until someone else releases it.')} />
-      <GroupChips label={tr('Default priority')} ordered value={cur.priority} suggestions={suggestions} onChange={(priority) => set({ priority, blocked: priority.reduce((b, g) => withoutGroup(b, g), cur.blocked) })}
-        hint={tr('Tried in this order. A series with its own ranking ignores this list.')} />
-      <div className="mt-3 flex flex-wrap items-center gap-2">
-        <label className="text-xs font-semibold uppercase tracking-wider text-fog-500" htmlFor="scanlator-patience">{tr('Patience (days)')}</label>
-        <input id="scanlator-patience" type="number" min={0} max={30} step={1} inputMode="numeric" placeholder="2"
-          value={cur.patienceDays ?? ''}
-          onChange={(e) => set({ patienceDays: e.target.value === '' ? null : Math.max(0, Math.min(30, Math.floor(Number(e.target.value)))) })}
-          className="field w-24" />
-      </div>
-      <p className="mt-1 max-w-prose text-[11px] text-fog-500">
-        {tr('How long a new chapter waits for a ranked group before the best available copy is fetched instead. 0 takes the best copy at once; blank means 2.')}
-      </p>
-      <button onClick={() => save({ scanlatorPrefs: { priority: cur.priority, blocked: cur.blocked, patienceDays: cur.patienceDays } }, 'Saved')}
-        disabled={!dirty} className="btn-accent mt-3 w-full py-2 text-sm disabled:opacity-50">{tr('Save scanlator defaults')}</button>
-    </div>
-  );
-}
-
-/**
- * The opt-in read-chapter cleanup.
- *
- * ⚠️ THE ONLY SWITCH ON THIS PAGE THAT DELETES FILES, so it is the only one that does not simply toggle.
- * Turning it ON asks first, and the question carries `cleanup_read_due` from the settings endpoint: the
- * number of chapters that would go on the first run. An admin deciding this needs "1,842 chapters" in front
- * of them, not an adjective. Turning it OFF is instant -- an off switch that argues with you is a bug.
- *
- * The day count saves separately from the switch, and 0 is a legal value meaning "at the next run". They
- * are two controls because they are two decisions, and because a slip in the number must not silently
- * enable the job.
- */
-function ReadCleanup({ data, save }: { data: any; save: (body: any, ok: string) => void }) {
-  const on = !!data.cleanup_read;
-  const stored: number = data.cleanup_read_days ?? 30;
-  const [days, setDays] = useState<number | null>(null);
-  const [confirm, setConfirm] = useState(false);
-  const cur = days ?? stored;
-  // What the server says would go on the next run. It is counted at the SAVED day count, so it is withheld
-  // while there is an unsaved number in the box: a figure that does not answer the setting on screen is
-  // worse than no figure, and this is the one number someone is about to make an irreversible decision on.
-  const due: number | null =
-    cur === stored && typeof data.cleanup_read_due === 'number' ? data.cleanup_read_due : null;
-
-  return (
-    <>
-      <div className="card grad-border full p-4">
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <p className="text-sm text-fog-100">{tr('Delete read chapters')}</p>
-            <p className="max-w-prose text-[11px] leading-relaxed text-fog-500">
-              {tr('Free space by deleting a chapter\u2019s file once everyone who started it has finished it. A chapter someone is partway through is never deleted, and neither is one nobody has read.')}
-            </p>
-          </div>
-          <Switch on={on} label={tr('Delete read chapters')}
-            onChange={(next) => { if (next) setConfirm(true); else save({ cleanupRead: false }, 'Read chapters are kept'); }} />
-        </div>
-        <div className="mt-3 flex flex-wrap items-center gap-2">
-          <label className="text-xs font-semibold uppercase tracking-wider text-fog-500" htmlFor="cleanup-days">{tr('Wait (days)')}</label>
-          <input id="cleanup-days" type="number" min={0} max={3650} step={1} inputMode="numeric"
-            value={cur}
-            onChange={(e) => setDays(Math.max(0, Math.min(3650, Math.floor(Number(e.target.value) || 0))))}
-            className="field w-24" />
-          <button onClick={() => save({ cleanupReadDays: cur }, 'Saved')} disabled={cur === stored}
-            className="chip text-xs disabled:opacity-50">{tr('Save')}</button>
-        </div>
-        <p className="mt-1 max-w-prose text-[11px] leading-relaxed text-fog-500">
-          {cur === 0
-            ? tr('0 \u2014 the chapter goes at the next hourly run after the last reader finishes it.')
-            : tr('Counted from the moment the last reader finished. Re-opening the chapter starts the wait again.')}
-        </p>
-        <p className="mt-2 max-w-prose text-[11px] leading-relaxed text-fog-600">
-          {tr('Only chapters Uchiyomi downloaded itself are removed \u2014 nothing in a library you built by hand is touched. The chapter stays listed and everyone keeps their reading history; the pages are what goes. It is not downloaded again by itself; Fetch again on the series page brings it back.')}
-        </p>
-        {due !== null && (
-          <p className={`mt-2 text-[11px] ${due > 0 ? 'text-amber-300' : 'text-fog-500'}`}>
-            {due > 0
-              ? tr('{n} chapters qualify right now.', { n: due.toLocaleString() })
-              : tr('No chapters qualify right now.')}
-          </p>
-        )}
-      </div>
-      {confirm && (
-        <ConfirmDialog
-          title={tr('Start deleting chapters after they are read?')}
-          body={(
-            <>
-              <p>{tr('From now on, an hourly job will permanently delete the file of any chapter that everyone who started it has finished, once it has been finished for {n} days. There is no undo and no recycle bin.', { n: cur })}</p>
-              <p className="mt-2">{tr('Chapters somebody is partway through, chapters nobody has read, bookmarked chapters, and files in a library you assembled yourself are all left alone. Reading history is never deleted.')}</p>
-              {due !== null && (
-                <p className={`mt-2 font-semibold ${due > 0 ? 'text-amber-300' : 'text-fog-400'}`}>
-                  {due > 0
-                    ? tr('{n} chapters qualify today and would go on the first run.', { n: due.toLocaleString() })
-                    : tr('Nothing qualifies today, so the first run would delete nothing.')}
-                </p>
-              )}
-            </>
-          )}
-          confirmLabel={tr('Turn it on')}
-          danger
-          // ⚠️ The day count goes with the switch when it is unsaved. The dialog quotes the number in the
-          // box, so confirming it with only `cleanupRead: true` ran the job at the OLD stored value while
-          // the box kept showing the new one -- with the due count deliberately withheld in that state,
-          // there was no figure left to notice it by. Reintroduce by saving `{ cleanupRead: true }` alone:
-          // type 7 over 30, switch on, and the next run uses 30.
-          onConfirm={() => { setConfirm(false); save({ cleanupRead: true, ...(cur !== stored ? { cleanupReadDays: cur } : {}) }, 'Read chapters will be deleted'); }}
-          onClose={() => setConfirm(false)}
-        />
-      )}
-    </>
-  );
-}
-
-function Settings() {
-  const toast = useToast();
-  const qc = useQueryClient();
-  const { data } = useQuery({ queryKey: ['admin-settings'], queryFn: () => api<any>('/api/admin/settings') });
-  const [name, setName] = useState<string | null>(null);
-  const [hours, setHours] = useState<number | null>(null);
-  const [extHours, setExtHours] = useState<number | null>(null);
-  const save = async (body: any, ok: string) => { try { await api('/api/admin/settings', { method: 'PATCH', json: body }); toast(ok, 'success'); qc.invalidateQueries({ queryKey: ['admin-settings'] }); } catch { toast('Failed', 'error'); } };
-  if (!data) return <div className="board"><div className="card grad-border p-6 text-center text-sm text-fog-500">{tr('Loading…')}</div></div>;
-  // A handful of settings look like a handful of settings. Padding a sparse panel out with a chart is the
-  // exact failure this rework exists to undo, so this one is deliberately left with room around it.
-  // The extension cards only appear when there is an extension server. `extension_hours` cannot answer that
-  // -- it has a NOT NULL default, so it is always set -- which is why the endpoint returns a separate flag.
-  return (
-    <div className="board">
-      <div className="card grad-border p-4">
-        <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-fog-500">{tr('Server name')}</label>
-        <input value={name ?? data.server_name} onChange={(e) => setName(e.target.value)} className="field" />
-        <button onClick={() => save({ serverName: name ?? data.server_name }, 'Saved')} className="btn-accent mt-2 w-full py-2 text-sm">{tr('Save name')}</button>
-      </div>
-      <div className="card grad-border flex items-center justify-between gap-3 p-4">
-        <div className="min-w-0">
-          <p className="text-sm text-fog-100">{tr('Open registration')}</p>
-          <p className="max-w-prose text-[11px] text-fog-500">{tr('Let anyone create their own account')}</p>
-        </div>
-        <Switch on={!!data.allow_registration} label={tr('Open registration')}
-          onChange={(next) => save({ allowRegistration: next }, next ? 'Registration open' : 'Registration closed')} />
-      </div>
-      <div className="card grad-border p-4">
-        <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-fog-500">{tr('Auto-update interval (hours)')}</label>
-        <input type="number" min={1} max={168} value={hours ?? data.updater_hours} onChange={(e) => setHours(Number(e.target.value))} className="field" />
-        <button onClick={() => save({ updaterHours: hours ?? data.updater_hours }, 'Saved')} className="btn-accent mt-2 w-full py-2 text-sm">{tr('Save interval')}</button>
-      </div>
-      <UpdateAndCount data={data} save={save} />
-      <ReadCleanup data={data} save={save} />
-      <ScanlatorDefaults data={data} save={save} />
-      {data.extensions_configured && (
-        <>
-          <div className="card grad-border flex items-center justify-between gap-3 p-4">
-            <div className="min-w-0">
-              <p className="text-sm text-fog-100">{tr('Update extensions automatically')}</p>
-              <p className="max-w-prose text-[11px] text-fog-500">
-                {tr('Install new versions of your installed extensions as their repositories publish them. Turn this off to be told about updates and apply them yourself.')}
-              </p>
-            </div>
-            <Switch on={data.extension_auto_update !== false} label={tr('Update extensions automatically')}
-              onChange={(next) => save({ extensionAutoUpdate: next }, next ? 'Extensions update automatically' : 'Extension updates are manual')} />
-          </div>
-          <div className="card grad-border p-4">
-            <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-fog-500">{tr('Extension check interval (hours)')}</label>
-            <input type="number" min={1} max={168} value={extHours ?? data.extension_hours} onChange={(e) => setExtHours(Number(e.target.value))} className="field" />
-            <button onClick={() => save({ extensionHours: extHours ?? data.extension_hours }, 'Saved')} className="btn-accent mt-2 w-full py-2 text-sm">{tr('Save interval')}</button>
-          </div>
-        </>
-      )}
     </div>
   );
 }

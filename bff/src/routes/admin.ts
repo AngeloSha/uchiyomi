@@ -166,7 +166,7 @@ type TrackerRead =
 const TOKEN_REJECTED_ERROR = 'the tracker rejected the saved token -- reconnect to resume syncing';
 /** The sentence a lapsed token leaves on the connection -- pushOne's again, word for word. */
 const TOKEN_EXPIRED_ERROR = 'the access token has expired -- reconnect to resume syncing';
-const CONNECT_HINT = 'Profile → Reading → Progress tracking';
+const CONNECT_HINT = 'Profile → Connections → Progress tracking';
 
 /**
  * Read the requesting admin's OWN list from a tracker, as batch entries. Only their own `user_trackers` row
@@ -411,7 +411,7 @@ export default async function adminRoutes(app: FastifyInstance) {
 
   // ---- server settings ----
   const SETTINGS_COLS = 'server_name, allow_registration, updater_hours, extension_hours, extension_auto_update, '
-    + 'update_check, install_ping, install_ping_last, scanlator_prefs, cleanup_read, cleanup_read_days';
+    + 'update_check, install_ping, install_ping_last, scanlator_prefs, cleanup_read, cleanup_read_days, backup_hour';
   // `extensions_configured` is not a column: extension_hours has a NOT NULL default, so its presence says
   // nothing about whether there is an engine to check. The settings page needs to know, or it offers two
   // controls for a job that can never run.
@@ -489,6 +489,8 @@ export default async function adminRoutes(app: FastifyInstance) {
       // setting, and so `.min(0)` cannot be mistaken for the off state.
       cleanupRead: z.boolean().optional(),
       cleanupReadDays: z.number().int().min(0).max(3650).optional(),
+      // The local hour of the nightly backup. Until v0.39.0 it was shown under Tasks and editable nowhere.
+      backupHour: z.number().int().min(0).max(23).optional(),
     }).parse(req.body);
     if (b.serverName !== undefined) await q('UPDATE server_settings SET server_name = $1, updated_at = now() WHERE id = 1', [b.serverName]);
     if (b.allowRegistration !== undefined) await q('UPDATE server_settings SET allow_registration = $1, updated_at = now() WHERE id = 1', [b.allowRegistration]);
@@ -500,6 +502,9 @@ export default async function adminRoutes(app: FastifyInstance) {
     if (b.scanlatorPrefs !== undefined) await q('UPDATE server_settings SET scanlator_prefs = $1::jsonb, updated_at = now() WHERE id = 1', [JSON.stringify(b.scanlatorPrefs)]);
     if (b.cleanupRead !== undefined) await q('UPDATE server_settings SET cleanup_read = $1, updated_at = now() WHERE id = 1', [b.cleanupRead]);
     if (b.cleanupReadDays !== undefined) await q('UPDATE server_settings SET cleanup_read_days = $1, updated_at = now() WHERE id = 1', [b.cleanupReadDays]);
+    // The scheduler is re-armed at once, so the change applies to the NEXT run rather than the one after: the
+    // timer used to re-read the hour only when it fired (server.ts, the backup block says why).
+    if (b.backupHour !== undefined) { await q('UPDATE server_settings SET backup_hour = $1, updated_at = now() WHERE id = 1', [b.backupHour]); runtime.rearmBackup?.(); }
     await logAudit('settings.update', { userId: userIdOf(req), detail: b, req });
     return settingsRow();
   });

@@ -502,7 +502,7 @@ async function updateCheck(): Promise<HealthCheck> {
     return {
       id: 'update', title: 'Version', status: 'ok',
       summary: running ? `Running v${running} — update checks are off` : 'Update checks are off',
-      note: 'Nothing is requested while this is off. Turn it on in Settings to be told when a release is out.',
+      note: 'Nothing is requested while this is off. Turn it on under Settings → Server to be told when a release is out.',
       items: [],
     };
   }

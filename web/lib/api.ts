@@ -98,6 +98,19 @@ interface Opts {
   headers?: Record<string, string>;
 }
 
+/**
+ * The 401s that are an answer, not an expired session.
+ *
+ * ⚠️ `/auth/password` and `/auth/totp/disable` say 401 `{ error: 'wrong_password' }` when the CURRENT
+ * password is wrong, and the login route says 401 `totp_invalid` for a bad code. Treating every 401 as "the
+ * access token died" rotated the refresh cookie and re-POSTed the same wrong password a second time --
+ * two attempts against the lockout counter for one press of Enter. A refusal the server spelled out is
+ * final; only a bare 401 earns the refresh-and-retry. The body is read from a clone so the caller still
+ * gets to read it.
+ */
+const REFUSAL = /"error"\s*:\s*"(?:wrong_password|totp_invalid)"/;
+const isRefusal = async (res: Response): Promise<boolean> => REFUSAL.test(await res.clone().text().catch(() => ''));
+
 async function raw(path: string, opts: Opts, retry: boolean): Promise<Response> {
   const headers = new Headers(opts.headers || {});
   if (accessToken) headers.set('authorization', `Bearer ${accessToken}`);
@@ -114,7 +127,7 @@ async function raw(path: string, opts: Opts, retry: boolean): Promise<Response> 
     signal: opts.signal,
   });
 
-  if (res.status === 401 && retry) {
+  if (res.status === 401 && retry && !(await isRefusal(res))) {
     const r = await refreshSession();
     if (r.kind === 'authed') return raw(path, opts, false);
   }

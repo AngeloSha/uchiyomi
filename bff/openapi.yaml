@@ -6,9 +6,9 @@
 openapi: 3.1.0
 info:
   title: Uchiyomi API
-  version: 0.38.0
+  version: 0.39.0
   description: "Everything the web app does, it does over this API. Session JWTs are for the browser; scripts
-    use a personal API token (Profile -> Account -> API tokens), sent as `Authorization: Bearer uy_...`.
+    use a personal API token (Profile -> Connections -> API tokens), sent as `Authorization: Bearer uy_...`.
     Scopes: read (every token; GET plus the library search POST, which is a query), write (anything that changes data), admin (the /api/admin surface, which also
     needs an admin account). /img/* takes the yomi_img cookie, an API token as a Bearer, or the OPDS token
     over HTTP Basic -- so a third-party client needs ONE credential for the JSON and the pictures alike;
@@ -722,6 +722,11 @@ paths:
       tags:
         - auth
       summary: "Start two-factor enrolment: returns the secret and QR payload."
+      description: >-
+        Writes a pending secret and returns it with the otpauth URI and a QR data URL; nothing is enforced
+        until `/auth/totp/enable` confirms a code. Refused while two-factor is already on for the account
+        (since v0.39.0), so a stale "Set up 2FA" button can never rotate the secret an authenticator app
+        holds — turn it off with `/auth/totp/disable` first.
       operationId: postAuthTotpSetup
       security:
         - bearer: []
@@ -730,6 +735,8 @@ paths:
           description: OK
         "401":
           description: Not authenticated
+        "409":
+          description: "`totp_enabled`: two-factor is already on for this account; the live secret was not touched. Disable it first."
   /auth/totp/enable:
     post:
       tags:
@@ -758,16 +765,17 @@ paths:
     post:
       tags:
         - auth
-      summary: Turn two-factor off (requires a current code).
+      summary: Turn two-factor off (requires the account password).
       operationId: postAuthTotpDisable
       requestBody:
-        required: false
+        required: true
         content:
           application/json:
             schema:
               type: object
+              required: [password]
               properties:
-                code:
+                password:
                   type: string
       security:
         - bearer: []
@@ -777,7 +785,7 @@ paths:
         "400":
           description: Malformed body or parameter
         "401":
-          description: Not authenticated
+          description: Not authenticated, or `wrong_password`
   /auth/oidc/start:
     get:
       tags:
@@ -3891,14 +3899,15 @@ paths:
       description: >-
         Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. The row
         includes scanlator_prefs, the server-wide release preferences (ScanlatorPrefs; the default is no
-        priority, nothing blocked, two days of patience).
+        priority, nothing blocked, two days of patience), and backup_hour, the local hour (0-23) of the
+        nightly backup.
       security:
         - bearer: []
       responses:
         "200":
           description: >-
-            The settings row. Only the read-chapter cleanup fields are described here; the rest are the
-            snake_case columns PATCH sets (server_name, allow_registration, updater_hours, ...).
+            The settings row. Only the read-chapter cleanup fields and backup_hour are described here; the
+            rest are the snake_case columns PATCH sets (server_name, allow_registration, updater_hours, ...).
           content:
             application/json:
               schema:
@@ -3920,6 +3929,11 @@ paths:
                       How many chapters the cleanup would delete if it ran now, at the current day setting,
                       whether or not it is switched on -- so the number can be seen before consenting. Memoised
                       for half a minute; null when it could not be counted.
+                  backup_hour:
+                    type: integer
+                    minimum: 0
+                    maximum: 23
+                    description: Local hour of the nightly backup. Default 3.
         "401":
           description: Not authenticated
         "403":
@@ -3927,9 +3941,9 @@ paths:
     patch:
       tags:
         - admin
-      summary: "Change server settings: name, open registration, update interval, extension check interval and
-        its kill switch, the update check, the opt-in install count, the opt-in read-chapter cleanup, and the
-        server-wide scanlation-group preferences."
+      summary: "Change server settings: name, open registration, update interval, backup hour, extension check
+        interval and its kill switch, the update check, the opt-in install count, the opt-in read-chapter
+        cleanup, and the server-wide scanlation-group preferences."
       operationId: patchApiAdminSettings
       description: >-
         Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. Answers
@@ -3979,6 +3993,13 @@ paths:
                   type: integer
                   minimum: 0
                   maximum: 3650
+                backupHour:
+                  type: integer
+                  minimum: 0
+                  maximum: 23
+                  description: >-
+                    Local hour of the nightly backup. The pending timer is re-armed at once, so the change
+                    applies to the next run rather than the one after.
       security:
         - bearer: []
       responses:

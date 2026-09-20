@@ -15,7 +15,7 @@ There are two ways in, and for scripts you want the second one.
 **Session tokens** are what the web app uses: `POST /auth/login` returns a JWT that expires after 15 minutes,
 refreshed with a rotating cookie. Fine for a browser, miserable for a cron job.
 
-**API tokens** are long-lived, revocable, and scoped. Create one under **Profile → Account → API tokens** (tap **Manage**, then **New token**).
+**API tokens** are long-lived, revocable, and scoped. Create one under **Profile → Connections → API tokens → New token** (the form opens inline).
 The token is shown once, so copy it then. It looks like `uy_` followed by random characters.
 
 ```bash
@@ -49,8 +49,8 @@ same panel as your active sessions.
 also accepts an OPDS token over HTTP Basic, so an OPDS reader can load covers and pages with the same
 credentials it uses for the feed, **and, since v0.29.0, an API token as a Bearer**, so a third-party client
 such as the Mihon extension needs one credential for the JSON and the pictures alike. A `read`-scoped token
-is enough for images. `/opds/*` uses HTTP Basic with your OPDS token as the password (**Profile → External
-readers**) and does not accept API tokens. A disabled account's OPDS token is refused (**401**) on the feed
+is enough for images. `/opds/*` uses HTTP Basic with your OPDS token as the password
+(**Profile → Connections → External readers**) and does not accept API tokens. A disabled account's OPDS token is refused (**401**) on the feed
 and on `/img/*` alike, like every other credential of a disabled account, and works again once the account
 is re-enabled — the token itself is not revoked.
 
@@ -315,7 +315,7 @@ chapter list, `GET /api/books/:id`, its pages, the offline manifest, next/previo
 that refused to record what you read would lose data rather than tidy a screen.
 
 OPDS feeds cannot pass the parameter, so the preference lives on the OPDS token instead: `PATCH
-/api/opds/token { "showAdult": true }` (also a checkbox under **Profile → External readers**). Off by
+/api/opds/token { "showAdult": true }` (also a switch under **Profile → Connections → External readers**). Off by
 default, per credential rather than per account, because the phone and the e-reader are different audiences.
 Chapter downloads and page streaming work either way; the age cap is a permission and is unaffected.
 
@@ -371,6 +371,14 @@ POST   /auth/totp/setup           POST   /auth/totp/enable
 POST   /auth/totp/disable
 GET    /auth/oidc/start             GET    /auth/oidc/callback
 ```
+
+**Two-factor enrolment is one way.** `POST /auth/totp/setup` writes a *pending* secret and answers
+`{secret, otpauth, qr}`; nothing is enforced until `POST /auth/totp/enable` `{code}` confirms a code from
+the app and answers the recovery codes once. While two-factor is already on, setup is **409**
+`{error: 'totp_enabled', message}` and the row is not touched (since v0.39.0): the secret in the row is
+the one the authenticator holds, and rotating it from a stale *Set up 2FA* button left the flag on and the
+app's codes wrong. `POST /auth/totp/disable` `{password}` is the way back (**401** `wrong_password`), and
+setup works again after it.
 
 ### Library and reading
 ```
@@ -686,6 +694,18 @@ POST   /api/admin/import/batches/:id/resume
 POST   /api/admin/import/batches/:id/run
 PATCH  /api/admin/import/candidates/:cid
 ```
+
+**Server settings.** `GET /api/admin/settings` is the one row: `server_name`, `allow_registration`,
+`updater_hours`, `extension_hours`, `extension_auto_update`, `update_check`, `install_ping`, `install_ping_last`,
+`cleanup_read`, `cleanup_read_days`, `backup_hour`, `scanlator_prefs`, plus `extensions_configured` (computed). `PATCH
+/api/admin/settings` takes any subset of `serverName` (1–64 chars), `allowRegistration`, `updaterHours`
+(1–168), `extensionHours` (1–168), `extensionAutoUpdate`, `updateCheck`, `installPing`, `cleanupRead`,
+`cleanupReadDays` (0–3650; 0 is a value, "at the next run"), `backupHour` (0–23, the local hour of the nightly
+backup — the pending timer is re-armed at once, so the change applies to the next run rather than the one
+after; `GET /api/admin/tasks` shows the backup's `schedule` as `daily at HH:00` from the same column) and
+`scanlatorPrefs` (below). Each field is written on its own, an out-of-range value is a **400** and nothing is
+written, and the audit row `settings.update` carries the body. The admin console's Settings tab sends one
+row per PATCH as each row is changed (the read-chapter confirmation carries the day count with the switch).
 
 The bulk importer's body takes `titles`, `autoUpdate`, `chapterCount` and `chapterFrom`, with the same
 meaning as on `/api/sources/add` (`chapterFrom: "newest"` takes the latest N and floors the series; the
@@ -1268,6 +1288,6 @@ an ordinary user. Leave it unset to keep managing roles in the admin panel.
 - Boolean settings read the actual word, so `"false"` means false.
 - The ID token's signature is verified against the issuer's published keys on every sign-in, along with its
   issuer, audience, expiry and nonce.
-- SSO sessions appear in **Profile → Account** as a device named "SSO" and can be revoked like any other.
+- SSO sessions appear in **Profile → Account → Active sessions** as a device named "SSO" and can be revoked like any other.
 - Signing in through SSO does not ask for a second factor here; your identity provider is responsible for
   that. Local password logins still use Uchiyomi's own 2FA.

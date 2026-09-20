@@ -7,7 +7,7 @@ You browse and install them from **Admin → Extensions**. There is nothing to s
 
 ## Using it
 
-1. Open **Admin → Providers**. The Extensions panel says `ready`.
+1. Open **Admin → Extensions** (`/admin/?tab=Extensions`; the Providers tab links there too). The panel says `ready`.
 2. **Add a repository** (once). Uchiyomi doesn't host extensions, so you point it at a repository you trust —
    the same URL you would paste into Mihon. Open **Manage** in the Extensions panel and add it.
 3. **Search and click Add.** The extension installs, its sources switch on straight away, and it is
@@ -56,7 +56,7 @@ What it does on its own:
 What it will not do: install extensions you did not ask for, uninstall anything, or reinstall something you
 removed yourself. Removing an extension in the engine's own interface is reported, not undone.
 
-**To turn it off:** Admin → Server → Settings → *Update extensions automatically*. The check still runs and
+**To turn it off:** **Admin → Settings → Updates & schedules** → *Update extensions automatically*. The check still runs and
 still tells you what is waiting; it just does not install anything. The **Update all** button in the
 Extensions panel remains the manual path, and it now refreshes the repositories first, so it no longer says
 "everything is already up to date" against a stale catalogue.
@@ -127,8 +127,8 @@ reclaim the RAM as well, `docker compose stop uchiyomi-suwayomi` (`yomi-suwayomi
 | `SUWAYOMI_PAGE_CONCURRENCY` | `4` | Pages of one chapter fetched from the engine at once (1-8). The engine rate-limits the site itself, so extension downloads skip the one-at-a-time pacing that scraped sites need; a 429 from the engine drops back to one for the rest of the chapter. |
 | `SOURCE_LATEST_TIMEOUT_MS` | `8000` | How long one source gets to answer "what's new" on Discover before it is given up on and marked unhealthy. A source that keeps overrunning it is diagnosed *answers, but more slowly than it is given* — since v0.37.0 by the admin *Test* button and the daily source check too, not only Discover's health view — and the fix sentence names this budget. |
 
-The update check's own settings live in **Admin → Server → Settings**, not here: *Update extensions
-automatically* (on by default) and *Extension check interval* (6 hours).
+The update check's own settings live in **Admin → Settings → Updates & schedules**, not here: *Update extensions
+automatically* (on by default) and *Extension check interval (hours)* (6). The switch saves as it flips; the interval saves when you leave the field or press Enter, and the row says *Saved*.
 
 **Adult sources.** Extensions declare whether they are adult, and Uchiyomi records that per source. A member
 whose age limit is set below 18 cannot reach one: it is left out of their source list entirely, and the
@@ -156,7 +156,7 @@ the limits.
 
 ### Setting Mihon up
 
-1. In Uchiyomi, mint an API token under **Profile → Account → API tokens** (tap *Manage*, then *New token*)
+1. In Uchiyomi, mint an API token under **Profile → Connections → API tokens → New token** (the form opens inline)
    with **read + write** — tick *Allow changes*. A read-only token browses and reads, but nothing syncs in
    either direction: Mihon retries a failed push a few times with backoff, then gives up quietly until the
    next chapter read. Tick **Include 18+ libraries** if you want those shelves listed on the phone; the

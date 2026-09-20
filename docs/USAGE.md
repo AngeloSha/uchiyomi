@@ -288,7 +288,8 @@ files downloaded before v0.31.0 show no group either.
 
 **Use server defaults**, in the sheet's footer, drops everything the series set for itself — ranking, blocks and
 patience; the defaults themselves live under
-**Admin → Settings → Scanlators**. The two combine sensibly: a group blocked on the server is blocked in
+**Admin → Settings → Scanlators** (the two lists and the patience share one *Save scanlator defaults* button —
+the only Save button on that tab). The two combine sensibly: a group blocked on the server is blocked in
 every series, a series with its own ranking ignores the server's ranking, and a series with no patience of
 its own uses the server's.
 
@@ -482,6 +483,12 @@ you keep scrolling through a series without interruption.
 
 It remembers your scroll position, so closing and reopening drops you right back where you were.
 
+**Reader defaults** — mode (webtoon scroll or paged), theme, repeated pages, fit, page gap, auto-scroll and
+brightness — live under **Profile → Settings → Reading**, where each one saves as you change it and says
+*Saved* beside the row. The reader's own sheet still changes them for the session you are in, and a series
+you have adjusted keeps its own memory, which wins over the defaults. The weekly goal, offline downloads and
+new-chapter alerts are on the same tab.
+
 ### Skipping the pages that are not the story
 
 Most scanlated chapters open with the same credit page, and some carry an advert or a "read the rest at…"
@@ -605,7 +612,7 @@ manga-site families (**Madara**, **MangaThemesia**, and **Manganato**), and most
 
 ### Add a site — step by step
 
-1. Go to **Admin → Providers** (Profile → *Admin & server settings* → **Providers** tab).
+1. Go to **Admin → Providers** (`/admin/?tab=Providers`; **Admin** on the profile rail, then the **Providers** tab).
 2. In the **Add a site** box, leave the engine on **Auto-detect**. (The small (i) beside the heading
    explains, in five lines, what a source, an extension, a site by URL and a translation group are, and
    the difference between *Fetch* and *Save offline*.)
@@ -681,8 +688,8 @@ read on the phone comes back.
 
 **The Uchiyomi extension** — add the store URL from
 [AngeloSha/uchiyomi-extension](https://github.com/AngeloSha/uchiyomi-extension) as an extension repo,
-install **Uchiyomi**, and give it your server address and a **read**-scoped API token (**Profile → Account →
-API tokens**, tap *Manage* then *New token*; leave *Allow changes* unticked). Favourites come first under
+install **Uchiyomi**, and give it your server address and a **read**-scoped API token
+(**Profile → Connections → API tokens → New token**; leave *Allow changes* unticked). Favourites come first under
 *Popular*, recently updated under *Latest*, and search takes the same genre / status / read-state / library
 filters as the web app. Its honest limit: **reading progress does not flow back to Uchiyomi** from there.
 The Mihon family only lets a *tracker* built into the app report reads, so an extension cannot; what you
@@ -714,9 +721,13 @@ work against this too; it was not tested here. The full list of what is and is n
 
 ## 8. The admin panel
 
-Reachable from **Profile → Admin & server settings** (admins only). Panels are grouped by what you are
-doing rather than by what the code is called: **Server** (Overview, Tasks, Settings), **People** (Members,
-Sessions, Activity), **Content** (Library, Health, Art) and **Sources** (Providers, Extensions).
+Reachable from **Admin** on the profile rail, or directly at `/admin/` (admins only). Panels are grouped by
+what you are doing rather than by what the code is called: **Server** (Overview, Tasks, Settings), **People**
+(Members, Sessions, Activity), **Content** (Library, Health, Art) and **Sources** (Providers, Extensions).
+Every tab has an address — `/admin/?tab=Settings`, `/admin/?tab=Health` and so on — so a refresh, the Back
+button, a bookmark or a language change keeps you on the tab you were on. The first tab, Overview, is plain
+`/admin/`. The same is true of the profile: `/profile/?tab=Settings`, `/profile/?tab=Connections`,
+`/profile/?tab=Account`.
 
 **Server → Overview:** library stats + recent member activity.
 
@@ -789,10 +800,10 @@ must never be able to wipe a hand-curated folder.
 
 ### Deleting chapters after they are read
 
-**Admin → Settings → Delete read chapters**. Off by default, and turning it on asks you to confirm, with
-the number of chapters that would go on the first run in front of you (and the day count it will use — an
-unsaved number in the box is saved along with the switch, so the job never runs at a value the card no
-longer shows). It is the only scheduled job in Uchiyomi that destroys anything.
+**Admin → Settings → Library housekeeping → Delete read chapters**. Off by default, and turning it on asks
+you to confirm, with the number of chapters that would go on the first run in front of you (and the day count
+it will use — a *Wait (days)* you have just typed is saved along with the switch, so the job never runs at a
+value the row no longer shows). It is the only scheduled job in Uchiyomi that destroys anything.
 
 Once it is on, an hourly job deletes the file of any chapter that **everyone who started it has finished**,
 after however many days you set. Zero days is allowed and means the next run takes it. The wait is counted
@@ -867,8 +878,8 @@ what makes an exception possible. Unrated stays visible to everyone on purpose.
 **A library rated 18+ is also kept off the shelf.** Not just from members with an age limit, but from
 everybody, until somebody asks for it. It stays out of the home rails, the library grid, search, browse,
 your collections, updates, history, bookmarks and the OPDS feeds, and its tab does not appear on the Library
-page. (An OPDS reader has no button to press, so for it the choice sits on its own credential: **Profile →
-External readers → Include 18+ libraries in this reader**, off by default.) A **Show 18+** button sits beside the sorts on the Library page and brings it all back; the reveal
+page. (An OPDS reader has no button to press, so for it the choice sits on its own credential:
+**Profile → Connections → External readers → Include 18+ libraries in this reader**, off by default.) A **Show 18+** button sits beside the sorts on the Library page and brings it all back; the reveal
 lasts until you close the browser and then it hides itself again. The button only appears for accounts that
 actually have such a library, and never for one whose age limit is below 18.
 
@@ -934,8 +945,8 @@ import page (`/admin/import/`), which takes the list four ways:
   login, which Uchiyomi never asks for; make a list public and share that instead.
 - **Paste titles** — one per line, from anywhere.
 - **From your tracker** — the box above the intake lists every AniList, MyAnimeList or Kitsu account you
-  have connected under **Profile → Reading → Progress tracking**; when none is, one line says so and links
-  there, landing on that card. Pick the account, tick the lists to bring over — *Reading* and *Plan to
+  have connected under **Profile → Connections → Progress tracking**; when none is, one line says so and links
+  there, landing on that section. Pick the account, tick the lists to bring over — *Reading* and *Plan to
   read* are on by default, *Finished*, *On hold* and *Dropped* off — and **Load list** reads that account's
   manga list with the token you already gave it. What is read is each entry's id on the service, its titles
   and how far you got; the English title is searched on every source first and, only when it misses
@@ -1008,7 +1019,8 @@ and get your server blocked.
 
 **Tasks:** run the **library scan**, **check-for-new-chapters** or **extension updates** on demand, and see
 when each last ran and what it did. Extension updates run every 6 hours on their own and can be switched
-off in Settings; see [extensions.md](extensions.md). **Verify chapter files** is the one task that never
+off under **Admin → Settings → Updates & schedules**; see [extensions.md](extensions.md). The nightly backup's
+hour is shown here and changed there. **Verify chapter files** is the one task that never
 runs by itself: it is the repair for a database restored without its chapter files, and section 12 says
 when to run it and what it will not do. Like the sweep, it starts in the background and its line shows what
 it found when it is done.
@@ -1019,11 +1031,19 @@ it found when it is done.
 
 ![Settings](shots/admin-settings.webp)
 
-**Settings:** server name, an **open-registration** toggle (let anyone sign up), and the **auto-update
-interval** (how often Uchiyomi checks your library for new chapters). The **Scanlators** card holds the
-server-wide defaults for choosing between scanlation groups — **Blocked groups**, which apply to every
-series, a **Default priority** for series that have no ranking of their own, and the **Patience (days)**
-before a chapter is taken from a group lower down the list; see *Sources & translations* in section 4.
+**Settings** (`/admin/?tab=Settings`) is four sections. **Server**: the server name, an **Open registration**
+switch (let anyone sign up), **Check for updates** and the anonymous **install count**, each of the last two
+with a fold (*How this works* / *What is sent, once a day*) that spells out exactly what leaves the server.
+**Updates & schedules**: the **Library update interval (hours)** (how often followed series are asked for new
+chapters), the **Backup time (hour, 0–23)** of the nightly backup — change it and the pending timer is re-armed at
+once, so the next run is at the new hour — and, when the extension engine is configured, **Update extensions
+automatically** and its check interval. **Library housekeeping**: **Delete read chapters** and its **Wait
+(days)**, below. **Scanlators**: the server-wide defaults for choosing between scanlation groups — **Blocked
+groups**, which apply to every series, a **Default priority** for series that have no ranking of their own, and
+the **Patience (days)** before a chapter is taken from a group lower down the list; see *Sources & translations*
+in section 4. Switches save the moment they flip; text and number fields save when you leave them or press
+Enter, and each row says *Saved* beside itself. Only the scanlator lists have a Save button (**Save scanlator
+defaults**), because a half-typed list is not something to save on every keystroke.
 
 ---
 
@@ -1031,14 +1051,18 @@ before a chapter is taken from a group lower down the list; see *Sources & trans
 
 ![Profile](shots/profile-security.webp)
 
-In **Profile → Account** (every user has this):
+In **Profile → Account** (`/profile/?tab=Account`; every user has this):
 
-- **Change password:** requires your current password; changing it signs out your other devices.
+- **Signed in as:** who you are, and **Change password** — it requires your current password, and changing it
+  signs out your other devices (**Update password** is the button; a wrong current password is said inline).
 - **Two-factor authentication:** tap **Set up 2FA**, scan the QR with any authenticator app (Google
   Authenticator, Authy, 1Password…), enter a code to enable, and **save your recovery codes** (shown once).
   After that, logins ask for the 6-digit code. Disable it anytime by confirming your password.
 - **Active sessions:** see every device you're signed in on (with IP + last-active), revoke any one, or
   **Log out others** in a single click.
+- **Sign out:** this device only; other devices stay signed in. The same button sits on the profile rail.
+
+API tokens, progress trackers and the OPDS link are not here any more: they are on **Profile → Connections**.
 
 Uchiyomi also locks an account after repeated failed logins and records everything in the admin audit feed.
 
@@ -1047,7 +1071,7 @@ Uchiyomi also locks an account after repeated failed logins and records everythi
 ### API tokens
 
 A normal sign-in expires every 15 minutes, which is fine for a browser and useless for a script. Under
-**Profile → Account → API tokens** (the card is collapsed — tap **Manage**, then **New token**) you can create a
+**Profile → Connections → API tokens → New token** (the form opens inline under the section's heading) you can create a
 long-lived token instead, scoped to **read**, **write** or **admin**, with an optional expiry. The token is shown once, so copy it then, and you can revoke it at any time.
 **Include 18+ libraries** (since v0.38.0, off by default) decides whether the Komga-compatible API — Mihon's
 Komga extension, section 7 — lists your 18+ libraries to that token, since that app has no reveal button of
@@ -1061,16 +1085,16 @@ token on a non-admin account still can't reach the admin API. See [docs/api.md](
 
 ## 10. Tracking: AniList sync
 
-Connect your AniList account once under **Profile → Reading → Progress tracking** and finishing a chapter
-here updates your AniList list on its own.
+Connect your AniList account once under **Profile → Connections → Progress tracking** (tap **Connect** on the
+AniList row and the token field opens under it) and finishing a chapter here updates your AniList list on its own.
 
 Paste an access token from AniList's developer settings. Progress is the highest chapter you have **finished**,
 so re-reading an old chapter never rewinds your list, and AniList being slow or down can never delay or block
-your reading. If the service rejects your token, Uchiyomi disables the connection and says so on the card
-rather than failing silently; a token that has lapsed is noted on the card too, but the connection is left
+your reading. If the service rejects your token, Uchiyomi disables the connection and says so on the row
+rather than failing silently; a token that has lapsed is noted on the row too, but the connection is left
 in place until you paste a new one. A service that is blocking or rate-limiting the server is a sync
 error to retry on the next chapter, never a verdict on the token, so it does not disconnect anything.
-Disconnect at any time. MyAnimeList and Kitsu connect the same way, on the same card, and more than one can
+Disconnect at any time. MyAnimeList and Kitsu connect the same way, each on its own row, and more than one can
 be connected at once; each syncs on its own.
 
 **Bringing your list over.** The same connection reads in the other direction, once: on the import page
@@ -1092,11 +1116,13 @@ Reading.
 ## 11. Install as an app & offline
 
 Uchiyomi is a **PWA**. In your browser's menu choose **Install app** (or "Add to Home Screen" on mobile) to get a
-standalone, full-screen app icon.
+standalone, full-screen app icon; **Profile → Settings → This device → Install Uchiyomi** offers the same, with the
+steps for the browser you are in.
 
 **Offline:** favorite a series (or use **Save all offline** / a chapter's ⬇), and those chapters are stored on the
 device for reading with no connection. The **Downloads** screen shows what's saved and a **Sync now** button;
-with smart-offline on, your favorites' next unread chapters auto-download while you're online. A cover with a
+with **Keep favorites offline** on (**Profile → Settings → Downloads**), your favorites' next unread chapters
+auto-download while you're online. A cover with a
 small ⌁ badge has something saved on this device.
 
 **Opening the app with no connection at all** — on a plane, in a tunnel — works: launch it from the home
@@ -1159,8 +1185,10 @@ BACKUP_PATH=/mnt/backups/uchiyomi
 The directory must be writable by uid `10002` (the app's user):
 `docker run --rm -v /mnt/backups:/b alpine chown 10002:10002 /b/uchiyomi`
 
-Tune with `BACKUP_KEEP` (how many runs to retain, default 14) and the backup hour in the database
-(`server_settings.backup_hour`).
+Tune with `BACKUP_KEEP` (how many runs to retain, default 14) and the hour under
+**Admin → Settings → Updates & schedules → Backup time** (local time; since v0.39.0 it is a field there, and the
+pending timer is re-armed as soon as you change it, so the next run is at the new hour). Scripts can set the same
+thing with `PATCH /api/admin/settings {"backupHour": 4}`; the column is `server_settings.backup_hour`.
 
 ### Restoring
 
@@ -1309,7 +1337,8 @@ at `/library`, and any folder layout is read. If it is still empty, check that y
 scan; you can also force a rescan from the admin panel, or restart the stack.
 
 **I never set an admin password / can't sign in.** If no users exist yet, just open the app and the first-run
-screen lets you create the admin. If an admin already exists, reset the password under **Profile → Account**.
+screen lets you create the admin. If an admin already exists, reset the password under
+**Profile → Account → Signed in as → Change password**.
 
 **A source/site won't add.** Paste the site's **base URL** (e.g. `https://example.com`), not a series page.
 Uchiyomi auto-detects the engine (Madara, MangaThemesia, Manganato); Cloudflare-protected sites are handled
@@ -1349,7 +1378,7 @@ HTTPS.
 of the 6-digit code — that is the intended way back in, so keep them somewhere that is not the phone.
 
 If the recovery codes are gone too, the account cannot be recovered from the UI: turning 2FA off is
-self-service (**Profile → Account**) and needs the account's own password, and there is deliberately no admin
+self-service (**Profile → Account → Two-factor authentication**) and needs the account's own password, and there is deliberately no admin
 override. Someone with server access can clear it directly:
 
 ```bash

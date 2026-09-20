@@ -412,12 +412,23 @@ export default async function authRoutes(app: FastifyInstance) {
   });
 
   // ---- TOTP 2FA ----
-  app.post('/auth/totp/setup', { preHandler: [authenticate] }, async (req) => {
+  app.post('/auth/totp/setup', { preHandler: [authenticate] }, async (req, reply) => {
     const uid = userIdOf(req);
-    const u = await one<{ username: string | null }>('SELECT username FROM users WHERE id = $1', [uid]);
+    const u = await one<{ username: string | null; totp_enabled: boolean }>('SELECT username, totp_enabled FROM users WHERE id = $1', [uid]);
+    // ⚠️ Setup is for an account WITHOUT a second step. With 2FA on, the secret in the row is the one the
+    // authenticator app holds, and this route used to overwrite it unconditionally, so a stale "Set up 2FA"
+    // button (a profile tab remounted with an old `totpEnabled`) rotated a live secret: the app's codes
+    // stopped matching, the flag stayed true, and the next login needed a recovery code. Off first, then
+    // set up again; the disable route is the only way out. Reintroduce by dropping this check.
+    const refuse = () => reply.code(409).send({ error: 'totp_enabled', message: 'Two-factor authentication is already on. Turn it off first to set it up again.' });
+    if (!u) return reply.code(401).send({ error: 'unauthorized' }); // a token that outlived its account
+    if (u.totp_enabled) return refuse();
     const secret = generateSecret();
-    await q('UPDATE users SET totp_secret = $2 WHERE id = $1', [uid, secret]); // pending until enabled
-    const uri = otpauthURL(secret, u?.username || 'user');
+    // The write carries the same condition, so an enable that lands between the SELECT and this UPDATE
+    // (two tabs) still cannot have its live secret replaced; a row it did not touch is the same refusal.
+    const wrote = await q<{ id: string }>('UPDATE users SET totp_secret = $2 WHERE id = $1 AND NOT totp_enabled RETURNING id', [uid, secret]); // pending until enabled
+    if (!wrote.length) return refuse();
+    const uri = otpauthURL(secret, u.username || 'user');
     const qr = await QRCode.toDataURL(uri, { margin: 1, width: 240 }).catch(() => '');
     return { secret, otpauth: uri, qr };
   });

@@ -39,9 +39,9 @@ before the art arrived.
 | `phone` | 390 × 844 @3x | 1170 × 2532 |
 | `crop` | element-clipped | varies |
 
-Admin screens are framed by scrolling the relevant panel into view rather than clipping the column: the admin
-content is capped around 768px inside a 1366px viewport, so a plain full-viewport shot is mostly empty black
-and a full-column clip comes out absurdly tall.
+Admin screens are framed by scrolling the relevant panel into view rather than clipping the column: a plain
+full-viewport shot of a two-column settings grid is mostly the hero, and a full-column clip comes out absurdly
+tall.
 
 ## Shots that use a fixture
 
@@ -65,6 +65,25 @@ feature that is honest and fine. For marketing it usually is not, so don't reach
 
 Capturing a populated stats page would mean signing in as a real reader, which the rig deliberately cannot
 do: the real accounts have 2FA, and working around that is worse than the screenshot is worth.
+
+## Stale after v0.39.0
+
+The profile and the admin Settings tab were rebuilt in v0.39.0 and the shots in `docs/shots/` have not been
+re-captured yet, so these show the old screens until `bash scripts/shots/run.sh --yes --only <names>` is run
+against a v0.39.0 instance (the rig itself already targets the new addresses):
+
+- `admin-settings` — the tab is now four sections (Server, Updates & schedules, Library housekeeping,
+  Scanlators) with inline *Saved* ticks and one Save button; the shot still shows the old cards.
+- `profile-security` — captured from `/profile/?tab=Account` (Signed in as, Two-factor, Active sessions,
+  Sign out); the old shot shows the eight-card Account tab with its Manage chips.
+- `crop-tokens` and `crop-anilist` — both sections now live on `/profile/?tab=Connections`, the token form
+  opens inline under *New token*, and each tracker is a row rather than a card.
+- `profile-stats` — the You tab gained the Reading studio (heatmap, pace, weekday) that used to sit under
+  Reading, so the board is taller than the shot.
+- `admin-providers` — the Extensions catalogue no longer renders inside Providers; a link card that reads
+  *{n} sources enabled* points at the Extensions tab instead.
+- `admin-extensions`, `crop-extensions`, `ext-strip-*` — same content, now captured from the Extensions tab;
+  the framing around the search field differs.
 
 ## Adding a shot
 

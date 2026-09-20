@@ -95,8 +95,8 @@ mean it comes up in seconds on a NAS or a Raspberry Pi.
 ## Translations
 
 The interface ships in **English, Spanish, French, German, Portuguese (Brazil), Russian, Japanese, Chinese
-and Arabic**, with right-to-left layout for Arabic. Pick one under **Profile → Language**; the choice follows
-your account to other devices.
+and Arabic**, with right-to-left layout for Arabic. Pick one under **Profile → Settings → Language**; the choice
+follows your account to other devices.
 
 **Everything except English is machine-assisted and has not been checked by a native speaker.** If something
 reads wrong, it is one JSON file per language in [`web/public/locales/`](web/public/locales) and the keys are
@@ -120,8 +120,8 @@ Uchiyomi is free and open-source. If it's useful to you, you can help fund conti
 
 **[☕ Buy me a coffee on Ko-fi →](https://ko-fi.com/angeloshaheen)**
 
-You'll also find a **♡ Sponsor** button at the top of this repo's GitHub page, and a **Support Uchiyomi** card inside
-the app under **Profile** and **Admin → Settings**.
+You'll also find a **♡ Sponsor** button at the top of this repo's GitHub page, and a **Support Uchiyomi** link inside
+the app on the **Profile** rail.
 
 ## Contributors
 

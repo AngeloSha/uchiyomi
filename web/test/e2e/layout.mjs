@@ -14,7 +14,12 @@ import puppeteer from 'puppeteer';
 const BASE = process.env.BASE || 'http://127.0.0.1:18140';
 const USER = process.env.E2E_USER || 'e2e';
 const PASS = process.env.E2E_PASS || 'e2e-passw0rd-123';
-const PAGES = (process.env.PAGES || '/,/library,/collections,/discover,/profile,/admin,/admin/import,/moments').split(',');
+// The four `?tab=` entries are the v0.39.0 settings grids (three profile tabs and the admin Settings tab):
+// each is a new `SETTINGS_GRID` of sections that must fill 1920 without any container capping it at
+// 700-1500 px -- the "768 px ribbon" the owner reported on the old admin console -- and must not overflow
+// at 390. The tab row's first panel is what a bare `/profile` or `/admin` measures, so the other tabs
+// were never measured at all before this.
+const PAGES = (process.env.PAGES || '/,/library,/collections,/discover,/profile,/admin,/admin/import,/moments,/profile/?tab=Settings,/profile/?tab=Connections,/profile/?tab=Account,/admin/?tab=Settings').split(',');
 
 // How much of a wide viewport the content must actually occupy. Not 100%: a settings form SHOULD have
 // margins, and prose that runs 1900px wide is unreadable. But a page using less than this is a column

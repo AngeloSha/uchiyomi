@@ -357,8 +357,20 @@ async function main() {
     })();
   }
 
-  // Nightly backup, aligned to a wall-clock hour and re-read from settings each run so it stays live-editable.
+  // Nightly backup, aligned to a wall-clock hour and re-read from settings each time the timer is armed.
+  //
+  // ⚠️ `arm()` IS THE ONLY SCHEDULER, and it always clears the pending timer before setting the next one.
+  // The hour used to be re-read only when a run finished, so a change made at 10:00 from 3 to 22 still fired
+  // at 03:00 tomorrow and only the run after that landed at 22:00 -- the Tasks tab said "daily at 22:00" for
+  // a night that ran at three. The settings route now calls `runtime.rearmBackup` after writing the hour,
+  // and because a re-arm clears first, one arriving DURING a running backup replaces the timer that run's
+  // `finally` is about to set rather than adding a second one: the arm CALLED last wins (a generation counter
+  // inside `arm` makes an earlier arm that resolves later stand down), and there is only ever one timer.
+  // Reintroduce by having `backupTick` call `setTimeout` itself again.
   {
+    let timer: NodeJS.Timeout | null = null;
+    // Bumped by every arm(); an arm that is no longer the newest when its SELECT resolves stands down.
+    let gen = 0;
     const backupTick = async () => {
       try {
         runtime.backingUp = true;
@@ -370,8 +382,8 @@ async function main() {
         app.log.error(e as any);
       } finally {
         runtime.backingUp = false;
+        void arm();
       }
-      setTimeout(backupTick, await nextBackupDelay()).unref();
     };
     const nextBackupDelay = async (): Promise<number> => {
       let hour = 3;
@@ -382,7 +394,26 @@ async function main() {
       } catch { /* settings not readable yet — keep 03:00 */ }
       return msUntilHour(hour);
     };
-    void (async () => { setTimeout(backupTick, await nextBackupDelay()).unref(); })();
+    const arm = async () => {
+      // The clear sits AFTER the await, right before the set, with nothing between them. Clearing before the
+      // await lets two overlapping arms (a re-arm during a run's `finally`) both pass the clear and both set
+      // a timer, the first of which is then orphaned but live: two backups a night.
+      //
+      // ⚠️ And the LAST-CALLED arm must own the timer, not the last-resolved one. Two PATCHes of the hour
+      // milliseconds apart (5 then 18) issue two SELECTs on separate pool connections; when the first one
+      // resolves after the second, clear-then-set alone leaves the surviving timer at the superseded hour,
+      // and the night's one backup runs at 05:00 while the Tasks tab says 18:00. So each arm takes a
+      // generation number before its await and stands down if a newer arm has started meanwhile: only the
+      // newest arm ever reaches the set. Reintroduce by dropping the `g !== gen` return.
+      const g = ++gen;
+      const delay = await nextBackupDelay();
+      if (g !== gen) return;
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(backupTick, delay);
+      timer.unref();
+    };
+    runtime.rearmBackup = () => { void arm(); };
+    void arm();
   }
 
   /**

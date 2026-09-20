@@ -1,5 +1,98 @@
 # Changelog
 
+## v0.39.0 — 2026-09-20
+
+The profile page and the admin Settings tab, reorganised. The profile had grown by accretion: identity shown
+three times, *Sign out* twice, a *Reading* tab that was mostly device settings plus one chart, an *Account*
+tab of eight cards with two-factor, API tokens and the OPDS link each hidden behind an identical *Manage*
+chip, and the reader's own defaults nowhere on it at all. The admin Settings tab mixed three ways of saving
+— full-width *Save name* / *Save interval* buttons, switches that saved on their own with a toast, a tiny
+*Save* chip and a dirty-tracked Save — under three-hundred-word paragraphs. Neither console remembered which
+tab you were on across a refresh, and changing the language dropped you back on the first one. This release
+is that cleanup, and nothing else: no new setting was invented, every endpoint and body is what it was, and
+the reader, the library and the admin's other tabs are untouched.
+
+### The profile: You · Settings · Connections · Account
+
+Four tabs, each with an address. **You** is the hero, the badges, the lists and the reading studio (heatmap,
+pace, by weekday — moved here from the old Reading tab, next to the things a reader looks at first).
+**Settings** is four sections on one grid: **Appearance** (avatar, accent, language), **Reading** (the weekly
+goal, then the reader's defaults — mode, theme, pages per view, repeated pages, fit, page gap, auto-scroll and
+brightness — which until now could only be changed from inside the reader), **Downloads** (*Keep favorites
+offline* with its per-series count, storage used, *Protect downloads*, and the way to the offline list) and
+**This device** (new-chapter alerts and *Install Uchiyomi*, only where they apply). The reader defaults write
+the same store the reader's sheet writes, so the two never disagree: the sheet still changes them for the
+session you are in, and a series you have adjusted keeps its own memory, which wins. **Connections** is
+everything that lets something other than this app read or write on your account: **Progress tracking**
+(one row per service; *Connect* opens the token field under the row), **External readers** (the OPDS link,
+its status, *Include 18+ libraries in this reader*, and a fresh link's URL, username and password shown once,
+never behind a fold) and **API tokens** (*New token* opens the form inline, right under the heading; the text
+now says that Mihon's Komga extension and the Uchiyomi extension use these). **Account** is who you are and
+how you are signed in: **Signed in as** with *Change password*, **Two-factor authentication**, **Active
+sessions** and **Sign out**. The *Admin and server settings* card and the second sign-out card are gone; the
+rail keeps *Admin*, *Support Uchiyomi* and *Sign out*, and on a phone those sit as pills above the board.
+
+### Settings save themselves and say so
+
+One rule on both consoles now. A switch, a pill group, a colour or a slider saves the moment it changes; a
+text or number field saves when you leave it or press Enter, and only if it changed (Escape puts it back; a
+number outside its range is clamped and shows the clamped value; an empty number field reverts rather than
+saving 0). The row says *Saving…* then *✓ Saved* beside the control, announced to a screen reader, and a
+failed save shows the server's message in the same spot until the next change. There is no toast for a
+setting any more — toasts stay for actions with side effects: revoking, generating, connecting, signing
+other devices out, and the two admin switches that destroy or send something (the read-chapter cleanup and
+the install count). On the settings tabs a *Save* button remains in exactly three kinds of place, on purpose: secrets (*Update
+password*, *Verify and enable* for 2FA, *Create* for a token, *Generate OPDS link*), the scanlator lists on
+the admin tab (*Save scanlator defaults*, one button for the two lists and the patience — a half-typed list
+is not something to save on every keystroke), and the confirmation the read-chapter cleanup asks for.
+
+### The admin Settings tab
+
+Four sections in a fixed order. **Server**: the server name, *Open registration*, *Check for updates* and
+the anonymous install count — each of the last two with a fold (*How this works*; *What is sent, once a day*
+or *What would be sent, once a day*) holding the full explanation and, for the count, the exact request that
+would be sent and the three promises about it. The fold is open while you are counted and opens when you
+switch the count on, so the consent is on screen at the moment of consent. **Updates & schedules**: the
+library update interval, the **backup time** — the nightly backup's hour was shown under Tasks and editable
+nowhere; it is a field now (0–23, local time), and changing it re-arms the pending timer at once, so a change
+at ten in the morning from 3 to 22 fires tonight at 22:00 rather than tomorrow at 03:00 — and, when an
+extension engine is configured, *Update extensions automatically* with its check interval. **Library
+housekeeping**: *Delete read chapters* and its *Wait (days)*; switching the deletion on still asks first,
+with the count of chapters that would go, and a day count you have just typed is carried into that
+confirmation so the job never runs at a number the row no longer shows. **Scanlators**: the blocked list,
+the default priority and the patience, with the one Save.
+
+### Both consoles remember the tab
+
+`/admin/?tab=Settings`, `/profile/?tab=Connections` and so on: a tab tap rewrites the address in place (no
+history entry, so Back still leaves the page), a refresh or a bookmark opens that tab, and a language change
+— which rebuilds the whole page — lands you back on the tab you changed it from, which is the Settings tab
+where the language lives, instead of the first one. The first tab is plain `/admin/` and `/profile/`.
+`/profile/?tab=Connections&card=tracking` still scrolls Progress tracking into view, and the import page's
+"connect a tracker" line points there. The Providers tab no longer renders the whole Extensions catalogue a
+second time under its own cards; it has a link card that says how many sources the engine has enabled (or
+that the engine is not running) and opens the Extensions tab.
+
+### Paths that moved, for anyone following older instructions
+
+**Profile → Connections → API tokens → New token** (was *Profile → Account → API tokens*, then *Manage*),
+**Profile → Connections → Progress tracking** (was under Reading),
+**Profile → Connections → External readers** (was under Account), **Profile → Settings → Language** and
+**Profile → Settings → Reading** for the reader defaults, **Admin → Settings → Server** for the update check
+and the install count, **Admin → Settings → Updates & schedules** for the extension update switch. The docs, the API reference, the OpenAPI
+description, the import page and the health note that names the update check all say the new places, and
+the test that checks every documented path against the console's own strings covers them. The eight
+translations gained the new strings and lost thirteen that nothing renders any more.
+
+What was verified: source guards for every rule above (the primitives' accessibility, the save-once-on-blur
+rule, the one-Save-button rule, the tab hook writing `replaceState` and never re-reading in an effect, the
+confirmation carrying the day count, the consent fold's labels, the reader defaults going through the
+reader's own store, every new string present in all eight locale files), the backup hour end to end against
+a database (PATCH 4, GET reads it back, the tasks list says *daily at 04:00*, 24 and −1 are refused), and
+type-checking plus the static build. The release chain drives every row of both consoles in a browser at
+1280 and 390 px before the tag; the screenshots in the docs still show the old screens and are listed as
+stale in `docs/SCREENSHOTS.md` until they are re-captured.
+
 ## v0.38.0 — 2026-09-20
 
 Two things TIGamingTV asked for. [PR #51](https://github.com/AngeloSha/uchiyomi/pull/51) proposed a

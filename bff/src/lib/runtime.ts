@@ -60,6 +60,16 @@ export const runtime: {
   lastCleanup: number;
   lastCleanupResult: CleanupResult | null;
   cleaning: boolean;
+  /**
+   * Re-arms the nightly backup timer, installed by server.ts once the scheduler exists.
+   *
+   * The scheduler arms ONE timer per run and re-reads `backup_hour` only when that timer fires, so before
+   * this hook a change made at 10:00 from 3 to 22 still fired at 03:00 the next morning and only the run
+   * after that landed at 22:00 -- the admin panel said "daily at 22:00" for a night that ran at three. The
+   * settings route calls this after writing the hour so the pending timer is replaced at once. `null` in
+   * tests and until the server has started; callers use `runtime.rearmBackup?.()`.
+   */
+  rearmBackup: (() => void) | null;
 } = {
   lastScan: 0,
   lastUpdate: 0,
@@ -72,4 +82,5 @@ export const runtime: {
   lastCleanup: 0,
   lastCleanupResult: null,
   cleaning: false,
+  rearmBackup: null,
 };

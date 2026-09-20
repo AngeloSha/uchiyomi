@@ -15,6 +15,7 @@ import {
   linkedCount, linkedLine,
   type ImportCandidate, type ImportBatchSummary,
 } from '../lib/importBatch';
+import { readTab } from '../lib/tabParam';
 
 const ROOT = join(__dirname, '..');
 const read = (p: string) => readFileSync(join(ROOT, p), 'utf8');
@@ -430,7 +431,7 @@ test('the tracker intake is a nested box, and the intake card still ends on its 
   assert.match(intake, /<div className="mb-4 rounded-xl border border-ink-700 bg-ink-900\/50 p-2\.5" data-tracker-intake>/, 'the tracker intake is not the nested box');
   assert.match(intake, /<OpenImports batches=\{open\} onOpen=\{onOpen\} \/>\s*<TrackerIntake starting=\{starting\} onStart=\{onTracker\} \/>\s*<p className="mb-2 text-xs font-semibold uppercase tracking-wider text-fog-500">\{tr\('Bring your library over'\)\}<\/p>/, 'the box is not between Open imports and the eyebrow');
   // Not connected: one dim line that lands ON the Progress tracking card (tab + card, see the profile test).
-  assert.match(intake, /<Link href="\/profile\/\?tab=Reading&card=tracking"[^>]*>\s*\{NOT_CONNECTED\(\)\}/, 'the not-connected line does not point at the tracking card');
+  assert.match(intake, /<Link href="\/profile\/\?tab=Connections&card=tracking"[^>]*>\s*\{NOT_CONNECTED\(\)\}/, 'the not-connected line does not point at the tracking card');
   // Reading + Plan to read on by default; "Finished" is the read-state word, never the series status "Completed".
   assert.match(src, /const LIST_STATUS_LABELS = keys\('Reading', 'Plan to read', 'Finished', 'On hold', 'Dropped'\);/, 'the list buckets are not declared through keys()');
   assert.match(src, /\{ id: 'reading', label: LIST_STATUS_LABELS\[0\], on: true \},\s*\{ id: 'plan_to_read', label: LIST_STATUS_LABELS\[1\], on: true \},\s*\{ id: 'completed', label: LIST_STATUS_LABELS\[2\], on: false \}/, 'Reading and Plan to read are not the defaults, or completed is not labelled Finished');
@@ -444,13 +445,24 @@ test('the tracker intake is a nested box, and the intake card still ends on its 
 
 test('the profile page opens the tab named in ?tab=, under Suspense', () => {
   // `useSearchParams` needs a Suspense boundary in a static export (the build fails without one), and the
-  // import page's tracker line points at `/profile/?tab=Reading` -- without this the link landed on You,
-  // five cards away from Progress tracking. Reintroduce by initialising `tab` to 'You' again: "the tab is
-  // not read from the query" fails; or by dropping the Suspense wrapper: "no Suspense boundary" fails.
+  // import page's tracker line points at `/profile/?tab=Connections` -- without this the link landed on
+  // You, a tab away from Progress tracking. Since v0.39.0 the tab comes from `useTabParam` (lib/useTabParam.ts),
+  // which reads the query ONCE in a lazy `useState` and never in an effect: an effect re-reading the params
+  // would snap a person back to the URL's tab on the render after they tapped the rail. Reintroduce by
+  // initialising `tab` with `useState<Tab>('You')` again: "the tab is not read from the query" fails; by
+  // adding a `useEffect` to the hook that re-reads `params`: "the hook re-reads the query in an effect"
+  // fails; or by dropping the Suspense wrapper: "no Suspense boundary" fails.
   const src = code(read('app/profile/page.tsx'));
   assert.match(src, /<Suspense fallback=\{<div className="min-h-screen-d" \/>\}>\s*<ProfileInner \/>\s*<\/Suspense>/, 'no Suspense boundary');
-  assert.match(src, /const \[tab, setTab\] = useState<Tab>\(\(\) => \{ const t = params\.get\('tab'\); return isTab\(t\) \? t : 'You'; \}\);/, 'the tab is not read from the query');
-  assert.match(src, /const isTab = \(v: string \| null\): v is Tab => typeof v === 'string' && \(PROFILE_GROUPS\[0\]\.tabs as readonly string\[\]\)\.includes\(v\);/, 'an arbitrary ?tab= value is not rejected');
+  assert.match(src, /const PROFILE_TABS = PROFILE_GROUPS\[0\]\.tabs;/, 'the tab list is not the first group\'s tabs');
+  assert.match(src, /const \[tab, setTab\] = useTabParam<Tab>\(PROFILE_TABS, 'You'\);/, 'the tab is not read from the query');
+  const hook = code(read('lib/useTabParam.ts'));
+  assert.match(hook, /useState<T>\(\(\) => readTab\(params\.get\('tab'\), tabs, fallback\)\)/, 'the hook does not read the query once, lazily');
+  assert.doesNotMatch(hook, /useEffect\(/, 'the hook re-reads the query in an effect');
+  // The pure half, called: an arbitrary ?tab= value falls back rather than rendering an empty panel.
+  assert.equal(readTab('Bogus', ['You', 'Settings'], 'You'), 'You', 'an arbitrary ?tab= value is not rejected');
+  assert.equal(readTab('Settings', ['You', 'Settings'], 'You'), 'Settings', 'a real tab is not honoured');
+  assert.equal(readTab(null, ['You', 'Settings'], 'You'), 'You', 'no ?tab= does not fall back');
 });
 
 test('the pointer lands ON the Progress tracking card: ?card=tracking scrolls it into view once the trackers are known', () => {
@@ -459,17 +471,24 @@ test('the pointer lands ON the Progress tracking card: ?card=tracking scrolls it
   // line landed the person on a screen with no Progress tracking on it. The card is scrolled to after the
   // trackers query settles (it is null before that, and its height depends on the answer), once per
   // arrival, instantly under reduced motion, with a scroll margin for the sticky desktop bar.
-  // Reintroduce by dropping the `focus` prop from the TrackerCard call: "the Reading tab does not hand the
-  // card its focus" fails; by removing the `useEffect` in TrackerCard: "the card never scrolls itself into
-  // view" fails; by scrolling before `isPending` is false: "the scroll does not wait for the trackers" fails.
+  // Since v0.39.0 the card is the Progress tracking section of the Connections tab, in
+  // components/ProfileConnections.tsx; the page hands it `focusTracking` and the section does the scroll.
+  // Reintroduce by dropping the `focusTracking` prop from the ProfileConnections call: "the Connections
+  // tab does not hand the section its focus" fails; by removing the `useEffect` in TrackerSection: "the
+  // section never scrolls itself into view" fails; by scrolling before `isPending` is false: "the scroll
+  // does not wait for the trackers" fails.
   const src = code(read('app/profile/page.tsx'));
   assert.match(src, /const \[focusTracking\] = useState<boolean>\(\(\) => params\.get\('card'\) === 'tracking'\);/, 'card=tracking is not read from the query');
-  assert.match(src, /<TrackerCard span="wide" focus=\{focusTracking && tab === 'Reading'\} \/>/, 'the Reading tab does not hand the card its focus');
-  const card = src.slice(src.indexOf('function TrackerCard('), src.indexOf('function TrackerRow('));
-  assert.match(card, /useEffect\(\(\) => \{\s*if \(!focus \|\| isPending \|\| scrolled\.current \|\| !ref\.current\) return;\s*scrolled\.current = true;\s*ref\.current\.scrollIntoView\(\{ block: 'start', behavior: still \? 'auto' : 'smooth' \}\);\s*\}, \[focus, isPending, still\]\);/, 'the card never scrolls itself into view, or does not wait for the trackers, or ignores reduced motion');
-  assert.match(card, /<div ref=\{ref\} id="progress-tracking" className=\{`\$\{CARD\} \$\{span\} scroll-mt-4 lg:scroll-mt-20`\}>/, 'the card has no id or no scroll margin for the sticky desktop bar');
+  assert.match(src, /<ProfileConnections focusTracking=\{focusTracking && tab === 'Connections'\} \/>/, 'the Connections tab does not hand the section its focus');
+  const conn = code(read('components/ProfileConnections.tsx'));
+  const from = conn.indexOf('function TrackerSection(');
+  const to = conn.indexOf('function TrackerRow(');
+  assert.ok(from > 0 && to > from, 'TrackerSection / TrackerRow are not where this test looks');
+  const card = conn.slice(from, to);
+  assert.match(card, /useEffect\(\(\) => \{\s*if \(!focus \|\| isPending \|\| scrolled\.current \|\| !ref\.current\) return;\s*scrolled\.current = true;\s*ref\.current\.scrollIntoView\(\{ block: 'start', behavior: still \? 'auto' : 'smooth' \}\);\s*\}, \[focus, isPending, still\]\);/, 'the section never scrolls itself into view, or does not wait for the trackers, or ignores reduced motion');
+  assert.match(card, /<Section ref=\{ref\} id="progress-tracking" className="scroll-mt-4 lg:scroll-mt-20" title=\{tr\('Progress tracking'\)\}/, 'the section has no id or no scroll margin for the sticky desktop bar');
   // The import page sends people there with both halves of the query.
-  assert.match(code(read('app/admin/import/page.tsx')), /href="\/profile\/\?tab=Reading&card=tracking"/, 'the import page does not point at the card');
+  assert.match(code(read('app/admin/import/page.tsx')), /href="\/profile\/\?tab=Connections&card=tracking"/, 'the import page does not point at the card');
 });
 
 test('an all-owned tracker batch says what it did: the done card counts and names the rows linked for progress sync', () => {
@@ -611,4 +630,31 @@ test('the i18n rig leak word for the tracker box is a sentence word, not the eye
   const rig = read('test/e2e/i18n.mjs');
   assert.match(rig, /\['\/admin\/import', \[[^\]]*'bring your list over'/, 'the rig does not look for the tracker line');
   assert.doesNotMatch(rig, /\['\/admin\/import', \[[^\]]*'From your tracker'/, 'the rig looks for the eyebrow');
+});
+
+test('the i18n rig visits the v0.39.0 consoles by their ?tab= address and looks for words that really translate', () => {
+  // The rig's tab-row check only ever saw each console's first tab, so the rebuilt admin Settings tab and
+  // the profile's Settings tab are visited by URL. And every word it looks for must have an es/de/fr
+  // translation that differs from the English: "Badges" is "Badges" in French, so with it in the list a
+  // correctly translated /profile counted one leak before a single real one -- and the profile tab row
+  // no longer says "Reading" at all, so a rig still looking for it would be measuring nothing there.
+  // Reintroduce by putting 'Badges' or 'Reading' back in the /profile list, or by dropping the
+  // `?tab=Settings` entries.
+  const rig = read('test/e2e/i18n.mjs');
+  assert.match(rig, /\['\/profile', \['Connections', 'Account', 'Settings', 'Reading studio', 'Lists', 'Sign out'\]\]/, 'the /profile word list is not the v0.39.0 one');
+  assert.doesNotMatch(rig, /\['\/profile', \[[^\]]*'(?:Badges|Reading|Moments)'/, 'the /profile list has a word that is the same in French, or the retired Reading tab');
+  assert.match(rig, /\['\/profile\/\?tab=Settings', \[[^\]]*'Repeated pages'/, 'the rig does not visit the profile Settings tab');
+  assert.match(rig, /\['\/admin\/\?tab=Settings', \[[^\]]*'Backup time'/, 'the rig does not visit the admin Settings tab');
+  // GroupChips renders its labels as CSS-uppercase eyebrows, so innerText reads DEFAULT PRIORITY and a
+  // case-sensitive \bDefault priority\b can never match -- the same trap the import page's 'From your tracker'
+  // eyebrow set (above). Reintroduce by listing 'Default priority' for /admin/?tab=Settings.
+  assert.doesNotMatch(rig, /\['\/admin\/\?tab=Settings', \[[^\]]*'(?:Default priority|Blocked groups|Patience)/, 'the admin Settings list looks for an uppercase eyebrow');
+  // The words the rig relies on for the profile are ones the locale files translate today (the other two
+  // lists lean on strings other v0.39.0 builders add, which test 14 of settingsConsole.test.ts covers).
+  for (const f of ['es.json', 'de.json', 'fr.json']) {
+    const d = JSON.parse(read(`public/locales/${f}`));
+    for (const w of ['Account', 'Settings', 'Reading studio', 'Lists', 'Sign out', 'Weekly goal', 'Language', 'Accent', 'Offline downloads']) {
+      assert.ok(d[w] && d[w] !== w, `${f}: "${w}" is missing or the same as the English, so the rig would count it as a leak`);
+    }
+  }
 });

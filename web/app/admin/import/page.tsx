@@ -4,7 +4,7 @@
 // selected" adds only what was accepted. Since v0.35.0 this is the ONLY import path in the UI: the one-shot
 // textarea on Admin → Providers, which added the first cross-source hit with no review, is gone
 // (POST /api/admin/import stays for scripts). Since v0.36.0 the fourth way in is the AniList / MyAnimeList /
-// Kitsu list of an account connected under Profile → Reading → Progress tracking (#48 point 1): the same
+// Kitsu list of an account connected under Profile → Connections → Progress tracking (#48 point 1): the same
 // review, and every title that lands is linked to its tracker entry so progress sync works from day one.
 //
 // A dedicated route rather than a Sheet off the admin Providers card: this is a multi-step flow that can run
@@ -65,7 +65,7 @@ interface IntakeNote { skippedNovels: number; truncated: boolean }
 
 /** The dim sentence of the not-connected state; also what a `not_connected` refusal falls back to. */
 const NOT_CONNECTED = () =>
-  tr('Have an AniList, MyAnimeList or Kitsu account? Connect it under Profile → Reading → Progress tracking to bring your list over.');
+  tr('Have an AniList, MyAnimeList or Kitsu account? Connect it under Profile → Connections → Progress tracking to bring your list over.');
 
 /**
  * The tracker intake: the reading list of an account connected under Profile, brought in as a batch.
@@ -77,9 +77,10 @@ const NOT_CONNECTED = () =>
  * control like the MangaDex "Load", and the card still ends on its one accent button.
  *
  * With nothing connected it is one dim line -- the state nearly every admin sees -- linking straight to the
- * Progress tracking card of Profile (`?tab=Reading&card=tracking`: the profile page opens the tab and scrolls
- * the card into view once the trackers have loaded). "Open Profile" used to land on the You tab, five cards
- * away from it; `?tab=Reading` alone opened the right tab with the card ~430 px below the fold on a phone.
+ * Progress tracking section of Profile (`?tab=Connections&card=tracking`: the profile page opens the tab and
+ * scrolls the section into view once the trackers have loaded). "Open Profile" used to land on the You tab,
+ * a tab away from it; the tab alone opened the right tab with the card ~430 px below the fold on a phone.
+ * (It was `?tab=Reading` until v0.39.0 folded that tab's trackers into Connections.)
  */
 function TrackerIntake({ starting, onStart }: {
   starting: boolean;
@@ -108,7 +109,7 @@ function TrackerIntake({ starting, onStart }: {
     <div className="mb-4 rounded-xl border border-ink-700 bg-ink-900/50 p-2.5" data-tracker-intake>
       <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-fog-500">{tr('From your tracker')}</p>
       {!connected.length ? (
-        <Link href="/profile/?tab=Reading&card=tracking" className="block text-[11px] text-fog-500 underline decoration-ink-600 underline-offset-2 hover:text-fog-300">
+        <Link href="/profile/?tab=Connections&card=tracking" className="block text-[11px] text-fog-500 underline decoration-ink-600 underline-offset-2 hover:text-fog-300">
           {NOT_CONNECTED()}
         </Link>
       ) : (

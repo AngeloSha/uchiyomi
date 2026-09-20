@@ -134,8 +134,8 @@ export default async function opdsRoutes(app: FastifyInstance) {
     // so a rule enforced only in the app is not enforced at all.
     //
     // 18+ libraries: hidden unless the token itself says otherwise. An OPDS reader has no button to press
-    // and no query parameter it knows about, so the preference lives on the credential (Profile → External
-    // readers) rather than being inferred from anything the request carries. Hidden is the right default:
+    // and no query parameter it knows about, so the preference lives on the credential (Profile → Connections →
+    // External readers) rather than being inferred from anything the request carries. Hidden is the right default:
     // a feed nobody can filter should not be the way adult titles get onto a device. `/opds/book/:id/file`
     // and page streaming still work either way, because by-id resolution goes through `visibleBookFile`,
     // which is `visible()` and not `browsable()`. The age CAP is a permission and is not affected by this.

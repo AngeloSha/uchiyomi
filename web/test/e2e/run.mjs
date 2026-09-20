@@ -774,6 +774,20 @@ try {
     if (!opened) bad('admin: no Settings tab');
     else {
       await sleep(2500);
+      // Since v0.39.0 the payload sits in a disclosure under the install-count switch, closed until the
+      // server is counting (open while it is, and opened by the act of consenting). This instance is not
+      // counting, so open it the way a person would -- by its button -- and fail if there is no such button:
+      // a payload that cannot be reached is a payload nobody was shown.
+      const disclosed = await page.evaluate(() => {
+        if (document.querySelector('pre')) return 'already';
+        const b = [...document.querySelectorAll('button[aria-expanded="false"]')]
+          .find((x) => /what (is|would be) sent/i.test(x.textContent || ''));
+        if (!b) return null;
+        b.click();
+        return 'opened';
+      });
+      if (!disclosed) bad('admin settings: no "What would be sent" disclosure to open — the payload is unreachable');
+      else if (disclosed === 'opened') await sleep(600);
       const seen = await page.evaluate(() => {
         const pre = document.querySelector('pre');
         const text = document.body.innerText || '';
