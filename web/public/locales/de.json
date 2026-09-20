@@ -925,5 +925,9 @@
   "A group name is at most 80 characters": "Ein Gruppenname hat höchstens 80 Zeichen",
   "A group name needs at least one letter or digit": "Ein Gruppenname braucht mindestens einen Buchstaben oder eine Ziffer",
   "Tap the download icon on any chapter — or turn on Keep favorites offline under Profile → Settings → Downloads — to read offline. Perfect for flights and commutes.": "Tippe bei einem Kapitel auf das Download-Symbol — oder schalte unter Profil → Einstellungen → Downloads „Favoriten offline behalten“ ein — um offline zu lesen. Perfekt für Flüge und den Arbeitsweg.",
-  "Nothing is saved on this device, and there is no connection to fetch anything with. Reconnect and download a chapter to read it here.": "Auf diesem Gerät ist nichts gespeichert, und es gibt keine Verbindung, um etwas zu holen. Verbinde dich wieder und lade ein Kapitel herunter, um es hier zu lesen."
+  "Nothing is saved on this device, and there is no connection to fetch anything with. Reconnect and download a chapter to read it here.": "Auf diesem Gerät ist nichts gespeichert, und es gibt keine Verbindung, um etwas zu holen. Verbinde dich wieder und lade ein Kapitel herunter, um es hier zu lesen.",
+  "Show missing chapters in Mihon": "Fehlende Kapitel in Mihon anzeigen",
+  "List the chapters this server has not downloaded, and those whose files were deleted, alongside the ones it holds — so Mihon and your trackers count the whole series rather than only what is on disk. These rows cannot be opened; they are marked “not downloaded”. Only the Mihon extension sees them.": "Zeigt die Kapitel, die dieser Server nicht heruntergeladen hat, sowie jene, deren Dateien gelöscht wurden, neben den vorhandenen an — damit Mihon und deine Tracker die ganze Serie zählen und nicht nur das, was auf der Festplatte liegt. Diese Zeilen lassen sich nicht öffnen; sie sind als „not downloaded“ gekennzeichnet. Nur die Mihon-Erweiterung sieht sie.",
+  "Missing chapters are listed": "Fehlende Kapitel werden angezeigt",
+  "Only downloaded chapters are listed": "Es werden nur heruntergeladene Kapitel angezeigt"
 }

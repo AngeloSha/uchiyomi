@@ -1165,7 +1165,7 @@ the progress endpoint's numbers are **one quantity**, the override-aware chapter
 extension makes it the chapter number and Mihon compares and `PUT`s it back in that unit; `metadata.number`
 is the display string. The scanlation group rides as an author with role `translator`, which the extension
 turns back into the scanlator. `media.status` is `READY` for a chapter whose file is on the server and
-`ERROR` for a tombstone. The full field lists are in [`openapi.yaml`](../bff/openapi.yaml) under
+`ERROR` for a tombstone (both `READY` under *ghost chapters* below). The full field lists are in [`openapi.yaml`](../bff/openapi.yaml) under
 `KomgaSeries`, `KomgaBook`, `KomgaPageDto`, `KomgaReadProgressV2` and `KomgaUser`, and
 `bff/test/komgaContract.test.ts` pins the required-field lists copied from the two clients' sources.
 
@@ -1224,6 +1224,36 @@ first real sync (n ≥ 1) marks a number-0 chapter read on both sides, as Komga 
 ignored. No
 reading event is written, so a sync from the phone does not count towards streaks, the leaderboard or
 Wrapped, exactly like the app's own bulk mark-read. Needs the `write` scope.
+
+**Ghost chapters** (opt-in, *Settings → Show missing chapters in Mihon*, `komgaGhostChapters`, off by
+default). Mihon takes a series' chapter total from the list this API answers, so a library running the
+read-chapter cleanup was telling the trackers a thousand-chapter manhwa had one chapter, and a followed
+series nobody has fetched looked complete at zero. Turned on, `GET /api/v1/series/:id/books` also lists the
+chapters this server does not hold: the **tombstones** it stops filtering out (`media_status=READY` no longer
+excludes them), and the **ghosts** — numbers the sources listed at the last check with no chapter row at all,
+from `series_listing`, whatever the reason they are absent, the chapter floor included. They are merged into
+the ordinary chapter order by number, not appended.
+
+A ghost's id is `g_<series id>_<number>` with the decimal point as `_` (chapter 10.5 is `g_s_…_10_5`); it
+carries its series so the ordinary visibility gate applies to it, and a ghost id for a series the token
+cannot see is **404**, like everything else. Both kinds report `media.status: READY` — the extension asks for
+`READY` and filters nothing itself, so anything else would simply hide them — with `media.pagesCount` 0,
+`sizeBytes` 0 and `size` the literal text **`not downloaded`**, which the default chapter-name template
+`{number} - {title} ({size})` renders as *1041 - Chapter 1041 (not downloaded)* in the list, before anyone
+taps it. They cannot be opened: `GET /api/v1/books/:id/pages` is `[]` for both (a tombstone's pages are gone
+and a ghost never had any), so Mihon shows its own empty-chapter error, and a ghost's `pages/:n` and
+`thumbnail` are **404**. Deliberately not a placeholder image — Mihon marks a chapter read once it is viewed,
+which would corrupt the very progress this exists to fix.
+
+The progress endpoint agrees with the list: a ghost counts in `booksCount`, `booksUnreadCount` and
+`maxNumberSort` — that last one is the point, since it is the chapter total the tracker reports — but is
+**skipped** when walking the leading run, never breaking it. It has no chapter row, so no `PUT` can ever mark
+it; were it to break the run, one never-fetched chapter 5 would pin `lastReadContinuousNumberSort` at 4 for a
+reader at chapter 1000 and drag the tracker back there on the next sync. Skipped, the server reports 1000 and
+Mihon marks every local chapter at or below it read — the ghost rows included, which is how a chapter that is
+listed but absent still shows as read on the phone. Tombstones are real rows with real progress attached and
+were always counted correctly. Nothing outside `/api/v1` and `/api/v2` changes: the web app, OPDS and the
+offline manifest list what is on disk exactly as before.
 
 ---
 

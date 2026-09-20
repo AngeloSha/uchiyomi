@@ -481,6 +481,19 @@ ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS cleanup_read_last_result js
 ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS verify_last_run    timestamptz;
 ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS verify_last_result jsonb;
 
+-- Ghost chapters on the Komga surface (lib/komgaGhosts.ts, routes/komgaCompat.ts): list the chapters this
+-- server does NOT hold -- the ones the sources listed and the sweep never fetched (series_listing), and the
+-- ones the read-cleanup deleted the file of (lib_books.pruned_at) -- alongside the ones it does.
+--
+-- It exists for the TRACKERS. Mihon derives a series' chapter total from what this API lists, so a library
+-- that prunes what it has read told AniList a thousand-chapter manhwa had one chapter, and a follow-only
+-- series looked complete at zero. The rows cannot be opened (no pages, no images) and are labelled as such.
+--
+-- OFF by default, and not because it is dangerous: it changes what an already-paired phone sees. Chapter
+-- counts and tracker totals moving on their own after an upgrade is the kind of surprise an admin has to be
+-- able to consent to, and a library that downloads everything it lists gains nothing from it.
+ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS komga_ghost_chapters boolean NOT NULL DEFAULT false;
+
 -- What the repositories offered and what was installed, as of the last check. This is what makes "new
 -- upstream", "dropped upstream" and "installed outside Uchiyomi" answerable at all, and what lets a wiped
 -- extension server get its extensions back rather than just its repository list.

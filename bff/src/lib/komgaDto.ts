@@ -327,8 +327,14 @@ export interface OwnedBookDto {
  * default chapter-name template is `{number} - {title} ({size})` (Komga.kt L619), so a size of 0 rendered
  * every chapter as "(0 B)" on the phone -- cosmetic, but on every row of every series. `size` is Komga's
  * `BinaryByteUnit.format` text ("1.5 KiB"), which is what the template pastes in verbatim.
+ *
+ * `opts.absent` is the opt-in ghost mode (lib/komgaGhosts, server_settings.komga_ghost_chapters): a pruned
+ * tombstone is LISTED rather than hidden, so a library that deletes what it has read still tells the trackers
+ * how many chapters the series has. It reports READY because the extension asks for `media_status=READY` and
+ * filters nothing itself, and carries the same "not downloaded" size text as a ghost so the row says what it
+ * is in the list. Off, a tombstone keeps its ERROR status and the route keeps filtering it out.
  */
-export function komgaBook(dto: OwnedBookDto, opts?: { sizeBytes?: number | null; created?: Date | string | number | null }) {
+export function komgaBook(dto: OwnedBookDto, opts?: { sizeBytes?: number | null; created?: Date | string | number | null; absent?: boolean }) {
   const title = str(dto.metadata?.title ?? dto.name);
   const number = Number(dto.number);
   const numberSort = Number.isFinite(number) ? number : 0;
@@ -339,6 +345,9 @@ export function komgaBook(dto: OwnedBookDto, opts?: { sizeBytes?: number | null;
   const sizeBytes = Math.max(0, Math.trunc(Number(opts?.sizeBytes ?? dto.sizeBytes ?? 0)) || 0);
   const scanlator = str(dto.scanlator);
   const authors: KomgaAuthor[] = scanlator ? [{ name: scanlator, role: 'translator' }] : [];
+  // A tombstone listed under the ghost opt-in: there are no bytes behind it, so the size text says so rather
+  // than reporting the size the file had before the cleanup took it.
+  const absent = !!(opts?.absent && dto.pruned);
   return {
     id: str(dto.id),
     seriesId: str(dto.seriesId),
@@ -350,12 +359,13 @@ export function komgaBook(dto: OwnedBookDto, opts?: { sizeBytes?: number | null;
     lastModified: created,
     fileLastModified: created ?? komgaDate(null),
     sizeBytes,
-    size: humanSize(sizeBytes),
+    size: absent ? NOT_DOWNLOADED : humanSize(sizeBytes),
     media: {
       // A tombstone (lib/chapterCleanup: the file is gone, the row stays for everyone's progress) is not
       // READY: the extension asks for `media_status=READY` and would otherwise list a chapter whose page list
-      // is empty and whose every image is a 404.
-      status: dto.pruned ? 'ERROR' : 'READY',
+      // is empty and whose every image is a 404. Under the ghost opt-in it is READY on purpose -- being
+      // listed is the point, and the "not downloaded" size text is what warns instead.
+      status: dto.pruned && !absent ? 'ERROR' : 'READY',
       mediaType: str(dto.media?.mediaType) || 'application/zip',
       pagesCount: int(dto.media?.pagesCount),
       mediaProfile: 'DIVINA',
@@ -372,6 +382,95 @@ export function komgaBook(dto: OwnedBookDto, opts?: { sizeBytes?: number | null;
       numberSort,
       numberSortLock: false,
       releaseDate: komgaDay(when),
+      releaseDateLock: false,
+      authors,
+      authorsLock: false,
+      tags: [] as string[],
+      tagsLock: false,
+      isbn: '',
+      isbnLock: false,
+      links: [] as unknown[],
+      linksLock: false,
+    },
+    deleted: false,
+    oneshot: false,
+  };
+}
+
+/**
+ * The size text of a chapter with no file behind it.
+ *
+ * ⚠️ This string is the whole user-facing warning. The extension's default chapter-name template is
+ * `{number} - {title} ({size})` (Komga.kt L619) and pastes `size` in verbatim, so a ghost reads
+ * "1041 - Chapter 1041 (not downloaded)" in the list -- before anyone taps it. Deliberately not a byte
+ * count: `humanSize(0)` is "0 B", which reads as a broken file rather than an absent one.
+ *
+ * Not translated. It is generated inside a Kotlin client's chapter name, on a device whose language this
+ * server does not know and cannot ask; every other string on this API is English for the same reason.
+ */
+export const NOT_DOWNLOADED = 'not downloaded';
+
+/**
+ * A chapter the sources list that this server does not hold, as a `BookDto` (lib/komgaGhosts).
+ *
+ * Every field `komgaBook` emits, because the Kotlin decode requires them all and one short row fails the
+ * whole list it sits in -- komgaContract.test.ts pins the two against each other for exactly that reason.
+ * The differences are the three that make it a ghost:
+ *
+ *   media.status  READY, not ERROR. The extension requests `media_status=READY` (parseBooksQuery) and does
+ *                 no client-side filtering, so ERROR would simply hide it and the feature would do nothing.
+ *   pagesCount    0, which is true, and what makes a reader open to nothing rather than to a broken page.
+ *   size          NOT_DOWNLOADED, the label described above.
+ *
+ * `number`/`numberSort` is series_listing.number -- the source's number, the same quantity lib_books.number
+ * holds and the same one the progress endpoint compares, so a ghost sorts into its right place among the
+ * downloaded chapters and is marked read by the tracker's `chapterNumber <= lastRead` sweep.
+ */
+export function komgaGhostBook(g: {
+  id: string;
+  seriesId: string;
+  seriesTitle: string;
+  number: number;
+  title: string | null;
+  releaseDate: string | null;
+  scanlator: string | null;
+}) {
+  const number = Number(g.number);
+  const numberSort = Number.isFinite(number) ? number : 0;
+  const title = str(g.title) || `Chapter ${numberSort}`;
+  const created = komgaDateOrNull(g.releaseDate);
+  const scanlator = str(g.scanlator);
+  const authors: KomgaAuthor[] = scanlator ? [{ name: scanlator, role: 'translator' }] : [];
+  return {
+    id: str(g.id),
+    seriesId: str(g.seriesId),
+    seriesTitle: str(g.seriesTitle),
+    name: title,
+    url: '',
+    number: numberSort,
+    created,
+    lastModified: created,
+    fileLastModified: created ?? komgaDate(null),
+    sizeBytes: 0,
+    size: NOT_DOWNLOADED,
+    media: {
+      status: 'READY',
+      mediaType: 'application/vnd.comicbook+zip',
+      pagesCount: 0,
+      mediaProfile: 'DIVINA',
+      epubDivinaCompatible: false,
+      comment: '',
+    },
+    metadata: {
+      title,
+      titleLock: false,
+      summary: '',
+      summaryLock: false,
+      number: String(numberSort),
+      numberLock: false,
+      numberSort,
+      numberSortLock: false,
+      releaseDate: komgaDay(g.releaseDate),
       releaseDateLock: false,
       authors,
       authorsLock: false,

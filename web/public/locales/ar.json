@@ -925,5 +925,9 @@
   "A group name is at most 80 characters": "اسم المجموعة لا يتجاوز 80 حرفًا",
   "A group name needs at least one letter or digit": "يحتاج اسم المجموعة إلى حرف أو رقم واحد على الأقل",
   "Tap the download icon on any chapter — or turn on Keep favorites offline under Profile → Settings → Downloads — to read offline. Perfect for flights and commutes.": "انقر على أيقونة التنزيل في أي فصل — أو فعّل «إبقاء المفضلات دون اتصال» من الملف الشخصي ← الإعدادات ← التنزيلات — للقراءة دون اتصال. مثالي للرحلات والتنقلات.",
-  "Nothing is saved on this device, and there is no connection to fetch anything with. Reconnect and download a chapter to read it here.": "لا شيء محفوظ على هذا الجهاز، ولا يوجد اتصال لجلب أي شيء. أعد الاتصال ونزّل فصلًا لقراءته هنا."
+  "Nothing is saved on this device, and there is no connection to fetch anything with. Reconnect and download a chapter to read it here.": "لا شيء محفوظ على هذا الجهاز، ولا يوجد اتصال لجلب أي شيء. أعد الاتصال ونزّل فصلًا لقراءته هنا.",
+  "Show missing chapters in Mihon": "إظهار الفصول الناقصة في Mihon",
+  "List the chapters this server has not downloaded, and those whose files were deleted, alongside the ones it holds — so Mihon and your trackers count the whole series rather than only what is on disk. These rows cannot be opened; they are marked “not downloaded”. Only the Mihon extension sees them.": "اعرض الفصول التي لم يُنزّلها هذا الخادم، وتلك التي حُذفت ملفاتها، إلى جانب الفصول المتوفرة — كي يحسب Mihon وبرامج التتبّع لديك السلسلة كاملةً لا ما هو على القرص فقط. لا يمكن فتح هذه الصفوف، وتظهر موسومة بـ «not downloaded». ولا تراها سوى إضافة Mihon.",
+  "Missing chapters are listed": "يتم عرض الفصول الناقصة",
+  "Only downloaded chapters are listed": "يتم عرض الفصول المُنزّلة فقط"
 }

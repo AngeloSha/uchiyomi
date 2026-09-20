@@ -411,7 +411,8 @@ export default async function adminRoutes(app: FastifyInstance) {
 
   // ---- server settings ----
   const SETTINGS_COLS = 'server_name, allow_registration, updater_hours, extension_hours, extension_auto_update, '
-    + 'update_check, install_ping, install_ping_last, scanlator_prefs, cleanup_read, cleanup_read_days, backup_hour';
+    + 'update_check, install_ping, install_ping_last, scanlator_prefs, cleanup_read, cleanup_read_days, '
+    + 'komga_ghost_chapters, backup_hour';
   // `extensions_configured` is not a column: extension_hours has a NOT NULL default, so its presence says
   // nothing about whether there is an engine to check. The settings page needs to know, or it offers two
   // controls for a job that can never run.
@@ -491,6 +492,9 @@ export default async function adminRoutes(app: FastifyInstance) {
       cleanupReadDays: z.number().int().min(0).max(3650).optional(),
       // The local hour of the nightly backup. Until v0.39.0 it was shown under Tasks and editable nowhere.
       backupHour: z.number().int().min(0).max(23).optional(),
+      // Ghost chapters on the Komga surface (lib/komgaGhosts.ts). Affects nothing this server stores and
+      // nothing the web app shows: it widens one API's chapter list so the trackers behind it can count.
+      komgaGhostChapters: z.boolean().optional(),
     }).parse(req.body);
     if (b.serverName !== undefined) await q('UPDATE server_settings SET server_name = $1, updated_at = now() WHERE id = 1', [b.serverName]);
     if (b.allowRegistration !== undefined) await q('UPDATE server_settings SET allow_registration = $1, updated_at = now() WHERE id = 1', [b.allowRegistration]);
@@ -505,6 +509,7 @@ export default async function adminRoutes(app: FastifyInstance) {
     // The scheduler is re-armed at once, so the change applies to the NEXT run rather than the one after: the
     // timer used to re-read the hour only when it fired (server.ts, the backup block says why).
     if (b.backupHour !== undefined) { await q('UPDATE server_settings SET backup_hour = $1, updated_at = now() WHERE id = 1', [b.backupHour]); runtime.rearmBackup?.(); }
+    if (b.komgaGhostChapters !== undefined) await q('UPDATE server_settings SET komga_ghost_chapters = $1, updated_at = now() WHERE id = 1', [b.komgaGhostChapters]);
     await logAudit('settings.update', { userId: userIdOf(req), detail: b, req });
     return settingsRow();
   });

@@ -925,5 +925,9 @@
   "A group name is at most 80 characters": "Название группы — не более 80 символов",
   "A group name needs at least one letter or digit": "В названии группы должна быть хотя бы одна буква или цифра",
   "Tap the download icon on any chapter — or turn on Keep favorites offline under Profile → Settings → Downloads — to read offline. Perfect for flights and commutes.": "Нажмите значок загрузки у любой главы — или включите «Хранить избранное офлайн» в Профиль → Настройки → Загрузки — чтобы читать офлайн. Идеально для перелётов и дороги.",
-  "Nothing is saved on this device, and there is no connection to fetch anything with. Reconnect and download a chapter to read it here.": "На этом устройстве ничего не сохранено, а соединения, чтобы что-то загрузить, нет. Подключитесь снова и загрузите главу, чтобы читать её здесь."
+  "Nothing is saved on this device, and there is no connection to fetch anything with. Reconnect and download a chapter to read it here.": "На этом устройстве ничего не сохранено, а соединения, чтобы что-то загрузить, нет. Подключитесь снова и загрузите главу, чтобы читать её здесь.",
+  "Show missing chapters in Mihon": "Показывать отсутствующие главы в Mihon",
+  "List the chapters this server has not downloaded, and those whose files were deleted, alongside the ones it holds — so Mihon and your trackers count the whole series rather than only what is on disk. These rows cannot be opened; they are marked “not downloaded”. Only the Mihon extension sees them.": "Показывать главы, которые этот сервер не скачал, и те, файлы которых были удалены, рядом с имеющимися — чтобы Mihon и ваши трекеры считали серию целиком, а не только то, что есть на диске. Эти строки нельзя открыть; они помечены как «not downloaded». Их видит только расширение Mihon.",
+  "Missing chapters are listed": "Отсутствующие главы показываются",
+  "Only downloaded chapters are listed": "Показываются только скачанные главы"
 }

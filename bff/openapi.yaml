@@ -4000,6 +4000,16 @@ paths:
                   description: >-
                     Local hour of the nightly backup. The pending timer is re-armed at once, so the change
                     applies to the next run rather than the one after.
+                komgaGhostChapters:
+                  description: >-
+                    List the chapters this server does not hold on the Komga-compatible API: the ones the
+                    sources listed but the sweep never fetched, and the tombstones whose files the read
+                    cleanup deleted. Off by default. They report media.status READY so the extension does
+                    not filter them out, carry a page count of 0 and a size of "not downloaded", and cannot
+                    be opened. Their numbers count towards the chapter total the trackers read, which is
+                    what the setting is for; they never affect lastReadContinuousNumberSort. Nothing outside
+                    /api/v1 and /api/v2 changes.
+                  type: boolean
       security:
         - bearer: []
       responses:

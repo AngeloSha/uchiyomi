@@ -13,6 +13,7 @@
 // mark the wrong chapters.
 import { q } from './db';
 import { ViewCtx, seriesVisible } from './visibility';
+import { ghostsEnabled, ghostNumbers } from './komgaGhosts';
 
 export interface ReadProgressV2 {
   booksCount: number;
@@ -38,6 +39,19 @@ export interface ReadProgressV2 {
  * marks its local number-0 chapters read (`chapterNumber <= 0`), which is what they are. The PUT side has the
  * matching rule (markReadUpTo).
  *
+ * ⚠️ GHOSTS (lib/komgaGhosts, opt-in). When the chapter list includes the chapters this server does not hold,
+ * this must agree with it or the tracker is fed a total that contradicts the list it just read. So a ghost
+ * counts in `booksCount`, in `booksUnreadCount` and in `maxNumberSort` -- that last one is the fix the whole
+ * feature is for, since it is what Mihon reports as the series' chapter total.
+ *
+ * But a ghost must NOT break the continuous run, and this is the subtle half. A ghost has no lib_books row,
+ * so markReadUpTo can never mark it: were it to break the run, one never-fetched chapter 5 would pin
+ * `lastReadContinuousNumberSort` at 4 for a reader at chapter 1000, and the tracker would take the series
+ * back to 4 on the next sync. Skipped instead, the run reads through it, the server reports 1000, and Mihon
+ * marks every local chapter at or below 1000 read -- the ghost rows included, which is how a chapter that is
+ * listed but absent still shows as read on the phone. A tombstone is a real row with a real read_progress
+ * and is never skipped; it is already counted correctly and always was.
+ *
  * Returns null when the viewer may not see the series (deleted, merged, other library, above the age cap): the
  * route turns that into 404 so "not yours" and "no such series" look identical from outside.
  */
@@ -54,23 +68,34 @@ export async function readProgressV2(ctx: ViewCtx, userId: string, seriesId: str
       ORDER BY COALESCE(ov.number, b.number) ASC, b.file ASC`,
     [seriesId, userId],
   );
+  // Merged into the same ascending order the run is walked in, so a ghost sits where its number puts it
+  // rather than after everything. `ghost` is what the run loop skips on.
+  const ghosts = (await ghostsEnabled()) ? await ghostNumbers(seriesId) : [];
+  const all: Array<{ number: number; completed: boolean | null; ghost: boolean }> = [
+    ...rows.map((r) => ({ number: Number(r.number), completed: r.completed, ghost: false })),
+    ...ghosts.map((number) => ({ number, completed: null, ghost: true })),
+  ];
+  if (ghosts.length) all.sort((a, b) => a.number - b.number);
+
   let read = 0;
   let inProgress = 0;
   let max = 0;
-  for (const r of rows) {
+  for (const r of all) {
     if (r.completed === true) read++;
     else if (r.completed === false) inProgress++;
     if (r.number > max) max = r.number;
   }
   let last = 0;
-  for (const r of rows) {
+  for (const r of all) {
+    // A chapter nobody can read cannot be the thing that says how far this reader has got.
+    if (r.ghost) continue;
     if (r.completed !== true) break;
     last = r.number;
   }
   return {
-    booksCount: rows.length,
+    booksCount: all.length,
     booksReadCount: read,
-    booksUnreadCount: rows.length - read - inProgress,
+    booksUnreadCount: all.length - read - inProgress,
     booksInProgressCount: inProgress,
     lastReadContinuousNumberSort: last,
     maxNumberSort: max,

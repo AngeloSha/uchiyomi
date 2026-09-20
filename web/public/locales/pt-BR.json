@@ -925,5 +925,9 @@
   "A group name is at most 80 characters": "O nome de um grupo tem no máximo 80 caracteres",
   "A group name needs at least one letter or digit": "O nome de um grupo precisa de pelo menos uma letra ou dígito",
   "Tap the download icon on any chapter — or turn on Keep favorites offline under Profile → Settings → Downloads — to read offline. Perfect for flights and commutes.": "Toque no ícone de download em qualquer capítulo — ou ative “Manter favoritos offline” em Perfil → Configurações → Downloads — para ler offline. Perfeito para voos e deslocamentos.",
-  "Nothing is saved on this device, and there is no connection to fetch anything with. Reconnect and download a chapter to read it here.": "Nada está salvo neste dispositivo e não há conexão para buscar algo. Reconecte-se e baixe um capítulo para lê-lo aqui."
+  "Nothing is saved on this device, and there is no connection to fetch anything with. Reconnect and download a chapter to read it here.": "Nada está salvo neste dispositivo e não há conexão para buscar algo. Reconecte-se e baixe um capítulo para lê-lo aqui.",
+  "Show missing chapters in Mihon": "Mostrar capítulos ausentes no Mihon",
+  "List the chapters this server has not downloaded, and those whose files were deleted, alongside the ones it holds — so Mihon and your trackers count the whole series rather than only what is on disk. These rows cannot be opened; they are marked “not downloaded”. Only the Mihon extension sees them.": "Lista os capítulos que este servidor não baixou, e aqueles cujos arquivos foram apagados, junto com os que ele tem — para que o Mihon e seus rastreadores contem a série inteira, e não apenas o que está em disco. Essas linhas não podem ser abertas; elas aparecem marcadas como “not downloaded”. Apenas a extensão do Mihon as vê.",
+  "Missing chapters are listed": "Os capítulos ausentes são listados",
+  "Only downloaded chapters are listed": "Apenas os capítulos baixados são listados"
 }

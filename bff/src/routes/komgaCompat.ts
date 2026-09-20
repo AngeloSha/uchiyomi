@@ -27,8 +27,9 @@ import { viewCtxFor, seriesVisible, browsable, Params, type ViewCtx } from '../l
 import { q, one } from '../lib/db';
 import { pushSeriesProgressAsync } from '../lib/trackers';
 import { serveLibSeriesThumb, serveLibBookThumb, serveLibBookPage } from './images';
-import { springPage, komgaSeries, komgaBook, komgaPage, parseSeriesQuery, parseBooksQuery } from '../lib/komgaDto';
+import { springPage, komgaSeries, komgaBook, komgaGhostBook, komgaPage, parseSeriesQuery, parseBooksQuery } from '../lib/komgaDto';
 import { readProgressV2, markReadUpTo } from '../lib/komgaProgress';
+import { ghostsEnabled, ghostBooksFor, ghostBookById, isGhostId } from '../lib/komgaGhosts';
 
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 
@@ -264,20 +265,35 @@ export default async function komgaCompatRoutes(app: FastifyInstance) {
   // `media_status=READY` excludes pruned tombstones: the extension filters nothing client-side, and a tombstone
   // listed as READY is a chapter whose every page 404s the moment it is tapped. Their numbers still count for
   // the progress endpoints, which read all books.
+  //
+  // Under the ghost opt-in (lib/komgaGhosts) that inverts: the tombstones stay IN, and the chapters the sources
+  // listed but this server never fetched join them, both labelled "not downloaded" in the row itself. The
+  // trackers are the reason -- Mihon takes the series' chapter total from this list, so a library that prunes
+  // what it has read was telling AniList a thousand-chapter manhwa had one chapter.
   app.get('/api/v1/series/:id/books', async (req, reply) => {
     const { id } = req.params as { id: string };
     if (!(await seriesVisible(id, vc(req)))) return reply.code(404).send({ error: 'not_found' });
     const parsed = parseBooksQuery(req.query as Record<string, unknown>);
+    const ghosts = await ghostsEnabled();
     // One query for the whole series rather than a count and a page: the READY filter has to run over the
     // rows, and a series holds hundreds of chapters, not millions.
     const all = await owned.seriesBooks(vc(req), id, 0, 100_000, parsed.sort);
-    const rows = parsed.readyOnly ? all.content.filter((b: any) => !b.pruned) : all.content;
+    const real = parsed.readyOnly && !ghosts ? all.content.filter((b: any) => !b.pruned) : all.content;
+    let rows: unknown[] = real.map((b: any) => komgaBook(b, { absent: ghosts }));
+    if (ghosts) {
+      // Merged by number into the order seriesBooks already returned, rather than appended: the extension
+      // renders the list as given, and a chapter list that runs 1..40 and then jumps back to 3 is unreadable.
+      // The sort direction is the one parseBooksQuery resolved, so `desc` stays desc.
+      const desc = /desc/i.test(parsed.sort);
+      const ghostRows = (await ghostBooksFor(id)).map((g) => komgaGhostBook(g));
+      rows = [...rows, ...ghostRows].sort((a: any, b: any) => (desc ? b.number - a.number : a.number - b.number));
+    }
     const size = parsed.unpaged ? Math.max(1, rows.length) : parsed.size;
     const page = parsed.unpaged ? 0 : parsed.page;
     const slice = rows.slice(page * size, page * size + size);
     // `unpaged` reaches springPage as the option, never as a size: the size is capped at 500 and a series
     // above it answered `size 500, last false` with every row in content (8 live series are above it).
-    return springPage(slice.map((b: any) => komgaBook(b)), rows.length, page, size, { unpaged: parsed.unpaged });
+    return springPage(slice, rows.length, page, size, { unpaged: parsed.unpaged });
   });
 
   app.get('/api/v1/series/:id/thumbnail', (req, reply) => serveLibSeriesThumb(req, reply, (req.params as { id: string }).id));
@@ -299,16 +315,35 @@ export default async function komgaCompatRoutes(app: FastifyInstance) {
     }
   };
 
+  // ⚠️ Every route that takes a book id has to test for a ghost one FIRST. A ghost id matches no lib_books
+  // row, so the ordinary lookup can only 404 it -- which would mean `/pages` saying "no such chapter" for a
+  // chapter the list had just handed out. The cheap shape test (isGhostId) gates the settings read, so the
+  // ordinary path costs nothing extra.
+
   app.get('/api/v1/books/:id', async (req, reply) => {
     const { id } = req.params as { id: string };
+    const ghosts = await ghostsEnabled();
+    if (isGhostId(id)) {
+      const ghost = ghosts ? await ghostBookById(id, vc(req)) : null;
+      return ghost ? komgaGhostBook(ghost) : reply.code(404).send({ error: 'not_found' });
+    }
     const dto = await bookOr404(req, reply, id);
-    return dto ? komgaBook(dto) : undefined;
+    return dto ? komgaBook(dto, { absent: ghosts }) : undefined;
   });
 
   // 1-based page numbers, as Komga's are and as the extension uses them verbatim in the image URL. A pruned
   // chapter answers an empty list: there are no pages behind it, and page_dims is a cache that outlives them.
+  //
+  // So does a ghost, and for the same reason -- there were never any pages. Mihon shows its own "no pages"
+  // error, which is the intended end of tapping one. ⚠️ NOT a placeholder image saying "not downloaded":
+  // Mihon marks a chapter read once it is viewed, and that would push the very tracker progress the ghost
+  // rows exist to keep honest.
   app.get('/api/v1/books/:id/pages', async (req, reply) => {
     const { id } = req.params as { id: string };
+    if (isGhostId(id)) {
+      const ghost = (await ghostsEnabled()) ? await ghostBookById(id, vc(req)) : null;
+      return ghost ? [] : reply.code(404).send({ error: 'not_found' });
+    }
     if (!(await bookOr404(req, reply, id))) return;
     const pages = await owned.bookPages(vc(req), id);
     return pages.map((p, i) => komgaPage(p, i));
@@ -320,10 +355,17 @@ export default async function komgaCompatRoutes(app: FastifyInstance) {
     const { id, n } = req.params as { id: string; n: string };
     const pageNo = Number(n);
     if (!Number.isInteger(pageNo) || pageNo < 1) return reply.code(400).send({ error: 'bad_page', message: 'Page numbers start at 1.' });
+    // A ghost has no page 1 to serve. 404 rather than a placeholder, for the reason on /pages above.
+    if (isGhostId(id)) return reply.code(404).send({ error: 'not_found' });
     return serveLibBookPage(req, reply, id, pageNo, 0);
   });
 
-  app.get('/api/v1/books/:id/thumbnail', (req, reply) => serveLibBookThumb(req, reply, (req.params as { id: string }).id));
+  // No cover for a chapter with no pages; the extension falls back to the series thumbnail.
+  app.get('/api/v1/books/:id/thumbnail', (req, reply) => {
+    const { id } = req.params as { id: string };
+    if (isGhostId(id)) return reply.code(404).send({ error: 'not_found' });
+    return serveLibBookThumb(req, reply, id);
+  });
 
   // ---- referential (the filter sheet) ------------------------------------------------------------------
   // `fetchFilterData` fires libraries, collections, genres, tags, publishers and authors back to back and the

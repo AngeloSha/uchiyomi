@@ -925,5 +925,9 @@
   "A group name is at most 80 characters": "Un nom de groupe fait au plus 80 caractères",
   "A group name needs at least one letter or digit": "Un nom de groupe doit contenir au moins une lettre ou un chiffre",
   "Tap the download icon on any chapter — or turn on Keep favorites offline under Profile → Settings → Downloads — to read offline. Perfect for flights and commutes.": "Touchez l’icône de téléchargement d’un chapitre — ou activez « Garder les favoris hors ligne » dans Profil → Paramètres → Téléchargements — pour lire hors ligne. Parfait pour les vols et les trajets.",
-  "Nothing is saved on this device, and there is no connection to fetch anything with. Reconnect and download a chapter to read it here.": "Rien n’est enregistré sur cet appareil et aucune connexion ne permet de récupérer quoi que ce soit. Reconnectez-vous et téléchargez un chapitre pour le lire ici."
+  "Nothing is saved on this device, and there is no connection to fetch anything with. Reconnect and download a chapter to read it here.": "Rien n’est enregistré sur cet appareil et aucune connexion ne permet de récupérer quoi que ce soit. Reconnectez-vous et téléchargez un chapitre pour le lire ici.",
+  "Show missing chapters in Mihon": "Afficher les chapitres manquants dans Mihon",
+  "List the chapters this server has not downloaded, and those whose files were deleted, alongside the ones it holds — so Mihon and your trackers count the whole series rather than only what is on disk. These rows cannot be opened; they are marked “not downloaded”. Only the Mihon extension sees them.": "Affiche les chapitres que ce serveur n’a pas téléchargés, ainsi que ceux dont les fichiers ont été supprimés, à côté de ceux qu’il possède — afin que Mihon et vos trackers comptent la série entière et non seulement ce qui est sur le disque. Ces lignes ne peuvent pas être ouvertes ; elles portent la mention « not downloaded ». Seule l’extension Mihon les voit.",
+  "Missing chapters are listed": "Les chapitres manquants sont affichés",
+  "Only downloaded chapters are listed": "Seuls les chapitres téléchargés sont affichés"
 }

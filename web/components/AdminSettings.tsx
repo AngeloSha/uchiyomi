@@ -270,6 +270,13 @@ function HousekeepingSection({ data, save: patch }: { data: any; save: Save }) {
             {tr('Only chapters Uchiyomi downloaded itself are removed — nothing in a library you built by hand is touched. The chapter stays listed and everyone keeps their reading history; the pages are what goes. It is not downloaded again by itself; Fetch again on the series page brings it back.')}
           </p>
         </div>
+        {/* The reveal for the cleanup above, and for a followed series nobody has fetched: without it Mihon
+            counted a pruned or never-downloaded chapter as zero chapters, and told the trackers so. No
+            confirmation — nothing here is deleted or written, and turning it off is exactly as reversible
+            as turning it on. */}
+        <SwitchRow label={tr('Show missing chapters in Mihon')} on={!!data.komga_ghost_chapters}
+          help={tr('List the chapters this server has not downloaded, and those whose files were deleted, alongside the ones it holds — so Mihon and your trackers count the whole series rather than only what is on disk. These rows cannot be opened; they are marked “not downloaded”. Only the Mihon extension sees them.')}
+          onChange={(next) => patch({ komgaGhostChapters: next })} />
       </Section>
       {confirm && (
         <ConfirmDialog
