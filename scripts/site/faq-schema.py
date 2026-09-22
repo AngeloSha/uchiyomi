@@ -13,6 +13,12 @@ So the HTML is the source and this derives the block from it:
 Paragraphs marked `data-live` are skipped: they are filled by nginx SSI at request time, so their text is
 not fixed and must not be quoted as an answer.
 
+Two markup shapes are accepted, because the page has used both: `div.faq-q` with an `h3` and paragraphs,
+and `details.faq-q` with a `summary` and paragraphs. A `<details>` answer still counts as visible to
+Google — the text is in the DOM and the element is expandable without script — but the question moved from
+`h3` to `summary`, and the first version of this script silently found zero questions when that happened.
+Zero questions is treated as an error rather than an empty document for exactly that reason.
+
 The site is not in git, so this lives here, where it is versioned, rather than beside the page it checks.
 """
 import json
@@ -24,20 +30,21 @@ MARK = ('<script type="application/ld+json" id="faq-schema">', '</script>')
 
 
 class Faq(HTMLParser):
-    """Collect (question, answer) from every `div.faq-q`: its h3, then its non-live paragraphs."""
+    """Collect (question, answer) from every `.faq-q`: its h3 or summary, then its non-live paragraphs."""
 
     def __init__(self):
         super().__init__(convert_charrefs=True)
         self.pairs, self.depth, self.mode, self.buf, self.q, self.answers = [], 0, None, [], None, []
+        self.container = 'div'
 
     def handle_starttag(self, tag, attrs):
         a = dict(attrs)
-        if tag == 'div' and 'faq-q' in (a.get('class') or ''):
-            self.depth, self.q, self.answers = 1, None, []
+        if tag in ('div', 'details') and 'faq-q' in (a.get('class') or ''):
+            self.container, self.depth, self.q, self.answers = tag, 1, None, []
         elif self.depth:
-            if tag == 'div':
+            if tag == self.container:
                 self.depth += 1
-            elif tag == 'h3':
+            elif tag in ('h3', 'summary'):
                 self.mode, self.buf = 'q', []
             elif tag == 'p' and 'data-live' not in a:
                 self.mode, self.buf = 'a', []
@@ -45,14 +52,14 @@ class Faq(HTMLParser):
     def handle_endtag(self, tag):
         if not self.depth:
             return
-        if tag in ('h3', 'p') and self.mode:
+        if tag in ('h3', 'summary', 'p') and self.mode:
             text = re.sub(r'\s+', ' ', ''.join(self.buf)).strip()
             if self.mode == 'q':
                 self.q = text
             elif text:
                 self.answers.append(text)
             self.mode, self.buf = None, []
-        elif tag == 'div':
+        elif tag == self.container:
             self.depth -= 1
             if self.depth == 0 and self.q and self.answers:
                 self.pairs.append((self.q, ' '.join(self.answers)))
