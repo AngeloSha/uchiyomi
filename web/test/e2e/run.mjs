@@ -997,6 +997,18 @@ try {
             const tab = await browser.newPage();
             await tab.setViewport({ width: 1440, height: 900 });
             try {
+              // ⚠️ SET THE PREFERENCE THIS CHECK IS ABOUT, instead of inheriting whatever an earlier block
+              // left. Reader preferences live in localStorage, which is per ORIGIN and therefore shared with
+              // every other tab in this context -- the phone pass above opens this very chapter, and the
+              // chapter sheet it drives can write `junkPages`. Under one Chrome build that left `collapse`
+              // and under the next it did not, and the check read as "the feature is broken" either way.
+              // Reintroduce by deleting these four lines: the check passes or fails on block order.
+              await tab.goto(`${BASE}/reader/?book=${book.id}`, { waitUntil: 'domcontentloaded', timeout: 60000 });
+              await tab.evaluate(() => {
+                const k = 'yomi_reader_prefs';
+                const cur = (() => { try { return JSON.parse(localStorage.getItem(k) || '{}'); } catch { return {}; } })();
+                localStorage.setItem(k, JSON.stringify({ ...cur, junkPages: 'collapse' }));
+              });
               await tab.goto(`${BASE}/reader/?book=${book.id}`, { waitUntil: 'networkidle2', timeout: 60000 });
               await sleep(8000);
               const vp = tab.viewport();
