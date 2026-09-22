@@ -546,6 +546,9 @@ you keep scrolling through a series without interruption.
 - **Per-series memory:** your zoom/theme choices are remembered per title.
 - **Jump to a chapter:** the chapter button in the top bar opens the full list, at every screen size. On a
   desktop `[` / `]` step to the previous/next chapter as well.
+- **Keyboard:** in paged mode **→** / **↓** / **Page Down** / **Space** turn to the next page and **←** / **↑** /
+  **Page Up** to the previous one, one press per page, the same as tapping the edge of the page. In webtoon
+  scroll, **Space** / **↓** and **↑** scroll by most of a screen.
 - **Jump to a page:** tap the page counter (`4/18`) in the bottom bar for a thumbnail grid of the chapter.
 - **Desktop:** the page is centered with comfortable margins.
 
