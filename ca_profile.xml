@@ -1,10 +1,10 @@
 <?xml version="1.0"?>
 <CommunityApplications>
   <Profile>
-    A self-hosted manga and manhwa reader.
+    A self-hosted manga server that downloads too.
   </Profile>
 
   <Icon>https://raw.githubusercontent.com/AngeloSha/uchiyomi/main/web/public/icons/icon-512.png</Icon>
 
-  <WebPage>https://github.com/AngeloSha/uchiyomi</WebPage>
+  <WebPage>https://uchiyomi.com</WebPage>
 </CommunityApplications>

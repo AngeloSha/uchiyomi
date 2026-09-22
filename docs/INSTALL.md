@@ -24,8 +24,9 @@ Uchiyomi used to ship as `uchiyomi-bff` + `uchiyomi-web`, with a separate nginx 
 layout is **deprecated but not dead**: it is still built, still published and still works, and nothing about
 your install has stopped functioning. You are not required to move.
 
-It is deprecated because the single container measured better on the same host — **265 MB instead of
-441 MB**, less memory, one less network hop on every API call, and no redirect on deep links — and because
+It is deprecated because the single container measured better on the same host — **275 MB on disk instead
+of 409 MB** for the pair (98 MB to pull instead of 161 MB, measured at v0.40.0), less memory, one less
+network hop on every API call, and no redirect on deep links — and because
 the end-to-end tests only ever drive the single container, so it is the layout that is actually proven on
 every commit.
 
@@ -47,18 +48,22 @@ docker compose up -d
 
 ## One-click installs
 
-**On CasaOS?** Use [`deploy/casaos/docker-compose.yml`](../deploy/casaos/docker-compose.yml) instead — import it
-as a custom app and it appears with an icon like any store app. That manifest leaves out the extension
-engine, so Mihon/Tachiyomi extensions are off there; add `uchiyomi-suwayomi` from
-[`deploy/docker-compose.yml`](../deploy/docker-compose.yml) and set `SUWAYOMI_URL` if you want them.
+**On CasaOS?** Use [`deploy/casaos/docker-compose.yml`](../deploy/casaos/docker-compose.yml) instead — import
+it as a custom app and it appears with an icon like any store app. Two differences from the file above: it
+runs Postgres as its own `uchiyomi-db` container rather than inside the app, and it leaves out the extension
+engine. For Mihon/Tachiyomi extensions, add `uchiyomi-suwayomi` from
+[`deploy/docker-compose.yml`](../deploy/docker-compose.yml) and set `SUWAYOMI_URL`. Set `PUBLIC_ORIGIN` to the
+address you actually open (the manifest defaults to `http://localhost:8080`) or logins will not stick.
 
-**On Unraid?** The template is [`templates/uchiyomi.xml`](../templates/uchiyomi.xml) in this repository,
-which is laid out as a Community Applications template repository (`templates/` plus the `ca_profile.xml`
-at the root) and is being submitted to Community Applications. Once it is listed there, install it from the
-**Apps** tab like anything else. Until it shows up, copy the file to
+**On Unraid?** Uchiyomi is in **Community Applications** — search for *uchiyomi* on the **Apps** tab and
+install it like anything else. One container, database included; set PUID/PGID to the owner of your library
+so renames work.
+
+The template behind that listing is [`templates/uchiyomi.xml`](../templates/uchiyomi.xml) in this
+repository, which is laid out as a Community Applications template repository (`templates/` plus the
+`ca_profile.xml` at the root). If you would rather install it by hand, copy that file to
 `/boot/config/plugins/dockerMan/templates-user/` on the server, then *Docker → Add Container* and pick
-*uchiyomi* under **User templates**, as before. One container, database included; set PUID/PGID to the
-owner of your library for renames.
+*uchiyomi* under **User templates**.
 
 Unraid removed the *Template repositories* field in 6.10, and since 7.3 the file behind it is not read at
 all, so pointing Unraid at a template repository URL no longer works on any current version — the template
@@ -66,8 +71,10 @@ file itself has to be on the server, or come through Community Applications. The
 [`unraid-templates`](https://github.com/AngeloSha/unraid-templates) repository is kept only so old links
 keep working; it points here.
 
-**On Umbrel?** Uchiyomi is [submitted to the Umbrel App Store](https://github.com/getumbrel/umbrel-apps/pull/6055); until it is listed, the package at
-[`deploy/umbrel/uchiyomi`](../deploy/umbrel/uchiyomi) is the exact one under review. It runs the database inside
+**On Umbrel?** Uchiyomi is [submitted to the Umbrel App Store](https://github.com/getumbrel/umbrel-apps/pull/6055)
+and the submission is still open. Until it is listed, install the package at
+[`deploy/umbrel/uchiyomi`](../deploy/umbrel/uchiyomi) yourself — it is kept pinned to the current release by
+digest, so it may be a version ahead of the one in the pull request. It runs the database inside
 the container, reads your library from *Downloads/manga*, and includes the Cloudflare solver; the Mihon
 extension engine is not part of it.
 
@@ -108,8 +115,8 @@ Upgrading in place is safe: accounts, reading progress, downloads and settings l
 database migrates itself on boot.
 
 > The two upgrade warnings that used to sit here — empty backups on v0.9.0/v0.9.1, and volume ownership
-> before v0.5.1 — were about releases fourteen and nineteen versions back. They are in the
-> [changelog](../CHANGELOG.md) with the same detail, which is where release history belongs.
+> before v0.5.1 — are long past. They are in the [changelog](../CHANGELOG.md) with the same detail, which is
+> where release history belongs.
 
 ## Behind a domain (HTTPS)
 
@@ -127,7 +134,7 @@ networks:
     external: true
 services:
   uchiyomi:
-    networks: [uchiyomi_app, uchiyomi_internal, proxy]   # keep the first two: the solver, and the database
+    networks: [uchiyomi_app, proxy]   # keep uchiyomi_app: it is how the app reaches the solver
 ```
 
 Point the proxy at **`uchiyomi` port 3000**. Once it reaches the app over a shared Docker network you no

@@ -27,7 +27,7 @@ Suwayomi) fetches chapters but is Android-only or wraps them in a basic web UI. 
 **both**, in a single app that's actually a pleasure to use:
 
 
-  <img src="docs/shots/admin-health.webp" alt="The library health checks in the admin panel" width="820">
+  <img src="shots/admin-health.webp" alt="The library health checks in the admin panel" width="820">
 
 - **Server *and* sources in one.** Own your library *and* pull new chapters, with no Komga-plus-Suwayomi-plus-a-
   reader Frankenstein to stitch together.
@@ -56,16 +56,22 @@ Suwayomi) fetches chapters but is Android-only or wraps them in a basic web UI. 
 | Single sign-on (OIDC) | ✅ | ✅ | ❌ | ❌ |
 | Reaches Mihon's extensions | ✅ | ❌ | ✅ | ✅ |
 | Reads CBZ / CBR / PDF / image EPUB | ✅ | ✅ | ✅ | ✅ |
-| Runs in one container (+ a database) | ✅ | ✅ | ✅ *(an app)* | ✅ |
-| Interface in 9 languages | ✅ | ✅ | ✅ | limited |
+| Runs in one container, database included | ✅ | ❌ *(+ a database)* | ✅ *(an app)* | ❌ *(+ a database)* |
+| Interface in 9 languages, right-to-left | ✅ | ✅ | ✅ | limited |
 | Age ratings + per-member limit | ✅ | ✅ | ❌ | ❌ |
 | Hide an 18+ library until asked for | ✅ | ❌ | ❌ | ❌ |
 | Per-member permission to add series | ✅ | ❌ | ❌ | ❌ |
 | Syncs to AniList / MAL / Kitsu | ✅ | Kavita+, paid | ✅ | ✅ |
+| Prefer or block scanlation groups | ✅ | ❌ | per-source only | ❌ |
+| Shows chapters the sources have that you don't | ✅ | ❌ | ✅ | ✅ |
+| Reviews every match before an import lands | ✅ | ❌ | ❌ | ❌ |
+| Imports an AniList / MAL / Kitsu list | ✅ | ❌ | ❌ | ❌ |
+| Readable from Mihon (Komga-compatible API) | ✅ | Komga ✅ | n/a | ❌ |
+| Keeps a part-downloaded chapter and repairs it | ✅ | n/a | ❌ | ❌ |
 | Reads text ebooks (reflowable EPUB) | ❌ *(on purpose)* | Kavita ✅ | ❌ | ❌ |
 | Kobo device sync | ❌ | Komga ✅ | ❌ | ❌ |
 
-<sub>Compiled 2026-08-24 from each project's own docs. These projects move fast and I do not run all of them
+<sub>Compiled 2026-09-22 (Uchiyomi v0.40.0) from each project's own docs. These projects move fast and I do not run all of them
 daily — if a row is wrong or out of date, [open an issue](https://github.com/AngeloSha/uchiyomi/issues) and I
 will fix it.</sub>
 

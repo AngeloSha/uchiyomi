@@ -24,6 +24,9 @@ services:
     container_name: uchiyomi
     hostname: uchiyomi
     image: ghcr.io/angelosha/uchiyomi:latest
+    # The app finishes the chapter it is writing, then Postgres checkpoints. Docker's default 10 s cuts that
+    # short.
+    stop_grace_period: 40s
     environment:
       # Run as the owner of your library so file operations work. Unset = uid 10002, library read-only.
       PUID: ${PUID:-}
@@ -32,7 +35,11 @@ services:
       PORT: "3000"
       DATABASE_URL: postgres://yomi:uchiyomi@uchiyomi-db:5432/yomi
       LIBRARY_BACKEND: owned
-      PUBLIC_ORIGIN: http://localhost:8080
+      # How you actually reach it. Logins and cookies break when this does not match the address in the
+      # browser, so on a box you open by LAN address set PUBLIC_ORIGIN=http://<nas-ip>:8080 in CasaOS's
+      # environment editor rather than leaving the localhost default.
+      PUBLIC_ORIGIN: ${PUBLIC_ORIGIN:-http://localhost:8080}
+      BACKUP_KEEP: ${BACKUP_KEEP:-14}
       FLARESOLVERR_URL: http://uchiyomi-flaresolverr:8191
       SOURCES_DIR: /sources
       CUSTOM_SITES_FILE: /config/sites.json
@@ -66,6 +73,18 @@ services:
     container_name: uchiyomi-flaresolverr
     hostname: uchiyomi-flaresolverr
     image: ghcr.io/flaresolverr/flaresolverr:latest
+    # Chrome's shared memory; Docker's 64 MB default kills chromedriver mid-challenge, which reads from the
+    # app's side as the manga site blocking us.
+    shm_size: 1gb
+    # FlareSolverr leaks over long uptimes and a bloated solver fails mid-challenge rather than dying. A cap
+    # plus `restart: unless-stopped` turns that into an automatic restart.
+    mem_limit: 2g
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8191/ | grep -q 'FlareSolverr is ready' || exit 1"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
     environment:
       LOG_LEVEL: warning
     restart: unless-stopped
@@ -95,24 +114,29 @@ x-casaos:
   title:
     en_US: Uchiyomi
   tagline:
-    en_US: A self-hosted manga and manhwa reader that also keeps up with new chapters
+    en_US: Self-hosted manga server that downloads too
   description:
     en_US: |
-      Uchiyomi is a self-hosted manga and manhwa reader that also fetches new chapters — the whole pipeline
-      (discover, grab, monitor, serve, read) in one place instead of a stack of containers.
+      Uchiyomi is a self-hosted manga server that also downloads: it stores and serves your manga, manhwa
+      and webtoons the way a library server does, and it fetches and watches for new chapters the way a
+      source app does. The whole pipeline — discover, grab, monitor, serve, read — in one place instead of a
+      stack of containers.
 
       Point it at a folder of CBZ/CBR files and read them on any device through a true-black OLED interface
       built webtoon-first: continuous vertical scroll across chapters, pinch zoom, per-series settings, and
       double-page spreads for classic manga. It installs as a PWA, so it works offline and lives on your home
       screen without an app store.
 
-      Unlike a plain library server, it can also follow series: add a source by pasting a site's URL, and a
-      scheduled updater grabs new chapters as they appear. Bring your library over from Mihon/Tachiyomi with a
-      backup file, or from a public MangaDex list.
+      Unlike a plain library server, it can also follow series: add a source by pasting a site's URL or point
+      it at a Mihon/Tachiyomi extension repository, and a scheduled updater grabs new chapters as they
+      appear, choosing between scanlation groups and falling back to another source when one refuses. Bring
+      your library over from a Mihon backup, a MangaDex list, or your AniList, MyAnimeList or Kitsu list —
+      every match is reviewed before it lands.
 
-      Built for a household — per-user reading progress, favourites, history and a leaderboard, plus two-factor
-      auth, an audit log and a Jellyfin-style admin panel. It backs itself up nightly, and there is no account,
-      no telemetry and no cloud: your library stays yours.
+      Built for a household — per-user reading progress, favourites, history and a leaderboard, plus age
+      ratings, two-factor auth, single sign-on, an audit log and a Jellyfin-style admin panel. It backs itself
+      up nightly. There is no account and no cloud; an update check reads GitHub's public releases page and
+      can be turned off, and the anonymous install count is off unless you turn it on.
   tips:
     before_install:
       en_US: |
