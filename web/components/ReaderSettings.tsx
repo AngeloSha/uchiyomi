@@ -19,10 +19,19 @@ export function ReaderSettings({
   prefs,
   set,
   onClose,
+  sourceName,
+  sourceDefault,
+  onSourceDefault,
 }: {
   prefs: ReaderPrefs;
   set: (p: Partial<ReaderPrefs>) => void;
   onClose: () => void;
+  /** The source this chapter came from, named for the button. Absent for a copy with no source on record. */
+  sourceName?: string;
+  /** Whether that source already has a default saved, which decides what the button offers. */
+  sourceDefault?: boolean;
+  /** Save the current mode/theme/spread as that source's default, or clear it when `false` is passed. */
+  onSourceDefault?: (save: boolean) => void;
 }) {
   return (
     <motion.div className="fixed inset-0 z-50" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
@@ -122,6 +131,29 @@ export function ReaderSettings({
               className={`rounded-2xl border py-3 text-sm ${!prefs.fitWidth ? 'border-accent bg-accent-soft text-accent' : 'border-ink-700 text-fog-300'}`}>{tr('Original')}</button>
           </div>
         </Row>
+
+        {/*
+          One source is a good proxy for one FORMAT: a webtoon source wants continuous vertical scroll, a
+          manga source wants paged right-to-left. Pinning the current look to the source fixes every title
+          from it at once, instead of the global default being wrong for half the library or each series
+          having to be corrected by hand. A series you have already adjusted still wins over this.
+        */}
+        {sourceName && onSourceDefault && (
+          <Row label={tr('This source')}>
+            <div className="grid gap-2">
+              <button onClick={() => onSourceDefault(true)}
+                className="rounded-2xl border border-ink-700 py-3 text-sm text-fog-300">
+                {tr('Use this reader for everything from {source}', { source: sourceName })}
+              </button>
+              {sourceDefault && (
+                <button onClick={() => onSourceDefault(false)}
+                  className="rounded-2xl border border-ink-700 py-2 text-xs text-fog-500">
+                  {tr('Forget the default for {source}', { source: sourceName })}
+                </button>
+              )}
+            </div>
+          </Row>
+        )}
       </motion.div>
     </motion.div>
   );

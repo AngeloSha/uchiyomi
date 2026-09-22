@@ -15,7 +15,7 @@ import { chapterLabel } from '@/lib/format';
 import { deviceId } from '@/lib/device';
 import { getOfflineChapter, getPageBlob, queueProgress, noteOfflineProgress, listSeriesDownloads, setOfflinePageJunk } from '@/lib/downloads';
 import { applyCover, clearCover } from '@/lib/theme';
-import { ReaderPrefs, loadPrefs, savePrefs, loadSeriesPrefs, saveSeriesPrefs, syncPrefsFromServer, THEME_FILTER } from '@/lib/readerPrefs';
+import { ReaderPrefs, loadPrefs, savePrefs, loadSeriesPrefs, saveSeriesPrefs, syncPrefsFromServer, THEME_FILTER, loadSourcePrefs, saveSourcePrefs, clearSourcePrefs } from '@/lib/readerPrefs';
 import { ReaderSettings } from '@/components/ReaderSettings';
 import { Rail, SectionTitle, useImgRetry } from '@/components/ui';
 import { PageGrid } from '@/components/PageGrid';
@@ -658,15 +658,20 @@ function ReaderInner() {
     syncPrefsFromServer().then((p) => setPrefs((cur) => ({ ...cur, ...p }))).catch(() => {});
   }, []);
 
-  // ---- per-series memory (mode/theme/zoom) ----
+  // ---- per-source, then per-series, memory (mode/theme/zoom) ----
+  //
+  // Applied in that order so the precedence is global default < source default < this series: a source
+  // default fixes everything from it in one go, and a title someone has adjusted by hand still wins.
   useEffect(() => {
     if (!seriesId) return;
-    const sp = loadSeriesPrefs(seriesId);
+    const src = chapters[0]?.sourceId || '';
+    const base = src ? loadSourcePrefs(src) : {};
+    const sp = { ...base, ...loadSeriesPrefs(seriesId) };
     if (sp.mode || sp.theme || sp.spread !== undefined)
       setPrefs((cur) => ({ ...cur, ...(sp.mode ? { mode: sp.mode } : {}), ...(sp.theme ? { theme: sp.theme } : {}), ...(sp.spread !== undefined ? { spread: sp.spread } : {}) }));
     setZoom(sp.zoom && sp.zoom >= 1 ? sp.zoom : 1);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [seriesId]);
+  }, [seriesId, chapters[0]?.sourceId]);
 
   // ---- auto-hide chrome ----
   useEffect(() => {
@@ -1118,7 +1123,22 @@ function ReaderInner() {
       </AnimatePresence>
 
       <AnimatePresence>
-        {showSettings && <ReaderSettings prefs={prefs} set={setPref} onClose={() => setShowSettings(false)} />}
+        {showSettings && (
+          <ReaderSettings
+            prefs={prefs}
+            set={setPref}
+            onClose={() => setShowSettings(false)}
+            sourceName={sourceNameOf(chapters[0]?.sourceId) || (chapters[0]?.sourceId ?? undefined)}
+            sourceDefault={!!(chapters[0]?.sourceId && Object.keys(loadSourcePrefs(chapters[0].sourceId!)).length)}
+            onSourceDefault={(save) => {
+              const src = chapters[0]?.sourceId;
+              if (!src) return;
+              if (save) saveSourcePrefs(src, { mode: prefs.mode, theme: prefs.theme, spread: prefs.spread });
+              else clearSourcePrefs(src);
+              setShowSettings(false);
+            }}
+          />
+        )}
       </AnimatePresence>
 
       {showPages && (

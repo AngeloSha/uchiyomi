@@ -106,7 +106,7 @@ function queueSync() {
     syncTimer = null;
     pushing++;
     void import('./api')
-      .then(({ api }) => api('/api/settings', { method: 'PUT', json: { reader: loadPrefs(), readerSeries: allSeriesPrefs() } }))
+      .then(({ api }) => api('/api/settings', { method: 'PUT', json: { reader: loadPrefs(), readerSeries: allSeriesPrefs(), readerSource: allSourcePrefs() } }))
       .catch(() => {})
       .finally(() => { pushing--; });
   }, SYNC_DELAY);
@@ -130,7 +130,7 @@ export async function syncPrefsFromServer(): Promise<ReaderPrefs> {
   if (syncTimer || pushing) return loadPrefs();
   try {
     const { api } = await import('./api');
-    const s = await api<{ reader?: Partial<ReaderPrefs>; readerSeries?: Record<string, SeriesPrefs> }>('/api/settings');
+    const s = await api<{ reader?: Partial<ReaderPrefs>; readerSeries?: Record<string, SeriesPrefs>; readerSource?: Record<string, SourcePrefs> }>('/api/settings');
     if (s?.reader && typeof s.reader === 'object') {
       // Through the same reconciliation as a local read: a settings row written by an older build carries
       // `skipJunk` and no `junkPages`, and must not land here as a raw object.
@@ -140,6 +140,13 @@ export async function syncPrefsFromServer(): Promise<ReaderPrefs> {
       for (const [id, sp] of Object.entries(s.readerSeries)) {
         if (id && sp && typeof sp === 'object') {
           localStorage.setItem(`yomi_rs_${id}`, JSON.stringify({ ...loadSeriesPrefs(id), ...sp }));
+        }
+      }
+    }
+    if (s?.readerSource && typeof s.readerSource === 'object') {
+      for (const [id, sp] of Object.entries(s.readerSource)) {
+        if (id && sp && typeof sp === 'object') {
+          localStorage.setItem(`${SOURCE_KEY}${id}`, JSON.stringify({ ...loadSourcePrefs(id), ...sp }));
         }
       }
     }
@@ -165,6 +172,8 @@ function allSeriesPrefs(): Record<string, SeriesPrefs> {
   return out;
 }
 
+const SOURCE_KEY = 'yomi_rp_';
+
 // ---- per-series memory (mode/theme/zoom remembered per title) ----
 export interface SeriesPrefs {
   mode?: ReaderPrefs['mode'];
@@ -189,6 +198,69 @@ export function saveSeriesPrefs(seriesId: string, partial: SeriesPrefs) {
     localStorage.setItem(`yomi_rs_${seriesId}`, JSON.stringify({ ...cur, ...partial }));
   } catch {}
   queueSync();
+}
+
+// ---- per-source memory (the source is the best proxy the app has for the FORMAT) ----
+/**
+ * Reader settings remembered per SOURCE.
+ *
+ * Which source a chapter came from is the most reliable signal available for what it actually is: a webtoon
+ * site serves long strips, a manga site serves paged volumes. Those want opposite readers -- one continuous
+ * vertical scroll, the other right-to-left paged spreads -- and until now the only options were a single global
+ * default that was wrong for half the library, or correcting it on every title forever.
+ *
+ * Same shape as the per-series memory, and resolved between it and the global default:
+ *
+ *     global default  <  source default  <  this series
+ *
+ * so setting a source fixes everything from it at once, and a title you have adjusted by hand still wins.
+ *
+ * Stored under `yomi_rp_` rather than `yomi_rs_` deliberately: `allSeriesPrefs()` collects by that prefix,
+ * and a key that began with it would be pushed up as a series override under a source's id.
+ */
+export type SourcePrefs = SeriesPrefs;
+
+export function loadSourcePrefs(sourceId: string): SourcePrefs {
+  if (typeof window === 'undefined' || !sourceId) return {};
+  try {
+    return JSON.parse(localStorage.getItem(`${SOURCE_KEY}${sourceId}`) || '{}');
+  } catch {
+    return {};
+  }
+}
+
+export function saveSourcePrefs(sourceId: string, partial: SourcePrefs) {
+  if (!sourceId) return;
+  try {
+    const cur = loadSourcePrefs(sourceId);
+    localStorage.setItem(`${SOURCE_KEY}${sourceId}`, JSON.stringify({ ...cur, ...partial }));
+  } catch {}
+  queueSync();
+}
+
+/** Forget a source's default, so its titles fall back to the global one. */
+export function clearSourcePrefs(sourceId: string) {
+  if (!sourceId) return;
+  try { localStorage.removeItem(`${SOURCE_KEY}${sourceId}`); } catch {}
+  queueSync();
+}
+
+/** Every per-source default held locally, capped like the per-series map for the same reason. */
+function allSourcePrefs(): Record<string, SourcePrefs> {
+  const out: Record<string, SourcePrefs> = {};
+  try {
+    const keys: string[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k?.startsWith(SOURCE_KEY)) keys.push(k);
+    }
+    for (const k of keys.slice(-SERIES_CAP)) {
+      const id = k.slice(SOURCE_KEY.length);
+      const v = loadSourcePrefs(id);
+      if (Object.keys(v).length) out[id] = v;
+    }
+  } catch {}
+  return out;
 }
 
 export const THEME_FILTER: Record<ReaderTheme, string> = {
