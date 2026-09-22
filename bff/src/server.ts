@@ -18,6 +18,7 @@ import { solverHealth } from './lib/health';
 import { notifyAdmins } from './lib/push';
 import { runSourceCheck } from './lib/sourceWatchdog';
 import { runSweep } from './lib/updater';
+import { runRepair, REPAIR_HOURS } from './lib/repair';
 import { runChapterCleanup, unpruneRestored } from './lib/chapterCleanup';
 import { runExtensionMonitor } from './lib/extensionMonitor';
 import { startSweeper } from './lib/imageCache';
@@ -164,18 +165,29 @@ async function main() {
   if (process.env.LIBRARY_BACKEND === 'owned') {
     const tick = async () => {
       let hours = 6;
+      let retryIn = 0;
       try {
         const s = await pool.query('SELECT updater_hours FROM server_settings WHERE id = 1');
         hours = Math.min(168, Math.max(1, s.rows[0]?.updater_hours || 6));
-        // The running flag, the stored result and the summary line all live in runSweep now, so the panel's
-        // "Run now" button gets the same treatment as this tick -- and this tick can see the button's sweep.
-        const run = runSweep({ maxNew: 5 }, app.log);
-        if (run) await run;
-        else app.log.info('updater: the previous sweep is still running, skipping this tick');
+        // ⚠️ Never beside a repair. Both download into the same series folders and both write lib_books for
+        // what landed, so a chapter the repair is replacing could be the very file this sweep scans, and two
+        // persistScans racing one folder mint rows twice. `runSweep` refuses on its own, but a refusal here
+        // would be logged as "the previous sweep is still running" -- the wrong story -- and would push the
+        // next attempt out by a full interval. Ten minutes, the same wait the repair tick does for a sweep.
+        if (runtime.repairing) {
+          app.log.info('updater: a library repair is running, trying again in 10 minutes');
+          retryIn = 10 * 60 * 1000;
+        } else {
+          // The running flag, the stored result and the summary line all live in runSweep now, so the panel's
+          // "Run now" button gets the same treatment as this tick -- and this tick can see the button's sweep.
+          const run = runSweep({ maxNew: 5 }, app.log);
+          if (run) await run;
+          else app.log.info('updater: the previous sweep is still running, skipping this tick');
+        }
       } catch (e) {
         app.log.error(e as any);
       }
-      setTimeout(tick, hours * 60 * 60 * 1000).unref();
+      setTimeout(tick, retryIn || hours * 60 * 60 * 1000).unref();
     };
     // The first run used to wait a full interval after boot, so every deploy pushed the next sweep out by
     // six hours: three deploys in one day meant no scheduled sweep at all, measured. Now the first run is
@@ -300,6 +312,64 @@ async function main() {
       setTimeout(tick, DAY).unref();
     };
     setTimeout(tick, 10 * 60 * 1000).unref();
+  }
+
+  /**
+   * The nightly library repair (lib/repair.ts).
+   *
+   * Five steps, in order: clear stale Cloudflare state, count the pages of chapter files nobody has opened,
+   * give week-old capped failures another chance, replace one- and two-page chapters where another source
+   * has a longer copy, and look for a source that can fill a gap. It never deletes, merges or renumbers
+   * anything -- the two findings that need a decision stay one-click actions an admin confirms.
+   *
+   * ⚠️ THE SWITCH IS RE-READ FROM THE DATABASE EVERY TICK, never captured at boot, the same rule as the
+   * install count and the read-chapter cleanup: an admin who turns it off must stop it without restarting
+   * the server. With it off this does one SELECT and re-arms.
+   *
+   * ⚠️ Never beside a chapter sweep, in either direction: the sweep tick above waits ten minutes for a
+   * repair, this one waits ten minutes for a sweep, and both jobs refuse to start on top of the other.
+   *
+   * Its own interval (REPAIR_HOURS, default 24) counted from the END of the last completed run, which is
+   * persisted -- so a deploy does not push the next repair out by a whole day, the way the sweep's first
+   * run used to be pushed out by six hours. The floor is thirty minutes rather than the sweep's ten: this
+   * job opens two thousand archives, and a server that has just booted should be answering readers first.
+   * Owned mode only: everything it repairs lives in lib_books and DL_ROOT, which a Komga-backed install
+   * does not have.
+   */
+  if (process.env.LIBRARY_BACKEND === 'owned') {
+    const tick = async () => {
+      let next = REPAIR_HOURS * 60 * 60 * 1000;
+      try {
+        const s = await pool.query('SELECT repair_enabled FROM server_settings WHERE id = 1');
+        if (s.rows[0]?.repair_enabled === false) {
+          app.log.info('repair: switched off in settings, nothing to do');
+        } else if (runtime.updating) {
+          app.log.info('repair: a chapter sweep is running, trying again in 10 minutes');
+          next = 10 * 60 * 1000;
+        } else {
+          // No opts at all: an automatic run honours the switch (checked again inside the job) and audits
+          // with a null user, which is what tells the Activity feed nobody pressed anything.
+          const run = runRepair(app.log);
+          if (run) await run;
+          else app.log.info('repair: the previous run is still going, skipping this tick');
+        }
+      } catch (e) {
+        // Outside the re-arm below, so a run that threw does not end the schedule.
+        app.log.error(e as any);
+      }
+      setTimeout(tick, next).unref();
+    };
+    void (async () => {
+      let last = 0;
+      try {
+        const s = await pool.query('SELECT repair_last_run FROM server_settings WHERE id = 1');
+        last = s.rows[0]?.repair_last_run ? new Date(s.rows[0].repair_last_run).getTime() : 0;
+      } catch { /* settings row not readable yet -- run on the floor */ }
+      const delay = Math.max(30 * 60 * 1000, last + REPAIR_HOURS * 60 * 60 * 1000 - Date.now());
+      app.log.info(`repair: first run in ${Math.round(delay / 60000)} min`
+        + (last ? ` (last completed ${new Date(last).toISOString()})` : ' (no completed run on record)'));
+      setTimeout(tick, delay).unref();
+    })();
   }
 
   // Drop import batches nobody will come back to (`sweepImportBatches` in routes/admin.ts owns the rule:

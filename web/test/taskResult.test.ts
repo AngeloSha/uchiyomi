@@ -118,3 +118,111 @@ test('a quiet extension check does not claim things are waiting when auto-update
   const r = taskResult({ refreshed: true, autoUpdate: true, updated: [], failed: [], updatesAvailable: [], obsolete: [] });
   assert.equal(r, ' · 0 updated');
 });
+
+// ---- the nightly repair (v0.41.0) ----
+
+test('a repair reports all five sections, with the backlog it has not reached yet', () => {
+  // `uncounted` is the point of the count step: 30,625 chapter files on the owner's server have never
+  // been opened, so the first weeks of nightly runs are a drain and "2000 stamped" alone reads as a job
+  // that has finished. Reintroduce by dropping the `r.uncounted` clause: the line below claims the count
+  // is done on the night it stamped its first 2000 of 30,625.
+  const r = taskResult({
+    counted: 2000, uncounted: 28625,
+    short: { looked: 20, replaced: 3, confirmed: 5, left: 12 },
+    gaps: { series: 5, followed: 2, fetched: 9, unfillable: 1, sweep: 0 },
+    failures: { reset: 41 },
+    solver: { reset: true, unblocked: 4, expired: 0 },
+  });
+  assert.equal(r, ' · 2000 page counts stamped, 28625 still to count · short: 3 replaced, 5 confirmed, 12 left'
+    + ' · gaps: 5 series, 2 followed, 9 chapters fetched · 41 failures reset · solver reset, 4 unblocked');
+});
+
+test('a repair counts in singulars when the count is one', () => {
+  // "1 page counts stamped · 1 chapters fetched · 1 failures reset" is the line this prevents.
+  const r = taskResult({
+    counted: 1, uncounted: 0,
+    short: { looked: 1, replaced: 0, confirmed: 0, left: 0 },
+    gaps: { series: 1, followed: 0, fetched: 1, unfillable: 0, sweep: 0 },
+    failures: { reset: 1 },
+    solver: { reset: false, unblocked: 0, expired: 1 },
+  });
+  assert.equal(r, ' · 1 page count stamped · short: 0 replaced, 0 confirmed · gaps: 1 series, 0 followed, 1 chapter fetched'
+    + ' · 1 failure reset · solver: nothing to reset, 1 old block cleared');
+});
+
+test('a repair started from a Health chip reports only the step it was asked for', () => {
+  // ⚠️ A chip sends `only: ['short']` (or one of the other four). Rendering the whole line for it would
+  // say "0 page counts stamped · gaps: 0 series" about work that was never asked for -- which reads as a
+  // repair that found nothing to do, the exact failure every branch in this file exists to prevent.
+  // Reintroduce by dropping the `ran()` gate: both lines below grow three sections of zeroes.
+  const solver = taskResult({
+    counted: 0, uncounted: 0, only: ['solver'],
+    short: { looked: 0, replaced: 0, confirmed: 0, left: 0 },
+    gaps: { series: 0, followed: 0, fetched: 0, unfillable: 0, sweep: 0 },
+    failures: { reset: 0 }, solver: { reset: false, unblocked: 0, expired: 0 },
+  });
+  assert.equal(solver, ' · solver: nothing to reset', `a solver-only run said: ${solver}`);
+  const short = taskResult({
+    counted: 0, uncounted: 0, only: ['short'],
+    short: { looked: 1, replaced: 1, confirmed: 0, left: 0 },
+    gaps: { series: 0, followed: 0, fetched: 0, unfillable: 0, sweep: 0 },
+    failures: { reset: 0 }, solver: { reset: false, unblocked: 0, expired: 0 },
+  });
+  assert.equal(short, ' · short: 1 replaced, 0 confirmed');
+});
+
+test('a Retry now says what the re-check did, not just what it reset', () => {
+  // `failures.retried` is written only by a run against ONE source -- the "Retry now" chip on a failing
+  // source in Health -- and it is the half the admin pressed the chip for. With only the reset count, a
+  // run that re-checked three series and landed two chapters read "4 failures reset": the same line as a
+  // nightly that reset four rows and did nothing else, which is the failure every branch in this file
+  // exists to prevent. Reintroduce by dropping the `retried` block from lib/tasks.ts.
+  const r = taskResult({
+    counted: 0, uncounted: 0, only: ['failures'],
+    failures: { reset: 4, retried: { series: 3, added: 2, failed: 0 } },
+  });
+  assert.equal(r, ' · 4 failures reset · 3 series re-checked, 2 chapters added');
+  // ⚠️ And a re-check in which every chapter failed again is not a quiet success. Reintroduce by pushing
+  // the bare sentence unconditionally: the line below stops at "0 chapters added".
+  const still = taskResult({
+    counted: 0, uncounted: 0, only: ['failures'],
+    failures: { reset: 1, retried: { series: 1, added: 0, failed: 5 } },
+  });
+  assert.equal(still, ' · 1 failure reset · 1 series re-checked, 0 chapters added, 5 still could not be saved');
+  // One chapter is "chapter", and a nightly (no `retried`) says nothing about a re-check it never ran.
+  assert.match(taskResult({ counted: 0, only: ['failures'], failures: { reset: 2, retried: { series: 1, added: 1, failed: 0 } } }), /1 chapter added/);
+  assert.equal(taskResult({ counted: 0, only: ['failures'], failures: { reset: 7 } }), ' · 7 failures reset');
+});
+
+test('a repair that stopped early says so before its counts', () => {
+  // The numbers after a stop are partial, and on a phone a clause at the end of a long line is the clause
+  // that is off the edge -- the same lesson the verify branch above carries. Reintroduce by pushing the
+  // stop clause after the sections: the index assertion below fails.
+  const r = taskResult({
+    counted: 120, uncounted: 4, stopped: 'shutdown',
+    short: { looked: 0, replaced: 0, confirmed: 0, left: 0 },
+    gaps: { series: 0, followed: 0, fetched: 0, unfillable: 0, sweep: 0 },
+    failures: { reset: 0 }, solver: { reset: false, unblocked: 0, expired: 0 },
+  });
+  assert.ok(r.indexOf('stopped for a restart') < r.indexOf('120 page counts'), `the stop must lead the line: ${r}`);
+  const disk = taskResult({
+    counted: 0, uncounted: 900, stopped: 'disk', only: ['count'],
+  });
+  assert.equal(disk, ' · stopped: the download disk is at its floor · 0 page counts stamped, 900 still to count');
+});
+
+test('a repair that is switched off says so, instead of five empty sections', () => {
+  // The nightly tick honours the Settings switch and returns without doing anything. Rendering its result
+  // as "0 page counts stamped · short: 0 replaced…" would read as a repair that ran and found nothing.
+  // Reintroduce by dropping the `skipped === 'disabled'` line.
+  assert.equal(taskResult({ counted: 0, skipped: 'disabled' }), ' · switched off');
+});
+
+test('the repair branch is read before the verify branch', () => {
+  // ⚠️ Both results are counts of files. `counted` is the repair and `checked` is Verify chapter files,
+  // and a repair result that also carried a `checked` key would render as a verify run with none of its
+  // own numbers. Reintroduce by moving the repair branch below the verify one: this reads "99 checked".
+  const r = taskResult({ counted: 5, uncounted: 0, checked: 99, missing: 0, unmounted: [] });
+  assert.match(r, /5 page counts stamped/);
+  assert.doesNotMatch(r, /checked/, 'a repair result was rendered as a verify run');
+});

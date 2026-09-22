@@ -229,15 +229,25 @@ test('a source you turned off is listed but never a warning', { skip: DSN ? fals
   const { q } = await import('../src/lib/db');
   const { runHealthChecks } = await import('../src/lib/health');
   await migrate();
-  const OFF = 'hl-off', DOWN = 'hl-down';
-  await q('DELETE FROM source_health WHERE source_id = ANY($1::text[])', [[OFF, DOWN]]);
-  await q(`INSERT INTO source_health (source_id, status, disabled) VALUES ($1, 'ok', true), ($2, 'down', false)`, [OFF, DOWN]);
+  const OFF = 'hl-off', DOWN = 'hl-down', UNUSED = 'hl-unused';
+  const S_DOWN = 's_health_down';
+  await q('DELETE FROM source_health WHERE source_id = ANY($1::text[])', [[OFF, DOWN, UNUSED]]);
+  await q('DELETE FROM lib_series WHERE id = $1', [S_DOWN]);
+  await q(`INSERT INTO source_health (source_id, status, disabled) VALUES ($1, 'ok', true), ($2, 'down', false), ($3, 'down', false)`,
+    [OFF, DOWN, UNUSED]);
+  // ⚠️ The down source needs a series on it, because "down" is only a finding when something depends on it:
+  // since v0.41.0 a failing source no series uses is greyed (ten of the live server's twelve not-ok rows are
+  // Discover-only noise nobody can act on). Without this row the fixture would prove the new rule instead of
+  // the old one. `hl-unused` is the new rule's own fixture: same failure, nothing using it.
+  await q(`INSERT INTO lib_series (id, source, title, folder, books_count, source_id, source_series_id)
+           VALUES ($1, 'test', 'Down Fixture', $1, 3, $2, 'd1')`, [S_DOWN, DOWN]);
   // Other files leave their own rows in source_health (the suite shares one database, one file at a time),
   // so the counts are checked against the items rather than assumed to be ours alone: the summary's
-  // "failing" figure must be exactly the non-info items, and the "turned off" figure exactly the info ones.
+  // "failing" figure must be exactly the non-info items, and the two quiet figures exactly the info ones.
   const counts = (c: any) => ({
     failing: Number(c.summary.match(/^(\d+) source/)?.[1] ?? 0),
     off: Number(c.summary.match(/(\d+) turned off by you/)?.[1] ?? 0),
+    idle: Number(c.summary.match(/(\d+) no series use/)?.[1] ?? 0),
     live: c.items.filter((i: any) => !i.info).length,
     info: c.items.filter((i: any) => i.info).length,
   });
@@ -246,21 +256,65 @@ test('a source you turned off is listed but never a warning', { skip: DSN ? fals
     assert.equal(first.status, 'warn', 'a source that is down is still a warning');
     const n1 = counts(first);
     assert.equal(n1.failing, n1.live, `the verdict counts only live faults (summary: ${first.summary})`);
-    assert.equal(n1.off, n1.info, 'and says how many are turned off');
+    assert.equal(n1.off + n1.idle, n1.info, 'and says how many are turned off or unused');
     const off = first.items.find((i: any) => i.title === OFF);
     assert.ok(off, 'the switched-off source is still listed');
     assert.equal(off.info, true, 'the switched-off source is marked as reference, not a finding');
     assert.match(off.detail, /turned off/);
-    assert.notEqual(first.items.find((i: any) => i.title === DOWN)?.info, true, 'the down source is a real finding');
+    const down = first.items.find((i: any) => i.title === DOWN);
+    assert.notEqual(down?.info, true, 'the down source is a real finding');
+    assert.match(down.detail, /1 series use it/, 'and the count now includes the series on it');
+    // Reintroduce by dropping the 0-series rule from sourceTrouble() (`info` for disabled rows only):
+    // this assertion fails -- a source nothing uses is a warning again, which is ten of the live server's
+    // twelve and the reason that check was permanently amber.
+    const unused = first.items.find((i: any) => i.title === UNUSED);
+    assert.ok(unused, 'a source nothing uses is still listed');
+    assert.equal(unused.info, true, 'but it is reference, not a finding: nothing depends on it');
+    assert.match(unused.detail, /no series use it/);
+    // The chips act on the source by id, never by parsing the title.
+    assert.equal(down.sourceId, DOWN, 'every source row names its source');
+    assert.deepEqual(down.actions, ['test', 'disable'], 'a live failing source offers Test and Turn off');
+    assert.deepEqual(off.actions, ['test'], 'one already turned off is not offered Turn off again');
 
-    await q('DELETE FROM source_health WHERE source_id = $1', [DOWN]);
+    await q('DELETE FROM lib_series WHERE id = $1', [S_DOWN]);
+    await q('DELETE FROM source_health WHERE source_id = ANY($1::text[])', [[DOWN, UNUSED]]);
     const second = (await runHealthChecks()).checks.find((c: any) => c.id === 'sources');
     const n2 = counts(second);
     assert.equal(second.status, n2.live ? 'warn' : 'ok', 'a page with only switched-off sources is ok');
     assert.equal(n2.failing, n2.live, `still only live faults in the verdict (summary: ${second.summary})`);
     assert.ok(second.items.some((i: any) => i.title === OFF && i.info), 'the switched-off source is still listed');
   } finally {
-    await q('DELETE FROM source_health WHERE source_id = ANY($1::text[])', [[OFF, DOWN]]);
+    await q('DELETE FROM lib_series WHERE id = $1', [S_DOWN]);
+    await q('DELETE FROM source_health WHERE source_id = ANY($1::text[])', [[OFF, DOWN, UNUSED]]);
+  }
+});
+
+/**
+ * A blocked source offers "Clear block" as well, and clearing is what also wipes the escalation memory
+ * (consecutive), which is what makes the next cooldown fifteen minutes instead of seventy-five.
+ *
+ * Reintroduce by dropping the `blocked_until` branch from the actions list in sourceTrouble(): the blocked
+ * fixture offers no way to clear the block from the page that reports it.
+ */
+test('a blocked source offers Clear block, and a source with a cooldown is a finding even with no series', { skip: DSN ? false : 'set TEST_DATABASE_URL to run' }, async () => {
+  const { migrate } = await import('../src/lib/migrate');
+  const { q } = await import('../src/lib/db');
+  const { runHealthChecks } = await import('../src/lib/health');
+  await migrate();
+  const BLOCKED = 'hl-blocked';
+  await q('DELETE FROM source_health WHERE source_id = $1', [BLOCKED]);
+  await q(`INSERT INTO source_health (source_id, status, disabled, blocked_until, consecutive)
+           VALUES ($1, 'blocked', false, now() + interval '1 hour', 4)`, [BLOCKED]);
+  try {
+    const c = (await runHealthChecks()).checks.find((x: any) => x.id === 'sources');
+    const row = c.items.find((i: any) => i.title === BLOCKED);
+    assert.ok(row, 'listed');
+    // A cooldown is happening NOW, so it is a finding whether or not a series uses the source: something is
+    // being waited on, and the waiting is the thing an admin may want to end.
+    assert.notEqual(row.info, true, 'a source in a cooldown is a finding even with nothing on it');
+    assert.deepEqual(row.actions, ['test', 'unblock', 'disable']);
+  } finally {
+    await q('DELETE FROM source_health WHERE source_id = $1', [BLOCKED]);
   }
 });
 
@@ -354,5 +408,280 @@ test('uninstall prunes an orphaned health row and keeps one that still has serie
   } finally {
     await q('DELETE FROM lib_series WHERE id = $1', [SB]);
     await q('DELETE FROM source_health WHERE source_id = ANY($1::text[])', [[A, B]]);
+  }
+});
+
+const S_HELD = 's_health_held';
+
+/**
+ * What the library HOLDS is one question with one answer (lib/libraryNumbers.ts), and this page used to get
+ * it wrong in both directions: a chapter deleted on purpose still counted as a hole the page told you to
+ * fill -- a finding that could not be cleared by doing what it asked -- while a renumber made through the
+ * series page left the old number reported for ever.
+ *
+ * Reintroduce by reading `lib_books.number` raw in chapterGaps() (no `haveNumbers`, no `heldBooks`, no
+ * override join): the deliberate deletion becomes a gap again and the renumbered chapter never fills one.
+ */
+test('a deliberate deletion is not a gap, a file that went missing is, and a renumber is honoured', { skip: DSN ? false : 'set TEST_DATABASE_URL to run' }, async () => {
+  const { migrate } = await import('../src/lib/migrate');
+  const { q } = await import('../src/lib/db');
+  const { runHealthChecks } = await import('../src/lib/health');
+  await migrate();
+  await q('DELETE FROM lib_series WHERE id = $1', [S_HELD]);
+  await q(`INSERT INTO lib_series (id, source, title, folder) VALUES ($1,'test','Held Fixture',$1)`, [S_HELD]);
+  for (const n of [1, 2, 3, 4, 5]) {
+    await q(`INSERT INTO lib_books (id, series_id, source, file, title, number, pages)
+             VALUES ($1,$2,'test',$3,$4,$5,20)`,
+      [`b_${S_HELD}_${n}`, S_HELD, `/test/${S_HELD}/${n}.cbz`, `Chapter ${n}`, n]);
+  }
+  // 3: the verify task found the file simply gone. Not held -- fetching it again is the whole point.
+  await q(`UPDATE lib_books SET pruned_at = now(), pruned_reason = 'missing' WHERE id = $1`, [`b_${S_HELD}_3`]);
+  // 4: deleted on purpose. Held, so the sweep does not fetch it back and this page must not ask for it.
+  await q(`UPDATE lib_books SET pruned_at = now(), pruned_reason = 'deleted' WHERE id = $1`, [`b_${S_HELD}_4`]);
+  const gapItem = async () => {
+    const c = (await runHealthChecks()).checks.find((x: any) => x.id === 'chapter-gaps');
+    return c.items.find((i: any) => i.title === 'Held Fixture');
+  };
+  try {
+    const item = await gapItem();
+    assert.ok(item, 'the missing file is a gap');
+    assert.match(item.detail, /^1 missing — 3/, `only the missing one (${item.detail})`);
+    assert.deepEqual(item.numbers, [3], 'the chip is told which numbers, so it can say so');
+    assert.deepEqual(item.actions, ['fill'], 'and offers to look for a source that has them');
+
+    // An admin renumbers chapter 5 to 3 through the series page: the hole is filled by a row that is
+    // already there, and the finding must clear itself.
+    await q(`INSERT INTO book_overrides (book_id, number) VALUES ($1, 3)`, [`b_${S_HELD}_5`]);
+    assert.equal(await gapItem(), undefined, 'a renumber the rest of the product honours clears the gap');
+  } finally {
+    await q('DELETE FROM book_overrides WHERE book_id = $1', [`b_${S_HELD}_5`]).catch(() => {});
+    await q('DELETE FROM lib_series WHERE id = $1', [S_HELD]);
+  }
+});
+
+const S_OUT = 's_health_outlier';
+
+/**
+ * The live signature: "Player Who Returned 10,000 Years Later" chapter 10000, the title's number parsed as
+ * a chapter. The finding now carries the rows it is about, because the fix is a delete and a delete needs
+ * ids -- and it clears itself when an admin corrects the number instead.
+ *
+ * Reintroduce by reading `lib_books.number` raw in outlierChapters() (no overrides, no `heldBooks`): the
+ * renumbered chapter is reported as impossible again, and so is the one already deleted.
+ */
+test('an impossible chapter number is offered for deletion, unless it was renumbered or already deleted', { skip: DSN ? false : 'set TEST_DATABASE_URL to run' }, async () => {
+  const { migrate } = await import('../src/lib/migrate');
+  const { q } = await import('../src/lib/db');
+  const { runHealthChecks } = await import('../src/lib/health');
+  await migrate();
+  await q('DELETE FROM lib_series WHERE id = $1', [S_OUT]);
+  await q(`INSERT INTO lib_series (id, source, title, folder) VALUES ($1,'test','Outlier Fixture',$1)`, [S_OUT]);
+  for (const n of [1, 2, 3, 4, 5, 10000]) {
+    await q(`INSERT INTO lib_books (id, series_id, source, file, title, number, pages)
+             VALUES ($1,$2,'test',$3,$4,$5,20)`,
+      [`b_${S_OUT}_${n}`, S_OUT, `/test/${S_OUT}/${n}.cbz`, `Chapter ${n}`, n]);
+  }
+  const outlier = async () => {
+    const c = (await runHealthChecks()).checks.find((x: any) => x.id === 'outliers');
+    return c.items.find((i: any) => i.title === 'Outlier Fixture');
+  };
+  try {
+    const item = await outlier();
+    assert.ok(item, 'the sidebar-widget number is reported');
+    assert.match(item.detail, /1 chapter\(s\) up to 10000/);
+    assert.deepEqual(item.bookIds, [`b_${S_OUT}_10000`], 'the chip is told exactly which chapter to delete');
+    assert.deepEqual(item.numbers, [10000]);
+    assert.deepEqual(item.actions, ['delete'], 'deleting is the action, and it is never automatic');
+
+    await q(`INSERT INTO book_overrides (book_id, number) VALUES ($1, 6)`, [`b_${S_OUT}_10000`]);
+    assert.equal(await outlier(), undefined, 'correcting the number clears the finding');
+
+    await q('DELETE FROM book_overrides WHERE book_id = $1', [`b_${S_OUT}_10000`]);
+    await q(`UPDATE lib_books SET pruned_at = now(), pruned_reason = 'deleted' WHERE id = $1`, [`b_${S_OUT}_10000`]);
+    assert.equal(await outlier(), undefined, 'and so does deleting it: the finding cannot outlive its rows');
+  } finally {
+    await q('DELETE FROM book_overrides WHERE book_id = $1', [`b_${S_OUT}_10000`]).catch(() => {});
+    await q('DELETE FROM lib_series WHERE id = $1', [S_OUT]);
+  }
+});
+
+const S_SHORT = 's_health_short';
+
+/**
+ * "Fix" replaces a file, so it is offered only for a file this server downloaded and named itself. For
+ * somebody's own copy in the read library the only honest chip is "It's fine" -- and a chapter already
+ * confirmed short is greyed, with WHEN and WHAT was decided, rather than being reported every night for
+ * ever. The nightly repair skips a confirmed chapter, which is why its only chip is the one that withdraws
+ * the confirmation.
+ *
+ * Reintroduce by offering `fix_short` for every row (dropping the root/name check in shortChapters()): the
+ * read-library assertion fails -- the page offers to overwrite a file we did not write.
+ */
+test('a short chapter offers Fix only for a file we downloaded, and a confirmed one is greyed with what was decided', { skip: DSN ? false : 'set TEST_DATABASE_URL to run' }, async () => {
+  const { migrate } = await import('../src/lib/migrate');
+  const { q } = await import('../src/lib/db');
+  const { runHealthChecks } = await import('../src/lib/health');
+  const { DL_ROOT } = await import('../src/lib/library');
+  const { chapterFileRel } = await import('../src/lib/downloader');
+  await migrate();
+  await q('DELETE FROM lib_series WHERE id = $1', [S_SHORT]);
+  await q(`INSERT INTO lib_series (id, source, title, folder) VALUES ($1,'test','Short Fixture',$1)`, [S_SHORT]);
+  const book = (n: number, pages: number, root: string, file: string) =>
+    q(`INSERT INTO lib_books (id, series_id, source, file, title, number, pages, root)
+       VALUES ($1,$2,'test',$3,$4,$5,$6,$7)`,
+      [`b_${S_SHORT}_${n}`, S_SHORT, file, `Chapter ${n}`, n, pages, root]);
+  await book(3, 2, DL_ROOT, chapterFileRel(S_SHORT, 3));
+  await book(4, 1, '/library', `${S_SHORT}/Ch 04 [somescan].cbz`);
+  await book(5, 2, DL_ROOT, chapterFileRel(S_SHORT, 5));
+  await book(6, 1, DL_ROOT, chapterFileRel(S_SHORT, 6));
+  await q(`UPDATE lib_books SET short_confirmed_at = now() WHERE id = $1`, [`b_${S_SHORT}_5`]);
+  // A tombstoned chapter: the bytes are gone, so a page count taken before they went says nothing anybody
+  // can act on. Reintroduce by dropping `b.pruned_at IS NULL` from shortChapters(): it is reported again.
+  await q(`UPDATE lib_books SET pruned_at = now(), pruned_reason = 'deleted' WHERE id = $1`, [`b_${S_SHORT}_6`]);
+  try {
+    const c = (await runHealthChecks()).checks.find((x: any) => x.id === 'short-chapters');
+    const of = (n: number) => c.items.find((i: any) => i.bookId === `b_${S_SHORT}_${n}`);
+    const ours = of(3);
+    assert.ok(ours, 'our own short chapter is reported');
+    assert.equal(ours.number, 3, 'the chip is told which chapter');
+    assert.deepEqual(ours.actions, ['fix_short', 'confirm_short']);
+    assert.notEqual(ours.info, true);
+    const theirs = of(4);
+    assert.ok(theirs, 'a read-library chapter is reported too');
+    assert.deepEqual(theirs.actions, ['confirm_short'], 'but never offered a replacement of a file we did not write');
+    const confirmed = of(5);
+    assert.ok(confirmed, 'a confirmed chapter stays listed');
+    assert.equal(confirmed.info, true, 'greyed: it is not a fault any more');
+    assert.equal(confirmed.fixed?.what, 'confirmed short at the source');
+    assert.ok(Date.parse(confirmed.fixed?.at) > 0, 'and says when that was decided');
+    assert.deepEqual(confirmed.actions, ['confirm_short'], 'its one chip is the one that withdraws the confirmation');
+    assert.equal(of(6), undefined, 'a deleted chapter is not a short chapter');
+    assert.match(c.summary, /1 confirmed short at the source/);
+    assert.match(c.note, /Counted nightly by the repair task/, 'the note no longer says only opened chapters count');
+  } finally {
+    await q('DELETE FROM lib_series WHERE id = $1', [S_SHORT]);
+  }
+});
+
+const S_GR = 's_health_gapsresult';
+
+/**
+ * A gap the nightly repair has already searched for, and found nobody carrying, is not a fault: it is an
+ * answer, and repeating it in amber every day is how a health page trains people to ignore it. It goes grey
+ * WITH the answer and the date -- and goes back to amber when the answer goes stale, when the library has
+ * moved on since, or when nobody actually asked (a cooldown is silence, not an answer).
+ *
+ * Reintroduce by greying on `gaps_checked_at` alone (dropping the `why` whitelist and the freshness check):
+ * the cooldown and the stale assertions below fail -- a gap nobody has looked at in a fortnight, and one
+ * whose search never ran, both read as settled.
+ */
+test('a gap the repair has already looked into is greyed until its answer goes stale', { skip: DSN ? false : 'set TEST_DATABASE_URL to run' }, async () => {
+  const { migrate } = await import('../src/lib/migrate');
+  const { q } = await import('../src/lib/db');
+  const { runHealthChecks } = await import('../src/lib/health');
+  await migrate();
+  await q('DELETE FROM lib_series WHERE id = $1', [S_GR]);
+  await q(`INSERT INTO lib_series (id, source, title, folder) VALUES ($1,'test','Gaps Result Fixture',$1)`, [S_GR]);
+  for (const n of [1, 2, 3, 7, 8]) {
+    await q(`INSERT INTO lib_books (id, series_id, source, file, title, number, pages)
+             VALUES ($1,$2,'test',$3,$4,$5,20)`,
+      [`b_${S_GR}_${n}`, S_GR, `/test/${S_GR}/${n}.cbz`, `Chapter ${n}`, n]);
+  }
+  const item = async () => {
+    const c = (await runHealthChecks()).checks.find((x: any) => x.id === 'chapter-gaps');
+    return c.items.find((i: any) => i.title === 'Gaps Result Fixture');
+  };
+  const stamp = async (ago: string, result: Record<string, unknown>) =>
+    q(`UPDATE lib_series SET gaps_checked_at = now() - $2::interval, gaps_result = $3::jsonb WHERE id = $1`,
+      [S_GR, ago, JSON.stringify({ at: new Date().toISOString(), have_count: 5, ...result })]);
+  try {
+    const first = await item();
+    assert.ok(first, 'never looked at: a plain finding');
+    assert.notEqual(first.info, true);
+    assert.equal(first.fixed, undefined, 'nothing has been decided about it yet');
+
+    await stamp('1 hour', { why: 'no_candidate', sweep: 0 });
+    const asked = await item();
+    assert.equal(asked.info, true, 'asked, and the answer was no: greyed');
+    assert.equal(asked.fixed?.what, 'no other source lists them');
+    assert.match(asked.detail, /no other source lists them, checked \d{4}-\d{2}-\d{2}$/);
+
+    await stamp('8 days', { why: 'no_candidate', sweep: 0 });
+    assert.notEqual((await item()).info, true, 'an answer older than a week is worth asking again');
+
+    await stamp('1 hour', { why: 'cooldown', sweep: 0 });
+    assert.notEqual((await item()).info, true, 'a cooldown is not an answer: nobody was asked');
+
+    // Something landed since the search ran, so the hole may have moved.
+    await stamp('1 hour', { why: 'no_candidate', sweep: 0, have_count: 4 });
+    assert.notEqual((await item()).info, true, 'an answer about a different library is not about this one');
+
+    // Every missing chapter is listed on a source we already follow: the ordinary sweep's job, not a search's.
+    await stamp('1 hour', { why: 'listed', sweep: 3 });
+    const listed = await item();
+    assert.equal(listed.info, true, 'a hole the chapter sweep is about to fill is not a finding');
+    assert.match(listed.detail, /the next chapter sweep will fetch them/);
+  } finally {
+    await q('DELETE FROM lib_series WHERE id = $1', [S_GR]);
+  }
+});
+
+const D1 = 's_health_dup_a', D2 = 's_health_dup_b';
+
+/**
+ * A merge is one-way and it moves everything into the survivor, so the survivor this page SUGGESTS has to
+ * be the copy that would lose the most by being the one absorbed: most live chapters, then the one people
+ * have actually read, then the older row (the id in everybody's links and history).
+ *
+ * Reintroduce by suggesting `ids[0]` (the alphabetically first title, which is what `array_agg ORDER BY
+ * ls.title` gives): the first assertion below keeps the copy with one chapter over the one with three.
+ */
+test('a duplicate pair suggests the copy with the most to lose as the one to keep', { skip: DSN ? false : 'set TEST_DATABASE_URL to run' }, async () => {
+  const { migrate } = await import('../src/lib/migrate');
+  const { q } = await import('../src/lib/db');
+  const { runHealthChecks } = await import('../src/lib/health');
+  await migrate();
+  const USER = 'hl-dup-reader';
+  await q('DELETE FROM lib_series WHERE id = ANY($1::text[])', [[D1, D2]]);
+  await q('DELETE FROM users WHERE username = $1', [USER]);
+  // D1 is the older row and holds three chapters; D2 is newer, holds one, and somebody has read it.
+  // ⚠️ D1's title sorts LAST on purpose: `array_agg(... ORDER BY ls.title)` would otherwise put the right
+  // answer first by accident, and this test would pass against a keep that is simply `ids[0]`.
+  await q(`INSERT INTO lib_series (id, source, title, folder, created_at) VALUES ($1,'test','Zeta Copy',$1, now() - interval '30 days')`, [D1]);
+  await q(`INSERT INTO lib_series (id, source, title, folder, created_at) VALUES ($1,'test','Alpha Copy',$1, now())`, [D2]);
+  for (const n of [1, 2, 3]) {
+    await q(`INSERT INTO lib_books (id, series_id, source, file, title, number, pages)
+             VALUES ($1,$2,'test',$3,$4,$5,20)`, [`b_${D1}_${n}`, D1, `/test/${D1}/${n}.cbz`, `Chapter ${n}`, n]);
+  }
+  await q(`INSERT INTO lib_books (id, series_id, source, file, title, number, pages)
+           VALUES ($1,$2,'test',$3,$4,1,20)`, [`b_${D2}_1`, D2, `/test/${D2}/1.cbz`, 'Chapter 1']);
+  const uid = (await q<{ id: string }>(`INSERT INTO users (username, display_name, password_hash, role, auth_kind)
+                                        VALUES ($1,$1,'x','user','password') RETURNING id`, [USER]))[0].id;
+  await q(`INSERT INTO read_progress (user_id, book_id, series_id, page, completed) VALUES ($1,$2,$3,5,true)`,
+    [uid, `b_${D2}_1`, D2]);
+  await q(`INSERT INTO series_trackers (series_id, provider, external_id, title) VALUES ($1,'anilist','hl-dup-1','Dup'), ($2,'anilist','hl-dup-1','Dup')`, [D1, D2]);
+  const item = async () => {
+    const c = (await runHealthChecks()).checks.find((x: any) => x.id === 'duplicates');
+    return c.items.find((i: any) => (i.seriesIds ?? []).includes(D1));
+  };
+  try {
+    const pair = await item();
+    assert.ok(pair, 'the pair is reported');
+    assert.deepEqual([...pair.seriesIds].sort(), [D1, D2].sort());
+    assert.equal(pair.keep, D1, 'chapters first: three beats one, read or not');
+    assert.deepEqual(pair.actions, ['merge'], 'and merging is offered, one pair at a time');
+
+    // Both down to one live chapter: the copy somebody has read wins over the older one.
+    await q(`UPDATE lib_books SET pruned_at = now(), pruned_reason = 'deleted' WHERE id = ANY($1::text[])`,
+      [[`b_${D1}_2`, `b_${D1}_3`]]);
+    assert.equal((await item()).keep, D2, 'then readers: a copy with progress on it is the one to keep');
+
+    await q('DELETE FROM read_progress WHERE user_id = $1', [uid]);
+    assert.equal((await item()).keep, D1, 'and last the older row, whose id is in everybody\'s links');
+  } finally {
+    await q('DELETE FROM series_trackers WHERE external_id = $1', ['hl-dup-1']).catch(() => {});
+    await q('DELETE FROM read_progress WHERE user_id = $1', [uid]).catch(() => {});
+    await q('DELETE FROM lib_series WHERE id = ANY($1::text[])', [[D1, D2]]).catch(() => {});
+    await q('DELETE FROM users WHERE username = $1', [USER]).catch(() => {});
   }
 });

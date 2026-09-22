@@ -327,6 +327,57 @@ export interface Page<T> {
   last: boolean;
 }
 
+/**
+ * Admin -> Health (`GET /api/admin/health`), mirroring `bff/src/lib/health.ts`.
+ *
+ * These live here rather than in app/admin/page.tsx because HealthActions.tsx renders the chips and the
+ * page mounts them: with the shapes declared in the page, the component would have had to import from a
+ * Next route file that imports the component back, which is a cycle.
+ */
+export type HealthAction =
+  | 'fix_short' | 'confirm_short' | 'delete' | 'fill' | 'retry'
+  | 'test' | 'unblock' | 'disable' | 'merge' | 'solver_reset';
+
+/** One step of the nightly repair (`bff/src/lib/repair.ts`), as `POST /api/admin/tasks/repair/run` takes it. */
+export type RepairStep = 'solver' | 'count' | 'failures' | 'short' | 'gaps';
+
+export interface HealthItem {
+  seriesId?: string;
+  /** Every series this item is about. The duplicates check needs both, so a merge can act on them. */
+  seriesIds?: string[];
+  titles?: string[];
+  title: string;
+  detail: string;
+  /**
+   * Listed for reference, never a reason to warn -- a source switched off, a short chapter the admin has
+   * already confirmed. A check's status is decided by the items WITHOUT this flag, and they render dimmed.
+   */
+  info?: boolean;
+  /** What an action acts ON: one chapter (short), several (impossible numbers), a source, a gap run. */
+  bookId?: string;
+  bookIds?: string[];
+  number?: number;
+  numbers?: number[];
+  sourceId?: string;
+  /** The duplicate pair's suggested survivor: the id inside `seriesIds` a merge should keep. */
+  keep?: string;
+  /** Which chips this item offers. Absent or empty means the item is a statement, not a task. */
+  actions?: HealthAction[];
+  /** Already dealt with, and when -- a confirmed-short chapter, a gap nobody lists. */
+  fixed?: { at: string; what: string };
+}
+
+export interface HealthCheck {
+  id: string;
+  title: string;
+  status: 'ok' | 'warn' | 'problem';
+  /** one-line human summary, already pluralised */
+  summary: string;
+  /** what this check cannot see -- shown so nobody reads more into a green result than it deserves */
+  note?: string;
+  items: HealthItem[];
+}
+
 export interface HomePayload {
   onDeck: Book[];
   updated: Series[];

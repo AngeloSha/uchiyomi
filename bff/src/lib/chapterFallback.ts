@@ -19,7 +19,10 @@
 //   3. A source found for the purpose (lib/sourceHunt.ts), only when the caller offers one and only when
 //      the chosen copy did not fail on a refusal: a 403 or a 429 says the site is saying no to us, and
 //      following a third source because the first is rate-limiting would turn a cooldown into a load on
-//      someone else. A missing page, an error, a site that is down -- those are worth a search.
+//      someone else. A missing page, an error, a site that is down -- those are worth a search. The one
+//      exception is a refusal the caller marks `persistent` (the same site has refused this number across
+//      two sweeps already): that is no longer a busy site but a chapter it will not serve, and the hunt
+//      is the only way it lands. Even then a refusal never becomes a partial (step 4).
 //   4. The best hold. A copy that arrived at or above PARTIAL_CHAPTER_FLOOR is offered by the downloader
 //      as a PartialHold (never written by it); the hold with the fewest missing pages across everything
 //      tried here is written last, once nothing landed whole. So a chapter is saved with holes only when
@@ -47,6 +50,16 @@ export interface FallbackInput {
   allowed?: (source: string) => boolean;
   /** Find and follow a source for this number. Only the sweep offers one; the job card never hunts. */
   hunt?: (why: string) => Promise<SourceChapter | null>;
+  /**
+   * The ledger already shows >= 2 refusals of this number from this source (lib/updater.ts reads
+   * chapter_failures for it) -- a third "no" is not a cooldown story any more. A refusal normally never
+   * starts a hunt, because a 429 minutes ago is a site that is busy, and the cooldown is the answer; but
+   * a chapter that the same site has refused across two sweeps, days apart, is a chapter that site is not
+   * going to serve (live: 169 chapters parked for weeks on "page 1: 404; page 2: 429"), and the hunt is
+   * the only way it ever lands. Lifts ONLY the hunt gate: the refusal still costs its strike, the source
+   * still goes into `refusing`, and a partial is still never written on one.
+   */
+  persistent?: boolean;
   /** Write over a file already on disk (the completion pass, the admin refetch). */
   replace?: boolean;
   /**
@@ -151,9 +164,13 @@ export async function downloadWithFallback(f: FallbackInput): Promise<FallbackOu
     }
 
     // ── 4. a source found for the purpose ───────────────────────────────────────────────────────────
-    // Only after a real failure of the chosen copy, and never after a refusal (the header says why). A
-    // chosen copy skipped for refusing counts as a refusal: the site that lists it has said no today.
-    if (f.hunt && first && !isRefusal(first.err)) {
+    // Only after a real failure of the chosen copy, and never after a refusal (the header says why) --
+    // unless the caller says the refusal is persistent (`FallbackInput.persistent`: the ledger already
+    // shows two of them for this number from this source, so a third is not a cooldown story any more).
+    // A chosen copy skipped for refusing counts as a refusal: the site that lists it has said no today.
+    // Reintroduce by dropping `|| f.persistent`: "a persistent refusal may hunt, and still never writes a
+    // partial" in chapterFallback.int.test.ts counts zero hunts.
+    if (f.hunt && first && (!isRefusal(first.err) || f.persistent)) {
       const why = whyOf(first.err);
       const found = await f.hunt(why).catch((e) => { console.warn(`[download] ${label}: the source hunt failed: ${(e as Error)?.message || e}`); return null; });
       const src = found?.source ?? '';

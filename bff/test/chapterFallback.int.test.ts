@@ -165,3 +165,34 @@ test('429 never writes a partial and never starts a hunt', { skip }, async () =>
   assert.ok(refusing.has(PRI));
   assert.equal(existsSync(join(ROOT, 'Fallback Tale', 'Chapter 6.cbz')), false, 'no placeholder archive was written');
 });
+
+test('a persistent refusal may hunt, and still never writes a partial', { skip }, async () => {
+  // Reintroduce by dropping `|| f.persistent` from the hunt gate in chapterFallback.ts: hunts stays 0 and
+  // the chapter fails as in the test above.
+  // The test above is the story so far: a refusal on its own is answered by the cooldown. This is the
+  // sweep's third attempt, after the ledger (lib/updater.ts) has shown the same site refusing this number
+  // twice -- the caller's word, here -- and the one thing that changes is that the hunt may run.
+  failures.set(`${PRI}/persist-five/4`, 429);
+  let hunts = 0;
+  const hunt = async () => { hunts++; return chapter(NEW, 'new-five', 7); };
+  const refusing = new Set<string>();
+  const out = await run(chapter(PRI, 'persist-five', 7), [], { hunt, refusing, persistent: true }).result;
+  assert.equal(hunts, 1, 'the third refusal is not a cooldown story: the hunt runs');
+  assert.equal(out.kind, 'landed', 'and the chapter lands from the hunted copy, whole');
+  assert.equal(out.via, NEW);
+  assert.equal(out.pages, 5);
+  assert.deepEqual(out.switched, { from: PRI, why: 'rate_limited' });
+  assert.ok(refusing.has(PRI), 'the refusal still costs the source its strike for the run');
+  assert.ok(asked.some((x) => x.startsWith(`${NEW}/new-five/`)), 'the hunted source was asked');
+  assert.ok(existsSync(join(ROOT, 'Fallback Tale', 'Chapter 7.cbz')), 'the whole copy is on disk');
+
+  // Persistent lifts only the hunt gate. With nothing to hunt, a refusal (a 403 here: the same rule, no
+  // resume waits) is still never a partial.
+  failures.set(`${PRI}/persist-again/4`, 403);
+  await q('DELETE FROM source_health WHERE source_id = $1', [PRI]);
+  let idle = 0;
+  const none = await run(chapter(PRI, 'persist-again', 8), [], { hunt: async () => { idle++; return null; }, persistent: true }).result;
+  assert.equal(idle, 1, 'the hunt was offered its turn');
+  assert.equal(none.kind, 'failed');
+  assert.equal(existsSync(join(ROOT, 'Fallback Tale', 'Chapter 8.cbz')), false, 'no placeholder archive was written on a refusal, persistent or not');
+});

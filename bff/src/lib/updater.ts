@@ -250,10 +250,25 @@ export async function updateSeries(seriesId: string, maxNew = 10, opts: UpdateOp
   const live = new Set(heldRows.filter((r) => r.pruned_at == null).map((r) => Number(r.number)));
   const missing = wanted.filter((c) => !have.has(c.number)).sort((a, b) => a.number - b.number);
   await stampChecked(seriesId, releases.length, missing.length);
-  // Chapters that have already failed CHAPTER_RETRY_CAP times are not attempted again by the sweep.
-  const cappedNums = new Set(
-    (await q<{ number: number }>(`SELECT number FROM chapter_failures WHERE series_id = $1 AND attempts >= $2`, [seriesId, CHAPTER_RETRY_CAP])
-      .catch(() => [])).map((r) => Number(r.number)),
+  // The ledger for this series, read once: which chapters have already failed CHAPTER_RETRY_CAP times and
+  // are not attempted again by the sweep, and which have been REFUSED twice by the very source that still
+  // lists them. The second set is `persistent` for the fallback helper (lib/chapterFallback.ts): a refusal
+  // never starts a source hunt, because a 429 today is a busy site and the cooldown is the answer -- but
+  // the same site refusing the same number across two sweeps, days apart, is a chapter it is not going to
+  // serve (live: 169 chapters parked for weeks on "page 1: 404; page 2: 429" with a second copy on a
+  // followed source that was never asked). Only a refusal (`rate_limited`, `blocked`) counts, only from
+  // the source the chosen copy is on (a refusal from a source the series no longer routes through says
+  // nothing about this one), and only at two: one refusal is still one bad night.
+  // Reintroduce by lowering `attempts >= 2` to `>= 1`: "a refusal is hunted only after two sweeps" in
+  // updater.int.test.ts sees the hunt run on the first refusal.
+  const ledger = await q<{ number: number; attempts: number; status: string; source_id: string }>(
+    `SELECT number, attempts, status, source_id FROM chapter_failures WHERE series_id = $1`, [seriesId],
+  ).catch(() => []);
+  const cappedNums = new Set(ledger.filter((r) => Number(r.attempts) >= CHAPTER_RETRY_CAP).map((r) => Number(r.number)));
+  const persistentVia = new Map(
+    ledger
+      .filter((r) => (r.status === 'rate_limited' || r.status === 'blocked') && Number(r.attempts) >= 2)
+      .map((r) => [Number(r.number), r.source_id]),
   );
   // A number being held for its preferred group is still missing -- "{n} behind" must say so -- but it is
   // not fetched: the whole point of the hold is that the copy on offer is not the one wanted yet.
@@ -364,6 +379,9 @@ export async function updateSeries(seriesId: string, maxNew = 10, opts: UpdateOp
         alternates: async () => copiesOf(tagged, ch.number, prefs, chooseOpts).filter((c) => c !== ch),
         refusing, allowed,
         hunt: huntBudget ? async () => (await huntSource(seriesId, ch.number, { allowed, budget: huntBudget })).chapter : undefined,
+        // Twice refused by the source this very copy is on (the ledger read above): the hunt may run on a
+        // third refusal. A refusal from some other source is not this copy's history.
+        persistent: persistentVia.get(ch.number) === via,
       });
     } catch (e: any) {
       // The library disk is at its floor: not this chapter's fault, not the source's, and pointless to try
@@ -589,9 +607,17 @@ export type SweepResult = Awaited<ReturnType<typeof runUpdateAll>>;
  *
  * `sweep` is the seam a test uses to make the sweep itself throw. No fake source can: a source that throws
  * is a per-series `source_error`, which is the sweep working as designed.
+ *
+ * Also `false` while the nightly repair runs (`runtime.repairing`, lib/repair.ts): both jobs download into
+ * the same series folders and both write lib_books for what landed, and a chapter the repair is replacing
+ * could be the file the sweep is scanning. server.ts's tick re-arms itself ten minutes on; the panel's
+ * "Run now" is told a repair is running. The repair refuses to start while `updating` is set, so the two
+ * never hold each other's flag at once.
+ * Reintroduce by dropping `runtime.repairing` from the check: "the sweep stands down while a repair runs"
+ * in updater.int.test.ts gets a promise instead of false.
  */
 export function runSweep(opts: SweepOpts, log: SweepLog, sweep: typeof runUpdateAll = runUpdateAll): Promise<SweepResult | null> | false {
-  if (runtime.updating) return false;
+  if (runtime.updating || runtime.repairing) return false;
   // Set before the first await, so two starts in the same turn of the event loop cannot both get through.
   runtime.updating = true;
   return (async () => {

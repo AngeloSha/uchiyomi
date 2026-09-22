@@ -765,14 +765,72 @@ chapters, chapters that downloaded as one or two images, the same title sitting 
 numbers that can't be real, and any source that is failing or blocked. Each check says what it found and what
 it cannot see. Hit **Re-check** to run them again.
 
+Since v0.41.0 every finding also carries the button that fixes it, and most of them fix themselves overnight
+without you pressing anything.
+
+**What fixes itself.** Once a day — **Admin → Settings → Library housekeeping → Repair the library nightly**,
+on by default, and **Admin → Tasks → Repair library** with a *Run now* — Uchiyomi does the five things that
+are reversible or provable on their own, in this order:
+
+* **clears stale Cloudflare state** when sources are blaming the solver: the remembered sessions, the "could
+  not be solved" marks and any cooldown that lapsed more than a day ago. No site is contacted;
+* **counts the pages** of chapter files nobody has opened (2,000 a night), which is what makes the
+  short-chapter check see them at all;
+* **gives chapters that ran out of retries another chance** a week later, when the site has had time to
+  calm down (100 a night);
+* **replaces a one- or two-page chapter when another source has a longer copy** (20 a night; one copy from
+  each of at most three sources the series follows, plus one search) — and when nothing longer exists,
+  **marks it confirmed short**, but only when every one of those copies really answered *two pages*: a
+  source that was silent, in a cooldown, left unasked by that cap of three, or that handed back an empty
+  page list ends the proof, and the chapter is looked at again another night;
+* **looks for a source that can fill a gap** (five series a night) and fetches what it finds.
+
+A whole run starts at most five searches, however many findings there are, shared between the steps that
+need one — and the short chapters may take at most two of them, so a library full of short chapters cannot
+leave the gaps with nothing.
+
+**What asks you.** The two things that cannot be undone are never automatic. **Duplicate series** offer
+**Merge** per pair, and **Merge all** for the whole check, behind a confirmation that lists every pair and
+marks the copy that is kept (most chapters, then most readers, then the older row); merging is one way.
+**Impossible chapter numbers** offer **Delete chapter(s)**, also behind a confirmation, and a chapter anyone
+has bookmarked is refused. There is deliberately no *Fix all* for either.
+
+**What the nightly never does.** It never deletes a chapter, never marks one as gone, never merges two
+series and never renumbers anything. It also never runs beside a chapter sweep: whichever starts second
+waits ten minutes. Switching it off stops the schedule only — *Run now* and the buttons below keep working.
+
+**The buttons, one per finding.** *Fix* asks the repair to look at that one chapter now; *It's fine* records
+that it really is that short (the row goes grey with the date, and a greyed row's chip reads *Not fine* so
+you can take it back); *Fill now* searches other sources for one missing run of chapters; *Retry now* clears
+a source's attempt counts whatever their age and re-checks up to ten of its series; *Test*, *Clear block* and
+*Turn off* act on a source, with *Test*'s advice shown under the row; *Reset solver sessions* clears the
+Cloudflare cookies and "could not be solved" marks this server is holding. A check whose step the nightly can
+run also gets **Fix all** in its header. Everything a button starts is the same repair narrowed to one step,
+so it is refused while a chapter sweep is running and says so.
+
+⚠️ **A chapter Uchiyomi replaces keeps everyone's reading position and bookmarks exactly as they were.** If
+you had "finished" the two-page notice, it stays finished — open it again to read the rest. The alternative
+would be a background job quietly re-opening chapters people had closed, and pushing that to your tracker.
+
+A file in a library you assembled yourself is only ever offered *It's fine*: replacing it is not Uchiyomi's
+to do, and a re-fetch could not land on the same row anyway. A gap the nightly has already searched for is
+shown greyed with what it found (*no other source lists them, checked 2026-09-21*) rather than reported
+again every night; it becomes a finding again after a week, or as soon as the series changes. It greys only
+when the answer was no — nobody else lists them, the series already follows as many sources as it may, or
+searching other sources is switched off — never because a run did not get round to it: a series the nightly
+had no search left for is not marked as checked at all, and is looked at on the next run.
+
 A source you turned off yourself -- one at a time on Providers, or a whole language at once on Extensions --
 is listed greyed under *Source health* so the count stays visible, but it never makes the check amber: it is
 your decision, not a fault. A source whose last success is newer than its last failure is not diagnosed from
 the words of that old failure any more: since v0.37.0 the row shows only what is live (an empty streak, say)
 instead of sending you to fix a Cloudflare problem that ended days ago, and the same holds for the *Test*
 button on Providers, which no longer keeps an extension source's stale verdict once its live checks pass. The same greying marks the advisory rows, such as a solver or Uchiyomi version
-that is merely behind. When an extension server is configured there is one more check, *Extension source
-limit*, which goes amber when more sources are switched on than `SUWAYOMI_MAX_SOURCES` allows to register.
+that is merely behind. Since v0.41.0 the same greying covers a failing source **no series uses** — on a real
+install ten of twelve not-ok sources are Discover-only noise nobody can act on — and it counts as a fault
+again the moment something uses it, or it is actually in a cooldown. When an extension server is configured
+there is one more check, *Extension source limit*, which goes amber when more sources are switched on than
+`SUWAYOMI_MAX_SOURCES` allows to register.
 
 ![Library health](shots/admin-health.webp)
 
@@ -1052,6 +1110,24 @@ runs by itself: it is the repair for a database restored without its chapter fil
 when to run it and what it will not do. Like the sweep, it starts in the background and its line shows what
 it found when it is done.
 
+**Repair library** is the nightly that fixes what Health used to only report (the Health section above lists
+the five things it does and the two it never does). Its schedule reads *every 24h · never during a chapter
+sweep*, or *switched off · on demand* when the switch under **Admin → Settings → Library housekeeping** is
+off — and *Run now* works either way, because nothing it does deletes, merges or renumbers anything. Like
+the sweep it is detached, so the toast only says it started; its line shows what it did when it is done and
+keeps it across restarts, for example: *2000 page counts stamped, 28625 still to count · short: 3 replaced,
+5 confirmed, 12 left · gaps: 5 series, 2 followed, 9 chapters fetched · 41 failures reset · solver reset, 4
+unblocked*. A run you started from a Health button reports only the step it was asked for, a run that was
+stopped says so before its counts (*stopped for a restart*, *stopped: the download disk is at its floor*),
+and a nightly that was switched off reads *switched off*. A *Retry now* on one source also says what the
+re-check itself did, which the nightly never has to — *· 4 failures reset · 3 series re-checked, 2 chapters
+added*, and *, 5 still could not be saved* when they failed again.
+
+The repair and **check for new chapters** refuse each other by name: pressing one while the other is going
+says *A chapter sweep is running — try again in a few minutes* or *The library repair is running — try again
+in a few minutes*, rather than a bare *Already running* that would read as the task you just pressed being
+stuck.
+
 **Activity:** the audit feed, every login (success and failure), user change, settings change, source action.
 
 **Sessions:** every active session across all users, with one-click revoke.
@@ -1066,7 +1142,7 @@ chapters), the **Backup time (hour, 0–23)** of the nightly backup — change i
 once, so the next run is at the new hour — and, when the extension engine is configured, **Update extensions
 automatically** and its check interval. **Look for failed chapters on other sources** controls the bounded,
 once-a-day source hunt described in section 4 and is on by default. **Library housekeeping**: **Delete read chapters** and its **Wait
-(days)**, below. **Scanlators**: the server-wide defaults for choosing between scanlation groups — **Blocked
+(days)**, below, and **Repair the library nightly** (on by default), the job described under *Health* above. **Scanlators**: the server-wide defaults for choosing between scanlation groups — **Blocked
 groups**, which apply to every series, a **Default priority** for series that have no ranking of their own, and
 the **Patience (days)** before a chapter is taken from a group lower down the list; see *Sources & translations*
 in section 4. Switches save the moment they flip; text and number fields save when you leave them or press

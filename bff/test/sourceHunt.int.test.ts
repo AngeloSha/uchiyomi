@@ -148,3 +148,144 @@ test('simultaneous series share one search pool', { skip }, async () => {
   assert.ok(peak <= 2, `SCAN_CONCURRENCY=2 but ${peak} hunt searches overlapped`);
   assert.ok([...searches.values()].reduce((x, y) => x + y, 0) >= 4, 'both hunts actually searched several candidates');
 });
+
+// ── v0.41.0: the split (huntCandidates + followHunted) the nightly repair builds on ──────────────────
+//
+// Three sources that carry the title and judge `ok`, switched on per test (`hitOn`): registered after the
+// probes, so with the tests above they sit past HUNT_MAX_SOURCES and change nothing there; the tests below
+// hand `allowed` a rule that admits only them, so the candidate order is exactly hit-a, hit-b, hit-c.
+const HITS = ['hunt-hit-a', 'hunt-hit-b', 'hunt-hit-c'];
+let hitOn = false;
+/** listChapters calls per hit source: one per candidate judged, so "nothing past the accepted one is asked" is countable. */
+const judged = new Map<string, number>();
+let huntCandidates: any, followHunted: any;
+const hitSource = (id: string) => ({
+  id, name: id,
+  async search() {
+    searches.set(id, (searches.get(id) ?? 0) + 1);
+    return hitOn ? [{ sourceId: `${id}-series`, source: id, title: TITLE }] : [];
+  },
+  async getSeries(sid: string) { return { sourceId: sid, source: id, title: TITLE }; },
+  async listChapters() { judged.set(id, (judged.get(id) ?? 0) + 1); return chapters(id); },
+  async getPageUrls() { return []; },
+});
+const onlyHits = (id: string) => HITS.includes(id);
+const searched = () => [...searches.values()].reduce((a, b) => a + b, 0);
+const latestAudit = async (id: string) =>
+  (await q(`SELECT detail FROM audit_log WHERE event = 'series.follow_source' AND detail->>'id' = $1 ORDER BY at DESC LIMIT 1`, [id]))[0]?.detail;
+
+before(async () => {
+  if (!DSN) return;
+  const sources = await import('../src/lib/sources');
+  for (const id of HITS) sources.registerAdapter(hitSource(id) as any);
+  ({ huntCandidates, followHunted } = await import('../src/lib/sourceHunt'));
+});
+
+test('wants stops at the first accepted judgement and keeps the first ok one as the fallback', { skip }, async () => {
+  // Reintroduce by judging every hit before choosing (dropping the early return in the judge loop): hit-c is
+  // looked up too. Reintroduce the fallback by keeping the LAST ok judgement (`fallback = j`): it names hit-b.
+  await seed(MAIN);
+  hitOn = true; judged.clear();
+  try {
+    const budget = { left: 5 };
+    let prefsSeen: unknown = null;
+    const r = await huntCandidates(MAIN, {
+      allowed: onlyHits, budget,
+      wants: (j: any, prefs: unknown) => { prefsSeen = prefs; return j.source === HITS[1]; },
+    });
+    assert.equal(r.why, 'followed');
+    assert.equal(r.chosen?.source, HITS[1], 'the first judgement wants() accepted');
+    assert.equal(r.chosen?.chapters?.length, 11, 'the chosen judgement carries the chapter list the follow will read');
+    assert.equal(r.fallback?.source, HITS[0], 'the first ok judgement wants() refused is the fallback');
+    assert.equal(r.title, TITLE);
+    assert.ok(prefsSeen && typeof prefsSeen === 'object', 'wants() is handed the release preferences the judgement was made under');
+    assert.equal(judged.get(HITS[0]), 1);
+    assert.equal(judged.get(HITS[1]), 1);
+    assert.equal(judged.get(HITS[2]) ?? 0, 0, 'nothing past the accepted judgement is looked up');
+    assert.equal(budget.left, 4, 'one search, one charge');
+    assert.equal((await q('SELECT count(*)::int AS n FROM series_sources WHERE series_id = $1', [MAIN]))[0].n, 0,
+      'huntCandidates follows nothing: that is followHunted');
+
+    // Nothing wanted: no choice, the first ok judgement still offered as the fallback, and every hit judged.
+    await q('UPDATE lib_series SET source_hunt_at = NULL WHERE id = $1', [MAIN]);
+    judged.clear();
+    const none = await huntCandidates(MAIN, { allowed: onlyHits, budget, wants: () => false });
+    assert.equal(none.chosen, null);
+    assert.equal(none.why, 'no_candidate');
+    assert.equal(none.fallback?.source, HITS[0]);
+    assert.deepEqual([...judged.keys()], HITS, 'with nothing accepted, every candidate was judged in order');
+  } finally { hitOn = false; }
+});
+
+test('force searches inside the 24 h stamp, re-stamps, charges the budget, and still obeys the switch', { skip }, async () => {
+  // Reintroduce by dropping `!opts.force &&` from the stamp check: the forced hunt answers `cooldown` and
+  // searches nothing. Reintroduce the stamp by skipping the UPDATE when forced: source_hunt_at does not move.
+  await seed(MAIN);
+  await q(`UPDATE lib_series SET source_hunt_at = now() - interval '1 hour' WHERE id = $1`, [MAIN]);
+  const stampOf = async () => new Date((await q('SELECT source_hunt_at AS t FROM lib_series WHERE id = $1', [MAIN]))[0].t).getTime();
+  const before = await stampOf();
+  const budget = { left: 5 };
+  const cold = await huntSource(MAIN, 11, { allowed: onlyHits, budget });
+  assert.equal(cold.why, 'cooldown', 'inside the stamp, an ordinary hunt does nothing');
+  assert.equal(searched(), 0);
+  assert.equal(budget.left, 5);
+
+  const forced = await huntSource(MAIN, 11, { allowed: onlyHits, budget, force: true });
+  assert.equal(forced.why, 'no_candidate', 'forced, the search ran (the hits are switched off, so it found nothing)');
+  assert.equal(searched(), HITS.length, 'every admitted candidate was searched');
+  assert.equal(budget.left, 4, 'a forced hunt is still charged to the budget');
+  assert.ok((await stampOf()) > before, 'and still stamps: a forced hunt is today\'s hunt');
+
+  await q('UPDATE server_settings SET auto_follow_on_failure = false WHERE id = 1');
+  searches.clear();
+  assert.equal((await huntSource(MAIN, 11, { allowed: onlyHits, budget, force: true })).why, 'off', 'force overrides the stamp, never the switch');
+  assert.equal(searched(), 0);
+  assert.equal(budget.left, 4);
+});
+
+test('reason reaches the audit row, and followHunted carries the caller\'s detail or throws its why', { skip }, async () => {
+  // Reintroduce by hard-coding `reason: 'failed_chapter'` in followHunted's audit detail: the short-chapter
+  // row reads failed_chapter. Reintroduce the throw by returning on `cap`: the last block gets no error.
+  await seed(MAIN);
+  await seed(C1);
+  await seed(C2);
+  hitOn = true;
+  try {
+    const r = await huntSource(MAIN, 11, { allowed: onlyHits, budget: { left: 5 }, reason: 'short_chapter' });
+    assert.equal(r.why, 'followed');
+    assert.equal(r.followed?.source, HITS[0]);
+    assert.equal(r.chapter?.number, 11);
+    assert.equal(r.chapter?.source, HITS[0], 'the copy is tagged with the source it came from');
+    const a = await latestAudit(MAIN);
+    assert.equal(a?.reason, 'short_chapter');
+    assert.equal(a?.number, 11);
+    assert.equal(a?.auto, true);
+    assert.equal(a?.source, HITS[0]);
+
+    // The gap step's path: choose by the caller's rule, then follow with the caller's detail.
+    const found = await huntCandidates(C1, { allowed: onlyHits, budget: { left: 5 }, reason: 'gap', wants: (j: any) => j.source === HITS[1] });
+    assert.equal(found.chosen?.source, HITS[1]);
+    const f = await followHunted(C1, found.title, found.chosen, 'gap', { numbers: [5, 6, 7] });
+    assert.deepEqual(f, { source: HITS[1], sourceSeriesId: `${HITS[1]}-series` });
+    const row = (await q('SELECT source_id, added_by, coverage FROM series_sources WHERE series_id = $1', [C1]))[0];
+    assert.equal(row?.source_id, HITS[1]);
+    assert.equal(row?.added_by, null, 'a server-initiated follow is marked automatic');
+    const g = await latestAudit(C1);
+    assert.equal(g?.reason, 'gap');
+    assert.deepEqual(g?.numbers, [5, 6, 7]);
+    assert.equal(g?.auto, true);
+    assert.equal(g?.title, TITLE);
+
+    // Nothing written under the lock is a throw with the HuntResult verdict on it, not a silent success.
+    await q(`INSERT INTO series_sources (series_id, source_id, source_series_id) VALUES ($1, $2, 'p1'), ($1, $3, 'p2')`, [C2, PROBES[0], PROBES[1]]);
+    await assert.rejects(
+      () => followHunted(C2, TITLE, { ...found.chosen, source: HITS[2], sourceSeriesId: `${HITS[2]}-series` }, 'gap'),
+      (e: any) => e?.why === 'cap',
+    );
+    assert.equal(await latestAudit(C2), undefined, 'a follow that was not written is not audited');
+    await assert.rejects(
+      () => followHunted('s_hunt_nobody', TITLE, found.chosen, 'failed_chapter'),
+      (e: any) => e?.why === 'no_candidate',
+    );
+  } finally { hitOn = false; }
+});

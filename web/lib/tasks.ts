@@ -9,10 +9,73 @@ import { bytes } from './format';
  * updating looked exactly like a quiet week.
  *
  * Duck-typed on the shape of the result, because the tasks endpoint returns whatever the job stored: `added`
- * is the chapter sweep, `bytes` the backup, `refreshed` the extension check.
+ * is the chapter sweep, `bytes` the backup, `refreshed` the extension check, `counted` the nightly repair.
  */
 export function taskResult(r: any): string {
   if (!r) return '';
+  // "Repair library" (v0.41.0), FIRST because it is the only result with five sections and the only one
+  // that can report a step it deliberately did not run. `counted` is the key: no other job counts pages.
+  //
+  // ⚠️ Only the steps that RAN get a clause. A run started from a Health chip carries `only: ['short']`,
+  // and rendering the full line for it would say "0 page counts stamped · gaps: 0 series" about work that
+  // was never asked for -- which reads as a repair that found nothing to do, the exact failure every
+  // branch in this file exists to prevent.
+  //
+  // ⚠️ A `stopped` run leads the line, for the reason the verify branch below does: the numbers after it
+  // are partial, and a clause at the end of a long line is the clause that is off the edge of a phone.
+  // Reintroduce by pushing it last: "a repair that stopped early says so before its counts" fails.
+  if (typeof r.counted === 'number') {
+    if (r.skipped === 'disabled') return ' \u00b7 switched off';
+    const only: string[] | null = Array.isArray(r.only) && r.only.length ? r.only : null;
+    const ran = (step: string) => !only || only.includes(step);
+    const bits: string[] = [];
+    if (r.stopped === 'shutdown') bits.push('stopped for a restart');
+    if (r.stopped === 'disk') bits.push('stopped: the download disk is at its floor');
+    if (ran('count')) {
+      // `uncounted` is the backlog: 30,000 chapter files have never been opened, so the first weeks of
+      // nightly runs are a drain and "2000 stamped" alone looks like the job has finished.
+      bits.push(`${r.counted} page count${r.counted === 1 ? '' : 's'} stamped${r.uncounted ? `, ${r.uncounted} still to count` : ''}`);
+    }
+    if (ran('short')) {
+      const s = r.short || {};
+      // `confirmed` is not a failure: it is the answer "every source really does serve two pages here",
+      // and it is why the finding stops coming back. `left` is the honest remainder -- a copy that threw,
+      // a source in a cooldown -- and without it a run that proved nothing reads as a run that fixed it.
+      bits.push(`short: ${s.replaced ?? 0} replaced, ${s.confirmed ?? 0} confirmed${s.left ? `, ${s.left} left` : ''}`);
+    }
+    if (ran('gaps')) {
+      const g = r.gaps || {};
+      bits.push(`gaps: ${g.series ?? 0} series, ${g.followed ?? 0} followed, ${g.fetched ?? 0} chapter${g.fetched === 1 ? '' : 's'} fetched`);
+    }
+    if (ran('failures')) {
+      const n = r.failures?.reset ?? 0;
+      bits.push(`${n} failure${n === 1 ? '' : 's'} reset`);
+      // ⚠️ The second half of a "Retry now", and the more interesting one. `retried` is written only by an
+      // on-demand run against one source (the Health chip), where the whole point is what the re-check
+      // then did -- and with only the reset count, a run that re-checked three series and landed two
+      // chapters read "4 failures reset", the same line as a nightly that reset four rows and touched
+      // nothing. `failed` is said whenever it is not zero for the reason every branch in this file exists:
+      // a retry in which every chapter failed again must not render as a retry that worked.
+      // Reintroduce by dropping this block: "a Retry now says what the re-check did, not just what it
+      // reset" in taskResult.test.ts finds the line ends at "reset".
+      const t = r.failures?.retried;
+      if (t) {
+        const re = `${t.series} series re-checked, ${t.added} chapter${t.added === 1 ? '' : 's'} added`;
+        bits.push(t.failed ? `${re}, ${t.failed} still could not be saved` : re);
+      }
+    }
+    if (ran('solver')) {
+      const s = r.solver || {};
+      // ⚠️ Said even when nothing was reset. The solver step only resets when the solver answers AND a
+      // source is blaming it, so "nothing" is the normal, healthy outcome -- omitting the clause entirely
+      // made a solver-only run render as an empty line, which is a button that did nothing.
+      const bit = [s.reset ? 'solver reset' : 'solver: nothing to reset'];
+      if (s.unblocked) bit.push(`${s.unblocked} unblocked`);
+      if (s.expired) bit.push(`${s.expired} old block${s.expired === 1 ? '' : 's'} cleared`);
+      bits.push(bit.join(', '));
+    }
+    return bits.length ? ` \u00b7 ${bits.join(' \u00b7 ')}` : '';
+  }
   // "Verify chapter files". A root it skipped as unmounted is the one thing that must not read as a quiet
   // run: every chapter under it is still claiming bytes, and "0 missing" is exactly what the admin would
   // conclude the task had found. `checked` is the key: no other job reports one.

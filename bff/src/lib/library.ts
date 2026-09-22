@@ -552,10 +552,21 @@ export async function persistScan(): Promise<{ series: number; books: number; ms
           // again" (lib/chapterCleanup.ts); a file back under that path -- re-copied by hand, restored from
           // a backup, pulled down again -- makes that claim false, and a stale mark would leave the chapter
           // showing as removed while it sits there readable.
+          //
+          // short_confirmed_at survives a rescan that found the SAME file and is cleared when the mtime
+          // moved. The stamp means "this one-or-two-page chapter has been proven to be what the sources
+          // hold" (lib/repair.ts, and the column note in lib/migrate.ts), and a scan is the one thing that
+          // runs over every chapter every time: clearing it unconditionally would un-confirm the whole
+          // library on the next scan and hand the Health page back its fourteen findings. A file whose
+          // mtime changed is a different file, though -- a refetch, a hand-copied replacement -- and the
+          // proof was about the bytes that are no longer there.
+          // Reintroduce by dropping the CASE (always NULL): "a scan that finds the same file leaves a
+          // confirmed-short chapter confirmed" in repair.int.test.ts reads null.
           await qq(
             `INSERT INTO lib_books (id, series_id, source, file, number, title, mtime, root) VALUES ${tuples.join(',')}
              ON CONFLICT (root, file) DO UPDATE SET series_id=EXCLUDED.series_id, number=EXCLUDED.number,
-               title=EXCLUDED.title, mtime=EXCLUDED.mtime, updated_at=now(), pruned_at=NULL`,
+               title=EXCLUDED.title, mtime=EXCLUDED.mtime, updated_at=now(), pruned_at=NULL,
+               short_confirmed_at = CASE WHEN lib_books.mtime <> EXCLUDED.mtime THEN NULL ELSE lib_books.short_confirmed_at END`,
             params,
           );
 

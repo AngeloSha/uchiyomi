@@ -140,7 +140,7 @@ const abs = (n: number) => join(DL, FOLDER, `Chapter ${n}.cbz`);
 const entries = (file: string): Map<string, Buffer> =>
   new Map(new AdmZip(file).getEntries().map((e: any) => [e.entryName, e.getData()]));
 const row = async (n: number) => (await q(
-  `SELECT id, series_id, root, file, number, missing_pages, source_id, pages, page_dims, size, fp_at FROM lib_books WHERE series_id = $1 AND number = $2`, [S, n],
+  `SELECT id, series_id, root, file, number, missing_pages, source_id, pages, page_dims, size, fp_at, short_confirmed_at FROM lib_books WHERE series_id = $1 AND number = $2`, [S, n],
 ))[0];
 /** A written partial for chapter `n` with page 4 (index 3) missing, scanned and stamped as the sweep would. */
 async function partial(n: number): Promise<any> {
@@ -197,7 +197,7 @@ test('setBookMeta stamps the placeholder pages 1-based, and the DTO and page lis
 });
 
 test('the completion pass asks for exactly the missing page, merges it by index, and clears what was derived from the old bytes', { skip }, async () => {
-  // Reintroduce by dropping the `DELETE FROM page_hashes WHERE book_id` from stampRow in partial.ts: the
+  // Reintroduce by dropping the `DELETE FROM page_hashes WHERE book_id` from restampBook in partial.ts: the
   // hash computed from the PLACEHOLDER survives the rewrite and the `hashes of the old bytes are gone`
   // assertion reads 2 -- and live, three partial chapters would make the placeholder a "repeated page".
   // (Keeping the old placeholder entry in the merge is NOT a reintroduction: adm-zip replaces a duplicate
@@ -207,7 +207,7 @@ test('the completion pass asks for exactly the missing page, merges it by index,
   assert.ok(before.has('uchiyomi-partial.json'), 'a partial to begin with');
   // Things the old bytes produced, which must not survive the rewrite.
   await q('INSERT INTO page_hashes (book_id, page, hash) VALUES ($1, 0, NULL), ($1, 4, $2)', [b.id, '0000000000000000']);
-  await q('UPDATE lib_books SET fp_at = now() WHERE id = $1', [b.id]);
+  await q('UPDATE lib_books SET fp_at = now(), short_confirmed_at = now() WHERE id = $1', [b.id]);
   assert.ok((await row(1)).page_dims, 'page_dims cached from the previous test');
 
   failing.delete('c1/3'); // the page is back
@@ -229,6 +229,10 @@ test('the completion pass asks for exactly the missing page, merges it by index,
   assert.equal(r.missing_pages, null, 'the column is NULL');
   assert.equal(r.page_dims, null, 'page_dims dropped: it described the placeholder');
   assert.equal(r.fp_at, null, 'the fingerprint is due again');
+  // Reintroduce by removing `short_confirmed_at = NULL` from the SET in restampBook: a chapter proven to
+  // be two pages stays "proven" over a file that has since been rewritten, and the Health page would go
+  // quiet about a download that failed a second time.
+  assert.equal(r.short_confirmed_at, null, 'a proof about the old bytes says nothing about these ones');
   assert.equal(r.pages, 5);
   assert.equal(Number(r.size), (await stat(abs(1))).size, 'size is the new file');
   assert.equal((await q('SELECT count(*)::int AS n FROM page_hashes WHERE book_id = $1', [b.id]))[0].n, 0, 'hashes of the old bytes are gone');

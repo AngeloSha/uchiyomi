@@ -1,5 +1,100 @@
 # Changelog
 
+## v0.41.0 — 2026-09-22
+
+The Health page has always been honest about what is wrong with a library and useless about fixing it:
+fourteen chapters that downloaded as a two-page notice, forty gaps, a hundred and eighty-three chapters that
+would not download, four sources blaming the Cloudflare solver — every one of them a sentence, and nothing to
+press. This release gives every finding the button that fixes it, and does most of them overnight without
+being asked. Nothing that cannot be undone became automatic.
+
+### A nightly repair, bounded by numbers
+
+**Admin → Settings → Library housekeeping → Repair the library nightly** is on by default and listed as
+**Admin → Tasks → Repair library** with a *Run now*. Every 24 hours, counted from the end of the last
+completed run, it does five things and nothing else, in this order:
+
+* **Resets stale Cloudflare state** when sources are blaming the solver: the remembered sessions, the "could
+  not be solved" marks, and cooldowns that lapsed more than 24 hours ago. While the solver itself is down
+  nothing is cleared, because those cookies could only be re-earned by a solve that cannot happen. No site
+  is contacted.
+* **Counts pages** in up to **2,000** chapter files nobody has opened. A page count used to be stamped only
+  when somebody first opened a chapter, so on a real install 30,625 of 43,253 chapters had no count at all
+  and the short-chapter check could not see them. A file that turns out to be unreadable keeps a count of
+  zero and is never opened again.
+* **Gives failed chapters a second chance**: up to **100** ledger rows that hit the retry cap more than
+  **7 days** ago have their attempt count cleared, so the chapter sweep tries them again now the site has
+  had time to calm down.
+* **Replaces a one- or two-page chapter when another source has a longer copy** — up to **20** a night, one
+  copy from each of at most **3** sources the series follows plus one search, and only ever a file Uchiyomi
+  downloaded itself. The decision is made from the page lists *before* anything is downloaded, so a shorter
+  copy can never overwrite a longer one. When nothing longer exists the chapter is **marked confirmed
+  short** instead, and only when every copy really answered *two pages*: a source that was silent, in a
+  cooldown, left unasked by that cap of three, or that handed back an empty page list ends the proof and the
+  chapter is looked at again another night. Silence is never agreement.
+* **Searches for a source that can fill a gap**, for the **5** series with the largest holes, at most once a
+  day each, fetching up to **20** chapters. A hole a followed source already lists is left to the chapter
+  sweep instead. A source is followed only under the same title-and-90%-numbering rule as every other
+  automatic follow.
+
+One run may start **5** searches in total, shared between the steps that need one, of which the short step
+may spend at most **2** — a library full of short chapters can no longer leave the gap step with nothing.
+The repair and the chapter sweep never run at the same time — both download into the same folders — so
+whichever starts second waits ten minutes. Turning the nightly off stops the schedule only: *Run now* and
+the Health page's buttons keep working, because nothing it does is destructive.
+
+**The nightly never deletes a chapter, never marks one as gone, never merges two series and never renumbers
+anything.** Duplicate series and impossible chapter numbers stay one-click actions you confirm: *Merge* per
+pair (and *Merge all* for the check) behind a dialog that lists each pair and marks the copy that is kept,
+and *Delete chapter(s)* behind its own, with a bookmarked chapter refused. There is deliberately no
+*Fix all* for either.
+
+### Every finding has a button
+
+*Fix* looks at one short chapter now. *It's fine* records that it really is that short, and a greyed row's
+chip reads *Not fine* so you can take it back. *Fill now* searches for one missing run of chapters. *Retry
+now* clears a source's attempt counts whatever their age and re-checks up to ten of its series. *Test*,
+*Clear block* and *Turn off* act on a source. *Reset solver sessions* clears the Cloudflare state this
+server is holding — it does not restart the solver, because Uchiyomi has no access to other containers, by
+design. A check whose step the nightly can run also gets *Fix all* in its header.
+
+**A chapter that gets replaced keeps everyone's reading position and bookmarks.** If you had finished the
+two-page version it stays finished; open it again to read the rest.
+
+### The checks themselves got more careful
+
+Gaps and impossible chapter numbers now honour renumbering and deletions: a chapter you renumbered is read at
+the number you gave it, and a deliberate deletion is no longer reported as a hole — while a chapter whose
+file went missing still is. A gap the nightly has already searched for is shown greyed with what it found
+(*no other source lists them, checked 2026-09-21*) and becomes a finding again after a week or as soon as
+the series changes. A finding greys only when the answer was no — nobody else lists them, the series already
+follows as many sources as it may, or searching other sources is switched off — never because a run did not
+get round to it: a series the nightly had no search left for keeps its place in the queue instead. A failing
+source **no series uses** is listed for reference rather than as a fault; ten of the twelve not-ok sources on
+a real install are Discover-only noise nobody can act on.
+
+### Chapters a source keeps refusing
+
+A chapter the same source has refused on **two separate sweeps** — a 403 or a 429 both times — is searched
+for on another source on the third try. A single refusal is still answered by waiting, because a busy site
+is not a reason to put load on someone else, and a refused chapter is still never saved with pages missing.
+
+`REPAIR_HOURS`, `REPAIR_COUNT_MAX`, `REPAIR_SHORT_MAX`, `REPAIR_GAPS_MAX` and `REPAIR_PACE_MS` are in
+`docs/CONFIGURATION.md`; the task route, its body, its result and the new Health item fields are in
+`docs/api.md`. Existing clients may ignore all new fields.
+
+What was verified: the whole bff suite — 156 files, 1,620 tests, none failing — including new integration
+tests for the repair (count, short, gaps, failures, solver, concurrency and a static guard that the
+nightly's own code contains no delete, rename, merge or tombstone), its routes and the Health items; the web
+suite at 358 tests, the web type-check and a production build, all clean; and four browser-walk legs, each
+on its own throwaway instance — v0.40.0's walk, unchanged and still green at 1280 px and 390 px (41 checks
+a leg), and a new one that drives this release end to end at both widths (53 checks a leg): a two-page
+chapter found, fixed from a second source with its reader's completed mark intact, a second one confirmed
+short by both sources and un-confirmed when its file changed, a gap searched for and filled, a chapter
+refused across two sweeps and hunted on the third, and the task's schedule, result line and switch. The
+eight translations were merged and checked against the components that render them. The language rig itself,
+and the live run on the owner's own library, are the last steps and are not claimed here.
+
 ## v0.40.0 — 2026-09-22
 
 This is a reliability release for finding and fetching chapters from real-world sources: some are slow,

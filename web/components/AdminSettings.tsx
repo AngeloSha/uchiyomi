@@ -276,6 +276,15 @@ function HousekeepingSection({ data, save: patch }: { data: any; save: Save }) {
             {tr('Only chapters Uchiyomi downloaded itself are removed — nothing in a library you built by hand is touched. The chapter stays listed and everyone keeps their reading history; the pages are what goes. It is not downloaded again by itself; Fetch again on the series page brings it back.')}
           </p>
         </div>
+        {/* v0.41.0: the nightly repair. ON by default (`repair_enabled NOT NULL DEFAULT true`), which
+            `!== false` reads as: a server that does not send the key yet is a server that repairs.
+            ⚠️ Saved through `patch`, the section's PROP, not through the local `save` above -- that one
+            takes a success sentence as its second argument and a switch has no sentence to give it.
+            It sits in housekeeping rather than under schedules because it is library maintenance, and
+            below the delete switch because it is the one that never deletes anything. */}
+        <SwitchRow label={tr('Repair the library nightly')}
+          help={tr('Once a day: counts pages in files never opened, replaces one- or two-page chapters when a source has a longer copy, searches other sources for missing chapter runs, retries chapters that stopped failing, and resets the Cloudflare solver when sources blame it. Nothing is deleted or merged without you.')}
+          on={data.repair_enabled !== false} onChange={(next) => patch({ repairEnabled: next })} />
       </Section>
       {confirm && (
         <ConfirmDialog

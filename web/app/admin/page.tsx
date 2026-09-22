@@ -14,12 +14,13 @@ import { ConfirmDialog, Modal, msgOf } from '@/components/ConfirmDialog';
 import { Avatar } from '@/components/Avatar';
 import { IcChevronLeft, IcChevronRight, IcTrash, IcPlus, IcRefresh, IcInfo } from '@/components/icons';
 import { SourcesExplainer } from '@/components/SourcesExplainer';
+import { HealthActions, HealthCheckActions } from '@/components/HealthActions';
 import { Backdrop, Img } from '@/components/ui';
 import { SeriesCard } from '@/components/cards';
 import { ConsoleNav } from '@/components/ConsoleNav';
 import { motion, useReducedMotion } from 'framer-motion';
 import { t as tr, keys } from '@/lib/i18n';
-import type { Series } from '@/lib/types';
+import type { HealthCheck, Series } from '@/lib/types';
 import { groupProviders, type ProviderGroup, type ProviderSrc } from '@/lib/providerGroups';
 
 /**
@@ -971,7 +972,18 @@ function Tasks() {
       // `not_enabled` is reachable in one narrow window: this list polls every five seconds, so a task
       // switched off in Settings is still on screen for a moment afterwards. "Failed" would be a lie about
       // something the admin had just done on purpose.
-      if (r?.ok === false) toast(r.error === 'busy' ? 'Already running' : r.error === 'not_enabled' ? 'That task is switched off' : 'Failed', 'error');
+      // ⚠️ `sweep_running` and `repair_running` (v0.41.0) are the two jobs refusing to run beside each
+      // other -- the repair beside a chapter sweep, and the sweep beside a repair -- and they are the two
+      // refusals here that clear by themselves. Under "Already running" each read as the task the admin
+      // had just pressed being stuck, which is the opposite of what is happening and sends them restarting
+      // the container. Each one names the OTHER job, or the sentence is about a task that is idle.
+      if (r?.ok === false) {
+        toast(r.error === 'sweep_running' ? tr('A chapter sweep is running — try again in a few minutes')
+          : r.error === 'repair_running' ? tr('The library repair is running — try again in a few minutes')
+          : r.error === 'busy' ? 'Already running'
+          : r.error === 'not_enabled' ? 'That task is switched off'
+          : 'Failed', 'error');
+      }
       // ⚠️ The scan is the one task that runs to completion before answering, and it answers with its
       // counts. Toasting "Started" for it hid the only fact that mattered: in #34 a library scanned to zero
       // series and the reporter's summary was "the run now buttons don't work" -- because from the outside,
@@ -984,6 +996,10 @@ function Tasks() {
       // they appear is the Tasks line, which this panel polls -- and the admin who just restored a database
       // is told exactly that, or "Started" followed by nothing is a button that did nothing (#34).
       else if (id === 'verify' && r?.started) toast(tr('Started — the Tasks line shows what it found when it is done.'), 'success');
+      // The repair is detached for the same reason and reports the same way, so it gets the same sentence
+      // rather than a bare "Started": a nightly run counts two thousand files and can replace a chapter,
+      // and none of that is in this answer.
+      else if (id === 'repair' && r?.started) toast(tr('Started — the Tasks line shows what it did'), 'success');
       else toast('Started', 'success');
       qc.invalidateQueries({ queryKey: ['admin-tasks'] });
     } catch { toast('Failed', 'error'); }
@@ -1083,10 +1099,10 @@ function Sessions() {
   );
 }
 
-// `info`: listed for reference, never the reason a check is amber -- a source you switched off, a version
-// that is merely behind. Rendered dimmed so the eye lands on the real findings.
-interface HealthItem { seriesId?: string; seriesIds?: string[]; titles?: string[]; title: string; detail: string; info?: boolean }
-interface HealthCheck { id: string; title: string; status: 'ok' | 'warn' | 'problem'; summary: string; note?: string; items: HealthItem[] }
+// `HealthItem` / `HealthCheck` live in lib/types.ts (v0.41.0): HealthActions.tsx renders an item's chips
+// and this page mounts them, so declaring the shapes here would have meant that component importing from a
+// Next route file which imports the component straight back. `info` items -- a source you switched off, a
+// short chapter you already confirmed -- are rendered dimmed so the eye lands on the real findings.
 
 const HEALTH_TONE: Record<HealthCheck['status'], string> = {
   problem: 'border-red-500/40 bg-red-500/10 text-red-300',
@@ -1742,10 +1758,6 @@ function LibraryPanel() {
 
 function Health() {
   const [open, setOpen] = useState<string | null>(null);
-  const [merge, setMerge] = useState<HealthItem | null>(null);
-  const [keepFirst, setKeepFirst] = useState(true);
-  const [busy, setBusy] = useState(false);
-  const toast = useToast();
   const { data, isFetching, refetch } = useQuery({
     queryKey: ['admin-health'],
     queryFn: () => api<{ generatedAt: string; checks: HealthCheck[] }>('/api/admin/health'),
@@ -1769,40 +1781,6 @@ function Health() {
         </button>
       </div>
 
-      {merge && merge.seriesIds && (
-        <ConfirmDialog
-          title={tr('Merge these two?')}
-          confirmLabel="Merge"
-          busy={busy}
-          body={
-            <>
-              <p>Every chapter, and everyone&rsquo;s reading progress, favourites and ratings, move onto the copy you keep. <strong className="text-fog-100">{tr('Nothing is deleted')}</strong> &mdash; no chapter is dropped even if both copies have it, and no files are touched.</p>
-              <div className="mt-3 space-y-2">
-                {(merge.titles || []).map((t, i) => (
-                  <label key={i} className="flex cursor-pointer items-center gap-2 rounded-lg border border-ink-700 px-3 py-2 text-sm">
-                    <input type="radio" checked={keepFirst === (i === 0)} onChange={() => setKeepFirst(i === 0)} />
-                    <span className="truncate">{tr('Keep')}<strong className="text-fog-100">{t}</strong></span>
-                  </label>
-                ))}
-              </div>
-            </>
-          }
-          onConfirm={async () => {
-            const [a, b] = merge.seriesIds!;
-            const keep = keepFirst ? a : b;
-            const gone = keepFirst ? b : a;
-            setBusy(true);
-            try {
-              const r = await api<{ moved: number }>(`/api/admin/series/${gone}/merge`, { method: 'POST', json: { into: keep } });
-              toast(`Merged \u2014 ${r.moved} chapter${r.moved === 1 ? '' : 's'} moved`, 'success');
-              setMerge(null);
-              refetch();
-            } catch (e) { toast(msgOf(e, 'Could not merge'), 'error'); }
-            setBusy(false);
-          }}
-          onClose={() => setMerge(null)}
-        />
-      )}
       {checks.map((c) => {
         const isOpen = open === c.id;
         // Notes explain important states that are deliberately not findings. A readable partial chapter,
@@ -1811,39 +1789,47 @@ function Health() {
         const expandable = !!c.items.length || !!c.note;
         return (
           <div key={c.id} data-health-check={c.id} className={`card grad-border overflow-hidden ${c.status !== 'ok' ? 'full' : ''}`}>
-            <button
-              type="button"
-              onClick={() => setOpen(isOpen ? null : c.id)}
-              aria-expanded={expandable ? isOpen : undefined}
-              aria-controls={expandable ? `health-${c.id}-details` : undefined}
-              disabled={!expandable}
-              className="flex w-full flex-wrap items-center gap-x-3 gap-y-1.5 px-4 py-3.5 text-start disabled:cursor-default"
-            >
-              <span className={`shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-medium ${HEALTH_TONE[c.status]}`}>
-                {HEALTH_LABEL[c.status]}
-              </span>
-              <div className="min-w-0 flex-1">
-                <p className="text-sm text-fog-100">{c.title}</p>
-                <p className="text-[11px] text-fog-500">{c.summary}</p>
-              </div>
-              {expandable && (
-                <span className="shrink-0 text-xs text-fog-500">{isOpen ? 'Hide' : 'Show'}</span>
-              )}
-            </button>
+            {/* ⚠️ The check-level chips are a SIBLING of the disclosure, never a child of it: a button
+                inside a button is invalid HTML and the browser hoists the inner one out of the header
+                altogether. They also come after it, because the end-to-end walk opens a card by clicking
+                the first button inside `[data-health-check="…"]`. */}
+            <div className="flex items-center">
+              <button
+                type="button"
+                onClick={() => setOpen(isOpen ? null : c.id)}
+                aria-expanded={expandable ? isOpen : undefined}
+                aria-controls={expandable ? `health-${c.id}-details` : undefined}
+                disabled={!expandable}
+                className="flex min-w-0 flex-1 flex-wrap items-center gap-x-3 gap-y-1.5 px-4 py-3.5 text-start disabled:cursor-default"
+              >
+                <span className={`shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-medium ${HEALTH_TONE[c.status]}`}>
+                  {HEALTH_LABEL[c.status]}
+                </span>
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm text-fog-100">{c.title}</p>
+                  <p className="text-[11px] text-fog-500">{c.summary}</p>
+                </div>
+                {expandable && (
+                  <span className="shrink-0 text-xs text-fog-500">{isOpen ? 'Hide' : 'Show'}</span>
+                )}
+              </button>
+              <HealthCheckActions check={c} onDone={() => { void refetch(); }} />
+            </div>
 
             {isOpen && (
               <div id={`health-${c.id}-details`} className="border-t border-ink-800/70">
                 {c.note && <p data-health-note className="px-4 pt-3 text-[11px] leading-relaxed text-fog-500">{c.note}</p>}
                 <div className="divide-y divide-ink-800/70">
+                  {/* Wraps rather than truncating the row: a source item carries Test, Clear block and
+                      Turn off, which at 390 px is more than fits beside a title, and the Test chip's fix
+                      is a sentence that takes a line of its own inside this same wrap container. */}
                   {c.items.map((it, i) => (
-                    <div key={`${c.id}-${i}`} className={`flex items-center gap-3 px-4 py-2.5 ${it.info ? 'opacity-60' : ''}`}>
+                    <div key={`${c.id}-${i}`} className={`flex flex-wrap items-center gap-x-3 gap-y-1.5 px-4 py-2.5 ${it.info ? 'opacity-60' : ''}`}>
                       <div className="min-w-0 flex-1">
                         <p className="truncate text-sm text-fog-100">{it.title}</p>
                         <p className="text-[11px] text-fog-500">{it.detail}</p>
                       </div>
-                      {c.id === 'duplicates' && it.seriesIds && it.seriesIds.length === 2 && (
-                        <button onClick={() => setMerge(it)} className="chip shrink-0 text-xs hover:border-accent/50 hover:text-accent">{tr('Merge')}</button>
-                      )}
+                      <HealthActions check={c.id} item={it} onDone={() => { void refetch(); }} />
                       {it.seriesId && (
                         <a href={`/series/${it.seriesId}`} className="chip shrink-0 text-xs">{tr('Open')}</a>
                       )}

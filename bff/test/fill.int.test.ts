@@ -196,6 +196,41 @@ test('the scan finds the hole and says who can fill it', { skip }, async (t) => 
   });
 });
 
+/**
+ * The scan's have-set is the one definition of what the library holds (lib/libraryNumbers.ts), so it agrees
+ * with the Health page next door about which chapters are missing at all.
+ *
+ * Two rules, and the dialog used to have neither: a file the verify task found GONE is a hole worth
+ * offering (that is the whole point of the 'missing' reason), while a chapter somebody deliberately deleted
+ * is not -- offering to re-fetch a deletion is how the fill dialog and the Health page ended up telling an
+ * admin two different stories about the same series.
+ *
+ * Reintroduce by reading the raw rows again (`SELECT number FROM lib_books WHERE series_id = $1` in place
+ * of `haveNumbers`): `have.count` reads 5 and the gap at 3 disappears, so nothing is offered for the file
+ * that actually went missing.
+ */
+test('the scan offers a chapter whose file went missing, and not one deleted on purpose', { skip }, async () => {
+  const HELD = 's_fill_held', HELD_FOLDER = 'Poor Source/Held Series';
+  await q('DELETE FROM lib_series WHERE id = $1', [HELD]);
+  await q(`INSERT INTO lib_series (id, source, title, folder, books_count, library_id, source_id, source_series_id)
+           VALUES ($1,'T!fill','Filled Series',$2,5,$3,$4,'poor-s')`, [HELD, HELD_FOLDER, LIB, POOR]);
+  for (const n of [1, 2, 3, 4, 5]) {
+    await q(`INSERT INTO lib_books (id, series_id, source, file, number, title, root)
+             VALUES ($1,$2,'T!fill',$3,$4,$5,'/library')`,
+      [`b_held_${n}`, HELD, `${HELD_FOLDER}/Chapter ${n}.cbz`, n, `Chapter ${n}`]);
+  }
+  // 3: the verify task found the file gone. 4: an admin deleted it on purpose.
+  await q(`UPDATE lib_books SET pruned_at = now(), pruned_reason = 'missing' WHERE id = 'b_held_3'`);
+  await q(`UPDATE lib_books SET pruned_at = now(), pruned_reason = 'deleted' WHERE id = 'b_held_4'`);
+  try {
+    const j = (await scan({ seriesId: HELD })).json();
+    assert.equal(j.have.count, 4, 'the deleted chapter still counts as held; the missing one does not');
+    assert.deepEqual(j.gaps.map((g: any) => [g.lo, g.hi]), [[3, 3]], 'only the file that went missing is a hole');
+  } finally {
+    await q('DELETE FROM lib_series WHERE id = $1', [HELD]).catch(() => {});
+  }
+});
+
 test('a series added as "Latest N" can get its older chapters from its own source', { skip }, async (t) => {
   // The add dialog's hint sends people here for the chapters a "Latest N" add left behind. Before this the
   // scan offered interior gaps and newer chapters only, so that series answered "nothing is missing between

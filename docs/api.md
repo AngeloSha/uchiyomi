@@ -315,8 +315,24 @@ curl -H "Authorization: Bearer $TOK" https://your-server/api/admin/health
 
 Returns the same checks as the admin Health tab: chapter gaps, truncated downloads, duplicate series,
 impossible chapter numbers, and failing sources. Each check reports `status` (`ok`, `warn`, `problem`), a
-one-line `summary`, and the individual `items`. Useful as a nightly cron that emails you only when
-`status` isn't `ok`.
+one-line `summary`, and the individual `items`. A check is `ok` exactly when none of its items is a finding:
+an item flagged `info` is listed for reference (a source you turned off, a source no series uses, a chapter
+already confirmed short, a gap the nightly repair has already searched for) and never decides the verdict.
+Useful as a nightly cron that emails you only when `status` isn't `ok`.
+
+Since v0.41.0 an item also carries what can be **done** about it, so the same finding is actionable from a
+script: `actions` is an ordered list of `fix_short`, `confirm_short`, `delete`, `fill`, `retry`, `test`,
+`unblock`, `disable`, `merge`, `solver_reset`; `bookId`, `bookIds`, `seriesId`, `seriesIds`, `sourceId` and
+`keep` (the copy a duplicate pair should keep: most live chapters, then most readers, then the older row)
+are the ids those actions need; `number`/`numbers` are the chapters it is about (a gap item carries at most
+100 numbers, an impossible-number item at most 20 ids); and `fixed` `{at, what}` says what has already been
+decided or found — `confirmed short at the source`, or what the repair's gap search concluded — which is
+what greys the row. `fix_short`, `fill`, `retry` and `solver_reset` are `POST /api/admin/tasks/repair/run`
+with the matching `only` and target; `confirm_short` is `POST /api/admin/books/:id/confirm-short`, and on a
+row that already carries `fixed` it is the withdrawal (`{confirmed: false}`); `delete` is `POST
+/api/admin/series/:id/chapters/delete`, `merge` is `POST /api/admin/series/:id/merge`, and `test`/`unblock`/
+`disable` are the existing `POST /api/admin/sources/:id/...` routes. Nothing on this page acts on its own:
+the two destructive ones, `delete` and `merge`, are the two the nightly repair never does.
 
 **Trigger a library scan** (admin scope)
 
@@ -714,7 +730,7 @@ POST   /api/admin/series/:id/delete-files
 POST   /api/admin/series/:id/forget
 POST   /api/admin/series/:id/rename-folder
 POST   /api/admin/series/:id/chapters/delete POST   /api/admin/series/:id/chapters/refetch
-PUT    /api/admin/books/:id/meta
+PUT    /api/admin/books/:id/meta POST   /api/admin/books/:id/confirm-short
 POST   /api/admin/series/:id/restore
 POST   /api/admin/series/:id/merge
 GET    /api/admin/series/deleted
@@ -734,18 +750,19 @@ PATCH  /api/admin/import/candidates/:cid
 
 **Server settings.** `GET /api/admin/settings` is the one row: `server_name`, `allow_registration`,
 `updater_hours`, `extension_hours`, `extension_auto_update`, `update_check`, `install_ping`, `install_ping_last`,
-`cleanup_read`, `cleanup_read_days`, `backup_hour`, `scanlator_prefs`, `auto_follow_on_failure`, plus
-`extensions_configured` (computed). `auto_follow_on_failure` defaults to true and controls the bounded
-once-per-series-per-day source hunt after an ordinary scheduled-download failure; it never makes an
-interactive Add/Fetch hunt and never runs after a refusal. `PATCH
+`cleanup_read`, `cleanup_read_days`, `backup_hour`, `scanlator_prefs`, `auto_follow_on_failure`,
+`repair_enabled`, plus `extensions_configured` (computed). `auto_follow_on_failure` defaults to true and
+controls the bounded once-per-series-per-day source hunt after an ordinary scheduled-download failure; it
+never makes an interactive Add/Fetch hunt and never runs after a refusal. `PATCH
 /api/admin/settings` takes any subset of `serverName` (1–64 chars), `allowRegistration`, `updaterHours`
 (1–168), `extensionHours` (1–168), `extensionAutoUpdate`, `updateCheck`, `installPing`, `cleanupRead`,
 `cleanupReadDays` (0–3650; 0 is a value, "at the next run"), `backupHour` (0–23, the local hour of the nightly
 backup — the pending timer is re-armed at once, so the change applies to the next run rather than the one
 after; `GET /api/admin/tasks` shows the backup's `schedule` as `daily at HH:00` from the same column),
-`scanlatorPrefs` (below), and `autoFollowOnFailure`. Each field is written on its own, an out-of-range value
-is a **400** and nothing is
-written, and the audit row `settings.update` carries the body. The admin console's Settings tab sends one
+`scanlatorPrefs` (below), `autoFollowOnFailure`, and `repairEnabled` (the nightly library repair, on by
+default — switching it off stops the schedule only, since nothing it does deletes, merges or renumbers
+anything). Each field is written on its own, an out-of-range value is a **400** and nothing is written, and
+the audit row `settings.update` carries the body. The admin console's Settings tab sends one
 row per PATCH as each row is changed (the read-chapter confirmation carries the day count with the switch).
 
 The bulk importer's body takes `titles`, `autoUpdate`, `chapterCount` and `chapterFrom`, with the same
@@ -1015,6 +1032,55 @@ under roots that were not skipped (both roots), `missing` the download-root rows
 and `lastResult` are persisted in `server_settings.verify_last_run` / `verify_last_result`, so a restart does
 not turn the last run into "not run yet"; a run that threw stores a NULL result, so no stale healthy line
 comes back. A shutdown stops it between batches; what it had marked stays marked, because it was true.
+
+**Repair the library.** `POST /api/admin/tasks/repair/run` (since v0.41.0; the Tasks panel's *Repair
+library*, and the *Fix* / *Fill now* / *Retry now* / *Reset solver sessions* chips on the Health tab —
+*It's fine* is the separate `confirm-short` route below) runs the nightly repair now. It is **detached**, like `update` and `verify`, and answers **200**
+`{ok: true, started: true}`; the counts land on `GET /api/admin/tasks` as the `repair` entry's `lastResult`.
+It is the only task that takes a **body**: `{only?: ('solver' | 'count' | 'failures' | 'short' | 'gaps')[],
+seriesId?, bookId?, sourceId?}`. With no body it runs all five steps over the whole library, in that order.
+Each target belongs to exactly one step — `seriesId` to `gaps` (that series, ignoring the 24-hour re-check
+cooldown), `bookId` to `short` (that chapter), `sourceId` to `failures` (that source's failed chapters,
+whatever their age) — and a target sent **without** `only: ["<its step>"]` is a **400** `bad_request` with a
+message naming the step, rather than a full nightly run carrying an argument four steps ignore. `only` takes
+each step at most once.
+
+Two refusals, deliberately different: `{ok: false, error: 'sweep_running'}` while a chapter sweep is
+running, and `{ok: false, error: 'busy'}` while another repair is. The two jobs never overlap in either
+direction — both download into the same series folders and both write `lib_books` for what landed — so each
+tick waits ten minutes for the other, and `runSweep` itself refuses while a repair holds the folders. The
+refusal is symmetrical in the answer too: `POST /api/admin/tasks/update/run` answers `{ok: false, error:
+'repair_running'}` while a library repair is running, for the same reason and in the same words as the
+repair's `sweep_running` — a shared `busy` would tell the admin that the task they just pressed is the one
+that is stuck. The `repair_enabled` switch gates the **schedule only**: a run somebody asked for always
+starts, because nothing the repair does is destructive; the nightly honours the switch and reports
+`skipped: 'disabled'`.
+
+`GET /api/admin/tasks` always lists it: `{id: 'repair', name: 'Repair library', schedule: 'every 24h · never
+during a chapter sweep'` (or `'switched off · on demand'`), `lastRun: number | null, lastResult, running}`,
+persisted in `server_settings.repair_last_run` / `repair_last_result` so a restart keeps the last run; a run
+that threw stores a NULL result rather than leaving an older healthy line. The result is `{ok: true, ms,
+only?, counted, uncounted, short: {looked, replaced, confirmed, left}, gaps: {series, followed, fetched,
+unfillable, sweep}, failures: {reset, retried?: {series, added, failed}}, solver: {reset, unblocked,
+expired}, skipped?: 'disabled', stopped?: 'shutdown' | 'disk'}`. Audit: `task.run {task: 'repair'}` at the
+press and `library.repair {only?, seriesId?, bookId?, sourceId?, summary, stopped?, replaced[], confirmed[],
+followed[]}` when the run ends (`user_id` NULL for the nightly), plus `book.short_fixed` for each chapter
+replaced and the existing `series.follow_source` for each source followed.
+
+What one run may cost is bounded by `REPAIR_HOURS`, `REPAIR_COUNT_MAX`, `REPAIR_SHORT_MAX` and
+`REPAIR_GAPS_MAX` (plus `REPAIR_PACE_MS`); their defaults and ranges, and the bounds that are fixed rather
+than configurable, are in [CONFIGURATION](CONFIGURATION.md#the-nightly-repair).
+
+**Confirm a short chapter.** `POST /api/admin/books/:id/confirm-short {confirmed?: boolean = true}` records
+that a one- or two-page chapter really is that short at the source: it sets `lib_books.short_confirmed_at`,
+which greys the row on the Health page (listed with `fixed`) and stops the repair investigating it.
+`{confirmed: false}` withdraws it and the chapter is an open finding again. **404** for a chapter that is not
+there; audit `book.short_confirmed {id, seriesId, title, number, pages, confirmed}`. The nightly writes the
+same stamp itself, but only with proof — one copy from each of up to three sources the series follows, every
+one of them answering two pages or fewer, with none silent, in a cooldown, left unasked by that cap or
+answering with an empty page list (an empty page list is a parse failure, not a zero-page chapter), and a
+search that found no other source — and the stamp is cleared automatically whenever the file changes
+underneath it, because the proof was about bytes that are no longer there.
 
 **Following a second source.** `POST /api/admin/series/:id/sources {planId, source, sourceSeriesId}` makes
 the updater merge that source's chapter list with the primary's on every check; it answers `{ok, sources}`

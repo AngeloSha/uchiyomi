@@ -1115,3 +1115,86 @@ test('a refusing primary costs one strike and does not stop the follower\'s chap
     await q('DELETE FROM chapter_failures WHERE series_id = $1', [S('ref')]).catch(() => {});
   }
 });
+
+/**
+ * A refusal never starts a source hunt -- a 429 tonight is a busy site -- unless the ledger already shows
+ * two refusals of this number from this very source: the same site saying no across two sweeps is a chapter
+ * it will not serve (live: 169 chapters parked for weeks on "page 1: 404; page 2: 429"), and a hunt is the
+ * only way it lands. The hunt's own once-a-day stamp and the caller's budget are what show it ran: nothing
+ * else in this fixture carries the title, so it finds nothing, which is not the point.
+ *
+ * Reintroduce by lowering `attempts >= 2` to `>= 1` in updater.ts's persistent rule: the one-refusal case
+ * hunts. Reintroduce the source test by dropping `source_id === via`: the other-source row hunts.
+ */
+test('a refusal is hunted only after two sweeps', { skip }, async () => {
+  const { registerAdapter } = await import('../src/lib/sources');
+  const REF = 'upd-refuse';
+  registerAdapter({
+    id: REF, name: REF,
+    async search() { return []; },
+    async getSeries(sid: string) { return { sourceId: sid, source: REF, title: sid }; },
+    async listChapters() { return numbered(5, 'r'); },
+    async getPageUrls(chId: string) { return [`https://example.invalid/refuse/${chId}.png`]; },
+    async latest() { return []; },
+  } as any);
+  await mkSeries('refuse', REF);
+  await q('DELETE FROM lib_books WHERE series_id = $1', [S('refuse')]);
+  globalThis.fetch = (async (u: any) => (String(u).includes('/refuse/') ? new Response('go away', { status: 403 }) : png())) as typeof fetch;
+  const hunted = async () => (await q('SELECT source_hunt_at AS t FROM lib_series WHERE id = $1', [S('refuse')]))[0]?.t != null;
+  const sweepWith = async (ledger: { attempts: number; status: string; source: string } | null) => {
+    await q('DELETE FROM chapter_failures WHERE series_id = $1', [S('refuse')]);
+    if (ledger) {
+      await q(`INSERT INTO chapter_failures (series_id, number, source_id, status, reason, attempts) VALUES ($1, 1, $2, $3, 'x', $4)`,
+        [S('refuse'), ledger.source, ledger.status, ledger.attempts]);
+    }
+    await q('DELETE FROM source_health WHERE source_id = $1', [REF]); // the last refusal's cooldown, or the series is `blocked` unasked
+    await q('UPDATE lib_series SET source_hunt_at = NULL WHERE id = $1', [S('refuse')]);
+    const budget = { left: 5 };
+    const r = await updateSeries(S('refuse'), 5, { hunt: budget });
+    assert.equal(r.outcome, 'ok');
+    assert.equal(r.added, 0, 'nothing lands: the source refuses and nothing else carries the title');
+    return { charged: 5 - budget.left, stamped: await hunted() };
+  };
+  try {
+    assert.deepEqual(await sweepWith(null), { charged: 0, stamped: false }, 'a first refusal is answered by its cooldown, not a hunt');
+    assert.deepEqual(await sweepWith({ attempts: 1, status: 'rate_limited', source: REF }), { charged: 0, stamped: false },
+      'one refusal on the ledger is still one bad night');
+    assert.deepEqual(await sweepWith({ attempts: 2, status: 'rate_limited', source: REF }), { charged: 1, stamped: true },
+      'the third refusal of the same number by the same source is hunted');
+    assert.deepEqual(await sweepWith({ attempts: 2, status: 'blocked', source: REF }), { charged: 1, stamped: true },
+      'a 403 counts as a refusal too');
+    assert.deepEqual(await sweepWith({ attempts: 2, status: 'rate_limited', source: 'upd-someone-else' }), { charged: 0, stamped: false },
+      'two refusals from a source this copy is not on say nothing about this one');
+    assert.deepEqual(await sweepWith({ attempts: 2, status: 'incomplete', source: REF }), { charged: 0, stamped: false },
+      'two shortfalls are not two refusals: tonight\'s refusal is still just a refusal');
+    const row = (await q('SELECT attempts, status FROM chapter_failures WHERE series_id = $1 AND number = 1', [S('refuse')]))[0];
+    assert.equal(Number(row?.attempts), 3, 'the refusal still counts against the retry cap');
+    assert.equal(row?.status, 'blocked');
+  } finally {
+    await q('DELETE FROM chapter_failures WHERE series_id = $1', [S('refuse')]).catch(() => {});
+    await q('DELETE FROM source_health WHERE source_id = $1', [REF]).catch(() => {});
+    await q('DELETE FROM lib_series WHERE id = $1', [S('refuse')]).catch(() => {});
+  }
+});
+
+/**
+ * The repair and the sweep never overlap: both download into the same series folders and both write
+ * lib_books for what landed. Reintroduce by dropping `runtime.repairing` from runSweep's check: the first
+ * call gets a promise instead of false.
+ */
+test('the sweep stands down while a repair runs', { skip }, async () => {
+  const { runSweep } = await import('../src/lib/updater');
+  const { runtime } = await import('../src/lib/runtime');
+  await only(['empty']);
+  const quiet = { info() {}, warn() {}, error() {} };
+  runtime.repairing = true;
+  try {
+    assert.equal(runSweep({ maxNew: 1 }, quiet as any), false, 'refused, synchronously, while a repair holds the folders');
+    assert.equal(runtime.updating, false, 'and the sweep flag was never raised for it');
+  } finally {
+    runtime.repairing = false;
+  }
+  const run = runSweep({ maxNew: 1 }, quiet as any);
+  assert.ok(run, 'and starts again the moment the repair is done');
+  await run;
+});

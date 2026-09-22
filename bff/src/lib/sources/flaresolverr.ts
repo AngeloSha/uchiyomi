@@ -110,6 +110,26 @@ export async function cfSession(url: string): Promise<{ cookie: string; userAgen
   return sessions.get(origin) || { cookie: '', userAgent: 'Mozilla/5.0' };
 }
 
+/**
+ * Forget every solved session and every origin marked unsolvable, and say how many of each there were.
+ *
+ * What the nightly repair (lib/repair.ts) and the Health page's "Reset solver sessions" do when the solver
+ * itself answers its ping but sources behind it keep failing inside it: a `cf_clearance` cookie that
+ * Cloudflare has since rotated is re-sent with every image request until this process restarts, and an
+ * origin stamped `unsolvable` is not re-solved for RESOLVE_AFTER_MS however healthy it has become. Clearing
+ * both makes the next request solve afresh, which is what "restart the solver" achieved by accident.
+ *
+ * ⚠️ In-process state only. The app has no access to the solver container (or any container) and must
+ * never get any: that is a security boundary, not a missing feature. A solver that is genuinely wedged is
+ * for the operator's `docker restart`; this resets only what THIS process remembers about it.
+ */
+export function resetSolverSessions(): { sessions: number; unsolvable: number } {
+  const out = { sessions: sessions.size, unsolvable: unsolvable.size };
+  sessions.clear();
+  unsolvable.clear();
+  return out;
+}
+
 /** Where the solver is expected to be. Exported so the health page can name it without re-deriving it. */
 export const solverUrl = (): string => FS;
 

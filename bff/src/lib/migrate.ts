@@ -500,6 +500,45 @@ ALTER TABLE lib_series ADD COLUMN IF NOT EXISTS source_hunt_at timestamptz;
 -- chapter, follows at most two sources per series, and never attaches an adult source to a clean series.
 ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS auto_follow_on_failure boolean NOT NULL DEFAULT true;
 
+-- v0.41.0: the nightly library repair (lib/repair.ts), which fixes what the Health page could only report.
+--
+-- pages_checked_at: when the repair last read this chapter file to count its pages. A column of its own
+-- because the pages column alone cannot say "counted": a corrupt, imageless or missing archive counts 0,
+-- so a step selecting on a zero page count alone would re-open those same files every night forever and
+-- never reach the rest of the library (30,625 of 43,253 rows were uncounted on this install, because a
+-- page count is stamped only when somebody opens the chapter). Stamped even when the answer is 0, so the
+-- queue drains.
+ALTER TABLE lib_books ADD COLUMN IF NOT EXISTS pages_checked_at timestamptz;
+-- short_confirmed_at: this one-or-two-page chapter has been PROVEN to be what the sources hold, so the
+-- Health page stops reporting it. A proof is "every followed copy answered two pages or fewer, none of
+-- them threw or was skipped, and the search for another source found none"; a cooldown or a timeout is
+-- silence, not an answer, and never confirms. Written by the repair and by the admin chip; cleared
+-- AUTOMATICALLY in exactly two places, both of which mean the bytes changed: restampBook (lib/partial.ts)
+-- and persistScan when the mtime moves (lib/library.ts); and withdrawn BY HAND from
+-- POST /api/admin/books/:id/confirm-short with { confirmed: false }, the Health page's "Not fine" chip,
+-- which is a person saying the proof was wrong. Nothing else may clear it, or a confirmation would be
+-- undone by a rescan that found the same file.
+ALTER TABLE lib_books ADD COLUMN IF NOT EXISTS short_confirmed_at timestamptz;
+-- The count step's queue in the order it drains, newest chapter file first. Partial, so it indexes only
+-- the rows still to count and disappears as the job finishes -- on a library where most chapters have
+-- been counted, a full index on mtime would be almost entirely rows this query never wants.
+CREATE INDEX IF NOT EXISTS lib_books_uncounted_idx ON lib_books (mtime DESC)
+  WHERE pages = 0 AND pages_checked_at IS NULL AND pruned_at IS NULL;
+-- gaps_checked_at / gaps_result: when the repair last looked for a source that could fill this series'
+-- holes, and what it found. Stamped BEFORE the search, exactly like source_hunt_at above, so a crash
+-- mid-search never re-searches the same series every night. The result is what lets the Health page say
+-- "no source lists 12-15, checked on Tuesday" instead of repeating a finding nothing can act on.
+ALTER TABLE lib_series ADD COLUMN IF NOT EXISTS gaps_checked_at timestamptz;
+ALTER TABLE lib_series ADD COLUMN IF NOT EXISTS gaps_result jsonb;
+-- The repair's nightly switch and its last run, persisted like the cleanup's and the verify's so the Tasks
+-- panel still shows the last result after a restart. ON by default, which the read-chapter cleanup above
+-- is deliberately not: every step this job takes is reversible or provable, and it never removes a file,
+-- writes a tombstone, merges two series or renumbers a chapter -- those stay one-click actions an admin
+-- confirms.
+ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS repair_enabled     boolean NOT NULL DEFAULT true;
+ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS repair_last_run    timestamptz;
+ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS repair_last_result jsonb;
+
 -- What the repositories offered and what was installed, as of the last check. This is what makes "new
 -- upstream", "dropped upstream" and "installed outside Uchiyomi" answerable at all, and what lets a wiped
 -- extension server get its extensions back rather than just its repository list.

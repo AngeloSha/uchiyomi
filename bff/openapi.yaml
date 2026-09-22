@@ -6,7 +6,7 @@
 openapi: 3.1.0
 info:
   title: Uchiyomi API
-  version: 0.40.0
+  version: 0.41.0
   description: "Everything the web app does, it does over this API. Session JWTs are for the browser; scripts
     use a personal API token (Profile -> Connections -> API tokens), sent as `Authorization: Bearer uy_...`.
     Scopes: read (every token; GET plus the library search POST, which is a query), write (anything that changes data), admin (the /api/admin surface, which also
@@ -4111,6 +4111,12 @@ paths:
                     description: >-
                       Whether a scheduled sweep may find and follow another matching source after an
                       ordinary failed chapter. On by default; bounded to one hunt per series per day.
+                  repair_enabled:
+                    type: boolean
+                    description: >-
+                      Whether the nightly library repair runs on its own. On by default. Off stops the
+                      schedule only: Run now and the Health page's chips still work, because nothing the
+                      repair does is destructive (it never deletes, merges or renumbers anything).
         "401":
           description: Not authenticated
         "403":
@@ -4182,6 +4188,12 @@ paths:
                   description: >-
                     Allow the scheduled sweep to search for and follow a matching source after an ordinary
                     chapter failure. Does not affect interactive requests or refusals.
+                repairEnabled:
+                  type: boolean
+                  description: >-
+                    Run the library repair nightly (REPAIR_HOURS, default 24h). On by default. Switching it
+                    off stops the schedule only -- POST /api/admin/tasks/repair/run and the Health page's
+                    chips are unaffected, because nothing it does deletes, merges or renumbers anything.
       security:
         - bearer: []
       responses:
@@ -4211,6 +4223,13 @@ paths:
         bare path: no file at all under it; "<root> (95 % of 20 chapter files missing)": the 90 % rule).
         Both are persisted in server_settings (verify_last_run / verify_last_result) and survive a restart;
         a run that threw stores a null result rather than an older healthy one.
+        Since v0.41.0 the list also always carries `repair` ("Repair library"), the nightly library repair,
+        with `schedule` "every {REPAIR_HOURS}h · never during a chapter sweep" or "switched off · on demand"
+        when repair_enabled is false, `running`, and `lastRun`/`lastResult` (persisted in
+        server_settings.repair_last_run / repair_last_result, memory winning once this process has run it).
+        Its result is {ok, ms, only?, counted, uncounted, short: {looked, replaced, confirmed, left},
+        gaps: {series, followed, fetched, unfillable, sweep}, failures: {reset, retried?}, solver: {reset,
+        unblocked, expired}, skipped?: 'disabled', stopped?: 'shutdown' | 'disk'}.
       security:
         - bearer: []
       responses:
@@ -4224,8 +4243,10 @@ paths:
     post:
       tags:
         - admin
-      summary: Start a scheduled task now (scan, update, backup, fingerprint, pagehash, cleanup, extensions, verify).
-        {ok:false,error:busy} while it runs, {ok:false,error:not_enabled} for a task that is switched off.
+      summary: Start a scheduled task now (scan, update, backup, fingerprint, pagehash, cleanup, extensions, verify, repair).
+        {ok:false,error:busy} while it runs, {ok:false,error:not_enabled} for a task that is switched off,
+        {ok:false,error:sweep_running} for `repair` while a chapter sweep is going, and
+        {ok:false,error:repair_running} for `update` while a library repair is going.
       operationId: postApiAdminTasksIdRun
       description: >-
         Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. `scan` is
@@ -4246,6 +4267,21 @@ paths:
         Rows are never deleted; a row the cleanup already marked keeps its reason. Never runs at boot or on a
         schedule. Audit: `task.run` {task: 'verify'} at the press and `library.verify` {checked, missing,
         readLibraryMissing, unmounted, ms} when the walk ends.
+        `repair` (since v0.41.0) is the only task that takes a body, and it is also detached. With no body it
+        runs all five steps over the whole library; `only` narrows it to named steps, and the three targets
+        each belong to exactly one step -- `seriesId` to `gaps` ("Fill now" on one series), `bookId` to
+        `short` ("Fix" on one chapter), `sourceId` to `failures` ("Retry now" on one source) -- so a target
+        sent without `only: ["<its step>"]` is refused with 400 rather than quietly widened into a full run.
+        A run somebody asked for ignores the repair_enabled switch (nothing it does is destructive); the
+        nightly honours it and reports skipped: 'disabled'. It never runs beside a chapter sweep: while one
+        is running the answer is {ok:false,error:'sweep_running'}, and while another repair is running it is
+        {ok:false,error:'busy'}; the other direction is named too -- pressing `update` (Check for new
+        chapters) while a repair runs answers {ok:false,error:'repair_running'} rather than a shared `busy`,
+        which would say the sweep is still running when it is not. Counts land on GET /api/admin/tasks as the `repair` entry's `lastResult`.
+        Audit: `task.run` {task:'repair'} at the press, `library.repair` {only?, seriesId?, bookId?,
+        sourceId?, summary, stopped?, replaced[], confirmed[], followed[]} when the run ends (userId null for
+        the nightly), plus `book.short_fixed` per replaced chapter and `series.follow_source` per followed
+        source.
       parameters:
         - name: id
           in: path
@@ -4253,10 +4289,42 @@ paths:
           description: >-
             The task. `cleanup` is the opt-in read-chapter cleanup and answers not_enabled while cleanup_read
             is off; its run is subject to the same consent and the same vetoes as the hourly one. `verify` is
-            the repair for a database restored without its chapter files.
+            the repair for a database restored without its chapter files. `repair` is the nightly library
+            repair and is the only one that takes a body.
           schema:
             type: string
-            enum: [scan, update, backup, fingerprint, pagehash, cleanup, extensions, verify]
+            enum: [scan, update, backup, fingerprint, pagehash, cleanup, extensions, verify, repair]
+      requestBody:
+        required: false
+        description: Only `repair` reads a body; every other task ignores it.
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                only:
+                  type: array
+                  minItems: 1
+                  maxItems: 5
+                  description: >-
+                    Which steps to run, each at most once. Omitted means all five, in this order.
+                  items:
+                    type: string
+                    enum: [solver, count, failures, short, gaps]
+                seriesId:
+                  type: string
+                  description: >-
+                    One series to search another source for. Only with only: ["gaps"]; the 24-hour re-check
+                    cooldown is ignored for it.
+                bookId:
+                  type: string
+                  description: >-
+                    One short chapter to replace if a longer copy exists. Only with only: ["short"].
+                sourceId:
+                  type: string
+                  description: >-
+                    One source whose failed chapters to reset and re-check regardless of their age. Only
+                    with only: ["failures"].
       security:
         - bearer: []
       responses:
@@ -4995,6 +5063,51 @@ paths:
                   type: string
                 number:
                   type: number
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: Malformed body or parameter
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+        "404":
+          description: Not found, or not visible to this account
+  /api/admin/books/{id}/confirm-short:
+    post:
+      tags:
+        - admin
+      summary: Record that a one- or two-page chapter really is that short at the source (or withdraw it).
+      operationId: postApiAdminBooksIdConfirmShort
+      description: >-
+        Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. Sets
+        lib_books.short_confirmed_at, which takes the chapter off the Health page's findings (it is listed
+        greyed, with `fixed`) and stops the nightly repair investigating it. `confirmed: false` clears the
+        stamp, after which it is an open finding again and the next repair will look at it. The nightly
+        writes the same stamp itself, but only with proof: every source that has the chapter answered, none
+        of them silent or in a cooldown. The stamp is cleared automatically whenever the file changes
+        underneath it, because the proof was about bytes that are no longer there.
+        Audit: `book.short_confirmed` {id, seriesId, title, number, pages, confirmed}.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                confirmed:
+                  type: boolean
+                  default: true
+                  description: false withdraws an earlier confirmation.
       security:
         - bearer: []
       responses:
@@ -5971,7 +6084,23 @@ paths:
       summary: "Library health checks: chapter gaps, short chapters, duplicates, failing sources, frozen series, the
         solver."
       operationId: getApiAdminHealth
-      description: Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
+      description: >-
+        Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
+        {generatedAt, checks: [{id, title, status: 'ok'|'warn'|'problem', summary, note?, items}]}. A check's
+        status is 'ok' exactly when none of its items is a finding: an item flagged `info` is listed for
+        reference and never decides the verdict.
+        Since v0.41.0 an item may also carry what can be DONE about it: `actions` (in the order they are
+        shown), one or more of fix_short, confirm_short, delete, fill, retry, test, unblock, disable, merge,
+        solver_reset; the id the action needs (`bookId` for a short chapter, `bookIds` for impossible chapter
+        numbers, `seriesId`/`seriesIds`, `sourceId`, `keep` for the copy a duplicate pair should keep);
+        `number`/`numbers` for the chapters it is about (gaps carry at most 100, impossible numbers at most
+        20); and `fixed` {at, what} when something has already been decided or found -- a chapter confirmed
+        short at the source, or a gap the nightly repair has already searched for -- which is what greys the
+        row. fix_short, fill, retry and solver_reset are POST /api/admin/tasks/repair/run with the matching
+        `only` and target; confirm_short is POST /api/admin/books/{id}/confirm-short (and `confirmed: false`
+        withdraws it, which is what a row carrying `fixed` offers); delete is POST
+        /api/admin/series/{id}/chapters/delete; merge is POST /api/admin/series/{id}/merge; test, unblock and
+        disable are the existing POST /api/admin/sources/{id}/... routes.
       security:
         - bearer: []
       responses:

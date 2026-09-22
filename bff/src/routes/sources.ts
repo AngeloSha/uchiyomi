@@ -34,6 +34,7 @@ import { busyFolders } from '../lib/bulkNewest';
 import { chooseReleases, groupsOf, releaseOrder } from '../lib/releases';
 import { effectivePrefsFor, readSeriesPrefs } from '../lib/scanlatorPrefs';
 import { copyToChapter, listingRows, replaceListing, type ListingCopy } from '../lib/seriesListing';
+import { haveNumbers } from '../lib/libraryNumbers';
 import { groupStats } from '../lib/groupStats';
 import { fetchAniListArt, fetchTrendingManhwa, TrendingItem } from '../lib/anilist';
 import { q, one } from '../lib/db';
@@ -1207,8 +1208,12 @@ export default async function sourceRoutes(app: FastifyInstance) {
     const s = rows[0];
     if (!s) return reply.code(404).send({ error: 'not_found' });
 
-    const have = (await q<{ number: number }>('SELECT number FROM lib_books WHERE series_id = $1', [seriesId]))
-      .map((r: { number: number }) => Number(r.number)).filter((n: number) => Number.isFinite(n));
+    // What this series HOLDS, by the one definition (lib/libraryNumbers.ts): a chapter an admin renumbered
+    // counts under its new number, a chapter they deliberately deleted is not a hole to offer filling, and
+    // a file the verify task found gone is. This query used to be a bare SELECT of the raw number over
+    // every row, so the dialog offered to re-fetch a deletion and disagreed with the Health page next door
+    // about which chapters were missing at all.
+    const have = await haveNumbers(seriesId);
     // The sources the updater already merges into this series (series_sources), so the dialog can mark a
     // candidate as followed rather than offer to follow it twice.
     const following = (await q<{ source_id: string }>(

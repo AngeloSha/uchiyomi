@@ -14,6 +14,7 @@ import { runBackup } from '../lib/backup';
 import { runUpdateAll, updateSeries, runSweep } from '../lib/updater';
 import { runChapterCleanup, cleanupSettings, dueCountCached, tombstoneBooks } from '../lib/chapterCleanup';
 import { runVerify, verifyState } from '../lib/verifyFiles';
+import { runRepair, repairState, REPAIR_HOURS, REPAIR_STEPS, type RepairStep } from '../lib/repair';
 import { authenticate, requireAdmin, userIdOf, revokeAllSessions, revokeRefreshTokenById, passwordError } from '../lib/auth';
 import { logAudit, recentAudit } from '../lib/audit';
 import { healthAll, setDisabled, clearBlock, SourceHealth, pruneOrphanedHealth, isDisabled, blockedNow } from '../lib/sourceHealth';
@@ -411,7 +412,8 @@ export default async function adminRoutes(app: FastifyInstance) {
 
   // ---- server settings ----
   const SETTINGS_COLS = 'server_name, allow_registration, updater_hours, extension_hours, extension_auto_update, '
-    + 'update_check, install_ping, install_ping_last, scanlator_prefs, cleanup_read, cleanup_read_days, backup_hour, auto_follow_on_failure';
+    + 'update_check, install_ping, install_ping_last, scanlator_prefs, cleanup_read, cleanup_read_days, backup_hour, auto_follow_on_failure, '
+    + 'repair_enabled';
   // `extensions_configured` is not a column: extension_hours has a NOT NULL default, so its presence says
   // nothing about whether there is an engine to check. The settings page needs to know, or it offers two
   // controls for a job that can never run.
@@ -492,6 +494,11 @@ export default async function adminRoutes(app: FastifyInstance) {
       cleanupReadDays: z.number().int().min(0).max(3650).optional(),
       // The local hour of the nightly backup. Until v0.39.0 it was shown under Tasks and editable nowhere.
       backupHour: z.number().int().min(0).max(23).optional(),
+      // The nightly repair (lib/repair.ts). Off stops the SCHEDULE only: "Run now" and the Health page's
+      // chips keep working, because nothing the repair does is destructive -- it never deletes, merges or
+      // renumbers anything. The tick re-reads this column every time, so switching it off takes effect
+      // without a restart.
+      repairEnabled: z.boolean().optional(),
     }).parse(req.body);
     if (b.serverName !== undefined) await q('UPDATE server_settings SET server_name = $1, updated_at = now() WHERE id = 1', [b.serverName]);
     if (b.allowRegistration !== undefined) await q('UPDATE server_settings SET allow_registration = $1, updated_at = now() WHERE id = 1', [b.allowRegistration]);
@@ -504,6 +511,7 @@ export default async function adminRoutes(app: FastifyInstance) {
     if (b.scanlatorPrefs !== undefined) await q('UPDATE server_settings SET scanlator_prefs = $1::jsonb, updated_at = now() WHERE id = 1', [JSON.stringify(b.scanlatorPrefs)]);
     if (b.cleanupRead !== undefined) await q('UPDATE server_settings SET cleanup_read = $1, updated_at = now() WHERE id = 1', [b.cleanupRead]);
     if (b.cleanupReadDays !== undefined) await q('UPDATE server_settings SET cleanup_read_days = $1, updated_at = now() WHERE id = 1', [b.cleanupReadDays]);
+    if (b.repairEnabled !== undefined) await q('UPDATE server_settings SET repair_enabled = $1, updated_at = now() WHERE id = 1', [b.repairEnabled]);
     // The scheduler is re-armed at once, so the change applies to the NEXT run rather than the one after: the
     // timer used to re-read the hour only when it fired (server.ts, the backup block says why).
     if (b.backupHour !== undefined) { await q('UPDATE server_settings SET backup_hour = $1, updated_at = now() WHERE id = 1', [b.backupHour]); runtime.rearmBackup?.(); }
@@ -513,11 +521,12 @@ export default async function adminRoutes(app: FastifyInstance) {
 
   // ---- scheduled tasks ----
   app.get('/api/admin/tasks', async () => {
-    const s = await one<{ updater_hours: number; backup_hour: number; backup_last_run: string | null; backup_last_result: any; extension_hours: number; extension_auto_update: boolean; extension_last_run: string | null; extension_last_result: any; cleanup_read: boolean; cleanup_read_days: number; cleanup_read_last_run: string | null; cleanup_read_last_result: any; verify_last_run: string | null; verify_last_result: any }>(
+    const s = await one<{ updater_hours: number; backup_hour: number; backup_last_run: string | null; backup_last_result: any; extension_hours: number; extension_auto_update: boolean; extension_last_run: string | null; extension_last_result: any; cleanup_read: boolean; cleanup_read_days: number; cleanup_read_last_run: string | null; cleanup_read_last_result: any; verify_last_run: string | null; verify_last_result: any; repair_enabled: boolean; repair_last_run: string | null; repair_last_result: any }>(
       `SELECT updater_hours, backup_hour, backup_last_run, backup_last_result,
               extension_hours, extension_auto_update, extension_last_run, extension_last_result,
               cleanup_read, cleanup_read_days, cleanup_read_last_run, cleanup_read_last_result,
-              verify_last_run, verify_last_result
+              verify_last_run, verify_last_result,
+              repair_enabled, repair_last_run, repair_last_result
          FROM server_settings WHERE id = 1`,
     );
     // the backup's last run is persisted, so prefer the DB value over the in-memory one (which resets on restart)
@@ -560,6 +569,23 @@ export default async function adminRoutes(app: FastifyInstance) {
         lastResult: verifyState.finishedAt ? verifyState.lastResult : (s?.verify_last_result ?? null),
         running: verifyState.running,
       },
+      // The nightly repair (lib/repair.ts). Listed whether it is on or off, and the schedule text says
+      // which: unlike the read-chapter cleanup there is no "are you sure" to attach to its Run now, because
+      // nothing it does deletes, merges or renumbers anything. The schedule also states the one constraint
+      // an admin would otherwise discover from a refusal -- it never runs beside a chapter sweep.
+      {
+        id: 'repair',
+        name: 'Repair library',
+        schedule: s?.repair_enabled === false
+          ? 'switched off · on demand'
+          : `every ${REPAIR_HOURS}h · never during a chapter sweep`,
+        // Memory wins once this process has run it, including a run that threw (finishedAt set, lastResult
+        // null): the verify's precedent above says why falling through to the stored row there would put an
+        // older healthy result back on the panel over a run that died.
+        lastRun: repairState.finishedAt || (s?.repair_last_run ? new Date(s.repair_last_run).getTime() : null),
+        lastResult: repairState.finishedAt ? repairState.lastResult : (s?.repair_last_result ?? null),
+        running: repairState.running,
+      },
       // Only when it is switched on -- same rule as the extension task below. This one additionally must
       // not be listed while it is off because a "Run now" button beside a job an admin has not consented to
       // is an invitation to delete files by clicking something to see what it does.
@@ -588,10 +614,55 @@ export default async function adminRoutes(app: FastifyInstance) {
       }] : []),
     ] };
   });
-  app.post('/api/admin/tasks/:id/run', async (req) => {
+  /**
+   * The five steps of the repair, as a zod enum, taken FROM the job rather than written out again: a step
+   * added to lib/repair.ts and not to this list would be a body the route rejects for a job that supports
+   * it. The cast is only the shape zod wants (a non-empty tuple) over an array the module exports.
+   */
+  const STEPS = REPAIR_STEPS as unknown as [RepairStep, ...RepairStep[]];
+  const repairBody = z.object({
+    only: z.array(z.enum(STEPS)).min(1).max(STEPS.length)
+      .refine((a) => new Set(a).size === a.length, { message: 'each step at most once' })
+      .optional(),
+    seriesId: z.string().min(1).max(64).optional(),
+    bookId: z.string().min(1).max(64).optional(),
+    sourceId: z.string().min(1).max(100).optional(),
+  })
+    // Each of the three targets belongs to exactly one step, and a target without its step is not a smaller
+    // run -- it is a FULL nightly with an argument the other four steps ignore, which is the opposite of
+    // what a chip on one Health row means. Refused here rather than quietly widened.
+    .refine((b) => !b.seriesId || (b.only?.length === 1 && b.only[0] === 'gaps'), {
+      message: 'seriesId only applies to the gaps step (send only: ["gaps"])',
+    })
+    .refine((b) => !b.bookId || (b.only?.length === 1 && b.only[0] === 'short'), {
+      message: 'bookId only applies to the short-chapter step (send only: ["short"])',
+    })
+    .refine((b) => !b.sourceId || (b.only?.length === 1 && b.only[0] === 'failures'), {
+      message: 'sourceId only applies to the failures step (send only: ["failures"])',
+    });
+
+  app.post('/api/admin/tasks/:id/run', async (req, reply) => {
     const { id } = req.params as { id: string };
     await logAudit('task.run', { userId: userIdOf(req), detail: { task: id }, req });
     if (id === 'scan') return { ok: true, ...(await persistScan()) };
+    if (id === 'repair') {
+      const b = repairBody.safeParse(req.body ?? {});
+      if (!b.success) return reply.code(400).send({ error: 'bad_request', message: b.error.issues[0]?.message ?? 'Bad body' });
+      // ⚠️ The two jobs must never overlap (both download into the same series folders and both write
+      // lib_books for what landed). runRepair refuses on its own, but it cannot say WHY, and "busy" on a
+      // press the admin made while a sweep is running reads as "the repair is stuck". Answered separately
+      // so the page can say "a chapter sweep is running; try again in a few minutes".
+      if (runtime.updating) return { ok: false, error: 'sweep_running' };
+      // Never awaited: a full repair opens two thousand archives and can download chapters. The panel polls
+      // `running` and keeps the persisted result, exactly as the verify and the sweep do.
+      // ⚠️ `userId` is always passed, even though it is the admin's own id: an explicit run ignores the
+      // nightly switch (nothing it does is destructive), and lib/repair.ts reads "somebody asked for this"
+      // from userId being present at all. The tick passes none.
+      const run = runRepair(app.log, { ...b.data, userId: userIdOf(req) ?? null });
+      if (!run) return { ok: false, error: 'busy' };
+      run.catch(() => {}); // runRepair logs it and clears the result; this only stops an unhandled rejection
+      return { ok: true, started: true };
+    }
     if (id === 'verify') {
       // ⚠️ Never awaited, like the sweep and the cleanup. One stat per row over a network share is minutes
       // on a large library, and the first cut of this route awaited it: the reverse proxy cut the request
@@ -611,6 +682,13 @@ export default async function adminRoutes(app: FastifyInstance) {
       return { ok: true, started: true };
     }
     if (id === 'update') {
+      // ⚠️ The repair's clash is answered separately, exactly as the repair branch above answers a sweep's:
+      // runSweep refuses while a repair is running (updater.ts's `runtime.updating || runtime.repairing`)
+      // and every refusal here used to be `busy`, which this panel words as "Already running" -- a sentence
+      // about a sweep that is not running at all, and the same wrong story the repair branch added
+      // `sweep_running` to avoid, in the other direction. Reintroduce by deleting this line: "Run now on
+      // the chapter sweep says the repair is running" in web/test/healthActions.test.ts.
+      if (runtime.repairing) return { ok: false, error: 'repair_running' };
       // Never awaited: a sweep is minutes to hours, and the caller is an admin clicking a button. runSweep
       // marks it running, keeps the result, logs the summary and refuses to start on top of another one --
       // everything this path used to skip, which is why the panel showed a manual sweep as idle throughout.
@@ -1198,6 +1276,42 @@ export default async function adminRoutes(app: FastifyInstance) {
       req,
     });
     return { ok: true, affectedUsers: affected?.n ?? 0 };
+  });
+
+  /**
+   * "It's fine": this chapter really is one or two pages at the source.
+   *
+   * The Health page reports every whole-numbered chapter of one or two images as a probably-failed
+   * download, and some of them are simply true -- a long strip published as two files, an announcement.
+   * Without a way to say so, those rows sat on the page for ever and the nightly repair asked three sources
+   * about them again every night for nothing.
+   *
+   * The nightly writes this stamp ITSELF, but only when it has proof (every source that has the chapter
+   * answered, none of them silent or in a cooldown). This route is the human version of the same judgement,
+   * and `confirmed: false` is how it is withdrawn -- after which the chapter is an open finding again and
+   * the repair will look at it on its next run. The stamp is also cleared automatically whenever the file
+   * changes underneath it (restampBook, and persistScan's mtime CASE), because the proof was about bytes
+   * that are no longer there.
+   */
+  app.post('/api/admin/books/:id/confirm-short', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const b = z.object({ confirmed: z.boolean().optional() }).safeParse(req.body ?? {});
+    if (!b.success) return reply.code(400).send({ error: 'bad_request' });
+    const confirmed = b.data.confirmed ?? true;
+    const book = await one<{ series_id: string; number: number; pages: number; title: string }>(
+      `SELECT b.series_id, b.number::float8 AS number, b.pages, ls.title
+         FROM lib_books b JOIN lib_series ls ON ls.id = b.series_id
+        WHERE b.id = $1`,
+      [id],
+    );
+    if (!book) return reply.code(404).send({ error: 'not_found' });
+    await q('UPDATE lib_books SET short_confirmed_at = CASE WHEN $2 THEN now() ELSE NULL END WHERE id = $1', [id, confirmed]);
+    await logAudit('book.short_confirmed', {
+      userId: userIdOf(req),
+      detail: { id, seriesId: book.series_id, title: book.title, number: Number(book.number), pages: book.pages, confirmed },
+      req,
+    });
+    return { ok: true };
   });
 
   // ---- file operations on the user's own library ----

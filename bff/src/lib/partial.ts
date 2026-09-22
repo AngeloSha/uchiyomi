@@ -112,8 +112,17 @@ export async function readPartialManifest(abs: string): Promise<PartialManifest 
 
 const IMG = /\.(jpe?g|png|webp|gif|avif)$/i;
 
-/** Stamp the row after the file on disk changed: what the reader counts, what the jobs must redo. */
-async function stampRow(bookId: string, abs: string, missing0: number[], via?: { source: string; scanlator?: string }): Promise<void> {
+/**
+ * Stamp the row after the file on disk changed: what the reader counts, what the jobs must redo.
+ *
+ * Exported since v0.41.0 because the repair's short step (lib/repair.ts) replaces a truncated chapter with
+ * a longer copy and owes the row exactly this treatment. It is deliberately the only writer of
+ * `lib_books.pages` after a download in that job: a count taken from the source's page list is what
+ * decided to download, and the count that gets stored has to come from the bytes that actually landed.
+ * (The repair's count step stamps `pages` as well, but only into a row that never had a count, from a
+ * file on our own disk that nothing downloaded.)
+ */
+export async function restampBook(bookId: string, abs: string, missing0: number[], via?: { source: string; scanlator?: string }): Promise<void> {
   const zip = new StreamZip.async({ file: abs });
   let pages = 0;
   try {
@@ -127,7 +136,14 @@ async function stampRow(bookId: string, abs: string, missing0: number[], via?: {
   // are recomputed lazily (the reader, the nightly hash job) once cleared. fp_at too: the fingerprint is
   // of the bytes, and the bytes changed. updated_at moves the row to the back of the completion queue, so
   // ten partials the source cannot complete do not hold the same ten slots every sweep.
-  const set = ['missing_pages = $2', 'page_dims = NULL', 'pages = $3', 'size = $4', 'fp_at = NULL', 'updated_at = now()'];
+  //
+  // short_confirmed_at goes for the same reason, and it is the one field here that is about a JUDGEMENT
+  // rather than a measurement: "this chapter really is two pages, every source says so" was proven about
+  // the file that was on disk, and this is a different file. Leaving it would hide a chapter that came
+  // back two pages long a second time -- the Health page would stay quiet about a download that failed
+  // again. Reintroduce by removing it: "replacing a confirmed-short chapter un-confirms it" in
+  // partialComplete.int.test.ts finds the stamp still there.
+  const set = ['missing_pages = $2', 'page_dims = NULL', 'pages = $3', 'size = $4', 'fp_at = NULL', 'short_confirmed_at = NULL', 'updated_at = now()'];
   const params: any[] = [bookId, missing0.length ? missing0.map((i) => i + 1) : null, pages, size];
   if (via) {
     params.push(via.source, via.scanlator ?? null);
@@ -245,7 +261,7 @@ export async function completePartial(
           out.addFile(PARTIAL_MANIFEST, Buffer.from(JSON.stringify(next, null, 2)));
         }
         await writeAtomic(abs, out.toBuffer());
-        await stampRow(book.id, abs, still);
+        await restampBook(book.id, abs, still);
         console.log(`${label}: ${filled.length} of ${missing.length} missing page${missing.length === 1 ? '' : 's'} fetched from ${src.id}${still.length ? `, ${still.length} still missing` : ''}`);
         if (!still.length) return 'completed';
         missing = still;
@@ -257,7 +273,7 @@ export async function completePartial(
       try {
         const r = await downloadChapter({ sourceId: src.id, seriesFolder, chapter, meta }, { replace: true });
         if (r) {
-          await stampRow(book.id, abs, []);
+          await restampBook(book.id, abs, []);
           console.warn(`${label}: re-sliced on ${src.id} (${manifest.expected} → ${urls.length} pages), fetched whole`);
           return 'completed';
         }
@@ -266,7 +282,7 @@ export async function completePartial(
         const hold = e?.partial;
         if (hold && hold.missing.length < missing.length) {
           await hold.write();
-          await stampRow(book.id, abs, hold.missing);
+          await restampBook(book.id, abs, hold.missing);
           console.warn(`${label}: re-sliced on ${src.id} (${manifest.expected} → ${urls.length} pages), saved with ${hold.missing.length} missing`);
           missing = [...hold.missing];
           result = 'improved';
@@ -297,7 +313,7 @@ export async function completePartial(
     acceptPartial: (hold: { missing: number[] }) => hold.missing.length < missing.length,
   });
   if (out.kind === 'landed') {
-    await stampRow(book.id, abs, [], { source: out.via, scanlator: out.chapterUsed?.scanlator });
+    await restampBook(book.id, abs, [], { source: out.via, scanlator: out.chapterUsed?.scanlator });
     const after = (await stat(abs)).size;
     // Another source's copy is not the same file: say so when its page count differs, because every
     // reader's position in this chapter was measured against the old count.
@@ -305,7 +321,7 @@ export async function completePartial(
     return 'completed';
   }
   if (out.kind === 'partial') {
-    await stampRow(book.id, abs, out.missing, { source: out.via, scanlator: out.chapterUsed?.scanlator });
+    await restampBook(book.id, abs, out.missing, { source: out.via, scanlator: out.chapterUsed?.scanlator });
     console.warn(`${label}: ${out.via}'s copy has ${out.missing.length} missing against ${missing.length}, kept it${out.pages !== manifest.expected ? ` (${manifest.expected} → ${out.pages} pages)` : ''}`);
     return 'improved';
   }

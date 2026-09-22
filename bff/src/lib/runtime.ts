@@ -66,6 +66,17 @@ export const runtime: {
   lastCleanupResult: CleanupResult | null;
   cleaning: boolean;
   /**
+   * The nightly library repair (lib/repair.ts) is running.
+   *
+   * The repair and the chapter sweep must never overlap: both download into the same series folders and
+   * both write `lib_books` for what landed, so a chapter the repair is replacing could be the very file the
+   * sweep is scanning, and two `persistScan`s racing over one folder mint rows twice. `runSweep` returns
+   * false while this is set, the repair refuses to start while `updating` is set, and server.ts's ticks
+   * defer around each other on the same two flags. Its own `running` state (progress, last result) lives
+   * in repair.ts; this is only the cross-job lock.
+   */
+  repairing: boolean;
+  /**
    * Re-arms the nightly backup timer, installed by server.ts once the scheduler exists.
    *
    * The scheduler arms ONE timer per run and re-reads `backup_hour` only when that timer fires, so before
@@ -87,5 +98,6 @@ export const runtime: {
   lastCleanup: 0,
   lastCleanupResult: null,
   cleaning: false,
+  repairing: false,
   rearmBackup: null,
 };

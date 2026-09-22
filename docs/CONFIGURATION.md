@@ -191,6 +191,13 @@ ever hit.
 - `PARTIAL_COMPLETE_MAX` (default `10`): most partial chapters the nightly completion pass tries to heal.
   It asks only for the missing page indices and removes the partial mark once every page is real; `0`
   disables the completion pass.
+- `REPAIR_HOURS` (default `24`, 1–168): how often the nightly repair runs, counted from the END of the last
+  completed run, with a floor of thirty minutes after a restart. See *The nightly repair* below.
+- `REPAIR_COUNT_MAX` (default `2000`, 1–100000): chapter files whose pages one repair run counts.
+- `REPAIR_SHORT_MAX` (default `20`, 1–500): one- or two-page chapters one run investigates.
+- `REPAIR_GAPS_MAX` (default `5`, 1–100): series one run searches another source for.
+- `REPAIR_PACE_MS` (default `1500`, 0 or more): the pause between two series the repair's *Retry now* step
+  re-checks. `0` is a legitimate value and means no pause at all.
 - `MIN_FREE_GB` (default `10`): refuse to start a download when the download disk has less than this free.
   `0` disables the floor. Fails open if free space cannot be measured.
 
@@ -201,6 +208,52 @@ find a new matching source when **Admin → Settings → Updates & schedules →
 sources** is on (the default): once per series per day, at most six candidates and five hunts per
 sweep, with no more than two extra follows. Title and 90%-chapter matching apply, and a clean series never
 causes an adult source to be followed. There is intentionally no environment variable for this switch.
+
+## The nightly repair
+
+On by default, under **Admin → Settings → Library housekeeping → Repair the library nightly**, and listed as
+**Admin → Tasks → Repair library**. Once every `REPAIR_HOURS` it does the five things on the Health page that
+are reversible or provable on their own, in this order:
+
+1. **Cloudflare state.** If the solver answers *and* sources are blaming it, the remembered sessions and
+   "could not be solved" marks are cleared and those sources come out of their cooldown; while the solver
+   is down, nothing is cleared, because the cookies would have to be re-earned by a solve that cannot
+   happen. Either way, any cooldown that lapsed more than 24 hours ago is cleared along with its escalation
+   memory — a day, not "lapsed at all", so a source that refuses every night keeps what it has earned. No
+   site is contacted.
+2. **Page counts.** `REPAIR_COUNT_MAX` chapter files that nobody has opened, newest first. No site is
+   contacted. A file that turns out to be unreadable keeps a count of 0 and is not opened again.
+3. **Failed chapters.** Up to 100 ledger rows that hit `CHAPTER_RETRY_CAP` more than seven days ago have
+   their attempt count cleared, so the sweep tries them again now the site has calmed down. *Retry now* on
+   a source does that source's rows whatever their age and then re-checks up to 10 of its series,
+   `REPAIR_PACE_MS` apart.
+4. **Short chapters.** `REPAIR_SHORT_MAX` one- or two-page chapters Uchiyomi downloaded itself. One copy
+   from each of up to 3 sources the series follows is asked how many pages it has, plus one search if none
+   of them has more; the chapter is replaced only when a copy really is longer, and marked *confirmed
+   short* only when every copy answered and none was silent, in a cooldown, left unasked by that cap, or
+   answered with an empty page list — a page list that comes back empty is a site not answering, not a
+   zero-page chapter. The copies come from the chapter listing the step refreshes before it asks anything,
+   so a source that is in a cooldown at that moment offers no copy at all rather than one that stays
+   silent; either way it is not part of a proof.
+5. **Gaps.** `REPAIR_GAPS_MAX` series with the largest holes, at most once a day each: a hole a followed
+   source already lists is left to the chapter sweep, and only a hole nobody lists starts a search. A
+   source is followed only under the same 90%-numbering rule as every other automatic follow, and at most
+   20 chapters are fetched per series. A series the run has no searches left for is not marked as checked:
+   it keeps its place and is looked at on the next run rather than skipped for a day.
+
+Fixed rather than configurable, because they are the blast radius rather than a preference: 5 searches for a
+whole run, shared by steps 3–5, of which the short step may spend at most 2 — so a library full of short
+chapters can no longer leave the gap step with nothing; 100 ledger rows, 10 series re-checked, 3 sources
+asked per short chapter, 20 chapters per gap series, 8 archives opened at once, 7 days before a capped
+chapter gets another chance, and 24 hours between two gap checks of one series. A knob that is missing,
+unparseable or out of range falls back to its default and never to zero — `REPAIR_PACE_MS` included, where
+only a deliberate `0` turns the pause off.
+
+The repair and the chapter sweep never run at the same time — both download into the same folders — so
+whichever starts second waits ten minutes. Switching the nightly off stops the **schedule only**: *Run now*
+and the Health page's buttons keep working, because nothing the repair does deletes, merges or renumbers
+anything. Duplicate series and impossible chapter numbers are never touched by it; they stay one-click
+actions an admin confirms.
 
 ## Deleting chapters after they are read
 

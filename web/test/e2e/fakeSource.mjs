@@ -1,11 +1,25 @@
 #!/usr/bin/env node
-// Dependency-free HTTP source used only by the v0.40 browser walk.
+// Dependency-free HTTP source used only by the v0.40 and v0.41 browser walks.
 //
 //   node fakeSource.mjs --name fake-a --port 18150
 //
 // Control it with POST /__script {chapter,page,behaviour}; chapter may be a chapter id, a chapter number
-// (shorthand for walk-tale-N), or "search" with page 0. GET /__log returns every source request with start
-// and finish timestamps. POST /__reset clears scripts, counters and the log.
+// (shorthand for walk-tale-N), a SERIES id (for `omit:`), or "search" with page 0. GET /__log returns every
+// source request with start and finish timestamps. POST /__reset clears scripts, counters and the log.
+//
+// The behaviours, and which route reads each one:
+//   ok, tiny-webp, 404, slow:<ms>, 429:after=<n>,retryAfter=<s>   /img (and slow: also /search)
+//   429                                                           /img, EVERY request, forever
+//   short:<n>                                                     /pages (n urls) AND /chapters (pages: n)
+//   omit:<a>-<b>                                                  /chapters (those numbers are not listed)
+//
+// ⚠️ `short:` has to change BOTH routes. The downloader takes `expected = max(urls.length, chapter.pages)`
+// (lib/downloader.ts), so a listing that still declares twelve pages while /pages hands back two makes an
+// incomplete chapter that is never written -- and the v0.41 walk needs a two-page chapter to actually land.
+// ⚠️ `429` is bare on purpose, and separate from `429:after=…`: that one fires ONCE per (chapter, page) and
+// then lets the resume through, which is what v0.40's "a 429 is survivable" step needs. A chapter that must
+// be REFUSED across two whole sweeps -- v0.41's persistent-refusal hunt -- needs a source that keeps saying
+// no however often it is asked, including after POST /__script has cleared the one-shot flags.
 import http from 'node:http';
 import { deflateSync } from 'node:zlib';
 
@@ -15,8 +29,15 @@ const NAME = argv.get('--name') || 'fake-a';
 const PORT = Number(argv.get('--port') || 18150);
 if (!Number.isInteger(PORT) || PORT < 1 || PORT > 65535) throw new Error(`bad --port ${PORT}`);
 
+// ⚠️ "Walk Gap" runs to 14, not 12, and both fakes carry all fourteen: the walk punches its hole with
+// `omit:6-8` on fake-a, which leaves ELEVEN listed numbers, and judgeCandidate (lib/autoFollow.ts) only
+// judges an exact title one way once the primary lists ONE_WAY_MIN_LISTED = 10. At twelve chapters the
+// same hole leaves nine, the judgement goes both ways, and 9 of the candidate's 12 numbers is 0.75 --
+// under MIN_COVERAGE, so the source that can fill the gap is refused as `numbering_differs` and the gap
+// step has nothing to follow. The failure looks exactly like a bug in `wants`, so the margin is here.
 const SERIES = [
   { sourceId: 'walk-tale', title: 'Walk Tale', first: 1, last: 12 },
+  { sourceId: 'walk-gap', title: 'Walk Gap', first: 1, last: 14 },
   ...(NAME === 'fake-b' ? [{ sourceId: 'walk-tale-next', title: 'Walk Tale: Next', first: 13, last: 40 }] : []),
 ];
 const byId = new Map(SERIES.map((s) => [s.sourceId, s]));
@@ -134,7 +155,7 @@ const server = http.createServer(async (req, res) => {
       const page = Number(body.page ?? 0);
       const behaviour = String(body.behaviour ?? body.behavior ?? '');
       if (!chapter || !Number.isInteger(page) || page < 0 || page > 12 ||
-          !/^(?:ok|tiny-webp|404|slow:\d+|429:after=\d+,retryAfter=\d+)$/.test(behaviour)) {
+          !/^(?:ok|tiny-webp|404|short:(?:[1-9]|1[0-2])|omit:\d+-\d+|slow:\d+|429|429:after=\d+,retryAfter=\d+)$/.test(behaviour)) {
         return sendJson(res, 400, { error: 'bad_script' });
       }
       scripts.set(keyOf(chapter, page), behaviour);
@@ -174,10 +195,16 @@ const server = http.createServer(async (req, res) => {
       const row = begin(req, url, { route: 'chapters', series: id });
       const s = byId.get(id);
       finish(row, s ? 200 : 404);
-      return sendJson(res, s ? 200 : 404, s ? Array.from({ length: s.last - s.first + 1 }, (_, i) => {
-        const number = s.first + i;
-        return { sourceId: `${s.sourceId}-${number}`, number, title: `Chapter ${number}`, pages: 12, lang: 'en' };
-      }) : { error: 'not_found' });
+      // `omit:a-b` scripted on the SERIES id is this source not carrying those chapters at all: the hole
+      // the v0.41 gap step goes looking for. `short:n` on a chapter id is declared here as well as served
+      // by /pages, so the downloader's expected count agrees with what it is handed (see the header).
+      const hole = /^omit:(\d+)-(\d+)$/.exec(behaviourFor(id, 0));
+      return sendJson(res, s ? 200 : 404, s ? Array.from({ length: s.last - s.first + 1 }, (_, i) => s.first + i)
+        .filter((number) => !hole || number < Number(hole[1]) || number > Number(hole[2]))
+        .map((number) => {
+          const short = /^short:(\d+)$/.exec(behaviourFor(`${s.sourceId}-${number}`, 0));
+          return { sourceId: `${s.sourceId}-${number}`, number, title: `Chapter ${number}`, pages: short ? Number(short[1]) : 12, lang: 'en' };
+        }) : { error: 'not_found' });
     }
 
     const pagesMatch = /^\/pages\/([^/]+)$/.exec(url.pathname);
@@ -186,9 +213,10 @@ const server = http.createServer(async (req, res) => {
       const row = begin(req, url, { route: 'pages', chapter });
       const found = chapterFromId(chapter);
       const host = req.headers.host || `127.0.0.1:${PORT}`;
+      const short = /^short:(\d+)$/.exec(behaviourFor(chapter, 0));
       finish(row, found ? 200 : 404);
       return sendJson(res, found ? 200 : 404, found
-        ? Array.from({ length: 12 }, (_, i) => `http://${host}/img/${encodeURIComponent(chapter)}/${i + 1}`)
+        ? Array.from({ length: short ? Number(short[1]) : 12 }, (_, i) => `http://${host}/img/${encodeURIComponent(chapter)}/${i + 1}`)
         : { error: 'not_found' });
     }
 
@@ -202,6 +230,11 @@ const server = http.createServer(async (req, res) => {
       const behaviour = behaviourFor(chapter, page);
       await delayFor(behaviour);
 
+      // The bare `429` never stops: no count to outgrow and no one-shot flag to clear. See the header.
+      if (behaviour === '429') {
+        finish(row, 429);
+        return sendBytes(res, 429, 'text/plain', Buffer.from('slow down'), { 'retry-after': '1' });
+      }
       const limited = /^429:after=(\d+),retryAfter=(\d+)$/.exec(behaviour);
       const fired = `${keyOf(chapter, page)}:fired`;
       if (limited && count > Number(limited[1]) && !scripts.has(fired)) {
