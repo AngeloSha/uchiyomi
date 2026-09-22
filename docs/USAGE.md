@@ -67,7 +67,8 @@ sorting, which library, read state, publication status, format and genre. On a l
 the left of the grid; on a phone it opens from **Filters** at the top. Genres are listed biggest-first with
 how many series each holds, and formats (Manhwa, Manhua, Webtoon…) are kept separate from moods like Horror
 and Romance. Picking two genres shows series that are in **both**. Each cover shows a **NEW** ribbon when
-there are unread chapters. Click a cover to open the series. The ✦ button picks one at random.
+there are unread chapters. Click a cover to open the series. The ✦ **Surprise me** button picks one at random from whatever the
+filters currently show.
 
 The top bar has **Home** (a daily-pick hero + "For you" rails), **Library**, **Lists** and **Discover**,
 plus search, the updates bell, a refresh button, and your profile.
@@ -626,7 +627,7 @@ dialog and on the series page.
 
 ---
 
-## 7. Sources: MangaDex + Add-a-site
+## 7. Sources: extensions, add-a-site and MangaDex
 
 ![Add a site](shots/admin-providers.webp)
 
@@ -961,6 +962,8 @@ folded into one card that opens per language. This tab also holds **Import a lis
 over from another app. It is one path: import a list → review the matches → add. Pressing it opens the
 import page (`/admin/import/`), which takes the list four ways:
 
+![Import and review matches](shots/admin-import.webp)
+
 - **Mihon / Tachiyomi backup** — pick your `.tachibk` (or `.proto.gz`) file. Only each entry's title, its
   source and its address on that source are read: the source to look the title up on that same source here,
   if you have it installed, and the address as the proof that a result there is that exact entry rather than
@@ -1108,7 +1111,7 @@ token on a non-admin account still can't reach the admin API. See [docs/api.md](
 
 ![API tokens](shots/crop-tokens.webp)
 
-## 10. Tracking: AniList sync
+## 10. Tracking: AniList, MyAnimeList and Kitsu
 
 Connect your AniList account once under **Profile → Connections → Progress tracking** (tap **Connect** on the
 AniList row and the token field opens under it) and finishing a chapter here updates your AniList list on its own.
@@ -1188,15 +1191,14 @@ Uchiyomi backs itself up. Every night (03:00 by default) it writes a compressed 
 archive of your config to `/backups`, keeping the most recent 14 runs. You can also run it on demand from
 **Admin → Tasks → Backup database & config → Run now**, which shows the last run time and size.
 
-> **If you are on v0.9.0 or v0.9.1 of the single container, your backups are empty.** Those images were
-> built without the Postgres client, so the task produced a 20-byte file and still reported success. Update
-> to v0.9.2 or later, then check: a real dump is megabytes.
+> Worth doing once, on any install: confirm the image can actually dump, rather than trusting the panel.
 >
 > ```
 > docker compose exec uchiyomi pg_dump --version
 > ```
 >
-> No output means the image cannot dump, whatever the Tasks panel says.
+> No output means it cannot, whatever the Tasks panel says. (v0.9.0 and v0.9.1 shipped without the Postgres
+> client and wrote 20-byte backups while reporting success; the [changelog](../CHANGELOG.md) has the detail.)
 
 **What's in a backup:** accounts and passwords, everyone's reading progress and history, favorites,
 collections, ratings, the catalogue, your admin art overrides, and any custom sites you added.

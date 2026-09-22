@@ -117,7 +117,7 @@ is copied and nothing is converted.
 | containers | `uchiyomi-bff` + `uchiyomi-web` | `uchiyomi` |
 | the port inside the container | 80 (nginx) | 3000 |
 | published as | `${WEB_PORT:-8080}:80` | `${WEB_PORT:-8080}:3000` |
-| image size | 385 MB | 241 MB |
+| image size on disk | 409 MB (341 + 68) | 275 MB |
 | deep links | `/library` redirects to `/library/` | served directly |
 
 Everything else is identical: the same environment variables, the same volumes, the same database, the same
@@ -161,7 +161,7 @@ networks:
     external: true
 services:
   uchiyomi:                            # was: uchiyomi-web
-    networks: [uchiyomi_app, uchiyomi_internal, proxy]
+    networks: [uchiyomi_app, proxy]
 ```
 
 While you are there: the compose file publishes a host port so a fresh install works out of the box, but if
@@ -191,6 +191,8 @@ Then point your reverse proxy back at `uchiyomi-web:80`.
 
 ## CasaOS
 
-The CasaOS manifest at [`deploy/casaos/docker-compose.yml`](../deploy/casaos/docker-compose.yml) ships the
-single container. If you installed an older split-layout manifest, remove the app from CasaOS and re-import
-this one — CasaOS keeps the volumes, so your library survives.
+The CasaOS manifest at [`deploy/casaos/docker-compose.yml`](../deploy/casaos/docker-compose.yml) runs the
+app as one container next to its own `uchiyomi-db` — the external-database layout, not the embedded one, so
+that installs made before v0.18.0 keep their database exactly where it already is. If you installed an older
+split-layout manifest, remove the app from CasaOS and re-import this one; CasaOS keeps the volumes, so your
+library survives.

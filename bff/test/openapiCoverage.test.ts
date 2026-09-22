@@ -1,6 +1,6 @@
 // The API reference cannot drift from the API.
 //
-// bff/openapi.yaml is hand-maintained, and docs/api.md's route list was too -- at 181 of 182 routes, with
+// bff/openapi.yaml is hand-maintained, and docs/api.md's route list was too -- at 181 of 182 routes at the time (233 now), with
 // nothing holding it there. This makes both a tested claim: every route Fastify actually registers must
 // appear in the spec, every spec path must be a real route, and the same in both directions for the docs'
 // route list. A route added without its operation fails here, not in a user's client.

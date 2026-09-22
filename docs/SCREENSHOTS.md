@@ -7,7 +7,8 @@ the thirteen hours after it, and none of them appeared in a single image.
 ```bash
 bash scripts/shots/run.sh --yes                        # everything
 bash scripts/shots/run.sh --yes --only home,library    # a subset
-bash scripts/shots/run.sh --yes --site-dir ../site      # also refresh the marketing site's copies
+bash scripts/shots/run.sh --yes --site-dir /path/to/site  # also refresh the marketing site's copies
+bash scripts/shots/run.sh --yes --record                 # the tour video instead of stills
 ```
 
 Output lands in `docs/shots/` as WebP. With `--site-dir` it also writes smaller copies into the marketing
@@ -66,27 +67,26 @@ feature that is honest and fine. For marketing it usually is not, so don't reach
 Capturing a populated stats page would mean signing in as a real reader, which the rig deliberately cannot
 do: the real accounts have 2FA, and working around that is worse than the screenshot is worth.
 
-## Stale after v0.39.0
+## Currency
 
-The profile and the admin Settings tab were rebuilt in v0.39.0 and the shots in `docs/shots/` have not been
-re-captured yet, so these show the old screens until `bash scripts/shots/run.sh --yes --only <names>` is run
-against a v0.39.0 instance (the rig itself already targets the new addresses):
+The whole set was re-captured against **v0.40.0** on 2026-09-22, along with the tour video, so nothing in
+`docs/shots/` currently shows a retired screen.
 
-- `admin-settings` — the tab is now four sections (Server, Updates & schedules, Library housekeeping,
-  Scanlators) with inline *Saved* ticks and one Save button; the shot still shows the old cards.
-- `profile-security` — captured from `/profile/?tab=Account` (Signed in as, Two-factor, Active sessions,
-  Sign out); the old shot shows the eight-card Account tab with its Manage chips.
-- `crop-tokens` and `crop-anilist` — both sections now live on `/profile/?tab=Connections`, the token form
-  opens inline under *New token*, and each tracker is a row rather than a card.
-- `profile-stats` — the You tab gained the Reading studio (heatmap, pace, weekday) that used to sit under
-  Reading, so the board is taller than the shot.
-- `admin-providers` — the Extensions catalogue no longer renders inside Providers; a link card that reads
-  *{n} sources enabled* points at the Extensions tab instead.
-- `admin-extensions`, `crop-extensions`, `ext-strip-*` — same content, now captured from the Extensions tab;
-  the framing around the search field differs.
+Two things that run were worth writing down, because both had been silently wrong for weeks:
+
+- `profile-security` and `profile-stats` had been **byte-identical**. The Account capture navigates to
+  `/profile/?tab=Account`, and `?tab=` addresses only arrived in v0.39.0 — before that the deep link was
+  ignored and the rig photographed the You tab twice. Two identical files is the tell; check for it.
+- `admin-import` had been defined in `capture.mjs` since v0.35.0 and had **never produced a file**, so the
+  reviewed-import page was undocumented and unillustrated. A capture that is defined but not referenced
+  anywhere is easy to lose; `ls docs/shots/` against the `want(...)` calls catches it.
+
+`record.mjs` had drifted separately: it clicked **Providers** and then looked for the extension search
+field, which moved to its own tab in v0.39.0. Everything after that point was guarded by `if (f)`, so the
+recording simply lost its last twelve seconds without saying anything.
 
 ## Adding a shot
 
-Add an entry to `SHOTS` handling in `scripts/shots/capture.mjs` and re-run with `--only <name>`. Prefer a
-whole screen over a crop unless the crop is going to be used small, and always look at the result before
-committing it.
+Add a `want('<name>')` block in `scripts/shots/capture.mjs` and re-run with `--only <name>`. Prefer a whole
+screen over a crop unless the crop is going to be used small, always look at the result before committing
+it, and reference it from a doc or the site — an unreferenced shot stops being maintained.

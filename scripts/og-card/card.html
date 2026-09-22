@@ -1,0 +1,85 @@
+<!doctype html>
+<!--
+  The 1200x630 social card, as HTML so the slogan is a string in a file rather than pixels nobody can edit.
+
+  Every share of this project shows this image: the GitHub repo social preview, the uchiyomi.com link
+  unfurl, the app's own og:image and the CasaOS store thumbnail are all the same file. It carried the
+  slogan "The all-in-one *arr stack for manga" for a month after that line had been removed from the
+  README, because a picture is the one place nobody greps.
+
+  Render it with scripts/og-card/run.sh. SLOGAN and ACCENT are substituted there.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<style>
+  @font-face {
+    font-family: 'Unbounded';
+    src: url('../../web/app/fonts/Unbounded-latin.woff2') format('woff2');
+    font-weight: 100 900; font-display: block;
+  }
+  @font-face {
+    font-family: 'Inter';
+    src: url('../../web/app/fonts/Inter-latin.woff2') format('woff2');
+    font-weight: 100 900; font-display: block;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 1200px; height: 630px; }
+  body {
+    background: #000;
+    font-family: 'Inter', system-ui, sans-serif;
+    display: grid; place-items: center;
+    position: relative; overflow: hidden;
+    -webkit-font-smoothing: antialiased;
+  }
+  /* the same violet-to-magenta wash the site opens with, pushed to the corners so the type stays legible */
+  .aurora {
+    position: absolute; inset: -20%;
+    background:
+      radial-gradient(52% 58% at 22% 18%, rgba(124, 92, 255, .40), transparent 62%),
+      radial-gradient(48% 54% at 82% 86%, rgba(214, 64, 209, .34), transparent 64%),
+      radial-gradient(60% 60% at 50% 50%, rgba(124, 92, 255, .10), transparent 70%);
+    filter: blur(2px);
+  }
+  .inner { position: relative; text-align: center; padding-bottom: 8px; }
+
+  .tile {
+    width: 152px; height: 152px; margin: 0 auto 30px;
+    border-radius: 34px; background: #000;
+    display: grid; place-items: center;
+    box-shadow: 0 0 0 1px rgba(255,255,255,.10), 0 26px 70px rgba(124, 92, 255, .42);
+  }
+  .tile img { width: 124px; height: 124px; display: block; }
+
+  .wordmark {
+    font-family: 'Unbounded'; font-weight: 800; font-size: 82px; line-height: 1;
+    letter-spacing: -.028em; color: #fff;
+  }
+  .wordmark .dot { color: #7c5cff; }
+
+  .slogan {
+    font-family: 'Unbounded'; font-weight: 600; font-size: 33px; line-height: 1.24;
+    letter-spacing: -.012em; color: #fff; margin-top: 26px;
+  }
+  .slogan .grad {
+    background: linear-gradient(92deg, #9d7bff 0%, #d640d1 100%);
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+
+  .meta {
+    margin-top: 30px; font-size: 16px; font-weight: 600;
+    letter-spacing: .30em; text-transform: uppercase;
+    color: rgba(255,255,255,.44);
+  }
+</style>
+</head>
+<body>
+  <div class="aurora"></div>
+  <div class="inner">
+    <div class="tile"><img src="../../web/public/icons/icon-512.png" alt="" /></div>
+    <div class="wordmark">uchiyomi<span class="dot">.</span></div>
+    <div class="slogan">__SLOGAN__</div>
+    <div class="meta">__META__</div>
+  </div>
+</body>
+</html>

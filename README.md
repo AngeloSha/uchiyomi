@@ -1,6 +1,7 @@
 # Uchiyomi
 
-*A self-hosted manga and manhwa reader that also keeps up with new chapters: one installable PWA, true-black OLED, webtoon-first.*
+*Self-hosted manga server that downloads too — a manga, manhwa and webtoon reader that keeps up with new
+chapters on its own.*
 
 [![CI](https://github.com/AngeloSha/uchiyomi/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/AngeloSha/uchiyomi/actions/workflows/ci.yml)
 [![Latest release](https://img.shields.io/github/v/release/AngeloSha/uchiyomi?label=release&color=7c5cff)](https://github.com/AngeloSha/uchiyomi/releases/latest)
@@ -9,54 +10,102 @@
 
 ### 🌐 [**uchiyomi.com**](https://uchiyomi.com) · 🐙 [GitHub](https://github.com/AngeloSha/uchiyomi) · ☕ [Ko-fi](https://ko-fi.com/angeloshaheen) · 📜 [Changelog](CHANGELOG.md)
 
-A self-hosted, installable (PWA) manga / manhwa reader with a true-black OLED interface and a vertical-scroll
-webtoon reader as the centerpiece. Point it at your own CBZ library and read on any device.
+A self-hosted **manga server** that runs on your own hardware. It stores and serves your library the way
+Komga or Kavita do, and it also **downloads and watches for new chapters** the way a source app does — in
+one Docker image, behind a true-black OLED interface with a vertical-scroll webtoon reader at the centre,
+installable as an app on any device.
 
 [![Uchiyomi — a walk through the app](docs/shots/tour.webp)](https://uchiyomi.com)
 
-Uchiyomi is a **bring-your-own-library reader** first: like Komga / Kavita / Calibre-web, it reads comics *you*
-supply, and the library and reader work on nothing but files you already own.
+**If you already run Sonarr for TV and Radarr for films**, this is the same idea for manga, except the
+reader is included: the indexer, the scheduler, the downloader, the Cloudflare solver and the media server
+are one container instead of five. The whole mapping is in the
+[comparison](docs/COMPARISON.md) — an *\*arr stack for manga*, without the stack.
 
-**It also fetches**, by two routes, and both ship in the default install. **Mihon / Tachiyomi extensions**: a
-browsable catalogue of ~1,400 community extensions, installed with **one click** in the admin panel and
-searchable immediately, run by a bundled engine that starts with the stack. And **generic engines** for the
-common manga-site families, where you paste a site's URL yourself. Plus **MangaDex**, via its official public
-API.
+Uchiyomi is a **bring-your-own-library reader** first: like Komga / Kavita / Calibre-web, it reads comics
+*you* supply, and the library and reader work on nothing but files you already own.
 
-No source is enabled until you choose one, and nothing is compiled into the image. But the catalogue arrives
-wired up and one click away, so calling this a reader alone would undersell what it does. You pick what to
-enable, and you are responsible for using it in line with those sites' terms and your local law.
+**It also fetches**, by two routes, and both ship in the default install. **Mihon / Tachiyomi extensions**:
+you point Uchiyomi at an extension repository you trust, and from then on its ~1,400 extensions are
+browsable in the admin panel, installable with one click and searchable immediately, run by a bundled engine
+that starts with the stack. And **generic engines** for the common manga-site families, where you paste a
+site's URL yourself. Plus **MangaDex**, via its official public API.
+
+Uchiyomi hosts no sources, ships no extensions and compiles nothing into the image; no source is enabled
+until you choose one. You pick what to enable, and you are responsible for using it in line with those
+sites' terms and your local law.
 
 > 📖 **[Full usage guide →](docs/USAGE.md)**: every screen walked through with screenshots (library, reader,
 > Discover, admin, security, offline).
+
 ## Features
 
+**Reading**
+
 - **Webtoon-first reader** — vertical scroll or paged, RTL, double-page spreads, per-series settings.
-- **Skips the pages that are not the story** — the scanlator credit page that opens every chapter is
-  found by repetition and left out of the flow, with a tap to bring it back.
+- **Skips the pages that are not the story** — the scanlator credit page that opens every chapter is found
+  by repetition and collapsed into a band you can tap open (or hide entirely, or show everything).
 - **True-black OLED interface**, built for a phone and installable as a PWA.
 - **Offline downloads** — save chapters to the device and read them with no connection at all.
-- **Your own library** — CBZ, CBR, PDF, image EPUB or a folder of images, in any folder layout.
-- **Also fetches** — ~1,400 Mihon / Tachiyomi extensions installable in one click, generic engines for
-  common site families, and MangaDex. Nothing is enabled until you choose it.
-- **Discover** — what your sources just published, grouped by language, plus search across every source.
-- **Multi-user** — accounts, per-user progress and favourites, age ratings, per-member library access.
-- **Library management** — several libraries, filters, bulk actions, editable metadata that survives a
-  rescan, series merge, delete and restore.
 - **Moments** — star a page and it lands on its own screen as the panel itself, with notes.
 - **Reading Studio & Wrapped** — a year heat-map, chapters by month and weekday, your top series and genres.
+
+**Your library**
+
+- **Files you already own** — CBZ, CBR, PDF, image EPUB or a folder of images, in any folder layout.
+- **Library management** — several libraries, a filter panel (sort, read state, status, format, genres),
+  *Select all* with bulk fetch and removal, editable metadata that survives a rescan, merge, delete, restore
+  and forget.
+- **Health** — finds chapter gaps, suspiciously short chapters, bad downloads and duplicates; *Verify
+  chapter files* re-checks that what the database claims is on disk actually is.
+- **Import what you already track** — a Mihon backup, a MangaDex list, a pasted list of titles, or your
+  AniList / MyAnimeList / Kitsu list. Every match is **reviewed before it lands**, with a confidence score,
+  *Change* and *Skip*, and batches you can resume.
+
+**Fetching**
+
+- **~1,400 Mihon / Tachiyomi extensions** from a repository you add, plus generic engines for common site
+  families (paste a URL) and MangaDex. Nothing is enabled until you choose it.
+- **Discover** — what your sources just published, grouped by language, and a search that **answers
+  progressively**: results appear as each source replies instead of waiting for the slowest, and every
+  source says whether it answered, failed or timed out.
+- **Follows a series on more than one source**, and when a chapter will not come down it tries the other
+  copies, then other sources, before giving up.
+- **Chooses the translation** — prefer or block scanlation groups, server-wide or per series; wait a couple
+  of days for a preferred group; see every version of a chapter and fetch a specific one. The group is
+  written into the file as ComicInfo `<Translator>`.
+- **Shows you what you do not have** — chapters the sources list but your disk lacks appear as grey rows you
+  can select and fetch.
+- **Survives real-world sources** — it slows down when a site rate-limits instead of hammering it, and a
+  chapter missing a handful of pages is kept as a **partial**, with placeholders, and repaired overnight
+  rather than thrown away.
+
+**Household**
+
+- **Multi-user** — accounts, per-user progress and favourites, streaks and a leaderboard.
+- **Age ratings and an 18+ library** that stays off the home screen, the grid and search until somebody asks
+  for it, with a per-member rating cap and a per-member permission to add series at all.
+- **Security** — 2FA, lockout, active sessions, an audit log, and **OIDC single sign-on** against Authentik,
+  Authelia or Keycloak.
+- **Scoped API tokens** — read, write or admin, revocable, with an opt-in for 18+ libraries.
+- **Automatic nightly backups** of the database and config, rotated and restorable, at an hour you pick.
+
+**Beyond the browser**
+
 - **Push notifications** when a followed series gets a new chapter.
 - **OPDS** — read from Panels, Chunky or KOReader, page by page over OPDS-PSE.
 - **A Mihon / Tachimanga extension** — read your library from Mihon, any Tachiyomi fork, Tachimanga (iOS)
   or Suwayomi with one API token: [uchiyomi-extension](https://github.com/AngeloSha/uchiyomi-extension).
-- **A Komga-compatible API** — point Mihon's Komga extension at Uchiyomi instead and its built-in Komga
+- **A Komga-compatible API** — point Mihon's own Komga extension at Uchiyomi instead and its built-in Komga
   tracker syncs reading progress back in both directions, forward-only: [how to set it up](docs/extensions.md#komga-compatible-api).
 - **Progress sync** to AniList, MyAnimeList and Kitsu.
-- **Nothing phones home.** An update check reads GitHub's public releases page and sends nothing about your
-  server; it can be turned off. An anonymous install count exists and is **off unless you turn it on**, and
-  the settings page shows you the exact object it would send before you agree to it — a monthly-rotating id,
-  the version, the CPU architecture and which deployment shape you run. No library, no titles, no accounts,
-  no address. [What leaves your server](docs/CONFIGURATION.md#what-leaves-your-server).
+- **Nine languages**, with right-to-left layout for Arabic.
+
+**Nothing phones home.** An update check reads GitHub's public releases page and sends nothing about your
+server; it can be turned off. An anonymous install count exists and is **off unless you turn it on**, and
+the settings page shows you the exact object it would send before you agree to it — a monthly-rotating id,
+the version, the CPU architecture and which deployment shape you run. No library, no titles, no accounts,
+no address. [What leaves your server](docs/CONFIGURATION.md#what-leaves-your-server).
 
 > 📖 Every screen walked through with screenshots: **[docs/USAGE.md](docs/USAGE.md)**
 
@@ -110,7 +159,9 @@ Adding a language: copy `en` semantics into `web/public/locales/<code>.json`, ad
 
 Actively developed. On deck:
 
-- 🧭 **Per-source genre & popular browsing** — rounding out the newest-releases rails.
+- 🧭 **Per-source genre browsing** — browsing one source's newest and popular titles already works; genres
+  are the part still missing.
+- 📱 **Native App Store and Play builds** — the PWA installs on both today; wrapping it properly is planned.
 
 Everything already shipped is in the **[changelog](CHANGELOG.md)**.
 

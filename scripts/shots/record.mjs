@@ -140,7 +140,12 @@ async function main() {
   };
   await clickTab('Health');
   await awaitThen(() => /checks found something|All good/i.test(document.body.innerText), 2400);
-  await clickTab('Providers'); await skim(900);
+  // Extensions, not Providers: v0.39.0 moved the extension catalogue out of the Providers tab into its own,
+  // leaving a link card behind. capture.mjs was updated and this was not, so the search below silently found
+  // nothing (`if (f)`), the icon wait never fired, and the Add hover at the end landed on the Providers
+  // tab's own disabled "Add a site" button. All three failures are silent by design, so the recording just
+  // quietly lost its best twelve seconds.
+  await clickTab('Extensions'); await skim(900);
   const f = await page.$('input[placeholder*="Search extensions"]');
   if (f) {
     await f.click();

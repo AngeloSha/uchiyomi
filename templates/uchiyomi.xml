@@ -19,7 +19,7 @@
   <Privileged>false</Privileged>
   <Support>https://github.com/AngeloSha/uchiyomi/issues</Support>
   <Project>https://uchiyomi.com</Project>
-  <Overview>A self-hosted manga and manhwa reader that also fetches new chapters: discover, grab, monitor, serve and read in one container. Point it at a folder of CBZ/CBR files and read them on any device through a true-black OLED interface built webtoon-first. Installs as a PWA, works offline, per-user progress and favourites, two-factor auth, nightly backups, no account, no telemetry. The database runs inside the container; there is nothing else to install.</Overview>
+  <Overview>A self-hosted manga server that downloads too: it serves your manga, manhwa and webtoons like a library server and fetches new chapters like a source app, so discover, grab, monitor, serve and read all happen in one container. Point it at a folder of CBZ/CBR files and read them on any device through a true-black OLED interface built webtoon-first. Installs as a PWA, works offline. Mihon/Tachiyomi extensions, MangaDex, AniList/MyAnimeList/Kitsu sync, OPDS, per-user progress and favourites, age ratings, two-factor auth, single sign-on, nightly backups. No account and no cloud; the update check can be turned off and the anonymous install count is off unless you turn it on. The database runs inside the container; there is nothing else to install.</Overview>
   <Category>MediaServer:Books MediaApp:Books</Category>
   <WebUI>http://[IP]:[PORT:3000]/</WebUI>
   <TemplateURL>https://raw.githubusercontent.com/AngeloSha/uchiyomi/main/templates/uchiyomi.xml</TemplateURL>
@@ -27,7 +27,7 @@
   <!-- The app finishes the chapter it is writing on stop, then Postgres checkpoints; Docker's default 10 s would cut that short. -->
   <ExtraParams>--stop-timeout 40</ExtraParams>
   <DonateText>Support development</DonateText>
-  <DonateLink>https://github.com/sponsors/AngeloSha</DonateLink>
+  <DonateLink>https://ko-fi.com/angeloshaheen</DonateLink>
   <Config Name="Web UI port" Target="3000" Default="8080" Mode="tcp" Description="The port you open in a browser." Type="Port" Display="always" Required="true" Mask="false">8080</Config>
   <Config Name="Library" Target="/library" Default="/mnt/user/media/comics" Mode="rw" Description="Your existing CBZ/CBR library. Any folder layout works. Set PUID/PGID to the owner of these files for renames and deletes; otherwise it is read-only." Type="Path" Display="always" Required="true" Mask="false">/mnt/user/media/comics</Config>
   <Config Name="Data (embedded database)" Target="/data" Default="/mnt/user/appdata/uchiyomi/data" Mode="rw" Description="Postgres lives here. Back it up like any appdata, or rely on the nightly dump in Backups." Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/uchiyomi/data</Config>

@@ -48,11 +48,6 @@ The tuning knobs and additive API fields for progressive search, pacing, partial
 and the hunt switch are documented in `docs/CONFIGURATION.md` and `docs/api.md`. Existing clients may ignore
 all new fields.
 
-What was verified during recovery: the fake-adapter opt-in and production guard, API/OpenAPI coverage,
-documentation paths, deployment and release-workflow contracts, the web type-check, the fake HTTP protocol,
-and the browser-walk scripts under Node 24. The full two-width browser walk and final clean release gate are
-run from the recovered integration branch before the tag; they are not claimed by this preparation commit.
-
 ## v0.39.0 — 2026-09-20
 
 The profile page and the admin Settings tab, reorganised. The profile had grown by accretion: identity shown
