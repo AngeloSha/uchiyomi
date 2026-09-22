@@ -542,19 +542,31 @@ function ChapterRow({ book, downloaded, sourceNames, primarySource, versions, on
     // the dot, the date and two 36-px buttons -- exactly a group name with its avatar -- and a two-digit
     // day ("29d") took 4 of them back. Five gaps at 10 rather than 12 return ten. GhostRow matches.
     <div id={`ch-${book.number}`} className="border-b border-ink-800/70">
-    <div className="flex items-center gap-3 py-2.5 lg:gap-2.5">
+    {/*
+      Desktop rows are deliberately leaner than touch ones. A chapter list is hundreds of rows of the same
+      series, so anything repeated per row is repeated hundreds of times: the cover is the same picture
+      every time, and the two round buttons are a pair of targets that only one row at a time can be the
+      subject of. Both are for pointers -- `group-hover` brings the buttons back, `focus-within` brings
+      them back for the keyboard -- and touch keeps all of it, where there is no hover and the cover is
+      the thing you aim at. "Desktop" is `lg:pointer-fine:`, not `lg:` alone: a tablet in landscape is lg
+      wide with no hovering pointer, Tailwind's hover variants never fire there, and buttons faded out by
+      `lg:opacity-0` would be invisible targets on it.
+    */}
+    <div className="group flex items-center gap-3 py-2.5 lg:gap-2.5 lg:pointer-fine:py-1.5">
       {/* In select mode a pruned chapter is still selectable -- Mark read and Fetch again are exactly the
           things one wants for it -- so the disable only applies to opening. */}
       <button onClick={selectable ? onToggle : onReader} disabled={pruned && !selectable} aria-pressed={selectable ? !!selected : undefined}
         className="flex min-w-0 flex-1 items-center gap-3 text-start disabled:cursor-default">
-        <div className={`relative h-14 w-10 shrink-0 overflow-hidden rounded-lg border ${state === 'read' ? 'border-ink-800 opacity-45' : 'border-ink-700'} ${book.pruned && !downloaded ? 'border-dashed border-ink-600' : ''}`}>
+        <div className={`relative h-14 w-10 shrink-0 ${selectable ? '' : 'lg:pointer-fine:hidden'} overflow-hidden rounded-lg border ${state === 'read' ? 'border-ink-800 opacity-45' : 'border-ink-700'} ${book.pruned && !downloaded ? 'border-dashed border-ink-600' : ''}`}>
           {/* A tombstone has no file to draw a thumbnail from; asking would be a 404 per row on every visit.
               The dashed empty box is the ghost row's, so "no pages here" reads the same in both places. */}
           {!(book.pruned && !downloaded) && <Img src={img.bookThumb(book.id)} alt="" className="h-full w-full" />}
           {state === 'reading' && <span className="absolute inset-x-0 bottom-0 h-0.5 bg-accent" />}
           {selectable && <SelectBubble selected={!!selected} />}
         </div>
-        <span className={`h-2 w-2 shrink-0 rounded-full ${state === 'read' ? 'bg-ink-600' : state === 'reading' ? 'bg-accent' : 'bg-accent/40'}`} />
+        {/* On touch, where the cover is on screen, the dot said what the cover's dimming and its accent bar
+            already say. On desktop the state is the title's colour and the accent "page x/y" line under it. */}
+        <span className={`h-2 w-2 shrink-0 rounded-full lg:pointer-fine:hidden ${state === 'read' ? 'bg-ink-600' : state === 'reading' ? 'bg-accent' : 'bg-accent/40'}`} />
         <div className="min-w-0">
           <p className={`truncate text-sm ${state === 'read' ? 'text-fog-500' : 'text-fog-100'}`}>{chapterLabel(book)}</p>
           <RowCaption group={book.scanlator} via={altSource} versions={versions} pruned={book.pruned} missing={book.missingPages?.length} />
@@ -565,6 +577,13 @@ function ChapterRow({ book, downloaded, sourceNames, primarySource, versions, on
       </button>
       {book.metadata?.releaseDate && <RowDate iso={book.metadata.releaseDate} />}
       {!selectable && <>
+      {/*
+        Two round buttons on every row is two targets per row that only one row at a time is ever the
+        subject of. On a pointer they appear for the row under the cursor; `group-focus-within` does the
+        same for the keyboard, and an open menu pins them so the dropdown does not vanish when the pointer
+        leaves to reach it. Touch has no hover, so there they stay as they were.
+      */}
+      <div className={`flex shrink-0 items-center gap-3 lg:gap-2.5 lg:transition-opacity lg:group-hover:opacity-100 lg:group-focus-within:opacity-100 ${menu ? '' : 'lg:pointer-fine:opacity-0'}`}>
       {/* Not on Uchiyomi Desktop (lib/desktop.ts): the chapter is already a file on this computer. */}
       {!isDesktop() && <button
         onClick={async () => {
@@ -613,6 +632,7 @@ function ChapterRow({ book, downloaded, sourceNames, primarySource, versions, on
             </div>
           </>
         )}
+      </div>
       </div>
       </>}
     </div>
@@ -685,19 +705,22 @@ function GhostRow({ ghost, sourceNames, primarySource, selectable, selected, onT
   return (
     <div id={`ch-${ghost.number}`} className="border-b border-ink-800/70">
     {/* The dimming is the opener's and the date's, not the row's: the fetch button at the end of the line
-        is a live control, and a child cannot undo its parent's opacity. */}
-    <div className="flex items-center gap-3 py-2.5 lg:gap-2.5">
+        is a live control, and a child cannot undo its parent's opacity. The lg: classes are ChapterRow's leaner
+        desktop row, so the two kinds of row still line up where they interleave. */}
+    <div className="group flex items-center gap-3 py-2.5 lg:gap-2.5 lg:pointer-fine:py-1.5">
       <button type="button" onClick={selectable ? onToggle : onOpen} aria-pressed={selectable ? !!selected : undefined} aria-haspopup={selectable ? undefined : 'dialog'}
         className={`flex min-w-0 flex-1 items-center gap-3 text-start ${selected ? '' : 'opacity-60'}`}>
-        <div className="relative grid h-14 w-10 shrink-0 place-items-center rounded-lg border border-dashed border-ink-600">
+        <div className={`relative grid h-14 w-10 shrink-0 ${selectable ? '' : 'lg:pointer-fine:hidden'} place-items-center rounded-lg border border-dashed border-ink-600`}>
           {read && !selectable && (
             <span role="img" aria-label={tr('Read · not on the server')} className="text-fog-500"><IcCheck width={14} height={14} /></span>
           )}
           {selectable && <SelectBubble selected={!!selected} />}
         </div>
-        <span className={`h-2 w-2 shrink-0 rounded-full ${read ? 'bg-ink-600' : 'border border-ink-600'}`} />
+        <span className={`h-2 w-2 shrink-0 rounded-full lg:pointer-fine:hidden ${read ? 'bg-ink-600' : 'border border-ink-600'}`} />
         <div className="min-w-0">
           <p className={`truncate text-sm ${read ? 'text-fog-500' : 'text-fog-300'}`}>
+            {/* With the box hidden on desktop its tick's label goes with it; say it once for screen readers. */}
+            {read && !selectable && <span className="sr-only hidden lg:pointer-fine:inline">{tr('Read · not on the server')} </span>}
             {chapterLabel({ number: ghost.number })}
             {showTitle && <span className="text-fog-500"> · {title}</span>}
           </p>
@@ -708,6 +731,8 @@ function GhostRow({ ghost, sourceNames, primarySource, selectable, selected, onT
         </div>
       </button>
       {ghost.publishedAt && <RowDate iso={ghost.publishedAt} className={selected ? '' : 'opacity-60'} />}
+      {/* Hover-revealed on a pointer, pinned while the menu is open: ChapterRow's rule, for the same reason. */}
+      <div className={`flex shrink-0 items-center gap-3 lg:gap-2.5 lg:transition-opacity lg:group-hover:opacity-100 lg:group-focus-within:opacity-100 ${menu ? '' : 'lg:pointer-fine:opacity-0'}`}>
       {/* The cloud, not the ⬇ of the row above: that arrow saves a chapter to THIS DEVICE, this one brings
           it onto the server, and the same glyph for both would promise the wrong thing on one of them. */}
       {onFetch && !selectable && (
@@ -741,6 +766,7 @@ function GhostRow({ ghost, sourceNames, primarySource, selectable, selected, onT
           )}
         </div>
       )}
+      </div>
     </div>
     </div>
   );

@@ -116,6 +116,10 @@ genres, description, and the **chapter list**.
 - **Save all offline** copies every chapter to this device for reading with no connection.
 - Click any chapter to read it; the ⬇ on a chapter saves just that one to this device. Toggle
   **Oldest/Newest** to flip the order.
+- On a computer (a wide window and a mouse or trackpad) the chapter list is denser: rows drop the
+  per-chapter cover and status dot, and a row's buttons (⬇, ☁, ⋯) appear when the pointer is over it or it
+  has keyboard focus. Read chapters are the dimmed titles. **Select** brings the covers back, since the tick
+  sits on them. Phones and tablets keep the full row.
 - **Mark all read** does what it says to every chapter of the series; **Filter** narrows the list to one
   translation group or hides the grey rows; **Select** picks chapters one by one for the actions described
   in *Selecting chapters* below.
