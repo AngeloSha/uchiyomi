@@ -9,6 +9,7 @@
 // where the action moves other people's data — deleting a series a household is reading, merging two.
 import { useEffect, useRef, useState } from 'react';
 import { t as tr } from '@/lib/i18n';
+import { confirmsTitle } from '@/lib/confirmTitle';
 
 export function Modal({
   title,
@@ -98,26 +99,63 @@ export function ConfirmDialog({
   onClose: () => void;
 }) {
   const [typed, setTyped] = useState('');
-  // Compared the way a person types: trimmed and in NFC. A title read off a macOS-written share is NFD
-  // ("Cafe" + a combining accent) while every keyboard produces the precomposed "Café", and byte for byte
-  // those never match -- the button never enabled and the route (which normalises the same way) was never
-  // reached. Reintroduce by comparing `.trim()` alone: "the typed confirmation compares in NFC" in
-  // forgetSeries.test.ts.
-  const ready = !confirmText || typed.trim().normalize('NFC') === confirmText.trim().normalize('NFC');
+  // Compared the way a person can actually type it, through the fold `lib/confirmTitle.ts` explains and the
+  // route (routes/admin.ts `sameTitle`) applies to the same string: curly apostrophes, en and em dashes, a
+  // literal `&amp;` the source never decoded, a non-breaking space and an NFD accent all read as what they
+  // are drawn as. 38 of the owner's 241 series carry one of those, so Remove / Delete files / Forget were
+  // unreachable from a keyboard on a sixth of the library (#66). Case is NOT folded -- this same dialog
+  // confirms deleting a member. Reintroduce by comparing `typed.trim().normalize('NFC')` with the same of
+  // `confirmText`: "the typed confirmation is folded, like the route" in forgetSeries.test.ts.
+  const ready = !confirmText || confirmsTitle(typed, confirmText);
   // ONE sentence with the title inside it, split around the placeholder so the title can carry its own
   // colour. `tr('Type')` + title + a literal " to confirm" read "TYPGONE FOR GOOD TO CONFIRM" in German
   // and "النوعGONE…" in Arabic: 'Type' translated as the noun (Typ, النوع = "the kind"), no space before
   // the title, and the tail in English regardless of language. A sentence key translates as a sentence.
   const [before, after] = tr('Type {title} to confirm').split('{title}');
 
+  // Copy title, beside the label. The fold makes almost every stored title typeable; what it cannot help
+  // with is a title that folds to nothing (emoji only, where the exact string is the only thing that
+  // confirms) or one that is simply long, and copying beats transcribing either.
+  //
+  // ⚠️ `navigator.clipboard` is undefined outside a secure context -- plain http over a LAN, which is how
+  // most people reach this server -- so the button appears only once a mounted client has seen the API.
+  // Rendering it from `typeof navigator` during render instead would put it in the statically exported
+  // HTML and not in the first client render, which is a hydration mismatch; calling it unguarded would
+  // throw on the tap. Neither is worth a convenience.
+  const [canCopy, setCanCopy] = useState(false);
+  const [copied, setCopied] = useState(false);
+  useEffect(() => { setCanCopy(typeof navigator !== 'undefined' && typeof navigator.clipboard?.writeText === 'function'); }, []);
+  // The confirmation goes back to its normal label, so a second copy still says it worked.
+  useEffect(() => {
+    if (!copied) return;
+    const h = setTimeout(() => setCopied(false), 2000);
+    return () => clearTimeout(h);
+  }, [copied]);
+  // A rejected write (the tab lost focus, or the browser refused the permission) leaves the label alone:
+  // the button keeps saying Copy title, which is the truth, and the field can still be typed into.
+  const copyTitle = (text: string) => {
+    navigator.clipboard.writeText(text).then(() => setCopied(true), () => setCopied(false));
+  };
+
   return (
     <Modal title={title} onClose={onClose}>
       <div className="text-sm leading-relaxed text-fog-300">{body}</div>
       {confirmText && (
         <>
-          <label className="mb-1 mt-4 block text-xs font-semibold uppercase tracking-wider text-fog-500">
-            {before}<span className="text-fog-200">{confirmText}</span>{after}
-          </label>
+          <div className="mb-1 mt-4 flex items-center justify-between gap-2">
+            <label className="text-xs font-semibold uppercase tracking-wider text-fog-500">
+              {before}<span className="text-fog-200">{confirmText}</span>{after}
+            </label>
+            {canCopy && (
+              <button
+                type="button"
+                onClick={() => copyTitle(confirmText)}
+                className="chip shrink-0 px-2.5 py-1 text-xs"
+              >
+                {copied ? tr('Copied') : tr('Copy title')}
+              </button>
+            )}
+          </div>
           <input
             value={typed}
             onChange={(e) => setTyped(e.target.value)}

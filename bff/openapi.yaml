@@ -6,7 +6,7 @@
 openapi: 3.1.0
 info:
   title: Uchiyomi API
-  version: 0.41.0
+  version: 0.42.0
   description: "Everything the web app does, it does over this API. Session JWTs are for the browser; scripts
     use a personal API token (Profile -> Connections -> API tokens), sent as `Authorization: Bearer uy_...`.
     Scopes: read (every token; GET plus the library search POST, which is a query), write (anything that changes data), admin (the /api/admin surface, which also
@@ -1537,20 +1537,42 @@ paths:
     get:
       tags:
         - sources
-      summary: Every source the caller can reach, with health status and a one-sentence note.
+      summary: Every source the caller can reach and may be shown, with health status and a one-sentence note.
       operationId: getApiSources
+      description: >-
+        Since v0.42.0 this list honours the 18+ reveal as well as the age cap: without `adult=1` a source
+        whose extension declares itself adult is left out, the same way an 18+ library is left off every
+        other listing. The age cap is unchanged and is the permission — a source above the caller's
+        `max_age_rating` is absent whatever `adult` says, and every by-id route still answers 403 for it.
+      parameters:
+        - name: adult
+          in: query
+          required: false
+          schema:
+            type: string
+          description: "`1` to include adult sources in the list. Absent means hidden."
       security:
         - bearer: []
       responses:
         "200":
           description: >-
-            { content: [Source] }. Only the field added in v0.33.0 is described here; the rest of the shape
-            is the registry entry (id, name, lang, latest, popular, used, status, blockedUntil, note).
+            { content: [Source], hiddenAdult }. Only the fields added in v0.33.0 and v0.42.0 are described
+            here; the rest of the shape is the registry entry (id, name, lang, latest, popular, used,
+            status, blockedUntil, note).
           content:
             application/json:
               schema:
                 type: object
                 properties:
+                  hiddenAdult:
+                    type: integer
+                    description: >-
+                      How many sources the caller may reach but is not being shown right now, i.e. the adult
+                      ones `adult=1` would add back. 0 with `adult=1`, and 0 for an account capped below 18,
+                      which never had those sources to hide and is deliberately not told the number. Discover
+                      renders the "Show 18+" chip when this is above 0 (or when the reveal is already on, or
+                      when the account holds an 18+ library), so an install with adult providers and no adult
+                      shelf still has a way to ask for them back.
                   content:
                     type: array
                     items:
@@ -1584,6 +1606,10 @@ paths:
         - sources
       summary: Search one source.
       operationId: getApiSourcesSearch
+      description: >-
+        Since v0.42.0 an adult source answers `{ content: [] }` without being asked while the 18+ reveal is
+        off — an empty page, deliberately not a 403, because the hide is a preference and the same account
+        with `adult=1` gets the results. A source above the caller's age cap is still refused with 403.
       parameters:
         - name: source
           in: query
@@ -1600,6 +1626,12 @@ paths:
           required: false
           schema:
             type: integer
+        - name: adult
+          in: query
+          required: false
+          schema:
+            type: string
+          description: "`1` to search an adult source. Absent means it answers empty."
       security:
         - bearer: []
       responses:
@@ -1620,6 +1652,9 @@ paths:
         series' release preferences with patience off, so a fill of [n] lands one file. `following` lists
         the source ids the series already follows (see POST /api/admin/series/{id}/sources), on the
         too_few_chapters early answer as well.
+        This route deliberately does NOT honour the 18+ reveal (v0.42.0): it is an explicit act on a series
+        already in the library, and a series whose own source is adult has to stay fillable whatever the
+        chip says. The age cap still applies — a source above it is never a candidate.
       requestBody:
         required: false
         content:
@@ -1793,12 +1828,21 @@ paths:
         account's search asked. Each source is bounded at `SEARCH_SOURCE_MS` (default 20000; the solver
         budget for a source behind Cloudflare): a source that outruns it is recorded as slow, one that
         throws as failed, as the newest listing records them.
+        Since v0.42.0 the same filtering covers the 18+ reveal: without `adult=1` an adult source is
+        neither asked nor listed in `sources`, so no outbound query goes to it and nothing it answered for
+        another account is read back here.
       parameters:
         - name: q
           in: query
           required: false
           schema:
             type: string
+        - name: adult
+          in: query
+          required: false
+          schema:
+            type: string
+          description: "`1` to include adult sources in the fan-out. Absent means they are not asked."
         - name: groupBy
           in: query
           required: false
@@ -1851,6 +1895,10 @@ paths:
         - sources
       summary: A source's newest titles, cached ten minutes per page.
       operationId: getApiSourcesLatest
+      description: >-
+        Since v0.42.0 an adult source answers `{ content: [] }` while the 18+ reveal is off, without being
+        asked — the same answer a disabled source gives, and deliberately not a 403: the hide is a
+        preference, the age cap is the permission and still answers 403 by id.
       parameters:
         - name: source
           in: query
@@ -1862,6 +1910,12 @@ paths:
           required: false
           schema:
             type: integer
+        - name: adult
+          in: query
+          required: false
+          schema:
+            type: string
+          description: "`1` to browse an adult source. Absent means it answers empty."
       security:
         - bearer: []
       responses:
@@ -1877,6 +1931,8 @@ paths:
         - sources
       summary: A source's own popularity ranking, when it offers one.
       operationId: getApiSourcesPopular
+      description: >-
+        Every guard on GET /api/sources/latest applies identically, including the v0.42.0 18+ hide.
       parameters:
         - name: source
           in: query
@@ -1888,6 +1944,12 @@ paths:
           required: false
           schema:
             type: integer
+        - name: adult
+          in: query
+          required: false
+          schema:
+            type: string
+          description: "`1` to browse an adult source. Absent means it answers empty."
       security:
         - bearer: []
       responses:
@@ -1905,7 +1967,11 @@ paths:
       operationId: getApiSourcesJobs
       description: >-
         One card per series folder: `{folder, title, total, done, status, reason?, finishedAt?,
-        switched?: [{number, from, to, why?}], partial?}`. `switched` records a chapter completed from a
+        seriesId?, switched?: [{number, from, to, why?}], partial?}`. `seriesId` is the library id of the
+        series this job is filling, and appears once its first chapter has been scanned in: an add that
+        starts a download is answered before that row exists, so this is where "Open in library" gets the
+        id from (it is absent until then, and for good on a job whose first chapter never landed).
+        `switched` records a chapter completed from a
         different followed source after its first copy failed; `why` is `rate_limited` when a 429 caused
         the switch and may be absent for an ordinary failure. `partial` counts chapters this job saved with
         repair placeholders. Both additions are absent when empty. An add
@@ -1948,6 +2014,12 @@ paths:
                         status: { type: string }
                         reason: { type: string }
                         finishedAt: { type: integer }
+                        seriesId:
+                          type: string
+                          description: >-
+                            The series this job is filling, once its first chapter has been scanned in.
+                            Absent before that (a download add is answered before the row exists) and on a
+                            job whose first chapter never landed.
                         switched:
                           type: array
                           items:
@@ -2009,12 +2081,28 @@ paths:
         - sources
       summary: "Find a title across enabled sources in order: returns {source, sourceId, title, ...}."
       operationId: getApiSourcesFind
+      description: >-
+        `sources` is a comma-separated scope: unscoped this is one outbound request per registered source.
+        Since v0.42.0 an adult source is neither asked nor returned while the 18+ reveal is off, and naming
+        it in `sources` does not bring it back — the scope only narrows the fan-out, it never widens it.
       parameters:
         - name: q
           in: query
           required: false
           schema:
             type: string
+        - name: sources
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Comma-separated source ids to ask, instead of every reachable one.
+        - name: adult
+          in: query
+          required: false
+          schema:
+            type: string
+          description: "`1` to include adult sources. Absent means they are not asked."
       security:
         - bearer: []
       responses:
@@ -2035,6 +2123,9 @@ paths:
         preferences (what the add would land). `groups` is the who-scanlates-this panel built from the same
         chapter list (no second source call), with `onDisk` 0 since nothing is on disk yet; `versions` is how
         many numbers the source lists in more than one copy.
+        This route deliberately does NOT honour the 18+ reveal (v0.42.0), and neither does POST
+        /api/sources/add: both are explicit acts on a source and a series the caller just named, and the
+        reveal governs what appears unasked. The age cap does apply and answers 403 by id.
       parameters:
         - name: source
           in: query
@@ -2085,6 +2176,16 @@ paths:
       summary: Add a series from a source. Answers once the outcome is decided and downloads afterwards;
         started:true means downloading now.
       operationId: postApiSourcesAdd
+      description: >-
+        An add never fetches a chapter the library already holds. What is held is read from the library by
+        FOLDER across every root -- including a read-only library the server did not download and whatever
+        the files there are named -- so removing a series and adding it again downloads only what is
+        actually missing (`chapters` counts that remainder). A chapter removed with **Delete files** is the
+        one exception and IS fetched again: the nightly sweep treats that tombstone as held so it does not
+        undo a deliberate deletion, but an add is somebody asking for the chapter now. When the whole
+        selection is already here the answer carries `alreadyHere` with `chapters: 0` and `started: false`,
+        and the series is still routed, floored, listed and given its cover as any other add would.
+
       requestBody:
         required: false
         content:
@@ -2166,9 +2267,24 @@ paths:
                   ok: { type: boolean }
                   title: { type: string }
                   folder: { type: string }
-                  chapters: { type: integer, description: How many chapters the add will fetch; 0 when already in the library or for a `none` add. }
+                  chapters: { type: integer, description: How many chapters the add will fetch; 0 when already in the library, for a `none` add, or when the library already holds every chapter selected. }
                   started: { type: boolean, description: The download is running now. }
                   nothing: { type: boolean, description: "A `none` add: the series was created and floored and nothing was fetched or queued. Tells that outcome from `already in library`, which also answers chapters 0 and started false." }
+                  seriesId:
+                    type: string
+                    description: >-
+                      The library id of the series this add landed on -- the row it found already there, the
+                      one it minted, the one it revived, or the one it stamped with nothing left to fetch --
+                      so a client can open it without searching for it by title. Absent on a fresh download,
+                      whose row is created behind the reply: that id appears on the job card (GET
+                      /api/sources/jobs, `seriesId`) once the first chapter is scanned in. Also absent when
+                      the caller may not see the series, which an "already in library" answer can name.
+                  alreadyHere:
+                    type: integer
+                    minimum: 1
+                    description: >-
+                      Every chapter selected was already in the library, so none was fetched (`chapters` is
+                      0 and `started` false). Absent on a partial re-add, where `chapters` is the remainder.
         "400":
           description: Malformed body or parameter
         "401":
@@ -2178,7 +2294,11 @@ paths:
         "404":
           description: Not found, or not visible to this account
         "409":
-          description: "Conflict: already exists, already running, or duplicate"
+          description: >-
+            Conflict: already exists, already running, or duplicate. A `duplicate` carries
+            `existing: {title, source, id?}` -- the copy already on this server, whichever library it is in,
+            since that is what makes it a duplicate. `id` is included only when the caller may see that
+            series, so a client can offer to open it.
   /api/opds/token:
     post:
       tags:
@@ -4194,6 +4314,17 @@ paths:
                     Run the library repair nightly (REPAIR_HOURS, default 24h). On by default. Switching it
                     off stops the schedule only -- POST /api/admin/tasks/repair/run and the Health page's
                     chips are unaffected, because nothing it does deletes, merges or renumbers anything.
+                komgaGhostChapters:
+                  description: >-
+                    List the chapters this server does not hold on the Komga-compatible API: the ones the
+                    sources listed but the sweep never fetched, and the tombstones whose files the read
+                    cleanup deleted. Off by default. They report media.status READY so the extension does
+                    not filter them out, carry a page count of 0 and a size of "not downloaded", and cannot
+                    be opened. Their numbers count towards the chapter total the trackers read, which is
+                    what the setting is for -- maxNumberSort only: they are not counted in booksCount or
+                    booksUnreadCount, so a fully read series still reports COMPLETED -- and they never
+                    affect lastReadContinuousNumberSort. Nothing outside /api/v1 and /api/v2 changes.
+                  type: boolean
       security:
         - bearer: []
       responses:
@@ -5177,7 +5308,11 @@ paths:
               properties:
                 confirm:
                   type: string
-                  description: The series' title, compared trimmed and NFC-normalised on both sides.
+                  description: >-
+                    The series' title. Since v0.42.0 both sides go through one fold before they are
+                    compared (docs/api.md, "Typing a title to confirm"): one layer of HTML entities, NFKC,
+                    curly quotes and dashes folded to ASCII, invisibles and emoji dropped, every Unicode
+                    space collapsed to one, ends trimmed. Case is NOT folded.
       security:
         - bearer: []
       responses:
@@ -5234,14 +5369,18 @@ paths:
               properties:
                 confirm:
                   type: string
-                  description: The series' title, compared trimmed and NFC-normalised on both sides (a macOS-written NFD title is confirmed by an NFC keyboard).
+                  description: >-
+                    The series' title, through the same fold as delete-files above (docs/api.md, "Typing a
+                    title to confirm"): an NFD title written on a Mac, a curly apostrophe, an en dash, an
+                    undecoded HTML entity or a doubled space all confirm from an ordinary keyboard. Case
+                    is NOT folded.
       security:
         - bearer: []
       responses:
         "200":
           description: "{ ok: true, books, absorbed, users } -- chapter rows erased, absorbed series rows that went with it, and distinct members who lose history (progress, reading events, bookmarks, notes, favourites, ratings, collection entries, or a tracker floor erased rather than carried to a merge survivor; opening the series page, the NEW-badge counter, does not count)."
         "400":
-          description: "bad_request for a body without `confirm`; confirm_mismatch { message: 'Type the series title exactly to confirm.' } when it is not the title."
+          description: "bad_request for a body without `confirm`; confirm_mismatch { message: 'Type the series title to confirm — typography does not have to match.' } when it is not the title."
         "401":
           description: Not authenticated
         "403":

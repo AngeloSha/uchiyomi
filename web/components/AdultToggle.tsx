@@ -41,16 +41,21 @@ export function useAdultShown(): boolean {
  * already drops libraries above the viewer's age cap — so an account that may not open the 18+ shelf never
  * sees the button that would reveal it.
  *
+ * `alsoWhen` is a second reason to render, for a screen that knows of something else the reveal is hiding.
+ * Discover passes `hiddenAdult > 0` from `/api/sources`: since v0.42.0 the reveal also hides adult
+ * PROVIDERS, and an install with adult sources and no 18+ library would otherwise lose them with no button
+ * anywhere to ask for them back. It only ever adds a reason; the library check alone still renders it.
+ *
  * Flipping it invalidates every query rather than a chosen list. The reveal changes what a dozen endpoints
- * return — the home rails, search, genres and their counts, collections, updates, history, bookmarks — and
- * enumerating them here would be one more list to forget to update.
+ * return — the home rails, search, genres and their counts, collections, updates, history, bookmarks, and
+ * now the Discover source list — and enumerating them here would be one more list to forget to update.
  */
-export function AdultToggle({ className = '' }: { className?: string }) {
+export function AdultToggle({ className = '', alsoWhen = false }: { className?: string; alsoWhen?: boolean }) {
   const qc = useQueryClient();
   const { data: libs } = useLibraries();
   const on = useAdultShown();
 
-  if (!(libs ?? []).some((l) => l.adult)) return null;
+  if (!alsoWhen && !(libs ?? []).some((l) => l.adult)) return null;
 
   return (
     <button

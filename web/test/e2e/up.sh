@@ -8,6 +8,7 @@
 #   KEEP=1 bash web/test/e2e/up.sh       # leave it running to poke at
 #   KEEP=1 bash web/test/e2e/up.sh && WIDTH=1280 BASE=http://127.0.0.1:18140 npm run test:e2e:v040
 #   Run the v0.40 walk once per fresh instance; repeat with WIDTH=390 and a fresh E2E_NET/E2E_PORT.
+#   KEEP=1 E2E_ADULT=1 bash web/test/e2e/up.sh   # fake-b declares itself adult: what walk42 needs
 #   E2E_EMBEDDED=1 bash web/test/e2e/up.sh   # no Postgres container: the image runs its own (DATABASE_URL unset)
 #
 # The embedded leg is the proof that the one-container layout behaves like the two-container one, in the
@@ -37,6 +38,14 @@ FAKE_A_PORT=${E2E_FAKE_A_PORT:-$((20000 + (PORT % 1000) * 2))}
 FAKE_B_PORT=${E2E_FAKE_B_PORT:-$((FAKE_A_PORT + 1))}
 LIB=$(mktemp -d)
 DATA=$(mktemp -d)
+# The v0.42.0 walk needs one provider that declares itself adult, to prove the "Show 18+" reveal keeps it
+# off Discover (issue #64). Opt-in, and fake-b rather than fake-a, because an adult source is skipped by
+# the failure hunt (bff/src/lib/sourceHunt.ts) and by every listing while the reveal is off -- marking one
+# by default would change what the v0.40 and v0.41 walks see. Empty means nothing is marked, which is the
+# ordinary shape of this instance.
+# The same walk needs one series whose title carries characters a keyboard cannot type (#66), and it is
+# served by fake-a alone so that adding it names one provider and no fold has to be resolved.
+if [ "${E2E_ADULT:-0}" = "1" ]; then ADULT_SOURCE="fake-b"; EXTRA_A="v42"; else ADULT_SOURCE=""; EXTRA_A="none"; fi
 
 cleanup() {
   [ "${KEEP:-0}" = "1" ] && { echo "kept: $NET on :$PORT, fake sources on :$FAKE_A_PORT/:$FAKE_B_PORT (library $LIB, data $DATA)"; return; }
@@ -54,7 +63,7 @@ docker network create --subnet "$SUBNET" "$NET" >/dev/null
 echo "· starting the two v0.40 fake sources"
 docker run -d --name "$FAKE_A" --network "$NET" -p "127.0.0.1:$FAKE_A_PORT:$FAKE_A_PORT" \
   -v "$REPO:/repo:ro" -w /repo node:24-alpine \
-  node web/test/e2e/fakeSource.mjs --name fake-a --port "$FAKE_A_PORT" >/dev/null
+  node web/test/e2e/fakeSource.mjs --name fake-a --port "$FAKE_A_PORT" --extra "$EXTRA_A" >/dev/null
 docker run -d --name "$FAKE_B" --network "$NET" -p "127.0.0.1:$FAKE_B_PORT:$FAKE_B_PORT" \
   -v "$REPO:/repo:ro" -w /repo node:24-alpine \
   node web/test/e2e/fakeSource.mjs --name fake-b --port "$FAKE_B_PORT" >/dev/null
@@ -79,6 +88,7 @@ if [ "$EMBEDDED" = "1" ]; then
     -e JWT_SECRET='e2e-secret-at-least-16-chars' \
     -e LIBRARY_BACKEND=owned \
     -e FAKE_SOURCE_URLS="fake-a=http://$FAKE_A:$FAKE_A_PORT,fake-b=http://$FAKE_B:$FAKE_B_PORT" \
+    -e FAKE_SOURCE_NSFW="$ADULT_SOURCE" \
     -e DOWNLOAD_PAGE_GAP_MS=20 -e DOWNLOAD_RESUME_WAIT_MS=200,200,200 \
     -e PUID="$(id -u)" -e PGID="$(id -g)" \
     -v "$LIB":/library -v "$DATA":/data uchiyomi:e2e >/dev/null
@@ -92,6 +102,7 @@ else
     -e JWT_SECRET='e2e-secret-at-least-16-chars' \
     -e LIBRARY_BACKEND=owned \
     -e FAKE_SOURCE_URLS="fake-a=http://$FAKE_A:$FAKE_A_PORT,fake-b=http://$FAKE_B:$FAKE_B_PORT" \
+    -e FAKE_SOURCE_NSFW="$ADULT_SOURCE" \
     -e DOWNLOAD_PAGE_GAP_MS=20 -e DOWNLOAD_RESUME_WAIT_MS=200,200,200 \
     -e PUID="$(id -u)" -e PGID="$(id -g)" \
     -v "$LIB":/library uchiyomi:e2e >/dev/null

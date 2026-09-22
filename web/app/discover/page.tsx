@@ -16,6 +16,7 @@ import { aloneEmpty, budgetForMode, type ListMode } from '@/lib/sourceGroups';
 import { normTitle } from '@/lib/normTitle';
 import { foldByTitle, type WallProvider } from '@/lib/wall';
 import { AddSeriesDialog, AddSeed } from '@/components/AddSeriesDialog';
+import { AdultToggle, useAdultShown } from '@/components/AdultToggle';
 import { IcChevronLeft, IcSearch, IcSparkle, IcX } from '@/components/icons';
 import type { AutoFollow } from '@/lib/types';
 
@@ -82,12 +83,24 @@ export default function DiscoverPage() {
 
   const { data: sourcesData } = useQuery({
     queryKey: ['sources'],
-    queryFn: () => api<{ content: Src[] }>('/api/sources'),
+    // `hiddenAdult` is how many adult providers the "Show 18+" reveal is keeping out of `content` right now
+    // (v0.42.0). Optional, so an older server's answer still renders; 0 for an age-capped account, which
+    // never had those sources to hide. It is the only reason the reveal chip appears on this page.
+    queryFn: () => api<{ content: Src[]; hiddenAdult?: number }>('/api/sources'),
     enabled: mayAdd,
     staleTime: 30_000,
     refetchInterval: 60_000,
   });
   const sources = useMemo(() => sourcesData?.content ?? [], [sourcesData]);
+  /**
+   * Whether to offer the reveal chip here at all.
+   *
+   * ⚠️ The `adultOn ||` is load-bearing, not defensive. With the reveal ON the server hides nothing, so
+   * `hiddenAdult` is 0 — and a chip that vanishes the moment it is pressed strands the session with no way
+   * back. `AdultToggle` still renders on its own wherever an 18+ library exists.
+   */
+  const adultOn = useAdultShown();
+  const showAdultChip = adultOn || (sourcesData?.hiddenAdult ?? 0) > 0;
 
   const { data: trending } = useQuery({
     // NOT ['trending'] -- that key belongs to /api/trending, which is what the household is reading and is a
@@ -375,7 +388,17 @@ export default function DiscoverPage() {
       <div className="min-h-screen-d px-4 lg:px-0">
         {/* An age-limited account is served a filtered list, so "none" here can mean "none you may use"
             rather than "none installed" — and telling a reader to mount SOURCES_DIR would be nonsense. */}
-        {isAdmin ? (
+        {(sourcesData.hiddenAdult ?? 0) > 0 ? (
+          // Every provider on this server is marked 18+ and the reveal is off, so the page is empty for a
+          // reason the reader can undo. Without this branch the one screen that could offer the chip is the
+          // one screen the chip never reaches, and the sources would look uninstalled. `hiddenAdult`, not
+          // `showAdultChip`: with the reveal already on nothing is hidden and this sentence would be false.
+          <>
+            <EmptyState art={ART.emptyLibrary} title={tr('Nothing to browse with 18+ hidden')}
+              sub={tr('Every provider set up for your account is marked 18+. Turn on Show 18+ to browse them.')} />
+            <div className="-mt-10 flex justify-center pb-10"><AdultToggle alsoWhen /></div>
+          </>
+        ) : isAdmin ? (
           <EmptyState art={ART.emptyLibrary} title={tr('No sources installed')}
             sub={tr('Mount a source pack at SOURCES_DIR, or switch on an extension source, then reload from the Providers tab.')} />
         ) : (
@@ -397,7 +420,13 @@ export default function DiscoverPage() {
           <div className="min-w-0">
             <h1 className="font-display text-2xl font-bold tracking-tight lg:text-3xl">{tr('Discover')}</h1>
             {/* Follows the listing, or the toggle below says Popular while the page says Newest. */}
-            <p className="mt-0.5 text-sm text-fog-400">{listMode === 'popular' ? tr('Popular on your sources') : tr('Newest from your sources')}</p>
+            <div className="mt-0.5 flex flex-wrap items-center gap-x-2.5 gap-y-1.5">
+              <p className="text-sm text-fog-400">{listMode === 'popular' ? tr('Popular on your sources') : tr('Newest from your sources')}</p>
+              {/* In the HEADER and not on the chip row below, deliberately: SourcePicker is mounted only
+                  while `mode === 'newest'`, so a chip anchored there would disappear the moment someone
+                  searched — and search is one of the surfaces the reveal now changes. */}
+              <AdultToggle alsoWhen={showAdultChip} className="shrink-0 text-xs" />
+            </div>
           </div>
           <form onSubmit={search} className="flex w-full items-center gap-2 sm:w-auto">
             <div className="field flex min-w-0 flex-1 items-center gap-2 py-0 sm:w-72 lg:w-80">

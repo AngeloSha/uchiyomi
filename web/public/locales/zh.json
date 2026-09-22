@@ -2,7 +2,7 @@
   "_meta": {
     "language": "zh",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 986
+    "strings": 994
   },
   "1 check found something": "1 项检查发现问题",
   "1 member": "1 位成员",
@@ -989,5 +989,13 @@
   "Repair the library nightly": "每晚修复库",
   "Once a day: counts pages in files never opened, replaces one- or two-page chapters when a source has a longer copy, searches other sources for missing chapter runs, retries chapters that stopped failing, and resets the Cloudflare solver when sources blame it. Nothing is deleted or merged without you.": "每天一次：统计从未打开过的文件的页数；当某个来源有更长的版本时替换只有一两页的章节；到其他来源查找缺失的章节区间；重试已不再失败的章节；当来源指向它时重置 Cloudflare 解算器。不会在未经你确认的情况下删除或合并任何内容。",
   "The library repair is running — try again in a few minutes": "库修复正在运行 — 请过几分钟再试",
-  "Keep {title}": "保留 {title}"
+  "Keep {title}": "保留 {title}",
+  "Show missing chapters in Mihon": "在 Mihon 中显示缺失的章节",
+  "List the chapters this server has not downloaded, and those whose files were deleted, alongside the ones it holds — so Mihon and your trackers count the whole series rather than only what is on disk. These rows cannot be opened; they are marked “not downloaded”. Only the Mihon extension sees them.": "将本服务器未下载的章节，以及文件已被删除的章节，与已有的章节一并列出，让 Mihon 和你的追踪器统计整部作品，而不只是磁盘上的部分。这些条目无法打开，会标记为“not downloaded”。只有 Mihon 扩展能看到它们。",
+  "Nothing to browse with 18+ hidden": "隐藏 18+ 后没有可浏览的内容",
+  "Every provider set up for your account is marked 18+. Turn on Show 18+ to browse them.": "为你的账号设置的提供方全部标记为 18+。开启「显示 18+」即可浏览。",
+  "Copy title": "复制标题",
+  "Copied": "已复制",
+  "All {n} chapters are already in your library": "全部 {n} 章都已在你的库中",
+  "Open it": "打开"
 }

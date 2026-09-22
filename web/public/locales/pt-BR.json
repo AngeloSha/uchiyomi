@@ -2,7 +2,7 @@
   "_meta": {
     "language": "pt-BR",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 986
+    "strings": 994
   },
   "1 check found something": "1 verificação encontrou algo",
   "1 member": "1 membro",
@@ -989,5 +989,13 @@
   "Repair the library nightly": "Reparar a biblioteca todas as noites",
   "Once a day: counts pages in files never opened, replaces one- or two-page chapters when a source has a longer copy, searches other sources for missing chapter runs, retries chapters that stopped failing, and resets the Cloudflare solver when sources blame it. Nothing is deleted or merged without you.": "Uma vez por dia: conta as páginas de arquivos nunca abertos, substitui capítulos de uma ou duas páginas quando alguma fonte tem uma cópia mais longa, procura em outras fontes as sequências de capítulos que faltam, tenta de novo os capítulos que pararam de falhar e redefine o solucionador da Cloudflare quando as fontes o apontam como culpado. Nada é excluído ou mesclado sem você.",
   "The library repair is running — try again in a few minutes": "O reparo da biblioteca está em andamento — tente de novo em alguns minutos",
-  "Keep {title}": "Manter {title}"
+  "Keep {title}": "Manter {title}",
+  "Show missing chapters in Mihon": "Mostrar capítulos ausentes no Mihon",
+  "List the chapters this server has not downloaded, and those whose files were deleted, alongside the ones it holds — so Mihon and your trackers count the whole series rather than only what is on disk. These rows cannot be opened; they are marked “not downloaded”. Only the Mihon extension sees them.": "Lista os capítulos que este servidor não baixou, e aqueles cujos arquivos foram apagados, junto com os que ele tem — para que o Mihon e seus rastreadores contem a série inteira, e não apenas o que está em disco. Essas linhas não podem ser abertas; elas aparecem marcadas como “not downloaded”. Apenas a extensão do Mihon as vê.",
+  "Nothing to browse with 18+ hidden": "Nada para explorar com +18 oculto",
+  "Every provider set up for your account is marked 18+. Turn on Show 18+ to browse them.": "Todos os provedores configurados para a sua conta são marcados como +18. Ative “Mostrar +18” para explorá-los.",
+  "Copy title": "Copiar título",
+  "Copied": "Copiado",
+  "All {n} chapters are already in your library": "Todos os {n} capítulos já estão na sua biblioteca",
+  "Open it": "Abrir"
 }

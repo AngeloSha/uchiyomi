@@ -121,6 +121,13 @@ curl -X POST -H "Authorization: Bearer $TOK" -H 'Content-Type: application/json'
   https://your-server/api/sources/add
 ```
 
+An add **never fetches a chapter the library already holds**. What is held is read from the library by
+folder across every root, so a read-only library the server did not download counts, whatever the files
+there are named — removing a series and adding it again downloads only what is genuinely missing, instead
+of fetching the whole back catalogue and filing every chapter a second time. One deliberate exception: a
+chapter removed with **Delete files** *is* fetched again. The nightly sweep treats that tombstone as held
+so it does not undo a deliberate deletion; an add is somebody asking for the chapter now.
+
 `chapterCount` limits how many chapters to grab (omit for all). It counts from the OLDEST unless
 `chapterFrom: "newest"` is sent, and whichever end it counts from the selection is downloaded ascending, so
 a partial add always reads as a coherent run. With `newest`, the chapters below the selection are left to
@@ -200,6 +207,19 @@ server-wide), **409** `duplicate` (with the "add anyway" message), and **200** w
 for a title already in the library. A successful reply now carries `started: true`, which is what
 distinguishes "downloading now" from "already had it" — previously only `chapters === 0` said so.
 
+A successful reply also carries **`seriesId`**: the library id of the series the add landed on — the row it
+found already there, the one it minted, the one it revived, or the one it stamped with nothing left to
+fetch — so a client can open the series instead of searching for it by title and hoping. One branch cannot
+answer with it: a fresh download is answered before the first chapter has been scanned, and until that scan
+runs there is no row to name. That id arrives on the job card instead (`GET /api/sources/jobs`, `seriesId`),
+which the add dialog is already polling. The id is withheld from a caller who may not see the series, which
+an "already in library" answer can name — every by-id route checks the same thing. The **409** `duplicate`
+body follows the same rule: `existing` is `{title, source, id?}`, where the lookup behind it deliberately
+spans every library on the server (a duplicate is a property of the server, not of the viewer) and the `id`
+is added only when the caller may open that series. When every chapter selected is already here, the reply
+carries **`alreadyHere`** with `chapters: 0` and `started: false` — and the series still gets its routing,
+its floor, its listing and its cover, exactly as a downloading add would.
+
 The body may also name `alsoFollow: [{source, sourceId}]` (at most six): other sources the add dialog
 already found carrying the title, to be followed for the new series when they qualify. **Admins only**: a
 member's `alsoFollow` is dropped before the add, which then proceeds exactly as with none given (no
@@ -224,7 +244,8 @@ known after the download is attempted, so it now arrives as a failed job carryin
 strictly better than before, where the 429 came back only after the whole chapter attempt had burned its
 budget.
 
-`GET /api/sources/jobs` lists downloads in progress. A finished job is swept a few minutes after it ends; a
+`GET /api/sources/jobs` lists downloads in progress, and a card carries `seriesId` once its first chapter
+has been scanned in — the add that started it was answered before that row existed. A finished job is swept a few minutes after it ends; a
 **failed** one is never swept, because it is the only record that the download did not work, and it carries
 a `reason` naming the source and how far it got. `DELETE /api/sources/jobs/<folder>` dismisses a job that
 has stopped, and answers **409** `running` for one still downloading — or one whose auto-follow judgement
@@ -340,7 +361,7 @@ the two destructive ones, `delete` and `merge`, are the two the nightly repair n
 curl -X POST -H "Authorization: Bearer $TOK" https://your-server/api/admin/library/scan
 ```
 
-## 18+ libraries
+## 18+ libraries and sources
 
 A library whose `age_rating` is 18 or higher is left out of every **listing** endpoint by default: the home
 rails, `POST /api/series/search`, genres, collections, favourites, updates, history, bookmarks, notes,
@@ -351,6 +372,28 @@ It is deliberately **not** applied to endpoints that resolve one id you already 
 chapter list, `GET /api/books/:id`, its pages, the offline manifest, next/previous, `PUT
 /api/books/:id/progress` and `/opds/book/:id/file` all work whether or not the library is hidden. A filter
 that refused to record what you read would lose data rather than tidy a screen.
+
+**Since v0.42.0 the same default covers Discover's sources.** A source whose extension declares itself
+adult (`isNsfw`) is a listing like any other, and hiding 18+ libraries while painting twelve adult
+providers' covers on the browse screen was issue #64. The rule now reaches `GET /api/sources` (the provider
+list), `GET /api/sources/search` for one named source, `GET /api/sources/search-all` (it is not even
+**asked**, so no outbound request goes to it and nothing it answered for another account is read back),
+`GET /api/sources/latest`, `GET /api/sources/popular` and `GET /api/sources/find` (naming a hidden source
+in `?sources=` does not bring it back -- that parameter only narrows the fan-out). The three source routes
+that resolve something you named are deliberately **exempt**, for the same reason the series page is:
+`POST /api/sources/fill/scan`, `GET /api/sources/detail` and `POST /api/sources/add`. A series whose own
+source is adult has to stay fillable and fetchable while the chip is off, or the filter would break the
+library rather than tidy a screen.
+
+A hidden source is **hidden, not refused**: `/search`, `/latest` and `/popular` answer `200 { "content":
+[] }` -- the same answer a disabled source gives -- because the hide is a preference the same account can
+turn off, while the age cap is a permission and still answers `403 forbidden` by id whatever `adult` says.
+
+`GET /api/sources` also reports **`hiddenAdult`**: how many sources you may reach but are not being shown,
+i.e. how many `?adult=1` would add back. It is 0 with `adult=1`, and 0 for an account capped below 18 --
+those sources were already gone before the count was taken, and a capped account is not told the number.
+Discover renders the *Show 18+* chip when `hiddenAdult` is above 0, when the reveal is already on, or when
+the account holds an 18+ library, so an install with adult providers and no 18+ shelf still has a switch.
 
 OPDS feeds cannot pass the parameter, so the preference lives on the OPDS token instead: `PATCH
 /api/opds/token { "showAdult": true }` (also a switch under **Profile → Connections → External readers**). Off by
@@ -938,9 +981,9 @@ is not `ids`. `GET /api/admin/series/deleted` lists the hidden ones, newest firs
 carries `live_books` and `pruned_books` (counted from the chapter rows; `books_count` is the scan's figure
 and may be stale) — `live_books === 0 && pruned_books > 0` is how the panel knows the files are already gone.
 
-`POST /api/admin/series/:id/delete-files {confirm}` — `confirm` is the series' title, compared trimmed and
-NFC-normalised on both sides (a macOS-written NFD title is confirmed by an NFC keyboard), **400**
-`confirm_mismatch` otherwise — is the irreversible step and only ever after the hide: it removes the series'
+`POST /api/admin/series/:id/delete-files {confirm}` — `confirm` is the series' title, compared through the
+fold described under *Typing a title to confirm* below (**400** `confirm_mismatch` otherwise) — is the
+irreversible step and only ever after the hide: it removes the series'
 chapter files from every root it occupies (the read library included, which is why it takes the typed
 title) and keeps every row. Since v0.37.0 each row whose file it actually removed is marked
 pruned with `pruned_reason = 'deleted'` — the same tombstone `chapters/delete` and the cleanup leave — so a
@@ -965,8 +1008,8 @@ row: `read_progress.book_id` is `ON DELETE RESTRICT` on purpose. The one route t
 below.
 
 **Forget: Remove → Delete files → Forget.** `POST /api/admin/series/:id/forget {confirm}` (since v0.38.0;
-`confirm` is the series' title, compared trimmed and NFC-normalised on both sides — **400**
-`confirm_mismatch` *Type the series title exactly to confirm.* otherwise, **400** `bad_request` without a
+`confirm` is the series' title, compared through the same fold — **400** `confirm_mismatch`
+*Type the series title to confirm — typography does not have to match.* otherwise, **400** `bad_request` without a
 body) is the only call that hard-deletes a
 series row. It erases every member's progress, reading events, bookmarks, notes, ratings, favourites, tracker
 floors and collection entries on it, so stats, streaks, the leaderboard and Wrapped change retroactively, and
@@ -998,6 +1041,19 @@ There is no Put back. Audit row
 release, a merge also carries **bookmarks** to the survivor (they used to keep the absorbed id) and the
 tracker floor keeps the higher of the two counts, so a merge made now never leaves history for Forget to
 strand.
+
+**Typing a title to confirm (since v0.42.0).** `delete-files` and `forget` both take the series' title in
+`confirm`, and since v0.42.0 the two sides are compared through one fold rather than byte for byte. In
+order: a bounded set of HTML entities is decoded once (`&amp;`, `&#39;`, `&#x2019;` — one layer only, so
+`&amp;quot;` stays `&quot;`); the string is NFKC-normalised; curly quotes, apostrophes and primes fold to
+`'` and `"`, and U+2010–U+2015 and U+2212 to `-`; zero-width characters, variation selectors and emoji are
+dropped; every kind of Unicode space becomes one ASCII space, runs collapse and the ends are trimmed.
+**Case is not folded** — it is visible, and the same dialog in the app confirms deleting a member — and a
+title that folds to nothing (emoji only) is confirmed by the exact string instead. The client applies the
+identical function (`web/lib/confirmTitle.ts` and `bff/src/lib/confirmTitle.ts` are byte-identical, and a
+test holds them so), because loosening only the button would have traded a dead control for a 400. On one
+real library 38 of 241 titles carried a curly apostrophe, a dash, an entity or a non-breaking space and so
+could not be confirmed from a keyboard at all.
 
 **Verify chapter files.** `POST /api/admin/tasks/verify/run` (since v0.37.0; the Tasks panel's *Verify
 chapter files*) is the repair for a database restored without its chapter files. It is **detached**, like
@@ -1272,7 +1328,7 @@ the progress endpoint's numbers are **one quantity**, the override-aware chapter
 extension makes it the chapter number and Mihon compares and `PUT`s it back in that unit; `metadata.number`
 is the display string. The scanlation group rides as an author with role `translator`, which the extension
 turns back into the scanlator. `media.status` is `READY` for a chapter whose file is on the server and
-`ERROR` for a tombstone. The full field lists are in [`openapi.yaml`](../bff/openapi.yaml) under
+`ERROR` for a tombstone (both `READY` under *ghost chapters* below). The full field lists are in [`openapi.yaml`](../bff/openapi.yaml) under
 `KomgaSeries`, `KomgaBook`, `KomgaPageDto`, `KomgaReadProgressV2` and `KomgaUser`, and
 `bff/test/komgaContract.test.ts` pins the required-field lists copied from the two clients' sources.
 
@@ -1331,6 +1387,44 @@ first real sync (n ≥ 1) marks a number-0 chapter read on both sides, as Komga 
 ignored. No
 reading event is written, so a sync from the phone does not count towards streaks, the leaderboard or
 Wrapped, exactly like the app's own bulk mark-read. Needs the `write` scope.
+
+**Ghost chapters** (opt-in, *Settings → Show missing chapters in Mihon*, `komgaGhostChapters`, off by
+default). Mihon takes a series' chapter total from the list this API answers, so a library running the
+read-chapter cleanup was telling the trackers a thousand-chapter manhwa had one chapter, a series held under a
+chapter floor reported only the part above it, and a followed series nobody has fetched reported no chapters
+at all. Turned on, `GET /api/v1/series/:id/books` also lists the chapters this server does not hold: the
+**tombstones** it stops filtering out (`media_status=READY` no longer excludes them), and the **ghosts** —
+numbers the sources listed at the last check with no chapter row at all, from `series_listing`, whatever the
+reason they are absent, the chapter floor included. They are merged into the ordinary chapter order by number,
+not appended.
+
+A ghost's id is `g_<series id>~<number>`, the decimal point kept as a point (chapter 10.5 is `g_s_…~10.5`).
+The separator is a `~` and not a `_` because `g_s_x_1_5` reads equally as series `s_x` chapter 1.5 and as
+series `s_x_1` chapter 5, and a parser would have to guess; `~` occurs in neither half, and it and `.` are
+both RFC 3986 *unreserved*, so the id survives a URL path segment unencoded. It carries its series so the
+ordinary visibility gate applies to it, and a ghost id for a series the token cannot see is **404**, like
+everything else. Both kinds report `media.status: READY` — the extension asks for `READY` and filters nothing
+itself, so anything else would simply hide them — with `media.pagesCount` 0 (a ghost never had pages and a
+tombstone's are gone, so neither advertises any) and `size` the literal text **`not downloaded`**, which the
+default chapter-name template `{number} - {title} ({size})` renders as *1041 - Chapter 1041 (not downloaded)*
+in the list, before anyone taps it. They cannot be opened: `GET /api/v1/books/:id/pages` is `[]` for both (a
+tombstone's pages are gone and a ghost never had any), so Mihon shows its own empty-chapter error, and a
+ghost's `pages/:n` and `thumbnail` are **404**. Deliberately not a placeholder image — Mihon marks a chapter
+read once it is viewed, which would corrupt the very progress this exists to fix.
+
+On the progress endpoint a ghost raises **`maxNumberSort`** and nothing else. That is the chapter total the
+tracker reports, and the whole point of the switch. It is deliberately **not** counted in `booksCount` or
+`booksUnreadCount`, which stay over the chapters this server has rows for, tombstones included: Mihon picks
+the tracker status with `when (booksCount) { booksUnreadCount -> UNREAD; booksReadCount -> COMPLETED; else ->
+READING }`, and a ghost can never be read — so counting one would make `booksReadCount == booksCount`
+unreachable and a series you have finished could never be *Completed* again. The list is simply allowed to be
+longer than the counts. A ghost is also **skipped** when walking the leading run, never breaking it. It has no
+chapter row, so no `PUT` can ever mark it; were it to break the run, one never-fetched chapter 5 would pin
+`lastReadContinuousNumberSort` at 4 for a reader at chapter 1000 and drag the tracker back there on the next
+sync. Skipped, the server reports 1000 and Mihon marks every local chapter at or below it read — the ghost
+rows included, which is how a chapter that is listed but absent still shows as read on the phone. Tombstones
+are real rows with real progress attached and were always counted correctly. Nothing outside `/api/v1` and
+`/api/v2` changes: the web app, OPDS and the offline manifest list what is on disk exactly as before.
 
 ---
 

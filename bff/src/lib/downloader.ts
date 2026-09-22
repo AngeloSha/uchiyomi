@@ -223,7 +223,16 @@ export async function downloadChapter(input: DownloadInput, opts: { replace?: bo
 
   const rel = chapterFileRel(input.seriesFolder, input.chapter.number);
   const abs = join(DL_ROOT, rel);
-  // the already-downloaded check is free, so do it before queueing for a slot
+  // A PATH check under DL_ROOT, and nothing more: is the file this very call would write already there.
+  // It is free, so it runs before queueing for a slot, and it catches the same chapter twice in one run.
+  //
+  // ⚠️ It is not, and cannot be, the library's have-set. It sees one root and one filename convention, so
+  // a chapter the scanner indexed under the READ-ONLY library root, or under any other name, is invisible
+  // to it -- which is how a re-add used to re-download a series the library already held in full and then
+  // file every chapter twice (#65). Deciding what a download RUN should fetch is the add path's job, from
+  // `lib_books` across both roots: see the have-set in routes/sources.ts (addSeriesFromSource). Leaving
+  // this here is deliberate; `replace` is what the admin refetch and the completion pass (lib/partial.ts)
+  // use to write over a file they know to be stale or partial, and those paths never consult the have-set.
   if (!opts.replace && await stat(abs).then(() => true).catch(() => false)) return null;
   await assertFreeSpace();
 

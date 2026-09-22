@@ -137,3 +137,43 @@ test('every string the dialog renders is in all eight locale files', () => {
     assert.deepEqual(missing, [], `${missing.length} of the dialog's strings are missing from ${f}: ${missing.slice(0, 12).join(' | ')}`);
   }
 });
+
+test('Open in library navigates by the id the server gave, never by a title guess', () => {
+  // #67. The add now answers with `seriesId` whenever the server can know it, and a fresh download's id
+  // lands on the job card this dialog is already polling, so the title search is the last resort rather
+  // than the only path. ⚠️ And when it runs it must find an EXACT normalised match or give up: the old
+  // `?? p.content[0]` opened whatever the search happened to return, which on the owner's own install is
+  // a different series for two titles that normalise the same. Read with comments stripped, because the
+  // comment in the dialog quotes the fallback it forbids.
+  //
+  // Reintroduce by restoring `?? p.content[0]`: "the first search result is opened again" fails. Reintroduce
+  // the ordering by looking the title up before reading the id: "the id is read before any search" fails.
+  const src = code(read(DIALOG));
+  const at = src.indexOf('const openIt = async');
+  assert.notEqual(at, -1, 'openIt is gone -- update this slice');
+  const fn = src.slice(at, src.indexOf('// ------', at));
+  assert.match(fn, /const known = done\.seriesId \?\? job\?\.seriesId;/, 'the answer\'s id and the job card\'s are not what it opens by');
+  assert.ok(fn.indexOf('const known =') < fn.indexOf('/api/series/search'), 'the id is read before any search');
+  assert.match(fn, /router\.push\(`\/series\/\?id=\$\{known\}`\)/, 'the known id is not what it navigates to');
+  assert.doesNotMatch(src, /\?\? p\.content\[0\]/, 'the first search result is opened again -- a confident wrong navigation');
+  assert.match(fn, /const hit = p\.content\.find\(\(s\) => normTitle\(s\.metadata\?\.title \|\| s\.name\) === normTitle\(done\.title\)\);/,
+    'the fallback no longer requires an exact normalised match');
+  assert.match(fn, /router\.push\(hit \? `\/series\/\?id=\$\{hit\.id\}` : '\/downloads\/'\)/, 'no match no longer lands on the downloads page');
+  assert.doesNotMatch(src, /persists the scan before returning/, 'the stale comment is back: the add has not persisted anything by the time it answers');
+  assert.match(src, /seriesId\?: string;/, 'the job card type lost its series id');
+});
+
+test('an add that had nothing left to fetch says so, and a duplicate can be opened', () => {
+  // #65's wording and #67's second half. `alreadyHere` is the re-add that found every chapter on disk:
+  // before it, that add said "Fetching 1192 chapters" and downloaded them all again. The duplicate note
+  // gains "Open it" only when the server sent an id -- it withholds one for a series this account may not
+  // see, and the note reads the same without it.
+  // Reintroduce by dropping the `done.alreadyHere` arm: the done step is back to "Already in your
+  // library", which means something else entirely (the series row existed).
+  const src = code(read(DIALOG));
+  assert.match(src, /done\.alreadyHere \? tr\('All \{n\} chapters are already in your library', \{ n: done\.alreadyHere \}\)/,
+    'the "everything was already here" sentence is gone');
+  assert.match(src, /\{dup\.id && \(/, 'the duplicate note offers Open it whether or not the server sent an id');
+  assert.match(src, /setDup\(\{ message: body\.message \|\| tr\('You already have this title\.'\), id: body\.existing\?\.id \}\)/,
+    'the duplicate\'s id is not read off the 409 body');
+});

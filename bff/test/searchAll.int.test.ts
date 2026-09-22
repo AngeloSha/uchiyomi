@@ -205,14 +205,19 @@ test('THE LEAK: the shared entry never hands a capped viewer a source outside th
   // An uncapped viewer searches first, so the entry holds the adult source's answer. Reintroduce by
   // building the answer from the entry's own keys (`for (const [id] of entry.per)`) instead of the caller's
   // ask order: the adult id appears in `sources` and in the card's providers.
-  const plain = await app.inject({ method: 'GET', url: '/api/sources/search-all?q=Shared%20Title', headers: tok(ids.plain) });
+  //
+  // ⚠️ BOTH requests carry `adult=1`, and both must keep carrying it. Since v0.42.0 (#64) the fan-out also
+  // honours the "Show 18+" reveal, so without the parameter the adult source is dropped from the capped
+  // viewer's answer by the HIDE and this test would pass without the age cap doing anything at all. The
+  // claim here is about the cap and the shared entry, and the reveal has to be on for it to be tested.
+  const plain = await app.inject({ method: 'GET', url: '/api/sources/search-all?q=Shared%20Title&adult=1', headers: tok(ids.plain) });
   assert.equal(plain.statusCode, 200);
   const pj = plain.json();
   assert.ok(pj.content.some((g: any) => g.providers.some((p: any) => p.source === ADULT)), 'the uncapped viewer lost the adult source');
   assert.ok(pj.sources.some((s: any) => s.id === ADULT), 'the uncapped viewer\'s lines lost the adult source');
   assert.equal(calls[ADULT], 1);
 
-  const capped = await app.inject({ method: 'GET', url: '/api/sources/search-all?q=Shared%20Title', headers: tok(ids.capped) });
+  const capped = await app.inject({ method: 'GET', url: '/api/sources/search-all?q=Shared%20Title&adult=1', headers: tok(ids.capped) });
   assert.equal(capped.statusCode, 200);
   const cj = capped.json();
   const providers = cj.content.flatMap((g: any) => g.providers.map((p: any) => p.source));

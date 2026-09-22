@@ -8,6 +8,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'fs';
 import { join } from 'path';
+import { confirmsTitle } from '../lib/confirmTitle';
 
 const ROOT = join(__dirname, '..');
 const read = (rel: string) => readFileSync(join(ROOT, rel), 'utf8');
@@ -83,12 +84,20 @@ test('the typed confirmation label is one sentence with the title inside it, in 
   }
 });
 
-test('the typed confirmation compares in NFC, like the route', () => {
-  // A macOS-written folder carries "Cafe" + U+0301; a keyboard types U+00E9. Byte for byte they never match,
-  // so the button never enabled. routes/admin.ts normalises the same way (its own test is in
-  // bff/test/forgetSeries.int.test.ts). Reintroduce by comparing `.trim()` alone.
+test('the typed confirmation is folded, like the route', () => {
+  // A macOS-written folder carries "Cafe" + U+0301 while a keyboard types U+00E9 -- and 38 of the owner's
+  // 241 series carry a curly apostrophe, a dash or an entity a keyboard cannot produce at all. Byte for
+  // byte none of those ever matched, so the button never enabled and the action was unreachable (#66).
+  // The rule is `confirmsTitle` in lib/confirmTitle.ts, whose twin routes/admin.ts checks with (its own
+  // test is in bff/test/forgetSeries.int.test.ts, the fold's own in confirmTitle.test.ts). Reintroduce by
+  // comparing `typed.trim().normalize('NFC')` with the same of `confirmText`: "the dialog compares bytes"
+  // fails, and so does the curly-apostrophe line below.
   const src = code(read('components/ConfirmDialog.tsx'));
-  assert.match(src, /typed\.trim\(\)\.normalize\('NFC'\) === confirmText\.trim\(\)\.normalize\('NFC'\)/, 'the dialog compares bytes, not text');
+  assert.match(src, /const ready = !confirmText \|\| confirmsTitle\(typed, confirmText\);/, 'the dialog compares bytes, not text');
+  assert.match(src, /import \{ confirmsTitle \} from '@\/lib\/confirmTitle';/, 'the dialog must fold with the shared file, not a rule of its own');
+  assert.ok(confirmsTitle('Café Story', 'Cafe\u{0301} Story'), 'a typed NFC title must confirm an NFD one');
+  assert.ok(confirmsTitle("Emperor's Domination", 'Emperor’s Domination'), 'a straight apostrophe must confirm a curly one');
+  assert.equal(confirmsTitle('Cafe Story', 'Café Story'), false, 'a different title must still be refused');
 });
 
 test('every string on the Removed row and in the two dialogs is translated, and a long title is not cut to one line on a phone', () => {

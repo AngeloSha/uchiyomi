@@ -22,6 +22,28 @@ import { motion, useReducedMotion } from 'framer-motion';
 import { t as tr, keys } from '@/lib/i18n';
 import type { HealthCheck, Series } from '@/lib/types';
 import { groupProviders, type ProviderGroup, type ProviderSrc } from '@/lib/providerGroups';
+import { adultShown } from '@/lib/adult';
+
+/**
+ * `/api/sources` as an ADMIN needs it: every source the server has, adult ones included.
+ *
+ * Since v0.42.0 that route honours the "Show 18+" reveal like any other listing (issue #64), which is right
+ * for Discover and wrong here — this console is where a provider is tested, unblocked or switched off, and
+ * an admin cannot act on a row that is not on the page. On the install this was written against twelve of
+ * fourteen sources are adult, so with the reveal off the Providers tab would show two of them and the tile
+ * beside it would say "2".
+ *
+ * ⚠️ The parameter is added only when the reveal is OFF, never unconditionally: lib/api.ts appends its own
+ * `adult=1` when it is on, and two copies of the parameter arrive as an ARRAY, which `hideAdult` on the
+ * server reads as "not '1'" — i.e. hidden. Consulted at request time rather than captured, because flipping
+ * the reveal invalidates every query and this one is then rebuilt.
+ *
+ * It also carries its own query key. `['sources']` is the browsing list several screens share, and two
+ * shapes under one key is how a revealed answer gets replayed to a screen that asked for a hidden one.
+ * A prefix match means the existing `invalidateQueries({ queryKey: ['sources'] })` calls still reach it.
+ */
+const allSourcesUrl = () => (adultShown() ? '/api/sources' : '/api/sources?adult=1');
+const ALL_SOURCES_KEY = ['sources', 'all'] as const;
 
 /**
  * Ten panels, grouped by what an admin is actually doing rather than by what the code is called.
@@ -229,7 +251,7 @@ function Overview({ onTab }: { onTab: (t: Tab) => void }) {
   const { data: audit } = useQuery({ queryKey: ['admin-audit', 8], queryFn: () => api<{ content: any[] }>('/api/admin/audit?limit=8') });
   const { data: tasks } = useQuery({ queryKey: ['admin-tasks'], queryFn: () => api<{ content: any[] }>('/api/admin/tasks') });
   const { data: sessions } = useQuery({ queryKey: ['admin-sessions'], queryFn: () => api<{ content: any[] }>('/api/admin/sessions') });
-  const { data: sources } = useQuery({ queryKey: ['sources'], queryFn: () => api<{ content: any[] }>('/api/sources') });
+  const { data: sources } = useQuery({ queryKey: ALL_SOURCES_KEY, queryFn: () => api<{ content: any[] }>(allSourcesUrl()) });
 
   const failing = (health?.checks ?? []).filter((c) => c.status !== 'ok');
   const activity: any[] = stats?.activity ?? [];
@@ -476,7 +498,7 @@ function Providers({ onTab }: { onTab: (t: Tab) => void }) {
   const router = useRouter();
   const toast = useToast();
   const qc = useQueryClient();
-  const { data: srcs } = useQuery({ queryKey: ['sources'], queryFn: () => api<{ content: any[] }>('/api/sources') });
+  const { data: srcs } = useQuery({ queryKey: ALL_SOURCES_KEY, queryFn: () => api<{ content: any[] }>(allSourcesUrl()) });
   const { data: health } = useQuery({ queryKey: ['admin-sources'], queryFn: () => api<{ content: any[] }>('/api/admin/sources'), refetchInterval: 10000 });
   const hmap = new Map((health?.content || []).map((h) => [h.source_id, h]));
   const act = async (id: string, action: string, ok: string) => { try { await api(`/api/admin/sources/${id}/${action}`, { method: 'POST' }); toast(ok, 'success'); qc.invalidateQueries({ queryKey: ['admin-sources'] }); qc.invalidateQueries({ queryKey: ['sources'] }); } catch { toast('Failed', 'error'); } };

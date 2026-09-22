@@ -36,6 +36,7 @@ import { writePreflight } from '../lib/fsGuard';
 // Admin stats report on the whole library by definition; this route is already behind requireAdmin.
 import { NO_LIBRARIES, SYSTEM_CTX, visibleToAll } from '../lib/visibility';
 import { addSeriesFromSource, findBestMatch, resolveCandidate, norm, jobBusy, startDownloadJob, FILL_MAX_CHAPTERS, REFRESH_BUDGET_MS } from './sources';
+import { confirmsTitle } from '../lib/confirmTitle';
 import { chapterFileRel } from '../lib/downloader';
 import { REFETCH_BAK } from '../lib/fsAtomic';
 import type { SourceChapter } from '../lib/sources/types';
@@ -413,7 +414,7 @@ export default async function adminRoutes(app: FastifyInstance) {
   // ---- server settings ----
   const SETTINGS_COLS = 'server_name, allow_registration, updater_hours, extension_hours, extension_auto_update, '
     + 'update_check, install_ping, install_ping_last, scanlator_prefs, cleanup_read, cleanup_read_days, backup_hour, auto_follow_on_failure, '
-    + 'repair_enabled';
+    + 'repair_enabled, komga_ghost_chapters';
   // `extensions_configured` is not a column: extension_hours has a NOT NULL default, so its presence says
   // nothing about whether there is an engine to check. The settings page needs to know, or it offers two
   // controls for a job that can never run.
@@ -499,6 +500,9 @@ export default async function adminRoutes(app: FastifyInstance) {
       // renumbers anything. The tick re-reads this column every time, so switching it off takes effect
       // without a restart.
       repairEnabled: z.boolean().optional(),
+      // Ghost chapters on the Komga surface (lib/komgaGhosts.ts). Affects nothing this server stores and
+      // nothing the web app shows: it widens one API's chapter list so the trackers behind it can count.
+      komgaGhostChapters: z.boolean().optional(),
     }).parse(req.body);
     if (b.serverName !== undefined) await q('UPDATE server_settings SET server_name = $1, updated_at = now() WHERE id = 1', [b.serverName]);
     if (b.allowRegistration !== undefined) await q('UPDATE server_settings SET allow_registration = $1, updated_at = now() WHERE id = 1', [b.allowRegistration]);
@@ -515,6 +519,7 @@ export default async function adminRoutes(app: FastifyInstance) {
     // The scheduler is re-armed at once, so the change applies to the NEXT run rather than the one after: the
     // timer used to re-read the hour only when it fired (server.ts, the backup block says why).
     if (b.backupHour !== undefined) { await q('UPDATE server_settings SET backup_hour = $1, updated_at = now() WHERE id = 1', [b.backupHour]); runtime.rearmBackup?.(); }
+    if (b.komgaGhostChapters !== undefined) await q('UPDATE server_settings SET komga_ghost_chapters = $1, updated_at = now() WHERE id = 1', [b.komgaGhostChapters]);
     await logAudit('settings.update', { userId: userIdOf(req), detail: b, req });
     return settingsRow();
   });
@@ -1327,14 +1332,18 @@ export default async function adminRoutes(app: FastifyInstance) {
   });
 
   /**
-   * The typed confirmation, compared the way a person types: trimmed and in NFC. A title read off a
-   * macOS-written share or a ComicInfo.xml can be NFD ("Cafe" + a combining accent), while every phone and
-   * desktop keyboard produces the precomposed "Café"; byte-for-byte those never match, so the series could
-   * never be confirmed (R3's probe P6). ConfirmDialog.tsx normalises the same way before enabling the
-   * button. Reintroduce by comparing `.trim()` alone: "route: a typed NFC title confirms an NFD one" in
-   * forgetSeries.int.test.ts reads confirm_mismatch.
+   * The typed confirmation, compared the way a person can actually type it: the fold in lib/confirmTitle.ts,
+   * which is the same file ConfirmDialog.tsx enables the button from. A title read off a macOS-written share
+   * or a ComicInfo.xml can be NFD ("Cafe" + a combining accent) while every keyboard produces the
+   * precomposed "Café" (R3's probe P6), and a scraped one can carry a curly apostrophe, an en dash, a
+   * literal `&amp;` or a non-breaking space that no keyboard produces at all -- 38 of the owner's 241 series
+   * do (#66). Byte-for-byte none of those ever matched. The rule lives in one file on purpose: loosening
+   * only the client would have turned a dead button into a 400 from here. Reintroduce by comparing
+   * `typed.trim().normalize('NFC')` with the same of `title`: "route: a straight apostrophe confirms a
+   * curly-apostrophe title" in forgetSeries.int.test.ts reads confirm_mismatch (the NFD sibling still
+   * passes, which is why that one alone was never enough).
    */
-  const sameTitle = (typed: string, title: string) => typed.trim().normalize('NFC') === title.trim().normalize('NFC');
+  const sameTitle = (typed: string, title: string) => confirmsTitle(typed, title);
 
   app.post('/api/admin/series/:id/delete-files', async (req, reply) => {
     const { id } = req.params as { id: string };
@@ -1343,7 +1352,7 @@ export default async function adminRoutes(app: FastifyInstance) {
     const row = await getSeriesRow(id);
     if (!row) return reply.code(404).send({ error: 'not_found' });
     if (!sameTitle(b.data.confirm, row.title)) {
-      return reply.code(400).send({ error: 'confirm_mismatch', message: 'Type the series title exactly to confirm.' });
+      return reply.code(400).send({ error: 'confirm_mismatch', message: 'Type the series title to confirm — typography does not have to match.' });
     }
     const r = await deleteSeriesFiles(id);
     if (!r.ok) return reply.code(409).send({ error: 'refused', message: r.reason, fix: r.fix });
@@ -1367,7 +1376,7 @@ export default async function adminRoutes(app: FastifyInstance) {
     const row = await getSeriesRow(id);
     if (!row) return reply.code(404).send({ error: 'not_found' });
     if (!sameTitle(b.data.confirm, row.title)) {
-      return reply.code(400).send({ error: 'confirm_mismatch', message: 'Type the series title exactly to confirm.' });
+      return reply.code(400).send({ error: 'confirm_mismatch', message: 'Type the series title to confirm — typography does not have to match.' });
     }
     const r = await forgetSeries(id);
     if (!r.ok) {

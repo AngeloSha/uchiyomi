@@ -1,6 +1,6 @@
 {
   "name": "yomi-web",
-  "version": "0.41.0",
+  "version": "0.42.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -10,6 +10,7 @@
     "test:e2e": "bash test/e2e/up.sh",
     "test:e2e:v040": "node test/e2e/walk40.mjs",
     "test:e2e:v041": "node test/e2e/walk41.mjs",
+    "test:e2e:v042": "node test/e2e/walk42.mjs",
     "test:i18n": "node test/e2e/i18n.mjs"
   },
   "dependencies": {

@@ -572,6 +572,34 @@ test('route: a typed NFC title confirms an NFD one', { skip }, async () => {
   assert.equal(await rowsFor('lib_series', 'id', [S]), 0);
 });
 
+test('route: a straight apostrophe confirms a curly-apostrophe title', { skip }, async () => {
+  // The other half of the same problem, and the bigger one: 38 of the owner's 241 live series carry a
+  // character no keyboard produces -- 29 of them a curly apostrophe, 9 an en or em dash, 2 a literal HTML
+  // entity -- so Delete files and Forget were unreachable on a sixth of the library while both sides
+  // compared the exact string (#66). `sameTitle` now folds through lib/confirmTitle.ts, the file whose twin
+  // the dialog enables its button from, so the two can never disagree. Reintroduce by comparing
+  // `typed.trim().normalize('NFC')` with the same of `title` in sameTitle (routes/admin.ts): the
+  // delete-files answer reads confirm_mismatch and the forget at the end is a 400.
+  const curly = 'Emperor\u{2019}s Domination';
+  const typed = "Emperor's Domination";
+  assert.notEqual(curly, typed, 'the fixture must carry the curly apostrophe, or this test proves nothing');
+  await series(S, curly, { deleted: true });
+  await book('b_fg_1', S, 1);
+  const df = await app.inject({ method: 'POST', url: `/api/admin/series/${S}/delete-files`, headers: auth, payload: { confirm: typed } });
+  assert.notEqual(df.json().error, 'confirm_mismatch', `delete-files: ${df.body}`);
+  // ⚠️ Folded, not loosened. A title that is merely close is still refused, and the row is still there
+  // afterwards: the friction is the whole point of a typed confirmation.
+  assert.equal((await forget(S, { confirm: 'Emperors Domination' })).json().error, 'confirm_mismatch', 'a title missing a character confirmed');
+  assert.equal((await forget(S, { confirm: "emperor's domination" })).json().error, 'confirm_mismatch', 'case is visible, so it must not be folded');
+  assert.equal((await forget(S, { confirm: "Emperor's" })).json().error, 'confirm_mismatch', 'a prefix of the title confirmed');
+  assert.equal((await forget(S, { confirm: '' })).statusCode, 400, 'an empty confirmation confirmed');
+  assert.equal(await rowsFor('lib_series', 'id', [S]), 1, 'a refused confirmation removed the row anyway');
+  await q(`UPDATE lib_books SET pruned_at = now(), pruned_reason = 'deleted' WHERE series_id = $1`, [S]);
+  const res = await forget(S, { confirm: typed });
+  assert.equal(res.statusCode, 200, res.body);
+  assert.equal(await rowsFor('lib_series', 'id', [S]), 0);
+});
+
 test('route: no body is a 400, an unknown series a 404, a member a 403', { skip }, async () => {
   await seedForRoute();
   assert.equal((await forget(S, {})).statusCode, 400);

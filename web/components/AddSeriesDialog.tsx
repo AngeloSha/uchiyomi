@@ -33,6 +33,25 @@ interface Job extends JobCardNotes {
   folder: string; title: string; total: number; done: number; status: string;
   /** The add-time auto-follow (v0.36.0), once the server has judged the other sources. See lib/types.ts. */
   autoFollow?: AutoFollow;
+  /**
+   * The series this job is filling, once the server has scanned its first chapter in (v0.42.0, #67). A
+   * fresh download has no library row when the add is answered, so this card is how the id reaches
+   * "Open in library" -- and the done step is already polling it.
+   */
+  seriesId?: string;
+}
+
+/** What POST /api/sources/add answers with. */
+interface AddAnswer {
+  title: string; folder: string; chapters: number; started?: boolean; nothing?: boolean;
+  /**
+   * The series the add landed on (v0.42.0, #67). Present whenever the server could know it -- already in
+   * the library, a nothing-yet add, a revive, an add with nothing left to fetch -- and absent on a fresh
+   * download, whose row is created behind the reply; that one arrives on the job card.
+   */
+  seriesId?: string;
+  /** Every chapter asked for was already in the library, so none was fetched (v0.42.0, #65). */
+  alreadyHere?: number;
 }
 
 export type AddSeed =
@@ -151,8 +170,10 @@ export function AddSeriesDialog({ seed, sources, mayFollow, onClose, onAdded }: 
   const [pickChoice, setPickChoice] = useState<ChapterPick | null>(null);
   const [autoUpdate, setAutoUpdate] = useState(true);
   const [adding, setAdding] = useState(false);
-  const [dup, setDup] = useState<string | null>(null);
-  const [done, setDone] = useState<{ title: string; folder: string; chapters: number; started?: boolean; nothing?: boolean } | null>(null);
+  // The duplicate prompt: the server's sentence, and the id of the copy it found -- present only when the
+  // server was willing to hand it over, which it is not for a series this account may not open.
+  const [dup, setDup] = useState<{ message: string; id?: string } | null>(null);
+  const [done, setDone] = useState<AddAnswer | null>(null);
   const [opening, setOpening] = useState(false);
   const title = seed.kind === 'result' ? seed.provider.title : seed.title;
 
@@ -262,7 +283,7 @@ export function AddSeriesDialog({ seed, sources, mayFollow, onClose, onAdded }: 
     // listing it has just written, so a stale title or cover from the search cannot steer the match.
     const alsoFollowBody = mayFollow && alsoFollow && others.length ? others.map(({ source, sourceId }) => ({ source, sourceId })) : undefined;
     try {
-      const r = await api<{ title: string; folder: string; chapters: number; started?: boolean; nothing?: boolean }>('/api/sources/add', {
+      const r = await api<AddAnswer>('/api/sources/add', {
         json: { source: picked.source, sourceId: picked.sourceId, chapterCount, chapterFrom, autoUpdate, force, alsoFollow: alsoFollowBody },
         // The client has never set a timeout anywhere, so the only bound was the proxy's 120s -- which
         // turned a slow-but-working add into "Add failed. Try another source." while the download carried
@@ -270,15 +291,17 @@ export function AddSeriesDialog({ seed, sources, mayFollow, onClose, onAdded }: 
         // auto-follow is judged behind the reply too (on the job card), never inside this request.
         signal: AbortSignal.timeout(45_000),
       });
-      // The judgement only happens for a series the add created (a download, or nothing-yet); "already in
-      // your library" answers with neither flag and the server does nothing with the candidates.
-      setSentFollow(alsoFollowBody && (r.started || r.nothing) ? alsoFollowBody.length : 0);
+      // The judgement only happens for a series this add acted on: a download, a nothing-yet, or a re-add
+      // that found everything on disk (#65) -- that one writes the listing the judgement measures against,
+      // so the server mints a carrier card for it exactly as it does for a nothing-yet add. "Already in
+      // your library" answers with none of the three and the server does nothing with the candidates.
+      setSentFollow(alsoFollowBody && (r.started || r.nothing || r.alreadyHere) ? alsoFollowBody.length : 0);
       setDone(r);
       onAdded(r);
     } catch (e: any) {
       let body: any = {};
       try { body = JSON.parse(e?.body || '{}'); } catch { /* not JSON */ }
-      if (body.error === 'duplicate') setDup(body.message || tr('You already have this title.'));
+      if (body.error === 'duplicate') setDup({ message: body.message || tr('You already have this title.'), id: body.existing?.id });
       else toast(msgOf(e, tr('Add failed. Try another source.')), 'error');
     }
     setAdding(false);
@@ -287,10 +310,23 @@ export function AddSeriesDialog({ seed, sources, mayFollow, onClose, onAdded }: 
   const openIt = async () => {
     if (!done) return;
     setOpening(true);
+    // The id the SERVER gave, always first (#67). The add answers with it whenever it can know it, and on
+    // a fresh download it lands on the job card this dialog is already polling, once the first chapter has
+    // been scanned in. Either way it names the row this add actually landed on.
+    const known = done.seriesId ?? job?.seriesId;
+    if (known) {
+      qc.invalidateQueries({ queryKey: ['library'] });
+      router.push(`/series/?id=${known}`);
+      return;
+    }
     try {
-      // addSeriesFromSource persists the scan before returning, so in owned mode the row exists by now.
+      // Last resort, and only for a download whose first chapter has not been scanned yet: search by title
+      // and accept an EXACT normalised match.
+      // ⚠️ Never `?? p.content[0]`. That fallback turned "not found" into a confident wrong navigation --
+      // it opened whatever the search happened to return, and two series on the owner's own install
+      // normalise to the same title. The downloads page is the honest answer: the job is right there.
       const p = await api<Page<Series>>('/api/series/search', { json: { fullTextSearch: done.title, size: 5 } });
-      const hit = p.content.find((s) => normTitle(s.metadata?.title || s.name) === normTitle(done.title)) ?? p.content[0];
+      const hit = p.content.find((s) => normTitle(s.metadata?.title || s.name) === normTitle(done.title));
       qc.invalidateQueries({ queryKey: ['library'] });
       router.push(hit ? `/series/?id=${hit.id}` : '/downloads/');
     } catch { router.push('/downloads/'); }
@@ -304,7 +340,8 @@ export function AddSeriesDialog({ seed, sources, mayFollow, onClose, onAdded }: 
     // trending search asks the page's budgeted sources and the wall's fold holds whoever listed it lately,
     // never every source. Off switch: nothing to say.
     const af = job?.autoFollow;
-    const fresh = !!done.started || !!done.nothing;
+    // The three answers this add acted on, and so the three the server may have judged candidates for.
+    const fresh = !!done.started || !!done.nothing || !!done.alreadyHere;
     const followBlock = (() => {
       if (seed.kind === 'result') return <p className="text-start text-[11px] text-fog-500">{tr('Other sources: Find missing chapters on the series page.')}</p>;
       if (!providers || !fresh) return null;
@@ -350,8 +387,11 @@ export function AddSeriesDialog({ seed, sources, mayFollow, onClose, onAdded }: 
             <p className="font-display text-base font-semibold text-fog-50">{done.title}</p>
             <p className="mt-0.5 text-sm text-fog-400">
               {/* "Fetching", the server-side word: the chapters land on the server for everyone, which is not
-                  what "download" means on this device. `nothing` is a nothing-yet add: no job, no bar. */}
+                  what "download" means on this device. `nothing` is a nothing-yet add: no job, no bar.
+                  `alreadyHere` is the re-add that found everything on disk (#65) -- before it, that add
+                  read "Fetching 1192 chapters" and then downloaded them all over again. */}
               {done.nothing ? tr('Added — new chapters will be fetched as they come out')
+                : done.alreadyHere ? tr('All {n} chapters are already in your library', { n: done.alreadyHere })
                 : done.chapters > 0 ? tr('Fetching {n} chapters', { n: done.chapters })
                 : tr('Already in your library')}
             </p>
@@ -558,7 +598,20 @@ export function AddSeriesDialog({ seed, sources, mayFollow, onClose, onAdded }: 
               {tr('Grabbing many chapters at once can get you rate-limited. It pauses on its own and you can resume later.')}
             </p>
           )}
-          {dup && <p className="mt-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-2.5 py-1.5 text-[11px] text-amber-300">{dup}</p>}
+          {/* The duplicate prompt. "Open it" is offered only when the server sent the id -- it withholds
+              one for a series this account may not see, and the note still reads the same without it. */}
+          {dup && (
+            <div className="mt-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-2.5 py-1.5 text-[11px] text-amber-300">
+              <p>{dup.message}</p>
+              {dup.id && (
+                <button
+                  onClick={() => { qc.invalidateQueries({ queryKey: ['library'] }); router.push(`/series/?id=${dup.id}`); }}
+                  className="mt-1 font-semibold underline underline-offset-2">
+                  {tr('Open it')}
+                </button>
+              )}
+            </div>
+          )}
 
           {/* Disabled until the chapter list is here: the count and the from/none choice go in the request. */}
           <button onClick={() => add(!!dup)} disabled={adding || !detail} className="btn-accent mt-4 w-full py-2.5 text-sm disabled:opacity-50">

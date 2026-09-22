@@ -69,13 +69,18 @@ const NAMELESS = 'add-noname';
 const LATEST = 'add-latest'; // five chapters that really download, for the "latest N" add
 const GROUPS = 'add-groups'; // chapter 1 from two groups, the blocked one listed first
 const NOTHING = 'add-nothing'; // three chapters, then a fourth appears: the "nothing yet" add
+const IDS = 'add-ids';       // three titles on one adapter: what the add answers with (#67)
+const HELD = 'add-held';     // three chapters the library already holds under the read-only root (#65)
 const USER = 'add-route-user';
+const MEMBER = 'add-route-member';
 let addSeriesFromSource: any, q: any;
 let moodyCalls = 0;
 /** What the nothing-yet source lists; the second test appends to it to stand for a new release. */
 const nothingList: number[] = [1, 2, 3];
 /** Which chapter ids the groups source was asked for pages: who the add actually downloaded from. */
 let asked: string[] = [];
+/** The same call log for the held source: what an add actually went and fetched, rather than what it counted. */
+let heldAsked: string[] = [];
 
 const chapter = (n: number) => ({ number: n, title: `Chapter ${n}`, id: `c${n}`, pages: 1 });
 /** A one-pixel PNG, comfortably over the 256-byte floor the downloader uses to skip blocked responses. */
@@ -131,6 +136,57 @@ function nothing() {
   };
 }
 
+/**
+ * Three titles on one adapter, for #67: one added with no chapters, one downloaded synchronously, one
+ * downloaded in the background (the only branch whose id the add cannot answer with).
+ */
+const IDS_TITLES: Record<string, string> = { '1': 'Announced Title', '2': 'Fetched Title', '3': 'Carded Title' };
+function ids() {
+  return {
+    id: IDS, name: 'Ids Source',
+    async search() { return []; },
+    async getSeries(sid: string) { return { sourceId: sid, source: IDS, title: IDS_TITLES[sid.slice(-1)] ?? 'Ids Title' }; },
+    async listChapters() { return [1, 2].map((n) => ({ number: n, title: `Chapter ${n}`, sourceId: `i${n}`, pages: 1 })); },
+    async getPageUrls(chId: string) { return [`https://example.invalid/${chId}/p1.png`]; },
+    async latest() { return []; },
+  };
+}
+
+/** The folder of the first case's title; the other cases each have their own (see HELD_TITLES). */
+const HELD_FOLDER = 'Held Source/Already Here';
+/**
+ * A second, READ-ONLY root, as an install that mounts a library it did not download. It is the root the
+ * owner's 33,854 invisible chapters live under, and the reason the add's have-set cannot be a path check:
+ * nothing under it is below DL_ROOT, and its file names are not `Chapter <n>.cbz`.
+ */
+const RO_ROOT = '/library-readonly';
+
+/**
+ * Three dated chapters, and a call log of which copies were actually asked for pages (#65).
+ *
+ * One title per case, deliberately. A case that really downloads leaves both a file and a scan behind --
+ * and that scan is DETACHED, so it can land on the next case's freshly seeded row and file a chapter
+ * nobody asked for there. Separate folders make each case independent of the order they run in.
+ */
+const HELD_TITLES: Record<string, string> = { '1': 'Already Here', '2': 'Half Here', '3': 'Deleted Files', '4': 'Floored' };
+function held() {
+  return {
+    id: HELD, name: 'Held Source',
+    async search() { return []; },
+    async getSeries(sid: string) {
+      return { sourceId: sid, source: HELD, title: HELD_TITLES[sid.slice(-1)] ?? 'Already Here', coverUrl: 'https://example.invalid/held.jpg' };
+    },
+    async listChapters() {
+      return [1, 2, 3].map((n) => ({
+        number: n, title: `Chapter ${n}`, sourceId: `h${n}`, pages: 1,
+        publishedAt: new Date(Date.UTC(2024, 0, n)).toISOString(),
+      }));
+    },
+    async getPageUrls(chId: string) { heldAsked.push(chId); return [`https://example.invalid/${chId}/p1.png`]; },
+    async latest() { return []; },
+  };
+}
+
 function moody() {
   return {
     id: MOODY, name: 'Moody Source',
@@ -170,14 +226,18 @@ before(async () => {
   registerAdapter(latest() as any);
   registerAdapter(groups() as any);
   registerAdapter(nothing() as any);
+  registerAdapter(ids() as any);
+  registerAdapter(held() as any);
 });
 
 after(async () => {
   globalThis.fetch = realFetch;
   if (root) rmSync(root, { recursive: true, force: true });
   if (!DSN) return;
-  await q(`DELETE FROM lib_series WHERE source_id = ANY($1)`, [[MOODY, NAMELESS, LATEST, GROUPS, NOTHING]]).catch(() => {});
-  await q('DELETE FROM users WHERE username = $1', [USER]).catch(() => {});
+  await q(`DELETE FROM lib_series WHERE source_id = ANY($1)`, [[MOODY, NAMELESS, LATEST, GROUPS, NOTHING, IDS, HELD]]).catch(() => {});
+  // The held fixture is seeded by hand, so its row can still be unrouted (no source_id) if an add failed.
+  await q(`DELETE FROM lib_series WHERE folder LIKE 'Held Source/%'`).catch(() => {});
+  await q('DELETE FROM users WHERE username = ANY($1)', [[USER, MEMBER]]).catch(() => {});
   await q(`UPDATE server_settings SET scanlator_prefs = DEFAULT WHERE id = 1`).catch(() => {});
 });
 
@@ -591,6 +651,326 @@ test('a nothing-yet add creates the series with no chapters, a listing and a flo
     });
   } finally {
     await app.close();
+    globalThis.fetch = realFetch;
+  }
+});
+
+/**
+ * Seed the series as the SCANNER would have written it from a read-only library root, and then remove it
+ * from the library the way the Remove button does.
+ *
+ * Two details carry the whole of #65. The book rows sit under a second root, under names the
+ * `<DL_ROOT>/<folder>/Chapter <n>.cbz` check in lib/downloader.ts could never match on either root -- 53%
+ * of the owner's read-library chapters are named like this. And `deleteSeries` stamps `deleted_at` on the
+ * series alone: every `lib_books` row stays exactly where it was, which is what makes "remove it and add
+ * it again" -- the app's own advice when a series looks wrong -- a full re-download.
+ *
+ * The download root is cleared too, so each case starts from "the files are only on the read-only root"
+ * rather than inheriting a copy the previous case downloaded (which the path check would then skip, and
+ * the case would pass for the wrong reason).
+ */
+/** The library id of a folder, which is what every assertion about #67 compares the answer against. */
+const idOfFolder = async (folder: string): Promise<string> =>
+  (await q('SELECT id FROM lib_series WHERE folder = $1', [folder]))[0]?.id;
+
+async function seedHeldLibrary(which: string, numbers: number[]): Promise<string> {
+  const { libraryIdFor } = await import('../src/lib/library');
+  const title = HELD_TITLES[which];
+  const folder = `Held Source/${title}`;
+  await q('DELETE FROM lib_series WHERE folder = $1', [folder]);
+  rmSync(join(root, folder), { recursive: true, force: true });
+  const libs = await q('SELECT id, path FROM libraries ORDER BY length(path) DESC');
+  const id = `s_held_${which}`;
+  await q(
+    `INSERT INTO lib_series (id, source, title, folder, books_count, library_id)
+     VALUES ($1, 'Held Source', $2, $3, $4, $5)`,
+    [id, title, folder, numbers.length, libraryIdFor(folder, libs)],
+  );
+  for (const n of numbers) {
+    await q(
+      `INSERT INTO lib_books (id, series_id, source, root, file, number, pages)
+       VALUES ($1, $2, 'Held Source', $3, $4, $5, 1)`,
+      [`b_held_${which}_${n}`, id, RO_ROOT, `${folder}/Official_Chapter ${n}.cbz`, n],
+    );
+  }
+  await q('UPDATE lib_series SET deleted_at = now() WHERE id = $1', [id]);
+  return id;
+}
+
+/**
+ * #65: an add never fetches a chapter the library already holds -- on EITHER root, under ANY file name.
+ *
+ * The have-set is read from `lib_books` by folder in addSeriesFromSource. Reintroduce by deleting the
+ * `toFetch` filter there (`const toFetch = selected;`): "the source was never asked for a single page"
+ * reads three chapter ids, and "the answer says every chapter was already here" reads 3 fetched.
+ * Reintroduce the `pruned_at IS NULL` half by swapping it for `heldBooks()`: "a Delete-files tombstone is
+ * fetched again" asks for nothing. Reintroduce the empty branch by deleting it: the add answers 422
+ * `undownloadable` for a series we hold in full, and every stamp assertion below fails with it.
+ *
+ * Every assertion about what was FETCHED reads the adapter's own call log, never the job counter: a
+ * counter is what the bug reported correctly while downloading everything anyway.
+ */
+test('an add never re-downloads what the library already holds', { skip }, async (t) => {
+  globalThis.fetch = (async () => new Response(PIXEL, { status: 200, headers: { 'content-type': 'image/png' } })) as typeof fetch;
+  const numbers = async (id: string): Promise<number[]> =>
+    (await q('SELECT number FROM lib_books WHERE series_id = $1 ORDER BY number', [id])).map((r: any) => Number(r.number));
+  try {
+    let id = '';
+    await t.test('a series held only under the read-only root is not fetched again', async () => {
+      id = await seedHeldLibrary('1', [1, 2, 3]);
+      heldAsked = [];
+      const r = await addSeriesFromSource({ source: HELD, sourceId: `${HELD}-1`, wait: true });
+      assert.equal(r.ok, true, r.message);
+      assert.deepEqual(heldAsked, [], 'the source was never asked for a single page');
+      assert.equal(r.chapters, 0, 'nothing is being fetched');
+      assert.equal(r.alreadyHere, 3, 'the answer says every chapter was already here');
+      assert.equal(r.started, false, 'and no download was started to say otherwise');
+      assert.equal(r.seriesId, id, 'the answer names the row it revived (#67)');
+    });
+
+    await t.test('and the revived row still gets its routing, floor, listing, dates and art', async () => {
+      // Everything an add owes the series is written inside the download run, AFTER chapter one lands.
+      // With nothing to fetch there is no chapter one, so the branch has to write them itself -- or a
+      // re-added series is left unrouted (the sweep would never check it again), with no listing and no
+      // cover, which is worse than the double download it replaced.
+      const s = (await q(
+        'SELECT deleted_at, source_id, source_series_id, auto_update, chapter_floor FROM lib_series WHERE id = $1', [id]))[0];
+      assert.equal(s.deleted_at, null, 'the row came back');
+      assert.deepEqual([s.source_id, s.source_series_id, s.auto_update], [HELD, `${HELD}-1`, true], 'routed for the sweep');
+      assert.equal(s.chapter_floor, null, 'an "all" add floors nothing');
+      const listing = await q('SELECT number FROM series_listing WHERE series_id = $1 ORDER BY number', [id]);
+      assert.deepEqual(listing.map((r: any) => Number(r.number)), [1, 2, 3], 'the listing the series page reads');
+      const dates = await q('SELECT number, published_at FROM lib_books WHERE series_id = $1 ORDER BY number', [id]);
+      assert.ok(dates.every((b: any) => b.published_at), `release dates stamped on the chapters we hold: ${JSON.stringify(dates)}`);
+      const art = (await q('SELECT cover FROM series_art WHERE series_id = $1', [id]))[0];
+      assert.equal(art?.cover, 'https://example.invalid/held.jpg', 'the source cover, as on every other add');
+    });
+
+    await t.test('and nothing was written under the download root', async () => {
+      assert.equal(existsSync(join(root, HELD_FOLDER)), false, 'the downloader never ran, so it never made the folder');
+      assert.deepEqual(await numbers(id), [1, 2, 3], 'three chapters, not six: no second copy was filed beside the first');
+    });
+
+    await t.test('a partial re-add fetches exactly the complement', async () => {
+      id = await seedHeldLibrary('2', [1, 3]);
+      heldAsked = [];
+      const r = await addSeriesFromSource({ source: HELD, sourceId: `${HELD}-2`, wait: true });
+      assert.equal(r.ok, true, r.message);
+      assert.deepEqual(heldAsked, ['h2'], 'only the missing number was asked for');
+      assert.equal(r.chapters, 1, 'the count is what will be fetched, so the bar can reach it');
+      assert.equal(r.alreadyHere, undefined, 'a partial re-add is an ordinary download, not the "all here" answer');
+      // Wait for the run's own scan to file what it fetched. Two reasons: "one row per number, not two"
+      // is the other half of #65 (the duplicate listing is what needed hand repair), and the scan is
+      // detached -- left running, it lands in the middle of the next case's seed and files a chapter 2
+      // there that nothing asked for.
+      const until = Date.now() + 15_000;
+      let rows: any[] = [];
+      while (Date.now() < until) {
+        rows = await q('SELECT root, number FROM lib_books WHERE series_id = $1 ORDER BY number', [id]);
+        if (rows.length >= 3) break;
+        await new Promise((res) => setTimeout(res, 100));
+      }
+      assert.deepEqual(rows.map((b: any) => Number(b.number)), [1, 2, 3], 'the fetched chapter is filed once, beside the two already held');
+      assert.equal(rows.filter((b: any) => b.root !== RO_ROOT).length, 1, 'and only the new one is under the download root');
+    });
+
+    await t.test('a Delete-files tombstone is fetched again', async () => {
+      // ⚠️ The one place the add deliberately disagrees with the sweep. heldBooks() counts a Delete-files
+      // tombstone as HELD so the nightly sweep does not undo a deliberate deletion; an add is a person
+      // asking for that chapter NOW. Reintroduce by using heldBooks() for the have-set: nothing is asked
+      // for, and "Delete files" becomes a decision that can never be taken back from the add dialog.
+      id = await seedHeldLibrary('3', [1, 2, 3]);
+      const { tombstoneBooks } = await import('../src/lib/chapterCleanup');
+      await tombstoneBooks(['b_held_3_2'], 'deleted');
+      heldAsked = [];
+      const r = await addSeriesFromSource({ source: HELD, sourceId: `${HELD}-3`, wait: true });
+      assert.equal(r.ok, true, r.message);
+      assert.deepEqual(heldAsked, ['h2'], 'the chapter whose file was deleted on purpose is fetched again');
+      assert.equal(r.chapters, 1);
+    });
+
+    await t.test('the chapter floor still records what was asked for, not what was fetched', async () => {
+      // Reintroduce by computing the floor from `toFetch`: it is empty here, `Math.min()` of nothing is
+      // Infinity, and the series is floored above every chapter that will ever be released.
+      id = await seedHeldLibrary('4', [2, 3]);
+      heldAsked = [];
+      const r = await addSeriesFromSource({ source: HELD, sourceId: `${HELD}-4`, chapterCount: 2, chapterFrom: 'newest', wait: true });
+      assert.equal(r.alreadyHere, 2, 'both of the newest two are already here');
+      assert.deepEqual(heldAsked, []);
+      const s = (await q('SELECT chapter_floor FROM lib_series WHERE id = $1', [id]))[0];
+      assert.equal(Number(s.chapter_floor), 2, 'the lowest chapter ASKED for; chapter 1 stays below the floor');
+    });
+
+    await t.test('a refetch still replaces a chapter the library holds', async () => {
+      // The have-set belongs to the add path alone. The downloader keeps its own cheap DL_ROOT path check,
+      // and `replace` bypasses it -- which is what the admin refetch and the completion pass in
+      // lib/partial.ts rely on (chapterActions.int.test.ts, "refetch replaces the file with the copy the
+      // rules choose now, on the same row", pins the route half). Reintroduce by moving the have-set into
+      // downloadChapter, or by dropping the `!opts.replace` guard: the second call here asks for nothing.
+      const { downloadChapter } = await import('../src/lib/downloader');
+      const chapter = { number: 2, title: 'Chapter 2', sourceId: 'h2', pages: 1 };
+      const input = { sourceId: HELD, seriesFolder: HELD_FOLDER, chapter, meta: { series: 'Already Here' } };
+      await downloadChapter(input as any);
+      assert.ok(existsSync(join(root, HELD_FOLDER, 'Chapter 2.cbz')), 'PREMISE: the file is on the download root');
+      heldAsked = [];
+      assert.equal(await downloadChapter(input as any), null, 'PREMISE: a plain download skips a file already there');
+      assert.deepEqual(heldAsked, [], 'PREMISE: and does not ask the source');
+      const out = await downloadChapter(input as any, { replace: true });
+      assert.ok(out, 'a refetch writes the file again');
+      assert.deepEqual(heldAsked, ['h2'], 'and asks the source for it, have-set or no have-set');
+    });
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
+
+/**
+ * #67: every add answers with the id of the series it landed on, and the one branch that cannot know it
+ * puts it on the job card instead.
+ *
+ * Before this the dialog's "Open in library" re-found the series by title search and fell back to
+ * `p.content[0]` -- a confident wrong navigation, and two series on the owner's install normalise to the
+ * same title. Reintroduce by dropping `seriesId` from any one of the returns in addSeriesFromSource: the
+ * matching assertion below reads undefined.
+ */
+test('every add answers with the series id it created or revived', { skip }, async (t) => {
+  globalThis.fetch = (async () => new Response(PIXEL, { status: 200, headers: { 'content-type': 'image/png' } })) as typeof fetch;
+  const idOf = idOfFolder;
+  const ANNOUNCED = 'Ids Source/Announced Title';
+  const FETCHED = 'Ids Source/Fetched Title';
+  try {
+    let announced = '';
+    await t.test('a nothing-yet add answers with the id it minted', async () => {
+      const r = await addSeriesFromSource({ source: IDS, sourceId: `${IDS}-1`, chapterFrom: 'none', wait: true });
+      assert.equal(r.ok, true, r.message);
+      announced = await idOf(ANNOUNCED);
+      assert.equal(r.seriesId, announced, 'the id the INSERT returned, not something the client has to guess');
+    });
+
+    await t.test('adding it again answers with the same id', async () => {
+      const r = await addSeriesFromSource({ source: IDS, sourceId: `${IDS}-1`, chapterFrom: 'none', wait: true });
+      assert.equal(r.message, 'already in library', 'PREMISE: this is the already-present branch');
+      assert.equal(r.seriesId, announced);
+    });
+
+    await t.test('a series removed and added again answers with the id it revived', async () => {
+      const { deleteSeries } = await import('../src/lib/libraryAdmin');
+      await deleteSeries(announced);
+      const r = await addSeriesFromSource({ source: IDS, sourceId: `${IDS}-1`, chapterFrom: 'none', wait: true });
+      assert.equal(r.ok, true, r.message);
+      assert.equal(r.seriesId, announced, 'the same row, so every favourite and read mark hung on it is still there');
+      assert.equal(await idOf(ANNOUNCED), announced, 'and no second row was minted');
+    });
+
+    await t.test('an awaited download add answers with the id its scan created', async () => {
+      const r = await addSeriesFromSource({ source: IDS, sourceId: `${IDS}-2`, wait: true });
+      assert.equal(r.ok, true, r.message);
+      assert.equal(r.seriesId, await idOf(FETCHED), 'persistScan has run by the time an awaited add returns');
+    });
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
+
+/**
+ * The route's half of #67: it forwards the id, and it withholds one the caller may not use.
+ *
+ * Reintroduce the gate by forwarding `r.seriesId` unconditionally: "a member who cannot see the series is
+ * not given its id" reads the id. Reintroduce the 409's half by dropping `existing.id` from the duplicate
+ * body: "the duplicate answer carries the id of the copy it found" reads undefined and the dialog's
+ * "Open it" button can never appear.
+ */
+test('POST /api/sources/add forwards the series id, and only to someone who may see it', { skip }, async (t) => {
+  globalThis.fetch = (async () => new Response(PIXEL, { status: 200, headers: { 'content-type': 'image/png' } })) as typeof fetch;
+  const Fastify = (await import('fastify')).default;
+  const jwt = (await import('@fastify/jwt')).default;
+  const sourceRoutes = (await import('../src/routes/sources')).default;
+  const CARDED = 'Ids Source/Carded Title';
+  const ANNOUNCED = 'Ids Source/Announced Title';
+  const OTHER_LIB = 'add-lib-other';
+  await q('DELETE FROM users WHERE username = ANY($1)', [[USER, MEMBER]]);
+  const uid = (await q<{ id: string }>(
+    `INSERT INTO users (username, display_name, password_hash, role, auth_kind, perms, max_age_rating)
+     VALUES ($1,$1,'x','admin','password','{}',NULL) RETURNING id`, [USER]))[0].id;
+  const mid = (await q<{ id: string }>(
+    `INSERT INTO users (username, display_name, password_hash, role, auth_kind, perms, max_age_rating)
+     VALUES ($1,$1,'x','member','password','{}',NULL) RETURNING id`, [MEMBER]))[0].id;
+  // The member is granted ONE library, and it is not the one the series is in: `visible()` then answers
+  // no for it, which is what the route asks `seriesVisible` for.
+  await q('DELETE FROM libraries WHERE id = $1', [OTHER_LIB]);
+  await q(`INSERT INTO libraries (id, name, path, age_rating) VALUES ($1,'Elsewhere','/elsewhere',NULL)`, [OTHER_LIB]);
+  await q('INSERT INTO user_libraries (user_id, library_id) VALUES ($1,$2)', [mid, OTHER_LIB]);
+  const app = Fastify();
+  await app.register(jwt, { secret: process.env.JWT_SECRET! });
+  await app.register(sourceRoutes);
+  await app.ready();
+  const headers = { authorization: `Bearer ${app.jwt.sign({ sub: uid, role: 'admin' })}` };
+  const asMember = { authorization: `Bearer ${app.jwt.sign({ sub: mid, role: 'member' })}` };
+  try {
+    await t.test('an already-in-library add answers with the id', async () => {
+      const r = await app.inject({ method: 'POST', url: '/api/sources/add', headers,
+        payload: { source: IDS, sourceId: `${IDS}-1`, chapterFrom: 'none' } });
+      assert.equal(r.statusCode, 200, r.body);
+      assert.equal(r.json().seriesId, await idOfFolder(ANNOUNCED), r.body);
+    });
+
+    await t.test('a member who cannot see the series is not given its id', async () => {
+      // The id is a capability: every by-id route checks the viewer, and this route is where the viewer
+      // lives. The rest of the answer is unchanged -- the add itself is theirs to make.
+      const r = await app.inject({ method: 'POST', url: '/api/sources/add', headers: asMember,
+        payload: { source: IDS, sourceId: `${IDS}-1`, chapterFrom: 'none' } });
+      assert.equal(r.statusCode, 200, r.body);
+      assert.equal(r.json().seriesId, undefined, `the id of a series in a library they were not granted: ${r.body}`);
+      assert.equal(r.json().chapters, 0, 'and the rest of the answer is what it always was');
+    });
+
+    await t.test('the duplicate answer carries the id of the copy it found', async () => {
+      // A second source offering a title that normalises onto one already here. The lookup behind it is
+      // deliberately server-wide, so the id -- and only the id -- is gated the same way as above.
+      const { registerAdapter } = await import('../src/lib/sources');
+      registerAdapter({
+        id: 'add-dup', name: 'Dup Source',
+        async search() { return []; },
+        async getSeries(sid: string) { return { sourceId: sid, source: 'add-dup', title: 'Announced Title' }; },
+        async listChapters() { return [{ number: 1, title: 'Chapter 1', sourceId: 'd1', pages: 1 }]; },
+        async getPageUrls() { return ['https://example.invalid/d1/p1.png']; },
+        async latest() { return []; },
+      } as any);
+      const r = await app.inject({ method: 'POST', url: '/api/sources/add', headers,
+        payload: { source: 'add-dup', sourceId: 'add-dup-1' } });
+      assert.equal(r.statusCode, 409, r.body);
+      assert.equal(r.json().error, 'duplicate');
+      assert.equal(r.json().existing?.id, await idOfFolder(ANNOUNCED), r.body);
+      assert.equal(r.json().existing?.title, 'Announced Title', 'the wording the prompt is built from is unchanged');
+      const m = await app.inject({ method: 'POST', url: '/api/sources/add', headers: asMember,
+        payload: { source: 'add-dup', sourceId: 'add-dup-1' } });
+      assert.equal(m.statusCode, 409, m.body);
+      assert.equal(m.json().existing?.id, undefined, `a member is told it is a duplicate, not where it is: ${m.body}`);
+      assert.equal(m.json().existing?.title, 'Announced Title');
+    });
+
+    await t.test('a download add puts the series id on its job card once chapter one is scanned', async () => {
+      // The only branch that cannot answer with the id: the reply goes out before persistScan has minted
+      // the row. Reintroduce by dropping the `card.seriesId = seriesId` line after the scan in
+      // addSeriesFromSource: the card never carries an id and the dialog is back to guessing by title.
+      const r = await app.inject({ method: 'POST', url: '/api/sources/add', headers,
+        payload: { source: IDS, sourceId: `${IDS}-3` } });
+      assert.equal(r.statusCode, 200, r.body);
+      assert.deepEqual([r.json().started, r.json().seriesId], [true, undefined], `no row exists yet: ${r.body}`);
+      const until = Date.now() + 15_000;
+      let card: any;
+      while (Date.now() < until) {
+        const jobs = (await app.inject({ method: 'GET', url: '/api/sources/jobs', headers })).json().content;
+        card = jobs.find((j: any) => j.folder === CARDED);
+        if (card?.seriesId) break;
+        await new Promise((res) => setTimeout(res, 100));
+      }
+      assert.equal(card?.seriesId, await idOfFolder(CARDED), `the card the dialog is already polling: ${JSON.stringify(card)}`);
+    });
+  } finally {
+    await app.close();
+    await q('DELETE FROM user_libraries WHERE library_id = $1', [OTHER_LIB]).catch(() => {});
+    await q('DELETE FROM libraries WHERE id = $1', [OTHER_LIB]).catch(() => {});
     globalThis.fetch = realFetch;
   }
 });

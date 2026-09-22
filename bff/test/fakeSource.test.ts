@@ -16,6 +16,7 @@ const dirs: string[] = [];
 afterEach(async () => {
   globalThis.fetch = realFetch;
   delete process.env.FAKE_SOURCE_URLS;
+  delete process.env.FAKE_SOURCE_NSFW;
   for (const dir of dirs.splice(0)) await rm(dir, { recursive: true, force: true });
 });
 
@@ -35,6 +36,26 @@ test('an ordinary install never registers the e2e sources', async () => {
   const { sourceIds } = await import('../src/lib/sources/loader');
   loadBuiltins();
   assert.deepEqual(sourceIds(), ['mangadex'], 'FAKE_SOURCE_URLS is unset, so no fake source may exist');
+});
+
+test('only the stub named in FAKE_SOURCE_NSFW declares itself adult', async () => {
+  // The v0.42.0 walk needs one adult PROVIDER to prove the "Show 18+" reveal hides it from Discover (#64),
+  // and `isNsfw` is otherwise only ever set by a Suwayomi extension. The marking has to stay per id: the
+  // v0.41 walk's hunt skips an adult source (lib/sourceHunt.ts), so marking both stubs would break a walk
+  // that has nothing to do with this release.
+  // Reintroduce by marking every fake adapter instead of the named ones: `fake-a` comes back adult and
+  // this assertion names it.
+  process.env.FAKE_SOURCE_URLS = 'fake-a=http://127.0.0.1:18150,fake-b=http://127.0.0.1:18151';
+  process.env.FAKE_SOURCE_NSFW = 'fake-b';
+  await cleanRegistry();
+  const { loadBuiltins } = await import('../src/lib/sources/builtins');
+  const { getSource } = await import('../src/lib/sources/loader');
+  loadBuiltins();
+  assert.equal(getSource('fake-b')?.isNsfw, true, 'the stub named in FAKE_SOURCE_NSFW is not adult');
+  assert.equal(getSource('fake-a')?.isNsfw, undefined, 'a stub nobody named was marked adult');
+  // Unset is the ordinary install, where no fake source exists at all and none of this can be reached.
+  const { fakeNsfwIds } = await import('../src/lib/sources/fake');
+  assert.equal(fakeNsfwIds('').size, 0, 'an unset knob still named something adult');
 });
 
 test('the gated adapters call the stub contract and keep the downloader defaults', async () => {

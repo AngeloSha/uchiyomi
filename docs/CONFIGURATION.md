@@ -132,7 +132,10 @@ These caches share network work, not authorisation: results are filtered to the 
 
 `FAKE_SOURCE_URLS=name=http://host:port,name2=http://host:port` registers deterministic HTTP adapters used
 by the release test harness. It is empty in every shipped deployment and is not a production source
-configuration.
+configuration. `FAKE_SOURCE_NSFW=name` (since v0.42.0) makes the named ones — a comma-separated list of
+ids from that same list — declare themselves adult, which is the only way to drive the 18+ rules without a
+real adult extension; it does nothing at all while `FAKE_SOURCE_URLS` is unset, which is every shipped
+deployment.
 
 The shared source-work limits are `SOLVER_CONCURRENCY` (default `4`) and `SOLVER_BUDGET_MS` (default
 `90000`) for Cloudflare-backed work; `SCAN_CONCURRENCY` defaults to that solver slot count, while

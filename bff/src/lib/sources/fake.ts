@@ -89,7 +89,29 @@ export function makeFakeSource(id: string, base: string): SourceAdapter {
   };
 }
 
+/**
+ * Which of the gated adapters declare themselves ADULT, as a comma-separated list of their ids.
+ *
+ * `isNsfw` is otherwise only ever set by a Suwayomi extension (lib/sources/suwayomi/register.ts), so
+ * without this knob there is no way to drive the 18+ rules end to end in a browser: the v0.42.0 walk has
+ * to prove that the "Show 18+" reveal keeps an adult PROVIDER off Discover (issue #64), and an instance
+ * with no adult provider would pass every one of those checks for the wrong reason.
+ *
+ * ⚠️ Separate from FAKE_SOURCE_URLS rather than folded into its syntax, because that string is parsed by
+ * `fakeSourceConfig` above and read by the v0.40 and v0.41 walks' own rigs; a new field in it would change
+ * what those two see. An id here that is not in FAKE_SOURCE_URLS simply marks nothing.
+ */
+export function fakeNsfwIds(raw = process.env.FAKE_SOURCE_NSFW || ''): Set<string> {
+  return new Set(raw.split(',').map((entry) => entry.trim()).filter(Boolean));
+}
+
 /** Read the env at registration time so reload-all honours a knob changed before the reload. */
-export function fakeSources(raw = process.env.FAKE_SOURCE_URLS || ''): SourceAdapter[] {
-  return fakeSourceConfig(raw).map(({ id, base }) => makeFakeSource(id, base));
+export function fakeSources(raw = process.env.FAKE_SOURCE_URLS || '', nsfwRaw = process.env.FAKE_SOURCE_NSFW || ''): SourceAdapter[] {
+  const nsfw = fakeNsfwIds(nsfwRaw);
+  return fakeSourceConfig(raw).map(({ id, base }) => {
+    const adapter = makeFakeSource(id, base);
+    // Set only when asked for: an absent `isNsfw` is what every built-in and custom site reports, and
+    // `sourceAllowedFor` reads absent as "not adult" on purpose (lib/visibility.ts).
+    return nsfw.has(id) ? { ...adapter, isNsfw: true } : adapter;
+  });
 }

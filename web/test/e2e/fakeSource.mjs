@@ -35,10 +35,15 @@ if (!Number.isInteger(PORT) || PORT < 1 || PORT > 65535) throw new Error(`bad --
 // same hole leaves nine, the judgement goes both ways, and 9 of the candidate's 12 numbers is 0.75 --
 // under MIN_COVERAGE, so the source that can fill the gap is refused as `numbering_differs` and the gap
 // step has nothing to follow. The failure looks exactly like a bug in `wants`, so the margin is here.
+// ⚠️ `walk-quote` is opt-in (`--extra v42`) and its title is the point: a curly apostrophe and an en dash,
+// neither of which a keyboard produces, which is what the v0.42.0 walk types a straight-quoted version of
+// into Remove / Delete files / Forget (issue #66). Gated because the v0.40 walk folds search results by
+// title and asserts the order of the wall, and neither earlier walk should grow a series it never asked for.
 const SERIES = [
   { sourceId: 'walk-tale', title: 'Walk Tale', first: 1, last: 12 },
   { sourceId: 'walk-gap', title: 'Walk Gap', first: 1, last: 14 },
   ...(NAME === 'fake-b' ? [{ sourceId: 'walk-tale-next', title: 'Walk Tale: Next', first: 13, last: 40 }] : []),
+  ...(argv.get('--extra') === 'v42' ? [{ sourceId: 'walk-quote', title: 'Ren’s Walk – Notes', first: 1, last: 3 }] : []),
 ];
 const byId = new Map(SERIES.map((s) => [s.sourceId, s]));
 
@@ -257,7 +262,12 @@ const server = http.createServer(async (req, res) => {
     const row = begin(req, url, { route: 'unknown' });
     finish(row, 404); return sendJson(res, 404, { error: 'not_found' });
   } catch (error) {
-    sendJson(res, 500, { error: 'stub_error', message: error instanceof Error ? error.message : String(error) });
+    // The stub's own crash goes to its container log (`docker logs <net>-fake-a`), not into a response body:
+    // nothing in the suite reads this message, and a 500 carrying an exception string is the shape CodeQL
+    // flags as stack-trace exposure (alert #32). The status code is the assertion; the log is the debugging,
+    // and it is reachable where the body was not.
+    console.error('[fake-source] request failed', error);
+    sendJson(res, 500, { error: 'stub_error' });
   }
 });
 

@@ -1,5 +1,112 @@
 # Changelog
 
+## v0.42.0 — 2026-09-23
+
+Four bugs, reported by **@Squeaks72** with diagnoses accurate down to the line number (#64, #65, #66, #67),
+and one feature contributed by **@TIGamingTV** (#58). Three of the four were live on the maintainer's own
+library. The only default that moves is the first one, and it moves to what the setting had always said it
+did; the contributed feature is off until you turn it on.
+
+### Discover honours *Show 18+* (#64)
+
+The 18+ reveal hid adult libraries and then let Discover list adult **providers** anyway — their names, their
+newest covers, their popular walls, and a cross-source search that queried them. On the maintainer's own
+server that is twelve of the fourteen sources switched on, painted on the one screen where things appear
+without being asked for.
+
+With the reveal off, an adult source is now left out of the provider list and its sheet, its *Newest* and
+*Popular* walls answer nothing, and **the search across all your sources does not even ask it** — no request
+leaves the server for that site. **Show 18+** now sits on Discover as well, beside *Newest from your
+sources*, and stays there while you search; it appears whenever something is being hidden, so an install
+with adult providers and no 18+ shelf still has the switch. Three things are deliberately untouched, because
+you named them yourself: opening a provider's page for one title, adding it, and *Find missing chapters* on
+a series whose own source is adult — hiding those would stop a series you already own from being filled.
+An age limit below 18 is a different thing and is unchanged: those sources are refused by name, with or
+without the reveal.
+
+### Adding a series back no longer downloads it again (#65)
+
+*Remove from library* keeps every file, so adding the series back should cost nothing — and instead it
+fetched the entire back catalogue and then listed every chapter twice, because the only "do we have it"
+check was a filename in Uchiyomi's own download folder. A read-only library the server never downloaded was
+invisible to it: 33,854 chapters here, 18,064 of them (53 %) under names that check could not have matched
+anyway, and 30 series that exist **only** there — 654 chapters for the largest of them.
+
+An add now reads what the library actually holds, on every root and whatever the files are called, and
+fetches only what is missing. With nothing left to fetch the dialog says *All {n} chapters are already in
+your library* instead of starting a download, and the series still gets its source, its chapter floor, its
+chapter list and its cover. A chapter you removed with **Delete from server** or **Delete files** is
+deliberately fetched again: the nightly sweep treats that tombstone as kept so it does not undo a deliberate
+deletion, but an add is somebody asking for the chapter now. A partial re-add fetches exactly the
+complement, and the floor still records what you asked for rather than what was left to do.
+
+### *Open in library* opens the series you just added (#67)
+
+The add now answers with the id of the series it landed on — the one it found, minted, revived or stamped —
+and a download's id appears on its progress card as soon as the first chapter is scanned in. *Open in
+library* uses that. It used to search for the title and open the first result, which on a library with two
+similarly normalised titles is a confident wrong answer; the search is now a last resort, needs an exact
+match, and otherwise lands on Downloads rather than guessing. The duplicate prompt gains an **Open it**
+button for the copy you already have. An id is never handed to somebody who may not open that series.
+
+### A title you can actually type (#66)
+
+*Remove from library*, *Delete files* and *Forget* ask you to type the title, and compared it byte for byte —
+so any title carrying a character a keyboard does not produce could not be confirmed at all. That is 38 of
+241 series here (16 %): curly apostrophes, en and em dashes, an `&amp;` the source never decoded, a
+non-breaking space.
+
+Both sides now go through one fold: one layer of HTML entities, NFKC, curly quotes and dashes folded to
+ASCII, invisible characters and emoji dropped, every kind of space collapsed to one, ends trimmed. **Case is
+not folded** — it is visible, and the same dialog confirms deleting a member. The server applies the same
+function as the button, so the fix cannot turn a dead button into a refused request. A **Copy title** button
+now sits beside the box wherever the browser offers a clipboard (over plain `http` on a LAN it does not, and
+the button is hidden rather than broken).
+
+### Missing chapters in Mihon, if you want them (#58, @TIGamingTV)
+
+**Admin → Settings → Library housekeeping → Show missing chapters in Mihon**, off by default. Mihon works
+out how many chapters a series has from the list Uchiyomi hands its Komga extension, so it counts what is on
+disk. With this on, the chapters this server does not hold — the tombstones the read cleanup emptied, and
+the numbers the sources listed that were never fetched — are listed beside the ones it has, in number order,
+marked *not downloaded*, and their numbers count towards the chapter total Mihon reports to AniList and MAL.
+They cannot be opened: tapping one gets Mihon's own empty-chapter message rather than a placeholder page,
+because viewing a page would mark the chapter read.
+
+It is for libraries that deliberately hold less than the sources list — the read cleanup, series you follow
+without fetching, a chapter floor. It is **not** a fix for a bug on an ordinary install: the tracker's read
+counts were always right, and what was short was the chapter list on the phone and the total beside it. A
+series you have finished still reports *Completed*: a chapter that can never be read is listed, never
+counted. Nothing outside the Mihon surface moves — the app, OPDS and offline reading list what is on disk
+exactly as before — and turning the switch off puts every answer back at once.
+
+The feature, the design and its tests are TIGamingTV's, merged with five review fixes on top: the chapter
+counts stay over real chapters (counting a ghost would have made *Completed* unreachable for good, since
+Mihon derives the status from those counts), a chapter an admin renumbered is listed once rather than twice,
+a tombstone reports no pages like a ghost does instead of advertising the pages of a deleted file, the
+documented id format now matches the one the code emits, and the setting is read only on the requests that
+can use it.
+
+### Notes
+
+`hiddenAdult` on `GET /api/sources`, `seriesId` and `alreadyHere` on the add's answer, `id` in its 409
+`existing`, `seriesId` on a job card, and the folded `confirm` on *delete-files* and *forget* are all in
+`docs/api.md` and `bff/openapi.yaml`. Existing clients may ignore every new field. `FAKE_SOURCE_NSFW` is a
+test-harness knob and does nothing on a real server.
+
+What was verified: the whole bff suite on a fresh database — 157 files, 1,668 tests, none failing — the web
+suite at 371 tests, the web type-check and a production build, all clean. Every guard added here carries, as
+a comment, the exact edit that puts its bug back, and was run that way against the unmodified code before
+the fix was taken. Three browser walks, each on its own throwaway instance: v0.40.0's, unchanged at 41
+checks; v0.41.0's, unchanged at 54; and a new one for this release, 64 checks, run at 1280 px and at 390 px,
+that drives all five items end to end — the reveal hiding a provider, with the test source's own request log
+proving it was never even asked; a capped account still refused that source by id; a series removed and
+added back with not one page fetched and the dialog saying so; a chapter deleted from the server fetched
+again; *Open in library* landing on the id the server gave; a curly-apostrophe title confirmed with a
+straight one, through both the button and the route; and the ghost switch on and off against Mihon's own
+status arithmetic. The eight translations were merged, the language rig rendered all nine and reported every
+file complete, and the layout rig found no overflow at four widths.
+
 ## v0.41.0 — 2026-09-22
 
 The Health page has always been honest about what is wrong with a library and useless about fixing it:

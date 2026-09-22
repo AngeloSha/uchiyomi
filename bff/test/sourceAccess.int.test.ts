@@ -122,8 +122,13 @@ test('sources: who may reach them, and how long they get', { skip }, async (t) =
   try {
     // ------------------------------------------------------------------ adult sources
     await t.test('an adult source is not even listed for a capped account', async () => {
+      // ⚠️ `adult=1` throughout, and it must stay. Since v0.42.0 (#64) the source list also honours the
+      // "Show 18+" reveal, which is off by default -- so without the parameter the adult source is missing
+      // from EVERY answer here and the capped case would pass without the age cap doing anything. The claim
+      // this test makes is about the cap, so the reveal is turned on and only the cap can still filter.
+      // adultLibrary.int.test.ts is where the reveal itself is pinned.
       const seen = async (who: string, role = 'user') => {
-        const r = await app.inject({ method: 'GET', url: '/api/sources', headers: tok(who, role) });
+        const r = await app.inject({ method: 'GET', url: '/api/sources?adult=1', headers: tok(who, role) });
         assert.equal(r.statusCode, 200);
         return new Set(r.json().content.map((s: any) => s.id));
       };
@@ -156,7 +161,9 @@ test('sources: who may reach them, and how long they get', { skip }, async (t) =
     });
 
     await t.test('the same routes still work for an uncapped account', async () => {
-      const r = await app.inject({ method: 'GET', url: `/api/sources/latest?source=${ADULT}`, headers: tok(ids.plain) });
+      // `adult=1` for the same reason as above: the wall honours the reveal since v0.42.0, and an empty
+      // answer from the hide would look exactly like the refusal this test says must not happen.
+      const r = await app.inject({ method: 'GET', url: `/api/sources/latest?source=${ADULT}&adult=1`, headers: tok(ids.plain) });
       assert.equal(r.statusCode, 200);
       assert.ok(r.json().content.length > 0, 'an uncapped account got an empty adult wall');
       const d = await app.inject({

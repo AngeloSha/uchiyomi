@@ -2,7 +2,7 @@
   "_meta": {
     "language": "ru",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 986
+    "strings": 994
   },
   "1 check found something": "1 проверка нашла проблему",
   "1 member": "1 участник",
@@ -989,5 +989,13 @@
   "Repair the library nightly": "Чинить библиотеку каждую ночь",
   "Once a day: counts pages in files never opened, replaces one- or two-page chapters when a source has a longer copy, searches other sources for missing chapter runs, retries chapters that stopped failing, and resets the Cloudflare solver when sources blame it. Nothing is deleted or merged without you.": "Раз в сутки: считает страницы в файлах, которые ни разу не открывали, заменяет главы из одной-двух страниц, если у источника есть копия подлиннее, ищет пропущенные отрезки глав в других источниках, повторяет главы, которые перестали падать, и сбрасывает солвер Cloudflare, когда источники винят его. Ничего не удаляется и не объединяется без вас.",
   "The library repair is running — try again in a few minutes": "Ремонт библиотеки уже выполняется — попробуйте через несколько минут",
-  "Keep {title}": "Оставить {title}"
+  "Keep {title}": "Оставить {title}",
+  "Show missing chapters in Mihon": "Показывать отсутствующие главы в Mihon",
+  "List the chapters this server has not downloaded, and those whose files were deleted, alongside the ones it holds — so Mihon and your trackers count the whole series rather than only what is on disk. These rows cannot be opened; they are marked “not downloaded”. Only the Mihon extension sees them.": "Показывать главы, которые этот сервер не скачал, и те, файлы которых были удалены, рядом с имеющимися — чтобы Mihon и ваши трекеры считали серию целиком, а не только то, что есть на диске. Эти строки нельзя открыть; они помечены как «not downloaded». Их видит только расширение Mihon.",
+  "Nothing to browse with 18+ hidden": "Нечего просматривать, пока 18+ скрыто",
+  "Every provider set up for your account is marked 18+. Turn on Show 18+ to browse them.": "Все источники, настроенные для вашей учётной записи, помечены как 18+. Включите «Показать 18+», чтобы просматривать их.",
+  "Copy title": "Скопировать название",
+  "Copied": "Скопировано",
+  "All {n} chapters are already in your library": "Все {n} глав уже есть в вашей библиотеке",
+  "Open it": "Открыть"
 }

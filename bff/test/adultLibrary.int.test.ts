@@ -13,6 +13,16 @@
 // working while the library is hidden, because the browser session that hides it cannot reach a service
 // worker flushing progress with the app closed, an <img> tag, or an OPDS client.
 //
+// Since v0.42.0 (issue #64) the same rule covers Discover's SOURCES, not just the library's series. The
+// chip used to hide 18+ libraries while Discover went on listing every adult provider and painting its
+// newest covers -- on the reporting install twelve of fourteen enabled sources are NSFW, so "Show 18+" off
+// left a clean library behind a wall of adult covers. The `surfaceable` half of the sweep below is that
+// claim: the source list, its two walls, the per-source search, the cross-source search and `/find` all
+// honour the chip, while `fill/scan`, `detail` and `add` deliberately do not -- a series whose own source
+// is adult must stay fillable. Those listing tests assert on each fake source's own CALL COUNTER as well as
+// on the body, because a source that is asked and answers nothing passes a body-only assertion for the
+// wrong reason, and being asked at all is an outbound request to an adult site.
+//
 // Skipped automatically unless TEST_DATABASE_URL is set.
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -36,6 +46,50 @@ const ADULT_TITLE = 'Zzz Adult Only Title';
 const CLEAN_TITLE = 'Zzz Clean Title';
 const USERS = ['al-user', 'al-admin'];
 
+// ---------------------------------------------------------------- Discover's sources (v0.42.0, issue #64)
+const CLEAN_SRC = 'al-src-clean';
+const ADULT_SRC = 'al-src-adult';
+/** A series in the CLEAN library whose own source is the adult one: the case fill/scan must keep serving. */
+const FILL_SERIES = 's_fill_adultsrc';
+const FILL_BOOKS = ['b_fill_one', 'b_fill_two', 'b_fill_three'];
+
+/**
+ * What each fake source was actually ASKED, not merely what it answered.
+ *
+ * ⚠️ The body alone proves nothing: a source that is asked and answers nothing is indistinguishable from
+ * one that was never asked, so a body-only assertion would pass over a fix that does not exist. Being asked
+ * is itself the thing being prevented — an outbound query to an adult site on behalf of someone who asked
+ * not to see one, whose results then land in the shared search entry under that term.
+ */
+const asked: Record<string, { search: number; latest: number; popular: number }> = {
+  [CLEAN_SRC]: { search: 0, latest: 0, popular: 0 },
+  [ADULT_SRC]: { search: 0, latest: 0, popular: 0 },
+};
+/** A copy of the counters, so an assertion compares a delta rather than an absolute anyone may have bumped. */
+const snap = () => JSON.parse(JSON.stringify(asked)) as typeof asked;
+
+/**
+ * One source, adult or not, that answers everything Discover asks of it.
+ *
+ * `search` answers with the term as the title so `pickBest` matches it (that is what `/find` and the fill
+ * scan run the answer through); the two walls answer with a title carrying the source id, so a body
+ * assertion can name which source painted a cover.
+ */
+function fakeSource(id: string, name: string, isNsfw?: boolean) {
+  const wall = (n: number) => ({ sourceId: `${id}-${n}`, source: id, title: `Zzz Wall ${id} ${n}` });
+  return {
+    id, name, isNsfw,
+    async search(term: string) { asked[id].search++; return [{ sourceId: `${id}-1`, source: id, title: term }]; },
+    async getSeries(sid: string) { return { sourceId: sid, source: id, title: `Zzz Detail ${id}` }; },
+    async listChapters() {
+      return [1, 2, 3, 4, 5].map((n) => ({ number: n, title: `Chapter ${n}`, sourceId: `${id}-c${n}`, pages: 1 }));
+    },
+    async getPageUrls() { return []; },
+    async latest() { asked[id].latest++; return [wall(1), wall(2)]; },
+    async popular() { asked[id].popular++; return [wall(3)]; },
+  };
+}
+
 async function setup() {
   const { migrate } = await import('../src/lib/migrate');
   const { q } = await import('../src/lib/db');
@@ -45,10 +99,16 @@ async function setup() {
   const personalRoutes = (await import('../src/routes/personal')).default;
   const downloadRoutes = (await import('../src/routes/downloads')).default;
   const opdsRoutes = (await import('../src/routes/opds')).default;
+  const sourceRoutes = (await import('../src/routes/sources')).default;
+  const { registerAdapter } = await import('../src/lib/sources');
 
   await migrate();
-  await q('DELETE FROM lib_books WHERE id = ANY($1)', [[ADULT_BOOK, CLEAN_BOOK]]);
-  await q('DELETE FROM lib_series WHERE id = ANY($1)', [[ADULT_SERIES, CLEAN_SERIES]]);
+  // Two sources and nothing else: the registry is whatever this process registered, so `listSources()`
+  // here is exactly this pair and a count assertion over it means something.
+  registerAdapter(fakeSource(CLEAN_SRC, 'Zzz Clean Source') as any);
+  registerAdapter(fakeSource(ADULT_SRC, 'Zzz Adult Source', true) as any);
+  await q('DELETE FROM lib_books WHERE id = ANY($1)', [[ADULT_BOOK, CLEAN_BOOK, ...FILL_BOOKS]]);
+  await q('DELETE FROM lib_series WHERE id = ANY($1)', [[ADULT_SERIES, CLEAN_SERIES, FILL_SERIES]]);
   await q('DELETE FROM libraries WHERE id = ANY($1)', [[ADULT_LIB, CLEAN_LIB]]);
   await q('DELETE FROM users WHERE username = ANY($1)', [USERS]);
 
@@ -72,6 +132,22 @@ async function setup() {
       `INSERT INTO lib_books (id, series_id, source, file, number, title, mtime)
        VALUES ($1,$2,'T!al',$3,1,'Chapter 1',1)`,
       [bid, sid, `T!al/${sid}/ch1.cbz`],
+    );
+  }
+
+  // A series on the CLEAN shelf whose own source is the adult one, with MIN_HAVE (3) chapters so the fill
+  // scan has something to match against. This is the shape the #64 fix must NOT break: the chip hides
+  // providers from Discover, and a series already in the library still has to be fillable from its own.
+  await q(
+    `INSERT INTO lib_series (id, source, title, folder, books_count, library_id, source_id, source_series_id, latest_mtime, created_at)
+     VALUES ($1,'T!al','Zzz Fillable Title',$2,3,$3,$4,$5, 1, now())`,
+    [FILL_SERIES, `T!al/${FILL_SERIES}`, CLEAN_LIB, ADULT_SRC, `${ADULT_SRC}-1`],
+  );
+  for (const [i, bid] of FILL_BOOKS.entries()) {
+    await q(
+      `INSERT INTO lib_books (id, series_id, source, file, number, title, mtime)
+       VALUES ($1,$2,'T!al',$3,$4,$5,1)`,
+      [bid, FILL_SERIES, `T!al/${FILL_SERIES}/ch${i + 1}.cbz`, i + 1, `Chapter ${i + 1}`],
     );
   }
 
@@ -122,6 +198,7 @@ async function setup() {
   await app.register(personalRoutes);
   await app.register(downloadRoutes);
   await app.register(opdsRoutes);
+  await app.register(sourceRoutes);
   await app.ready();
 
   const tok = (id: string, role = 'user') => ({ authorization: `Bearer ${app.jwt.sign({ sub: id, role })}` });
@@ -314,6 +391,147 @@ test('an 18+ library stays off browsing surfaces until it is revealed', { skip }
         await q('DELETE FROM series_overrides WHERE series_id = $1', [ADULT_SERIES]);
       }
     });
+
+    // ------------------------------------------------------- Discover's sources (v0.42.0, issue #64)
+    // `surfaceable()` in routes/sources.ts is `browsable()` applied to the source registry, and every one
+    // of these reads a listing route that used to consult the age CAP alone.
+
+    const get = async (url: string, who: any = auth) => app.inject({ method: 'GET', url, headers: who });
+    const json = async (url: string, who: any = auth) => (await get(url, who)).json();
+
+    await t.test("Discover's source list leaves out an adult source until it is asked for", async () => {
+      // Reintroduce by putting `reachable(req)` back in place of `surfaceable(req)` at the `content:` of
+      // GET /api/sources: "an adult provider was listed on Discover with the reveal off" fails.
+      const hidden = await json('/api/sources');
+      const ids = hidden.content.map((s: any) => s.id);
+      assert.equal(ids.includes(ADULT_SRC), false, 'an adult provider was listed on Discover with the reveal off');
+      assert.equal(ids.includes(CLEAN_SRC), true, 'the clean provider vanished too, so the filter is too wide');
+      assert.equal(hidden.hiddenAdult, 1, 'the source list did not say how many providers it was hiding');
+
+      const shown = await json('/api/sources?adult=1');
+      assert.equal(shown.content.map((s: any) => s.id).includes(ADULT_SRC), true,
+        'the adult provider stayed hidden even with ?adult=1, which makes the filter a deletion');
+      assert.equal(shown.hiddenAdult, 0, 'nothing is hidden once the reveal is on, so the count must be 0');
+
+      // An admin is not exempt here either, for the same reason as the library sweep above: this is a tidy
+      // screen and not a permission, and an admin browsing Discover asked for the same thing everyone else did.
+      const asAdmin = await json('/api/sources', tok(admin, 'admin'));
+      assert.equal(asAdmin.content.map((s: any) => s.id).includes(ADULT_SRC), false,
+        'the admin was shown an adult provider by default');
+      assert.equal(asAdmin.hiddenAdult, 1);
+    });
+
+    await t.test('the newest and popular walls answer empty for a hidden source, without asking it', async () => {
+      // Reintroduce by deleting the `surfaceable(req).some(...)` short-circuit from /api/sources/latest:
+      // "the newest wall painted an adult source's covers" fails.
+      for (const [listing, counter] of [['latest', 'latest'], ['popular', 'popular']] as const) {
+        const before = snap();
+        const r = await get(`/api/sources/${listing}?source=${ADULT_SRC}`);
+        assert.equal(r.statusCode, 200, `the ${listing} wall answered ${r.statusCode}; the hide is not a permission`);
+        assert.deepEqual(r.json().content, [], `the ${listing} wall painted an adult source's covers`);
+        assert.equal(asked[ADULT_SRC][counter], before[ADULT_SRC][counter],
+          `the ${listing} wall asked an adult source anyway and merely dropped the answer`);
+
+        // The clean source keeps working while the reveal is off, or the filter is a blackout.
+        const ok = await json(`/api/sources/${listing}?source=${CLEAN_SRC}`);
+        assert.ok(ok.content.length > 0, `the ${listing} wall lost the clean source too`);
+
+        const revealed = await json(`/api/sources/${listing}?source=${ADULT_SRC}&adult=1`);
+        assert.ok(revealed.content.length > 0, `the ${listing} wall could not be revealed with ?adult=1`);
+        assert.equal(asked[ADULT_SRC][counter], before[ADULT_SRC][counter] + 1,
+          `the ${listing} wall answered from somewhere other than the revealed source`);
+      }
+    });
+
+    await t.test('searching one hidden source answers empty rather than 403, and does not ask it', async () => {
+      // An empty page, not `denySource`: 403 is the permission answer, and the same account with ?adult=1
+      // gets results. Reintroduce by deleting the `surfaceable` line from GET /api/sources/search.
+      const before = snap();
+      const r = await get(`/api/sources/search?source=${ADULT_SRC}&q=Zzzonesearch`);
+      assert.equal(r.statusCode, 200, 'a hidden source was REFUSED rather than hidden; the hide is not a permission');
+      assert.deepEqual(r.json().content, [], 'the per-source search answered from an adult source with the reveal off');
+      assert.equal(asked[ADULT_SRC].search, before[ADULT_SRC].search, 'the adult source was searched anyway');
+
+      const revealed = await json(`/api/sources/search?source=${ADULT_SRC}&q=Zzzonesearch&adult=1`);
+      assert.ok(revealed.content.length > 0, 'the per-source search could not be revealed with ?adult=1');
+    });
+
+    await t.test('the cross-source search does not even ask an adult source', async () => {
+      // ⚠️ Asserted on the adapter's OWN counter, not only on the body: `searchAll` fans out and a source
+      // that is asked and answers nothing looks exactly like one that was never asked. Each call uses its
+      // own term, because the answers live in a shared entry keyed by the normalised term for five minutes.
+      // Reintroduce by writing `const ask = reachable(req)` back: "an adult source was asked" fails.
+      const before = snap();
+      const hidden = await json('/api/sources/search-all?q=Zzzfanouthidden');
+      assert.equal(asked[ADULT_SRC].search, before[ADULT_SRC].search, 'an adult source was asked by the cross-source search');
+      assert.equal(asked[CLEAN_SRC].search, before[CLEAN_SRC].search + 1, 'the clean source was not asked, so this proves nothing');
+      assert.equal((hidden.sources ?? []).some((s: any) => s.id === ADULT_SRC), false,
+        'the per-source progress lines named an adult source the search never asked');
+      assert.equal(JSON.stringify(hidden.content).includes(ADULT_SRC), false, 'an adult provider was offered on a search card');
+
+      const shown = await json('/api/sources/search-all?q=Zzzfanoutshown&adult=1');
+      assert.equal(asked[ADULT_SRC].search > before[ADULT_SRC].search, true, 'the cross-source search could not be revealed');
+      assert.equal((shown.sources ?? []).some((s: any) => s.id === ADULT_SRC), true,
+        'the adult source is still missing from the progress lines with ?adult=1');
+    });
+
+    await t.test('/api/sources/find skips an adult source, and naming it does not override the hide', async () => {
+      // Reintroduce by writing `reachable` back into `allowed` in GET /api/sources/find.
+      const before = snap();
+      const hidden = await json('/api/sources/find?q=Zzzfindterm');
+      assert.equal(hidden.content.some((c: any) => c.source === ADULT_SRC), false, 'find returned an adult provider');
+      assert.equal(hidden.content.some((c: any) => c.source === CLEAN_SRC), true, 'find lost the clean provider too');
+      assert.equal(asked[ADULT_SRC].search, before[ADULT_SRC].search, 'find asked an adult source anyway');
+
+      // `sources=` narrows the fan-out; it must never widen it back past the hide.
+      const named = await json(`/api/sources/find?q=Zzzfindnamed&sources=${ADULT_SRC}`);
+      assert.deepEqual(named.content, [], 'naming a hidden source in `sources=` brought it back');
+
+      assert.equal((await json('/api/sources/find?q=Zzzfindshown&adult=1')).content.some((c: any) => c.source === ADULT_SRC),
+        true, 'find could not be revealed with ?adult=1');
+    });
+
+    await t.test('a capped account is still REFUSED by id, not merely unsurfaced', async () => {
+      // The hide and the cap are different rules and the cap is the one that says no. Reintroduce by
+      // deleting the `sourceAllowedFor` refusal from /api/sources/latest: the 403 becomes a 200.
+      await q('UPDATE users SET max_age_rating = 13 WHERE id = $1', [uid]);
+      try {
+        for (const url of [
+          `/api/sources/latest?source=${ADULT_SRC}&adult=1`,
+          `/api/sources/popular?source=${ADULT_SRC}&adult=1`,
+          `/api/sources/search?source=${ADULT_SRC}&q=Zzzcapped&adult=1`,
+          `/api/sources/detail?source=${ADULT_SRC}&sourceId=${ADULT_SRC}-1&adult=1`,
+        ]) {
+          const r = await get(url);
+          assert.equal(r.statusCode, 403, `${url} answered ${r.statusCode}; the age cap stopped being a refusal`);
+          assert.equal(r.json().error, 'forbidden');
+        }
+        // …and the count must not become a side channel: `reachable` already dropped the source, so there
+        // is nothing to hide and nothing to count. A capped account must not learn the number either.
+        const capped = await json('/api/sources');
+        assert.equal(capped.hiddenAdult, 0, 'a 13+ account was told how many adult providers exist');
+        assert.equal(capped.content.some((s: any) => s.id === ADULT_SRC), false);
+      } finally {
+        await q('UPDATE users SET max_age_rating = NULL WHERE id = $1', [uid]);
+      }
+    });
+
+    await t.test('filling and detail are NOT hidden: a series whose own source is adult stays serviceable', async () => {
+      // The deliberate exception, and the reason `surfaceable` is a separate helper rather than a change to
+      // `reachable`. Both calls run with the reveal OFF. Reintroduce by using `surfaceable` for `allowed`
+      // in POST /api/sources/fill/scan: "its own adult source was not offered" fails.
+      const scan = await app.inject({
+        method: 'POST', url: '/api/sources/fill/scan', headers: auth, payload: { seriesId: FILL_SERIES },
+      });
+      assert.equal(scan.statusCode, 200, `the fill scan answered ${scan.statusCode} for a series on an adult source`);
+      const own = scan.json().candidates.find((c: any) => c.source === ADULT_SRC);
+      assert.ok(own?.pinned, 'its own adult source was not offered, so the series became unfillable with the chip off');
+
+      // Detail is an explicit act on a source the person just named, so the chip does not reach it either.
+      const detail = await get(`/api/sources/detail?source=${ADULT_SRC}&sourceId=${ADULT_SRC}-1`);
+      assert.equal(detail.statusCode, 200, 'the add dialog could not read a named adult source with the reveal off');
+      assert.equal(detail.json().count, 5, 'the detail answer lost its chapters');
+    });
   } finally {
     await app.close();
     await q('DELETE FROM series_seen WHERE user_id = $1', [uid]).catch(() => {});
@@ -323,8 +541,8 @@ test('an 18+ library stays off browsing surfaces until it is revealed', { skip }
     await q('DELETE FROM collection_items WHERE collection_id = $1', [col]).catch(() => {});
     await q('DELETE FROM collections WHERE id = $1', [col]).catch(() => {});
     await q('DELETE FROM favorites WHERE user_id = $1', [uid]).catch(() => {});
-    await q('DELETE FROM lib_books WHERE id = ANY($1)', [[ADULT_BOOK, CLEAN_BOOK]]).catch(() => {});
-    await q('DELETE FROM lib_series WHERE id = ANY($1)', [[ADULT_SERIES, CLEAN_SERIES]]).catch(() => {});
+    await q('DELETE FROM lib_books WHERE id = ANY($1)', [[ADULT_BOOK, CLEAN_BOOK, ...FILL_BOOKS]]).catch(() => {});
+    await q('DELETE FROM lib_series WHERE id = ANY($1)', [[ADULT_SERIES, CLEAN_SERIES, FILL_SERIES]]).catch(() => {});
     await q('DELETE FROM libraries WHERE id = ANY($1)', [[ADULT_LIB, CLEAN_LIB]]).catch(() => {});
     await q('DELETE FROM users WHERE username = ANY($1)', [USERS]).catch(() => {});
   }

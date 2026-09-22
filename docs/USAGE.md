@@ -620,8 +620,24 @@ again.
   sources the dialog already found are asked. When the list held no other source the done step says
   *None of the other sources checked lists this title.*
 
-If you try to add a title you already have from another source, Uchiyomi warns you and lets you add a separate copy
-or cancel. A heads-up appears if you queue a lot of chapters at once (sources can rate-limit heavy downloads).
+**Adding a series back costs no downloads (since v0.42.0).** An add never fetches a chapter this server
+already has. *Remove from library* keeps every file and every chapter row, so removing a series and adding
+it again — which is this app's own advice when a title looks wrong — now fetches only what is genuinely
+missing. Chapters count wherever they are: a read-only library Uchiyomi never downloaded counts, whatever
+the files there are named. When nothing is left to fetch the dialog says *All {n} chapters are already in
+your library* instead of starting a download, and the series still gets its source, its floor, its chapter
+list and its cover. The one exception is a chapter you removed with **Delete from server** or **Delete
+files**: that is fetched again, because asking for it is what an add is. Before this, re-adding a series
+whose chapters sat in a read-only library downloaded the whole back catalogue a second time and then
+listed every chapter twice.
+
+**Open in library**, on the done step, opens the series the add actually landed on — the id the server
+answered with, or the one that appears on the download's card as soon as its first chapter is scanned in.
+It used to search for the title and open the first result, which on a library with two similarly named
+series was a confident wrong answer.
+
+If you try to add a title you already have from another source, Uchiyomi warns you and lets you add a
+separate copy, **Open it** (the copy you already have), or cancel. A heads-up appears if you queue a lot of chapters at once (sources can rate-limit heavy downloads).
 Descriptions are shown as plain text: a source's HTML and markdown are stripped before you see them, on the
 dialog and on the series page.
 
@@ -881,6 +897,17 @@ nothing is marked, and every row stays as it was. Deleting a merge survivor's fi
 folders of the series merged into it. There is no bulk form of this on purpose: *Select all* plus one tap
 must never be able to wipe a hand-curated folder.
 
+**Typing the title (since v0.42.0).** Every dialog that asks you to type a series' title to confirm it —
+*Remove from library*, *Delete files* and *Forget* — now compares what you typed the way it is drawn
+rather than byte for byte. Curly quotes and apostrophes, en and em dashes, an HTML entity the source never
+decoded (`&amp;` for `&`), invisible characters and doubled or non-breaking spaces all match their plain
+keyboard equivalents, in either direction, and so does an accent typed a different way. Case is **not**
+folded: that is visible, and the same dialog confirms deleting a member. Before this, a title carrying any
+of those simply could not be confirmed from a keyboard — 38 of 241 series on one real library — and the
+server applied the same strict rule, so the button was dead rather than the request refused. A **Copy
+title** button now sits beside the box as well, whenever the browser offers a clipboard (over plain `http`
+on a LAN it does not, and the button is then hidden rather than broken).
+
 ### Deleting chapters after they are read
 
 **Admin → Settings → Library housekeeping → Delete read chapters**. Off by default, and turning it on asks
@@ -924,6 +951,19 @@ job fails toward keeping. It corrects itself as chapters are read again.
 **Admin → Tasks → Delete read chapters** shows the last run, how much it freed, and how many chapters are
 waiting. **Run now** is there if you would rather not wait for the hour.
 
+**Show missing chapters in Mihon** (**Admin → Settings → Library housekeeping**, off by default, since
+v0.42.0) is for libraries that deliberately hold less than the sources list. Mihon works out how many
+chapters a series has from the list Uchiyomi hands its Komga extension, so it counts what is on disk: turn
+this on if you run the cleanup above, if you **follow** series without fetching them, or if you use a
+**chapter floor** — otherwise the trackers behind Mihon see the part you kept rather than the series. With it
+on, the chapters this server never downloaded and those whose files the cleanup deleted are listed beside the
+ones it holds, marked *not downloaded*, and count towards the chapter total Mihon reports to AniList and MAL.
+They cannot be opened, on purpose: tapping one gets Mihon's own empty-chapter message rather than a
+placeholder page, because viewing a page would mark the chapter read. A series you have finished still shows
+as *Completed* — a chapter that can never be read is listed, not counted as unread. Only the Mihon extension
+sees these rows: the app, OPDS and offline reading list what is on disk exactly as before, and turning the
+switch off puts the list back at once.
+
 **Merging duplicates** is on **Content → Health**, attached to the duplicate check that finds them: where it
 reports the same title sitting in your library twice, **Merge** folds one into the other. Every chapter and
 every progress row moves to the survivor. Chapters that look like duplicates are **kept**, not removed --
@@ -966,8 +1006,22 @@ page. (An OPDS reader has no button to press, so for it the choice sits on its o
 lasts until you close the browser and then it hides itself again. The button only appears for accounts that
 actually have such a library, and never for one whose age limit is below 18.
 
+**Since v0.42.0 the same reveal also covers adult providers on Discover.** A source whose extension
+declares itself adult used to keep listing itself, and painting its newest and popular covers, on the one
+screen where things appear without being asked for — on one real server twelve of the fourteen sources
+switched on. With the reveal off, such a source is left out of the provider list and its sheet, its newest
+and popular walls answer nothing, and the search across all your sources does not even ask it, so no
+request goes to that site at all. The **Show 18+** button is on Discover too — beside *Newest from your
+sources*, where it stays while you search — and brings the lot back for the rest of the browser session.
+It appears there whenever something is being hidden, so an install with adult providers and no 18+ shelf
+still has the switch. Three things are deliberately left alone, because you named them yourself: opening a
+provider's own page for a title, adding it, and *Find missing chapters* on a series whose own source is
+adult. Hiding those would stop a series you already own from being filled, which is breaking the library
+rather than tidying a screen.
+
 This is about what turns up unasked, not about access. A link, a bookmark, an offline download and reading
-progress all keep working while the library is hidden, because losing your place is not tidying.
+progress all keep working while the library is hidden, because losing your place is not tidying. An age
+limit below 18 is the other thing entirely: those sources are refused by name whatever the button says.
 
 **Access.** **Access** on a library row lists who can open it. One thing worth knowing: a member with no
 limits set can open every library, including ones you add later. Unticking them here is what turns that into
@@ -1402,7 +1456,8 @@ delete in the app is deliberately smaller than it sounds, so here is exactly wha
 - **Delete on the series page, and *Remove from library* on the Library page** hide the series. Nothing is
   erased: the chapter rows, the files, everyone's progress, favourites and ratings stay, the series sits in
   the Removed list on **Content → Library**, and *Put back* restores it exactly as it was. Adding the same
-  title again from a source revives the same series rather than making a second one — history and all.
+  title again from a source revives the same series rather than making a second one — history and all —
+  and since v0.42.0 it fetches only the chapters that are genuinely missing, never the ones still on disk.
 - ***Delete from server* on a chapter, the read-chapter cleanup, and *Delete files* on a removed series**
   remove the bytes and keep the rows. Each row is marked *deleted from the server*, everyone's reading
   history on it survives, and the updater does not fetch it back on its own; *Fetch again* can, for the
@@ -1429,8 +1484,9 @@ delete in the app is deliberately smaller than it sounds, so here is exactly wha
   the previous refusal is what stops it — chapters the verify task marked *missing* on a mounted share do
   not refuse), or while the folder still holds chapters under any root (a rescan would bring it back as a
   new series with no history; an empty folder does not count, since the scanner never turns one into a
-  series). The typed title is compared trimmed and Unicode-normalised, so a name written on a Mac confirms
-  from any keyboard. A series that absorbed others by merge takes those rows with it. History on chapters that moved
+  series). The typed title is compared the way it is drawn rather than byte for byte (section 8): curly
+  quotes and dashes, an undecoded HTML entity, invisible characters and extra spaces all match what a
+  keyboard produces, and a **Copy title** button sits beside the box. Case still matters. A series that absorbed others by merge takes those rows with it. History on chapters that moved
   to a merge survivor is kept under the survivor, never erased. Reading progress is still attached to the
   chapter row on purpose: this is the one place a delete takes a person's history, it says so in the dialog,
   and every other delete in this list keeps it.

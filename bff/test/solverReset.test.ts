@@ -22,7 +22,10 @@ test('the reset clears every remembered session and unsolvable origin, says how 
   globalThis.fetch = (async (_url: any, init: any) => {
     solves++;
     const asked = JSON.parse(init.body).url as string;
-    return asked.startsWith('https://dead.test') ? refused() : solved(asked);
+    // Compare the HOST, not a prefix: `startsWith` also accepts https://dead.test.example.com, which is
+    // the shape CodeQL flags as an incomplete URL sanitisation (alert #33). Verdict-identical for every URL
+    // this test produces, and honest about what it means.
+    return new URL(asked).hostname === 'dead.test' ? refused() : solved(asked);
   }) as typeof fetch;
 
   const first = await cfSession('https://live.test/img/1.png');
