@@ -394,6 +394,14 @@ export default async function catalogRoutes(app: FastifyInstance) {
       const f = await one<{ folder: string }>('SELECT folder FROM lib_series WHERE id = $1', [id]);
       if (f) out.folder = f.folder;
       out.scanlatorPrefs = await readSeriesPrefs(id).catch(() => null);
+      // Chapter-name borrowing (lib/borrowNames.ts): the series' own switch, null when it follows the
+      // server's, and what actually applies -- the sheet's checkbox has to show the latter, or a series
+      // following a server that has it on would read "off" while its names are being borrowed.
+      const bn = await one<{ own: boolean | null; server: boolean | null }>(
+        `SELECT s.borrow_names AS own, (SELECT borrow_names FROM server_settings WHERE id = 1) AS server
+           FROM lib_series s WHERE s.id = $1`, [id]).catch(() => null);
+      out.borrowNames = bn?.own ?? null;
+      out.borrowNamesEffective = bn?.own ?? !!bn?.server;
     }
     return out;
   });

@@ -369,6 +369,19 @@ export function SourcesSheet({ id, series, groups, admin, error, isLoading, have
     } catch (e) { toast(msgOf(e, tr('Could not remove that')), 'error'); }
     setUnfollowing(null);
   };
+  // Chapter-name borrowing for this series (bff lib/borrowNames.ts). The box shows what APPLIES, the
+  // server's setting included, and a tap writes this series' own choice: on asks for names at once, off
+  // takes back every name borrowed for it.
+  const [borrowing, setBorrowing] = useState(false);
+  const setBorrow = async (on: boolean) => {
+    setBorrowing(true);
+    try {
+      await api(`/api/admin/series/${encodeURIComponent(id)}`, { method: 'PATCH', json: { borrowNames: on } });
+      onSaved();
+      toast(on ? tr('Looking for chapter names…') : tr('Borrowed chapter names removed'), 'success');
+    } catch (e) { toast(msgOf(e, tr('Could not save')), 'error'); }
+    setBorrowing(false);
+  };
   const { checking, checkNow } = useCheckNow(id, () => { onSaved(); for (const k of ['series-scanlators', 'series-groups', 'series-listing', 'series-versions']) qc.invalidateQueries({ queryKey: [k, id] }); });
 
   // `getElementById`, not `querySelector('#ch-12.5')`: a chapter number with a decimal point is not a valid
@@ -436,6 +449,14 @@ export function SourcesSheet({ id, series, groups, admin, error, isLoading, have
             )}
             <button type="button" onClick={onFindMissing} className="chip text-xs">{tr('Add one from Find missing chapters')}</button>
           </div>
+        )}
+        {isAdmin && series?.borrowNamesEffective !== undefined && (
+          <label className="mt-3 flex items-start gap-2 text-[11px] leading-relaxed text-fog-500">
+            <input type="checkbox" className="mt-0.5 accent-[rgb(var(--accent))]"
+              checked={series.borrowNamesEffective} disabled={borrowing}
+              onChange={(e) => setBorrow(e.target.checked)} />
+            <span>{tr('Borrow chapter names from another source. Only a source whose numbering matches this series is used; switching this off takes those names back.')}</span>
+          </label>
         )}
       </section>
 

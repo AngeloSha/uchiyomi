@@ -499,6 +499,17 @@ ALTER TABLE lib_series ADD COLUMN IF NOT EXISTS source_hunt_at timestamptz;
 -- The switch for that hunt. ON by default: it only ever runs after every followed source has failed a
 -- chapter, follows at most two sources per series, and never attaches an adult source to a clean series.
 ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS auto_follow_on_failure boolean NOT NULL DEFAULT true;
+-- Borrowing chapter names from a source whose numbering was verified to line up (lib/borrowNames.ts).
+-- Off by default everywhere: it is outbound traffic to a source that carries nothing else for you. The
+-- series column is NULL to follow the server setting.
+ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS borrow_names boolean NOT NULL DEFAULT false;
+ALTER TABLE lib_series      ADD COLUMN IF NOT EXISTS borrow_names boolean;
+-- The donor whose numbering matched, so a check does not re-search to reach the same answer; or a marker
+-- that a search found none, so it is not repeated for a week.
+ALTER TABLE lib_series      ADD COLUMN IF NOT EXISTS name_donor jsonb;
+-- Which source a borrowed name came from. NULL means the chapter's own source supplied it (or nobody did),
+-- which is what makes a bad donor identifiable and clearable in bulk.
+ALTER TABLE lib_books       ADD COLUMN IF NOT EXISTS title_source text;
 
 -- v0.41.0: the nightly library repair (lib/repair.ts), which fixes what the Health page could only report.
 --

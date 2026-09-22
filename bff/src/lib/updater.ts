@@ -17,6 +17,7 @@ import { effectivePrefsFor, readSeriesPrefs } from './scanlatorPrefs';
 import { copyToChapter, listingRows, replaceListing, type ListingCopy } from './seriesListing';
 import { heldBooks } from './chapterCleanup';
 import { downloadWithFallback, type FallbackOutcome } from './chapterFallback';
+import { borrowChapterNames } from './borrowNames';
 import { huntSource, seriesIsAdult, sweepAllowedFor, HUNT_MAX_PER_SWEEP } from './sourceHunt';
 import { completePartial, PARTIAL_COMPLETE_MAX } from './partial';
 
@@ -336,6 +337,10 @@ export async function updateSeries(seriesId: string, maxNew = 10, opts: UpdateOp
   // The copies of each number are stored in the same order the chooser ranked them (releaseOrder with
   // the same source ranks), so the listing's "best first" is the sweep's, not a second opinion.
   if (tagged.length) await replaceListing(seriesId, listingRows(tagged, releases, heldNums, s.source_id, releaseOrder(prefs, chooseOpts))).catch(() => {});
+  // Chapters their own source never named can often be named by one that numbers the work the same way
+  // (lib/borrowNames.ts). Off unless switched on, and failure is never the sweep's problem: a name is
+  // cosmetic and must not stop a check that is otherwise fetching chapters.
+  await borrowChapterNames(seriesId).catch(() => {});
 
   let added = 0;
   let failed = 0;

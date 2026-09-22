@@ -220,6 +220,11 @@ function SchedulesSection({ data, save }: { data: any; save: Save }) {
       <SwitchRow label={tr('Look for failed chapters on other sources')}
         help={tr('When a chapter cannot be saved from the sources this series follows, search the others once a day and follow the one that has it')}
         on={data.auto_follow_on_failure !== false} onChange={(next) => save({ autoFollowOnFailure: next })} />
+      {/* Off by default: it is outbound traffic to sources that carry nothing else for a series. A series
+          can switch it for itself on its Sources & translations sheet. */}
+      <SwitchRow label={tr('Borrow chapter names from other sources')}
+        help={tr('When the source of a series only says “Chapter 12”, take the names from another source whose numbering was checked against yours. A source that numbers the chapters differently is never used. Turning this off removes the borrowed names.')}
+        on={!!data.borrow_names} onChange={(next) => save({ borrowNames: next })} />
     </Section>
   );
 }

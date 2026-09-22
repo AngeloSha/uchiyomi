@@ -170,16 +170,20 @@ export async function replaceListing(seriesId: string, rows: ListingRow[]): Prom
      * title that is not itself one: many sources genuinely call every chapter "Chapter 12", and replacing
      * one restatement with another would be churn. Nothing an admin set by hand matches that pattern, so
      * an overridden title is never overwritten.
+     *
+     * A name BORROWED from another source (lib/borrowNames.ts, marked by title_source) gives way too: the
+     * chapter's own source naming it is the better authority, and the mark goes with it.
      */
     await qq(
       `UPDATE lib_books b
-          SET title = l.title, updated_at = now()
+          SET title = l.title, title_source = NULL, updated_at = now()
          FROM series_listing l
         WHERE l.series_id = $1 AND b.series_id = $1
           AND abs(l.number - b.number) < 0.001
           AND l.title IS NOT NULL AND btrim(l.title) <> ''
           AND l.title !~* ('^(ch(apter|\\.)?|episode|ep\\.?)?\\s*0*' || l.number || '\\s*$')
-          AND b.title ~* ('^(ch(apter|\\.)?|episode|ep\\.?)?\\s*0*' || b.number || '\\s*$')`,
+          AND (b.title ~* ('^(ch(apter|\\.)?|episode|ep\\.?)?\\s*0*' || b.number || '\\s*$')
+               OR b.title_source IS NOT NULL)`,
       [seriesId],
     );
   });

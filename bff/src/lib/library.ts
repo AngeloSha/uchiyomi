@@ -696,6 +696,7 @@ export function chapterName(title: string | undefined | null, number: number): s
  *
  * `title` is what the source called the chapter. It is written only when it is a real name (chapterName,
  * above), so a copy whose source says only "Chapter 12" never replaces a name an earlier copy supplied.
+ * A real one does replace a name borrowed from another source, and clears the borrowed mark.
  */
 export async function setBookMeta(folder: string, landed: Array<{ number: number; scanlator?: string; source?: string; missing?: number[]; title?: string }>): Promise<void> {
   const rows = landed.filter((c) => Number.isFinite(c.number));
@@ -708,7 +709,9 @@ export async function setBookMeta(folder: string, landed: Array<{ number: number
   }
   await q(
     `UPDATE lib_books b SET scanlator = v.grp, source_id = v.src, missing_pages = v.miss,
-            title = COALESCE(v.name, b.title)
+            title = COALESCE(v.name, b.title),
+            -- The chapter's own source naming it outranks a name borrowed from another (lib/borrowNames.ts).
+            title_source = CASE WHEN v.name IS NOT NULL THEN NULL ELSE b.title_source END
      FROM (VALUES ${values.join(',')}) AS v(n, grp, src, miss, name), lib_series s
      WHERE s.folder = $1 AND b.series_id = s.id AND b.number = v.n
        AND (b.scanlator IS DISTINCT FROM v.grp OR b.source_id IS DISTINCT FROM v.src

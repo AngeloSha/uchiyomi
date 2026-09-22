@@ -39,6 +39,7 @@ import { ART_DIR, artFile, artOverview } from '../lib/seriesArt';
 import { writePreflight } from '../lib/fsGuard';
 // Admin stats report on the whole library by definition; this route is already behind requireAdmin.
 import { NO_LIBRARIES, SYSTEM_CTX, visibleToAll } from '../lib/visibility';
+import { borrowChapterNames, clearBorrowedNames } from '../lib/borrowNames';
 import { addSeriesFromSource, findBestMatch, resolveCandidate, norm, jobBusy, startDownloadJob, FILL_MAX_CHAPTERS, REFRESH_BUDGET_MS } from './sources';
 import { confirmsTitle } from '../lib/confirmTitle';
 import { chapterFileRel } from '../lib/downloader';
@@ -418,7 +419,7 @@ export default async function adminRoutes(app: FastifyInstance) {
   // ---- server settings ----
   const SETTINGS_COLS = 'server_name, allow_registration, updater_hours, extension_hours, extension_auto_update, '
     + 'update_check, install_ping, install_ping_last, scanlator_prefs, cleanup_read, cleanup_read_days, backup_hour, auto_follow_on_failure, '
-    + 'repair_enabled, komga_ghost_chapters';
+    + 'repair_enabled, komga_ghost_chapters, borrow_names';
   // `extensions_configured` is not a column: extension_hours has a NOT NULL default, so its presence says
   // nothing about whether there is an engine to check. The settings page needs to know, or it offers two
   // controls for a job that can never run.
@@ -507,6 +508,11 @@ export default async function adminRoutes(app: FastifyInstance) {
       // Ghost chapters on the Komga surface (lib/komgaGhosts.ts). Affects nothing this server stores and
       // nothing the web app shows: it widens one API's chapter list so the trackers behind it can count.
       komgaGhostChapters: z.boolean().optional(),
+      /**
+       * Borrow chapter names from a source whose numbering was verified to match (lib/borrowNames.ts).
+       * Off by default. Switching it off takes back the names it gave every series that follows it.
+       */
+      borrowNames: z.boolean().optional(),
     }).parse(req.body);
     if (b.serverName !== undefined) await q('UPDATE server_settings SET server_name = $1, updated_at = now() WHERE id = 1', [b.serverName]);
     if (b.allowRegistration !== undefined) await q('UPDATE server_settings SET allow_registration = $1, updated_at = now() WHERE id = 1', [b.allowRegistration]);
@@ -524,6 +530,13 @@ export default async function adminRoutes(app: FastifyInstance) {
     // timer used to re-read the hour only when it fired (server.ts, the backup block says why).
     if (b.backupHour !== undefined) { await q('UPDATE server_settings SET backup_hour = $1, updated_at = now() WHERE id = 1', [b.backupHour]); runtime.rearmBackup?.(); }
     if (b.komgaGhostChapters !== undefined) await q('UPDATE server_settings SET komga_ghost_chapters = $1, updated_at = now() WHERE id = 1', [b.komgaGhostChapters]);
+    if (b.borrowNames !== undefined) {
+      await q('UPDATE server_settings SET borrow_names = $1, updated_at = now() WHERE id = 1', [b.borrowNames]);
+      // Off means the names go too, for every series that follows this switch; one switched on for itself
+      // keeps its own. On is picked up by each series' next check rather than all at once here: it is a
+      // cross-source search per series, and the sweep is what paces those.
+      if (!b.borrowNames) await clearBorrowedNames('following-server').catch(() => 0);
+    }
     await logAudit('settings.update', { userId: userIdOf(req), detail: b, req });
     return settingsRow();
   });
@@ -835,14 +848,17 @@ export default async function adminRoutes(app: FastifyInstance) {
   // so there was no way to stop the updater chasing a series you had finished with. scanlatorPrefs is the
   // series' own release preferences (lib/releases.ts); null clears them, so the series inherits the global
   // ones again. Each field is written on its own, so a body naming only one leaves the other alone.
+  // borrowNames switches chapter-name borrowing (lib/borrowNames.ts) for this series; null follows the
+  // server setting.
   app.patch('/api/admin/series/:id', async (req, reply) => {
     const { id } = req.params as { id: string };
     const b = z.object({
       autoUpdate: z.boolean().optional(),
       scanlatorPrefs: prefsSchema.nullable().optional(),
+      borrowNames: z.boolean().nullable().optional(),
     }).strict().safeParse(req.body);
     if (!b.success) return reply.code(400).send({ error: 'bad_request' });
-    if (b.data.autoUpdate === undefined && b.data.scanlatorPrefs === undefined) {
+    if (b.data.autoUpdate === undefined && b.data.scanlatorPrefs === undefined && b.data.borrowNames === undefined) {
       return reply.code(400).send({ error: 'bad_request', message: 'Nothing to change.' });
     }
     const row = await getSeriesRow(id);
@@ -856,6 +872,17 @@ export default async function adminRoutes(app: FastifyInstance) {
       await q('UPDATE lib_series SET scanlator_prefs = $2::jsonb WHERE id = $1',
         [id, b.data.scanlatorPrefs === null ? null : JSON.stringify(b.data.scanlatorPrefs)]);
       detail.scanlatorPrefs = b.data.scanlatorPrefs;
+    }
+    if (b.data.borrowNames !== undefined) {
+      await q('UPDATE lib_series SET borrow_names = $2 WHERE id = $1', [id, b.data.borrowNames]);
+      detail.borrowNames = b.data.borrowNames;
+      // Switching it ON is a request for names now, not at the next scheduled check; switching it OFF
+      // takes back every name this feature wrote, which is the only honest meaning of "stop doing that".
+      // null lands on whichever of the two the server setting says.
+      const on = b.data.borrowNames ?? !!(await one<{ borrow_names: boolean }>(
+        'SELECT borrow_names FROM server_settings WHERE id = 1').catch(() => null))?.borrow_names;
+      if (on) void borrowChapterNames(id).catch(() => {});
+      else await clearBorrowedNames({ seriesId: id }).catch(() => 0);
     }
     await logAudit('series.settings', { userId: userIdOf(req), detail, req });
     return { ok: true, ...(b.data.autoUpdate !== undefined ? { autoUpdate: b.data.autoUpdate } : {}) };

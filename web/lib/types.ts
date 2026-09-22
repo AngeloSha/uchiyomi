@@ -129,6 +129,10 @@ export interface Series {
   };
   /** Every source the updater asks for this series, primary first. Sent to every viewer. */
   sources?: SeriesSource[];
+  /** Admins only: this series' own chapter-name borrowing switch; null follows the server setting. */
+  borrowNames?: boolean | null;
+  /** Admins only: whether names are borrowed for this series, after the server setting is applied. */
+  borrowNamesEffective?: boolean;
   /** This series' own scanlator overrides, or null when it follows the server defaults. Admins only. */
   scanlatorPrefs?: StoredPrefs | null;
 }
