@@ -178,6 +178,8 @@ test('sources: who may reach them, and how long they get', { skip }, async (t) =
       assert.equal(all.statusCode, 200);
       const providers = all.json().content.flatMap((g: any) => g.providers.map((p: any) => p.source));
       assert.equal(providers.includes(ADULT), false, 'search-all returned the adult source');
+      // The progress lines beside the cards (v0.40.0) are a listing too: naming the source is naming the id.
+      assert.equal(all.json().sources.some((s: any) => s.id === ADULT), false, 'search-all named the adult source in its progress lines');
     });
 
     await t.test('`used` counts by adapter id, not by the name the folder was created under', async () => {

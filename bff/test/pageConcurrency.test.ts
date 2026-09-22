@@ -8,19 +8,19 @@
 // for one that does not.
 //
 // Every fetch here is held for ~40ms so overlap is measurable: peak in-flight is the observable.
-import test, { before, after } from 'node:test';
+import test, { before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync } from 'fs';
 import { rm } from 'fs/promises';
 import { tmpdir } from 'os';
-import { join } from 'path';
+import { join } from 'path'; import { clearPace } from '../src/lib/pace'; // pace.ts reads no env, so it may load before the env below
 
 // Set before the module graph loads: DL_ROOT is read once, at import, and the downloader writes real files.
 const ROOT = mkdtempSync(join(tmpdir(), 'uy-pc-'));
 process.env.DL_ROOT = ROOT;
 // The default gap is production politeness, pinned by downloadPacing.int.test.ts. Here it would only add
 // 110 x 250ms to the long-chapter tests; the paced adapter below declares its own gap instead.
-process.env.DOWNLOAD_PAGE_GAP_MS = '0';
+process.env.DOWNLOAD_PAGE_GAP_MS = '0'; process.env.DOWNLOAD_RESUME_WAIT_MS = '0,0,0'; // resumes wait only Retry-After here; pacePersists.test.ts pins the wait
 process.env.DOWNLOAD_MIN_GAP_MS ||= '0';
 process.env.MIN_FREE_GB = '0'; // the disk floor is not the subject here; diskGuard.test.ts is
 process.env.DATABASE_URL ||= 'postgres://unused:unused@127.0.0.1:1/unused';
@@ -88,7 +88,7 @@ before(async () => {
   // Sequential with a gap: what an engine looks like, at a gap the test can afford.
   registerAdapter({ ...base, id: 'ext-slow', name: 'Ext Slow', pageConcurrency: 1, pageGapMs: 30, getPageUrls: async () => urls(5) } as any);
 });
-after(async () => { globalThis.fetch = realFetch; await rm(ROOT, { recursive: true, force: true }); });
+beforeEach(clearPace); after(async () => { globalThis.fetch = realFetch; await rm(ROOT, { recursive: true, force: true }); }); // clearPace: a 429 in one test must not narrow the next test's pool (pacePersists.test.ts is where that is the subject)
 
 const chapter = (id: string, n: number) => ({ sourceId: id, number: n });
 

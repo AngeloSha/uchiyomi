@@ -122,11 +122,32 @@ plugin and hit **Admin → Providers → Reload sources** (`POST /api/admin/sour
 added, no extensions installed and no pack mounted, Uchiyomi is just a clean reader for the library you
 already own.
 
+**Progressive search.** A cross-source Discover search returns after `SEARCH_FIRST_ANSWER_MS` (default
+`6000`) at the latest, or `SEARCH_GRACE_MS` (`1500`) after its first useful answer, while unfinished sources
+keep filling the same cached entry. `SEARCH_SOURCE_MS` (`20000`, plus the solver allowance when needed) is
+one source's budget; `SEARCH_CONCURRENCY` defaults to `SCAN_CONCURRENCY` (which defaults to
+`SOLVER_CONCURRENCY=4`) in each of the solver and ordinary lanes. Entries live for `SEARCH_TTL_MS` (`300000`)
+and the oldest is evicted above `SEARCH_CACHE_MAX` (`50`). A source detail lookup is cached for ten minutes.
+These caches share network work, not authorisation: results are filtered to the account on every response.
+
+`FAKE_SOURCE_URLS=name=http://host:port,name2=http://host:port` registers deterministic HTTP adapters used
+by the release test harness. It is empty in every shipped deployment and is not a production source
+configuration.
+
+The shared source-work limits are `SOLVER_CONCURRENCY` (default `4`) and `SOLVER_BUDGET_MS` (default
+`90000`) for Cloudflare-backed work; `SCAN_CONCURRENCY` defaults to that solver slot count, while
+`SCAN_ENOUGH` (default `3`) is how many matching candidates make a missing-chapter scan stop widening.
+
 ## Downloading
 
 All optional; the defaults are what the live install runs. Adding a series and importing hundreds of
 chapters both go through the same downloader, so these are the only knobs that decide how hard a site is
 ever hit.
+
+- `UPDATER_SWEEP_MAX` (default `150`): most chapter-fetch attempts in one scheduled sweep, so a backlog
+  cannot occupy the whole night.
+- `CHAPTER_RETRY_CAP` (default `3`): ordinary failures before a chapter is left as failed until a person
+  explicitly retries it.
 
 - `DOWNLOAD_CONCURRENCY` (default `2`): chapters downloaded at once, per source.
 - `DOWNLOAD_MIN_GAP_MS` (default `1200`): minimum gap between chapter downloads from the same source.
@@ -160,8 +181,26 @@ ever hit.
   own rate limits towards the site, so the one-at-a-time pacing above was only slowing extension downloads
   down for nothing. The first 429 from the engine drops the chapter back to one page at a time for the rest
   of the download.
+- `DOWNLOAD_RESUME_WAIT_MS` (default `5000,10000,20000`): waits before the three attempts to resume a
+  chapter after a 429. A source's longer `Retry-After` is always the floor. A 429 also raises that source's
+  in-memory pace level (0–4): slowed levels use one page worker and double gaps up to four seconds; ten
+  quiet minutes lower the level by one. A successful slow chapter does not immediately reset it.
+- `PARTIAL_CHAPTER_FLOOR` (default `0.8`): if an ordinary, non-refusal failure leaves at least this share of
+  pages, save the chapter with indexed placeholders and repair evidence instead of discarding it. `0`
+  disables partial chapters. A 403/429 is a refusal and is never saved partial.
+- `PARTIAL_COMPLETE_MAX` (default `10`): most partial chapters the nightly completion pass tries to heal.
+  It asks only for the missing page indices and removes the partial mark once every page is real; `0`
+  disables the completion pass.
 - `MIN_FREE_GB` (default `10`): refuse to start a download when the download disk has less than this free.
   `0` disables the floor. Fails open if free space cannot be measured.
+
+An ordinary chapter failure may continue from up to two sources already followed for that series. A copy
+explicitly picked by a person never switches. A 403/429 never becomes a partial chapter or starts a hunt;
+the refusing source cools down, while an already-followed copy can keep the queue moving. The sweep can also
+find a new matching source when **Admin → Settings → Updates & schedules → Look for failed chapters on other
+sources** is on (the default): once per series per day, at most six candidates and five hunts per
+sweep, with no more than two extra follows. Title and 90%-chapter matching apply, and a clean series never
+causes an adult source to be followed. There is intentionally no environment variable for this switch.
 
 ## Deleting chapters after they are read
 
@@ -203,4 +242,3 @@ defaulting to `off` ever since, so on a default install a renamed folder has alw
 opt-in because getting a rematch wrong merges two series, and the guards that prevent that (a minimum book
 count, a minimum overlap, exactly one candidate, and every book fingerprinted) are worth understanding
 before you turn it on. Start with `report`.
-

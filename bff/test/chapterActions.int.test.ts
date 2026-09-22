@@ -30,6 +30,7 @@ if (DSN) {
   process.env.DOWNLOAD_PAGE_GAP_MS = '0';
   process.env.MIN_FREE_GB = '0';
   process.env.UPDATER_LIST_TIMEOUT_MS = '300';
+  process.env.DOWNLOAD_RESUME_WAIT_MS = '0,0,0'; // a 403 here is never resumed; the wait is pacePersists.test.ts's subject
 }
 const skip = DSN ? false : 'set TEST_DATABASE_URL to run';
 
@@ -42,7 +43,7 @@ const OTHER = 's_act_other', OTHER_FOLDER = 'T!act/Other Series';
 const SRC = 'act-src', FOL = 'act-fol';
 const ADMIN = 'act-admin', MEMBER = 'act-member', NODL = 'act-nodl', CAPPED = 'act-capped';
 const B = { one: 'b_act_1', two: 'b_act_2', three: 'b_act_3', lib: 'b_act_lib', odd: 'b_act_odd', other: 'b_act_other' };
-let q: any, app: any, updateSeries: any, CHAPTER_RETRY_CAP: number;
+let q: any, app: any, updateSeries: any, CHAPTER_RETRY_CAP: number, clearPace: () => void;
 let adminTok: string, memberTok: string, nodlTok: string, cappedTok: string, adminId: string;
 let savedGlobal: any;
 /** Every chapter id the source was asked pages for: which copy each action actually downloaded. */
@@ -119,6 +120,7 @@ before(async () => {
   ({ q } = (await import('../src/lib/db')) as any);
   const { registerAdapter } = await import('../src/lib/sources');
   ({ updateSeries, CHAPTER_RETRY_CAP } = (await import('../src/lib/updater')) as any);
+  ({ clearPace } = await import('../src/lib/pace'));
   const Fastify = (await import('fastify')).default;
   const jwt = (await import('@fastify/jwt')).default;
   const sourceRoutes = (await import('../src/routes/sources')).default;
@@ -189,6 +191,7 @@ before(async () => {
 beforeEach(async () => {
   if (!DSN) return;
   await q('DELETE FROM source_health WHERE source_id = ANY($1)', [[SRC, FOL]]).catch(() => {});
+  clearPace(); // the in-memory pace level is the same kind of leak as the cooldown, and cleared for the same reason
 });
 
 after(async () => {

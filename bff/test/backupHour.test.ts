@@ -23,7 +23,7 @@ test('the settings route accepts backupHour as a whole hour of the day, and retu
   const admin = code(read('routes/admin.ts'));
   assert.match(admin, /backupHour: z\.number\(\)\.int\(\)\.min\(0\)\.max\(23\)\.optional\(\)/, 'backupHour is not validated as an integer hour 0-23');
   // The GET has to answer it back, or the panel cannot show what it just saved.
-  assert.match(admin, /SETTINGS_COLS = [\s\S]{0,400}?backup_hour'/, 'backup_hour is not in the columns GET /api/admin/settings returns');
+  assert.match(admin, /SETTINGS_COLS = [\s\S]{0,500}?backup_hour(?:[,']|\s)/, 'backup_hour is not in the columns GET /api/admin/settings returns');
 });
 
 test('writing the hour re-arms the pending timer', () => {

@@ -2,7 +2,7 @@
   "_meta": {
     "language": "pt-BR",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 922
+    "strings": 938
   },
   "1 check found something": "1 verificação encontrou algo",
   "1 member": "1 membro",
@@ -925,5 +925,21 @@
   "A group name is at most 80 characters": "O nome de um grupo tem no máximo 80 caracteres",
   "A group name needs at least one letter or digit": "O nome de um grupo precisa de pelo menos uma letra ou dígito",
   "Tap the download icon on any chapter — or turn on Keep favorites offline under Profile → Settings → Downloads — to read offline. Perfect for flights and commutes.": "Toque no ícone de download em qualquer capítulo — ou ative “Manter favoritos offline” em Perfil → Configurações → Downloads — para ler offline. Perfeito para voos e deslocamentos.",
-  "Nothing is saved on this device, and there is no connection to fetch anything with. Reconnect and download a chapter to read it here.": "Nada está salvo neste dispositivo e não há conexão para buscar algo. Reconecte-se e baixe um capítulo para lê-lo aqui."
+  "Nothing is saved on this device, and there is no connection to fetch anything with. Reconnect and download a chapter to read it here.": "Nada está salvo neste dispositivo e não há conexão para buscar algo. Reconecte-se e baixe um capítulo para lê-lo aqui.",
+  "{n} of {m} sources answered · still asking {names}": "{n} de {m} fontes responderam · ainda consultando {names}",
+  "{n} of {m} sources answered · still asking {name}": "{n} de {m} fontes responderam · ainda consultando {name}",
+  "and {n} more": "e mais {n}",
+  "and 1 more": "e mais 1",
+  "Loading chapter list…": "Carregando a lista de capítulos…",
+  "Page {n} could not be fetched from {source}": "Não foi possível buscar a página {n} de {source}",
+  "Page {n} could not be fetched": "Não foi possível buscar a página {n}",
+  "It will be retried automatically.": "Vai ser tentado de novo automaticamente.",
+  "{n} pages missing": "{n} páginas faltando",
+  "1 page missing": "1 página faltando",
+  "{from} asked us to slow down — continued from {to}": "{from} pediu para irmos mais devagar — continuamos de {to}",
+  "took chapter {n} from {to}": "capítulo {n} obtido de {to}",
+  "1 chapter saved with pages missing": "1 capítulo salvo com páginas faltando",
+  "{n} chapters saved with pages missing": "{n} capítulos salvos com páginas faltando",
+  "Look for failed chapters on other sources": "Procurar capítulos com falha em outras fontes",
+  "When a chapter cannot be saved from the sources this series follows, search the others once a day and follow the one that has it": "Quando um capítulo não pode ser salvo das fontes que esta série acompanha, procura nas outras uma vez por dia e acompanha a que o tiver"
 }

@@ -1,5 +1,58 @@
 # Changelog
 
+## v0.40.0 — 2026-09-22
+
+This is a reliability release for finding and fetching chapters from real-world sources: some are slow,
+some rate-limit bursts, and an otherwise good chapter can have one broken image. Discover now shows useful
+results as soon as they arrive instead of waiting on the slowest provider, and the downloader preserves as
+much of a chapter as it safely can instead of treating every imperfect fetch as all-or-nothing.
+
+### Discover answers progressively
+
+**Search all sources** now returns within six seconds at most, or 1.5 seconds after the first useful answer,
+and keeps filling the same result set in the background. The source rows say which providers answered,
+failed, timed out, were disabled, are cooling down, or are still pending. Repeating the request polls that
+work instead of starting it again; normalised terms are cached for five minutes (up to fifty searches), with
+at most twelve cards from each source. Every response is filtered again for the viewer, so a shared cache
+never shows or starts an adult source for an account that cannot reach it. Source detail is cached for ten
+minutes and duplicate lookups collapse into one request, which lets the add dialog pre-warm its first two
+providers without doubling their traffic.
+
+### Downloads slow down, switch sources, and keep repairable chapters
+
+A valid image smaller than 256 bytes is accepted when Sharp can decode it. When a source answers 429, its
+download pace rises through four levels, uses one page worker, doubles the gaps up to four seconds, and only
+decays one level after ten quiet minutes. The current chapter resumes after 5, 10 and 20 seconds, always
+honouring a longer `Retry-After`. If an ordinary fetch fails, Uchiyomi tries at most two copies from sources
+the series already follows. It never overrides a copy somebody explicitly picked. A 403 or 429 never
+becomes a partial chapter or starts a hunt; the refusing source cools down, while a copy on an already
+followed source can keep the queue moving. Download job cards report every switch and distinguish a
+rate-limited switch from an ordinary failure.
+
+When at least 80% of a chapter arrives, Uchiyomi can save it with indexed placeholder pages and an internal
+repair manifest. The chapter row shows how many pages are missing; the reader leaves the placeholder visible
+with a caption, including when that page was also marked repeated, and offline copies keep the same evidence.
+The nightly completion pass repairs only the missing indices, at most ten partial chapters per run, then
+removes the partial mark when the chapter is whole.
+
+### A bounded source hunt
+
+**Admin → Settings → Updates & schedules → Look for failed chapters on other sources** is on by default.
+After an ordinary failure, the scheduled sweep may search up to six eligible sources and follow one that
+matches the title and at least 90% of the known chapter numbering. A series is hunted at most once per day,
+only five hunts start in one sweep, and at most two extra sources are followed. Adult sources are eligible
+only for an adult series. A refusal never starts a hunt. The source-health and job surfaces preserve the
+reason for every switch or refusal instead of reducing the whole sweep to a generic failure.
+
+The tuning knobs and additive API fields for progressive search, pacing, partial chapters, source switches,
+and the hunt switch are documented in `docs/CONFIGURATION.md` and `docs/api.md`. Existing clients may ignore
+all new fields.
+
+What was verified during recovery: the fake-adapter opt-in and production guard, API/OpenAPI coverage,
+documentation paths, deployment and release-workflow contracts, the web type-check, the fake HTTP protocol,
+and the browser-walk scripts under Node 24. The full two-width browser walk and final clean release gate are
+run from the recovered integration branch before the tag; they are not claimed by this preparation commit.
+
 ## v0.39.0 — 2026-09-20
 
 The profile page and the admin Settings tab, reorganised. The profile had grown by accretion: identity shown

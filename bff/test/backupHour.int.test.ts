@@ -35,7 +35,7 @@ async function setup() {
   await migrate();
 
   await q(`DELETE FROM users WHERE username = $1`, [USER]).catch(() => {});
-  await q('UPDATE server_settings SET backup_hour = 3 WHERE id = 1');
+  await q('UPDATE server_settings SET backup_hour = 3, auto_follow_on_failure = true WHERE id = 1');
   const admin = (await q<{ id: string }>(
     `INSERT INTO users (username, display_name, password_hash, role, auth_kind)
      VALUES ($1,$1,'x','admin','password') RETURNING id`, [USER]))[0].id;
@@ -61,7 +61,7 @@ async function setup() {
 
 async function teardown(app: any, q: any) {
   await app.close();
-  await q('UPDATE server_settings SET backup_hour = 3 WHERE id = 1').catch(() => {});
+  await q('UPDATE server_settings SET backup_hour = 3, auto_follow_on_failure = true WHERE id = 1').catch(() => {});
   await q(`DELETE FROM users WHERE username = $1`, [USER]).catch(() => {});
 }
 
@@ -109,6 +109,29 @@ test('the backup hour round-trips through settings and reaches the Tasks list', 
     assert.equal(again.json().content.find((x: any) => x.id === 'backup')?.schedule, 'daily at 03:00');
   } finally {
     runtime.rearmBackup = null;
+    await teardown(app, q);
+  }
+});
+
+test('the failed-chapter source hunt switch round-trips through admin settings', { skip }, async () => {
+  const { app, patch, get, q } = await setup();
+  try {
+    // Reintroduce by omitting auto_follow_on_failure from SETTINGS_COLS: PATCH writes the value but neither
+    // its answer nor the next GET can tell the settings page what is actually active.
+    const off = await patch({ autoFollowOnFailure: false });
+    assert.equal(off.statusCode, 200, off.body);
+    assert.equal(off.json().auto_follow_on_failure, false);
+    assert.equal((await get()).auto_follow_on_failure, false);
+    assert.equal((await q('SELECT auto_follow_on_failure AS value FROM server_settings WHERE id = 1'))[0]?.value, false);
+
+    // An unrelated save must leave the switch alone, and the shipped default is restored through the same
+    // camelCase PATCH contract the web uses.
+    await patch({ updaterHours: 6 });
+    assert.equal((await get()).auto_follow_on_failure, false);
+    const on = await patch({ autoFollowOnFailure: true });
+    assert.equal(on.statusCode, 200, on.body);
+    assert.equal(on.json().auto_follow_on_failure, true);
+  } finally {
     await teardown(app, q);
   }
 });

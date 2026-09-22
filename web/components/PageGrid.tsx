@@ -9,6 +9,8 @@ export interface GridPage {
   src: string | null;
   /** A page the reader is skipping: drawn dimmed, with a mark, still openable. */
   junk?: boolean;
+  /** A server-written placeholder. It may never be offered as a page to skip. */
+  missing?: boolean;
 }
 
 /**
@@ -59,7 +61,7 @@ export function PageGrid({ title, pages, current, onPick, onClose, onToggleJunk 
             {/* ⚠️ A <span role="button"> rather than a nested <button>, which is invalid HTML: the browser
                 closes the outer button before this one, and the tile stops being clickable at all. The tile
                 is the jump; this is the correction, so it stops the event rather than bubbling into it. */}
-            {onToggleJunk && (
+            {onToggleJunk && !p.missing && (
               <span
                 role="button"
                 tabIndex={0}

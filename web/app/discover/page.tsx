@@ -6,7 +6,6 @@ import { ART } from '@/lib/art';
 import { relativeTime } from '@/lib/format';
 import { useAuth, canDownload } from '@/lib/auth';
 import { t as tr } from '@/lib/i18n';
-import { useToast } from '@/components/Toast';
 import { EmptyState } from '@/components/EmptyState';
 import { ProgressBar, Reveal } from '@/components/ui';
 import { SourceCard, SourceItem } from '@/components/cards';
@@ -26,6 +25,26 @@ interface Job {
   autoFollow?: AutoFollow;
 }
 interface SearchGroup { title: string; coverUrl?: string; inLibrary?: boolean; updatedAt?: string; providers: { source: string; name: string; sourceId: string; title: string; coverUrl?: string }[] }
+/** One source's line in a search answer (v0.40.0): what it did with the term, or that it is still being asked. */
+interface SearchSourceLine { id: string; name: string; state: 'ok' | 'empty' | 'timeout' | 'failed' | 'skipped' | 'pending'; ms?: number; why?: 'disabled' | 'cooldown' }
+/**
+ * `/api/sources/search-all`. `content` is the grouped hits, shaped exactly as before v0.40.0; the rest is the
+ * progress the server has reported since, and is optional so an older server's answer still renders.
+ */
+interface SearchAnswer { content: SearchGroup[]; sources?: SearchSourceLine[]; pending?: number; asked?: number }
+
+/**
+ * How long the server may hold the FIRST answer to a search while the sources are still being asked. The
+ * server clamps it to its own ceiling; six seconds is the owner's "a few seconds", and a Cloudflare source
+ * that needs longer fills in afterwards. Every later poll asks for a short wait only: by then the server
+ * answers from the entry it is still filling, so the poll is a cheap join, not a second search.
+ */
+const SEARCH_FIRST_WAIT_MS = 6000;
+const SEARCH_POLL_WAIT_MS = 1500;
+/** How often to poll while the answer says some sources are still pending. */
+const SEARCH_POLL_MS = 1500;
+/** How many pending sources the progress line names before "and N more". */
+const SEARCH_NAMES_SHOWN = 3;
 
 /**
  * How many titles the hero rotates through.
@@ -54,7 +73,6 @@ const HERO_SLIDES = 10;
  * would reflow tiles under a reading thumb.
  */
 export default function DiscoverPage() {
-  const toast = useToast();
   const qc = useQueryClient();
   const { user, isAdmin } = useAuth();
 
@@ -94,12 +112,13 @@ export default function DiscoverPage() {
   const [listMode, setListMode] = useState<ListMode>('newest');
   const [selected, setSelected] = useState<string | null>(null);
   const [q, setQ] = useState('');
+  // What was SUBMITTED, as opposed to `q`, which is whatever is in the field. The search is keyed on this, so
+  // typing never fires a request and a term is searched exactly once per five minutes however it is reached.
+  const [term, setTerm] = useState('');
   const [page, setPage] = useState(1);
   const [byId, setById] = useState<Record<string, SourceItem[]>>({});
   const [order, setOrder] = useState<string[]>([]);
   const [states, setStates] = useState<Record<string, SrcState>>({});
-  const [searchHits, setSearchHits] = useState<SourceItem[]>([]);
-  const [searching, setSearching] = useState(false);
   const [seed, setSeed] = useState<AddSeed | null>(null);
   const [added, setAdded] = useState<Set<string>>(new Set());
 
@@ -166,8 +185,73 @@ export default function DiscoverPage() {
   // first, not whichever answered first. Unranked sources sort last.
   const rankOf = useCallback((id: string) => { const i = ranked.findIndex((s) => s.id === id); return i < 0 ? ranked.length : i; }, [ranked]);
 
+  // ---------------------------------------------------------------- search
+  /**
+   * The search, as a query rather than an imperative fetch.
+   *
+   * It was one `await api(...)` that showed eighteen skeletons until EVERY source had answered, and a
+   * Cloudflare source has a ninety-second budget, so "takes forever" was the accurate description. The
+   * server now answers within `wait` with whatever has landed and says who is still being asked; this polls
+   * while `pending` is non-zero and the wall fills in. Keyed on the submitted term, so the answer to an old
+   * term can never land on a new one (the key changed; the old request is aborted through `signal`), the
+   * same term again inside five minutes is instant, and leaving search mode stops the polling by itself.
+   */
+  const searchQ = useQuery({
+    queryKey: ['search-all', term],
+    queryFn: ({ signal, queryKey, client }) => {
+      // ⚠️ Only the first request may wait the long wait. A poll that also waited six seconds would hold
+      // its answer until the server's grace expired, so the wall would fill in six seconds late every time.
+      const first = (client.getQueryState(queryKey)?.dataUpdateCount ?? 0) === 0;
+      return api<SearchAnswer>(`/api/sources/search-all?q=${encodeURIComponent(term)}&wait=${first ? SEARCH_FIRST_WAIT_MS : SEARCH_POLL_WAIT_MS}`, { signal });
+    },
+    enabled: mode === 'search' && !!term,
+    // A failed search is shown as one; retrying it would be another fan-out to every source.
+    retry: false,
+    staleTime: 5 * 60_000,
+    refetchOnWindowFocus: false,
+    refetchInterval: (qy) => (qy.state.data?.pending ? SEARCH_POLL_MS : false),
+  });
+  // The grouped hits as wall rows, under today's mapping: the first provider's ids are the card's, the badge
+  // counts every provider. Derived, so a poll's answer replaces the rows without anything being cleared.
+  const searchHits = useMemo<SourceItem[]>(() => (searchQ.data?.content ?? []).map((g) => ({
+    source: g.providers[0]?.source ?? '', sourceId: g.providers[0]?.sourceId ?? g.title,
+    title: g.title, coverUrl: g.coverUrl, updatedAt: g.updatedAt,
+    inLibrary: g.inLibrary, providerCount: g.providers.length,
+  })), [searchQ.data]);
+  const groupsRef = useRef<Record<string, SearchGroup['providers']>>({});
+  // What each search stored, keyed the way the wall's own fold is, so open() offers the providers of a hit
+  // the same way it offers the providers of a folded card. Written from the answer, never from state.
+  useEffect(() => {
+    // Replace the submitted term's provider map rather than accumulating past searches. Two different
+    // searches can fold to the same normalised title; retaining the old entry would let a freshly painted
+    // card briefly open the previous search's providers before this answer added its own.
+    groupsRef.current = {};
+    (searchQ.data?.content ?? []).forEach((g) => { groupsRef.current[normTitle(g.title)] = g.providers; });
+  }, [searchQ.data]);
+  // How many sources the search is still waiting on, from the latest answer; zero in every other mode and
+  // on an older server that does not report it.
+  const stillAsking = mode === 'search' ? (searchQ.data?.pending ?? 0) : 0;
+  /**
+   * "3 of 8 sources answered · still asking MangaDex, Aqua Manga, Bato and 2 more": the wall is usable
+   * from the first answer, and this is what says the rest is coming and who is slow. Three names, then a
+   * count, so the line stays one line on a phone; one name gets the singular sentence.
+   */
+  const progress = useMemo(() => {
+    const d = searchQ.data;
+    if (mode !== 'search' || !d?.pending || !d.sources) return null;
+    const m = d.asked ?? d.sources.filter((s) => s.state !== 'skipped').length;
+    const n = Math.max(0, m - d.pending);
+    const waiting = d.sources.filter((s) => s.state === 'pending').map((s) => s.name);
+    if (waiting.length === 1) return tr('{n} of {m} sources answered · still asking {name}', { n, m, name: waiting[0] });
+    const shown = waiting.slice(0, SEARCH_NAMES_SHOWN).join(', ');
+    const more = waiting.length - SEARCH_NAMES_SHOWN;
+    // A singular key for one: "et 1 autres" is not French, and a plural key cannot know.
+    const names = more > 1 ? `${shown} ${tr('and {n} more', { n: more })}` : more === 1 ? `${shown} ${tr('and 1 more')}` : shown;
+    return tr('{n} of {m} sources answered · still asking {names}', { n, m, names });
+  }, [mode, searchQ.data]);
+
   const wall = useMemo(() => {
-    // Search arrives already folded: the server grouped it and `search` stored the groups in groupsRef.
+    // Search arrives already folded: the server grouped it and the effect above stored the groups in groupsRef.
     if (mode === 'search') return { items: searchHits, groups: {} as Record<string, WallProvider[]> };
     const seen = new Set<string>();
     const out: SourceItem[] = [];
@@ -190,7 +274,10 @@ export default function DiscoverPage() {
     return foldByTitle(out, nameOf, rankOf);
   }, [mode, listMode, selected, searchHits, order, byId, nameOf, rankOf]);
 
-  const pending = mode === 'newest' ? Math.max(0, budget.length - settled) : (searching ? 3 : 0);
+  // Skeleton tiles: in search mode only until the FIRST answer (or a failure) -- after that the wall shows
+  // what has landed and the progress line says what has not, so a skeleton would sit beside real tiles and
+  // read as a stuck load.
+  const pending = mode === 'newest' ? Math.max(0, budget.length - settled) : (!searchQ.data && !searchQ.isError ? 3 : 0);
 
   // The empty card for ONE source browsed alone says that source's own reason and wait, the way its sheet
   // row does -- "Rate-limited … · back in ~12 min", not the wall's "nothing new". `selected` names a
@@ -200,24 +287,22 @@ export default function DiscoverPage() {
     ? aloneEmpty(budget.find((s) => s.id === selected) ?? { id: selected, name: selected, lang: null }, states[kOf(selected)] ?? 'idle')
     : null;
 
-  const search = async (e?: React.FormEvent) => {
+  const search = (e?: React.FormEvent) => {
     e?.preventDefault();
-    const term = q.trim();
-    if (!term) return;
-    setMode('search'); setSearching(true); setSearchHits([]);
-    try {
-      const r = await api<{ content: SearchGroup[] }>(`/api/sources/search-all?q=${encodeURIComponent(term)}`);
-      setSearchHits((r.content ?? []).map((g) => ({
-        source: g.providers[0]?.source ?? '', sourceId: g.providers[0]?.sourceId ?? g.title,
-        title: g.title, coverUrl: g.coverUrl, updatedAt: g.updatedAt,
-        inLibrary: g.inLibrary, providerCount: g.providers.length,
-      })));
-      (r.content ?? []).forEach((g) => { (groupsRef.current as any)[normTitle(g.title)] = g.providers; });
-    } catch { toast(tr('Search failed'), 'error'); }
-    setSearching(false);
+    const next = q.trim();
+    if (!next) return;
+    setMode('search');
+    // The same term submitted again while its answer is on screen is a refetch -- a failed search has no
+    // other way back, and a finished one costs the server nothing (it answers from its entry). Not while
+    // one is in flight: `refetch()` cancels the running request by default, so a second tap of Search during
+    // the six-second wait would throw away the answer it was about to get. A new term is a new key; the old
+    // answer is never shown under it.
+    if (next === term && mode === 'search') { if (!searchQ.isFetching) searchQ.refetch(); }
+    else setTerm(next);
   };
-  const groupsRef = useRef<Record<string, SearchGroup['providers']>>({});
-  const backToNewest = () => { setQ(''); setMode('newest'); setSearchHits([]); };
+  // `term` is kept: the query is disabled by the mode, and keeping its observer keeps the answer cached, so
+  // searching the same title again after browsing is instant.
+  const backToNewest = () => { setQ(''); setMode('newest'); };
 
   const open = (it: SourceItem) => {
     const key = normTitle(it.title);
@@ -383,7 +468,7 @@ export default function DiscoverPage() {
         </div>
       )}
 
-      <div className="mb-3 mt-6 flex items-baseline justify-between gap-3">
+      <div className="mb-3 mt-6 flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
         <h2 className="font-display text-lg font-semibold tracking-tight text-fog-50 lg:text-xl">
           {mode === 'search' ? tr('Results across your sources') : listMode === 'popular' ? tr('Popular on your sources') : tr('Newest from your sources')}
         </h2>
@@ -396,6 +481,14 @@ export default function DiscoverPage() {
             {tr('{done} of {total} sources', { done: settled, total: budget.length })}
           </span>
         ) : null}
+        {/* Search's own progress, on its own row: with three source names it does not fit beside the
+            heading at 390 px, and it is gone the moment the last source answers. Announced, since the wall
+            it describes changes under a screen reader without a focus change. */}
+        {mode === 'search' && progress && (
+          <p className="basis-full text-xs tabular-nums text-fog-500" aria-live="polite" data-search-progress>
+            {progress}
+          </p>
+        )}
       </div>
 
       <div className="grid grid-cols-3 gap-x-3 gap-y-5 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-7 lg:gap-x-4 xl:grid-cols-8 2xl:grid-cols-9 3xl:grid-cols-10">
@@ -409,10 +502,12 @@ export default function DiscoverPage() {
         ))}
       </div>
 
-      {!wall.items.length && !pending && (
+      {/* No "no results" while sources are still being asked: the first answer often has nothing yet and the
+          sentence would be a verdict on a search that is still running. The progress line covers that gap. */}
+      {!wall.items.length && !pending && !stillAsking && (
         <div className="card col-span-full mt-2 p-8 text-center">
           <p className={`text-sm ${alone?.warn ? 'text-amber-300' : 'text-fog-400'}`}>
-            {mode === 'search' ? tr('No results across your sources — try another title.')
+            {mode === 'search' ? (searchQ.isError ? tr('Search failed') : tr('No results across your sources — try another title.'))
               // Only an admin can act on the first sentence; a member told to open Admin has nowhere to go.
               : budget.length === 0 ? (isAdmin ? tr('No sources are set up yet. Add one in Admin \u2192 Providers.') : tr('No sources are set up yet. Ask whoever runs this server.'))
               // One source alone: its reason, amber, before any sentence about the wall as a whole.
@@ -421,8 +516,9 @@ export default function DiscoverPage() {
                 ? tr('No source could be reached right now.')
                 : tr('Nothing new from these sources right now.')}
           </p>
-          {mode === 'newest' && (
-            <button onClick={() => qc.invalidateQueries({ queryKey: ['src-latest'] })} className="btn-ghost mt-4 px-5 py-2 text-sm">
+          {/* A failed search gets the same button: with `retry: false` nothing else re-asks it. */}
+          {(mode === 'newest' || searchQ.isError) && (
+            <button onClick={() => (mode === 'search' ? searchQ.refetch() : qc.invalidateQueries({ queryKey: ['src-latest'] }))} className="btn-ghost mt-4 px-5 py-2 text-sm">
               {tr('Try again')}
             </button>
           )}

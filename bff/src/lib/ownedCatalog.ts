@@ -66,7 +66,7 @@ const browseSrc = (ctx: ViewCtx, p: Params, alias = 'sv') => seriesSrcWith(brows
  */
 const booksSrc = (ctx: ViewCtx, p: Params, alias = 'bv') => `(
   SELECT b.id, b.series_id, b.source, b.file, b.root, b.pages, b.mtime, b.published_at, b.page_dims,
-         b.updated_at, b.fingerprint, b.scanlator, b.source_id, b.pruned_at, b.size,
+         b.updated_at, b.fingerprint, b.scanlator, b.source_id, b.pruned_at, b.size, b.missing_pages,
          COALESCE(ov.number, b.number) AS number,
          COALESCE(ov.title,  b.title)  AS title
     FROM lib_books b
@@ -166,6 +166,10 @@ function bookDto(r: any) {
     // it any more. A client that ignores this gets a 404 from the image server, which is the honest failure
     // but a poor thing to find out by tapping.
     pruned: !!r.pruned_at,
+    // The 1-based pages that are placeholders in the file: the chapter was saved with these missing
+    // (lib/partial.ts) and the sweep is still trying to fetch them. null when the chapter is complete. The
+    // series page draws the badge from this; the reader learns which pages from /api/books/:id/pages.
+    missingPages: Array.isArray(r.missing_pages) && r.missing_pages.length ? r.missing_pages.map(Number) : null,
     // Downloaded by this server, as opposed to found in somebody's read library. Only such a chapter may be
     // deleted from the server or fetched again: we put those bytes there and can put them back; a file under
     // LIBRARY_ROOT is a collection we did not assemble and do not get to remove. The web greys out Delete and
@@ -519,8 +523,8 @@ export const owned = {
     // Goes through booksSrc so page dimensions cannot enumerate a chapter of a hidden series.
     const p = new Params();
     const bsrc = booksSrc(ctx, p);
-    const r = await one<{ file: string; root: string; pruned_at: string | null; page_dims: Array<{ name: string; width: number | null; height: number | null }> | null }>(
-      `SELECT file, root, pruned_at, page_dims FROM ${bsrc} WHERE id = ${p.add(id)}`,
+    const r = await one<{ file: string; root: string; pruned_at: string | null; missing_pages: number[] | null; page_dims: Array<{ name: string; width: number | null; height: number | null }> | null }>(
+      `SELECT file, root, pruned_at, missing_pages, page_dims FROM ${bsrc} WHERE id = ${p.add(id)}`,
       p.values as any[],
     );
     if (!r) return [];
@@ -528,12 +532,21 @@ export const owned = {
     // so without this the reader would open a pruned chapter, lay out the right number of pages, and 404
     // every single one of them. No pages is the truth.
     if (r.pruned_at) return [];
+    // A page that is a placeholder in the file (lib/partial.ts) is marked here, inside bookPages rather than
+    // on the route, so the offline manifest and the Komga-compatible API see it as well as the reader. It
+    // stays a page -- it has a real image behind it and keeps its number -- the mark only says what the
+    // image is. Same idiom as `junk` on the route.
+    const missing = new Set(Array.isArray(r.missing_pages) ? r.missing_pages.map(Number) : []);
+    const mark = <T extends { number: number }>(pg: T): T | (T & { missing: true }) => (missing.has(pg.number) ? { ...pg, missing: true as const } : pg);
     if (Array.isArray(r.page_dims) && r.page_dims.length) {
-      return r.page_dims.map((pd, i) => ({ number: i + 1, fileName: pd.name, mediaType: mediaType(pd.name), width: pd.width ?? null, height: pd.height ?? null, sizeBytes: null }));
+      return r.page_dims.map((pd, i) => mark({ number: i + 1, fileName: pd.name, mediaType: mediaType(pd.name), width: pd.width ?? null, height: pd.height ?? null, sizeBytes: null }));
     }
     const dims = await cbzPageDims(`${r.root || LIBRARY_ROOT}/${r.file}`).catch(() => [] as Array<{ name: string; width: number | null; height: number | null }>);
-    if (dims.length) q('UPDATE lib_books SET pages = $1, page_dims = $2 WHERE id = $3', [dims.length, JSON.stringify(dims), id]).catch(() => {});
-    return dims.map((pd, i) => ({ number: i + 1, fileName: pd.name, mediaType: mediaType(pd.name), width: pd.width, height: pd.height, sizeBytes: null }));
+    // This is a cache, so a failed write must never hide readable pages; but once this call resolves a
+    // second reader should be able to use the cache instead of opening the archive again. Fire-and-forget
+    // made that ordering depend on database load and was exposed by the partial-chapter completion suite.
+    if (dims.length) await q('UPDATE lib_books SET pages = $1, page_dims = $2 WHERE id = $3', [dims.length, JSON.stringify(dims), id]).catch(() => {});
+    return dims.map((pd, i) => mark({ number: i + 1, fileName: pd.name, mediaType: mediaType(pd.name), width: pd.width, height: pd.height, sizeBytes: null }));
   },
 
   // Next/previous compare (number, file) rather than number alone. Two chapters legitimately share a

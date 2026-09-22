@@ -106,3 +106,28 @@ test('expanding a page puts it back in the window', () => {
   const flow = buildFlow([ch], 'collapse', new Set(['c1:2']));
   assert.equal(renderWindow(flow, 0, 0, 2).has(1), true);
 });
+
+// ---- v0.40.0: a page the source never served ----
+
+test('a missing page passes through the flow untouched, in every mode', () => {
+  // The server saves a chapter short with a flat placeholder at the hole and marks that page `missing`
+  // (`/api/books/:id/pages`). The reader draws its caption from the flag on the FLOW item, so the flag has
+  // to survive the trip through `buildFlow` -- and the page has to stay a page: never collapsed, never
+  // removed, whatever the junk mode. Collapsing it would put two lines of caption on a 48 px strip; hiding
+  // it would make "flat index" and "page number" differ again for exactly the page whose number the
+  // caption prints. Reintroduce by leaving `missing: p.missing` off the flow item in buildFlow: the caption
+  // has nothing to key on and the placeholder renders as a blank grey page.
+  // A placeholder may inherit `junk` from an earlier scan or a stale/manual classification. `missing` wins:
+  // hiding or collapsing the only evidence of the hole would make the page silently disappear again.
+  const ch: FlowChapter = { id: 'c1', pages: [page(1), { number: 2, width: 800, height: 1200, junk: true, missing: true }, page(3, true), page(4)] };
+  for (const mode of ['show', 'collapse', 'hide'] as const) {
+    const flow = buildFlow([ch], mode);
+    const hole = flow.find((f) => f.number === 2);
+    assert.ok(hole, `${mode}: the missing page is still in the flow`);
+    assert.equal(hole.missing, true, `${mode}: the missing flag reaches the flow item`);
+    assert.equal(hole.collapsed, false, `${mode}: a missing page is never collapsed`);
+    assert.equal(flow.find((f) => f.number === 1)?.missing, undefined, `${mode}: a served page carries no flag`);
+  }
+  // And the hole keeps its place: page 2 is index 1 with nothing before it removed.
+  assert.equal(startIndex(buildFlow([ch], 'show'), 0, 2), 1);
+});

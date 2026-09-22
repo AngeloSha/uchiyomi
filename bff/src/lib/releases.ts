@@ -156,6 +156,37 @@ export function releaseOrder(prefs: ReleasePrefs, opts: ChooseOpts = {}): (a: So
 }
 
 /**
+ * EVERY copy of one number that the release rules would consider, best first: the same blocklist drop as
+ * chooseReleases (a copy whose every known group is blocked is not on offer), the same comparator, the
+ * listing order as the final tie-break. The chosen copy comes out first, so `copiesOf(...)[0]` is what
+ * chooseReleases would have picked.
+ *
+ * This is the fallback chain's supply (lib/chapterFallback.ts): when the chosen copy of a number fails on
+ * a missing page, the same number from another followed source is the next thing to try, and it had to
+ * be ranked by the same rules or a blocked group's copy would slip in through the back door. A pure
+ * function over the tagged union the updater already holds, so a fallback costs no listing call.
+ */
+export function copiesOf<T extends SourceChapter>(
+  tagged: T[],
+  number: number,
+  prefs: ReleasePrefs,
+  opts: ChooseOpts = {},
+): T[] {
+  const { blocked } = priorityKeys(prefs);
+  const rules = releaseOrder(prefs, opts);
+  return tagged
+    .map((c, idx) => ({ c, idx }))
+    .filter(({ c }) => {
+      if (c.number !== number) return false;
+      const keys = groupsOf(c).map(normGroup);
+      // The blocklist rule of chooseReleases, verbatim: dropped only when every known group is blocked.
+      return !(keys.length && keys.every((k) => blocked.has(k)));
+    })
+    .sort((a, b) => rules(a.c, b.c) || a.idx - b.idx)
+    .map(({ c }) => c);
+}
+
+/**
  * One copy per chapter number, ascending, plus the numbers that are being held for the preferred group.
  *
  * Per number: copies whose known groups are all blocked are dropped first. If a copy from the effective

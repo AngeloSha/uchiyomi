@@ -6,7 +6,7 @@
 openapi: 3.1.0
 info:
   title: Uchiyomi API
-  version: 0.39.0
+  version: 0.40.0
   description: "Everything the web app does, it does over this API. Session JWTs are for the browser; scripts
     use a personal API token (Profile -> Connections -> API tokens), sent as `Authorization: Bearer uy_...`.
     Scopes: read (every token; GET plus the library search POST, which is a query), write (anything that changes data), admin (the /api/admin surface, which also
@@ -400,6 +400,39 @@ components:
         number: { type: number, minimum: 0, maximum: 1000000 }
         source: { type: string, minLength: 1, maxLength: 200, description: The adapter id the copy is listed on. }
         sourceId: { type: string, minLength: 1, maxLength: 200, description: The chapter id within that source. }
+    SearchSourceLine:
+      type: object
+      description: >-
+        One source's part in a cross-source search (GET /api/sources/search-all), in the order the sources
+        were asked. Only sources the caller may reach are ever listed.
+      required: [id, name, state]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        state:
+          type: string
+          enum: [ok, empty, timeout, failed, skipped, pending]
+          description: >-
+            `ok` answered with results, `empty` answered with none, `timeout` outran its budget (recorded as
+            slow, never as a failure), `failed` threw (recorded against its health), `pending` is still
+            being asked, `skipped` was not asked at all.
+        ms: { type: integer, description: How long the source took, once it has settled. }
+        why:
+          type: string
+          enum: [disabled, cooldown]
+          description: Only with `skipped`. An operator switched the source off, or it is serving out a cooldown.
+    DownloadSwitch:
+      type: object
+      description: A chapter completed from a followed source after its first copy failed.
+      required: [number, from, to]
+      properties:
+        number: { type: number }
+        from: { type: string, description: The source whose copy failed. }
+        to: { type: string, description: The followed source whose copy landed. }
+        why:
+          type: string
+          enum: [rate_limited]
+          description: Present as `rate_limited` when a 429 caused the switch; absent for an ordinary failure.
     Cadence:
       type: object
       description: >-
@@ -1337,6 +1370,14 @@ paths:
                       Downloaded by this server (the file sits under the download directory); only such
                       chapters can be deleted or fetched again. False for a chapter the scanner found in the
                       read library.
+                  missingPages:
+                    type: [array, "null"]
+                    description: >-
+                      One-based indices represented by repair placeholders in a partial chapter; null once
+                      the chapter is complete.
+                    items:
+                      type: integer
+                      minimum: 1
         "401":
           description: Not authenticated
         "404":
@@ -1357,7 +1398,25 @@ paths:
         - bearer: []
       responses:
         "200":
-          description: OK
+          description: >-
+            Pages stay at their original one-based positions. A repair placeholder carries `missing: true`;
+            it may also carry `junk`, but clients must not hide a missing page.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  required: [number, fileName, mediaType]
+                  properties:
+                    number: { type: integer, minimum: 1 }
+                    fileName: { type: string }
+                    mediaType: { type: string }
+                    width: { type: [integer, "null"] }
+                    height: { type: [integer, "null"] }
+                    sizeBytes: { type: [integer, "null"] }
+                    junk: { type: boolean }
+                    missing: { type: boolean, description: True only for a repair placeholder in a partial chapter. }
         "401":
           description: Not authenticated
         "404":
@@ -1713,13 +1772,27 @@ paths:
     get:
       tags:
         - sources
-      summary: Search every enabled source at once.
+      summary: Search every enabled source at once, answering before the slow ones do.
       operationId: getApiSourcesSearchAll
       description: >-
         By default groups results by normalized title (one card, every provider that has it — what Discover
         uses). With `groupBy=source`, groups by provider instead (one rail per source, mirroring Mihon's
         global search) — used by the import review sheet's manual-search screen, where which specific source
         a pick comes from matters more than which other sources also carry the same title.
+        Since v0.40.0 the answer does not wait for every source: it comes when every source the caller may
+        reach has answered, or `wait` ms have passed (clamped to `SEARCH_FIRST_ANSWER_MS`, default 6000;
+        absent means that maximum), or `SEARCH_GRACE_MS` (default 1500) after the first source with results
+        — whichever is first. `sources` lists every source the caller may reach with its state (`ok`,
+        `empty`, `timeout`, `failed`, `pending`, or `skipped` with `why` `disabled` / `cooldown` for a source
+        that was not asked at all); `pending` counts the ones still being asked and `asked` the ones asked at
+        all. While `pending` is above 0, repeat the same request with a short `wait` (`wait=0` reads what
+        is there without waiting): the sources keep answering into a server-side entry, keyed by the
+        normalised term and kept `SEARCH_TTL_MS` (default 300000), which is why the same search typed again
+        by anyone answers at once. The entry is shared but every answer is filtered to the caller's own
+        reachable sources, so an age-capped account neither starts nor sees an adult source another
+        account's search asked. Each source is bounded at `SEARCH_SOURCE_MS` (default 20000; the solver
+        budget for a source behind Cloudflare): a source that outruns it is recorded as slow, one that
+        throws as failed, as the newest listing records them.
       parameters:
         - name: q
           in: query
@@ -1733,11 +1806,41 @@ paths:
             type: string
             enum: [source]
           description: Omit for the default title-grouped shape.
+        - name: wait
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 0
+          description: >-
+            The most milliseconds to hold the answer for, clamped to `SEARCH_FIRST_ANSWER_MS` (6000); absent
+            means that maximum. `0` answers at once with whatever the entry already holds.
       security:
         - bearer: []
       responses:
         "200":
-          description: OK
+          description: >-
+            `content` is the title-grouped list (or the per-source rails with `groupBy=source`), exactly as
+            before v0.40.0; the three fields beside it are the search's progress.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [content, sources, pending, asked]
+                properties:
+                  content:
+                    type: array
+                    items: {}
+                  sources:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/SearchSourceLine"
+                  pending:
+                    type: integer
+                    description: How many of the caller's sources are still being asked.
+                  asked:
+                    type: integer
+                    description: How many of the caller's sources were asked at all (everything but the skipped).
         "401":
           description: Not authenticated
         "403":
@@ -1801,7 +1904,11 @@ paths:
       summary: Downloads in progress and failed ones (a failed job is never swept; it carries a reason).
       operationId: getApiSourcesJobs
       description: >-
-        One card per series folder: `{folder, title, total, done, status, reason?, finishedAt?}`. An add
+        One card per series folder: `{folder, title, total, done, status, reason?, finishedAt?,
+        switched?: [{number, from, to, why?}], partial?}`. `switched` records a chapter completed from a
+        different followed source after its first copy failed; `why` is `rate_limited` when a 429 caused
+        the switch and may be absent for an ordinary failure. `partial` counts chapters this job saved with
+        repair placeholders. Both additions are absent when empty. An add
         that named `alsoFollow` candidates carries `autoFollow` on its card as well -- `{done, results}`
         with `done: false` and no results while the other sources are being asked, then one entry per
         candidate in the order given: `{source, name, theirTitle, followed, coverage, why}` where `why`
@@ -1820,7 +1927,35 @@ paths:
         - bearer: []
       responses:
         "200":
-          description: OK
+          description: Download job cards.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [content]
+                properties:
+                  content:
+                    type: array
+                    items:
+                      type: object
+                      additionalProperties: true
+                      required: [folder, title, total, done, status]
+                      properties:
+                        folder: { type: string }
+                        title: { type: string }
+                        total: { type: integer }
+                        done: { type: integer }
+                        status: { type: string }
+                        reason: { type: string }
+                        finishedAt: { type: integer }
+                        switched:
+                          type: array
+                          items:
+                            $ref: "#/components/schemas/DownloadSwitch"
+                        partial:
+                          type: integer
+                          minimum: 0
+                          description: Chapters in this job saved with repair placeholders.
         "401":
           description: Not authenticated
         "403":
@@ -3228,11 +3363,46 @@ paths:
         - bearer: []
       responses:
         "200":
-          description: OK
+          description: >-
+            A manifest whose `pages` keep their original one-based positions. A repair placeholder carries
+            `missing: true` (and may also carry `junk`), so offline readers preserve the partial-chapter
+            evidence.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [bookId, seriesId, seriesTitle, title, number, pageCount, readingDirection, coverUrl, totalBytes, pages]
+                properties:
+                  bookId: { type: string }
+                  seriesId: { type: string }
+                  seriesTitle: { type: string }
+                  title: { type: string }
+                  number: {}
+                  pageCount: { type: integer }
+                  readingDirection: { type: string }
+                  mediaType: { type: [string, "null"] }
+                  coverUrl: { type: string }
+                  totalBytes: { type: integer }
+                  pages:
+                    type: array
+                    items:
+                      type: object
+                      required: [number, url, width, height, bytes, mediaType]
+                      properties:
+                        number: { type: integer, minimum: 1 }
+                        url: { type: string }
+                        width: { type: [integer, "null"] }
+                        height: { type: [integer, "null"] }
+                        bytes: { type: [integer, "null"] }
+                        mediaType: { type: [string, "null"] }
+                        junk: { type: boolean }
+                        missing: { type: boolean, description: True only for a repair placeholder. }
         "401":
           description: Not authenticated
         "404":
           description: Not found, or not visible to this account
+        "410":
+          description: The chapter is a pruned tombstone and has no pages to download.
   /api/downloads:
     get:
       tags:
@@ -3899,15 +4069,17 @@ paths:
       description: >-
         Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. The row
         includes scanlator_prefs, the server-wide release preferences (ScanlatorPrefs; the default is no
-        priority, nothing blocked, two days of patience), and backup_hour, the local hour (0-23) of the
-        nightly backup.
+        priority, nothing blocked, two days of patience), backup_hour, the local hour (0-23) of the nightly
+        backup, and auto_follow_on_failure, the on-by-default bounded source hunt after an ordinary scheduled
+        chapter failure. The hunt never runs for interactive Add/Fetch or after a 403/429 refusal.
       security:
         - bearer: []
       responses:
         "200":
           description: >-
-            The settings row. Only the read-chapter cleanup fields and backup_hour are described here; the
-            rest are the snake_case columns PATCH sets (server_name, allow_registration, updater_hours, ...).
+            The settings row. Only the read-chapter cleanup fields, backup_hour and
+            auto_follow_on_failure are described here; the rest are the snake_case columns PATCH sets
+            (server_name, allow_registration, updater_hours, ...).
           content:
             application/json:
               schema:
@@ -3934,6 +4106,11 @@ paths:
                     minimum: 0
                     maximum: 23
                     description: Local hour of the nightly backup. Default 3.
+                  auto_follow_on_failure:
+                    type: boolean
+                    description: >-
+                      Whether a scheduled sweep may find and follow another matching source after an
+                      ordinary failed chapter. On by default; bounded to one hunt per series per day.
         "401":
           description: Not authenticated
         "403":
@@ -3943,7 +4120,7 @@ paths:
         - admin
       summary: "Change server settings: name, open registration, update interval, backup hour, extension check
         interval and its kill switch, the update check, the opt-in install count, the opt-in read-chapter
-        cleanup, and the server-wide scanlation-group preferences."
+        cleanup, the bounded failed-chapter source hunt, and the server-wide scanlation-group preferences."
       operationId: patchApiAdminSettings
       description: >-
         Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. Answers
@@ -4000,6 +4177,11 @@ paths:
                   description: >-
                     Local hour of the nightly backup. The pending timer is re-armed at once, so the change
                     applies to the next run rather than the one after.
+                autoFollowOnFailure:
+                  type: boolean
+                  description: >-
+                    Allow the scheduled sweep to search for and follow a matching source after an ordinary
+                    chapter failure. Does not affect interactive requests or refusals.
       security:
         - bearer: []
       responses:

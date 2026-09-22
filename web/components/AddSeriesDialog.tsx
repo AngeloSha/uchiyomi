@@ -18,6 +18,7 @@ import { relativeTime } from '@/lib/format';
 import { t as tr } from '@/lib/i18n';
 import { normTitle } from '@/lib/normTitle';
 import { cadenceText } from '@/lib/cadence';
+import { jobNoteLines, type JobCardNotes } from '@/lib/jobNotes';
 
 export interface Provider { source: string; name: string; sourceId: string; title: string; coverUrl?: string }
 interface Detail {
@@ -28,7 +29,7 @@ interface Detail {
   /** How many numbers have more than one copy. */
   versions?: number;
 }
-interface Job {
+interface Job extends JobCardNotes {
   folder: string; title: string; total: number; done: number; status: string;
   /** The add-time auto-follow (v0.36.0), once the server has judged the other sources. See lib/types.ts. */
   autoFollow?: AutoFollow;
@@ -96,6 +97,15 @@ function autoFollowLine(r: AutoFollowResult): string {
 type ChapterPick = 'all' | 'none' | `first:${number}` | `latest:${number}`;
 const CHAPTER_PRESETS = [10, 25, 50, 100, 200];
 
+/**
+ * How long a looked-up detail stays fresh on this device. The server caches the same lookup for ten minutes
+ * too, so a longer time here would only show a listing the server itself has already refreshed.
+ */
+const DETAIL_STALE_MS = 10 * 60_000;
+/** One source's series and chapter list. The signal is the query's, so a pick abandoned mid-flight is cancelled. */
+const fetchDetail = (p: Pick<Provider, 'source' | 'sourceId'>, signal?: AbortSignal) =>
+  api<Detail>(`/api/sources/detail?source=${encodeURIComponent(p.source)}&sourceId=${encodeURIComponent(p.sourceId)}`, { signal });
+
 /** Never render a swept-up <style>/<script> block as a description. The BFF guards this too. */
 const looksCss = (s: string) =>
   s.length > 2500 || /<\/?(?:style|script)\b|\.[a-z][\w-]*\s*[{,]|@import|gtag\(|wp-manga|woocommerce|datalayer/i.test(s);
@@ -132,9 +142,13 @@ export function AddSeriesDialog({ seed, sources, mayFollow, onClose, onAdded }: 
   const [picked, setPicked] = useState<Provider | null>(
     seed.kind === 'result' ? seed.provider : seed.kind === 'group' && seed.providers.length === 1 ? seed.providers[0] : null,
   );
-  const [detail, setDetail] = useState<Detail | null>(null);
+  // The trending `find` in flight. The detail has its own query below and no longer shares this flag.
   const [loading, setLoading] = useState(false);
-  const [pick, setPick] = useState<ChapterPick>('all');
+  // What the person chose in the chapter <select>, or null for "whatever the detail says is the default".
+  // Derived rather than set when the detail lands: a `count === 0` listing used to render one frame with
+  // `all` selected and no such option before the effect corrected it, and picking another source now
+  // simply clears the choice instead of racing the arrival of the new detail.
+  const [pickChoice, setPickChoice] = useState<ChapterPick | null>(null);
   const [autoUpdate, setAutoUpdate] = useState(true);
   const [adding, setAdding] = useState(false);
   const [dup, setDup] = useState<string | null>(null);
@@ -170,7 +184,8 @@ export function AddSeriesDialog({ seed, sources, mayFollow, onClose, onAdded }: 
   // card and what "Checking {n} sources" counts. Zero when the switch was off or there was nobody to check.
   const [sentFollow, setSentFollow] = useState(0);
 
-  // Which request the state belongs to. Picking source A then B and having A land last used to overwrite B.
+  // Which `find` the state belongs to: a seed that changes under an open dialog must not have the first
+  // search's answer land last and win. Only the trending search uses it now; the detail is a keyed query.
   const want = useRef(0);
 
   useEffect(() => {
@@ -183,15 +198,37 @@ export function AddSeriesDialog({ seed, sources, mayFollow, onClose, onAdded }: 
       .finally(() => { if (mine === want.current) setLoading(false); });
   }, [seed, sources]);
 
+  /**
+   * The picked source's series and chapter list, as a query keyed on the source and its id.
+   *
+   * It was an effect with a request counter, so picking A then B then A again asked the server for A twice
+   * and showed "Loading…" both times, and the step after picking a source was the slow one the owner named.
+   * Keyed, the second pick is instant, and the pre-warm below can fill the cache before anyone picks at all.
+   * The server keeps its own ten-minute cache and joins concurrent requests, so a fresh key costs one round
+   * trip and a repeat costs none. `retry: false`: a source that failed is shown as failed, with the way to
+   * another source right beside it; retrying would be another twenty-second budget against the same site.
+   */
+  const detailQ = useQuery({
+    // ⚠️ The same shape as the pre-warm's key below, or the pre-warm warms nothing.
+    queryKey: ['src-detail', picked?.source, picked?.sourceId],
+    queryFn: ({ signal }) => fetchDetail(picked!, signal),
+    enabled: !!picked,
+    staleTime: DETAIL_STALE_MS,
+    retry: false,
+  });
+  const detail = detailQ.data;
+  const pick: ChapterPick = pickChoice ?? (detail && detail.count === 0 ? 'none' : 'all');
+
+  // The pre-warm: a group with a choice to make looks up its first two providers as it opens, so by the
+  // time a person has read the list and tapped one, the detail is already in the cache (or in flight, and
+  // the query above joins it). Two, not all: each is a live request to a site, and the list is ranked, so
+  // the first two are where nearly every tap lands. A group of one picks itself and needs no pre-warm.
   useEffect(() => {
-    if (!picked) return;
-    const mine = ++want.current;
-    setLoading(true); setDetail(null);
-    api<Detail>(`/api/sources/detail?source=${encodeURIComponent(picked.source)}&sourceId=${encodeURIComponent(picked.sourceId)}`)
-      .then((d) => { if (mine === want.current) { setDetail(d); setPick(d.count === 0 ? 'none' : 'all'); } })
-      .catch(() => { if (mine === want.current) setDetail(null); })
-      .finally(() => { if (mine === want.current) setLoading(false); });
-  }, [picked]);
+    if (seed.kind !== 'group' || seed.providers.length < 2) return;
+    for (const p of seed.providers.slice(0, 2)) {
+      qc.prefetchQuery({ queryKey: ['src-detail', p.source, p.sourceId], queryFn: ({ signal }) => fetchDetail(p, signal), staleTime: DETAIL_STALE_MS, retry: false });
+    }
+  }, [seed, qc]);
 
   // Only while the dialog is showing a live download -- or, since v0.36.0, while an auto-follow it asked
   // for is still being judged: a "nothing yet" add starts no download, but with candidates sent the server
@@ -323,6 +360,12 @@ export function AddSeriesDialog({ seed, sources, mayFollow, onClose, onAdded }: 
             <>
               <ProgressBar value={job && job.total ? job.done / job.total : 0.02} />
               <p className="text-xs tabular-nums text-fog-500">{job ? `${job.done}/${job.total}` : '…'}</p>
+              {/* v0.40.0: a chapter the picked source could not serve is taken from another followed one,
+                  and one that arrived short is saved with placeholders. Both are worth a line under the
+                  counter while it runs, in the same words as the downloads pill. */}
+              {jobNoteLines(job, (id) => providers?.find((p) => p.source === id)?.name ?? id).map((line, i) => (
+                <p key={i} className="text-start text-[11px] leading-relaxed text-fog-400" data-job-note>{line}</p>
+              ))}
             </>
           )}
           {followBlock}
@@ -376,39 +419,52 @@ export function AddSeriesDialog({ seed, sources, mayFollow, onClose, onAdded }: 
   // ---------------------------------------------------------------- options
   const summary = detail?.summary && !looksCss(detail.summary) ? detail.summary : '';
   const presets = CHAPTER_PRESETS.filter((n) => detail && n < detail.count);
+  // The picked provider's own cover until the detail lands, then the detail's: the same picture nearly
+  // always, so nothing jumps, and the body paints at once instead of behind a bare "Loading…".
+  const coverUrl = detail?.coverUrl ?? picked.coverUrl;
 
   return (
     // Not dismissable while the request is in flight. Escape or a backdrop click used to unmount the dialog
     // mid-add: the add still completed, but `setDone` and `onAdded` ran against nothing, so there was no
     // confirmation and the tile was never marked as added -- the worst possible version of "did that work?"
     <Modal title={detail?.title || title} onClose={adding ? () => {} : onClose} wide>
-      {loading || !detail ? (
-        <p className="py-10 text-center text-sm text-fog-500">{tr('Loading…')}</p>
-      ) : (
-        <div className="sm:flex sm:gap-4">
-          <div className="mb-3 shrink-0 sm:mb-0 sm:w-40">
-            <Img src={sourceCover(detail.source, detail.coverUrl)} alt="" fallbackSrc={detail.coverUrl || undefined}
-              className="aspect-[2/3] w-28 rounded-xl border border-ink-700 sm:w-40" />
-          </div>
-          <div className="min-w-0 flex-1">
-            {/* Where it comes from, named with its favicon, before anything else about it -- and the way
-                back to the other providers as a small chip, only when there are any. */}
-            <p className="mb-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-fog-500">
-              <span className="inline-flex items-center gap-1.5">
-                {tr('From')}
-                <SourceIcon id={detail.source} name={picked.name} size={16} />
-                <span className="text-fog-200">{picked.name}</span>
-              </span>
-              {providers && providers.length > 1 && (
-                <button type="button" onClick={() => { setPicked(null); setDetail(null); }} className="chip py-0.5 text-[11px]">
-                  {tr('Change')}
-                </button>
-              )}
-            </p>
+      {/* ⚠️ No gate around the body. Everything the pick already knows -- the cover, the source, the way back
+          to the other providers, the switches -- renders now; only the count, the groups and the chapter
+          <select> wait for the detail, and say so in their own place. A whole-body "Loading…" was the second
+          "takes forever" the owner reported, and it hid the Change chip exactly when a slow source made it
+          the thing to tap. Reintroduce by wrapping the body in `!detail ? <p>Loading…</p> : …`. */}
+      <div className="sm:flex sm:gap-4">
+        <div className="mb-3 shrink-0 sm:mb-0 sm:w-40">
+          <Img src={sourceCover(picked.source, coverUrl)} alt="" fallbackSrc={coverUrl || undefined}
+            className="aspect-[2/3] w-28 rounded-xl border border-ink-700 sm:w-40" />
+        </div>
+        <div className="min-w-0 flex-1">
+          {/* Where it comes from, named with its favicon, before anything else about it -- and the way
+              back to the other providers as a small chip, only when there are any. */}
+          <p className="mb-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-fog-500">
+            <span className="inline-flex items-center gap-1.5">
+              {tr('From')}
+              <SourceIcon id={picked.source} name={picked.name} size={16} />
+              <span className="text-fog-200">{picked.name}</span>
+            </span>
+            {providers && providers.length > 1 && (
+              <button type="button" onClick={() => { setPicked(null); setPickChoice(null); }} className="chip py-0.5 text-[11px]">
+                {tr('Change')}
+              </button>
+            )}
+          </p>
+          {detail ? (
             <p className="text-xs text-fog-500">
               {detail.count} {detail.count === 1 ? tr('chapter') : tr('chapters')}
               {detail.first != null && detail.last != null && <> · {detail.first}–{detail.last}</>}
             </p>
+          ) : detailQ.isError ? (
+            // The picker's own words for a source that did not answer; Change is right above it.
+            <p className="text-xs text-amber-300" data-detail="failed">{tr('Could not be reached right now.')}</p>
+          ) : (
+            <p className="text-xs text-fog-500" aria-live="polite" data-detail="loading">{tr('Loading chapter list…')}</p>
+          )}
+          {detail && (<>
             {/* The series page's Translated by section, compressed to what fits a dialog: the five busiest
                 groups and their rhythm, so "is this being translated" is answered before the add, not after.
                 No controls -- there is no series to set preferences on yet. */}
@@ -459,7 +515,7 @@ export function AddSeriesDialog({ seed, sources, mayFollow, onClose, onAdded }: 
                 is called fetching everywhere else. With nothing listed, "Nothing yet" is the only option that
                 can succeed, so it is the only one offered. */}
             <label className="mb-1 mt-4 block text-xs font-semibold uppercase tracking-wider text-fog-500">{tr('Chapters to fetch now')}</label>
-            <select value={pick} onChange={(e) => setPick(e.target.value as ChapterPick)} className="field">
+            <select value={pick} onChange={(e) => setPickChoice(e.target.value as ChapterPick)} className="field">
               {detail.count > 0 && <option value="all">{tr('All ({n})', { n: detail.count })}</option>}
               {presets.map((n) => <option key={`first:${n}`} value={`first:${n}`}>{tr('First {n}', { n })}</option>)}
               {presets.map((n) => <option key={`latest:${n}`} value={`latest:${n}`}>{tr('Latest {n}', { n })}</option>)}
@@ -474,40 +530,42 @@ export function AddSeriesDialog({ seed, sources, mayFollow, onClose, onAdded }: 
                 {tr('Older chapters are not fetched by auto-update; fetch them from the series page when you want them.')}
               </p>
             )}
+          </>)}
 
-            <div className="mt-3 flex items-center justify-between gap-3">
-              <span className="text-sm text-fog-200">{tr('Auto-update new chapters')}</span>
-              <Switch on={autoUpdate} onChange={setAutoUpdate} label={tr('Auto-update new chapters')} />
-            </div>
-
-            {/* Only for an admin, and only when the dialog holds other sources for this title (a trending
-                search, a wall fold). The helper leads with why anyone would: the benefit is the reason #49
-                was filed. "Up to two per series" is the total, not two of these. */}
-            {mayFollow && others.length > 0 && (
-              <div className="mt-3" data-also-follow>
-                <div className="flex items-center justify-between gap-3">
-                  <span className="text-sm text-fog-200">{tr('Also check the other sources that carry this title')}</span>
-                  <Switch on={alsoFollow} onChange={setAlsoFollow} label={tr('Also check the other sources that carry this title')} />
-                </div>
-                <p className="mt-1 text-[11px] text-fog-500">
-                  {tr('Following one means new chapters are taken from whichever source has them first. Each is checked against this title\'s chapter list — only a source listing at least 90 % of the same numbers is followed, up to two per series.')}
-                </p>
-              </div>
-            )}
-
-            {count > 40 && (
-              <p className="mt-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-2.5 py-1.5 text-[11px] text-amber-300">
-                {tr('Grabbing many chapters at once can get you rate-limited. It pauses on its own and you can resume later.')}
-              </p>
-            )}
-            {dup && <p className="mt-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-2.5 py-1.5 text-[11px] text-amber-300">{dup}</p>}
-
-            <button onClick={() => add(!!dup)} disabled={adding} className="btn-accent mt-4 w-full py-2.5 text-sm disabled:opacity-50">
-              {adding ? tr('Working…') : dup ? tr('Add anyway') : tr('Add to library')}
-            </button>
+          {/* The switches depend on nothing the detail brings, so they are there from the first paint. */}
+          <div className="mt-3 flex items-center justify-between gap-3">
+            <span className="text-sm text-fog-200">{tr('Auto-update new chapters')}</span>
+            <Switch on={autoUpdate} onChange={setAutoUpdate} label={tr('Auto-update new chapters')} />
           </div>
+
+          {/* Only for an admin, and only when the dialog holds other sources for this title (a trending
+              search, a wall fold). The helper leads with why anyone would: the benefit is the reason #49
+              was filed. "Up to two per series" is the total, not two of these. */}
+          {mayFollow && others.length > 0 && (
+            <div className="mt-3" data-also-follow>
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-sm text-fog-200">{tr('Also check the other sources that carry this title')}</span>
+                <Switch on={alsoFollow} onChange={setAlsoFollow} label={tr('Also check the other sources that carry this title')} />
+              </div>
+              <p className="mt-1 text-[11px] text-fog-500">
+                {tr('Following one means new chapters are taken from whichever source has them first. Each is checked against this title\'s chapter list — only a source listing at least 90 % of the same numbers is followed, up to two per series.')}
+              </p>
+            </div>
+          )}
+
+          {count > 40 && (
+            <p className="mt-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-2.5 py-1.5 text-[11px] text-amber-300">
+              {tr('Grabbing many chapters at once can get you rate-limited. It pauses on its own and you can resume later.')}
+            </p>
+          )}
+          {dup && <p className="mt-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-2.5 py-1.5 text-[11px] text-amber-300">{dup}</p>}
+
+          {/* Disabled until the chapter list is here: the count and the from/none choice go in the request. */}
+          <button onClick={() => add(!!dup)} disabled={adding || !detail} className="btn-accent mt-4 w-full py-2.5 text-sm disabled:opacity-50">
+            {adding ? tr('Working…') : dup ? tr('Add anyway') : tr('Add to library')}
+          </button>
         </div>
-      )}
+      </div>
     </Modal>
   );
 }

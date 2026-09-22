@@ -335,6 +335,27 @@ the main one, the line's *{n} not here yet* counts the chapters missing across a
 and the scanlator preferences above apply to the merged list — so a group you prefer is taken from whichever
 source carries it.
 
+### When a source or page fails
+
+The downloader learns a source's pace. A 429 makes later chapters use one page worker and longer gaps, and
+the current chapter waits and resumes from its remaining pages. If a normal failure still wins, Uchiyomi
+tries the same chapter on at most two sources the series already follows; the download card says which
+source it switched from and to. It does not switch a version you explicitly picked, and a 403 or 429 is a
+refusal: the source cools down, no partial is saved and no new source is hunted. If the series already
+follows another source with the chapter, that copy may keep the queue moving.
+
+If at least four pages in five arrived after an ordinary page failure, the chapter is kept with a numbered
+placeholder at every missing position rather than thrown away. Its row says how many pages are missing. The
+reader never hides a missing placeholder — even when that position was also marked as a repeated page — and
+labels it *Page {n} could not be fetched* and *It will be retried automatically.* The nightly update pass tries only those missing indices and
+heals at most ten partial chapters at a time; once every real page lands, the badge and captions disappear.
+
+For ordinary sweep failures, admins can leave **Admin → Settings → Updates & schedules → Look for failed
+chapters on other sources** on (the default). The sweep may search for a matching copy and follow it, but only
+once per series per day, against six candidates, for no more than five series per sweep and two extra
+follows per series. A clean series never searches an adult source. Interactive Add and Fetch requests do
+not hunt behind the person's back.
+
 ### Chapters the sources have that you don't
 
 The chapter list also shows, greyed out, every chapter the followed sources list that this server does not
@@ -545,7 +566,10 @@ again.
   de-duplicated into one card per title (a *{n} sources* chip says how many carry it), and anything you
   already own is marked **✓ In library**. The wall does the same: a title several of your sources publish is
   one card with the same chip, and tapping it lets you pick the source. A card's corner shows the favicon of
-  the source it came from.
+  the source it came from. The first useful results appear without waiting for the slowest source (within
+  about six seconds); source rows show *Searching…*, empty, failed, disabled or cooling-down states while
+  the rest arrive. Repeating the same search continues the in-flight work and a recent term opens from the
+  five-minute cache. Results are still filtered for the signed-in account, including its age limit.
 - **Add:** tap a card and pick which source to add it from — each with its favicon, the first marked *most
   used* (skipped when only one has it). The dialog then opens with *From {source} · Change*. Choose
   **Chapters to fetch now** (All, First N, Latest N, or **Nothing yet — pick chapters later**), toggle
@@ -1037,7 +1061,8 @@ with a fold (*How this works* / *What is sent, once a day*) that spells out exac
 **Updates & schedules**: the **Library update interval (hours)** (how often followed series are asked for new
 chapters), the **Backup time (hour, 0–23)** of the nightly backup — change it and the pending timer is re-armed at
 once, so the next run is at the new hour — and, when the extension engine is configured, **Update extensions
-automatically** and its check interval. **Library housekeeping**: **Delete read chapters** and its **Wait
+automatically** and its check interval. **Look for failed chapters on other sources** controls the bounded,
+once-a-day source hunt described in section 4 and is on by default. **Library housekeeping**: **Delete read chapters** and its **Wait
 (days)**, below. **Scanlators**: the server-wide defaults for choosing between scanlation groups — **Blocked
 groups**, which apply to every series, a **Default priority** for series that have no ranking of their own, and
 the **Patience (days)** before a chapter is taken from a group lower down the list; see *Sources & translations*
@@ -1124,6 +1149,10 @@ device for reading with no connection. The **Downloads** screen shows what's sav
 with **Keep favorites offline** on (**Profile → Settings → Downloads**), your favorites' next unread chapters
 auto-download while you're online. A cover with a
 small ⌁ badge has something saved on this device.
+
+A partial chapter is saved offline with the same page positions as the server copy. Its placeholder page
+and retry caption remain visible offline, so a missing page is never mistaken for a shorter,
+complete chapter; syncing again after the server heals it replaces the placeholder.
 
 **Opening the app with no connection at all** — on a plane, in a tunnel — works: launch it from the home
 screen and it goes straight to **Downloads**, with a banner naming the account it is showing. Everything that

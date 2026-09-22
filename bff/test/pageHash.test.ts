@@ -237,3 +237,21 @@ test('pages sharing an information-free hash are not treated as the same page', 
     { bookId: 'c3', page: 1, hash: credit }, { bookId: 'c3', page: 2, hash: flat },
   ])], [credit], 'the gate must not cost us the page we are actually after');
 });
+
+test('the junk skipper never flags a placeholder: a partial chapter\'s flat page hashes null', async () => {
+  // A chapter saved with pages missing (lib/partial.ts) carries a flat placeholder image at every missing
+  // index, and the same placeholder appears in every partial chapter of the library. If it hashed, three
+  // partial chapters would make it a "repeated credit page" and the reader would skip the very slot the
+  // caption lives on. It does not: a flat image has no horizontal variation, so the identity gate above
+  // returns null and nothing in junkPages.ts had to learn what a placeholder is.
+  //
+  // Reintroduce by drawing anything on the placeholder in placeholderPng() -- a line of text, a border --
+  // or by lowering the `widest < 8` gate in pageHash(): the hash comes back as a string and the assertion
+  // fails.
+  process.env.DATABASE_URL ||= 'postgres://unused:unused@127.0.0.1:1/unused';
+  process.env.JWT_SECRET ||= 'test-secret-at-least-16-chars';
+  const { placeholderPng } = await import('../src/lib/partial');
+  assert.equal(await pageHash(await placeholderPng(800, 1200)), null, 'the placeholder carries no identity');
+  assert.equal(await pageHash(await placeholderPng(640, 300)), null, 'at any size');
+  assert.equal(await pageHash(await sharp(await placeholderPng(800, 1200)).jpeg().toBuffer()), null, 'and re-encoded');
+});

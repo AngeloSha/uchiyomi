@@ -10,6 +10,7 @@
 // Two outputs from one call: a log line a person can grep, and one row per MISSING chapter (not per attempt)
 // that the health page reads and persistScan deletes the moment the chapter lands.
 import { q } from './db';
+import type { PageFailure } from './downloader';
 
 export interface ChapterFailure {
   seriesId: string;
@@ -19,7 +20,22 @@ export interface ChapterFailure {
   err: unknown;
 }
 
-const reasonOf = (e: any): string => String(e?.message || e || 'unknown error').slice(0, 300);
+/** One failed page as the ledger shows it: `page 80: 200 image/webp 88 B`, `page 12: 404`, `page 3: timeout`. */
+const pageLabel = (f: PageFailure): string =>
+  `page ${f.index + 1}: ${f.status ? f.status : f.error || 'fetch failed'}${f.type ? ` ${f.type}` : ''}${f.bytes !== undefined ? ` ${f.bytes} B` : ''}`;
+
+/**
+ * The reason column: the error's message, plus the first three failed pages when the downloader recorded
+ * them. "109 of 110 pages" said nothing about WHICH page or what the site answered for it, and the fix for
+ * an 88-byte WebP, a 404 and a timeout are three different fixes. Pages are 1-based here, as a person
+ * counts them in the reader; ≤ 300 characters, the column's working size.
+ */
+export const reasonOf = (e: any): string => {
+  const base = String(e?.message || e || 'unknown error');
+  const pages: PageFailure[] = Array.isArray(e?.failedPages) ? e.failedPages : [];
+  const evidence = pages.slice(0, 3).map(pageLabel).join('; ');
+  return (evidence ? `${base} (${evidence})` : base).slice(0, 300);
+};
 
 /**
  * What the ledger records as the status. A refusal keeps the source status the downloader attached; a

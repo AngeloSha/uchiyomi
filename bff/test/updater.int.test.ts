@@ -323,7 +323,7 @@ test('a chapter that will not download is written down, and erased when it lands
   await only(['ledger']);
   const serve = (shortChapter: string | null) => {
     globalThis.fetch = (async (u: any) =>
-      shortChapter && String(u).endsWith(`/${shortChapter}/l4.png`) ? new Response('nope', { status: 503 }) : png()) as typeof fetch;
+      shortChapter && new RegExp(`/${shortChapter}/l[34]\\.png$`).test(String(u)) ? new Response('nope', { status: 503 }) : png()) as typeof fetch;
   };
   const clear = () => q('DELETE FROM source_health WHERE source_id = $1', [SRC_LEDGER]);
 
@@ -340,7 +340,7 @@ test('a chapter that will not download is written down, and erased when it lands
   const row = async () => (await q(`SELECT status, attempts, source_id FROM chapter_failures WHERE series_id = $1 AND number = 2`, [sid]))[0];
   await q('DELETE FROM chapter_failures WHERE series_id = $1', [sid]);
 
-  // Chapter 2 comes up one page short, twice.
+  // Chapter 2 comes up two pages short, twice: below the partial floor, so this remains the ledger case.
   await clear(); serve('c2');
   await updateSeries(sid, 5);
   let f = await row();
@@ -1068,12 +1068,13 @@ test('a cooldown on the primary does not stop the follower; a cooldown on both i
 });
 
 /**
- * Reintroduce by restoring `if (e?.blockStatus) break;`: the refusal on the primary ends the loop, chapter
- * 3 via the follower is never attempted, and "the follower's chapter still landed" fails.
+ * Reintroduce by ending the loop on the primary's refusal, or by skipping same-number copies: chapters 1
+ * and 2 never move to the follower and chapter 3 is never reached. One refusal is still only one strike.
  */
 test('a refusing primary costs one strike and does not stop the follower\'s chapters', { skip }, async () => {
   const { registerAdapter } = await import('../src/lib/sources');
-  // The primary lists 1..2, the follower 1..3, so the follower is only ever asked for chapter 3.
+  // The primary lists 1..2 and the follower 1..3. The refusal on primary chapter 1 moves chapters 1 and 2
+  // to their same-number follower copies; chapter 3 was already chosen from the follower.
   registerAdapter({
     id: 'upd-pri2', name: 'upd-pri2',
     async search() { return []; },
@@ -1100,10 +1101,13 @@ test('a refusing primary costs one strike and does not stop the follower\'s chap
   try {
     const r = await updateSeries(S('ref'), 5);
     assert.equal(priAsked.length, 1, `the refusing primary was asked once, not for chapter 2 as well; asked: ${priAsked}`);
-    assert.deepEqual(extAsked, ['f3'], 'the follower\'s chapter still landed');
-    assert.ok(onDisk('ref', 3));
-    assert.equal(r.added, 1);
-    assert.equal(r.failed, 1, 'the refusal is one failure, written down once');
+    assert.deepEqual(extAsked, ['f1', 'f2', 'f3'], 'each number landed from the healthy follower');
+    for (const n of [1, 2, 3]) assert.ok(onDisk('ref', n), `chapter ${n} landed`);
+    assert.equal(r.added, 3);
+    assert.equal(r.failed, 0, 'a recovered refusal is not a chapter failure');
+    assert.equal(r.switched, 2, 'the two primary copies report their source switch');
+    assert.equal(Number((await q('SELECT count(*)::int AS n FROM chapter_failures WHERE series_id = $1', [S('ref')]))[0]?.n), 0,
+      'a chapter recovered from its alternate leaves no retry-ledger row');
     const h = (await q('SELECT consecutive FROM source_health WHERE source_id = $1', ['upd-pri2']))[0];
     assert.equal(Number(h?.consecutive), 1, 'one refusal is one strike');
   } finally {

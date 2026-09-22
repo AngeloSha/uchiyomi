@@ -2,7 +2,7 @@
   "_meta": {
     "language": "ar",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 922
+    "strings": 938
   },
   "1 check found something": "فحص واحد وجد شيئًا",
   "1 member": "عضو واحد",
@@ -925,5 +925,21 @@
   "A group name is at most 80 characters": "اسم المجموعة لا يتجاوز 80 حرفًا",
   "A group name needs at least one letter or digit": "يحتاج اسم المجموعة إلى حرف أو رقم واحد على الأقل",
   "Tap the download icon on any chapter — or turn on Keep favorites offline under Profile → Settings → Downloads — to read offline. Perfect for flights and commutes.": "انقر على أيقونة التنزيل في أي فصل — أو فعّل «إبقاء المفضلات دون اتصال» من الملف الشخصي ← الإعدادات ← التنزيلات — للقراءة دون اتصال. مثالي للرحلات والتنقلات.",
-  "Nothing is saved on this device, and there is no connection to fetch anything with. Reconnect and download a chapter to read it here.": "لا شيء محفوظ على هذا الجهاز، ولا يوجد اتصال لجلب أي شيء. أعد الاتصال ونزّل فصلًا لقراءته هنا."
+  "Nothing is saved on this device, and there is no connection to fetch anything with. Reconnect and download a chapter to read it here.": "لا شيء محفوظ على هذا الجهاز، ولا يوجد اتصال لجلب أي شيء. أعد الاتصال ونزّل فصلًا لقراءته هنا.",
+  "{n} of {m} sources answered · still asking {names}": "أجاب {n} من {m} مصادر · لا نزال نسأل {names}",
+  "{n} of {m} sources answered · still asking {name}": "أجاب {n} من {m} مصادر · لا نزال نسأل {name}",
+  "and {n} more": "و{n} أخرى",
+  "and 1 more": "وواحد آخر",
+  "Loading chapter list…": "جارٍ تحميل قائمة الفصول…",
+  "Page {n} could not be fetched from {source}": "تعذّر جلب الصفحة {n} من {source}",
+  "Page {n} could not be fetched": "تعذّر جلب الصفحة {n}",
+  "It will be retried automatically.": "ستتم إعادة المحاولة تلقائيًا.",
+  "{n} pages missing": "{n} صفحات مفقودة",
+  "1 page missing": "صفحة واحدة مفقودة",
+  "{from} asked us to slow down — continued from {to}": "طلب منا {from} الإبطاء — تابعنا من {to}",
+  "took chapter {n} from {to}": "تم أخذ الفصل {n} من {to}",
+  "1 chapter saved with pages missing": "حُفظ فصل واحد بصفحات مفقودة",
+  "{n} chapters saved with pages missing": "حُفظ {n} فصول بصفحات مفقودة",
+  "Look for failed chapters on other sources": "البحث عن الفصول المتعذّرة في مصادر أخرى",
+  "When a chapter cannot be saved from the sources this series follows, search the others once a day and follow the one that has it": "عندما يتعذّر حفظ فصل من المصادر التي تتابعها هذه السلسلة، يُبحث في المصادر الأخرى مرة يوميًا وتُتابَع التي لديها الفصل"
 }

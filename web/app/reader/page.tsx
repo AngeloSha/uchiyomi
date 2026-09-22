@@ -10,6 +10,7 @@ import { chapterOutcome } from '@/lib/readerState';
 import { openableChapters } from '@/lib/chapterRows';
 import { buildFlow, startIndex, renderWindow } from '@/lib/readerFlow';
 import { Book, Page, PageInfo, Series } from '@/lib/types';
+import { useAuth, canDownload } from '@/lib/auth';
 import { chapterLabel } from '@/lib/format';
 import { deviceId } from '@/lib/device';
 import { getOfflineChapter, getPageBlob, queueProgress, noteOfflineProgress, listSeriesDownloads, setOfflinePageJunk } from '@/lib/downloads';
@@ -23,10 +24,11 @@ import { SeriesCard } from '@/components/cards';
 import { IcChevronLeft, IcChevronRight, IcSliders, IcRefresh, IcGrid } from '@/components/icons';
 import { t as tr } from '@/lib/i18n';
 
-interface PageDim { number: number; width: number | null; height: number | null; junk?: boolean }
-interface Chapter { id: string; seriesId: string; seriesTitle: string; title: string; pages: PageDim[]; offline: boolean; readingDirection?: string | null; pruned?: boolean }
+interface PageDim { number: number; width: number | null; height: number | null; junk?: boolean; missing?: boolean }
+/** `sourceId`: the adapter the copy came from, for naming it on a missing page's caption. Unknown for a downloaded copy. */
+interface Chapter { id: string; seriesId: string; seriesTitle: string; title: string; pages: PageDim[]; offline: boolean; readingDirection?: string | null; pruned?: boolean; sourceId?: string | null }
 interface ChapterRef { id: string; label: string }
-interface FlatItem { ci: number; number: number; width: number | null; height: number | null; key: string; firstOfChapter: boolean; junk?: boolean }
+interface FlatItem { ci: number; number: number; width: number | null; height: number | null; key: string; firstOfChapter: boolean; junk?: boolean; missing?: boolean; collapsed?: boolean }
 
 const WINDOW_BEHIND = 2;
 const WINDOW_AHEAD = 6;
@@ -50,11 +52,12 @@ async function loadChapter(bookId: string): Promise<Chapter | null> {
       seriesId: b.seriesId,
       seriesTitle: b.seriesTitle,
       title: b.metadata?.title || b.name,
-      pages: pInfo.map((p) => ({ number: p.number, width: p.width ?? null, height: p.height ?? null, junk: p.junk })),
+      pages: pInfo.map((p) => ({ number: p.number, width: p.width ?? null, height: p.height ?? null, junk: p.junk, missing: p.missing })),
       offline: false,
       // The server deleted this chapter's file after everyone finished it. Carried so the empty page list
       // below can be explained rather than blamed on the reader's library mount.
       pruned: b.pruned === true,
+      sourceId: b.sourceId ?? null,
     };
   } catch {
     return null;
@@ -101,6 +104,9 @@ function ReaderInner() {
   const [showPages, setShowPages] = useState(false);
   const [showChapters, setShowChapters] = useState(false);
   const [current, setCurrent] = useState(0);
+  const { user } = useAuth();
+  /** Source id -> display name from the series' own followed sources (set with the reading direction). */
+  const [seriesSourceNames, setSeriesSourceNames] = useState<Record<string, string>>({});
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const [colW, setColW] = useState(0);
@@ -210,7 +216,12 @@ function ReaderInner() {
       // reading direction (drives double-spread pair order for RTL manga)
       try {
         const s = await api<Series>(`/api/series/${first.seriesId}`);
-        if (alive) setRtl(s?.metadata?.readingDirection === 'RIGHT_TO_LEFT');
+        if (alive) {
+          setRtl(s?.metadata?.readingDirection === 'RIGHT_TO_LEFT');
+          // The followed sources' display names, for the caption on a page the source never served. Free:
+          // this request is made anyway, and `sources` is sent to every viewer, unlike /api/sources.
+          setSeriesSourceNames(Object.fromEntries((s?.sources ?? []).map((x) => [x.sourceId, x.name])));
+        }
       } catch { /* offline: the downloaded record's direction, set above, stands */ }
       setReady(true);
     })();
@@ -257,6 +268,26 @@ function ReaderInner() {
   const removing = prefs.junkPages === 'hide';
 
   /**
+   * Who to name on the caption of a page the source never served (v0.40.0).
+   *
+   * The series' own followed sources come with the series (set above, sent to every viewer), and nearly every
+   * chapter saved short came from one of those. The full list is asked for ONLY when a placeholder's source
+   * is not among them -- a copy a fill took from an unfollowed source -- and only for a viewer the route
+   * answers: /api/sources is 403 to a member without download rights, which would be one failed request per
+   * chapter opened. The caption without a name is the fallback, never an id: an extension's id is nineteen
+   * digits nobody can read.
+   */
+  const unnamedMissingSource = chapters.some((c) => !!c.sourceId && !seriesSourceNames[c.sourceId] && c.pages.some((p) => p.missing));
+  const { data: allSources } = useQuery({
+    queryKey: ['sources'],
+    queryFn: () => api<{ content: { id: string; name: string }[] }>('/api/sources'),
+    staleTime: 60_000,
+    enabled: unnamedMissingSource && canDownload(user),
+  });
+  const sourceNameOf = (id: string | null | undefined): string | null =>
+    (id && (seriesSourceNames[id] ?? allSources?.content.find((x) => x.id === id)?.name)) || null;
+
+  /**
    * How many pages the chapter being read is hiding right now, for the chip.
    *
    * ⚠️ Only in `hide`, where pages are genuinely absent. Where they collapse, the strip sits exactly where
@@ -267,7 +298,7 @@ function ReaderInner() {
   const hiddenHere = useMemo(() => {
     const ch = chapters[flat[current]?.ci ?? 0];
     if (!removing || !ch) return 0;
-    return ch.pages.filter((p) => p.junk && !expanded.has(`${ch.id}:${p.number}`)).length;
+    return ch.pages.filter((p) => p.junk && !p.missing && !expanded.has(`${ch.id}:${p.number}`)).length;
   }, [chapters, flat, current, removing, expanded]);
 
   // ---- paged slides: 1 page per slide, or double spreads ----
@@ -308,10 +339,11 @@ function ReaderInner() {
   // Reintroduce by dropping `expanded` from the deps: expand a strip, then scroll -- the counter is off by
   // however much the page grew.
   const { heights, tops } = useMemo(() => {
-    const hs = flat.map((p) =>
-      collapsing && p.junk && !expanded.has(p.key)
-        ? STRIP_H
-        : p.width && p.height ? colW * (p.height / p.width) : colW * 1.4);
+    // `buildFlow` owns the collapse decision. In particular, `missing` outranks a stale/manual `junk` flag:
+    // a placeholder must keep its full page box so its explanation is never squeezed into a strip.
+    const hs = flat.map((p) => p.collapsed
+      ? STRIP_H
+      : p.width && p.height ? colW * (p.height / p.width) : colW * 1.4);
     const ts: number[] = [];
     let acc = 0;
     flat.forEach((p, i) => {
@@ -581,7 +613,9 @@ function ReaderInner() {
     if (!ch) return [];
     return ch.pages.map((p) => ({
       idx: startIndex(flat, ci, p.number),
-      junk: !!p.junk,
+      // A missing placeholder may carry an old junk flag, but it is not furniture and cannot be skipped.
+      junk: !!p.junk && !p.missing,
+      missing: !!p.missing,
       number: p.number,
       // An offline chapter has no URL to request: its pages are blobs already decoded into memory, and
       // the same blob is the thumbnail.
@@ -844,7 +878,8 @@ function ReaderInner() {
           <div className="mx-auto" style={{ width: colW || '100%', filter: THEME_FILTER[prefs.theme] }}>
             <div className="h-2" />
             {flat.map((p, i) => {
-              const collapsed = collapsing && p.junk && !expanded.has(p.key);
+              // Do not duplicate buildFlow's rule here: it deliberately keeps missing+junk placeholders open.
+              const collapsed = !!p.collapsed;
               return (
               <div key={p.key}>
                 {p.firstOfChapter && p.ci > 0 && (
@@ -892,7 +927,7 @@ function ReaderInner() {
                   )}
                   {/* Opened by hand, so it can be closed by hand -- otherwise expanding one to check it is a
                       one-way door for the rest of the session. */}
-                  {collapsing && p.junk && expanded.has(p.key) && (
+                  {collapsing && p.junk && !p.missing && expanded.has(p.key) && (
                     <button
                       type="button"
                       aria-expanded
@@ -905,6 +940,11 @@ function ReaderInner() {
                       {tr('collapse')}
                     </button>
                   )}
+                  {/* The server saved this chapter short and this page is its placeholder: say so, over the
+                      flat panel, or a grey page reads as the reader failing to load it. Not on a collapsed
+                      strip (a hand-marked one): the band is too short for two lines and expanding it shows
+                      the caption. */}
+                  {p.missing && !collapsed && <MissingCaption number={p.number} source={sourceNameOf(chapters[p.ci]?.sourceId)} />}
                 </div>
               </div>
             );})}
@@ -921,12 +961,24 @@ function ReaderInner() {
               <div key={flat[idxs[0]].key} className="relative flex h-full w-full shrink-0 snap-center items-center justify-center gap-1">
                 {shown.map((i) => {
                   const p = flat[i];
-                  return activeSet.has(i) && srcFor(i) ? (
+                  if (!(activeSet.has(i) && srcFor(i))) return <span key={p.key} className="text-ink-600">{p.number}</span>;
+                  // A placeholder page gets a box of its own so the caption sits over THAT page and not over
+                  // the whole spread. `h-full` on the box is what keeps the image's `max-h-full` meaningful:
+                  // a percentage max-height against an auto-height parent is no limit at all, and the page
+                  // would overflow the slide. Ordinary pages keep the bare <img>, byte for byte as before.
+                  if (p.missing) {
+                    return (
+                      <div key={p.key} className={`relative flex h-full items-center justify-center ${idxs.length === 2 ? 'max-w-[50%]' : 'max-w-full'}`}
+                        style={{ transform: zoom !== 1 ? `scale(${zoom})` : undefined }}>
+                        <ReaderImg src={srcFor(i)!} alt={`Page ${p.number}`} className="max-h-full object-contain" />
+                        <MissingCaption number={p.number} source={sourceNameOf(chapters[p.ci]?.sourceId)} />
+                      </div>
+                    );
+                  }
+                  return (
                     <ReaderImg key={p.key} src={srcFor(i)!} alt={`Page ${p.number}`}
                       className={`max-h-full object-contain ${idxs.length === 2 ? 'max-w-[50%]' : 'max-w-full'}`}
                       style={{ transform: zoom !== 1 ? `scale(${zoom})` : undefined }} />
-                  ) : (
-                    <span key={p.key} className="text-ink-600">{p.number}</span>
                   );
                 })}
               </div>
@@ -1052,7 +1104,7 @@ function ReaderInner() {
               if (!ch) return;
               setExpanded((prev) => {
                 const n = new Set(prev);
-                ch.pages.forEach((p) => { if (p.junk) n.add(`${ch.id}:${p.number}`); });
+                ch.pages.forEach((p) => { if (p.junk && !p.missing) n.add(`${ch.id}:${p.number}`); });
                 return n;
               });
             }}
@@ -1129,4 +1181,28 @@ function ReaderImg({ src, alt, className, style }: {
   }
   // eslint-disable-next-line @next/next/no-img-element
   return <img src={shown} alt={alt} className={className} style={style} decoding="async" onError={onError} />;
+}
+
+/**
+ * The caption over a page the source never served (v0.40.0).
+ *
+ * The server saved the chapter short -- at least 80 % of its pages arrived -- with a flat panel at this
+ * index, so the page count, progress and spreads are all unchanged; the one thing a reader cannot tell from
+ * the panel is WHY it is blank. This says why, names the source when the reader can be told one, and says
+ * what happens next (the sweep re-asks for the holes). Both renderers draw it inside the page's own box.
+ *
+ * ⚠️ `pointer-events-none`, and no button: a tap on it must be the tap it always was -- chrome toggle,
+ * double-tap zoom -- because the scroll container owns those gestures and reads them from the same
+ * pointerdown/up pair. There is nothing to do here by hand anyway: the retry is the server's, not the
+ * reader's. Reintroduce by making the caption a <button>: a tap on a missing page stops toggling the chrome.
+ */
+function MissingCaption({ number, source }: { number: number; source: string | null }) {
+  return (
+    <div role="note" className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-1.5 px-6 text-center">
+      <span className="text-sm font-medium text-fog-200">
+        {source ? tr('Page {n} could not be fetched from {source}', { n: number, source }) : tr('Page {n} could not be fetched', { n: number })}
+      </span>
+      <span className="text-xs text-fog-500">{tr('It will be retried automatically.')}</span>
+    </div>
+  );
 }

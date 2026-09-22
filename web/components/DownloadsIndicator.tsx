@@ -6,8 +6,9 @@ import { useAuth, canDownload } from '@/lib/auth';
 import { ProgressBar } from '@/components/ui';
 import { t as tr } from '@/lib/i18n';
 import { chaptersLeft } from '@/lib/chapterRows';
+import { jobNoteLines, type JobCardNotes } from '@/lib/jobNotes';
 
-interface Job { folder: string; title: string; total: number; done: number; status: string; reason?: string }
+interface Job extends JobCardNotes { folder: string; title: string; total: number; done: number; status: string; reason?: string }
 
 /**
  * What is downloading, wherever you are.
@@ -39,6 +40,15 @@ export function DownloadsIndicator() {
   const jobs = data?.content ?? [];
   const active = jobs.filter((j) => j.status === 'downloading');
   const failed = jobs.filter((j) => j.status === 'error');
+  // Names for the "took chapter 12 from …" lines. Asked for only once a card has a switch to name, and the
+  // pill already exists only for a viewer who may download, which is who the route answers.
+  const { data: sources } = useQuery({
+    queryKey: ['sources'],
+    queryFn: () => api<{ content: { id: string; name: string }[] }>('/api/sources'),
+    staleTime: 60_000,
+    enabled: mayAdd && jobs.some((j) => !!j.switched?.length),
+  });
+  const nameOf = (id: string) => sources?.content.find((x) => x.id === id)?.name ?? id;
   // Nothing to say when nothing is happening. A finished download ages out on the server, so this does not
   // linger after the fact; a failed one stays until dismissed, because it is the only record of the failure.
   if (!mayAdd || (!active.length && !failed.length)) return null;
@@ -79,6 +89,11 @@ export function DownloadsIndicator() {
                   </button>
                 </div>
               )}
+              {/* What the job did that the counter cannot show: a chapter taken from another source, a
+                  chapter saved short. Under a running job as it happens, under a failed one as its record. */}
+              {jobNoteLines(j, nameOf).map((line, i) => (
+                <p key={i} className="mt-1 text-[11px] leading-relaxed text-fog-400">{line}</p>
+              ))}
             </div>
           ))}
         </div>

@@ -21,6 +21,13 @@ export interface FlowPage {
   width: number | null;
   height: number | null;
   junk?: boolean;
+  /**
+   * A placeholder the server saved in place of a page the source never served (v0.40.0). Carried, never
+   * acted on: a missing page is drawn at full height with a caption over it, in every mode. It is not
+   * furniture -- it is the one page the reader most needs to know is not there -- so `collapse` and `hide`
+   * leave it exactly where it is.
+   */
+  missing?: boolean;
 }
 
 export interface FlowChapter {
@@ -38,6 +45,8 @@ export interface FlowItem {
   key: string;
   firstOfChapter: boolean;
   junk?: boolean;
+  /** The page is a placeholder for one the source never served; the renderer draws the caption. See FlowPage. */
+  missing?: boolean;
   /** Drawn as a thin band of itself rather than at full height. Derived, never stored. */
   collapsed?: boolean;
 }
@@ -69,7 +78,7 @@ export function buildFlow(
     // `expanded` means "the reader asked for this page" in both modes: collapse draws it full height, hide
     // puts it back in the flow. One state axis, so a page can never be expanded-but-absent.
     const keep = mode === 'hide'
-      ? ch.pages.filter((p) => !p.junk || expanded.has(`${ch.id}:${p.number}`))
+      ? ch.pages.filter((p) => p.missing || !p.junk || expanded.has(`${ch.id}:${p.number}`))
       : ch.pages;
     // A chapter that is nothing but furniture is a chapter we have got wrong. Showing it empty would read as
     // a broken download, so it is shown whole instead.
@@ -84,7 +93,13 @@ export function buildFlow(
         key,
         firstOfChapter: false,
         junk: p.junk,
-        collapsed: mode === 'collapse' && !!p.junk && !expanded.has(key),
+        // ⚠️ Passed through untouched and never a reason to collapse or drop the page. The flow's job is
+        // to keep "flat index" and "page number" the same thing, and a missing page is still a page --
+        // the archive holds a real placeholder at that index, the server counts it, progress lands on it.
+        // Reintroduce by leaving `missing` off this object: the reader's caption has nothing to key on and
+        // the placeholder renders as a blank grey page that reads as a broken image.
+        missing: p.missing,
+        collapsed: mode === 'collapse' && !!p.junk && !p.missing && !expanded.has(key),
       });
     });
   });

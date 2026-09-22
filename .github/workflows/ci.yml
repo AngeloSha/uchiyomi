@@ -89,7 +89,10 @@ jobs:
         run: E2E_EMBEDDED=1 E2E_NET=uchiyomi-e2e-embedded E2E_PORT=18141 E2E_SUBNET=10.222.1.0/24 npm run test:e2e
       - name: Tear it down
         if: always()
-        run: docker rm -f uchiyomi-e2e uchiyomi-e2e-db uchiyomi-e2e-embedded || true
+        run: |
+          docker rm -f uchiyomi-e2e uchiyomi-e2e-db uchiyomi-e2e-fake-a uchiyomi-e2e-fake-b \
+            uchiyomi-e2e-embedded uchiyomi-e2e-embedded-fake-a uchiyomi-e2e-embedded-fake-b || true
+          docker network rm uchiyomi-e2e uchiyomi-e2e-embedded || true
       - name: Keep the screenshots when it fails
         if: failure()
         uses: actions/upload-artifact@v7

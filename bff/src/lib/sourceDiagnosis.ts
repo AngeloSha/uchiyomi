@@ -157,9 +157,15 @@ const RULES: Array<[RegExp, () => Diagnosis]> = [
       "The site's CDN is refusing this server outright with a 403. A challenge solver cannot fix that; it is usually a datacentre-IP block. Change egress or drop the source.",
       'admin')],
 
+  // Since v0.40.0 a 429 is not only waited out: the downloader remembers it per source (lib/pace.ts) and
+  // the next chapters from it go one page at a time with a longer pause, and a chapter it still refuses is
+  // taken from another followed source (lib/chapterFallback.ts). The sentence says so, or an admin reading
+  // "nothing to do" beside a series that keeps landing chapters "via" another source has no way to connect
+  // the two.
   [/\b429\b|rate.?limit|too many requests|slow down/i, () =>
     D('rate_limited', 'This source asked us to slow down.',
-      'Nothing to do. The cooldown widens automatically and clears itself.', 'wait')],
+      'The downloader slows itself down on this source (one page at a time, a longer pause) for the next chapters and takes a chapter from another followed source when this one still refuses. The cooldown widens automatically and clears itself.',
+      'wait')],
 
   [/^suwayomi\b|suwayomi \d{3}|suwayomi returned no data/i, () =>
     D('upstream_down', 'The extension server did not answer.',

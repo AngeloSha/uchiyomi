@@ -10,7 +10,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync } from 'fs';
 import { rm, stat } from 'fs/promises';
 import { tmpdir } from 'os';
-import { join } from 'path';
+import { join } from 'path'; import { clearPace } from '../src/lib/pace'; // pace.ts reads no env, so it may load before the env below
 
 // Set before the module graph loads: DL_ROOT is read once, at import, and the downloader writes real files.
 const ROOT = mkdtempSync(join(tmpdir(), 'uy-dl-'));
@@ -18,7 +18,7 @@ process.env.DL_ROOT = ROOT;
 // Pacing is production politeness, not the subject here, and 110 pages x 250ms would add half a minute to
 // every test in this file. downloadPacing.int.test.ts is where the delay itself is pinned.
 process.env.DOWNLOAD_PAGE_GAP_MS = '0';
-process.env.DOWNLOAD_MIN_GAP_MS ||= '0';
+process.env.DOWNLOAD_MIN_GAP_MS ||= '0'; process.env.DOWNLOAD_RESUME_WAIT_MS = '0,0,0'; // resumes wait only Retry-After here; pacePersists.test.ts pins the wait
 process.env.MIN_FREE_GB = '0'; // the disk floor is not the subject here; diskGuard.test.ts is
 process.env.DATABASE_URL ||= 'postgres://unused:unused@127.0.0.1:1/unused';
 process.env.JWT_SECRET ||= 'test-secret-at-least-16-chars';
@@ -66,7 +66,7 @@ before(async () => {
     getPageUrls: async () => Array.from({ length: 110 }, (_, i) => `https://example.invalid/p${i}.png`),
   } as any);
 });
-beforeEach(() => { served = []; });
+beforeEach(() => { served = []; clearPace(); }); // a 429 in one test must not slow the next test's source
 after(async () => { globalThis.fetch = realFetch; await rm(ROOT, { recursive: true, force: true }); });
 
 const chapter = (n: number, pages?: number) => ({ sourceId: `c${n}`, number: n, pages });
@@ -102,6 +102,17 @@ test('the source\'s own page count wins over the number of urls', async () => {
     /incomplete chapter: 5 of 9 pages/,
   );
   assert.equal(await exists('T/Declared/Chapter 3.cbz'), false);
+});
+
+test('a stale declared count cannot hide a failed URL returned by the source', async () => {
+  // Five URLs came back while the listing still says four. The old `expected = chapter.pages` path packed
+  // the first four as complete and left the failed fifth page unmarked forever.
+  serve(4);
+  await assert.rejects(
+    downloadChapter({ sourceId: 'test-partial', seriesFolder: 'T/StaleCount', chapter: chapter(14, 4) } as any),
+    /incomplete chapter: 4 of 5 pages/,
+  );
+  assert.equal(await exists('T/StaleCount/Chapter 14.cbz'), false, 'a URL the source returned was silently discarded');
 });
 
 test('a chapter where nothing downloaded still reports as blocked', async () => {
@@ -258,4 +269,147 @@ test('the CBZ names the releasing group in ComicInfo, and says nothing when the 
   serve(5);
   await downloadChapter({ sourceId: 'test-partial', seriesFolder: 'T/Credited', chapter: chapter(2) } as any);
   assert.doesNotMatch(xmlOf('T/Credited/Chapter 2.cbz'), /<Translator>/, 'no tag at all when nobody was named');
+});
+
+// ── v0.40.0: the evidence on the error, and the partial hold ──────────────────────────────────────────
+//
+// The truncation guard above stays exactly as it is: downloadChapter alone still never writes a short
+// chapter. What changed is what the caller is HANDED when it refuses: which pages failed and how, and --
+// when enough of the chapter arrived and the site did not say no -- a hold it can choose to write, with a
+// placeholder at every missing index, once every other source has failed too (lib/chapterFallback.ts).
+
+test('a shortfall names the pages that failed and what the site answered for each', async () => {
+  // "109 of 110 pages" said nothing about which page or why, and a 404, an 88-byte body and a timeout have
+  // three different fixes. Reintroduce by dropping `failedPages` from the thrown object in fetchChapter:
+  // the deepEqual below reads undefined.
+  serve(4); // page 5 (index 4) answers 503, on both passes
+  const err = await downloadChapter({ sourceId: 'test-partial', seriesFolder: 'T/Evidence', chapter: chapter(8) } as any)
+    .then(() => null, (e) => e);
+  assert.ok(err);
+  assert.deepEqual(err.failedPages, [{ index: 4, status: 503 }], 'the one failed page, 0-based, with its status');
+
+  const { reasonOf } = await import('../src/lib/chapterFailures');
+  assert.equal(reasonOf(err), 'incomplete chapter: 4 of 5 pages (page 5: 503)', 'the ledger shows it 1-based');
+});
+
+test('four pages of five is offered as a hold, and the hold is not a file until write() is called', async () => {
+  // Reintroduce by dropping the `partial ? { partial } : {}` spread from the throw in fetchChapter: the
+  // `typeof err.partial` assertion reads 'undefined' and nothing downstream can ever save a partial.
+  serve(4);
+  const err = await downloadChapter({ sourceId: 'test-partial', seriesFolder: 'T/Hold', chapter: chapter(9) } as any)
+    .then(() => null, (e) => e);
+  assert.ok(err);
+  assert.match(String(err.message), /incomplete chapter: 4 of 5 pages/, 'still refused: the guard above is untouched');
+  assert.equal(typeof err.partial, 'object', 'a hold rides on the error');
+  assert.deepEqual(err.partial.missing, [4], '0-based: the fifth page is the placeholder');
+  assert.equal(err.partial.expected, 5);
+  assert.equal(err.partial.pages, 4, 'four real pages held');
+  assert.equal(await exists('T/Hold/Chapter 9.cbz'), false, 'downloadChapter alone still writes nothing');
+
+  const written = await err.partial.write();
+  assert.deepEqual(written, { file: 'T/Hold/Chapter 9.cbz', pages: 5, missing: [4] });
+  assert.equal(await exists('T/Hold/Chapter 9.cbz'), true);
+
+  const AdmZip = (await import('adm-zip')).default;
+  const zip = new AdmZip(join(ROOT, 'T/Hold/Chapter 9.cbz'));
+  const names = zip.getEntries().map((e: any) => e.entryName).sort();
+  assert.deepEqual(names, ['0001.png', '0002.png', '0003.png', '0004.png', '0005.png', 'ComicInfo.xml', 'uchiyomi-partial.json'],
+    'five page entries by INDEX, a placeholder in the fifth slot, the manifest, and the ComicInfo');
+  // The placeholder is a real image the reader can show. The fixture pages are not decodable, so the
+  // nearest-page measurement falls back to the default size.
+  const sharp = (await import('sharp')).default;
+  const m = await sharp(zip.getEntry('0005.png')!.getData()).metadata();
+  assert.equal(`${m.width}x${m.height}`, '800x1200', 'the placeholder decodes, at the fallback size');
+  const manifest = JSON.parse(zip.getEntry('uchiyomi-partial.json')!.getData().toString('utf8'));
+  assert.deepEqual(
+    { ...manifest, writtenAt: typeof manifest.writtenAt },
+    { version: 1, source: 'test-partial', chapterSourceId: 'c9', expected: 5, missing: [4], placeholder: { width: 800, height: 1200 }, writtenAt: 'string' },
+    'the manifest says which indices are placeholders and where the real pages came from -- and carries no page URLs',
+  );
+  assert.ok(!JSON.stringify(manifest).includes('example.invalid'), 'no page URL leaks into an exported file');
+  const { readPartialManifest } = await import('../src/lib/partial');
+  assert.deepEqual((await readPartialManifest(join(ROOT, 'T/Hold/Chapter 9.cbz')))?.missing, [4], 'and the reader helper finds it');
+
+  // write() is once: a second call returns the first result rather than writing the file again.
+  assert.equal(await err.partial.write(), written, 'the same result object: written once');
+});
+
+test('THE COOLDOWN case is worth keeping: 109 of 110 carries a hold', async () => {
+  // The live ledger was 153 rows of exactly this shape. Reintroduce by raising PARTIAL_CHAPTER_FLOOR's
+  // default above 0.99: the hold disappears from the one case it exists for.
+  serveExcept([7]);
+  const err = await downloadChapter({ sourceId: 'test-long', seriesFolder: 'Long/Series', chapter: chapter(10) })
+    .then(() => null, (e) => e);
+  assert.ok(err);
+  assert.equal(err.blockStatus, undefined, 'still no cooldown for one flaky page');
+  assert.equal(typeof err.partial, 'object');
+  assert.deepEqual(err.partial.missing, [7]);
+  assert.deepEqual(err.failedPages, [{ index: 7, status: 503 }]);
+  assert.equal(await exists('Long/Series/Chapter 10.cbz'), false, 'offered, not written');
+});
+
+test('never a hold on a refusal: a 403 or a 429 gets no partial however many pages arrived', async () => {
+  // 403 and 429 are the site saying no. A file written on a refusal is a chapter the site will never be
+  // asked to finish, and the cooldown -- not a file with holes in it -- is the answer to a refusal.
+  // Reintroduce by dropping `!refusing &&` from the hold condition in fetchChapter: the 403 case, at 109
+  // of 110, is over the floor and the `no hold on a 403` assertion reads 'object'.
+  serveExcept([2], 403);
+  const forbidden = await downloadChapter({ sourceId: 'test-long', seriesFolder: 'Long/Series', chapter: chapter(11) })
+    .then(() => null, (e) => e);
+  assert.ok(forbidden?.blockStatus, 'a refusal still carries blockStatus');
+  assert.equal(forbidden.partial, undefined, 'no hold on a 403');
+  assert.deepEqual(forbidden.failedPages, [{ index: 2, status: 403 }]);
+
+  // A limit that never lifts, after 100 of 110 pages: over the floor, and still no hold.
+  let asked = 0;
+  served = [];
+  globalThis.fetch = (async () => {
+    asked++;
+    if (asked > 100) return new Response('slow down', { status: 429, headers: { 'retry-after': '1' } });
+    return new Response(PIXEL, { status: 200, headers: { 'content-type': 'image/png' } });
+  }) as typeof fetch;
+  const limited = await downloadChapter({ sourceId: 'test-long', seriesFolder: 'Long/Series', chapter: chapter(12) })
+    .then(() => null, (e) => e);
+  assert.equal(limited?.blockStatus, 'rate_limited');
+  assert.ok(limited.pages >= 100, `over the floor (${limited.pages} of 110)`);
+  assert.equal(limited.partial, undefined, 'no hold on a 429');
+  assert.equal(await exists('Long/Series/Chapter 12.cbz'), false);
+});
+
+test('a larger HTTP error cannot mask a refusal on another page', async () => {
+  // Numeric `worst` is 503, but policy is not numeric: the 403 still means stop, cool down, and never write
+  // a partial. Reintroduce by deriving `refusing` only from `worst` and this offers a 108/110 hold.
+  globalThis.fetch = (async (u: any) => {
+    const i = Number(String(u).match(/p(\d+)\.png$/)?.[1] ?? -1);
+    if (i === 2) return new Response('forbidden', { status: 403 });
+    if (i === 3) return new Response('down', { status: 503 });
+    return new Response(PIXEL, { status: 200, headers: { 'content-type': 'image/png' } });
+  }) as typeof fetch;
+  const err = await downloadChapter({ sourceId: 'test-long', seriesFolder: 'Long/Mixed', chapter: chapter(15) })
+    .then(() => null, (e) => e);
+  assert.equal(err?.worst, 503, 'the evidence still keeps the numerically largest status');
+  assert.equal(err?.blockStatus, 'blocked', 'the independent refusal controls policy');
+  assert.equal(err?.partial, undefined, 'a mixed-status refusal must never produce a hold');
+  assert.equal(await exists('Long/Mixed/Chapter 15.cbz'), false);
+});
+
+test('the placeholder takes the size of the nearest real page', async () => {
+  // A long strip keeps its width so the vertical reader's layout does not jump at the hole. Reintroduce by
+  // returning `{ width: 800, height: 1200 }` unconditionally in holdFor: the placeholder is 800 wide.
+  const sharp = (await import('sharp')).default;
+  const wide = await sharp({ create: { width: 640, height: 300, channels: 3, background: '#ffffff' } }).png().toBuffer();
+  served = [];
+  globalThis.fetch = (async (u: any) => {
+    if (String(u).endsWith('/c.png')) return new Response('nope', { status: 404 });
+    return new Response(wide, { status: 200, headers: { 'content-type': 'image/png' } });
+  }) as typeof fetch;
+  const err = await downloadChapter({ sourceId: 'test-partial', seriesFolder: 'T/Sized', chapter: chapter(13) } as any)
+    .then(() => null, (e) => e);
+  assert.deepEqual(err?.partial?.missing, [2]);
+  assert.deepEqual(err.failedPages, [{ index: 2, status: 404 }]);
+  await err.partial.write();
+  const AdmZip = (await import('adm-zip')).default;
+  const ph = new AdmZip(join(ROOT, 'T/Sized/Chapter 13.cbz')).getEntry('0003.png')!.getData();
+  const m = await sharp(ph).metadata();
+  assert.equal(`${m.width}x${m.height}`, '640x300', 'measured from the page beside it');
 });

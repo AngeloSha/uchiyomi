@@ -481,6 +481,25 @@ ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS cleanup_read_last_result js
 ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS verify_last_run    timestamptz;
 ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS verify_last_result jsonb;
 
+-- v0.40.0: chapters that survive a missing page, and the automatic search for a source that has it.
+--
+-- missing_pages: the 1-based page numbers that are PLACEHOLDERS in the file on disk, NULL when the chapter
+-- is complete. A chapter that lost one page in a hundred used to be refused outright and re-tried every
+-- night for weeks (153 ledger rows of "N-1 of N pages" on one install); now the downloader writes it with
+-- a flat placeholder at the missing index, marks it here, and the sweep's completion pass (lib/partial.ts)
+-- fetches only the missing pages until the column is NULL again. Stamped by setBookMeta when the chapter
+-- lands and cleared by the completion pass; the scanner never touches it, because the scanner reads the
+-- file and the file does not know which of its pages are real.
+ALTER TABLE lib_books ADD COLUMN IF NOT EXISTS missing_pages int[];
+-- When the sweep last searched OTHER sources for a chapter this series' followed sources could not serve
+-- (lib/sourceHunt.ts). Stamped BEFORE the search, so a crash mid-hunt never re-hunts the same series every
+-- sweep; the hunt itself is one search per candidate source, capped, and once a day per series is the cap
+-- that keeps it from being a load the sites notice.
+ALTER TABLE lib_series ADD COLUMN IF NOT EXISTS source_hunt_at timestamptz;
+-- The switch for that hunt. ON by default: it only ever runs after every followed source has failed a
+-- chapter, follows at most two sources per series, and never attaches an adult source to a clean series.
+ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS auto_follow_on_failure boolean NOT NULL DEFAULT true;
+
 -- What the repositories offered and what was installed, as of the last check. This is what makes "new
 -- upstream", "dropped upstream" and "installed outside Uchiyomi" answerable at all, and what lets a wiped
 -- extension server get its extensions back rather than just its repository list.
@@ -1038,6 +1057,18 @@ const DATA_MIGRATIONS: { id: string; run: (c: PoolClient) => Promise<void> }[] =
         `ALTER TABLE read_progress ADD CONSTRAINT fk_read_progress_book_id
            FOREIGN KEY (book_id) REFERENCES lib_books(id) ON DELETE RESTRICT NOT VALID`,
       );
+    },
+  },
+
+  // v0.40.0 changed what an incomplete chapter means: a tiny-but-valid image is a page, a chapter at 80 %
+  // is written with placeholders, and a failed copy is taken from another source. The ledger rows that had
+  // hit CHAPTER_RETRY_CAP under the old rules (153 "N-1 of N pages" rows on one install, none a block) would
+  // otherwise sit capped forever, because only a landed chapter resets attempts. One reset, once, so the
+  // first sweep after this deploy tries each of them again under the new rules. Refusals keep their count.
+  {
+    id: 'v0.40.0-retry-incomplete',
+    run: async (c) => {
+      await c.query(`UPDATE chapter_failures SET attempts = 0 WHERE status = 'incomplete'`);
     },
   },
 

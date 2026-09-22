@@ -5,10 +5,12 @@ import { z } from 'zod';
 import { authenticate, userIdOf, roleOf } from '../lib/auth';
 import { getSource, listSources, isSwAdapterId, SW_PREFIX, swAdapterId, withTimeout } from '../lib/sources';
 import type { SourceAdapter, SourceSeries, SourceChapter } from '../lib/sources/types';
-import { downloadChapter, sanitize, type DownloadInput } from '../lib/downloader';
+import { sanitize, type DownloadInput } from '../lib/downloader';
+import { downloadWithFallback } from '../lib/chapterFallback';
 import { selectChapters, type ChapterFrom } from '../lib/selectChapters';
 import { noteChapterFailure } from '../lib/chapterFailures';
 import { scanOrder } from '../lib/scanOrder';
+import { searchAll, groupByTitle, bySource, SEARCH_FIRST_ANSWER_MS } from '../lib/searchAll';
 import { budgetFor } from '../lib/sources/budget';
 import { SOLVER_CONCURRENCY } from '../lib/sources/flaresolverr';
 
@@ -76,6 +78,14 @@ interface Job {
    * a nothing-yet add, which has no download, gets a card with `total: 0` just to carry this.
    */
   autoFollow?: { done: boolean; results: FollowResult[] };
+  /**
+   * Chapters this job took from a source other than the one their copy named (lib/chapterFallback.ts):
+   * the copy failed -- a missing page, a refusal -- and the same number from another followed source
+   * landed instead. One entry per chapter, in job order; the card's `reason` words the latest one.
+   */
+  switched?: Array<{ number: number; from: string; to: string; why: string }>;
+  /** How many chapters this job saved with placeholder pages (lib/partial.ts). */
+  partial?: number;
 }
 const jobs = new Map<string, Job>();
 
@@ -105,10 +115,19 @@ export interface DownloadJobInput {
   folder: string;
   title: string;
   seriesId: string;
-  /** Ascending. Every copy carries `source`: the adapter it is fetched through. */
-  chapters: SourceChapter[];
+  /**
+   * Ascending. Every copy carries `source`: the adapter it is fetched through. A copy marked `pinned` is
+   * one a person picked by name (a versions-list pick): it is fetched from that source and no other.
+   */
+  chapters: Array<SourceChapter & { pinned?: boolean }>;
   /** OUR series row's metadata, never a candidate's -- see the note on `meta` inside the loop. */
   meta: DownloadInput['meta'];
+  /**
+   * Which sources THIS viewer may reach (visibility.sourceAllowedFor), for the copies the job may fall
+   * back to: a capped member's fetch must not have the server take a chapter from an adult source on
+   * their behalf. Absent = every source (the admin's routes; admins are unrestricted by construction).
+   */
+  allowed?: (source: string) => boolean;
   /**
    * Called once per chapter with whether it landed: right after its attempt, or at the end of the job for
    * a chapter the job never reached (a full disk, a refusing source, a shutdown). The refetch route uses it
@@ -123,12 +142,18 @@ export interface DownloadJobInput {
  *
  * This is the fill's loop, lifted out so a manual fetch of ghost chapters and an admin's "fetch again"
  * run the same code rather than three copies of it. The job answers `total` at once; the work happens
- * after, and the client polls GET /api/sources/jobs. The three generalisations over the fill's original,
- * and only these: each copy names its own source (the fill's chapters all name one, so it behaves as
- * before), a source that refuses is not asked again but the others still are -- the loop ends when every
- * source in the job is refusing, which for one source is the first refusal, exactly as before -- and the
- * loop checks `runtime.stopping` between chapters, as the updater's does, so a `docker compose up -d`
- * mid-fetch ends at a chapter boundary instead of mid-write.
+ * after, and the client polls GET /api/sources/jobs. The generalisations over the fill's original: each
+ * copy names its own source (the fill's chapters all name one, so it behaves as before); a source that
+ * refuses is not asked again but the others still are; a copy that fails is taken from another FOLLOWED
+ * source that lists the same number, or saved with placeholder pages when enough of it arrived
+ * (lib/chapterFallback.ts -- the one download policy every loop shares); the loop ends when every source
+ * the job could still draw on is refusing, which for a series with one source is the first refusal,
+ * exactly as before; and it checks `runtime.stopping` between chapters, as the updater's does, so a
+ * `docker compose up -d` mid-fetch ends at a chapter boundary instead of mid-write.
+ *
+ * The job never hunts for a NEW source: a person is watching this card, and a search across six sites is
+ * the sweep's to run tonight, once, on its own budget. A copy the person picked by name (`pinned`) is
+ * never switched either.
  *
  * The caller has already authorised the chapters and recorded the audit line; this function does neither.
  */
@@ -140,21 +165,41 @@ export function startDownloadJob(input: DownloadJobInput): { total: number } {
     // A hook that throws must not take the job's tail with it: the scan and the stamps still have to run.
     await input.onSettled(ch, landed).catch((e) => console.warn(`[download] settle hook failed for ${folder} ch ${ch.number}: ${(e as Error)?.message || e}`));
   };
+  const nameOf = (id: string) => getSource(id)?.name ?? id;
 
   void (async () => {
     let failures = 0;
     // What this job wrote, for the provenance stamp; a skipped copy was already on disk and is not ours.
-    const landed: Array<{ number: number; scanlator?: string; source?: string }> = [];
+    const landed: Array<{ number: number; scanlator?: string; source?: string; missing?: number[] }> = [];
     const settled = new Set<SourceChapter>();
     // A source that has refused once this job is not asked again, but the others still are: a rate-limited
-    // primary must not stop the follower's chapters. Each source costs at most one strike per job.
+    // primary must not stop the follower's chapters. Each source costs at most one strike per job. Written
+    // by the helper (a copy that earns `blockStatus` puts its source here) and read by it.
     const refusing = new Set<string>();
+    // What the helper called the failure that switched a chapter, per source, so a LATER chapter whose
+    // chosen copy is merely skipped for refusing can still be worded as "asked us to slow down" when a
+    // 429 was what started it.
+    const whyBySource = new Map<string, string>();
+    // The sources this job may draw on: the copies' own, and everything the series follows (the listing's
+    // other copies are only ever taken from followed sources -- the same rule as a manual fetch, where a
+    // listing row's source is trusted only while the series follows it). Read once, before any download.
     const sources = new Set(chapters.map((c) => c.source ?? ''));
+    const followed = new Set([
+      ...(await one<{ source_id: string | null }>('SELECT source_id FROM lib_series WHERE id = $1', [seriesId]).then((r) => (r?.source_id ? [r.source_id] : []), () => [])),
+      ...(await q<{ source_id: string }>('SELECT source_id FROM series_sources WHERE series_id = $1', [seriesId]).catch(() => [])).map((r) => r.source_id),
+    ]);
+    const exhausted = () => [...sources, ...followed].every((sid) => refusing.has(sid));
+    /** The listing's other copies of a number, from followed sources; the helper drops the copy's own source. */
+    const alternatesOf = async (n: number): Promise<SourceChapter[]> => {
+      const row = await one<{ title: string | null; copies: ListingCopy[] }>(
+        'SELECT title, copies FROM series_listing WHERE series_id = $1 AND number = $2::real', [seriesId, n]).catch(() => null);
+      return (row?.copies ?? []).filter((c) => followed.has(c.source)).map((c) => copyToChapter(c, { number: n, title: row!.title }));
+    };
     for (const ch of chapters) {
       if (runtime.stopping) break; // between chapters, never mid-write
       const via = ch.source ?? '';
-      if (refusing.has(via)) continue;
       settled.add(ch);
+      let out;
       try {
         /**
          * `meta` comes from OUR series row, never from the candidate.
@@ -166,11 +211,11 @@ export function startDownloadJob(input: DownloadJobInput): { total: number } {
          * silently rename the series, for everyone, on the next scan. It fires even when the match is
          * RIGHT, because a right match is often under a different English title.
          */
-        const res = await downloadChapter({ sourceId: via, seriesFolder: folder, chapter: ch, meta });
-        if (!res.skipped) landed.push({ number: ch.number, scanlator: ch.scanlator, source: via });
-        const j = jobs.get(folder);
-        if (j && !res.skipped) { j.done++; if (j.done % 5 === 0) await persistScan().catch(() => {}); }
-        await settle(ch, !res.skipped);
+        out = await downloadWithFallback({
+          seriesId, title, folder, meta, chapter: ch,
+          alternates: () => alternatesOf(ch.number),
+          refusing, allowed: input.allowed, hunt: undefined,
+        });
       } catch (e: any) {
         const j = jobs.get(folder);
         if (e?.diskFull) {
@@ -178,20 +223,53 @@ export function startDownloadJob(input: DownloadJobInput): { total: number } {
           await settle(ch, false);
           break;
         }
-        failures++;
-        await noteChapterFailure({ seriesId, title, number: ch.number, sourceId: via, err: e });
-        await settle(ch, false);
-        if (e?.blockStatus) {
-          refusing.add(via);
-          if (j) {
-            j.reason = `${getSource(via)?.name ?? via} stopped part-way. ${j.done} of ${j.total} chapters saved.`;
-            if ([...sources].every((sid) => refusing.has(sid))) { j.status = 'error'; j.finishedAt = Date.now(); }
+        throw e;
+      }
+      const j = jobs.get(folder);
+      if (out.kind === 'landed' || out.kind === 'partial') {
+        landed.push({
+          number: ch.number, scanlator: out.chapterUsed.scanlator, source: out.via,
+          ...(out.kind === 'partial' ? { missing: out.missing.map((i) => i + 1) } : {}),
+        });
+        if (j) {
+          j.done++;
+          if (out.switched) {
+            const why = out.switched.why === 'refusing' ? whyBySource.get(out.switched.from) ?? 'refusing' : out.switched.why;
+            whyBySource.set(out.switched.from, why);
+            (j.switched ??= []).push({ number: ch.number, from: out.switched.from, to: out.via, why });
+            j.reason = why === 'rate_limited'
+              ? `${nameOf(out.switched.from)} asked us to slow down \u2014 continued from ${nameOf(out.via)}`
+              : `${nameOf(out.switched.from)} could not serve chapter ${ch.number} \u2014 took it from ${nameOf(out.via)}`;
           }
-          if ([...sources].every((sid) => refusing.has(sid))) break;
-          continue;
+          if (out.kind === 'partial') {
+            j.partial = (j.partial ?? 0) + 1;
+            j.reason = `Chapter ${ch.number} saved with ${out.missing.length} page${out.missing.length === 1 ? '' : 's'} missing`;
+          }
+          if (j.done % 5 === 0) await persistScan().catch(() => {});
         }
-        if (j) j.reason = `${failures} chapter${failures === 1 ? '' : 's'} could not be saved: ${String(e?.message || e).slice(0, 120)}`;
+        await settle(ch, true);
+      } else if (out.kind === 'skipped') {
+        // On disk already, or its source is refusing with nothing else to ask: neither is this job's
+        // failure, and neither advances the bar.
+        await settle(ch, false);
+      } else {
+        failures++;
+        await noteChapterFailure({ seriesId, title, number: ch.number, sourceId: out.via, err: out.err });
+        await settle(ch, false);
+        if (refusing.has(out.via)) {
+          if (j) {
+            j.reason = `${nameOf(out.via)} stopped part-way. ${j.done} of ${j.total} chapters saved.`;
+            if (exhausted()) { j.status = 'error'; j.finishedAt = Date.now(); }
+          }
+        } else if (j) {
+          j.reason = `${failures} chapter${failures === 1 ? '' : 's'} could not be saved: ${String(out.err?.message || out.err).slice(0, 120)}`;
+        }
         // NOT counted: a chapter that was not written must never advance the bar.
+      }
+      // Every source this job could draw on has refused: the rest of the queue has nowhere to land.
+      if (refusing.size && exhausted()) {
+        if (j && j.status !== 'error') { j.status = 'error'; j.reason ??= `${j.done} of ${j.total} chapters saved.`; j.finishedAt = Date.now(); }
+        break;
       }
     }
     // Settled BEFORE the scan, so a copy the hook puts back is on disk when the scanner looks.
@@ -216,40 +294,11 @@ export const norm = (t: string) => t.toLowerCase().replace(/[^a-z0-9]+/g, '');
 function findOrder(): string[] {
   return listSources().slice().sort((a, b) => (a.preferredOrder ?? 999) - (b.preferredOrder ?? 999)).map((s) => s.id);
 }
-const STOP = new Set(['the', 'a', 'an', 'of', 'and', 'to', 'in', 'is', 'no', 'my', 'i', 'on', 'with', 'for']);
-
-/** Title-match confidence tiers, best first. Exposed to callers that show the pick to a person (import review). */
-export type MatchConfidence = 'same_source' | 'exact' | 'contains' | 'fuzzy';
-
-// Best title-match for a provider, or null if it doesn't really carry the title. NEVER fall back to list[0]
-// — a provider's first result for a title it lacks is an unrelated manga (the "wrong manga" bug).
-// Scored version used where the caller (or a human) needs to know HOW GOOD the match is, not just what it
-// is. Kept separate from `pickBest` below rather than changing its signature: fifteen existing call sites
-// only ever wanted the item.
-function pickBestScored<T extends { title: string }>(list: T[], term: string): { item: T; confidence: MatchConfidence } | null {
-  if (!list.length) return null;
-  const n = norm(term);
-  const exact = list.find((r) => norm(r.title) === n);
-  if (exact) return { item: exact, confidence: 'exact' };
-  const sub = list.find((r) => { const t = norm(r.title); return t.length > 2 && (t.includes(n) || n.includes(t)); });
-  if (sub) return { item: sub, confidence: 'contains' };
-  // token overlap: most meaningful query words must appear in the title
-  const qw = term.toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length > 2 && !STOP.has(w));
-  if (qw.length) {
-    let best: T | null = null;
-    let score = 0;
-    for (const r of list) {
-      const tw = new Set(r.title.toLowerCase().split(/[^a-z0-9]+/));
-      const hit = qw.filter((w) => tw.has(w)).length / qw.length;
-      if (hit > score) { score = hit; best = r; }
-    }
-    if (score >= 0.7 && best) return { item: best, confidence: 'fuzzy' };
-  }
-  return null;
-}
-function pickBest<T extends { title: string }>(list: T[], term: string): T | null {
-  return pickBestScored(list, term)?.item ?? null;
-}
+// The title-match rule (`pickBest`, `pickBestScored`, `MatchConfidence`) moved to lib/titleMatch.ts in
+// v0.40.0 so the source hunt -- a lib -- can apply it without importing this route. Re-exported so the
+// type keeps its old address for anyone who imported it from here.
+import { pickBest, pickBestScored, type MatchConfidence } from '../lib/titleMatch';
+export type { MatchConfidence };
 
 /**
  * Which of these titles the library already has.
@@ -288,42 +337,66 @@ const ADD_LOOKUP_TIMEOUT = 20_000;
  *
  * The add dialog calls `detail` to show the cover, summary and chapter count, and `add` then made the exact
  * same two calls seconds later -- on a Cloudflare source that is two more challenge solves, and it was
- * measured at 22.8s of an add that had already moved its downloading to the background. Nobody presses Add
- * a minute after opening the dialog, so a short life is enough, and a short life is also what keeps a
- * chapter list from going stale.
+ * measured at 22.8s of an add that had already moved its downloading to the background. Ten minutes,
+ * not the ninety seconds this began with: the dialog now fetches the detail of a card's first providers
+ * the moment the card opens, and the person may read the summary, compare sources and come back, so the
+ * pre-warm has to outlive a slow decision -- and a chapter list that is ten minutes old is still the list
+ * the sweep would act on. Anything a person adds within that window is what the site said within it.
  *
  * Keyed by source and series only: this is what the SITE said, identical for every viewer, exactly like
- * `latestCache` above.
+ * `latestCache` above. The in-flight map is what makes the dialog's pre-warm and the pick a single fetch:
+ * without it the pick, arriving while the pre-warm is still solving a challenge, started a second solve
+ * of its own and waited for the slower of the two.
  */
-const DETAIL_TTL = 90_000;
+const DETAIL_TTL = 600_000;
 const detailCache = new Map<string, { at: number; series: SourceSeries | null; chapters: SourceChapter[] }>();
+const detailInflight = new Map<string, Promise<{ series: SourceSeries | null; chapters: SourceChapter[] }>>();
 
 export async function seriesAndChapters(src: SourceAdapter, sourceId: string):
   Promise<{ series: SourceSeries | null; chapters: SourceChapter[] }> {
   const key = `${src.id}:${sourceId}`;
   const hit = detailCache.get(key);
   if (hit && Date.now() - hit.at < DETAIL_TTL) return { series: hit.series, chapters: hit.chapters };
-  // In parallel. `add` ran these one after the other while `detail` had always run them together, so an add
-  // paid the sum of two solves where the dialog beside it paid the larger of the two.
-  //
-  // `failed` is tracked separately from the empty value, because the two are indistinguishable otherwise:
-  // both `getSeries` and `listChapters` answer a timeout or a throw with null/[], which is exactly what a
-  // title with genuinely nothing on it looks like.
-  let failed = false;
-  const [series, chapters] = await Promise.all([
-    withTimeout(src.getSeries(sourceId), budgetFor(src, ADD_LOOKUP_TIMEOUT)).catch(() => { failed = true; return null; }),
-    withTimeout(src.listChapters(sourceId), budgetFor(src, ADD_LOOKUP_TIMEOUT)).catch(() => { failed = true; return [] as SourceChapter[]; }),
-  ]);
-  // Only a real answer is remembered. Caching the failure -- which this did when the cache was added -- turns
-  // a hiccup into a confident "No readable chapters for this title on this source. Try a different source."
-  // pinned for ninety seconds, so retrying inside the window returns the same wrong advice. Before the cache
-  // existed the same catch was here, but a retry worked; the cache is what made it stick.
-  if (!failed) detailCache.set(key, { at: Date.now(), series, chapters });
-  return { series, chapters };
+  const flying = detailInflight.get(key);
+  if (flying) return flying;
+
+  const fetchBoth = async (): Promise<{ series: SourceSeries | null; chapters: SourceChapter[] }> => {
+    // In parallel. `add` ran these one after the other while `detail` had always run them together, so an
+    // add paid the sum of two solves where the dialog beside it paid the larger of the two.
+    //
+    // `failed` is tracked separately from the empty value, because the two are indistinguishable otherwise:
+    // both `getSeries` and `listChapters` answer a timeout or a throw with null/[], which is exactly what a
+    // title with genuinely nothing on it looks like.
+    let failed = false;
+    const [series, chapters] = await Promise.all([
+      withTimeout(src.getSeries(sourceId), budgetFor(src, ADD_LOOKUP_TIMEOUT)).catch(() => { failed = true; return null; }),
+      withTimeout(src.listChapters(sourceId), budgetFor(src, ADD_LOOKUP_TIMEOUT)).catch(() => { failed = true; return [] as SourceChapter[]; }),
+    ]);
+    // Only a real answer is remembered. Caching the failure -- which this did when the cache was added --
+    // turns a hiccup into a confident "No readable chapters for this title on this source. Try a different
+    // source." pinned for ten minutes, so retrying inside the window returns the same wrong advice. Before
+    // the cache existed the same catch was here, but a retry worked; the cache is what made it stick. The
+    // in-flight join below is not that: two callers of ONE attempt share its failure, and the next call
+    // asks again.
+    if (!failed) detailCache.set(key, { at: Date.now(), series, chapters });
+    return { series, chapters };
+  };
+
+  // Registered before anything can await, and removed only if it is still the entry we put there -- the
+  // `latestInflight` idiom below. ⚠️ Not named `run` (and this comment must not spell that declaration
+  // out either): sourceSlow.int.test.ts finds the first arrow so named in this file's raw text and
+  // expects it to be latestPage's, whose catch it inspects.
+  const p = fetchBoth();
+  detailInflight.set(key, p);
+  void p.finally(() => { if (detailInflight.get(key) === p) detailInflight.delete(key); });
+  return p;
 }
 
 /** Exposed for tests: the cache is process-global and would otherwise leak between cases. */
-export function clearDetailCache(): void { detailCache.clear(); }
+export function clearDetailCache(): void {
+  detailCache.clear();
+  detailInflight.clear();
+}
 const latestCache = new Map<string, { at: number; items: SourceSeries[] }>();
 const latestInflight = new Map<string, Promise<SourceSeries[]>>();
 
@@ -642,12 +715,40 @@ export async function addSeriesFromSource(opts: {
   const run = async (): Promise<AddResult> => {
     // Which chapters this run wrote, for the provenance stamp. Only what LANDED, never the selection: a
     // copy the downloader skipped because the file was already there is somebody else's work.
-    const landed: Array<{ number: number; scanlator?: string; source?: string }> = [];
+    const landed: Array<{ number: number; scanlator?: string; source?: string; missing?: number[] }> = [];
+    // The add has one source by definition, but it still goes through the same policy as every other
+    // download path: pacing, refusal accounting and an explicit partial hold all live in the helper. There
+    // are deliberately no alternates and no hunt here -- no followed series exists until chapter one has
+    // been scanned, and an Add from one named source must not quietly become an Add from another.
+    const refusing = new Set<string>();
+    const fetchOne = (chapter: SourceChapter) => downloadWithFallback({
+      // A brand-new add has no lib_series id until persistScan sees chapter one. The helper does not query
+      // by this id; keeping the field empty is more honest than inventing an id that persistScan will not use.
+      seriesId: existing?.id ?? '', title, folder, meta,
+      chapter: { ...chapter, source: source! },
+      alternates: async () => [], refusing, allowed: opts.sourceAllowed, hunt: undefined,
+    });
     let firstPages = 0; let blockReason: string | null = null; let diskFull: string | null = null;
     try {
-      const r = await downloadChapter({ sourceId: source!, seriesFolder: folder, chapter: selected[0], meta });
-      firstPages = r.skipped ? 1 : r.pages;
-      if (!r.skipped) landed.push({ number: selected[0].number, scanlator: selected[0].scanlator, source });
+      const out = await fetchOne(selected[0]);
+      if (out.kind === 'landed' || out.kind === 'partial') {
+        firstPages = out.pages;
+        landed.push({
+          number: selected[0].number, scanlator: out.chapterUsed.scanlator, source: out.via,
+          ...(out.kind === 'partial' ? { missing: out.missing.map((i) => i + 1) } : {}),
+        });
+        if (out.kind === 'partial') {
+          const j = jobs.get(folder);
+          if (j) {
+            j.partial = (j.partial ?? 0) + 1;
+            j.reason = `Chapter ${selected[0].number} saved with ${out.missing.length} page${out.missing.length === 1 ? '' : 's'} missing`;
+          }
+        }
+      } else if (out.kind === 'skipped' && out.why === 'on_disk') {
+        firstPages = 1;
+      } else if (out.kind === 'failed') {
+        blockReason = out.err?.blockStatus || null;
+      }
     }
     catch (e: any) { blockReason = e?.blockStatus || null; diskFull = e?.diskFull ? String(e.message) : null; }
     if (!firstPages) {
@@ -714,28 +815,69 @@ export async function addSeriesFromSource(opts: {
     void (async () => {
       let failures = 0;
       for (const ch of selected.slice(1)) {
+        let out: Awaited<ReturnType<typeof downloadWithFallback>>;
         try {
-          const r = await downloadChapter({ sourceId: source!, seriesFolder: folder, chapter: ch, meta });
-          if (!r.skipped) landed.push({ number: ch.number, scanlator: ch.scanlator, source });
+          out = await fetchOne(ch);
         } catch (e: any) {
           const j = jobs.get(folder);
-          if (e?.blockStatus) {
+          if (e?.diskFull) {
             if (j) {
               j.status = 'error';
-              j.reason = `${src.name} stopped part-way: it is ${e.blockStatus === 'rate_limited' ? 'rate-limiting' : e.blockStatus === 'blocked' ? 'blocking' : 'unreachable for'} downloads. ${j.done} of ${j.total} chapters saved.`;
+              j.reason = `Not enough free space: ${String(e.message)}. ${j.done} of ${j.total} chapters saved.`;
               j.finishedAt = Date.now();
             }
             break;
           }
-          // ANY other failure -- a full disk, a permission error, a chapter with no readable pages -- used
-          // to be swallowed whole, and the counter below still advanced. The bar filled to 100%, the tick
-          // went green, and nothing had landed. On a host whose disk is nearly full that is the likeliest
-          // failure there is, and it was the one that said nothing.
           failures++;
+          if (seriesId) await noteChapterFailure({ seriesId, title, number: ch.number, sourceId: source!, err: e }).catch(() => {});
           if (j) j.reason = `${failures} chapter${failures === 1 ? '' : 's'} could not be saved: ${String(e?.message || e).slice(0, 120)}`;
-          continue; // do NOT count a chapter that was not written
+          continue;
         }
-        const j = jobs.get(folder); if (j) { j.done++; if (j.done % 5 === 0) await persistScan().catch(() => {}); }
+        const j = jobs.get(folder);
+        if (out.kind === 'landed' || out.kind === 'partial') {
+          landed.push({
+            number: ch.number, scanlator: out.chapterUsed.scanlator, source: out.via,
+            ...(out.kind === 'partial' ? { missing: out.missing.map((i: number) => i + 1) } : {}),
+          });
+          if (j) {
+            j.done++;
+            if (out.kind === 'partial') {
+              j.partial = (j.partial ?? 0) + 1;
+              j.reason = `Chapter ${ch.number} saved with ${out.missing.length} page${out.missing.length === 1 ? '' : 's'} missing`;
+            }
+            if (j.done % 5 === 0) await persistScan().catch(() => {});
+          }
+          continue;
+        }
+        if (out.kind === 'skipped') {
+          // An old file in a revived folder is part of the requested result; a refusal is not. With no
+          // alternate source the latter leaves every remaining chapter nowhere to go, so stop at one strike.
+          if (out.why === 'on_disk') {
+            if (j) { j.done++; if (j.done % 5 === 0) await persistScan().catch(() => {}); }
+            continue;
+          }
+          if (j) {
+            j.status = 'error';
+            j.reason = `${src.name} stopped part-way. ${j.done} of ${j.total} chapters saved.`;
+            j.finishedAt = Date.now();
+          }
+          break;
+        }
+
+        failures++;
+        if (seriesId) await noteChapterFailure({ seriesId, title, number: ch.number, sourceId: out.via, err: out.err }).catch(() => {});
+        if (refusing.has(out.via)) {
+          if (j) {
+            const status = out.err?.blockStatus;
+            j.status = 'error';
+            j.reason = `${src.name} stopped part-way: it is ${status === 'rate_limited' ? 'rate-limiting' : status === 'blocked' ? 'blocking' : 'unreachable for'} downloads. ${j.done} of ${j.total} chapters saved.`;
+            j.finishedAt = Date.now();
+          }
+          break;
+        }
+        // ANY other failure -- a permission error, a chapter with no readable pages -- must not advance
+        // the bar. The next chapter may still be healthy, so keep going as the old loop did.
+        if (j) j.reason = `${failures} chapter${failures === 1 ? '' : 's'} could not be saved: ${String(out.err?.message || out.err).slice(0, 120)}`;
       }
       await persistScan().catch(() => {});
       await setBookDates(folder, selected).catch(() => {});
@@ -1214,9 +1356,10 @@ export default async function sourceRoutes(app: FastifyInstance) {
     const auth = authorise(plan, source, sourceSeriesId, numbers.map(Number), FILL_MAX_CHAPTERS);
     if (!auth.ok) return reply.code(400).send({ error: auth.error, message: auth.message });
 
+    const maxAgeRating = vc(req).maxAgeRating;
     const src = getSource(source);
     if (!src) return reply.code(400).send({ error: 'bad_request' });
-    if (!sourceAllowedFor(src, vc(req).maxAgeRating)) return denySource(reply);
+    if (!sourceAllowedFor(src, maxAgeRating)) return denySource(reply);
     if (await isDisabled(source).catch(() => false)) return reply.code(409).send({ error: 'disabled' });
     if (await blockedNow(source).catch(() => false)) return reply.code(429).send({ error: 'blocked' });
 
@@ -1237,6 +1380,10 @@ export default async function sourceRoutes(app: FastifyInstance) {
       folder: s.folder, title: s.title, seriesId: plan.seriesId,
       chapters: picked.map((c) => ({ ...c, source })),
       meta: { series: s.title, summary: s.summary, author: s.author, genres: s.genres, url: s.web, status: s.status },
+      allowed: (id) => {
+        const candidate = getSource(id);
+        return !!candidate && sourceAllowedFor(candidate, maxAgeRating);
+      },
     });
     return { ok: true, started: true, folder: s.folder, total };
   });
@@ -1290,6 +1437,7 @@ export default async function sourceRoutes(app: FastifyInstance) {
       .safeParse(req.body);
     if (!b.success) return reply.code(400).send({ error: 'bad_request' });
     const { seriesId } = b.data;
+    const maxAgeRating = vc(req).maxAgeRating;
     // First pick per number wins, and a number with a pick leaves `numbers`: the explicit choice is the
     // more specific ask, and fetching the number's chosen copy beside it would land two files on one path.
     // A second pick for the same number is reported, not dropped: the web client never sends two, but a
@@ -1351,7 +1499,7 @@ export default async function sourceRoutes(app: FastifyInstance) {
       [seriesId, numbers],
     )).map((r) => Number(r.number)));
 
-    const chapters: SourceChapter[] = [];
+    const chapters: Array<SourceChapter & { pinned?: boolean }> = [];
     // Health is per source, asked once per source rather than once per number.
     const sourceState = new Map<string, 'ok' | 'source_unavailable' | 'cooldown' | 'denied'>();
     const stateOf = async (sid: string) => {
@@ -1382,7 +1530,7 @@ export default async function sourceRoutes(app: FastifyInstance) {
         const st = await stateOf(copy.source);
         if (st === 'denied') return denySource(reply);
         if (st !== 'ok') { skipped.push({ number: n, reason: st, source: pick.source, sourceId: pick.sourceId }); continue; }
-        chapters.push(copyToChapter(copy, { number: n, title: row.title }));
+        chapters.push({ ...copyToChapter(copy, { number: n, title: row.title }), pinned: true });
         continue;
       }
       if (!row) { skipped.push({ number: n, reason: 'not_listed' }); continue; }
@@ -1418,66 +1566,57 @@ export default async function sourceRoutes(app: FastifyInstance) {
     const { total } = startDownloadJob({
       folder: s.folder, title: s.title, seriesId, chapters,
       meta: { series: s.title, summary: s.summary, author: s.author, genres: s.genres, url: s.web, status: s.status },
+      allowed: (id) => {
+        const candidate = getSource(id);
+        return !!candidate && sourceAllowedFor(candidate, maxAgeRating);
+      },
     });
     return { ok: true, started: true, folder: s.folder, total, skipped };
   });
 
+  /**
+   * Search every source this viewer may reach, answering within `wait` (lib/searchAll.ts has the whole
+   * mechanism). `content` is shaped exactly as it always was; `sources`, `pending` and `asked` are additive,
+   * so a client that ignores them -- the import review sheet -- keeps working, and one that reads `pending`
+   * polls the same URL with a short `wait` until it is 0.
+   */
   app.get('/api/sources/search-all', async (req) => {
-    const { q: rawQ, groupBy } = req.query as { q?: string; groupBy?: string };
+    const { q: rawQ, groupBy, wait } = req.query as { q?: string; groupBy?: string; wait?: string };
     const term = (rawQ || '').trim();
-    if (!term) return { content: [] };
+    if (!term) return { content: [], sources: [], pending: 0, asked: 0 };
+    // Absent means the full first-answer wait, so a caller written before `wait` existed gets the most
+    // complete answer one request can give; anything above the cap is clamped rather than refused.
+    const asked = wait === undefined || wait === '' ? SEARCH_FIRST_ANSWER_MS : Number(wait);
+    const waitMs = Math.min(SEARCH_FIRST_ANSWER_MS, Math.max(0, Number.isFinite(asked) ? asked : SEARCH_FIRST_ANSWER_MS));
     // Filtered rather than rejected: a fan-out has no single source to refuse, and a capped account asking
     // for a title that only exists on adult sources should get "nobody has it", not a partial denial.
-    const allowed = new Set(reachable(req).map((x) => x.id));
-    const ids = findOrder().filter((id) => allowed.has(id));
-    const per = await Promise.all(ids.map(async (id) => {
-      const src = getSource(id);
-      if (!src) return [];
-      if (await isDisabled(id).catch(() => false)) return [];
-      try { return (await withTimeout(src.search(term), budgetFor(src, 20000))).slice(0, 12).map((r) => ({ ...r, name: src.name })); }
-      catch { return []; }
-    }));
+    // ⚠️ `ask` is the ONLY thing that decides which sources this viewer starts or reads from the shared
+    // entry, so it must be the viewer's reachable set and nothing wider.
+    const ask = reachable(req);
+    const health = new Map((await healthAll().catch(() => [])).map((h) => [h.source_id, h] as const));
+    const ans = await searchAll(term, ask, { waitMs, health });
+    const byId = new Map(ask.map((s) => [s.id, s] as const));
+    // Shaped in provider-preference order, as before: the first provider of a card is the default pick.
+    const order = findOrder().map((id) => byId.get(id)).filter((s): s is SourceAdapter => !!s);
+    const rest = { sources: ans.sources, pending: ans.pending, asked: ans.asked };
 
     // Same fan-out either way; only the shaping differs. groupBy=source mirrors Mihon's global-search
     // screen (one rail per provider) for the import-review "search manually" sheet — the title-grouped
     // shape below groups all providers of the SAME title into one card instead, which is what Discover
     // wants but hides which specific source a manual pick would come from.
     if (groupBy === 'source') {
-      const have = await inLibrary(per.flat().map((r) => r.title));
-      const bySource = ids
-        .map((id, i) => {
-          const src = getSource(id);
-          const list = per[i] || [];
-          if (!src || !list.length) return null;
-          return {
-            source: id, name: src.name, lang: src.lang ?? null,
-            results: list.filter((r) => !!r.sourceId).map((r) => ({ ...r, inLibrary: have.has(norm(r.title)) })),
-          };
-        })
-        .filter((g): g is NonNullable<typeof g> => !!g);
-      return { content: bySource };
+      const rails = bySource(ans.per, order);
+      const have = await inLibrary(rails.flatMap((g) => g.results.map((r) => r.title)));
+      return {
+        content: rails.map((g) => ({ ...g, results: g.results.map((r) => ({ ...r, inLibrary: have.has(norm(r.title)) })) })),
+        ...rest,
+      };
     }
 
     // group by normalized title → one card that carries every provider offering it (preferred order preserved)
-    const groups = new Map<string, { title: string; coverUrl?: string; updatedAt?: string; providers: { source: string; name: string; sourceId: string; coverUrl?: string; title: string }[] }>();
-    for (const list of per) for (const r of list) {
-      if (!r.sourceId || !r.title) continue;
-      const key = norm(r.title);
-      if (!key) continue;
-      let g = groups.get(key);
-      if (!g) { g = { title: r.title, coverUrl: r.coverUrl, updatedAt: r.updatedAt, providers: [] }; groups.set(key, g); }
-      if (!g.coverUrl && r.coverUrl) g.coverUrl = r.coverUrl;
-      if (!g.updatedAt && r.updatedAt) g.updatedAt = r.updatedAt;
-      if (!g.providers.some((p) => p.source === r.source)) {
-        g.providers.push({ source: r.source, name: r.name, sourceId: r.sourceId, coverUrl: r.coverUrl, title: r.title });
-      }
-    }
-    const have = await inLibrary([...groups.values()].map((g) => g.title));
-    const out = [...groups.values()]
-      .map((g) => ({ ...g, inLibrary: have.has(norm(g.title)) }))
-      .sort((a, b) => b.providers.length - a.providers.length)
-      .slice(0, 30);
-    return { content: out };
+    const groups = groupByTitle(ans.per, order);
+    const have = await inLibrary(groups.map((g) => g.title));
+    return { content: groups.map((g) => ({ ...g, inLibrary: have.has(norm(g.title)) })), ...rest };
   });
 
   // Browse a source's newest / recently-updated series (no query). Same card shape as search.

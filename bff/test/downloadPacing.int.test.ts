@@ -10,7 +10,7 @@
 // for saying so.
 //
 // Skipped automatically unless TEST_DATABASE_URL is set.
-import test, { before, after } from 'node:test';
+import test, { before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -25,6 +25,7 @@ if (DSN) {
   process.env.DL_ROOT = ROOT;
   process.env.DOWNLOAD_MIN_GAP_MS = '0';
   process.env.DOWNLOAD_PAGE_GAP_MS = String(GAP);
+  process.env.DOWNLOAD_RESUME_WAIT_MS = '0,0,0'; // no 429 here; the resume wait is pacePersists.test.ts's subject
   process.env.CONFIG_DIR = process.env.CONFIG_DIR || '/tmp/uchiyomi-test-config';
 }
 const skip = DSN ? false : 'set TEST_DATABASE_URL to run';
@@ -32,7 +33,7 @@ const skip = DSN ? false : 'set TEST_DATABASE_URL to run';
 const SRC = 'pace-src';
 const PAGES = 6;
 const PIXEL = Buffer.concat([Buffer.from('89504e470d0a1a0a', 'hex'), Buffer.alloc(400, 7)]);
-let q: any, downloadChapter: any;
+let q: any, downloadChapter: any, clearPace: () => void;
 let stamps: number[] = [];
 
 before(async () => {
@@ -41,6 +42,7 @@ before(async () => {
   ({ q } = (await import('../src/lib/db')) as any);
   const { registerAdapter } = await import('../src/lib/sources/loader');
   ({ downloadChapter } = (await import('../src/lib/downloader')) as any);
+  ({ clearPace } = await import('../src/lib/pace'));
   await migrate();
   registerAdapter({
     id: SRC, name: 'Pace Source',
@@ -48,6 +50,10 @@ before(async () => {
     getPageUrls: async () => Array.from({ length: PAGES }, (_, i) => `https://example.invalid/q${i}.png`),
   } as any);
 });
+
+// The gap measured below is the level-0 gap: a pace level left behind by another file's 429 would double it
+// and the assertion would pass for the wrong reason.
+beforeEach(() => { if (DSN) clearPace(); });
 
 after(async () => {
   if (ROOT) rmSync(ROOT, { recursive: true, force: true });

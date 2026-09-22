@@ -175,6 +175,14 @@ export interface Book {
    * theirs, not the updater's, and no button here may touch it.
    */
   owned?: boolean;
+  /**
+   * The 1-based numbers of the pages the source never served, when the chapter was saved short (v0.40.0:
+   * at least 80 % of its pages arrived, so the file holds a flat placeholder at each of these). Null or
+   * absent means the chapter is whole. The page COUNT is unchanged by construction -- a placeholder is a
+   * real page in the archive -- so progress and bookmarks keep meaning what they meant; the sweep refills
+   * the holes and clears this when the last one lands.
+   */
+  missingPages?: number[] | null;
 }
 
 /**
@@ -296,6 +304,12 @@ export interface PageInfo {
   number: number;
   /** Set by the server when this page recurs across chapters of the series -- a credit page, an advert. */
   junk?: boolean;
+  /**
+   * Set by the server when this page is a placeholder: the source never served it and the chapter was
+   * saved short (`Book.missingPages`). The bytes behind it are a flat panel, so the reader draws the
+   * explanation over it rather than letting a blank page read as a broken image.
+   */
+  missing?: true;
   fileName: string;
   mediaType: string;
   width?: number;
@@ -332,7 +346,8 @@ export interface DownloadManifest {
   mediaType: string | null;
   coverUrl: string;
   totalBytes: number;
-  pages: { number: number; url: string; width: number | null; height: number | null; bytes: number | null; junk?: boolean }[];
+  /** `missing` rides along like `junk`: the placeholder bytes download like any page, and the caption is drawn offline too. */
+  pages: { number: number; url: string; width: number | null; height: number | null; bytes: number | null; junk?: boolean; missing?: true }[];
 }
 
 export function isWebtoon(dir?: string): boolean {

@@ -61,6 +61,10 @@ export default async function downloadRoutes(app: FastifyInstance) {
         bytes: p.sizeBytes ?? null,
         mediaType: p.mediaType ?? null,
         junk: junk.has(p.number) || undefined,
+        // A placeholder page of a partial chapter (lib/partial.ts), marked by bookPages. Copied for the same
+        // reason as `junk`: the offline reader never asks the server, so the caption has to travel with the
+        // download. The placeholder's bytes download like any page.
+        missing: p.missing || undefined,
       };
     });
 

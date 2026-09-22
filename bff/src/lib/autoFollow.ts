@@ -37,6 +37,7 @@ import { effectivePrefsFor, readSeriesPrefs } from './scanlatorPrefs';
 import { assess, verdict, followable, MIN_HAVE, MIN_COVERAGE } from './fill';
 import { logAudit } from './audit';
 import type { SourceChapter } from './sources/types';
+import { normTitle } from './titleMatch';
 
 /** How many sources a series may FOLLOW, on top of its primary. */
 export const MAX_FOLLOWERS = 2;
@@ -80,8 +81,9 @@ const AUTO_FOLLOW_CONCURRENCY = Math.max(1, Number(process.env.SCAN_CONCURRENCY 
  * armed until it fires, which is harmless at 20 s but not at this file's 90-second wall: one armed per
  * add, it would hold a stopping process -- and every test runner -- for a minute and a half after the
  * last candidate answered. The rejection is tagged as the shared one's is, for anyone who classifies it.
+ * Exported for the source hunt (lib/sourceHunt.ts), which has a wall of its own.
  */
-function bounded<T>(p: Promise<T>, ms: number): Promise<T> {
+export function bounded<T>(p: Promise<T>, ms: number): Promise<T> {
   let timer: NodeJS.Timeout | undefined;
   const clock = new Promise<T>((_, rej) => {
     timer = setTimeout(() => rej(Object.assign(new Error(`timeout after ${ms}ms`), { selfTimeout: true, ms })), ms);
@@ -146,13 +148,17 @@ export interface Judgement {
   theirTitle: string | null;
   coverage: number | null;
   why: 'ok' | Exclude<FollowWhy, 'followed' | 'cap' | 'not_tried'>;
+  /**
+   * What the candidate listed, raw, when it was asked (an `ok` or `numbering_differs` verdict; absent when
+   * no source was asked). The source hunt (lib/sourceHunt.ts) follows a candidate BECAUSE it wants one
+   * chapter from it, and that chapter is in the list the judgement already fetched: carrying it here is
+   * what keeps the hunt at two lookups per judged candidate rather than three.
+   */
+  chapters?: SourceChapter[];
 }
 
-/**
- * The same key as `norm` in routes/sources.ts. A lib cannot import a route (routes/sources.ts imports this
- * file), so the rule is repeated here and autoFollow.int.test.ts pins the two equal.
- */
-const normTitle = (t: string) => t.toLowerCase().replace(/[^a-z0-9]+/g, '');
+// The same key as `norm` in routes/sources.ts, now from the one lib both share (v0.40.0, lib/titleMatch.ts);
+// autoFollow.int.test.ts still pins the two equal by value.
 
 /** How the candidate's title relates to ours, or null when it does not. `exact` beats `contains`. */
 export type TitleMatch = 'exact' | 'contains';
@@ -266,9 +272,9 @@ export async function judgeCandidate(
   const decided = Math.min(a.coverage, back);
   const coverage = Math.round(decided * 100) / 100;
   if (!followable({ coverage: a.coverage, why: verdict(a, nums.length) }) || back < MIN_COVERAGE) {
-    return { ...base, theirTitle, coverage, why: 'numbering_differs' };
+    return { ...base, theirTitle, coverage, why: 'numbering_differs', chapters: raw };
   }
-  return { ...base, theirTitle, coverage, why: 'ok' };
+  return { ...base, theirTitle, coverage, why: 'ok', chapters: raw };
 }
 
 export interface AutoFollowOpts {
@@ -385,7 +391,7 @@ export async function autoFollow(seriesId: string, candidates: FollowCandidate[]
   for (const j of judged) {
     const out = { source: j.source, name: j.name, theirTitle: j.theirTitle, coverage: j.coverage };
     if (j.why !== 'ok') { results.push({ ...out, followed: false, why: j.why }); continue; }
-    const written = await followUnderCap(seriesId, j).catch(() => 'gone' as const);
+    const written = await followJudged(seriesId, j).catch(() => 'gone' as const);
     if (written !== 'inserted') {
       results.push({ ...out, followed: false, why: written === 'cap' ? 'cap' : 'unavailable' });
       continue;
@@ -401,6 +407,8 @@ export async function autoFollow(seriesId: string, candidates: FollowCandidate[]
 
 /**
  * The follow itself: one transaction, the series row locked, the INSERT conditional on the count.
+ * Exported (as `followJudged`, v0.40.0) for the source hunt, which judges one candidate at a time with the
+ * same `judgeCandidate` and must write the row under the same cap and the same lock.
  *
  * The count excludes the candidate's own source so a re-follow is an update and not a `cap`; `added_by`
  * is NULL -- the automatic path's signature (seriesSources.ts `auto`) -- and the COALESCE keeps a human's
@@ -411,7 +419,7 @@ export async function autoFollow(seriesId: string, candidates: FollowCandidate[]
  * microseconds wide -- the racing test does not open it, and passes with the lock removed -- so the lock
  * is here for the day the window is hit, not because a test says so.
  */
-async function followUnderCap(seriesId: string, j: Omit<Judgement, 'why'>): Promise<'inserted' | 'cap' | 'gone'> {
+export async function followJudged(seriesId: string, j: Omit<Judgement, 'why' | 'chapters'>): Promise<'inserted' | 'cap' | 'gone'> {
   return tx(async (qq) => {
     const row = (await qq<{ deleted_at: string | null; merged_into: string | null }>(
       'SELECT deleted_at, merged_into FROM lib_series WHERE id = $1 FOR UPDATE', [seriesId]))[0];

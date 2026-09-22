@@ -196,3 +196,27 @@ test('a sweep that throws is logged, cleared, and lets the next one run', { skip
   assert.ok(runtime.lastUpdate >= before, 'last run moved to now...');
   assert.equal(runtime.lastUpdateResult, null, "...and the previous run's result does not pose as this one's");
 });
+
+test('the stored result and summary carry fallback/completion counts with singular wording', { skip }, async () => {
+  const { runSweep } = await import('../src/lib/updater');
+  const { runtime } = await import('../src/lib/runtime');
+  const { logger, lines } = capturingLogger();
+  const result = {
+    series: 1, visited: 1, added: 3, failed: 0, chapterFailures: 0, capped: 0,
+    outcomes: { ok: 1, gone: 0, unrouted: 0, blocked: 0, source_error: 0, threw: 0, skipped: 0 },
+    healthy: true, switched: 1, partial: 1, completed: 1,
+  };
+  const run = runSweep({}, logger, async () => result as any);
+  assert.notEqual(run, false);
+  assert.equal(await run, result);
+  assert.deepEqual(
+    { switched: runtime.lastUpdateResult?.switched, partial: runtime.lastUpdateResult?.partial, completed: runtime.lastUpdateResult?.completed },
+    { switched: 1, partial: 1, completed: 1 },
+    'the Tasks API reads all three counts from runtime.lastUpdateResult',
+  );
+  const line = String(lines.find((l) => l.level === 'info')?.msg ?? '');
+  assert.match(line, /1 chapter taken from another source/);
+  assert.match(line, /1 chapter saved with pages missing/);
+  assert.match(line, /1 chapter completed/);
+  assert.doesNotMatch(line, /1 chapters/, 'singular counts do not read as plural');
+});

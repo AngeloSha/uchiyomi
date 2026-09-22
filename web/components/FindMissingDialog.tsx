@@ -21,6 +21,7 @@ import { useAuth } from '@/lib/auth';
 import { t as tr } from '@/lib/i18n';
 import { followable } from '@/lib/scanlators';
 import type { SeriesSource } from '@/lib/types';
+import { jobNoteLines, type JobCardNotes } from '@/lib/jobNotes';
 
 interface Candidate {
   source: string; name: string; sourceSeriesId: string; title: string; coverUrl?: string;
@@ -42,7 +43,7 @@ interface Scan {
   following?: string[];
   refusal: { code: string; message: string } | null;
 }
-interface Job { folder: string; title: string; total: number; done: number; status: string; reason?: string }
+interface Job extends JobCardNotes { folder: string; title: string; total: number; done: number; status: string; reason?: string }
 
 /** Why a source was not offered, in words rather than a code. */
 function whyText(c: Candidate): string {
@@ -154,6 +155,12 @@ export function FindMissingDialog({ seriesId, onClose }: { seriesId: string; onC
           <p className="mt-2 text-xs text-fog-500">
             {job ? `${job.done} / ${job.total}` : tr('Starting…')}
           </p>
+          {/* A fill asks one source for numbers it has; when a chapter still came from another one, or was
+              saved short, the card says so here -- the same lines as the downloads pill. Names from the
+              scan's candidates, which is every source this fill could have touched. */}
+          {jobNoteLines(job, (id) => scan.data?.candidates.find((c) => c.source === id)?.name ?? id).map((line, i) => (
+            <p key={i} className="mt-1.5 text-xs leading-relaxed text-fog-400">{line}</p>
+          ))}
         </div>
         <button onClick={onClose} className="btn-ghost mt-5 w-full text-sm">{tr('Close')}</button>
       </Modal>

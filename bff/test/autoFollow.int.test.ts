@@ -320,7 +320,7 @@ test('a nothing-yet add with alsoFollow judges every candidate after its listing
   await t.test('the next sweep takes the chapter only the follower lists', async () => {
     // The loop the feature was filed for: RICH lists 21 and the primary does not. The nothing-yet add
     // floored the series just above 20, so the sweep wants exactly 21 -- from RICH, through the follower
-    // row this add wrote. Reintroduce by dropping the INSERT from followUnderCap (answer 'inserted'
+    // row this add wrote. Reintroduce by dropping the INSERT from followJudged (answer 'inserted'
     // without writing): the sweep sees the primary's 1..20 alone, and `added` reads 0.
     const { updateSeries } = await import('../src/lib/updater');
     const { persistScan } = await import('../src/lib/library');
@@ -337,7 +337,7 @@ test('a nothing-yet add with alsoFollow judges every candidate after its listing
   await t.test('a person confirming the automatic follower makes it theirs; the automatic path cannot take that back', async () => {
     // The sheet reads `auto` from added_by. Reintroduce the manual half by dropping `added_by = COALESCE(…)`
     // from the follow route's DO UPDATE in routes/admin.ts: the row keeps NULL and `auto` stays true after
-    // a person chose it. Reintroduce the automatic half by dropping the COALESCE from followUnderCap: the
+    // a person chose it. Reintroduce the automatic half by dropping the COALESCE from followJudged: the
     // re-follow writes NULL over the admin's id and `auto` flips back to true.
     for (const n of [1, 2, 3]) {
       await q(`INSERT INTO lib_books (id, series_id, source, file, number, title, root) VALUES ($1,$2,'T!af',$3,$4,$5,'/library') ON CONFLICT (id) DO NOTHING`,
@@ -524,7 +524,7 @@ test('a plain nothing-yet add still mints no card, and the body cannot name more
 
 test('at most two followers: three good candidates follow two, and two adds racing each other cannot exceed two', { skip }, async (t) => {
   await t.test('the third good candidate reads cap, in the order the candidates were given', async () => {
-    // Reintroduce by dropping the `WHERE (SELECT count(*) …)` clause from followUnderCap: three rows.
+    // Reintroduce by dropping the `WHERE (SELECT count(*) …)` clause from followJudged: three rows.
     const { id } = await addNothing(PRIMARY);
     const results = await autoFollow(id, [{ source: RICH, sourceId: 'r-1' }, { source: THIRD, sourceId: '3-1' }, { source: FOURTH, sourceId: '4-1' }]);
     assert.deepEqual(results.map((r: any) => [r.source, r.followed, r.why]), [[RICH, true, 'followed'], [THIRD, true, 'followed'], [FOURTH, false, 'cap']], JSON.stringify(results));
@@ -532,7 +532,7 @@ test('at most two followers: three good candidates follow two, and two adds raci
     await dropSeries(id);
   });
   await t.test('two concurrent judgements of the same series end at two followers, not four', async () => {
-    // Reintroduce by dropping the count clause from followUnderCap's INSERT: six follows land and the
+    // Reintroduce by dropping the count clause from followJudged's INSERT: six follows land and the
     // series ends with three. (The `FOR UPDATE` beside it closes a window this test cannot open -- two
     // INSERTs evaluating the count in the same instant -- and is not what this assertion measures.)
     const { id } = await addNothing(PRIMARY);

@@ -617,21 +617,25 @@ export async function setBookDates(folder: string, chapters: { number: number; p
  * stamping every listed number would relabel a file already on disk from group A as group B the moment
  * the choice moved -- while the file itself stayed A's. Same RAW-number match as setBookDates, for the
  * same reason: these numbers are the source's, not the override's.
+ *
+ * `missing` is the 1-based list of placeholder pages when the chapter was saved partial (lib/partial.ts),
+ * and its absence writes NULL: a complete copy landing over a partial one -- a refetch, the completion
+ * pass falling through to another source -- clears the mark in the same stamp that records who wrote it.
  */
-export async function setBookMeta(folder: string, landed: Array<{ number: number; scanlator?: string; source?: string }>): Promise<void> {
+export async function setBookMeta(folder: string, landed: Array<{ number: number; scanlator?: string; source?: string; missing?: number[] }>): Promise<void> {
   const rows = landed.filter((c) => Number.isFinite(c.number));
   if (!rows.length) return;
   const values: string[] = [];
   const params: any[] = [folder];
   for (const c of rows) {
-    params.push(c.number, c.scanlator ?? null, c.source ?? null);
-    values.push(`($${params.length - 2}::real, $${params.length - 1}::text, $${params.length}::text)`);
+    params.push(c.number, c.scanlator ?? null, c.source ?? null, c.missing?.length ? c.missing : null);
+    values.push(`($${params.length - 3}::real, $${params.length - 2}::text, $${params.length - 1}::text, $${params.length}::int[])`);
   }
   await q(
-    `UPDATE lib_books b SET scanlator = v.grp, source_id = v.src
-     FROM (VALUES ${values.join(',')}) AS v(n, grp, src), lib_series s
+    `UPDATE lib_books b SET scanlator = v.grp, source_id = v.src, missing_pages = v.miss
+     FROM (VALUES ${values.join(',')}) AS v(n, grp, src, miss), lib_series s
      WHERE s.folder = $1 AND b.series_id = s.id AND b.number = v.n
-       AND (b.scanlator IS DISTINCT FROM v.grp OR b.source_id IS DISTINCT FROM v.src)`,
+       AND (b.scanlator IS DISTINCT FROM v.grp OR b.source_id IS DISTINCT FROM v.src OR b.missing_pages IS DISTINCT FROM v.miss)`,
     params,
   );
 }

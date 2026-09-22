@@ -199,6 +199,12 @@ function SchedulesSection({ data, save }: { data: any; save: Save }) {
             onSave={(n) => save({ extensionHours: n })} />
         </>
       )}
+      {/* v0.40.0: the sweep's hunt for a chapter none of the followed sources could serve. ON by default,
+          which `!== false` reads as: a server that does not send the key yet is a server that hunts. It sits
+          outside the extensions block because the hunt asks every registered source, engine or not. */}
+      <SwitchRow label={tr('Look for failed chapters on other sources')}
+        help={tr('When a chapter cannot be saved from the sources this series follows, search the others once a day and follow the one that has it')}
+        on={data.auto_follow_on_failure !== false} onChange={(next) => save({ autoFollowOnFailure: next })} />
     </Section>
   );
 }

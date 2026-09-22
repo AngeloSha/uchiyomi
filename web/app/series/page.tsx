@@ -427,7 +427,7 @@ function ChapterEditModal({ book, onClose, onSaved }: { book: Book; onClose: () 
  * sat OUTSIDE the opener for exactly this reason). The copies open from ⋯ → Versions on a chapter row, and
  * from the row tap on a ghost row.
  */
-function RowCaption({ group, via, versions, tone = 'text-fog-500', pruned, lead }: {
+function RowCaption({ group, via, versions, tone = 'text-fog-500', pruned, lead, missing }: {
   group?: string | null;
   via?: string | null;
   versions?: number;
@@ -435,8 +435,15 @@ function RowCaption({ group, via, versions, tone = 'text-fog-500', pruned, lead 
   pruned?: boolean;
   /** A first part before the group: a ghost's reason ("not here yet", "waiting for Asura Scans · 2 days left"). */
   lead?: { text: string; amber?: boolean } | null;
+  /**
+   * How many pages the saved file holds a placeholder for (`Book.missingPages`, v0.40.0). A chip like the
+   * tombstone's, amber because it is news that clears itself: the sweep refills the holes and the server
+   * drops the column when the last one lands. Zero or absent draws nothing.
+   */
+  missing?: number;
 }) {
   const parts: ReactNode[] = [];
+  const short = missing && missing > 0 ? (missing === 1 ? tr('1 page missing') : tr('{n} pages missing', { n: missing })) : null;
   // The same caption as plain text, for `title`: at the owner's desktop width a cell is 287 px and the
   // caption beside the thumb, the date and the two buttons gets ≈90, so "Reaper Scans · 2 versions" is an
   // ellipsis there and a hover is how the rest is read.
@@ -448,8 +455,8 @@ function RowCaption({ group, via, versions, tone = 'text-fog-500', pruned, lead 
   if (group) { parts.push(<span key="g"><GroupAvatar name={group} size={14} className="me-1 align-text-bottom" />{group}</span>); plain.push(group); }
   if (via) { const t = tr('via {source}', { source: via }); parts.push(<span key="via">{t}</span>); plain.push(t); }
   if (versions && versions >= 2) { const t = tr('{n} versions', { n: versions }); parts.push(<span key="v">{t}</span>); plain.push(t); }
-  if (!parts.length && !pruned) return null;
-  const title = [...(pruned ? [tr('Deleted from the server')] : []), ...plain].join(' · ');
+  if (!parts.length && !pruned && !short) return null;
+  const title = [...(pruned ? [tr('Deleted from the server')] : []), ...(short ? [short] : []), ...plain].join(' · ');
   return (
     // One block that truncates as a whole (inline children, no flex): a flex row of shrink-0 parts would
     // run under the date at the end of the row instead of ending in an ellipsis.
@@ -460,6 +467,9 @@ function RowCaption({ group, via, versions, tone = 'text-fog-500', pruned, lead 
           cleanup, and the row cannot tell which, so "to free space" blamed a job that is off on most
           installs. */}
       {pruned && <span className="me-1 rounded-full border border-ink-700 px-1.5 text-[10px] leading-4 text-fog-600">{tr('Deleted from the server')}</span>}
+      {/* Before the group, as a chip and not a caption part: "3 pages missing · Asura Scans" would read as
+          the group's fault. The count is the file's -- the reader shows the caption on exactly those pages. */}
+      {short && <span className="me-1 rounded-full border border-amber-500/40 bg-amber-500/10 px-1.5 text-[10px] leading-4 text-amber-300">{short}</span>}
       {parts.map((n, i) => (
         <span key={i}>
           {i > 0 && <span aria-hidden className="text-ink-600"> · </span>}
@@ -546,7 +556,7 @@ function ChapterRow({ book, downloaded, sourceNames, primarySource, versions, on
         <span className={`h-2 w-2 shrink-0 rounded-full ${state === 'read' ? 'bg-ink-600' : state === 'reading' ? 'bg-accent' : 'bg-accent/40'}`} />
         <div className="min-w-0">
           <p className={`truncate text-sm ${state === 'read' ? 'text-fog-500' : 'text-fog-100'}`}>{chapterLabel(book)}</p>
-          <RowCaption group={book.scanlator} via={altSource} versions={versions} pruned={book.pruned} />
+          <RowCaption group={book.scanlator} via={altSource} versions={versions} pruned={book.pruned} missing={book.missingPages?.length} />
           {state === 'reading' && rp && (
             <p className="text-[11px] text-accent">page {rp.page}/{book.media.pagesCount}</p>
           )}

@@ -285,6 +285,28 @@ To add a whole *site* rather than one series, that is `POST /api/admin/sources/c
 curl -H "Authorization: Bearer $TOK" "https://your-server/api/sources/search-all?q=solo+leveling"
 ```
 
+Since v0.40.0 this answers before the slow sources do. `GET /api/sources/search-all?q=<term>&wait=<ms>` returns
+when every source you may reach has answered, when `wait` milliseconds have passed (clamped to
+`SEARCH_FIRST_ANSWER_MS`, default 6000; omitted means that maximum), or `SEARCH_GRACE_MS` (default 1500) after
+the first source that had results — whichever comes first. `content` keeps its shape (title-grouped cards, or
+one rail per source with `groupBy=source`); beside it, `sources` lists each source you may reach with a `state`
+(`ok`, `empty`, `timeout`, `failed`, `pending`, or `skipped` with `why: disabled | cooldown` for one that was
+not asked at all), `pending` counts the ones still being asked and `asked` the ones asked at all. While
+`pending` is above 0, repeat the same request with a short `wait` (`wait=0` reads what is there without
+waiting): the sources keep answering into a server-side entry keyed by the normalised term and kept for
+`SEARCH_TTL_MS` (default 300000, at most `SEARCH_CACHE_MAX` = 50 entries), which is why the same search typed
+again — by anyone — answers at once. The entry is shared, but every answer is filtered to the caller's own
+reachable sources: an age-capped account neither starts nor sees an adult source that another account's search
+asked. Each source is bounded at `SEARCH_SOURCE_MS` (default 20000; the solver budget for a source behind
+Cloudflare) and asked through a pool of `SEARCH_CONCURRENCY` (default: `SCAN_CONCURRENCY`, itself the solver's
+slot count) at a time, one lane for solver-fronted sources and one for the rest; a source that outruns its
+budget is recorded as slow (never as a failure), one that throws is recorded against its health, and one that
+is disabled or in a cooldown is skipped rather than asked — exactly as the newest listing treats them.
+
+`GET /api/sources/detail` is cached for ten minutes per source and series (it was ninety seconds), and
+concurrent requests for the same pair — the add dialog's pre-warm and the pick that follows it — collapse
+into one outbound fetch. A failed lookup is never cached, so an immediate retry asks the source again.
+
 **Check the library for problems** (admin scope)
 
 ```bash
@@ -418,6 +440,13 @@ row is a tombstone: reading progress is still attached, but there are no pages b
 is listed by `GET /api/series/:id/books` (with the flag) and skipped everywhere a chapter is *served*:
 `next`, Continue reading, the OPDS feed, the offline plan; its download manifest answers **410** `pruned`.
 
+Since v0.40.0 every chapter object also carries `missingPages: number[] | null`: 1-based indices whose
+images are repair placeholders in a partial chapter. `GET /api/books/:id/pages` keeps those entries in
+place and adds `missing: true`; a page may be both `missing` and `junk`, and a reader must not hide the
+missing placeholder. `GET /api/books/:id/download-manifest` copies the same optional `missing: true` onto
+each affected entry in `pages`, so offline readers preserve the evidence. A complete chapter has
+`missingPages: null` and no page-level `missing` keys.
+
 **Chapters the sources have that you don't.** `GET /api/series/:id/listing` answers
 `{checkedAt, content: [Ghost]}`: every chapter number the series' sources listed at the last check (the
 sweep, or **Check now**) that this server has no row for, each with the reason —
@@ -516,6 +545,14 @@ the admin `chapters/refetch`); the rest of the library is not locked — **404**
 cannot see. Same permission gate as the fill:
 `canDownload: false` is refused by the whole `/api/sources` surface, and a source outside the account's
 age cap answers **403**. Progress is on `GET /api/sources/jobs` under the series' `folder`.
+
+**Download progress.** Since v0.40.0 a job may carry `switched: [{number, from, to, why?}]`, one entry for
+each chapter completed from a different followed source after its first copy failed. `why` is
+`"rate_limited"` when that was the reason for the switch; it may be absent for an ordinary failure. It may
+also carry `partial`, the count of chapters this job saved with repair placeholders. Both fields are
+additive and absent when their count is zero. An explicitly pinned copy never switches. A 403/429 refusal
+never becomes a partial chapter or starts a source hunt; a copy from an already-followed source may still
+land, with `why: "rate_limited"` when appropriate.
 
 **Picks — fetching one specific version.** `picks: [{number, source, sourceId}]` names copies out of
 `GET /api/series/:id/versions` instead of numbers. A pick is authorised by a matching entry among the
@@ -697,13 +734,17 @@ PATCH  /api/admin/import/candidates/:cid
 
 **Server settings.** `GET /api/admin/settings` is the one row: `server_name`, `allow_registration`,
 `updater_hours`, `extension_hours`, `extension_auto_update`, `update_check`, `install_ping`, `install_ping_last`,
-`cleanup_read`, `cleanup_read_days`, `backup_hour`, `scanlator_prefs`, plus `extensions_configured` (computed). `PATCH
+`cleanup_read`, `cleanup_read_days`, `backup_hour`, `scanlator_prefs`, `auto_follow_on_failure`, plus
+`extensions_configured` (computed). `auto_follow_on_failure` defaults to true and controls the bounded
+once-per-series-per-day source hunt after an ordinary scheduled-download failure; it never makes an
+interactive Add/Fetch hunt and never runs after a refusal. `PATCH
 /api/admin/settings` takes any subset of `serverName` (1–64 chars), `allowRegistration`, `updaterHours`
 (1–168), `extensionHours` (1–168), `extensionAutoUpdate`, `updateCheck`, `installPing`, `cleanupRead`,
 `cleanupReadDays` (0–3650; 0 is a value, "at the next run"), `backupHour` (0–23, the local hour of the nightly
 backup — the pending timer is re-armed at once, so the change applies to the next run rather than the one
-after; `GET /api/admin/tasks` shows the backup's `schedule` as `daily at HH:00` from the same column) and
-`scanlatorPrefs` (below). Each field is written on its own, an out-of-range value is a **400** and nothing is
+after; `GET /api/admin/tasks` shows the backup's `schedule` as `daily at HH:00` from the same column),
+`scanlatorPrefs` (below), and `autoFollowOnFailure`. Each field is written on its own, an out-of-range value
+is a **400** and nothing is
 written, and the audit row `settings.update` carries the body. The admin console's Settings tab sends one
 row per PATCH as each row is changed (the read-chapter confirmation carries the day count with the switch).
 

@@ -1805,11 +1805,18 @@ function Health() {
       )}
       {checks.map((c) => {
         const isOpen = open === c.id;
+        // Notes explain important states that are deliberately not findings. A readable partial chapter,
+        // for example, is absent from the active failure ledger but this note is the only place Health says
+        // where it appears and when it is repaired. Keep those cards expandable even when `items` is empty.
+        const expandable = !!c.items.length || !!c.note;
         return (
-          <div key={c.id} className={`card grad-border overflow-hidden ${c.status !== 'ok' ? 'full' : ''}`}>
+          <div key={c.id} data-health-check={c.id} className={`card grad-border overflow-hidden ${c.status !== 'ok' ? 'full' : ''}`}>
             <button
+              type="button"
               onClick={() => setOpen(isOpen ? null : c.id)}
-              disabled={!c.items.length}
+              aria-expanded={expandable ? isOpen : undefined}
+              aria-controls={expandable ? `health-${c.id}-details` : undefined}
+              disabled={!expandable}
               className="flex w-full flex-wrap items-center gap-x-3 gap-y-1.5 px-4 py-3.5 text-start disabled:cursor-default"
             >
               <span className={`shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-medium ${HEALTH_TONE[c.status]}`}>
@@ -1819,14 +1826,14 @@ function Health() {
                 <p className="text-sm text-fog-100">{c.title}</p>
                 <p className="text-[11px] text-fog-500">{c.summary}</p>
               </div>
-              {!!c.items.length && (
+              {expandable && (
                 <span className="shrink-0 text-xs text-fog-500">{isOpen ? 'Hide' : 'Show'}</span>
               )}
             </button>
 
             {isOpen && (
-              <div className="border-t border-ink-800/70">
-                {c.note && <p className="px-4 pt-3 text-[11px] leading-relaxed text-fog-500">{c.note}</p>}
+              <div id={`health-${c.id}-details`} className="border-t border-ink-800/70">
+                {c.note && <p data-health-note className="px-4 pt-3 text-[11px] leading-relaxed text-fog-500">{c.note}</p>}
                 <div className="divide-y divide-ink-800/70">
                   {c.items.map((it, i) => (
                     <div key={`${c.id}-${i}`} className={`flex items-center gap-3 px-4 py-2.5 ${it.info ? 'opacity-60' : ''}`}>

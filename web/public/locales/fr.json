@@ -2,7 +2,7 @@
   "_meta": {
     "language": "fr",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 922
+    "strings": 938
   },
   "1 check found something": "1 vérification a trouvé quelque chose",
   "1 member": "1 membre",
@@ -925,5 +925,21 @@
   "A group name is at most 80 characters": "Un nom de groupe fait au plus 80 caractères",
   "A group name needs at least one letter or digit": "Un nom de groupe doit contenir au moins une lettre ou un chiffre",
   "Tap the download icon on any chapter — or turn on Keep favorites offline under Profile → Settings → Downloads — to read offline. Perfect for flights and commutes.": "Touchez l’icône de téléchargement d’un chapitre — ou activez « Garder les favoris hors ligne » dans Profil → Paramètres → Téléchargements — pour lire hors ligne. Parfait pour les vols et les trajets.",
-  "Nothing is saved on this device, and there is no connection to fetch anything with. Reconnect and download a chapter to read it here.": "Rien n’est enregistré sur cet appareil et aucune connexion ne permet de récupérer quoi que ce soit. Reconnectez-vous et téléchargez un chapitre pour le lire ici."
+  "Nothing is saved on this device, and there is no connection to fetch anything with. Reconnect and download a chapter to read it here.": "Rien n’est enregistré sur cet appareil et aucune connexion ne permet de récupérer quoi que ce soit. Reconnectez-vous et téléchargez un chapitre pour le lire ici.",
+  "{n} of {m} sources answered · still asking {names}": "{n} sur {m} sources ont répondu · on interroge encore {names}",
+  "{n} of {m} sources answered · still asking {name}": "{n} sur {m} sources ont répondu · on interroge encore {name}",
+  "and {n} more": "et {n} autres",
+  "and 1 more": "et 1 autre",
+  "Loading chapter list…": "Chargement de la liste des chapitres…",
+  "Page {n} could not be fetched from {source}": "La page {n} n'a pas pu être récupérée depuis {source}",
+  "Page {n} could not be fetched": "La page {n} n'a pas pu être récupérée",
+  "It will be retried automatically.": "Une nouvelle tentative sera faite automatiquement.",
+  "{n} pages missing": "{n} pages manquantes",
+  "1 page missing": "1 page manquante",
+  "{from} asked us to slow down — continued from {to}": "{from} nous a demandé de ralentir — poursuivi depuis {to}",
+  "took chapter {n} from {to}": "chapitre {n} pris depuis {to}",
+  "1 chapter saved with pages missing": "1 chapitre enregistré avec des pages manquantes",
+  "{n} chapters saved with pages missing": "{n} chapitres enregistrés avec des pages manquantes",
+  "Look for failed chapters on other sources": "Chercher les chapitres en échec sur d'autres sources",
+  "When a chapter cannot be saved from the sources this series follows, search the others once a day and follow the one that has it": "Quand un chapitre ne peut pas être enregistré depuis les sources suivies par cette série, cherche une fois par jour parmi les autres et suit celle qui l'a"
 }

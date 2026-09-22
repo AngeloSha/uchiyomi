@@ -173,7 +173,9 @@ async function chapterFailures(): Promise<HealthCheck> {
       `${new Date(r.since).toISOString().slice(0, 10)}, tried up to ${r.attempts} time${r.attempts === 1 ? '' : 's'}` +
       `${r.capped ? `, ${r.capped} left alone after ${CHAPTER_RETRY_CAP}` : ''}; ` +
       `latest: "${r.latest_title}" ch ${r.latest_number} (${r.latest_status}` +
-      `${r.latest_reason ? `: ${String(r.latest_reason).slice(0, 80)}` : ''})`,
+      // 160, not 80: since v0.40.0 the reason ends with the evidence -- ` (page 80: 200 image/webp 88 B;
+      // page 12: 404)` -- and that tail is the part that says WHICH theory is right. At 80 it was cut.
+      `${r.latest_reason ? `: ${String(r.latest_reason).slice(0, 160)}` : ''})`,
   }));
   const total = rows.reduce((n, r) => n + r.chapters, 0);
   return {
@@ -186,7 +188,11 @@ async function chapterFailures(): Promise<HealthCheck> {
     note:
       'One entry per source, counting chapters still missing after an attempt and how often each has been tried. ' +
       `They clear themselves the moment the chapter lands. After ${CHAPTER_RETRY_CAP} failed tries the nightly sweep leaves a chapter alone; ` +
-      '"Find missing chapters" on the series still fetches it on purpose.' + (rows.length > 20 ? ` ${rows.length - 20} more not shown.` : ''),
+      '"Find missing chapters" on the series still fetches it on purpose. ' +
+      // Not a failure row: a chapter saved short is on disk and readable, so it is not in this ledger at
+      // all. Said here because this is where an admin looks for "why is a chapter not whole".
+      'A chapter saved with pages missing is listed on its series page and re-tried by the sweep, up to 10 a night.' +
+      (rows.length > 20 ? ` ${rows.length - 20} more not shown.` : ''),
     items,
   };
 }
