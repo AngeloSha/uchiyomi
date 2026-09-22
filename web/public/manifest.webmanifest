@@ -1,7 +1,7 @@
 {
   "name": "Uchiyomi",
   "short_name": "Uchiyomi",
-  "description": "Your library, your way.",
+  "description": "Your self-hosted manga server. Read, download, keep up.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
