@@ -318,7 +318,9 @@ async function main() {
     // 8.3 short names: an ASCII alias of the same folder, when the volume generates them.
     const { powershell } = await import('./lib/probes.mjs');
     await fsp.mkdir(path.join(na, 'runtime'), { recursive: true });
-    const short = (await powershell(`(New-Object -ComObject Scripting.FileSystemObject).GetFolder('${na.replace(/'/g, "''")}').ShortPath`)).trim();
+    // Base64 round trip: PowerShell's stdout encoding would otherwise mangle a non-ASCII answer.
+    const b64 = (await powershell(`[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes((New-Object -ComObject Scripting.FileSystemObject).GetFolder('${na.replace(/'/g, "''")}').ShortPath))`)).trim();
+    const short = Buffer.from(b64, 'base64').toString('utf8');
     results.shortPath = short;
     line('INFO', 'short-path', `8.3 short path of "${NON_ASCII}": ${short || '(none)'}${short && /^[\x20-\x7e]+$/.test(short) ? ' (ASCII)' : ''}`);
     if (short && /^[\x20-\x7e]+$/.test(short) && short !== na) {
@@ -365,19 +367,25 @@ async function main() {
     if (!rr.ready) {
       line('FAIL', 'design-literal', `not ready: ${rr.reason}; tail ${hh.tail.slice(-800)}`);
     } else {
-      // Suwayomi race: extensionRepos is a MigratedConfigValue whose forwarding collector is launched lazily
+      // 1. Suwayomi race: extensionRepos is a MigratedConfigValue whose forwarding collector is launched lazily
       // on first access and drops the first value it sees; when setSettings is the FIRST access the new list
-      // is shown back but never reaches extensionStores/server.conf. Probe it on this fresh engine.
-      await gql(port, creds, 'mutation($r:[String!]){ setSettings(input:{settings:{extensionRepos:$r}}){ settings { extensionRepos } } }', { r: [TEST_REPO] });
+      // is echoed back but never reaches extensionStores/server.conf. Probe it on this fresh engine, before
+      // anything reads `settings` (a read creates the flow early and hides the race).
+      let echoed = null;
+      try {
+        echoed = (await gql(port, creds, 'mutation($r:[String!]){ setSettings(input:{settings:{extensionRepos:$r}}){ settings { extensionRepos } } }', { r: [TEST_REPO] })).json?.data?.setSettings?.settings?.extensionRepos;
+      } catch (e) { echoed = `error ${e.message}`; }
+      // 2. The design's flags as written. (Any `settings` read initialises every setting's flow, so this comes
+      //    after the race probe.)
+      const none = await probe(port).catch((e) => ({ status: `error ${e.cause?.code || e.message}` }));
+      const s = (await gql(port, creds, '{ settings { authMode flareSolverrUrl kcefEnabled } }').catch(() => null))?.json?.data?.settings;
+      line(none.status === 401 && s?.flareSolverrUrl === stub.url ? 'PASS' : 'FAIL', 'design-literal', `design §5 flags verbatim: ready in ${(rr.ms / 1000).toFixed(1)} s; authMode=basic_auth (lowercase) -> unauthenticated ${none.status}, engine reports authMode=${s?.authMode}; unquoted flareSolverrUrl reported ${s?.flareSolverrUrl === stub.url ? 'intact' : `as ${s?.flareSolverrUrl}`}; kcefEnabled=${s?.kcefEnabled}`, { ms: rr.ms, settings: s });
       await sleep(4000);
       const confText = fs.existsSync(path.join(root, 'server.conf')) ? fs.readFileSync(path.join(root, 'server.conf'), 'utf8') : '';
       const persisted = /extensionStores = (\[[^\]]*\])/.exec(confText)?.[1]?.replace(/\s+/g, '') ?? '?';
-      results.repoWriteRace = { writeFirstPersisted: persisted };
-      line('INFO', 'repo-write-race', `setSettings(extensionRepos) as the very first settings access on a fresh engine: server.conf extensionStores after 4 s = ${persisted} (${persisted === '[]' ? 'LOST: the bff must read settings first, or use addExtensionStore' : 'kept'})`);
-      await gql(port, creds, 'mutation($r:[String!]){ setSettings(input:{settings:{extensionRepos:$r}}){ settings { extensionRepos } } }', { r: [] });
-      const none = await probe(port);
-      const s = (await gql(port, creds, settingsQ)).json?.data?.settings;
-      line(none.status === 401 && s?.flareSolverrUrl === stub.url ? 'PASS' : 'FAIL', 'design-literal', `design §5 flags verbatim: ready in ${(rr.ms / 1000).toFixed(1)} s; authMode=basic_auth (lowercase) -> unauthenticated ${none.status}, engine reports authMode=${s?.authMode}; unquoted flareSolverrUrl reported ${s?.flareSolverrUrl === stub.url ? 'intact' : `as ${s?.flareSolverrUrl}`}`, { ms: rr.ms, settings: s });
+      results.repoWriteRace = { echoed, writeFirstPersisted: persisted };
+      line('INFO', 'repo-write-race', `setSettings(extensionRepos) as the very first settings access on a fresh engine: echoed ${JSON.stringify(echoed)}; server.conf extensionStores 4 s later = ${persisted} (${persisted === '[]' ? 'LOST: the bff must read settings first, or use addExtensionStore' : 'kept'})`);
+      if (!hh.done) await gql(port, creds, 'mutation($r:[String!]){ setSettings(input:{settings:{extensionRepos:$r}}){ settings { extensionRepos } } }', { r: [] }).catch(() => null);
       // KCEF: Suwayomi's default is kcefEnabled=true; watch what it does on its own.
       const t0 = Date.now();
       let state = 'no CEF activity logged';
@@ -386,6 +394,7 @@ async function main() {
       while (Date.now() - t0 < KCEF_WAIT_S * 1000) {
         text = fs.existsSync(logFile) ? fs.readFileSync(logFile, 'utf8') : '';
         if (/Failed to set up CEF/.test(text)) { state = 'failed'; break; }
+        if (hh.done) { state = /Downloaded CEF successfully/.test(text) ? 'downloaded, then the engine exited' : 'engine exited'; break; }
         if (/Downloaded CEF successfully/.test(text)) { state = 'downloaded'; doneAt ??= Date.now(); }
         if (/Downloading CEF from Github/.test(text) && state === 'no CEF activity logged') state = 'downloading';
         if (doneAt && Date.now() - doneAt > 15000) break; // give CEF 15 s to start (or fail) after the download
@@ -407,7 +416,22 @@ async function main() {
       const hsErr = fs.readdirSync(rtAscii).filter((n) => /^hs_err/.test(n));
       const stillAnswers = engineAlive ? (await probe(port).catch(() => ({ status: 'no answer' }))).status : 'n/a';
       results.kcef = { state, release, lastProgress: pct.at(-1)?.[0], failure, kcefBytes: kcefSize?.bytes, kcefFiles: kcefSize?.files, cacheBytes: cacheSize?.bytes, children: kids, rss: m.rss, engineAlive, exit, hsErr, stillAnswers, watchedMs: Date.now() - t0 };
-      line('INFO', 'kcef', `with Suwayomi's default kcefEnabled=true: ${release ? `downloads ${release}` : 'no download started'}${pct.length ? ` (${pct.at(-1)[0]})` : ''}; outcome ${state}${failure ? ` -- ${failure}` : ''}; bin/kcef ${kcefSize ? `${mib(kcefSize.bytes)} in ${kcefSize.files} files` : 'absent'}; cache/kcef ${cacheSize ? mib(cacheSize.bytes) : 'absent'}; engine afterwards: ${engineAlive ? `alive, about -> ${stillAnswers}, RSS ${mib(m.rss)}, children ${kids.length ? kids.join('; ') : 'none'}` : `DEAD (exit ${JSON.stringify(exit)}${hsErr.length ? `, ${hsErr.join(',')}` : ''})`}; watched ${((Date.now() - t0) / 1000).toFixed(0)} s. With -D...kcefEnabled=false (every other boot here) bin/kcef stays absent.`);
+      line('INFO', 'kcef', `with Suwayomi's default kcefEnabled=true: ${release ? `downloads ${release}` : 'no download started'}${pct.length ? ` (${pct.at(-1)[0]})` : ''}; outcome ${state}${failure ? ` -- ${failure}` : ''}; bin/kcef ${kcefSize ? `${mib(kcefSize.bytes)} in ${kcefSize.files} files` : 'absent'}; cache/kcef ${cacheSize ? mib(cacheSize.bytes) : 'absent'}; engine afterwards: ${engineAlive ? `alive, about -> ${stillAnswers}, RSS ${mib(m.rss)}, children ${kids.length ? kids.join('; ') : 'none'}` : `DEAD (exit code ${exit?.code} signal ${exit?.signal}${exit ? `, ${((exit.at - (hh.t0 + rr.ms)) / 1000).toFixed(1)} s after ready` : ''}${hsErr.length ? `, ${hsErr.join(',')}` : ''})`}; watched ${((Date.now() - t0) / 1000).toFixed(0)} s. With -D...kcefEnabled=false (every other boot here) bin/kcef stays absent.`);
+      if (!engineAlive) {
+        // Does it die on every start once KCEF is installed? Same rootDir, debug logs on for the CEF steps.
+        await stopEngine(hh, { mode: 'kill' });
+        const l2 = buildLaunch({ runtimeDir: rtAscii, rootDir: root, port, fsUrl: stub.url, ...creds, pathMode: 'cmdline', fsQuote: false, authModeValue: 'basic_auth', kcef: true, isolatePrefs: false, extraProps: { debugLogsEnabled: 'true' } });
+        const log2 = path.join(WORK, 'engine-design-literal-restart.log');
+        const h2 = startEngine(l2, { logFile: log2 });
+        const r2 = await waitReady(h2, port, { timeoutMs: 180000 });
+        const t1 = Date.now();
+        while (Date.now() - t1 < 60000 && !h2.done) await sleep(500);
+        const e2 = h2.done ? await h2.exited : null;
+        const cefLines = fs.readFileSync(log2, 'utf8').replace(/\r/g, '').split('\n').filter((x) => /cef/i.test(x)).map((x) => x.replace(/^\S+ \[[^\]]+\] /, '').slice(0, 200)).slice(-6);
+        results.kcefRestart = { ready: r2.ready, readyMs: r2.ms, died: !!e2, exit: e2 && { code: e2.code, signal: e2.signal }, diedAfterReadyMs: e2 && r2.ready ? e2.at - (h2.t0 + r2.ms) : null, cefLines };
+        line('INFO', 'kcef-restart', `restart with KCEF already installed: ${r2.ready ? `ready in ${(r2.ms / 1000).toFixed(1)} s` : `never ready (${r2.reason})`}; ${e2 ? `DIED AGAIN ${results.kcefRestart.diedAfterReadyMs ?? '?'} ms after ready, exit code ${e2.code} signal ${e2.signal}` : 'alive 60 s later'}; last CEF log lines: ${cefLines.join(' | ')}`);
+        await stopEngine(h2, { mode: 'graceful' });
+      }
     }
     await stopEngine(hh, { mode: 'graceful' });
     const fpd = await footprint();
