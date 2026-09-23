@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<title>Uchiyomi</title>
+<style>
+  :root { color-scheme: dark; }
+  html, body { margin: 0; height: 100%; background: #000; color: #e7e5e4; font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { height: 100%; display: grid; place-items: center; text-align: center; }
+  .mark { width: 44px; height: 44px; border-radius: 50%; border: 3px solid #27272a; border-top-color: #e7e5e4; animation: spin 0.9s linear infinite; margin: 0 auto 18px; }
+  h1 { font-size: 17px; font-weight: 600; margin: 0 0 4px; letter-spacing: 0.01em; }
+  p { margin: 0; color: #a1a1aa; font-size: 13px; }
+  pre { max-width: 70ch; white-space: pre-wrap; text-align: left; color: #fca5a5; background: #0a0a0a; border: 1px solid #27272a; border-radius: 12px; padding: 12px 14px; font-size: 12px; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) { .mark { animation: none; } }
+</style>
+</head>
+<body>
+<main>
+  <div id="starting">
+    <div class="mark" aria-hidden="true"></div>
+    <h1>Starting Uchiyomi</h1>
+    <p>Opening your library…</p>
+  </div>
+  <div id="failed" hidden>
+    <h1>Uchiyomi could not start</h1>
+    <pre id="msg"></pre>
+    <p>The logs are in the Uchiyomi data folder, under <code>logs</code>.</p>
+  </div>
+</main>
+<script>
+  const err = new URLSearchParams(location.search).get('error');
+  if (err) {
+    document.getElementById('starting').hidden = true;
+    document.getElementById('failed').hidden = false;
+    document.getElementById('msg').textContent = err;
+  }
+</script>
+</body>
+</html>

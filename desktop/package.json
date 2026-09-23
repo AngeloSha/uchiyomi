@@ -1,0 +1,28 @@
+{
+  "name": "uchiyomi-desktop",
+  "productName": "Uchiyomi",
+  "version": "0.43.0",
+  "description": "Uchiyomi as a Windows/macOS app: the same server and web app, with the library on this PC.",
+  "private": true,
+  "type": "commonjs",
+  "main": "src/main.js",
+  "author": "Angelo Shaheen <angeloshaheen@gmail.com>",
+  "license": "MPL-2.0",
+  "homepage": "https://uchiyomi.com",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "stage": "node scripts/stage.mjs",
+    "pg-dist": "node scripts/pg-dist.mjs",
+    "start": "electron .",
+    "pack": "electron-builder --dir --publish never",
+    "dist": "electron-builder --publish never",
+    "test": "node --test \"test/*.test.mjs\""
+  },
+  "devDependencies": {
+    "electron": "44.4.5",
+    "electron-builder": "26.15.3",
+    "puppeteer-core": "25.12.0"
+  }
+}
