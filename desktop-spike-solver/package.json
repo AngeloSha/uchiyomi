@@ -1,0 +1,19 @@
+{
+  "name": "uchiyomi-desktop-spike-solver",
+  "private": true,
+  "version": "0.43.0",
+  "productName": "Uchiyomi",
+  "description": "Phase 0 spike rig for the desktop Cloudflare solver (throwaway; Phase 2 keeps desktop/src/solver).",
+  "main": "dist/desktop-spike-solver/main.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test:contract": "node --import tsx --test ../desktop/test/solver.contract.test.ts",
+    "test:electron": "electron dist/desktop/test/solver.electron.test.js"
+  },
+  "devDependencies": {
+    "@types/node": "^24.3.0",
+    "electron": "44.4.5",
+    "tsx": "^4.20.5",
+    "typescript": "^5.9.2"
+  }
+}

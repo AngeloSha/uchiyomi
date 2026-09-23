@@ -1,0 +1,12 @@
+{
+  "_provenance": "Request bodies exactly as the live FlareSolverr logged them (docker logs yomi-flaresolverr, 'Incoming request => POST /v1 body: ...', 2026-09-13..23, 10,000 requests). Only the URLs and cookie values are replaced. Counts over those 10 days: bffPost 6883, bffGet 3086, suwayomiGetWithCookies 17, suwayomiGetNoCookies 8. suwayomiPost is not in the log; its shape is derived from CloudflareInterceptor.kt:216-231 (a non-form POST body becomes \"\").",
+  "bffGet": { "cmd": "request.get", "url": "https://madara.test/manga/some-series/", "maxTimeout": 60000 },
+  "bffPost": { "cmd": "request.post", "url": "https://madara.test/manga/some-series/ajax/chapters/", "postData": "", "maxTimeout": 60000 },
+  "suwayomiGetWithCookies": {
+    "cmd": "request.get", "url": "https://ext.test/series/123", "maxTimeout": 60000, "session": "suwayomi", "session_ttl_minutes": 15,
+    "cookies": [{ "name": "_ga", "value": "GA1.1.1" }, { "name": "PHPSESSID", "value": "abc" }, { "name": "theme", "value": "dark" }],
+    "returnOnlyCookies": true
+  },
+  "suwayomiGetNoCookies": { "cmd": "request.get", "url": "https://ext.test/", "maxTimeout": 60000, "session": "suwayomi", "session_ttl_minutes": 15, "cookies": [], "returnOnlyCookies": true },
+  "suwayomiPost": { "cmd": "request.post", "url": "https://ext.test/api/search", "maxTimeout": 60000, "session": "suwayomi", "session_ttl_minutes": 15, "cookies": [], "returnOnlyCookies": true, "postData": "" }
+}
