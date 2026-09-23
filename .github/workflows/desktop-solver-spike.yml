@@ -46,7 +46,7 @@ jobs:
       - run: node node_modules/electron/install.js
       - run: npm run build
       - name: Contract tests (plain Node, fake browser, the bff's real client + Suwayomi's DTOs)
-        run: node --import tsx --test --test-reporter=spec ../desktop/test/solver.contract.test.ts 2>&1 | tee contract.log
+        run: node --import tsx --test --test-reporter=spec --test-timeout=30000 ../desktop/test/solver.contract.test.ts 2>&1 | tee contract.log
       - name: Linux only - let Chromium use its user-namespace sandbox (Ubuntu 24.04 restricts it via AppArmor)
         if: runner.os == 'Linux'
         run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
@@ -66,7 +66,7 @@ jobs:
       - name: Summary
         if: always()
         run: |
-          { echo "### ${{ matrix.os }}"; echo '```'; grep -h -E '^(✔|✖|MEASURE|[0-9]+/[0-9]+ passed|ℹ (pass|fail))' contract.log electron-hidden.log electron-offscreen.log 2>/dev/null; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          { echo "### ${{ matrix.os }}"; echo '```'; grep -h -E '^(✔|✖|MEASURE|[0-9]+/[0-9]+ passed|ℹ (pass|fail))' contract.log electron-hidden.log electron-offscreen.log 2>/dev/null || true; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v7
         if: always()
         with:

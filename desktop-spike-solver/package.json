@@ -7,7 +7,7 @@
   "main": "dist/desktop-spike-solver/main.js",
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "test:contract": "node --import tsx --test ../desktop/test/solver.contract.test.ts",
+    "test:contract": "node --import tsx --test --test-timeout=30000 ../desktop/test/solver.contract.test.ts",
     "test:electron": "electron dist/desktop/test/solver.electron.test.js"
   },
   "devDependencies": {

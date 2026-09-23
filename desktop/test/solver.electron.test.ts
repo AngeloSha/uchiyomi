@@ -249,8 +249,9 @@ app.whenReady().then(async () => {
     const r = await solve({ cmd: 'request.get', url: `${S}/throttle`, waitInSeconds: 2 });
     const m = JSON.parse((r.j.solution.response.match(/<pre id="r">([^<]*)<\/pre>/) || [])[1]);
     measure('hidden-window-scheduling', m);
-    // setTimeout(10) chained for 1 s: ~90+ when unthrottled, ~1 when throttled to once a second.
-    assert.ok(m.timers > 50, `only ${m.timers} timer ticks in 1 s`);
+    // setTimeout(10) chained for 1 s: ~100 unthrottled, 1 under Chromium's background throttle (one wake-up a
+    // second), fewer still under intensive throttling. macOS CI measured 50 (timer coalescing), Linux 101.
+    assert.ok(m.timers > 10, `only ${m.timers} timer ticks in 1 s: the hidden window is being throttled`);
   });
 
   await check('concurrency: 4 solves at once each get their own window', async () => {

@@ -108,18 +108,23 @@ export async function startSolverServer(opts: SolverServerOptions): Promise<Solv
     return b.length === tokenBuf.length && timingSafeEqual(b, tokenBuf);
   };
 
+  /**
+   * The body, or null when it is over the cap. An oversized body is still READ (and dropped, up to 16x the
+   * cap) before the 413 goes out: closing the socket on a client that is mid-write turns the clean 413 into
+   * an EPIPE/ECONNRESET on its side (seen on the macOS and Windows CI runners). Past 16x it is cut off.
+   */
   const readBody = (req: http.IncomingMessage): Promise<Buffer | null> =>
     new Promise((resolve, rejectP) => {
-      const declared = Number(req.headers['content-length']);
-      if (Number.isFinite(declared) && declared > maxBody) { resolve(null); return; }
       const chunks: Buffer[] = [];
       let n = 0;
+      let over = Number(req.headers['content-length']) > maxBody;
       req.on('data', (c: Buffer) => {
         n += c.length;
-        if (n > maxBody) { resolve(null); req.pause(); return; }
+        if (n > maxBody) over = true;
+        if (over) { chunks.length = 0; if (n > maxBody * 16) { resolve(null); req.destroy(); } return; }
         chunks.push(c);
       });
-      req.on('end', () => resolve(Buffer.concat(chunks)));
+      req.on('end', () => resolve(over ? null : Buffer.concat(chunks)));
       req.on('error', rejectP);
     });
 
@@ -146,7 +151,7 @@ export async function startSolverServer(opts: SolverServerOptions): Promise<Solv
   async function v1(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
     const start = Date.now();
     const body = await readBody(req);
-    if (body === null) { reject(res, 413, 'Request body too large'); req.destroy(); return; }
+    if (body === null) { if (!res.headersSent && !res.socket?.destroyed) reject(res, 413, 'Request body too large'); return; }
     let parsed: unknown;
     try { parsed = body.length ? JSON.parse(body.toString('utf8')) : {}; } catch {
       json(res, 500, envelope(start, 'error', 'Error: Request body is not valid JSON.'));

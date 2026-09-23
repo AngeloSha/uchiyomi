@@ -225,7 +225,9 @@ function parseDtos(src: string): Map<string, KField[]> {
   }
   return out;
 }
-const DTOS = parseDtos(readFileSync(join(FIX, 'suwayomi-v2.3.2243-FlareSolverDtos.kt'), 'utf8'));
+// CRLF-safe: a Windows checkout rewrites the fixture's line endings.
+const fixture = (name: string) => readFileSync(join(FIX, name), 'utf8').replace(/\r\n/g, '\n');
+const DTOS = parseDtos(fixture('suwayomi-v2.3.2243-FlareSolverDtos.kt'));
 
 /** kotlinx.serialization with ignoreUnknownKeys=true, explicitNulls=false, isLenient=false. Throws like it would. */
 function kDecode(v: unknown, t: KType, path: string): void {
@@ -395,7 +397,7 @@ test('concurrency: 4 session-less solves at once, Suwayomi gets its own 5th slot
 // ---- the pure pieces -----------------------------------------------------------------------------------
 
 test("detection lists are FlareSolverr 3.5.2's, verbatim", () => {
-  const py = readFileSync(join(FIX, 'flaresolverr-3.5.2-detection-lists.py'), 'utf8');
+  const py = fixture('flaresolverr-3.5.2-detection-lists.py');
   const list = (name: string) => {
     const body = py.match(new RegExp(`${name} = \\[([\\s\\S]*?)\\n\\]`))![1];
     return [...body.replace(/^\s*#.*$/gm, '').matchAll(/'([^']*)'|"([^"]*)"/g)].map((m) => m[1] ?? m[2]);

@@ -36,7 +36,9 @@ let active = 0;
 let peak = { total: 0, procs: [] as Sample[] };
 let before = new Set<number>();
 let seenDuring = new Map<number, string>();
-let last: (SolveDetail & { peakRssKB?: number; peakProcs?: Sample[]; spawned?: Array<{ pid: number; type: string }> }) | null = null;
+type Detail = SolveDetail & { peakRssKB?: number; peakProcs?: Sample[]; spawned?: Array<{ pid: number; type: string }> };
+let last: Detail | null = null;
+const all: Detail[] = [];
 
 function startSampling(): void {
   if (active++ > 0) return;
@@ -67,6 +69,7 @@ app.whenReady().then(async () => {
       const m = metricsNow();
       if (m.total > peak.total) peak = m;
       last = { ...d, peakRssKB: peak.total, peakProcs: peak.procs, spawned: [...seenDuring].map(([pid, type]) => ({ pid, type })) };
+      all.push(last);
       log('solve-detail', last as unknown as Record<string, unknown>);
     },
   });
@@ -83,6 +86,7 @@ app.whenReady().then(async () => {
     },
     debugRoutes: {
       last: () => last,
+      details: () => all,
       metrics: () => metricsNow(),
       stats: () => backend.stats(),
     },
