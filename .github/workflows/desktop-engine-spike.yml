@@ -1,0 +1,112 @@
+# Uchiyomi Desktop, Phase 0 spike S7: build the slim extension-engine pack per platform and prove it on real
+# Windows and macOS runners. A prototype: publishes nothing, never runs on main or on tags.
+name: desktop-engine-spike
+
+on:
+  push:
+    branches: [spike/desktop-engine]
+  workflow_dispatch:
+    inputs:
+      cycles:
+        description: kill-survival cycles
+        default: '20'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-engine-spike-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  engine:
+    name: engine (${{ matrix.platform }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            platform: win-x64
+          - os: macos-15
+            platform: mac-arm64
+          - os: macos-15-intel
+            platform: mac-x64
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 75
+    env:
+      SUWAYOMI_VERSION: v2.3.2243
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: bff/package-lock.json
+
+      # javac --release 21 for the shim (the pack itself ships Suwayomi's own JRE 25).
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Cache the Suwayomi release download
+        uses: actions/cache@v6
+        with:
+          path: ${{ runner.temp }}/suwayomi-dl
+          key: suwayomi-${{ env.SUWAYOMI_VERSION }}-${{ matrix.platform }}
+
+      # The bff's own Suwayomi client (dist/lib/sources/suwayomi) is driven against the engine in the auth and
+      # extension checks, so "basic auth works with the bff" is the bff's code, not a re-implementation.
+      - name: Build the bff (client leg only; nothing in bff/ changes)
+        working-directory: bff
+        run: |
+          npm ci --no-audit --no-fund
+          npm run build
+
+      - name: Build the engine pack
+        shell: bash
+        run: node desktop-engine/pack.mjs --platform ${{ matrix.platform }} --cache "$RUNNER_TEMP/suwayomi-dl" --out "$RUNNER_TEMP/pack"
+
+      - name: Run the S7 checks
+        shell: bash
+        run: >
+          node desktop-engine/spike.mjs
+          --pack "$RUNNER_TEMP/pack/engine-pack-${{ matrix.platform }}.zip"
+          --work "$RUNNER_TEMP/spike"
+          --bff bff
+          --cycles ${{ github.event.inputs.cycles || '20' }}
+          --results "$RUNNER_TEMP/spike/results-${{ matrix.platform }}.json"
+
+      - name: Summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "### S7 engine pack: ${{ matrix.platform }}"
+            [ -f "$RUNNER_TEMP/pack/engine-pack-${{ matrix.platform }}.json" ] && { echo '```json'; cat "$RUNNER_TEMP/pack/engine-pack-${{ matrix.platform }}.json"; echo '```'; }
+            node -e 'const r=require(process.argv[1]); for (const l of r.lines) console.log("- " + l.replace(/\|/g,"/"))' "$RUNNER_TEMP/spike/results-${{ matrix.platform }}.json" 2>/dev/null || echo "(no results file)"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload results and engine logs
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: s7-${{ matrix.platform }}
+          retention-days: 14
+          if-no-files-found: warn
+          path: |
+            ${{ runner.temp }}/spike/results-*.json
+            ${{ runner.temp }}/spike/*.log
+            ${{ runner.temp }}/pack/engine-pack-*.json
+            ${{ runner.temp }}/pack/engine-pack-*.zip.sha256
+
+      - name: Upload the engine pack (short retention)
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: engine-pack-${{ matrix.platform }}
+          retention-days: 2
+          if-no-files-found: ignore
+          compression-level: 0
+          path: ${{ runner.temp }}/pack/engine-pack-*.zip
