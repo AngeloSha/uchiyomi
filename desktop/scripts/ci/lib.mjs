@@ -41,7 +41,10 @@ export function appExe(dist = join(DESKTOP, 'dist')) {
 
 /** Electron from node_modules, for ELECTRON_RUN_AS_NODE (the packaged app has the runAsNode fuse off). */
 export function devElectron() {
-  return execFileSync(process.execPath, ['-e', "process.stdout.write(require('electron'))"], { cwd: DESKTOP, encoding: 'utf8' });
+  // require('electron') downloads the binary on first use and says so on STDOUT ("Downloading Electron
+  // binary..."), so the path is the last line, not the whole output.
+  const out = execFileSync(process.execPath, ['-e', "process.stdout.write('\\n' + require('electron'))"], { cwd: DESKTOP, encoding: 'utf8' });
+  return out.trim().split(/\r?\n/).pop().trim();
 }
 
 /** Run to completion. @returns {{code:number|null, out:string, ms:number}} */
@@ -124,11 +127,12 @@ export function processes() {
     const out = execFileSync('powershell.exe', ['-NoProfile', '-Command', ps], { encoding: 'utf8', maxBuffer: 64 << 20 });
     return JSON.parse(out).map((p) => ({ pid: p.ProcessId, ppid: p.ParentProcessId, name: p.Name || '', rssKB: Math.round((p.WorkingSetSize || 0) / 1024), cmd: p.CommandLine || '' }));
   }
-  const out = execFileSync('ps', ['-axww', '-o', 'pid=,ppid=,rss=,comm=,args='], { encoding: 'utf8', maxBuffer: 64 << 20 });
+  const out = execFileSync('ps', ['-axww', '-o', 'pid=,ppid=,rss=,args='], { encoding: 'utf8', maxBuffer: 64 << 20 });
   return out.split('\n').filter(Boolean).map((l) => {
-    const m = /^\s*(\d+)\s+(\d+)\s+(\d+)\s+(\S+)\s+(.*)$/.exec(l);
+    const m = /^\s*(\d+)\s+(\d+)\s+(\d+)\s+(.*)$/.exec(l);
     if (!m) return null;
-    return { pid: +m[1], ppid: +m[2], rssKB: +m[3], name: m[4].split('/').pop(), cmd: m[5] };
+    const exe = /^(.*?)(?:\s--|$)/.exec(m[4])?.[1] || m[4];
+    return { pid: +m[1], ppid: +m[2], rssKB: +m[3], name: exe.split('/').pop(), cmd: m[4] };
   }).filter(Boolean);
 }
 

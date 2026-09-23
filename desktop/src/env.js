@@ -40,7 +40,10 @@ function bffEnv(o) {
   }
   // pg_dump for the nightly backup (bff/src/lib/backup.ts spawns it from PATH). First, so it wins over any
   // PostgreSQL the user installed themselves -- a different major writes dumps ours cannot restore.
-  e[pathKey] = o.pgBinDir + path.delimiter + (e[pathKey] || '');
+  // Windows: System32 right after it, so the bff's `tar` (backup.ts) is Windows' own bsdtar even when the app was
+  // started from a shell that puts Git's GNU tar first -- GNU tar reads `C:\...` as a remote host.
+  const sys32 = process.platform === 'win32' ? path.join(process.env.SystemRoot || 'C:\\Windows', 'System32') + path.delimiter : '';
+  e[pathKey] = o.pgBinDir + path.delimiter + sys32 + (e[pathKey] || '');
   // Linux is dev-only (a PostgreSQL source build without rpath); Windows and macOS binaries find their own libs.
   if (process.platform === 'linux') e.LD_LIBRARY_PATH = path.join(o.pgBinDir, '..', 'lib');
   const origin = `http://127.0.0.1:${o.uiPort}`;

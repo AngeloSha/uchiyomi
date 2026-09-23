@@ -15,8 +15,16 @@ $ErrorActionPreference = 'Continue'
 $Desktop = Resolve-Path (Join-Path $PSScriptRoot '..\..')
 $Out = Join-Path $Desktop 'ci-out'
 New-Item -ItemType Directory -Force $Out | Out-Null
-$Inst = Join-Path $env:LOCALAPPDATA 'Programs\Uchiyomi'
+# electron-builder's one-click per-user installer names the folder after package.json "name" (sanitizedName),
+# not productName: %LOCALAPPDATA%\Programs\uchiyomi-desktop. Found, not assumed.
+$Inst = Join-Path $env:LOCALAPPDATA 'Programs\uchiyomi-desktop'
 $Exe = Join-Path $Inst 'Uchiyomi.exe'
+function FindInstall {
+  $hit = Get-ChildItem (Join-Path $env:LOCALAPPDATA 'Programs') -Directory -ErrorAction SilentlyContinue | Where-Object { Test-Path (Join-Path $_.FullName 'Uchiyomi.exe') } | Select-Object -First 1
+  if ($hit) { $script:Inst = $hit.FullName; $script:Exe = Join-Path $hit.FullName 'Uchiyomi.exe' }
+  $reg = Get-ChildItem 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall' -ErrorAction SilentlyContinue | ForEach-Object { Get-ItemProperty $_.PSPath } | Where-Object { $_.DisplayName -like 'Uchiyomi*' } | Select-Object -First 1 DisplayName, DisplayVersion, InstallLocation
+  return $reg
+}
 $Data = Join-Path $env:LOCALAPPDATA 'Uchiyomi'
 $Body = '{"username":"s5admin","password":"s5-passw0rd-123"}'
 
@@ -57,6 +65,8 @@ $ev = [ordered]@{}
 
 # ---- vN
 $ev.installN = Install $SetupN
+$ev.uninstallEntryN = FindInstall
+$ev.installDir = $Inst
 $ev.versionN = (Get-Item $Exe -ErrorAction SilentlyContinue).VersionInfo.ProductVersion
 Start-Process -FilePath $Exe
 $port = WaitHealthy
@@ -75,6 +85,7 @@ $ev.stopLog = StopLines
 
 # ---- vN+1 over it
 $ev.installN1 = Install $SetupN1
+$ev.uninstallEntryN1 = FindInstall
 $ev.versionN1 = (Get-Item $Exe -ErrorAction SilentlyContinue).VersionInfo.ProductVersion
 Start-Process -FilePath $Exe
 $port1 = WaitHealthy
@@ -85,9 +96,9 @@ $ev.pgdataSame = ((Get-Content (Join-Path $Data 'state.json') -Raw | ConvertFrom
 $ev.versionsBooted = Versions
 
 $pass = ($ev.installN.exit -eq 0) -and ($ev.quitForUpdate.exit -eq 0) -and ($ev.leftAfterQuit.Count -eq 0) -and ($ev.installN1.exit -eq 0) -and `
-  ($ev.versionsBooted -contains $VersionN1) -and ($port1 -gt 0) -and ($ev.setupStatusN1.needsSetup -eq $false) -and ($ev.loginN1 -eq 200) -and $ev.pgdataSame
+  ($ev.versionsBooted -contains $VersionN1) -and ($port1 -gt 0) -and ($ev.setupStatusN1 -isnot [string]) -and ($ev.setupStatusN1.needsSetup -eq $false) -and ($ev.loginN1 -eq 200) -and $ev.pgdataSame -and ($ev.runningN.Count -gt 0)
 Rec 'S5-nsis-update' $(if ($pass) { 'PASS' } else { 'FAIL' }) `
-  ("vN install exit $($ev.installN.exit) ($($ev.installN.ms) ms), $($ev.runningN.Count) processes under the install dir while running; --quit-for-update exit $($ev.quitForUpdate.exit) in $($ev.quitForUpdate.ms) ms, left running: $($ev.leftAfterQuit.Count); vN+1 install exit $($ev.installN1.exit) ($($ev.installN1.ms) ms); booted versions: $($ev.versionsBooted -join ' -> '); same data dir: $($ev.pgdataSame), setup closed: $(-not $ev.setupStatusN1.needsSetup), vN's admin signs in: $($ev.loginN1); same UI port: $($port -eq $port1)") $ev
+  ("vN install exit $($ev.installN.exit) ($($ev.installN.ms) ms), $($ev.runningN.Count) processes under the install dir while running; --quit-for-update exit $($ev.quitForUpdate.exit) in $($ev.quitForUpdate.ms) ms, left running: $($ev.leftAfterQuit.Count); vN+1 install exit $($ev.installN1.exit) ($($ev.installN1.ms) ms); booted versions: $($ev.versionsBooted -join ' -> '); same data dir: $($ev.pgdataSame), setup closed: $(($ev.setupStatusN1 -isnot [string]) -and ($ev.setupStatusN1.needsSetup -eq $false)), vN's admin signs in: $($ev.loginN1); same UI port: $($port -eq $port1)") $ev
 
 # ---- control: install over the RUNNING app, no ordered shutdown
 $c = [ordered]@{}

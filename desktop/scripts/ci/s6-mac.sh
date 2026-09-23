@@ -17,6 +17,19 @@ APP=$(ls -d "$DESKTOP"/dist/mac*/Uchiyomi.app | head -1)
 DMG=$(ls "$DESKTOP"/dist/*.dmg | head -1)
 ZIP=$(ls "$DESKTOP"/dist/*.zip | head -1)
 echo "app=$APP dmg=$DMG zip=$ZIP arch=$(uname -m)"
+# Every step that could wait on a Gatekeeper/Keychain prompt gets a hard timeout: perl's alarm (macOS has no timeout(1)).
+t() { local s=$1; shift; perl -e 'alarm shift; exec @ARGV' "$s" "$@"; }
+# A command that may block INSIDE exec (a quarantined binary waiting on Gatekeeper) ignores alarms, so the probes
+# below run in the background and are abandoned, not awaited, when their time is up: bgt <secs> <out> cmd...
+bgt() {
+  local s=$1 out=$2; shift 2
+  rm -f "$out" "$out.rc"
+  ( "$@" > "$out" 2>&1; echo $? > "$out.rc" ) &
+  local p=$! i
+  for i in $(seq 1 "$s"); do [ -f "$out.rc" ] && { cat "$out.rc"; return; }; sleep 1; done
+  pkill -9 -P "$p" 2>/dev/null; kill -9 "$p" 2>/dev/null
+  echo timeout
+}
 
 # ---------------------------------------------------------------- 1. signatures
 SIG="$OUT/s6-codesign.txt"
@@ -46,7 +59,7 @@ for f in "${FILES[@]}"; do
   KINDS="$KINDS\"$(basename "$rel")\":\"$k\","
 done
 KINDS="${KINDS%,}}"
-DEEP=$(codesign --verify --deep --strict --verbose=2 "$APP" 2>&1); DEEP_RC=$?
+DEEP=$(t 180 codesign --verify --deep --strict --verbose=2 "$APP" 2>&1); DEEP_RC=$?
 echo "== deep verify rc=$DEEP_RC" >> "$SIG"; echo "$DEEP" >> "$SIG"
 cat "$SIG"
 APPK=$(kind "$APP"); PGK=$(kind "$APP/Contents/Resources/pg/bin/postgres"); IDK=$(kind "$APP/Contents/Resources/pg/bin/initdb"); DK=$(kind "$APP/Contents/Resources/pg/bin/pg_dump")
@@ -58,12 +71,14 @@ $REC S6-signatures "$V" "app=$APPK; postgres=$PGK; initdb=$IDK; pg_dump=$DK; cod
 # ---------------------------------------------------------------- 2. the DMG, launched from a terminal
 MNT="$T/mnt"
 mkdir -p "$MNT"
-hdiutil attach -nobrowse -readonly -mountpoint "$MNT" "$DMG" >/dev/null
+echo "S6: attaching the dmg"
+t 180 hdiutil attach -nobrowse -readonly -noautoopen -mountpoint "$MNT" "$DMG"
 cp -R "$MNT/Uchiyomi.app" "$T/Uchiyomi.app"
 hdiutil detach "$MNT" >/dev/null || hdiutil detach -force "$MNT" >/dev/null
 QBEFORE=$(xattr -lr "$T/Uchiyomi.app" 2>/dev/null | grep -c quarantine)
 START=$(date +%s)
-"$T/Uchiyomi.app/Contents/MacOS/Uchiyomi" --smoke --data-dir="$T/data" --result="$T/smoke.json" > "$OUT/s6-dmg-smoke.log" 2>&1
+echo "S6: smoke from the dmg copy"
+t 360 "$T/Uchiyomi.app/Contents/MacOS/Uchiyomi" --smoke --data-dir="$T/data" --result="$T/smoke.json" > "$OUT/s6-dmg-smoke.log" 2>&1
 RC=$?
 END=$(date +%s)
 HZ=$(node -e "const r=require('$T/smoke.json');console.log(r.checks.healthz&&r.checks.healthz.status, r.ok, r.checks.bffBackup&&r.checks.bffBackup.pass)" 2>/dev/null)
@@ -72,33 +87,35 @@ V=FAIL; [ "$RC" = 0 ] && V=PASS
 $REC S6-dmg-terminal-launch "$V" "copied out of $(basename "$DMG") (quarantine xattrs: $QBEFORE), --smoke exit $RC in $((END-START)) s; healthz/ok/bffBackup: $HZ" "$T/smoke.json"
 
 # The zip is what an updater would unpack: it must keep the signatures intact.
-ditto -x -k "$ZIP" "$T/zip"
-ZV=$(codesign --verify --deep --strict "$T/zip/Uchiyomi.app" 2>&1); ZRC=$?
+echo "S6: zip integrity"
+t 300 ditto -x -k "$ZIP" "$T/zip"
+ZV=$(t 180 codesign --verify --deep --strict "$T/zip/Uchiyomi.app" 2>&1); ZRC=$?
 $REC S6-zip-integrity "$([ $ZRC = 0 ] && echo PASS || echo FAIL)" "$(basename "$ZIP") unpacked with ditto: codesign --verify --deep --strict rc=$ZRC ${ZV:0:200}"
 
 # ---------------------------------------------------------------- 3. quarantine
-GK=$(spctl --status 2>&1)
+echo "S6: quarantine"
+GK=$(t 30 spctl --status 2>&1)
 xattr -w com.apple.quarantine "0081;$(printf %x "$(date +%s)");Safari;" "$T/Uchiyomi.app"
-SP=$(spctl --assess --type execute -vv "$T/Uchiyomi.app" 2>&1); SPRC=$?
+SP=$(t 120 spctl --assess --type execute -vv "$T/Uchiyomi.app" 2>&1); SPRC=$?
 echo "$SP"
 # A real download quarantines every file, not only the bundle.
 mkdir -p "$T/q"
 cp -R "$T/Uchiyomi.app" "$T/q/Uchiyomi.app"
 xattr -r -w com.apple.quarantine "0081;$(printf %x "$(date +%s)");Safari;" "$T/q/Uchiyomi.app"
-# perl's alarm is the portable timeout (macOS has no timeout(1)); a Gatekeeper prompt must not hang the job.
-NESTED=$(perl -e 'alarm shift; exec @ARGV' 30 "$T/q/Uchiyomi.app/Contents/Resources/pg/bin/pg_ctl" --version 2>&1); NRC=$?
-( "$T/q/Uchiyomi.app/Contents/MacOS/Uchiyomi" --smoke --data-dir="$T/qdata" --result="$T/qsmoke.json" > "$OUT/s6-quarantined-smoke.log" 2>&1 ) &
-QPID=$!
-for i in $(seq 1 90); do kill -0 $QPID 2>/dev/null || break; sleep 1; done
-if kill -0 $QPID 2>/dev/null; then QRC=timeout; kill -9 $QPID; else wait $QPID; QRC=$?; fi
+echo "S6: exec a quarantined nested binary"
+NRC=$(bgt 30 "$T/nested.txt" "$T/q/Uchiyomi.app/Contents/Resources/pg/bin/pg_ctl" --version); NESTED=$(cat "$T/nested.txt" 2>/dev/null)
+echo "S6: terminal launch of the quarantined app"
+QRC=$(bgt 90 "$OUT/s6-quarantined-smoke.log" "$T/q/Uchiyomi.app/Contents/MacOS/Uchiyomi" --smoke --data-dir="$T/qdata" --result="$T/qsmoke.json")
 QOK=$(node -e "try{const r=require('$T/qsmoke.json');console.log(r.ok)}catch{console.log('no-result')}")
-open -n "$T/q/Uchiyomi.app" --args --smoke --data-dir="$T/odata" --result="$T/osmoke.json" > "$T/open.txt" 2>&1; ORC=$?
+echo "S6: open (LaunchServices) on the quarantined copy"
+ORC=$(bgt 30 "$T/open.txt" open -n "$T/q/Uchiyomi.app" --args --smoke --data-dir="$T/odata" --result="$T/osmoke.json")
 sleep 45
 OOK=$(node -e "try{const r=require('$T/osmoke.json');console.log(r.ok)}catch{console.log('no-result')}")
+pkill -9 -f "$T/q/Uchiyomi.app" 2>/dev/null || true
 cat > "$T/ev3.json" <<EOF
 {"gatekeeper":$(node -e "console.log(JSON.stringify(process.argv[1]))" "$GK"),"spctl":$(node -e "console.log(JSON.stringify(process.argv[1]))" "$SP"),"spctlRc":$SPRC,
- "quarantinedNestedPgCtl":{"rc":$NRC,"out":$(node -e "console.log(JSON.stringify(process.argv[1]))" "$NESTED")},
- "quarantinedTerminalSmoke":{"rc":"$QRC","ok":"$QOK"},"quarantinedOpen":{"rc":$ORC,"ok":"$OOK"}}
+ "quarantinedNestedPgCtl":{"rc":"$NRC","out":$(node -e "console.log(JSON.stringify(process.argv[1]))" "$NESTED")},
+ "quarantinedTerminalSmoke":{"rc":"$QRC","ok":"$QOK"},"quarantinedOpen":{"rc":"$ORC","ok":"$OOK"}}
 EOF
 cat "$T/ev3.json"
 V=INFO

@@ -37,6 +37,7 @@ if (want('i')) {
       elevated: /S-1-16-12288/.test(groups),
       administratorsGroup: /S-1-5-32-544/.test(groups),
       enableLUA: (/EnableLUA\s+REG_DWORD\s+(0x[0-9a-f]+)/i.exec(lua) || [])[1] || lua.trim().slice(0, 200),
+      groupLines: groups.split(/\r?\n/).filter((l) => /Administrators|Mandatory Label|S-1-5-32-544|S-1-16-/i.test(l)).map((l) => l.replace(/\s+/g, ' ').trim()),
     };
   } else {
     who = { user: runSync('id', []).out.trim() };

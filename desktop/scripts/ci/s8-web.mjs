@@ -8,7 +8,7 @@
 // running.
 import puppeteer from 'puppeteer-core';
 import { join } from 'node:path';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { WIN, REPO, OUT, OS_TAG, appExe, record, tmpRoot, launch, waitFor, waitHealthy, freePort, snapshot, runAsync, rssTable, runSync, sleep, readJson, hardKill, isAlive, APP_EXTRA } from './lib.mjs';
 
 const exe = appExe();
@@ -16,6 +16,8 @@ const root = tmpRoot('s8');
 const USER = 's8admin';
 const PASS = 's8-passw0rd-123';
 const results = {};
+// s6-keychain.mjs relaunches a REBUILT app on this same profile.
+writeFileSync(join(OUT, 's8-root.txt'), root);
 const fails = [];
 const check = (name, ok, detail) => { results[name] = { ok, detail }; if (!ok) fails.push(name); console.log(`  [${ok ? ' ok ' : 'FAIL'}] ${name}: ${typeof detail === 'string' ? detail : JSON.stringify(detail)}`); };
 
@@ -77,7 +79,6 @@ try {
   // ------------------------------------------------------------ first launch: setup through the UI
   run1 = await start('first');
   const { page, origin, t0 } = run1;
-  const firstPaint = await paintTimes(page, t0);
   const setupForm = () => page.waitForFunction(() => /create your admin account/i.test(document.body.innerText) && document.querySelectorAll('input[type=password]').length >= 2, { timeout: 90_000 }).then(() => true).catch(() => false);
   const form = await setupForm();
   check('setup screen renders', form, `${page.url()} (${Date.now() - t0} ms after spawn)`);
@@ -87,6 +88,8 @@ try {
   await sleep(2500);
   await setupForm();
   results.firstVisitServiceWorkerClaim = claimed;
+  // Measured on the document that is showing now (after the service worker's one reload), from our spawn.
+  const firstPaint = await paintTimes(page, t0);
   await shot(page, 's8-setup');
   for (let attempt = 1; attempt <= 3; attempt++) {
     try {
@@ -191,8 +194,9 @@ try {
   check('relaunch opens signed in (cookies survived a restart)', still, cold);
   await shot(run2.page, 's8-relaunch');
   const appLog = readFileSync(join(root, 'logs', 'desktop.log'), 'utf8');
-  const bootLine = appLog.split('\n').filter((l) => /window: app loaded/.test(l)).pop();
-  results.appTimeline = bootLine ? JSON.parse(bootLine.slice(bootLine.indexOf('{'))) : null;
+  // The shell's own timeline for both launches (ms from its main.js start; supervisor marks relative to itself).
+  const loaded = appLog.split('\n').filter((l) => /window: app loaded/.test(l)).map((l) => JSON.parse(l.slice(l.indexOf('{'))));
+  results.appTimeline = { first: loaded[0] || null, warm: loaded[loaded.length - 1] || null };
   await run2.browser.disconnect();
   const q2 = await quitApp();
   results.quit2 = q2;

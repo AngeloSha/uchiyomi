@@ -10,7 +10,7 @@
 import { join } from 'node:path';
 import { OUT, DESKTOP, appExe, devElectron, record, runSync, readJson, tmpRoot, APP_EXTRA } from './lib.mjs';
 
-const ROUNDS = Number(process.env.S1_ROUNDS || 2);
+const ROUNDS = Number(process.env.S1_ROUNDS || 3);
 const bff = join(DESKTOP, 'resources', 'bff');
 const bench = join(DESKTOP, 'src', 'bench', 'sharp-bench.cjs');
 const electron = devElectron();

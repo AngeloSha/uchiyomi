@@ -98,6 +98,7 @@ jobs:
         working-directory: desktop
         run: |
           npm ci --no-audit --no-fund
+          node node_modules/electron/install.js
           ELECTRON_RUN_AS_NODE=1 "$(node -e "process.stdout.write(require('electron'))")" -e "console.log('electron', process.versions.electron, 'node', process.versions.node)"
       - name: Suite
         run: node desktop/scripts/ci/s1-suite.mjs --runtime ${{ matrix.runtime }} --shard ${{ matrix.shard }}/3
@@ -267,6 +268,18 @@ jobs:
         continue-on-error: true
         working-directory: desktop
         run: node scripts/ci/s8-web.mjs
+      - name: S6 unsigned update vs the cookie keychain (vN+1 on S8's signed-in profile)
+        if: runner.os == 'macOS'
+        continue-on-error: true
+        working-directory: desktop
+        run: |
+          cp package.json "$RUNNER_TEMP/package.json.orig"
+          cp package-lock.json "$RUNNER_TEMP/package-lock.json.orig"
+          npm version 0.43.1 --no-git-tag-version --allow-same-version
+          npx electron-builder ${{ matrix.eb }} --dir --publish never -c.directories.output=dist-next
+          cp "$RUNNER_TEMP/package.json.orig" package.json
+          cp "$RUNNER_TEMP/package-lock.json.orig" package-lock.json
+          node scripts/ci/s6-keychain.mjs
       - name: S5 build vN+1 installer
         if: runner.os == 'Windows'
         continue-on-error: true
