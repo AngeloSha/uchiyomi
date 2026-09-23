@@ -12,6 +12,7 @@
 import { app, BrowserWindow, session as Sessions, powerMonitor, Notification, type Session, type Cookie } from 'electron';
 import { SolveError, type SolverBackend, type SolveRequest, type SolveResult, type SolverCookie } from './protocol';
 import { PROBE_SOURCE, TURNSTILE_RECT_SOURCE, challengeReason, isAccessDenied, isChallenge, type Probe } from './detect';
+import { chPlatform, greaseBrands, secChUa, type Brand } from './userAgent';
 
 export interface BrowserBackendOptions {
   /** Windows alive at once, busy or idle: 4 for the bff + 1 for Suwayomi. */
@@ -20,14 +21,26 @@ export interface BrowserBackendOptions {
   idleCloseMs?: number;
   /** A session-less origin's cookie jar is wiped after this long. */
   originTtlMs?: number;
-  /** Still challenged after this long: one trusted click on the Turnstile checkbox. */
+  /** Still challenged after this long: the first trusted "verify" input on the Turnstile checkbox. */
   clickAfterMs?: number;
+  /** Then again every this often while still challenged (0 = only once, the design's first guess). */
+  clickEveryMs?: number;
+  /**
+   * How to press the checkbox. 'keyboard' = focus + Tab + Space, which is what FlareSolverr does
+   * (flaresolverr_service.py click_verify); 'mouse' = a pointer move + click on the box; 'both' alternates.
+   */
+  verifyInput?: 'keyboard' | 'mouse' | 'both';
+  /** 'cdp' = DevTools Input domain (reaches cross-origin iframes); 'sendInputEvent' = the design's first guess. */
+  inputVia?: 'cdp' | 'sendInputEvent';
   /** Still challenged after this long: ask the human (§3.5 step 2). */
   showAfterMs?: number;
   /** 'show' = the product behaviour; 'log' = the spike: only report that the window would have been shown. */
   humanCheck?: 'show' | 'log';
-  /** 'hidden' = show:false (the design). 'offscreen' = a visible window parked off-screen (S4's fallback). */
-  windowMode?: 'hidden' | 'offscreen';
+  /**
+   * 'hidden' = show:false (the design). 'offscreen' = a visible window parked off-screen (S4's named fallback).
+   * 'visible' = an ordinary on-screen window (diagnostics only: is a failure about being hidden?).
+   */
+  windowMode?: 'hidden' | 'offscreen' | 'visible';
   /** Refuse every request from a solver window to a loopback address (default). */
   blockAllLoopback?: boolean;
   /** Loopback ports refused even when blockAllLoopback is off (the solver's own, the UI's, Postgres's…). */
@@ -37,6 +50,12 @@ export interface BrowserBackendOptions {
   onSolveDetail?: (d: SolveDetail) => void;
   /** Tray badge when the user is away and Cloudflare wants a click (product only). */
   onNeedsHuman?: (host: string) => void;
+  /**
+   * Add the Sec-CH-UA trio Chrome sends on HTTPS (Electron sends none; see userAgent.ts). Default on.
+   */
+  chromeHeaders?: boolean;
+  /** Diagnostics: a PNG of the hidden page at the click and at the "ask the human" moment. */
+  onCapture?: (what: 'before-click' | 'after-click' | 'human-check', host: string, png: Buffer) => void;
 }
 
 export interface SolveDetail {
@@ -51,6 +70,7 @@ export interface SolveDetail {
   solveMs: number;
   totalMs: number;
   clicked: boolean;
+  verifyAttempts: Array<{ atMs: number; kind: string }>;
   wouldShow: boolean;
   shown: boolean;
   statuses: number[];
@@ -102,18 +122,26 @@ export function toSolverCookie(c: Cookie): SolverCookie {
 }
 
 export class ElectronSolverBackend implements SolverBackend {
-  private readonly o: Required<Omit<BrowserBackendOptions, 'log' | 'onSolveDetail' | 'onNeedsHuman'>> & BrowserBackendOptions;
+  private readonly o: Required<Omit<BrowserBackendOptions, 'log' | 'onSolveDetail' | 'onNeedsHuman' | 'onCapture'>> & BrowserBackendOptions;
   private parts = new Map<string, Part>();
   private slots: Slot[] = [];
   private prompted = new Map<string, number>();
   private configured = new WeakSet<Session>();
+  /** The brand list the pages' own navigator.userAgentData reports; computed until a page tells us. */
+  private brands: Brand[] = greaseBrands(Number(process.versions.chrome?.split('.')[0] || 0));
 
   constructor(opts: BrowserBackendOptions = {}) {
     this.o = {
       poolSize: 5,
       idleCloseMs: 60_000,
       originTtlMs: 30 * 60_000,
-      clickAfterMs: 15_000,
+      // Measured (spike S4): the widget takes ~3-5 s to become clickable; a press at 2 s was ignored, one at
+      // 5 s solved in ~10 s. The design's single click at 15 s could never meet a 15 s median.
+      clickAfterMs: 5_000,
+      clickEveryMs: 8_000,
+      chromeHeaders: true,
+      verifyInput: 'both',
+      inputVia: 'cdp',
       showAfterMs: 25_000,
       humanCheck: 'show',
       windowMode: 'hidden',
@@ -149,6 +177,20 @@ export class ElectronSolverBackend implements SolverBackend {
     ses.setPermissionCheckHandler(() => false);
     ses.on('will-download', (e, item) => { e.preventDefault(); try { item.cancel(); } catch { /* already gone */ } });
     ses.setSpellCheckerEnabled(false);
+    if (this.o.chromeHeaders) {
+      ses.webRequest.onBeforeSendHeaders((details, cb) => {
+        const h = details.requestHeaders;
+        if (/^https:/i.test(details.url)) {
+          const has = (k: string) => Object.keys(h).some((x) => x.toLowerCase() === k);
+          if (!has('sec-ch-ua')) {
+            h['sec-ch-ua'] = secChUa(this.brands);
+            h['sec-ch-ua-mobile'] = '?0';
+            h['sec-ch-ua-platform'] = `"${chPlatform()}"`;
+          }
+        }
+        cb({ requestHeaders: h });
+      });
+    }
     ses.webRequest.onBeforeRequest((details, cb) => {
       let cancel = this.blockedUrl(details.url);
       if (!cancel && details.webContentsId !== undefined && MEDIA.has(details.resourceType)) {
@@ -203,7 +245,7 @@ export class ElectronSolverBackend implements SolverBackend {
   private createSlot(p: Part): Slot {
     const offscreen = this.o.windowMode === 'offscreen';
     const win = new BrowserWindow({
-      show: offscreen,
+      show: offscreen || this.o.windowMode === 'visible',
       x: offscreen ? -4000 : undefined,
       y: offscreen ? -4000 : undefined,
       width: 1280,
@@ -276,26 +318,84 @@ export class ElectronSolverBackend implements SolverBackend {
   private async probe(s: Slot): Promise<Probe | null> {
     if (s.win.isDestroyed()) return null;
     const run = s.win.webContents.executeJavaScriptInIsolatedWorld(1000, [{ code: PROBE_SOURCE }]) as Promise<Probe>;
-    return Promise.race([run.catch(() => null), sleep(2000).then(() => null)]);
+    const p = await Promise.race([run.catch(() => null), sleep(2000).then(() => null)]);
+    if (p?.brands?.length && secChUa(p.brands) !== secChUa(this.brands)) {
+      this.o.log?.('client-hints', { was: secChUa(this.brands), now: secChUa(p.brands) });
+      this.brands = p.brands;
+    }
+    return p;
   }
 
-  /** §3.5 step 1: one trusted click where the Turnstile checkbox is. Returns whether a target was found. */
-  private async clickTurnstile(s: Slot): Promise<boolean> {
+  private async capture(s: Slot, what: 'before-click' | 'after-click' | 'human-check', host: string): Promise<void> {
+    if (!this.o.onCapture || s.win.isDestroyed()) return;
+    try { this.o.onCapture(what, host, (await s.win.webContents.capturePage()).toPNG()); } catch { /* diagnostics only */ }
+  }
+
+  /**
+   * §3.5 step 1: trusted input on the Turnstile checkbox.
+   *
+   * Through the DevTools protocol (webContents.debugger, Input.dispatch*), not webContents.sendInputEvent.
+   * Measured in the spike: sendInputEvent hands the event to the MAIN frame's widget, so it never reaches a
+   * cross-origin iframe, which is exactly where the Turnstile checkbox lives (challenges.cloudflare.com is an
+   * out-of-process iframe). A same-origin test box took the click; the real checkbox never reacted -- not to
+   * the click, and not to Space after Tab had visibly focused it. The DevTools Input domain is routed by the
+   * browser's hit-testing (the same path as a real mouse), which is how chromedriver clicks it for
+   * FlareSolverr. Attaching the debugger does not set navigator.webdriver.
+   *
+   * Keyboard = focus, Tab, Space (FlareSolverr's click_verify); mouse = glide onto the box and click.
+   */
+  private async pressVerify(s: Slot, kind: 'keyboard' | 'mouse'): Promise<boolean> {
     const wc = s.win.webContents;
-    const r = await Promise.race([
-      (wc.executeJavaScriptInIsolatedWorld(1000, [{ code: TURNSTILE_RECT_SOURCE }]) as Promise<any>).catch(() => null),
-      sleep(2000).then(() => null),
-    ]);
-    if (!r) return false;
-    const x = Math.round(r.x + Math.min(30, r.w / 2));
-    const y = Math.round(r.y + r.h / 2);
-    wc.sendInputEvent({ type: 'mouseMove', x, y });
-    await sleep(120);
-    wc.sendInputEvent({ type: 'mouseDown', x, y, button: 'left', clickCount: 1 });
-    await sleep(80);
-    wc.sendInputEvent({ type: 'mouseUp', x, y, button: 'left', clickCount: 1 });
-    this.o.log?.('turnstile-click', { x, y, target: `${r.tag}#${r.id}` });
-    return true;
+    const dbg = wc.debugger;
+    const viaCdp = this.o.inputVia === 'cdp';
+    if (viaCdp && !dbg.isAttached()) dbg.attach('1.3');
+    const cdp = (m: string, p: Record<string, unknown>) => dbg.sendCommand(m, p);
+    try {
+      if (kind === 'keyboard') {
+        wc.focus();
+        if (viaCdp) {
+          await cdp('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9, nativeVirtualKeyCode: 9 });
+          await cdp('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9, nativeVirtualKeyCode: 9 });
+          await sleep(1000);
+          await cdp('Input.dispatchKeyEvent', { type: 'keyDown', key: ' ', code: 'Space', text: ' ', unmodifiedText: ' ', windowsVirtualKeyCode: 32, nativeVirtualKeyCode: 32 });
+          await cdp('Input.dispatchKeyEvent', { type: 'keyUp', key: ' ', code: 'Space', windowsVirtualKeyCode: 32, nativeVirtualKeyCode: 32 });
+        } else {
+          wc.sendInputEvent({ type: 'keyDown', keyCode: 'Tab' });
+          wc.sendInputEvent({ type: 'keyUp', keyCode: 'Tab' });
+          await sleep(1000);
+          wc.sendInputEvent({ type: 'keyDown', keyCode: 'Space' });
+          wc.sendInputEvent({ type: 'char', keyCode: ' ' });
+          wc.sendInputEvent({ type: 'keyUp', keyCode: 'Space' });
+        }
+        this.o.log?.('verify-input', { kind, via: this.o.inputVia });
+        return true;
+      }
+      const r = await Promise.race([
+        (wc.executeJavaScriptInIsolatedWorld(1000, [{ code: TURNSTILE_RECT_SOURCE }]) as Promise<any>).catch(() => null),
+        sleep(2000).then(() => null),
+      ]);
+      if (!r) return false;
+      const x = Math.round(r.x + Math.min(30, r.w / 2));
+      const y = Math.round(r.y + r.h / 2);
+      // Arrive from somewhere else in a few steps, like a hand would, rather than teleporting onto the box.
+      const from = { x: x + 180, y: y + 120 };
+      for (let i = 1; i <= 8; i++) {
+        const mx = Math.round(from.x + ((x - from.x) * i) / 8), my = Math.round(from.y + ((y - from.y) * i) / 8);
+        if (viaCdp) await cdp('Input.dispatchMouseEvent', { type: 'mouseMoved', x: mx, y: my });
+        else wc.sendInputEvent({ type: 'mouseMove', x: mx, y: my });
+        await sleep(25 + Math.round(Math.random() * 25));
+      }
+      await sleep(120);
+      if (viaCdp) await cdp('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', buttons: 1, clickCount: 1 });
+      else wc.sendInputEvent({ type: 'mouseDown', x, y, button: 'left', clickCount: 1 });
+      await sleep(70 + Math.round(Math.random() * 60));
+      if (viaCdp) await cdp('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', buttons: 0, clickCount: 1 });
+      else wc.sendInputEvent({ type: 'mouseUp', x, y, button: 'left', clickCount: 1 });
+      this.o.log?.('verify-input', { kind, via: this.o.inputVia, x, y, target: `${r.tag}#${r.id}` });
+      return true;
+    } finally {
+      if (viaCdp && dbg.isAttached()) { try { dbg.detach(); } catch { /* already gone */ } }
+    }
   }
 
   /** §3.5 step 2. Returns true when the window was actually shown. */
@@ -354,7 +454,7 @@ export class ElectronSolverBackend implements SolverBackend {
     slot.blockMedia = req.disableMedia;
     const d: SolveDetail = {
       id: req.id, url: req.url, partition: part.name, reusedWindow: reused, acquireMs: Date.now() - t0, firstLoadMs: 0,
-      challenged: false, challengeReason: '', solveMs: 0, totalMs: 0, clicked: false, wouldShow: false, shown: false,
+      challenged: false, challengeReason: '', solveMs: 0, totalMs: 0, clicked: false, verifyAttempts: [], wouldShow: false, shown: false,
       statuses: slot.statuses, finalUrl: '',
     };
     let keep = false;
@@ -410,8 +510,22 @@ export class ElectronSolverBackend implements SolverBackend {
             if (++clean >= 2) break; // clean on two looks 500 ms apart: the redirect after the challenge has landed
           } else clean = 0;
           const el = Date.now() - ts;
-          if (!d.clicked && el >= this.o.clickAfterMs) { d.clicked = true; await this.clickTurnstile(slot).catch(() => false); }
+          const due = this.o.clickEveryMs > 0
+            ? el >= this.o.clickAfterMs + d.verifyAttempts.length * this.o.clickEveryMs
+            : !d.clicked && el >= this.o.clickAfterMs;
+          if (due) {
+            const kind = this.o.verifyInput === 'both' ? (d.verifyAttempts.length % 2 ? 'mouse' : 'keyboard') : this.o.verifyInput;
+            d.clicked = true;
+            d.verifyAttempts.push({ atMs: el, kind });
+            if (d.verifyAttempts.length === 1) await this.capture(slot, 'before-click', target.host);
+            await this.pressVerify(slot, kind).catch(() => false);
+            if (this.o.onCapture && d.verifyAttempts.length <= 2) {
+              await sleep(400); await this.capture(slot, 'after-click', target.host);
+              await sleep(2600); await this.capture(slot, 'after-click', target.host);
+            }
+          }
           if (!d.wouldShow && el >= this.o.showAfterMs) {
+            await this.capture(slot, 'human-check', target.host);
             const h = this.humanCheck(slot, target.host);
             d.wouldShow = h.would;
             d.shown = h.shown;

@@ -8,15 +8,22 @@
 //   GET <url>/_debug/metrics  app.getAppMetrics() now, summed
 import { app } from 'electron';
 import { randomBytes } from 'node:crypto';
-import { appendFileSync } from 'node:fs';
+import { appendFileSync, writeFileSync } from 'node:fs';
 import { startSolverServer } from '../desktop/src/solver/server';
 import { ElectronSolverBackend, type SolveDetail } from '../desktop/src/solver/browser';
 import { parseUaMode, userAgentFor } from '../desktop/src/solver/userAgent';
 
 const mode = parseUaMode(process.env.SOLVER_UA_MODE, 'native');
+// Spike diagnostics: extra Chromium switches, e.g. SOLVER_FLAGS="--enable-unsafe-swiftshader".
+for (const f of (process.env.SOLVER_FLAGS || '').split(/\s+/).filter(Boolean)) {
+  const [k, v] = f.replace(/^--/, '').split('=');
+  app.commandLine.appendSwitch(k, v);
+}
 // Before any session exists (design-shell.md §3.4).
 const nativeUa = app.userAgentFallback;
-app.userAgentFallback = userAgentFor(mode, nativeUa);
+// SOLVER_UA_MODE=untouched: never assign userAgentFallback at all (diagnostics: does ASSIGNING it change what
+// Chromium sends, e.g. the Sec-CH-UA client hints?).
+if (process.env.SOLVER_UA_MODE !== 'untouched') app.userAgentFallback = userAgentFor(mode, nativeUa);
 
 const logFile = process.env.SOLVER_LOG;
 const log = (event: string, data: Record<string, unknown> = {}) => {
@@ -63,10 +70,22 @@ app.dock?.hide();
 app.whenReady().then(async () => {
   const backend = new ElectronSolverBackend({
     humanCheck: 'log',
-    windowMode: process.env.SOLVER_WINDOW_MODE === 'offscreen' ? 'offscreen' : 'hidden',
+    ...(process.env.SOLVER_VERIFY ? { verifyInput: process.env.SOLVER_VERIFY as 'keyboard' | 'mouse' | 'both' } : {}),
+    ...(process.env.SOLVER_VERIFY_AFTER ? { clickAfterMs: Number(process.env.SOLVER_VERIFY_AFTER) } : {}),
+    ...(process.env.SOLVER_VERIFY_EVERY ? { clickEveryMs: Number(process.env.SOLVER_VERIFY_EVERY) } : {}),
+    ...(process.env.SOLVER_INPUT_VIA ? { inputVia: process.env.SOLVER_INPUT_VIA as 'cdp' | 'sendInputEvent' } : {}),
+    ...(process.env.SOLVER_CH === '0' ? { chromeHeaders: false } : {}),
+    windowMode: (['offscreen', 'visible'].includes(process.env.SOLVER_WINDOW_MODE || '') ? process.env.SOLVER_WINDOW_MODE : 'hidden') as 'hidden' | 'offscreen' | 'visible',
     log,
+    onCapture: (what, host, png) => {
+      const dir = process.env.SOLVER_SHOTS;
+      if (!dir) return;
+      const f = `${dir}/${new Date().toISOString().replace(/[:.]/g, '-')}-${mode}-${host}-${what}.png`;
+      try { writeFileSync(f, png); log('capture', { file: f }); } catch { /* best effort */ }
+    },
     onSolveDetail: (d) => {
       const m = metricsNow();
+      for (const p of m.procs) if (!before.has(p.pid)) seenDuring.set(p.pid, p.type);
       if (m.total > peak.total) peak = m;
       last = { ...d, peakRssKB: peak.total, peakProcs: peak.procs, spawned: [...seenDuring].map(([pid, type]) => ({ pid, type })) };
       all.push(last);

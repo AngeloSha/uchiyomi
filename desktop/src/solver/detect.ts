@@ -42,6 +42,8 @@ export interface Probe {
   denied: string[];
   challenge: string[];
   turnstile: string[];
+  /** navigator.userAgentData.brands (secure pages only); the solver's Sec-CH-UA header repeats it. */
+  brands?: Array<{ brand: string; version: string }>;
 }
 
 /**
@@ -57,6 +59,7 @@ export const PROBE_SOURCE = `(() => {
     denied: ${JSON.stringify(ACCESS_DENIED_SELECTORS)}.filter(has),
     challenge: ${JSON.stringify(CHALLENGE_SELECTORS)}.filter(has),
     turnstile: ${JSON.stringify(TURNSTILE_SELECTORS)}.filter(has),
+    brands: (navigator.userAgentData && navigator.userAgentData.brands || []).map((b) => ({ brand: b.brand, version: b.version })),
   };
 })()`;
 

@@ -19,6 +19,7 @@ app.dock?.hide();
 const TOKEN = 'e1ec7e0e1ec7e0e1ec7e0e1ec7e0e1ec';
 const hits: Array<{ method: string; path: string; ct?: string; len: number; cookie?: string }> = [];
 let clickLog: Array<{ trusted: boolean; x: number; y: number }> = [];
+let oopifHit = false;
 
 // ---- the fixture site ----------------------------------------------------------------------------------
 function fixture(): Promise<http.Server> {
@@ -57,6 +58,20 @@ function fixture(): Promise<http.Server> {
                 if (e.isTrusted) { document.cookie = 'ts_ok=1; path=/'; location.reload(); }
               });
             });</script>`);
+        case '/oopif':
+          if (/oopif_ok=1/.test(cookies)) return html(200, 'Through the iframe', '<p>through the iframe</p>');
+          // Cloudflare's shape: the checkbox lives in a CROSS-SITE iframe (challenges.cloudflare.com there;
+          // localhost vs 127.0.0.1 here), which site isolation puts in another renderer process.
+          return html(403, 'Just a moment...', `<div style="margin:120px 0 0 200px;width:300px;height:65px"><iframe src="${String(req.headers.host).startsWith('127.0.0.1') ? 'http://localhost' : 'http://127.0.0.1'}:${String(req.headers.host).split(':')[1]}/oopif-box" style="width:300px;height:65px;border:0"></iframe>
+              <input type="hidden" name="cf-turnstile-response" value=""></div><script>
+            setInterval(() => fetch('/oopif-state').then((r) => r.text()).then((t) => { if (t === 'ok') { document.cookie = 'oopif_ok=1; path=/'; location.reload(); } }), 300);
+          </script>`);
+        case '/oopif-box':
+          return html(200, 'box', `<label style="display:block;padding:20px"><input type="checkbox" id="cb"> Verify you are human</label><script>
+            document.getElementById('cb').addEventListener('change', (e) => { if (e.isTrusted) fetch('/oopif-hit'); });
+          </script>`);
+        case '/oopif-hit': oopifHit = true; res.writeHead(204); return res.end();
+        case '/oopif-state': res.writeHead(200, { 'content-type': 'text/plain' }); return res.end(oopifHit ? 'ok' : 'no');
         case '/click-log': {
           const q = new URL(req.url!, 'http://x').searchParams;
           clickLog.push({ trusted: q.get('trusted') === 'true', x: Number(q.get('x')), y: Number(q.get('y')) });
@@ -98,7 +113,7 @@ app.whenReady().then(async () => {
   const details: SolveDetail[] = [];
   const logs: Array<{ event: string; data?: Record<string, unknown> }> = [];
   const backend = new ElectronSolverBackend({
-    blockAllLoopback: false, protectedPorts, humanCheck: 'log', clickAfterMs: 1000, showAfterMs: 2000,
+    blockAllLoopback: false, protectedPorts, humanCheck: 'log', clickAfterMs: 1000, clickEveryMs: 1500, showAfterMs: 2000,
     windowMode: process.env.SOLVER_WINDOW_MODE === 'offscreen' ? 'offscreen' : 'hidden',
     onSolveDetail: (d) => details.push(d), log: (event, data) => logs.push({ event, data }),
   });
@@ -109,6 +124,10 @@ app.whenReady().then(async () => {
     return { status: r.status, origin: r.headers.get('x-origin-status'), j: (await r.json()) as any };
   };
   const lastDetail = () => details[details.length - 1];
+  const legacy = new ElectronSolverBackend({ blockAllLoopback: false, protectedPorts, humanCheck: 'log', clickAfterMs: 1000, clickEveryMs: 1500, inputVia: 'sendInputEvent' });
+  const legacySrv = await startSolverServer({ backend: legacy, token: TOKEN, appVersion: 'test' });
+  protectedPorts.push(legacySrv.port);
+  const backend2 = () => legacySrv;
   measure('platform', { platform: process.platform, arch: process.arch, electron: process.versions.electron, chrome: process.versions.chrome, mode: process.env.SOLVER_WINDOW_MODE || 'hidden' });
 
   await check('GET a plain page: "Challenge not detected!", outerHTML, status 200', async () => {
@@ -168,7 +187,7 @@ app.whenReady().then(async () => {
     assert.deepEqual(lastDetail().statuses, [200]);
   });
 
-  await check('a Turnstile-style box: one TRUSTED click (sendInputEvent) in a hidden window gets through', async () => {
+  await check('a same-origin Turnstile-style box: a TRUSTED click in a hidden window gets through', async () => {
     clickLog = [];
     const r = await solve({ cmd: 'request.get', url: `${S}/turnstile` });
     measure('fixture-turnstile', { clicks: clickLog, solveMs: lastDetail().solveMs, clicked: lastDetail().clicked });
@@ -176,6 +195,25 @@ app.whenReady().then(async () => {
     assert.equal(clickLog.length, 1);
     assert.equal(clickLog[0].trusted, true);
     assert.match(r.j.solution.response, /through/);
+  });
+
+  await check('a checkbox in a CROSS-SITE iframe (Turnstile\'s real shape) gets the trusted input (DevTools Input, not sendInputEvent)', async () => {
+    oopifHit = false;
+    const r = await solve({ cmd: 'request.get', url: `${S}/oopif` });
+    const d = lastDetail();
+    measure('fixture-oopif', { solveMs: d.solveMs, attempts: d.verifyAttempts, via: 'cdp' });
+    assert.equal(r.j.message, MSG.solved);
+    assert.equal(oopifHit, true);
+  });
+
+  await check('control: webContents.sendInputEvent never reaches that cross-site iframe (why the design had to change)', async () => {
+    oopifHit = false;
+    const old = backend2();
+    const r = await fetch(`${old.url}/v1`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ cmd: 'request.get', url: `${S.replace('127.0.0.1', 'localhost')}/oopif`, maxTimeout: 6000 }) });
+    const j: any = await r.json();
+    measure('fixture-oopif-sendInputEvent', { status: r.status, message: j.message, hit: oopifHit });
+    assert.equal(r.status, 500);
+    assert.equal(oopifHit, false);
   });
 
   await check('a challenge that never clears: FlareSolverr\'s timeout wording, click tried, window WOULD be shown', async () => {
@@ -265,7 +303,9 @@ app.whenReady().then(async () => {
   const failed = results.filter((r) => !r.ok);
   console.log(`\n${results.length - failed.length}/${results.length} passed`);
   await srv.close();
+  await legacySrv.close();
   await backend.shutdown();
+  await legacy.shutdown();
   site.close();
   app.exit(failed.length ? 1 : 0);
 });
