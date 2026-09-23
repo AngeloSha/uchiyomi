@@ -10,7 +10,7 @@
 import { join } from 'node:path';
 import { OUT, DESKTOP, appExe, devElectron, record, runSync, readJson, tmpRoot, APP_EXTRA } from './lib.mjs';
 
-const ROUNDS = Number(process.env.S1_ROUNDS || 3);
+const ROUNDS = Number(process.env.S1_ROUNDS || 5);
 const bff = join(DESKTOP, 'resources', 'bff');
 const bench = join(DESKTOP, 'src', 'bench', 'sharp-bench.cjs');
 const electron = devElectron();
@@ -33,21 +33,34 @@ for (let r = 0; r < ROUNDS; r++) {
 }
 
 const med = (xs) => { const s = [...xs].sort((a, b) => a - b); return s.length ? s[Math.floor(s.length / 2)] : null; };
-const stat = (leg, w) => med(runs[leg].map((j) => j.results[w].medianPerSec));
+// ⚠️ PAIRED, not pooled. A shared runner's noise is correlated in time (CI run 3 on macos-15-intel: every leg of
+// round 2 ran ~35 % slow together, and one utilityProcess leg halved mid-run), so comparing each leg's own median
+// compares different minutes of the machine's life. Each round runs the three legs back to back; the ratio is
+// taken WITHIN a round, and the verdict is the median of those per-round ratios. Pooled medians are reported
+// beside it.
+const perSec = (leg, r, w) => runs[leg][r]?.results[w].medianPerSec ?? null;
 const table = {};
 for (const w of ['pageHash', 'cover', 'rawDecode']) {
-  const n = stat('node', w);
+  const paired = { electronAsNode: [], utility: [] };
+  for (let r = 0; r < ROUNDS; r++) {
+    const n = perSec('node', r, w);
+    if (!n) continue;
+    const e = perSec('electron-as-node', r, w);
+    const u = perSec('utilityProcess', r, w);
+    if (e) paired.electronAsNode.push(+(e / n).toFixed(3));
+    if (u) paired.utility.push(+(u / n).toFixed(3));
+  }
+  const pooled = (leg) => med(runs[leg].map((j) => j.results[w].medianPerSec));
   table[w] = {
-    nodePerSec: n,
-    electronAsNodePerSec: stat('electron-as-node', w),
-    utilityPerSec: stat('utilityProcess', w),
-    electronAsNodeRatio: n ? +(stat('electron-as-node', w) / n).toFixed(3) : null,
-    utilityRatio: n ? +(stat('utilityProcess', w) / n).toFixed(3) : null,
+    nodePerSec: pooled('node'), electronAsNodePerSec: pooled('electron-as-node'), utilityPerSec: pooled('utilityProcess'),
+    electronAsNodeRatio: med(paired.electronAsNode), utilityRatio: med(paired.utility),
+    pairedRatios: paired,
   };
 }
 const meta = Object.fromEntries(Object.entries(runs).map(([k, v]) => [k, v[0] ? { runtime: v[0].runtime, sharp: v[0].sharp.versions?.sharp, libvips: v[0].sharp.versions?.vips, concurrency: v[0].sharp.concurrency, images: v[0].images, avgImageBytes: v[0].avgImageBytes, rssMB: v[0].rssMB } : null]));
 const ph = table.pageHash;
+const pct = (x) => (x === null ? 'n/a' : `${Math.round(x * 100)} %`);
 const ok = ph.electronAsNodeRatio !== null && ph.utilityRatio !== null && ph.electronAsNodeRatio >= 0.75 && ph.utilityRatio >= 0.75;
 record('S1b-sharp-throughput', ok ? 'PASS' : 'FAIL',
-  `pageHash: node ${ph.nodePerSec}/s, electron-as-node ${ph.electronAsNodePerSec}/s (${Math.round((ph.electronAsNodeRatio || 0) * 100)} %), utilityProcess ${ph.utilityPerSec}/s (${Math.round((ph.utilityRatio || 0) * 100)} %) [pass >= 75 %]; cover ratio ${table.cover.electronAsNodeRatio}/${table.cover.utilityRatio}, rawDecode ratio ${table.rawDecode.electronAsNodeRatio}/${table.rawDecode.utilityRatio}`,
+  `pageHash (median of per-round paired ratios): electron-as-node ${pct(ph.electronAsNodeRatio)} ${JSON.stringify(ph.pairedRatios.electronAsNode)}, utilityProcess ${pct(ph.utilityRatio)} ${JSON.stringify(ph.pairedRatios.utility)} of node [pass >= 75 %]; pooled medians node ${ph.nodePerSec}/s, electron ${ph.electronAsNodePerSec}/s, utility ${ph.utilityPerSec}/s; cover ${pct(table.cover.electronAsNodeRatio)}/${pct(table.cover.utilityRatio)}, rawDecode (2.9 MB out) ${pct(table.rawDecode.electronAsNodeRatio)}/${pct(table.rawDecode.utilityRatio)}`,
   { table, meta, rounds: ROUNDS, errors });

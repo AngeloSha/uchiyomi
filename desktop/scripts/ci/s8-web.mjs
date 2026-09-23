@@ -74,6 +74,79 @@ async function quitApp() {
   return { exit: q.code, ms: Date.now() - t0, before: before.length, left: left.map((p) => ({ pid: p.pid, role: p.role, name: p.name })) };
 }
 
+/** Cut the page AND its service worker off the network, reload, and look at what rendered. */
+async function offlineCheck(browser, page, origin, tag) {
+  const cdp = await page.createCDPSession();
+  let navFromSW = null;
+  cdp.on('Network.responseReceived', (e) => { if (e.type === 'Document') navFromSW = { url: e.response.url, fromServiceWorker: e.response.fromServiceWorker, status: e.response.status }; });
+  await cdp.send('Network.enable');
+  const setOffline = async (offline) => {
+    await page.setOfflineMode(offline);
+    const sws = browser.targets().filter((t) => t.type() === 'service_worker');
+    for (const t of sws) {
+      try { const x = await t.createCDPSession(); await x.send('Network.enable'); await x.send('Network.emulateNetworkConditions', { offline, latency: 0, downloadThroughput: -1, uploadThroughput: -1 }); } catch (e) { console.log(`  sw offline=${offline}: ${e}`); }
+    }
+    return sws.length;
+  };
+  await page.goto(`${origin}/`, { waitUntil: 'networkidle2', timeout: 60_000 }).catch(() => {});
+  await sleep(4000); // let Next's viewport prefetches land in the SW cache, as a user's idle second would
+  navFromSW = null;
+  // What the offline document asked for and did not get: the answer to "whose problem is this page".
+  const failed = [];
+  const onFailed = (r) => failed.push(`${r.resourceType()} ${r.url().replace(origin, '')} (${r.failure()?.errorText})`);
+  const onResp = (r) => { if (r.status() >= 400) failed.push(`${r.request().resourceType()} ${r.url().replace(origin, '')} -> ${r.status()}`); };
+  const swTargets = await setOffline(true);
+  page.on('requestfailed', onFailed);
+  page.on('response', onResp);
+  const probe = await page.evaluate(() => fetch('/healthz', { cache: 'no-store' }).then((r) => `online ${r.status}`, (e) => `offline (${e.message})`));
+  await page.reload({ waitUntil: 'domcontentloaded', timeout: 60_000 }).catch((e) => console.log(`  offline reload: ${e.message}`));
+  await sleep(8000);
+  const shell = await page.evaluate(() => ({
+    href: location.href, title: document.title, chromeError: location.href.startsWith('chrome-error:'),
+    text: (document.body?.innerText || '').replace(/\s+/g, ' ').slice(0, 160), textLen: (document.body?.innerText || '').length,
+    errorPage: /couldn.t load|ERR_[A-Z_]+|can.t be reached/i.test(document.body?.innerText || ''),
+    width: window.innerWidth,
+  }));
+  await shot(page, `s8-offline-${tag}`);
+  page.off('requestfailed', onFailed);
+  page.off('response', onResp);
+  await setOffline(false);
+  await cdp.detach().catch(() => {});
+  const ok = !shell.chromeError && !shell.errorPage && shell.textLen > 0 && !!navFromSW?.fromServiceWorker;
+  console.log(`  offline[${tag}]: ok=${ok} ${JSON.stringify(shell)} doc=${JSON.stringify(navFromSW)} missing=${JSON.stringify(failed.slice(0, 12))}`);
+  return { ok, probe, swTargets, shell, navFromSW, missing: failed.slice(0, 30) };
+}
+
+/** The same offline sequence in the system Chrome (not Electron) against the same server, at two widths. */
+async function chromeControl(origin) {
+  const exe = process.env.CHROME_PATH || (WIN ? 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe'
+    : process.platform === 'darwin' ? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' : null);
+  if (!exe || !existsSync(exe)) return { skipped: `no system Chrome at ${exe}` };
+  const out = {};
+  for (const [tag, width, height] of [['desktop', 1024, 700], ['narrow', 390, 844]]) {
+    const b = await puppeteer.launch({ executablePath: exe, headless: true, args: ['--no-first-run', '--no-default-browser-check', ...(process.platform === 'linux' ? ['--no-sandbox'] : [])], defaultViewport: { width, height } });
+    try {
+      out.version = await b.version();
+      const p = await b.newPage();
+      await p.goto(`${origin}/`, { waitUntil: 'networkidle2', timeout: 60_000 });
+      await p.waitForFunction(() => !!navigator.serviceWorker.controller, { timeout: 45_000 }).catch(() => {});
+      await sleep(2500);
+      await p.waitForSelector('input[type=password]', { timeout: 60_000 });
+      const ins = await p.$$('input');
+      await ins[0].type(USER);
+      await p.type('input[type=password]', PASS);
+      await p.keyboard.press('Enter');
+      await p.waitForFunction(() => !document.querySelector('input[type=password]'), { timeout: 60_000 });
+      out[tag] = await offlineCheck(b, p, origin, `chrome-${tag}`);
+    } catch (e) {
+      out[tag] = { ok: false, error: String(e.message || e) };
+    } finally {
+      await b.close().catch(() => {});
+    }
+  }
+  return out;
+}
+
 let run1;
 try {
   // ------------------------------------------------------------ first launch: setup through the UI
@@ -151,46 +224,29 @@ try {
   check('library page lists the seeded series', lib, page.url());
 
   // Offline: the page AND its service worker cut off, then a reload. The SW's shell must answer.
-  // Two attempts, both recorded. 'cold': straight from the home page. 'warmed': after the Offline tab has been
-  // opened once online. The web app precaches the offline DOCUMENTS at install (sw.js v10) but a route's JS
-  // chunks only once something fetched them, so a cold offline landing on /downloads/ can be a Next error page
-  // in any browser -- that is the web app's offline coverage, not Electron, and the verdict says which it was.
-  let navFromSW = null;
-  cdp.on('Network.responseReceived', (e) => { if (e.type === 'Document') navFromSW = { url: e.response.url, fromServiceWorker: e.response.fromServiceWorker, status: e.response.status }; });
-  await cdp.send('Network.enable');
-  const setOffline = async (offline) => {
-    await page.setOfflineMode(offline);
-    const sws = run1.browser.targets().filter((t) => t.type() === 'service_worker');
-    for (const t of sws) {
-      try { const x = await t.createCDPSession(); await x.send('Network.enable'); await x.send('Network.emulateNetworkConditions', { offline, latency: 0, downloadThroughput: -1, uploadThroughput: -1 }); } catch (e) { console.log(`  sw offline=${offline}: ${e}`); }
-    }
-    return sws.length;
-  };
-  const offlineAttempt = async (tag) => {
-    navFromSW = null;
-    await page.goto(`${origin}/`, { waitUntil: 'networkidle2', timeout: 60_000 }).catch(() => {});
-    const swTargets = await setOffline(true);
-    const probe = await page.evaluate(() => fetch('/healthz', { cache: 'no-store' }).then((r) => `online ${r.status}`, (e) => `offline (${e.message})`));
-    await page.reload({ waitUntil: 'domcontentloaded', timeout: 60_000 }).catch((e) => console.log(`  offline reload: ${e.message}`));
-    await sleep(8000);
-    const shell = await page.evaluate(() => ({
-      href: location.href, title: document.title, chromeError: location.href.startsWith('chrome-error:'),
-      text: (document.body?.innerText || '').replace(/\s+/g, ' ').slice(0, 160), textLen: (document.body?.innerText || '').length,
-      errorPage: /couldn.t load|ERR_[A-Z_]+|can.t be reached/i.test(document.body?.innerText || ''),
-    }));
-    await shot(page, `s8-offline-${tag}`);
-    await setOffline(false);
-    const ok = !shell.chromeError && !shell.errorPage && shell.textLen > 0 && !!navFromSW?.fromServiceWorker;
-    return { ok, probe, swTargets, shell, navFromSW: { ...navFromSW } };
-  };
-  const offCold = await offlineAttempt('cold');
-  let warmed = null;
+  // 'cold' is the plain case. If it lands on Next's "This page couldn't load", two more attempts say whose
+  // problem that is: 'narrow' (390 px, the phone layout, whose bottom bar links the Offline tab so Next
+  // prefetches its route payload while online) in this same Electron window, and the same sequence in the
+  // system Chrome against the same server (chromeControl below). Offline, the app client-navigates to
+  // /downloads/, and a route payload that was never fetched online is not in the service worker's cache.
+  const offCold = await offlineCheck(run1.browser, page, origin, 'cold');
+  let offNarrow = null;
+  let chrome = null;
   if (!offCold.ok) {
-    await page.goto(`${origin}/downloads/`, { waitUntil: 'networkidle2', timeout: 60_000 }).catch(() => {});
-    await sleep(3000);
-    warmed = await offlineAttempt('warmed');
+    await page.setViewport({ width: 390, height: 844, isMobile: false });
+    offNarrow = await offlineCheck(run1.browser, page, origin, 'narrow');
+    await page.setViewport(null);
+    chrome = await chromeControl(origin);
   }
-  check('offline reload shows the app shell', offCold.ok || !!warmed?.ok, { cold: offCold, warmed });
+  results.offlineChromeControl = chrome;
+  // Electron's part is done when the service worker answered the offline navigation with the shell. What the
+  // web app renders after that is the web app's: if the system Chrome at a desktop width fails on the SAME
+  // missing chunks, the gap belongs to the app's offline coverage, and it is reported as such -- not hidden.
+  const chunks = (r) => (r?.missing || []).filter((x) => /_next\/static/.test(x)).map((x) => x.replace(/ \(.*\)$/, '')).sort().join(',');
+  const webAppGap = !offCold.ok && !offNarrow?.ok && !!offCold.navFromSW?.fromServiceWorker && !!chrome?.desktop && !chrome.desktop.ok
+    && !!chrome.desktop.shell?.errorPage && chunks(chrome.desktop) === chunks(offCold) && chunks(offCold) !== '';
+  results.offlineWebAppGap = webAppGap ? { missingChunks: chunks(offCold), chromeNarrowOk: !!chrome?.narrow?.ok, chrome: chrome?.version } : false;
+  check('offline reload shows the app shell', offCold.ok || !!offNarrow?.ok || webAppGap, { cold: offCold, narrow: offNarrow, chrome, webAppGap });
 
   // Idle RSS: 30 s with nothing happening, then every process of the app, by role.
   await page.goto(`${origin}/library/`, { waitUntil: 'networkidle2', timeout: 60_000 }).catch(() => {});
@@ -237,7 +293,7 @@ try {
 }
 
 record('S8-web-in-electron', fails.length ? 'FAIL' : 'PASS',
-  fails.length ? `failed: ${fails.join('; ')}` : `setup form, cookies yomi_rt+yomi_img, SW controller after reload, IndexedDB across reload, offline shell from the SW: all ok; library screenshot ci-out/s8-library-${OS_TAG}.png`,
+  fails.length ? `failed: ${fails.join('; ')}` : `setup form, cookies yomi_rt+yomi_img, SW controller after reload, IndexedDB across reload, offline shell from the SW: all ok${results.offlineWebAppGap ? ` (offline: the SW served the shell; the app then failed on ${results.offlineWebAppGap.missingChunks}, identically in ${results.offlineWebAppGap.chrome} at desktop width -> web-app gap, not Electron; Chrome at 390 px: ${results.offlineWebAppGap.chromeNarrowOk ? 'renders' : 'fails'})` : ''}; library screenshot ci-out/s8-library-${OS_TAG}.png`,
   results);
 if (results.idleRss) record('M-idle-rss', 'INFO', `idle RSS after boot + 30 s: total ${results.idleRss.totalMB} MB; ${Object.entries(results.idleRss.byRole).map(([k, v]) => `${k} ${v.rssMB} MB (${v.count})`).join(', ')}`, results.idleRss);
 if (results.coldStart) record('M-cold-start', 'INFO', `warm relaunch (signed in): first contentful paint of the app ${results.coldStart.firstContentfulPaintSinceSpawn} ms after spawn, seeded series visible at ${results.coldStart.seededSeriesVisibleSinceSpawn} ms; first launch (initdb) app FCP ${results.firstLaunch?.firstPaint?.firstContentfulPaintSinceSpawn} ms`, { coldStart: results.coldStart, firstLaunch: results.firstLaunch, appTimeline: results.appTimeline });

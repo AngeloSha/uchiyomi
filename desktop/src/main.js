@@ -24,7 +24,7 @@ const fs = require('node:fs');
 const zlib = require('node:zlib');
 const os = require('node:os');
 const net = require('node:net');
-const { app, BrowserWindow, Tray, Menu, nativeImage, shell, utilityProcess } = require('electron');
+const { app, BrowserWindow, Tray, Menu, nativeImage, shell, session, utilityProcess } = require('electron');
 
 const paths = require('./paths');
 const log = require('./log');
@@ -240,6 +240,15 @@ async function quit(reason) {
   if (quitting) return;
   quitting = true;
   log.info(`quit: ${reason}`);
+  // app.exit() below skips Chromium's orderly shutdown, and the cookie store is written to disk lazily (about
+  // every 30 s). The bff ROTATES the refresh cookie on use, so a rotation in the last seconds before Quit was
+  // lost and the next launch presented the previous, already-spent token: signed out (CI run 3, macOS x64).
+  try {
+    await session.defaultSession.cookies.flushStore();
+    session.defaultSession.flushStorageData();
+  } catch (e) {
+    log.warn('quit: could not flush the browser profile', { error: String(e) });
+  }
   try {
     const r = await sup?.stop(reason);
     log.info('quit: children stopped', r);

@@ -116,8 +116,9 @@ try { $lr = Invoke-WebRequest -UseBasicParsing -Method Post -Uri "http://127.0.0
 $pgLog = Join-Path $Data 'logs\postgres.log'
 $c.crashRecoveryLogged = [bool](Select-String -Path $pgLog -Pattern 'not properly shut down|automatic recovery' -Quiet)
 $c.recoveryLine = @(Select-String -Path (Join-Path $Data 'logs\desktop.log') -Pattern 'recovery on boot|stale postmaster|orphaned server' | ForEach-Object { $_.Line }) | Select-Object -Last 3
+$names = { param($list) (@($list) | Group-Object { $_.name } | ForEach-Object { "$($_.Name) x$($_.Count)" }) -join ', ' }
 Rec 'S5-control-no-shutdown' 'INFO' `
-  ("installing over a running app WITHOUT --quit-for-update: installer exit $($c.install.exit); processes under the install dir before $($c.runningBefore.Count) -> after $($c.runningAfter.Count) (the installer force-stops them, postgres.exe included); postmaster.pid left behind: $($c.postmasterPidLeft); postgres crash recovery on the next boot: $($c.crashRecoveryLogged); next boot healthy: $($port2 -gt 0), login $($c.loginAfter)") $c
+  ("installing over a running app WITHOUT --quit-for-update: installer exit $($c.install.exit); running from the install dir before: $(& $names $c.runningBefore); still running after the installer: $(& $names $c.runningAfter); postmaster.pid left behind: $($c.postmasterPidLeft); next boot: healthy $($port2 -gt 0), login $($c.loginAfter), recovery: $(@($c.recoveryLine | ForEach-Object { ($_ -split 'WARN ')[-1] }) -join ' / ')") $c
 
 # ---- cleanup
 Start-Process -FilePath $Exe -ArgumentList '--quit-for-update' -Wait
