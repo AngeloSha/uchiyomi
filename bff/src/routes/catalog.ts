@@ -19,6 +19,9 @@ import { enrichSeries, seriesSeen } from '../lib/enrich';
 import { seriesSourcesFor } from '../lib/seriesSources';
 import { readSeriesPrefs, effectivePrefsFor } from '../lib/scanlatorPrefs';
 import { listingFor, type ListingCopy } from '../lib/seriesListing';
+import { markNumbers, unmarkNumbers, LISTING_MARK_MAX } from '../lib/listingProgress';
+import { pushSeriesProgressAsync } from '../lib/trackers';
+import { ghostsEnabled } from '../lib/komgaGhosts';
 import { groupStats, type StatCopy } from '../lib/groupStats';
 import { groupsOf, normGroup } from '../lib/releases';
 import { getSource } from '../lib/sources';
@@ -495,7 +498,54 @@ export default async function catalogRoutes(app: FastifyInstance) {
     await komga.series(vc(req), id);
     const f = await one<{ chapter_floor: number | null }>('SELECT chapter_floor FROM lib_series WHERE id = $1', [id]);
     const floor = f?.chapter_floor == null ? null : Number(f.chapter_floor);
-    return listingFor(id, { floor, admin: roleOf(req) === 'admin' });
+    return listingFor(id, { floor, admin: roleOf(req) === 'admin', userId: userIdOf(req) });
+  });
+
+  /**
+   * Mark chapters this server does not hold read, or un-mark them (#69): the ghost rows' read tick. The body
+   * names numbers; lib/listingProgress resolves each one -- a number the library holds (a chapter that landed
+   * since the page loaded, or a tombstone) is marked on its row like any chapter, a listed number with no row
+   * becomes a listing_progress mark, anything else is `not_listed`.
+   *
+   * ⚠️ THE LISTING IS THE AUTHORISATION, as it is for a manual fetch, and the series gate is the listing
+   * route's own: `komga.series` throws 404 for anything this viewer cannot open, so a walled-off member can
+   * neither mark nor probe which numbers a hidden series lists. NOT gated on canDownload: a mark touches only
+   * the caller's own rows and costs no bytes, so a member who may not fetch may still keep track. NOT gated on
+   * komga_ghost_chapters either: that switch is about what a paired phone sees, and the page has always drawn
+   * these rows.
+   *
+   * ⚠️ Bounded: at most LISTING_MARK_MAX numbers, each finite in 0..1e6 -- the numbers are cast to real[], and a
+   * value past float4 range made Postgres throw 22003 as a 500 on the fetch route (sources.ts). Reintroduce by
+   * dropping `.max(1e6)`: "a mark request is bounded" in listingProgress.int.test.ts reads 500.
+   *
+   * ⚠️ ONE tracker push per request, and only when a POST moved something: the write is set-based precisely so
+   * a 500-number tick is not 500 AniList calls (lib/progress writeProgress pushes on every completed write).
+   * The push itself counts marks only as a contiguous run (lib/trackers seriesProgressFor). A DELETE pushes
+   * nothing, which leaves the tracker ahead -- the safe direction. Neither writes reading_events.
+   * ⚠️ New marks alone push only with komga_ghost_chapters on: with it off seriesProgressFor ignores them, so
+   * the push could only repeat the number already sent -- outbound traffic v0.42.0 never made. A number marked
+   * on its own chapter row (`viaBook`) is ordinary progress and pushes either way. Reintroduce by pushing on
+   * `marked` regardless: "with the ghost switch off, a mark sends nothing to a tracker" in
+   * listingProgress.int.test.ts sees a push.
+   */
+  const listingMarkBody = z.object({
+    numbers: z.array(z.number().finite().min(0).max(1e6)).min(1).max(LISTING_MARK_MAX),
+  });
+  app.post('/api/series/:id/listing-progress', async (req) => {
+    const { id } = req.params as { id: string };
+    const { numbers } = listingMarkBody.parse(req.body ?? {});
+    await komga.series(vc(req), id);
+    const uid = userIdOf(req);
+    const r = await markNumbers(uid, id, numbers, 'web');
+    if (r.viaBook > 0 || (r.marked > 0 && (await ghostsEnabled()))) pushSeriesProgressAsync(uid, id);
+    return { ok: true, marked: r.marked, viaBook: r.viaBook, skipped: r.skipped };
+  });
+  app.delete('/api/series/:id/listing-progress', async (req) => {
+    const { id } = req.params as { id: string };
+    const { numbers } = listingMarkBody.parse(req.body ?? {});
+    await komga.series(vc(req), id);
+    const r = await unmarkNumbers(userIdOf(req), id, numbers);
+    return { ok: true, unmarked: r.unmarked, viaBook: r.viaBook };
   });
 
   /** When the series' sources were last listed, as the listing routes report it. */

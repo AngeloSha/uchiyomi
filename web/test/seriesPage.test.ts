@@ -139,3 +139,53 @@ test('a row caption carries its text as a title, and the desktop grid shows the 
   assert.match(date, /className="hidden lg:inline">\{short\}/, 'the grid gets the short form');
   assert.match(date, /className="lg:hidden">\{long\}/, 'the phone keeps the long one');
 });
+
+// ---- #69: read marks on the grey rows (chapters the server does not hold) -------------------------------
+
+test('a grey row the reader marked reads as read, stays grey, and carries Mark read / Mark unread', () => {
+  // The read treatment is the chapter row's (filled grey dot, dimmed title) plus a ✓ in the empty thumb;
+  // the dashed box and the dimming stay, because the server still does not have it. Reintroduce by
+  // dropping the ✓ or the filled dot: "a read ghost shows the tick" / "and the filled dot" fails; by
+  // rendering the ⋯ in select mode: "the menu hides in select mode" fails.
+  const page = code(read('app/series/page.tsx'));
+  const row = page.slice(page.indexOf('function GhostRow('), page.indexOf('interface StartedJob'));
+  assert.ok(row.length > 100, 'GhostRow is where the scan expects it');
+  assert.match(row, /const read = ghost\.read === true/, 'the row reads the listing\'s flag');
+  assert.match(row, /\{read && !selectable && \([\s\S]{0,200}<IcCheck\b/, 'a read ghost shows the tick');
+  assert.match(row, /read \? 'bg-ink-600' : 'border border-ink-600'/, 'and the filled dot');
+  assert.match(row, /read \? 'text-fog-500' : 'text-fog-300'/, 'and the dimmed title');
+  assert.match(row, /border border-dashed border-ink-600/, 'the thumb stays dashed: still not on the server');
+  assert.match(row, /\{onMark && !selectable && \(/, 'the menu hides in select mode');
+  assert.match(row, /onMark\(!read\)/, 'the one action toggles');
+  assert.match(page, /onMark=\{\(completed\) => markGhost\(r\.ghost\.number, completed\)\}/, 'the page hands every grey row the action');
+});
+
+test('select mode marks the grey rows too, through their own route in chunks of its cap', () => {
+  // ⚠️ Select mode is how a reader who reads elsewhere ticks a stretch of chapters the server never fetched.
+  // Reintroduce by marking `pickedBookList` alone in bulkMark: "the picked grey rows are marked" fails; by
+  // enabling the two chips on `pickedBookList.length` again: "enabled with only grey rows picked" fails.
+  const page = code(read('app/series/page.tsx'));
+  const bulk = fn(page, 'bulkMark');
+  assert.match(bulk, /await markGhosts\(pickedGhostList\.map\(\(g\) => g\.number\), completed\)/, 'the picked grey rows are marked');
+  assert.match(bulk, /await setRead\(pickedBookList, completed\)/, 'and the picked chapters, as before');
+  assert.match(page, /disabled=\{acting \|\| !pickedCount\} onClick=\{\(\) => bulkMark\(true\)\}/, 'Mark read is enabled with only grey rows picked');
+  assert.match(page, /disabled=\{acting \|\| !pickedCount\} onClick=\{\(\) => bulkMark\(false\)\}/, 'Mark unread is enabled with only grey rows picked');
+  const marks = fn(page, 'markGhosts');
+  assert.match(marks, /chunkNumbers\(numbers, MARK_CHUNK\)/, 'cut at the route\'s cap');
+  assert.match(marks, /\/listing-progress`/, 'the by-number route, not the book progress endpoint');
+  assert.match(marks, /method: completed \? 'POST' : 'DELETE'/);
+  // The cap is the route's: a chunk one number larger is a 400 for the whole chunk.
+  const lib = readFileSync(join(ROOT, '../bff/src/lib/listingProgress.ts'), 'utf8');
+  const cap = Number(/export const LISTING_MARK_MAX = (\d+);/.exec(lib)?.[1]);
+  const rows = read('lib/chapterRows.ts');
+  assert.equal(Number(/export const MARK_CHUNK = (\d+);/.exec(rows)?.[1]), cap, 'MARK_CHUNK is the server\'s LISTING_MARK_MAX');
+});
+
+test('Mark all read never touches the grey rows', () => {
+  // ⚠️ One tap must not tick 800 listed chapters: a contiguous run of ticks is what the trackers are told.
+  // Reintroduce by adding the ghosts to markAllRead's `todo`: the body names them and this fails.
+  const page = code(read('app/series/page.tsx'));
+  const all = fn(page, 'markAllRead');
+  assert.match(all, /books\?\.content/, 'it reads the chapters on the server');
+  assert.doesNotMatch(all, /ghost|Ghost|listing/, 'and nothing about the grey rows');
+});

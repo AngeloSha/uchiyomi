@@ -10,6 +10,7 @@ import { Img, ProgressBar } from './ui';
 import { IcHeart, IcPlay, IcPlus, IcWifiOff } from './icons';
 import { SourceIcon } from './SourcePicker';
 import { useOfflineSeries } from '@/lib/useOfflineSeries';
+import { effectsReduced } from '@/lib/effects';
 import { t as tr } from '@/lib/i18n';
 
 /** Pointer-tracked 3D tilt + moving glare for cover cards. Desktop-only (hover+fine pointer),
@@ -26,7 +27,9 @@ function useTilt() {
     return ok.current;
   };
   const onPointerMove = useCallback((e: React.PointerEvent<HTMLElement>) => {
-    if (!enabled()) return;
+    // Reduce effects is read on every move, not cached with the media queries above: it can be switched on
+    // while the page is open, and a tilt that kept going until the next reload would be the switch lying.
+    if (!enabled() || effectsReduced()) return;
     const r = e.currentTarget.getBoundingClientRect();
     const px = (e.clientX - r.left) / r.width - 0.5;   // -0.5 .. 0.5
     const py = (e.clientY - r.top) / r.height - 0.5;

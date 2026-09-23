@@ -405,6 +405,42 @@ same request the selection bar's *Fetch* makes for many. It is the cloud, not th
 arrow saves a chapter to this device, the cloud brings one onto the server. Tapping the row itself opens the
 chapter's sheet, next.
 
+### Marking chapters you don't have as read
+
+Since v0.43.0 a grey row can be marked read or unread, for the chapters you read somewhere else, or long ago,
+and never want on this server. Use the row's own **⋯** menu (**Mark read** / **Mark unread**), or tick grey
+rows in **Select** mode: the bar's *Mark read* and *Mark unread* act on grey rows as well as on chapters. A grey
+row marked read shows a ✓ in its empty thumbnail, a filled grey dot and a dimmed title, and it stays dashed
+and dimmed, because the server still does not have it.
+
+- Marking needs no download permission — it costs no bytes — but it does need a connection. Offline it says
+  *Could not mark — try again when online* and nothing is queued.
+- **Mark all read** and *Mark previous as read* still mark only the chapters on the server, never grey rows,
+  so one tap cannot tick hundreds of listed chapters.
+- When a chapter you marked is later downloaded, it becomes an ordinary read chapter, keeping the time you
+  marked it. The read-chapter cleanup does not delete the newly downloaded file because of the mark — nor a
+  chapter you had already started.
+- Marks write no reading events: your stats, streaks, the leaderboard and Wrapped do not change.
+- The Library page's bulk **Mark unread** (select series on the shelf) clears a series' marks too; its bulk
+  *Mark read* never creates them.
+- Merging two series carries the marks to the survivor (where both had one on the same number, the earlier
+  time wins). **Forget** deletes them, and a member whose only history there was a mark counts among the
+  members' history that is lost.
+
+**What AniList, MyAnimeList and Kitsu are told.** A mark reaches a tracker only when an admin has switched on
+**Show missing chapters in Mihon** (section 8), and only as part of a *contiguous* run of read chapters from
+the start — a number sent to a tracker cannot be taken back there, so a lone tick far ahead is never sent:
+
+- Chapters read to 12 here, plus a mark on 1000: the tracker is still told **12**.
+- Chapters read to 12, plus marks on 13–200: it is told **200**.
+- A gap in what the sources list stops the run: a source listing only 951–1000, plus a mark on 951, still
+  sends 12.
+- A run ending on a fractional mark is rounded down (12.6 sends 12).
+- Whether the series is *finished* on the tracker is still decided by the chapters on the server alone.
+- Marking a chapter unread never sends anything, so the tracker stays ahead — the safe direction.
+
+With that switch off, marks never reach a tracker at all, and marking alone sends nothing.
+
 ### The chapter sheet: Fetch and Replace…
 
 Since v0.33.0 the listing keeps every copy of a chapter number the followed sources offer, not only the one
@@ -443,8 +479,9 @@ remembered between visits; the switch is, per device.
 **Select**, beside *Mark all read*, turns the chapter list into a pick list: tap rows to tick them (a grey
 row too), and the bar at the bottom shows what can be done with the selection. **Done** leaves the mode.
 
-- **Mark read** / **Mark unread** — the same as on a single row, for every ticked chapter (a grey row has
-  nothing to mark). Marking a backlog read this way does not count towards streaks, as on the Library page.
+- **Mark read** / **Mark unread** — the same as on a single row, for every ticked chapter, grey rows
+  included since v0.43.0 (see *Marking chapters you don't have as read*); with only grey rows ticked the two
+  are still live. Marking a backlog read this way does not count towards streaks, as on the Library page.
 - **Save offline** — saves the ticked chapters to this device, skipping any already saved and any the
   server has deleted.
 - **Fetch** — for grey rows, downloads them to the server now. Anyone who may download (the same permission
@@ -964,6 +1001,25 @@ as *Completed* — a chapter that can never be read is listed, not counted as un
 sees these rows: the app, OPDS and offline reading list what is on disk exactly as before, and turning the
 switch off puts the list back at once.
 
+Since v0.43.0 the missing chapters can be marked read on the series page (section 4, *Marking chapters you
+don't have as read*), and with this switch on the marks reach Mihon:
+
+- Mihon's last-read chapter is the higher of two answers: v0.42.0's (missing chapters skipped) and the run
+  through the chapters you marked. It never drops below what v0.42.0 said, and it rises only through a
+  contiguous run of marks.
+- The chapter counts include the missing chapters only for a reader who has marked at least one of the ones
+  listed now **on the series page**. That reader reaches *Completed* by marking the rest; everyone else keeps
+  v0.42.0's counts. A mark on a number the sources no longer list is ignored, and so is one the phone's own
+  sync wrote: Mihon sends that sync on every refresh, so counting it would take a series you had finished out
+  of *Completed* without you touching anything.
+- A sync from Mihon up to chapter N also marks every listed missing chapter at or below N on the server, so
+  the phone and the series page agree. It tells AniList, MyAnimeList or Kitsu something only when it marked a
+  chapter above everything you have finished here — ticking missing chapters on the phone reaches your tracker,
+  a refresh repeating what the server just told it does not.
+
+With the switch off, the Komga API answers exactly as it did in v0.42.0, and marks are neither read nor
+written there.
+
 **Merging duplicates** is on **Content → Health**, attached to the duplicate check that finds them: where it
 reports the same title sitting in your library twice, **Merge** folds one into the other. Every chapter and
 every progress row moves to the survivor. Chapters that look like duplicates are **kept**, not removed --
@@ -1188,7 +1244,7 @@ stuck.
 
 ![Settings](shots/admin-settings.webp)
 
-**Settings** (`/admin/?tab=Settings`) is four sections. **Server**: the server name, an **Open registration**
+**Settings** (`/admin/?tab=Settings`) is five sections. **Server**: the server name, an **Open registration**
 switch (let anyone sign up), **Check for updates** and the anonymous **install count**, each of the last two
 with a fold (*How this works* / *What is sent, once a day*) that spells out exactly what leaves the server.
 **Updates & schedules**: the **Library update interval (hours)** (how often followed series are asked for new
@@ -1199,9 +1255,85 @@ once-a-day source hunt described in section 4 and is on by default. **Library ho
 (days)**, below, and **Repair the library nightly** (on by default), the job described under *Health* above. **Scanlators**: the server-wide defaults for choosing between scanlation groups — **Blocked
 groups**, which apply to every series, a **Default priority** for series that have no ranking of their own, and
 the **Patience (days)** before a chapter is taken from a group lower down the list; see *Sources & translations*
-in section 4. Switches save the moment they flip; text and number fields save when you leave them or press
-Enter, and each row says *Saved* beside itself. Only the scanlator lists have a Save button (**Save scanlator
-defaults**), because a half-typed list is not something to save on every keystroke.
+in section 4. **Notifications** (since v0.43.0): where new chapters and server problems are sent besides
+this browser — see the next section. Switches save the moment they flip; text and number fields save when you
+leave them or press Enter, and each row says *Saved* beside itself. Only the scanlator lists have a Save
+button (**Save scanlator defaults**), because a half-typed list is not something to save on every keystroke.
+
+### Notifications
+
+**Admin → Settings → Notifications** sends new chapters and server problems somewhere other than a browser:
+a webhook, Home Assistant, ntfy or Discord. Each device's own web push stays where it was, under **Profile →
+Settings → This device**. **Add** opens a dialog that asks for exactly what the kind needs:
+
+- **Webhook** — an address that receives a JSON `POST` with `event`, `title`, `message`, `count` and `series`
+  (each with its `id`, `title` and how many chapters were `added`). An optional token is sent as
+  `Authorization: Bearer …`. This is also the way to Telegram, email or anything else: point it at a bridge
+  such as n8n, Node-RED or Apprise.
+- **Home Assistant** — the address of your Home Assistant (for example `http://homeassistant.local:8123`), a
+  **long-lived access token** (your Home Assistant profile → *Security* → *Long-lived access tokens*) and the
+  notify service to call, as `notify.<service>` — for example `notify.mobile_app_your_phone`. Lower-case
+  letters, digits and `_` only, as `domain.service`. The title and the message are sent to
+  `/api/services/<domain>/<service>` on that address — only the address part of what you typed is used; the
+  path is always built from the checked service name, never pasted together from text.
+- **ntfy** — a server (leave it blank for ntfy.sh), a topic of 1–64 letters, digits, `-` or `_`, and a token
+  if your server needs one. The title travels in ntfy's *Title* header. On a public server the topic works like
+  a password: pick one nobody would guess.
+- **Discord** — the channel's webhook address, from *Server Settings → Integrations → Webhooks → Copy Webhook
+  URL*. The address is the password, so it is never shown again. `@everyone` and every other mention are
+  switched off, so a series title cannot ping a server.
+
+Telegram and email are not offered: Telegram needs a chat id found by hand and puts its bot token in the URL,
+and email means another dependency and a mail server's worth of settings to get right. The webhook reaches
+both through a bridge.
+
+For each target you choose what it hears — **New chapters** and/or **Server problems** (a source refusing
+this server, the Cloudflare solver, extensions: the notices admins also get as web push, and they arrive even
+when web push is not configured) — and **who it is for**: the whole server, or one person, who then hears
+only about their own favourites, and about server problems only if they are an admin. **Include 18+ series**
+is off by default: titles from libraries rated 18+ are left out of the digest unless you tick it, the way an
+OPDS link and an API token have their own *Include 18+ libraries* (the web app's *Show 18+* button lives in
+the browser, so a target carries its own choice). A target aimed at a person is bounded by that person's own
+libraries and age limit whatever the box says — those are permissions, not a reveal — so it never names a
+series they could not open themselves.
+
+**The digest.** After each library update — the scheduled sweep, or **Run now** on it under **Admin →
+Tasks** — every target gets **one** message for the whole update, never one per chapter, and none when
+nothing new arrived. A series' own *Check now* sends nothing, since its result is already on your screen.
+The default message is *{count} new chapters in {series}* (*1 new chapter in Solo Leveling*, *12 new chapters
+in 4 series*); the **Message** box changes it, with a live preview underneath. `{count}` is the number of
+chapters, `{series}` the one title or *3 series*, and `{list}` up to ten titles and then *…and N more*. A
+placeholder it does not know is left as you typed it, so a typo shows in the preview. The message is sent
+as written — English by default — so write your own to change the language. Its title is the server's name.
+
+**The rules that keep it safe**, in plain words:
+
+- **Addresses on your own network work**, on purpose — `192.168.x.x`, `10.x.x.x`, `homeassistant.local`.
+- Only `http` and `https`, and no `user:password@` inside an address.
+- **Cloud-metadata addresses are refused** — `169.254.x.x` and the other addresses a cloud host uses to hand
+  out its own credentials — when you save a target **and** every time something is sent, whatever the name
+  resolves to at that moment.
+- **A redirect is never followed.** A target that answers with one has failed, and the address it pointed at
+  is never contacted.
+- This server's own address and port are refused, so a target cannot loop back into Uchiyomi.
+- A target that does not answer within 10 seconds has failed. A network error, a *slow down* (429) or a
+  server error (5xx) is tried once more, 30 seconds later; any other refusal is not.
+- **Addresses and tokens are stored encrypted** and never shown again: the list shows only the scheme and
+  host (for example `https://discord.com/…`), and **Edit** leaves those boxes empty — type a new one to
+  replace it, leave it blank to keep the stored one — but **a new address needs its token (and, for ntfy, its
+  topic) typed again**: a stored credential never follows an address to another host, which would hand that
+  host a secret this panel promises never to show. Correcting the path on the same host keeps the token.
+  They are never written to the log or the Activity feed.
+  If the server's `JWT_SECRET` changes (a lost `/config`, say), a target stops and says *The stored address and
+  token could not be read — enter them again* rather than sending without its token.
+
+**Send a test** on a target's row sends one test message to that saved target — only a saved one, never an
+address typed into the request — at most five times a minute per admin, and says how it went in a short
+sentence (*Delivered*, *The target refused the token (401/403)*, *The target answered with a redirect, which
+is never followed*…), never with what the target itself answered. A failed test is shown on the row but does
+not count towards switching off. After **ten failed deliveries in a row** a target switches itself off and
+the admins are told once; fix it, then switch it back on, which gives it ten fresh tries. The row always
+shows its last result.
 
 ---
 
@@ -1268,6 +1400,11 @@ if you have since finished a chapter above the old mark here, the next one you f
 Nothing is written to the tracker by the import. One thing the mark cannot see is status: a *Finished*
 entry the tracker holds at chapter 0 gets no mark, and the first chapter finished here may set it back to
 Reading.
+
+**Chapters you marked read without downloading them** (since v0.43.0, section 4) reach a tracker only when an
+admin has switched on **Show missing chapters in Mihon**, and only as part of an unbroken run of read chapters
+from the start: chapters read to 12 plus a mark on chapter 1000 still send 12, because a number sent to a
+tracker cannot be taken back there. Section 4, *Marking chapters you don't have as read*, has the whole rule.
 
 ![AniList sync](shots/crop-anilist.webp)
 
@@ -1523,6 +1660,29 @@ engine yourself? Set both on that container — see
 than `SOURCE_LATEST_TIMEOUT_MS` (8 s by default) to return its newest page. Since v0.37.0 the *Test* button
 and the daily source check report this too, not only Discover's health view. Raise the budget if the wait is
 acceptable; otherwise the site itself, or the Cloudflare solver in front of it, is the slow part.
+
+**Scrolling stutters, or moving between pages feels slow, on this computer.** Turn on **Profile → Settings →
+Appearance → Reduce effects** (since v0.43.0). It is the performance mode, and off by default, because the
+look is deliberate: the animated background, the film grain and the vignette, the glass that blurs what
+scrolls under it, momentum scrolling, covers that sharpen in. On a modest PC those are what a frame pays for —
+measured in headless browsers on a 200-series library at 1440 px, switching it on took scrolling from about
+40 to 60 frames a second in Chrome at a 4× CPU throttle, and from under 8 to about 58 in Firefox. It turns
+off:
+
+- the animated background, the film grain and the vignette;
+- every backdrop blur, with the glass panels turning solid;
+- smooth (Lenis) scrolling, leaving your browser's own scrolling;
+- the cover blur-in and the loading shimmer;
+- card tilt;
+- the page and settings-panel transitions;
+- the accent rim on cards (each keeps its plain border).
+
+It applies the moment you flip it, is saved to your **account** (`reduceEffects` in your settings, like the
+accent colour), so it follows you to another device, and a copy is kept on the device for an offline launch —
+cleared when you sign out, or when the server ends your session, alongside the offline library that copy
+exists to serve, so the next person on a shared tablet gets their own setting. Signing in again brings it
+back from your account. Your system's
+*reduce motion* setting is separate: it keeps doing what it always did and does not turn this on.
 
 **Behind a reverse proxy, login/cookies don't stick.** Set `PUBLIC_ORIGIN` to the exact public URL you use (e.g.
 `https://manga.example.com`) so cookies and CORS match, and serve it over HTTPS.

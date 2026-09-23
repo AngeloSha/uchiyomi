@@ -102,6 +102,18 @@ function AppearanceSection() {
       .then((ok) => { if (!ok) { setAccent(prev); setSettings({ accent: prev }); } });
   };
 
+  // Reduce effects (#71): the performance mode. Stored on the account like the accent, so it follows the
+  // person to another device, and applied the moment it is flipped -- `setSettings` sets html.reduce-effects
+  // and its mirror (lib/effects.ts) -- then put back if the server refuses, so the switch never shows a
+  // state the account does not hold.
+  const reduceEffects = user?.settings?.reduceEffects === true;
+  const saveReduceEffects = async (next: boolean) => {
+    const prev = reduceEffects;
+    setSettings({ reduceEffects: next });
+    try { await api('/api/settings', { method: 'PUT', json: { reduceEffects: next } }); }
+    catch (e) { setSettings({ reduceEffects: prev }); throw e; }
+  };
+
   // ⚠️ Read at render time, not held in state. I18nProvider remounts its entire subtree on a language change,
   // so tapping a chip while a once-only secret is on screen -- the OPDS password, a fresh API token, the 2FA
   // recovery codes, all on other tabs -- destroys it permanently (the server keeps only a hash) and kills a
@@ -147,6 +159,10 @@ function AppearanceSection() {
           ))}
         </div>
       </Row>
+
+      <SwitchRow label={tr('Reduce effects')}
+        help={tr('Turns off the animated background, blur, smooth scrolling and transitions. Try it if scrolling feels slow.')}
+        on={reduceEffects} onChange={saveReduceEffects} />
 
       {/* Written to the server so it follows you to another device, and mirrored to localStorage so the login
           screen -- which nobody is signed in to -- is already translated. The note about machine assistance

@@ -202,6 +202,11 @@ export interface Ghost {
   waitingFor?: string;
   /** Only with `waitingFor`: whole days (never below 0) until the patience window closes and the sweep settles. */
   waitDaysLeft?: number;
+  /**
+   * Only when true: the viewer marked this number read although the server does not hold it (#69,
+   * lib/listingProgress). Absent rather than false, so the answer for anyone with no marks is unchanged.
+   */
+  read?: true;
 }
 
 /**
@@ -225,7 +230,7 @@ export function whyOf(status: ListingStatus, number: number, floor: number | nul
 interface GhostRow {
   number: number; title: string | null; published_at: Date | null; scanlator: string | null;
   groups: string[]; source_id: string; status: ListingStatus; attempts: number | null; reason: string | null;
-  copies: ListingCopy[] | null;
+  copies: ListingCopy[] | null; marked: boolean;
 }
 
 const DAY_MS = 86_400_000;
@@ -254,18 +259,33 @@ export function waitDaysLeftOf(copies: ListingCopy[], patienceMs: number, now = 
  * A tombstone is a lib_books row and so is never a ghost: the chapter WAS here, somebody read it, and the
  * cleanup let the bytes go on purpose -- the series page shows that row with its badge, and "fetch again"
  * is the action on it, not "fetch". Only a number with no row at all is missing in the sense this list
- * means. The anti-join is on the raw number, which is the source's, like every stamp the updater writes.
+ * means.
+ *
+ * ⚠️ THE ANTI-JOIN COMPARES THE OVERRIDE-AWARE NUMBER, `COALESCE(book_overrides.number, lib_books.number)`,
+ * exactly as lib/komgaGhosts does. It used to compare the raw number, and a duplicate row was only cosmetic
+ * then; since a ghost row carries read state (#69) it is not. A chapter whose filename parsed as 0 and that an
+ * admin renumbered to 105 was a ghost at 105 here and a real row at 105 on the Komga surface, and
+ * reconciliation (override-aware) moved the mark to the book while this page kept drawing an unmarked ghost.
+ * Reintroduce by comparing `b.number = l.number`: "a renumbered chapter is not a ghost on the series page" in
+ * listingProgress.int.test.ts finds 105 in the list.
+ *
+ * `userId` names whose marks set `read`; without it no row is marked.
  */
-export async function listingFor(seriesId: string, opts: { floor: number | null; admin: boolean }): Promise<{ checkedAt: string | null; content: Ghost[] }> {
+export async function listingFor(seriesId: string, opts: { floor: number | null; admin: boolean; userId?: string }): Promise<{ checkedAt: string | null; content: Ghost[] }> {
   const s = await one<{ source_checked_at: Date | null }>('SELECT source_checked_at FROM lib_series WHERE id = $1', [seriesId]);
   const rows = await q<GhostRow>(
-    `SELECT l.number, l.title, l.published_at, l.scanlator, l.groups, l.source_id, l.status, l.copies, f.attempts, f.reason
+    `SELECT l.number, l.title, l.published_at, l.scanlator, l.groups, l.source_id, l.status, l.copies, f.attempts, f.reason,
+            (lp.user_id IS NOT NULL) AS marked
        FROM series_listing l
        LEFT JOIN chapter_failures f ON f.series_id = l.series_id AND f.number = l.number
+       LEFT JOIN listing_progress lp ON lp.user_id = $2 AND lp.series_id = l.series_id AND lp.number = l.number
       WHERE l.series_id = $1
-        AND NOT EXISTS (SELECT 1 FROM lib_books b WHERE b.series_id = l.series_id AND b.number = l.number)
+        AND NOT EXISTS (
+          SELECT 1 FROM lib_books b
+            LEFT JOIN book_overrides ov ON ov.book_id = b.id
+           WHERE b.series_id = l.series_id AND COALESCE(ov.number, b.number) = l.number)
       ORDER BY l.number`,
-    [seriesId],
+    [seriesId, opts.userId ?? null],
   );
   // The effective preferences, read once per listing and not per row: who a held number is waiting for
   // is the first priority group the blocklist leaves standing (priorityKeys in releases.ts drops a blocked
@@ -294,6 +314,7 @@ export async function listingFor(seriesId: string, opts: { floor: number | null;
       };
       if (attempts > 0) g.attempts = attempts;
       if (opts.admin && r.reason) g.reason = r.reason;
+      if (r.marked) g.read = true;
       // Both fields or neither: a name with no end date, or a count with no name, is half a caption.
       if (g.why === 'held' && waitingFor) {
         // ⚠️ Only the copies the chooser RANKS. `copies` holds every copy of the number, blocked groups'

@@ -1,6 +1,7 @@
 'use client';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { motion } from 'framer-motion';
+import { useReduceEffects } from '@/lib/effects';
 import { t as tr } from '@/lib/i18n';
 
 export interface NavGroup<T extends string> {
@@ -45,6 +46,7 @@ export function ConsoleNav<T extends string>({
   children: ReactNode;
 }) {
   const [sheet, setSheet] = useState(false);
+  const reduced = useReduceEffects();
   const group = groups.find((g) => (g.tabs as readonly string[]).includes(tab)) ?? groups[0];
 
   return (
@@ -104,9 +106,10 @@ export function ConsoleNav<T extends string>({
           {/* A flat nav has no group sheet, so on a phone the footer would have nowhere to live. */}
           {footer && flat && <div className="mb-4 flex flex-wrap gap-2 lg:hidden">{footer}</div>}
 
-          {/* Keyed on the tab so each panel animates in rather than snapping. */}
-          <motion.div key={tab} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.28, ease: [0.22, 0.61, 0.36, 1] }} className="pb-10">
+          {/* Keyed on the tab so each panel animates in rather than snapping -- unless Reduce effects is on
+              (#71), where the panel is simply there. */}
+          <motion.div key={tab} initial={reduced ? false : { opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
+            transition={reduced ? { duration: 0 } : { duration: 0.28, ease: [0.22, 0.61, 0.36, 1] }} className="pb-10">
             {children}
           </motion.div>
         </div>

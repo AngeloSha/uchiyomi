@@ -17,6 +17,7 @@ import { artFile } from './seriesArt';
 import { allWritable, containedPath } from './fsGuard';
 import { tombstoneBooks } from './chapterCleanup';
 import { LIBRARY_ROOT, DL_ROOT, listChapters } from './library';
+import { reconcileListingProgress } from './listingProgress';
 import { join, dirname } from 'path';
 
 export interface SeriesRow {
@@ -141,6 +142,24 @@ export async function mergeSeries(fromId: string, intoId: string): Promise<Merge
       [fromId, intoId],
     );
     await qq(`DELETE FROM tracker_progress WHERE series_id = $1`, [fromId]);
+    // Read marks on chapters neither series held (#69, lib/listingProgress) are keyed (user, series, number)
+    // with no book to follow, so they carry like the floor above: insert if absent, and where both series had
+    // a mark on the same number the EARLIER time wins -- reconciliation stamps read_progress with it, and the
+    // earliest claim is the one that can never make a fetched file look read after it landed. Then the
+    // survivor is reconciled at once: the absorbed series' chapters now sit under it, and a mark on a number
+    // the survivor now holds would otherwise stay inert (and the Komga run would drop below the marks) until
+    // some later scan. Reintroduce by dropping the reconcile: "merge: marks carry to the survivor, the earliest
+    // time wins, and the chapters it now holds are reconciled" in forgetSeries.int.test.ts finds the mark
+    // still a mark and the run at 0.
+    await qq(
+      `INSERT INTO listing_progress (user_id, series_id, number, completed_at, source)
+       SELECT user_id, $2, number, completed_at, source FROM listing_progress WHERE series_id = $1
+       ON CONFLICT (user_id, series_id, number) DO UPDATE
+         SET completed_at = LEAST(listing_progress.completed_at, EXCLUDED.completed_at)`,
+      [fromId, intoId],
+    );
+    await qq(`DELETE FROM listing_progress WHERE series_id = $1`, [fromId]);
+    await reconcileListingProgress({ run: qq, seriesId: intoId });
 
     // Point the absorbed row at its survivor instead of deleting it: its folder still exists on disk, and
     // persistScan needs this to keep putting those files under the merged series.
@@ -215,7 +234,7 @@ const BOOK_KEYED_TABLES = [...BOOK_KEYED_USER_TABLES, 'book_overrides', 'page_ha
 const SERIES_KEYED_TABLES = [
   'favorites', 'collection_items', 'ratings', 'series_colors', 'series_art', 'series_seen', 'series_trackers',
   'series_overrides', 'notes', 'series_sources', 'series_listing', 'chapter_failures', 'tracker_progress',
-  'reading_events', 'offline_downloads', 'bookmarks',
+  'reading_events', 'offline_downloads', 'bookmarks', 'listing_progress',
 ] as const;
 
 export interface ForgetRefusal {
@@ -404,6 +423,9 @@ export async function forgetSeries(id: string): Promise<ForgetResult | ForgetRef
     // -- an absorbed row's floor was carried to its survivor two statements up, not lost. Reintroduce by
     // adding series_seen back, or by counting tracker_progress over every id: "users counts members who
     // lose history, not a NEW badge or a carried tracker floor" in forgetSeries.int.test.ts reads 1 too many.
+    // A read mark on a chapter the server never held (#69) IS history -- "I read chapter 57" -- and goes with
+    // the series. Reintroduce by dropping its arm: "forget deletes read marks and counts their owner" in
+    // forgetSeries.int.test.ts reads 0 members.
     const [{ n: users }] = await qq<{ n: number }>(
       `SELECT count(DISTINCT user_id)::int AS n FROM (
          SELECT user_id FROM read_progress     WHERE book_id = ANY($2)
@@ -414,6 +436,7 @@ export async function forgetSeries(id: string): Promise<ForgetResult | ForgetRef
          UNION SELECT user_id FROM favorites        WHERE series_id = ANY($1)
          UNION SELECT user_id FROM ratings          WHERE series_id = ANY($1)
          UNION SELECT user_id FROM tracker_progress WHERE series_id = ANY($3)
+         UNION SELECT user_id FROM listing_progress WHERE series_id = ANY($1)
          UNION SELECT c.user_id FROM collection_items ci JOIN collections c ON c.id = ci.collection_id
                 WHERE ci.series_id = ANY($1)
        ) u`,

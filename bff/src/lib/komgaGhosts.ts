@@ -113,8 +113,8 @@ const iso = (v: Date | string | null): string | null =>
  * and was corrected to 105 by hand leaves listing number 105 unmatched, so the same chapter appears once as
  * a real row at 105 and once as a ghost at 105, and the tracker counts it twice. Tombstones are lib_books
  * rows and so are excluded here by construction; they reach the list from the ordinary query, which is what
- * keeps their read_progress attached. (lib/seriesListing's listingFor still matches on the raw number, where
- * a duplicate row is only cosmetic.)
+ * keeps their read_progress attached. (lib/seriesListing's listingFor matches the same way since v0.43.0,
+ * when a ghost row began carrying read state and a duplicate stopped being only cosmetic.)
  *
  * No floor filter. A chapter below lib_series.chapter_floor is one this server chose not to fetch, but it is
  * still a chapter of the series, and the tracker total is wrong without it -- which is the whole reason this
@@ -194,9 +194,9 @@ export async function ghostBookById(id: string, ctx: ViewCtx): Promise<GhostBook
 /**
  * The ghost numbers of a series, for the progress endpoint's chapter total.
  *
- * Numbers only: readProgressV2 takes the highest of them into `maxNumberSort` and skips them when it walks
- * the leading run, and never shows them. It deliberately does NOT count them -- see the COMPLETED rule
- * there.
+ * Numbers only: readProgressV2 takes the highest of them into `maxNumberSort`, walks the leading run over
+ * them (skipped, or read where this reader marked them -- lib/listingProgress continuousRun), and counts them
+ * only for a reader who has marked one -- see the COMPLETED rule there. The tracker push reads the same list.
  */
 export async function ghostNumbers(seriesId: string): Promise<number[]> {
   const rows = await q<{ number: string | number }>(

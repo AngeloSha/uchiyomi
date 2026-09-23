@@ -357,3 +357,115 @@ test('resync clears the floor for MAL and Kitsu too', { skip: DSN ? false : 'set
     await q(`DELETE FROM lib_series WHERE id = $1`, [RESYNC_SERIES]);
   }
 });
+
+// ---- read marks on chapters the server does not hold (#69) ------------------------------------------------
+//
+// A reader can tick a chapter this server never fetched (lib/listingProgress). A number pushed to AniList, MAL
+// or Kitsu is effectively irreversible (the floor above), so a mark reaches a tracker ONLY through the
+// contiguous run the Komga surface reports -- GREATEST-ed with the real MAX, floored, and only with
+// komga_ghost_chapters on, like that surface. Everything here goes through seriesProgressFor, the one figure
+// every push sends.
+test('read marks reach a tracker only as a contiguous run', { skip: DSN ? false : 'set TEST_DATABASE_URL to run' }, async (t) => {
+  const { migrate } = await import('../src/lib/migrate');
+  const { q } = await import('../src/lib/db');
+  const trackers = await import('../src/lib/trackers');
+  await migrate();
+  const S = 's_trk_marks', F = 's_trk_marks_f';
+  await q(`DELETE FROM users WHERE username = $1`, ['tracker-marks']);
+  await q(`DELETE FROM lib_series WHERE id = ANY($1)`, [[S, F]]);
+  for (const id of [S, F]) await q(`INSERT INTO lib_series (id, source, title, folder) VALUES ($1,'test',$1,$1)`, [id]);
+  const u = await q(`INSERT INTO users (username, display_name, password_hash, role) VALUES ($1,$1,'x','user') RETURNING id`, ['tracker-marks']);
+  const userId = u[0].id as string;
+  const range = (a: number, b: number) => Array.from({ length: b - a + 1 }, (_, i) => a + i);
+  // Real chapters 1..12, all read.
+  for (const n of range(1, 12)) {
+    await q(`INSERT INTO lib_books (id, series_id, source, file, title, number) VALUES ($1,$2,'test',$3,$4,$5)`,
+      [`b_trk_marks_${n}`, S, `/test/marks/${n}.cbz`, `Chapter ${n}`, n]);
+    await q(`INSERT INTO read_progress (user_id, book_id, series_id, page, completed) VALUES ($1,$2,$3,1,true)`,
+      [userId, `b_trk_marks_${n}`, S]);
+  }
+  const setListing = async (sid: string, numbers: number[]) => {
+    await q(`DELETE FROM series_listing WHERE series_id = $1`, [sid]);
+    await q(`INSERT INTO series_listing (series_id, number, title, source_id, chosen, status)
+             SELECT $1, n, 'Chapter ' || n, 'src', '{}'::jsonb, 'available' FROM unnest($2::real[]) AS n`, [sid, numbers]);
+  };
+  const setMarks = async (sid: string, numbers: number[]) => {
+    await q(`DELETE FROM listing_progress WHERE user_id = $1 AND series_id = $2`, [userId, sid]);
+    await q(`INSERT INTO listing_progress (user_id, series_id, number) SELECT $1, $2, n FROM unnest($3::real[]) AS n`, [userId, sid, numbers]);
+  };
+  const chapters = async (sid = S) => (await trackers.seriesProgressFor(userId, sid)).chapters;
+  const ghosts = (on: boolean) => q(`UPDATE server_settings SET komga_ghost_chapters = $1 WHERE id = 1`, [on]);
+
+  try {
+    await ghosts(true);
+    await setListing(S, range(1, 1000));
+
+    await t.test('with no marks the figure is exactly the real MAX', async () => {
+      await setMarks(S, []);
+      assert.deepEqual(await trackers.seriesProgressFor(userId, S), { chapters: 12, finished: true });
+    });
+
+    await t.test('one mark on chapter 1000 with real progress at 12 pushes 12', async () => {
+      // ⚠️ THE ONE THIS WHOLE DESIGN EXISTS FOR. Reintroduce by GREATEST-ing the highest MARKED number into
+      // seriesProgressFor (the way the real rows use MAX): this reads 1000, and AniList keeps it.
+      await setMarks(S, [1000]);
+      assert.equal(await chapters(), 12);
+    });
+
+    await t.test('ticking 13..200 behind the real 12 pushes 200', async () => {
+      await setMarks(S, range(13, 200));
+      assert.equal(await chapters(), 200);
+      assert.equal((await trackers.seriesProgressFor(userId, S)).finished, true, 'finished stays over the real rows');
+    });
+
+    await t.test('one tick past a hole in the listing pushes nothing new', async () => {
+      // Reintroduce by dropping the adjacency break in continuousRun: B pushes 1000, C 951.
+      await setListing(S, [...range(1, 12), 1000]);
+      await setMarks(S, [1000]);
+      assert.equal(await chapters(), 12, 'B: only 1000 is listed above 12');
+      await setListing(S, [...range(1, 12), ...range(951, 1000)]);
+      await setMarks(S, [951]);
+      assert.equal(await chapters(), 12, 'C: a DMCA hole from 13 to 950');
+      await setListing(F, range(200, 300));
+      await setMarks(F, [200]);
+      assert.equal(await chapters(F), 0, 'D: a follow-only series whose source starts at 200');
+    });
+
+    await t.test('a run that ends on a fractional tick is floored', async () => {
+      // `::int` would round 12.6 up to 13 -- a chapter nobody ticked. Reintroduce by Math.round: this reads 13.
+      await setListing(S, [...range(1, 12), 12.6, 13]);
+      await setMarks(S, [12.6]);
+      assert.equal(await chapters(), 12);
+    });
+
+    await t.test('a mark on a number that is no longer listed plays no part', async () => {
+      await setListing(S, range(1, 20));
+      await setMarks(S, [13, 14, 500]);
+      assert.equal(await chapters(), 14, 'the contiguous 13, 14 count; the orphan 500 does not');
+    });
+
+    await t.test('with the switch off, marks never reach a tracker', async () => {
+      // ⚠️ An install with komga_ghost_chapters off (the default) sends exactly what v0.42.0 sent: the
+      // phone surface is off, and the two must agree on one quantity. Reintroduce by dropping the
+      // `ghostsEnabled()` return in seriesProgressFor: the follow-only series pushes 200 with the switch off.
+      await setListing(F, range(1, 300));
+      await setMarks(F, range(1, 200));
+      await ghosts(false);
+      assert.deepEqual(await trackers.seriesProgressFor(userId, F), { chapters: 0, finished: false });
+      await trackers.saveConnection(userId, 'myanimelist', 'tok-mal', 'me', new Date(Date.now() + 86_400_000));
+      await trackers.linkSeries(F, '999', 'Marks', userId, 'myanimelist');
+      pushes.length = 0;
+      await trackers.pushSeriesProgress(userId, F);
+      assert.equal(pushes.length, 0, 'nothing is sent');
+      await ghosts(true);
+      assert.equal(await chapters(F), 200, 'and with it on, the contiguous run is');
+      await trackers.pushSeriesProgress(userId, F);
+      assert.equal(pushes.length, 1);
+      assert.match(pushes[0].body, /num_chapters_read=200/);
+    });
+  } finally {
+    await ghosts(false);
+    await q(`DELETE FROM users WHERE username = $1`, ['tracker-marks']);
+    await q(`DELETE FROM lib_series WHERE id = ANY($1)`, [[S, F]]);
+  }
+});

@@ -1,6 +1,7 @@
 'use client';
 import { useState, ReactNode, useRef, useEffect, useCallback } from 'react';
 import { genreBackdrop } from '@/lib/art';
+import { useReduceEffects } from '@/lib/effects';
 import { t as tr } from '@/lib/i18n';
 
 /** Series backdrop: the BFF composites a wide, blurred, darkened full-bleed ambient from the series art
@@ -206,6 +207,7 @@ export function Img({
   const [loaded, setLoaded] = useState(false);
   const [failed, setFailed] = useState(false);
   const [fellBack, setFellBack] = useState(false);
+  const reduced = useReduceEffects();
   const error = failed || !src; // no src at all is the same broken tile as a src that 404s
   const shown = fellBack && fallbackSrc ? fallbackSrc : src;
   const setError = () => {
@@ -239,7 +241,12 @@ export function Img({
           decoding="async"
           onLoad={() => setLoaded(true)}
           onError={setError}
-          className={`h-full w-full object-cover ${imgClassName} transition-all duration-700 ease-out ${loaded ? 'scale-100 opacity-100 blur-none' : 'scale-105 opacity-0 blur-md'}`}
+          // Under Reduce effects (#71) a cover simply appears. The sharpen-in animates `filter`, which is
+          // repainted every frame of its 700 ms on the main thread -- in Firefox in particular -- and while
+          // a grid scrolls, covers land continuously, so there is always one in flight.
+          className={`h-full w-full object-cover ${imgClassName} ${reduced
+            ? (loaded ? 'opacity-100' : 'opacity-0')
+            : `transition-all duration-700 ease-out ${loaded ? 'scale-100 opacity-100 blur-none' : 'scale-105 opacity-0 blur-md'}`}`}
         />
       )}
     </div>

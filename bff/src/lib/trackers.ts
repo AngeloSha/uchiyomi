@@ -14,6 +14,8 @@ import { q, one } from './db';
 import { seal, open as unseal } from './secretbox';
 import { withGate } from './gate';
 import { ADAPTERS, PROVIDERS, type Provider } from './trackerProviders';
+import { ghostsEnabled, ghostNumbers } from './komgaGhosts';
+import { continuousRun, marksFor, mergeRun, realRows } from './listingProgress';
 export type { Provider } from './trackerProviders';
 
 
@@ -165,6 +167,17 @@ export async function whoAmI(token: string, provider: Provider = 'anilist'): Pro
  * Deliberately the maximum completed chapter rather than the one just finished — re-reading chapter 3 of a
  * series you're 200 chapters into must not rewind the tracker, and a backfill pushing chapters in arbitrary
  * order must converge on the same answer. Exported so this rule can be tested without calling AniList.
+ *
+ * ⚠️ MARKS ON CHAPTERS THIS SERVER DOES NOT HOLD (#69, lib/listingProgress) reach the tracker ONLY through the
+ * contiguous run -- continuousRun, the figure the Komga surface reports as lastReadContinuousNumberSort --
+ * GREATEST-ed with the real MAX above, never through the MAX itself. A number pushed here is effectively
+ * irreversible (the monotonic floor in pushOne), so one stray tick on chapter 1000 must add nothing, while
+ * ticking 13..200 behind a real 12 pushes 200. Floored: a run ending on a marked 12.6 tells the tracker 12,
+ * not a chapter 13 nobody ticked. ⚠️ And only with komga_ghost_chapters on, like the Komga surface: the two
+ * must agree on one quantity (this file's header), and an install with the switch off (the default) sends
+ * exactly what v0.42.0 sent. `finished` stays over the real rows, so a partly-ticked ghost list can never
+ * flip an entry to COMPLETED. Reintroduce by pushing the max marked number: "one mark on chapter 1000 with
+ * real progress at 12 pushes 12" in trackers.int.test.ts reads 1000.
  */
 export async function seriesProgressFor(userId: string, seriesId: string): Promise<{ chapters: number; finished: boolean }> {
   const prog = await one<{ chapters: number; total: number; done: number }>(
@@ -179,10 +192,19 @@ export async function seriesProgressFor(userId: string, seriesId: string): Promi
       WHERE b.series_id = $1`,
     [seriesId, userId],
   );
-  return {
+  const out = {
     chapters: prog?.chapters ?? 0,
     finished: !!prog && prog.total > 0 && prog.done === prog.total,
   };
+  // The cheap exits first, so a reader with no marks (nearly everyone) pays one indexed probe at most.
+  if (!(await ghostsEnabled())) return out;
+  const marks = await marksFor(userId, seriesId);
+  if (!marks.size) return out;
+  const ghosts = await ghostNumbers(seriesId);
+  if (!ghosts.some((n) => marks.has(n))) return out;
+  const run = continuousRun(mergeRun(await realRows(userId, seriesId), ghosts, marks));
+  out.chapters = Math.max(out.chapters, Math.floor(run));
+  return out;
 }
 
 /**

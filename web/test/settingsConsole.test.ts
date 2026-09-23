@@ -199,6 +199,8 @@ test('every string the new consoles render is in all eight locale files', () => 
     'components/settings.tsx', 'components/ProfileYou.tsx', 'components/ProfileSettings.tsx',
     'components/ProfileConnections.tsx', 'components/ProfileAccount.tsx', 'components/AdminSettings.tsx',
     'app/profile/page.tsx',
+    // v0.43.0 (#70): Admin → Settings → Notifications is a console section of its own file, with 74 strings.
+    'components/AdminNotifications.tsx',
   ];
   for (const f of files) assert.ok(existsSync(join(ROOT, f)), `${f} does not exist -- a console this test covers is not built yet`);
   const keys = trKeys(files);

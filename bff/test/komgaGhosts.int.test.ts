@@ -131,6 +131,7 @@ async function setup() {
 
   const tok = {
     read: (await auth.issueApiToken(reader, 'read', ['read'], null)).token,
+    write: (await auth.issueApiToken(reader, 'write', ['read', 'write'], null)).token,
     capped: (await auth.issueApiToken(users.find((u) => u.username === CAPPED)!.id, 'capped', ['read'], null)).token,
   };
   return { app, q, reader, tok };
@@ -411,6 +412,193 @@ test('ghost chapters: the opt-in, the list, what a tap gets, and the tracker num
       assert.equal(s.booksReadCount, 3);
       assert.equal(s.booksUnreadCount, 0, 'a ghost is not an unread chapter of this library');
       assert.equal(s.booksInProgressCount, 0);
+    });
+
+    // ---- on: read marks on ghosts (#69, lib/listingProgress) -------------------------------------------
+    // A reader can now tick a chapter this server does not hold. What the phone is told afterwards is the
+    // dangerous half: the run may rise only through a CONTIGUOUS run of ticks (a lone high tick would reach
+    // AniList as "read up to here"), and the counts include the ghosts only for a reader who has marked one
+    // of them, so COMPLETED stays reachable for everyone.
+    const S_MK = 's_kg_mk_follow', S_MK_LONE = 's_kg_mk_lone', S_MK_HOLE = 's_kg_mk_hole', S_MK_PUT = 's_kg_mk_put';
+    // The finished long runner a phone refresh must not disturb: 19 real chapters read, one never-fetched
+    // chapter 5 among them and five more listed above the reader.
+    const S_MK_FIN = 's_kg_mk_fin';
+    const range = (a: number, b: number) => Array.from({ length: b - a + 1 }, (_, i) => a + i);
+    const markGhosts = (sid: string, numbers: number[]) =>
+      q(`INSERT INTO listing_progress (user_id, series_id, number) SELECT $1, $2, n FROM unnest($3::real[]) AS n
+         ON CONFLICT DO NOTHING`, [reader, sid, numbers]);
+    const unmarkAll = (sid: string) => q(`DELETE FROM listing_progress WHERE user_id = $1 AND series_id = $2`, [reader, sid]);
+    const status = (p: any) => (p.booksCount === p.booksUnreadCount ? 'UNREAD'
+      : p.booksCount === p.booksReadCount ? 'COMPLETED' : 'READING');
+
+    await t.test('marks: fixtures', async () => {
+      const mk = (id: string, count: number) =>
+        q(`INSERT INTO lib_series (id, source, title, folder, books_count, library_id) VALUES ($1,'T!kg',$1,$2,$3,$4)`,
+          [id, `T!kg/${id}`, count, LIB]);
+      const list = (sid: string, numbers: number[]) =>
+        q(`INSERT INTO series_listing (series_id, number, title, source_id, chosen, status)
+           SELECT $1, n, 'Chapter ' || n, 'src', '{}'::jsonb, 'available' FROM unnest($2::real[]) AS n`, [sid, numbers]);
+      const readBooks = async (sid: string, numbers: number[]) => {
+        for (const n of numbers) {
+          await q(`INSERT INTO lib_books (id, series_id, source, file, number, title, root) VALUES ($1,$2,'T!kg',$3,$4,$5,'/kg')`,
+            [`b_${sid}_${n}`, sid, `${sid}/${n}.cbz`, n, `Chapter ${n}`]);
+          await complete(`b_${sid}_${n}`, sid);
+        }
+      };
+      await mk(S_MK, 0); await list(S_MK, range(1, 10));                                  // follow-only
+      await mk(S_MK_LONE, 10); await list(S_MK_LONE, range(1, 1000)); await readBooks(S_MK_LONE, range(1, 10));
+      await mk(S_MK_HOLE, 12); await list(S_MK_HOLE, [...range(1, 12), ...range(951, 1000)]); await readBooks(S_MK_HOLE, range(1, 12));
+      await mk(S_MK_PUT, 0); await list(S_MK_PUT, range(1, 600));
+      await mk(S_MK_FIN, 19); await list(S_MK_FIN, range(1, 25));
+      await readBooks(S_MK_FIN, [...range(1, 4), ...range(6, 20)]);
+    });
+
+    await t.test('a follow-only series read to 5 on the page reports 10 chapters, 5 read, run 5', async () => {
+      // Before #69 this series answered 0/0/0/0 however far the reader had got: nothing here had a row.
+      await markGhosts(S_MK, range(1, 5));
+      const p = await progress(S_MK);
+      assert.deepEqual(
+        [p.booksCount, p.booksReadCount, p.booksUnreadCount, p.booksInProgressCount, p.lastReadContinuousNumberSort, p.maxNumberSort],
+        [10, 5, 5, 0, 5, 10],
+      );
+      assert.equal(status(p), 'READING');
+    });
+
+    await t.test('a reader who marked every ghost is COMPLETED, on the progress endpoint and the series DTO', async () => {
+      // ⚠️ The twin of "a series read to the end is still COMPLETED once a ghost appears": with the ghosts
+      // counted for this reader, marking all of them must reach COMPLETED -- including on /api/v1/series/:id,
+      // whose booksCount is lib_series.books_count (0 here). Reintroduce by dropping `total` in the v1 route:
+      // the DTO says booksCount 0 beside booksReadCount 10, which Mihon reads as UNREAD.
+      await markGhosts(S_MK, range(6, 10));
+      const p = await progress(S_MK);
+      assert.equal(status(p), 'COMPLETED');
+      assert.equal(p.lastReadContinuousNumberSort, 10);
+      const s = (await get(`/api/v1/series/${S_MK}`, key(tok.read))).json();
+      assert.equal(s.booksCount, 10, 'the total the read counts are OF');
+      assert.equal(s.booksReadCount, 10);
+      assert.equal(s.booksUnreadCount, 0);
+      assert.equal(s.booksCount, s.booksReadCount + s.booksUnreadCount + s.booksInProgressCount);
+      // And the long runner: 997..1000 read, the ghost at 1001 ticked.
+      await markGhosts(S_LONG, [1001]);
+      const l = await progress(S_LONG);
+      assert.equal(status(l), 'COMPLETED', 'every listed chapter is read or ticked');
+      assert.equal(l.booksCount, 5);
+      assert.equal(l.lastReadContinuousNumberSort, 1001, 'the tick is adjacent to the run, so it carries it');
+      const ls = (await get(`/api/v1/series/${S_LONG}`, key(tok.read))).json();
+      assert.equal(ls.booksCount, ls.booksReadCount + ls.booksUnreadCount + ls.booksInProgressCount);
+      await unmarkAll(S_LONG);
+    });
+
+    await t.test('a stale mark does not make the reader engaged', async () => {
+      // A mark can outlive its listing row, and the page draws rows only from the current listing, so an
+      // orphan mark is one the reader has no row left to clear. It must not switch a finished series to
+      // ghost-inclusive counts. Reintroduce by `engaged = marks.size > 0` in readProgressDetail: READING.
+      await markGhosts(S_LONG, [1002]);
+      const p = await progress(S_LONG);
+      assert.equal(status(p), 'COMPLETED');
+      assert.deepEqual([p.booksCount, p.booksReadCount, p.booksUnreadCount], [4, 4, 0]);
+      assert.equal(p.lastReadContinuousNumberSort, 1000);
+      await unmarkAll(S_LONG);
+    });
+
+    await t.test('a lone tick far ahead moves nothing the phone passes on', async () => {
+      // ⚠️ Real 1..10 read, 11..999 listed and never fetched, the reader ticks 1000. Reported as the run, that
+      // is `last_chapter_read = 1000` on the phone and on AniList behind it. Reintroduce by a single
+      // skip-and-extend walk in continuousRun: this reads 1000.
+      await markGhosts(S_MK_LONE, [1000]);
+      const p = await progress(S_MK_LONE);
+      assert.equal(p.lastReadContinuousNumberSort, 10);
+      assert.equal(p.maxNumberSort, 1000);
+    });
+
+    await t.test('one tick past a hole in the listing moves nothing either', async () => {
+      // Real 1..12 read; the sources list nothing between 13 and 950 (a licensed middle). Reintroduce by
+      // dropping the adjacency break in continuousRun: this reads 951.
+      await markGhosts(S_MK_HOLE, [951]);
+      assert.equal((await progress(S_MK_HOLE)).lastReadContinuousNumberSort, 12);
+    });
+
+    await t.test('marks change nothing on the Komga surface while the switch is off', async () => {
+      // ⚠️ Off is byte-identical to v0.42.0, marks or no marks: the phone never saw a ghost, so a run or a
+      // count built from one would be a claim about chapters it cannot see. Reintroduce by reading the marks
+      // outside the `ghostsEnabled()` gate: the marked series answers 10 chapters instead of 0.
+      await ghosts(false);
+      try {
+        const withMarks = await Promise.all([S_MK, S_MK_LONE, S_MK_HOLE].map((sid) => progress(sid)));
+        const dtoWith = (await get(`/api/v1/series/${S_MK}`, key(tok.read))).json();
+        const saved = await q(`SELECT series_id, number FROM listing_progress WHERE user_id = $1`, [reader]);
+        await q(`DELETE FROM listing_progress WHERE user_id = $1`, [reader]);
+        const without = await Promise.all([S_MK, S_MK_LONE, S_MK_HOLE].map((sid) => progress(sid)));
+        const dtoWithout = (await get(`/api/v1/series/${S_MK}`, key(tok.read))).json();
+        for (const r of saved) await markGhosts(r.series_id, [Number(r.number)]);
+        assert.deepEqual(withMarks, without);
+        assert.deepEqual(dtoWith, dtoWithout);
+        assert.deepEqual([withMarks[0].booksCount, withMarks[0].lastReadContinuousNumberSort], [0, 0]);
+      } finally {
+        await ghosts(true);
+      }
+    });
+
+    await t.test('markReadUpTo writes ghost marks only with the switch on, and no reading events', async () => {
+      // "Mihon sync should also work with this": a PUT of 500 on a series the phone lists as ghosts ticks
+      // them here too, so the page and the phone agree. Reintroduce by dropping the `ghostsEnabled()` gate in
+      // markReadUpTo: the off half below finds 500 marks.
+      const { markReadUpTo } = await import('../src/lib/komgaProgress');
+      await ghosts(false);
+      try {
+        assert.deepEqual(await markReadUpTo(reader, S_MK_PUT, 500), { changed: 0, ghostMarks: 0, ghostMarksAhead: 0 });
+        assert.equal((await q(`SELECT count(*)::int n FROM listing_progress WHERE series_id = $1`, [S_MK_PUT]))[0].n, 0);
+      } finally {
+        await ghosts(true);
+      }
+      const put = await app.inject({ method: 'PUT', url: `/api/v2/series/${S_MK_PUT}/read-progress/tachiyomi`,
+        headers: { ...key(tok.write), 'content-type': 'application/json' }, payload: { lastBookNumberSortRead: 500 },
+        remoteAddress: '10.79.200.1' });
+      assert.equal(put.statusCode, 204);
+      const rows = await q<{ n: number; komga: number }>(
+        `SELECT count(*)::int n, count(*) FILTER (WHERE source = 'komga')::int komga FROM listing_progress WHERE user_id = $1 AND series_id = $2`,
+        [reader, S_MK_PUT]);
+      assert.deepEqual(rows[0], { n: 500, komga: 500 }, 'every listed ghost at or below 500, stamped as a phone sync');
+      assert.equal((await q(`SELECT count(*)::int n FROM reading_events WHERE series_id = $1`, [S_MK_PUT]))[0].n, 0);
+      assert.deepEqual(await markReadUpTo(reader, S_MK_PUT, 500), { changed: 0, ghostMarks: 0, ghostMarksAhead: 0 },
+        'a refresh is free');
+      // Nothing on this series is on disk, so every one of these ten is above the reader's real progress: the
+      // phone knows something this server did not, and the route is allowed to tell the tracker.
+      assert.deepEqual(await markReadUpTo(reader, S_MK_PUT, 510), { changed: 0, ghostMarks: 10, ghostMarksAhead: 10 },
+        'and a step counts what moved');
+      const p = await progress(S_MK_PUT);
+      assert.equal(p.lastReadContinuousNumberSort, 510);
+    });
+
+    await t.test('a phone refresh alone never takes a finished series out of Completed', async () => {
+      // ⚠️ THE ONE THAT NEARLY SHIPPED. Mihon PUTs on every bind and refresh, not only after reading, and that
+      // PUT marks every listed ghost at or below the run this server itself reported. Read as engagement, one
+      // echoed mark switched a reader who had FINISHED the series to ghost-inclusive counts -- COMPLETED to
+      // READING, with nobody having marked anything -- and un-marking from the web lasted exactly until the
+      // next refresh. Reintroduce by `engaged = ghosts.some((n) => marks.all.has(n))` in readProgressDetail:
+      // this reads READING.
+      const before = await progress(S_MK_FIN);
+      assert.equal(status(before), 'COMPLETED', 'nineteen real chapters, all read');
+      assert.deepEqual([before.booksCount, before.booksReadCount, before.booksUnreadCount], [19, 19, 0]);
+      const { markReadUpTo } = await import('../src/lib/komgaProgress');
+      // The phone PUTs back the run it was told: 20. Ghost 5 is listed, below it, and not on disk.
+      const put = await markReadUpTo(reader, S_MK_FIN, before.lastReadContinuousNumberSort);
+      assert.deepEqual(put, { changed: 0, ghostMarks: 1, ghostMarksAhead: 0 },
+        'a bind that only echoes the run back tells no tracker anything');
+      const after = await progress(S_MK_FIN);
+      assert.equal(status(after), 'COMPLETED', 'still finished after the sync');
+      assert.deepEqual([after.booksCount, after.booksReadCount, after.booksUnreadCount], [19, 19, 0]);
+      assert.ok(after.booksUnreadCount >= 0, 'and the counts stay arithmetic');
+      // And again, because the trap was that the second refresh undid any repair.
+      await markReadUpTo(reader, S_MK_FIN, before.lastReadContinuousNumberSort);
+      assert.equal(status(await progress(S_MK_FIN)), 'COMPLETED');
+      // The reader's own tick is still engagement: the ghosts above the run join the counts, and COMPLETED
+      // goes because chapters 21..25 are genuinely unread.
+      await markGhosts(S_MK_FIN, [21]);
+      const own = await progress(S_MK_FIN);
+      assert.deepEqual([own.booksCount, own.booksReadCount], [25, 21], 'nineteen real, six ghosts, 5 and 21 ticked');
+      assert.equal(status(own), 'READING');
+      await unmarkAll(S_MK_FIN);
     });
 
     await t.test('turning it back off restores the old answers at once', async () => {

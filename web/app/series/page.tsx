@@ -18,7 +18,7 @@ import { IcChevronLeft, IcHeart, IcStar, IcPlay, IcDownload, IcCloudDownload, Ic
 import { t as tr } from '@/lib/i18n';
 import { FindMissingDialog } from '@/components/FindMissingDialog';
 import { normGroup } from '@/lib/scanlators';
-import { GHOST_CAP, mergeRows, whyLabel, runLabel, chunkNumbers } from '@/lib/chapterRows';
+import { GHOST_CAP, mergeRows, whyLabel, runLabel, chunkNumbers, MARK_CHUNK } from '@/lib/chapterRows';
 import { ALL_GROUPS, copySourceId, groupsOfRow, matchesGroup } from '@/lib/groupFilter';
 import { SourcesSheet, useSeriesGroups, useCheckNow } from '@/components/SourcesSheet';
 import { SourcesExplainer } from '@/components/SourcesExplainer';
@@ -639,8 +639,13 @@ function SelectBubble({ selected }: { selected: boolean }) {
  * things done about them, and only `failed` is amber, because it is the only one that is news rather than
  * a state. The downloader's error text is in the sheet for admins (the server sends `reason` to nobody
  * else).
+ *
+ * A reader can mark it read without ever fetching it (#69): the row then takes the chapter row's read
+ * treatment -- the filled grey dot, the dimmed title -- plus a ✓ in the empty thumb, and it STAYS dashed and
+ * dimmed, because "this server does not have it" is still true. The mark lives in its own table and becomes
+ * ordinary progress when the chapter lands (bff lib/listingProgress).
  */
-function GhostRow({ ghost, sourceNames, primarySource, selectable, selected, onToggle, onFetch, onOpen }: {
+function GhostRow({ ghost, sourceNames, primarySource, selectable, selected, onToggle, onFetch, onOpen, onMark }: {
   ghost: Ghost;
   sourceNames?: Record<string, string>;
   primarySource?: string;
@@ -653,8 +658,15 @@ function GhostRow({ ghost, sourceNames, primarySource, selectable, selected, onT
   onFetch?: () => Promise<void>;
   /** Open the chapter sheet for this number. */
   onOpen: () => void;
+  /**
+   * Mark this number read (true) or unread (false) -- the ⋯ menu, the chapter row's. For every viewer who
+   * can see the page, download permission or not: a mark costs no bytes. Select mode hides it like the ☁.
+   */
+  onMark?: (completed: boolean) => void;
 }) {
   const [busy, setBusy] = useState(false);
+  const [menu, setMenu] = useState(false);
+  const read = ghost.read === true;
   const label = whyLabel(ghost);
   // The same rule as the chapter row's caption: the series' own source is the normal case, not news. The
   // listing carries the source's name, so an id the followed list no longer resolves still gets one --
@@ -675,12 +687,15 @@ function GhostRow({ ghost, sourceNames, primarySource, selectable, selected, onT
     <div className="flex items-center gap-3 py-2.5 lg:gap-2.5">
       <button type="button" onClick={selectable ? onToggle : onOpen} aria-pressed={selectable ? !!selected : undefined} aria-haspopup={selectable ? undefined : 'dialog'}
         className={`flex min-w-0 flex-1 items-center gap-3 text-start ${selected ? '' : 'opacity-60'}`}>
-        <div className="relative h-14 w-10 shrink-0 rounded-lg border border-dashed border-ink-600">
+        <div className="relative grid h-14 w-10 shrink-0 place-items-center rounded-lg border border-dashed border-ink-600">
+          {read && !selectable && (
+            <span role="img" aria-label={tr('Read · not on the server')} className="text-fog-500"><IcCheck width={14} height={14} /></span>
+          )}
           {selectable && <SelectBubble selected={!!selected} />}
         </div>
-        <span className="h-2 w-2 shrink-0 rounded-full border border-ink-600" />
+        <span className={`h-2 w-2 shrink-0 rounded-full ${read ? 'bg-ink-600' : 'border border-ink-600'}`} />
         <div className="min-w-0">
-          <p className="truncate text-sm text-fog-300">
+          <p className={`truncate text-sm ${read ? 'text-fog-500' : 'text-fog-300'}`}>
             {chapterLabel({ number: ghost.number })}
             {showTitle && <span className="text-fog-500"> · {title}</span>}
           </p>
@@ -703,6 +718,26 @@ function GhostRow({ ghost, sourceNames, primarySource, selectable, selected, onT
           className="grid h-9 w-9 shrink-0 place-items-center rounded-full border border-ink-700 text-fog-500 disabled:opacity-60">
           {busy ? <span className="text-[10px] font-semibold text-accent">…</span> : <IcCloudDownload width={16} height={16} />}
         </button>
+      )}
+      {/* The chapter row's ⋯, with the one action that applies to a chapter that is not here. */}
+      {onMark && !selectable && (
+        <div className="relative shrink-0">
+          <button type="button" onClick={() => setMenu((m) => !m)} aria-label={tr('Chapter actions')}
+            className="grid h-9 w-9 place-items-center rounded-full border border-ink-700 text-fog-500">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.8" /><circle cx="12" cy="12" r="1.8" /><circle cx="19" cy="12" r="1.8" /></svg>
+          </button>
+          {menu && (
+            <>
+              <div className="fixed inset-0 z-20" onClick={() => setMenu(false)} />
+              <div className="absolute end-0 top-10 z-30 w-48 overflow-hidden rounded-xl border border-ink-700 bg-ink-900 shadow-lift">
+                <button type="button" onClick={() => { setMenu(false); onMark(!read); }}
+                  className="block w-full px-3.5 py-2.5 text-start text-xs text-fog-200 hover:bg-ink-800">
+                  {read ? tr('Mark unread') : tr('Mark read')}
+                </button>
+              </div>
+            </>
+          )}
+        </div>
       )}
     </div>
     </div>
@@ -978,6 +1013,34 @@ function SeriesInner() {
     qc.invalidateQueries({ queryKey: ['series', id] });
     qc.invalidateQueries({ queryKey: ['home'] });
   };
+  /**
+   * The same for chapters the server does not hold (#69): they have no book id for the progress endpoint,
+   * so they go by number to their own route, in chunks of its cap (MARK_CHUNK). Neither writes a reading
+   * event. ⚠️ No offline outbox: the outbox replays `/api/books/:id/progress` and a ghost has no book, so a
+   * failure says so instead of pretending it will sync later. The caches are invalidated either way -- a
+   * chunk that landed before a failure is still a change -- the books' too, because a number that landed
+   * since the page loaded is marked on its chapter row by the server. Resolves to whether every chunk was
+   * accepted.
+   */
+  const markGhosts = async (numbers: number[], completed: boolean): Promise<boolean> => {
+    let ok = true;
+    try {
+      for (const chunk of chunkNumbers(numbers, MARK_CHUNK)) {
+        await api(`/api/series/${id}/listing-progress`, { method: completed ? 'POST' : 'DELETE', json: { numbers: chunk } });
+      }
+    } catch {
+      ok = false;
+      toast(tr('Could not mark — try again when online'), 'error');
+    }
+    qc.invalidateQueries({ queryKey: ['series-listing', id] });
+    qc.invalidateQueries({ queryKey: ['series-books', id] });
+    qc.invalidateQueries({ queryKey: ['series', id] });
+    qc.invalidateQueries({ queryKey: ['home'] });
+    return ok;
+  };
+  const markGhost = async (number: number, completed: boolean) => {
+    if (await markGhosts([number], completed)) toast(completed ? tr('Marked read') : tr('Marked unread'), 'success');
+  };
   const markChapter = async (b: Book, mode: 'read' | 'unread' | 'previous') => {
     if (mode === 'previous') {
       const prev = (books?.content ?? []).filter((x) => x.number < b.number && !x.readProgress?.completed);
@@ -993,6 +1056,11 @@ function SeriesInner() {
   // Deliberately the WHOLE list, not the group filter's subset: "Mark all read" is a statement about the
   // series, and a reader who filtered to one group to look at it did not thereby decide the other groups'
   // chapters are unread. Select mode is the way to mark a subset.
+  // ⚠️ And the chapters on this server ONLY, never the grey rows (#69): a series listing 800 chapters would
+  // otherwise tick all 800 with one tap -- and a contiguous run of ticks is exactly what the trackers are
+  // told. Marking chapters the server does not hold is a choice made row by row or in select mode.
+  // Reintroduce by adding the ghosts to `todo`: "Mark all read never touches the grey rows" in
+  // seriesPage.test.ts fails.
   const markAllRead = async () => {
     const todo = (books?.content ?? []).filter((b) => !b.readProgress?.completed);
     if (!todo.length) { toast('Everything is already read', 'success'); return; }
@@ -1049,7 +1117,7 @@ function SeriesInner() {
   const pickedGhostList = useMemo(() => filteredGhosts.filter((g) => pickedGhosts.has(g.number)), [filteredGhosts, pickedGhosts]);
   // Each action's eligible subset. A button acts on its subset, never on the whole selection, and is
   // disabled when the subset is empty -- so picking three chapters and a ghost never makes Fetch try the
-  // chapters or Mark read try the ghost.
+  // chapters. Mark read / Mark unread are the two that take BOTH kinds since #69 (bulkMark).
   const saveable = pickedBookList.filter((b) => !b.pruned && !downloaded.has(b.id));
   const fetchable = pickedGhostList.filter((g) => g.why !== 'blocked');
   const refetchable = pickedBookList.filter((b) => b.owned);
@@ -1066,10 +1134,17 @@ function SeriesInner() {
   const invalidateChapters = () => {
     for (const k of [['series-books', id], ['series-listing', id], ['series-versions', id], ['series-groups', id], ['series-scanlators', id], ['series', id], ['home'], ['source-jobs']]) qc.invalidateQueries({ queryKey: k });
   };
+  // The picked chapters AND the picked grey rows (#69): select mode is how a reader who reads elsewhere ticks
+  // a stretch of chapters this server never fetched. Two requests, one per kind, and one toast that counts
+  // what was asked. A ghost failure has already said so (markGhosts), so only a clean run toasts success.
+  // Reintroduce by marking `pickedBookList` alone: "select mode marks the grey rows too" in
+  // seriesPage.test.ts fails.
   const bulkMark = async (completed: boolean) => {
     setActing(true);
-    await setRead(pickedBookList, completed);
-    toast(`Marked ${pickedBookList.length} ${completed ? 'read' : 'unread'}`, 'success');
+    const n = pickedBookList.length + pickedGhostList.length;
+    if (pickedBookList.length) await setRead(pickedBookList, completed);
+    const ok = pickedGhostList.length ? await markGhosts(pickedGhostList.map((g) => g.number), completed) : true;
+    if (ok) toast(completed ? tr('Marked {n} read', { n }) : tr('Marked {n} unread', { n }), 'success');
     setActing(false);
     leaveSelect();
   };
@@ -1412,7 +1487,8 @@ function SeriesInner() {
                 onOpen={() => setChapterSheet({ number: r.ghost.number, ghost: r.ghost })}
                 // Same audience and same exclusion as the bar's Fetch (`fetchable`): a row only blocked
                 // groups released cannot be fetched while the block stands, so it gets no button.
-                onFetch={canDownload(user) && r.ghost.why !== 'blocked' ? () => fetchOne(r.ghost.number) : undefined} />
+                onFetch={canDownload(user) && r.ghost.why !== 'blocked' ? () => fetchOne(r.ghost.number) : undefined}
+                onMark={(completed) => markGhost(r.ghost.number, completed)} />
             );
           }
           if (r.kind === 'run') {
@@ -1476,8 +1552,8 @@ function SeriesInner() {
           over this bar's lower band while a source job is running. */}
       <div className="mx-auto flex max-w-3xl flex-wrap items-center gap-2 pe-36 lg:pe-0">
         <span className="me-auto text-sm font-medium text-fog-100">{acting ? '…' : tr('{n} selected', { n: pickedCount })}</span>
-        <button disabled={acting || !pickedBookList.length} onClick={() => bulkMark(true)} className="chip text-xs disabled:opacity-50">{tr('Mark read')}</button>
-        <button disabled={acting || !pickedBookList.length} onClick={() => bulkMark(false)} className="chip text-xs disabled:opacity-50">{tr('Mark unread')}</button>
+        <button disabled={acting || !pickedCount} onClick={() => bulkMark(true)} className="chip text-xs disabled:opacity-50">{tr('Mark read')}</button>
+        <button disabled={acting || !pickedCount} onClick={() => bulkMark(false)} className="chip text-xs disabled:opacity-50">{tr('Mark unread')}</button>
         {/* The two icons say which side each acts on: ⬇ this device, ☁ the server. */}
         <button disabled={acting || !saveable.length} onClick={bulkSave} className="chip text-xs disabled:opacity-50"><IcDownload width={14} height={14} />{tr('Save offline')}</button>
         {canDownload(user) && <button disabled={acting || !fetchable.length} onClick={bulkFetch} className="chip text-xs disabled:opacity-50"><IcCloudDownload width={14} height={14} />{tr('Fetch')}</button>}

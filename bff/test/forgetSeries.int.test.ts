@@ -55,7 +55,7 @@ const exists = (p: string) => stat(p).then(() => true).catch(() => false);
 const SERIES_TABLES = [
   'lib_books', 'read_progress', 'reading_events', 'bookmarks', 'notes', 'offline_downloads', 'favorites',
   'collection_items', 'ratings', 'series_colors', 'series_art', 'series_seen', 'series_trackers', 'series_overrides',
-  'series_sources', 'series_listing', 'chapter_failures', 'tracker_progress',
+  'series_sources', 'series_listing', 'chapter_failures', 'tracker_progress', 'listing_progress',
 ];
 const BOOK_TABLES = ['read_progress', 'reading_events', 'bookmarks', 'notes', 'offline_downloads', 'book_overrides', 'page_hashes'];
 
@@ -87,6 +87,8 @@ async function history(uid: string, sid: string, bid: string) {
   await q(`INSERT INTO ratings (user_id, series_id, stars) VALUES ($1,$2,4)`, [uid, sid]);
   await q(`INSERT INTO series_seen (user_id, series_id, seen_books_count) VALUES ($1,$2,1)`, [uid, sid]);
   await q(`INSERT INTO tracker_progress (user_id, series_id, provider, chapters) VALUES ($1,$2,'anilist',5)`, [uid, sid]);
+  // A read mark on the listed chapter 9 this series does not hold (#69, listing_progress).
+  await q(`INSERT INTO listing_progress (user_id, series_id, number) VALUES ($1,$2,9)`, [uid, sid]);
   const c = await q<{ id: string }>(`INSERT INTO collections (user_id, name) VALUES ($1,$2) RETURNING id`, [uid, `fg-${sid}`]);
   await q(`INSERT INTO collection_items (collection_id, series_id, position) VALUES ($1,$2,0)`, [c[0].id, sid]);
 }
@@ -395,6 +397,73 @@ test('merge: the tracker floor carries to the survivor and never goes backwards'
   assert.equal(rows.find((r) => r.user_id === users[0])?.chapters, 12, "the survivor's lower floor won");
   assert.equal(rows.find((r) => r.user_id === users[1])?.chapters, 7, 'the other member\'s floor did not carry over');
   assert.equal(await rowsFor('tracker_progress', 'series_id', [A]), 0, 'a stale floor was left under the absorbed id');
+});
+
+test('merge: marks carry to the survivor, the earliest time wins, and the chapters it now holds are reconciled', { skip }, async () => {
+  // Read marks on chapters a series did not hold (#69) are keyed (user, series, number) with no book to
+  // follow. B is follow-only and users[0] ticked 1..5 there; A holds real chapters 1..3 and users[0] had
+  // ticked 4 on A too, earlier. After the merge B holds 1..3, so those marks must become read_progress on
+  // A's old rows at once -- left as marks they are inert, and B's run for users[0] falls from 5 to 0 until
+  // some later scan. Reintroduce by dropping the reconcile call in mergeSeries: the run reads 0 and the marks
+  // on 1..3 are still marks. Both series marking 4 and 5 is the LEAST check, one each way round (A's is the
+  // earlier on 4, B's own on 5). Reintroduce by dropping the LEAST for `= EXCLUDED.completed_at`: 5 takes
+  // A's later time. For `DO NOTHING`: 4 keeps B's later time.
+  const { readProgressV2 } = await import('../src/lib/komgaProgress');
+  const { SYSTEM_CTX } = await import('../src/lib/visibility');
+  await series(A, 'Absorbed');
+  await series(B, 'Survivor');
+  const landed = Date.now() - 3_600_000;
+  for (const n of [1, 2, 3]) {
+    await book(`b_fg_a${n}`, A, n);
+    await q(`UPDATE lib_books SET mtime = $2 WHERE id = $1`, [`b_fg_a${n}`, landed]);
+  }
+  for (const n of [1, 2, 3, 4, 5]) {
+    await q(`INSERT INTO series_listing (series_id, number, source_id, chosen) VALUES ($1,$2,'src','{}')`, [B, n]);
+  }
+  const tB = new Date(Date.now() - 2 * 86_400_000), tA = new Date(Date.now() - 5 * 86_400_000);
+  for (const n of [1, 2, 3, 4, 5]) {
+    await q(`INSERT INTO listing_progress (user_id, series_id, number, completed_at) VALUES ($1,$2,$3,$4)`, [users[0], B, n, tB]);
+  }
+  const tLate = new Date(Date.now() - 86_400_000);
+  await q(`INSERT INTO listing_progress (user_id, series_id, number, completed_at) VALUES ($1,$2,4,$3)`, [users[0], A, tA]);
+  await q(`INSERT INTO listing_progress (user_id, series_id, number, completed_at) VALUES ($1,$2,5,$3)`, [users[0], A, tLate]);
+  await q(`INSERT INTO listing_progress (user_id, series_id, number, completed_at) VALUES ($1,$2,5,$3)`, [users[1], A, tA]);
+  await q(`UPDATE server_settings SET komga_ghost_chapters = true WHERE id = 1`);
+  try {
+    assert.equal((await readProgressV2(SYSTEM_CTX, users[0], B))!.lastReadContinuousNumberSort, 5, 'before: five ticked ghosts');
+    await admin.mergeSeries(A, B);
+
+    const marks = await q<{ user_id: string; number: number; completed_at: Date }>(
+      `SELECT user_id, number, completed_at FROM listing_progress WHERE series_id = ANY($1) ORDER BY user_id, number`, [[A, B]]);
+    const mine = marks.filter((m) => m.user_id === users[0]);
+    assert.deepEqual(mine.map((m) => Number(m.number)), [4, 5], '1..3 are chapters now, not marks');
+    assert.equal(new Date(mine[0].completed_at).getTime(), tA.getTime(), 'the earlier of the two marks on 4: the absorbed one');
+    assert.equal(new Date(mine[1].completed_at).getTime(), tB.getTime(), 'the earlier of the two marks on 5: the survivor\'s own');
+    assert.deepEqual(marks.filter((m) => m.user_id === users[1]).map((m) => Number(m.number)), [5], "the other member's mark carried too");
+    assert.equal(await rowsFor('listing_progress', 'series_id', [A]), 0, 'nothing left under the absorbed id');
+
+    const rp = await q<{ book_id: string; completed: boolean; updated_at: Date }>(
+      `SELECT book_id, completed, updated_at FROM read_progress WHERE user_id = $1 AND series_id = $2 ORDER BY book_id`, [users[0], B]);
+    assert.deepEqual(rp.map((r) => [r.book_id, r.completed]), [['b_fg_a1', true], ['b_fg_a2', true], ['b_fg_a3', true]]);
+    assert.ok(rp.every((r) => new Date(r.updated_at).getTime() === tB.getTime()), 'stamped with the marks, not now()');
+    assert.equal((await readProgressV2(SYSTEM_CTX, users[0], B))!.lastReadContinuousNumberSort, 5, 'after: the run did not drop');
+  } finally {
+    await q(`UPDATE server_settings SET komga_ghost_chapters = false WHERE id = 1`);
+  }
+});
+
+test('forget deletes read marks and counts their owner', { skip }, async () => {
+  // A mark is history ("I read chapter 9"), so the member who made it is one the toast must count, and the
+  // purge must leave none behind. Reintroduce by dropping the listing_progress arm of the users count: 0.
+  await series(S, 'Ticked', { deleted: true });
+  await book('b_fg_1', S, 1, { pruned: 'deleted' });
+  await q(`INSERT INTO series_listing (series_id, number, source_id, chosen) VALUES ($1,9,'src','{}')`, [S]);
+  await q(`INSERT INTO listing_progress (user_id, series_id, number) VALUES ($1,$2,9)`, [users[1], S]);
+  const r = await admin.forgetSeries(S);
+  assert.equal(r.ok, true, r.ok ? '' : (r as any).message);
+  assert.equal(r.users, 1, 'the member whose only history was a mark');
+  assert.equal(r.rowsByTable.listing_progress, 1);
+  assert.equal(await rowsFor('listing_progress', 'series_id', [S]), 0);
 });
 
 test('forget keeps a bookmark and progress on a chapter that moved to the survivor', { skip }, async () => {

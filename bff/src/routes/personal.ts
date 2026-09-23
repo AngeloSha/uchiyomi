@@ -641,6 +641,12 @@ export default async function personalRoutes(app: FastifyInstance) {
       // Nothing is pushed: this leaves the tracker ahead of the app, which is the safe direction, and the
       // monotonic floor makes that explicit rather than accidental.
       await q(`DELETE FROM read_progress WHERE user_id = $1 AND series_id = ANY($2)`, [uid, live]);
+      // And the read marks on chapters the server never held (#69, lib/listingProgress): "mark unread" on a
+      // follow-only series would otherwise leave every grey row ticked and the Komga run where it was. The
+      // bulk READ above stays real-only on purpose -- ticking every listed chapter is a select-mode choice on
+      // the series page, never a side effect of a shelf action. Reintroduce by dropping this: "bulk mark-unread
+      // clears the read marks too" in listingProgress.int.test.ts finds the marks still there.
+      await q(`DELETE FROM listing_progress WHERE user_id = $1 AND series_id = ANY($2)`, [uid, live]);
     }
     return { ok: true, applied: live.length, skipped: skippedOf(b.data.seriesIds, live) };
   });

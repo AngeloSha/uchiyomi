@@ -14,6 +14,17 @@
 import { q } from './db';
 import { ViewCtx, seriesVisible } from './visibility';
 import { ghostsEnabled, ghostNumbers } from './komgaGhosts';
+import { continuousRun, marksByOrigin, mergeRun, realRows } from './listingProgress';
+
+/** What one Mihon PUT moved. Only `changed` and `ghostMarksAhead` are news for a tracker (markReadUpTo). */
+export interface MarkUpToResult {
+  /** read_progress rows this call moved to completed: real reading progress, and the route's push condition. */
+  changed: number;
+  /** listing_progress rows this call wrote for listed chapters this server does not hold (#69). */
+  ghostMarks: number;
+  /** Of those, the ones above every chapter this reader has finished here -- the phone knowing more than we did. */
+  ghostMarksAhead: number;
+}
 
 export interface ReadProgressV2 {
   booksCount: number;
@@ -40,78 +51,96 @@ export interface ReadProgressV2 {
  * matching rule (markReadUpTo).
  *
  * ⚠️ GHOSTS (lib/komgaGhosts, opt-in). A ghost is a chapter the sources listed that this server does not
- * hold, so it has no lib_books row at all. It raises `maxNumberSort` and nothing else -- and that one field
- * is the whole feature: KomgaApi.kt L69 truncates it to the series' chapter total, which is the number a
- * pruned or never-fetched library was reporting as 1.
+ * hold, so it has no lib_books row at all. It always raises `maxNumberSort` -- the field KomgaApi.kt L69
+ * truncates to the series' chapter total, which is the number a pruned or never-fetched library was reporting
+ * as 1. Since v0.43.0 (#69) a reader can also MARK a ghost read (lib/listingProgress), and a mark moves the
+ * two things below, for that reader only. With the switch off none of this runs and every answer is
+ * byte-identical to v0.42.0: marks are a web-page fact until an admin opts the phone surface in.
  *
- * ⚠️ A GHOST MUST NOT COUNT IN `booksCount` OR `booksUnreadCount`, however much it would tidy the arithmetic
- * to make them agree with the longer list. Mihon picks the tracker status with
+ * ⚠️ THE COUNTS ARE ENGAGED-ONLY. Mihon picks the tracker status with
  * `when (booksCount) { booksUnreadCount -> UNREAD; booksReadCount -> COMPLETED; else -> READING }`
- * (KomgaApi.kt L70-74) -- and a ghost can never be read, because markReadUpTo has no row to mark. Counting
- * ghosts would therefore make `booksReadCount == booksCount` unreachable for every series with one listed
- * chapter it does not hold, and a series the reader has finished could never be COMPLETED again: the long
- * runner this feature exists for would go from COMPLETED to permanently READING the day the switch was
- * flipped. So the four counts stay over the REAL rows, tombstones included, and the list is simply allowed
- * to be longer than them.
+ * (KomgaApi.kt L70-74). Counting every ghost for everyone would make `booksReadCount == booksCount`
+ * unreachable for a reader who has never touched a ghost, and the long runner this feature exists for would
+ * go from COMPLETED to permanently READING the day the switch was flipped. So the counts stay over the REAL
+ * rows (tombstones included) -- unless this reader has marked at least one of the series' CURRENT ghosts, in
+ * which case they are a reader who tracks the ghosts, and the counts include every ghost: a marked one as
+ * read, an unmarked one as unread. COMPLETED stays reachable for them by marking the rest. ⚠️ "Current": a mark
+ * can outlive its listing row (the sweep rewrites the listing whole), and an orphan mark must not switch a
+ * finished series to ghost-inclusive counts it has no row left to clear. Reintroduce by `marks.size > 0`: "a
+ * stale mark does not make the reader engaged" in komgaGhosts.int.test.ts reads READING.
+ * ⚠️ AND "MARKED" MEANS A MARK THE READER MADE -- `marks.own`, source <> 'komga' -- never one the phone echoed
+ * back. markReadUpTo below marks every listed ghost at or below the number a PUT carries, and Mihon PUTs on
+ * every bind and refresh (the route's own note), so reading `marks.all` here took a series the reader had
+ * FINISHED out of COMPLETED and into READING with nobody having marked anything, and un-marking from the web
+ * lasted until the next refresh re-created the mark. Reintroduce by `ghosts.some((n) => marks.all.has(n))`:
+ * "a phone refresh alone never takes a finished series out of Completed" in komgaGhosts.int.test.ts reads
+ * READING.
  *
- * And a ghost must NOT break the continuous run, which is the subtle half. A ghost has no lib_books row,
- * so markReadUpTo can never mark it: were it to break the run, one never-fetched chapter 5 would pin
- * `lastReadContinuousNumberSort` at 4 for a reader at chapter 1000, and the tracker would take the series
- * back to 4 on the next sync. Skipped instead, the run reads through it, the server reports 1000, and Mihon
- * marks every local chapter at or below 1000 read -- the ghost rows included, which is how a chapter that is
- * listed but absent still shows as read on the phone. A tombstone is a real row with a real read_progress
- * and is never skipped; it is already counted correctly and always was.
+ * ⚠️ THE RUN IS continuousRun's MAX OF TWO WALKS (lib/listingProgress says why). The v0.42.0 walk skips
+ * ghosts, so one never-fetched chapter 5 cannot pin a reader at chapter 1000 back to 4; the strict walk lets a
+ * contiguous run of MARKED ghosts carry it further, and an unmarked one breaks it. A tombstone is a real row
+ * with a real read_progress and is never skipped; it is already counted correctly and always was.
  *
  * Returns null when the viewer may not see the series (deleted, merged, other library, above the age cap): the
  * route turns that into 404 so "not yours" and "no such series" look identical from outside.
  */
 export async function readProgressV2(ctx: ViewCtx, userId: string, seriesId: string): Promise<ReadProgressV2 | null> {
+  return (await readProgressDetail(ctx, userId, seriesId))?.progress ?? null;
+}
+
+/**
+ * readProgressV2 plus whether the counts are ghost-inclusive for this reader, for the v1 series DTO.
+ *
+ * ⚠️ That DTO takes `booksCount` from lib_series.books_count (the real rows) and the three read counts from
+ * here. With engaged counts the two would disagree -- a follow-only series with every listed chapter marked
+ * read would answer booksCount 0 beside booksReadCount 10, which Mihon's `when (booksCount)` reads as UNREAD --
+ * so the route takes the total from here too, and only when `engaged`, so every other answer is unchanged.
+ * The six-field v2 JSON stays exactly the six fields.
+ */
+export async function readProgressDetail(ctx: ViewCtx, userId: string, seriesId: string): Promise<{ progress: ReadProgressV2; engaged: boolean } | null> {
   // visible(), not browsable(): the 18+ hide is a surfacing filter, and refusing to report progress on a
   // series the reader deliberately bound would lose data rather than tidy a screen (lib/visibility).
   if (!(await seriesVisible(seriesId, ctx))) return null;
-  const rows = await q<{ number: number; completed: boolean | null }>(
-    `SELECT COALESCE(ov.number, b.number) AS number, rp.completed
-       FROM lib_books b
-       LEFT JOIN book_overrides ov ON ov.book_id = b.id
-       LEFT JOIN read_progress rp ON rp.book_id = b.id AND rp.user_id = $2
-      WHERE b.series_id = $1
-      ORDER BY COALESCE(ov.number, b.number) ASC, b.file ASC`,
-    [seriesId, userId],
-  );
+  const rows = await realRows(userId, seriesId);
   // Merged into the same ascending order the run is walked in, so a ghost sits where its number puts it
-  // rather than after everything. `ghost` is what the run loop skips on.
-  const ghosts = (await ghostsEnabled()) ? await ghostNumbers(seriesId) : [];
-  const all: Array<{ number: number; completed: boolean | null; ghost: boolean }> = [
-    ...rows.map((r) => ({ number: Number(r.number), completed: r.completed, ghost: false })),
-    ...ghosts.map((number) => ({ number, completed: null, ghost: true })),
-  ];
-  if (ghosts.length) all.sort((a, b) => a.number - b.number);
+  // rather than after everything. The marks are read only under the switch, with the ghosts they apply to.
+  const ghostsOn = await ghostsEnabled();
+  const ghosts = ghostsOn ? await ghostNumbers(seriesId) : [];
+  const marks = ghosts.length ? await marksByOrigin(userId, seriesId) : { all: new Set<number>(), own: new Set<number>() };
+  const all = mergeRun(rows, ghosts, marks.all);
+  // `own`, never `all`: a mark the PHONE wrote is this server's own answer echoed back, not an act (see above).
+  const engaged = ghosts.some((n) => marks.own.has(n));
 
   let read = 0;
   let inProgress = 0;
   let max = 0;
   for (const r of all) {
+    // A ghost counts for an engaged reader only, on exactly the condition `booksCount` below uses -- counting
+    // a phone-echoed ghost as read here while the total stayed over the real rows sent booksUnreadCount to -1.
+    // Reintroduce by dropping this branch: "a phone refresh alone never takes a finished series out of
+    // Completed" fails at 'still finished after the sync' -- the echoed ghost is read while the total stays
+    // at the 19 real rows, so the reader has 20 read of 19 and booksUnreadCount -1.
+    if (r.ghost && !engaged) {
+      if (r.number > max) max = r.number;
+      continue;
+    }
+    // A ghost is `completed: true` only when marked, and never false, so it counts as read or not at all.
     if (r.completed === true) read++;
     else if (r.completed === false) inProgress++;
     if (r.number > max) max = r.number;
   }
-  let last = 0;
-  for (const r of all) {
-    // A chapter nobody can read cannot be the thing that says how far this reader has got.
-    if (r.ghost) continue;
-    if (r.completed !== true) break;
-    last = r.number;
-  }
+  // `rows.length` unless engaged, never `all.length` for everyone: see THE COUNTS ARE ENGAGED-ONLY above.
+  const booksCount = rows.length + (engaged ? ghosts.length : 0);
   return {
-    // `rows.length`, never `all.length`: the counts are over the real rows so that a fully read series still
-    // satisfies `booksReadCount == booksCount` and stays COMPLETED (KomgaApi.kt L70-74). Only `max` below is
-    // allowed to see the ghosts.
-    booksCount: rows.length,
-    booksReadCount: read,
-    booksUnreadCount: rows.length - read - inProgress,
-    booksInProgressCount: inProgress,
-    lastReadContinuousNumberSort: last,
-    maxNumberSort: max,
+    engaged,
+    progress: {
+      booksCount,
+      booksReadCount: read,
+      booksUnreadCount: booksCount - read - inProgress,
+      booksInProgressCount: inProgress,
+      lastReadContinuousNumberSort: continuousRun(all),
+      maxNumberSort: max,
+    },
   };
 }
 
@@ -140,11 +169,33 @@ export async function readProgressV2(ctx: ViewCtx, userId: string, seriesId: str
  * row: a sync from a phone is not reading in the app and must not inflate streaks, the leaderboard or Wrapped
  * (the `silent` policy of lib/progress.ts).
  *
+ * ⚠️ GHOST MARKS, UNDER THE SWITCH ONLY (#69). With komga_ghost_chapters on, the phone lists the ghosts and
+ * Mihon marks every local chapter at or below `n` read -- the ghost rows included -- so the listed numbers
+ * at or below `n` that this server does not hold become marks too (lib/listingProgress, source 'komga'), and
+ * the phone and the series page agree. `ON CONFLICT DO NOTHING` keeps an earlier mark's time and keeps a
+ * refresh free. With the switch off the phone never saw a ghost and nothing is written for one. Reintroduce by
+ * dropping the `ghostsEnabled()` gate: "markReadUpTo writes ghost marks only with the switch on" in
+ * komgaGhosts.int.test.ts finds marks written with it off.
+ * ⚠️ Consequence worth knowing: Mihon PUTs back whatever run it was told. A skip-walk answer of 1000 over an
+ * unmarked ghost at 5 comes back as PUT 1000 and marks 5 -- which the phone already shows as read, so this is
+ * the two agreeing, not a new claim.
+ *
+ * ⚠️ THREE NUMBERS, BECAUSE ONLY ONE OF THEM IS NEWS. `changed` counts REAL rows this call moved, and nothing
+ * else: the route pushes to AniList/MAL/Kitsu on it, and folding the echoed ghost marks in made the first
+ * refresh after the switch was flipped fire one remote mutation per bound series saying exactly what the
+ * tracker already held (a bulk "Mark unread" re-armed it, since the next refresh re-creates the marks).
+ * `ghostMarksAhead` is the honest other half: a ghost mark ABOVE every chapter this reader has actually
+ * finished here is the phone telling us something new -- a follow-only series ticked to 500 on the phone, say
+ * -- and the run it feeds is what the tracker is owed, so the route pushes for that too. An echo is never
+ * ahead: it can only mark numbers at or below the run this server itself reported, which is at or below the
+ * reader's highest completed real chapter. Reintroduce by adding the ghost marks into `changed`: the assertion
+ * "a bind that only echoes the run back tells no tracker anything" in komgaGhosts.int.test.ts reads changed 1.
+ *
  * ⚠️ Does NOT check visibility. The route must answer 404 from `seriesVisible` before calling this, exactly
  * as it does for the GET; the write itself is keyed on series_id so it cannot reach another series' books.
  */
-export async function markReadUpTo(userId: string, seriesId: string, n: number): Promise<{ changed: number }> {
-  if (!Number.isFinite(n) || n <= 0) return { changed: 0 };
+export async function markReadUpTo(userId: string, seriesId: string, n: number): Promise<MarkUpToResult> {
+  if (!Number.isFinite(n) || n <= 0) return { changed: 0, ghostMarks: 0, ghostMarksAhead: 0 };
   const rows = await q<{ book_id: string }>(
     `INSERT INTO read_progress (user_id, book_id, series_id, page, completed)
      SELECT $1, b.id, b.series_id, COALESCE(b.pages, 0), true
@@ -157,5 +208,33 @@ export async function markReadUpTo(userId: string, seriesId: string, n: number):
      RETURNING book_id`,
     [userId, seriesId, n],
   );
-  return { changed: rows.length };
+  // The override-aware anti-join, as ghostNumbers draws the ghosts: a renumbered chapter is a real row here.
+  // `done` is this reader's highest COMPLETED real chapter, computed after the upsert above so the rows this
+  // very call moved count: a mark above it is progress no push has ever carried, a mark below it is an echo.
+  const ghostRows = (await ghostsEnabled())
+    ? await q<{ marks: number; ahead: number }>(
+        `WITH ins AS (
+           INSERT INTO listing_progress (user_id, series_id, number, source)
+           SELECT $1, l.series_id, l.number, 'komga'
+             FROM series_listing l
+            WHERE l.series_id = $2 AND l.number <= $3::real
+              AND NOT EXISTS (
+                SELECT 1 FROM lib_books b
+                  LEFT JOIN book_overrides ov ON ov.book_id = b.id
+                 WHERE b.series_id = l.series_id AND COALESCE(ov.number, b.number) = l.number)
+           ON CONFLICT (user_id, series_id, number) DO NOTHING
+           RETURNING number
+         ), done AS (
+           SELECT COALESCE(MAX(COALESCE(ov.number, b.number)), 0) AS n
+             FROM lib_books b
+             LEFT JOIN book_overrides ov ON ov.book_id = b.id
+             JOIN read_progress rp ON rp.book_id = b.id AND rp.user_id = $1 AND rp.completed
+            WHERE b.series_id = $2
+         )
+         SELECT count(*)::int AS marks, count(*) FILTER (WHERE ins.number > done.n)::int AS ahead
+           FROM ins, done`,
+        [userId, seriesId, n],
+      )
+    : [];
+  return { changed: rows.length, ghostMarks: ghostRows[0]?.marks ?? 0, ghostMarksAhead: ghostRows[0]?.ahead ?? 0 };
 }

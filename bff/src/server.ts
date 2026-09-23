@@ -38,6 +38,7 @@ import downloadRoutes from './routes/downloads';
 import sourceRoutes from './routes/sources';
 import opdsRoutes from './routes/opds';
 import komgaCompatRoutes from './routes/komgaCompat';
+import notifyRoutes from './routes/notify';
 
 async function main() {
   await migrate();
@@ -140,6 +141,8 @@ async function main() {
 
   await app.register(authRoutes);
   await app.register(adminRoutes);
+  // Notification targets (#70): admin-only, with its own hooks, like admin.ts.
+  await app.register(notifyRoutes);
   await app.register(catalogRoutes);
   await app.register(imageRoutes);
   await app.register(personalRoutes);

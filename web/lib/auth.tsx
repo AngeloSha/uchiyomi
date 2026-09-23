@@ -4,6 +4,7 @@ import { api, refreshSession, setAccessToken, setCurrentUser } from './api';
 import { readOfflineIdentity, writeOfflineIdentity, clearOfflineIdentity, OfflineIdentity } from './offlineIdentity';
 import { deviceId, deviceName } from './device';
 import { clearShownOnce } from './shownOnce';
+import { applyReduceEffects, restoreReduceEffects } from './effects';
 
 export interface Avatar { emoji?: string; color?: string }
 interface User {
@@ -123,6 +124,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     writeOfflineIdentity(u, exp);
     setUser(u);
     applyAccent(u.settings);
+    // ⚠️ Before setStatus, never in an effect after it: `authed` is what mounts CinematicFX, and a class that
+    // arrived one commit later would let the mesh, grain and vignette paint a frame on every reload with
+    // Reduce effects on (#71). Both directions, so the next account on a shared device gets its own setting.
+    applyReduceEffects(u.settings?.reduceEffects === true);
     setStatus('authed');
   };
 
@@ -139,6 +144,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       settings: saved.accent ? { accent: saved.accent } : {},
     });
     applyAccent({ accent: saved.accent });
+    // No server to ask, so the device's copy, which the last online sign-in of this same account wrote (the
+    // mirror is cleared with the saved identity on sign-out). Before setStatus for the same reason as above.
+    restoreReduceEffects();
     setStatus('offline');
   };
 
@@ -153,6 +161,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setAccessToken(null);
     setCurrentUser(null);
     clearOfflineIdentity();
+    // The sign-in screen belongs to nobody, so it gets the app's default look -- and the mirror goes with the
+    // saved identity it exists to serve, or the next person's offline launch would inherit this one's choice.
+    //
+    // This runs for an EXPIRED session too, and that is right rather than merely tolerable: the line above
+    // has just cleared the offline identity, so `adoptOffline` -- the only reader of the mirror that belongs
+    // to an account -- can no longer run, and a kept mirror would do nothing but render the splash and the
+    // sign-in screen reduced for whoever's session happened to lapse. The account still holds the setting and
+    // the next sign-in applies it, both ways.
+    applyReduceEffects(false);
     setUser(null);
     setStatus('anon');
     // Secrets the server only ever sends once are held outside React so a remount cannot destroy them.
@@ -269,6 +286,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const setSettings = (partial: Record<string, any>) => {
     setUser((u) => (u ? { ...u, settings: { ...u.settings, ...partial } } : u));
     applyAccent({ ...(user?.settings || {}), ...partial });
+    // The Appearance switch applies the moment it is flipped, and again (reverted) if the save is refused.
+    if ('reduceEffects' in partial) applyReduceEffects(partial.reduceEffects === true);
   };
 
   const setAvatar = (avatar: Avatar) => setUser((u) => (u ? { ...u, avatar } : u));

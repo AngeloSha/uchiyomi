@@ -92,7 +92,8 @@ sites' terms and your local law.
 
 **Beyond the browser**
 
-- **Push notifications** when a followed series gets a new chapter.
+- **Push notifications** when a followed series gets a new chapter, and one digest per library update to a
+  **webhook, Home Assistant, ntfy or Discord**.
 - **OPDS** — read from Panels, Chunky or KOReader, page by page over OPDS-PSE.
 - **A Mihon / Tachimanga extension** — read your library from Mihon, any Tachiyomi fork, Tachimanga (iOS)
   or Suwayomi with one API token: [uchiyomi-extension](https://github.com/AngeloSha/uchiyomi-extension).

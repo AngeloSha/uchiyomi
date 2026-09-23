@@ -22,6 +22,7 @@ docker-compose.override.yml
 # browser end-to-end screenshots: evidence for a failing run, not source
 web/test/e2e/shots/
 web/test/e2e/shots-i18n/
+web/shots*/
 .design/
 
 # Instance-local files that must never be committed: a login wall built from a real library, etc.

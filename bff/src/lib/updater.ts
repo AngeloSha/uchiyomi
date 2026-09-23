@@ -9,6 +9,7 @@ import { blockedNow, isDisabled } from './sourceHealth';
 import { noteChapterFailure } from './chapterFailures';
 import { budgetFor } from './sources/budget';
 import { notifyNewChapter } from './push';
+import { sendDigest, type Landed as DigestSeries } from './notify';
 import { visibleToAll } from './visibility';
 import { runtime } from './runtime';
 import { chooseReleases, copiesOf, releaseOrder } from './releases';
@@ -450,6 +451,9 @@ export async function runUpdateAll(opts: { onlyFavorites?: boolean; maxNew?: num
   switched: number; partial: number;
   /** Partial chapters from earlier sweeps that this one made whole (the completion pass, lib/partial.ts). */
   completed: number;
+  /** Every series this sweep landed chapters for, with its title and how many: the digest's material
+   *  (lib/notify, #70). Optional so a test's stand-in sweep need not invent one. */
+  newChapters?: DigestSeries[];
 }> {
   const sweepMax = opts.sweepMax ?? SWEEP_MAX;
   // Rows never checked sort first, so the first sweep after this change visits in the old order.
@@ -483,6 +487,7 @@ export async function runUpdateAll(opts: { onlyFavorites?: boolean; maxNew?: num
   // `skipped` is what the budget or a parked source left unvisited: not a failure, and not nothing either.
   const outcomes: Record<UpdateOutcome | 'threw' | 'skipped', number> = { ok: 0, gone: 0, unrouted: 0, blocked: 0, source_error: 0, threw: 0, skipped: 0 };
   const dated: { folder: string; chapters: SourceChapter[]; landed: Landed[] }[] = [];
+  const newChapters: DigestSeries[] = [];
 
   sweep: while (queues.size) {
     let progressed = false;
@@ -504,6 +509,8 @@ export async function runUpdateAll(opts: { onlyFavorites?: boolean; maxNew?: num
       spent += r.added + (r.failed ?? 0);
       outcomes[r.outcome] = (outcomes[r.outcome] ?? 0) + 1;
       if (r.added && r.folder && r.chapters?.length) dated.push({ folder: r.folder, chapters: r.chapters, landed: r.landed });
+      // The throw fallback above has `added: 0` and no title, so it can never reach the digest.
+      if (r.added && (r as { title?: string }).title) newChapters.push({ id, title: (r as { title: string }).title, added: r.added });
       if (r.diskFull) { stopped = 'disk'; break sweep; }
       if (r.outcome === 'blocked') parked.add(src);
       await new Promise((res) => setTimeout(res, 1500));
@@ -563,6 +570,7 @@ export async function runUpdateAll(opts: { onlyFavorites?: boolean; maxNew?: num
   return {
     series: rows.length, visited, added, failed: broken, chapterFailures, capped, outcomes, stopped, switched, partial, completed,
     healthy: broken === 0 && chapterFailures === 0 && stopped !== 'disk' && stopped !== 'shutdown',
+    newChapters,
   };
 }
 
@@ -651,6 +659,11 @@ export function runSweep(opts: SweepOpts, log: SweepLog, sweep: typeof runUpdate
         `${r.capped ? ` (${r.capped} left alone after ${CHAPTER_RETRY_CAP} failed tries)` : ''} ` +
         `(${Object.entries(r.outcomes).filter(([, n]) => n).map(([k, n]) => `${k}=${n}`).join(' ')})${fallback}`,
       );
+      // The notification targets' digest (lib/notify, #70): ONE message per target for the whole sweep,
+      // after it has finished, and nothing when nothing landed. Not awaited -- a Home Assistant that takes
+      // ten seconds and a retry to answer must not hold `runtime.updating` for the next tick -- and it never
+      // throws. A per-series "check now" does not come through here, so it sends nothing.
+      void sendDigest(r.newChapters ?? []).catch(() => {});
       return r;
     } catch (e) {
       // The rule the backup path already follows: the panel must not keep showing the last good run as if it

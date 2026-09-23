@@ -1,5 +1,240 @@
 # Changelog
 
+## v0.43.0 — 2026-09-23
+
+Three issues, all from people using this: a performance mode for a modest PC, asked for by **@nealhead**
+(#71), and two from **@TIGamingTV** — progress on chapters the server never downloaded (#69), and
+notifications that reach something other than a browser (#70), which he filed while saying he would not
+build it himself because the security was too complicated. It was, a little; the rules are below.
+
+The defaults stay where they were: Reduce effects is off, a mark exists only once a reader makes one, and no
+notification goes anywhere until an admin adds a target. The one change to the default look is a fix: the
+unprefixed `backdrop-filter` now survives the build, so every browser that supports it blurs the glass panels
+as Safari always did.
+
+### Reduce effects: the performance mode (#71, @nealhead)
+
+**Profile → Settings → Appearance → Reduce effects**, off by default. The report was "laggy, stutters when
+scrolling or moving between areas", on Firefox 156 and Windows 11, with a request for a performance mode —
+and this is that mode. It turns off, at once and without a reload:
+
+* the animated background, the film grain and the vignette (not dimmed: not rendered at all);
+* every backdrop blur, with the glass panels turning solid;
+* smooth (Lenis) scrolling, leaving the browser's native scrolling;
+* the cover blur-in and the loading shimmer;
+* card tilt;
+* the page and settings-panel transitions;
+* the accent rim on cards (each keeps its own plain border underneath).
+
+It is one switch per **account**, stored with your other settings, so it follows you to another device; a
+copy on the device covers an offline launch and is cleared at sign-out, so the next person on a shared tablet
+gets their own setting. The system's *reduce motion* setting is separate and unchanged, and does not turn this
+on: someone who asked their OS for less motion did not ask for the grain or the glass to go.
+
+**The look is unchanged by design.** That was the owner's call: the app does not get plainer for everyone
+because one machine is slow, so the default keeps every effect exactly as v0.42.0 drew it, and Reduce effects
+is the performance mode. Frozen screenshots of home, the library and a series page at 1440 and 390 px render
+pixel-identical to v0.42.0, apart from the glass fix below. The rule left room for optimisations nobody can
+see, if they bought frames; four were measured — `contain: strict` on the three layers, `translateZ(0)`,
+`isolation: isolate` on the page, `will-change` on the background — and none bought one (`will-change` on the
+animated background made the library five times *slower*), so none shipped.
+
+What it measured, on the same instance and data with the v0.42.0 web build swapped for this one, median of
+three runs (two for the v0.42.0 Firefox rows). The library in these rows is 200 series, every fourth a
+favourite.
+
+**Scrolling — headless Chrome 152, CPU throttled 4×/6×, 1440×900 / 390×844** (fps, then the share of frames
+over 33 ms)
+
+| | v0.42.0 | v0.43.0 default | v0.43.0 Reduce effects |
+|---|---|---|---|
+| library 1440, 4× | 38.8 (49 %) | 40.7 (44 %) | **60 (0 %)** |
+| home 1440, 4× | 51.2 (16 %) | 53.3 (11 %) | **60 (0 %)** |
+| library 1440, 6× | 40.5 (45 %) | 41.3 (43 %) | **60 (0 %)** |
+| library 390, 4× | 60 | 60 | 60 |
+| home 390, 4× | 59.6 | 60 | 60 |
+
+**Scrolling — headless Firefox 155, unthrottled** (it composites in software, which puts on the CPU what a
+weak GPU pays for, so it is the closer stand-in for the reporter's machine)
+
+| | v0.42.0 | v0.43.0 default | v0.43.0 Reduce effects |
+|---|---|---|---|
+| library 1440 | 7.7 | 7.6 | **57.9** |
+| home 1440 | 12.3 | 8.9 | **55.1** |
+| library 390 | n/a (the rig crashed; fixed since) | 19.3 | **60** |
+
+The two default columns are the same CSS; home's 12.3 against 8.9 is Firefox's run-to-run spread.
+
+**Everything else — headless Chrome 152**
+
+| | v0.42.0 | v0.43.0 default | v0.43.0 Reduce effects |
+|---|---|---|---|
+| composited layers, library 1440 | 184 (66.1 Mpx) | 184 | **24 (22.1 Mpx)** |
+| composited layers, home 1440 | 62 (20.5 Mpx) | 62 | **6 (5 Mpx)** |
+| page transition home → library, 4× | 39.6 fps | 42.8–50.3 | **58.1–58.7** |
+| page transition home → library, 6× | 49.8 fps | 40.6–43.9 | **58.7–59.4** |
+| card tilt sweep, home rail, 4× | not measured | 56.5 (53 tilts) | 60 (0 tilts) |
+| phone nav pill, 390, 4× | 60 | 60 | 60 |
+
+Those default columns were measured before the glass fix below, so the scrolling rows were measured again on
+the release build with the same rig: in Chrome, default 40.6 / 54.4 / 41.5 / 59.2 / 60 fps down the first
+table's rows and 60 on every row with the switch on; in Firefox, default 8.3 / 11.5 / 19.1 and 57.8 / 57 / 60 with the
+switch on. The same within run-to-run spread — so the restored blur costs nothing measurable **in Chrome**
+(1440 and 390, 4× and 6×). The Firefox rows cannot price it: headless Firefox accepts `backdrop-filter` into
+the computed style and then composites it away, so forcing the phone nav to `blur(40px)` or to `none` there
+produces screenshots identical to the pixel, while a plain `filter: blur(6px)` on the same element moves 6 %
+of them. If the nav, the dialogs or the command palette feel slower on a real Firefox after this release,
+that is the one thing in it that could do it, and Reduce effects turns the blur off.
+
+In short: with the switch on, the library goes from 38.8 to 60 fps in Chrome at 4× and from 7.6 to 57.9 in
+Firefox, and from 184 composited layers to 24. Where the frames went, taking one effect away at a time on
+the library at 1440 (Chrome at 4×, the pre-release audit): removing the grain alone took it from 37.7 to 55.2
+fps, removing all three background layers to 60. In Firefox nothing alone came close — the mesh was worth
+the most (7.7 → 13.4) — and with everything else already off, the accent rims were the last big cost (32.1
+→ 59.5), which is why the switch hides them too.
+
+These are headless browsers standing in for a modest PC, not the PC: Chrome's throttle slows only the main
+thread, and a weak GPU pays for blends and blurs in a compositor that throttle cannot see. The rig that
+produced every number here is committed as `web/test/perf/` (not in CI — frame timings on a shared runner are
+noise), with a README on how to run it, what it can and cannot say, and the traps it has already fallen into,
+so the next report like this one is measured rather than guessed.
+
+**The glass panels blur again (the one change to the default).** `.glass` and `.glass-strong` were written
+unprefixed first and `-webkit-` second, and the build's CSS minifier read the second as overriding the first
+and kept only it — a property Chrome and Firefox ignore. So outside Safari the phone nav, dialogs, the
+command palette and the sign-in card were plain see-through panels. The unprefixed property now survives the
+build, so every browser that supports `backdrop-filter` applies it; the owner asked for that fix in this
+release, and a test runs the stylesheet through the same minifier so it cannot come back unnoticed. Verified
+rendering in Chrome 152 — headless Firefox reports the blur in the computed style but composites it away, so
+it could only be verified there at declaration level.
+
+### Marking chapters you never downloaded (#69, @TIGamingTV)
+
+The series page's grey rows — chapters the sources list that this server does not hold — can now be marked
+read and unread: from the row's own **⋯** menu, or by picking them in **Select** mode, whose *Mark read* and
+*Mark unread* now act on grey rows as well as chapters. A marked grey row shows a ✓ in its empty thumbnail
+and the read dot, and stays grey, because the server still does not have it. It is for the reader who reads
+elsewhere, or read long ago, and wants the page — and Mihon — to agree.
+
+* **Mark all read** and **Mark previous as read** still mark only the chapters on the server: one tap must
+  not tick eight hundred listed chapters, and a run of ticks is exactly what the trackers are told.
+* A mark needs a connection but no download permission (it costs no bytes); offline it says *Could not
+  mark — try again when online* rather than queueing.
+* Marks write **no reading events**, so stats, streaks, the leaderboard and Wrapped do not move.
+* When a marked chapter is later downloaded, the mark becomes ordinary read progress on it, keeping the time
+  you marked it — stamped just before the file's own time, so the read-chapter cleanup never deletes a chapter
+  the sweep has just fetched, or one you had started reading.
+* Merging series carries marks to the survivor (the earlier of two marks on one number wins); **Forget**
+  deletes them and counts a member whose only history was a mark among those who lose history; the library's
+  bulk *Mark unread* clears them, and its bulk *Mark read* never creates them.
+
+**What the trackers are told, and what they are not.** A mark reaches AniList, MyAnimeList or Kitsu only
+with **Admin → Settings → Library housekeeping → Show missing chapters in Mihon** switched on, and only as
+part of an unbroken run of read chapters from the start — never as a lone tick, because a number sent to a
+tracker cannot be taken back there:
+
+* chapters read here to 12, plus a mark on 1000: the tracker is told **12**;
+* chapters read to 12, plus marks on 13–200: it is told **200**;
+* a gap in what the sources list stops the run: a source listing only 951–1000, plus a mark on 951, still
+  sends 12;
+* a run ending on a fractional chapter is rounded down (12.6 sends 12);
+* marking a chapter unread sends nothing, so the tracker stays ahead — the safe direction;
+* Uchiyomi's own tracker sync still decides *finished* from chapters on the server alone; Mihon, reading the
+  Komga API, counts the listed chapters as soon as you have marked one of them **on the series page**, and
+  reaches *Completed* when you have marked the rest.
+
+With the switch **off**, marks never reach a tracker, marking alone sends nothing, and the Komga API answers
+exactly as it did in v0.42.0. With it on, Mihon's last-read number is the higher of v0.42.0's (missing
+chapters skipped) and the run through your marks — never lower than before — and a sync from the phone up to
+chapter N also marks every listed missing chapter at or below N here, so the phone and the series page agree.
+Those phone-written marks are treated as the echo they are: Mihon sends that sync on every bind and refresh,
+so they never switch your counts to the listed chapters (a series you had finished would have gone from
+*Completed* to *Reading* on its own), and they reach a tracker only when the phone marked something above
+everything you have finished here — a refresh repeating the server's own answer sends nothing at all.
+
+Also fixed on the way: the listing matched a chapter by its file's number rather than an admin's correction,
+so a chapter renumbered from 0 to 105 was also shown as a grey row at 105. It uses the corrected number now.
+
+### Notifications beyond this browser (#70, @TIGamingTV)
+
+**Admin → Settings → Notifications** (a new, last section) sends new chapters and server problems somewhere
+other than this browser's own notifications. Four kinds ship:
+
+* **Webhook** — a JSON `POST` (`event`, `title`, `message`, `count`, `series`), with an optional token sent as
+  `Authorization: Bearer`;
+* **Home Assistant** — its address, a long-lived access token and a `notify.<service>` name;
+* **ntfy** — a server (ntfy.sh when left blank), a topic and an optional token;
+* **Discord** — a channel's webhook address, with `@everyone` and every other mention switched off.
+
+**Telegram and email do not ship, on purpose.** Telegram needs a chat id obtained by hand through its API and
+puts the bot token in the URL path; email means a new dependency, server/port/TLS/login settings, and the
+biggest support burden in self-hosting. The webhook reaches both through a bridge (n8n, Node-RED, Apprise).
+
+**One message per update, not one per chapter.** After each library sweep — the scheduled one, or **Run now**
+on it under Admin → Tasks — every target that wants new chapters gets **one** digest: *3 new chapters in Walk
+Tale*, or *12 new chapters in 4 series*. The message is a template you can change, with `{count}`, `{series}`
+and `{list}` (up to ten titles, then *…and N more*), and a live preview. Nothing is sent when nothing landed,
+and a series' own *Check now* sends nothing (its result is already on your screen). A target can be aimed at
+one person, who then hears only about their own favourites. **Include 18+ series** is off by default, like an
+OPDS link's and an API token's *Include 18+ libraries*: a digest leaves titles from 18+ libraries out unless
+the target asked for them. A person's target is bounded by that person's own libraries and age limit as well —
+permissions the checkbox cannot widen — so it never names a series they could not open. **Server problems** — a source refusing this server, the
+Cloudflare solver, extensions — go to the targets that ask for them, the same notices admins get as web
+push, and they arrive even on an install without push configured.
+
+**What keeps it safe.**
+
+* Addresses on your own network are **allowed on purpose** — a Home Assistant lives at
+  `homeassistant.local` or `192.168.x.x`, exactly what the cover proxy's address rule refuses, so that rule
+  is deliberately not used here.
+* `http` and `https` only, and no `user:password@` in an address.
+* Cloud-metadata addresses (169.254.0.0/16, `fe80::/10`, `fd00:ec2::254`, 100.100.100.200,
+  `metadata.google.internal`, `metadata.goog`) are refused when a target is saved **and** at every send, on
+  every address the name resolves to, inside the connection's own lookup — so a name cannot resolve public
+  when checked and to the metadata service when connected.
+* **A redirect is never followed.** A target that answers 302 has failed, and the address it pointed at is
+  never asked; that one rule is what stops a public host bouncing a Home Assistant token somewhere else.
+* This server's own port on loopback, or its own public address, is refused.
+* A ten-second timeout, and one retry thirty seconds later on a network error, a 429 or a 5xx — never on
+  another 4xx.
+* Every address and token is **encrypted at rest** under a key of its own (derived from `JWT_SECRET` with a
+  salt used for nothing else), and is never logged, never in the audit feed and never sent back to the
+  browser: the panel shows scheme and host only, and changing one means typing it again. **A stored token
+  never follows an address to another host** — re-point a target and it asks for the token, and an ntfy
+  topic, again, so a re-point plus a test cannot be used to read back a secret the panel never shows; the
+  audit row for an accepted re-point records the new host. If `JWT_SECRET`
+  changes, a target sends nothing and says *The stored address and token could not be read — enter them
+  again*, rather than sending without its token.
+* **Send a test** works only on a saved target — an address in the request is ignored — at most five a minute
+  per admin, and it answers with a short reason, never the target's own response. (An admin can still save a
+  target anywhere on the network and test it, which is why all of this is admin-only.)
+* After ten failed deliveries in a row a target switches itself off and the admins are told once; switching
+  it back on gives it ten fresh tries.
+
+### Notes
+
+New in the API, all described in `docs/api.md` and `bff/openapi.yaml`: `POST` / `DELETE
+/api/series/:id/listing-progress` (1–500 numbers, each 0–1,000,000), `read: true` on a listing ghost the
+caller marked, the ghost-inclusive `booksCount` on the Komga v1 series for a reader who has marked one, and
+the admin-only `/api/admin/notify-targets` routes with their `NotifyTarget` shape. `reduceEffects` is one
+more key in the free-form `/api/settings` object. Two tables are created on start (`listing_progress`,
+`notify_targets`), with no data migration; there is no new environment variable. Existing clients may ignore
+every new field.
+
+What was verified: the web suite at 394 tests, the web and server type-checks and a production build, all
+clean. Every guard added here carries, as a comment, the exact edit that puts its bug back, and was run that
+way. The release image itself was built and driven in a browser: the main browser suite (72 checks) on seven
+fresh instances, and a new walk for this release, 73 checks at 1440 px and again at 390 px on an instance of its own
+each — the default look's three background layers computing exactly v0.42.0's styles and the glass computing
+its blur, the switch removing every layer and every blur and surviving a reload from the account alone, the
+library scrolling at 60 fps at a 4× throttle with the switch on (the walk's floor is 50), a grey row marked
+from its menu and from select mode and the Mihon answer moving with the ghost switch on and not with it off, a
+mark becoming read progress when its chapter lands, and a webhook target receiving exactly one digest for a
+sweep while a target that answered 302 had its redirect ignored and the token turned up nowhere in the page,
+the API, the audit feed or the server's log. The v0.40.0, v0.41.0 and v0.42.0 walks are unchanged at 41, 54
+and 64 checks, each on its own instance; the layout rig found no overflow at four widths, and the language rig
+rendered all nine languages and reported every file complete.
+
 ## v0.42.0 — 2026-09-23
 
 Four bugs, reported by **@Squeaks72** with diagnoses accurate down to the line number (#64, #65, #66, #67),

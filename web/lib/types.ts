@@ -217,6 +217,11 @@ export interface Ghost {
    */
   waitingFor?: string;
   waitDaysLeft?: number;
+  /**
+   * The viewer marked this number read although the server does not hold it (#69). Only ever `true`; absent
+   * for everyone with no mark on it, and on a server older than v0.43.0.
+   */
+  read?: boolean;
 }
 
 export interface Listing {

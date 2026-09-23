@@ -163,6 +163,13 @@ export function openableChapters<T extends { id: string; pruned?: boolean }>(boo
 export const FETCH_CHUNK = 300;
 
 /**
+ * How many numbers one "mark read / unread" request for chapters the server does not hold may carry: the
+ * route's LISTING_MARK_MAX (bff/src/lib/listingProgress.ts), past which it answers 400. Larger than
+ * FETCH_CHUNK because a mark is one small row and a fetch is a download.
+ */
+export const MARK_CHUNK = 500;
+
+/**
  * A run's numbers cut into requests of at most `size`, in order, none empty. ⚠️ The requests are for ONE
  * series and the route answers 409 `busy` while that series' job is running, so the page posts them one
  * after the other, waiting for each job to end (`fetchMany` in the series page); this only decides the

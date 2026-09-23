@@ -477,6 +477,8 @@ GET    /api/books/:id/next        PUT    /api/books/:id/progress
 PUT    /api/books/:id/pages/:n/junk
 GET    /api/offline/plan             GET    /api/series/:id/listing
 GET    /api/series/:id/groups        GET    /api/series/:id/versions
+POST   /api/series/:id/listing-progress
+DELETE /api/series/:id/listing-progress
 ```
 
 **Where a series and its chapters came from.** `GET /api/series/:id` carries `sources`, primary first, then
@@ -510,7 +512,7 @@ each affected entry in `pages`, so offline readers preserve the evidence. A comp
 `{checkedAt, content: [Ghost]}`: every chapter number the series' sources listed at the last check (the
 sweep, or **Check now**) that this server has no row for, each with the reason —
 `Ghost = {number, title, publishedAt, scanlator, groups, sourceId, sourceName, why, attempts?, reason?,
-waitingFor?, waitDaysLeft?}`, `why` one of `missing` (not fetched yet), `held` (waiting for a preferred
+waitingFor?, waitDaysLeft?, read?}`, `why` one of `missing` (not fetched yet), `held` (waiting for a preferred
 group under the release preferences), `failed` (the sweep gave up after the retry cap; `attempts` says how
 many tries), `blocked` (only blocked groups have released it), `floor` (below the series' Latest-N floor).
 A `held` ghost also carries `waitingFor` (since v0.34.0) — the effective first-choice group it is being
@@ -520,7 +522,33 @@ that is not from a blocked group, under today's preferences (so it can read 0 on
 before a preference change; both are absent when no priority group survives the blocklist). The listing is read from what the updater
 persisted, never from the sources on a page open, so `checkedAt` is how old the answer is; a source that
 failed to answer leaves the previous listing standing. `reason`, the downloader's last error text, is
-present for admins only. A tombstone is a row, so it is never a ghost.
+present for admins only. A tombstone is a row, so it is never a ghost. Since v0.43.0 a chapter matches its
+listing number by its *override-aware* number (an admin's correction wins over the filename), so a chapter
+renumbered from 0 to 105 is no longer also a ghost at 105; and `read: true` is present on a ghost the caller
+marked read (below) — absent, never `false`, for everyone else.
+
+**Marking chapters you don't have read** (since v0.43.0). `POST /api/series/:id/listing-progress {numbers}`
+marks chapter numbers read for the caller, and `DELETE` on the same path with the same body marks them unread
+(1–500 numbers, each 0–1,000,000; **400** otherwise, **404** for a series the caller cannot open). Each number
+is resolved in one pass: a number a chapter row holds — by its override-aware number, a deleted chapter's row
+included — is marked on that row exactly as the library's bulk mark-read does (`viaBook`); a number the listing
+above has and no row holds becomes a read *mark* (`marked`); anything else is skipped as `not_listed`, because
+the listing is the authorisation, as it is for a fetch. The POST answers `{ok, marked, viaBook, skipped:
+[{number, reason: 'not_listed'}]}`, the DELETE `{ok, unmarked, viaBook}`. Re-marking keeps the first mark's
+time. The DELETE is not checked against the listing — it only removes the caller's own rows, and a mark can
+outlive the listing row it was made on. Neither writes a reading event, so stats, streaks, the household
+leaderboard and Wrapped do not move, and neither needs the download permission: a mark costs no bytes. When a
+marked chapter later lands on the server, the scan turns the mark into ordinary read progress on it, stamped
+with the mark's time — clamped to just before the file's own time, so the read-chapter cleanup never takes a
+file the sweep has just fetched. A merge carries marks to the surviving series (the earlier of two marks on
+one number wins), **Forget** deletes them and counts their owner among the members who lose history, and the
+library's bulk **mark unread** clears them too; bulk **mark read** and the series page's **Mark all read**
+never create them. After a POST that changed something, the trackers get ONE push for the series (one that
+only added marks pushes only with the Komga ghost-chapters setting on, since marks count for nothing without
+it) — and a mark reaches AniList, MyAnimeList or Kitsu only as part of a *contiguous* run of read chapters
+from the start, only with the Komga ghost-chapters setting on (below), never as a lone tick: real chapters read to 12 plus one mark
+on 1000 still sends 12, while marks on 13–200 behind them send 200. A DELETE pushes nothing; the tracker stays
+ahead, the safe direction.
 
 **Translated by.** `GET /api/series/:id/groups` answers `{checkedAt, content: [GroupStat]}`, one entry
 per scanlation group, sorted by releases descending:
@@ -742,6 +770,9 @@ DELETE /api/downloads/:bookId     GET    /api/books/:id/download-manifest
 ```
 GET    /api/admin/stats           GET    /api/admin/health
 GET    /api/admin/settings        PATCH  /api/admin/settings
+GET    /api/admin/notify-targets  POST   /api/admin/notify-targets
+PATCH  /api/admin/notify-targets/:id DELETE /api/admin/notify-targets/:id
+POST   /api/admin/notify-targets/:id/test
 GET    /api/admin/install-ping/preview
 GET    /api/admin/users           POST   /api/admin/users
 PATCH  /api/admin/users/:id       DELETE /api/admin/users/:id
@@ -807,6 +838,40 @@ default — switching it off stops the schedule only, since nothing it does dele
 anything). Each field is written on its own, an out-of-range value is a **400** and nothing is written, and
 the audit row `settings.update` carries the body. The admin console's Settings tab sends one
 row per PATCH as each row is changed (the read-chapter confirmation carries the day count with the switch).
+
+**Notification targets** (since v0.43.0, Admin → Settings → Notifications) are where notices go besides web
+push: `webhook` (a JSON POST `{event, title, message, count, series: [{id, title, added}]}`, optional
+`Authorization: Bearer`), `home_assistant` (`{title, message}` to `/api/services/<domain>/<service>` on the
+stored origin, rebuilt from a `service` that must match `domain.service` in lower case, digits and `_`),
+`ntfy` (the message as text to `<server>/<topic>`, the title in a `Title` header) and `discord` (`{content}`
+with mentions switched off). `POST /api/admin/notify-targets` takes `kind`, `name` and what the kind needs
+(`url`, `token`, `topic`, `service`) plus `events` (`new_chapters`, `health`; both by default), `template`
+(`{count}`, `{series}`, `{list}`; blank is "{count} new chapters in {series}"), `userId` (aim it at one person:
+only their favourites, and health notices only if they are an admin), `includeAdult` (name series from 18+
+libraries in the digest; `false` by default, like an OPDS link's and an API token's `showAdult` — a target
+aimed at a person is bounded by that person's libraries and age cap whatever it says) and `enabled`. Addresses
+and tokens are encrypted under a key of their own and **never come back**: every answer is the `NotifyTarget`
+shape, whose `target` is scheme and host only; changing one means sending it again in a `PATCH`, and `hasToken`
+says whether one is stored. **A stored credential never follows the address to another host**: a `PATCH` whose
+`url` lands on another origin is refused with `reenter_token` (a token is stored and none was sent) or, for
+ntfy, `reenter_topic`, so re-pointing a target and pressing Test cannot read back a secret; a path change on
+the same origin keeps them. The `notify.target.update` audit row carries the new host when the address changed. Private addresses are allowed on purpose (a Home Assistant lives on the LAN); `http(s)` only, no
+`user:password@`, and cloud-metadata addresses (169.254.0.0/16, `fe80::/10`, `fd00:ec2::254`,
+100.100.100.200, `metadata.google.internal`, `metadata.goog`) are refused at save AND on every DNS answer at
+send time, as is this server's own port on loopback or at its own `PUBLIC_ORIGIN`; a redirect is never
+followed. Every refusal is a fixed `{error, message}` (`bad_url`,
+`blocked_address`, `self_target`, `token_required`, `bad_token`, `bad_service`, `bad_topic`, `bad_discord_url`,
+`unknown_user`, `reenter_all`, `reenter_token`, `reenter_topic`) that never repeats what was typed. `POST /api/admin/notify-targets/:id/test`
+sends one test message to a SAVED target (an address in the body is ignored), five a minute per admin, and
+answers `{ok, status, reason}` with `reason` one of `ok`, `timeout`, `refused`, `dns`, `tls`, `unreachable`,
+`unauthorized`, `not_found`, `rate_limited`, `server_error`, `bad_response`, `redirect`, `blocked`,
+`secret_unreadable` — never the target's own answer. New chapters go out ONCE per sweep — the scheduled one,
+or **Run now** on it (`POST /api/admin/tasks/update/run`) — after it finishes, as one digest per target, and
+not at all when nothing landed (a series' own **Check now** sends nothing); health notices go wherever the admins' web
+push goes, whether or not push is configured. A delivery is retried once on a network error, a 429 or a 5xx,
+never on another 4xx; after 10 consecutive failures the target is switched off and the admins are told once.
+The audit rows `notify.target.create` / `.update` / `.delete` / `.test` carry ids, names, the host and the
+names of the fields changed — never an address or a token.
 
 The bulk importer's body takes `titles`, `autoUpdate`, `chapterCount` and `chapterFrom`, with the same
 meaning as on `/api/sources/add` (`chapterFrom: "newest"` takes the latest N and floors the series; the
@@ -1412,19 +1477,41 @@ tombstone's pages are gone and a ghost never had any), so Mihon shows its own em
 ghost's `pages/:n` and `thumbnail` are **404**. Deliberately not a placeholder image — Mihon marks a chapter
 read once it is viewed, which would corrupt the very progress this exists to fix.
 
-On the progress endpoint a ghost raises **`maxNumberSort`** and nothing else. That is the chapter total the
-tracker reports, and the whole point of the switch. It is deliberately **not** counted in `booksCount` or
-`booksUnreadCount`, which stay over the chapters this server has rows for, tombstones included: Mihon picks
-the tracker status with `when (booksCount) { booksUnreadCount -> UNREAD; booksReadCount -> COMPLETED; else ->
-READING }`, and a ghost can never be read — so counting one would make `booksReadCount == booksCount`
-unreachable and a series you have finished could never be *Completed* again. The list is simply allowed to be
-longer than the counts. A ghost is also **skipped** when walking the leading run, never breaking it. It has no
-chapter row, so no `PUT` can ever mark it; were it to break the run, one never-fetched chapter 5 would pin
-`lastReadContinuousNumberSort` at 4 for a reader at chapter 1000 and drag the tracker back there on the next
-sync. Skipped, the server reports 1000 and Mihon marks every local chapter at or below it read — the ghost
-rows included, which is how a chapter that is listed but absent still shows as read on the phone. Tombstones
-are real rows with real progress attached and were always counted correctly. Nothing outside `/api/v1` and
-`/api/v2` changes: the web app, OPDS and the offline manifest list what is on disk exactly as before.
+On the progress endpoint a ghost always raises **`maxNumberSort`** — the chapter total the tracker reports,
+and the whole point of the switch. Since v0.43.0 a ghost can also be **marked read** (from the series page,
+`POST /api/series/:id/listing-progress` above, or by the phone's own `PUT`), and a mark moves two more things,
+for the reader who made it only:
+
+- **The counts are engaged-only.** Mihon picks the tracker status with `when (booksCount) { booksUnreadCount ->
+  UNREAD; booksReadCount -> COMPLETED; else -> READING }`. Counting every ghost for everyone would make
+  `booksReadCount == booksCount` unreachable for a reader who never touches one, so a series they finished
+  could never be *Completed* again. So `booksCount` and `booksUnreadCount` stay over the chapters this server
+  has rows for, tombstones included — unless this reader has marked at least one of the series' *current*
+  ghosts, in which case the counts include every ghost (marked ones read, the rest unread) and *Completed* is
+  reached by marking the rest. Two kinds of mark deliberately do not count here: one on a number the listing no
+  longer has, and one the **phone's own `PUT` wrote** (below) — Mihon sends that `PUT` on every bind and
+  refresh, so a mark it created is this server's answer echoed back rather than anything the reader did, and
+  treating it as engagement would take a series they had finished out of *Completed* with nobody having marked
+  anything. Neither can make a finished series *Reading* again. `GET /api/v1/series/:id` then reports the same
+  `booksCount`, so its four counts always add up.
+- **`lastReadContinuousNumberSort` is the higher of two walks.** The first is v0.42.0's: a ghost is
+  **skipped**, never breaking the run, so one never-fetched chapter 5 cannot pin a reader at chapter 1000 back
+  to 4 and drag the tracker there on the next sync. The second treats ghosts as chapters: a marked one extends
+  the run, an unmarked one breaks it — and a marked one extends it only when no whole number is missing before
+  it, because a listing is only what the sources list (a licensed middle, a source starting at 200). The answer
+  can therefore never fall below what v0.42.0 reported, and it rises only through a *contiguous* run of marks:
+  real chapters read to 10 plus one mark on 1000 still reports 10.
+
+With the switch on, a `PUT` of `lastBookNumberSortRead: n` also marks every listed ghost at or below `n`, so
+the phone and the series page agree (the phone already shows those rows read); it writes no reading event.
+Those marks do not make the reader *engaged* (above), and the `PUT` pushes to AniList, MyAnimeList or Kitsu
+only when it moved real reading progress or marked a chapter **above everything this reader has finished here**
+— a phone that has ticked chapters the server never fetched is telling it something new, while a refresh
+echoing back the run it was just given is not, and pushing for that fired one remote write per bound series
+every time the ghost setting was turned on. With the switch **off**, marks are never read
+and never written here and every answer is byte-identical to v0.42.0. Tombstones are real rows with real
+progress attached and were always counted correctly. Nothing else outside `/api/v1` and `/api/v2` changes:
+the web app, OPDS and the offline manifest list what is on disk exactly as before.
 
 ---
 

@@ -28,7 +28,7 @@ import { q, one } from '../lib/db';
 import { pushSeriesProgressAsync } from '../lib/trackers';
 import { serveLibSeriesThumb, serveLibBookThumb, serveLibBookPage } from './images';
 import { springPage, komgaSeries, komgaBook, komgaGhostBook, komgaPage, parseSeriesQuery, parseBooksQuery } from '../lib/komgaDto';
-import { readProgressV2, markReadUpTo } from '../lib/komgaProgress';
+import { readProgressV2, readProgressDetail, markReadUpTo } from '../lib/komgaProgress';
 import { ghostsEnabled, ghostBooksFor, ghostBookById, isGhostId } from '../lib/komgaGhosts';
 
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
@@ -253,9 +253,18 @@ export default async function komgaCompatRoutes(app: FastifyInstance) {
     const { id } = req.params as { id: string };
     const dto = await seriesOr404(req, reply, id);
     if (!dto) return;
-    const prog = await readProgressV2(vc(req), uid(req), id);
+    // ⚠️ The total rides along only for a reader whose counts include marked ghosts (#69): the DTO's own
+    // booksCount is lib_series.books_count, the real rows, and beside ghost-inclusive read counts it would
+    // report a fully-marked follow-only series as 0 chapters with 10 read -- UNREAD to Mihon. Reintroduce by
+    // dropping `total`: "a reader who marked every ghost is COMPLETED on the series DTO too" in
+    // komgaGhosts.int.test.ts reads booksCount 0.
+    const detail = await readProgressDetail(vc(req), uid(req), id);
+    const prog = detail?.progress;
     const counts = prog
-      ? { read: prog.booksReadCount, unread: prog.booksUnreadCount, inProgress: prog.booksInProgressCount }
+      ? {
+          read: prog.booksReadCount, unread: prog.booksUnreadCount, inProgress: prog.booksInProgressCount,
+          ...(detail.engaged ? { total: prog.booksCount } : {}),
+        }
       : undefined;
     return komgaSeries(dto, counts);
   });
@@ -465,8 +474,13 @@ export default async function komgaCompatRoutes(app: FastifyInstance) {
     if (!b.success) return reply.code(400).send({ error: 'bad_request', message: 'lastBookNumberSortRead must be a finite number between 0 and 1000000000.' });
     const n = b.data.lastBookNumberSortRead;
     if (n <= 0) return reply.code(204).send();
-    const { changed } = await markReadUpTo(uid(req), id, n);
-    if (changed > 0) pushSeriesProgressAsync(uid(req), id);
+    // ⚠️ The push condition is "reading progress moved", not "a row was written". A bind marks every listed
+    // ghost at or below the run this server just reported (#69), and counting those as a change fired one
+    // remote mutation per bound series on the first refresh after the ghost switch was flipped, each one
+    // telling the tracker the number it already held. `ghostMarksAhead` is the case that IS news -- a phone
+    // that has ticked chapters we never fetched and never knew were read (lib/komgaProgress).
+    const { changed, ghostMarksAhead } = await markReadUpTo(uid(req), id, n);
+    if (changed > 0 || ghostMarksAhead > 0) pushSeriesProgressAsync(uid(req), id);
     return reply.code(204).send();
   });
 }

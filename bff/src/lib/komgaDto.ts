@@ -207,7 +207,15 @@ export interface OwnedSeriesDto {
 export interface KomgaAuthor { name: string; role: string }
 
 /** Per-user counts for the three fields Mihon's tracker requires (KomgaModels.kt L14-16). */
-export interface ReadCounts { read: number; unread: number; inProgress: number }
+export interface ReadCounts {
+  read: number; unread: number; inProgress: number;
+  /**
+   * The total the three counts are OF, when it is not lib_series.books_count: only for a reader whose counts
+   * include the ghost chapters they marked (#69, lib/komgaProgress readProgressDetail). Absent everywhere
+   * else, so every other answer keeps the stored count.
+   */
+  total?: number;
+}
 
 /**
  * A Komga `SeriesDto` the extension (Dto.kt L17-72, L74-84) AND the tracker (KomgaModels.kt L6-53) both decode.
@@ -227,7 +235,9 @@ export function komgaSeries(dto: OwnedSeriesDto, counts?: ReadCounts | null, opt
   const genres = strs(dto.metadata?.genres);
   const tags = strs(dto.metadata?.tags);
   const author = str(dto.metadata?.author);
-  const booksCount = int(dto.booksCount);
+  // ⚠️ The total must be the one the read counts are of, or Mihon's `when (booksCount)` compares numbers
+  // about two different lists (see ReadCounts.total).
+  const booksCount = counts?.total != null ? int(counts.total) : int(dto.booksCount);
   const read = counts ? int(counts.read) : 0;
   const inProgress = counts ? int(counts.inProgress) : 0;
   const unread = counts ? int(counts.unread) : Math.max(0, booksCount - read - inProgress);

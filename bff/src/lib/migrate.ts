@@ -924,6 +924,77 @@ ALTER TABLE import_candidates ADD COLUMN IF NOT EXISTS progress    int;
 ALTER TABLE import_batches    ADD COLUMN IF NOT EXISTS skipped_novels int     NOT NULL DEFAULT 0;
 ALTER TABLE import_batches    ADD COLUMN IF NOT EXISTS truncated      boolean NOT NULL DEFAULT false;
 
+-- Read marks on chapters this server does NOT hold (v0.43.0, issue 69): a series_listing number with no
+-- lib_books row, ticked read from the series page or by a Mihon sync (lib/listingProgress.ts). A row IS the
+-- assertion "this reader has read this number"; there is no completed column, because a chapter with no
+-- pages cannot be half-read, and un-marking is a DELETE, the rule the library's bulk mark-unread follows.
+--
+-- WHY NOT read_progress. Its key is (user_id, book_id) and book_id is ON DELETE RESTRICT precisely so reading
+-- history cannot be erased by a chapter row going away (the FK note below). A nullable book_id would mean
+-- dropping that key for two partial unique indexes and weakening the one guarantee this project has no undo
+-- for. AND NOT a fabricated lib_books row: the updater's have-set is a plain SELECT over lib_books, so a row
+-- with no file is a chapter the sweep would never fetch -- the feature would silently stop the download it
+-- sits beside. books_count, cover_book_id, Verify and the gap check read those rows the same way.
+--
+-- number is real to match series_listing.number and lib_books.number exactly; every comparison binds ::real,
+-- or 12.1 arrives as 12.100000381469727 on one side only (the note on markReadUpTo in lib/komgaProgress.ts).
+-- completed_at is WHEN THE PERSON MARKED IT, and persistScan carries it into read_progress.updated_at when the
+-- chapter lands -- clamped to just before the file's mtime. Stamping now() there would make the read-chapter
+-- cleanup delete a file minutes after fetching it (the which-copy-did-they-read rule in dueSql,
+-- lib/chapterCleanup.ts), and the tombstone would make that permanent. source is 'web' or 'komga': whether a
+-- person ticked it here or a paired phone's sync wrote it. ⚠️ Not a support field -- it is the difference
+-- between an act and an echo. Mihon PUTs on every bind, and that PUT marks the ghosts under the run this
+-- server just reported, so only a 'web' row says the READER did anything (lib/komgaProgress readProgressDetail).
+--
+-- The keys are declared here rather than in the NOT VALID list below: this table is new, so there are no
+-- orphans to quarantine first. Deleting a series (Forget) or a user takes the marks with it; merging carries
+-- them to the survivor first (lib/libraryAdmin.ts).
+CREATE TABLE IF NOT EXISTS listing_progress (
+  user_id      uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  series_id    text NOT NULL REFERENCES lib_series(id) ON DELETE CASCADE,
+  number       real NOT NULL,
+  completed_at timestamptz NOT NULL DEFAULT now(),
+  source       text NOT NULL DEFAULT 'web',
+  PRIMARY KEY (user_id, series_id, number)
+);
+CREATE INDEX IF NOT EXISTS idx_listing_progress_series ON listing_progress (series_id);
+
+-- Where a notification goes besides a browser (v0.43.0, issue 70): a webhook, Home Assistant, ntfy, Discord.
+-- Admin-only and admin-written, which is why lib/notify/guard.ts ALLOWS a private address here that
+-- lib/ssrfGuard.ts refuses for the cover proxy -- a self-hosted Home Assistant lives on the LAN.
+--
+-- config holds nothing that could be used to post to the target: a masked display form, the Home Assistant
+-- service name, whether a token is set. secret is secretbox-sealed under the NOTIFY key (not the tracker one)
+-- and holds every address and every token, because for Discord and ntfy the address IS the credential and a
+-- generic webhook often carries its secret in the path. It is text because a sealed value is a
+-- self-describing text string (v1:iv:tag:ciphertext), the same as user_trackers.access_token.
+--
+-- user_id aims a target at one person: the digest then carries only that person's favourites. CASCADE, not
+-- SET NULL -- a personal target whose person is deleted must not quietly become a server-wide one.
+-- consecutive_failures switches a target off at 10 (lib/notify/index.ts), once, with one admin notice.
+CREATE TABLE IF NOT EXISTS notify_targets (
+  id                   uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  kind                 text NOT NULL,
+  name                 text NOT NULL,
+  config               jsonb NOT NULL DEFAULT '{}'::jsonb,
+  secret               text,
+  user_id              uuid REFERENCES users(id) ON DELETE CASCADE,
+  events               text[] NOT NULL DEFAULT ARRAY['new_chapters','health']::text[],
+  template             text,
+  enabled              boolean NOT NULL DEFAULT true,
+  consecutive_failures int NOT NULL DEFAULT 0,
+  last_ok_at           timestamptz,
+  last_error           text,
+  last_error_at        timestamptz,
+  created_at           timestamptz NOT NULL DEFAULT now(),
+  updated_at           timestamptz NOT NULL DEFAULT now()
+);
+-- include_adult: name series from 18+ libraries in this target's digest. Off by default, the way an OPDS link's
+-- and an API token's show_adult are: the web app's Show 18+ is a per-browser session cookie the server never
+-- sees, so a target carries its own choice. A SURFACING choice only -- a target aimed at a person still never
+-- names a series outside that person's libraries or above their age cap (lib/notify/index.ts sendDigest).
+ALTER TABLE notify_targets ADD COLUMN IF NOT EXISTS include_adult boolean NOT NULL DEFAULT false;
+
 -- Ledger for run-once DATA migrations. The DDL string above stays the home for everything idempotent
 -- (CREATE / ALTER ... IF NOT EXISTS, which can safely run on every boot). Anything that would corrupt data
 -- by running twice goes through runOnce() instead, which stamps this table IN THE SAME TRANSACTION as its

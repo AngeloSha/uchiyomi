@@ -1,7 +1,8 @@
 'use client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { useEffect, useState, ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useState, ReactNode } from 'react';
 import Lenis from 'lenis';
+import { effectsReduced, restoreReduceEffects, useReduceEffects } from '@/lib/effects';
 import { AuthProvider } from '@/lib/auth';
 import { ToastProvider } from '@/components/Toast';
 import { I18nProvider } from '@/lib/I18nProvider';
@@ -52,8 +53,21 @@ export function Providers({ children }: { children: ReactNode }) {
     };
   }, []);
 
+  // The device's copy of Reduce effects, before the first paint of the splash or the sign-in screen. The
+  // account's own value replaces it the moment /auth/refresh answers (lib/auth.tsx).
+  useLayoutEffect(restoreReduceEffects, []);
+  const reduceEffects = useReduceEffects();
+
   // Momentum scroll on desktop wheel (native touch on mobile; reader opts out via data-lenis-prevent).
+  //
+  // ⚠️ Not under Reduce effects (#71). Lenis takes the wheel away from the browser and scrolls from a
+  // main-thread animation frame loop that never stops, so every main-thread stall becomes a scroll stall --
+  // native scrolling runs off the main thread. Keyed on the switch, so turning it on destroys the running
+  // instance (destroy() also removes its `lenis` classes) and turning it off starts a fresh one. The store
+  // is read again inside because the layout effect above may have changed it after this render was taken.
+  // prefers-reduced-motion keeps its own check, unchanged.
   useEffect(() => {
+    if (reduceEffects || effectsReduced()) return;
     if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
     const lenis = new Lenis({ duration: 1.05, smoothWheel: true });
     let raf = requestAnimationFrame(function loop(t) {
@@ -64,7 +78,7 @@ export function Providers({ children }: { children: ReactNode }) {
       cancelAnimationFrame(raf);
       lenis.destroy();
     };
-  }, []);
+  }, [reduceEffects]);
 
   // Capture the Android install prompt + flush the offline progress outbox when back online.
   useEffect(() => {

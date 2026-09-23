@@ -10,6 +10,7 @@ import { fingerprintChapter } from './fingerprint';
 import { findRematch, applyRematch, logRematch, MIN_BOOKS } from './rematch';
 import { numFromName, naturalCmp } from './naming';
 import { parseComicInfoAgeRating } from './ageRating';
+import { reconcileListingProgress } from './listingProgress';
 
 // node-stream-zip reads the central directory only (cheap) and can stream a single entry.
 // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -592,6 +593,13 @@ export async function persistScan(): Promise<{ series: number; books: number; ms
            FROM (SELECT series_id, count(*) AS n, max(mtime) AS mt FROM lib_books GROUP BY series_id) c WHERE c.series_id = s.id`);
   // A chapter that has landed is no longer a failure. Cheap: the ledger only ever holds what is still missing.
   await q(`DELETE FROM chapter_failures f USING lib_books b WHERE b.series_id = f.series_id AND b.number = f.number`).catch(() => {});
+  // The same "a chapter has landed" moment for a reader's marks (#69): a number somebody ticked read while
+  // this server did not hold it becomes ordinary progress on the row that now exists, then the mark goes.
+  // Here because this is the only place a lib_books row is ever minted, so the only place a number stops
+  // being a ghost. ⚠️ lib/listingProgress stamps it strictly before the file's mtime -- now() would make the
+  // read-chapter cleanup delete what the sweep just fetched. Best effort, like the ledger above: a scan must
+  // never fail over it, and the marks keep until the next scan.
+  await reconcileListingProgress().catch((e) => console.warn('[scan] listing marks not reconciled:', (e as Error).message));
   return { series: seenFolders.size, books: nBooks, ms: Date.now() - t0 };
 }
 

@@ -2,6 +2,9 @@
 const webpush = require('web-push');
 import { q } from './db';
 import { env } from '../env';
+// A cycle, and a safe one: notify/index.ts calls notifyAdmins back when it switches a failing target off, and
+// both sides only ever touch the other inside a function body, never while the modules load.
+import { notifyTargetsOfHealth } from './notify';
 
 const enabled = !!(env.VAPID_PUBLIC_KEY && env.VAPID_PRIVATE_KEY);
 if (enabled) {
@@ -61,6 +64,14 @@ export async function notifyNewChapter(seriesId: string, title: string, addedCou
  * reader cannot act on "ManhuaUS is refusing this server" and should not be woken up for it.
  */
 export async function notifyAdmins(title: string, body: string, url = '/admin/', tag = 'sources'): Promise<void> {
+  // ⚠️ BEFORE the VAPID early return, and not awaited. The notification targets (lib/notify, #70) have
+  // nothing to do with VAPID, and an install whose keys could not be written to a read-only /config is the
+  // install that most needs another channel -- inside the return below, every target would be silently dead.
+  // Not awaited because a target can take ten seconds and a retry to answer, and the callers (the source
+  // watchdog, the extension monitor, the solver watch) should not wait on a webhook.
+  // Reintroduce by moving this line under `if (!enabled) return;`: "a health notice reaches a target on an
+  // install without push" in notifyTargets.int.test.ts never sees it arrive.
+  void notifyTargetsOfHealth(title, body).catch(() => {});
   if (!enabled) return;
   const users = await q<{ id: string }>("SELECT id FROM users WHERE role = 'admin'").catch(() => []);
   await Promise.all(users.map((u) => sendToUser(u.id, { title, body, url, tag })));

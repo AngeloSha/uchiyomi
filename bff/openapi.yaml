@@ -6,7 +6,7 @@
 openapi: 3.1.0
 info:
   title: Uchiyomi API
-  version: 0.42.0
+  version: 0.43.0
   description: "Everything the web app does, it does over this API. Session JWTs are for the browser; scripts
     use a personal API token (Profile -> Connections -> API tokens), sent as `Authorization: Bearer uy_...`.
     Scopes: read (every token; GET plus the library search POST, which is a query), write (anything that changes data), admin (the /api/admin surface, which also
@@ -376,6 +376,20 @@ components:
         reason: { type: string, description: The downloader's last error text. Admins only. }
         waitingFor: { type: string, description: "Only when why is held, and only when a priority group survives the blocklist: the effective first-choice group (the series' own priority over the global one) the chapter is being held for, spelt as the preference names it." }
         waitDaysLeft: { type: integer, minimum: 0, description: "Only with waitingFor: whole days until the patience window closes, counted as the sweep counts it -- from the oldest hosted copy that is not from a blocked group, under today's preferences (so 0 when the window has closed since the last check)." }
+        read: { type: boolean, enum: [true], description: "Only when the caller marked this number read although the server does not hold it (POST /api/series/{id}/listing-progress). Absent, never false, for everyone else." }
+    ListingNumbers:
+      type: object
+      description: The chapter numbers a listing-progress call names, as the listing spells them.
+      required: [numbers]
+      properties:
+        numbers:
+          type: array
+          minItems: 1
+          maxItems: 500
+          items:
+            type: number
+            minimum: 0
+            maximum: 1000000
     SkippedNumber:
       type: object
       required: [number, reason]
@@ -489,6 +503,33 @@ components:
         chosen: { type: boolean, description: The copy the release rules chose at the last check. }
         blocked: { type: boolean, description: Every group on the copy is blocked by the effective preferences. A copy with no groups is never blocked. }
         onDisk: { type: boolean, description: "Best effort: a live chapter for the number came from the same source with the same group stamp (or, for a file with no stamp, this is the chosen copy)." }
+    NotifyTarget:
+      type: object
+      description: >-
+        A notification target (since v0.43.0), as the admin panel may see it. The address, the token and the ntfy
+        topic are never in it: `target` is scheme and host only, with "/…" when the stored address has a path.
+      required: [id, kind, name, target, service, hasToken, userId, userName, events, template, enabled, includeAdult, consecutiveFailures, lastOkAt, lastError, lastErrorMessage, lastErrorAt, lastResult, createdAt, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        kind: { type: string, enum: [webhook, home_assistant, ntfy, discord] }
+        name: { type: string }
+        target: { type: string, description: "The masked display form, e.g. https://discord.com/… or http://homeassistant.local:8123." }
+        service: { type: [string, "null"], description: The Home Assistant service (domain.service); null for the other kinds. }
+        hasToken: { type: boolean, description: Whether a token is stored. The token itself is never returned. }
+        userId: { type: [string, "null"], description: The person the target is aimed at; null for the whole server. }
+        userName: { type: [string, "null"] }
+        events: { type: array, items: { type: string, enum: [new_chapters, health] } }
+        template: { type: [string, "null"], description: "The digest template; null is the default \"{count} new chapters in {series}\"." }
+        enabled: { type: boolean, description: Switched off automatically after 10 consecutive failed deliveries, with one notice to the admins. }
+        includeAdult: { type: boolean, description: "Whether the digest may name series from libraries rated 18+. False by default, like an OPDS link's and an API token's showAdult. A target aimed at a person is bounded by that person's libraries and age cap whatever this says." }
+        consecutiveFailures: { type: integer }
+        lastOkAt: { type: [string, "null"], format: date-time }
+        lastError: { type: [string, "null"], description: "The last failure's reason code (as POST .../test answers), never the target's own answer." }
+        lastErrorMessage: { type: [string, "null"], description: The reason as an English sentence. }
+        lastErrorAt: { type: [string, "null"], format: date-time }
+        lastResult: { type: [string, "null"], enum: [ok, error, null], description: Whichever of the last success and the last failure is newer; null before the first delivery. }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
 paths:
   /livez:
     get:
@@ -1205,7 +1246,9 @@ paths:
         listed here. `why` is one of `missing` (not fetched yet), `held` (waiting for a preferred group),
         `failed` (the sweep gave up after the retry cap; `attempts` says how many), `blocked` (only blocked
         groups released it; unblock the group to fetch it), `floor` (below the series' Latest-N floor). `reason`,
-        the downloader's last error text, is present for admins only.
+        the downloader's last error text, is present for admins only. `read: true` marks a number the caller
+        ticked read without it being here (POST /api/series/{id}/listing-progress). A chapter matches its
+        listing number by its override-aware number, so a chapter an admin renumbered is not also a ghost.
       parameters:
         - name: id
           in: path
@@ -1230,6 +1273,108 @@ paths:
                     type: array
                     items:
                       $ref: "#/components/schemas/Ghost"
+        "401":
+          description: Not authenticated
+        "404":
+          description: Not found, or not visible to this account
+  /api/series/{id}/listing-progress:
+    post:
+      tags:
+        - library
+      summary: Mark chapters read by number, including chapters this server does not hold.
+      operationId: postApiSeriesIdListingProgress
+      description: >-
+        For the caller only. Each number is resolved in one pass: a number a chapter row holds (its
+        override-aware number, a deleted chapter's row included) is marked read on that row, as the library's
+        bulk mark-read does (`viaBook`); a number the last listing (GET /api/series/{id}/listing) has and no row
+        holds becomes a read mark (`marked`); anything else is skipped as `not_listed` -- the listing is the
+        authorisation, as for POST /api/sources/fetch. Marking a number already marked keeps the first mark's
+        time and counts nothing. No reading event is written (stats, streaks and Wrapped are not moved). When a
+        marked chapter later lands on the server, the mark becomes ordinary read progress on it, stamped with
+        the mark's time (never after the file, so the read-chapter cleanup does not take the new file). Not
+        gated on the download permission: a mark costs no bytes. When something changed, ONE tracker push
+        follows for the series (for new marks alone, only with the Komga ghost-chapters setting on, since
+        marks count for nothing without it), and a mark reaches AniList / MyAnimeList / Kitsu only as part of a contiguous
+        run of read chapters from the start, and only with the Komga ghost-chapters setting on -- a lone tick
+        far ahead is never sent.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ListingNumbers"
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, marked, viaBook, skipped]
+                properties:
+                  ok: { type: boolean }
+                  marked: { type: integer, description: New read marks on numbers this server does not hold. }
+                  viaBook: { type: integer, description: Chapter rows this call moved to read. }
+                  skipped:
+                    type: array
+                    items:
+                      type: object
+                      required: [number, reason]
+                      properties:
+                        number: { type: number }
+                        reason: { type: string, enum: [not_listed] }
+        "400":
+          description: No numbers, more than 500, or a number outside 0..1000000
+        "401":
+          description: Not authenticated
+        "404":
+          description: Not found, or not visible to this account
+    delete:
+      tags:
+        - library
+      summary: Mark chapters unread by number, including chapters this server does not hold.
+      operationId: deleteApiSeriesIdListingProgress
+      description: >-
+        For the caller only, and a DELETE like the library's bulk mark-unread: a number a chapter row holds
+        loses that row's read progress (`viaBook`), and the caller's read mark on the number goes (`unmarked`).
+        Not checked against the listing -- it only removes the caller's own rows, and a mark can outlive the
+        listing row it was made on. Nothing is pushed to the trackers, which stay ahead: the safe direction.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ListingNumbers"
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, unmarked, viaBook]
+                properties:
+                  ok: { type: boolean }
+                  unmarked: { type: integer, description: Read marks removed. }
+                  viaBook: { type: integer, description: Chapter rows whose read progress was removed. }
+        "400":
+          description: No numbers, more than 500, or a number outside 0..1000000
         "401":
           description: Not authenticated
         "404":
@@ -2495,6 +2640,232 @@ paths:
           description: Malformed body or parameter
         "401":
           description: Not authenticated
+  /api/admin/notify-targets:
+    get:
+      tags:
+        - admin
+      summary: Every notification target (webhook, Home Assistant, ntfy, Discord), masked.
+      operationId: getApiAdminNotifyTargets
+      description: >-
+        Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. Since v0.43.0.
+        Each target is shown by its masked display form alone (scheme and host); the address, the token and the
+        ntfy topic are never returned and there is no endpoint that reveals them.
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: The targets, oldest first.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [targets]
+                properties:
+                  targets:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/NotifyTarget"
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+    post:
+      tags:
+        - admin
+      summary: Add a notification target. The address and token are sealed and never shown again.
+      operationId: postApiAdminNotifyTargets
+      description: >-
+        Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. Since v0.43.0.
+        What each kind needs - webhook: url, optional token (sent as a Bearer header). home_assistant: url (only
+        its origin is kept), token (a long-lived access token), service (domain.service, e.g.
+        notify.mobile_app_pixel; the request path is rebuilt from it, never concatenated). ntfy: url (default
+        https://ntfy.sh), topic (1-64 of A-Z a-z 0-9 _ -), optional token. discord: url, a Discord webhook address
+        (https, discord.com or discordapp.com, /api/webhooks/id/token). Private addresses (192.168.x, 10.x,
+        .local) are allowed on purpose; http(s) only, no user:password in the address, cloud-metadata addresses
+        and this server's own port are refused. Every refusal is a fixed sentence that never repeats what was
+        typed. The audit row notify.target.create carries the id, kind, name, host and userId, never the address
+        or the token.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [kind, name]
+              properties:
+                kind:
+                  type: string
+                  enum: [webhook, home_assistant, ntfy, discord]
+                name: { type: string, minLength: 1, maxLength: 80 }
+                url: { type: string, maxLength: 2048 }
+                token: { type: [string, "null"], maxLength: 4096 }
+                topic: { type: string, maxLength: 64 }
+                service: { type: string, maxLength: 255 }
+                events:
+                  type: array
+                  items: { type: string, enum: [new_chapters, health] }
+                  minItems: 1
+                  description: Default both.
+                template:
+                  type: [string, "null"]
+                  maxLength: 500
+                  description: "The digest message. Variables {count}, {series}, {list}; null or blank is the default \"{count} new chapters in {series}\"."
+                userId:
+                  type: [string, "null"]
+                  format: uuid
+                  description: Aim the target at one person - the digest then carries only their favourites, and health notices reach it only when that person is an admin.
+                includeAdult:
+                  type: boolean
+                  description: Name series from libraries rated 18+ in the digest. Default false - a target aimed at a person is still bounded by that person's libraries and age cap.
+                enabled: { type: boolean, description: Default true. }
+      security:
+        - bearer: []
+      responses:
+        "201":
+          description: The saved target, masked.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotifyTarget"
+        "400":
+          description: >-
+            Malformed body (bad_request, with the field names in fields), or a refusal - bad_url, blocked_address
+            (cloud metadata), self_target (this server), token_required, bad_token, bad_service, bad_topic,
+            bad_discord_url, unknown_user.
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+  /api/admin/notify-targets/{id}:
+    patch:
+      tags:
+        - admin
+      summary: Change a notification target; re-entering an address or token replaces it.
+      operationId: patchApiAdminNotifyTargetsId
+      description: >-
+        Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. Since v0.43.0.
+        Any subset of name, enabled, events, template, userId, includeAdult, and the credentials url, token, topic, service;
+        the kind cannot change (an unknown field is a 400). A re-entered credential is merged over the stored
+        ones and the target validated again as at creation; a new address or token clears last_error and the
+        failure streak, and switching a target back on gives it a fresh streak. When the stored secret can no
+        longer be read (a regenerated JWT_SECRET) a partial re-entry is a 400 reenter_all - type the address and
+        the token again. A stored credential never follows the address to another host: a url on another origin
+        is a 400 reenter_token when a token is stored and none was sent, or reenter_topic for ntfy, so a
+        re-point plus a Test cannot read back a secret the API never returns; a path change on the same origin
+        keeps them. The audit row notify.target.update carries the id, the NAMES of the fields sent - never
+        their values - and the new host when the address changed.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                name: { type: string, minLength: 1, maxLength: 80 }
+                url: { type: string, maxLength: 2048 }
+                token: { type: [string, "null"], maxLength: 4096, description: null or blank removes an optional token. }
+                topic: { type: string, maxLength: 64 }
+                service: { type: string, maxLength: 255 }
+                events:
+                  type: array
+                  items: { type: string, enum: [new_chapters, health] }
+                  minItems: 1
+                template: { type: [string, "null"], maxLength: 500 }
+                userId: { type: [string, "null"], format: uuid }
+                includeAdult: { type: boolean }
+                enabled: { type: boolean }
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: The target after the change, masked.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotifyTarget"
+        "400":
+          description: Malformed body, a refusal as for POST, reenter_all, reenter_token or reenter_topic.
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+        "404":
+          description: Not found, or not visible to this account
+    delete:
+      tags:
+        - admin
+      summary: Delete a notification target.
+      operationId: deleteApiAdminNotifyTargetsId
+      description: >-
+        Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. Since v0.43.0.
+        Audited as notify.target.delete with the id, kind and name.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: "{ok: true}"
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+        "404":
+          description: Not found, or not visible to this account
+  /api/admin/notify-targets/{id}/test:
+    post:
+      tags:
+        - admin
+      summary: Send one test message to a SAVED target and say how it went.
+      operationId: postApiAdminNotifyTargetsIdTest
+      description: >-
+        Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. Since v0.43.0.
+        Takes the id of a saved target and nothing else - an address in the body is ignored, so this cannot be
+        used to probe an arbitrary URL. Five per minute per admin (keyed on the account, not the address).
+        Not retried; redirects are never followed. The answer is a reason from a closed set, never the target's
+        answer body, headers or resolved address. The result is recorded on the target (lastOkAt / lastError),
+        but a failed Test does not count towards the automatic switch-off. Audited as notify.target.test.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: How the delivery went.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, status, reason]
+                properties:
+                  ok: { type: boolean }
+                  status: { type: [integer, "null"], description: The HTTP status the target answered, null when none. }
+                  reason:
+                    type: string
+                    enum: [ok, timeout, refused, dns, tls, unreachable, unauthorized, not_found, rate_limited, server_error, bad_response, redirect, blocked, secret_unreadable]
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+        "404":
+          description: Not found, or not visible to this account
+        "429":
+          description: More than five Tests in a minute from this admin
   /api/favorites:
     get:
       tags:

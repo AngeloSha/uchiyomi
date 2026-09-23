@@ -271,16 +271,20 @@
   100% { transform: translate3d(2%, -3%, 0) scale(1.14); }
 }
 
+/* ⚠️ Prefixed FIRST, in both. Written the other way round (as they were until v0.43.0), Tailwind's minifier
+   read the trailing `-webkit-backdrop-filter` as overriding the unprefixed one and kept only it -- which
+   Chrome and Firefox ignore -- so the phone nav, dialogs, the command palette and the sign-in card were
+   plain see-through panels everywhere but Safari. Pinned in web/test/effects.test.ts. */
 .glass {
   background: rgba(10, 10, 15, 0.55);
-  backdrop-filter: blur(20px) saturate(1.3);
   -webkit-backdrop-filter: blur(20px) saturate(1.3);
+  backdrop-filter: blur(20px) saturate(1.3);
   border: 1px solid rgba(255, 255, 255, 0.07);
 }
 .glass-strong {
   background: rgba(6, 6, 9, 0.78);
-  backdrop-filter: blur(24px) saturate(1.3);
   -webkit-backdrop-filter: blur(24px) saturate(1.3);
+  backdrop-filter: blur(24px) saturate(1.3);
 }
 
 /* gradient hairline border (accent-lit) */
@@ -299,6 +303,43 @@
   .fx-mesh { animation: none; }
   *, *::before, *::after { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; }
 }
+
+/* ============ Reduce effects (#71) ============
+   The performance mode: a switch per account under Profile -> Settings -> Appearance, applied as this class
+   by lib/effects.ts before the app shell renders. Measured on a 200-series library at 1440 (web/test/perf):
+   headless Chrome at a 4x CPU throttle scrolls it at about 40 fps with the finish above and at 60 with the
+   switch on; headless Firefox at 7.6 and 57.9.
+
+   ⚠️ The finish above is the default ON PURPOSE and stays exactly as it is -- the owner's rule for #71 was
+   that the app does not get plainer because one machine is slow. A cheaper grain, an unblurred mesh or a
+   vignette moved under the content all change the look; the answer to a slow machine is this switch.
+   web/test/effects.test.ts pins the three .fx-* rules.
+
+   ⚠️ UNLAYERED, like the rules it overrides, and that is load-bearing: Tailwind v4 emits every
+   `backdrop-blur-*` utility inside @layer utilities and `.skeleton` inside @layer components, and an
+   unlayered rule beats any layered one whatever its specificity -- which is why nothing here needs
+   !important. Move this into an @layer and the 56 backdrop-blur utilities win again: the switch would say
+   "on" with every blur still running. */
+html.reduce-effects .fx-mesh,
+html.reduce-effects .fx-grain,
+html.reduce-effects .fx-vignette { display: none; }
+/* ⚠️ Prefixed FIRST. Tailwind's minifier (lightningcss) treats a `-webkit-backdrop-filter` that follows
+   `backdrop-filter` as overriding it and keeps only the prefixed one -- which Chrome and Firefox both
+   ignore. Written the other way round (as .glass above is), this compiled to `-webkit-backdrop-filter:none`
+   alone and the switch left every blur on everywhere but Safari. */
+html.reduce-effects *,
+html.reduce-effects *::before,
+html.reduce-effects *::after { -webkit-backdrop-filter: none; backdrop-filter: none; }
+/* Glass without its blur is a 22-45 % see-through panel over whatever scrolls under it, and text on it stops
+   reading over a bright cover. Solid ink-900 is what the blurred glass looked like over the black page. */
+html.reduce-effects .glass,
+html.reduce-effects .glass-strong { background: var(--color-ink-900); }
+html.reduce-effects .skeleton::after { animation: none; display: none; }
+/* The accent hairline is a two-layer mask with `mask-composite: exclude`, on every tile in the grid. Chrome
+   barely notices it; Firefox does: with everything above already off, the 200-tile library at 1440 still
+   scrolled at 32 fps in headless Firefox, and at 59.5 with only these rings gone. Every element wearing one
+   keeps its own plain border underneath, so nothing loses its edge -- only the accent glint on it. */
+html.reduce-effects .grad-border::before { display: none; }
 
 /* Lenis momentum scroll */
 html.lenis, html.lenis body { height: auto; }

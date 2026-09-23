@@ -8,7 +8,8 @@
 // that DOM order (Server first: `test/e2e/run.mjs` reads the first 4000 characters of body text for the
 // install-count payload), composed from `components/settings.tsx` so a field saves when you leave it and
 // says "Saved" in one place. The only Save button left is the scanlators' one, because those are lists
-// that are edited in several steps and must land as one write.
+// that are edited in several steps and must land as one write. Since v0.43.0 a fifth, Notifications
+// (components/AdminNotifications.tsx), comes last; its dialog saves a whole target at once.
 //
 // Toasts survive on exactly two rows, and only for the sentence the inline tick cannot say: the install count
 // ("Thank you — counted" / "No longer counted", because opting out destroys the identifier) and the
@@ -26,6 +27,7 @@ import { t as tr } from '@/lib/i18n';
 import type { KnownGroup, StoredPrefs } from '@/lib/types';
 import { hasGroup, normGroup, reorder, withoutGroup } from '@/lib/scanlators';
 import { suggestGroups } from '@/lib/groupSuggest';
+import { NotificationsSection } from '@/components/AdminNotifications';
 
 /** One PATCH. Resolves once the server has answered, so the row that called it can show its tick. */
 type Save = (body: Record<string, unknown>) => Promise<unknown>;
@@ -53,6 +55,10 @@ export function AdminSettings() {
       <SchedulesSection data={data} save={save} />
       <HousekeepingSection data={data} save={save} />
       <ScanlatorsSection data={data} save={save} />
+      {/* v0.43.0 (#70): webhook, Home Assistant, ntfy and Discord targets. Last, after Library housekeeping and
+          Scanlators: Server must stay first (run.mjs), and settingsConsole.test.ts pins the four above in
+          their order. Its rows and its one dialog live in their own file; it reads its own endpoint. */}
+      <NotificationsSection />
     </div>
   );
 }
