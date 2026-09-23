@@ -80,7 +80,8 @@ export function challengeReason(p: Probe): string {
 }
 
 /**
- * Where the Turnstile checkbox is, for the one trusted click of §3.5.
+ * Where the Turnstile checkbox is, for the trusted press of §3.5 -- the fallback when DevTools cannot see the
+ * widget's iframe (browser.ts turnstileBox pierces the closed shadow root first).
  *
  * The managed-challenge page puts the widget iframe inside a CLOSED shadow root, so the iframe itself is
  * not reachable from script. The shadow HOST is, and the hidden `cf-turnstile-response` input lives beside

@@ -9,6 +9,16 @@
 // Detection is FlareSolverr's (detect.ts). The response body is `document.documentElement.outerHTML`, which is
 // what Selenium's page_source returns -- so a JSON endpoint comes back wrapped in the browser's <pre> exactly
 // as manganato.ts:104-105 expects.
+//
+// Measured in the Phase 0 spike (owner's IP, 2026-09-23), and why this differs from design-shell.md §3.5:
+//   - Cloudflare served its interactive Turnstile checkbox to BOTH FlareSolverr and us. With the design's
+//     "one sendInputEvent click at 15 s" nothing was ever solved (0/12, both UA modes): sendInputEvent cannot
+//     reach the cross-site Turnstile iframe. Pressing through the DevTools Input domain (pressVerify) at 5 s,
+//     then every 8 s: 24/24 cold challenges solved in hidden windows, median 9.7 s (FlareSolverr: ~11.5 s).
+//   - The same-origin jar then skips the challenge on the next request (24/24, ~0.4 s); FlareSolverr re-solves.
+//   - show:false + backgroundThrottling:false keeps the page "visible" (rAF runs) on Windows, macOS and Linux;
+//     an off-screen visible window is reported hidden (rAF 1/s) and missed trusted clicks -- keep hidden.
+//   - Electron sends no Sec-CH-UA headers; configure() adds them.
 import { app, BrowserWindow, session as Sessions, powerMonitor, Notification, type Session, type Cookie } from 'electron';
 import { SolveError, type SolverBackend, type SolveRequest, type SolveResult, type SolverCookie } from './protocol';
 import { PROBE_SOURCE, TURNSTILE_RECT_SOURCE, challengeReason, isAccessDenied, isChallenge, type Probe } from './detect';
