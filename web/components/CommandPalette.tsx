@@ -1,7 +1,7 @@
 'use client';
-// Global command palette (Ctrl/Cmd+K or "/"): instant series search + quick actions.
+// Global command palette (Ctrl/Cmd+K, "/", or just start typing): instant series search + quick actions.
 // No dependency — a fixed overlay + debounced POST /api/series/search, keyboard-navigable.
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { AnimatePresence, motion } from 'framer-motion';
 import { api, img } from '@/lib/api';
@@ -12,10 +12,11 @@ import { Img } from './ui';
 import { IcSearch, IcSparkle, IcRefresh, IcBell, IcDownload, IcGrid, IcMoments } from './icons';
 import { t as tr } from '@/lib/i18n';
 import { hiddenOnDesktop, DESKTOP_HIDDEN } from '@/lib/desktop';
+import { isTypingTarget, typeToSearchKey } from '@/lib/typeToSearch';
 
 interface Action { key: string; label: string; hint?: string; icon: React.ReactNode; run: () => void | Promise<void> }
 
-export function CommandPalette({ open, onClose }: { open: boolean; onClose: () => void }) {
+export function CommandPalette({ open, seed = '', onClose }: { open: boolean; seed?: string; onClose: () => void }) {
   const router = useRouter();
   const toast = useToast();
   const [q, setQ] = useState('');
@@ -25,15 +26,19 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
   const inputRef = useRef<HTMLInputElement>(null);
   const seq = useRef(0);
 
-  // reset on open; focus the input
-  useEffect(() => {
+  // Reset on open (to the typed-to-open character, if any) and focus the input. A layout effect, focusing
+  // in the same commit that mounts the input: with type-to-search the NEXT keystroke is usually already on
+  // its way, and a deferred focus let it land on <body> and vanish. The timeout stays as a backstop for
+  // the enter animation.
+  useLayoutEffect(() => {
     if (open) {
-      setQ('');
+      setQ(seed);
       setResults([]);
       setSel(0);
+      inputRef.current?.focus();
       setTimeout(() => inputRef.current?.focus(), 30);
     }
-  }, [open]);
+  }, [open]); // seed is read at open time only
 
   // debounced instant search
   useEffect(() => {
@@ -159,17 +164,22 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
   );
 }
 
-/** Global open-palette keybindings: Ctrl/Cmd+K anywhere, "/" when not typing. */
-export function usePaletteHotkeys(setOpen: (fn: (o: boolean) => boolean) => void, enabled: boolean) {
+/**
+ * Global open-palette keybindings: Ctrl/Cmd+K anywhere, "/" when not typing, and type-to-search -- a letter
+ * or digit when not typing opens the palette with that character already in it (lib/typeToSearch.ts).
+ */
+export function usePaletteHotkeys(setOpen: (fn: (o: boolean) => boolean) => void, enabled: boolean, onSeed?: (seed: string) => void) {
   useEffect(() => {
     if (!enabled) return;
     const onKey = (e: KeyboardEvent) => {
-      const el = document.activeElement as HTMLElement | null;
-      const typing = !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable);
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); setOpen((o) => !o); }
-      else if (e.key === '/' && !typing) { e.preventDefault(); setOpen(() => true); }
+      const typing = isTypingTarget(document.activeElement);
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); onSeed?.(''); setOpen((o) => !o); return; }
+      if (e.key === '/' && !typing) { e.preventDefault(); onSeed?.(''); setOpen(() => true); return; }
+      if (!onSeed) return;
+      const ch = typeToSearchKey(e, { typing, modalOpen: !!document.querySelector('[aria-modal="true"]') });
+      if (ch) { e.preventDefault(); onSeed(ch); setOpen(() => true); }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [setOpen, enabled]);
+  }, [setOpen, enabled, onSeed]);
 }

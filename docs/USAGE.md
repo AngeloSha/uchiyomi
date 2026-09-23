@@ -82,6 +82,13 @@ filters currently show.
 The top bar has **Home** (a daily-pick hero + "For you" rails), **Library**, **Lists** and **Discover**,
 plus search, the updates bell, a refresh button, and your profile.
 
+Search opens the **command palette**: one box that finds any series in the library and runs the quick actions
+(Surprise me, Updates, Refresh library and so on). With a keyboard there are three ways in: **Ctrl+K** (**⌘K**
+on a Mac) or **/** open it empty, and simply **starting to type** a title opens it with that first letter
+already in the box, so *"one p"* typed on the library page is a search. Only letters and digits do this, and
+only when nothing else wants the key: not while you are typing in a field, not with a dialog open, not with
+Ctrl, Alt or ⌘ held, and never in the reader, which keeps its own keys.
+
 ### What counts as a chapter
 
 Point `LIBRARY_PATH` at what you already have. A chapter can be any of:
