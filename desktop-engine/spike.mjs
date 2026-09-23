@@ -74,11 +74,13 @@ async function main() {
   line('INFO', 'unpack', `pack ${mib(results.pack.zipBytes)} -> ${onDisk.files} files, ${mib(onDisk.bytes)} on disk in ${u.ms} ms; Main-Class ${u.meta.mainClass}; java ${u.meta.javaVersion}`);
   if (process.platform === 'darwin') {
     const { execFileSync } = await import('node:child_process');
-    const cs = (() => { try { return execFileSync('codesign', ['-dv', path.join(rtAscii, 'jre', 'bin', 'java')], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }); } catch (e) { return `${e.stdout || ''}${e.stderr || ''}`; } })();
+    // codesign -dv writes to stderr.
+    const cs = (() => { try { return execFileSync('sh', ['-c', 'codesign -dv --verbose=2 "$1" 2>&1; echo; spctl --status 2>&1', 'sh', path.join(rtAscii, 'jre', 'bin', 'java')], { encoding: 'utf8' }); } catch (e) { return `${e.stdout || ''}${e.stderr || ''}`; } })();
     const authority = (cs.match(/Authority=([^\n]+)/g) || []).join('; ');
     const teamId = /TeamIdentifier=(\S+)/.exec(cs)?.[1];
     results.macCodesign = { authority, teamId, raw: cs.slice(0, 1500) };
-    line('INFO', 'mac-codesign', `jre/bin/java: ${authority || 'no Authority'} TeamIdentifier=${teamId || '?'}`);
+    const sig = /Signature=([^\n]+)/.exec(cs)?.[1];
+    line('INFO', 'mac-codesign', `jre/bin/java: ${authority || 'no Authority'}; Signature=${sig || '?'}; TeamIdentifier=${teamId || '?'}; ${/assessments (enabled|disabled)/.exec(cs)?.[0] || 'spctl ?'}`);
   }
 
   const stub = await startSolverStub();
@@ -150,33 +152,53 @@ async function main() {
     const webUi = rootEntries.filter((n) => /webui/i.test(n));
     const tmpEntries = fs.existsSync(path.join(tmpAscii, 'Tachidesk')) ? fs.readdirSync(path.join(tmpAscii, 'Tachidesk')) : [];
     const kids = await children(h.pid);
+    // conhost.exe is the host of the window-less console CREATE_NO_WINDOW gives a console program (see the
+    // console check); anything else would be a browser, a tray helper or CEF.
+    const unexpected = kids.filter((k) => !/\bconhost\.exe$/i.test(k));
     const kcefDir = fs.existsSync(path.join(rootAscii, 'bin', 'kcef'));
     const log = fs.readFileSync(path.join(WORK, 'engine-ascii.log'), 'utf8');
     const browserLog = /openInBrowser|browseURL|Desktop\.browse/i.test(log);
     const trayLog = /SystemTray\.create|Failed to create\/remove SystemTray/i.test(log);
-    const ok = !webUi.length && !tmpEntries.some((n) => /webui/i.test(n)) && !kids.length && !kcefDir && !browserLog
+    const ok = !webUi.length && !tmpEntries.some((n) => /webui/i.test(n)) && !unexpected.length && !kcefDir && !browserLog
       && s?.systemTrayEnabled === false && s?.initialOpenInBrowserEnabled === false && s?.kcefEnabled === false;
     line(ok ? 'PASS' : 'FAIL', 'headless', `rootDir entries [${rootEntries.join(', ')}]; webUI dirs: ${webUi.length ? webUi.join(',') : 'none'}; tmp/Tachidesk [${tmpEntries.join(', ')}]; java child processes: ${kids.length ? kids.join('; ') : 'none'}; bin/kcef: ${kcefDir ? 'PRESENT' : 'absent'}; browser/tray log lines: ${browserLog || trayLog ? 'FOUND' : 'none'}; engine reports systemTray=${s?.systemTrayEnabled} openInBrowser=${s?.initialOpenInBrowserEnabled} kcef=${s?.kcefEnabled} downloadAsCbz=${s?.downloadAsCbz} autoDownload=${s?.autoDownloadNewChapters} ip=${s?.ip}`,
       { rootEntries, tmpEntries, children: kids, kcefDir, settings: s });
   }
 
   // ------------------------------------------------------------------ 9. Windows: no console window
+  // The shell's main process has no console (GUI subsystem), so the test parent must not have one either: a
+  // console program started from a console-less parent gets a NEW console window unless CREATE_NO_WINDOW is
+  // set, which libuv does for windowsHide:true when no stdio is inherited. Probe: GetConsoleWindow() after
+  // AttachConsole(pid); hwnd 0 = no window exists that could flash.
   if (win && want('console')) {
     const scratch = path.join(WORK, 'probe');
     await fsp.mkdir(scratch, { recursive: true });
-    const eng = await consoleProbe(h.pid, scratch);
-    const idleLaunch = (hide) => ({ ...buildLaunch({ runtimeDir: rtAscii, rootDir: path.join(WORK, 'idle'), port: 1, fsUrl: stub.url, ...creds, extraJvm: ['-Duchiyomi.shim.idle=true'] }), hide });
-    const ctl = {};
-    for (const hide of [true, false]) {
-      const l = idleLaunch(hide);
-      const hh = startEngine(l, { windowsHide: hide });
-      await sleep(2500);
-      ctl[hide ? 'hidden' : 'notHidden'] = await consoleProbe(hh.pid, scratch);
-      await stopEngine(hh, { mode: 'graceful', timeoutMs: 5000 });
-    }
-    const ok = eng.attached === false && ctl.hidden?.attached === false && ctl.notHidden?.attached === true;
-    line(ok ? 'PASS' : 'FAIL', 'console', `engine (windowsHide:true): ${JSON.stringify(eng)}; control shim windowsHide:true ${JSON.stringify(ctl.hidden)}; control windowsHide:false ${JSON.stringify(ctl.notHidden)} -- attached=false/error 6 means the process owns no console, so no window can flash; the windowsHide:false control proves the probe sees a console when there is one`,
-      { engine: eng, control: ctl });
+    const viaConsolelessParent = async (l, hide, tag, waitPort) => {
+      const lf = path.join(scratch, `launch-${tag}.json`);
+      fs.writeFileSync(lf, JSON.stringify(l));
+      const parent = spawn(process.execPath, [path.join(here, 'lib', 'console-launcher.mjs'), lf, hide ? '1' : '0', path.join(WORK, `console-${tag}.log`)], { detached: true, stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true });
+      const javaPid = await withTimeout(new Promise((res) => parent.stdout.once('data', (d) => res(JSON.parse(d.toString()).javaPid))), 20000, 'console launcher');
+      if (waitPort) await waitReady({ t0: Date.now(), done: false, get tail() { return ''; } }, waitPort, { timeoutMs: 180000 });
+      else await sleep(3000);
+      const probeResult = await consoleProbe(javaPid, scratch);
+      const kids = await children(javaPid);
+      parent.kill();
+      const t0 = Date.now();
+      while (Date.now() - t0 < 20000 && (await alive(javaPid))) await sleep(250);
+      if (await alive(javaPid)) try { process.kill(javaPid); } catch { /* gone */ }
+      fs.rmSync(lf, { force: true });
+      return { ...probeResult, children: kids };
+    };
+    const idle = (hide) => buildLaunch({ runtimeDir: rtAscii, rootDir: path.join(WORK, 'idle'), port: 1, fsUrl: stub.url, ...creds, extraJvm: ['-Duchiyomi.shim.idle=true'] });
+    const res = {};
+    res.idleHidden = await viaConsolelessParent(idle(true), true, 'idle-hidden');
+    res.idleShown = await viaConsolelessParent(idle(false), false, 'idle-shown');
+    const cport = await freePort();
+    res.engineHidden = await viaConsolelessParent(buildLaunch({ runtimeDir: rtAscii, rootDir: path.join(WORK, 'console-engine'), tmpDir: path.join(WORK, 'console-engine-tmp'), port: cport, fsUrl: stub.url, ...creds }), true, 'engine-hidden', cport);
+    const noWin = (x) => x && x.hwnd === 0;
+    const ok = noWin(res.engineHidden) && noWin(res.idleHidden) && res.idleShown?.hwnd > 0;
+    const fmt = (x) => `hwnd=${x?.hwnd} visible=${x?.visible} attached=${x?.attached} children=[${(x?.children || []).join(', ')}]`;
+    line(ok ? 'PASS' : 'FAIL', 'console', `from a console-less parent (as Electron): real engine windowsHide:true -> ${fmt(res.engineHidden)}; idle shim windowsHide:true -> ${fmt(res.idleHidden)}; control windowsHide:false -> ${fmt(res.idleShown)} (a window was created: that is the flash windowsHide prevents)`, res);
   }
 
   // ------------------------------------------------------------------ 7a. idle RSS
@@ -285,18 +307,31 @@ async function main() {
 
   // ------------------------------------------------------------------ 1b. non-ASCII rootDir (and runtime)
   const na = path.join(WORK, NON_ASCII);
+  const asciiTmp = (tag) => path.join(WORK, 'ascii', `tmp-${tag}`);
   const variants = [
-    { id: 'nonascii-root-env', verdictCounts: true, rt: rtAscii, root: path.join(na, 'engine'), mode: 'env', note: 'rootDir via env through the shim, runtime on an ASCII path' },
-    { id: 'nonascii-root-cmdline', verdictCounts: false, rt: rtAscii, root: path.join(na, 'engine-cmdline'), mode: 'cmdline', note: 'design-shell.md §5 as written: rootDir as a -D flag on the command line' },
-    { id: 'nonascii-runtime', verdictCounts: false, rt: path.join(na, 'runtime'), root: path.join(na, 'engine-rt'), mode: 'env', note: 'the pack itself unpacked under the non-ASCII folder (cwd-relative classpath)' },
+    { id: 'nonascii-root', verdictCounts: true, rt: rtAscii, root: path.join(na, 'engine'), tmp: asciiTmp('na-root'), mode: 'env', note: 'rootDir "…/Jösé 名前/engine" via env through the shim; runtime and java.io.tmpdir on ASCII paths (the recommended launch)' },
+    { id: 'nonascii-root-and-tmp', verdictCounts: false, rt: rtAscii, root: path.join(na, 'engine-t'), tmp: path.join(na, 'tmp'), mode: 'env', note: 'rootDir AND java.io.tmpdir under the non-ASCII folder (what a default %TEMP% under C:\\Users\\Jösé 名前 would mean)' },
+    { id: 'nonascii-root-cmdline', verdictCounts: false, rt: rtAscii, root: path.join(na, 'engine-cmdline'), tmp: undefined, mode: 'cmdline', note: 'design-shell.md §5 as written: rootDir as a -D flag on the command line' },
+    { id: 'nonascii-runtime', verdictCounts: false, rt: path.join(na, 'runtime'), root: path.join(na, 'engine-rt'), tmp: asciiTmp('na-rt'), mode: 'env', note: 'the pack itself unpacked under the non-ASCII folder (cwd-relative classpath)' },
   ];
+  if (win) {
+    // 8.3 short names: an ASCII alias of the same folder, when the volume generates them.
+    const { powershell } = await import('./lib/probes.mjs');
+    await fsp.mkdir(path.join(na, 'runtime'), { recursive: true });
+    const short = (await powershell(`(New-Object -ComObject Scripting.FileSystemObject).GetFolder('${na.replace(/'/g, "''")}').ShortPath`)).trim();
+    results.shortPath = short;
+    line('INFO', 'short-path', `8.3 short path of "${NON_ASCII}": ${short || '(none)'}${short && /^[\x20-\x7e]+$/.test(short) ? ' (ASCII)' : ''}`);
+    if (short && /^[\x20-\x7e]+$/.test(short) && short !== na) {
+      variants.push({ id: 'nonascii-runtime-shortpath', verdictCounts: false, rt: path.join(na, 'runtime'), rtLaunch: path.join(short, 'runtime'), root: path.join(na, 'engine-sp'), tmp: asciiTmp('na-sp'), mode: 'env', note: `the non-ASCII runtime launched through its 8.3 alias ${short}` });
+    }
+  }
   if (want('nonascii')) {
     for (const v of variants) {
       try {
-        if (v.rt !== rtAscii) await unpackPack(PACK, v.rt);
+        if (v.rt !== rtAscii && !fs.existsSync(path.join(v.rt, 'engine.json'))) await unpackPack(PACK, v.rt);
         await fsp.mkdir(v.root, { recursive: true });
         const port = await freePort();
-        const l = buildLaunch({ runtimeDir: v.rt, rootDir: v.root, tmpDir: v.mode === 'env' ? path.join(v.root, '..', 'tmp-' + path.basename(v.root)) : undefined, port, fsUrl: stub.url, ...creds, pathMode: v.mode });
+        const l = buildLaunch({ runtimeDir: v.rtLaunch || v.rt, rootDir: v.root, tmpDir: v.tmp, port, fsUrl: stub.url, ...creds, pathMode: v.mode });
         const hh = startEngine(l, { logFile: path.join(WORK, `engine-${v.id}.log`) });
         const rr = await waitReady(hh, port, { timeoutMs: 180000 });
         const conf = fs.existsSync(path.join(v.root, 'server.conf'));
@@ -358,16 +393,21 @@ async function main() {
       }
       await sleep(2000);
       text = fs.readFileSync(logFile, 'utf8');
+      text = text.replace(/\r/g, '');
       const release = /Downloading CEF from Github \(([^)]+)\)/.exec(text)?.[1];
       const pct = [...text.matchAll(/Downloading (\d+)% of ([^\n]+)/g)];
       const failure = /Failed to set up CEF\s*\n([^\n]+)/.exec(text)?.[1];
       const kcefDir = path.join(root, 'bin', 'kcef');
       const kcefSize = fs.existsSync(kcefDir) ? await dirSize(kcefDir) : null;
       const cacheSize = fs.existsSync(path.join(root, 'cache', 'kcef')) ? await dirSize(path.join(root, 'cache', 'kcef')) : null;
-      const kids = await children(hh.pid);
-      const m = await rss(hh.pid);
-      results.kcef = { state, release, lastProgress: pct.at(-1)?.[0], failure, kcefBytes: kcefSize?.bytes, kcefFiles: kcefSize?.files, cacheBytes: cacheSize?.bytes, children: kids, rss: m.rss, watchedMs: Date.now() - t0 };
-      line('INFO', 'kcef', `with Suwayomi's default kcefEnabled=true: ${release ? `downloads ${release}` : 'no download started'}${pct.length ? ` (${pct.at(-1)[0]})` : ''}; outcome ${state}${failure ? ` -- ${failure}` : ''}; bin/kcef ${kcefSize ? `${mib(kcefSize.bytes)} in ${kcefSize.files} files` : 'absent'}; cache/kcef ${cacheSize ? mib(cacheSize.bytes) : 'absent'}; java children now: ${kids.length ? kids.join('; ') : 'none'}; RSS ${mib(m.rss)}; watched ${((Date.now() - t0) / 1000).toFixed(0)} s. With -D...kcefEnabled=false (every other boot here) bin/kcef stays absent.`);
+      const engineAlive = !hh.done && (await alive(hh.pid));
+      const exit = hh.done ? await hh.exited : null;
+      const kids = engineAlive ? await children(hh.pid) : [];
+      const m = engineAlive ? await rss(hh.pid) : { rss: 0 };
+      const hsErr = fs.readdirSync(rtAscii).filter((n) => /^hs_err/.test(n));
+      const stillAnswers = engineAlive ? (await probe(port).catch(() => ({ status: 'no answer' }))).status : 'n/a';
+      results.kcef = { state, release, lastProgress: pct.at(-1)?.[0], failure, kcefBytes: kcefSize?.bytes, kcefFiles: kcefSize?.files, cacheBytes: cacheSize?.bytes, children: kids, rss: m.rss, engineAlive, exit, hsErr, stillAnswers, watchedMs: Date.now() - t0 };
+      line('INFO', 'kcef', `with Suwayomi's default kcefEnabled=true: ${release ? `downloads ${release}` : 'no download started'}${pct.length ? ` (${pct.at(-1)[0]})` : ''}; outcome ${state}${failure ? ` -- ${failure}` : ''}; bin/kcef ${kcefSize ? `${mib(kcefSize.bytes)} in ${kcefSize.files} files` : 'absent'}; cache/kcef ${cacheSize ? mib(cacheSize.bytes) : 'absent'}; engine afterwards: ${engineAlive ? `alive, about -> ${stillAnswers}, RSS ${mib(m.rss)}, children ${kids.length ? kids.join('; ') : 'none'}` : `DEAD (exit ${JSON.stringify(exit)}${hsErr.length ? `, ${hsErr.join(',')}` : ''})`}; watched ${((Date.now() - t0) / 1000).toFixed(0)} s. With -D...kcefEnabled=false (every other boot here) bin/kcef stays absent.`);
     }
     await stopEngine(hh, { mode: 'graceful' });
     const fpd = await footprint();

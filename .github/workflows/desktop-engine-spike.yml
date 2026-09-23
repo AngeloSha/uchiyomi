@@ -78,6 +78,14 @@ jobs:
           --cycles ${{ github.event.inputs.cycles || '20' }}
           --results "$RUNNER_TEMP/spike/results-${{ matrix.platform }}.json"
 
+      - name: Collect macOS crash reports
+        if: always() && runner.os == 'macOS'
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/spike/crash"
+          cp ~/Library/Logs/DiagnosticReports/*java* "$RUNNER_TEMP/spike/crash/" 2>/dev/null || true
+          ls -la "$RUNNER_TEMP/spike/crash"
+
       - name: Summary
         if: always()
         shell: bash
@@ -98,6 +106,8 @@ jobs:
           path: |
             ${{ runner.temp }}/spike/results-*.json
             ${{ runner.temp }}/spike/*.log
+            ${{ runner.temp }}/spike/**/hs_err*.log
+            ${{ runner.temp }}/spike/crash/*
             ${{ runner.temp }}/pack/engine-pack-*.json
             ${{ runner.temp }}/pack/engine-pack-*.zip.sha256
 
