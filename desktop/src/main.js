@@ -61,6 +61,11 @@ log.info(`Uchiyomi Desktop ${app.getVersion()} starting`, {
   execPath: process.execPath,
 });
 
+// ⚠️ Never touch the macOS Keychain while the app is unsigned: an ad-hoc signature changes with every build, so
+// a Keychain item created by one version is a stranger's to the next (a blocking password prompt on every update).
+// With the cookie-encryption fuse off Chromium should not need it; the mock keychain makes sure nothing else does.
+if (process.platform === 'darwin') app.commandLine.appendSwitch('use-mock-keychain');
+
 if (MODE === 'smoke' || MODE === 'bench') {
   // Headless modes: no window, no GPU process to go wrong on a CI runner or under another user's logon.
   app.disableHardwareAcceleration();

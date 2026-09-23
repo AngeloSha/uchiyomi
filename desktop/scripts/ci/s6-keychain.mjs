@@ -68,6 +68,7 @@ const signedIn = next.signedIn;
 const reached = next.reached;
 ev.appPageMs = next.appPageMs;
 ev.error = next.error;
-record('S6-unsigned-update-keychain', 'INFO',
+// An update must open straight into the app, still signed in, with no Keychain item involved at all.
+record('S6-unsigned-update-keychain', reached && signedIn === true && control.signedIn === true && !ev.keychainItem ? 'PASS' : 'FAIL',
   `rebuilt app (CDHash ${ev.cdhashOld?.slice(0, 10)} -> ${ev.cdhashNew?.slice(0, 10)}) on the S8 profile: app page ${reached ? `reached in ${ev.appPageMs} ms` : 'NOT reached'}, still signed in: ${signedIn}${ev.error ? ` (${ev.error.slice(0, 120)})` : ''}; control (the original build, same profile, right after): ${control.reached ? `reached in ${control.appPageMs} ms, signed in: ${control.signedIn}` : `NOT reached (${String(control.error).slice(0, 100)})`}; keychain item "Uchiyomi Safe Storage": ${ev.keychainItem ? 'present' : 'absent'}; screen: ci-out/s6-keychain-vN+1-screen.png`,
   ev);

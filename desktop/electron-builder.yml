@@ -26,7 +26,14 @@ asar: true
 electronFuses:
   # utilityProcess keeps working with this off, and it closes "run this signed app as a plain Node".
   runAsNode: false
-  enableCookieEncryption: true
+  # ⚠️ OFF while the builds are unsigned (owner's decision, 2026-09-23). On macOS Chromium keeps the cookie key in
+  # the login Keychain with an access list naming the app by its code-directory hash, and an ad-hoc signature
+  # gets a NEW hash every build: in the spike the updated app hung behind a hidden "wants to use your
+  # confidential information" prompt for 2 minutes, and even the same build came back with unreadable cookies
+  # (S6 run 35928548323). These cookies are only a session with our own loopback server, inside the user's
+  # private data folder, and Phase 1's desktop sign-in re-creates them silently. Turn it back ON together with
+  # real signing (Developer ID + DPAPI-backed Windows is fine either way).
+  enableCookieEncryption: false
   enableNodeOptionsEnvironmentVariable: false
   enableNodeCliInspectArguments: false
   onlyLoadAppFromAsar: true

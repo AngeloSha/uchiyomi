@@ -74,6 +74,31 @@ async function quitApp() {
   return { exit: q.code, ms: Date.now() - t0, before: before.length, left: left.map((p) => ({ pid: p.pid, role: p.role, name: p.name })) };
 }
 
+/** Chromium's cookie DB for our origin, straight from disk (sqlite3 CLI, present on the macOS/Linux runners). */
+function cookieDb() {
+  const db = join(root, 'electron', 'Cookies');
+  if (!existsSync(db)) return { missing: db };
+  const r = runSync('sqlite3', ['-readonly', db, "select name, length(value), length(encrypted_value), creation_utc, last_update_utc, expires_utc from cookies where host_key like '%127.0.0.1%'"]);
+  return r.code === 0 ? r.out.trim().split('\n') : { error: r.out.slice(0, 300) };
+}
+
+/** Every /auth/refresh the bff answered, with its status, from the bff's pino log. */
+function refreshLog() {
+  try {
+    const lines = readFileSync(join(root, 'logs', 'bff.log'), 'utf8').split('\n');
+    const reqs = new Map();
+    const out = [];
+    for (const l of lines) {
+      let j; try { j = JSON.parse(l); } catch { continue; }
+      if (j.req?.url === '/auth/refresh' || j.req?.url === '/api/setup' || j.req?.url === '/auth/login') reqs.set(j.reqId, j.req.url);
+      else if (j.res && reqs.has(j.reqId)) out.push(`${new Date(j.time).toISOString().slice(11, 23)} ${reqs.get(j.reqId)} ${j.res.statusCode}`);
+    }
+    return out.slice(-40);
+  } catch (e) {
+    return [String(e)];
+  }
+}
+
 /** Cut the page AND its service worker off the network, reload, and look at what rendered. */
 async function offlineCheck(browser, page, origin, tag) {
   const cdp = await page.createCDPSession();
@@ -258,8 +283,14 @@ try {
   console.log(`  idle RSS: ${JSON.stringify(rss)}`);
   results.firstLaunch = { firstPaint };
 
+  // What the session looks like right before Quit, and what Chromium actually wrote to disk after it: the
+  // relaunch check below depends on the refresh cookie surviving, and macOS lost it in runs 3 and 4.
+  const jar = async (p) => (await (await p.createCDPSession()).send('Network.getAllCookies')).cookies
+    .filter((c) => /127\.0\.0\.1/.test(c.domain)).map((c) => ({ name: c.name, expires: Math.round(c.expires), len: String(c.value).length, tail: String(c.value).slice(-6) }));
+  results.cookiesBeforeQuit = await jar(page);
   await run1.browser.disconnect();
   const q = await quitApp();
+  results.cookieDbAfterQuit = cookieDb();
   check('Quit stops every process (ordered shutdown)', q.exit === 0 && q.left.length === 0, q);
 
   // ------------------------------------------------------------ second launch: signed in, straight to the library
@@ -269,8 +300,9 @@ try {
   const paint2 = await paintTimes(run2.page, t2);
   const cold = { ...paint2, seededSeriesVisibleSinceSpawn: visible ? visible - t2 : null, url: run2.page.url() };
   results.coldStart = cold;
+  results.cookiesAtRelaunch = await jar(run2.page);
   const still = await run2.page.evaluate(() => !document.querySelector('input[type=password]'));
-  check('relaunch opens signed in (cookies survived a restart)', still, cold);
+  check('relaunch opens signed in (cookies survived a restart)', still, { ...cold, cookiesAtRelaunch: results.cookiesAtRelaunch });
   await shot(run2.page, 's8-relaunch');
   const appLog = readFileSync(join(root, 'logs', 'desktop.log'), 'utf8');
   // The shell's own timeline for both launches (ms from its main.js start; supervisor marks relative to itself).
@@ -279,6 +311,9 @@ try {
   await run2.browser.disconnect();
   const q2 = await quitApp();
   results.quit2 = q2;
+  results.cookieDbAfterQuit2 = cookieDb();
+  // The server's side of the same story: every /auth/refresh and its status, in order.
+  results.refreshLog = refreshLog();
 } catch (e) {
   fails.push(`error: ${e.message}`);
   results.error = String(e.stack || e);
