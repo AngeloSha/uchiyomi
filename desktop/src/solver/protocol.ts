@@ -68,6 +68,12 @@ export interface SolverCookie {
   secure: boolean;
   session: boolean;
   sameSite: 'None' | 'Lax' | 'Strict';
+  /**
+   * Selenium's name for the expiry (integer seconds), which is what FlareSolverr 3.5.2 actually returns
+   * (measured: its cookies carry domain/expiry/httpOnly/name/path/sameSite/secure/value). Sent alongside the
+   * design's CDP-shaped `expires`, so a client written against either shape reads a date. Absent on session cookies.
+   */
+  expiry?: number;
 }
 
 export interface SolveResult {

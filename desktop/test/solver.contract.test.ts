@@ -15,7 +15,7 @@ import { join } from 'node:path';
 import { startSolverServer, type SolverServer } from '../src/solver/server';
 import { MSG, SolveError, pySeconds, type SolverBackend, type SolveRequest, type SolveResult } from '../src/solver/protocol';
 import * as detect from '../src/solver/detect';
-import { chromeShaped, parseUaMode } from '../src/solver/userAgent';
+import { chromeShaped, parseUaMode, greaseBrands, secChUa, chPlatform } from '../src/solver/userAgent';
 
 const FIX = join(__dirname, 'fixtures');
 const REQ = JSON.parse(readFileSync(join(FIX, 'solver-requests.json'), 'utf8'));
@@ -428,4 +428,12 @@ test('UA mode B removes the Electron and app tokens and nothing else', () => {
   assert.equal(chromeShaped(chromeShaped(win)), chromeShaped(win));
   assert.equal(parseUaMode('A'), 'native');
   assert.equal(parseUaMode('b'), 'chrome');
+});
+
+test('Sec-CH-UA the solver adds matches what Electron 44 (Chromium 152) reports in navigator.userAgentData', () => {
+  // Measured through the solver on an HTTPS page: brands [{"Not?A_Brand","24"},{"Chromium","152"}], and no
+  // Sec-CH-UA request headers at all from Electron itself (httpbin.org/headers).
+  assert.deepEqual(greaseBrands(152), [{ brand: 'Not?A_Brand', version: '24' }, { brand: 'Chromium', version: '152' }]);
+  assert.equal(secChUa(greaseBrands(152)), '"Not?A_Brand";v="24", "Chromium";v="152"');
+  assert.deepEqual([chPlatform('win32'), chPlatform('darwin'), chPlatform('linux')], ['Windows', 'macOS', 'Linux']);
 });

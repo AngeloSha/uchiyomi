@@ -255,7 +255,8 @@ app.whenReady().then(async () => {
     assert.equal(r.j.solution.headers, undefined);
     const c = r.j.solution.cookies.find((x: any) => x.name === 'cf_clearance');
     assert.ok(c, 'cf_clearance');
-    assert.deepEqual(Object.keys(c), ['name', 'value', 'domain', 'path', 'expires', 'size', 'httpOnly', 'secure', 'session', 'sameSite']);
+    assert.deepEqual(Object.keys(c), ['name', 'value', 'domain', 'path', 'expires', 'size', 'httpOnly', 'secure', 'session', 'sameSite', 'expiry']);
+    assert.equal(c.expiry, Math.floor(c.expires));
     assert.equal(c.domain, '127.0.0.1');
     assert.ok(c.expires > Date.now() / 1000);
     assert.equal(c.session, false);

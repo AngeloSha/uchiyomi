@@ -12,9 +12,13 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { rebase } from '../../bff/src/lib/sources/slug';
 
-type Variant = 'FS' | 'A' | 'B';
-const VARIANTS: Variant[] = ['FS', 'A', 'B'];
-const target: Record<Variant, string> = { FS: process.env.FS!, A: process.env.A!, B: process.env.B! };
+// Round 1: FS, A, B. A later round can compare new solver builds without touching FlareSolverr again:
+//   VARIANTS='{"A2":"<url>","B2":"<url>"}'  INPUT=<round-1 results.json> (reuse its URLs)  SKIP='{"site":["step"]}'
+type Variant = string;
+const target: Record<Variant, string> = process.env.VARIANTS ? JSON.parse(process.env.VARIANTS) : { FS: process.env.FS!, A: process.env.A!, B: process.env.B! };
+const VARIANTS: Variant[] = Object.keys(target);
+const SKIP: Record<string, string[]> = JSON.parse(process.env.SKIP || '{}');
+const PRIOR: Record<string, Record<string, string | null>> = process.env.INPUT ? JSON.parse(readFileSync(process.env.INPUT, 'utf8')).input ?? {} : {};
 const sites: Array<{ engine: string; id: string; name: string; base: string }> = JSON.parse(readFileSync(process.env.SITES!, 'utf8'));
 const known: Record<string, string> = JSON.parse(process.env.KNOWN_SERIES || '{}');
 const OUT = process.env.OUT!;
@@ -64,6 +68,7 @@ const success = (op: string, r: OpResult): boolean => {
 
 (async () => {
   const runners = Object.fromEntries(VARIANTS.map((v) => [v, new Runner(v)])) as Record<Variant, Runner>;
+  if (!VARIANTS.every((v) => target[v])) throw new Error('every variant needs a target url');
   await Promise.all(VARIANTS.map((v) => runners[v].ready));
   const rows: any[] = [];
   const stopped: Record<string, Set<Variant>> = {};
@@ -73,18 +78,21 @@ const success = (op: string, r: OpResult): boolean => {
     stopped[s.id] = new Set();
     input[s.id] = {};
     if (known[s.id]) input[s.id].series = rebase(known[s.id], s.base.replace(/\/$/, ''));
+    Object.assign(input[s.id], PRIOR[s.id] ?? {});
   }
   // Each site's 3 page requests, then the image follow-up.
   const steps = (id: string) => known[id] ? ['series', 'chapters', 'pages', 'image'] : ['latest', 'series', 'chapters'];
   const started = new Date().toISOString();
 
   for (let stepIdx = 0; stepIdx < 4; stepIdx++) {
-    for (let slot = 0; slot < 3; slot++) {
+    for (let slot = 0; slot < Math.max(3, VARIANTS.length); slot++) {
       for (const s of sites) {
         const op = steps(s.id)[stepIdx];
         if (!op || siteStopped.has(s.id)) continue;
         // Rotate who goes first per step, so no variant is always the one meeting a cold challenge.
-        const v = VARIANTS[(slot + stepIdx) % 3];
+        if (slot >= VARIANTS.length) continue;
+        const v = VARIANTS[(slot + stepIdx) % VARIANTS.length];
+        if (SKIP[s.id]?.includes(op)) { rows.push({ site: s.id, step: op, variant: v, skipped: 'skipped in this round (SKIP)' }); continue; }
         if (stopped[s.id].has(v)) { rows.push({ site: s.id, step: op, variant: v, skipped: 'stopped after a refusal' }); continue; }
         const arg = op === 'latest' ? undefined : op === 'series' ? input[s.id].series : op === 'chapters' ? input[s.id].series : op === 'pages' ? input[s.id].chapter : input[s.id].image;
         if (op !== 'latest' && !arg) { rows.push({ site: s.id, step: op, variant: v, skipped: 'no input (earlier step failed for every variant)' }); continue; }
@@ -104,7 +112,7 @@ const success = (op: string, r: OpResult): boolean => {
         if (ok && op === 'pages' && !input[s.id].image) input[s.id].image = r.result.first;
         if (why && op !== 'image') {
           stopped[s.id].add(v);
-          if (stopped[s.id].size === 3) siteStopped.add(s.id);
+          if (stopped[s.id].size === VARIANTS.length) siteStopped.add(s.id);
         }
         writeFileSync(OUT, JSON.stringify({ started, rows }, null, 1));
       }

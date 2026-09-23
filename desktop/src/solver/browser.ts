@@ -118,6 +118,7 @@ export function toSolverCookie(c: Cookie): SolverCookie {
     secure: !!c.secure,
     session,
     sameSite,
+    ...(session ? {} : { expiry: Math.floor(Number(c.expirationDate)) }),
   };
 }
 
@@ -328,7 +329,9 @@ export class ElectronSolverBackend implements SolverBackend {
 
   private async capture(s: Slot, what: 'before-click' | 'after-click' | 'human-check', host: string): Promise<void> {
     if (!this.o.onCapture || s.win.isDestroyed()) return;
-    try { this.o.onCapture(what, host, (await s.win.webContents.capturePage()).toPNG()); } catch { /* diagnostics only */ }
+    // Bounded: capturePage() can wait ~30 s for a frame when the page navigates underneath it (measured).
+    const img = await Promise.race([s.win.webContents.capturePage().catch(() => null), sleep(1500).then(() => null)]);
+    if (img) { try { this.o.onCapture(what, host, img.toPNG()); } catch { /* diagnostics only */ } }
   }
 
   /**
@@ -370,11 +373,13 @@ export class ElectronSolverBackend implements SolverBackend {
         this.o.log?.('verify-input', { kind, via: this.o.inputVia });
         return true;
       }
-      const r = await Promise.race([
+      // Where the box is: the Turnstile iframe's own box, found by DevTools (which pierces the CLOSED shadow
+      // root the challenge page hides it in); else the page-script guess next to cf-turnstile-response.
+      const r = (viaCdp ? await this.turnstileBox(dbg).catch(() => null) : null) ?? await Promise.race([
         (wc.executeJavaScriptInIsolatedWorld(1000, [{ code: TURNSTILE_RECT_SOURCE }]) as Promise<any>).catch(() => null),
         sleep(2000).then(() => null),
       ]);
-      if (!r) return false;
+      if (!r) { this.o.log?.('verify-input', { kind, via: this.o.inputVia, target: 'none found' }); return false; }
       const x = Math.round(r.x + Math.min(30, r.w / 2));
       const y = Math.round(r.y + r.h / 2);
       // Arrive from somewhere else in a few steps, like a hand would, rather than teleporting onto the box.
@@ -396,6 +401,27 @@ export class ElectronSolverBackend implements SolverBackend {
     } finally {
       if (viaCdp && dbg.isAttached()) { try { dbg.detach(); } catch { /* already gone */ } }
     }
+  }
+
+  /** The challenges.cloudflare.com iframe's border box in page coordinates, via DOM.getDocument(pierce). */
+  private async turnstileBox(dbg: Electron.Debugger): Promise<{ x: number; y: number; w: number; h: number; tag: string; id: string } | null> {
+    const { root } = await dbg.sendCommand('DOM.getDocument', { depth: -1, pierce: true }) as { root: any };
+    let hit: any = null;
+    const walk = (n: any) => {
+      if (hit || !n) return;
+      if (n.nodeName === 'IFRAME') {
+        const a: string[] = n.attributes || [];
+        const src = a[a.indexOf('src') + 1] || '';
+        if (a.includes('src') && /challenges\.cloudflare\.com/.test(src)) { hit = n; return; }
+      }
+      for (const c of [...(n.children || []), ...(n.shadowRoots || []), ...(n.contentDocument ? [n.contentDocument] : [])]) walk(c);
+    };
+    walk(root);
+    if (!hit) return null;
+    const { model } = await dbg.sendCommand('DOM.getBoxModel', { backendNodeId: hit.backendNodeId }) as { model: { border: number[]; width: number; height: number } };
+    const [x1, y1] = model.border;
+    if (!model.width || !model.height) return null;
+    return { x: x1, y: y1, w: model.width, h: model.height, tag: 'IFRAME', id: 'challenges.cloudflare.com' };
   }
 
   /** §3.5 step 2. Returns true when the window was actually shown. */
@@ -514,7 +540,7 @@ export class ElectronSolverBackend implements SolverBackend {
             ? el >= this.o.clickAfterMs + d.verifyAttempts.length * this.o.clickEveryMs
             : !d.clicked && el >= this.o.clickAfterMs;
           if (due) {
-            const kind = this.o.verifyInput === 'both' ? (d.verifyAttempts.length % 2 ? 'mouse' : 'keyboard') : this.o.verifyInput;
+            const kind = this.o.verifyInput === 'both' ? (d.verifyAttempts.length % 2 ? 'keyboard' : 'mouse') : this.o.verifyInput;
             d.clicked = true;
             d.verifyAttempts.push({ atMs: el, kind });
             if (d.verifyAttempts.length === 1) await this.capture(slot, 'before-click', target.host);

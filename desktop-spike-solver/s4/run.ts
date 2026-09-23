@@ -41,11 +41,11 @@ async function call(base: string, body: Record<string, unknown>) {
         lastHit.set(host, Date.now());
         const row = {
           i, url, solver: name, at: new Date().toISOString(), first, second,
-          firstDetail: d1 && { challenged: d1.challenged, reason: d1.challengeReason, solveMs: d1.solveMs, totalMs: d1.totalMs, firstLoadMs: d1.firstLoadMs, clicked: d1.clicked, wouldShow: d1.wouldShow, statuses: d1.statuses, peakRssKB: d1.peakRssKB, spawned: d1.spawned, peakProcs: d1.peakProcs },
+          firstDetail: d1 && { challenged: d1.challenged, reason: d1.challengeReason, attempts: d1.verifyAttempts, solveMs: d1.solveMs, totalMs: d1.totalMs, firstLoadMs: d1.firstLoadMs, clicked: d1.clicked, wouldShow: d1.wouldShow, statuses: d1.statuses, peakRssKB: d1.peakRssKB, spawned: d1.spawned, peakProcs: d1.peakProcs },
           secondDetail: d2 && { challenged: d2.challenged, solveMs: d2.solveMs, totalMs: d2.totalMs, statuses: d2.statuses, reusedWindow: d2.reusedWindow },
         };
         rows.push(row);
-        console.log(`${row.at} ${name} ${host} #${i} first: ${(first as any).message ?? (first as any).error} ${(first as any).ms}ms solve=${d1?.solveMs} statuses=${JSON.stringify(d1?.statuses)} clicked=${d1?.clicked} rss=${d1?.peakRssKB} | second: ${(second as any).message ?? (second as any).error} ${(second as any).ms}ms statuses=${JSON.stringify(d2?.statuses)}`);
+        console.log(`${row.at} ${name} ${host} #${i} first: ${(first as any).message ?? (first as any).error} ${(first as any).ms}ms solve=${d1?.solveMs} statuses=${JSON.stringify(d1?.statuses)} attempts=${JSON.stringify((d1?.verifyAttempts || []).map((a: any) => [Math.round(a.atMs / 1000), a.kind[0]]))} rss=${d1?.peakRssKB} | second: ${(second as any).message ?? (second as any).error} ${(second as any).ms}ms statuses=${JSON.stringify(d2?.statuses)}`);
         writeFileSync(OUT, JSON.stringify(rows, null, 1));
       }
     }
