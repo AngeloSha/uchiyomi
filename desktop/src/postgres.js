@@ -28,6 +28,9 @@ const MAJOR = '16';
 const WIN = process.platform === 'win32';
 
 const exe = (name) => (WIN ? `${name}.exe` : name);
+// Windows' own tools by absolute path: a PATH that puts Git's usr/bin first (any shell-launched start) resolves
+// `whoami` to the Unix one, which ignores /user and silently skipped the ACL lock-down in CI run 2.
+const sys32 = (name) => path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', `${name}.exe`);
 const nonAscii = (s) => /[^\x20-\x7e]/.test(s);
 
 /**
@@ -72,7 +75,7 @@ function isAlive(pid) {
 async function isPostgresPid(pid) {
   try {
     if (WIN) {
-      const r = await run('tasklist', ['/FI', `PID eq ${pid}`, '/FO', 'CSV', '/NH'], { timeoutMs: 15_000 });
+      const r = await run(sys32('tasklist'), ['/FI', `PID eq ${pid}`, '/FO', 'CSV', '/NH'], { timeoutMs: 15_000 });
       if (r.code !== 0) return null;
       if (/No tasks|INFO:/i.test(r.out) || !r.out.trim()) return false;
       return /^"postgres\.exe"/im.test(r.out);
@@ -176,10 +179,10 @@ class Postgres {
   async lockDown(dir) {
     if (!WIN) return;
     try {
-      const who = await run('whoami', ['/user', '/fo', 'csv', '/nh'], { timeoutMs: 15_000 });
+      const who = await run(sys32('whoami'), ['/user', '/fo', 'csv', '/nh'], { timeoutMs: 15_000 });
       const sid = (who.out.match(/"(S-1-[0-9-]+)"/) || [])[1];
       if (!sid) throw new Error(`no SID in: ${who.out}`);
-      const r = await run('icacls', [dir, '/inheritance:r', '/grant:r', `*${sid}:(OI)(CI)F`, '*S-1-5-18:(OI)(CI)F', '*S-1-5-32-544:(OI)(CI)F'], { timeoutMs: 30_000 });
+      const r = await run(sys32('icacls'), [dir, '/inheritance:r', '/grant:r', `*${sid}:(OI)(CI)F`, '*S-1-5-18:(OI)(CI)F', '*S-1-5-32-544:(OI)(CI)F'], { timeoutMs: 30_000 });
       if (r.code !== 0) throw new Error(r.out);
       this.log.info('postgres: fallback dir restricted to this user', { dir, sid });
     } catch (e) {

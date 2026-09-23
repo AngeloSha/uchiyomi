@@ -16,6 +16,12 @@ const exe = appExe();
 const only = process.env.S2_ONLY ? process.env.S2_ONLY.split(',') : null;
 const want = (k) => !only || only.includes(k);
 
+/** The line that says why initdb stopped, not the banner it printed first. */
+const initdbWhy = (err) => {
+  const lines = String(err || '').split('\n');
+  return (lines.filter((l) => /^initdb: error|could not|invalid binary/i.test(l)).pop() || lines[0] || '').slice(0, 300);
+};
+
 function pgLogTail(root, n = 1500) {
   for (const f of [join(root, 'logs', 'postgres.log')]) {
     try { return readFileSync(f, 'utf8').slice(-n); } catch { /* none */ }
@@ -30,10 +36,13 @@ if (want('i')) {
   const d = smokeDigest(s);
   let who = {};
   if (WIN) {
-    const groups = runSync('whoami', ['/groups']).out;
+    const sys32 = (n) => join(process.env.SystemRoot || 'C:\\Windows', 'System32', `${n}.exe`);
+    const groups = runSync(sys32('whoami'), ['/groups']).out;
     const lua = runSync('reg', ['query', 'HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\System', '/v', 'EnableLUA']).out;
     who = {
-      user: runSync('whoami', []).out.trim(),
+      user: runSync(sys32('whoami'), []).out.trim(),
+      isInRoleAdministrators: runSync('powershell.exe', ['-NoProfile', '-Command', "([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole('Administrators')"]).out.trim(),
+      localAdmins: runSync(sys32('net'), ['localgroup', 'Administrators']).out.split(/\r?\n/).filter((l) => /runneradmin/i.test(l)).join(' '),
       elevated: /S-1-16-12288/.test(groups),
       administratorsGroup: /S-1-5-32-544/.test(groups),
       enableLUA: (/EnableLUA\s+REG_DWORD\s+(0x[0-9a-f]+)/i.exec(lua) || [])[1] || lua.trim().slice(0, 200),
@@ -68,19 +77,23 @@ if (WIN && want('ii')) {
   const a = smokeDigest(smoke(exe2, join(base, 'data-nofallback'), ['--no-ascii-fallback']));
   const initdbFailed = /initdb failed|PG_INITDB_FAILED/.test(a.error || '');
   record('S2-ii-nonascii-nofallback', initdbFailed ? 'EXPECTED' : a.ok ? 'INFO' : 'FAIL',
-    initdbFailed ? `reproduced: initdb fails under "${base}" (ANSI code page ${acp}): ${(a.error || '').split('\n').find((l) => /initdb|could not|invalid|error/i.test(l))?.slice(0, 300)}`
+    initdbFailed ? `reproduced: initdb fails under "${base}" (ANSI code page ${acp}): ${initdbWhy(a.error)}`
       : a.ok ? `NOT reproduced: initdb worked under "${base}" with the fallback off (ANSI code page ${acp})` : `failed, but not in initdb: ${(a.error || '').slice(0, 400)}`,
     { base, acp, smoke: a });
 
   // b) fallback ON, same install, fresh data dir.
   const bRoot = join(base, 'data');
   const b = smokeDigest(smoke(exe2, bRoot));
-  const bOk = b.ok && b.bffBackup?.pass;
+  const bOkRun = b.ok && b.bffBackup?.pass;
   let acl = '';
-  if (b.fallback?.base) acl = runSync('icacls', [b.fallback.base]).out.trim().slice(0, 600);
+  if (b.fallback?.base) acl = runSync(join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'icacls.exe'), [b.fallback.base]).out.trim().slice(0, 800);
+  // The cluster left %LOCALAPPDATA% (private to this user) for %ProgramData% (readable by every local user by
+  // inheritance), so the lock-down is part of the pass condition, not a nicety.
+  const aclPrivate = !!acl && !/BUILTIN\\Users|Everyone|Authenticated Users/i.test(acl);
+  const bOk = bOkRun && aclPrivate;
   record('S2-ii-nonascii-fallback', bOk ? 'PASS' : 'FAIL',
-    `binaries+data under "${base}", fallback ON: ${bOk ? 'works' : 'FAILS'}; cluster at ${b.fallback?.base || '(no fallback used)'} (binaries copied: ${b.fallback?.copied}); bff backup ${b.bffBackup?.files?.['db.sql.gz']} B into the non-ASCII BACKUP_DIR; 8.3 short path "${shortName}" (${eightDot3}); app copy ${copyMs} ms`,
-    { base, shortName, eightDot3, acl, smoke: b });
+    `binaries+data under "${base}", fallback ON: ${bOkRun ? 'works' : 'FAILS'}, fallback dir private to this user: ${aclPrivate}; cluster at ${b.fallback?.base || '(no fallback used)'} (binaries copied: ${b.fallback?.copied}); bff backup ${b.bffBackup?.files?.['db.sql.gz']} B into the non-ASCII BACKUP_DIR; 8.3 short path "${shortName}" (${eightDot3}); app copy ${copyMs} ms`,
+    { base, shortName, eightDot3, acl, aclPrivate, smoke: b });
 
   // c) which part of the path matters: ASCII binaries, non-ASCII DATA only, fallback off -- once with characters
   //    the Windows-1252 code page has (Jösé) and once with ones it does not (名前).
@@ -89,7 +102,7 @@ if (WIN && want('ii')) {
     rmSync(dirname(root), { recursive: true, force: true });
     const c = smokeDigest(smoke(exe, root, ['--no-ascii-fallback']));
     record(`S2-ii-dataonly-${tag}`, 'INFO',
-      `binaries ASCII, data under "${root}", fallback off: ${c.ok ? 'works' : `fails: ${(c.error || '').split('\n').find((l) => /initdb|failed|error/i.test(l))?.slice(0, 240)}`}`,
+      `binaries ASCII, data under "${root}", fallback off: ${c.ok ? 'works' : `fails: ${initdbWhy(c.error)}`}`,
       { root, smoke: c });
     rmSync(dirname(root), { recursive: true, force: true });
   }
