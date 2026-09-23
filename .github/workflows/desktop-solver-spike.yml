@@ -1,0 +1,75 @@
+# Uchiyomi Desktop, Phase 0 spike track C: the desktop Cloudflare solver (desktop/src/solver/).
+# Proves the FlareSolverr-compatible contract under plain Node (both clients' real request shapes), then runs
+# the solver in real Electron hidden windows against a local fixture site on each desktop OS -- the part the
+# Linux host cannot show: how Windows and macOS schedule a show:false window. The live-site comparison with
+# FlareSolverr (S3) is run on the owner's host, not here: a GitHub runner's IP is not the owner's.
+name: desktop-solver-spike
+
+on:
+  push:
+    branches: [spike/desktop-solver]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-solver-spike-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  solver:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-15, macos-15-intel]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash
+        working-directory: desktop-spike-solver
+    env:
+      electron_config_cache: ${{ github.workspace }}/.electron-cache
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: desktop-spike-solver/package-lock.json
+      - uses: actions/cache@v4
+        with:
+          path: .electron-cache
+          key: electron-44.4.5-${{ runner.os }}-${{ runner.arch }}
+      - run: npm ci --no-audit --no-fund
+      - run: node node_modules/electron/install.js
+      - run: npm run build
+      - name: Contract tests (plain Node, fake browser, the bff's real client + Suwayomi's DTOs)
+        run: node --import tsx --test --test-reporter=spec --test-timeout=30000 ../desktop/test/solver.contract.test.ts 2>&1 | tee contract.log
+      - name: Linux only - let Chromium use its user-namespace sandbox (Ubuntu 24.04 restricts it via AppArmor)
+        if: runner.os == 'Linux'
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      - name: Electron fixture test, hidden windows (show:false + backgroundThrottling:false)
+        run: |
+          if [ "$RUNNER_OS" = Linux ]; then X="xvfb-run -a -s '-screen 0 1920x1080x24'"; else X=; fi
+          eval "$X npx electron dist/desktop/test/solver.electron.test.js" 2>&1 | tee electron-hidden.log
+          grep -q -E '^[0-9]+/[0-9]+ passed' electron-hidden.log
+          ! grep -q '^✖' electron-hidden.log
+      - name: Electron fixture test, off-screen visible windows (S4's named fallback, measured for comparison)
+        continue-on-error: true
+        env:
+          SOLVER_WINDOW_MODE: offscreen
+        run: |
+          if [ "$RUNNER_OS" = Linux ]; then X="xvfb-run -a -s '-screen 0 1920x1080x24'"; else X=; fi
+          eval "$X npx electron dist/desktop/test/solver.electron.test.js" 2>&1 | tee electron-offscreen.log
+      - name: Summary
+        if: always()
+        run: |
+          { echo "### ${{ matrix.os }}"; echo '```'; grep -h -E '^(✔|✖|MEASURE|[0-9]+/[0-9]+ passed|ℹ (pass|fail))' contract.log electron-hidden.log electron-offscreen.log 2>/dev/null || true; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: solver-spike-${{ matrix.os }}
+          path: desktop-spike-solver/*.log
+          retention-days: 7
