@@ -16,6 +16,9 @@
 //        System.getenv() on Windows is UTF-16 and arrives intact;
 //      - the engine's basic-auth credentials, which would otherwise be visible in any process listing.
 //    A value already given with -D wins, so the shim never overrides an explicit flag.
+//    On Windows the tmpdir must still be an ASCII path: JNA extracts its DLL there and HotSpot loads native
+//    libraries through the ANSI code page too (measured: UnsatisfiedLinkError on "…\Jösé ??\…\jna….dll").
+//    The runtime folder itself must be ASCII as well (java.exe under "Jösé 名前": "could not find java.dll").
 //
 // 3. It invokes the real main class. It is read from the Main-Class of the Suwayomi jar's manifest (for
 //    v2.3.2243 that is `suwayomi.tachidesk.MainKt`); `-Duchiyomi.engine.mainClass=` overrides it.

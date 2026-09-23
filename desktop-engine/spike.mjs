@@ -322,7 +322,7 @@ async function main() {
     const b64 = (await powershell(`[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes((New-Object -ComObject Scripting.FileSystemObject).GetFolder('${na.replace(/'/g, "''")}').ShortPath))`)).trim();
     const short = Buffer.from(b64, 'base64').toString('utf8');
     results.shortPath = short;
-    line('INFO', 'short-path', `8.3 short path of "${NON_ASCII}": ${short || '(none)'}${short && /^[\x20-\x7e]+$/.test(short) ? ' (ASCII)' : ''}`);
+    line('INFO', 'short-path', `8.3 short path of "${NON_ASCII}": ${!short || short === na ? `none (GetFolder().ShortPath returned the long path: this volume does not generate 8.3 names)` : `${short}${/^[\x20-\x7e]+$/.test(short) ? ' (ASCII)' : ''}`}`);
     if (short && /^[\x20-\x7e]+$/.test(short) && short !== na) {
       variants.push({ id: 'nonascii-runtime-shortpath', verdictCounts: false, rt: path.join(na, 'runtime'), rtLaunch: path.join(short, 'runtime'), root: path.join(na, 'engine-sp'), tmp: asciiTmp('na-sp'), mode: 'env', note: `the non-ASCII runtime launched through its 8.3 alias ${short}` });
     }
@@ -431,6 +431,19 @@ async function main() {
         results.kcefRestart = { ready: r2.ready, readyMs: r2.ms, died: !!e2, exit: e2 && { code: e2.code, signal: e2.signal }, diedAfterReadyMs: e2 && r2.ready ? e2.at - (h2.t0 + r2.ms) : null, cefLines };
         line('INFO', 'kcef-restart', `restart with KCEF already installed: ${r2.ready ? `ready in ${(r2.ms / 1000).toFixed(1)} s` : `never ready (${r2.reason})`}; ${e2 ? `DIED AGAIN ${results.kcefRestart.diedAfterReadyMs ?? '?'} ms after ready, exit code ${e2.code} signal ${e2.signal}` : 'alive 60 s later'}; last CEF log lines: ${cefLines.join(' | ')}`);
         await stopEngine(h2, { mode: 'graceful' });
+        if (e2 && process.platform === 'darwin') {
+          // Is it the headless JVM? One more start with KCEF installed and -Djava.awt.headless=true dropped.
+          const l3 = buildLaunch({ runtimeDir: rtAscii, rootDir: root, port, fsUrl: stub.url, ...creds, pathMode: 'cmdline', fsQuote: false, authModeValue: 'basic_auth', kcef: true, isolatePrefs: false, headless: false });
+          const h3 = startEngine(l3, { logFile: path.join(WORK, 'engine-design-literal-nonheadless.log') });
+          const r3 = await waitReady(h3, port, { timeoutMs: 180000 });
+          const t3 = Date.now();
+          while (Date.now() - t3 < 60000 && !h3.done) await sleep(500);
+          const e3 = h3.done ? await h3.exited : null;
+          const kids3 = e3 ? [] : await children(h3.pid);
+          results.kcefNonHeadless = { ready: r3.ready, died: !!e3, exit: e3 && { code: e3.code, signal: e3.signal }, children: kids3 };
+          line('INFO', 'kcef-nonheadless', `same rootDir, KCEF installed, WITHOUT -Djava.awt.headless=true: ${r3.ready ? `ready in ${(r3.ms / 1000).toFixed(1)} s` : `never ready (${r3.reason})`}; ${e3 ? `died, exit code ${e3.code} signal ${e3.signal}` : `alive 60 s later, children ${kids3.join('; ') || 'none'}`}`);
+          await stopEngine(h3, { mode: 'graceful' });
+        }
       }
     }
     await stopEngine(hh, { mode: 'graceful' });

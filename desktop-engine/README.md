@@ -40,10 +40,20 @@ jre/bin/java -Xmx768m -XX:+UseSerialGC -Djava.awt.headless=true
   dev.uchiyomi.EngineShim                                            (spawned with windowsHide: true)
 ```
 
-Two traps the spike found in the design's layout and flags:
+Traps the spike found in the design's layout and flags (evidence: the desktop-engine-spike runs):
 
 - **The jar must stay in `bin/`.** Next to `jre/`, ClassGraph treats it as part of the JRE and skips it; the
   GraphQL schema then has no classes and Suwayomi dies at boot (`InvalidPackagesException`).
 - **Set repos after reading them.** `extensionRepos` is a deprecated `MigratedConfigValue`; when
   `setSettings(extensionRepos)` is the first access after boot, the change is echoed back but never reaches
   `extensionStores`/`server.conf`. The bff's admin route reads first, so it works; `addExtensionStore` avoids it.
+- **Windows cannot take a non-ASCII path on the java command line, nor run java from one.** The launcher
+  reads its arguments through the ANSI code page (`-D…rootDir=…\Jösé 名前\…` arrives as `Jösé ??`) and a
+  runtime under such a folder fails with `could not find java.dll`. Pass rootDir through the environment
+  (the shim does) and keep the runtime on an ASCII path.
+- **…and not a non-ASCII `java.io.tmpdir` either.** JNA (used at every boot by the app-dirs library) extracts
+  its DLL there and HotSpot cannot load it (`UnsatisfiedLinkError … Jösé ??\…\jna….dll`). Point
+  `UCHIYOMI_ENGINE_TMP_DIR` at the same ASCII fallback folder the design already needs for Postgres.
+- **Keep `kcefEnabled=false`.** Left at Suwayomi's default the engine downloads a 226-261 MB JetBrains
+  runtime with CEF (490-546 MiB on disk) through the unauthenticated GitHub API (403 when rate-limited), and
+  on macOS it then dies in `cef_initialize` (SIGTRAP) on every start.

@@ -43,7 +43,7 @@ export function freePort() {
  */
 export function buildLaunch({
   runtimeDir, rootDir, port, fsUrl, user, pass, tmpDir, xmx = '768m', kcef = false,
-  pathMode = 'env', fsQuote = true, authModeValue = 'BASIC_AUTH', isolatePrefs = true, extraJvm = [], extraProps = {},
+  pathMode = 'env', fsQuote = true, authModeValue = 'BASIC_AUTH', isolatePrefs = true, headless = true, extraJvm = [], extraProps = {},
 }) {
   const win = process.platform === 'win32';
   const java = path.join(runtimeDir, 'jre', 'bin', win ? 'java.exe' : 'java');
@@ -80,7 +80,7 @@ export function buildLaunch({
     if (tmpDir) extraJvm = [...extraJvm, `-Djava.io.tmpdir=${tmpDir}`];
   }
   const args = [
-    `-Xmx${xmx}`, '-XX:+UseSerialGC', '-Djava.awt.headless=true',
+    `-Xmx${xmx}`, '-XX:+UseSerialGC', ...(headless ? ['-Djava.awt.headless=true'] : []),
     ...(isolatePrefs ? ['-Djava.util.prefs.PreferencesFactory=dev.uchiyomi.IsolatedPreferences$Factory'] : []), ...extraJvm,
     '-cp', cp,
     ...Object.entries(props).map(([k, v]) => `${P}${k}=${v}`),
