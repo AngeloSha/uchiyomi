@@ -1,0 +1,9 @@
+# staged by scripts/stage.mjs and scripts/pg-dist.mjs -- build inputs, never source
+resources/
+# electron-builder output
+dist/
+# copied from web/public/icons by scripts/stage.mjs
+build/icon.png
+# CI evidence written by scripts/ci/*
+ci-out/
+.cache/

@@ -1,0 +1,52 @@
+# Uchiyomi Desktop packaging (spike). Windows: NSIS, per-user, x64. macOS: dmg + zip per arch, ad-hoc signed.
+appId: com.uchiyomi.desktop
+productName: Uchiyomi
+copyright: Copyright © 2026 Angelo Shaheen
+directories:
+  output: dist
+  buildResources: build
+# The shell itself (tiny, no runtime deps) goes into app.asar. The server, the web app and Postgres are
+# extraResources: outside asar, laid out on disk exactly like Dockerfile.aio (the bff resolves files relative
+# to its own dist/), and native modules load from real paths.
+files:
+  - src/**/*
+  - package.json
+extraResources:
+  # ONE entry rooted at resources/, on purpose. electron-builder's copy filter drops a node_modules directory at
+  # the ROOT of any copy source, whatever the patterns say (app-builder-lib/out/util/filter.js: relative ===
+  # "node_modules" -> false). Rooted at resources/bff that silently shipped a bff with no dependencies; rooted
+  # here, it is bff/node_modules and is copied.
+  - from: resources
+    to: .
+    filter:
+      - bff/**/*
+      - web/**/*
+      - pg/**/*
+asar: true
+electronFuses:
+  # utilityProcess keeps working with this off, and it closes "run this signed app as a plain Node".
+  runAsNode: false
+  enableCookieEncryption: true
+  enableNodeOptionsEnvironmentVariable: false
+  enableNodeCliInspectArguments: false
+  onlyLoadAppFromAsar: true
+  enableEmbeddedAsarIntegrityValidation: false
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+  artifactName: Uchiyomi-Setup-${version}.${ext}
+nsis:
+  oneClick: true
+  perMachine: false
+  deleteAppDataOnUninstall: false
+mac:
+  target: [dmg, zip]
+  category: public.app-category.books
+  # Unsigned for now (owner decision): ad-hoc only. Hardened runtime needs a Team ID to be useful and would
+  # enforce library validation against the ad-hoc framework, so it stays off until there is a Developer ID.
+  identity: "-"
+  hardenedRuntime: false
+  artifactName: Uchiyomi-${version}-${arch}.${ext}
+dmg:
+  artifactName: Uchiyomi-${version}-${arch}.${ext}
