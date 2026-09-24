@@ -583,10 +583,23 @@ export async function persistScan(): Promise<{ series: number; books: number; ms
           // proof was about the bytes that are no longer there.
           // Reintroduce by dropping the CASE (always NULL): "a scan that finds the same file leaves a
           // confirmed-short chapter confirmed" in repair.int.test.ts reads null.
+          //
+          // The title is the filename's, EXCEPT when the filename says nothing but the number and the row
+          // already holds a real name. A downloaded file is named `Chapter 12.cbz` whatever the source
+          // called it, and the chapter's own name is stored on the row afterwards (setBookMeta, and the
+          // listing heal in lib/seriesListing.ts). This upsert runs on every add, every sweep and every
+          // manual scan, so taking the filename unconditionally would wipe every name in the library each
+          // time anything anywhere was fetched. A file that carries a name of its own still wins.
+          // Reintroduce by going back to `title=EXCLUDED.title`: "a rescan keeps a chapter's stored name" in
+          // chapterNames.int.test.ts reads `Chapter 3`.
           await qq(
             `INSERT INTO lib_books (id, series_id, source, file, number, title, mtime, root) VALUES ${tuples.join(',')}
              ON CONFLICT (root, file) DO UPDATE SET series_id=EXCLUDED.series_id, number=EXCLUDED.number,
-               title=EXCLUDED.title, mtime=EXCLUDED.mtime, updated_at=now(), pruned_at=NULL,
+               title = CASE WHEN EXCLUDED.title ~* ('^(ch(apter|\\.)?|episode|ep\\.?)?\\s*0*' || EXCLUDED.number || '\\s*$')
+                             AND lib_books.title !~* ('^(ch(apter|\\.)?|episode|ep\\.?)?\\s*0*' || EXCLUDED.number || '\\s*$')
+                             AND btrim(lib_books.title) <> ''
+                            THEN lib_books.title ELSE EXCLUDED.title END,
+               mtime=EXCLUDED.mtime, updated_at=now(), pruned_at=NULL,
                short_confirmed_at = CASE WHEN lib_books.mtime <> EXCLUDED.mtime THEN NULL ELSE lib_books.short_confirmed_at END`,
             params,
           );
@@ -649,19 +662,6 @@ export async function setBookDates(folder: string, chapters: { number: number; p
 }
 
 /**
- * Stamp which group released the file on disk, and which adapter it came from, onto a series' books.
- *
- * Takes only the chapters that LANDED in this run, never the whole listing. The listing's chosen copy for
- * a number can change from one sweep to the next (a preferred group catches up, a block is added), and
- * stamping every listed number would relabel a file already on disk from group A as group B the moment
- * the choice moved -- while the file itself stayed A's. Same RAW-number match as setBookDates, for the
- * same reason: these numbers are the source's, not the override's.
- *
- * `missing` is the 1-based list of placeholder pages when the chapter was saved partial (lib/partial.ts),
- * and its absence writes NULL: a complete copy landing over a partial one -- a refetch, the completion
- * pass falling through to another source -- clears the mark in the same stamp that records who wrote it.
- */
-/**
  * The chapter's own name, when the source gave one worth keeping.
  *
  * A downloaded chapter's FILE is named from its number alone -- `Chapter 12.cbz`, for the reasons
@@ -681,6 +681,22 @@ export function chapterName(title: string | undefined | null, number: number): s
   return t;
 }
 
+/**
+ * Stamp which group released the file on disk, and which adapter it came from, onto a series' books.
+ *
+ * Takes only the chapters that LANDED in this run, never the whole listing. The listing's chosen copy for
+ * a number can change from one sweep to the next (a preferred group catches up, a block is added), and
+ * stamping every listed number would relabel a file already on disk from group A as group B the moment
+ * the choice moved -- while the file itself stayed A's. Same RAW-number match as setBookDates, for the
+ * same reason: these numbers are the source's, not the override's.
+ *
+ * `missing` is the 1-based list of placeholder pages when the chapter was saved partial (lib/partial.ts),
+ * and its absence writes NULL: a complete copy landing over a partial one -- a refetch, the completion
+ * pass falling through to another source -- clears the mark in the same stamp that records who wrote it.
+ *
+ * `title` is what the source called the chapter. It is written only when it is a real name (chapterName,
+ * above), so a copy whose source says only "Chapter 12" never replaces a name an earlier copy supplied.
+ */
 export async function setBookMeta(folder: string, landed: Array<{ number: number; scanlator?: string; source?: string; missing?: number[]; title?: string }>): Promise<void> {
   const rows = landed.filter((c) => Number.isFinite(c.number));
   if (!rows.length) return;
