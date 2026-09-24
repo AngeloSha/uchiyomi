@@ -283,8 +283,11 @@ async function runApp() {
   installBridge({
     ipcMain,
     win: () => win,
-    // Only while our own bff child holds the port (Supervisor.trustedPort): a squatter's page gets no bridge.
-    appOrigin: () => (sup && sup.trustedPort() ? `http://127.0.0.1:${sup.trustedPort()}` : 'http://127.0.0.1:0'),
+    // The plain origin check is enough here: a document from the UI origin can only have been loaded while our
+    // own bff child held the port -- the onBeforeRequest gate below cancels every request to it otherwise -- so a
+    // squatter's page never exists to ask. Reading trustedPort() here broke our OWN page during the bff's restart
+    // after an engine install ("not allowed" on desktop:engine-status, run 35949994672 on win-x64 and mac-x64).
+    appOrigin: () => (sup && sup.uiPort ? `http://127.0.0.1:${sup.uiPort}` : 'http://127.0.0.1:0'),
     log,
     engine: () => /** @type {any} */ (sup).engine,
     updates,
@@ -320,7 +323,7 @@ async function runApp() {
     sup.on('fatal', (e) => showError(String(e?.message || e)));
     sup.on('engine-status', (s) => {
       const wc = win?.webContents;
-      if (wc && !wc.isDestroyed() && sup?.trustedPort() && wc.getURL().startsWith(`http://127.0.0.1:${sup.trustedPort()}/`)) wc.send('desktop:engine-status-changed', s);
+      if (wc && !wc.isDestroyed() && wc.getURL().startsWith(`http://127.0.0.1:${sup?.uiPort}/`)) wc.send('desktop:engine-status-changed', s);
     });
     await sup.start();
     sup.mark('windowLoadApp');
@@ -396,7 +399,9 @@ function createWindow(show) {
 }
 
 function isOwnOrigin(url) {
-  try { return sup !== null && sup.trustedPort() > 0 && new URL(url).origin === `http://127.0.0.1:${sup.trustedPort()}`; } catch { return false; }
+  // The plain origin (see appOrigin in the bridge): during the bff's restart gap a click on our own link must not
+  // open in the system browser; the request gate holds the load until the port is ours again.
+  try { return sup !== null && sup.uiPort > 0 && new URL(url).origin === `http://127.0.0.1:${sup.uiPort}`; } catch { return false; }
 }
 
 function showWindow() {

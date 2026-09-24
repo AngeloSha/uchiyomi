@@ -18,7 +18,10 @@ function Rec($id, $verdict, $summary, $evidence) {
 
 $ev = [ordered]@{}
 Remove-Item -Recurse -Force $Base -ErrorAction SilentlyContinue
-New-Item -ItemType Directory -Force (Join-Path $Base 'app'), (Join-Path $Base 'data') | Out-Null
+# ⚠️ Its own library folder: under Start-Process -Credential the child inherits the CALLER's environment, so
+# os.tmpdir() (the smoke's default library) is the admin's %TEMP%, which a standard user cannot write -- the first
+# run of this check failed on that, not on the app. A real standard user's %TEMP% is its own.
+New-Item -ItemType Directory -Force (Join-Path $Base 'app'), (Join-Path $Base 'data'), (Join-Path $Base 'library') | Out-Null
 Copy-Item -Recurse -Force (Join-Path $Src '*') (Join-Path $Base 'app')
 
 $pw = 'Uc!' + [guid]::NewGuid().ToString('N').Substring(0, 16) + 'aA1'
@@ -32,10 +35,11 @@ try {
 $ev.isAdmin = [bool](Get-LocalGroupMember -Group 'Administrators' | Where-Object { $_.Name -like "*\$User" })
 & icacls $Base /grant "${User}:(OI)(CI)RX" | Out-Null
 & icacls (Join-Path $Base 'data') /grant "${User}:(OI)(CI)M" | Out-Null
+& icacls (Join-Path $Base 'library') /grant "${User}:(OI)(CI)M" | Out-Null
 & icacls $Base /grant "${User}:(M)" | Out-Null
 
 $cred = New-Object System.Management.Automation.PSCredential($User, $sec)
-$appArgs = @('--smoke', "--data-dir=$(Join-Path $Base 'data')", "--result=$Result")
+$appArgs = @('--smoke', "--data-dir=$(Join-Path $Base 'data')", "--library-dir=$(Join-Path $Base 'library')", "--result=$Result")
 try {
   $t = Get-Date
   $p = Start-Process -FilePath (Join-Path $Base 'app\Uchiyomi.exe') -ArgumentList $appArgs -Credential $cred -LoadUserProfile -WorkingDirectory $Base -PassThru

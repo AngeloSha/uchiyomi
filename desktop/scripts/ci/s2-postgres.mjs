@@ -98,6 +98,9 @@ if (WIN && want('ii')) {
     b = smokeDigest(await smoke(exe2, bRoot, served ? [`--engine-pack-url=${served.url}`, `--engine-pack-sha256=${fixture.sha256}`] : [], { env: { USERPROFILE: profile, TEMP: join(profile, 'Temp'), TMP: join(profile, 'Temp') } }));
   } finally {
     served?.close();
+    for (const f of ['engine.log', 'desktop.log', 'bff.log', 'postgres.log']) {
+      try { cpSync(join(bRoot, 'logs', f), join(OUT, `s2-ii-${f}`)); } catch { /* not written */ }
+    }
   }
   const engineOk = !served || b.engine?.pass === true;
   const bOkRun = b.ok && b.bffBackup?.pass && engineOk;
