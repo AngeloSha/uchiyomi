@@ -156,6 +156,32 @@ export async function replaceListing(seriesId: string, rows: ListingRow[]): Prom
         params,
       );
     }
+
+    /**
+     * Give a chapter its own name, when the listing knows one and the book does not.
+     *
+     * A downloaded file is named from its NUMBER alone (lib/downloader.ts explains why), so the title the
+     * scanner derives from the filename is the number said twice, and every chapter fetched before the
+     * downloader learned to record the source's name is stuck that way. The listing being written right
+     * here is the same data, for the same chapters, already in hand -- so the repair costs one statement
+     * per check rather than a migration that can only run once.
+     *
+     * Only rows whose title is still a bare restatement of the number are touched, and only from a listing
+     * title that is not itself one: many sources genuinely call every chapter "Chapter 12", and replacing
+     * one restatement with another would be churn. Nothing an admin set by hand matches that pattern, so
+     * an overridden title is never overwritten.
+     */
+    await qq(
+      `UPDATE lib_books b
+          SET title = l.title, updated_at = now()
+         FROM series_listing l
+        WHERE l.series_id = $1 AND b.series_id = $1
+          AND abs(l.number - b.number) < 0.001
+          AND l.title IS NOT NULL AND btrim(l.title) <> ''
+          AND l.title !~* ('^(ch(apter|\\.)?|episode|ep\\.?)?\\s*0*' || l.number || '\\s*$')
+          AND b.title ~* ('^(ch(apter|\\.)?|episode|ep\\.?)?\\s*0*' || b.number || '\\s*$')`,
+      [seriesId],
+    );
   });
 }
 
