@@ -98,6 +98,14 @@ function ReaderInner() {
   const [prefs, setPrefs] = useState<ReaderPrefs>(loadPrefs());
   const [zoom, setZoom] = useState(1);
   const [rtl, setRtl] = useState(false); // series reads right-to-left → double-spread pair order flips
+  // Paged mode's track direction: the reader setting (lib/readerPrefs.ts `pagedDirection`), or the series'
+  // own direction above when it says `series`. `trackSign` turns a slide index into a scrollLeft: an RTL
+  // track scrolls negative.
+  // ⚠️ The track states its `dir` either way rather than inheriting it. Under the Arabic UI <html> is
+  // dir="rtl", so the track used to inherit a right-to-left layout that the positive-scrollLeft maths below
+  // never expected: the page counter sat on 1 and a jump or a resume clamped to the first page.
+  const pagedRtl = prefs.mode === 'paged' && (prefs.pagedDirection === 'rtl' || (prefs.pagedDirection === 'series' && rtl));
+  const trackSign = pagedRtl ? -1 : 1;
   const [scrubbing, setScrubbing] = useState(false); // slider drag in progress → show the page preview
 
   const [chrome, setChrome] = useState(true);
@@ -425,7 +433,7 @@ function ReaderInner() {
     const idx = Math.max(0, Math.min(flat.length - 1, startIndex(flat, 0, startPage)));
     if (prefs.mode === 'vertical' && scrollRef.current && idx > 0) scrollRef.current.scrollTop = tops[idx];
     if (prefs.mode === 'paged' && scrollRef.current && idx > 0)
-      scrollRef.current.scrollLeft = (slideOf[idx] ?? idx) * scrollRef.current.clientWidth;
+      scrollRef.current.scrollLeft = trackSign * (slideOf[idx] ?? idx) * scrollRef.current.clientWidth;
     setCurrent(idx);
     // Seed the dedupe key so landing here does not immediately ping progress. Opening a saved Moment is
     // looking something up, not reading it, and it should not move where you were or add a reading event.
@@ -435,12 +443,23 @@ function ReaderInner() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready, colW, tops]);
 
+  // Flipping the direction mid-chapter mirrors the track, and the old scrollLeft now points at another page
+  // (or clamps to page 1). Put the reader back on the page they were looking at.
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el || !didInitScroll.current || prefs.mode !== 'paged') return;
+    el.scrollLeft = trackSign * (slideOf[current] ?? current) * el.clientWidth;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [trackSign]);
+
   // ---- track current page on scroll ----
   const onScroll = useCallback(() => {
     const el = scrollRef.current;
     if (!el) return;
     if (prefs.mode === 'paged') {
-      const s = Math.round(el.scrollLeft / Math.max(1, el.clientWidth));
+      // Math.abs: an RTL track scrolls from 0 into NEGATIVE scrollLeft (the spec'd behaviour every current
+      // engine follows), so page n sits at -n × width.
+      const s = Math.round(Math.abs(el.scrollLeft) / Math.max(1, el.clientWidth));
       const idxs = slides[Math.max(0, Math.min(slides.length - 1, s))];
       const i = idxs ? idxs[idxs.length - 1] : 0; // last page of a spread → completion fires on the final spread
       setCurrent((c) => (c === i ? c : i));
@@ -450,7 +469,7 @@ function ReaderInner() {
     let lo = 0, hi = tops.length - 1, ans = 0;
     while (lo <= hi) { const mid = (lo + hi) >> 1; if (tops[mid] <= probe) { ans = mid; lo = mid + 1; } else hi = mid - 1; }
     setCurrent((c) => (c === ans ? c : ans));
-  }, [tops, prefs.mode, slides]);
+  }, [tops, prefs.mode, slides]); // the sign-free Math.abs above needs no trackSign dep
 
   // ---- continuous reading: append next chapter near the end ----
   useEffect(() => {
@@ -568,8 +587,8 @@ function ReaderInner() {
     setCurrent(i);
     if (!el) return;
     if (prefs.mode === 'vertical') el.scrollTo({ top: tops[i] || 0 });
-    else el.scrollTo({ left: (slideOf[i] ?? i) * (el.clientWidth || 0) });
-  }, [flat.length, prefs.mode, tops, slideOf]);
+    else el.scrollTo({ left: trackSign * (slideOf[i] ?? i) * (el.clientWidth || 0) });
+  }, [flat.length, prefs.mode, tops, slideOf, trackSign]);
 
   /**
    * Mark or un-mark one page by hand, from the page grid.
@@ -955,9 +974,12 @@ function ReaderInner() {
         </div>
       ) : (
         <div ref={scrollRef} data-lenis-prevent onScroll={onScroll} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerEnd} onPointerCancel={onPointerEnd}
+          dir={pagedRtl ? 'rtl' : 'ltr'}
           className="hide-scrollbar flex h-screen-d snap-x snap-mandatory overflow-x-auto overflow-y-hidden" style={{ filter: THEME_FILTER[prefs.theme] }}>
           {slides.map((idxs) => {
-            const shown = rtl && idxs.length === 2 ? [idxs[1], idxs[0]] : idxs; // RTL manga: right page reads first
+            // RTL manga: right page reads first. On an RTL track `dir` already lays a spread out right to
+            // left, so flipping here as well would put it back the wrong way round.
+            const shown = rtl && !pagedRtl && idxs.length === 2 ? [idxs[1], idxs[0]] : idxs;
             return (
               <div key={flat[idxs[0]].key} className="relative flex h-full w-full shrink-0 snap-center items-center justify-center gap-1">
                 {shown.map((i) => {
@@ -1043,7 +1065,11 @@ function ReaderInner() {
 
             <motion.footer initial={{ y: 64, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 64, opacity: 0 }}
               className="absolute inset-x-0 bottom-0 z-40 bg-linear-to-t from-black/90 via-black/55 to-transparent px-4 pt-10 pb-[max(0.9rem,calc(env(safe-area-inset-bottom)+0.4rem))]">
-              <div className="relative mx-auto flex max-w-3xl items-center gap-2">
+              {/* `dir` mirrors the bar with the track on a right-to-left read: previous chapter on the right, next
+                  on the left, and the slider fills from the right, so dragging it moves the same way the pages
+                  do. The chevrons swap to keep pointing outwards; the counter stays LTR so "12/40" never
+                  reorders. Otherwise the bar inherits the page's direction, as it always has. */}
+              <div dir={pagedRtl ? 'rtl' : undefined} className="relative mx-auto flex max-w-3xl items-center gap-2">
                 {/* scrubber preview: a small render of the target page while dragging */}
                 {scrubbing && flat[current] && (() => {
                   const it = flat[current];
@@ -1064,11 +1090,11 @@ function ReaderInner() {
                 })()}
                 <button onClick={() => goChapter(prevId)} disabled={!prevId}
                   className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-black/45 text-white backdrop-blur disabled:opacity-30">
-                  <IcChevronLeft width={18} height={18} />
+                  {pagedRtl ? <IcChevronRight width={18} height={18} /> : <IcChevronLeft width={18} height={18} />}
                 </button>
                 {/* The counter is the button. A long-press would be invisible on a phone, which this repo
                     already learned once from a hover-only affordance nobody found. */}
-                <button onClick={() => setShowPages(true)} aria-label={tr('Jump to a page')}
+                <button dir="ltr" onClick={() => setShowPages(true)} aria-label={tr('Jump to a page')}
                   className="shrink-0 rounded-full px-1.5 py-0.5 text-[11px] tabular-nums text-fog-300 transition hover:bg-white/10 hover:text-white">
                   {chapterPageCount ? `${pageInChapter}/${chapterPageCount}` : `${current + 1}/${total}`}
                 </button>
@@ -1080,7 +1106,7 @@ function ReaderInner() {
                   className="h-1 flex-1 accent-[rgb(var(--accent))]" />
                 <button onClick={() => goChapter(nextId)} disabled={!nextId}
                   className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-black/45 text-white backdrop-blur disabled:opacity-30">
-                  <IcChevronRight width={18} height={18} />
+                  {pagedRtl ? <IcChevronLeft width={18} height={18} /> : <IcChevronRight width={18} height={18} />}
                 </button>
               </div>
             </motion.footer>

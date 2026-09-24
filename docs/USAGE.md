@@ -551,6 +551,15 @@ you keep scrolling through a series without interruption.
 
 It remembers your scroll position, so closing and reopening drops you right back where you were.
 
+**Right-to-left paged reading.** In paged mode, *Reading direction* (in the reader's settings sheet and under
+Profile → Settings → Reading) can lay the pages out right to left, the way manga is printed: the next page is
+to the left, so you swipe right, tap the left edge or press ←. A double spread puts its first page on the
+right, and the bottom bar mirrors with it — the page slider fills from the right, and the next-chapter button
+moves to the left. The default, *Series default*, does this only for a series whose metadata says it reads
+right to left (a Komga library can say so; the built-in library does not yet, so there every series reads left
+to right as before). *Left to right* and *Right to left* override it for every series. The webtoon scroll is
+unaffected.
+
 **Reader defaults** — mode (webtoon scroll or paged), theme, repeated pages, fit, page gap, auto-scroll and
 brightness — live under **Profile → Settings → Reading**, where each one saves as you change it and says
 *Saved* beside the row. The reader's own sheet still changes them for the session you are in, and a series
