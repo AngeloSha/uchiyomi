@@ -361,8 +361,8 @@ export default async function catalogRoutes(app: FastifyInstance) {
     // apply admin metadata overrides (title/summary shown here; cover/banner are handled by the image server)
     const ov = await one<{ title: string | null; summary: string | null; cover: string | null; banner: string | null;
                           author: string | null; status: string | null; genres: string[] | null;
-                          age_rating: number | null; v: string }>(
-      `SELECT title, summary, cover, banner, author, status, genres, age_rating,
+                          age_rating: number | null; adult_exempt: boolean | null; v: string }>(
+      `SELECT title, summary, cover, banner, author, status, genres, age_rating, adult_exempt,
               EXTRACT(EPOCH FROM updated_at) * 1000 AS v FROM series_overrides WHERE series_id = $1`,
       [id],
     );
@@ -378,7 +378,8 @@ export default async function catalogRoutes(app: FastifyInstance) {
       // the edit modal seeds from these, so every overridable field has to come back or a save would
       // write back a blank and clear the very override the user opened the modal to keep
       out.overrides = { title: ov.title, summary: ov.summary, cover: ov.cover, banner: ov.banner,
-                        author: ov.author, status: ov.status, genres: ov.genres, ageRating: ov.age_rating };
+                        author: ov.author, status: ov.status, genres: ov.genres, ageRating: ov.age_rating,
+                        adultExempt: ov.adult_exempt === true };
       // The edit modal seeds from the override where one exists, so the effective rating has to reflect it
       // or reopening the modal would show the scanned value and saving would undo the correction.
       if (ov.age_rating != null && out.metadata) out.metadata.ageRating = ov.age_rating;

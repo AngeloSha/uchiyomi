@@ -499,6 +499,15 @@ ALTER TABLE lib_series ADD COLUMN IF NOT EXISTS source_hunt_at timestamptz;
 -- The switch for that hunt. ON by default: it only ever runs after every followed source has failed a
 -- chapter, follows at most two sources per series, and never attaches an adult source to a clean series.
 ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS auto_follow_on_failure boolean NOT NULL DEFAULT true;
+-- What the 18+ switch hides, beyond libraries rated 18+.
+--
+-- Library ratings alone could not express "keep ecchi off the shelf": that meant moving series into an
+-- 18+ library, which is a filing decision made to get a display outcome, and it fought the scanner every
+-- time a folder was rescanned. These two lists say it directly -- genres to treat as adult, and sources
+-- to treat as adult on top of whatever their extension declares -- and they change nothing about where a
+-- series is filed or who may open it. Empty by default, so an existing install behaves exactly as before.
+ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS adult_genres  jsonb NOT NULL DEFAULT '[]'::jsonb;
+ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS adult_sources jsonb NOT NULL DEFAULT '[]'::jsonb;
 
 -- v0.41.0: the nightly library repair (lib/repair.ts), which fixes what the Health page could only report.
 --
@@ -741,6 +750,9 @@ CREATE INDEX IF NOT EXISTS bookmarks_series_idx ON bookmarks (user_id, series_id
 -- most of an existing library the moment someone sets a cap.
 ALTER TABLE lib_series       ADD COLUMN IF NOT EXISTS age_rating int;
 ALTER TABLE series_overrides ADD COLUMN IF NOT EXISTS age_rating int;
+-- "Hide everything tagged Mature, except this one." Without it the genre list above is all-or-nothing, and
+-- one wrongly-tagged classic is enough to make somebody turn the whole filter off.
+ALTER TABLE series_overrides ADD COLUMN IF NOT EXISTS adult_exempt boolean;
 -- NULL means no cap, matching how user_libraries having no rows means "every library".
 ALTER TABLE users            ADD COLUMN IF NOT EXISTS max_age_rating int;
 CREATE INDEX IF NOT EXISTS lib_series_age_idx ON lib_series (age_rating) WHERE age_rating IS NOT NULL;

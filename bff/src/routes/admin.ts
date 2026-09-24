@@ -38,7 +38,7 @@ import sharp from 'sharp';
 import { ART_DIR, artFile, artOverview } from '../lib/seriesArt';
 import { writePreflight } from '../lib/fsGuard';
 // Admin stats report on the whole library by definition; this route is already behind requireAdmin.
-import { NO_LIBRARIES, SYSTEM_CTX, visibleToAll } from '../lib/visibility';
+import { NO_LIBRARIES, SYSTEM_CTX, visibleToAll, sanitiseAdultList, invalidateAdultFilter } from '../lib/visibility';
 import { addSeriesFromSource, findBestMatch, resolveCandidate, norm, jobBusy, startDownloadJob, FILL_MAX_CHAPTERS, REFRESH_BUDGET_MS } from './sources';
 import { confirmsTitle } from '../lib/confirmTitle';
 import { chapterFileRel } from '../lib/downloader';
@@ -418,7 +418,7 @@ export default async function adminRoutes(app: FastifyInstance) {
   // ---- server settings ----
   const SETTINGS_COLS = 'server_name, allow_registration, updater_hours, extension_hours, extension_auto_update, '
     + 'update_check, install_ping, install_ping_last, scanlator_prefs, cleanup_read, cleanup_read_days, backup_hour, auto_follow_on_failure, '
-    + 'repair_enabled, komga_ghost_chapters';
+    + 'repair_enabled, komga_ghost_chapters, adult_genres, adult_sources';
   // `extensions_configured` is not a column: extension_hours has a NOT NULL default, so its presence says
   // nothing about whether there is an engine to check. The settings page needs to know, or it offers two
   // controls for a job that can never run.
@@ -507,6 +507,14 @@ export default async function adminRoutes(app: FastifyInstance) {
       // Ghost chapters on the Komga surface (lib/komgaGhosts.ts). Affects nothing this server stores and
       // nothing the web app shows: it widens one API's chapter list so the trackers behind it can count.
       komgaGhostChapters: z.boolean().optional(),
+      /**
+       * What the 18+ switch hides besides 18+ libraries: genres to treat as adult, and sources to treat
+       * as adult whatever their extension says. Both are surfacing preferences -- nothing here changes
+       * who may open a series, and an individual title can be exempted from the genre rule on its own
+       * page (`adultExempt` on the series meta route).
+       */
+      adultGenres: z.array(z.string().min(1).max(60)).max(60).optional(),
+      adultSources: z.array(z.string().min(1).max(120)).max(200).optional(),
     }).parse(req.body);
     if (b.serverName !== undefined) await q('UPDATE server_settings SET server_name = $1, updated_at = now() WHERE id = 1', [b.serverName]);
     if (b.allowRegistration !== undefined) await q('UPDATE server_settings SET allow_registration = $1, updated_at = now() WHERE id = 1', [b.allowRegistration]);
@@ -524,6 +532,20 @@ export default async function adminRoutes(app: FastifyInstance) {
     // timer used to re-read the hour only when it fired (server.ts, the backup block says why).
     if (b.backupHour !== undefined) { await q('UPDATE server_settings SET backup_hour = $1, updated_at = now() WHERE id = 1', [b.backupHour]); runtime.rearmBackup?.(); }
     if (b.komgaGhostChapters !== undefined) await q('UPDATE server_settings SET komga_ghost_chapters = $1, updated_at = now() WHERE id = 1', [b.komgaGhostChapters]);
+    // Sanitised here as well as in visibility.ts: what is stored should be what is enforced, so a
+    // name that could never match is rejected at the door rather than sitting in the settings page
+    // looking as though it does something.
+    if (b.adultGenres !== undefined) {
+      await q('UPDATE server_settings SET adult_genres = $1::jsonb, updated_at = now() WHERE id = 1',
+        [JSON.stringify(sanitiseAdultList(b.adultGenres))]);
+    }
+    if (b.adultSources !== undefined) {
+      await q('UPDATE server_settings SET adult_sources = $1::jsonb, updated_at = now() WHERE id = 1',
+        [JSON.stringify(sanitiseAdultList(b.adultSources))]);
+    }
+    // The view context caches these for a few seconds; a save must take effect on the next request,
+    // not whenever that window happens to lapse.
+    if (b.adultGenres !== undefined || b.adultSources !== undefined) invalidateAdultFilter();
     await logAudit('settings.update', { userId: userIdOf(req), detail: b, req });
     return settingsRow();
   });
@@ -1205,6 +1227,14 @@ export default async function adminRoutes(app: FastifyInstance) {
       genres: z.array(z.string().min(1).max(60)).max(50).nullish(),
       // A minimum age, or null to fall back to whatever ComicInfo said. See lib/ageRating.ts.
       ageRating: z.number().int().min(0).max(18).nullish(),
+      /**
+       * Keep this series visible even when the 18+ switch would hide it for one of its genres.
+       *
+       * Absent leaves the flag as it is, which matters because this route writes every other column
+       * unconditionally: the edit modal does not send this field, and without the COALESCE below an
+       * ordinary retitle would quietly clear the exemption.
+       */
+      adultExempt: z.boolean().nullish(),
     }).safeParse(req.body);
     if (!b.success) return reply.code(400).send({ error: 'bad_request' });
     const norm = (v: string | null | undefined) => { const s = (v ?? '').trim(); return s ? s : null; };
@@ -1232,12 +1262,13 @@ export default async function adminRoutes(app: FastifyInstance) {
     // genres all failed the same way, under a message that only said "Could not save". `?? null` because
     // the field is nullish: absent and null both mean "inherit whatever ComicInfo said".
     await q(
-      `INSERT INTO series_overrides (series_id, title, summary, author, status, genres, age_rating, updated_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, now())
+      `INSERT INTO series_overrides (series_id, title, summary, author, status, genres, age_rating, adult_exempt, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, now())
        ON CONFLICT (series_id) DO UPDATE SET title = $2, summary = $3, author = $4, status = $5,
-         genres = $6, age_rating = $7, updated_at = now()`,
+         genres = $6, age_rating = $7,
+         adult_exempt = COALESCE($8, series_overrides.adult_exempt), updated_at = now()`,
       [id, norm(b.data.title), norm(b.data.summary), norm(b.data.author), norm(b.data.status),
-       normGenres(b.data.genres), b.data.ageRating ?? null],
+       normGenres(b.data.genres), b.data.ageRating ?? null, b.data.adultExempt ?? null],
     );
     await logAudit('series.meta_override', { userId: userIdOf(req), detail: { id }, req });
     return { ok: true };

@@ -65,7 +65,7 @@ import { runtime } from '../lib/runtime';
 //
 // Which SOURCES you may reach is the opposite: entirely about who is asking, which is what `viewCtxFor` and
 // `sourceAllowedFor` answer.
-import { visibleToAll, viewCtxFor, sourceAllowedFor, browsable, seriesVisible, Params, type ViewCtx, hideAdult } from '../lib/visibility';
+import { visibleToAll, viewCtxFor, sourceAllowedFor, sourceBrowsableFor, browsable, seriesVisible, Params, type ViewCtx, hideAdult } from '../lib/visibility';
 
 interface Job {
   title: string; total: number; done: number;
@@ -1231,8 +1231,10 @@ export default async function sourceRoutes(app: FastifyInstance) {
    * the very line `browsable()` draws against `visible()`.
    */
   const surfaceable = (req: FastifyRequest): SourceAdapter[] => {
-    const all = reachable(req);
-    return vc(req).hideAdultLibraries ? all.filter((s) => !s.isNsfw) : all;
+    // Through `sourceBrowsableFor` rather than `isNsfw` alone, so a source the admin NAMED as adult in
+    // server_settings.adult_sources drops out too, even though its extension does not flag itself.
+    const ctx = vc(req);
+    return reachable(req).filter((s) => sourceBrowsableFor(s, ctx));
   };
 
   app.get('/api/sources', async (req) => {

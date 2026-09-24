@@ -40,6 +40,15 @@ export interface ViewCtx {
    * an older ViewCtx literal degrades to, so nothing silently starts filtering.
    */
   readonly hideAdultLibraries: boolean;
+  /**
+   * Genres the 18+ switch treats as adult, lowercased and already sanitised (see `sanitiseAdultList`).
+   *
+   * Only consulted while `hideAdultLibraries` is on, and only by `browsable()`. Empty means the switch
+   * behaves exactly as it did when libraries were the only thing it knew about.
+   */
+  readonly adultGenres: readonly string[];
+  /** Source ids the 18+ switch treats as adult, on top of whatever the extension itself declares. */
+  readonly adultSources: readonly string[];
 }
 
 /**
@@ -105,7 +114,71 @@ export const SYSTEM_CTX: ViewCtx = {
   userId: null, libraryIds: null, maxAgeRating: null,
   // Background work and admin reporting count what is there, not what someone wants on screen.
   hideAdultLibraries: false,
+  adultGenres: [], adultSources: [],
 };
+
+/**
+ * The shape a configured genre or source name is allowed to have.
+ *
+ * `browsable()` may not bind parameters (see the note inside it), so the genre list is interpolated into
+ * SQL. The library clause beside it gets away with interpolation because ADULT_RATING is a code constant;
+ * an admin-configured list is not, so it is held to this shape before it can reach a query. Anything
+ * outside the shape is DROPPED rather than escaped: genres are short human labels, and nothing legitimate
+ * needs a control character, a backslash, a `$` or a semicolon.
+ *
+ * Why this is enough, spelled out because the safety of every listing query rests on it:
+ *   - the allowed set is letters, digits, space and ` ' - + / & ( ) . ! : ` -- the punctuation real genre
+ *     and source names use ("Boys' Love", "Sci-Fi", "4-Koma", "Shoujo Ai (GL)");
+ *   - inside a standard single-quoted Postgres literal the ONLY character that ends the literal is `'`,
+ *     and `sqlLiterals` doubles it. `standard_conforming_strings` has been on by default since 9.1 and
+ *     the literal is never written with an `E` prefix, so a backslash would be inert anyway -- and it is
+ *     excluded regardless;
+ *   - `$` is excluded, so a value can neither open a dollar-quoted string nor look like a `$N` placeholder
+ *     to anything that counts them; NUL and every other control character fall outside `\p{L}\p{N}`;
+ *   - 60 characters at most, and the settings route caps the list at 60 entries, so the clause stays small.
+ * `browsable()` re-applies this function at the interpolation site as well as trusting what `viewCtxFor`
+ * loaded, so the guarantee is local to the one place that needs it and a hand-built ViewCtx cannot skip it.
+ */
+const ADULT_NAME_OK = /^[\p{L}\p{N} '\-+/&().!:]{1,60}$/u;
+
+/** Lowercased, trimmed, de-duplicated, and filtered to `ADULT_NAME_OK`. Anything that is not a string list is empty. */
+export function sanitiseAdultList(values: unknown): string[] {
+  if (!Array.isArray(values)) return [];
+  const out = new Set<string>();
+  for (const v of values) {
+    if (typeof v !== 'string' && typeof v !== 'number') continue;
+    const t = String(v).trim().toLowerCase();
+    if (t && ADULT_NAME_OK.test(t)) out.add(t);
+  }
+  return [...out];
+}
+
+/** Values that already passed `sanitiseAdultList`, as SQL string literals. The quote doubling is load-bearing: `'` is in the shape. */
+const sqlLiterals = (values: readonly string[]): string =>
+  values.map((v) => `'${v.replace(/'/g, "''")}'`).join(', ');
+
+/**
+ * The configured lists, cached briefly.
+ *
+ * Read on every request that builds a view context, so it is cached for a few seconds and dropped
+ * whenever the settings are written. A read that fails yields empty lists: this is a surfacing filter, and
+ * the failure mode of showing something that would have been tidied away is the right one -- the
+ * permission (`maxAgeRating`) is a different field and is never sourced from here.
+ */
+let adultCache: { at: number; genres: string[]; sources: string[] } | null = null;
+const ADULT_CACHE_MS = 15_000;
+export function invalidateAdultFilter(): void { adultCache = null; }
+async function adultFilter(): Promise<{ genres: string[]; sources: string[] }> {
+  if (adultCache && Date.now() - adultCache.at < ADULT_CACHE_MS) return adultCache;
+  const row = await one<{ adult_genres: unknown; adult_sources: unknown }>(
+    'SELECT adult_genres, adult_sources FROM server_settings WHERE id = 1').catch(() => null);
+  adultCache = {
+    at: Date.now(),
+    genres: sanitiseAdultList(row?.adult_genres),
+    sources: sanitiseAdultList(row?.adult_sources),
+  };
+  return adultCache;
+}
 
 /**
  * The predicate for anything that LISTS series: `visible()`, plus the 18+ hide.
@@ -125,8 +198,27 @@ export function browsable(alias: string, ctx: ViewCtx, p: Params): string {
   // interpolate the result into queries whose parameter arrays are hand-written, so a bound parameter would
   // emit a `$N` nothing ever binds -- and `q()` would either throw or, worse, collide with the caller's own
   // $1. ADULT_RATING is a code constant, never user input, so interpolating it is safe.
-  return `${base} AND NOT EXISTS (
-    SELECT 1 FROM libraries l_ad WHERE l_ad.id = ${alias}.library_id AND l_ad.age_rating >= ${ADULT_RATING})`;
+  const parts = [base, `NOT EXISTS (
+    SELECT 1 FROM libraries l_ad WHERE l_ad.id = ${alias}.library_id AND l_ad.age_rating >= ${ADULT_RATING})`];
+  // Genres, when the admin has named any. Sanitised again HERE, at the interpolation, and then quoted --
+  // this function cannot bind (see above), and `ADULT_NAME_OK` says why that pair is sufficient. An admin
+  // override of the genre list wins over what the scan read, exactly as it does for the age rating in
+  // `visible()`, and an `adult_exempt` override lets one series through. `lower(btrim())` is the same fold
+  // the genre overview applies, so a key picked from that list matches the rows it was counted from.
+  const genres = sqlLiterals(sanitiseAdultList(ctx.adultGenres));
+  if (genres) {
+    parts.push(`NOT (
+      EXISTS (
+        SELECT 1 FROM unnest(COALESCE(
+          (SELECT o_ad.genres FROM series_overrides o_ad WHERE o_ad.series_id = ${alias}.id),
+          ${alias}.genres
+        )) AS g_ad WHERE lower(btrim(g_ad)) IN (${genres})
+      )
+      AND NOT COALESCE(
+        (SELECT o_ex.adult_exempt FROM series_overrides o_ex WHERE o_ex.series_id = ${alias}.id), false)
+    )`);
+  }
+  return parts.join(' AND ');
 }
 
 /**
@@ -200,6 +292,30 @@ export function sourceAllowedFor(src: { isNsfw?: boolean } | null | undefined, m
 }
 
 /**
+ * Whether a source belongs in a LISTING for this viewer: Discover's source list, the latest and popular
+ * rails, and the cross-source search fan-out.
+ *
+ * This is to `sourceAllowedFor` what `browsable()` is to `visible()`. The permission is unchanged and still
+ * lives in `sourceAllowedFor`; this adds the same 18+ SURFACING filter every library listing already
+ * applies. Without it "Show 18+" was half a switch: 18+ libraries left the shelf while Discover went on
+ * offering the adult sources they came from, so adult covers still turned up unasked -- which is the one
+ * thing the switch exists to answer. An admin, or any member with no age cap, saw them whatever it was set
+ * to, because the age cap was the only input.
+ *
+ * Deliberately NOT used by the by-id routes. A source asked for by name gets the same deal a hidden library
+ * gets: a link, a bookmark and a download already running all keep working while the switch is off. Hiding
+ * is tidying. Refusing something explicitly asked for is a permission, and the permission is the age cap.
+ */
+export function sourceBrowsableFor(src: { id?: string; isNsfw?: boolean } | null | undefined, ctx: ViewCtx): boolean {
+  if (!sourceAllowedFor(src, ctx.maxAgeRating)) return false;
+  if (!ctx.hideAdultLibraries) return true;
+  if (src?.isNsfw) return false;
+  // Named by the admin as adult even though its extension does not say so. The list is lowercased on the
+  // way in, so the comparison is too.
+  return !(src?.id && (ctx.adultSources ?? []).includes(String(src.id).toLowerCase()));
+}
+
+/**
  * The viewer for one request.
  *
  * Called once per handler. Everything downstream -- every SQL source, the image server, OPDS -- inherits
@@ -228,8 +344,17 @@ export async function viewCtxFor(
   // a model this backend does not have. Only an EXPLICIT 'komga' takes this branch: with `!== 'owned'` an
   // unset or misspelled variable handed every account an unrestricted context on the path that governs page
   // bytes and OPDS downloads. Fail closed, into the restricted model below.
-  if (process.env.LIBRARY_BACKEND === 'komga') return { userId, libraryIds: null, maxAgeRating: null, hideAdultLibraries: false };
-  if (!userId || role === 'admin') return { userId, libraryIds: null, maxAgeRating: null, hideAdultLibraries };
+  if (process.env.LIBRARY_BACKEND === 'komga') {
+    return { userId, libraryIds: null, maxAgeRating: null, hideAdultLibraries: false, adultGenres: [], adultSources: [] };
+  }
+  // Loaded even for an admin: the 18+ switch is a surfacing preference everyone has, not a restriction
+  // only capped accounts carry, and an admin is exactly who turns it on to tidy their own home screen.
+  const { genres: adultGenres, sources: adultSources } = hideAdultLibraries
+    ? await adultFilter()
+    : { genres: [] as string[], sources: [] as string[] };
+  if (!userId || role === 'admin') {
+    return { userId, libraryIds: null, maxAgeRating: null, hideAdultLibraries, adultGenres, adultSources };
+  }
   // Deliberately NOT caught. Both restrictions are expressed by a NON-null value, so any fallback here is a
   // fallback to "unrestricted": `.catch(() => [])` collapsed through `rows.length ? ... : null` into
   // `libraryIds: null`, and `.catch(() => null)` into `maxAgeRating: null`. A database hiccup therefore handed
@@ -249,6 +374,8 @@ export async function viewCtxFor(
     libraryIds: rows.length ? rows.map((r) => r.library_id) : null,
     maxAgeRating: cap?.max_age_rating ?? null,
     hideAdultLibraries,
+    adultGenres,
+    adultSources,
   };
 }
 
