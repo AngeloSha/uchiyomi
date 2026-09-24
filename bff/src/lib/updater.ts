@@ -17,6 +17,7 @@ import { effectivePrefsFor, readSeriesPrefs } from './scanlatorPrefs';
 import { copyToChapter, listingRows, replaceListing, type ListingCopy } from './seriesListing';
 import { heldBooks } from './chapterCleanup';
 import { downloadWithFallback, type FallbackOutcome } from './chapterFallback';
+import { effectiveSourcePriority, sourceUpgradesOn, UPGRADE_MAX_PER_SWEEP, UPGRADE_BACKOFF_DAYS } from './sourcePrefs';
 import { huntSource, seriesIsAdult, sweepAllowedFor, HUNT_MAX_PER_SWEEP } from './sourceHunt';
 import { completePartial, PARTIAL_COMPLETE_MAX } from './partial';
 
@@ -90,6 +91,12 @@ export interface UpdateResult {
   switched: number;
   /** Of `added`, how many were saved with placeholder pages (`Landed.missing`; lib/partial.ts). */
   partial: number;
+  /**
+   * Of `added`, how many replaced a chapter already held with a copy from a higher-ranked source
+   * (lib/sourcePrefs.ts). Counted in `added` so the sweep budget and the post-sweep scan see them; left out
+   * of the new-chapter notification and the digest, because nothing new appeared.
+   */
+  upgraded?: number;
   landed: Landed[];
   capped?: number;
   folder?: string;
@@ -147,13 +154,21 @@ export interface UpdateOpts {
    * never hunts: a person is watching a bulk progress surface, and the sweep tonight will.
    */
   hunt?: { left: number } | false;
+  /**
+   * The upgrade budget for this run (lib/sourcePrefs.ts): how many held chapters may still be re-fetched
+   * from a higher-ranked source. Shared across the sweep exactly like `hunt`, so a night makes at most
+   * UPGRADE_MAX_PER_SWEEP upgrade attempts library-wide; a standalone "Check now" gets its own; `false`
+   * turns upgrades off for the run. "Fetch newest" never upgrades. Irrelevant while the server's
+   * `source_upgrade` switch is off, which is the default.
+   */
+  upgrades?: { left: number } | false;
 }
 
 const nothing = (title: string, outcome: UpdateOutcome): UpdateResult =>
   ({ title, added: 0, available: 0, outcome, failed: 0, waiting: 0, switched: 0, partial: 0, landed: [], asked: false });
 
 export async function updateSeries(seriesId: string, maxNew = 10, opts: UpdateOpts = {}): Promise<UpdateResult> {
-  const s = await one<any>(`SELECT id,title,source_id,source_series_id,web,folder,summary,author,genres,status,chapter_floor,scanlator_prefs FROM lib_series s WHERE s.id=$1 AND ${visibleToAll('s')}`, [seriesId]);
+  const s = await one<any>(`SELECT id,title,source_id,source_series_id,web,folder,summary,author,genres,status,chapter_floor,scanlator_prefs,source_prefs FROM lib_series s WHERE s.id=$1 AND ${visibleToAll('s')}`, [seriesId]);
   if (!s) return nothing('', 'gone');
 
   // Everything the series is followed on: the primary pair first, then series_sources in the order they
@@ -226,7 +241,23 @@ export async function updateSeries(seriesId: string, maxNew = 10, opts: UpdateOp
   // has something of its own, which almost none do.
   const prefs = await effectivePrefsFor(s.scanlator_prefs == null ? null : await readSeriesPrefs(seriesId));
   const rank = new Map(followed.map((f, i) => [f.source, i]));
-  const chooseOpts = { sourceRank: (id?: string) => rank.get(id ?? '') ?? followed.length };
+  // The source order (lib/sourcePrefs.ts), when one is set, ranks the copies of a number BEFORE the follow
+  // order does: a listed source goes ahead of every unlisted one, and the follow order breaks the ties that
+  // are left. It sits below the group ranking and the hosted-before-external rule in `releaseOrder`, so it
+  // decides between two copies the release rules consider equal, exactly as the follow order did alone.
+  // Without it the chosen copy stayed the primary's even when the order preferred a follower, and the
+  // upgrade below -- which compares the CHOSEN copy's source with the held one -- never saw the preferred
+  // copy at all. With no order set, the ranks are the follow order's, unchanged.
+  const priority = await effectiveSourcePriority(s.source_prefs).catch(() => null);
+  const ordered = priority?.order.length ? priority : null;
+  const chooseOpts = {
+    sourceRank: (id?: string) => {
+      const f = rank.get(id ?? '') ?? followed.length;
+      if (!ordered) return f;
+      const p = ordered.rank(id);
+      return p < ordered.order.length ? p : ordered.order.length + f;
+    },
+  };
   const { releases, waiting: held } = chooseReleases(tagged, prefs, chooseOpts);
 
   // A series added as "latest N" carries a floor, and what the source lists below it is not this job's
@@ -244,7 +275,7 @@ export async function updateSeries(seriesId: string, maxNew = 10, opts: UpdateOp
   // again is the recovery. heldBooks in lib/chapterCleanup.ts is that rule, in one place.
   // Reintroduce by dropping the heldBooks predicate: "the sweep fetches a chapter the verify task marked
   // missing" in verifyFiles.int.test.ts asks for nothing.
-  const heldRows = await q<{ number: number; pruned_at: string | null }>(`SELECT number, pruned_at FROM lib_books WHERE series_id=$1 AND ${heldBooks()}`, [seriesId]);
+  const heldRows = await q<{ number: number; pruned_at: string | null; source_id: string | null }>(`SELECT number, pruned_at, source_id FROM lib_books WHERE series_id=$1 AND ${heldBooks()}`, [seriesId]);
   const have = new Set(heldRows.map((r) => Number(r.number)));
   // The held numbers a LIVE row stands behind. The sweep needs only `have`; "Fetch newest" tells a
   // number we hold as pages apart from one we hold only as a deliberate tombstone (see the verdict below).
@@ -275,6 +306,36 @@ export async function updateSeries(seriesId: string, maxNew = 10, opts: UpdateOp
   // not fetched: the whole point of the hold is that the copy on offer is not the one wanted yet.
   const heldNums = new Set(held);
   const eligible = missing.filter((c) => !cappedNums.has(c.number) && !heldNums.has(c.number));
+
+  // Upgrades: a chapter we already hold, listed now by a source that outranks the one the held copy came
+  // from. The rule above -- what is on disk is never replaced -- is right when the ranking is about who
+  // translated it, and wrong here: a series that followed a mediocre source while the preferred one was
+  // behind would keep those copies for good, with no way back short of deleting them by hand.
+  //
+  // Only LIVE rows: a tombstone is a chapter deliberately removed, and re-fetching it under the guise of
+  // an upgrade would undo that. The file lands at the same path (named from the number alone), so chapter
+  // ids, reading progress and bookmarks survive the replacement.
+  //
+  // Off unless the admin turned `source_upgrade` on: an order alone only chooses among copies not yet
+  // held. With it on, bounded four ways: upgrades queue BEHIND the missing chapters and share the series'
+  // `maxNew` for the run; the whole sweep makes at most UPGRADE_MAX_PER_SWEEP of them (`upgradeBudget`,
+  // spent in the loop below); a (series, number) whose upgrade failed is left alone for
+  // UPGRADE_BACKOFF_DAYS; and a copy of unknown origin is never replaced (sourcePrefs.ts `outranks`).
+  const upgradeBudget = opts.upgrades === false || opts.newestOnly ? null : (opts.upgrades ?? { left: UPGRADE_MAX_PER_SWEEP });
+  const heldFrom = new Map(heldRows.filter((r) => r.pruned_at == null).map((r) => [Number(r.number), r.source_id] as const));
+  const upgrades = new Set<number>();
+  if (ordered && upgradeBudget && upgradeBudget.left > 0 && maxNew > 0 && await sourceUpgradesOn().catch(() => false)) {
+    const backoff = new Set((await q<{ number: number }>(
+      `SELECT number FROM source_upgrade_failures WHERE series_id = $1 AND at > now() - make_interval(days => $2)`,
+      [seriesId, UPGRADE_BACKOFF_DAYS],
+    ).catch(() => [])).map((r) => Number(r.number)));
+    for (const c of wanted) {
+      if (!heldFrom.has(c.number) || backoff.has(c.number)) continue;
+      if (cappedNums.has(c.number) || heldNums.has(c.number)) continue;
+      if (ordered.outranks((c as { source?: string }).source, heldFrom.get(c.number))) upgrades.add(c.number);
+    }
+  }
+  const upgradeChapters = upgrades.size ? wanted.filter((c) => upgrades.has(c.number)).sort((a, b) => a.number - b.number) : [];
   const capped = missing.filter((c) => cappedNums.has(c.number)).length;
   const waiting = missing.filter((c) => heldNums.has(c.number)).length;
 
@@ -299,7 +360,9 @@ export async function updateSeries(seriesId: string, maxNew = 10, opts: UpdateOp
   // the series page). A live row beside a tombstone of the same number is simply held: live wins.
   // Reintroduce by answering `up_to_date` for every held number (dropping the `live.has` test): "a newest
   // chapter deleted on purpose is told apart from one we hold" in updater.int.test.ts reads up_to_date.
-  let queue = eligible;
+  // New chapters first: they share one `maxNew` budget with the upgrades, and a missing chapter is worth
+  // more than a better copy of one already readable.
+  let queue = upgradeChapters.length ? [...eligible, ...upgradeChapters] : eligible;
   let newest: NewestVerdict | undefined;
   if (opts.newestOnly) {
     const top = releases.reduce<SourceChapter | null>((best, c) => (best && best.number >= c.number ? best : c), null);
@@ -341,6 +404,7 @@ export async function updateSeries(seriesId: string, maxNew = 10, opts: UpdateOp
   let failed = 0;
   let switched = 0;
   let partial = 0;
+  let upgraded = 0;
   let diskFull = false;
   let attempts = 0;
   const landed: Landed[] = [];
@@ -366,6 +430,20 @@ export async function updateSeries(seriesId: string, maxNew = 10, opts: UpdateOp
     if (attempts >= maxNew) break;
     if (runtime.stopping) break; // between chapters, never mid-write
     const via = ch.source ?? (s.source_id as string);
+    // An upgrade replaces a readable file, so it may only ever land a BETTER one, whole. The fallback
+    // helper's usual ladder is for a chapter we do not have, where any readable copy beats none; here each
+    // rung would be a downgrade: an alternate from a source no better than the held one (which the next
+    // sweep would then "upgrade" again, every night), a hunted source nobody ranked, or a partial with
+    // placeholder pages written over a complete chapter. So an upgrade asks the one listed copy from the
+    // higher-ranked source and nothing else. The downloader never writes a short chapter itself (it offers
+    // a hold, refused here), and a complete one lands through writeAtomic: a temporary file renamed over the
+    // old one, so the held file is untouched until the new one is entirely on disk.
+    const upgrade = upgrades.has(ch.number);
+    const heldSource = heldFrom.get(ch.number);
+    if (upgrade) {
+      if (!upgradeBudget || upgradeBudget.left <= 0) continue;
+      upgradeBudget.left--;
+    }
     attempts++;
     let out: FallbackOutcome;
     try {
@@ -377,9 +455,14 @@ export async function updateSeries(seriesId: string, maxNew = 10, opts: UpdateOp
       out = await downloadWithFallback({
         seriesId, title: s.title, folder: s.folder, meta,
         chapter: ch.source ? ch : { ...ch, source: via },
-        alternates: async () => copiesOf(tagged, ch.number, prefs, chooseOpts).filter((c) => c !== ch),
+        // An upgrade REPLACES: the point is to overwrite the copy already there, and without this the
+        // downloader's own "already present" check would skip it and the queue entry would be a no-op.
+        // The write is atomic (fsAtomic), so a failed attempt never leaves a half-written file behind.
+        replace: upgrade,
+        alternates: upgrade ? async () => [] : async () => copiesOf(tagged, ch.number, prefs, chooseOpts).filter((c) => c !== ch),
         refusing, allowed,
-        hunt: huntBudget ? async () => (await huntSource(seriesId, ch.number, { allowed, budget: huntBudget })).chapter : undefined,
+        hunt: huntBudget && !upgrade ? async () => (await huntSource(seriesId, ch.number, { allowed, budget: huntBudget })).chapter : undefined,
+        ...(upgrade ? { acceptPartial: () => false } : {}),
         // Twice refused by the source this very copy is on (the ledger read above): the hunt may run on a
         // third refusal. A refusal from some other source is not this copy's history.
         persistent: persistentVia.get(ch.number) === via,
@@ -392,6 +475,10 @@ export async function updateSeries(seriesId: string, maxNew = 10, opts: UpdateOp
     }
     if (out.kind === 'landed' || out.kind === 'partial') {
       added++;
+      if (upgrade) {
+        upgraded++;
+        await q('DELETE FROM source_upgrade_failures WHERE series_id = $1 AND number = $2::real', [seriesId, ch.number]).catch(() => {});
+      }
       if (out.switched) switched++;
       if (out.kind === 'partial') partial++;
       landed.push({
@@ -405,7 +492,22 @@ export async function updateSeries(seriesId: string, maxNew = 10, opts: UpdateOp
       if (out.why === 'on_disk' && newest && newest.number === ch.number) newest = { ...newest, state: 'on_disk' };
       // Never asked -- its source is refusing and nothing else lists it -- is the old loop's `continue`:
       // not an attempt, not a failure, and no ledger row towards the retry cap for a chapter nobody tried.
-      if (out.why === 'refusing') attempts--;
+      if (out.why === 'refusing') {
+        attempts--;
+        // Never asked, so it spent nothing: the upgrade budget gets its attempt back and no backoff starts.
+        if (upgrade && upgradeBudget) upgradeBudget.left++;
+      }
+    } else if (upgrade) {
+      // A failed UPGRADE is not a missing chapter: the held copy is still there and still readable, so it
+      // gets no chapter_failures row (that ledger lists chapters that will not download, and the scan clears
+      // any row whose number is on disk anyway) and does not count in `failed`. It gets a backoff instead,
+      // so a preferred source that lists what it cannot serve is asked for it once a week, not every night.
+      await q(
+        `INSERT INTO source_upgrade_failures (series_id, number, source_id) VALUES ($1, $2, $3)
+         ON CONFLICT (series_id, number) DO UPDATE SET source_id = EXCLUDED.source_id, at = now()`,
+        [seriesId, ch.number, out.via],
+      ).catch(() => {});
+      console.warn(`[update] "${s.title}" ch ${ch.number}: upgrade from ${out.via} failed; keeping the copy from ${heldSource ?? 'unknown'}`);
     } else {
       failed++; // a failed chapter shouldn't abort the rest, but it must not vanish either
       await noteChapterFailure({ seriesId, title: s.title, number: ch.number, sourceId: out.via, err: out.err });
@@ -419,13 +521,13 @@ export async function updateSeries(seriesId: string, maxNew = 10, opts: UpdateOp
     // primary refused has still left the primary refusing.
     if (refusing.size && followed.every((f) => refusing.has(f.source))) break;
   }
-  if (added) notifyNewChapter(seriesId, s.title, added).catch(() => {});
+  if (added - upgraded) notifyNewChapter(seriesId, s.title, added - upgraded).catch(() => {});
   // backfill release dates onto already-scanned books; freshly downloaded ones are stamped after the sweep's scan
   await setBookDates(s.folder, releases).catch(() => {});
   // Provenance goes only onto what LANDED, never onto the whole listing: the chosen copy for a number can
   // change between runs, and the file on disk does not change with it.
   await setBookMeta(s.folder, landed).catch(() => {});
-  return { title: s.title, added, available: releases.length, outcome: 'ok', failed, waiting, switched, partial, landed, capped, folder: s.folder, chapters: releases, diskFull, asked: true, ...(newest ? { newest } : {}) };
+  return { title: s.title, added, available: releases.length, outcome: 'ok', failed, waiting, switched, partial, upgraded, landed, capped, folder: s.folder, chapters: releases, diskFull, asked: true, ...(newest ? { newest } : {}) };
 }
 
 /**
@@ -482,6 +584,9 @@ export async function runUpdateAll(opts: { onlyFavorites?: boolean; maxNew?: num
   // One hunt budget for the whole night (lib/sourceHunt.ts): however many chapters fail, the sweep
   // searches other sources at most HUNT_MAX_PER_SWEEP times.
   const huntBudget = { left: HUNT_MAX_PER_SWEEP };
+  // And one upgrade budget (lib/sourcePrefs.ts): at most UPGRADE_MAX_PER_SWEEP held chapters re-fetched
+  // from a higher-ranked source per night, library-wide, whatever the number of series that qualify.
+  const upgradeBudget = { left: UPGRADE_MAX_PER_SWEEP };
   // Tallied so the caller can say what happened. `updateSeries` throwing outright is its own outcome:
   // catching it into `{ added: 0 }` is what made "the database went away mid-sweep" read as "nothing new".
   // `skipped` is what the budget or a parked source left unvisited: not a failure, and not nothing either.
@@ -499,7 +604,7 @@ export async function runUpdateAll(opts: { onlyFavorites?: boolean; maxNew?: num
       const id = ids.shift()!;
       progressed = true;
       visited++;
-      const r = await updateSeries(id, Math.min(opts.maxNew ?? 10, Math.max(1, sweepMax - spent)), { hunt: huntBudget })
+      const r = await updateSeries(id, Math.min(opts.maxNew ?? 10, Math.max(1, sweepMax - spent)), { hunt: huntBudget, upgrades: upgradeBudget })
         .catch(() => ({ added: 0, outcome: 'threw' as const, failed: 0, landed: [] } as { added: number; outcome: 'threw'; failed: number; folder?: string; chapters?: SourceChapter[]; landed: Landed[]; diskFull?: boolean; switched?: number; partial?: number }));
       added += r.added;
       chapterFailures += r.failed ?? 0;
@@ -510,7 +615,9 @@ export async function runUpdateAll(opts: { onlyFavorites?: boolean; maxNew?: num
       outcomes[r.outcome] = (outcomes[r.outcome] ?? 0) + 1;
       if (r.added && r.folder && r.chapters?.length) dated.push({ folder: r.folder, chapters: r.chapters, landed: r.landed });
       // The throw fallback above has `added: 0` and no title, so it can never reach the digest.
-      if (r.added && (r as { title?: string }).title) newChapters.push({ id, title: (r as { title: string }).title, added: r.added });
+      // Upgrades are in `added` (they cost the budget and need the scan) but are not new chapters.
+      const fresh = r.added - ((r as { upgraded?: number }).upgraded ?? 0);
+      if (fresh && (r as { title?: string }).title) newChapters.push({ id, title: (r as { title: string }).title, added: fresh });
       if (r.diskFull) { stopped = 'disk'; break sweep; }
       if (r.outcome === 'blocked') parked.add(src);
       await new Promise((res) => setTimeout(res, 1500));

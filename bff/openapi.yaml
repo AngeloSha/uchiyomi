@@ -1134,6 +1134,15 @@ paths:
                     oneOf:
                       - $ref: "#/components/schemas/ScanlatorPrefs"
                       - type: "null"
+                  sourcePrefs:
+                    description: >-
+                      Admins only. The series' own source order ({priority: [sourceId, ...]}), or null when
+                      the server-wide order applies.
+                    oneOf:
+                      - type: object
+                        properties:
+                          priority: { type: array, items: { type: string } }
+                      - type: "null"
         "401":
           description: Not authenticated
         "404":
@@ -4608,6 +4617,18 @@ paths:
                       Whether the nightly library repair runs on its own. On by default. Off stops the
                       schedule only: Run now and the Health page's chips still work, because nothing the
                       repair does is destructive (it never deletes, merges or renumbers anything).
+                  source_prefs:
+                    type: object
+                    description: >-
+                      The server-wide source order, most preferred first. Empty by default. A series with an
+                      order of its own uses that instead (replaced, not merged).
+                    properties:
+                      priority: { type: array, items: { type: string } }
+                  source_upgrade:
+                    type: boolean
+                    description: >-
+                      Whether chapters already held from a lower-ranked source are re-fetched from a
+                      higher-ranked one. Off by default.
         "401":
           description: Not authenticated
         "403":
@@ -4617,7 +4638,8 @@ paths:
         - admin
       summary: "Change server settings: name, open registration, update interval, backup hour, extension check
         interval and its kill switch, the update check, the opt-in install count, the opt-in read-chapter
-        cleanup, the bounded failed-chapter source hunt, and the server-wide scanlation-group preferences."
+        cleanup, the bounded failed-chapter source hunt, the server-wide scanlation-group preferences, and the
+        server-wide source order with its opt-in upgrade switch."
       operationId: patchApiAdminSettings
       description: >-
         Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. Answers
@@ -4695,6 +4717,28 @@ paths:
                     what the setting is for -- maxNumberSort only: they are not counted in booksCount or
                     booksUnreadCount, so a fully read series still reports COMPLETED -- and they never
                     affect lastReadContinuousNumberSort. Nothing outside /api/v1 and /api/v2 changes.
+                  type: boolean
+                sourcePrefs:
+                  description: >-
+                    The server-wide source order, replaced whole: source ids, most preferred first. It ranks
+                    the copies of a chapter not yet held, after the scanlation-group preferences and before
+                    the follow order; an unlisted source ranks below every listed one. A series with an
+                    order of its own uses that instead.
+                  type: object
+                  required: [priority]
+                  properties:
+                    priority:
+                      type: array
+                      maxItems: 100
+                      items: { type: string, minLength: 1, maxLength: 120 }
+                sourceUpgrade:
+                  description: >-
+                    Replace a chapter already held from a lower-ranked source with the copy a higher-ranked
+                    one lists. Off by default. Only a complete copy from a source that outranks the held
+                    copy's (never one of unknown origin, never a tombstone) replaces it, written over the
+                    same file so ids and reading progress survive; at most 20 attempts per sweep across the
+                    library, behind each series' missing chapters; a failed attempt is not retried for 7
+                    days.
                   type: boolean
       security:
         - bearer: []
@@ -4984,7 +5028,7 @@ paths:
     patch:
       tags:
         - admin
-      summary: Change a series' settings (auto-update, its own scanlation-group preferences).
+      summary: Change a series' settings (auto-update, its own scanlation-group preferences, its own source order).
       operationId: patchApiAdminSeriesId
       description: >-
         Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. The body
@@ -5015,6 +5059,19 @@ paths:
                     blocked list is added to it, and a null patienceDays inherits.
                   oneOf:
                     - $ref: "#/components/schemas/ScanlatorPrefs"
+                    - type: "null"
+                sourcePrefs:
+                  description: >-
+                    The series' own source order, replaced whole; null clears it so the server-wide order
+                    applies again. Replaces the server's order for this series rather than merging with it.
+                  oneOf:
+                    - type: object
+                      required: [priority]
+                      properties:
+                        priority:
+                          type: array
+                          maxItems: 100
+                          items: { type: string, minLength: 1, maxLength: 120 }
                     - type: "null"
       security:
         - bearer: []

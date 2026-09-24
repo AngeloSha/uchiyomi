@@ -499,6 +499,22 @@ ALTER TABLE lib_series ADD COLUMN IF NOT EXISTS source_hunt_at timestamptz;
 -- The switch for that hunt. ON by default: it only ever runs after every followed source has failed a
 -- chapter, follows at most two sources per series, and never attaches an adult source to a clean series.
 ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS auto_follow_on_failure boolean NOT NULL DEFAULT true;
+-- Which sources a series is preferred to come from, most preferred first. Server-wide, overridable per
+-- series. The order decides which copy of a chapter not yet held is taken; replacing a chapter already
+-- held from a lower-ranked source (an "upgrade") is its own switch, OFF by default -- see lib/sourcePrefs.ts.
+ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS source_prefs jsonb NOT NULL DEFAULT '{"priority": []}'::jsonb;
+ALTER TABLE lib_series      ADD COLUMN IF NOT EXISTS source_prefs jsonb;
+ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS source_upgrade boolean NOT NULL DEFAULT false;
+-- An upgrade that failed, so the same chapter is not asked for again every night: the updater skips a
+-- (series, number) here for UPGRADE_BACKOFF_DAYS. Not chapter_failures: that ledger is for chapters the
+-- server does NOT hold (the scan clears any row whose number is on disk), and an upgrade's chapter is held.
+CREATE TABLE IF NOT EXISTS source_upgrade_failures (
+  series_id text NOT NULL REFERENCES lib_series(id) ON DELETE CASCADE,
+  number    real NOT NULL,
+  source_id text,
+  at        timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (series_id, number)
+);
 
 -- v0.41.0: the nightly library repair (lib/repair.ts), which fixes what the Health page could only report.
 --

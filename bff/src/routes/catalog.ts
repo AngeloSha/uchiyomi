@@ -391,9 +391,13 @@ export default async function catalogRoutes(app: FastifyInstance) {
     // The series' own release preferences ride along for the same audience: the editor seeds from them, and
     // null (rather than absent) says "none of its own, the global ones apply".
     if (roleOf(req) === 'admin') {
-      const f = await one<{ folder: string }>('SELECT folder FROM lib_series WHERE id = $1', [id]);
+      const f = await one<{ folder: string; source_prefs: { priority?: string[] } | null }>(
+        'SELECT folder, source_prefs FROM lib_series WHERE id = $1', [id]);
       if (f) out.folder = f.folder;
       out.scanlatorPrefs = await readSeriesPrefs(id).catch(() => null);
+      // And the series' own source order (lib/sourcePrefs.ts), for the Sources sheet's preferred-source
+      // chips -- an admin control, like the release preferences. Null means the server-wide order applies.
+      out.sourcePrefs = f?.source_prefs ?? null;
     }
     return out;
   });

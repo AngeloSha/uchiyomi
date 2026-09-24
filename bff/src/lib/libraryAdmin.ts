@@ -236,7 +236,7 @@ const BOOK_KEYED_TABLES = [...BOOK_KEYED_USER_TABLES, 'book_overrides', 'page_ha
 const SERIES_KEYED_TABLES = [
   'favorites', 'collection_items', 'ratings', 'series_colors', 'series_art', 'series_seen', 'series_trackers',
   'series_overrides', 'notes', 'series_sources', 'series_listing', 'chapter_failures', 'tracker_progress',
-  'reading_events', 'offline_downloads', 'bookmarks', 'listing_progress',
+  'reading_events', 'offline_downloads', 'bookmarks', 'listing_progress', 'source_upgrade_failures',
 ] as const;
 
 export interface ForgetRefusal {

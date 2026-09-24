@@ -39,6 +39,7 @@ import { ART_DIR, artFile, artOverview } from '../lib/seriesArt';
 import { writePreflight } from '../lib/fsGuard';
 // Admin stats report on the whole library by definition; this route is already behind requireAdmin.
 import { NO_LIBRARIES, SYSTEM_CTX, visibleToAll } from '../lib/visibility';
+import { invalidateSourcePrefs } from '../lib/sourcePrefs';
 import { addSeriesFromSource, findBestMatch, resolveCandidate, norm, jobBusy, startDownloadJob, FILL_MAX_CHAPTERS, REFRESH_BUDGET_MS } from './sources';
 import { confirmsTitle } from '../lib/confirmTitle';
 import { chapterFileRel } from '../lib/downloader';
@@ -418,7 +419,7 @@ export default async function adminRoutes(app: FastifyInstance) {
   // ---- server settings ----
   const SETTINGS_COLS = 'server_name, allow_registration, updater_hours, extension_hours, extension_auto_update, '
     + 'update_check, install_ping, install_ping_last, scanlator_prefs, cleanup_read, cleanup_read_days, backup_hour, auto_follow_on_failure, '
-    + 'repair_enabled, komga_ghost_chapters';
+    + 'repair_enabled, komga_ghost_chapters, source_prefs, source_upgrade';
   // `extensions_configured` is not a column: extension_hours has a NOT NULL default, so its presence says
   // nothing about whether there is an engine to check. The settings page needs to know, or it offers two
   // controls for a job that can never run.
@@ -507,6 +508,10 @@ export default async function adminRoutes(app: FastifyInstance) {
       // Ghost chapters on the Komga surface (lib/komgaGhosts.ts). Affects nothing this server stores and
       // nothing the web app shows: it widens one API's chapter list so the trackers behind it can count.
       komgaGhostChapters: z.boolean().optional(),
+      /** Source ids, most preferred first. Decides which copy of a chapter not yet held is taken. */
+      sourcePrefs: z.object({ priority: z.array(z.string().min(1).max(120)).max(100) }).optional(),
+      /** Replace chapters already held from a lower-ranked source (lib/sourcePrefs.ts). Off by default. */
+      sourceUpgrade: z.boolean().optional(),
     }).parse(req.body);
     if (b.serverName !== undefined) await q('UPDATE server_settings SET server_name = $1, updated_at = now() WHERE id = 1', [b.serverName]);
     if (b.allowRegistration !== undefined) await q('UPDATE server_settings SET allow_registration = $1, updated_at = now() WHERE id = 1', [b.allowRegistration]);
@@ -524,6 +529,15 @@ export default async function adminRoutes(app: FastifyInstance) {
     // timer used to re-read the hour only when it fired (server.ts, the backup block says why).
     if (b.backupHour !== undefined) { await q('UPDATE server_settings SET backup_hour = $1, updated_at = now() WHERE id = 1', [b.backupHour]); runtime.rearmBackup?.(); }
     if (b.komgaGhostChapters !== undefined) await q('UPDATE server_settings SET komga_ghost_chapters = $1, updated_at = now() WHERE id = 1', [b.komgaGhostChapters]);
+    if (b.sourcePrefs !== undefined) {
+      await q('UPDATE server_settings SET source_prefs = $1::jsonb, updated_at = now() WHERE id = 1',
+        [JSON.stringify({ priority: b.sourcePrefs.priority })]);
+      invalidateSourcePrefs();
+    }
+    if (b.sourceUpgrade !== undefined) {
+      await q('UPDATE server_settings SET source_upgrade = $1, updated_at = now() WHERE id = 1', [b.sourceUpgrade]);
+      invalidateSourcePrefs();
+    }
     await logAudit('settings.update', { userId: userIdOf(req), detail: b, req });
     return settingsRow();
   });
@@ -840,9 +854,15 @@ export default async function adminRoutes(app: FastifyInstance) {
     const b = z.object({
       autoUpdate: z.boolean().optional(),
       scanlatorPrefs: prefsSchema.nullable().optional(),
+      /**
+       * Which sources this series is preferred to come from, most preferred first; null clears it so the
+       * server-wide order applies again. With the server's upgrade switch on, a chapter already held from a
+       * lower-ranked source is re-fetched from a higher-ranked one, over the same path, so progress survives.
+       */
+      sourcePrefs: z.object({ priority: z.array(z.string().min(1).max(120)).max(100) }).nullable().optional(),
     }).strict().safeParse(req.body);
     if (!b.success) return reply.code(400).send({ error: 'bad_request' });
-    if (b.data.autoUpdate === undefined && b.data.scanlatorPrefs === undefined) {
+    if (b.data.autoUpdate === undefined && b.data.scanlatorPrefs === undefined && b.data.sourcePrefs === undefined) {
       return reply.code(400).send({ error: 'bad_request', message: 'Nothing to change.' });
     }
     const row = await getSeriesRow(id);
@@ -851,6 +871,11 @@ export default async function adminRoutes(app: FastifyInstance) {
     if (b.data.autoUpdate !== undefined) {
       await q('UPDATE lib_series SET auto_update = $2 WHERE id = $1', [id, b.data.autoUpdate]);
       detail.autoUpdate = b.data.autoUpdate;
+    }
+    if (b.data.sourcePrefs !== undefined) {
+      await q('UPDATE lib_series SET source_prefs = $2::jsonb WHERE id = $1',
+        [id, b.data.sourcePrefs === null ? null : JSON.stringify({ priority: b.data.sourcePrefs.priority })]);
+      detail.sourcePrefs = b.data.sourcePrefs;
     }
     if (b.data.scanlatorPrefs !== undefined) {
       await q('UPDATE lib_series SET scanlator_prefs = $2::jsonb WHERE id = $1',
