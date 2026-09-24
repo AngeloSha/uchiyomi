@@ -1,0 +1,326 @@
+name: Desktop
+
+# Uchiyomi Desktop: the Electron app built, installed and exercised on real Windows and macOS runners.
+# Nothing here publishes anything: installers go up as workflow artifacts, and the release workflow (which calls
+# this one) attaches them to the GitHub Release.
+#
+#   prebuild   web export + bff dist, built ONCE on Linux (platform-independent output, like Dockerfile.aio's
+#              first two stages) and handed to every OS job
+#   shell      the shell's own tests on Linux: unit tests, the solver's contract tests (the bff's REAL client and
+#              engines, Suwayomi's DTOs), the type check, and the solver in real hidden Electron windows
+#   build      per OS: stage -> pg-dist -> electron-builder (installer + unpacked) -> the product checks:
+#                solver fixture test in real hidden windows on this OS
+#                --smoke: postgres + solver + bff headless, the sign-in handshake and its refusals, the bff's own
+#                  backup, the extension engine installed from a locally served pack
+#                product smoke: fresh profile -> first run -> signed in on an empty library, no sign-in form ->
+#                  a MangaDex chapter downloaded and read -> engine installed from the bridge -> Extensions
+#                  reachable -> Quit leaves nothing -> relaunch signed in
+#                S2 (Postgres on a non-ASCII profile, power-off, orphan), S5 (Windows NSIS update and install over
+#                a running app), S6 (macOS unsigned: dmg, quarantine, a rebuilt app on the same profile)
+#   Artifacts: desktop-dist-<platform> (installers, blockmaps, latest*.yml -- what the release uploads) and
+#   desktop-evidence-<platform> (ci-out: verdicts, screenshots, logs).
+
+# Every change that reaches the app is built and exercised BEFORE a release tag does it for the first time. Until
+# v0.44.0 this ran only on the desktop branch, so after the merge nothing built the shell, the installers or the
+# smokes until the tag -- and a desktop leg that first goes red at the tag ships a Release with no latest.yml, so
+# every Windows install's updater gets a 404 from the newest release. bff/ and web/ are in the list because the
+# app ships them (the desktop switch and its routes, relPath and the backups, the web's desktop gates), and
+# desktop/ covers Dependabot's Electron PRs. The repository is public, so the macOS legs cost no minutes.
+on:
+  push:
+    branches: [main, desktop]
+    paths:
+      - 'desktop/**'
+      - 'bff/src/**'
+      - 'bff/package.json'
+      - 'bff/package-lock.json'
+      - 'web/**'
+      - '.github/workflows/desktop.yml'
+  pull_request:
+    paths:
+      - 'desktop/**'
+      - 'bff/src/**'
+      - 'bff/package.json'
+      - 'bff/package-lock.json'
+      - 'web/**'
+      - '.github/workflows/desktop.yml'
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  # When release.yml calls this, github.workflow is the caller's name, so the group never collides with a
+  # push run of this workflow on the same ref.
+  group: desktop-${{ github.workflow }}-${{ github.ref }}
+  # Superseded pull-request pushes are cancelled. main is not, for ci.yml's reason: a cancelled run renders as
+  # a red "failing" run even when every job that finished had passed. (A tag called from release.yml has
+  # event_name 'push' too, and a ref of its own, so it never matches.)
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || github.ref == 'refs/heads/desktop' }}
+
+env:
+  PG_EDB: 16.15-4
+  SUWAYOMI: v2.3.2243
+  ELECTRON_CACHE_KEY: electron-44.4.5-eb-26.15.3
+
+jobs:
+  prebuild:
+    name: Build web + bff once
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: |
+            web/package-lock.json
+            bff/package-lock.json
+      # A release tag with no published engine pack in the pin fails here, in seconds, instead of after the whole
+      # desktop build; release.yml's desktop-publish holds the same line before it uploads anything. Branches and
+      # pull requests build from an unpinned tree on purpose (the smokes make their own pack).
+      - name: A release tag ships a pinned extension engine
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: node desktop/scripts/release/check-pin.mjs
+      - name: Web static export
+        working-directory: web
+        run: npm ci --no-audit --no-fund && npm run build
+      - name: bff dist
+        working-directory: bff
+        run: npm ci --no-audit --no-fund && npm run build
+      - run: mkdir -p prebuilt && cp -r web/out prebuilt/web-out && cp -r bff/dist prebuilt/bff-dist
+      - uses: actions/upload-artifact@v7
+        with:
+          name: desktop-prebuilt
+          path: prebuilt
+          retention-days: 3
+
+  shell:
+    name: Shell tests (unit, solver contract, types, Electron solver)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: |
+            bff/package-lock.json
+            desktop/package-lock.json
+      # The contract tests import the bff's real flaresolverr.ts, madara/manganato engines and sourceDiagnosis,
+      # and the env test runs bff/src/lib/desktop.ts's own desktopPlan() against the shell's environment.
+      - name: bff dependencies
+        working-directory: bff
+        run: npm ci --no-audit --no-fund
+      - name: desktop dependencies
+        working-directory: desktop
+        run: |
+          npm ci --no-audit --no-fund
+          node node_modules/electron/install.js
+      - name: Type check (the solver's TypeScript and the shell's // @ts-check JavaScript)
+        working-directory: desktop
+        run: npm run typecheck
+      - name: Unit + contract tests
+        working-directory: desktop
+        run: npm test
+      - name: Linux only - let Chromium use its user-namespace sandbox (Ubuntu 24.04 restricts it via AppArmor)
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      - name: The solver in real hidden Electron windows (fixture site)
+        working-directory: desktop
+        run: |
+          npm run build
+          xvfb-run -a -s '-screen 0 1920x1080x24' node_modules/electron/dist/electron out/test/solver.electron.test.js 2>&1 | tee ../solver-electron.log
+          grep -q -E '^[0-9]+/[0-9]+ passed' ../solver-electron.log
+          ! grep -q '^✖' ../solver-electron.log
+      - name: Summary
+        if: always()
+        run: |
+          { echo '### Solver in Electron (ubuntu)'; echo '```'; grep -h -E '^(✔|✖|MEASURE|[0-9]+/[0-9]+ passed)' solver-electron.log 2>/dev/null || true; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+
+  build:
+    name: Desktop ${{ matrix.platform }}
+    needs: prebuild
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 75
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            platform: win-x64
+            eb: --win --x64
+          - os: macos-15
+            platform: mac-arm64
+            eb: --mac --arm64
+          - os: macos-15-intel
+            platform: mac-x64
+            eb: --mac --x64
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+      # javac --release 21 for the engine shim, only while engine-pin.json has no published pack to download.
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: actions/download-artifact@v8
+        with:
+          name: desktop-prebuilt
+          path: prebuilt
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/AppData/Local/electron/Cache
+            ~/AppData/Local/electron-builder/Cache
+            ~/Library/Caches/electron
+            ~/Library/Caches/electron-builder
+          key: ${{ env.ELECTRON_CACHE_KEY }}-${{ runner.os }}-${{ matrix.platform }}
+      - uses: actions/cache@v6
+        with:
+          path: desktop/.cache/*.zip
+          key: pg-zip-${{ runner.os }}-${{ env.PG_EDB }}
+      # The engine pack for the smokes: the published one once pinned, else built from the cached Suwayomi
+      # release -- so a run never pulls 200-330 MB unless the cache is cold (scripts/ci/engine-fixture.mjs).
+      - uses: actions/cache@v6
+        with:
+          path: |
+            desktop/.cache/suwayomi
+            desktop/.cache/engine-pack
+          key: engine-${{ env.SUWAYOMI }}-${{ matrix.platform }}-${{ hashFiles('desktop/src/engine-pin.json', 'desktop/engine-shim/*.java') }}
+          restore-keys: engine-${{ env.SUWAYOMI }}-${{ matrix.platform }}-
+      - name: desktop dependencies
+        working-directory: desktop
+        run: |
+          npm ci --no-audit --no-fund
+          node node_modules/electron/install.js
+      - name: Compile the solver
+        working-directory: desktop
+        run: npm run build
+      - name: Stage web + bff (as Dockerfile.aio)
+        working-directory: desktop
+        run: node scripts/stage.mjs --prebuilt ../prebuilt
+      - name: pg-dist (EDB PostgreSQL ${{ env.PG_EDB }}, pruned)
+        working-directory: desktop
+        run: node scripts/pg-dist.mjs --version ${{ env.PG_EDB }} --cache .cache
+      - name: Engine pack fixture
+        working-directory: desktop
+        run: node scripts/ci/engine-fixture.mjs --cache .cache
+      - name: Package (installer + unpacked)
+        id: package
+        working-directory: desktop
+        run: npx electron-builder ${{ matrix.eb }} --publish never
+      - name: Sizes
+        working-directory: desktop
+        run: |
+          node -e "
+            const fs=require('fs'),p=require('path');
+            const du=(d)=>{const s=fs.lstatSync(d);return s.isDirectory()?fs.readdirSync(d).reduce((n,e)=>n+du(p.join(d,e)),0):s.size};
+            const files=fs.readdirSync('dist').filter(f=>/\.(exe|dmg|zip)$/.test(f)).map(f=>[f,fs.statSync(p.join('dist',f)).size]);
+            const unpacked=fs.readdirSync('dist').filter(d=>/unpacked|^mac/.test(d)).map(d=>[d,du(p.join('dist',d))]);
+            const res=['bff','web','pg'].map(r=>[r,du(p.join('resources',r))]);
+            const mb=(b)=>(b/1048576).toFixed(1)+' MB';
+            const s='installers: '+files.map(([f,b])=>f+' '+mb(b)).join(', ')+'; unpacked: '+unpacked.map(([d,b])=>d+' '+mb(b)).join(', ')+'; resources: '+res.map(([r,b])=>r+' '+mb(b)).join(', ');
+            fs.mkdirSync('ci-out',{recursive:true});
+            fs.writeFileSync(p.join(process.env.RUNNER_TEMP,'sizes.json'),JSON.stringify({files,unpacked,res}));
+            require('child_process').execFileSync(process.execPath,['scripts/ci/record.mjs','M-sizes','INFO',s,p.join(process.env.RUNNER_TEMP,'sizes.json')],{stdio:'inherit'});
+          "
+      # Each check below records a verdict row (ci-out/results.jsonl) and carries on, so one red check still
+      # leaves the others' evidence; the Verdicts step fails the job if any row is FAIL.
+      - name: Solver fixture test in real hidden windows on this OS
+        continue-on-error: true
+        working-directory: desktop
+        run: |
+          mkdir -p ci-out
+          npx electron out/test/solver.electron.test.js 2>&1 | tee ci-out/solver-electron.log || true
+          LINE=$(grep -E '^[0-9]+/[0-9]+ passed' ci-out/solver-electron.log || echo 'no result line')
+          if grep -q '^✖' ci-out/solver-electron.log || ! grep -q -E '^[0-9]+/[0-9]+ passed' ci-out/solver-electron.log; then R=FAIL; else R=PASS; fi
+          node scripts/ci/record.mjs S-solver-electron "$R" "$LINE (fixture site, hidden windows, DevTools input, bounded jars, popups denied)"
+      - name: Smoke (headless) with the extension engine
+        continue-on-error: true
+        working-directory: desktop
+        run: node scripts/ci/smoke.mjs || node scripts/ci/record.mjs D-smoke-script FAIL "smoke.mjs itself failed (exit $?)"
+      - name: Product smoke (window, first run, MangaDex, engine, quit, relaunch)
+        continue-on-error: true
+        working-directory: desktop
+        run: node scripts/ci/product-smoke.mjs || node scripts/ci/record.mjs P-product-smoke-script FAIL "product-smoke.mjs itself failed (exit $?)"
+      - name: S2 postgres lifecycle (non-ASCII profile, power-off, orphan)
+        continue-on-error: true
+        working-directory: desktop
+        run: node scripts/ci/s2-postgres.mjs || node scripts/ci/record.mjs S2-script FAIL "s2-postgres.mjs itself failed (exit $?)"
+      - name: S2 (iv) standard user
+        continue-on-error: true
+        if: runner.os == 'Windows'
+        working-directory: desktop
+        shell: pwsh
+        run: ./scripts/ci/s2-standard-user.ps1
+      - name: S6 unsigned macOS (dmg copy, quarantine)
+        continue-on-error: true
+        if: runner.os == 'macOS'
+        working-directory: desktop
+        run: bash scripts/ci/s6-mac.sh
+      - name: vN+1 build (version bumped) for the update checks
+        working-directory: desktop
+        run: |
+          cp package.json "$RUNNER_TEMP/package.json.orig"
+          cp package-lock.json "$RUNNER_TEMP/package-lock.json.orig"
+          NEXT=$(node -e "const v=require('./package.json').version.split('.');v[2]=String(Number(v[2])+1);process.stdout.write(v.join('.'))")
+          echo "NEXT_VERSION=$NEXT" >> "$GITHUB_ENV"
+          npm version "$NEXT" --no-git-tag-version --allow-same-version
+          if [ "$RUNNER_OS" = Windows ]; then npx electron-builder --win --x64 --publish never -c.directories.output=dist-next; else npx electron-builder ${{ matrix.eb }} --dir --publish never -c.directories.output=dist-next; fi
+          cp "$RUNNER_TEMP/package.json.orig" package.json
+          cp "$RUNNER_TEMP/package-lock.json.orig" package-lock.json
+      - name: S6 unsigned update vs the cookie keychain (vN+1 on the product smoke's profile)
+        continue-on-error: true
+        if: runner.os == 'macOS'
+        working-directory: desktop
+        run: node scripts/ci/s6-keychain.mjs || node scripts/ci/record.mjs S6-keychain-script FAIL "s6-keychain.mjs itself failed (exit $?)"
+      - name: S5 NSIS update, and an install over the running app
+        continue-on-error: true
+        if: runner.os == 'Windows'
+        working-directory: desktop
+        shell: pwsh
+        run: |
+          $v = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          ./scripts/ci/s5-update.ps1 -SetupN "dist/Uchiyomi-Setup-$v.exe" -SetupN1 "dist-next/Uchiyomi-Setup-$env:NEXT_VERSION.exe" -VersionN1 $env:NEXT_VERSION
+      # What the release uploads: the installers, their blockmaps, and latest*.yml (electron-updater's feed; each
+      # mac job writes its own latest-mac.yml, which the release merges). Uploaded even when a check failed, for
+      # debugging -- the release only proceeds when this whole job is green.
+      - uses: actions/upload-artifact@v7
+        if: always() && steps.package.outcome == 'success'
+        with:
+          name: desktop-dist-${{ matrix.platform }}
+          path: |
+            desktop/dist/*.exe
+            desktop/dist/*.exe.blockmap
+            desktop/dist/*.dmg
+            desktop/dist/*.dmg.blockmap
+            desktop/dist/*.zip
+            desktop/dist/*.zip.blockmap
+            desktop/dist/latest*.yml
+          retention-days: 7
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: desktop-evidence-${{ matrix.platform }}
+          path: |
+            desktop/ci-out
+            desktop/resources/pg/PG_BUNDLE.json
+          retention-days: 7
+      - name: Verdicts
+        if: always()
+        working-directory: desktop
+        run: node scripts/ci/summary.mjs

@@ -1,0 +1,15 @@
+# staged by scripts/stage.mjs and scripts/pg-dist.mjs -- build inputs, never source
+resources/
+# the solver, compiled from src/solver/*.ts by `npm run build`
+out/
+# electron-builder output
+dist/
+dist-next/
+# copied from web/public/icons by scripts/stage.mjs (build/installer.nsh IS source)
+build/icon.png
+# engine/pack.mjs downloads and output
+engine/.cache/
+engine/build/
+# CI evidence written by scripts/ci/*
+ci-out/
+.cache/

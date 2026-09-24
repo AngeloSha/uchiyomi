@@ -16,7 +16,8 @@
 // ⚠️ The manifest carries no page URLs. They expire, and an exported CBZ would leak the source host into a
 // file that travels; the completion pass re-runs getPageUrls instead.
 import { stat } from 'fs/promises';
-import { dirname, join } from 'path';
+import { join } from 'path';
+import { dirnameRel } from './relPath';
 import sharp from 'sharp';
 import { q, one } from './db';
 import { getSource, SourceChapter } from './sources';
@@ -209,9 +210,11 @@ export async function completePartial(
   const s = await one<{ title: string; summary: string | null; author: string | null; genres: string[]; web: string | null; status: string | null }>(
     'SELECT title, summary, author, genres, web, status FROM lib_series WHERE id = $1', [book.series_id],
   );
-  const title = s?.title ?? dirname(book.file).split('/').pop() ?? '';
+  const title = s?.title ?? dirnameRel(book.file).split('/').pop() ?? '';
   const meta: DownloadInput['meta'] = { series: title, summary: s?.summary ?? undefined, author: s?.author ?? undefined, genres: s?.genres ?? undefined, url: s?.web ?? undefined, status: s?.status ?? undefined };
-  const seriesFolder = dirname(book.file);
+  // dirnameRel, not dirname: book.file is the stored `/` form (lib/relPath.ts), and this folder is handed
+  // back to the downloader, whose chapterFileRel must land on the same row.
+  const seriesFolder = dirnameRel(book.file);
   const chapter: SourceChapter = { sourceId: manifest.chapterSourceId, number: book.number };
   const label = `[partial] "${title}" ch ${book.number}`;
   let result: Completion = 'unchanged';

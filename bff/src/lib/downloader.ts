@@ -4,7 +4,7 @@
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const AdmZip = require('adm-zip');
 import { mkdir, stat, statfs } from 'fs/promises';
-import { join, dirname } from 'path';
+import { join, dirname, posix } from 'path';
 import sharp from 'sharp';
 import { getSource, SourceAdapter, SourceChapter, SourceSeries } from './sources';
 import { cfSession } from './sources/flaresolverr';
@@ -16,8 +16,30 @@ import { writeAtomic } from './fsAtomic';
 import { paceFor, paceLevel, noteRateLimited, MAX_PAGE_GAP_MS } from './pace';
 import { pageName, placeholderPng, PARTIAL_MANIFEST, type PartialManifest } from './partial';
 
-export function sanitize(s: string): string {
-  return (s || '').replace(/[\/\\:*?"<>|]+/g, '_').replace(/\s+/g, ' ').trim().slice(0, 150) || 'untitled';
+export function sanitize(s: string, platform: NodeJS.Platform = process.platform): string {
+  const name = (s || '').replace(/[\/\\:*?"<>|]+/g, '_').replace(/\s+/g, ' ').trim().slice(0, 150) || 'untitled';
+  return platform === 'win32' ? winSafe(name) : name;
+}
+
+/**
+ * The names Windows cannot hold, made holdable. Windows only: on Linux every one of these is a legal name
+ * and the server's folders must keep the exact spelling they already have on disk.
+ *
+ * ⚠️ Node reaches these through the `\\?\` long-path prefix, which CREATES them literally -- and then
+ * Explorer can neither open nor delete a folder called `CON`, `Title.` or `Title ` (it strips the trailing
+ * dot or space and finds nothing). Control characters are illegal in a Windows name outright. Tabs and
+ * newlines have already become spaces above, so what is left to strip is the rest of 0x00-0x1F.
+ * Reintroduce by returning `name` unchanged: relPath.test.ts "sanitize on win32" finds `CON` and `Title.`.
+ */
+function winSafe(name: string): string {
+  const out = name
+    // eslint-disable-next-line no-control-regex
+    .replace(/[\x00-\x1f]+/g, '')
+    .replace(/[. ]+$/, '')
+    // CON, PRN, AUX, NUL, COM0-9, LPT0-9 (and the superscript digits Windows also reserves), with or
+    // without an extension: `nul.txt` is the device too.
+    .replace(/^(con|prn|aux|nul|com[0-9\u00b9\u00b2\u00b3]|lpt[0-9\u00b9\u00b2\u00b3])(?=$|[. ])/i, '$1_');
+  return out || 'untitled';
 }
 
 function comicInfo(d: { series: string; number: number; title?: string; summary?: string; author?: string; genres?: string[]; web?: string; status?: string; scanlator?: string }): string {
@@ -198,8 +220,13 @@ async function assertFreeSpace(): Promise<void> {
  * the group. That is what makes a re-download of the same number land on the same lib_books row (the
  * scanner conflicts on (root, file)), which is what keeps reading progress attached across a refetch --
  * and it is why the refetch route in routes/admin.ts only ever offers a file at exactly this path.
+ *
+ * ⚠️ `posix.join`, never `join`: this string is compared with what the database stores (`/`, see
+ * lib/relPath.ts) by the nightly repair, the Health "Fix" chip and "Fetch again", and on Windows `join`
+ * answers with `\` so none of the three ever matched. Identical on Linux, which is why only a static check
+ * can catch a regression (desktopSwitchHygiene.test.ts).
  */
-export const chapterFileRel = (seriesFolder: string, number: number): string => join(seriesFolder, `Chapter ${number}.cbz`);
+export const chapterFileRel = (seriesFolder: string, number: number): string => posix.join(seriesFolder, `Chapter ${number}.cbz`);
 
 /**
  * The per-source chapter gate every download path runs under: at most DL_CONCURRENCY chapters at once and

@@ -1,5 +1,5 @@
 'use client';
-import { Suspense, useMemo, useState } from 'react';
+import { Suspense, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { motion, useReducedMotion } from 'framer-motion';
@@ -22,6 +22,7 @@ import { ProfileSettings } from '@/components/ProfileSettings';
 import { ProfileConnections } from '@/components/ProfileConnections';
 import { ProfileAccount } from '@/components/ProfileAccount';
 import { t as tr, keys } from '@/lib/i18n';
+import { hiddenOnDesktop, isDesktop, visibleGroups, DESKTOP_HIDDEN } from '@/lib/desktop';
 
 /**
  * One group, four entries, so `flat` drops the group eyebrow and the phone group sheet: profile has an index,
@@ -94,6 +95,10 @@ function ProfileInner() {
   const still = useReducedMotion();
   const params = useSearchParams();
   const [tab, setTab] = useTabParam<Tab>(PROFILE_TABS, 'You');
+  // Uchiyomi Desktop has no Account tab: no password, no 2FA, no other sessions, and the app signs itself in
+  // (lib/desktop.ts). The rail never lists it; `?tab=Account` lands on You. PROFILE_GROUPS stays as it is.
+  const hiddenTab = hiddenOnDesktop(DESKTOP_HIDDEN.profileTabs, tab);
+  useEffect(() => { if (hiddenTab) setTab('You'); }, [hiddenTab]); // eslint-disable-line react-hooks/exhaustive-deps
   // Read once: the card is scrolled to on arrival, never again on a re-render or a tab change.
   const [focusTracking] = useState<boolean>(() => params.get('card') === 'tracking');
   const [goalOpen, setGoalOpen] = useState(false);
@@ -332,9 +337,9 @@ function ProfileInner() {
           behind a board of eight cards. They belong to the person, not to a panel, so they live on the rail.
           The nav is labelled "Profile", not "You": that was the first tab's name doubling as the name of the
           whole list, which read as "You › You" to a screen reader and in the phone sheet's heading. */}
-      <ConsoleNav groups={PROFILE_GROUPS} tab={tab} onTab={setTab} ariaLabel={tr('Profile')} flat
+      <ConsoleNav groups={isDesktop() ? visibleGroups(PROFILE_GROUPS, DESKTOP_HIDDEN.profileTabs) : PROFILE_GROUPS} tab={tab} onTab={setTab} ariaLabel={tr('Profile')} flat
         footer={<RailActions isAdmin={isAdmin} />}>
-        {panel}
+        {hiddenTab ? null : panel}
       </ConsoleNav>
 
       {goalOpen && (
@@ -379,10 +384,13 @@ function RailActions({ isAdmin }: { isAdmin: boolean }) {
         <span className="min-w-0 truncate">{tr('Support Uchiyomi')}</span>
         <IcChevronRight width={15} height={15} className={chev} />
       </a>
-      <button onClick={logout} className={`${row} text-red-300/90 hover:bg-red-500/10 hover:text-red-300`}>
-        <IcLogOut width={16} height={16} className="shrink-0" />
-        <span className="min-w-0 truncate">{tr('Sign out')}</span>
-      </button>
+      {/* Not on desktop: the app signs itself back in at once, so "Sign out" there would do nothing visible. */}
+      {!isDesktop() && (
+        <button onClick={logout} className={`${row} text-red-300/90 hover:bg-red-500/10 hover:text-red-300`}>
+          <IcLogOut width={16} height={16} className="shrink-0" />
+          <span className="min-w-0 truncate">{tr('Sign out')}</span>
+        </button>
+      )}
     </>
   );
 }

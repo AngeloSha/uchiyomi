@@ -19,6 +19,12 @@ name: Release
 # The legs are independent, so before this an image that built in two minutes would move its own `:latest`
 # while another was still going, and if that one then failed, `docker compose pull` handed people a bff from
 # one release and a web from another. v0.5.1 half-published this way and v0.7.0 did it again.
+#
+# Since v0.44.0 the same tag also builds Uchiyomi Desktop (beta): `desktop` runs desktop.yml -- installers built
+# and exercised on real Windows and macOS runners -- beside the images, never in front of them, and
+# `desktop-publish` attaches the installers to the Release this workflow just created. The Docker images do not
+# wait for the desktop build and a red desktop build never holds them back; it only means the Release carries no
+# desktop downloads until the desktop jobs are re-run.
 
 on:
   push:
@@ -257,3 +263,135 @@ jobs:
           else
             echo "::warning::no CHANGELOG section for $ver; leaving the existing release untouched"
           fi
+
+  # Uchiyomi Desktop (beta): desktop.yml builds the Windows installer and both macOS builds, each on its own
+  # runner (no cross-building, the same rule as the images), and runs the product checks there -- first run,
+  # the sign-in handshake, a real download read in the window, the extension engine, quit and relaunch, the
+  # Windows update over a running app. Nothing in it publishes.
+  #
+  # ⚠️ NO `needs`, on purpose, and nothing may ever need it except desktop-publish. It takes 30-60 minutes on
+  # three OSes and depends on things the images do not (a live MangaDex in the product smoke, macOS runner
+  # capacity); the images are two to eight minutes and are what every existing install pulls. Reintroduce by
+  # adding `needs: build` here or `needs: desktop` to `latest` or `release`: a macOS queue then holds up
+  # `:latest` for everyone.
+  desktop:
+    name: Desktop app
+    uses: ./.github/workflows/desktop.yml
+    permissions:
+      contents: read
+
+  # Attaches what `desktop` built to the Release `release` just created. It needs BOTH: the Release must exist
+  # (made from the CHANGELOG by the job above), and every desktop leg must be green -- a Release offering the
+  # Windows installer but no Mac one, or an installer without its update feed, is worse than a Release with no
+  # desktop section yet. A red desktop build therefore leaves the Release as the images alone; re-running the
+  # failed jobs finishes it.
+  #
+  # ⚠️ ORDER. electron-updater on Windows asks GitHub for the latest release, downloads latest.yml from it, then
+  # downloads the installer latest.yml names and checks it against the SHA-512 in the feed. Upload the feed first
+  # and, for those seconds, every Windows install that checks is handed a file that 404s. So the installers and
+  # blockmaps go up first, and latest.yml / latest-mac.yml last, in a call of their own (gh uploads the files of
+  # one call in parallel, so "later in the list" is not "later").
+  desktop-publish:
+    name: Attach the desktop app to the release
+    needs: [release, desktop]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      # Scoped here like the release job's; the workflow as a whole stays read-only.
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      # ⚠️ Before anything is downloaded or uploaded: an app whose engine-pin.json names no published pack tells
+      # every user "the extension engine download is not available", and every desktop check passes anyway (the
+      # smokes build their own pack). Push the engine-v* tag and commit pin-engine.mjs's pin BEFORE the v* tag.
+      - name: The extension engine is pinned to a published pack
+        run: node desktop/scripts/release/check-pin.mjs
+      - uses: actions/download-artifact@v8
+        with:
+          # One folder per platform: both macOS legs write a file called latest-mac.yml.
+          pattern: desktop-dist-*
+          path: dist
+      - name: Check every installer against its update feed, and merge the two macOS feeds
+        run: |
+          set -euo pipefail
+          ls -laR dist
+          ver="${GITHUB_REF_NAME#v}"
+          # The installers are named from desktop/package.json. desktopParity.test.ts holds that equal to
+          # bff/package.json; this holds it equal to the TAG, which nothing else does. An rc tag (v0.45.0-rc1) may
+          # carry the plain version, because nobody bumps package.json for an rc.
+          dv=$(node desktop/scripts/release/check-feed.mjs dist/desktop-dist-win-x64/latest.yml dist/desktop-dist-win-x64)
+          if [ "$dv" != "$ver" ] && [ "$dv" != "${ver%%-*}" ]; then
+            echo "::error::the desktop build is $dv but the tag is $GITHUB_REF_NAME -- bump desktop/package.json with the other versions"
+            exit 1
+          fi
+          node desktop/scripts/release/check-feed.mjs dist/desktop-dist-mac-arm64/latest-mac.yml dist/desktop-dist-mac-arm64 --version "$dv"
+          node desktop/scripts/release/check-feed.mjs dist/desktop-dist-mac-x64/latest-mac.yml dist/desktop-dist-mac-x64 --version "$dv"
+          mkdir -p feeds
+          cp dist/desktop-dist-win-x64/latest.yml feeds/latest.yml
+          node desktop/scripts/release/merge-latest-mac.mjs --out feeds/latest-mac.yml --version "$dv" \
+            dist/desktop-dist-mac-arm64/latest-mac.yml dist/desktop-dist-mac-x64/latest-mac.yml
+          # The files the notes below link to, by name.
+          for f in "win-x64/Uchiyomi-Setup-$dv.exe" "mac-arm64/Uchiyomi-$dv-arm64.dmg" "mac-x64/Uchiyomi-$dv-x64.dmg"; do
+            [ -s "dist/desktop-dist-$f" ] || { echo "::error::dist/desktop-dist-$f is missing"; exit 1; }
+          done
+          echo "DESKTOP_VERSION=$dv" >> "$GITHUB_ENV"
+      - name: Upload the installers, then the update feeds
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          mapfile -t bins < <(find dist -type f \( -name '*.exe' -o -name '*.dmg' -o -name '*.zip' -o -name '*.blockmap' \) | sort)
+          printf '%s\n' "${bins[@]}"
+          [ "${#bins[@]}" -ge 5 ] || { echo "::error::expected at least the exe and two dmg + zip pairs"; exit 1; }
+          # --clobber: a re-run replaces its own earlier upload instead of failing on it.
+          gh release upload "$GITHUB_REF_NAME" --clobber "${bins[@]}"
+          # Last, and on their own. Reintroduce by folding this into the call above: see ORDER in the job comment.
+          gh release upload "$GITHUB_REF_NAME" --clobber feeds/latest.yml feeds/latest-mac.yml
+      - name: Add the desktop downloads to the release notes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          v="$DESKTOP_VERSION"
+          dl="https://github.com/$GITHUB_REPOSITORY/releases/download/$GITHUB_REF_NAME"
+          docs="https://github.com/$GITHUB_REPOSITORY/blob/$GITHUB_REF_NAME"
+          gh release view "$GITHUB_REF_NAME" --json body --jq .body > body.md
+          # Idempotent: the section a previous run added is dropped before it is added again (and the blank lines
+          # it leaves at the end with it), so a re-run never stacks two. The release job rewrites the body from the
+          # CHANGELOG on a full re-run anyway; this covers re-running only this job.
+          awk '/<!-- desktop-beta:start -->/ {skip=1}
+               !skip { if ($0 == "") blank++; else { while (blank) { print ""; blank-- } print } }
+               /<!-- desktop-beta:end -->/ {skip=0}' body.md > notes.md
+          cat >> notes.md <<EOF
+
+          <!-- desktop-beta:start -->
+          ## Uchiyomi Desktop (beta): downloads
+
+          Uchiyomi as a program on your own computer: the same app, with the library in a folder on your PC, and
+          no Docker or server to run. This is its first release, so it is a beta.
+
+          | Your computer | Download |
+          |---|---|
+          | Windows (x64) | [Uchiyomi-Setup-$v.exe]($dl/Uchiyomi-Setup-$v.exe) |
+          | Mac with Apple silicon (M1 or newer) | [Uchiyomi-$v-arm64.dmg]($dl/Uchiyomi-$v-arm64.dmg) |
+          | Mac with an Intel processor | [Uchiyomi-$v-x64.dmg]($dl/Uchiyomi-$v-x64.dmg) |
+
+          The app is not signed yet, so the first launch takes one extra step:
+
+          - **Windows:** "Windows protected your PC" appears once. Choose **More info**, then **Run anyway**. A PC
+            with **Smart App Control** turned on blocks unsigned apps with no way past it; use the Docker install there.
+          - **macOS:** open the dmg and drag Uchiyomi to Applications. The first time you open it, macOS refuses;
+            go to **System Settings → Privacy & Security** and choose **Open Anyway**.
+
+          Windows installs updates by itself. A Mac cannot update an unsigned app, so there a new version is a new
+          download; the menu-bar icon and Admin → Health say when one is out.
+
+          Where your files live, the extension engine, backups, and what the desktop app leaves out:
+          [the README]($docs/README.md#download-the-desktop-app) and
+          [the desktop chapter of the guide]($docs/docs/USAGE.md#14-uchiyomi-desktop).
+          <!-- desktop-beta:end -->
+          EOF
+          gh release edit "$GITHUB_REF_NAME" --notes-file notes.md

@@ -32,6 +32,8 @@ import { generateRecoveryCodes, generateSecret, otpauthURL, sha256, verifyTotp }
 import { oidcEnabled, oidcName, beginLogin, completeLogin, isAdminByGroup, type OidcClaims } from '../lib/oidc';
 import { randomBytes } from 'crypto';
 import { SESSION_COOKIE as KOMGA_SESSION_COOKIE } from '../lib/komgaSession';
+import { desktopFailAudit, desktopSecretMatches, isDesktop, isLoopback } from '../lib/desktop';
+import { desktopUserId, ensureDesktopUser } from '../lib/desktopUser';
 
 const loginBody = z.object({
   username: z.string().max(64).optional(),
@@ -56,8 +58,14 @@ interface FullUser {
 const USER_AUTH_COLS =
   'id, username, display_name, role, password_hash, disabled, locked_until, totp_enabled, totp_secret, recovery_codes';
 
-function signAccess(app: FastifyInstance, userId: string, role: string): { accessToken: string; expiresIn: number } {
-  return { accessToken: app.jwt.sign({ sub: userId, role }, { expiresIn: env.ACCESS_TTL_SECONDS }), expiresIn: env.ACCESS_TTL_SECONDS };
+function signAccess(app: FastifyInstance, userId: string, role: string): { accessToken: string; expiresIn: number; desktop?: true } {
+  // `desktop: true` tells the web app it is inside Uchiyomi Desktop (web/lib/desktop.ts). Spread in only when
+  // on, so every server response is byte-for-byte what it was.
+  return {
+    accessToken: app.jwt.sign({ sub: userId, role }, { expiresIn: env.ACCESS_TTL_SECONDS }),
+    expiresIn: env.ACCESS_TTL_SECONDS,
+    ...(isDesktop() ? { desktop: true as const } : {}),
+  };
 }
 function setImgCookie(app: FastifyInstance, reply: any, userId: string) {
   reply.setCookie(IMG_COOKIE, app.jwt.sign({ sub: userId, typ: 'img' }, { expiresIn: IMG_COOKIE_TTL }), imgCookieOptions());
@@ -168,10 +176,67 @@ export default async function authRoutes(app: FastifyInstance) {
     const s = await one<{ server_name: string; allow_registration: boolean }>('SELECT server_name, allow_registration FROM server_settings WHERE id = 1');
     return {
       serverName: s?.server_name || 'Uchiyomi',
-      allowRegistration: !!s?.allow_registration,
+      // Desktop has one person and no sign-up form, whatever a restored server database says.
+      allowRegistration: !isDesktop() && !!s?.allow_registration,
       oidc: oidcEnabled() ? { enabled: true, name: oidcName() } : { enabled: false, name: '' },
+      // What a browser tab pointed at the desktop app's port sees instead of a sign-in form (LoginScreen.tsx).
+      ...(isDesktop() ? { desktop: true as const } : {}),
     };
   });
+
+  /**
+   * The desktop sign-in handshake: how Uchiyomi Desktop's own window gets a session with no sign-in screen.
+   *
+   * The shell starts this server with a fresh 256-bit secret on every launch (lib/desktop.ts takes it out of
+   * the environment), and its main process adds `X-Uchiyomi-Desktop: <secret>` to exactly this request, below
+   * the page -- page JavaScript never sees it. Success answers exactly like `/auth/login`: the same body and the
+   * same `yomi_rt` + `yomi_img` cookies, so every other route, image loading and refresh work unchanged.
+   *
+   * Registered ONLY when the desktop switch is on, so the server's route table (openapiCoverage.test.ts) is
+   * untouched, and deliberately not in openapi.yaml: it is a private handshake with the shell, not an API.
+   *
+   * Checked in this order, each answer saying as little as possible:
+   *   1. not from this machine -> 404 (as if the route did not exist, so a future LAN mode cannot expose it);
+   *   2. an Origin that is not the app's own -> 403 (a page elsewhere cannot trigger it -- the header would be
+   *      missing anyway, but a no-cors POST from another origin must not even reach the comparison);
+   *   3. the secret, compared by digest in constant time -> 401, audited when one was offered (at most a row
+   *      a minute, so a flood cannot grow the database).
+   * No rate limit and no lockout, on purpose: everything arrives from 127.0.0.1, so another local account could
+   * exhaust a limit and lock the real window out, and a 256-bit secret needs none. No 2FA: holding the OS
+   * account and the shell's secret IS the factor.
+   *
+   * Reintroduce by dropping any one check: desktopAuth.test.ts names each answer.
+   */
+  if (isDesktop()) {
+    app.post('/auth/desktop', async (req, reply) => {
+      if (!isLoopback(req.socket.remoteAddress)) return reply.code(404).send({ error: 'not_found' });
+      const origin = req.headers.origin;
+      if (origin !== undefined && origin !== env.PUBLIC_ORIGIN) return reply.code(403).send({ error: 'forbidden' });
+      const header = req.headers['x-uchiyomi-desktop'];
+      if (!desktopSecretMatches(header)) {
+        // ⚠️ With no rate limit, a row per refusal let anything on the PC grow audit_log without bound. A request
+        // that offered no secret guessed nothing and is not written down; wrong secrets are, one row a minute
+        // at most, counting the attempts it stands for (lib/desktop.ts desktopFailAudit).
+        const attempts = header ? desktopFailAudit() : null;
+        if (attempts !== null) await logAudit('login.desktop_fail', { detail: { reason: 'bad_secret', attempts }, req });
+        return reply.code(401).send({ error: 'unauthorized' });
+      }
+      // The window may name itself (the same device id the sign-in form sends), and nothing else is read.
+      const b = z.object({ deviceId: z.string().max(128).optional() }).safeParse(req.body ?? {});
+      const userId = (await desktopUserId()) ?? (await ensureDesktopUser());
+      const user = await one<{ role: string; username: string | null }>('SELECT role, username FROM users WHERE id = $1', [userId]);
+      const refresh = await issueRefreshToken(userId, {
+        deviceId: b.success ? b.data.deviceId : undefined,
+        deviceName: 'This PC',
+        ip: clientIp(req),
+        userAgent: (req.headers['user-agent'] as string) || null,
+      });
+      reply.setCookie(REFRESH_COOKIE, refresh, cookieOptions());
+      setImgCookie(app, reply, userId);
+      await logAudit('login.desktop', { userId, username: user?.username ?? undefined, req });
+      return reply.send({ ...signAccess(app, userId, user?.role ?? 'admin'), user: await userPayload(userId), refreshExpiresAt: refreshExpiresAt() });
+    });
+  }
 
 
   // ---- OIDC / SSO -----------------------------------------------------------

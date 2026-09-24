@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<title>Uchiyomi</title>
+<style>
+  :root { color-scheme: dark; --ink-700: #1a1a22; --ink-600: #26262f; --fog-100: #ececf2; --fog-400: #9292a3; --accent: #7c5cff; }
+  html, body { margin: 0; height: 100%; background: #000; color: var(--fog-100); font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { height: 100%; display: grid; place-items: center; text-align: center; padding: 0 24px; box-sizing: border-box; }
+  .mark { width: 44px; height: 44px; border-radius: 50%; border: 3px solid var(--ink-600); border-top-color: var(--fog-100); animation: spin 0.9s linear infinite; margin: 0 auto 18px; }
+  h1 { font-size: 17px; font-weight: 600; margin: 0 0 4px; letter-spacing: 0.01em; }
+  p { margin: 0; color: var(--fog-400); font-size: 13px; }
+  pre { max-width: 70ch; max-height: 40vh; overflow: auto; white-space: pre-wrap; text-align: start; color: #fca5a5; background: #0b0b0f; border: 1px solid var(--ink-600); border-radius: 12px; padding: 12px 14px; font-size: 12px; margin: 14px auto; }
+  .row { display: flex; gap: 10px; justify-content: center; margin-top: 6px; }
+  button { font: inherit; font-size: 13px; border-radius: 999px; padding: 8px 16px; cursor: pointer; border: 1px solid var(--ink-600); background: var(--ink-700); color: var(--fog-100); }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) { .mark { animation: none; } }
+</style>
+</head>
+<body>
+<main>
+  <div id="starting">
+    <div class="mark" aria-hidden="true"></div>
+    <h1 data-s="loading.title">Starting Uchiyomi</h1>
+    <p data-s="loading.sub">Opening your library…</p>
+  </div>
+  <div id="failed" hidden>
+    <h1 data-s="loading.failed">Uchiyomi could not start</h1>
+    <pre id="msg"></pre>
+    <div class="row">
+      <button class="primary" id="retry" data-s="loading.retry">Try again</button>
+      <button id="logs" data-s="loading.logs">Open the logs folder</button>
+    </div>
+  </div>
+</main>
+<script>
+  const shell = window.uchiyomiShell;
+  if (shell) {
+    document.documentElement.lang = shell.lang;
+    if (shell.lang === 'ar') document.documentElement.dir = 'rtl';
+    shell.strings().then((s) => {
+      for (const el of document.querySelectorAll('[data-s]')) if (s[el.dataset.s]) el.textContent = s[el.dataset.s];
+    }).catch(() => {});
+    document.getElementById('retry').onclick = () => shell.relaunch();
+    document.getElementById('logs').onclick = () => shell.openLogs();
+  }
+  const err = new URLSearchParams(location.search).get('error');
+  if (err) {
+    document.getElementById('starting').hidden = true;
+    document.getElementById('failed').hidden = false;
+    document.getElementById('msg').textContent = err;
+  }
+</script>
+</body>
+</html>

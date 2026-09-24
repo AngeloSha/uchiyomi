@@ -13,6 +13,7 @@
 import type { FastifyInstance } from 'fastify';
 import { existsSync } from 'fs';
 import { join } from 'path';
+import { toStoredRel } from './relPath';
 
 /**
  * Where the built web export lives, when it is bundled. Unset means "not bundled": serve nothing.
@@ -69,8 +70,12 @@ export async function registerWebRoot(app: FastifyInstance): Promise<void> {
     // @fastify/static v10 hands this the fastify REPLY, not the raw Node response v7 passed. The old
     // `res.setHeader` threw on every static file, which the handler surfaced as a 500 for the whole
     // web root -- the suite caught it before it shipped.
+    //
+    // ⚠️ toStoredRel before matching: on Windows `filePath` arrives with `\`, so `\_next\static\…` never
+    // matched `/_next/static/` and every hashed chunk lost its immutable header, and sw.js lost `no-store`
+    // (an installed app pinned to an old build). Identity on Linux.
     setHeaders(reply: any, filePath: string) {
-      const rel = '/' + filePath.slice(root.length).replace(/^\/+/, '');
+      const rel = '/' + toStoredRel(filePath.slice(root.length)).replace(/^\/+/, '');
       reply.header('Cache-Control', cacheControl(rel));
       if (rel.endsWith('.webmanifest')) reply.header('Content-Type', 'application/manifest+json');
     },

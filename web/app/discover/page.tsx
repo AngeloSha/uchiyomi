@@ -6,6 +6,7 @@ import { ART } from '@/lib/art';
 import { relativeTime } from '@/lib/format';
 import { useAuth, canDownload } from '@/lib/auth';
 import { t as tr } from '@/lib/i18n';
+import { isDesktop } from '@/lib/desktop';
 import { EmptyState } from '@/components/EmptyState';
 import { ProgressBar, Reveal } from '@/components/ui';
 import { SourceCard, SourceItem } from '@/components/cards';
@@ -400,7 +401,9 @@ export default function DiscoverPage() {
           </>
         ) : isAdmin ? (
           <EmptyState art={ART.emptyLibrary} title={tr('No sources installed')}
-            sub={tr('Mount a source pack at SOURCES_DIR, or switch on an extension source, then reload from the Providers tab.')} />
+            sub={isDesktop()
+              ? tr('Add a site, or turn on an extension source, in Admin → Providers.')
+              : tr('Mount a source pack at SOURCES_DIR, or switch on an extension source, then reload from the Providers tab.')} />
         ) : (
           <EmptyState art={ART.emptyLibrary} title={tr('No sources available')}
             sub={tr('There is nothing set up for your account to browse yet. Ask whoever runs this server.')} />

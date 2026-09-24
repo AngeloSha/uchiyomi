@@ -23,6 +23,7 @@ import { ChapterSheet } from '@/components/ChapterSheet';
 import { SeriesCard } from '@/components/cards';
 import { IcChevronLeft, IcChevronRight, IcSliders, IcRefresh, IcGrid } from '@/components/icons';
 import { t as tr } from '@/lib/i18n';
+import { serverReachableHint } from '@/lib/desktop';
 
 interface PageDim { number: number; width: number | null; height: number | null; junk?: boolean; missing?: boolean }
 /** `sourceId`: the adapter the copy came from, for naming it on a missing page's caption. Unknown for a downloaded copy. */
@@ -167,7 +168,7 @@ function ReaderInner() {
       } else {
         // The server wins when it answers: progress is cross-device, and the outbox pushes this device's
         // offline position up to it. The downloaded copy is a fallback, not a peer.
-        const canAsk = !(first.offline && typeof navigator !== 'undefined' && navigator.onLine === false);
+        const canAsk = !(first.offline && !serverReachableHint());
         let resolved = 0;
         if (canAsk) {
           try {
@@ -1127,7 +1128,7 @@ function ReaderInner() {
            flag anyway. */
         <PageGrid title={activeChapter?.title || tr('Pages')} pages={gridPages} current={current}
           onPick={jumpTo} onClose={() => setShowPages(false)}
-          onToggleJunk={typeof navigator !== 'undefined' && navigator.onLine === false ? undefined : toggleJunk} />
+          onToggleJunk={!serverReachableHint() ? undefined : toggleJunk} />
       )}
       {showChapters && (
         <ChapterSheet title={tr('Chapters')} chapters={chapterRefs} activeId={activeChapter?.id}

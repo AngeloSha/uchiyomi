@@ -11,6 +11,7 @@ import { useToast } from '@/components/Toast';
 import { ConfirmDialog, msgOf } from '@/components/ConfirmDialog';
 import { IcCloudDownload, IcPlus, IcRefresh } from '@/components/icons';
 import { Row, Section, SETTINGS_GRID, SwitchRow } from '@/components/settings';
+import { isDesktop } from '@/lib/desktop';
 
 /**
  * Profile → Connections: everything that lets something OTHER than this app read or write on the account --
@@ -28,11 +29,15 @@ import { Row, Section, SETTINGS_GRID, SwitchRow } from '@/components/settings';
  * of the settings consoles.
  */
 export function ProfileConnections({ focusTracking }: { focusTracking: boolean }) {
+  // Uchiyomi Desktop (lib/desktop.ts) keeps the trackers -- they are outbound -- but not OPDS or API tokens:
+  // both exist so another device can sign in to this library, and the desktop app listens on this computer
+  // only. The server answers 404 for both there.
+  const desktop = isDesktop();
   return (
     <div className={SETTINGS_GRID}>
       <TrackerSection focus={focusTracking} />
-      <OpdsSection />
-      <TokensSection />
+      {!desktop && <OpdsSection />}
+      {!desktop && <TokensSection />}
     </div>
   );
 }

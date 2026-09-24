@@ -101,6 +101,8 @@ sites' terms and your local law.
   tracker syncs reading progress back in both directions, forward-only: [how to set it up](docs/extensions.md#komga-compatible-api).
 - **Progress sync** to AniList, MyAnimeList and Kitsu.
 - **Nine languages**, with right-to-left layout for Arabic.
+- **A Windows and macOS app (beta)** — the whole thing as a program on your own computer, with the library in a
+  folder there and no server to run: [download the desktop app](#download-the-desktop-app).
 
 **Nothing phones home.** An update check reads GitHub's public releases page and sends nothing about your
 server; it can be turned off. An anonymous install count exists and is **off unless you turn it on**, and
@@ -130,12 +132,51 @@ mean it comes up in seconds on a NAS or a Raspberry Pi.
 > 📦 CasaOS, Unraid, Umbrel, an external database, reverse proxies and updating:
 > **[docs/INSTALL.md](docs/INSTALL.md)**
 
+Rather not run a server at all? The desktop app below is the same Uchiyomi on your own Windows PC or Mac.
+
+## Download the desktop app
+
+**Uchiyomi Desktop (beta)** is the same app as a program for Windows or a Mac: the library lives in a folder
+on your own computer, and there is no Docker, no server and no account to create. It opens already signed in,
+on an empty library, and you add sources, sites and extensions in Admin exactly as on a server.
+
+| Your computer | From the [latest release](https://github.com/AngeloSha/uchiyomi/releases/latest) |
+|---|---|
+| Windows (x64) | `Uchiyomi-Setup-<version>.exe` |
+| Mac with Apple silicon (M1 or newer) | `Uchiyomi-<version>-arm64.dmg` |
+| Mac with an Intel processor | `Uchiyomi-<version>-x64.dmg` |
+
+**It is not signed yet**, so the first launch takes one extra step:
+
+- **Windows:** the installer needs no administrator rights and installs for your account only. The first time,
+  Windows shows *"Windows protected your PC"*: choose **More info**, then **Run anyway**. On a PC with
+  **Smart App Control** turned on, Windows blocks unsigned apps with no way past it; use the Docker install
+  above on that machine.
+- **macOS:** open the dmg and drag **Uchiyomi** to Applications. The first time you open it, macOS refuses; go
+  to **System Settings → Privacy & Security**, find the message about Uchiyomi and choose **Open Anyway**.
+
+**Updates.** Windows downloads a new version in the background and installs it when you quit (or straight away
+from **Restart to update** in its tray menu). A Mac cannot update an unsigned app by itself, so there a new
+version is a new download: the menu-bar icon and the Version card under Admin → Health say when one is out,
+and link to it.
+
+**What is different from a server.** It is for one person on one computer, so what exists for other people and
+other devices is left out: the sign-in screen and passwords, members, OPDS, the Komga-compatible API, API
+tokens, push notifications, *Save offline*, and the install count. Closing the window keeps it running in the
+tray or menu bar, so new chapters still arrive. The Mihon/Tachiyomi **extension engine** is a separate download
+of about 200 MB, offered the first time you open Admin → Extensions, and extensions that need an in-app web view
+do not work in it. There is no Linux or Windows on Arm build; use Docker there.
+
+Where your files go, backups and restoring them, the tray, and uninstalling:
+**[the desktop chapter of the guide](docs/USAGE.md#14-uchiyomi-desktop)**.
+
 ## Documentation
 
 | | |
 |---|---|
 | [Usage](docs/USAGE.md) | Every screen, with screenshots |
 | [Install](docs/INSTALL.md) | One-click stores, updating, HTTPS, external DB |
+| [Desktop app](docs/USAGE.md#14-uchiyomi-desktop) | Uchiyomi Desktop for Windows and macOS (beta) |
 | [Configuration](docs/CONFIGURATION.md) | Environment variables and source paths |
 | [Extensions](docs/extensions.md) | The Mihon / Tachiyomi engine |
 | [API](docs/api.md) | REST reference |

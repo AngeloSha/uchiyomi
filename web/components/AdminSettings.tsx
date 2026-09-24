@@ -28,6 +28,7 @@ import type { KnownGroup, StoredPrefs } from '@/lib/types';
 import { hasGroup, normGroup, reorder, withoutGroup } from '@/lib/scanlators';
 import { suggestGroups } from '@/lib/groupSuggest';
 import { NotificationsSection } from '@/components/AdminNotifications';
+import { isDesktop } from '@/lib/desktop';
 
 /** One PATCH. Resolves once the server has answered, so the row that called it can show its tick. */
 type Save = (body: Record<string, unknown>) => Promise<unknown>;
@@ -117,12 +118,16 @@ function SwitchWithMore({ label, help, on, onChange, more }: {
 function ServerSection({ data, save }: { data: any; save: Save }) {
   const toast = useToast();
   const on = !!data.install_ping;
+  // Uchiyomi Desktop has one person and no install count (lib/desktop.ts): no registration switch, and the
+  // count's row is gone with its preview, which the server answers 404 for there and never sends.
+  const desktop = isDesktop();
   // Fetched whether or not it is on: seeing exactly what WOULD be sent is the point of the preview, and
   // asking someone to consent first in order to find out would be backwards.
   const { data: preview } = useQuery({
     queryKey: ['install-ping-preview'],
     queryFn: () => api<{ url: string; payload: Record<string, unknown>; sample: boolean }>('/api/admin/install-ping/preview'),
     staleTime: 60_000,
+    enabled: !desktop,
   });
 
   return (
@@ -131,8 +136,10 @@ function ServerSection({ data, save }: { data: any; save: Save }) {
           back to the saved name on blur instead of a "Could not save" over nothing. */}
       <TextRow label={tr('Server name')} value={data.server_name ?? ''} maxLength={64} autoComplete="off" required
         onSave={(v) => save({ serverName: v })} />
-      <SwitchRow label={tr('Open registration')} help={tr('Let anyone create their own account')}
-        on={!!data.allow_registration} onChange={(next) => save({ allowRegistration: next })} />
+      {!desktop && (
+        <SwitchRow label={tr('Open registration')} help={tr('Let anyone create their own account')}
+          on={!!data.allow_registration} onChange={(next) => save({ allowRegistration: next })} />
+      )}
       <SwitchWithMore label={tr('Check for updates')} help={tr('Asks GitHub once a day; nothing about this server is sent.')}
         on={data.update_check !== false} onChange={(next) => save({ updateCheck: next })}
         more={(
@@ -142,7 +149,7 @@ function ServerSection({ data, save }: { data: any; save: Save }) {
             </p>
           </Disclosure>
         )} />
-      <SwitchWithMore label={tr('Count this server in the anonymous install count')}
+      {!desktop && <SwitchWithMore label={tr('Count this server in the anonymous install count')}
         help={tr('Off by default. Once a day, sends the few facts below to uchiyomi.com and nothing else.')}
         on={on}
         onChange={async (next) => {
@@ -174,7 +181,7 @@ function ServerSection({ data, save }: { data: any; save: Save }) {
               <li>{tr('Turning this off deletes the secret and asks for this month to be forgotten. A new id is made if you ever turn it back on.')}</li>
             </ul>
           </Disclosure>
-        )} />
+        )} />}
     </Section>
   );
 }
@@ -188,13 +195,15 @@ function ServerSection({ data, save }: { data: any; save: Save }) {
  * default, so it is always set -- which is why the endpoint returns a separate flag.
  */
 function SchedulesSection({ data, save }: { data: any; save: Save }) {
+  // A computer is often off at 3 a.m.; the desktop server runs a missed backup the next time it opens.
+  const nightly = tr('Nightly, local time. Shown under Tasks.');
   return (
     <Section title={tr('Updates & schedules')} icon={<IcRefresh width={18} height={18} />}>
       <NumberRow label={tr('Library update interval (hours)')} min={1} max={168} value={data.updater_hours ?? 6}
         help={tr('How often every followed series is asked for new chapters.')}
         onSave={(n) => save({ updaterHours: n })} />
       <NumberRow label={tr('Backup time (hour, 0–23)')} min={0} max={23} value={data.backup_hour ?? 3}
-        help={tr('Nightly, local time. Shown under Tasks.')}
+        help={isDesktop() ? `${nightly} ${tr('If the PC is off then, it runs the next time Uchiyomi opens.')}` : nightly}
         onSave={(n) => save({ backupHour: n })} />
       {data.extensions_configured && (
         <>
@@ -295,9 +304,12 @@ function HousekeepingSection({ data, save: patch }: { data: any; save: Save }) {
             counted a pruned or never-downloaded chapter as zero chapters, and told the trackers so. No
             confirmation — nothing here is deleted or written, and turning it off is exactly as reversible
             as turning it on. */}
-        <SwitchRow label={tr('Show missing chapters in Mihon')} on={!!data.komga_ghost_chapters}
-          help={tr('List the chapters this server has not downloaded, and those whose files were deleted, alongside the ones it holds — so Mihon and your trackers count the whole series rather than only what is on disk. These rows cannot be opened; they are marked “not downloaded”. Only the Mihon extension sees them.')}
-          onChange={(next) => patch({ komgaGhostChapters: next })} />
+        {/* Only the Komga-compatible API reads it, and desktop does not serve that API (lib/desktop.ts). */}
+        {!isDesktop() && (
+          <SwitchRow label={tr('Show missing chapters in Mihon')} on={!!data.komga_ghost_chapters}
+            help={tr('List the chapters this server has not downloaded, and those whose files were deleted, alongside the ones it holds — so Mihon and your trackers count the whole series rather than only what is on disk. These rows cannot be opened; they are marked “not downloaded”. Only the Mihon extension sees them.')}
+            onChange={(next) => patch({ komgaGhostChapters: next })} />
+        )}
       </Section>
       {confirm && (
         <ConfirmDialog

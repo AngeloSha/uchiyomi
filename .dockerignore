@@ -10,3 +10,10 @@ bff/dist
 .git
 .env
 docker-compose.override.yml
+# The desktop app (Electron shell, bundled Postgres, engine packs) is never part of an image. Its staged
+# resources/ and dist/ run to hundreds of MB on a machine that has built it, and all of that would otherwise
+# be sent as build context on every `docker build .`. desktop-engine/ was the Phase 0 spike's folder; listed so
+# an old checkout that still has one does not send it either.
+desktop/
+desktop-engine/
+prebuilt/

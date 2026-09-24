@@ -2,7 +2,8 @@
 import { useEffect, useState } from 'react';
 import { motion, useReducedMotion } from 'framer-motion';
 import { useAuth } from '@/lib/auth';
-import { api } from '@/lib/api';
+import { api, ApiError } from '@/lib/api';
+import { noteServerDesktop } from '@/lib/desktop';
 import { ART } from '@/lib/art';
 import { Mark, Wordmark } from './Brand';
 import { t as tr } from '@/lib/i18n';
@@ -20,7 +21,8 @@ const SSO_ERRORS: Record<string, string> = {
 
 export function LoginScreen() {
   const { login, firstRunSetup } = useAuth();
-  const [mode, setMode] = useState<'checking' | 'login' | 'setup'>('checking');
+  // `desktop`: this port is Uchiyomi Desktop's, reached from a browser tab -- see the effect below.
+  const [mode, setMode] = useState<'checking' | 'login' | 'setup' | 'desktop'>('checking');
   const [username, setUsername] = useState('');
   const [pw, setPw] = useState('');
   const [confirm, setConfirm] = useState('');
@@ -37,16 +39,25 @@ export function LoginScreen() {
   // First-run detection: if the server has no users yet, show a create-admin form instead of login.
   useEffect(() => {
     (async () => {
+      // ⚠️ A 404 here is Uchiyomi Desktop (it has no first-run setup route): stay on the spinner until
+      // /auth/config has said so, rather than flash a sign-in form nobody can use. Any other failure still
+      // falls back to the form at once, as it always has.
+      let desktopMaybe = false;
       try {
         const s = await api<{ needsSetup: boolean }>('/api/setup/status');
         setMode(s.needsSetup ? 'setup' : 'login');
-      } catch {
-        setMode('login');
+      } catch (e) {
+        if (e instanceof ApiError && e.status === 404) desktopMaybe = true;
+        else setMode('login');
       }
       try {
-        const c = await api<{ oidc?: { enabled: boolean; name: string } }>('/auth/config');
+        const c = await api<{ oidc?: { enabled: boolean; name: string }; desktop?: boolean }>('/auth/config');
         if (c.oidc?.enabled) setSso(c.oidc);
-      } catch { /* SSO is optional; a failure here just means no button */ }
+        // A browser tab pointed at the desktop app's port: that library signs in only inside the app, and
+        // this form could never succeed there (the server has no password sign-in to answer it).
+        if (c.desktop === true) { noteServerDesktop(true); setMode('desktop'); }
+        else if (desktopMaybe) setMode('login');
+      } catch { /* SSO is optional; a failure here just means no button */ if (desktopMaybe) setMode('login'); }
     })();
     // the OIDC callback sends people back here with a reason when it couldn't sign them in
     const reason = new URLSearchParams(window.location.search).get('sso_error');
@@ -130,6 +141,13 @@ export function LoginScreen() {
           <Wordmark className="mt-5 text-5xl drop-shadow-[0_2px_20px_rgba(0,0,0,0.6)]" />
           <p className="mt-2 text-sm text-fog-300">{mode === 'setup' ? 'Welcome — create your admin account.' : 'Your library, your way.'}</p>
         </div>
+
+        {mode === 'desktop' && (
+          <div className="glass grad-border rounded-3xl p-6 text-center shadow-lift">
+            <p className="text-sm text-fog-100">{tr('This library opens in the Uchiyomi app on this computer.')}</p>
+            <p className="mt-2 text-xs text-fog-500">{tr('Open Uchiyomi from the Start menu or your Applications folder.')}</p>
+          </div>
+        )}
 
         {mode === 'checking' && (
           <div className="glass grad-border flex items-center justify-center rounded-3xl p-10 shadow-lift">

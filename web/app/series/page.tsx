@@ -27,6 +27,7 @@ import { ChapterFilterSheet } from '@/components/ChapterFilterSheet';
 import { ChapterVersionsSheet } from '@/components/ChapterVersionsSheet';
 import { GroupAvatar } from '@/components/GroupAvatar';
 import { supplyLine } from '@/lib/supplyLine';
+import { isDesktop } from '@/lib/desktop';
 
 // The four the scanner itself writes from ComicInfo's PublishingStatus. Kept as a suggestion list rather
 // than a hard enum, because a file can carry anything and rejecting it would reject Uchiyomi's own data.
@@ -564,7 +565,8 @@ function ChapterRow({ book, downloaded, sourceNames, primarySource, versions, on
       </button>
       {book.metadata?.releaseDate && <RowDate iso={book.metadata.releaseDate} />}
       {!selectable && <>
-      <button
+      {/* Not on Uchiyomi Desktop (lib/desktop.ts): the chapter is already a file on this computer. */}
+      {!isDesktop() && <button
         onClick={async () => {
           if (busy) return;
           setBusy(true);
@@ -580,7 +582,7 @@ function ChapterRow({ book, downloaded, sourceNames, primarySource, versions, on
         aria-label={downloaded ? tr('Remove from this device') : tr('Save offline')}
       >
         {busy ? <span className="text-[10px] font-semibold text-accent">…</span> : downloaded ? <IcCheck width={16} height={16} /> : <IcDownload width={16} height={16} />}
-      </button>
+      </button>}
       <div className="relative shrink-0">
         <button onClick={() => setMenu((m) => !m)} aria-label={tr('Chapter actions')}
           className="grid h-9 w-9 place-items-center rounded-full border border-ink-700 text-fog-500">
@@ -1355,8 +1357,9 @@ function SeriesInner() {
         <button onClick={toggleFav} className={`flex flex-1 items-center justify-center gap-2 rounded-full border py-3 text-sm ${fav ? 'border-accent/50 bg-accent-soft text-accent' : 'border-ink-700 text-fog-300'}`}>
           <IcHeart width={18} height={18} fill={fav ? 'currentColor' : 'none'} stroke={fav ? 'none' : 'currentColor'} /> {fav ? 'Saved' : 'Favorite'}
         </button>
-        {/* "Save all offline", not "Download all": this copies to THIS DEVICE; the server side is Fetch (☁). */}
-        {!nothingYet && (
+        {/* "Save all offline", not "Download all": this copies to THIS DEVICE; the server side is Fetch (☁).
+            Never on Uchiyomi Desktop, where this device IS the server (lib/desktop.ts). */}
+        {!nothingYet && !isDesktop() && (
           <button onClick={downloadAll} disabled={downloadingAll} className="flex flex-1 items-center justify-center gap-2 rounded-full border border-ink-700 py-3 text-sm text-fog-300 disabled:opacity-50">
             <IcDownload width={18} height={18} /> {downloadingAll ? tr('Saving…') : tr('Save all offline')}
           </button>
@@ -1555,7 +1558,7 @@ function SeriesInner() {
         <button disabled={acting || !pickedCount} onClick={() => bulkMark(true)} className="chip text-xs disabled:opacity-50">{tr('Mark read')}</button>
         <button disabled={acting || !pickedCount} onClick={() => bulkMark(false)} className="chip text-xs disabled:opacity-50">{tr('Mark unread')}</button>
         {/* The two icons say which side each acts on: ⬇ this device, ☁ the server. */}
-        <button disabled={acting || !saveable.length} onClick={bulkSave} className="chip text-xs disabled:opacity-50"><IcDownload width={14} height={14} />{tr('Save offline')}</button>
+        {!isDesktop() && <button disabled={acting || !saveable.length} onClick={bulkSave} className="chip text-xs disabled:opacity-50"><IcDownload width={14} height={14} />{tr('Save offline')}</button>}
         {canDownload(user) && <button disabled={acting || !fetchable.length} onClick={bulkFetch} className="chip text-xs disabled:opacity-50"><IcCloudDownload width={14} height={14} />{tr('Fetch')}</button>}
         {isAdmin && <button disabled={acting || !refetchable.length} onClick={() => setConfirming('refetch')} className="chip text-xs disabled:opacity-50"><IcCloudDownload width={14} height={14} />{tr('Fetch again')}</button>}
         {isAdmin && <button disabled={acting || !deletable.length} onClick={() => setConfirming('delete')} className="chip text-xs text-rose-300 disabled:opacity-50">{tr('Delete from server')}</button>}

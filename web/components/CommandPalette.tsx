@@ -11,6 +11,7 @@ import { useToast } from './Toast';
 import { Img } from './ui';
 import { IcSearch, IcSparkle, IcRefresh, IcBell, IcDownload, IcGrid, IcMoments } from './icons';
 import { t as tr } from '@/lib/i18n';
+import { hiddenOnDesktop, DESKTOP_HIDDEN } from '@/lib/desktop';
 
 interface Action { key: string; label: string; hint?: string; icon: React.ReactNode; run: () => void | Promise<void> }
 
@@ -53,7 +54,7 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
 
   const go = useCallback((href: string) => { onClose(); router.push(href); }, [onClose, router]);
 
-  const actions: Action[] = useMemo(() => [
+  const actions: Action[] = useMemo(() => ([
     {
       key: 'surprise', label: 'Surprise me', hint: 'random series', icon: <IcSparkle width={16} height={16} />,
       run: async () => {
@@ -70,7 +71,7 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
       key: 'refresh', label: 'Refresh library', hint: 'scan for new chapters', icon: <IcRefresh width={16} height={16} />,
       run: async () => { onClose(); toast('Refreshing…'); await triggerRefresh(); toast('Refresh started', 'success'); },
     },
-  ], [go, onClose, toast]);
+  ] as Action[]).filter((a) => !hiddenOnDesktop(DESKTOP_HIDDEN.paletteKeys, a.key)), [go, onClose, toast]); // no Offline downloads on desktop (lib/desktop.ts)
 
   const query = q.trim().toLowerCase();
   const shownActions = query.length < 2 ? actions : actions.filter((a) => a.label.toLowerCase().includes(query) || a.key.includes(query));

@@ -11,14 +11,16 @@
 // read_progress rows into one, and getting that wrong silently marks chapters unread -- which then syncs
 // outward to the user's AniList account and cannot be undone. Duplicate chapter numbers are a tidiness
 // problem the health page can surface; lost reading progress is not recoverable.
-import { rm, rename, realpath, stat } from 'fs/promises';
+import { rm, rename, realpath, stat, readdir } from 'fs/promises';
 import { q, one, tx } from './db';
 import { artFile } from './seriesArt';
 import { allWritable, containedPath } from './fsGuard';
 import { tombstoneBooks } from './chapterCleanup';
 import { LIBRARY_ROOT, DL_ROOT, listChapters } from './library';
 import { reconcileListingProgress } from './listingProgress';
-import { join, dirname } from 'path';
+import { join, dirname, relative, resolve, sep, isAbsolute } from 'path';
+import { isDesktop } from './desktop';
+import { toStoredRel, dirnameRel } from './relPath';
 
 export interface SeriesRow {
   id: string;
@@ -602,7 +604,12 @@ export async function deleteSeriesFiles(id: string): Promise<{ ok: true; files: 
       const target = containedPath(root, folder);
       if (!target) return { ok: false, reason: 'That folder path is not inside the library.' };
       const real = await realpath(target).catch(() => null);
-      if (!real || !containedPath(root, real.slice(root.length + 1) || '.')) {
+      // ⚠️ Desktop: `real.slice(root.length + 1)` assumes realpath kept the root's spelling, and on a PC it
+      // often does not -- a macOS folder under /tmp is really /private/tmp, and Windows answers with the
+      // on-disk case and long names for 8.3 short ones -- so the slice cut the path in the wrong place and
+      // a folder inside the library read as outside it. There the answer is path.relative against the
+      // root's own realpath. The server keeps the slice (its roots are the mount points realpath returns).
+      if (!real || !(isDesktop() ? await insideRealRoot(root, real) : containedPath(root, real.slice(root.length + 1) || '.'))) {
         if (real && real !== target) return { ok: false, reason: 'That folder resolves outside the library.' };
       }
       targets.push({ root, abs: target });
@@ -710,11 +717,19 @@ export async function renameSeriesFolder(id: string, newFolder: string): Promise
   );
   if (!row) return { ok: false, reason: 'That series no longer exists.' };
 
-  const dest = newFolder.replace(/^\/+|\/+$/g, '').trim();
-  if (!dest || dest === row.folder) return { ok: false, reason: 'Choose a different folder name.' };
+  const typed = toStoredRel(newFolder).replace(/^\/+|\/+$/g, '').trim();
+  if (!typed || typed === row.folder) return { ok: false, reason: 'Choose a different folder name.' };
 
   const roots = await rootsOf(id);
   if (!roots.length) return { ok: false, reason: 'That series has no files on disk.' };
+  // Desktop: the folders ABOVE the new name spelled the way the disk spells them. On NTFS and APFS
+  // `mangadex/Title` lands inside the existing `MangaDex`, and a folder stored with the typed case would
+  // never match what the scanner reads back -- the series would split in two on the next scan. The new
+  // name itself keeps the case typed, which is the point of a case-only rename.
+  const dest = isDesktop() && typed.includes('/')
+    ? `${await diskSpelling(roots, dirnameRel(typed))}/${typed.slice(typed.lastIndexOf('/') + 1)}`
+    : typed;
+  if (dest === row.folder) return { ok: false, reason: 'Choose a different folder name.' };
 
   const w = await allWritable(roots);
   if (!w.ok) return { ok: false, reason: w.reason, fix: w.fix };
@@ -726,6 +741,13 @@ export async function renameSeriesFolder(id: string, newFolder: string): Promise
     const from = containedPath(root, row.folder);
     if (!to || !from) return { ok: false, reason: 'That folder path is not inside the library.' };
     if (await stat(to).then(() => true).catch(() => false)) {
+      // ⚠️ Desktop, case-insensitive disks: `Title` -> `title` finds `title` already there, because it IS
+      // the folder being renamed, and a case-only rename was refused as a clash with itself. Allowed only
+      // when both names are the same directory (same device and inode, compared as bigints: NTFS ids do not
+      // fit a double), so two real folders differing only in case on a case-SENSITIVE volume still refuse.
+      // Reintroduce by removing this line: desktopSwitchHygiene.test.ts "the desktop-only filesystem rules"
+      // finds it gone; desktopPaths.test.ts "sameDir" proves the comparison itself.
+      if (isDesktop() && await sameDir(from, to)) continue;
       return { ok: false, reason: `Something already exists at "${dest}".` };
     }
   }
@@ -764,6 +786,53 @@ export async function renameSeriesFolder(id: string, newFolder: string): Promise
     );
   });
   return { ok: true };
+}
+
+/** Is `real` inside `root` once the root is resolved the same way (realpath) the path was? */
+export async function insideRealRoot(root: string, real: string): Promise<boolean> {
+  const base = await realpath(root).catch(() => resolve(root));
+  const rel = relative(base, real);
+  return rel === '' || (rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel));
+}
+
+/**
+ * Are these two paths, which differ at most in case, one and the same directory? Case alone is checked
+ * first so a path elsewhere on the disk can never qualify, and the ids decide (a zero id is no answer).
+ */
+export async function sameDir(a: string, b: string): Promise<boolean> {
+  if (a.normalize('NFC').toLowerCase() !== b.normalize('NFC').toLowerCase()) return false;
+  const [x, y] = await Promise.all([stat(a, { bigint: true }).catch(() => null), stat(b, { bigint: true }).catch(() => null)]);
+  return !!x && !!y && x.isDirectory() && x.ino !== 0n && x.dev === y.dev && x.ino === y.ino;
+}
+
+/**
+ * Desktop: a typed relative folder path, respelled segment by segment the way the disk already spells it.
+ *
+ * NTFS and APFS find `mangadex/title` when the folder is `MangaDex/Title`, but everything this app stores
+ * (lib_series.folder, libraries.path) is compared as an exact string with what the scanner reads back
+ * from readdir, which is always the on-disk spelling. So a path somebody types has to be put into that
+ * spelling before it is stored, or it silently matches nothing. Segments that do not exist yet are kept as
+ * typed. The root with the longest existing match wins. Unicode is compared NFC, because macOS keeps the
+ * decomposed form some names were created with. On the server this returns `rel` untouched.
+ */
+export async function diskSpelling(roots: string[], rel: string): Promise<string> {
+  if (!isDesktop() || !rel) return rel;
+  const segs = rel.split('/');
+  const fold = (x: string) => x.normalize('NFC').toLowerCase();
+  let best: string[] = [];
+  for (const root of roots) {
+    const got: string[] = [];
+    let dir = root;
+    for (const seg of segs) {
+      const names = await readdir(dir).catch(() => null);
+      const hit = names?.includes(seg) ? seg : names?.find((n) => fold(n) === fold(seg));
+      if (!hit) break;
+      got.push(hit);
+      dir = join(dir, hit);
+    }
+    if (got.length > best.length) best = got;
+  }
+  return [...best, ...segs.slice(best.length)].join('/');
 }
 
 /** mkdir -p without pulling in another import at the top of this file. */

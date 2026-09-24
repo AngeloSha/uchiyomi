@@ -19,6 +19,7 @@ import { t as tr } from '@/lib/i18n';
 import { normTitle } from '@/lib/normTitle';
 import { cadenceText } from '@/lib/cadence';
 import { jobNoteLines, type JobCardNotes } from '@/lib/jobNotes';
+import { isDesktop } from '@/lib/desktop';
 
 export interface Provider { source: string; name: string; sourceId: string; title: string; coverUrl?: string }
 interface Detail {
@@ -325,11 +326,13 @@ export function AddSeriesDialog({ seed, sources, mayFollow, onClose, onAdded }: 
       // ⚠️ Never `?? p.content[0]`. That fallback turned "not found" into a confident wrong navigation --
       // it opened whatever the search happened to return, and two series on the owner's own install
       // normalise to the same title. The downloads page is the honest answer: the job is right there.
+      // ⚠️ Desktop has no downloads page (the Offline tab is hidden there, and its empty state points at controls
+      // the app hides): the library, where the series appears once its first chapter is in.
       const p = await api<Page<Series>>('/api/series/search', { json: { fullTextSearch: done.title, size: 5 } });
       const hit = p.content.find((s) => normTitle(s.metadata?.title || s.name) === normTitle(done.title));
       qc.invalidateQueries({ queryKey: ['library'] });
-      router.push(hit ? `/series/?id=${hit.id}` : '/downloads/');
-    } catch { router.push('/downloads/'); }
+      router.push(hit ? `/series/?id=${hit.id}` : isDesktop() ? '/library/' : '/downloads/');
+    } catch { router.push(isDesktop() ? '/library/' : '/downloads/'); }
   };
 
   // ---------------------------------------------------------------- done

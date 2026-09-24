@@ -5,6 +5,7 @@ import { readOfflineIdentity, writeOfflineIdentity, clearOfflineIdentity, Offlin
 import { deviceId, deviceName } from './device';
 import { clearShownOnce } from './shownOnce';
 import { applyReduceEffects, restoreReduceEffects } from './effects';
+import { isDesktop, serverReachableHint, untilReachable } from './desktop';
 
 export interface Avatar { emoji?: string; color?: string }
 interface User {
@@ -43,6 +44,10 @@ interface AuthCtx {
   setAvatar: (avatar: Avatar) => void;
   /** Written the moment 2FA is enabled or disabled, see the note beside its definition. */
   setTotpEnabled: (v: boolean) => void;
+  /** Uchiyomi Desktop (lib/desktop.ts): one person, signed in by the app, nothing for other devices. */
+  desktop: boolean;
+  /** Try the session again -- DesktopReconnect's button. True when it came back. */
+  reconnect: () => Promise<boolean>;
 }
 
 const Ctx = createContext<AuthCtx>(null as any);
@@ -204,13 +209,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // A definitive negative. `navigator.onLine === false` cannot be wrong in this direction, and without
       // this short-circuit a captive portal or a DNS black hole holds the splash screen -- and therefore the
       // whole app -- for however long `fetch` takes to give up, which on a plane is most of a minute.
-      if (saved && typeof navigator !== 'undefined' && navigator.onLine === false) {
+      // Never taken on desktop, where the server is this computer (serverReachableHint, lib/desktop.ts).
+      if (saved && !serverReachableHint()) {
         adoptOffline(saved);
         void revalidate(); // onLine can still lie the other way; harmless when it fails
         return;
       }
 
-      const r = await refreshSession();
+      // Desktop keeps the splash and asks again while its server starts (lib/desktop.ts); it is never
+      // `offline`. Everywhere else this is one request, exactly as before.
+      const r = await untilReachable(refreshSession, () => alive);
       if (!alive) return;
       if (r.kind === 'authed') adoptAuthed(r.user, r.refreshExpiresAt);
       else if (r.kind === 'rejected') await clearLocalSession();
@@ -298,8 +306,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // setup that rotated that secret while the recovery codes were still on screen.
   const setTotpEnabled = (v: boolean) => setUser((u) => (u ? { ...u, totpEnabled: v } : u));
 
+  // DesktopReconnect's Retry: the refresh, and on the desktop app the exchange behind it (lib/api.ts).
+  const reconnect = async (): Promise<boolean> => {
+    const r = await refreshSession();
+    if (r.kind !== 'authed') return false;
+    adoptAuthed(r.user, r.refreshExpiresAt);
+    return true;
+  };
+
   return (
-    <Ctx.Provider value={{ status, user, isAdmin: user?.role === 'admin', login, firstRunSetup, logout, setSettings, setAvatar, setTotpEnabled }}>
+    <Ctx.Provider value={{ status, user, isAdmin: user?.role === 'admin', login, firstRunSetup, logout, setSettings, setAvatar, setTotpEnabled, desktop: isDesktop(), reconnect }}>
       {children}
     </Ctx.Provider>
   );

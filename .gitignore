@@ -30,3 +30,8 @@ local/
 
 # Python bytecode from the e2e seed script
 __pycache__/
+
+# The desktop app's build outputs are listed in desktop/.gitignore (resources/, out/, dist/, .cache/ -- where
+# desktop/scripts/release/pin-engine.mjs keeps the packs it hashes). This is the one that lands OUTSIDE
+# desktop/: the web + bff build that .github/workflows/desktop.yml hands to `scripts/stage.mjs --prebuilt`.
+prebuilt/
