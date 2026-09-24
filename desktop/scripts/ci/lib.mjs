@@ -134,9 +134,11 @@ export async function freePort() {
  */
 export function processes() {
   if (WIN) {
-    const ps = 'Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,Name,WorkingSetSize,CommandLine | ConvertTo-Json -Compress';
+    // CreationDate as epoch ms: Windows reuses PIDs at once and never rewrites a child's ParentProcessId, so a
+    // child is only trusted when it started AFTER the process now holding its parent's PID (snapshot below).
+    const ps = "Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,Name,WorkingSetSize,CommandLine,@{n='Born';e={[DateTimeOffset]::new($_.CreationDate).ToUnixTimeMilliseconds()}} | ConvertTo-Json -Compress";
     const out = execFileSync('powershell.exe', ['-NoProfile', '-Command', ps], { encoding: 'utf8', maxBuffer: 64 << 20 });
-    return JSON.parse(out).map((p) => ({ pid: p.ProcessId, ppid: p.ParentProcessId, name: p.Name || '', rssKB: Math.round((p.WorkingSetSize || 0) / 1024), cmd: p.CommandLine || '' }));
+    return JSON.parse(out).map((p) => ({ pid: p.ProcessId, ppid: p.ParentProcessId, name: p.Name || '', rssKB: Math.round((p.WorkingSetSize || 0) / 1024), cmd: p.CommandLine || '', born: Number(p.Born) || 0 }));
   }
   const out = execFileSync('ps', ['-axww', '-o', 'pid=,ppid=,rss=,args='], { encoding: 'utf8', maxBuffer: 64 << 20 });
   return out.split('\n').filter(Boolean).map((l) => {
@@ -171,9 +173,18 @@ export function roleOf(p) {
 export function snapshot(root) {
   const st = readJson(join(root, 'state.json')) || {};
   const all = processes();
+  const byPid = new Map(all.map((p) => [p.pid, p]));
+  // ⚠️ On Windows a ParentProcessId can name a DEAD parent whose PID was reused by one of ours: session processes
+  // (csrss, winlogon, dwm, fontdrvhost) left by a finished logon then "descend" from a postgres backend, and the
+  // Quit check reported them as left running (run 35952948826). A real child always started after its parent.
+  const childOf = (c, parentPid) => {
+    if (c.ppid !== parentPid || c.pid === c.ppid) return false;
+    const parent = byPid.get(parentPid);
+    return !WIN || !parent || !c.born || !parent.born || c.born >= parent.born;
+  };
   const desc = (pid) => {
     const s = new Set([pid]);
-    for (let grew = true; grew;) { grew = false; for (const p of all) if (s.has(p.ppid) && !s.has(p.pid) && p.pid !== p.ppid) { s.add(p.pid); grew = true; } }
+    for (let grew = true; grew;) { grew = false; for (const p of all) if (!s.has(p.pid) && [...s].some((q) => childOf(p, q))) { s.add(p.pid); grew = true; } }
     return s;
   };
   const app = st.mainPid ? desc(st.mainPid) : new Set();
