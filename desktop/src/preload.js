@@ -12,8 +12,16 @@
  * Its presence is also THE marker the web app uses to hide what a one-person PC app has no use for (sign-in,
  * Web Push, "Save offline"...). The web app must keep working when it is absent -- that is the server build.
  *
- * On the shell's own local pages (file://: the loading screen and the first-run folder picker),
- * `window.uchiyomiShell` instead: their strings and the three first-run calls.
+ * On the shell's own local pages (file://: the loading screen, the first-launch choice / server address /
+ * certificate page, and the first-run folder picker), `window.uchiyomiShell` instead: their strings and calls.
+ *
+ * ⚠️ Which of the two depends on the MODE main.js started the window in (`--uchiyomi-mode`), not on the address
+ * alone: in server mode the window shows the person's OWN server, and a server on this same PC is
+ * http://127.0.0.1:8080 -- with the bridge, its web app would take itself for the desktop app, wait for a
+ * desktop sign-in that never comes, and never show its sign-in page. So the bridge exists only in a window
+ * started in standalone mode (anything else, a missing argument included, gets none), and a server-mode page
+ * gets only an inert marker, `window.uchiyomiShell = { mode: 'server', version }` -- no functions -- so a v0.45+
+ * server's web app can hide what makes no sense inside the app ("Install app"); older servers ignore it.
  *
  * Nothing secret crosses this bridge: the sign-in secret is added to one request in the main process
  * (signin.js) and never reaches any page. Every call is re-checked in the main process against the page that
@@ -28,7 +36,8 @@ const arg = (name) => {
   return a ? a.slice(p.length) : '';
 };
 
-const onApp = location.protocol === 'http:' && location.hostname === '127.0.0.1';
+const mode = arg('mode');
+const onApp = mode === 'standalone' && location.protocol === 'http:' && location.hostname === '127.0.0.1';
 const onShellPage = location.protocol === 'file:';
 
 if (onApp) {
@@ -65,6 +74,21 @@ if (onApp) {
       choose: () => ipcRenderer.invoke('firstrun:choose'),
       /** @param {string} dir @param {boolean} anyway */
       confirm: (dir, anyway) => ipcRenderer.invoke('firstrun:confirm', String(dir || ''), !!anyway),
+      back: () => ipcRenderer.invoke('firstrun:back'),
+    },
+    welcome: {
+      info: () => ipcRenderer.invoke('welcome:info'),
+      /** @param {string} address */
+      connect: (address) => ipcRenderer.invoke('welcome:connect', String(address || '')),
+      /** @param {string} host @param {string} fingerprint @param {boolean} replace */
+      trust: (host, fingerprint, replace) => ipcRenderer.invoke('welcome:trust', String(host || ''), String(fingerprint || ''), !!replace),
+      use: () => ipcRenderer.invoke('welcome:use'),
+      local: () => ipcRenderer.invoke('welcome:local'),
+      cancel: () => ipcRenderer.invoke('welcome:cancel'),
+      retry: () => ipcRenderer.invoke('welcome:retry'),
     },
   });
+} else if (mode === 'server') {
+  // Inert on purpose: data, no functions, nothing that reaches the main process.
+  contextBridge.exposeInMainWorld('uchiyomiShell', { mode: 'server', version: arg('version') });
 }

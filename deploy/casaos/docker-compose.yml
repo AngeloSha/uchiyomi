@@ -110,7 +110,9 @@ x-casaos:
     - https://raw.githubusercontent.com/AngeloSha/uchiyomi/main/docs/shots/home.webp
     - https://raw.githubusercontent.com/AngeloSha/uchiyomi/main/docs/shots/library.webp
     - https://raw.githubusercontent.com/AngeloSha/uchiyomi/main/docs/shots/discover.webp
-    - https://raw.githubusercontent.com/AngeloSha/uchiyomi/main/docs/shots/admin-extensions.webp
+    # Not admin-extensions: this listing ships no extension engine (see docs/extensions.md), and the Health page
+    # is a screen every CasaOS install has.
+    - https://raw.githubusercontent.com/AngeloSha/uchiyomi/main/docs/shots/admin-health.webp
   title:
     en_US: Uchiyomi
   tagline:

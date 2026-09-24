@@ -6,7 +6,7 @@
 openapi: 3.1.0
 info:
   title: Uchiyomi API
-  version: 0.44.0
+  version: 0.45.0
   description: "Everything the web app does, it does over this API. Session JWTs are for the browser; scripts
     use a personal API token (Profile -> Connections -> API tokens), sent as `Authorization: Bearer uy_...`.
     Scopes: read (every token; GET plus the library search POST, which is a query), write (anything that changes data), admin (the /api/admin surface, which also
@@ -6536,7 +6536,12 @@ paths:
         - admin
       summary: Add an extension repository by index URL.
       operationId: postApiAdminExtensionsRepos
-      description: Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
+      description: >-
+        Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
+        `url` may be the index address, an add-repo link (`mihon://add-repo?url=…`, `tachiyomi://add-repo?url=…`
+        or a web `…/add-repo?url=…`, unwrapped), or an address without `https://` (added). A repository is kept
+        only if it yields extensions (after one retry at the alternative index address); the answer is
+        {ok, url, corrected, added, total, error?} where `added` is what THIS repository contributed.
       requestBody:
         required: false
         content:
@@ -6552,21 +6557,26 @@ paths:
         "200":
           description: OK
         "400":
-          description: Malformed body or parameter
+          description: "`bad_url` (not an http(s) repository address) or `github_page` (a GitHub repository page: paste its index.min.json link)"
         "401":
           description: Not authenticated
         "403":
           description: "Forbidden: token scope, account permission or age limit"
         "409":
-          description: "Conflict: already exists, already running, or duplicate"
+          description: "`exists`: that repository is already added (compared without case, scheme, trailing slash or index file name)"
+        "422":
+          description: "`empty`: the repository yielded no extensions and was removed again (`removed: false` if that failed); `reason` carries the engine's error"
         "502":
-          description: The extension engine did not answer
+          description: "`unreachable` (the engine's repository list could not be read; nothing was written) or `engine_refused` (the engine refused the write; `reason`)"
     delete:
       tags:
         - admin
       summary: Remove an extension repository.
       operationId: deleteApiAdminExtensionsRepos
-      description: Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
+      description: >-
+        Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
+        Removes every spelling of that repository from the engine and from the copy the scheduled extension
+        check restores; {ok, removed}.
       requestBody:
         required: false
         content:
@@ -6587,6 +6597,8 @@ paths:
           description: Not authenticated
         "403":
           description: "Forbidden: token scope, account permission or age limit"
+        "502":
+          description: "`unreachable` (the list could not be read; nothing was written) or `engine_refused`"
   /api/admin/health:
     get:
       tags:

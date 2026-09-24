@@ -4,8 +4,12 @@
  * The main-process half of the preload bridge (preload.js): one ipcMain handler per call, and a check on
  * EVERY call that it came from the page allowed to make it.
  *
- *   desktop:*   only from the app window, showing the app's own origin (http://127.0.0.1:<ui port>)
+ *   desktop:*   only from the app window, showing the app's own origin (http://127.0.0.1:<ui port>) -- and only
+ *               in standalone mode: in server mode appOrigin is a port nothing listens on (servermode.js
+ *               appOriginFor), so the person's own server's page can never reach restore, engine or update
  *   firstrun:*  only from the app window, showing the shell's firstrun.html
+ *   welcome:*   only from the app window, showing the shell's welcome.html (the first-launch choice, the server
+ *               address, the certificate prompt, the server-mode error page)
  *   shell:*     only from the app window, showing one of the shell's own file:// pages
  *
  * The window never shows anything else (main.js blocks navigation away from those), but a check that holds
@@ -30,7 +34,7 @@ function fromOrigin(e, win, origin) {
 }
 
 /** The shell's own local pages, beside this file (inside app.asar when packaged). */
-const SHELL_PAGES = ['loading.html', 'firstrun.html'];
+const SHELL_PAGES = ['loading.html', 'firstrun.html', 'welcome.html'];
 
 /**
  * Is this IPC message from the app window showing one of the shell's OWN local pages -- `page`, or either when
@@ -83,7 +87,11 @@ function freeGB(dir) {
  *   strings: () => Record<string, string>,
  *   relaunch: () => void,
  *   openLogs: () => void,
- *   firstRun: { defaults: () => any, choose: () => Promise<any>, confirm: (dir: string, anyway: boolean) => any },
+ *   firstRun: { defaults: () => any, choose: () => Promise<any>, confirm: (dir: string, anyway: boolean) => any, back?: () => any },
+ *   welcome?: {
+ *     info: () => any, connect: (address: string) => Promise<any>, trust: (host: string, fingerprint: string, replace: boolean) => any,
+ *     use: () => any, local: () => any, cancel: () => any, retry: () => any,
+ *   },
  * }} o
  */
 function installBridge(o) {
@@ -115,6 +123,17 @@ function installBridge(o) {
   ipcMain.handle('firstrun:defaults', (e) => (fromShellPage(e, o.win(), 'firstrun.html') ? o.firstRun.defaults() : deny('firstrun:defaults')));
   ipcMain.handle('firstrun:choose', (e) => (fromShellPage(e, o.win(), 'firstrun.html') ? o.firstRun.choose() : deny('firstrun:choose')));
   ipcMain.handle('firstrun:confirm', (e, dir, anyway) => (fromShellPage(e, o.win(), 'firstrun.html') ? o.firstRun.confirm(String(dir || ''), !!anyway) : deny('firstrun:confirm')));
+  ipcMain.handle('firstrun:back', (e) => (fromShellPage(e, o.win(), 'firstrun.html') ? o.firstRun.back?.() : deny('firstrun:back')));
+
+  const welcome = (e) => fromShellPage(e, o.win(), 'welcome.html');
+  const w = () => /** @type {NonNullable<typeof o.welcome>} */ (o.welcome);
+  ipcMain.handle('welcome:info', (e) => (welcome(e) ? w().info() : deny('welcome:info')));
+  ipcMain.handle('welcome:connect', (e, address) => (welcome(e) ? w().connect(String(address || '').slice(0, 2048)) : deny('welcome:connect')));
+  ipcMain.handle('welcome:trust', (e, host, fingerprint, replace) => (welcome(e) ? w().trust(String(host || ''), String(fingerprint || ''), replace === true) : deny('welcome:trust')));
+  ipcMain.handle('welcome:use', (e) => (welcome(e) ? w().use() : deny('welcome:use')));
+  ipcMain.handle('welcome:local', (e) => (welcome(e) ? w().local() : deny('welcome:local')));
+  ipcMain.handle('welcome:cancel', (e) => (welcome(e) ? w().cancel() : deny('welcome:cancel')));
+  ipcMain.handle('welcome:retry', (e) => (welcome(e) ? w().retry() : deny('welcome:retry')));
 }
 
 module.exports = { installBridge, fromOrigin, fromShellPage, isShellPage, freeGB, SHELL_PAGES };

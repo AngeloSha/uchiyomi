@@ -9,8 +9,16 @@
 //
 // It runs against a live instance, so the route stops short of anything destructive — notably it hovers the
 // Add button in the extension browser but never clicks it, which would really install an extension.
+//
+// ⚠️ No frame may show a real site's, group's or repository's name (owner, v0.45.0) -- until then the tour showed
+// a real source and its groups in the series supply line, a scanlator's credits page ("PLEASE READ ON OUR
+// SITE…", a Discord invite) and the live extension catalogue. So the page gets fixtures.mjs's neutralNames()
+// (every source and group name shown as a made-up one, source and extension icons as neutral tiles) with the
+// extension fixture answering the catalogue, the names are met BEFORE the screencast starts, and no frame is
+// kept while the reader opens: it starts a fifth of the way in, never on page one.
 import { mkdir, writeFile } from 'node:fs/promises';
 import puppeteer from 'puppeteer';
+import { neutralNames, meetNames, extensionFixture, FIXTURE_REPO_STORED } from './fixtures.mjs';
 
 const BASE = process.env.SHOT_BASE || 'http://uchiyomi:3000';
 const OUT = process.env.SHOT_OUT || '/out';
@@ -18,6 +26,9 @@ const USER = process.env.SHOT_USER;
 const PASS = process.env.SHOT_PASS;
 const SERIES_ID = process.env.SHOT_SERIES_ID || '';
 const BOOK_ID = process.env.SHOT_BOOK_ID || '';
+// What the command palette and Discover's search type: words that match the library being filmed.
+const PALETTE_Q = process.env.SHOT_PALETTE_QUERY || 'martial';
+const DISCOVER_Q = process.env.SHOT_DISCOVER_QUERY || 'solo leveling';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -28,6 +39,7 @@ async function main() {
   });
   const page = await browser.newPage();
   await page.setViewport({ width: 1440, height: 900, deviceScaleFactor: 1 });
+  await neutralNames(page, { fixtures: [extensionFixture({ repos: [FIXTURE_REPO_STORED] })] });
 
   // sign in before recording starts — nobody wants to watch a login
   await page.goto(`${BASE}/`, { waitUntil: 'networkidle2', timeout: 60000 });
@@ -38,14 +50,19 @@ async function main() {
   await Promise.all([page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 45000 }).catch(() => {}), page.click('button[type=submit]')]);
   await sleep(3000);
   if (await page.$('input[type=password]')) throw new Error('login failed');
+  // Every source name, and this series' groups, known before the first frame (fixtures.mjs meetNames).
+  await meetNames(page, BASE);
+  if (SERIES_ID) await page.goto(`${BASE}/series/?id=${SERIES_ID}`, { waitUntil: 'networkidle2', timeout: 60000 }).catch(() => {});
 
   await page.goto(`${BASE}/`, { waitUntil: 'networkidle2', timeout: 60000 });
   await sleep(2500);
 
   const client = await page.createCDPSession();
   const frames = [];
+  // Frames that arrive while `paused` are not kept: the reader opening on its first page (see below).
+  let paused = false;
   client.on('Page.screencastFrame', async ({ data, sessionId, metadata }) => {
-    frames.push({ data, t: metadata.timestamp, wall: Date.now() });
+    if (!paused) frames.push({ data, t: metadata.timestamp, wall: Date.now() });
     try { await client.send('Page.screencastFrameAck', { sessionId }); } catch {}
   });
   await client.send('Page.startScreencast', { format: 'jpeg', quality: 92, everyNthFrame: 1 });
@@ -76,7 +93,7 @@ async function main() {
   // command palette
   await page.keyboard.down('Control'); await page.keyboard.press('KeyK'); await page.keyboard.up('Control');
   await hold(600);
-  for (const ch of 'martial') { await page.keyboard.type(ch); await sleep(85); }
+  for (const ch of PALETTE_Q) { await page.keyboard.type(ch); await sleep(85); }
   await hold(1500);
   await page.keyboard.press('Escape');
   await beat(500);
@@ -93,16 +110,27 @@ async function main() {
   // the reader — the centerpiece, and the one thing never shown moving.
   // Scroll continuously through a chapter boundary so the "Up Next" divider passes on camera.
   if (BOOK_ID) {
+    // Start a fifth of the way in, and keep no frame until then. Page one of a scanlated chapter is usually a
+    // credits page covered in another site's branding, Patreon and Discord links -- not something to put on a
+    // homepage. ⚠️ The jump used to come AFTER a 1.4 s hold on the freshly opened chapter, so the credits page
+    // was on camera, legible, every time (V2 review, v0.45.0): now the frames are dropped until the reader has
+    // pages to jump past and has jumped.
+    paused = true;
     await page.goto(`${BASE}/reader/?book=${BOOK_ID}`, { waitUntil: 'networkidle2', timeout: 45000 });
+    await page.waitForFunction(() => {
+      const el = document.querySelector('[data-lenis-prevent]');
+      return !!el && el.scrollHeight > el.clientHeight * 5;
+    }, { timeout: 30000, polling: 250 }).catch(() => {});
+    await page.evaluate(() => {
+      const el = document.querySelector('[data-lenis-prevent]');
+      if (el) el.scrollTop = Math.floor(el.scrollHeight * 0.2);
+    });
+    await sleep(900);
+    paused = false;
     await hold(1400);
     await page.evaluate(async () => {
       const el = document.querySelector('[data-lenis-prevent]');
       if (!el) return;
-      // Start a fifth of the way in. Page one of a scanlated chapter is usually a credits page covered in
-      // another site's branding, Patreon and Discord links -- not something to put on a homepage. The still
-      // screenshots already skip it; the recording has to as well.
-      el.scrollTop = Math.floor(el.scrollHeight * 0.2);
-      await new Promise((r) => setTimeout(r, 600));
       const target = Math.floor(el.scrollHeight * 0.92);
       const start = performance.now(), dur = 7000, from = el.scrollTop;
       await new Promise((res) => {
@@ -123,7 +151,7 @@ async function main() {
   const box = await page.$('input[placeholder*="Search"]');
   if (box) {
     await box.click();
-    for (const ch of 'solo leveling') { await page.keyboard.type(ch); await sleep(70); }
+    for (const ch of DISCOVER_Q) { await page.keyboard.type(ch); await sleep(70); }
     await page.keyboard.press('Enter');
     // A cross-source search takes 10-20s. Wait for real result cards instead of guessing at a duration --
     // the first cut used a fixed 7s and cut away before anything had rendered.
@@ -152,7 +180,7 @@ async function main() {
     for (const ch of 'manga') { await page.keyboard.type(ch); await sleep(85); }
     await awaitThen(() => document.querySelectorAll('img[src*="/img/extensions/icon/"]').length > 3, 2200);
   }
-  // hover an Add button, deliberately without clicking: this is the live server.
+  // hover an Add button, deliberately without clicking (the catalogue is the fixture's, but the rule stands).
   const add = await page.evaluateHandle(() => [...document.querySelectorAll('button')].find((b) => (b.textContent || '').trim() === 'Add'));
   if (add.asElement()) { await add.asElement().hover(); await hold(1600); }
 

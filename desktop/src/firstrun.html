@@ -20,6 +20,7 @@
   button:disabled { opacity: 0.55; cursor: default; }
   button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   .actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 22px; }
+  #back { margin-inline-end: auto; }
   .note { font-size: 13px; margin-top: 14px; border-radius: 12px; padding: 10px 14px; }
   .note.warn { color: #fcd34d; background: rgb(252 211 77 / 0.08); border: 1px solid rgb(252 211 77 / 0.25); }
   .note.err { color: #fca5a5; background: rgb(252 165 165 / 0.08); border: 1px solid rgb(252 165 165 / 0.25); }
@@ -37,6 +38,7 @@
     <div class="note warn" id="warn" hidden></div>
     <div class="note err" id="err" role="alert" hidden></div>
     <div class="actions">
+      <button id="back" data-s="first.back" hidden>Back</button>
       <button class="primary" id="use" data-s="first.use">Use this folder</button>
     </div>
   </div>
@@ -66,6 +68,9 @@
     show(await shell.firstRun.defaults());
     $('use').focus();
   }
+  // Back to the first-launch choice (welcome.html), when that is where this page came from.
+  $('back').hidden = new URLSearchParams(location.search).get('back') !== '1';
+  $('back').onclick = () => shell.firstRun.back();
   $('choose').onclick = async () => {
     const r = await shell.firstRun.choose();
     if (r) show(r);

@@ -295,6 +295,51 @@ test('the desktop app is built beside the images, never in front of them, and pu
   assert.deepEqual(d.jobs.build.strategy.matrix.include.map((m: any) => m.platform).sort(), ['mac-arm64', 'mac-x64', 'win-x64']);
 });
 
+test('the permanent download links the docs give are files every release uploads, never a feed', () => {
+  // Since v0.45.0 the README, docs/DESKTOP.md and uchiyomi.com/download link to
+  // https://github.com/AngeloSha/uchiyomi/releases/latest/download/<name>, which only works for a file name that
+  // is the same in every release -- and electron-builder names every installer after its version. So the publish
+  // job uploads copies under fixed names beside the versioned files. What must not happen: a link in the docs to
+  // a name nothing uploads (a 404 on the one button a beginner presses), a copy of the wrong file (a Mac user
+  // handed the Windows installer), or a copy riding in the feeds' call, whose ORDER exists for the updater.
+  // Reintroduce by renaming `permanent/Uchiyomi-Setup.exe` in release.yml, by linking a versioned name through
+  // /releases/latest/download/ in README.md, or by dropping the copies from the installers' upload.
+  const wf = parseYaml(read('.github/workflows/release.yml'));
+  const steps: any[] = wf.jobs['desktop-publish'].steps;
+  const run: string = steps.map((st) => String(st.run ?? '')).join('\n');
+  const uploads = run.split('\n').filter((l) => /gh release upload/.test(l) && !l.trim().startsWith('#'));
+  // Each fixed name is a byte copy of the versioned file the feed-check step verified for that platform.
+  const PERMANENT: Record<string, string> = {
+    'Uchiyomi-Setup.exe': 'dist/desktop-dist-win-x64/Uchiyomi-Setup-$dv.exe',
+    'Uchiyomi-mac-arm64.dmg': 'dist/desktop-dist-mac-arm64/Uchiyomi-$dv-arm64.dmg',
+    'Uchiyomi-mac-x64.dmg': 'dist/desktop-dist-mac-x64/Uchiyomi-$dv-x64.dmg',
+  };
+  const copyStep = steps.findIndex((st) => /permanent\//.test(String(st.run ?? '')) && /\bcp\b/.test(String(st.run ?? '')));
+  const uploadStep = steps.findIndex((st) => /gh release upload/.test(String(st.run ?? '')));
+  assert.ok(copyStep >= 0 && copyStep < uploadStep, 'the permanent copies are not made before the upload step');
+  for (const [name, from] of Object.entries(PERMANENT)) {
+    assert.ok(run.includes(`cp "${from}" permanent/${name}`), `permanent/${name} is not a copy of ${from}`);
+    assert.ok(uploads[0]?.includes(`permanent/${name}`), `${name} is not uploaded with the installers`);
+    assert.ok(!uploads.slice(1).some((u) => u.includes(name)), `${name} goes up in the feeds' call`);
+  }
+
+  // Every /releases/latest/download/ link in the docs names one of them.
+  const docs = ['README.md', 'CHANGELOG.md', ...readdirSync(join(REPO, 'docs')).filter((f) => f.endsWith('.md')).map((f) => `docs/${f}`)];
+  const seen: Record<string, Set<string>> = {};
+  const bad: string[] = [];
+  for (const f of docs) {
+    for (const m of read(f).matchAll(/releases\/latest\/download\/([^)\s"'<>\]`]+)/g)) {
+      (seen[f] ??= new Set()).add(m[1]);
+      if (!(m[1] in PERMANENT)) bad.push(`${f}: releases/latest/download/${m[1]} -- no release uploads a file by that name`);
+    }
+  }
+  assert.deepEqual(bad, [], bad.join('\n'));
+  // ...and the two places a beginner starts from offer all three.
+  for (const f of ['README.md', 'docs/DESKTOP.md']) {
+    assert.deepEqual([...(seen[f] ?? [])].sort(), Object.keys(PERMANENT).sort(), `${f} does not link all three permanent downloads`);
+  }
+});
+
 test('a release never attaches a desktop app whose extension engine is not pinned to a published pack', async () => {
   // ⚠️ With a null sha256 the app says "the extension engine download is not available" and never fetches
   // anything -- and every desktop check still passes, because the smokes build their own pack when the pin is

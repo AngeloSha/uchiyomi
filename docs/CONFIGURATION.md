@@ -114,7 +114,7 @@ in plain words.
 
 This section covers one of the two fetch routes: the **generic engines**. The other, and the one most people
 will use, is the one-click extension catalogue described under
-[Mihon / Tachiyomi extensions](#features) and in [docs/extensions.md](extensions.md).
+[Mihon / Tachiyomi extensions](../README.md#features) and in [docs/extensions.md](extensions.md).
 
 Uchiyomi bundles a few **generic engines** (parsers for the common manga-site families: Madara /
 MangaThemesia / Manganato) but **no specific sites for them**. Along this route, nothing fetches anything

@@ -4,9 +4,9 @@ The two-command quick start lives in the [README](../README.md). This page is ev
 app stores, what each container is for, keeping it up to date, and putting it behind a domain.
 
 > 💻 **Want it on your own Windows PC or Mac instead of a server?** That is **Uchiyomi Desktop (beta)**: an
-> installer, no Docker. Downloads and the unsigned first-launch steps are in the
-> [README](../README.md#download-the-desktop-app); everything else about it is in the
-> [desktop chapter of the guide](USAGE.md#14-uchiyomi-desktop). The rest of this page is about the server.
+> installer, no Docker. It also works the other way round: installed on a PC or Mac, it can **connect to the
+> server** you set up here and show it in its own window. Everything about it — downloads, the first launch,
+> both modes — is in **[the desktop guide](DESKTOP.md)**. The rest of this page is about the server.
 
 ## Other layouts
 
@@ -57,7 +57,8 @@ docker compose up -d
 it as a custom app and it appears with an icon like any store app. Two differences from the file above: it
 runs Postgres as its own `uchiyomi-db` container rather than inside the app, and it leaves out the extension
 engine. For Mihon/Tachiyomi extensions, add `uchiyomi-suwayomi` from
-[`deploy/docker-compose.yml`](../deploy/docker-compose.yml) and set `SUWAYOMI_URL`. Set `PUBLIC_ORIGIN` to the
+[`deploy/docker-compose.yml`](../deploy/docker-compose.yml) and set `SUWAYOMI_URL`; then add an extension
+repository ([step by step](extensions.md#add-an-extension-repository--step-by-step)). Set `PUBLIC_ORIGIN` to the
 address you actually open (the manifest defaults to `http://localhost:8080`) or logins will not stick.
 
 **On Unraid?** Uchiyomi is in **Community Applications** — search for *uchiyomi* on the **Apps** tab and
@@ -89,7 +90,7 @@ extension engine is not part of it.
 |---|---|
 | `uchiyomi` | the app: the API, the PWA it serves, and the embedded Postgres database |
 | `uchiyomi-flaresolverr` | Cloudflare solver — **started automatically**; sources that need it use it with no config, and since v0.37.0 so does the extension engine |
-| `uchiyomi-suwayomi` | the extension engine, so Mihon / Tachiyomi extensions work ([docs](extensions.md)); the compose file points it at the solver above (`FLARESOLVERR_ENABLED` / `FLARESOLVERR_URL` on this container) |
+| `uchiyomi-suwayomi` | the extension engine, so Mihon / Tachiyomi extensions work once you add an extension repository ([step by step](extensions.md#add-an-extension-repository--step-by-step)); the compose file points it at the solver above (`FLARESOLVERR_ENABLED` / `FLARESOLVERR_URL` on this container) |
 
 ```bash
 docker compose logs -f uchiyomi  # watch it boot
@@ -145,6 +146,12 @@ services:
 Point the proxy at **`uchiyomi` port 3000**. Once it reaches the app over a shared Docker network you no
 longer need the published host port, and deleting the `ports:` entry stops the app also being served over
 plain HTTP alongside your HTTPS domain.
+
+**Reading from the desktop app.** Uchiyomi Desktop's *Connect to my server* opens this server in its own
+window on a Windows PC or Mac ([how](DESKTOP.md#4-connect-to-your-own-server)). Give it the same address as
+`PUBLIC_ORIGIN`, with no path: Uchiyomi has to be at the root of its address. A self-signed certificate works
+(the app asks once and remembers it), and so do sign-in portals in front of the app (Authelia, Authentik…); a
+proxy's own password prompt (HTTP Basic Auth) does not, yet.
 
 > Using the development stack from a clone instead? Its services are named `yomi-*`, with networks
 > `yomi_app` and `yomi_internal`.

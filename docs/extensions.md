@@ -1,33 +1,146 @@
 # Extensions (Mihon / Tachiyomi sources)
 
-Uchiyomi ships **generic engines** that reach whole families of manga sites by URL. On top of that it can use
-the **Mihon / Tachiyomi extension ecosystem** — the same extensions those apps use, roughly 1,400 of them.
+Uchiyomi ships **generic engines** that reach whole families of manga sites by URL, and MangaDex. On top of
+that it can use the **Mihon / Tachiyomi extension ecosystem** — the same extensions those apps use, well over a
+thousand of them.
 
-You browse and install them from **Admin → Extensions**. There is nothing to set up first.
+Uchiyomi does not host or ship a single extension, and it has no repository built in. **You add an extension
+repository you trust**, once, and from then on its extensions are listed under **Admin → Extensions**, one
+**Add** each.
 
-## Using it
+- [What you need first: the extension engine](#what-you-need-first-the-extension-engine)
+- [Add an extension repository — step by step](#add-an-extension-repository--step-by-step)
+- [Choose your extensions](#choose-your-extensions)
+- [Automatic updates](#automatic-updates) · [Why there is a second container](#why-there-is-a-second-container) ·
+  [How it behaves](#how-it-behaves) · [Turning it off](#turning-it-off) · [Settings](#settings)
+- [Komga-compatible API](#komga-compatible-api) (Mihon reading Uchiyomi, the other direction)
 
-1. Open **Admin → Extensions** (`/admin/?tab=Extensions`; the Providers tab links there too). The panel says `ready`.
-2. **Add a repository** (once). Uchiyomi doesn't host extensions, so you point it at a repository you trust —
-   the same URL you would paste into Mihon. Open **Manage** in the Extensions panel and add it.
-3. **Search and click Add.** The extension installs, its sources switch on straight away, and it is
-   searchable from Discover immediately. No second step, no restart.
+## What you need first: the extension engine
 
-Adult extensions are hidden until you tap **18+**. Installed ones show **Remove**, and one with a newer
-version shows **Update**.
+Extensions run in the **extension engine**, a separate program ([why](#why-there-is-a-second-container)).
+Where it comes from depends on how you run Uchiyomi:
 
-**Languages you don't read.** A multi-language extension provides one source per language, and adding it
-switches all of them on -- thirty sources you will never search, each one counting towards the source
-limit. **Admin → Extensions → Languages** lists every language your extensions offer with how many sources
-it has, how many are on, and how many of your series came from them; **Hide** switches that language's
-sources off in one go, and it stays hidden: the next extension you add leaves its sources in that language
-off (the install message says how many). **Show** brings them back. Series added from a hidden language stay
-readable but stop updating until it is shown again, and the Health page names them.
+| You run | The engine |
+|---|---|
+| **Docker** (the standard [`deploy/docker-compose.yml`](../deploy/docker-compose.yml), and the development stack) | Already there: the `uchiyomi-suwayomi` container starts with the rest. Nothing to set up. |
+| **Uchiyomi Desktop, on this computer** | A download of about 200 MB, once: **Admin → Extensions** → **Download the extension engine (about 200 MB)**. Step by step in [the desktop guide](DESKTOP.md#add-your-first-sources). |
+| **Uchiyomi Desktop, connected to your server** | Your server's. Nothing runs on the computer; the Extensions tab is the server's own. |
+| **CasaOS** | Not part of that listing. **Admin → Extensions** says *No extension engine is set up for this server*; add the `uchiyomi-suwayomi` service from [`deploy/docker-compose.yml`](../deploy/docker-compose.yml) and set `SUWAYOMI_URL` ([INSTALL.md](INSTALL.md#one-click-installs)). |
+| **Unraid** | Not in the template: set the advanced *SUWAYOMI_URL* to a Suwayomi server you run (and point that one at your FlareSolverr, as the template's help text says). |
+| **Umbrel** | Not part of that package. |
 
-There is a ceiling, `SUWAYOMI_MAX_SOURCES` (25 by default), on how many extension sources register at once,
-because every one of them is searched together. If you have more switched on than that, the panel says so in
-an amber banner and **Content → Health** lists it under *Extension source limit*; hiding languages is the
-cheap way under it, raising the limit is the other.
+When the engine is there, the top of **Admin → Extensions** shows a green `ready` badge with its version.
+With the engine turned off on Docker (`SUWAYOMI_URL` empty) the tab says so and how to bring it back:
+*The standard Docker install runs one in the `uchiyomi-suwayomi` container. If you turned it off by emptying
+SUWAYOMI_URL, put that line back in .env and run `docker compose up -d`.* A container that is set up but
+stopped shows *Can't reach the extension engine…* instead.
+
+It costs memory: about **750 MB** once running (731 MiB measured on a server with 22 extensions installed).
+
+## Add an extension repository — step by step
+
+**What a repository is.** An extension repository is a list of extensions that someone publishes, as a small
+file on the web. Mihon, Tachiyomi's forks and Uchiyomi all read the same format, so **the repository you use in
+Mihon is the one to add here**. Uchiyomi never suggests one: which repository you trust is your call.
+
+**What its address looks like.** It usually ends in **`index.min.json`**:
+
+```
+https://example.org/repo/index.min.json
+```
+
+(`example.org` stands in for the real host.) **Where to find yours:**
+
+- **In Mihon:** **More → Settings → Browse → Extension repos** lists the repositories you already added. Copy the
+  address from there.
+- **On the repository's own page:** repositories publish their address, and many have an **Add to Mihon** button.
+  That button is a link like `mihon://add-repo?url=https://…/index.min.json` (or `tachiyomi://add-repo?url=…`).
+  Uchiyomi understands those: copy the button's link (right-click → *Copy link*) and paste it as it is, and
+  Uchiyomi takes the address out of it.
+
+**Adding it:**
+
+1. Open **Admin → Extensions** (`/admin/?tab=Extensions`; the Extensions card under Providers leads there too).
+2. With no repository yet, the repository row is **already open**: *No extension repository yet — add one to
+   see extensions*, and an address field (`https://…/index.min.json`). Later, it opens with **Manage**.
+
+   ![The Extensions tab on a first visit: no repository yet, the address field open with https://example.org/repo/index.min.json typed in, and the Add button](shots/crop-repo-empty.webp)
+
+3. Paste the address and press **Add** (or Enter). The button reads **Checking…** and a line says *Checking the
+   repository — this can take up to a minute.*: Uchiyomi has the engine read the repository and waits until its
+   extensions have arrived.
+4. **Added — {n} extensions from this repository** shows for a moment at the top of the window:
+
+   ![The message at the top of the window after the add: Added — 72 extensions from this repository](shots/crop-repo-toast.webp)
+
+   The repository appears in the row, and a line under it says what to do next:
+
+   ![After the add: "1 extension repository · 72 extensions available", the saved address with Remove, and the next-step line with Choose languages](shots/crop-repo-added.webp)
+
+   The number is what **this** repository brought — not the size of the whole list, which also counts any
+   repositories you added before.
+
+**Later, the address in the list may change.** Right after the add, the list shows exactly what you pasted. After
+the extension engine restarts, it may show `…/repo.json` (or `index.pb`) instead of the `index.min.json` you
+pasted. It is the same repository. Uchiyomi treats both addresses as one repository, so it is never added twice.
+On the desktop app the engine restarts each time the app starts.
+
+**What you can paste:**
+
+| Paste | Uchiyomi |
+|---|---|
+| `https://…/index.min.json` | the address as it is |
+| an *Add to Mihon* link, `mihon://add-repo?url=…` or `tachiyomi://add-repo?url=…`, or a web link ending in `/add-repo?url=…` | takes out the address after `url=` |
+| an address without `https://` | adds `https://` |
+| a link to one file on GitHub, `…/blob/<branch>/index.min.json` | turns it into the raw file's address |
+| a GitHub **repository page** (`https://github.com/<owner>/<name>`) | refuses it: that is a web page, not the list itself |
+
+The extension engine reads a repository's list only from a file named `index.min.json`. So if an `index.json`
+address gives nothing, Uchiyomi tries the `index.min.json` beside it once. If a folder address gives nothing, it
+tries `<folder>/index.min.json`. When the second address is the one that worked, the message adds *· saved as
+index.min.json*. An `index.min.json` that gives nothing is not retried at another address.
+
+**What each message means.** A refusal is shown in the message and also stays in red under the field until you
+change the address.
+
+| Message | Meaning |
+|---|---|
+| *Added — {n} extensions from this repository* | It worked. Next, [choose your extensions](#choose-your-extensions). |
+| *That doesn’t look like a repository address. It usually ends in index.min.json.* | Not a web address at all, or not http/https. |
+| *That is a GitHub page, not the repository itself. Paste the repository’s index.min.json link instead.* | You pasted the project's page. Uchiyomi never guesses which branch holds the file; find the `index.min.json` link (often behind the *Add to Mihon* button). |
+| *That repository is already added.* | It is in the list already. Case, `http`/`https`, a trailing slash or the file name at the end make no difference to this check. |
+| *That address gave no extensions, so it was not kept. Check that it is the repository’s index.min.json link, not a web page — or it may only list extensions you already have.* | The engine read the address and nothing new arrived. **It was not saved**, so there is nothing to remove. If the engine gave a reason, *The engine said: …* follows. Usually it gives none here: for a missing file, a host it cannot reach or a file it will not read, the engine writes the reason only to its own log. |
+| *The extension engine refused that address: …* | The engine would not take the address; its reason follows. Nothing was changed. |
+| *Could not reach the extension engine: …* | The engine is not running or not reachable ([what you need first](#what-you-need-first-the-extension-engine)). Nothing was changed. |
+
+**Removing one:** open the row (**Manage**) and press **Remove** next to it: *Repository removed*. A removed
+repository stays removed (before v0.45.0 the scheduled extension check could put it back). Its installed
+extensions keep working until you remove them too, but they get no updates. Add the repository again and they
+get updates again.
+
+**↻ Refresh** at the top re-reads every repository: *Refreshed — {n} extensions available*.
+
+## Choose your extensions
+
+![The extension list: a search field, All languages, 18+ and Added, and one row per extension with Add, Remove or Update](shots/admin-extensions.webp)
+
+1. **Hide the languages you don't read first.** A multi-language extension provides one source per language,
+   and adding it switches all of them on — thirty sources you will never search, each counting towards the
+   limit below. **Choose languages** (on the next-step line) or **Admin → Extensions → Languages** → **Manage**
+   lists every language your extensions offer with how many sources it has, how many are on, and how many of
+   your series came from them. **Hide** switches that language's sources off in one go, and it stays hidden:
+   the next extension you add leaves its sources in that language off (the install message says how many).
+   **Show** brings them back. Series added from a hidden language stay readable but stop updating until it is
+   shown again, and the Health page names them.
+2. **Search and press Add.** The extension installs, its sources switch on straight away, and it is searchable
+   from Discover immediately — no second step, no restart. Installed ones show **Remove**, and one with a newer
+   version shows **Update** (an amber line offers **Update all** when several are out of date).
+3. Adult extensions are hidden until you tap **18+**.
+
+**Only 25 extension sources can be switched on at once** (`SUWAYOMI_MAX_SOURCES`, 25 by default), because every
+one of them is searched together. If you have more switched on than that, the panel says so in an amber banner
+and **Content → Health** lists it under *Extension source limit*; hiding languages is the cheap way under it. On
+a Docker install, raising `SUWAYOMI_MAX_SOURCES` is the other; the desktop app has no setting for it.
 
 ## Automatic updates
 
@@ -80,7 +193,8 @@ Uchiyomi configures itself to talk to it, and you never open it. Uchiyomi keeps 
 downloads, updates, users and UI; the engine only answers "search this", "list these chapters", "give me this
 chapter's pages".
 
-The cost is honest: it is a JVM and sits around 800 MB of RAM once running.
+The cost is honest: it is a JVM, and it uses about 750 MB of memory once running (731 MiB measured on a
+server with 22 extensions installed; the desktop app caps its Java heap at 768 MB).
 
 ## How it behaves
 
@@ -114,8 +228,10 @@ Two things worth knowing:
 
 ## Turning it off
 
-Set `SUWAYOMI_URL=` (empty) in `.env` and restart the BFF; the panel disappears and nothing else changes. To
-reclaim the RAM as well, `docker compose stop uchiyomi-suwayomi` (`yomi-suwayomi` in the development stack).
+On Docker: set `SUWAYOMI_URL=` (empty) in `.env` and restart the app; the Extensions tab then says no engine is
+set up, and nothing else changes. To reclaim the memory as well, `docker compose stop uchiyomi-suwayomi`
+(`yomi-suwayomi` in the development stack). The desktop app has no switch for it: an engine that was never
+downloaded costs nothing, and one that was only runs while Uchiyomi does.
 
 ## Settings
 
@@ -148,7 +264,7 @@ The other direction, since v0.38.0: **Mihon reading Uchiyomi**, with reading pro
 [Uchiyomi extension](https://github.com/AngeloSha/uchiyomi-extension) already adds your library as a source
 in Mihon, Tachimanga and Suwayomi, but an extension cannot report what you read — Mihon only lets a
 *tracker* do that, and its trackers are built into the app. One of them, the **Komga tracker**, binds to
-the keiyoushi **Komga** extension and nothing else, and speaks a small, fixed set of Komga's endpoints. So
+the **Komga** extension and nothing else, and speaks a small, fixed set of Komga's endpoints. So
 Uchiyomi now answers those endpoints (`/api/v1/*`, `/api/v2/*`), enough for the Komga extension to browse
 and read the library and for the Komga tracker to sync progress in both directions, forward-only. The wire
 contract is in [api.md](api.md#komga-compatible-api-mihons-komga-extension-and-tracker); this is the setup and
@@ -161,7 +277,7 @@ the limits.
    either direction: Mihon retries a failed push a few times with backoff, then gives up quietly until the
    next chapter read. Tick **Include 18+ libraries** if you want those shelves listed on the phone; the
    account's age limit still applies whatever the token says.
-2. In Mihon, install the **Komga** extension from the keiyoushi repository (it ships three copies — *Komga*,
+2. In Mihon, install the **Komga** extension from the extension repository you use there (it comes as three copies — *Komga*,
    *Komga (2)*, *Komga (3)* — for people with more than one server). In its settings, **Address** is your
    Uchiyomi URL exactly as you reach it — scheme, host, port, no trailing slash — and **API key** is the
    token. (Username and password are only shown while the API key field is empty; if you use them instead,

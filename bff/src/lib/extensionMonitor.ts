@@ -36,7 +36,7 @@ import { reloadAll as liveReloadAll } from './sources/reload';
 import { runtime } from './runtime';
 import { gql as defaultGql, type Gql } from './sources/suwayomi/client';
 import {
-  listExtensions, refreshExtensions, setExtensionState, getRepos, setRepos,
+  listExtensions, refreshExtensions, setExtensionState, getRepos, setRepos, repoKey,
   type ExtensionInfo,
 } from './sources/suwayomi/extensions';
 
@@ -274,7 +274,18 @@ export async function runExtensionCheck(
       settings.repos = live;
     } else if (settings.repos.length) {
       wiped = live.length === 0;
-      const missing = settings.repos.filter((u) => !live.includes(u));
+      // By repoKey, never by the exact string. ⚠️ Suwayomi v2.3.2243 reports the address it was given until it
+      // restarts and then its own spelling of it (the repo.json beside a pasted index.min.json), while our copy
+      // keeps what was typed. An exact compare called every repository added that way "lost" after each
+      // engine restart -- on the desktop app, every launch -- wrote it back as a duplicate and told the admins
+      // it had been restored. One entry per key, too, so two spellings in our copy are never both written.
+      const liveKeys = new Set(live.map(repoKey));
+      const missing = settings.repos.filter((u) => {
+        const k = repoKey(u);
+        if (liveKeys.has(k)) return false;
+        liveKeys.add(k);
+        return true;
+      });
       if (missing.length) {
         await setRepos([...live, ...missing], deps.gql).catch(() => {});
         result.reposRestored = missing;
