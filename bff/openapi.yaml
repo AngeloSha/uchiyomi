@@ -893,6 +893,32 @@ paths:
           description: OK
         "401":
           description: Not authenticated
+  /api/adult-filter:
+    get:
+      tags:
+        - library
+      summary: Whether the 18+ filter names any genre or source, so a client can offer the reveal without an 18+ library.
+      operationId: getApiAdultFilter
+      description: >-
+        `configured` is true when Admin → Settings → 18+ filter lists at least one genre or source
+        (adult_genres / adult_sources), i.e. when "Show 18+" would reveal something even on an install with
+        no library rated 18+. Only the flag is returned, never the lists. Always false for an account whose
+        age limit is below 18, which is never offered the reveal. Does not depend on `adult`.
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [configured]
+                properties:
+                  configured:
+                    type: boolean
+        "401":
+          description: Not authenticated
   /api/genres:
     get:
       tags:

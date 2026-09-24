@@ -1112,7 +1112,9 @@ say so. With **Show 18+** off, a series carrying one of those genres leaves the 
 does, and a ticked source leaves Discover the way a self-declared adult one does. Nothing is refiled and
 nothing is refused: it is the same surfacing filter, with the same exceptions as above. One title that is
 tagged wrongly, or that you simply want to keep, can be let through on its own: **Edit details → Always show**
-on the series page. Both lists are empty until you tick something, so an existing server behaves as before.
+on the series page. The **Show 18+** button appears on Library and Home whenever either list has something
+in it, even with no 18+ library (never for an account whose age limit is below 18). Both lists are empty
+until you tick something, so an existing server behaves as before.
 
 **Access.** **Access** on a library row lists who can open it. One thing worth knowing: a member with no
 limits set can open every library, including ones you add later. Unticking them here is what turns that into

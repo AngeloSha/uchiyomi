@@ -80,6 +80,7 @@ export function AdminSettings() {
  */
 function AdultFilterSection({ data, save }: { data: any; save: Save }) {
   const toast = useToast();
+  const qc = useQueryClient();
   // Held locally and saved whole on every click, re-seeded whenever the settings refetch. Read straight
   // from `data`, two quick clicks both toggled against the list as it was before either save landed, and
   // the second PATCH quietly undid the first.
@@ -119,7 +120,10 @@ function AdultFilterSection({ data, save }: { data: any; save: Save }) {
   const flip = (field: 'adultGenres' | 'adultSources', list: string[], set: (v: string[]) => void, v: string) => {
     const next = toggle(list, v);
     set(next);
-    save({ [field]: next }).catch(() => { set(list); toast(tr('Could not save'), 'error'); });
+    save({ [field]: next })
+      // Library and Home decide whether to offer the reveal from this; an emptied or first list changes it.
+      .then(() => qc.invalidateQueries({ queryKey: ['adult-filter'] }))
+      .catch(() => { set(list); toast(tr('Could not save'), 'error'); });
   };
 
   return (

@@ -16,6 +16,25 @@ export function useLibraries() {
   });
 }
 
+/**
+ * Whether the server's 18+ filter names any genre or source (Admin → Settings → 18+ filter), as this
+ * viewer meets it.
+ *
+ * The toggle's own check only knows about 18+ LIBRARIES. An install whose only adult content is a genre on
+ * that list (the common case the setting exists for) had the filter on and no switch to turn it off on
+ * Library or Home, so the screens that show library series pass this as `alsoWhen` -- the same way
+ * Discover passes its hidden-source count. A yes/no only: the lists themselves are admin settings. Always
+ * asked without `adult=1`, and the answer does not depend on the reveal, so it has one key.
+ */
+export function useAdultFilterConfigured(): boolean {
+  const { data } = useQuery({
+    queryKey: ['adult-filter'],
+    queryFn: () => api<{ configured: boolean }>('/api/adult-filter'),
+    staleTime: 5 * 60 * 1000,
+  });
+  return data?.configured === true;
+}
+
 /** Whether 18+ is currently revealed, kept in sync with the cookie another tab may have changed. */
 export function useAdultShown(): boolean {
   // Starts false and is corrected after mount: this app is a static export, so the first render happens at
@@ -44,7 +63,8 @@ export function useAdultShown(): boolean {
  * `alsoWhen` is a second reason to render, for a screen that knows of something else the reveal is hiding.
  * Discover passes `hiddenAdult > 0` from `/api/sources`: since v0.42.0 the reveal also hides adult
  * PROVIDERS, and an install with adult sources and no 18+ library would otherwise lose them with no button
- * anywhere to ask for them back. It only ever adds a reason; the library check alone still renders it.
+ * anywhere to ask for them back. Library and Home pass `useAdultFilterConfigured()`, for the admin's
+ * 18+ genres and sources. It only ever adds a reason; the library check alone still renders it.
  *
  * Flipping it invalidates every query rather than a chosen list. The reveal changes what a dozen endpoints
  * return — the home rails, search, genres and their counts, collections, updates, history, bookmarks, and

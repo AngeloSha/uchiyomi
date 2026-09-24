@@ -55,7 +55,7 @@ test('a toggle is saved from local state, and a failed save puts the chip back',
   assert.match(s, /const \[sources, setSources\] = useState<string\[\]>/, 'the source list is not held locally');
   assert.match(s, /onClick=\{\(\) => flip\('adultGenres', genres, setGenres, g\.key\)\}/);
   assert.match(s, /onClick=\{\(\) => flip\('adultSources', sources, setSources, src\.id\)\}/);
-  assert.match(s, /save\(\{ \[field\]: next \}\)\.catch\(\(\) => \{ set\(list\); toast\(tr\('Could not save'\), 'error'\); \}\);/,
+  assert.match(s, /\.catch\(\(\) => \{ set\(list\); toast\(tr\('Could not save'\), 'error'\); \}\);/,
     'a failed save leaves the chip lit over a list that was not stored');
 });
 
@@ -90,4 +90,23 @@ test('every new string is in all eight locale files', () => {
     const missing = keys.filter((k) => !(k in d) || !String(d[k]).trim() || d[k] === k);
     assert.deepEqual(missing, [], `${f} lacks (or copies the English of) ${missing.join(' | ')}`);
   }
+});
+
+test('the 18+ reveal still renders on Library and Home when only the 18+ filter has something to hide', () => {
+  // AdultToggle renders on its own only when the account holds an 18+ LIBRARY. With genres or sources on the
+  // 18+ filter and no such library, those series were hidden with no off switch on either page -- the
+  // failure `alsoWhen` exists for (see discoverAdult.test.ts). Reintroduce by dropping
+  // `alsoWhen={adultFilter}` from either page: "has no second reason" fails for it; by reading the flag from
+  // anything but `/api/adult-filter`: "the hook" fails.
+  const hook = code(read('components/AdultToggle.tsx'));
+  assert.match(hook, /export function useAdultFilterConfigured\(\): boolean \{[\s\S]*?queryKey: \['adult-filter'\][\s\S]*?api<\{ configured: boolean \}>\('\/api\/adult-filter'\)[\s\S]*?return data\?\.configured === true;/,
+    'the hook no longer asks /api/adult-filter');
+  for (const [file, tag] of [['app/page.tsx', '<AdultToggle className="shrink-0" alsoWhen={adultFilter} />'], ['app/library/page.tsx', '<AdultToggle alsoWhen={adultFilter} />']]) {
+    const src = code(read(file));
+    assert.ok(src.includes('const adultFilter = useAdultFilterConfigured();'), `${file} does not ask whether the filter is configured`);
+    assert.ok(src.includes(tag), `${file}'s reveal has no second reason, so a genre-only filter has no off switch there`);
+  }
+  // A save that changes the lists must refresh the answer, or the switch appears (or goes) only after
+  // five minutes.
+  assert.match(section(), /qc\.invalidateQueries\(\{ queryKey: \['adult-filter'\] \}\)/, 'a save does not refresh the reveal');
 });

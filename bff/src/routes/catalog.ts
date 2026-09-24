@@ -6,7 +6,7 @@ import { komgaImage } from '../lib/komga';
 import { content as komga, NATIVE_PROGRESS } from '../lib/backend';
 import { UnsupportedFilter } from '../lib/ownedCatalog';
 import { cleanDescription } from '../lib/htmlText';
-import { viewCtxFor, SYSTEM_CTX, type ViewCtx, hideAdult, browsableIds, browsable, Params } from '../lib/visibility';
+import { viewCtxFor, SYSTEM_CTX, type ViewCtx, hideAdult, browsableIds, browsable, Params, adultFilterConfigured } from '../lib/visibility';
 
 /** The viewer attached by the preHandler above. */
 const vc = (req: FastifyRequest): ViewCtx => (req as any).viewCtx as ViewCtx;
@@ -118,6 +118,15 @@ export default async function catalogRoutes(app: FastifyInstance) {
   });
 
   app.get('/api/libraries', async (req) => komga.libraries(vc(req)));
+
+  // Whether "Show 18+" would reveal anything beyond 18+ libraries: an admin-named genre or source. The
+  // toggle renders only where there is something to reveal, and `/api/libraries` can only say that about
+  // libraries -- so without this, an install whose only adult content is a genre on the 18+ filter hid it
+  // with no off switch on the Library or Home page. A boolean, never the lists themselves.
+  app.get('/api/adult-filter', async (req) => {
+    const ctx = await viewCtxFor(userIdOf(req), roleOf(req), { hideAdult: true });
+    return { configured: adultFilterConfigured(ctx) };
+  });
 
   // No re-sort. SQL already ordered these by the database collation; sorting again in JS is byte order, so
   // every lowercase genre jumped to the end of the grid after every uppercase one.

@@ -12,7 +12,7 @@ import { ART } from '@/lib/art';
 import { Img, ProgressBar, Rail, RailSkeleton, SectionTitle, Reveal } from '@/components/ui';
 import { SeriesCard, ContinueCard } from '@/components/cards';
 import { HeroCarousel } from '@/components/HeroCarousel';
-import { AdultToggle } from '@/components/AdultToggle';
+import { AdultToggle, useAdultFilterConfigured } from '@/components/AdultToggle';
 import { IcPlay, IcSparkle, IcRefresh, IcBell } from '@/components/icons';
 import { PullToRefresh } from '@/components/PullToRefresh';
 import { Avatar } from '@/components/Avatar';
@@ -65,6 +65,8 @@ function greeting() {
 export default function HomePage() {
   const { user } = useAuth();
   const qc = useQueryClient();
+  // A second reason for the 18+ reveal to render: a genre or source on the admin's 18+ filter.
+  const adultFilter = useAdultFilterConfigured();
   const { data, isLoading } = useQuery({ queryKey: ['home'], queryFn: () => api<HomePayload>('/api/home') });
   const { data: foryou } = useQuery({ queryKey: ['foryou'], queryFn: () => api<{ genres: string[]; content: Series[] }>('/api/foryou'), staleTime: 600000 });
   const { data: trending } = useQuery({ queryKey: ['trending'], queryFn: () => api<{ content: Series[] }>('/api/trending'), staleTime: 300000 });
@@ -134,12 +136,13 @@ export default function HomePage() {
       )}
 
       {/* The greeting shares its line with the 18+ reveal, which renders nothing unless this account has
-          such a library. Home is where a missing rail is noticed, so it is where the way back has to be. */}
+          such a library or the 18+ filter names a genre or source. Home is where a missing rail is noticed,
+          so it is where the way back has to be. */}
       <div className="flex items-center justify-between gap-3 px-5 pt-6 lg:px-0">
         <p className="min-w-0 text-sm text-fog-400 lg:text-base">
           {greeting()}{user?.displayName && user.displayName !== 'me' ? `, ${user.displayName}` : ''}.
         </p>
-        <AdultToggle className="shrink-0" />
+        <AdultToggle className="shrink-0" alsoWhen={adultFilter} />
       </div>
 
       {/* Keep reading */}

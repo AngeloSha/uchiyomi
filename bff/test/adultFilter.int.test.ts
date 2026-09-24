@@ -35,6 +35,8 @@ const PLAIN = 's_af_plain';
 const SERIES = [TAGGED, EXEMPT, RETAGGED, QUOTED, PLAIN];
 const TITLE = (id: string) => `Zzz AF ${id}`;
 const ADMIN = 'af-admin';
+const MEMBER = 'af-member';
+const CAPPED = 'af-capped';
 const NAMED_SRC = 'af-src-named';
 const CLEAN_SRC = 'af-src-clean';
 
@@ -66,7 +68,7 @@ test('the 18+ filter hides named genres and sources, and nothing else', { skip }
     await q('DELETE FROM series_overrides WHERE series_id = ANY($1)', [SERIES]).catch(() => {});
     await q('DELETE FROM lib_series WHERE id = ANY($1)', [SERIES]).catch(() => {});
     await q('DELETE FROM libraries WHERE id = $1', [LIB]).catch(() => {});
-    await q('DELETE FROM users WHERE username = $1', [ADMIN]).catch(() => {});
+    await q('DELETE FROM users WHERE username = ANY($1)', [[ADMIN, MEMBER, CAPPED]]).catch(() => {});
     // Shared database: leaving a list behind would quietly change what every later suite's listings return.
     await q(`UPDATE server_settings SET adult_genres = '[]'::jsonb, adult_sources = '[]'::jsonb WHERE id = 1`).catch(() => {});
     invalidateAdultFilter();
@@ -98,6 +100,12 @@ test('the 18+ filter hides named genres and sources, and nothing else', { skip }
     `INSERT INTO users (username, display_name, password_hash, role, auth_kind) VALUES ($1,$1,'x','admin','password') RETURNING id`,
     [ADMIN],
   ))[0].id;
+  const mkUser = async (name: string, cap: number | null) => (await q<{ id: string }>(
+    `INSERT INTO users (username, display_name, password_hash, role, auth_kind, max_age_rating)
+     VALUES ($1,$1,'x','user','password',$2) RETURNING id`, [name, cap],
+  ))[0].id;
+  const member = await mkUser(MEMBER, null);
+  const capped = await mkUser(CAPPED, 16);
   const app = Fastify();
   await app.register(jwt, { secret: process.env.JWT_SECRET! });
   await app.register((await import('../src/routes/catalog')).default);
@@ -122,6 +130,30 @@ test('the 18+ filter hides named genres and sources, and nothing else', { skip }
   try {
     await t.test('PREMISE: with empty lists nothing of ours is hidden', async () => {
       assert.deepEqual(await listed(), [...SERIES].sort());
+    });
+
+    /** What `/api/adult-filter` tells this account. */
+    const offered = async (id: string, role = 'user') => {
+      const r = await app.inject({ method: 'GET', url: '/api/adult-filter',
+        headers: { authorization: `Bearer ${app.jwt.sign({ sub: id, role })}` } });
+      assert.equal(r.statusCode, 200, r.body);
+      // Only the flag crosses the wire: the lists are admin settings.
+      assert.deepEqual(Object.keys(r.json()), ['configured']);
+      return r.json().configured as boolean;
+    };
+
+    await t.test('/api/adult-filter says whether a reveal would change anything, and nothing more', async () => {
+      // Library and Home render "Show 18+" from this when no 18+ library exists. Reintroduce by answering
+      // from the library list alone: the second assertion fails, and a genre-only filter has no off switch.
+      assert.equal(await offered(member), false, 'empty lists still offered a reveal');
+      await patch({ adultGenres: ['zzzaf only'] });
+      assert.equal(await offered(member), true, 'a configured genre did not offer the reveal to a member');
+      assert.equal(await offered(admin, 'admin'), true);
+      assert.equal(await offered(capped), false, 'an account capped below 18 was offered the reveal');
+      await patch({ adultGenres: [], adultSources: [NAMED_SRC] });
+      assert.equal(await offered(member), true, 'a configured source did not offer the reveal');
+      await patch({ adultSources: [] });
+      assert.equal(await offered(member), false, 'emptying the lists did not withdraw it');
     });
 
     await t.test('a named genre leaves the listing, and ?adult=1 brings it back', async () => {

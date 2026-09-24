@@ -292,6 +292,21 @@ export function sourceAllowedFor(src: { isNsfw?: boolean } | null | undefined, m
 }
 
 /**
+ * Whether the 18+ filter has anything configured beyond 18+ libraries, as this viewer would meet it.
+ *
+ * Only a yes/no, never the lists: the genre and source names are admin settings, and a member needs to
+ * know that a reveal would change something, not what it would change. `ctx` must be built with
+ * `hideAdult: true`, because `viewCtxFor` only loads the lists for a request that is hiding.
+ *
+ * False for an account capped below 18, for the same reason `/api/libraries` drops 18+ libraries for it:
+ * the reveal is never offered to someone the lists are treating as too young, so their filter stays on.
+ */
+export function adultFilterConfigured(ctx: ViewCtx): boolean {
+  if (ctx.maxAgeRating !== null && ctx.maxAgeRating < ADULT_RATING) return false;
+  return (ctx.adultGenres ?? []).length > 0 || (ctx.adultSources ?? []).length > 0;
+}
+
+/**
  * Whether a source belongs in a LISTING for this viewer: Discover's source list, the latest and popular
  * rails, and the cross-source search fan-out.
  *
