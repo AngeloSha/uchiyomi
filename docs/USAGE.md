@@ -118,6 +118,16 @@ genres, description, and the **chapter list**.
   name is taken when a chapter is downloaded, and chapters downloaded before this was kept pick theirs up
   on the series' next source check (nightly, or **Check now**). Many sources only ever say *Chapter 12*;
   those rows show the number alone, since repeating it adds nothing.
+
+  An admin can have those names **borrowed** from another source: **Admin → Settings → Updates & schedules →
+  Borrow chapter names from other sources** for the whole server, or the checkbox under *Sources* in a
+  series' **Sources & translations** sheet for one series. It is off by default, because it means asking
+  sources that carry nothing else for you. A donor is only used when its title matches the series exactly
+  (case and punctuation aside) and it lists at least 90% of the chapter numbers you hold — the same check
+  used before following a second source — and a chapter that already has a name is never touched. A
+  search that finds no donor is not repeated for a week. Switching it off, for the server or the series,
+  puts every borrowed name back to what the chapter's file says; if the chapter's own source later names
+  a chapter, that name replaces the borrowed one.
 - **Favorite** (heart) adds it to your favorites + smart offline sync.
 - **Save all offline** copies every chapter to this device for reading with no connection.
 - Click any chapter to read it; the ⬇ on a chapter saves just that one to this device. Toggle

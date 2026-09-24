@@ -1134,6 +1134,16 @@ paths:
                     oneOf:
                       - $ref: "#/components/schemas/ScanlatorPrefs"
                       - type: "null"
+                  borrowNames:
+                    type: [boolean, "null"]
+                    description: >-
+                      Admins only. The series' own chapter-name borrowing switch, or null when it follows
+                      the server setting (borrow_names on /api/admin/settings).
+                  borrowNamesEffective:
+                    type: boolean
+                    description: >-
+                      Admins only. Whether chapter names are borrowed for this series once the server
+                      setting is applied to a null borrowNames.
         "401":
           description: Not authenticated
         "404":
@@ -4608,6 +4618,12 @@ paths:
                       Whether the nightly library repair runs on its own. On by default. Off stops the
                       schedule only: Run now and the Health page's chips still work, because nothing the
                       repair does is destructive (it never deletes, merges or renumbers anything).
+                  borrow_names:
+                    type: boolean
+                    description: >-
+                      Whether chapters whose source only numbers them borrow their names from another
+                      source whose numbering was verified to match. Off by default; a series can override
+                      it (PATCH /api/admin/series/{id}).
         "401":
           description: Not authenticated
         "403":
@@ -4617,7 +4633,8 @@ paths:
         - admin
       summary: "Change server settings: name, open registration, update interval, backup hour, extension check
         interval and its kill switch, the update check, the opt-in install count, the opt-in read-chapter
-        cleanup, the bounded failed-chapter source hunt, and the server-wide scanlation-group preferences."
+        cleanup, the bounded failed-chapter source hunt, chapter-name borrowing, and the server-wide
+        scanlation-group preferences."
       operationId: patchApiAdminSettings
       description: >-
         Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. Answers
@@ -4696,6 +4713,13 @@ paths:
                     booksUnreadCount, so a fully read series still reports COMPLETED -- and they never
                     affect lastReadContinuousNumberSort. Nothing outside /api/v1 and /api/v2 changes.
                   type: boolean
+                borrowNames:
+                  type: boolean
+                  description: >-
+                    Borrow chapter names from another source whose numbering was verified to match, for
+                    every series that follows this setting. Off by default: it is outbound traffic to a
+                    source that carries nothing else for the series. Switching it off removes the names it
+                    borrowed for those series; switching it on takes effect at each series' next check.
       security:
         - bearer: []
       responses:
@@ -4984,7 +5008,7 @@ paths:
     patch:
       tags:
         - admin
-      summary: Change a series' settings (auto-update, its own scanlation-group preferences).
+      summary: Change a series' settings (auto-update, its own scanlation-group preferences, chapter-name borrowing).
       operationId: patchApiAdminSeriesId
       description: >-
         Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. The body
@@ -5016,6 +5040,13 @@ paths:
                   oneOf:
                     - $ref: "#/components/schemas/ScanlatorPrefs"
                     - type: "null"
+                borrowNames:
+                  type: [boolean, "null"]
+                  description: >-
+                    Borrow chapter names for this series from another source whose numbering was verified
+                    to match; null follows the server setting. Turning it on (or to null while the server
+                    setting is on) starts a borrow at once in the background; turning it off removes every
+                    name borrowed for this series, back to the title its file gives.
       security:
         - bearer: []
       responses:
