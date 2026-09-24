@@ -91,6 +91,11 @@ if (WIN && want('ii')) {
   const bRoot = join(base, 'data');
   const profile = join(local, name);
   mkdirSync(join(profile, 'Temp'), { recursive: true });
+  // ⚠️ A real profile has these. Windows expands "User Shell Folders" (%USERPROFILE%\AppData\Local) with the
+  // PROCESS's USERPROFILE, so SHGetKnownFolderPath(LocalAppData) fails with error 2 when the fake profile lacks
+  // them -- and Suwayomi's config manager asks for it at startup (AppDirsException, run 35951552963). The first
+  // version of this check faked a profile no real "Jösé 名前" would have.
+  for (const d of ['AppData\\Local', 'AppData\\Roaming', 'AppData\\LocalLow']) mkdirSync(join(profile, d), { recursive: true });
   const fixture = readJson(join(OUT, 'engine-fixture.json'));
   const served = fixture ? await serveFile(fixture.file) : null;
   let b;

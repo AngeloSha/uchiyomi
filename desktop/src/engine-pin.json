@@ -5,8 +5,8 @@
   "tag": "engine-v2.3.2243",
   "baseUrl": "https://github.com/AngeloSha/uchiyomi/releases/download/engine-v2.3.2243",
   "packs": {
-    "win-x64": { "file": "engine-pack-win-x64.zip", "sha256": null, "bytes": null },
-    "mac-arm64": { "file": "engine-pack-mac-arm64.zip", "sha256": null, "bytes": null },
-    "mac-x64": { "file": "engine-pack-mac-x64.zip", "sha256": null, "bytes": null }
+    "win-x64": { "file": "engine-pack-win-x64.zip", "sha256": "14c3f2120dacd93b7bb808c9f1679487f97cb351ba071c733e852808f0e96769", "bytes": 198283547 },
+    "mac-arm64": { "file": "engine-pack-mac-arm64.zip", "sha256": "a18ab03a83aa86f07b6349fce8a6a19a6be9f5fe8e38bc72383500663ff94248", "bytes": 197543556 },
+    "mac-x64": { "file": "engine-pack-mac-x64.zip", "sha256": "dd5a2f15d7372a199618b7a94302246aade521646a7da3141a525deb12cfd068", "bytes": 198739291 }
   }
 }
