@@ -5,6 +5,7 @@ import { motion } from 'framer-motion';
 import { IcHome, IcGrid, IcSearch, IcDownload, IcUser, IcPlus } from './icons';
 import { useAuth, canDownload } from '@/lib/auth';
 import { keys, t as tr } from '@/lib/i18n';
+import { isDesktop, DESKTOP_HIDDEN } from '@/lib/desktop';
 
 // `keys()` is the identity function; it exists so these reach the translation extractor, which
 // cannot see a label rendered as `tr(label)`. This nav shipped untranslated once already.
@@ -30,7 +31,9 @@ export function BottomNav() {
   const offline = status === 'offline';
   // An account that may not add series has nothing to do on Discover -- every route the page calls is now
   // refused for it -- so the tab is a promise the app cannot keep. The page itself says so if you type it.
-  const shown = canDownload(user) ? items : items.filter((i) => i.href !== '/discover');
+  const allowed = canDownload(user) ? items : items.filter((i) => i.href !== '/discover');
+  // Uchiyomi Desktop has no Offline tab: the chapters are already on this disk (lib/desktop.ts).
+  const shown = isDesktop() ? allowed.filter((i) => !(DESKTOP_HIDDEN.navHrefs as readonly string[]).includes(i.href)) : allowed;
   return (
     <nav className="safe-bottom fixed inset-x-0 bottom-0 z-40 lg:hidden">
       <div className="mx-auto max-w-2xl px-4 pb-2">

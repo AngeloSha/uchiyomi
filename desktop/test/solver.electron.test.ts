@@ -3,9 +3,9 @@
 // needs a trusted click, an access-denied page, a JSON API, an empty-body POST).
 //
 // Runs under Electron itself (it needs BrowserWindow), with its own tiny runner:
-//   cd desktop-spike-solver && npm run build && xvfb-run -a electron dist/desktop/test/solver.electron.test.js
+//   cd desktop && npm run test:electron        (Linux: xvfb-run -a npm run test:electron -- --no-sandbox)
 // Prints one ✔/✖ line per check plus MEASURE lines, and exits non-zero on any failure.
-import { app } from 'electron';
+import { app, BrowserWindow } from 'electron';
 import http from 'node:http';
 import assert from 'node:assert/strict';
 import type { AddressInfo } from 'node:net';
@@ -80,7 +80,8 @@ function fixture(): Promise<http.Server> {
         case '/forever': return html(403, 'Just a moment...', '<div id="challenge-spinner"></div>');
         case '/denied': return html(403, 'Access denied | fixture used Cloudflare to restrict access', '<div class="cf-error-title"></div>');
         case '/notfound': return html(404, 'Not here', '<p>404 page</p>');
-        case '/popup': return html(200, 'Popup', `<script>window.__opened = !!window.open('/plain');</script>`);
+        // The answer goes into the DOM, so the solver's own response carries it (a JS global never left the page).
+        case '/popup': return html(200, 'Popup', `<pre id="o">pending</pre><script>document.getElementById('o').textContent = 'opened=' + !!window.open('/plain');</script>`);
         case '/throttle':
           // How a hidden window schedules work: timer drift and animation frames over one second.
           return html(200, 'Throttle', `<pre id="r">pending</pre><script>
@@ -265,7 +266,9 @@ app.whenReady().then(async () => {
   await check('a named session is its own jar (fs-s:*), listed and destroyable', async () => {
     let r = await solve({ cmd: 'sessions.list' });
     assert.ok(r.j.sessions.includes('suwayomi'));
-    assert.equal(lastDetail().partition, 'fs-s:suwayomi');
+    // The jar is the session's; the Electron partition is one of the fixed pool's names (pool.ts).
+    assert.equal(lastDetail().jar, 's:suwayomi');
+    assert.match(lastDetail().partition, /^fs-s:\d$/);
     r = await solve({ cmd: 'sessions.destroy', session: 'suwayomi' });
     assert.equal(r.j.message, MSG.sessionRemoved);
     r = await solve({ cmd: 'sessions.list' });
@@ -273,9 +276,43 @@ app.whenReady().then(async () => {
   });
 
   await check('popups are denied', async () => {
+    // Reintroduce by returning { action: 'allow' } from the window-open handler in browser.ts: the page reads
+    // opened=true and a sixth BrowserWindow appears. (The spike's version of this check could not fail: it
+    // counted only the pool's own windows and never read the page's answer.)
+    const before = BrowserWindow.getAllWindows().length;
     const r = await solve({ cmd: 'request.get', url: `${S}/popup` });
     assert.equal(r.status, 200);
-    assert.equal(backend.stats().windows <= 5, true);
+    assert.match(r.j.solution.response, /<pre id="o">opened=false<\/pre>/);
+    assert.ok(BrowserWindow.getAllWindows().length <= before + 1, `windows ${before} -> ${BrowserWindow.getAllWindows().length}`);
+  });
+
+  await check('jars are bounded: a new origin past the cap takes the least recently used partition, emptied first', async () => {
+    // Reintroduce by keying partitions by origin again (pool.ts unused): partitionNamesEverUsed reaches 3 here,
+    // and without the wipe the evicted origin's cf_clearance survives into its next jar.
+    const extra = await fixture();
+    const extra2 = await fixture();
+    const origins = [S, `http://127.0.0.1:${(extra.address() as AddressInfo).port}`, `http://127.0.0.1:${(extra2.address() as AddressInfo).port}`];
+    const small = new ElectronSolverBackend({ maxOrigins: 2, partitionPrefix: 'bounded', blockAllLoopback: false, protectedPorts, humanCheck: 'log', clickAfterMs: 1000, clickEveryMs: 1500, onSolveDetail: (d) => details.push(d) });
+    const smallSrv = await startSolverServer({ backend: small, token: TOKEN, appVersion: 'test' });
+    protectedPorts.push(smallSrv.port);
+    const go = async (origin: string) => {
+      const r = await fetch(`${smallSrv.url}/v1`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ cmd: 'request.get', url: `${origin}/challenge`, maxTimeout: 20000 }) });
+      return (await r.json()) as any;
+    };
+    try {
+      assert.equal((await go(origins[0])).message, MSG.solved); // A: challenged, cf_clearance in jar o:A
+      assert.equal((await go(origins[0])).message, MSG.notDetected); // A again: the jar remembers
+      assert.equal((await go(origins[1])).message, MSG.solved); // B
+      assert.equal((await go(origins[2])).message, MSG.solved); // C: pushes A (least recently used) out, starts empty
+      assert.equal(small.stats().partitionNamesEverUsed, 2);
+      assert.equal((await go(origins[0])).message, MSG.solved); // A: a fresh, EMPTY jar -- challenged again
+      assert.equal(small.stats().partitionNamesEverUsed, 2);
+    } finally {
+      await smallSrv.close();
+      await small.shutdown();
+      extra.close();
+      extra2.close();
+    }
   });
 
   await check("the hidden browser cannot reach the solver's own port", async () => {

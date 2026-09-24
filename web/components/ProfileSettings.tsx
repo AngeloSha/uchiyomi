@@ -15,6 +15,7 @@ import { IcBell, IcCheck, IcDownload, IcMoments, IcSparkle } from '@/components/
 import { t as tr, LOCALES, keys } from '@/lib/i18n';
 import { useT } from '@/lib/I18nProvider';
 import { SETTINGS_GRID, Section, Row, SwitchRow, Segmented, NumberRow, RangeRow, LinkRow, useAutosave } from '@/components/settings';
+import { isDesktop } from '@/lib/desktop';
 
 /**
  * The profile's Settings tab: Appearance · Reading · Downloads · This device.
@@ -26,12 +27,16 @@ import { SETTINGS_GRID, Section, Row, SwitchRow, Segmented, NumberRow, RangeRow,
  * device) so the two columns end near the same height.
  */
 export function ProfileSettings({ weeklyGoal }: { weeklyGoal: number }) {
+  // Uchiyomi Desktop (lib/desktop.ts): no Downloads (the chapters are already on this disk; copying them
+  // into the window's storage would store every one twice) and no This device (Electron has no push
+  // service, and the app is already installed).
+  const desktop = isDesktop();
   return (
     <div className={SETTINGS_GRID}>
       <AppearanceSection />
       <ReadingSection weeklyGoal={weeklyGoal} />
-      <DownloadsSection />
-      <DeviceSection />
+      {!desktop && <DownloadsSection />}
+      {!desktop && <DeviceSection />}
     </div>
   );
 }

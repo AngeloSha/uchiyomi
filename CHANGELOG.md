@@ -1,5 +1,181 @@
 # Changelog
 
+## v0.44.0 — 2026-09-24
+
+**Uchiyomi Desktop (beta).** The owner asked, a day before this release, whether Uchiyomi could be something you
+*download as an app* — "empty of manga, you add the extensions repo and the manga sites in admin, everything
+exactly same as now, the only difference it won't be on your server and all the manga will be on your own pc".
+It can: this release is that app, for Windows and both kinds of Mac, attached to this GitHub Release beside the
+unchanged Docker images.
+
+**Nothing changes for a server.** Every server-side difference sits behind one switch, `UCHIYOMI_DESKTOP`, read
+in one file; with it off — every Docker install — the server has the same routes, the same responses, the same
+listen address and the same defaults as v0.43.0, and the tests that say so are listed under *For server
+installs* below, together with the few places where code a server also runs was touched, and why that is
+identical on Linux.
+
+### Uchiyomi Desktop (beta): the whole app on your own Windows PC or Mac
+
+It is the same app, screen for screen — the same server and the same web app, inside an Electron shell — with
+the library in a folder on your computer. No Docker, no server to keep running, no account to create: it opens
+signed in, on an empty library, and sources, sites and extensions are added in Admin exactly as on a server.
+
+| Your computer | Download |
+|---|---|
+| Windows (x64) | `Uchiyomi-Setup-0.44.0.exe` — installs for your account only, no administrator prompt |
+| Mac with Apple silicon | `Uchiyomi-0.44.0-arm64.dmg` |
+| Mac with an Intel processor | `Uchiyomi-0.44.0-x64.dmg` |
+
+**Unsigned, for now** (the owner's call; signing is a drop-in later). Windows SmartScreen asks once — **More
+info → Run anyway** — and a PC with **Smart App Control** on blocks it outright, so the Docker install is the
+answer there. macOS refuses the first launch until **System Settings → Privacy & Security → Open Anyway**.
+Windows then updates itself in the background and installs on quit; a Mac cannot update an unsigned app, so it
+says *New version X — download* in the menu-bar menu and on the Version card in Admin → Health instead.
+
+What is in it:
+
+* **First run** asks one question, *"Where should Uchiyomi keep your manga?"*, defaulting to `Uchiyomi
+  Library` in your home folder — not inside Documents, which OneDrive and iCloud like to sync. A synced folder
+  gets a warning, and the app's own data folder, a drive root or the home folder itself are refused.
+* **No sign-in, ever.** The first start creates one local admin named after your computer account. The shell
+  signs its window in through a private handshake: a fresh 256-bit secret per launch, added by the shell below
+  the page to one loopback-only request, compared as a digest, and removed from the server's environment so no
+  child process inherits it. A browser pointed at the same port gets *"This library opens in the Uchiyomi app
+  on this computer."*
+* **Its own PostgreSQL 16**, the same major version as the Docker image, with `pg_dump` and `psql`, on
+  loopback with a password that never appears on a command line (macOS shows every user's).
+* **Its own Cloudflare helper** instead of FlareSolverr: a FlareSolverr-compatible endpoint the shell serves from
+  hidden browser windows, so neither the server nor the extension engine changed to use it. It reuses a site's
+  clearance cookie instead of solving again, and when a site insists on a human, a window *"Uchiyomi needs you
+  to verify <site>"* opens if you are at the computer.
+* **The extension engine on first use.** Admin → Extensions offers *Download the extension engine (about 200
+  MB)*: a slim pack of Suwayomi-Server and its own Java runtime, published on its own `engine-v2.3.2243`
+  prerelease and checked against a SHA-256 pinned in the app. Once downloaded it installs and starts in
+  seconds, and starts with the app from then on; the repository list ships empty, as on a server. ⚠️ **Extensions that need an
+  in-app web view do not work** in the desktop app: the engine's own Chromium download (KCEF) is off, because on
+  macOS the engine died on every start with it on.
+* **The tray / menu bar.** Closing the window keeps Uchiyomi running, so checks and downloads carry on: *Open*,
+  *Check for new chapters*, *Restore a backup…*, the update item, *Start when I log in* (off by default) and
+  *Quit*, which stops everything in order — the server finishes the chapter it is writing first.
+* **Backups** every night as on a server (`db.sql.gz` + `config.zip`), plus what a computer needs: a backup
+  runs about five minutes after start when the last one is more than a day old, and re-aims within a minute
+  after the machine wakes from sleep. **Restore a backup…** (Admin → Tasks, or the tray) saves a safety copy
+  first, replaces the database in one transaction, and restarts; the manga files are never touched.
+* **Left out, because they exist for other people or other devices:** the sign-in screen, passwords, 2FA,
+  sessions and sign-out, single sign-on and registration; members and per-library access; OPDS, the
+  Komga-compatible API (and its Mihon setting) and API tokens; web push (the window has no push service —
+  notification targets still work); *Save offline* and the Offline tab (the chapters are already on this disk);
+  and the install count, which the desktop app never sends. The server answers *not found* for every one of
+  them, and listens on `127.0.0.1` only, so nothing on your network can reach it.
+* **Sooner schedules**, because a computer is switched off far more than a server: the first new-chapter and
+  extension checks after 2 minutes, the Cloudflare helper check after 1, repair and the clean-ups after 5, the
+  daily source check a day after its last run. Downloads keep **5 GB** free (10 on a server) and the image
+  cache is capped at **4 GiB** (16).
+* **Windows-safe files:** folder names lose trailing dots and spaces and control characters, reserved names get
+  a `_` (`CON` → `CON_`), stored paths always use `/`, a rename that antivirus briefly blocks is retried, and on
+  case-insensitive disks (NTFS, APFS) a series whose folder exists in another case reuses it, and a case-only
+  rename works.
+* **Messages that talked about Docker** — containers, `PUID`, `chown`, `shm_size`, `SUWAYOMI_MAX_SOURCES` —
+  say what to do on a computer instead, in the server's Health and diagnosis text and in 25 new sentences in
+  the app, each translated into the other eight languages. The shell's own tray, first-run and dialog
+  sentences follow the system language, in the same nine.
+
+Where the files live, the hidden settings for troubleshooting, and uninstalling are in the new chapter
+[14. Uchiyomi Desktop](docs/USAGE.md#14-uchiyomi-desktop) of the guide; the downloads and first-launch steps
+are in the [README](README.md#download-the-desktop-app).
+
+**How it was proven.** A spike ran first, on GitHub's Windows and macOS runners: the server unchanged inside
+Electron (its full test suite identical under Electron's Node), the bundled PostgreSQL (including a Windows user
+name that is not ASCII), an update installed over a running app, the web app's service worker and storage inside
+the window, the extension engine pack on all three platforms, and the Cloudflare helper side by side with
+FlareSolverr on real sites.
+Every release now builds the three installers on those runners and, on each, runs a product smoke on a fresh
+profile — first run, signed in with no password form, a real MangaDex chapter downloaded into the chosen folder
+and read in the window, the extension engine installed through the app, Quit leaving no process behind, and a
+relaunch signed in — plus the Windows update and the macOS unsigned-update checks. It has not yet been tried on
+many real PCs, which is why it is a beta.
+
+### For server installs: nothing changes
+
+The switch is read in `bff/src/lib/desktop.ts` alone, and every place that behaves differently asks it, with
+the server's own value as the other answer. With the switch off, `desktopOff.test.ts` checks that importing it
+changes nothing in the environment and that every server arm hands back the server value;
+`desktopSwitchHygiene.test.ts` checks that the flag is read nowhere else, that the server keeps its literals
+(`0.0.0.0`, `trustProxy`, the first-run delays, the backup and custom-sites paths), and that new routes exist
+only behind the switch; `openapiCoverage.test.ts` still pins the route table (`POST /auth/desktop` is not in it:
+it is registered only on desktop and is deliberately not a documented API). **No change unless running as the
+desktop app** in:
+
+* `env.ts`, `server.ts`, `routes/auth.ts`, `lib/auth.ts` — the switch, the local sign-in, the listen address,
+  the route guard, and the schedulers' first-run delays;
+* `backup.ts`, `fsGuard.ts`, `health.ts`, `sourceDiagnosis.ts` — the desktop wording and the desktop backup
+  (bundled `pg_dump`, `config.zip`); every server string is byte-for-byte what it was;
+* `libraryAdmin.ts`, `routes/sources.ts`, `routes/admin.ts`, `sources/customSites.ts` — the case-insensitive
+  and Windows-path branches;
+* the web app: every hidden surface is gated on the desktop shell or on the server saying `desktop: true`,
+  which a server never says, so a Docker install renders exactly as before.
+
+**Code a server also runs, changed for Windows and identical on Linux** — said plainly, because these are not
+behind the switch:
+
+* `chapterFileRel` builds the stored chapter path with `path.posix.join`. On Linux that is `path.join`; on
+  Windows `path.join` wrote `\`, so the nightly repair, the Health *Fix* chip and *Fetch again* never matched a
+  downloaded chapter there.
+* A restored refetch file is recorded with `/`; partial-chapter completion takes the folder with the POSIX
+  `dirname`; the web root normalises `\` before choosing its cache headers — all the same bytes on Linux.
+* The library scanner's symlink-loop guard keys folders by device and inode on Linux, as before, and by real path
+  on Windows only; the rename retry for antivirus and the extra `sanitize` rules run on Windows only.
+* Paths typed in Admin → Library go through a `\`-to-`/` conversion that does nothing on Linux (a `\` is a legal
+  character in a Linux file name, so it is left alone there).
+* The backup scheduler now also reads `backup_last_run`, and ignores it unless it is the desktop app.
+* Two web changes with no visible effect: the sign-in screen waits for `/auth/config` when the first-run check
+  answers *not found*, which a server never does; and the five "am I offline" checks go through one helper that
+  reads `navigator.onLine` the same way.
+
+### Release pipeline
+
+* `release.yml` gains a `desktop` job — `.github/workflows/desktop.yml` on the three runners — with no `needs`,
+  so the images never wait for it, and `desktop-publish`, which needs both the Release and every desktop leg,
+  checks each installer against its update feed (size and SHA-512), merges the two macOS feeds, uploads the
+  installers first and `latest.yml` / `latest-mac.yml` last, and adds a download section to the Release notes.
+  A red desktop build leaves the Release as the images alone until its jobs are re-run.
+* New `engine-pack.yml` builds the engine pack on each OS, boots it there, and publishes all three on the
+  `engine-v*` **prerelease** (never "latest", so no updater mistakes it for the app); a pack the app already
+  pins is never replaced. `desktop/scripts/release/pin-engine.mjs` pins the hashes from what was actually
+  published.
+* Dependabot watches `/desktop`; `.dockerignore` keeps `desktop/` out of every image build; the Phase 0 spike
+  workflows are gone.
+* Versions: `bff`, `web`, `openapi.yaml` and `desktop/package.json` are 0.44.0; `desktopParity.test.ts` now
+  holds the desktop version to the server's.
+
+### Known limits of the beta
+
+* Unsigned: SmartScreen once, Smart App Control blocks it, and macOS updates are a download.
+* No Linux or Windows on Arm build; Docker covers both.
+* The library folder is chosen once; moving it later is not in this version. Neither is moving a library from a
+  Docker server into the app: *Restore a backup…* refuses a server's backup, whose series point at the server's
+  folders.
+* Extensions that need an in-app web view do not work (KCEF is off).
+* After the computer sleeps, the scheduled jobs other than the backup can run one interval late.
+* On a Mac, *Start when I log in* may open the window at login instead of starting in the menu bar.
+* Very deep library folders can pass Windows Explorer's 260-character path limit; Uchiyomi itself copes, but
+  Explorer may not open them.
+* Found on the way and left for changes of their own: on a server, *Delete files*' check that a folder is
+  inside the library cuts the folder's real path at the library path's length, which misreads a library reached
+  through a symlink (fixed on desktop only, to keep the server byte-identical in this release); and on desktop
+  the audit log's own IP helper still reads a forwarded-for header (sessions use the fixed one, so only another
+  program on the same computer could put a false address in the audit log).
+
+### Notes
+
+New tests: `desktopOff`, `desktopSwitchHygiene`, `desktopAuth` (and its database twin), `desktopRoutes`,
+`relPath`, `backupSchedule`, `desktopCopy`, `desktopPaths`, `desktopBackup`, `libBooksRoot` and `desktopParity`
+on the server; `desktopSession` and `desktopSurfaces` in the web app; the shell's own suite in `desktop/test`
+(unit, contract and the solver in real Electron windows); and `releasePipeline` now pins the desktop jobs, the
+engine prerelease, the feed checks and the upload order. Every guard added carries, as a comment, the exact edit
+that puts its bug back, and was run that way. There is no new server environment variable for a Docker install
+and no migration.
+
 ## v0.43.0 — 2026-09-23
 
 Three issues, all from people using this: a performance mode for a modest PC, asked for by **@nealhead**

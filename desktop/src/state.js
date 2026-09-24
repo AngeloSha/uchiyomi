@@ -23,4 +23,17 @@ function write(file, data, mode) {
   fs.renameSync(tmp, file);
 }
 
-module.exports = { read, write };
+/**
+ * Read-modify-write. ⚠️ Several owners write state.json (the supervisor's ports and pid, main.js's library
+ * folder and one-time notices, a person's hand-edited settings), so nobody may write back a copy read earlier:
+ * that silently drops whatever another owner wrote since.
+ * @param {string} file @param {(s: Record<string, any>) => void} fn
+ */
+function update(file, fn) {
+  const s = read(file);
+  fn(s);
+  write(file, s);
+  return s;
+}
+
+module.exports = { read, write, update };

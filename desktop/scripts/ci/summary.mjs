@@ -14,7 +14,7 @@ for (const d of dirs) {
 }
 const md = ['| check | os | verdict | evidence |', '|---|---|---|---|', ...rows.map((r) => `| ${r.id} | ${r.os} | **${r.verdict}** | ${String(r.summary).replace(/\|/g, '/').slice(0, 900)} |`)].join('\n');
 console.log(md);
-if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, `## Desktop spike checks\n\n${md}\n`);
+if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, `## Desktop checks\n\n${md}\n`);
 const failed = rows.filter((r) => r.verdict === 'FAIL');
 if (!rows.length) { console.log('no results recorded'); process.exit(1); }
 if (failed.length) { console.log(`\n${failed.length} FAIL: ${failed.map((r) => r.id).join(', ')}`); process.exit(1); }

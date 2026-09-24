@@ -18,7 +18,7 @@
  * not in `pg_ctl -o`: pg_ctl hands -o to `/bin/sh -c` on POSIX and to `cmd /C` on Windows, and the two quote
  * `unix_socket_directories=''` differently. A file has one syntax.
  */
-const { spawn } = require('node:child_process');
+const { spawn, spawnSync } = require('node:child_process');
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const os = require('node:os');
@@ -90,6 +90,239 @@ async function isPostgresPid(pid) {
 
 function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
 
+/*
+ * The private ASCII folder Windows falls back to when the data root has characters outside the ANSI code page,
+ * shared by the database (PostgreSQL BUG #16926) and the extension engine's runtime + temp folder (java.exe
+ * cannot start from such a path, and JNA cannot load its DLL from one -- spike S7).
+ *
+ * ⚠️ It lives in %ProgramData%, which every local account can WRITE to (Users may create folders there), and
+ * it holds binaries this user runs and a database with tracker tokens in it. So it FAILS CLOSED and NEVER ADOPTS
+ * A FOLDER IT DID NOT MAKE. Until v0.44.0's review it was `%ProgramData%\Uchiyomi\<sha256 of the pgdata path>`:
+ * a predictable name, created with mkdir -p (which quietly accepts a folder someone else made first), and a
+ * failed icacls only logged "continuing". A second account on a shared PC could create that folder first, keep
+ * an ACE for itself (icacls /grant:r replaces only the SIDs it names), and plant pg/bin/*.exe or a JRE for this
+ * user to run. Now:
+ *   - the name is random (`Uchiyomi-<16 hex>`, directly under %ProgramData%, so no shared parent can be owned
+ *     by someone else) and recorded in state.json, which lives in the user's own profile;
+ *   - it is created with a NON-recursive mkdir: EEXIST is a refusal, not a welcome;
+ *   - it is locked to this user, SYSTEM and Administrators, the ACL is READ BACK (owner included), and it must
+ *     still be empty afterwards -- or the app refuses to start and says why;
+ *   - on every later start the recorded folder's ACL is read back again before anything in it is run.
+ * With only this user, SYSTEM and Administrators able to write there (and each of those can already run code
+ * as this user), nothing can be planted; the binary copy is also swapped in whole and compared file by file
+ * against the bundle on every start (Postgres.prepare), so a half-finished or altered copy is replaced.
+ */
+
+const FALLBACK_NAME = /^Uchiyomi-[0-9a-f]{16}$/;
+
+function programDataDir() {
+  return process.env.ProgramData || process.env.PROGRAMDATA || 'C:\\ProgramData';
+}
+
+/** A fresh, unguessable fallback folder name (not created). @param {string} [programData] */
+function newFallbackName(programData = programDataDir()) {
+  return path.join(programData, `Uchiyomi-${crypto.randomBytes(8).toString('hex')}`);
+}
+
+/**
+ * Is `dir` a name this app would have made (what state.json may hold)? Anything else is ignored and a new one is
+ * made: a hand-edited state.json must not be able to point the database at a folder someone else controls.
+ * @param {unknown} dir @param {string} [programData]
+ * @returns {dir is string}
+ */
+function isFallbackName(dir, programData = programDataDir()) {
+  return typeof dir === 'string' && FALLBACK_NAME.test(path.basename(dir))
+    && path.dirname(dir).toLowerCase() === programData.toLowerCase();
+}
+
+/** @param {string} message @param {string} code */
+function coded(message, code) {
+  const e = new Error(message);
+  /** @type {any} */ (e).code = code;
+  return e;
+}
+
+/** This process's user SID (Windows' own whoami, by absolute path -- see sys32). */
+async function userSid() {
+  const who = await run(sys32('whoami'), ['/user', '/fo', 'csv', '/nh'], { timeoutMs: 15_000 });
+  const sid = (who.out.match(/"(S-1-[0-9-]+)"/) || [])[1];
+  if (!sid) throw new Error(`no SID in: ${who.out}`);
+  return sid;
+}
+
+/**
+ * Does this security descriptor (SDDL, as Get-Acl's .Sddl prints it) keep a folder to `sid`, SYSTEM and
+ * Administrators? Owner one of them, the DACL protected from inheritance, and no ALLOW entry for anybody else
+ * (deny entries take nothing away from us). Anything it cannot read -- a null DACL, a conditional entry, an
+ * unknown shape -- is a no: this decides whether binaries in the folder get run.
+ * @param {string} sddl @param {string} sid
+ * @returns {{ ok: boolean, why?: string }}
+ */
+function sddlPrivate(sddl, sid) {
+  const s = String(sddl || '').trim();
+  /** @type {Record<string, string>} */
+  const alias = { SY: 'S-1-5-18', BA: 'S-1-5-32-544' };
+  // The built-in Administrator account prints as LA rather than its SID.
+  if (/-500$/.test(sid)) alias.LA = sid;
+  const trusted = new Set([sid, 'S-1-5-18', 'S-1-5-32-544']);
+  const who = (x) => alias[x] || x;
+  // Split into O: G: D: S: at the top level (ACEs are in parentheses and hold no colons of their own).
+  /** @type {Record<string, string>} */
+  const part = {};
+  let key = '';
+  let depth = 0;
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    if (c === '(') depth++;
+    if (c === ')') depth--;
+    if (depth === 0 && 'OGDS'.includes(c) && s[i + 1] === ':') { key = c; part[key] = ''; i++; continue; }
+    if (depth < 0 || depth > 1) return { ok: false, why: `unreadable descriptor: ${s}` };
+    if (key) part[key] += c;
+  }
+  if (!part.O || !trusted.has(who(part.O))) return { ok: false, why: `owned by ${part.O || 'nobody we can read'}` };
+  if (part.D === undefined) return { ok: false, why: 'no DACL' };
+  const flags = part.D.split('(')[0];
+  if (/NO_ACCESS_CONTROL/.test(flags)) return { ok: false, why: 'a null DACL: everyone has full access' };
+  if (!flags.includes('P')) return { ok: false, why: 'the folder still inherits permissions from %ProgramData%' };
+  const aces = part.D.slice(flags.length).match(/\(([^()]*)\)/g) || [];
+  if (part.D.slice(flags.length).replace(/\(([^()]*)\)/g, '') !== '') return { ok: false, why: `unreadable DACL: ${part.D}` };
+  for (const a of aces) {
+    const f = a.slice(1, -1).split(';');
+    if (f.length < 6) return { ok: false, why: `unreadable entry ${a}` };
+    if (f[0] === 'D' || f[0] === 'OD') continue;
+    if (!trusted.has(who(f[5]))) return { ok: false, why: `${f[5]} has access (${a})` };
+  }
+  return { ok: true };
+}
+
+/**
+ * Read `dir`'s ACL back and throw unless it is this user's alone (sddlPrivate). PowerShell's Get-Acl, because
+ * icacls prints account NAMES, in the machine's language; the path travels in the environment, not the command.
+ * @param {string} dir
+ * @param {{ info: Function, warn: Function }} log
+ */
+async function verifyPrivate(dir, log) {
+  const sid = await userSid();
+  const ps = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
+  const r = await run(ps, ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', '(Get-Acl -LiteralPath $env:UCHIYOMI_ACL_DIR).Sddl'], { env: { ...process.env, UCHIYOMI_ACL_DIR: dir }, timeoutMs: 60_000 });
+  const sddl = r.out.split(/\r?\n/).map((l) => l.trim()).filter((l) => /^O:/.test(l)).pop() || '';
+  const v = r.code === 0 && sddl ? sddlPrivate(sddl, sid) : { ok: false, why: `could not read its permissions (exit ${r.code}): ${r.out.slice(0, 500)}` };
+  if (!v.ok) {
+    throw coded(`Uchiyomi's private folder ${dir} is not private to you (${v.why}), so Uchiyomi will not run anything from it. `
+      + 'Only you, SYSTEM and Administrators may have access to it.', 'FALLBACK_NOT_PRIVATE');
+  }
+  log.info('fallback dir is private to this user', { dir, sid, sddl });
+}
+
+/**
+ * %ProgramData% children inherit "Users: read & execute" (and "create folders"). Replace the inherited ACL:
+ * this user, SYSTEM and Administrators only. pg_ctl's restricted token keeps the user SID enabled, so postgres
+ * still gets in. ⚠️ Throws: a folder that could not be locked is never used.
+ * @param {string} dir
+ * @param {{ info: Function, warn: Function }} log
+ */
+async function lockDown(dir, log) {
+  if (!WIN) return;
+  const sid = await userSid();
+  const r = await run(sys32('icacls'), [dir, '/inheritance:r', '/grant:r', `*${sid}:(OI)(CI)F`, '*S-1-5-18:(OI)(CI)F', '*S-1-5-32-544:(OI)(CI)F'], { timeoutMs: 30_000 });
+  if (r.code !== 0) throw coded(`could not restrict ${dir} to this user (icacls exit ${r.code}): ${r.out.slice(0, 500)}`, 'FALLBACK_LOCK_FAILED');
+  log.info('fallback dir restricted to this user', { dir, sid });
+}
+
+/**
+ * Make (or, when state.json recorded it, re-check) the private fallback folder. Throws rather than use a folder
+ * that is not private, or one this app did not create.
+ * @param {string} dir a name from newFallbackName() or state.json (isFallbackName)
+ * @param {{
+ *   recorded: boolean,
+ *   log: { info: Function, warn: Function },
+ *   lock?: (dir: string, log: any) => Promise<void>,
+ *   verify?: (dir: string, log: any) => Promise<void>,
+ * }} o lock/verify: tests only (the real ones need Windows)
+ * @returns {Promise<{ dir: string, created: boolean }>}
+ */
+async function claimFallback(dir, o) {
+  const lock = o.lock || lockDown;
+  const verify = o.verify || verifyPrivate;
+  if (o.recorded && fs.existsSync(dir)) {
+    await verify(dir, o.log);
+    return { dir, created: false };
+  }
+  if (o.recorded) o.log.warn('the private fallback folder in state.json is gone; making it again (a new, empty database)', { dir });
+  try {
+    // ⚠️ NEVER recursive: mkdir -p succeeds on a folder someone else made first, which is the attack.
+    fs.mkdirSync(dir);
+  } catch (e) {
+    if (/** @type {any} */ (e).code === 'EEXIST') {
+      throw coded(`${dir} already exists and Uchiyomi did not create it, so Uchiyomi will not use it. Open Uchiyomi again to use a new folder.`, 'FALLBACK_TAKEN');
+    }
+    throw e;
+  }
+  try {
+    await lock(dir, o.log);
+    await verify(dir, o.log);
+    // Created empty a moment ago; anything in it now got in before the lock (%ProgramData%'s "Users: create
+    // folders" is inherited until then).
+    const found = fs.readdirSync(dir);
+    if (found.length) throw coded(`something was put in ${dir} before Uchiyomi could lock it (${found.slice(0, 5).join(', ')}), so Uchiyomi will not use it.`, 'FALLBACK_TAMPERED');
+  } catch (e) {
+    // Empty: remove it so the next start makes a clean one. Not empty: never delete what someone else put there.
+    try { fs.rmdirSync(dir); } catch { /* not empty, or already gone */ }
+    throw e;
+  }
+  return { dir, created: true };
+}
+
+/**
+ * Is the copy at `dst` the bundle at `src`, file for file (names and sizes)? A copy that differs -- a file
+ * missing, an extra one (a DLL beside postgres.exe would be loaded first), or one of another size -- is
+ * replaced, not trusted because its PG_BUNDLE.json stamp matches.
+ * @param {string} src @param {string} dst
+ */
+function sameTree(src, dst) {
+  try {
+    const a = fs.readdirSync(src, { withFileTypes: true }).map((d) => d.name).sort();
+    const b = fs.readdirSync(dst, { withFileTypes: true }).map((d) => d.name).sort();
+    if (a.length !== b.length || a.some((n, i) => n !== b[i])) return false;
+    for (const n of a) {
+      const s = fs.lstatSync(path.join(src, n));
+      const d = fs.lstatSync(path.join(dst, n));
+      if (s.isDirectory() !== d.isDirectory() || d.isSymbolicLink()) return false;
+      if (s.isDirectory() ? !sameTree(path.join(src, n), path.join(dst, n)) : s.size !== d.size) return false;
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The fallback's copy of the bundled binaries: replaced when the bundle changes (an app update ships new ones) or
+ * when it is not the bundle file for file (sameTree). ⚠️ Built beside and swapped in whole: fs.cpSync copies
+ * PG_BUNDLE.json FIRST (it sorts before bin/), so a copy cut short by a crash used to carry a matching stamp and
+ * no postgres.exe -- and was trusted on every start after.
+ * @param {string} src the bundled pg/ @param {string} copy <fallback>/pg
+ * @param {{ info: Function }} log
+ * @returns {{ copied: boolean }}
+ */
+function syncCopy(src, copy, log) {
+  const stamp = fs.readFileSync(path.join(src, 'PG_BUNDLE.json'), 'utf8');
+  let current = '';
+  try { current = fs.readFileSync(path.join(copy, 'PG_BUNDLE.json'), 'utf8'); } catch { /* none yet */ }
+  if (current === stamp && sameTree(src, copy)) return { copied: false };
+  const t0 = Date.now();
+  const part = `${copy}.partial-${crypto.randomBytes(4).toString('hex')}`;
+  try {
+    fs.cpSync(src, part, { recursive: true });
+    fs.rmSync(copy, { recursive: true, force: true });
+    fs.renameSync(part, copy);
+  } finally {
+    fs.rmSync(part, { recursive: true, force: true });
+  }
+  log.info(`postgres: copied binaries to the ASCII fallback in ${Date.now() - t0} ms`, { copy, stampChanged: current !== stamp });
+  return { copied: true };
+}
+
 class Postgres {
   /**
    * @param {{
@@ -126,41 +359,34 @@ class Postgres {
     }
   }
 
-  /**
-   * Decide where the binaries and the cluster actually live. Idempotent; call once before anything else.
-   * @param {{ pgdataHint?: string }} [_]
-   */
-  async prepare() {
+  /** Which of our paths Windows' initdb cannot use (empty = no fallback needed). */
+  fallbackReasons() {
     const reasons = [];
     if (nonAscii(this.distDir)) reasons.push(`binaries: ${this.distDir}`);
     if (nonAscii(this.pgdata)) reasons.push(`data: ${this.pgdata}`);
     if (nonAscii(this.tmpDir)) reasons.push(`temp: ${this.tmpDir}`);
     if (nonAscii(this.logFile)) reasons.push(`log: ${this.logFile}`);
+    return reasons;
+  }
+
+  /**
+   * Decide where the binaries and the cluster actually live. Idempotent; call once before anything else.
+   * @param {{ base?: string | null }} [o] base: the private fallback folder the supervisor has already claimed
+   *   (claimFallback) -- made, locked and verified, or re-verified. Never created or chosen here.
+   */
+  async prepare({ base = null } = {}) {
+    const reasons = this.fallbackReasons();
     if (!WIN || !reasons.length) return { fallback: null };
     if (this.o.asciiFallback === false) {
       this.log.warn('postgres: non-ASCII paths and the ASCII fallback is DISABLED (test mode)', { reasons });
       return { fallback: null, disabled: true, reasons };
     }
-    const programData = process.env.ProgramData || process.env.PROGRAMDATA || 'C:\\ProgramData';
-    const key = crypto.createHash('sha256').update(this.pgdata.toLowerCase()).digest('hex').slice(0, 12);
-    const base = path.join(programData, 'Uchiyomi', key);
+    // Fail closed: without a claimed private folder there is nowhere safe to put the cluster.
+    if (!base) throw coded('postgres needs its private ASCII folder, and none was claimed', 'FALLBACK_MISSING');
     if (nonAscii(base)) throw new Error(`the ASCII fallback directory is itself non-ASCII: ${base}`);
-    fs.mkdirSync(base, { recursive: true });
-    await this.lockDown(base);
 
-    // Binaries: a copy, refreshed when the bundle changes (an app update ships new ones).
-    const stamp = fs.readFileSync(path.join(this.distDir, 'PG_BUNDLE.json'), 'utf8');
     const copy = path.join(base, 'pg');
-    let copied = false;
-    let current = '';
-    try { current = fs.readFileSync(path.join(copy, 'PG_BUNDLE.json'), 'utf8'); } catch { /* none yet */ }
-    if (current !== stamp) {
-      const t0 = Date.now();
-      fs.rmSync(copy, { recursive: true, force: true });
-      fs.cpSync(this.distDir, copy, { recursive: true });
-      copied = true;
-      this.log.info(`postgres: copied binaries to the ASCII fallback in ${Date.now() - t0} ms`, { copy });
-    }
+    const { copied } = syncCopy(this.distDir, copy, this.log);
     this.distDir = copy;
     this.pgdata = path.join(base, 'pg16');
     this.tmpDir = path.join(base, 'tmp');
@@ -169,25 +395,6 @@ class Postgres {
     this.fallback = { base, reasons, copied };
     this.log.warn('postgres: using the ASCII fallback (PostgreSQL BUG #16926)', this.fallback);
     return { fallback: this.fallback };
-  }
-
-  /**
-   * %ProgramData% children inherit "Users: read & execute". The cluster is this user's alone, so replace the
-   * inherited ACL: this user, SYSTEM and Administrators only. pg_ctl's restricted token keeps the user SID
-   * enabled, so postgres still gets in.
-   */
-  async lockDown(dir) {
-    if (!WIN) return;
-    try {
-      const who = await run(sys32('whoami'), ['/user', '/fo', 'csv', '/nh'], { timeoutMs: 15_000 });
-      const sid = (who.out.match(/"(S-1-[0-9-]+)"/) || [])[1];
-      if (!sid) throw new Error(`no SID in: ${who.out}`);
-      const r = await run(sys32('icacls'), [dir, '/inheritance:r', '/grant:r', `*${sid}:(OI)(CI)F`, '*S-1-5-18:(OI)(CI)F', '*S-1-5-32-544:(OI)(CI)F'], { timeoutMs: 30_000 });
-      if (r.code !== 0) throw new Error(r.out);
-      this.log.info('postgres: fallback dir restricted to this user', { dir, sid });
-    } catch (e) {
-      this.log.warn('postgres: could not restrict the fallback dir (continuing)', { error: String(e) });
-    }
   }
 
   env(extra = {}) {
@@ -383,18 +590,66 @@ class Postgres {
   }
 
   /**
+   * The last resort when Windows is ending the session under us (sessionend.js): a fast stop, SYNCHRONOUSLY,
+   * because the event loop may never get another turn. 10 s cap -- Windows will not wait much longer.
+   * @returns {string}
+   */
+  stopSync() {
+    if (!this.running()) return 'not-running';
+    const r = spawnSync(this.bin('pg_ctl'), ['-D', this.pgdata, '-m', 'fast', '-w', '-t', '10', 'stop'], { env: this.env(), windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'], timeout: 12_000 });
+    return r.status === 0 ? 'fast' : `failed:${r.status ?? r.signal ?? r.error}`;
+  }
+
+  /**
+   * Replay a plain-SQL dump (`db.sql.gz`, as the bff's backup task writes it: pg_dump --clean --if-exists
+   * --no-owner --no-acl) into the yomi database with the bundled psql, gunzipped on the way in.
+   *
+   * ⚠️ One transaction (`-1`) with ON_ERROR_STOP: a dump that fails half-way (a dump from a newer major, a
+   * truncated file) rolls back to the database as it was, instead of leaving it half-dropped. The file is
+   * opened by Node and fed on stdin, never passed to psql as a path: on Windows psql opens files through the
+   * ANSI code page, and the backups folder lives under the user's profile.
+   * @param {string} gzFile
+   * @returns {Promise<{ ms: number }>}
+   */
+  restoreSqlGz(gzFile) {
+    const t0 = Date.now();
+    return new Promise((resolve, reject) => {
+      const child = spawn(this.bin('psql'), ['-h', '127.0.0.1', '-p', String(this.port), '-U', 'yomi', '-d', 'yomi', '-X', '-q', '-1', '-v', 'ON_ERROR_STOP=1', '-f', '-'], { env: this.clientEnv(), windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
+      let err = '';
+      const add = (d) => { if (err.length < 64_000) err += String(d); };
+      child.stdout.on('data', add);
+      child.stderr.on('data', add);
+      child.stdin.on('error', () => { /* psql stopped reading (ON_ERROR_STOP); its exit code says why */ });
+      child.once('error', reject);
+      const src = fs.createReadStream(gzFile);
+      const gunzip = require('node:zlib').createGunzip();
+      const fail = (e) => { try { child.kill(); } catch { /* gone */ } reject(e); };
+      src.once('error', fail);
+      gunzip.once('error', (e) => fail(new Error(`${path.basename(gzFile)} is not a readable gzip file: ${e.message}`)));
+      src.pipe(gunzip).pipe(child.stdin);
+      child.once('exit', (code) => {
+        if (code === 0) resolve({ ms: Date.now() - t0 });
+        else reject(new Error(`psql failed (exit ${code}); the database was left as it was. ${err.trim().slice(-1500)}`));
+      });
+    });
+  }
+
+  /**
    * A plain-SQL dump with the bundled pg_dump, piped to a file the way bff/src/lib/backup.ts does it (stdout,
    * never `-f`): the output path is then opened by Node, which handles any Unicode path, instead of by
    * pg_dump, which on Windows opens files through the ANSI code page.
+   * `clean` adds `--clean --if-exists`, as the bff's own backups have, so the file can be restored over a
+   * database that already has the tables (the restore's safety copy).
    * @param {string} file
+   * @param {{ clean?: boolean }} [o]
    * @returns {Promise<{ ms: number, bytes: number }>}
    */
-  dump(file) {
+  dump(file, { clean = false } = {}) {
     fs.mkdirSync(path.dirname(file), { recursive: true });
     const t0 = Date.now();
     return new Promise((resolve, reject) => {
       const out = fs.createWriteStream(file);
-      const child = spawn(this.bin('pg_dump'), ['-h', '127.0.0.1', '-p', String(this.port), '-U', 'yomi', '-d', 'yomi', '--no-owner', '--no-acl'], { env: this.clientEnv(), windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+      const child = spawn(this.bin('pg_dump'), ['-h', '127.0.0.1', '-p', String(this.port), '-U', 'yomi', '-d', 'yomi', '--no-owner', '--no-acl', ...(clean ? ['--clean', '--if-exists'] : [])], { env: this.clientEnv(), windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
       let err = '';
       let code = /** @type {number | null} */ (null);
       let closed = false;
@@ -413,4 +668,7 @@ class Postgres {
   }
 }
 
-module.exports = { Postgres, run, isAlive, isPostgresPid, nonAscii, MAJOR, exe };
+module.exports = {
+  Postgres, run, isAlive, isPostgresPid, nonAscii, lockDown, MAJOR, exe,
+  newFallbackName, isFallbackName, sddlPrivate, verifyPrivate, claimFallback, sameTree, syncCopy,
+};

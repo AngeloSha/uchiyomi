@@ -11,8 +11,13 @@
 // notice. What can be checked without them is checked.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, existsSync } from 'fs';
+import { readFileSync, existsSync, readdirSync, mkdtempSync, writeFileSync, rmSync, statSync } from 'fs';
 import { join } from 'path';
+import { tmpdir } from 'os';
+import { createHash } from 'crypto';
+import { execFile } from 'child_process';
+import { createServer } from 'http';
+import type { AddressInfo } from 'net';
 import { parse as parseYaml } from 'yaml';
 
 const REPO = join(__dirname, '..', '..');
@@ -79,7 +84,9 @@ test('a tag publishes a GitHub Release, not just images', () => {
 test('dependencies and actions are watched weekly, grouped so CI is not run thirty times', () => {
   const d = parseYaml(read('.github/dependabot.yml'));
   const npm = d.updates.filter((u: any) => u['package-ecosystem'] === 'npm').map((u: any) => u.directory).sort();
-  assert.deepEqual(npm, ['/bff', '/web']);
+  // /desktop since v0.44.0: Electron is a browser engine the app ships, and only its three newest majors get
+  // security fixes. Reintroduce by deleting the /desktop entry: this names the list.
+  assert.deepEqual(npm, ['/bff', '/desktop', '/web']);
   for (const u of d.updates.filter((u: any) => u['package-ecosystem'] === 'npm')) {
     assert.ok(u.groups && Object.keys(u.groups).length, `${u.directory}: npm updates are not grouped`);
     assert.equal(u.schedule.interval, 'weekly');
@@ -213,4 +220,330 @@ test('an Unraid or Umbrel user can still get from the README to their manifest',
   assert.ok(existsSync(join(REPO, 'templates/uchiyomi.xml')), 'the Unraid template moved');
   assert.match(i, /deploy\/umbrel\/uchiyomi/, 'the install guide does not point Umbrel users at the manifest');
   assert.ok(existsSync(join(REPO, 'deploy/casaos/docker-compose.yml')), 'the CasaOS manifest moved');
+});
+
+// ---------------------------------------------------------------------------------------------------------------
+// Uchiyomi Desktop (beta), since v0.44.0: the same tag also builds Windows and macOS installers and attaches them
+// to the Release. What must not happen: the desktop build (30-60 minutes on three OSes, and a live MangaDex in its
+// product smoke) holding up the images every existing install pulls; an update feed going up before the file it
+// names; the extension-engine release becoming "latest" and being offered to every desktop app as an update; and
+// a pinned engine pack being replaced under the hash every install checks it against.
+
+/** node on a script, asynchronously: the pin test's HTTP server lives in THIS process, so spawnSync would starve it. */
+function runNode(args: string[]): Promise<{ code: number; stdout: string; stderr: string }> {
+  return new Promise((resolve) => {
+    execFile(process.execPath, args, { cwd: REPO, timeout: 60_000 }, (err, stdout, stderr) => {
+      resolve({ code: err ? (typeof (err as any).code === 'number' ? (err as any).code : 1) : 0, stdout: String(stdout), stderr: String(stderr) });
+    });
+  });
+}
+
+test('the desktop app is built beside the images, never in front of them, and published only when every leg is green', () => {
+  const y = read('.github/workflows/release.yml');
+  const wf = parseYaml(y);
+  const desk = wf.jobs.desktop;
+  assert.ok(desk, 'release.yml no longer builds the desktop app');
+  assert.equal(desk.uses, './.github/workflows/desktop.yml');
+  // Reintroduce by adding `needs: build` to the desktop job: a macOS queue then decides when the images publish.
+  assert.equal(desk.needs, undefined, 'the desktop build waits on the image build');
+  // ...and nothing on the images' path may wait for it either.
+  for (const j of ['build', 'merge', 'latest', 'release']) {
+    const needs = [wf.jobs[j].needs ?? []].flat();
+    assert.ok(!needs.includes('desktop') && !needs.includes('desktop-publish'), `${j} waits on the desktop build`);
+  }
+  assert.equal(desk.permissions?.contents, 'read', 'the desktop build must not be able to write to the repo');
+
+  const pub = wf.jobs['desktop-publish'];
+  assert.ok(pub, 'nothing attaches the installers to the Release');
+  // The Release must exist (the release job makes it), and EVERY desktop leg must be green. Reintroduce by
+  // dropping `release` from its needs: the upload can then start before the Release it uploads to exists.
+  assert.deepEqual([pub.needs].flat().sort(), ['desktop', 'release']);
+  assert.ok(!pub.if, 'desktop-publish must not run when a desktop leg failed (no `if: always()`)');
+  assert.deepEqual(pub.permissions, { contents: 'write' }, 'write access is scoped to the job that uploads, and only contents');
+  assert.equal(wf.permissions.contents, 'read');
+  assert.ok(pub['timeout-minutes'], 'desktop-publish has no timeout');
+
+  const run: string = pub.steps.map((s: any) => String(s.run ?? '')).join('\n');
+  // Every feed is checked against the installers it names (sizes and SHA-512) before anything is uploaded.
+  for (const f of ['desktop-dist-win-x64/latest.yml', 'desktop-dist-mac-arm64/latest-mac.yml', 'desktop-dist-mac-x64/latest-mac.yml']) {
+    assert.match(run, new RegExp(`check-feed\\.mjs dist/${f.replace(/[.]/g, '\\.')}`), `${f} is not checked before upload`);
+  }
+  assert.match(run, /merge-latest-mac\.mjs --out feeds\/latest-mac\.yml/, 'the two macOS feeds are not merged');
+  assert.match(run, /--version "\$dv"/);
+  assert.match(run, /\$\{ver%%-\*\}/, 'the desktop version is not held to the tag');
+
+  // ⚠️ ORDER: binaries first, the feeds last and in a call of their own. Reintroduce by moving
+  // feeds/latest.yml into the first upload: gh uploads one call's files in parallel, so a Windows install
+  // could read a feed whose installer is not there yet.
+  const uploads = run.split('\n').filter((l) => /gh release upload/.test(l));
+  assert.equal(uploads.length, 2, `expected two upload calls (installers, then feeds), found ${uploads.length}`);
+  assert.ok(!/latest/.test(uploads[0]), 'the feeds go up in the same call as the installers');
+  assert.match(uploads[1], /feeds\/latest\.yml/);
+  assert.match(uploads[1], /feeds\/latest-mac\.yml/);
+  assert.ok(run.indexOf(uploads[0]) < run.indexOf(uploads[1]), 'the feeds are uploaded before the installers');
+  // The notes section is idempotent: a re-run replaces it rather than stacking a second one.
+  assert.match(run, /desktop-beta:start/);
+  assert.match(run, /skip=1/, 'a re-run of the notes step would add the downloads section twice');
+
+  // desktop.yml is callable, and publishes nothing itself.
+  const d = parseYaml(read('.github/workflows/desktop.yml'));
+  assert.ok('workflow_call' in d.on, 'desktop.yml cannot be called from the release');
+  assert.equal(d.permissions.contents, 'read');
+  assert.ok(!/gh release/.test(code(read('.github/workflows/desktop.yml'))), 'desktop.yml publishes on its own');
+  // What desktop-publish downloads is what desktop.yml uploads.
+  assert.match(read('.github/workflows/desktop.yml'), /name: desktop-dist-\$\{\{ matrix\.platform \}\}/);
+  assert.deepEqual(d.jobs.build.strategy.matrix.include.map((m: any) => m.platform).sort(), ['mac-arm64', 'mac-x64', 'win-x64']);
+});
+
+test('a release never attaches a desktop app whose extension engine is not pinned to a published pack', async () => {
+  // ⚠️ With a null sha256 the app says "the extension engine download is not available" and never fetches
+  // anything -- and every desktop check still passes, because the smokes build their own pack when the pin is
+  // empty (engine-fixture.mjs). So a v* tag pushed before the engine-v* prerelease is published and pinned shipped
+  // a desktop app whose Admin -> Extensions is broken for every user, from a fully green run. The gate is a
+  // script, run before anything is downloaded or uploaded.
+  const wf = parseYaml(read('.github/workflows/release.yml'));
+  const steps: any[] = wf.jobs['desktop-publish'].steps;
+  const at = (re: RegExp) => steps.findIndex((s) => re.test(String(s.run ?? '')) || re.test(String(s.uses ?? '')));
+  const gate = at(/check-pin\.mjs/);
+  // Reintroduce by deleting the "pinned to a published pack" step: this names it.
+  assert.ok(gate >= 0, 'desktop-publish does not check the engine pin');
+  assert.ok(gate < at(/download-artifact/), 'the engine pin is checked after the installers are downloaded');
+  assert.ok(gate < at(/gh release upload/), 'the engine pin is checked after something is uploaded');
+  assert.ok(!steps[gate].if && !steps[gate]['continue-on-error'], 'the pin check can be skipped or ignored');
+  // desktop.yml fails a TAG in seconds instead of after the 30-60 minute build; branches build unpinned on purpose.
+  const pre: any[] = parseYaml(read('.github/workflows/desktop.yml')).jobs.prebuild.steps;
+  const early = pre.find((s) => /check-pin\.mjs/.test(String(s.run ?? '')));
+  assert.ok(early, 'a desktop build on a release tag does not check the engine pin');
+  assert.equal(early.if, "startsWith(github.ref, 'refs/tags/v')");
+
+  // The script itself, on pins it must refuse and one it must pass.
+  const dir = mkdtempSync(join(tmpdir(), 'uchi-checkpin-'));
+  try {
+    const real = JSON.parse(read('desktop/src/engine-pin.json'));
+    const withPacks = (packs: Record<string, any>) => {
+      const f = join(dir, `pin-${Object.keys(packs).length}-${Math.random().toString(36).slice(2)}.json`);
+      writeFileSync(f, JSON.stringify({ ...real, packs }));
+      return f;
+    };
+    const filled = Object.fromEntries(Object.entries<any>(real.packs).map(([k, v], i) => [k, { ...v, sha256: String(i).repeat(64), bytes: 1000 + i }]));
+    const ok = await runNode(['desktop/scripts/release/check-pin.mjs', '--pin', withPacks(filled)]);
+    assert.equal(ok.code, 0, `a fully pinned engine was refused: ${ok.stdout}${ok.stderr}`);
+    // Every pack unpublished (the tree as the engine build left it): refused, naming all three.
+    const none = Object.fromEntries(Object.entries<any>(real.packs).map(([k, v]) => [k, { ...v, sha256: null, bytes: null }]));
+    const r = await runNode(['desktop/scripts/release/check-pin.mjs', '--pin', withPacks(none)]);
+    assert.equal(r.code, 1, 'an unpinned engine passed the release gate');
+    assert.match(r.stdout, /^::error::/m);
+    for (const k of Object.keys(real.packs)) assert.match(r.stdout, new RegExp(`${k} \\(no sha256, no size\\)`));
+    assert.match(r.stdout, /pin-engine\.mjs/, 'the refusal does not say how to fix it');
+    // One platform missing is still a broken Extensions tab on that platform; a hash that is not one is no pin.
+    const one = { ...filled, 'mac-x64': { ...filled['mac-x64'], sha256: null } };
+    const r1 = await runNode(['desktop/scripts/release/check-pin.mjs', '--pin', withPacks(one)]);
+    assert.equal(r1.code, 1);
+    assert.match(r1.stdout, /mac-x64 \(no sha256\)/);
+    assert.doesNotMatch(r1.stdout, /win-x64|mac-arm64/);
+    const junk = { ...filled, 'win-x64': { ...filled['win-x64'], sha256: 'not-a-sha256', bytes: 0 } };
+    const r2 = await runNode(['desktop/scripts/release/check-pin.mjs', '--pin', withPacks(junk)]);
+    assert.equal(r2.code, 1);
+    assert.match(r2.stdout, /win-x64 \(no sha256, no size\)/);
+    assert.equal((await runNode(['desktop/scripts/release/check-pin.mjs', '--pin', withPacks({})])).code, 1, 'a pin with no packs passed');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('the desktop app is built and tested before a release tag, on every change that reaches it', () => {
+  // Until v0.44.0 desktop.yml ran only on the desktop branch, so after the merge nothing built the shell, the
+  // installers or the smokes until the tag -- and a leg that first goes red at the tag ships a Release with no
+  // latest.yml, so every Windows install's updater gets a 404 from the newest release. Reintroduce by dropping
+  // pull_request from desktop.yml's `on:`: this names it.
+  const d = parseYaml(read('.github/workflows/desktop.yml'));
+  assert.ok(d.on.pull_request, 'desktop.yml does not run on pull requests');
+  assert.ok(d.on.push?.branches?.includes('main'), 'desktop.yml does not run on pushes to main');
+  for (const trig of ['push', 'pull_request']) {
+    const paths: string[] = d.on[trig].paths ?? [];
+    // What the app ships: the shell, the bff it runs (the desktop switch, routes, backups) and the web it shows.
+    for (const p of ['desktop/**', 'bff/src/**', 'web/**', '.github/workflows/desktop.yml']) {
+      assert.ok(paths.includes(p), `desktop.yml ${trig} does not run for ${p}`);
+    }
+  }
+  assert.ok('workflow_call' in d.on && 'workflow_dispatch' in d.on);
+  // main is never cancelled (ci.yml's reason: a cancelled run is a red run); a superseded PR push is.
+  const cancel = String(d.concurrency['cancel-in-progress']);
+  assert.match(cancel, /github\.event_name == 'pull_request'/);
+  assert.doesNotMatch(cancel, /refs\/heads\/main|event_name == 'push'/, 'a push to main can cancel the desktop run before it');
+});
+
+test('the Phase 0 spike workflows are gone, and nothing points at the spike folders', () => {
+  // They only ran on their spike branches, but they referenced desktop-engine/ and desktop-spike-solver/, which
+  // the product build moved into desktop/. A workflow file that cannot work is a trap for the next person who
+  // pushes one of those branches. Reintroduce by restoring either file: this names it.
+  const wfs = readdirSync(join(REPO, '.github/workflows'));
+  assert.deepEqual(wfs.filter((f) => /spike/.test(f)), [], 'a spike workflow is still in .github/workflows');
+  for (const f of wfs) {
+    const y = code(read(`.github/workflows/${f}`));
+    assert.ok(!/desktop-engine\/|desktop-spike-solver/.test(y), `${f} still uses a spike folder`);
+  }
+  // The image builds never see the desktop app (its staged resources run to hundreds of MB).
+  const ignore = read('.dockerignore').split('\n').map((l) => l.trim());
+  assert.ok(ignore.includes('desktop/'), '.dockerignore does not exclude desktop/');
+});
+
+test('the extension engine is published on a prerelease the app pins, and a pinned pack is never replaced', () => {
+  const y = read('.github/workflows/engine-pack.yml');
+  const wf = parseYaml(y);
+  const pin = JSON.parse(read('desktop/src/engine-pin.json'));
+  // Its own tag family: release.yml fires on `v*`, and GitHub's "latest release" is what both updaters follow.
+  assert.deepEqual(wf.on.push.tags, ['engine-v*']);
+  assert.ok('workflow_dispatch' in wf.on);
+  assert.match(pin.tag, /^engine-v/, 'the pin names a v* tag: release.yml would build images for it');
+  assert.match(pin.tag, new RegExp(`^engine-${pin.version.replace(/\./g, '\\.')}(-\\d+)?$`), 'the engine tag does not name the Suwayomi version');
+  const packMjs = read('desktop/engine/pack.mjs');
+  assert.match(packMjs, new RegExp(`version: '${pin.version.replace(/\./g, '\\.')}'`), 'pack.mjs builds a different Suwayomi than the pin names');
+  // One pack per platform the app ships, each built on its own OS.
+  const legs = wf.jobs.pack.strategy.matrix.include.map((m: any) => m.platform).sort();
+  assert.deepEqual(legs, Object.keys(pin.packs).sort());
+  for (const [p, v] of Object.entries<any>(pin.packs)) assert.equal(v.file, `engine-pack-${p}.zip`);
+  // Built AND booted before anything is published.
+  assert.match(code(y), /desktop\/engine\/run\.mjs --pack/, 'the packs are published without being started once');
+  assert.equal(wf.jobs.publish.needs, 'pack');
+  assert.ok(!wf.jobs.publish.if, 'publish must not run when a pack failed');
+  assert.deepEqual(wf.jobs.publish.permissions, { contents: 'write' });
+  assert.equal(wf.permissions.contents, 'read');
+  for (const j of Object.keys(wf.jobs)) assert.ok(wf.jobs[j]['timeout-minutes'], `engine-pack.yml job ${j} has no timeout`);
+  const pub = wf.jobs.publish.steps.map((s: any) => String(s.run ?? '')).join('\n');
+  // Reintroduce by dropping --prerelease from the create: the engine release can become "latest", and every
+  // desktop install is offered it as an app update.
+  assert.match(pub, /gh release create "\$tag"[^\n]*--prerelease/, 'the engine release is not created as a prerelease');
+  assert.match(pub, /gh release edit "\$tag" --prerelease/, 'an existing engine release is not forced back to prerelease');
+  assert.match(pub, /isPrerelease/, 'nothing checks it is still a prerelease after the upload');
+  // Reintroduce by deleting the refusal loop: a re-run after the pin landed clobbers the file every installed app
+  // version checks its download against.
+  assert.match(pub, /\.packs\[\$p\]\.sha256/, 'the publish job does not refuse to replace a pinned pack');
+  assert.match(pub, /sha256sum -c/, 'the packs are not checked against their .sha256 before upload');
+});
+
+// Fixture feeds shaped exactly like electron-builder's (js-yaml, lineWidth 8000).
+function feedFixture(dir: string, version: string, files: Array<[string, string]>, extra = '') {
+  const entries = files.map(([name, body]) => {
+    writeFileSync(join(dir, name), body);
+    const sha512 = createHash('sha512').update(body).digest('base64');
+    return `  - url: ${name}\n    sha512: ${sha512}\n    size: ${Buffer.byteLength(body)}`;
+  });
+  const first = files[0][0];
+  return `version: ${version}\nfiles:\n${entries.join('\n')}\npath: ${first}\nsha512: ${createHash('sha512').update(files[0][1]).digest('base64')}\n${extra}releaseDate: '2026-09-24T01:02:03.000Z'\n`;
+}
+
+test('the macOS feeds merge into one that serves each Mac its own build, and a bad feed stops the release', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'feeds-'));
+  try {
+    const arm = feedFixture(dir, '0.44.0', [['Uchiyomi-0.44.0-arm64.zip', 'arm zip'], ['Uchiyomi-0.44.0-arm64.dmg', 'arm dmg']]);
+    const x64 = feedFixture(dir, '0.44.0', [['Uchiyomi-0.44.0-x64.zip', 'intel zip'], ['Uchiyomi-0.44.0-x64.dmg', 'intel dmg']]);
+    writeFileSync(join(dir, 'arm.yml'), arm);
+    writeFileSync(join(dir, 'x64.yml'), x64);
+    const merge = 'desktop/scripts/release/merge-latest-mac.mjs';
+    const out = join(dir, 'latest-mac.yml');
+    const ok = await runNode([merge, '--out', out, '--version', '0.44.0', join(dir, 'arm.yml'), join(dir, 'x64.yml')]);
+    assert.equal(ok.code, 0, ok.stderr);
+    const m = parseYaml(readFileSync(out, 'utf8'));
+    assert.equal(m.version, '0.44.0');
+    assert.deepEqual(m.files.map((f: any) => f.url).sort(), ['Uchiyomi-0.44.0-arm64.dmg', 'Uchiyomi-0.44.0-arm64.zip', 'Uchiyomi-0.44.0-x64.dmg', 'Uchiyomi-0.44.0-x64.zip']);
+    // The legacy fields point at the build every Mac can run (Rosetta runs x64; nothing runs arm64 on Intel).
+    assert.equal(m.path, 'Uchiyomi-0.44.0-x64.zip');
+    assert.equal(m.sha512, parseYaml(x64).sha512);
+    for (const f of m.files) assert.ok(f.sha512 && f.size, `${f.url} lost its sha512/size in the merge`);
+
+    // Two feeds for ONE architecture (a matrix typo) would publish a feed with no build for the other Macs.
+    // Reintroduce by dropping the "two feeds for the same architecture" check: this merge then succeeds.
+    const twice = await runNode([merge, '--out', join(dir, 'bad.yml'), join(dir, 'arm.yml'), join(dir, 'arm.yml')]);
+    assert.equal(twice.code, 1, 'two arm64 feeds merged into one');
+    assert.match(twice.stderr, /same architecture/);
+    // A leg built from a stale desktop/package.json announces the wrong version.
+    const stale = await runNode([merge, '--out', join(dir, 'bad.yml'), '--version', '0.45.0', join(dir, 'arm.yml'), join(dir, 'x64.yml')]);
+    assert.equal(stale.code, 1, 'a feed for the wrong version was merged');
+
+    // check-feed: every file the feed names is there with that size and SHA-512 -- or the release stops.
+    const check = 'desktop/scripts/release/check-feed.mjs';
+    const good = await runNode([check, join(dir, 'x64.yml'), dir, '--version', '0.44.0']);
+    assert.equal(good.code, 0, good.stderr);
+    assert.equal(good.stdout.trim(), '0.44.0');
+    // Reintroduce by skipping the SHA-512 comparison in check-feed.mjs: a feed that disagrees with its installer
+    // then goes out, and every Windows update fails with "sha512 checksum mismatch".
+    writeFileSync(join(dir, 'Uchiyomi-0.44.0-x64.dmg'), 'intel dmg, rebuilt');
+    const bad = await runNode([check, join(dir, 'x64.yml'), dir]);
+    assert.equal(bad.code, 1, 'a feed whose installer changed was accepted');
+    assert.match(bad.stderr, /Uchiyomi-0\.44\.0-x64\.dmg: sha512/);
+    rmSync(join(dir, 'Uchiyomi-0.44.0-arm64.zip'));
+    const missing = await runNode([check, join(dir, 'arm.yml'), dir]);
+    assert.equal(missing.code, 1);
+    assert.match(missing.stderr, /arm64\.zip: not among the built files/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('pin-engine pins what the release actually serves, and only from a prerelease', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'pin-'));
+  const packs: Record<string, Buffer> = {
+    'engine-pack-win-x64.zip': Buffer.from('win pack'),
+    'engine-pack-mac-arm64.zip': Buffer.from('arm pack!'),
+    'engine-pack-mac-x64.zip': Buffer.from('intel pack'),
+  };
+  const sha = (b: Buffer) => createHash('sha256').update(b).digest('hex');
+  let prerelease = true;
+  let lie = '';
+  const srv = createServer((req, res) => {
+    const u = req.url || '';
+    if (u === '/api') { res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ tag_name: 'engine-v2.3.2243', prerelease })); return; }
+    const name = u.replace(/^\/dl\//, '');
+    if (name.endsWith('.sha256') && packs[name.slice(0, -7)]) {
+      const f = name.slice(0, -7);
+      res.end(`${f === lie ? '0'.repeat(64) : sha(packs[f])}  ${f}\n`);
+      return;
+    }
+    if (packs[name]) { res.end(packs[name]); return; }
+    res.statusCode = 404; res.end();
+  });
+  await new Promise<void>((r) => srv.listen(0, '127.0.0.1', () => r()));
+  const base = `http://127.0.0.1:${(srv.address() as AddressInfo).port}`;
+  try {
+    const pinFile = join(dir, 'engine-pin.json');
+    const original = read('desktop/src/engine-pin.json');
+    writeFileSync(pinFile, JSON.stringify({ ...JSON.parse(original), packs: Object.fromEntries(Object.entries(JSON.parse(original).packs).map(([k, v]: [string, any]) => [k, { ...v, sha256: null, bytes: null }])) }, null, 2));
+    const args = ['desktop/scripts/release/pin-engine.mjs', '--pin', pinFile, '--base-url', `${base}/dl`, '--api', `${base}/api`, '--cache', join(dir, 'cache')];
+
+    // Reintroduce by dropping the prerelease check: this pins from a release that could become "latest".
+    prerelease = false;
+    const notPre = await runNode(args);
+    assert.equal(notPre.code, 1, 'pinned from a release that is not a prerelease');
+    assert.match(notPre.stderr, /not marked as a prerelease/);
+    prerelease = true;
+
+    // The published .sha256 and the bytes served must agree.
+    lie = 'engine-pack-mac-arm64.zip';
+    const liar = await runNode(args);
+    assert.equal(liar.code, 1, 'pinned a pack whose download does not match its .sha256');
+    lie = '';
+
+    const ok = await runNode(args);
+    assert.equal(ok.code, 0, ok.stderr);
+    const pin = JSON.parse(readFileSync(pinFile, 'utf8'));
+    for (const [k, v] of Object.entries<any>(pin.packs)) {
+      assert.equal(v.sha256, sha(packs[v.file]), `${k}: pinned the wrong hash`);
+      assert.equal(v.bytes, packs[v.file].length, `${k}: pinned the wrong size`);
+      assert.equal(statSync(join(dir, 'cache', v.file)).size, packs[v.file].length);
+    }
+    // The layout the file is kept in: one line per pack.
+    assert.match(readFileSync(pinFile, 'utf8'), /\n {4}"win-x64": \{ "file": "engine-pack-win-x64\.zip", "sha256": "[0-9a-f]{64}", "bytes": 8 \},\n/);
+    assert.equal((await runNode([...args, '--check'])).code, 0, '--check disagrees with what was just written');
+
+    // Reintroduce by dropping the "already pinned" comparison: a pack replaced on the release after it was pinned
+    // is then silently re-pinned, and every install of the older app version refuses its download.
+    packs['engine-pack-win-x64.zip'] = Buffer.from('replaced pack');
+    const replaced = await runNode(args);
+    assert.equal(replaced.code, 1, 'a pinned pack that changed on the release was re-pinned');
+    assert.match(replaced.stderr, /already pinned/);
+  } finally {
+    srv.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

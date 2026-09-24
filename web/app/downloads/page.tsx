@@ -9,6 +9,8 @@ import { EmptyState } from '@/components/EmptyState';
 import { ART } from '@/lib/art';
 import { IcTrash, IcPlay, IcDownload, IcWifiOff, IcRefresh } from '@/components/icons';
 import { t as tr } from '@/lib/i18n';
+import { useRouter } from 'next/navigation';
+import { isDesktop, serverReachableHint } from '@/lib/desktop';
 
 export default function DownloadsPage() {
   const [items, setItems] = useState<OfflineChapter[]>([]);
@@ -17,6 +19,12 @@ export default function DownloadsPage() {
   const [online, setOnline] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const toast = useToast();
+  const router = useRouter();
+  // Desktop hides the Offline tab and "Save offline" (the chapters are on this disk already), so this page there
+  // is an empty "No downloads yet" pointing at controls the app does not show. A deep link to it -- the reader's
+  // end-of-downloads button, an old bookmark -- goes to the library instead.
+  const desktop = isDesktop();
+  useEffect(() => { if (desktop) router.replace('/library/'); }, [desktop, router]);
 
   const refresh = async () => {
     setItems(await listDownloads());
@@ -25,13 +33,15 @@ export default function DownloadsPage() {
   };
   useEffect(() => {
     refresh();
-    setOnline(navigator.onLine);
+    setOnline(serverReachableHint());
     const on = () => setOnline(true);
     const off = () => setOnline(false);
     window.addEventListener('online', on);
     window.addEventListener('offline', off);
     return () => { window.removeEventListener('online', on); window.removeEventListener('offline', off); };
   }, []);
+
+  if (desktop) return null;
 
   const remove = async (bookId: string) => {
     await deleteDownload(bookId);

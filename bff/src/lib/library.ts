@@ -1,6 +1,6 @@
 // Owned library scanner: reads the CBZ folder Suwayomi writes (replacing Komga's library role).
 // Layout: <root>/<source>/<series title>/<chapter>.cbz ; each cbz carries ComicInfo.xml + page images.
-import { readdir, stat, readFile } from 'fs/promises';
+import { readdir, stat, readFile, realpath } from 'fs/promises';
 import { join } from 'path';
 import sharp from 'sharp';
 import { q, one, tx } from './db';
@@ -314,6 +314,26 @@ export interface FoundSeries {
 }
 
 /**
+ * The symlink-loop guard's name for a directory: the same directory must get the same key however it was
+ * reached, and two different directories must never share one.
+ *
+ * ⚠️ Not dev:ino on Windows. NTFS file ids are 64-bit and lose precision in a JavaScript number, so two
+ * different folders can share a key and the second is silently never scanned; FAT and exFAT drives (most
+ * USB sticks and SD cards) have no stable id at all. The real path, case-folded because NTFS is
+ * case-insensitive, names a folder exactly once there. POSIX keeps dev:ino. `platform` and `real` are
+ * parameters for the test. Reintroduce by returning dev:ino on every platform: relPath.test.ts "the loop
+ * guard on Windows" finds two folders under one key.
+ */
+export async function dirKey(
+  abs: string,
+  st: { dev: number; ino: number },
+  platform: NodeJS.Platform = process.platform,
+  real: (p: string) => Promise<string> = realpath,
+): Promise<string> {
+  return platform === 'win32' ? (await real(abs).catch(() => abs)).toLowerCase() : `${st.dev}:${st.ino}`;
+}
+
+/**
  * Every directory under `root` that IS a series.
  *
  * A directory is a series when it DIRECTLY contains chapters. Depth is irrelevant, which is the whole point:
@@ -344,7 +364,7 @@ async function findSeriesDirs(root: string): Promise<FoundSeries[]> {
     // stat, not lstat: a symlinked library directory should still work. We follow it once, then decline.
     const st = await stat(abs).catch(() => null);
     if (!st) return;
-    const key = `${st.dev}:${st.ino}`;
+    const key = await dirKey(abs, st);
     if (seenInode.has(key)) return;
     seenInode.add(key);
 

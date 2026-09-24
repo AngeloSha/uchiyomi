@@ -7,7 +7,8 @@ import { cacheBytes } from '../lib/imageCache';
 import { runtime } from '../lib/runtime';
 import { persistScan, libraryIdFor, LIBRARY_ROOT, DL_ROOT, setBookDates, setBookMeta } from '../lib/library';
 import { containedPath, allWritable } from '../lib/fsGuard';
-import { deleteSeries, restoreSeries, mergeSeries, getSeriesRow, deleteSeriesFiles, renameSeriesFolder, forgetSeries } from '../lib/libraryAdmin';
+import { deleteSeries, restoreSeries, mergeSeries, getSeriesRow, deleteSeriesFiles, renameSeriesFolder, forgetSeries, diskSpelling } from '../lib/libraryAdmin';
+import { toStoredRel } from '../lib/relPath';
 import { runFingerprintBackfill, fingerprintRemaining, fpState } from '../lib/fingerprintJob';
 import { runPageHashBackfill, pageHashRemaining, phState } from '../lib/pageHashJob';
 import { runBackup } from '../lib/backup';
@@ -1790,6 +1791,12 @@ export default async function adminRoutes(app: FastifyInstance) {
     return { content: rows, candidates };
   });
 
+  // ⚠️ Every typed library path in the four routes below goes through toStoredRel (a `\` typed on Windows is a
+  // separator, and the database stores `/`: lib/relPath.ts) and, on the desktop, diskSpelling -- NTFS and
+  // APFS find `manga/seinen` for `Manga/Seinen`, but lib_series.folder and libraries.path are compared as
+  // exact strings with the on-disk spelling, so the typed case would match nothing. Both are identities on
+  // the server.
+
   /**
    * The folders that actually exist, at any depth.
    *
@@ -1801,7 +1808,8 @@ export default async function adminRoutes(app: FastifyInstance) {
    * and delete paths use, and the only thing between a query parameter and the disk.
    */
   app.get('/api/admin/libraries/folders', async (req, reply) => {
-    const raw = String((req.query as { path?: string }).path ?? '').replace(/^\/+/, '').replace(/\/+$/, '').trim();
+    const raw = await diskSpelling([LIBRARY_ROOT, DL_ROOT],
+      toStoredRel(String((req.query as { path?: string }).path ?? '')).replace(/^\/+/, '').replace(/\/+$/, '').trim());
     const { readdir } = await import('node:fs/promises');
 
     const names = new Set<string>();
@@ -1851,7 +1859,7 @@ export default async function adminRoutes(app: FastifyInstance) {
 
   /** What promoting a path WOULD do, without doing it. Same habit as the chapter-override route. */
   app.get('/api/admin/libraries/preview', async (req, reply) => {
-    const path = String((req.query as { path?: string }).path ?? '').trim();
+    const path = await diskSpelling([LIBRARY_ROOT, DL_ROOT], toStoredRel(String((req.query as { path?: string }).path ?? '')).trim());
     if (!path) return reply.code(400).send({ error: 'bad_request' });
     // Exactly the predicate the create and re-path handlers use, or the preview promises something other
     // than what happens. `library_id = 'lib'` was right when libraries could not nest: it now understates a
@@ -1880,10 +1888,11 @@ export default async function adminRoutes(app: FastifyInstance) {
       ageRating: z.number().int().min(0).max(18).nullable().optional(),
     }).safeParse(req.body);
     if (!b.success) return reply.code(400).send({ error: 'bad_request' });
-    const path = b.data.path.replace(/^\/+/, '').replace(/\/+$/, '').trim();
-    if (!path || path.includes('..') || path.startsWith('/')) {
+    const typed = toStoredRel(b.data.path).replace(/^\/+/, '').replace(/\/+$/, '').trim();
+    if (!typed || typed.includes('..') || typed.startsWith('/')) {
       return reply.code(400).send({ error: 'bad_path', message: 'Use a folder path relative to your library root.' });
     }
+    const path = await diskSpelling([LIBRARY_ROOT, DL_ROOT], typed);
     // Nesting is allowed. libraryIdFor() resolves the MOST SPECIFIC library containing a folder, so
     // `Manga/Seinen` inside `Manga` is unambiguous -- and refusing it blocked the obvious thing an admin
     // wants, which is to carve a big library into parts. Only an exact duplicate is refused, because two
@@ -1936,10 +1945,11 @@ export default async function adminRoutes(app: FastifyInstance) {
     }
 
     if (b.data.path !== undefined && id !== 'lib') {
-      const path = b.data.path.replace(/^\/+/, '').replace(/\/+$/, '').trim();
-      if (!path || path.includes('..') || path.startsWith('/')) {
+      const typed = toStoredRel(b.data.path).replace(/^\/+/, '').replace(/\/+$/, '').trim();
+      if (!typed || typed.includes('..') || typed.startsWith('/')) {
         return reply.code(400).send({ error: 'bad_path', message: 'Use a folder path relative to your library root.' });
       }
+      const path = await diskSpelling([LIBRARY_ROOT, DL_ROOT], typed);
       const dup = await one<{ name: string }>('SELECT name FROM libraries WHERE path = $1 AND id <> $2', [path, id]);
       if (dup) return reply.code(409).send({ error: 'duplicate', message: `"${dup.name}" already covers that folder.` });
 

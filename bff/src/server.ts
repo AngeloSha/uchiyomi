@@ -1,3 +1,7 @@
+// ⚠️ FIRST. On desktop this writes the paths and settings into process.env that library.ts, customSites.ts and
+// the source loader capture when they load; today they happen to import env (which imports this first) before
+// reading anything, but that order is an accident this line stops relying on. A no-op on a server.
+import './lib/desktop';
 import Fastify from 'fastify';
 import cookie from '@fastify/cookie';
 import cors from '@fastify/cors';
@@ -22,7 +26,8 @@ import { runRepair, REPAIR_HOURS } from './lib/repair';
 import { runChapterCleanup, unpruneRestored } from './lib/chapterCleanup';
 import { runExtensionMonitor } from './lib/extensionMonitor';
 import { startSweeper } from './lib/imageCache';
-import { runBackup, msUntilHour } from './lib/backup';
+import { runBackup, backupDelay, stampDelay } from './lib/backup';
+import { firstRunFloor, DESKTOP_FLOORS } from './lib/desktop';
 import { KomgaError } from './lib/komga';
 import { ZodError } from 'zod';
 import { registerWebRoot, webRootConfigured } from './lib/webRoot';
@@ -39,9 +44,14 @@ import sourceRoutes from './routes/sources';
 import opdsRoutes from './routes/opds';
 import komgaCompatRoutes from './routes/komgaCompat';
 import notifyRoutes from './routes/notify';
+import { isDesktop } from './lib/desktop';
+import { installDesktopGuards } from './lib/desktopGuard';
+import { ensureDesktopUser } from './lib/desktopUser';
 
 async function main() {
   await migrate();
+  // Desktop: the one local account the window signs in as (lib/desktopUser.ts). There is no setup screen.
+  if (isDesktop()) await ensureDesktopUser();
   const bi = loadBuiltins(); // always-on built-ins bundled in the core (MangaDex)
   const ls = loadSources(); // bespoke source plugins from SOURCES_DIR (the optional pack)
   const cs = loadCustomSites(); // user-added engine sites from /config/sites.json (built via the in-core engines)
@@ -55,7 +65,9 @@ async function main() {
 
   const app = Fastify({
     logger: { level: env.NODE_ENV === 'production' ? 'info' : 'debug' },
-    trustProxy: true,
+    // Desktop: nothing sits in front of the app, so a forwarded-for header is only ever something a local
+    // process made up.
+    trustProxy: !isDesktop(),
     bodyLimit: 2 * 1024 * 1024,
   });
 
@@ -83,6 +95,10 @@ async function main() {
   // by @fastify/static with no Content-Length, so those are compressed whatever their size. nginx skipped
   // anything under 1 KB; the difference is a few bytes of gzip framing on the handful of tiny assets.
   await app.register(compress, { threshold: 1024, encodings: ['br', 'gzip', 'deflate'] });
+
+  // Desktop only: the Host allowlist (DNS rebinding) and the hidden routes, as one root onRequest hook that runs
+  // ahead of every route, /livez included, and of every plugin's own auth (lib/desktopGuard.ts).
+  if (isDesktop()) installDesktopGuards(app);
 
   /**
    * Liveness, deliberately separate from readiness.
@@ -148,10 +164,12 @@ async function main() {
   await app.register(personalRoutes);
   await app.register(downloadRoutes);
   await app.register(sourceRoutes);
-  await app.register(opdsRoutes);
+  // Neither OPDS nor the Komga-compatible API exists on desktop: both are for OTHER devices reading this
+  // library, and the desktop server is reachable from this PC only (they return with "Share with my phone").
+  if (!isDesktop()) await app.register(opdsRoutes);
   // The Komga-compatible API for Mihon's Komga extension + tracker. Its own auth hook (API tokens and the
   // UCHIYOMI-SESSION cookie), encapsulated like OPDS: the cookie is honoured by these routes and nowhere else.
-  await app.register(komgaCompatRoutes);
+  if (!isDesktop()) await app.register(komgaCompatRoutes);
   // The interactive API reference, BEFORE the web root: registerWebRoot installs the not-found handler that
   // serves the app shell for any unknown path, and a route added after it would still work, but its
   // static assets under /api/docs/ would not be found by the UI in the same way. Unauthenticated on
@@ -206,7 +224,9 @@ async function main() {
         last = s.rows[0]?.updater_last_run ? new Date(s.rows[0].updater_last_run).getTime() : 0;
       } catch { /* settings row not readable yet — keep the defaults */ }
       const due = last + hours * 60 * 60 * 1000 - Date.now();
-      const delay = Math.max(10 * 60 * 1000, due);
+      // Desktop: a two-minute floor instead of ten (lib/desktop.ts DESKTOP_FLOORS). A PC is switched off
+      // every night, so a server's boot wait would push most of its sweeps past the time it is on at all.
+      const delay = Math.max(firstRunFloor(10 * 60 * 1000, 'sweep'), due);
       app.log.info(`updater: first sweep in ${Math.round(delay / 60000)} min` + (last ? ` (last completed ${new Date(last).toISOString()})` : ' (no completed sweep on record)'));
       setTimeout(tick, delay).unref();
     })();
@@ -252,7 +272,7 @@ async function main() {
       }
       setTimeout(tick, HOUR).unref();
     };
-    setTimeout(tick, 10 * 60 * 1000).unref();
+    setTimeout(tick, firstRunFloor(10 * 60 * 1000, 'solverHealth')).unref();
   }
 
   /**
@@ -266,8 +286,11 @@ async function main() {
    * Daily, and the first run waits an hour: nothing about this is urgent, and an install that is restarted
    * repeatedly (a crash loop, someone tuning their compose file) must not turn a headcount into a flood.
    * Sending at most one ping a day per install is also what makes the number mean "installs", not "boots".
+   *
+   * Not on desktop at all (owner decision): the switch is hidden there and nothing is ever sent, whatever a
+   * restored server database says about consent.
    */
-  {
+  if (!isDesktop()) {
     const DAY = 24 * 60 * 60 * 1000;
     const tick = async () => {
       try {
@@ -314,7 +337,17 @@ async function main() {
       }
       setTimeout(tick, DAY).unref();
     };
-    setTimeout(tick, 10 * 60 * 1000).unref();
+    // Desktop: from the last check's stamp, not from boot. The server is up for weeks, so "ten minutes after
+    // boot, then daily" is daily; a PC that is on for a few hours a day would otherwise check every source on
+    // every start (and never reach the second tick). ⚠️ The stamp is per source (sourceWatchdog.ts writes
+    // source_health.checked_at), so the newest one is the last run; none at all means run at the floor.
+    if (isDesktop()) {
+      void (async () => {
+        const row = await one<{ last: Date | null }>('SELECT max(checked_at) AS last FROM source_health').catch(() => null);
+        const last = row?.last ? new Date(row.last).getTime() : 0;
+        setTimeout(tick, stampDelay({ last, interval: DAY, floor: DESKTOP_FLOORS.watchdog, now: Date.now() })).unref();
+      })();
+    } else setTimeout(tick, 10 * 60 * 1000).unref();
   }
 
   /**
@@ -368,7 +401,7 @@ async function main() {
         const s = await pool.query('SELECT repair_last_run FROM server_settings WHERE id = 1');
         last = s.rows[0]?.repair_last_run ? new Date(s.rows[0].repair_last_run).getTime() : 0;
       } catch { /* settings row not readable yet -- run on the floor */ }
-      const delay = Math.max(30 * 60 * 1000, last + REPAIR_HOURS * 60 * 60 * 1000 - Date.now());
+      const delay = Math.max(firstRunFloor(30 * 60 * 1000, 'repair'), last + REPAIR_HOURS * 60 * 60 * 1000 - Date.now());
       app.log.info(`repair: first run in ${Math.round(delay / 60000)} min`
         + (last ? ` (last completed ${new Date(last).toISOString()})` : ' (no completed run on record)'));
       setTimeout(tick, delay).unref();
@@ -390,7 +423,7 @@ async function main() {
       }
       setTimeout(tick, DAY).unref();
     };
-    setTimeout(tick, 15 * 60 * 1000).unref();
+    setTimeout(tick, firstRunFloor(15 * 60 * 1000, 'importSweep')).unref();
   }
 
   // Keep the installed extensions current with the repositories they came from.
@@ -424,7 +457,7 @@ async function main() {
         hours = Math.min(168, Math.max(1, s.rows[0]?.extension_hours || 6));
         last = s.rows[0]?.extension_last_run ? new Date(s.rows[0].extension_last_run).getTime() : 0;
       } catch { /* settings row not readable yet -- keep the defaults */ }
-      const delay = Math.max(10 * 60 * 1000, last + hours * 60 * 60 * 1000 - Date.now());
+      const delay = Math.max(firstRunFloor(10 * 60 * 1000, 'extensionCheck'), last + hours * 60 * 60 * 1000 - Date.now());
       app.log.info(`extensions: first check in ${Math.round(delay / 60000)} min`);
       setTimeout(tick, delay).unref();
     })();
@@ -447,6 +480,8 @@ async function main() {
     const backupTick = async () => {
       try {
         runtime.backingUp = true;
+        // Before the run, success or not: the desktop catch-up reads it (backupDelay in lib/backup.ts).
+        runtime.lastBackupAttempt = Date.now();
         const r = await runBackup();
         runtime.lastBackup = Date.now();
         runtime.lastBackupResult = { bytes: r.bytes, ms: r.ms, configEmpty: r.configEmpty, sizeUnknown: r.sizeUnknown };
@@ -458,14 +493,19 @@ async function main() {
         void arm();
       }
     };
+    // The server: the next `backup_hour`, exactly as before. The desktop: the same, unless the last run is
+    // more than a day old -- a PC that is off at that hour every night would otherwise never back up -- in
+    // which case it runs a few minutes after start (backupDelay in lib/backup.ts).
     const nextBackupDelay = async (): Promise<number> => {
       let hour = 3;
+      let lastRun: number | null = null;
       try {
-        const s = await pool.query('SELECT backup_hour FROM server_settings WHERE id = 1');
+        const s = await pool.query('SELECT backup_hour, backup_last_run FROM server_settings WHERE id = 1');
         const h = Number(s.rows[0]?.backup_hour);
         if (Number.isInteger(h) && h >= 0 && h <= 23) hour = h;
+        lastRun = s.rows[0]?.backup_last_run ? new Date(s.rows[0].backup_last_run).getTime() : null;
       } catch { /* settings not readable yet — keep 03:00 */ }
-      return msUntilHour(hour);
+      return backupDelay({ hour, lastRun, lastAttempt: runtime.lastBackupAttempt, now: Date.now(), desktop: isDesktop() });
     };
     const arm = async () => {
       // The clear sits AFTER the await, right before the set, with nothing between them. Clearing before the
@@ -487,6 +527,32 @@ async function main() {
     };
     runtime.rearmBackup = () => { void arm(); };
     void arm();
+  }
+
+  /**
+   * Desktop: notice the PC waking up, and re-aim the backup.
+   *
+   * ⚠️ Timers count monotonic time, which does not advance while a Mac sleeps (and may not on Windows), but
+   * the backup is aimed at a wall-clock hour. A laptop that sleeps from 23:00 to 07:00 fires its 03:00
+   * backup around 11:00 -- or, closed again before then, not that day at all. So once a minute compare the
+   * wall clock with the last tick: a jump of more than five minutes means the machine slept, and re-arming
+   * re-reads the hour and the last run, which catches up at once if the night was missed (backupDelay).
+   * The other jobs run on intervals and at worst run one interval late; that is documented, not fixed.
+   * Reintroduce by deleting this block: desktopSwitchHygiene.test.ts "the backup catch-up is wired, and a
+   * desktop wake re-arms the backup".
+   */
+  if (isDesktop()) {
+    const EVERY = 60 * 1000;
+    const SLEPT = 5 * 60 * 1000;
+    let wall = Date.now();
+    setInterval(() => {
+      const now = Date.now();
+      if (now - wall > EVERY + SLEPT) {
+        app.log.info(`woke after about ${Math.round((now - wall) / 60000)} min asleep; re-aiming the backup`);
+        runtime.rearmBackup?.();
+      }
+      wall = now;
+    }, EVERY).unref();
   }
 
   /**
@@ -521,7 +587,7 @@ async function main() {
       }
       setTimeout(tick, HOUR).unref();
     };
-    setTimeout(tick, 15 * 60 * 1000).unref();
+    setTimeout(tick, firstRunFloor(15 * 60 * 1000, 'cleanup')).unref();
   }
 
   // Abandoned half-writes from a previous life: a chapter or cache file whose rename never happened. A
@@ -549,7 +615,9 @@ async function main() {
     });
   }
 
-  await app.listen({ host: '0.0.0.0', port: env.PORT });
+  // ⚠️ Desktop: this PC only. 0.0.0.0 would put the library on the LAN (and raise a firewall prompt on first run)
+  // for an app that has no sign-in screen.
+  await app.listen({ host: isDesktop() ? '127.0.0.1' : '0.0.0.0', port: env.PORT });
 
   // Says which topology is running, so "why is / a 404" is answerable from `docker compose logs`.
   console.log(webRootConfigured()

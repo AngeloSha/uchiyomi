@@ -1,0 +1,19 @@
+{
+  // The TypeScript half of the shell: the Cloudflare solver (src/solver/*.ts) and its Electron fixture test,
+  // compiled to CommonJS in out/ (`npm run build`), which the plain-JS main process requires. The contract
+  // test runs the .ts sources directly under tsx, so the solver is checked by both.
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "commonjs",
+    "moduleResolution": "node",
+    "lib": ["ES2022", "DOM"],
+    "rootDir": ".",
+    "outDir": "out",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "sourceMap": false,
+    "types": ["node"]
+  },
+  "include": ["src/solver/*.ts", "test/solver.electron.test.ts"]
+}

@@ -9,6 +9,7 @@
 import { Sheet } from '@/components/ui';
 import { IcCloudDownload, IcDownload } from '@/components/icons';
 import { t as tr } from '@/lib/i18n';
+import { isDesktop } from '@/lib/desktop';
 
 export function SourcesExplainer({ onClose }: { onClose: () => void }) {
   const rows: { term: string; text: string }[] = [
@@ -26,20 +27,31 @@ export function SourcesExplainer({ onClose }: { onClose: () => void }) {
             <dd className="mt-0.5 text-fog-400">{r.text}</dd>
           </div>
         ))}
-        <div>
-          <dt className="font-semibold text-fog-100">{tr('Fetch vs Save offline')}</dt>
-          {/* One flowing paragraph with the icons INLINE. Each icon+sentence was an `inline-flex` span, and
-              at 390px a span that does not fit the line wraps as one block: the cloud floated centred beside
-              two lines of text with "everyone." orphaned under an indent. An inline-block icon sits in the
-              line like a letter and the sentence wraps like a sentence. */}
-          <dd className="mt-0.5 text-fog-400">
-            <IcCloudDownload width={14} height={14} className="me-1 inline-block align-text-bottom text-fog-300" />
-            {tr('Fetch brings a chapter onto the server for everyone.')}
-            {' '}
-            <IcDownload width={14} height={14} className="me-1 inline-block align-text-bottom text-fog-300" />
-            {tr('Save offline copies it to this device.')}
-          </dd>
-        </div>
+        {/* Desktop hides "Save offline" (the chapters are on this disk already), so there it defines Fetch alone. */}
+        {isDesktop() ? (
+          <div>
+            <dt className="font-semibold text-fog-100">{tr('Fetch')}</dt>
+            <dd className="mt-0.5 text-fog-400">
+              <IcCloudDownload width={14} height={14} className="me-1 inline-block align-text-bottom text-fog-300" />
+              {tr('Fetch brings a chapter into your library folder on this computer.')}
+            </dd>
+          </div>
+        ) : (
+          <div>
+            <dt className="font-semibold text-fog-100">{tr('Fetch vs Save offline')}</dt>
+            {/* One flowing paragraph with the icons INLINE. Each icon+sentence was an `inline-flex` span, and
+                at 390px a span that does not fit the line wraps as one block: the cloud floated centred beside
+                two lines of text with "everyone." orphaned under an indent. An inline-block icon sits in the
+                line like a letter and the sentence wraps like a sentence. */}
+            <dd className="mt-0.5 text-fog-400">
+              <IcCloudDownload width={14} height={14} className="me-1 inline-block align-text-bottom text-fog-300" />
+              {tr('Fetch brings a chapter onto the server for everyone.')}
+              {' '}
+              <IcDownload width={14} height={14} className="me-1 inline-block align-text-bottom text-fog-300" />
+              {tr('Save offline copies it to this device.')}
+            </dd>
+          </div>
+        )}
       </dl>
     </Sheet>
   );

@@ -1,10 +1,12 @@
 // The solver's real backend: hidden Electron BrowserWindows (design-shell.md §3.3-§3.5).
 //
-// One page load per request, in a window drawn from a small pool. Cookies live in in-memory partitions:
-//   fs-s:<name>    a named session (Suwayomi sends its fixed "suwayomi"), recreated after session_ttl_minutes
-//   fs-o:<origin>  everyone else (the bff), one jar per target origin, cleared after 30 minutes
+// One page load per request, in a window drawn from a small pool. Cookies live in in-memory jars:
+//   s:<name>    a named session (Suwayomi sends its fixed "suwayomi"), recreated after session_ttl_minutes
+//   o:<origin>  everyone else (the bff), one jar per target origin, cleared after 30 minutes
 // so a cf_clearance earned on the first request to an origin is still in the jar for the next one. That is
 // the deliberate difference from FlareSolverr, which starts a fresh Chrome for every session-less call.
+// ⚠️ A jar is an Electron partition, and Electron never frees one; the jars therefore map onto a FIXED set of
+// partition names (pool.ts: fs-o:0..15, fs-s:0..3), least recently used first out, emptied before reuse.
 //
 // Detection is FlareSolverr's (detect.ts). The response body is `document.documentElement.outerHTML`, which is
 // what Selenium's page_source returns -- so a JSON endpoint comes back wrapped in the browser's <pre> exactly
@@ -23,6 +25,7 @@ import { app, BrowserWindow, session as Sessions, powerMonitor, Notification, ty
 import { SolveError, type SolverBackend, type SolveRequest, type SolveResult, type SolverCookie } from './protocol';
 import { PROBE_SOURCE, TURNSTILE_RECT_SOURCE, challengeReason, isAccessDenied, isChallenge, type Probe } from './detect';
 import { chPlatform, greaseBrands, secChUa, type Brand } from './userAgent';
+import { PartitionPool } from './pool';
 
 export interface BrowserBackendOptions {
   /** Windows alive at once, busy or idle: 4 for the bff + 1 for Suwayomi. */
@@ -42,7 +45,10 @@ export interface BrowserBackendOptions {
   verifyInput?: 'keyboard' | 'mouse' | 'both';
   /** 'cdp' = DevTools Input domain (reaches cross-origin iframes); 'sendInputEvent' = the design's first guess. */
   inputVia?: 'cdp' | 'sendInputEvent';
-  /** Still challenged after this long: ask the human (§3.5 step 2). */
+  /**
+   * Still challenged after this long: ask the human (§3.5 step 2). 30 s, not the design's 25: the slowest of
+   * S4's 24 real solves took 24.9 s, so a 25 s prompt would pop up just as a press was succeeding.
+   */
   showAfterMs?: number;
   /** 'show' = the product behaviour; 'log' = the spike: only report that the window would have been shown. */
   humanCheck?: 'show' | 'log';
@@ -64,6 +70,15 @@ export interface BrowserBackendOptions {
    * Add the Sec-CH-UA trio Chrome sends on HTTPS (Electron sends none; see userAgent.ts). Default on.
    */
   chromeHeaders?: boolean;
+  /** How many session-less origin jars exist at once (each is an Electron partition that is never freed). */
+  maxOrigins?: number;
+  /** How many named-session jars exist at once (Suwayomi uses one). */
+  maxSessions?: number;
+  /**
+   * Partition names are `<prefix>-o:<n>` / `<prefix>-s:<n>`. Electron partitions are process-wide, so two
+   * backends in one process (only the tests do that) need different prefixes or they share jars.
+   */
+  partitionPrefix?: string;
   /** Diagnostics: a PNG of the hidden page at the click and at the "ask the human" moment. */
   onCapture?: (what: 'before-click' | 'after-click' | 'human-check', host: string, png: Buffer) => void;
 }
@@ -71,7 +86,10 @@ export interface BrowserBackendOptions {
 export interface SolveDetail {
   id: number;
   url: string;
+  /** The Electron partition name (from the fixed pool). */
   partition: string;
+  /** The jar it holds: `s:<session name>` or `o:<origin>`. */
+  jar: string;
   reusedWindow: boolean;
   acquireMs: number;
   firstLoadMs: number;
@@ -89,13 +107,18 @@ export interface SolveDetail {
 }
 
 interface Part {
+  /** The Electron partition name, from the pool. */
   name: string;
+  /** The jar's key, `s:<session>` / `o:<origin>`. */
+  key: string;
   kind: 'session' | 'origin';
   label: string;
   ses: Session;
   createdAt: number;
   ttlMs: number;
   lastUsed: number;
+  /** The partition held another jar before: empty it before the first load. */
+  dirty: boolean;
 }
 
 interface Slot {
@@ -134,7 +157,12 @@ export function toSolverCookie(c: Cookie): SolverCookie {
 
 export class ElectronSolverBackend implements SolverBackend {
   private readonly o: Required<Omit<BrowserBackendOptions, 'log' | 'onSolveDetail' | 'onNeedsHuman' | 'onCapture'>> & BrowserBackendOptions;
+  /** By jar key (`s:<session>` / `o:<origin>`). */
   private parts = new Map<string, Part>();
+  private originPool: PartitionPool;
+  private sessionPool: PartitionPool;
+  /** Partition names that have held a jar at some point (a reuse must start empty). */
+  private usedNames = new Set<string>();
   private slots: Slot[] = [];
   private prompted = new Map<string, number>();
   private configured = new WeakSet<Session>();
@@ -153,13 +181,18 @@ export class ElectronSolverBackend implements SolverBackend {
       chromeHeaders: true,
       verifyInput: 'both',
       inputVia: 'cdp',
-      showAfterMs: 25_000,
+      showAfterMs: 30_000,
       humanCheck: 'show',
       windowMode: 'hidden',
       blockAllLoopback: true,
       protectedPorts: [],
+      maxOrigins: 16,
+      maxSessions: 4,
+      partitionPrefix: 'fs',
       ...opts,
     };
+    this.originPool = new PartitionPool(`${this.o.partitionPrefix}-o`, this.o.maxOrigins);
+    this.sessionPool = new PartitionPool(`${this.o.partitionPrefix}-s`, this.o.maxSessions);
   }
 
   userAgent(): string {
@@ -169,14 +202,26 @@ export class ElectronSolverBackend implements SolverBackend {
   // ---- sessions ------------------------------------------------------------------------------------------
 
   private partition(kind: 'session' | 'origin', label: string, ttlMs: number): Part {
-    const name = `${kind === 'session' ? 'fs-s' : 'fs-o'}:${label}`;
-    let p = this.parts.get(name);
-    if (!p) {
-      const ses = Sessions.fromPartition(name, { cache: true });
-      this.configure(ses);
-      p = { name, kind, label, ses, createdAt: Date.now(), ttlMs, lastUsed: Date.now() };
-      this.parts.set(name, p);
+    const key = `${kind === 'session' ? 's' : 'o'}:${label}`;
+    const pool = kind === 'session' ? this.sessionPool : this.originPool;
+    const now = Date.now();
+    let p = this.parts.get(key);
+    if (p) {
+      pool.claim(key, now); // touch: most recently used
+      return p;
     }
+    const c = pool.claim(key, now, (k) => this.slots.some((s) => s.busy && s.part.key === k));
+    if (c.evicted) {
+      const old = this.parts.get(c.evicted);
+      this.parts.delete(c.evicted);
+      if (old) for (const s of this.slots.filter((x) => x.part === old && !x.busy)) this.destroySlot(s);
+      this.o.log?.('jar-evicted', { jar: c.evicted, partition: c.name, for: key });
+    }
+    const ses = Sessions.fromPartition(c.name, { cache: true });
+    this.configure(ses);
+    p = { name: c.name, key, kind, label, ses, createdAt: now, ttlMs, lastUsed: now, dirty: this.usedNames.has(c.name) };
+    this.usedNames.add(c.name);
+    this.parts.set(key, p);
     return p;
   }
 
@@ -232,8 +277,10 @@ export class ElectronSolverBackend implements SolverBackend {
   }
 
   async sessionsCreate(name: string): Promise<boolean> {
-    const existed = this.parts.has(`fs-s:${name}`);
-    this.partition('session', name, 0);
+    const existed = this.parts.has(`s:${name}`);
+    const p = this.partition('session', name, 0);
+    if (p.dirty) await this.wipe(p);
+    p.dirty = false;
     return !existed;
   }
 
@@ -242,9 +289,10 @@ export class ElectronSolverBackend implements SolverBackend {
   }
 
   async sessionsDestroy(name: string): Promise<boolean> {
-    const p = this.parts.get(`fs-s:${name}`);
+    const p = this.parts.get(`s:${name}`);
     if (!p) return false;
-    this.parts.delete(p.name);
+    this.parts.delete(p.key);
+    this.sessionPool.release(p.key);
     for (const s of this.slots.filter((x) => x.part === p)) this.destroySlot(s);
     await p.ses.clearStorageData().catch(() => {});
     await p.ses.clearCache().catch(() => {});
@@ -480,8 +528,10 @@ export class ElectronSolverBackend implements SolverBackend {
       ? this.partition('session', req.session, (req.sessionTtlMinutes ?? 0) * 60_000)
       : this.partition('origin', target.origin, this.o.originTtlMs);
     if (req.session && req.sessionTtlMinutes) part.ttlMs = req.sessionTtlMinutes * 60_000;
-    // FlareSolverr's TTL rule (sessions.py:74-79): an expired session is recreated on use.
-    if (part.ttlMs > 0 && Date.now() - part.createdAt > part.ttlMs) await this.wipe(part);
+    // A partition name that held another jar before starts empty; and FlareSolverr's TTL rule
+    // (sessions.py:74-79): an expired session is recreated on use.
+    if (part.dirty || (part.ttlMs > 0 && Date.now() - part.createdAt > part.ttlMs)) await this.wipe(part);
+    part.dirty = false;
     part.lastUsed = Date.now();
 
     const { slot, reused } = this.acquire(part);
@@ -489,7 +539,7 @@ export class ElectronSolverBackend implements SolverBackend {
     slot.statuses = [];
     slot.blockMedia = req.disableMedia;
     const d: SolveDetail = {
-      id: req.id, url: req.url, partition: part.name, reusedWindow: reused, acquireMs: Date.now() - t0, firstLoadMs: 0,
+      id: req.id, url: req.url, partition: part.name, jar: part.key, reusedWindow: reused, acquireMs: Date.now() - t0, firstLoadMs: 0,
       challenged: false, challengeReason: '', solveMs: 0, totalMs: 0, clicked: false, verifyAttempts: [], wouldShow: false, shown: false,
       statuses: slot.statuses, finalUrl: '',
     };
@@ -607,7 +657,7 @@ export class ElectronSolverBackend implements SolverBackend {
   }
 
   /** How many windows exist and how many are busy (diagnostics). */
-  stats(): { windows: number; busy: number; partitions: number } {
-    return { windows: this.slots.length, busy: this.slots.filter((s) => s.busy).length, partitions: this.parts.size };
+  stats(): { windows: number; busy: number; partitions: number; partitionNamesEverUsed: number } {
+    return { windows: this.slots.length, busy: this.slots.filter((s) => s.busy).length, partitions: this.parts.size, partitionNamesEverUsed: this.usedNames.size };
   }
 }

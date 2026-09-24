@@ -3,7 +3,8 @@
 // site needs no rebuild. (loader.ts must NOT import this file — keep the dependency one-directional.)
 import { readFileSync } from 'fs';
 import { readFile, writeFile, mkdir } from 'fs/promises';
-import { dirname } from 'path';
+import { dirname, join } from 'path';
+import { forDesktop } from '../desktop';
 import type { SourceAdapter } from './types';
 import { registerAdapter } from './loader';
 import { makeMadara } from './engines/madara';
@@ -11,8 +12,16 @@ import { makeManganato } from './engines/manganato';
 import { makeMangaThemesia } from './engines/mangathemesia';
 
 export interface Site { engine?: string; id?: string; name?: string; base?: string; order?: number }
-/** Where the operator's template sites live. Written by Admin, read by the pack on every reload. */
-export const FILE = process.env.CUSTOM_SITES_FILE || '/config/sites.json';
+/**
+ * Where the operator's template sites live. Written by Admin, read by the pack on every reload.
+ *
+ * ⚠️ The server keeps the literal `/config/sites.json` even when CONFIG_DIR points elsewhere: an install
+ * that moved CONFIG_DIR has its sites at the old path today, and following CONFIG_DIR would make every one
+ * of them vanish on upgrade. The desktop app has no `/config` (on Windows it would mean `C:\config`), so
+ * there the file follows CONFIG_DIR, the one place the rest of its settings live.
+ */
+export const FILE = process.env.CUSTOM_SITES_FILE
+  || forDesktop('/config/sites.json', join(process.env.CONFIG_DIR || '/config', 'sites.json'));
 
 /**
  * The operator's site list, as a file.

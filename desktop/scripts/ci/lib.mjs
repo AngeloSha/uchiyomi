@@ -1,10 +1,10 @@
-// Shared helpers for the spike's CI checks. Every check ends in record(): one line `RESULT <id> <VERDICT> ...`
+// Shared helpers for the desktop CI checks. Every check ends in record(): one line `RESULT <id> <VERDICT> ...`
 // on stdout and one JSON line in ci-out/results.jsonl, which summary.mjs turns into the job summary.
 //   PASS / FAIL  the check's pass condition, with the number that decided it
 //   EXPECTED     a failure the check set out to reproduce (e.g. initdb under a non-ASCII path, fallback off)
 //   INFO         a measurement or observation with no pass condition of its own
 import { spawn, spawnSync, execFileSync } from 'node:child_process';
-import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, openSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, openSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import net from 'node:net';
@@ -28,8 +28,12 @@ export function record(id, verdict, summary, evidence = {}) {
   return row;
 }
 
-/** The unpacked app's executable (electron-builder --dir output). */
+/**
+ * The unpacked app's executable (electron-builder --dir output), or, with DESKTOP_DEV=1, a launcher that runs
+ * the app from source (`electron desktop/`) -- the Linux dev loop, which has no packaged build.
+ */
 export function appExe(dist = join(DESKTOP, 'dist')) {
+  if (process.env.DESKTOP_DEV === '1') return devLauncher();
   if (WIN) return join(dist, 'win-unpacked', 'Uchiyomi.exe');
   if (MAC) {
     const d = readdirSync(dist).find((x) => /^mac/.test(x) && existsSync(join(dist, x, 'Uchiyomi.app')));
@@ -37,6 +41,13 @@ export function appExe(dist = join(DESKTOP, 'dist')) {
     return join(dist, d, 'Uchiyomi.app', 'Contents', 'MacOS', 'Uchiyomi');
   }
   return join(dist, 'linux-unpacked', 'uchiyomi-desktop');
+}
+
+/** A tiny shell script that runs `electron <desktop> "$@"` (POSIX dev only). */
+function devLauncher() {
+  const f = join(OUT, 'dev-app.sh');
+  writeFileSync(f, `#!/bin/sh\nexec "${join(DESKTOP, 'node_modules', 'electron', 'dist', 'electron')}" "${DESKTOP}" "$@"\n`, { mode: 0o755 });
+  return f;
 }
 
 /** Electron from node_modules, for ELECTRON_RUN_AS_NODE (the packaged app has the runAsNode fuse off). */
@@ -205,10 +216,14 @@ export function tmpRoot(name) {
   return join(base, `uchi-${name}-${Date.now().toString(36)}`);
 }
 
-/** Run the packaged app in --smoke mode against a data dir; returns its result JSON (or an error row). */
-export function smoke(exe, root, extra = [], { timeoutMs = 6 * 60_000 } = {}) {
+/**
+ * Run the packaged app in --smoke mode against a data dir; returns its result JSON (or an error row).
+ * ⚠️ Async on purpose: a smoke may download the engine pack from serveFile() in THIS process, and a
+ * spawnSync would block the event loop that has to answer it (the download would stall until its timeout).
+ */
+export async function smoke(exe, root, extra = [], { timeoutMs = 10 * 60_000, env } = {}) {
   const result = join(root + '-smoke.json');
-  const r = runSync(exe, [...APP_EXTRA, '--smoke', `--data-dir=${root}`, `--result=${result}`, ...extra], { timeout: timeoutMs, env: { ...process.env, ELECTRON_ENABLE_LOGGING: '1' } });
+  const r = await runAsync(exe, [...APP_EXTRA, '--smoke', `--data-dir=${root}`, `--result=${result}`, ...extra], { timeoutMs, env: { ...process.env, ELECTRON_ENABLE_LOGGING: '1', ...(env || {}) } });
   const j = readJson(result);
   return { exit: r.code, ms: r.ms, result: j, out: r.out.slice(-4000) };
 }
@@ -218,11 +233,25 @@ export function smokeDigest(s) {
   const c = s.result?.checks || {};
   return {
     exit: s.exit, ok: !!s.result?.ok, ms: s.ms,
-    healthz: c.healthz?.status, setup: c.setupStatus?.body, account: c.account?.how,
+    healthz: c.healthz?.status, desktop: c.desktopMode?.desktop, signIn: c.signIn, solver: c.solver?.msg, engine: c.engine, restore: c.restore,
     bffBackup: c.bffBackup ? { pass: c.bffBackup.pass, files: c.bffBackup.files, tables: c.bffBackup.tables, error: c.bffBackup.error || c.bffBackup.task?.lastResult?.error } : null,
     shellDump: c.shellDump ? { bytes: c.shellDump.bytes, usersTable: c.shellDump.hasUsersTable, tables: c.shellDump.tables } : null,
     listen: c.listen ? { exposedBeyondLoopback: c.listen.exposedBeyondLoopback } : null,
     stop: s.result?.stop, fallback: s.result?.fallback, staleRecovery: s.result?.staleRecovery,
     timeline: s.result?.timeline, error: s.result?.error?.slice(0, 1500) || (s.result ? undefined : s.out.slice(-1500)),
   };
+}
+
+/** Serve one file on loopback (the engine pack for --engine-pack-url). @returns {Promise<{ url: string, close: () => void }>} */
+export async function serveFile(file) {
+  const http = await import('node:http');
+  const { createReadStream, statSync } = await import('node:fs');
+  const { basename } = await import('node:path');
+  const srv = http.createServer((req, res) => {
+    if (req.url !== `/${basename(file)}`) { res.writeHead(404); res.end(); return; }
+    res.writeHead(200, { 'content-type': 'application/zip', 'content-length': statSync(file).size });
+    createReadStream(file).pipe(res);
+  });
+  await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+  return { url: `http://127.0.0.1:${srv.address().port}/${basename(file)}`, close: () => srv.close() };
 }

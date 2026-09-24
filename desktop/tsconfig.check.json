@@ -1,0 +1,20 @@
+{
+  // Type-check the plain-JS shell (src/*.js, // @ts-check) against Electron's and Node's types. No output.
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "commonjs",
+    "moduleResolution": "node",
+    "lib": ["ES2022", "DOM"],
+    "allowJs": true,
+    "checkJs": true,
+    "noEmit": true,
+    "strict": false,
+    "noImplicitAny": false,
+    "esModuleInterop": true,
+    "resolveJsonModule": true,
+    "skipLibCheck": true,
+    "types": ["node"]
+  },
+  "include": ["src/*.js", "src/*.cjs"],
+  "exclude": ["src/archive.js"]
+}

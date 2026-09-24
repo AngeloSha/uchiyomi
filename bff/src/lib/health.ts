@@ -25,6 +25,7 @@ import { diagnose } from './sourceDiagnosis';
 import { haveNumbers } from './libraryNumbers';
 import { DL_ROOT } from './library';
 import { chapterFileRel } from './downloader';
+import { forDesktop } from './desktop';
 
 export type HealthStatus = 'ok' | 'warn' | 'problem';
 
@@ -451,7 +452,7 @@ async function frozenSeries(): Promise<HealthCheck> {
   const why = (r: typeof rows[number]) =>
     // Enabled yet unregistered is the third case: dropped by SUWAYOMI_MAX_SOURCES, which the cap check
     // above names but a series page cannot see.
-    r.switched_off ? 'switched off' : r.still_enabled ? 'over the source limit (SUWAYOMI_MAX_SOURCES)' : 'no longer installed';
+    r.switched_off ? 'switched off' : r.still_enabled ? forDesktop('over the source limit (SUWAYOMI_MAX_SOURCES)', 'over the source limit') : 'no longer installed';
   const items: HealthItem[] = frozen.slice(0, 20).map((r) => ({
     seriesId: r.id,
     title: r.title,
@@ -749,6 +750,15 @@ export async function solverBlaming(): Promise<string[]> {
   return rows.map((r) => r.source_id);
 }
 
+/**
+ * " (v3.4.6)" for FlareSolverr, whose versions are numbers; the desktop helper's is `uchiyomi-desktop-0.44.0`,
+ * deliberately not semver-shaped (desktop/src/solver/server.ts), and read "vuchiyomi-desktop-…" with the v.
+ */
+export function solverVersionLabel(version?: string): string {
+  if (!version) return '';
+  return ` (${/^\d/.test(version) ? 'v' : ''}${version})`;
+}
+
 export async function solverHealth(): Promise<HealthCheck> {
   const ping = await solverPing();
   const blaming = await solverBlaming();
@@ -759,14 +769,20 @@ export async function solverHealth(): Promise<HealthCheck> {
       id: 'solver',
       title: 'Cloudflare solver',
       status: blaming.length ? 'problem' : 'warn',
-      summary: `Not answering at ${url}${ping.error ? ` (${ping.error})` : ''}`,
-      note: 'Sources on Cloudflare-protected sites cannot work without it. Check the container is running '
+      // ⚠️ Desktop: the helper's address carries its access token as the path, so it is named, never
+      // printed (a screenshot in a bug report would hand the token to anyone who reads it).
+      summary: forDesktop(`Not answering at ${url}`, 'Not answering') + (ping.error ? ` (${ping.error})` : ''),
+      note: forDesktop(
+        'Sources on Cloudflare-protected sites cannot work without it. Check the container is running '
           + 'and that FLARESOLVERR_URL points at it.',
+        "Sources on Cloudflare-protected sites cannot work without it. Uchiyomi's built-in Cloudflare helper "
+          + "isn't answering; quit and reopen Uchiyomi.",
+      ),
       // The solver itself is the first item, not just the sources blaming it. Every other check on this page
       // holds "no items means ok", and a solver that is simply absent has nothing to list -- so without this
       // it would report a warning with an empty body, which reads as a page bug rather than a finding.
       items: [
-        { title: url, detail: ping.error ? `not answering (${ping.error})` : 'not answering' },
+        { title: forDesktop(url, 'Cloudflare helper'), detail: ping.error ? `not answering (${ping.error})` : 'not answering' },
         // No "Reset solver sessions" chip while it is down. The reset clears what THIS process remembers
         // about a solver that is answering; on one that is not, it would be a button that reports success
         // and changes nothing, which is worse than no button. The repair's solver step refuses for the
@@ -787,10 +803,13 @@ export async function solverHealth(): Promise<HealthCheck> {
     status: blaming.length ? 'warn' : 'ok',
     summary: blaming.length
       ? `Answering, but ${blaming.length} source${blaming.length === 1 ? '' : 's'} recently failed inside it`
-      : `Ready${ping.version ? ` (v${ping.version})` : ''}${behind ? ` — v${latest} is available` : ''}`,
+      : `Ready${solverVersionLabel(ping.version)}${behind ? ` — v${latest} is available` : ''}`,
     note: blaming.length
-      ? 'It responds, but it has been failing mid-request. Chrome needs far more than Docker\'s default '
-      + '64 MB of shared memory (set shm_size: 1gb), and the solver leaks memory, so it wants a restart.'
+      ? forDesktop(
+        'It responds, but it has been failing mid-request. Chrome needs far more than Docker\'s default '
+        + '64 MB of shared memory (set shm_size: 1gb), and the solver leaks memory, so it wants a restart.',
+        'It responds, but it has been failing mid-request; quit and reopen Uchiyomi to restart it.',
+      )
       : undefined,
     items: [
       // `info`: this row and `status: 'ok'` coexist on purpose, see the note above. Without the flag it
@@ -887,10 +906,17 @@ async function extensionCap(): Promise<HealthCheck> {
       : load && !load.reachable
         ? `engine unreachable at the last load; nothing is registered (limit ${cap})`
         : `${load?.registered ?? 0} of ${cap} extension sources in use`,
-    note: 'Every registered source is searched at once, which is why there is a limit. Hiding the languages you do not read ' +
-      'is the cheap way under it; SUWAYOMI_MAX_SOURCES raises it.',
+    note: forDesktop(
+      'Every registered source is searched at once, which is why there is a limit. Hiding the languages you do not read ' +
+        'is the cheap way under it; SUWAYOMI_MAX_SOURCES raises it.',
+      'Every registered source is searched at once, which is why there is a limit. Hide the languages you don\'t read ' +
+        'to get under it.',
+    ),
     items: skipped
-      ? [{ title: 'SUWAYOMI_MAX_SOURCES', detail: `${skipped} enabled sources not registered; the limit is ${cap}. Hide languages you do not read, or raise the limit.` }]
+      ? [forDesktop(
+        { title: 'SUWAYOMI_MAX_SOURCES', detail: `${skipped} enabled sources not registered; the limit is ${cap}. Hide languages you do not read, or raise the limit.` },
+        { title: 'Source limit', detail: `${skipped} enabled sources not registered; the limit is ${cap}. Hide the languages you don't read.` },
+      )]
       : [],
   };
 }

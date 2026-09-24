@@ -7,7 +7,7 @@
 //     verbatim DTOs from CloudflareInterceptor.kt at v2.3.2243 (fixtures/suwayomi-*.kt), with the request
 //     bodies both clients really send (fixtures/solver-requests.json, from the live FlareSolverr's log).
 //
-// Run: cd desktop-spike-solver && node --import tsx --test ../desktop/test/solver.contract.test.ts
+// Run: cd desktop && node --import tsx --test ../desktop/test/solver.contract.test.ts
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';

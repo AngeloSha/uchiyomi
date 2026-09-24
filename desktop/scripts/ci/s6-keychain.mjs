@@ -5,14 +5,16 @@
 // app by its code-directory hash, and a new version has a new hash -- so the updated app may be a stranger to
 // its own keychain item: a "wants to use your confidential information" prompt, or cookies it cannot decrypt.
 //
-// Relaunch a REBUILT app (dist-next, version bumped, ad-hoc signed again) on the profile S8 left signed in, and
-// record: does it reach the app page, is it still signed in, how long did it take, and is the item there.
+// Relaunch a REBUILT app (dist-next, version bumped, ad-hoc signed again) on the profile the product smoke left
+// signed in, and record: does it reach the app page, is it still signed in, how long did it take, and is the item
+// there. (The cookie-encryption fuse is OFF since the spike, so the item must never exist; this stays as the
+// regression check for the day someone turns it back on without signing.)
 import puppeteer from 'puppeteer-core';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { DESKTOP, OUT, record, launch, waitFor, freePort, runAsync, runSync, sleep, readJson, snapshot, hardKill, isAlive } from './lib.mjs';
 
-const root = readFileSync(join(OUT, 's8-root.txt'), 'utf8').trim();
+const root = readFileSync(join(OUT, 'product-root.txt'), 'utf8').trim();
 const dist = join(DESKTOP, 'dist-next');
 const d = readdirSync(dist).find((x) => /^mac/.test(x));
 const exe = join(dist, d, 'Uchiyomi.app', 'Contents', 'MacOS', 'Uchiyomi');
@@ -25,7 +27,7 @@ const ev = {
   keychainItem: runSync('security', ['find-generic-password', '-s', 'Uchiyomi Safe Storage']).out.split('\n').filter((l) => /svce|acct|keychain:/.test(l)).join(' | '),
 };
 
-/** Launch `exeToRun` on the S8 profile; did the window reach the app, and is it signed in? */
+/** Launch `exeToRun` on the product smoke's profile; did the window reach the app, and is it signed in? */
 async function attempt(exeToRun, tag, pageTimeoutMs) {
   const r = { tag, reached: false, signedIn: null };
   const dbg = await freePort();
@@ -70,5 +72,5 @@ ev.appPageMs = next.appPageMs;
 ev.error = next.error;
 // An update must open straight into the app, still signed in, with no Keychain item involved at all.
 record('S6-unsigned-update-keychain', reached && signedIn === true && control.signedIn === true && !ev.keychainItem ? 'PASS' : 'FAIL',
-  `rebuilt app (CDHash ${ev.cdhashOld?.slice(0, 10)} -> ${ev.cdhashNew?.slice(0, 10)}) on the S8 profile: app page ${reached ? `reached in ${ev.appPageMs} ms` : 'NOT reached'}, still signed in: ${signedIn}${ev.error ? ` (${ev.error.slice(0, 120)})` : ''}; control (the original build, same profile, right after): ${control.reached ? `reached in ${control.appPageMs} ms, signed in: ${control.signedIn}` : `NOT reached (${String(control.error).slice(0, 100)})`}; keychain item "Uchiyomi Safe Storage": ${ev.keychainItem ? 'present' : 'absent'}; screen: ci-out/s6-keychain-vN+1-screen.png`,
+  `rebuilt app (CDHash ${ev.cdhashOld?.slice(0, 10)} -> ${ev.cdhashNew?.slice(0, 10)}) on the product smoke's profile: app page ${reached ? `reached in ${ev.appPageMs} ms` : 'NOT reached'}, still signed in: ${signedIn}${ev.error ? ` (${ev.error.slice(0, 120)})` : ''}; control (the original build, same profile, right after): ${control.reached ? `reached in ${control.appPageMs} ms, signed in: ${control.signedIn}` : `NOT reached (${String(control.error).slice(0, 100)})`}; keychain item "Uchiyomi Safe Storage": ${ev.keychainItem ? 'present' : 'absent'}; screen: ci-out/s6-keychain-vN+1-screen.png`,
   ev);

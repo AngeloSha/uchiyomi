@@ -26,7 +26,9 @@ import { SOLVER_CONCURRENCY } from '../lib/sources/flaresolverr';
 const SCAN_CONCURRENCY = Math.max(1, Number(process.env.SCAN_CONCURRENCY || SOLVER_CONCURRENCY));
 const SCAN_ENOUGH = Math.max(1, Number(process.env.SCAN_ENOUGH || 3));
 const SCAN_SEARCH_MS = Number(process.env.SCAN_SEARCH_MS) || 45_000;
-import { persistScan, setBookDates, setBookMeta, libraryIdFor, type LibraryRow } from '../lib/library';
+import { persistScan, setBookDates, setBookMeta, libraryIdFor, type LibraryRow, LIBRARY_ROOT, DL_ROOT } from '../lib/library';
+import { diskSpelling } from '../lib/libraryAdmin';
+import { isDesktop } from '../lib/desktop';
 import { newSeriesId } from '../lib/ids';
 import { cleanDescription } from '../lib/htmlText';
 import { updateSeries } from '../lib/updater';
@@ -619,7 +621,22 @@ export async function addSeriesFromSource(opts: {
       message: `${src.name} did not return this title just now. Try again in a moment.`,
     };
   }
-  const folder = `${src.name}/${sanitize(title)}`;
+  // ⚠️ Windows: the source's name is the first folder, and a custom site's name is whatever the admin typed --
+  // `Site: EN` is not a legal Windows name at all (the colon names a data stream) and `CON` or a trailing dot
+  // is one Explorer cannot open -- so there it gets the same treatment as the title. Linux keeps the name
+  // exactly: every folder already on a server is spelled that way.
+  const srcDir = process.platform === 'win32' ? sanitize(src.name) : src.name;
+  let folder = `${srcDir}/${sanitize(title)}`;
+  // ⚠️ Desktop, case-insensitive disks (NTFS, APFS): a source that now spells the title `Solo leveling`
+  // still downloads into the existing `Solo Leveling` folder, and the scanner reads that folder back with
+  // its on-disk spelling -- so a row keyed on the new spelling never met its own chapters, and the series
+  // split in two. Reuse the spelling already stored, then the one already on disk; only a folder that
+  // exists nowhere keeps the new one. The server's disks are case-sensitive and keep the exact match.
+  if (isDesktop()) {
+    const stored = await one<{ folder: string }>(
+      'SELECT folder FROM lib_series WHERE lower(folder) = lower($1) ORDER BY (deleted_at IS NOT NULL), created_at LIMIT 1', [folder]);
+    folder = stored?.folder ?? await diskSpelling([DL_ROOT, LIBRARY_ROOT], folder);
+  }
 
   // A deleted series does not count as present: re-adding it is how you undo a delete from the app side.
   const existing = await one<{ id: string; deleted_at: string | null }>(

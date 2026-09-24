@@ -40,12 +40,12 @@ function layout(root) {
     config: j('config'),
     db: j('db'),
     pgdata: j('db', 'pg16'),
-    // Read library (the scanner's root) and the download root. Phase 1 decides the user-visible defaults
-    // (`~/Uchiyomi Library` chosen on first run); the spike keeps both inside the data root.
-    library: j('library'),
-    downloads: j('downloads'),
-    sources: j('sources'),
-    cache: j('cache'),
+    // ⚠️ config/ and backups/ are ALSO what bff/src/lib/desktop.ts derives as CONFIG_DIR and BACKUP_DIR from
+    // UCHIYOMI_DATA_DIR (the shell does not set those; one owner per value). The shell reads them only to
+    // restore a backup and to open the backups folder, so they must stay the same names on both sides.
+    // The manga themselves are NOT under here: DL_ROOT is the folder the user chose on first run
+    // (state.json `libraryDir`, default ~/Uchiyomi Library), and the bff keeps an empty read library at
+    // <data>/library.
     backups: j('backups'),
     engine: j('engine'),
     logs: j('logs'),

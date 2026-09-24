@@ -23,6 +23,8 @@ import { t as tr, keys } from '@/lib/i18n';
 import type { HealthCheck, Series } from '@/lib/types';
 import { groupProviders, type ProviderGroup, type ProviderSrc } from '@/lib/providerGroups';
 import { adultShown } from '@/lib/adult';
+import { bridge, hiddenOnDesktop, isDesktop, visibleGroups, DESKTOP_HIDDEN, type UpdateStatus } from '@/lib/desktop';
+import { EngineInstall } from '@/components/EngineInstall';
 
 /**
  * `/api/sources` as an ADMIN needs it: every source the server has, adult ones included.
@@ -94,6 +96,11 @@ function AdminInner() {
   // In the URL rather than in state: a refresh, the back button and every deep link used to land on
   // Overview, and `/admin/?tab=Settings` is the address the docs can now give (lib/useTabParam.ts).
   const [tab, setTab] = useTabParam<Tab>(TABS, 'Overview');
+  // Uchiyomi Desktop has no Members or Sessions (lib/desktop.ts). The rail never lists them, and a deep link
+  // or an old bookmark to one lands on Overview rather than on a panel whose every request answers 404.
+  // `GROUPS` and the line above stay as they are: only what ConsoleNav receives is filtered.
+  const hiddenTab = hiddenOnDesktop(DESKTOP_HIDDEN.adminTabs, tab);
+  useEffect(() => { if (hiddenTab) setTab('Overview'); }, [hiddenTab]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!isAdmin) return <div className="flex min-h-screen-d items-center justify-center text-fog-400">{tr('Admins only.')}</div>;
 
@@ -117,8 +124,8 @@ function AdminInner() {
     <div className="min-h-screen-d px-4 lg:px-0">
       <AdminHero onBack={() => router.back()} />
 
-      <ConsoleNav groups={GROUPS} tab={tab} onTab={setTab} ariaLabel={tr('Admin')}>
-        {panel}
+      <ConsoleNav groups={isDesktop() ? visibleGroups(GROUPS, DESKTOP_HIDDEN.adminTabs) : GROUPS} tab={tab} onTab={setTab} ariaLabel={tr('Admin')}>
+        {hiddenTab ? null : panel}
       </ConsoleNav>
     </div>
   );
@@ -168,7 +175,8 @@ function AdminHero({ onBack }: { onBack: () => void; onScan?: undefined }) {
   // both forms as two strings.
   const facts = [
     stats ? tr('{n} series', { n: stats.seriesTotal }) : null,
-    stats ? (stats.members === 1 ? tr('1 member') : tr('{n} members', { n: stats.members })) : null,
+    // Desktop is one person: "1 member" there would describe a household that does not exist.
+    stats && !isDesktop() ? (stats.members === 1 ? tr('1 member') : tr('{n} members', { n: stats.members })) : null,
     stats ? tr('{size} cached', { size: bytes(stats.cacheBytes) }) : null,
     // Which layout this is, in one word: the answer to "where is my database" without reading a compose file.
     stats?.database ? (stats.database === 'embedded' ? tr('embedded database') : tr('external database')) : null,
@@ -250,7 +258,9 @@ function Overview({ onTab }: { onTab: (t: Tab) => void }) {
   });
   const { data: audit } = useQuery({ queryKey: ['admin-audit', 8], queryFn: () => api<{ content: any[] }>('/api/admin/audit?limit=8') });
   const { data: tasks } = useQuery({ queryKey: ['admin-tasks'], queryFn: () => api<{ content: any[] }>('/api/admin/tasks') });
-  const { data: sessions } = useQuery({ queryKey: ['admin-sessions'], queryFn: () => api<{ content: any[] }>('/api/admin/sessions') });
+  // Not asked on desktop, where the route answers 404: there is no Sessions tab for the tile to open.
+  const desktop = isDesktop();
+  const { data: sessions } = useQuery({ queryKey: ['admin-sessions'], queryFn: () => api<{ content: any[] }>('/api/admin/sessions'), enabled: !desktop });
   const { data: sources } = useQuery({ queryKey: ALL_SOURCES_KEY, queryFn: () => api<{ content: any[] }>(allSourcesUrl()) });
 
   const failing = (health?.checks ?? []).filter((c) => c.status !== 'ok');
@@ -315,8 +325,10 @@ function Overview({ onTab }: { onTab: (t: Tab) => void }) {
       {/* Band C -- where to go next, each tile carrying the one number that decides whether to go there. */}
       <TabTile label={tr('Tasks')} value={String(tasks?.content?.length ?? 0)}
         sub={lastRun ? relativeTime(new Date(lastRun).toISOString()) : undefined} onClick={() => onTab('Tasks')} />
-      <TabTile label={tr('Sessions')} value={String(sessions?.content?.length ?? 0)}
-        sub={sessions?.content?.[0] ? relativeTime(sessions.content[0].last_seen) : undefined} onClick={() => onTab('Sessions')} />
+      {!desktop && (
+        <TabTile label={tr('Sessions')} value={String(sessions?.content?.length ?? 0)}
+          sub={sessions?.content?.[0] ? relativeTime(sessions.content[0].last_seen) : undefined} onClick={() => onTab('Sessions')} />
+      )}
       <TabTile label={tr('Providers')} value={String(sources?.content?.length ?? 0)} onClick={() => onTab('Providers')} />
       {/* Activity's headline is a time rather than a count: "how long since anything happened" is the
           question, and eight rows of audit cannot answer "how many". */}
@@ -802,7 +814,12 @@ function Providers({ onTab }: { onTab: (t: Tab) => void }) {
       {list.length === 0 ? (
         <div className="card grad-border full p-6 text-center">
           <p className="text-sm font-semibold text-fog-100">{tr('No sources installed')}</p>
-          <p className="mx-auto mt-1 max-w-md text-xs text-fog-500">Mount a compiled source pack at the server&apos;s <code className="rounded bg-ink-800 px-1 py-0.5">SOURCES_DIR</code>, then hit Reload. With none installed, Uchiyomi reads only the library you already own.</p>
+          {/* Desktop has no SOURCES_DIR to mount anything at: its ways to a source are this tab and the engine. */}
+          {isDesktop() ? (
+            <p className="mx-auto mt-1 max-w-md text-xs text-fog-500">{tr('Add a site above, or download the extension engine under Extensions and turn on an extension source. With none, Uchiyomi reads only the library you already own.')}</p>
+          ) : (
+            <p className="mx-auto mt-1 max-w-md text-xs text-fog-500">Mount a compiled source pack at the server&apos;s <code className="rounded bg-ink-800 px-1 py-0.5">SOURCES_DIR</code>, then hit Reload. With none installed, Uchiyomi reads only the library you already own.</p>
+          )}
         </div>
       ) : (
         <>
@@ -1030,6 +1047,7 @@ function Tasks() {
   // `justify-between`, which at 1592px left a lake of nothing between a task's name and its own button.
   return (
     <div className="board">
+      <DesktopBackups />
       <div className="card grad-border full divide-y divide-ink-800/70 overflow-hidden">
         {(data?.content || []).map((t: any) => (
           <div key={t.id} className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 px-4 py-3.5 lg:grid-cols-[minmax(0,20rem)_minmax(0,1fr)_auto]">
@@ -1052,6 +1070,52 @@ function Tasks() {
           </div>
         ))}
       </div>
+    </div>
+  );
+}
+
+/**
+ * Uchiyomi Desktop's backups, under Tasks where the nightly backup is listed. Renders nothing without the
+ * shell's bridge, so the server build's Tasks tab is unchanged.
+ *
+ * The backups are files in a folder on this computer, so the useful thing is to open that folder (to copy
+ * one to another drive, or to find last night's). Restoring cannot happen inside the page: the shell has to
+ * stop the library server, load the dump into the database and start it again (design-inapp §6), so this
+ * asks first -- it replaces everything since that backup -- and then hands over to the shell's own dialog.
+ */
+function DesktopBackups() {
+  const toast = useToast();
+  const b = bridge();
+  const [asking, setAsking] = useState(false);
+  const [busy, setBusy] = useState(false);
+  if (!b || (typeof b.revealBackups !== 'function' && typeof b.restoreBackup !== 'function')) return null;
+  const restore = async () => {
+    setBusy(true);
+    try { await b.restoreBackup(); setAsking(false); }
+    // Electron prefixes a rejected IPC call with "Error invoking remote method '…': Error: "; the shell's own
+    // sentence is what follows it.
+    catch (e: any) { toast(String(e?.message || '').replace(/^Error invoking remote method '[^']*': (?:Error: )?/, '') || tr('Could not restore that backup'), 'error'); }
+    setBusy(false);
+  };
+  return (
+    <div className="full flex flex-wrap items-center justify-end gap-2">
+      {typeof b.revealBackups === 'function' && (
+        <button type="button" onClick={() => b.revealBackups()} className="chip text-xs">{tr('Open backups folder')}</button>
+      )}
+      {typeof b.restoreBackup === 'function' && (
+        <button type="button" onClick={() => setAsking(true)} className="chip text-xs">{tr('Restore a backup…')}</button>
+      )}
+      {asking && (
+        <ConfirmDialog
+          title={tr('Restore a backup?')}
+          body={tr('Uchiyomi closes your library, replaces its database and settings with the backup you choose, and opens again. Everything since that backup — reading progress, new series, settings — is replaced. The manga files themselves are not touched.')}
+          confirmLabel={tr('Choose a backup…')}
+          danger
+          busy={busy}
+          onConfirm={() => { void restore(); }}
+          onClose={() => setAsking(false)}
+        />
+      )}
     </div>
   );
 }
@@ -1362,6 +1426,8 @@ function LibrariesSection() {
     queryFn: () => api<{ content: { role: string }[] }>('/api/admin/users'),
   });
   const anyMembers = (people?.content ?? []).some((u) => u.role !== 'admin');
+  // Uchiyomi Desktop keeps libraries and their age rating but not who may open them (lib/desktop.ts).
+  const desktopLibs = isDesktop();
   const refresh = () => { for (const k of [['admin-libraries'], ['admin-users'], ['library'], ['home']]) qc.invalidateQueries({ queryKey: k }); };
 
   // Preview follows whatever is typed or clicked, so "what will this contain" is answered before committing.
@@ -1428,7 +1494,9 @@ function LibrariesSection() {
         <button onClick={openNew} className="chip shrink-0 text-xs"><IcPlus width={13} height={13} />{tr('New library')}</button>
       </div>
       <p className="mb-3 max-w-prose text-xs leading-relaxed text-fog-500">
-        {tr('A library is a folder, plus any series you file into it by hand. Give it an age rating and everything in it inherits that, and choose who can open it.')}
+        {desktopLibs
+          ? tr('A library is a folder, plus any series you file into it by hand. Give it an age rating and everything in it inherits that.')
+          : tr('A library is a folder, plus any series you file into it by hand. Give it an age rating and everything in it inherits that, and choose who can open it.')}
       </p>
 
       {/* Cards rather than one divided list: at 1592px a row left a lake between a library's path and the
@@ -1444,7 +1512,8 @@ function LibrariesSection() {
               <p className="truncate text-[11px] text-fog-600">
                 {l.n} {tr('series')}
                 {l.pinned > 0 && <> · {tr('{n} filed by hand', { n: l.pinned })}</>}
-                {' · '}{!anyMembers ? tr('admins only') : l.members.length ? tr('{n} can open it', { n: l.members.length }) : tr('nobody can open it')}
+                {/* Who may open it is per-person access, which desktop does not have (one person, no members). */}
+                {!desktopLibs && <>{' · '}{!anyMembers ? tr('admins only') : l.members.length ? tr('{n} can open it', { n: l.members.length }) : tr('nobody can open it')}</>}
               </p>
             </div>
             <div className="mt-2 flex flex-wrap gap-1.5">
@@ -1457,7 +1526,7 @@ function LibrariesSection() {
                 className={`chip text-xs ${l.age_rating != null ? 'border-amber-500/40 text-amber-300' : ''}`}>
                 {l.age_rating != null ? tr('{n}+', { n: l.age_rating }) : tr('Not rated')}
               </button>
-              <button onClick={() => setAccess(l)} className="chip text-xs">{tr('Access')}</button>
+              {!desktopLibs && <button onClick={() => setAccess(l)} className="chip text-xs">{tr('Access')}</button>}
               <button onClick={() => openEdit(l)} className="chip text-xs">{tr('Settings')}</button>
               {l.id !== 'lib' && (
                 <button onClick={() => setConfirmDel(l)} className="chip text-xs hover:border-rose-500/50 hover:text-rose-400">{tr('Remove')}</button>
@@ -1837,6 +1906,7 @@ function Health() {
               </button>
               <HealthCheckActions check={c} onDone={() => { void refetch(); }} />
             </div>
+            {c.id === 'update' && <DesktopUpdateNote />}
 
             {isOpen && (
               <div id={`health-${c.id}-details`} className="border-t border-ink-800/70">
@@ -1863,6 +1933,38 @@ function Health() {
           </div>
         );
       })}
+    </div>
+  );
+}
+
+/**
+ * Under the Health "Version" card on Uchiyomi Desktop: what the SHELL knows about a newer release.
+ *
+ * The card above still comes from the server's own GitHub check, which is the only update path on an
+ * unsigned Mac. The shell adds the half the server cannot do: on Windows it has already downloaded the
+ * update (`ready` -> restart to install); on a Mac it can only point at the release page. Renders nothing
+ * without the bridge, or while there is nothing newer, so the server build's card is exactly as it was.
+ */
+function DesktopUpdateNote() {
+  const b = bridge();
+  const [u, setU] = useState<UpdateStatus | null>(null);
+  useEffect(() => {
+    if (!b?.update?.status) return;
+    let live = true;
+    b.update.status().then((s) => { if (live) setU(s); }).catch(() => {});
+    return () => { live = false; };
+  }, [b]);
+  if (!b || !u?.available) return null;
+  return (
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 border-t border-ink-800/70 px-4 py-2.5">
+      <p className="min-w-0 flex-1 text-sm text-fog-100">
+        {u.version ? tr('New version available — {version}', { version: u.version }) : tr('New version available')}
+      </p>
+      {u.ready && typeof b.update.installNow === 'function' ? (
+        <button type="button" onClick={() => b.update.installNow()} className="chip shrink-0 text-xs">{tr('Restart to update')}</button>
+      ) : u.url ? (
+        <a href={u.url} target="_blank" rel="noopener noreferrer" className="chip shrink-0 text-xs">{tr('Download')}</a>
+      ) : null}
     </div>
   );
 }
@@ -1917,6 +2019,10 @@ function Extensions({ span = '' }: { span?: string }) {
   });
 
   if (!status) return null;
+
+  // Uchiyomi Desktop: the engine is a download on first use, not a container -- until the server can reach
+  // it, the card is the download (components/EngineInstall.tsx). The server build never takes this branch.
+  if (isDesktop() && !(status.configured && status.reachable)) return <EngineInstall span={span} />;
 
   if (!status.configured) {
     return (
@@ -2154,7 +2260,8 @@ function Extensions({ span = '' }: { span?: string }) {
               <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-amber-400" />
               <p className="min-w-0 flex-1 text-[11px] leading-snug text-amber-200">
                 {status.skipped} enabled source{status.skipped === 1 ? ' is' : 's are'} not registered — over the limit of {status.cap}.
-                <span className="text-amber-200/60"> Hide languages you don&apos;t read, or raise SUWAYOMI_MAX_SOURCES.</span>
+                {/* SUWAYOMI_MAX_SOURCES is an environment variable of the Docker install; desktop has no .env to raise it in. */}
+                <span className="text-amber-200/60">{isDesktop() ? ' Hide languages you don\'t read.' : ' Hide languages you don\'t read, or raise SUWAYOMI_MAX_SOURCES.'}</span>
               </p>
             </div>
           )}

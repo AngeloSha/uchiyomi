@@ -16,6 +16,18 @@ updates:
       web-minor-and-patch:
         update-types: [minor, patch]
     open-pull-requests-limit: 3
+  # The desktop app (Electron, electron-builder, electron-updater). Electron majors arrive as their own pull
+  # requests, not in the group: each is a new Chromium and Node, and only the three newest get security fixes,
+  # so they are wanted -- but they are exactly the update the desktop build on real Windows and macOS runners
+  # (.github/workflows/desktop.yml) has to prove before a release, not something to merge on a green Tests job
+  # that never starts the app.
+  - package-ecosystem: npm
+    directory: /desktop
+    schedule: { interval: weekly, day: monday }
+    groups:
+      desktop-minor-and-patch:
+        update-types: [minor, patch]
+    open-pull-requests-limit: 3
   - package-ecosystem: github-actions
     directory: /
     schedule: { interval: weekly, day: monday }

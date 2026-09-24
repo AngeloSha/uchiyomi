@@ -2,6 +2,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { q, one } from './db';
 import { env } from '../env';
+import { isDesktop } from './desktop';
 
 export const REFRESH_COOKIE = 'yomi_rt';
 // Stateless JWT cookie that authorizes <img> requests to /img/* (which can't send a Bearer header).
@@ -96,6 +97,8 @@ export interface OpdsIdentity { userId: string; showAdult: boolean }
  * the app controls, no button. Callers that only want the id read `.userId`.
  */
 export async function resolveOpdsBasic(authHeader?: string): Promise<OpdsIdentity | null> {
+  // Desktop has no OPDS: a token that arrived inside a restored server database must not open /img/ either.
+  if (isDesktop()) return null;
   if (!authHeader || !/^basic /i.test(authHeader)) return null;
   let decoded = '';
   try { decoded = Buffer.from(authHeader.slice(6).trim(), 'base64').toString('utf8'); } catch { return null; }
@@ -263,9 +266,14 @@ export const revokeAllSessions = (userId: string, exceptId?: string) =>
   q(`UPDATE refresh_tokens SET revoked_at = now() WHERE user_id = $1 AND revoked_at IS NULL${exceptId ? ' AND id <> $2' : ''}`,
     exceptId ? [userId, exceptId] : [userId]);
 
-/** Client IP from the proxy chain. */
+/**
+ * Client IP from the proxy chain.
+ *
+ * ⚠️ This reads X-Forwarded-For whatever `trustProxy` is set to. On the desktop app nothing sits in front of the
+ * server, so a forwarded-for header there is only ever one a local process invented, and it is ignored.
+ */
 export function clientIp(req: FastifyRequest): string | null {
-  const xff = (req.headers['x-forwarded-for'] as string) || '';
+  const xff = isDesktop() ? '' : (req.headers['x-forwarded-for'] as string) || '';
   return (xff.split(',')[0].trim() || req.ip || '').slice(0, 64) || null;
 }
 
@@ -423,6 +431,8 @@ function resolved(row: TokenRow | null): ResolvedToken | null {
 }
 
 export async function resolveApiToken(raw: string): Promise<ResolvedToken | null> {
+  // API tokens are hidden on desktop (owner decision): one arriving in a restored server database opens nothing.
+  if (isDesktop()) return null;
   return resolved(await one<TokenRow>(`${TOKEN_SELECT} t.token_hash = $1`, [sha256(raw)]));
 }
 
@@ -432,6 +442,7 @@ export async function resolveApiToken(raw: string): Promise<ResolvedToken | null
  * it expire, or disabling the account end the cookie too, with no session table and no revocation list.
  */
 export async function resolveApiTokenById(id: string): Promise<ResolvedToken | null> {
+  if (isDesktop()) return null;
   // A uuid column; anything else is a cast error in Postgres, and a malformed id is simply not a token.
   if (!/^[0-9a-f-]{36}$/i.test(id)) return null;
   return resolved(await one<TokenRow>(`${TOKEN_SELECT} t.id = $1`, [id]));

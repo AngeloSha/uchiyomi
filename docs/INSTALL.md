@@ -3,6 +3,11 @@
 The two-command quick start lives in the [README](../README.md). This page is everything else: the one-click
 app stores, what each container is for, keeping it up to date, and putting it behind a domain.
 
+> 💻 **Want it on your own Windows PC or Mac instead of a server?** That is **Uchiyomi Desktop (beta)**: an
+> installer, no Docker. Downloads and the unsigned first-launch steps are in the
+> [README](../README.md#download-the-desktop-app); everything else about it is in the
+> [desktop chapter of the guide](USAGE.md#14-uchiyomi-desktop). The rest of this page is about the server.
+
 ## Other layouts
 
 <details>

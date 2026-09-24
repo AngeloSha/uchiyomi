@@ -158,7 +158,8 @@ test('Open in library navigates by the id the server gave, never by a title gues
   assert.doesNotMatch(src, /\?\? p\.content\[0\]/, 'the first search result is opened again -- a confident wrong navigation');
   assert.match(fn, /const hit = p\.content\.find\(\(s\) => normTitle\(s\.metadata\?\.title \|\| s\.name\) === normTitle\(done\.title\)\);/,
     'the fallback no longer requires an exact normalised match');
-  assert.match(fn, /router\.push\(hit \? `\/series\/\?id=\$\{hit\.id\}` : '\/downloads\/'\)/, 'no match no longer lands on the downloads page');
+  // The server build's arm; desktop (no downloads page) goes to the library -- desktopSurfaces.test.ts pins that.
+  assert.match(fn, /router\.push\(hit \? `\/series\/\?id=\$\{hit\.id\}` : isDesktop\(\) \? '\/library\/' : '\/downloads\/'\)/, 'no match no longer lands on the downloads page');
   assert.doesNotMatch(src, /persists the scan before returning/, 'the stale comment is back: the add has not persisted anything by the time it answers');
   assert.match(src, /seriesId\?: string;/, 'the job card type lost its series id');
 });

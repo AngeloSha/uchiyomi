@@ -15,15 +15,62 @@ import fs from 'fs/promises';
 import path from 'path';
 import { env } from '../env';
 import { q } from './db';
+import { isDesktop, forDesktop, DESKTOP_FLOORS } from './desktop';
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const AdmZip = require('adm-zip');
 
 const run = promisify(execFile);
+
+/**
+ * A database URL without its password, and the password. Anything `new URL` cannot parse (the embedded
+ * image's socket DSN is one) comes back untouched with no password.
+ */
+export function splitPassword(url: string): { url: string; password: string | null } {
+  try {
+    const u = new URL(url);
+    if (!u.password) return { url, password: null };
+    const password = decodeURIComponent(u.password);
+    u.password = '';
+    return { url: u.toString(), password };
+  } catch {
+    return { url, password: null };
+  }
+}
+
+/**
+ * pg_dump as the desktop app runs it: the binary the shell bundles (PG_DUMP_PATH), and the password in the
+ * child's environment rather than on its command line.
+ *
+ * ⚠️ macOS `ps` shows every user's command lines, so a password inside the URL argument is readable by any
+ * other account on the Mac for as long as the dump runs. The shell already passes it as PGPASSWORD with a
+ * password-free URL; a URL that carries one anyway is split here so it still never reaches argv.
+ * Reintroduce by passing the URL through unsplit: backupSchedule.test.ts "the desktop dump keeps the password
+ * off the command line" and desktopBackup.test.ts find it in the arguments.
+ */
+export function desktopDumpCommand(args: string[], url: string, parent: NodeJS.ProcessEnv): {
+  bin: string; args: string[]; env: NodeJS.ProcessEnv;
+} {
+  const { url: bare, password } = splitPassword(url);
+  return {
+    bin: parent.PG_DUMP_PATH || 'pg_dump',
+    args: [...args, bare],
+    env: password ? { ...parent, PGPASSWORD: password } : { ...parent },
+  };
+}
+
+function desktopDump(args: string[]) {
+  const c = desktopDumpCommand(args, env.DATABASE_URL, process.env);
+  return spawn(c.bin, c.args, { env: c.env, windowsHide: true });
+}
 
 /** pg_dump → gzip → file. Plain SQL (not -Fc) on purpose: the bundled client is a newer major than the
  *  server, and a newer custom-format archive can't be read by the older pg_restore. Plain SQL restores with
  *  any psql (including the db container's own), which is what you actually want at 3am in a crisis. */
 function dumpSql(target: string): Promise<void> {
   return new Promise((resolve, reject) => {
-    const pg = spawn('pg_dump', ['--no-owner', '--no-acl', '--clean', '--if-exists', env.DATABASE_URL]);
+    const pg = isDesktop()
+      ? desktopDump(['--no-owner', '--no-acl', '--clean', '--if-exists'])
+      : spawn('pg_dump', ['--no-owner', '--no-acl', '--clean', '--if-exists', env.DATABASE_URL]);
     const gz = createGzip();
     const out = createWriteStream(target);
     let stderr = '';
@@ -38,7 +85,10 @@ function dumpSql(target: string): Promise<void> {
       reject(e?.code === 'ENOENT'
         // Say which binary and where it comes from: the failure is a missing package in the image, not
         // anything the operator did, and the message is the only thing they will have to go on.
-        ? new Error('pg_dump not found in the image — the backup task needs the postgresql client installed')
+        ? new Error(forDesktop(
+          'pg_dump not found in the image — the backup task needs the postgresql client installed',
+          'The bundled database tools are missing; reinstall Uchiyomi.',
+        ))
         : e));
     out.on('error', reject);
     gz.on('error', reject);
@@ -50,6 +100,37 @@ function dumpSql(target: string): Promise<void> {
     out.on('close', settle);
     pg.stdout.pipe(gz).pipe(out);
   });
+}
+
+/**
+ * CONFIG_DIR as a zip, for the desktop app. The server keeps `tar`.
+ *
+ * ⚠️ Not `tar` on the desktop: Windows has one (bsdtar in System32), but a `tar` found first on PATH is
+ * often Git for Windows' GNU tar, which reads `C:\…` as a remote host and fails. adm-zip is already here,
+ * is pure JavaScript, and the shell's "Restore backup…" unpacks .zip (and a server's .tar.gz).
+ * Written as `.part` and renamed, the same rule as the dump: a half-written archive must never look like one.
+ */
+export async function zipConfig(from: string, to: string): Promise<void> {
+  const part = `${to}.part`;
+  try {
+    // Walked by hand rather than addLocalFolder: that stores directory entries with the platform separator
+    // (`series-art\` on Windows), and its async twin strips every non-ASCII character from the names. Here
+    // every entry is a file, named with `/`, spelled exactly as on disk.
+    const zip = new AdmZip();
+    const walk = async (dir: string, rel: string): Promise<void> => {
+      for (const e of await fs.readdir(dir, { withFileTypes: true })) {
+        const name = rel ? `${rel}/${e.name}` : e.name;
+        if (e.isDirectory()) await walk(path.join(dir, e.name), name);
+        else if (e.isFile()) zip.addFile(name, await fs.readFile(path.join(dir, e.name)));
+      }
+    };
+    await walk(from, '');
+    await fs.writeFile(part, zip.toBuffer());
+    await fs.rename(part, to);
+  } catch (e) {
+    await fs.rm(part, { force: true }).catch(() => {});
+    throw e;
+  }
 }
 
 export interface BackupResult {
@@ -117,10 +198,11 @@ export async function runBackup(): Promise<BackupResult> {
     // The usual cause is a host directory bind-mounted at BACKUP_DIR that the app's user can't write.
     // This runs unattended overnight, so say exactly how to fix it rather than leaving a bare errno.
     if ((e as NodeJS.ErrnoException)?.code === 'EACCES' || (e as NodeJS.ErrnoException)?.code === 'EPERM') {
-      throw new Error(
+      throw new Error(forDesktop(
         `cannot write to ${env.BACKUP_DIR} — the backup directory must be writable by uid 10002. ` +
           `If it is a host folder, run:  docker run --rm -v <that folder>:/b alpine chown 10002:10002 /b`,
-      );
+        `Can't write to ${env.BACKUP_DIR}; check your account can write to it.`,
+      ));
     }
     throw e;
   }
@@ -143,7 +225,8 @@ export async function runBackup(): Promise<BackupResult> {
   try {
     const items = await fs.readdir(env.CONFIG_DIR);
     if (items.length) {
-      await run('tar', ['-czf', path.join(dir, 'config.tar.gz'), '-C', env.CONFIG_DIR, '.'], { timeout: 5 * 60 * 1000 });
+      if (isDesktop()) await zipConfig(env.CONFIG_DIR, path.join(dir, 'config.zip'));
+      else await run('tar', ['-czf', path.join(dir, 'config.tar.gz'), '-C', env.CONFIG_DIR, '.'], { timeout: 5 * 60 * 1000 });
     } else configEmpty = true;
   } catch {
     configEmpty = true; // no config dir mounted — the dump alone is still worth keeping
@@ -176,3 +259,32 @@ export function msUntilHour(hour: number, now = new Date()): number {
   if (next.getTime() <= now.getTime()) next.setDate(next.getDate() + 1);
   return next.getTime() - now.getTime();
 }
+
+const DAY = 24 * 60 * 60 * 1000;
+
+/**
+ * How long until the next backup should start.
+ *
+ * The server backs up at `hour` every night and nothing else: it is always on, so the hour always comes.
+ * A PC is not. One that is off at three in the morning, every night, would never back up at all -- so on
+ * the desktop, when the last run (or the last attempt this process made) is more than a day old, the backup
+ * runs shortly after the app starts instead of waiting for an hour it may sleep through again.
+ *
+ * `lastAttempt` is the in-memory stamp server.ts sets as each run starts. A failed run stamps the database
+ * too (recordFailure), so there is no retry loop -- but when the database is the thing that is down it
+ * cannot be stamped, and without the in-memory one every re-arm would try again in five minutes.
+ * With `desktop` off this is exactly `msUntilHour(hour)`, whatever the stamps say.
+ * Reintroduce by dropping the `o.desktop &&`: backupSchedule.test.ts "the server ignores a month-old stamp"
+ * gets five minutes.
+ */
+export function backupDelay(o: { hour: number; lastRun: number | null; lastAttempt: number; now: number; desktop: boolean }): number {
+  if (o.desktop && o.now - Math.max(o.lastRun ?? 0, o.lastAttempt) > DAY) return DESKTOP_FLOORS.backupCatchUp;
+  return msUntilHour(o.hour, new Date(o.now));
+}
+
+/**
+ * The first run of a job that should happen every `interval`, counted from its last stamp: whatever is left
+ * of the interval, never sooner than `floor`. No stamp (`last` 0) means now, at the floor.
+ */
+export const stampDelay = (o: { last: number; interval: number; floor: number; now: number }): number =>
+  Math.max(o.floor, o.last + o.interval - o.now);

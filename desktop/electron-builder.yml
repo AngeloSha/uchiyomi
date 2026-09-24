@@ -1,15 +1,19 @@
-# Uchiyomi Desktop packaging (spike). Windows: NSIS, per-user, x64. macOS: dmg + zip per arch, ad-hoc signed.
+# Uchiyomi Desktop packaging. Windows: NSIS, per-user, x64. macOS: dmg + zip per arch, ad-hoc signed.
+# Unsigned for now (owner's decision, 2026-09-23): Windows shows SmartScreen's "More info -> Run anyway" once;
+# macOS needs System Settings -> Privacy & Security -> Open Anyway once, and cannot auto-update (updates.js).
 appId: com.uchiyomi.desktop
 productName: Uchiyomi
 copyright: Copyright © 2026 Angelo Shaheen
 directories:
   output: dist
   buildResources: build
-# The shell itself (tiny, no runtime deps) goes into app.asar. The server, the web app and Postgres are
-# extraResources: outside asar, laid out on disk exactly like Dockerfile.aio (the bff resolves files relative
-# to its own dist/), and native modules load from real paths.
+# The shell itself goes into app.asar: src/ (plain CommonJS + the local pages) and out/src/ (the solver, compiled
+# from TypeScript by `npm run build` -- it must run BEFORE electron-builder, see package.json "dist").
+# electron-updater, the one runtime dependency, is added from node_modules automatically.
 files:
   - src/**/*
+  - "!src/**/*.ts"
+  - out/src/**/*.js
   - package.json
 extraResources:
   # ONE entry rooted at resources/, on purpose. electron-builder's copy filter drops a node_modules directory at
@@ -31,13 +35,22 @@ electronFuses:
   # gets a NEW hash every build: in the spike the updated app hung behind a hidden "wants to use your
   # confidential information" prompt for 2 minutes, and even the same build came back with unreadable cookies
   # (S6 run 35928548323). These cookies are only a session with our own loopback server, inside the user's
-  # private data folder, and Phase 1's desktop sign-in re-creates them silently. Turn it back ON together with
-  # real signing (Developer ID + DPAPI-backed Windows is fine either way).
+  # private data folder, and the desktop sign-in re-creates them silently. Turn it back ON together with real
+  # signing (Developer ID + DPAPI-backed Windows is fine either way).
   enableCookieEncryption: false
   enableNodeOptionsEnvironmentVariable: false
   enableNodeCliInspectArguments: false
   onlyLoadAppFromAsar: true
   enableEmbeddedAsarIntegrityValidation: false
+# The same GitHub Release as the server's `v*` tag. electron-builder writes app-update.yml from this (Windows'
+# electron-updater reads it) and latest.yml / latest-mac.yml beside the installers; the release workflow uploads
+# them LAST, after the binaries, so no client ever sees a latest.yml whose installer is not there yet. Builds
+# always run with --publish never: publishing is the release workflow's job.
+publish:
+  provider: github
+  owner: AngeloSha
+  repo: uchiyomi
+  releaseType: release
 win:
   target:
     - target: nsis

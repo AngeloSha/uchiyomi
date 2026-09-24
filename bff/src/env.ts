@@ -1,3 +1,7 @@
+// ⚠️ FIRST, before anything reads process.env: on desktop this fills in the paths and settings the rest of the
+// server reads when it loads (CONFIG_DIR just below, among them). A no-op on a server. desktopSwitchHygiene.test.ts
+// pins the order.
+import { isDesktop } from './lib/desktop';
 import { z } from 'zod';
 import { randomBytes } from 'crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
@@ -57,7 +61,9 @@ function ensureVapidKeys(): { publicKey: string; privateKey: string } | null {
     return null;
   }
 }
-const vapid = ensureVapidKeys();
+// Not on desktop: Electron has no push service to deliver to, so the keys would only be a Notifications card
+// that can never work. The notification targets (lib/notify) do not use VAPID and keep working there.
+const vapid = isDesktop() ? null : ensureVapidKeys();
 if (vapid) {
   process.env.VAPID_PUBLIC_KEY = vapid.publicKey;
   process.env.VAPID_PRIVATE_KEY = vapid.privateKey;

@@ -1,0 +1,173 @@
+name: Engine pack
+
+# The extension engine Uchiyomi Desktop downloads on first use (Admin -> Extensions -> "Download the extension
+# engine"): a slim per-platform pack of Suwayomi-Server's own jlinked JRE + its jar + our shim jar, built by
+# desktop/engine/pack.mjs. It is NOT in the installer (owner's decision), so it is published once per Suwayomi
+# pin on its own release, `engine-v<suwayomi version>`, and every app version pins the packs' SHA-256 in
+# desktop/src/engine-pin.json.
+#
+#   1. push the tag the pin names -- `git tag engine-v2.3.2243 && git push origin engine-v2.3.2243` -- or run this
+#      workflow by hand once it is on the default branch (workflow_dispatch only works from there);
+#   2. each pack is built AND booted on its own OS (the readiness probe the app itself uses), then all three are
+#      uploaded to the prerelease;
+#   3. `node desktop/scripts/release/pin-engine.mjs` downloads what was published, verifies it, and writes the
+#      hashes into engine-pin.json; commit that before tagging the app release.
+#
+# Three things here are rules, not style:
+#   * PRERELEASE, always. electron-updater (Windows) and the app's macOS update check both follow GitHub's
+#     "latest release"; an engine release marked latest would be offered to every desktop install as an app
+#     update. The tag is `engine-v*`, never `v*`, so release.yml (tags: v*) never builds images for it either.
+#   * A pinned pack is never replaced. Every install of an app version that pins it checks the download against
+#     that hash, so replacing the file breaks the engine download for all of them at once. The publish job refuses
+#     when engine-pin.json at this commit already holds a hash; a new pack (a new Suwayomi, a changed shim) is a
+#     new tag.
+#   * Nothing publishes unless all three built and booted: the job that writes to the release needs all of them.
+
+on:
+  push:
+    tags: ['engine-v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: engine-pack-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  pack:
+    name: pack ${{ matrix.platform }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Native runners, the same three the desktop app is built on.
+          - { os: windows-latest, platform: win-x64 }
+          - { os: macos-15, platform: mac-arm64 }
+          - { os: macos-15-intel, platform: mac-x64 }
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      # javac --release 21 for the shim; the pack itself carries Suwayomi's own JRE 25.
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: The release being built is the one the app pins
+        run: |
+          node --input-type=module -e "
+            import fs from 'node:fs';
+            const { SUWAYOMI } = await import('./desktop/engine/pack.mjs');
+            const pin = JSON.parse(fs.readFileSync('desktop/src/engine-pin.json', 'utf8'));
+            const fail = (m) => { console.error('::error::' + m); process.exit(1); };
+            if (!/^engine-v/.test(pin.tag)) fail('engine-pin.json tag ' + pin.tag + ' is not engine-v*: electron-updater and release.yml would see it');
+            if (pin.version !== SUWAYOMI.version) fail('engine-pin.json pins ' + pin.version + ' but pack.mjs builds ' + SUWAYOMI.version);
+            // engine-v2.3.2243, or engine-v2.3.2243-2 for a rebuilt pack of the same Suwayomi (a changed shim).
+            if (pin.tag !== 'engine-' + pin.version && !pin.tag.startsWith('engine-' + pin.version + '-')) fail('the tag ' + pin.tag + ' does not name the version ' + pin.version);
+            if (process.env.GITHUB_REF_TYPE === 'tag' && process.env.GITHUB_REF_NAME !== pin.tag) fail('pushed ' + process.env.GITHUB_REF_NAME + ' but engine-pin.json names ' + pin.tag);
+            if (!pin.packs['${{ matrix.platform }}']) fail('engine-pin.json has no ${{ matrix.platform }} entry');
+            if (pin.packs['${{ matrix.platform }}'].file !== 'engine-pack-${{ matrix.platform }}.zip') fail('engine-pin.json expects a different file name for ${{ matrix.platform }}');
+            // Fail in seconds rather than after a 330 MB download: the publish job would refuse anyway.
+            if (pin.packs['${{ matrix.platform }}'].sha256) fail(pin.tag + ' is already pinned at this commit; a published pack is never replaced (a new pack is a new engine-v* tag)');
+            console.log('building ' + pin.tag + ' / ${{ matrix.platform }}');
+          "
+      - uses: actions/cache@v6
+        with:
+          path: ${{ runner.temp }}/suwayomi
+          # pack.mjs pins the Suwayomi version and each asset's SHA-256, and re-downloads a cached file that does
+          # not match, so keying on it only saves a stale-cache re-download.
+          key: suwayomi-${{ matrix.platform }}-${{ hashFiles('desktop/engine/pack.mjs') }}
+      - name: Build the pack
+        run: node desktop/engine/pack.mjs --platform ${{ matrix.platform }} --cache "$RUNNER_TEMP/suwayomi" --out pack-out
+      # The same unpack -> launch (engine.js buildLaunch, the spike's working recipe) -> /api/v1/settings/about
+      # readiness probe the app runs, on the OS this pack is for. run.mjs stops the engine through the shim's stdin
+      # lifeline once it is ready; stdin is /dev/null so that happens straight away.
+      - name: Boot it on ${{ matrix.os }}
+        run: |
+          node desktop/engine/run.mjs --pack "pack-out/engine-pack-${{ matrix.platform }}.zip" \
+            --runtime "$RUNNER_TEMP/rt" --root "$RUNNER_TEMP/root" --timeout-s 240 < /dev/null
+      - name: Engine log
+        if: failure()
+        run: tail -n 200 "$RUNNER_TEMP/root/engine-stdout.log" || true
+      - uses: actions/upload-artifact@v7
+        with:
+          name: engine-pack-${{ matrix.platform }}
+          path: |
+            pack-out/engine-pack-${{ matrix.platform }}.zip
+            pack-out/engine-pack-${{ matrix.platform }}.zip.sha256
+            pack-out/engine-pack-${{ matrix.platform }}.json
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: Publish to the engine prerelease
+    needs: pack
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      # The only job that writes. Scoped here, like release.yml's release job.
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: engine-pack-*
+          path: packs
+          merge-multiple: true
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          cd packs
+          ls -la
+          tag=$(jq -r .tag ../desktop/src/engine-pin.json)
+          version=$(jq -r .version ../desktop/src/engine-pin.json)
+          # Every pack is here and is what its .sha256 says.
+          for p in win-x64 mac-arm64 mac-x64; do
+            [ -s "engine-pack-$p.zip" ] || { echo "::error::engine-pack-$p.zip is missing"; exit 1; }
+            sha256sum -c "engine-pack-$p.zip.sha256"
+          done
+          # ⚠️ Never replace a pinned pack (see the header). Reintroduce by deleting this loop: a re-run after the pin
+          # landed would clobber the files every installed app version checks its download against.
+          for p in win-x64 mac-arm64 mac-x64; do
+            pinned=$(jq -r --arg p "$p" '.packs[$p].sha256 // empty' ../desktop/src/engine-pin.json)
+            if [ -n "$pinned" ]; then
+              echo "::error::engine-pin.json already pins $p to $pinned at this commit. A published pack is never replaced; a new pack needs a new engine-v* tag (and a new version/tag in engine-pin.json)."
+              exit 1
+            fi
+          done
+          if gh release view "$tag" >/dev/null 2>&1; then
+            # Idempotent: a re-run before the pin exists may replace the files, and must leave it a prerelease.
+            gh release edit "$tag" --prerelease
+          else
+            gh release create "$tag" --target "$GITHUB_SHA" --prerelease --latest=false \
+              --title "Extension engine $version (Uchiyomi Desktop)" \
+              --notes "The extension engine Uchiyomi Desktop downloads on first use (Admin → Extensions): Suwayomi-Server $version with its own Java runtime and Uchiyomi's launcher shim, one pack per platform. Not an app release, and not something to download by hand: the app fetches the pack for its platform and checks it against the SHA-256 pinned in that app version. Built by .github/workflows/engine-pack.yml from $GITHUB_SHA. What is inside, unmodified: Suwayomi-Server $version (MPL-2.0; source: https://github.com/Suwayomi/Suwayomi-Server/tree/$version) and the OpenJDK runtime from that same Suwayomi release; plus Uchiyomi's shim, whose source is desktop/engine-shim/ in this repository."
+          fi
+          gh release upload "$tag" --clobber \
+            engine-pack-win-x64.zip engine-pack-mac-arm64.zip engine-pack-mac-x64.zip \
+            engine-pack-win-x64.zip.sha256 engine-pack-mac-arm64.zip.sha256 engine-pack-mac-x64.zip.sha256 \
+            engine-pack-win-x64.json engine-pack-mac-arm64.json engine-pack-mac-x64.json
+          # Belt and braces: it must still be a prerelease after the upload.
+          [ "$(gh release view "$tag" --json isPrerelease --jq .isPrerelease)" = true ] \
+            || { echo "::error::$tag is not a prerelease"; exit 1; }
+          {
+            echo "### Published $tag"
+            echo
+            echo '| pack | bytes | sha256 |'
+            echo '|---|---|---|'
+            for p in win-x64 mac-arm64 mac-x64; do
+              echo "| engine-pack-$p.zip | $(jq -r .packBytes "engine-pack-$p.json") | \`$(cut -d' ' -f1 "engine-pack-$p.zip.sha256")\` |"
+            done
+            echo
+            echo "Next: \`node desktop/scripts/release/pin-engine.mjs\` (downloads the three packs as published, verifies them and writes desktop/src/engine-pin.json), commit, then tag the app release."
+          } >> "$GITHUB_STEP_SUMMARY"

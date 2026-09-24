@@ -8,9 +8,13 @@
 //
 // This module turns the stored evidence (plus a live probe, when someone has just gone and looked) into a
 // code, a sentence anyone may read, and a fix only an admin should see. It is deliberately pure: no db, no
-// fetch, no imports beyond a type. That is what lets its test run without a database and assert against the
-// verbatim strings production actually holds.
+// fetch, no imports beyond a type and lib/desktop.ts (which imports nothing of ours). That is what lets its
+// test run without a database and assert against the verbatim strings production actually holds.
+//
+// The fixes that send an admin to a container, a compose file or an env var go through `forDesktop`: the
+// desktop app has none of those, and its answer is Uchiyomi's own built-in helper and a restart.
 import type { SourceStatus } from './sourceHealth';
+import { forDesktop } from './desktop';
 
 export type DiagnosisCode =
   | 'ok'
@@ -118,12 +122,18 @@ const NEEDS_ADMIN = 'This source needs a check from an admin.';
 const RULES: Array<[RegExp, () => Diagnosis]> = [
   [/chromedriver.*exited|devtoolsactiveport|session not created/i, () =>
     D('solver_crash', NEEDS_ADMIN,
-      "The Cloudflare solver's browser crashed. Chrome in Docker needs far more than the default 64 MB of shared memory: set shm_size: 1gb on the flaresolverr service and recreate it.",
+      forDesktop(
+        "The Cloudflare solver's browser crashed. Chrome in Docker needs far more than the default 64 MB of shared memory: set shm_size: 1gb on the flaresolverr service and recreate it.",
+        "The browser inside Uchiyomi's built-in Cloudflare helper crashed. Quit and reopen Uchiyomi to restart it.",
+      ),
       'admin')],
 
   [/httpconnectionpool|max retries exceeded|newconnectionerror|failed to establish a new connection/i, () =>
     D('solver_down', NEEDS_ADMIN,
-      'The Cloudflare solver is not answering. Check the container is up and FLARESOLVERR_URL is right. It also leaks memory, so it wants a periodic restart.',
+      forDesktop(
+        'The Cloudflare solver is not answering. Check the container is up and FLARESOLVERR_URL is right. It also leaks memory, so it wants a periodic restart.',
+        "Uchiyomi's built-in Cloudflare helper is not answering. Quit and reopen Uchiyomi to restart it.",
+      ),
       'admin')],
 
   [/timeout after [\d.]+ seconds|error solving the challenge/i, () =>
@@ -144,7 +154,10 @@ const RULES: Array<[RegExp, () => Diagnosis]> = [
   // precisely the people it is for. Name the shipped names as examples and point at the value they have.
   [/cloudflare bypass currently disabled/i, () =>
     D('cf_challenge', 'This source is protected by a check we could not get past.',
-      "The extension engine's own Cloudflare bypass is switched off. On the Suwayomi engine's container (uchiyomi-suwayomi in the shipped compose files) set FLARESOLVERR_ENABLED=true and FLARESOLVERR_URL to the same solver address Uchiyomi uses (http://uchiyomi-flaresolverr:8191 in the shipped files), then recreate it. The v0.37.0 compose files already set both, so an upgrade that recreates the engine is the fix there.",
+      forDesktop(
+        "The extension engine's own Cloudflare bypass is switched off. On the Suwayomi engine's container (uchiyomi-suwayomi in the shipped compose files) set FLARESOLVERR_ENABLED=true and FLARESOLVERR_URL to the same solver address Uchiyomi uses (http://uchiyomi-flaresolverr:8191 in the shipped files), then recreate it. The v0.37.0 compose files already set both, so an upgrade that recreates the engine is the fix there.",
+        "The extension engine isn't using Uchiyomi's built-in Cloudflare helper. Quit and reopen Uchiyomi to restart it.",
+      ),
       'admin')],
 
   [/just a moment|cf-chl|cf_clearance|cloudflare|challenge/i, () =>
@@ -169,7 +182,10 @@ const RULES: Array<[RegExp, () => Diagnosis]> = [
 
   [/^suwayomi\b|suwayomi \d{3}|suwayomi returned no data/i, () =>
     D('upstream_down', 'The extension server did not answer.',
-      'This is the Suwayomi extension server, not the site. Check that container.', 'admin')],
+      forDesktop(
+        'This is the Suwayomi extension server, not the site. Check that container.',
+        "This is Uchiyomi's extension engine, not the site. Quit and reopen Uchiyomi to restart it.",
+      ), 'admin')],
 
   [/enotfound|eai_again|econnrefused/i, () =>
     D('unreachable', 'This source is not answering right now.',
@@ -243,7 +259,10 @@ export function diagnose(f: HealthFacts, probe?: Probe, baseUrl?: string): Diagn
         const hit = RULES.find(([re]) => re.test(err))?.[1]();
         if (hit && hit.code.startsWith('solver_')) return hit;
         return D('solver_down', NEEDS_ADMIN,
-          'The site answers fine from this server, so the Cloudflare solver is the broken part. Check that container.',
+          forDesktop(
+            'The site answers fine from this server, so the Cloudflare solver is the broken part. Check that container.',
+            "The site answers fine from this computer, so Uchiyomi's built-in Cloudflare helper is the broken part. Quit and reopen Uchiyomi to restart it.",
+          ),
           'admin');
       }
       if (probe.httpStatus === 200 && probe.looksHtml && suspect) {
