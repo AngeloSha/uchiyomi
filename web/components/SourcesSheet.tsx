@@ -274,6 +274,7 @@ export function SourcesSheet({ id, series, groups, admin, error, isLoading, have
   const toast = useToast();
   const qc = useQueryClient();
   const [busy, setBusy] = useState(false);
+  const [savingPref, setSavingPref] = useState(false);
   const isAdmin = !!admin;
   const sources = series?.sources ?? [];
 
@@ -381,6 +382,34 @@ export function SourcesSheet({ id, series, groups, admin, error, isLoading, have
   };
 
   const serverDefault = admin?.global.patienceDays ?? 2;
+  /** The series' own first choice, or null when it is following the server-wide order. */
+  const preferredId: string | null = series?.sourcePrefs?.priority?.[0] ?? null;
+  /**
+   * Put one source at the head of this series' order, or clear the override.
+   *
+   * The whole list is sent, not just the winner: the order is a ranked sequence, and storing only a first
+   * choice would leave the rest unranked and therefore all equal -- which decides nothing when the
+   * preferred source is the one that is behind.
+   */
+  const setPreferred = async (sourceId: string | null) => {
+    setSavingPref(true);
+    try {
+      const priority = sourceId
+        ? [sourceId, ...sources.map((x) => x.sourceId).filter((x) => x !== sourceId)]
+        : null;
+      await api(`/api/admin/series/${encodeURIComponent(id)}`, {
+        method: 'PATCH', json: { sourcePrefs: priority ? { priority } : null },
+      });
+      onSaved();
+      toast(sourceId
+        ? tr('Preferring {name}', { name: sources.find((x) => x.sourceId === sourceId)?.name ?? sourceId })
+        : tr('Back to the server default'), 'success');
+    } catch (e) {
+      toast(msgOf(e, tr('Could not save that')), 'error');
+    }
+    setSavingPref(false);
+  };
+
   const main = sources.find((s) => s.primary) ?? sources[0];
   // A site read by the built-in engine cannot say who translated a chapter; an extension or MangaDex series
   // with no groups yet simply has not been checked (or nothing on it is tagged).
@@ -427,6 +456,37 @@ export function SourcesSheet({ id, series, groups, admin, error, isLoading, have
               ))}
             </div>
           : <p className="text-xs text-fog-500">{tr('No source — the chapters were scanned from disk.')}</p>}
+        {/*
+          Which source this series should be taken from, when more than one carries it.
+          Unlike the group ranking below, this one can REPLACE what is already here, when the server's
+          upgrade switch is on: a chapter held from a lower-ranked source is fetched again from the
+          preferred one, over the same file, so chapter ids and everyone's progress survive. That is the
+          whole point -- a series that followed a mediocre source while the good one was behind had no way
+          back short of deleting chapters by hand.
+        */}
+        {isAdmin && sources.length > 1 && (
+          <div className="mt-3">
+            <p className="mb-1.5 max-w-prose text-[11px] leading-relaxed text-fog-500">
+              {tr('Preferred source for this series. Chapters come from it first when it has them; with “Replace chapters from a better source” on in Admin, chapters already here from another source are fetched again from it.')}
+            </p>
+            <div className="flex flex-wrap gap-1.5">
+              {sources.map((x) => (
+                <button key={x.sourceId} type="button" disabled={savingPref}
+                  onClick={() => setPreferred(preferredId === x.sourceId ? null : x.sourceId)}
+                  aria-pressed={preferredId === x.sourceId}
+                  className={`chip text-xs disabled:opacity-50 ${preferredId === x.sourceId ? 'chip-active' : ''}`}>
+                  {x.name}
+                </button>
+              ))}
+              {preferredId && (
+                <button type="button" disabled={savingPref} onClick={() => setPreferred(null)}
+                  className="chip text-xs text-fog-500 disabled:opacity-50">
+                  {tr('Use the server default')}
+                </button>
+              )}
+            </div>
+          </div>
+        )}
         {isAdmin && (
           <div className="mt-2 flex flex-wrap gap-1.5">
             {sources.length > 0 && (

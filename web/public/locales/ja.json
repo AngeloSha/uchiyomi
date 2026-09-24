@@ -2,7 +2,7 @@
   "_meta": {
     "language": "ja",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 1149
+    "strings": 1159
   },
   "1 check found something": "1 件のチェックで問題を検出",
   "1 member": "メンバー 1 人",
@@ -1152,5 +1152,15 @@
   "The engine said: {reason}": "エンジンの応答: {reason}",
   "The extension engine refused that address: {reason}": "拡張機能エンジンがこのアドレスを拒否しました: {reason}",
   "The standard Docker install runs one in the {name} container. If you turned it off by emptying SUWAYOMI_URL, put that line back in .env and run {command}.": "標準の Docker インストールでは {name} コンテナーでエンジンが動作します。SUWAYOMI_URL を空にして無効にした場合は、.env にその行を戻して {command} を実行してください。",
-  "Tip: hide the languages you don’t read first — only {n} sources can be switched on at once.": "ヒント: まず読まない言語を隠しておきましょう — 同時に有効にできるソースは {n} 件までです。"
+  "Tip: hide the languages you don’t read first — only {n} sources can be switched on at once.": "ヒント: まず読まない言語を隠しておきましょう — 同時に有効にできるソースは {n} 件までです。",
+  "Add a source to the order": "順位にソースを追加",
+  "Back to the server default": "サーバーの既定に戻しました",
+  "Most preferred first. When a chapter is on more than one followed source, it is taken from the highest-ranked one, after your scanlation group preferences. A series can override this under its own Sources & translations.": "優先度の高い順。ひとつの話が複数のフォロー中ソースにある場合、スキャンレーターの優先設定のあとで、最上位のソースから取得します。シリーズごとに「ソースと翻訳」で上書きできます。",
+  "No order set — each series prefers the source it was added from, and nothing is ever replaced.": "順位は未設定です。各シリーズは追加元のソースを優先し、何も置き換えられません。",
+  "Off by default. When on, a chapter you already have from a lower-ranked source is downloaded again from a higher-ranked one, over the same file, so reading progress is kept. At most 20 a night across the library; only complete copies replace a chapter; one that fails is left alone for a week.": "既定ではオフです。オンにすると、下位のソースから取得済みの話を上位のソースから同じファイルに再ダウンロードするため、読書の進捗は保たれます。ライブラリ全体で1晩最大20話、完全なコピーだけが置き換え、失敗した話は1週間そのままにします。",
+  "Preferred source for this series. Chapters come from it first when it has them; with “Replace chapters from a better source” on in Admin, chapters already here from another source are fetched again from it.": "このシリーズの優先ソース。そのソースにある話はまずそこから取得します。管理画面で「より良いソースから話を置き換える」がオンなら、ほかのソースから取得済みの話もこのソースから再取得します。",
+  "Preferring {name}": "{name} を優先",
+  "Replace chapters from a better source": "より良いソースから話を置き換える",
+  "Source order": "ソースの順位",
+  "Use the server default": "サーバーの既定を使う"
 }

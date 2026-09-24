@@ -345,6 +345,31 @@ the main one, the line's *{n} not here yet* counts the chapters missing across a
 and the scanlator preferences above apply to the merged list — so a group you prefer is taken from whichever
 source carries it.
 
+### Preferring one source
+
+When two followed sources both have a chapter and your scanlator preferences do not decide between the
+copies, the main source used to win. A **source order** changes that: **Admin → Settings → Source order**
+ranks sources for the whole server (↑ ↓ to move one, ✕ to drop it, a chip to add one), and an admin can
+override it for one series with the source chips in its *Sources & translations* sheet — tapping one makes it
+that series' first choice, **Use the server default** clears it. A series' own order replaces the server's
+rather than merging with it. A source that is not in the order ranks below every one that is.
+
+On its own the order only decides where chapters you do not have yet come from. **Replace chapters from a
+better source**, the switch under the order, goes further, and is **off by default**: with it on, a chapter
+you already have from a lower-ranked source is downloaded again from a higher-ranked one that lists it,
+written over the same file, so the chapter keeps its place, its reading progress and its bookmarks. It is
+deliberately careful:
+
+- at most **20 a night** across the whole library, and in each series only after its missing chapters;
+- only a **complete** copy from the higher-ranked source replaces a chapter — if that source fails or serves
+  it with pages missing, nothing else is tried and the file you have stays exactly as it is (the new file is
+  written beside it and only renamed over it once it is whole);
+- a chapter whose replacement failed is left alone for **a week**;
+- a chapter you deleted is never brought back this way, and a file whose source is unknown — one the scan
+  found on disk, or one downloaded before the source was recorded — is never replaced.
+
+A replaced chapter is not announced as a new chapter.
+
 ### When a source or page fails
 
 The downloader learns a source's pace. A 429 makes later chapters use one page worker and longer gaps, and

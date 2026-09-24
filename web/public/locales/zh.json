@@ -2,7 +2,7 @@
   "_meta": {
     "language": "zh",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 1149
+    "strings": 1159
   },
   "1 check found something": "1 项检查发现问题",
   "1 member": "1 位成员",
@@ -1152,5 +1152,15 @@
   "The engine said: {reason}": "引擎返回：{reason}",
   "The extension engine refused that address: {reason}": "扩展引擎拒绝了该地址：{reason}",
   "The standard Docker install runs one in the {name} container. If you turned it off by emptying SUWAYOMI_URL, put that line back in .env and run {command}.": "标准 Docker 安装会在 {name} 容器中运行一个扩展引擎。如果你是通过清空 SUWAYOMI_URL 关闭的，请把那一行加回 .env，然后运行 {command}。",
-  "Tip: hide the languages you don’t read first — only {n} sources can be switched on at once.": "提示：先隐藏你不读的语言 — 同时最多只能启用 {n} 个来源。"
+  "Tip: hide the languages you don’t read first — only {n} sources can be switched on at once.": "提示：先隐藏你不读的语言 — 同时最多只能启用 {n} 个来源。",
+  "Add a source to the order": "将来源加入排序",
+  "Back to the server default": "已恢复为服务器默认",
+  "Most preferred first. When a chapter is on more than one followed source, it is taken from the highest-ranked one, after your scanlation group preferences. A series can override this under its own Sources & translations.": "最优先的排在最前。同一章节出现在多个已关注来源时，在应用你的汉化组偏好之后，从排名最高的来源获取。每部系列都可以在自己的“来源与翻译”中覆盖此设置。",
+  "No order set — each series prefers the source it was added from, and nothing is ever replaced.": "未设置排序——每部系列优先使用添加时的来源，且不会替换任何内容。",
+  "Off by default. When on, a chapter you already have from a lower-ranked source is downloaded again from a higher-ranked one, over the same file, so reading progress is kept. At most 20 a night across the library; only complete copies replace a chapter; one that fails is left alone for a week.": "默认关闭。开启后，已从排名较低来源获取的章节会从排名较高的来源重新下载，覆盖同一文件，因此阅读进度会保留。整个库每晚最多 20 章；只有完整副本才会替换章节；失败的章节一周内不再尝试。",
+  "Preferred source for this series. Chapters come from it first when it has them; with “Replace chapters from a better source” on in Admin, chapters already here from another source are fetched again from it.": "此系列的首选来源。只要该来源有章节，就优先从它获取；在管理中开启“从更好的来源替换章节”后，已有的来自其他来源的章节会从它重新获取。",
+  "Preferring {name}": "优先使用 {name}",
+  "Replace chapters from a better source": "从更好的来源替换章节",
+  "Source order": "来源排序",
+  "Use the server default": "使用服务器默认"
 }

@@ -2,7 +2,7 @@
   "_meta": {
     "language": "ru",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 1149
+    "strings": 1159
   },
   "1 check found something": "1 проверка нашла проблему",
   "1 member": "1 участник",
@@ -1152,5 +1152,15 @@
   "The engine said: {reason}": "Ответ движка: {reason}",
   "The extension engine refused that address: {reason}": "Движок расширений отклонил этот адрес: {reason}",
   "The standard Docker install runs one in the {name} container. If you turned it off by emptying SUWAYOMI_URL, put that line back in .env and run {command}.": "Стандартная установка Docker запускает его в контейнере {name}. Если вы отключили его, очистив SUWAYOMI_URL, верните эту строку в .env и выполните {command}.",
-  "Tip: hide the languages you don’t read first — only {n} sources can be switched on at once.": "Совет: сначала скройте языки, которые вы не читаете, — одновременно можно включить не больше {n} источников."
+  "Tip: hide the languages you don’t read first — only {n} sources can be switched on at once.": "Совет: сначала скройте языки, которые вы не читаете, — одновременно можно включить не больше {n} источников.",
+  "Add a source to the order": "Добавить источник в порядок",
+  "Back to the server default": "Снова по умолчанию сервера",
+  "Most preferred first. When a chapter is on more than one followed source, it is taken from the highest-ranked one, after your scanlation group preferences. A series can override this under its own Sources & translations.": "Самый предпочтительный — первым. Если глава есть в нескольких отслеживаемых источниках, она берётся из самого высокого по порядку — после ваших предпочтений по сканлейтерам. Серия может переопределить это в своих «Источниках и переводах».",
+  "No order set — each series prefers the source it was added from, and nothing is ever replaced.": "Порядок не задан — каждая серия предпочитает источник, из которого была добавлена, и ничего не заменяется.",
+  "Off by default. When on, a chapter you already have from a lower-ranked source is downloaded again from a higher-ranked one, over the same file, so reading progress is kept. At most 20 a night across the library; only complete copies replace a chapter; one that fails is left alone for a week.": "По умолчанию выключено. Если включить, глава, которая у вас уже есть из источника ниже по порядку, заново скачивается из источника выше — поверх того же файла, поэтому прогресс чтения сохраняется. Не больше 20 за ночь на всю библиотеку; главу заменяет только полная копия; неудавшуюся главу не трогают неделю.",
+  "Preferred source for this series. Chapters come from it first when it has them; with “Replace chapters from a better source” on in Admin, chapters already here from another source are fetched again from it.": "Предпочтительный источник для этой серии. Главы берутся сначала из него, если они там есть; при включённом «Заменять главы из лучшего источника» в Администрировании уже имеющиеся главы из других источников будут скачаны из него заново.",
+  "Preferring {name}": "Предпочтение: {name}",
+  "Replace chapters from a better source": "Заменять главы из лучшего источника",
+  "Source order": "Порядок источников",
+  "Use the server default": "Использовать настройку сервера"
 }
