@@ -32,6 +32,24 @@ export function chapterLabel(b: { metadata?: { number?: string; title?: string }
   return b.name || '';
 }
 
+/**
+ * The chapter's own name, when it says something its number does not.
+ *
+ * Rows show `chapterLabel` -- "Ch. 12" -- and nothing else, so a chapter that has a real name never
+ * showed one: not in the list, not beside Continue, nowhere. Sources do supply names, and the server now
+ * keeps them (lib/library.ts `chapterName`), so the remaining job is to not print the number twice:
+ * most sources title a chapter "Chapter 12", which next to "Ch. 12" is noise.
+ */
+export function chapterName(b: { name?: string; number?: number; metadata?: { title?: string; number?: string } }): string {
+  const t = (b.metadata?.title || b.name || '').trim();
+  if (!t) return '';
+  const n = b.metadata?.number ?? (b.number != null ? String(b.number) : '');
+  if (!n) return t;
+  const esc = n.replace('.', '\\.');
+  if (new RegExp(`^(?:ch(?:apter|\\.)?|episode|ep\\.?)?\\s*0*${esc}\\s*$`, 'i').test(t)) return '';
+  return t;
+}
+
 export function relativeTime(iso?: string | null): string {
   if (!iso) return '';
   const d = new Date(iso).getTime();

@@ -661,20 +661,43 @@ export async function setBookDates(folder: string, chapters: { number: number; p
  * and its absence writes NULL: a complete copy landing over a partial one -- a refetch, the completion
  * pass falling through to another source -- clears the mark in the same stamp that records who wrote it.
  */
-export async function setBookMeta(folder: string, landed: Array<{ number: number; scanlator?: string; source?: string; missing?: number[] }>): Promise<void> {
+/**
+ * The chapter's own name, when the source gave one worth keeping.
+ *
+ * A downloaded chapter's FILE is named from its number alone -- `Chapter 12.cbz`, for the reasons
+ * lib/downloader.ts sets out -- so the title the scanner derives from that filename is the number said a
+ * second time. Sources usually know better ("Log. 12", "The Sound of Thunder"), and the downloader already
+ * writes that into the CBZ's ComicInfo; nothing has ever read it back, so a chapter with a real name never
+ * showed one anywhere in the app.
+ *
+ * Filtered, because most sources also just say "Chapter 12": replacing one restatement of the number with
+ * another is churn, and would make every row read `Ch. 12 · Chapter 12`.
+ */
+export function chapterName(title: string | undefined | null, number: number): string | null {
+  const t = (title ?? '').trim();
+  if (!t) return null;
+  const n = String(number).replace('.', '\\.');
+  if (new RegExp(`^(?:ch(?:apter|\\.)?|episode|ep\\.?)?\\s*0*${n}\\s*$`, 'i').test(t)) return null;
+  return t;
+}
+
+export async function setBookMeta(folder: string, landed: Array<{ number: number; scanlator?: string; source?: string; missing?: number[]; title?: string }>): Promise<void> {
   const rows = landed.filter((c) => Number.isFinite(c.number));
   if (!rows.length) return;
   const values: string[] = [];
   const params: any[] = [folder];
   for (const c of rows) {
-    params.push(c.number, c.scanlator ?? null, c.source ?? null, c.missing?.length ? c.missing : null);
-    values.push(`($${params.length - 3}::real, $${params.length - 2}::text, $${params.length - 1}::text, $${params.length}::int[])`);
+    params.push(c.number, c.scanlator ?? null, c.source ?? null, c.missing?.length ? c.missing : null, chapterName(c.title, c.number));
+    values.push(`($${params.length - 4}::real, $${params.length - 3}::text, $${params.length - 2}::text, $${params.length - 1}::int[], $${params.length}::text)`);
   }
   await q(
-    `UPDATE lib_books b SET scanlator = v.grp, source_id = v.src, missing_pages = v.miss
-     FROM (VALUES ${values.join(',')}) AS v(n, grp, src, miss), lib_series s
+    `UPDATE lib_books b SET scanlator = v.grp, source_id = v.src, missing_pages = v.miss,
+            title = COALESCE(v.name, b.title)
+     FROM (VALUES ${values.join(',')}) AS v(n, grp, src, miss, name), lib_series s
      WHERE s.folder = $1 AND b.series_id = s.id AND b.number = v.n
-       AND (b.scanlator IS DISTINCT FROM v.grp OR b.source_id IS DISTINCT FROM v.src OR b.missing_pages IS DISTINCT FROM v.miss)`,
+       AND (b.scanlator IS DISTINCT FROM v.grp OR b.source_id IS DISTINCT FROM v.src
+            OR b.missing_pages IS DISTINCT FROM v.miss
+            OR (v.name IS NOT NULL AND b.title IS DISTINCT FROM v.name))`,
     params,
   );
 }

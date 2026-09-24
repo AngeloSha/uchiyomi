@@ -6,7 +6,7 @@ import { useSearchParams, useRouter } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, img } from '@/lib/api';
 import { Book, Ghost, Listing, Page, Series, VersionCopy, Versions } from '@/lib/types';
-import { chapterLabel, isVolumeName, relativeTime } from '@/lib/format';
+import { chapterLabel, chapterName, isVolumeName, relativeTime } from '@/lib/format';
 import { listDownloads, downloadChapter, deleteDownload } from '@/lib/downloads';
 import { applyCover, clearCover } from '@/lib/theme';
 import { Img, Backdrop, Rail, SectionTitle } from '@/components/ui';
@@ -556,7 +556,11 @@ function ChapterRow({ book, downloaded, sourceNames, primarySource, versions, on
         </div>
         <span className={`h-2 w-2 shrink-0 rounded-full ${state === 'read' ? 'bg-ink-600' : state === 'reading' ? 'bg-accent' : 'bg-accent/40'}`} />
         <div className="min-w-0">
-          <p className={`truncate text-sm ${state === 'read' ? 'text-fog-500' : 'text-fog-100'}`}>{chapterLabel(book)}</p>
+          <p className={`truncate text-sm ${state === 'read' ? 'text-fog-500' : 'text-fog-100'}`}>
+            {chapterLabel(book)}
+            {/* The chapter's own name, when the source gave one that is not just the number again. */}
+            {chapterName(book) && <span className="text-fog-500"> · {chapterName(book)}</span>}
+          </p>
           <RowCaption group={book.scanlator} via={altSource} versions={versions} pruned={book.pruned} missing={book.missingPages?.length} />
           {state === 'reading' && rp && (
             <p className="text-[11px] text-accent">page {rp.page}/{book.media.pagesCount}</p>
@@ -1353,6 +1357,22 @@ function SeriesInner() {
       <button onClick={() => resumeBook && router.push(`/reader/?book=${resumeBook.id}`)} disabled={nothingYet || !resumeBook} className="btn-accent w-full disabled:opacity-50">
         <IcPlay width={18} height={18} /> {nothingYet ? tr('Nothing to read yet') : inProgress ? tr('Continue') : tr('Start reading')}
       </button>
+      {/*
+        Which chapter that button opens. "Continue" on its own is a promise with no subject: on a long
+        series there is no way to tell whether it resumes the chapter you were part-way through, moves on
+        to the next unread one, or drops you at the top -- and those differ precisely when it matters.
+      */}
+      {!nothingYet && resumeBook && (
+        <p className="-mt-1 truncate text-center text-xs text-fog-500">
+          {resumeBook.readProgress && !resumeBook.readProgress.completed && resumeBook.media?.pagesCount
+            ? tr('{chapter} · page {page} of {pages}', {
+                chapter: [chapterLabel(resumeBook), chapterName(resumeBook)].filter(Boolean).join(' · '),
+                page: resumeBook.readProgress.page ?? 1,
+                pages: resumeBook.media.pagesCount,
+              })
+            : [chapterLabel(resumeBook), chapterName(resumeBook)].filter(Boolean).join(' · ')}
+        </p>
+      )}
       <div className="flex gap-2">
         <button onClick={toggleFav} className={`flex flex-1 items-center justify-center gap-2 rounded-full border py-3 text-sm ${fav ? 'border-accent/50 bg-accent-soft text-accent' : 'border-ink-700 text-fog-300'}`}>
           <IcHeart width={18} height={18} fill={fav ? 'currentColor' : 'none'} stroke={fav ? 'none' : 'currentColor'} /> {fav ? 'Saved' : 'Favorite'}
