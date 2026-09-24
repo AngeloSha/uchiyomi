@@ -1,5 +1,158 @@
 # Changelog
 
+## v0.45.0 — 2026-09-24
+
+**The desktop app can also be a window onto your own server; adding an extension repository is spelled out,
+in the app and in the docs; and the desktop app has a real guide.** The owner asked for three things the day
+v0.44.0 shipped: that the Windows and Mac app should also work with "our usual self-hosted version by putting in
+the website url", asked on first launch; better documentation of the desktop app; and a clearer way to learn how
+to add the extensions repository. This release is those three.
+
+### Uchiyomi Desktop: "On this computer" or "Connect to my server"
+
+The first launch now asks **"How do you want to use Uchiyomi?"**:
+
+* **On this computer** is v0.44.0's app, unchanged: the library folder question (now with a **Back** button),
+  then the whole app on the PC — its own server, database, downloads and extension engine.
+* **Connect to my server** asks for the address you open Uchiyomi at in a browser — `https://manga.example.com`,
+  `http://192.168.1.10:8080` — checks that an Uchiyomi server answers there, says *Connected to* and its name,
+  and opens it in the window. **Nothing runs on the computer in this mode**: no database, no server, no engine,
+  no sign-in secret. You sign in on your server's own page, and every tab is your server's.
+
+An install that already chose a library folder in v0.44.0 is never asked: it opens standalone, as before. You
+can switch at any time from the tray or menu-bar icon — **Connect to my server instead…** in one mode; **Switch
+server…**, **Use on this computer instead** and **Forget this server…** in the other — and switching never
+touches the library on the computer.
+
+* **Checked before it is saved.** The address is reduced to its origin (a path is dropped and said so, since
+  Uchiyomi must be at the root of its address; with no scheme typed, `https://` is tried and the message says to
+  type `http://` in full if that is what the server uses), redirects are followed hop by hop and the final
+  origin stored (one that leads to another host name is shown and waits for **Continue**), and `/auth/config`
+  must answer like an Uchiyomi server. Each refusal names its cause: unreachable, not an
+  Uchiyomi server, an HTTP error, a user name in the address, another copy of the desktop app, or a proxy's
+  password prompt (HTTP Basic Auth is not supported yet, and says so). A sign-in portal in front of the server
+  (Authelia-style forward auth — one that sends you on to its sign-in page, or one that answers 401/403 itself)
+  is recognised and offered as **Continue**; the window follows it, and single sign-on round trips stay in the
+  window.
+* **Self-signed certificates: asked once, remembered, loud when they change** (the owner's decision). A
+  certificate the computer does not trust shows *Trust this server's certificate?* with the server, its SHA-256
+  fingerprint (the value `openssl x509 -noout -fingerprint -sha256` prints), the issuer and the expiry; **Trust
+  this server** remembers exactly that certificate for that host name. A pinned host presenting any other
+  certificate gets a red *This server's certificate has changed*, with both fingerprints and no one-click way
+  past it — **Trust the new certificate…** only arms a second button, and a double-click does not confirm it.
+  There is no accept-all path: Chromium's own refusal stays the answer to anything that is neither trusted by
+  the system nor the pinned certificate. A server saved while the computer trusted its certificate is
+  remembered as such, so a self-signed certificate there later gets the same red warning with no way to trust
+  it (**Forget this server…** starts again). Only the server's own certificate is ever asked about, never one
+  that a page's other requests or another host present.
+* **The window onto a server gets no desktop bridge at all.** The page is the server's, so it is given only an
+  inert `window.uchiyomiShell = { mode: 'server', version }` and never `window.uchiyomiDesktop` — even for a
+  server on the same PC at `http://127.0.0.1:8080`, which the old address-only check would have treated as the
+  app's own and left unable to sign in. A v0.45.0 server reads the marker to hide its *Install Uchiyomi* row;
+  older servers ignore it.
+* **Server mode behaves like a window, not a service.** Closing it quits (nothing local to keep running, so no
+  tray keep-alive; on Windows that also installs a downloaded update, as Quit does). A server that does not
+  answer shows *Can't reach {name}* with **Try again**, **Change server…** and **Use on this computer
+  instead**; over https the server's own service worker still serves what was saved offline. The window title
+  and the tray tooltip are the server's name. **Forget this server…** signs out and removes what the app kept
+  for it (offline chapters, settings, the trusted certificate), then asks the first question again — where **On
+  this computer** reopens the library already on the computer, in its folder. **Use on this computer instead**
+  with no library there yet shows the folder page first, with **Back** to the server, and switches only once a
+  folder is chosen. The server's *New-chapter alerts* switch is not offered inside the window (Electron has no
+  push service); a line points to the server's notification targets instead.
+* `--server-url=<address>` is the non-interactive "Connect to my server" for scripts and CI, as `--library-dir`
+  is for the other mode; a mode already saved wins over both. The mode, server and pins live in `state.json`
+  (`mode`, `serverOrigin`, `serverName`, `certPins`).
+* Every new sentence in the shell — 57 of them — is in all nine languages.
+
+Four things only the real Electron app showed, all fixed here: a page's own `window.close()` destroys the window
+without Electron's `close` event (server mode was left running with no window); Chromium caches a refused
+certificate per session even after the verify procedure changes, so a certificate the person had just trusted
+kept failing (the check now probes in a fresh session and relaunches after a trust); the server's service worker
+answered navigations from its cache, so a changed certificate showed no warning at all (the prompt now comes
+from the refusal itself, not from a failed page load); and the chooser's cards did not wrap.
+
+### Adding an extension repository, made obvious
+
+**In the app** (**Admin → Extensions**):
+
+* With no repository yet, the repository row is **open by itself** — the address field was hidden behind a
+  collapsed *Manage* while the empty list below said "add a repository above".
+* The field asks for `https://…/index.min.json` (the shape Mihon users have), and the help text says what a
+  repository is, that it is *the same address you added in Mihon (More → Settings → Browse → Extension repos)*,
+  and that a repository's *Add to Mihon* link works too. While it checks, a line says *this can take up to a
+  minute*.
+* **What you paste is understood.** An *Add to Mihon* link (`mihon://add-repo?url=…`, `tachiyomi://…`, or a web
+  `…/add-repo?url=…`) is unwrapped, a missing `https://` is added, a GitHub `…/blob/<branch>/index.min.json`
+  link becomes the raw file, and a GitHub repository *page* is refused with advice rather than saved. An
+  `index.json` or a bare folder that gives nothing is tried once as the `index.min.json` there, the only file the
+  extension engine reads a list from (the old retry went the other way, `index.min.json` → `index.json`, which
+  the engine never accepts).
+* **Success is what this repository brought.** *Added — {n} extensions from this repository*, never the size of
+  the whole catalogue: before, adding a broken second repository reported *Added — 1396 extensions available*.
+  A repository that yields nothing is **removed again** and answered *That address gave no extensions, so it was
+  not kept…*, with the engine's reason when it gives one. A duplicate is
+  recognised whatever its case, scheme, trailing slash or index file name. An engine that refuses the address,
+  or cannot be read, answers with its reason and leaves the list exactly as it was (a failed read used to be
+  taken as "no repositories", so the next add would have dropped every other one).
+* Refusals stay in red under the field until the address is edited, because a toast is gone in three seconds.
+  After a success, a next-step line says to choose extensions and to hide unused languages first — only 25
+  sources can be on at once — with a **Choose languages** button. Every string in the flow is translated.
+* **A removed repository stays removed.** The scheduled extension check restores the repository list from its own
+  copy, and that copy was only ever written the first time the check ran: a repository removed in the app came
+  back at the next check, and one added in the app was never protected. Adding and removing now keep it in step.
+  The check also compares repositories the way a duplicate is recognised, not letter for letter: the engine
+  lists a pasted `index.min.json` as its `repo.json` once it restarts, and a check that had saved the pasted form
+  wrote the repository back a second time and sent *Extension repositories restored*, after every restart.
+* The Docker *engine off* card names the container the shipped compose files actually use, `uchiyomi-suwayomi`
+  (it said the development stack's `yomi-suwayomi`). On the desktop app, before the engine is downloaded, the
+  Providers tab's Extensions card says *Not installed yet — download it under Extensions* instead of *The
+  extension engine isn't running*, which read as a fault on a first visit.
+
+**API** (`POST /api/admin/extensions/repos`): 200 `{ ok, url, corrected, added, total }` with `added` counted for
+this repository; refusals carry a stable `error` — 400 `bad_url` / `github_page`, 409 `exists`, 422 `empty`
+(removed again), 502 `unreachable` / `engine_refused` with `reason`. `DELETE` answers `{ ok, removed }`. Both are in
+`openapi.yaml` and [api.md](docs/api.md).
+
+### Documentation
+
+* **[docs/DESKTOP.md](docs/DESKTOP.md)**, the desktop guide, written for someone who has never run a server:
+  which file (and how to tell an Apple silicon Mac from an Intel one), which release files to ignore, the browser
+  download warning, the Windows SmartScreen and Smart App Control situation and the macOS 15 *Open Anyway*
+  sequence (and macOS 14's Control-click → Open) — each OS step cited to Microsoft's or Apple's own pages — the
+  two modes and when to pick which, the first sources (MangaDex, a site, the extension engine and a repository),
+  server mode's address rules, certificates and error page, updates per OS (including the Mac's quit, drag,
+  replace), backups, where files live, uninstalling, and troubleshooting with the user-level steps first. The
+  desktop chapter of the user guide (§14) is now a pointer to it, and the README keeps one short section.
+* **[docs/extensions.md](docs/extensions.md)** starts with *Add an extension repository — step by step*: what a
+  repository is, what its address looks like and where to find yours, the *Add to Mihon* link, what each message
+  means, removing one, and languages and the 25-source limit; then where the engine comes from on each kind of
+  install (Docker, the desktop download, CasaOS, Unraid and Umbrel without one, server mode using the server's).
+* One memory figure for the engine everywhere: about 750 MB once running (731 MiB measured on a server with 22
+  extensions installed). The docs had said half a gigabyte, 800 MB and 1 GB.
+* The user guide's table of contents links for §7 and §10 work again, and §1, §2 and the FAQ point desktop
+  readers to the right place.
+* **No third-party names.** The docs no longer name a third-party extension repository or real scanlation
+  groups, and every screenshot of the extension flow and the sources list is taken on made-up data — *Example
+  Manga (EN)*, generated icons, `https://example.org/repo/index.min.json` — by a fixture in the screenshot rig
+  that applies to every run. The old extension shots showed real site names, some of them 18+; the icon strips
+  on uchiyomi.com were real sites' logos. The desktop app's own pages are photographed from the real Electron
+  app.
+
+### Permanent download links
+
+Every release now also carries the installers under names without a version — `Uchiyomi-Setup.exe`,
+`Uchiyomi-mac-arm64.dmg`, `Uchiyomi-mac-x64.dmg` — so
+`https://github.com/AngeloSha/uchiyomi/releases/latest/download/Uchiyomi-Setup.exe` always serves the newest
+one. The README, the desktop guide and uchiyomi.com link to those. The update feeds keep naming the versioned
+files, which are unchanged. A test holds every such link in the docs to a name the release actually uploads.
+
+### For server installs
+
+The server changes are the repository route above (and the scheduled extension check's copy of the list, which
+it now keeps in step) and two web-app details: the Extensions tab's repository flow, and the *Install Uchiyomi*
+row hidden inside the desktop app's window. Nothing else in the server or the web app changed.
+
 ## v0.44.0 — 2026-09-24
 
 **Uchiyomi Desktop (beta).** The owner asked, a day before this release, whether Uchiyomi could be something you

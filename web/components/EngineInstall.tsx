@@ -76,6 +76,8 @@ export function EngineInstall({ span = '' }: { span?: string }) {
         <>
           <p className="max-w-prose text-[11px] leading-relaxed text-fog-500">
             {tr('Extensions run in the extension engine, a separate download of about 200 MB. It is fetched once and runs only on this computer.')}
+            {/* The whole path in one place: the repository row opens by itself once the engine is up. */}
+            {' '}{tr('Once it is running, add an extension repository here, then choose your extensions.')}
           </p>
           {state === 'failed' && (
             <p role="alert" className="mt-2 max-w-prose text-[11px] leading-relaxed text-red-300">

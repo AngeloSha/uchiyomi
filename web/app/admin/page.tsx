@@ -23,7 +23,7 @@ import { t as tr, keys } from '@/lib/i18n';
 import type { HealthCheck, Series } from '@/lib/types';
 import { groupProviders, type ProviderGroup, type ProviderSrc } from '@/lib/providerGroups';
 import { adultShown } from '@/lib/adult';
-import { bridge, hiddenOnDesktop, isDesktop, visibleGroups, DESKTOP_HIDDEN, type UpdateStatus } from '@/lib/desktop';
+import { bridge, hiddenOnDesktop, isDesktop, visibleGroups, DESKTOP_HIDDEN, type EngineStatus, type UpdateStatus } from '@/lib/desktop';
 import { EngineInstall } from '@/components/EngineInstall';
 
 /**
@@ -833,6 +833,24 @@ function Providers({ onTab }: { onTab: (t: Tab) => void }) {
 }
 
 /**
+ * What the desktop shell says about the extension engine download, or null anywhere but the desktop app's
+ * own window (the server build, a browser tab, the desktop app in server mode) -- so every caller's other arm
+ * is exactly what it rendered before. Follows the shell's progress events while mounted.
+ */
+function useDesktopEngineState(): EngineStatus['state'] | null {
+  const [st, setSt] = useState<EngineStatus['state'] | null>(null);
+  useEffect(() => {
+    const b = bridge();
+    if (!b?.engine) return;
+    let live = true;
+    b.engine.status?.().then((x) => { if (live) setSt(x?.state ?? null); }).catch(() => {});
+    const off = b.engine.onStatus?.((x) => { if (live) setSt(x?.state ?? null); });
+    return () => { live = false; if (typeof off === 'function') off(); };
+  }, []);
+  return st;
+}
+
+/**
  * The Providers tab's door to the Extensions tab: one line of status and a chevron, the whole card a
  * button. It reads the same status query the Extensions tab does (same key, same url), so the count here
  * is the count there, and a click is a tab switch rather than a navigation -- the `?tab=` in the URL
@@ -840,8 +858,17 @@ function Providers({ onTab }: { onTab: (t: Tab) => void }) {
  */
 function ExtensionsLink({ onTab }: { onTab: (t: Tab) => void }) {
   const { data: status } = useQuery({ queryKey: ['ext-status'], queryFn: () => api<ExtStatus>('/api/admin/extensions/status') });
+  const engine = useDesktopEngineState();
+  const down = !!status && (!status.configured || !status.reachable);
   const sub = !status ? tr('Loading…')
-    : !status.configured || !status.reachable ? tr('The extension engine isn’t running')
+    // ⚠️ On desktop the engine is a download nobody has made yet, and "isn't running" read as a fault on the
+    // very first visit. The shell knows which it is; the server only knows it cannot reach it.
+    : down && engine === 'absent' ? tr('Not installed yet — download it under Extensions')
+    : down && engine === 'downloading' ? tr('Downloading the extension engine…')
+    : down && engine === 'installing' ? tr('Installing the extension engine…')
+    : down && (engine === 'starting' || engine === 'running') ? tr('Starting the extension engine…')
+    : down && engine === 'failed' ? tr('The extension engine could not be installed.')
+    : down ? tr('The extension engine isn’t running')
     : status.enabled === 1 ? tr('1 source enabled')
     : tr('{n} sources enabled', { n: status.enabled ?? 0 });
   return (
@@ -1979,6 +2006,31 @@ interface CatalogExt { pkgName: string; name: string; lang: string | null; versi
 interface Catalog { content: CatalogExt[]; total: number; matched: number; shown: number; installed: number; updatable: number; hiddenAdult: number; langs: string[] }
 
 /**
+ * A refused "Add a repository" in the viewer's language.
+ *
+ * The server answers a stable `error` code with an English `message` (bff routes/admin.ts, the repos route);
+ * the known codes are translated here, and the engine's own `reason` -- never translatable, and the most
+ * useful words in the toast -- is appended as it came. An unknown code shows the server's message as it is.
+ * ⚠️ Until v0.45.0 the add read neither: every refusal was "Could not add that repository".
+ */
+function repoAddError(e: unknown): string {
+  let j: { error?: string; reason?: string; removed?: boolean } = {};
+  try { j = JSON.parse((e as ApiError)?.body || '{}'); } catch { /* not JSON: the generic line below */ }
+  const said = j.reason ? ` ${tr('The engine said: {reason}', { reason: j.reason })}` : '';
+  switch (j.error) {
+    case 'bad_url': return tr('That doesn’t look like a repository address. It usually ends in index.min.json.');
+    case 'github_page': return tr('That is a GitHub page, not the repository itself. Paste the repository’s index.min.json link instead.');
+    case 'exists': return tr('That repository is already added.');
+    case 'empty':
+      return tr('That address gave no extensions, so it was not kept. Check that it is the repository’s index.min.json link, not a web page — or it may only list extensions you already have.')
+        + said + (j.removed === false ? ` ${tr('It could not be taken back out — press Remove next to it.')}` : '');
+    case 'engine_refused': return tr('The extension engine refused that address: {reason}', { reason: j.reason ?? '' });
+    case 'unreachable': return tr('Could not reach the extension engine: {reason}', { reason: j.reason ?? '' });
+    default: return msgOf(e, tr('Could not add that repository'));
+  }
+}
+
+/**
  * Browse and install Mihon / Tachiyomi extensions.
  *
  * Installing one switches its sources on in the same action — having to find them again in a second list is
@@ -1995,7 +2047,14 @@ function Extensions({ span = '' }: { span?: string }) {
   const [busy, setBusy] = useState<string | null>(null);
   const [repoUrl, setRepoUrl] = useState('');
   const [addingRepo, setAddingRepo] = useState(false);
-  const [showRepos, setShowRepos] = useState(false);
+  // null = nobody has touched the toggle yet, and the row follows the list (reposOpen below); a click is the
+  // person's choice from then on.
+  const [showRepos, setShowRepos] = useState<boolean | null>(null);
+  // The count the last add brought, for the next-step line under the row (it outlives the toast on purpose).
+  const [justAdded, setJustAdded] = useState<number | null>(null);
+  // The last refusal, kept under the input until the address is edited: a toast lasts 3.2 s, and "check that
+  // it is the index.min.json link, not a web page" is two sentences someone needs while fixing the paste.
+  const [repoError, setRepoError] = useState<string | null>(null);
   const [showLangs, setShowLangs] = useState(false);
   const [hiding, setHiding] = useState<ExtLang | null>(null);
 
@@ -2012,6 +2071,8 @@ function Extensions({ span = '' }: { span?: string }) {
     queryFn: () => api<{ content: string[] }>('/api/admin/extensions/repos'),
     enabled: !!status?.configured && !!status?.reachable,
   });
+  // Open by itself while there are none: the input IS the next step, and nothing else on the tab works yet.
+  const reposOpen = showRepos ?? (!!repos && repos.content.length === 0);
   const { data: cat, isFetching } = useQuery({
     queryKey: ['ext-catalog', q2, lang, onlyInstalled, showAdult],
     queryFn: () => api<Catalog>(`/api/admin/extensions/catalog?q=${encodeURIComponent(q2)}&lang=${encodeURIComponent(lang)}${onlyInstalled ? '&installed=true' : ''}${showAdult ? '&nsfw=true' : ''}`),
@@ -2028,9 +2089,19 @@ function Extensions({ span = '' }: { span?: string }) {
     return (
       <div className={`card grad-border p-4 ${span}`}>
         <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-fog-500">{tr('Extensions')}</p>
+        {/* Reached only when SUWAYOMI_URL is empty (turned off, or an install with no engine such as CasaOS):
+            a stopped container with the URL still set is the "Can't reach" line further down. It used to name
+            `yomi-suwayomi`, the development stack's container; the shipped compose files call it
+            `uchiyomi-suwayomi`. */}
         <p className="text-[11px] leading-relaxed text-fog-500">
-          The extension engine isn&apos;t running. It normally starts with the rest of Uchiyomi — if you turned it
-          off, bring it back with <code className="text-fog-300">docker compose up -d yomi-suwayomi</code>.
+          {tr('No extension engine is set up for this server.')}{' '}
+          {/* Split on the placeholders, keeping them, so a translation may put them in either order. */}
+          {tr('The standard Docker install runs one in the {name} container. If you turned it off by emptying SUWAYOMI_URL, put that line back in .env and run {command}.')
+            .split(/(\{name\}|\{command\})/).map((part, i) => (
+              part === '{name}' ? <code key={i} className="text-fog-300">uchiyomi-suwayomi</code>
+                : part === '{command}' ? <code key={i} className="text-fog-300">docker compose up -d</code>
+                  : part
+            ))}
         </p>
       </div>
     );
@@ -2085,21 +2156,36 @@ function Extensions({ span = '' }: { span?: string }) {
     try {
       const r = await api<{ count: number }>('/api/admin/extensions/refresh', { json: {} });
       refreshAll();
-      toast(`Refreshed — ${r.count} extension${r.count === 1 ? '' : 's'} available`, 'success');
-    } catch { toast('Could not refresh the list', 'error'); }
+      toast(r.count === 1 ? tr('Refreshed — 1 extension available') : tr('Refreshed — {n} extensions available', { n: r.count }), 'success');
+    } catch { toast(tr('Could not refresh the list'), 'error'); }
     setBusy(null);
   };
 
+  /**
+   * The server decides what a paste means (an Add-to-Mihon link, a missing https://, a GitHub page) and keeps a
+   * repository only when it yielded extensions, so a 200 here always carries `added` > 0: the count THIS
+   * repository brought, never the catalogue's size.
+   */
   const addRepo = async () => {
     if (!repoUrl.trim()) return;
     setAddingRepo(true);
+    setJustAdded(null);
+    setRepoError(null);
     try {
-      const r = await api<{ url: string; corrected: boolean; total: number }>('/api/admin/extensions/repos', { json: { url: repoUrl.trim() } });
+      const r = await api<{ url: string; corrected: boolean; added: number }>('/api/admin/extensions/repos', { json: { url: repoUrl.trim() } });
       setRepoUrl('');
+      // Stay open on the row just used, even though the list is no longer empty.
+      setShowRepos(true);
+      setJustAdded(r.added);
       refreshAll();
-      toast(r.total ? `Added — ${r.total} extension${r.total === 1 ? '' : 's'} available${r.corrected ? ' (used the full index)' : ''}`
-                    : 'Added, but that repository returned no extensions', r.total ? 'success' : 'error');
-    } catch (e: any) { toast(msgOf(e, 'Could not add that repository'), 'error'); }
+      const file = r.url.replace(/[?#].*$/, '').split('/').filter(Boolean).pop() ?? r.url;
+      toast((r.added === 1 ? tr('Added — 1 extension from this repository') : tr('Added — {n} extensions from this repository', { n: r.added }))
+        + (r.corrected ? ` · ${tr('saved as {file}', { file })}` : ''), 'success');
+    } catch (e: unknown) {
+      const why = repoAddError(e);
+      setRepoError(why);
+      toast(why, 'error');
+    }
     setAddingRepo(false);
   };
 
@@ -2107,8 +2193,9 @@ function Extensions({ span = '' }: { span?: string }) {
     try {
       await api('/api/admin/extensions/repos', { method: 'DELETE', json: { url } });
       refreshAll();
-      toast('Repository removed', 'success');
-    } catch { toast('Could not remove it', 'error'); }
+      setJustAdded(null);
+      toast(tr('Repository removed'), 'success');
+    } catch (e: unknown) { toast(msgOf(e, tr('Could not remove it')), 'error'); }
   };
 
   /**
@@ -2141,7 +2228,7 @@ function Extensions({ span = '' }: { span?: string }) {
           </span>
           {status.reachable && (
             <button onClick={refreshRepos} disabled={busy === '__refresh'} className="chip text-[11px] disabled:opacity-50">
-              {busy === '__refresh' ? 'Refreshing…' : '↻ Refresh'}
+              {busy === '__refresh' ? tr('Refreshing…') : `↻ ${tr('Refresh')}`}
             </button>
           )}
         </div>
@@ -2159,17 +2246,24 @@ function Extensions({ span = '' }: { span?: string }) {
             searchable from Discover immediately.
           </p>
 
-          {/* repositories — where the catalogue comes from */}
+          {/* repositories — where the catalogue comes from. ⚠️ It used to start collapsed even with none, so a
+              first visit showed "add a repository above" pointing at a closed row with no input in sight. */}
           <div className="mb-2 rounded-lg border border-ink-700/60 bg-ink-850/40 p-2">
-            <button onClick={() => setShowRepos(!showRepos)} className="flex w-full items-center justify-between text-start">
+            <button onClick={() => setShowRepos(!reposOpen)} aria-expanded={reposOpen} className="flex w-full items-center justify-between text-start">
               <span className="text-[11px] text-fog-300">
                 {repos?.content.length
-                  ? `${repos.content.length} extension ${repos.content.length === 1 ? 'repository' : 'repositories'} · ${cat?.total ?? 0} extensions available`
-                  : 'No extension repository yet — add one to see extensions'}
+                  ? (repos.content.length === 1
+                    ? (cat?.total === 1
+                      ? tr('1 extension repository · 1 extension available')
+                      : tr('1 extension repository · {m} extensions available', { m: cat?.total ?? 0 }))
+                    : (cat?.total === 1
+                      ? tr('{n} extension repositories · 1 extension available', { n: repos.content.length })
+                      : tr('{n} extension repositories · {m} extensions available', { n: repos.content.length, m: cat?.total ?? 0 })))
+                  : tr('No extension repository yet — add one to see extensions')}
               </span>
-              <span className="text-[11px] text-fog-500">{showRepos ? 'Hide' : 'Manage'}</span>
+              <span className="text-[11px] text-fog-500">{reposOpen ? tr('Hide') : tr('Manage')}</span>
             </button>
-            {showRepos && (
+            {reposOpen && (
               <div className="mt-2 space-y-1.5">
                 {(repos?.content || []).map((u) => (
                   <div key={u} className="flex items-center gap-2">
@@ -2178,21 +2272,44 @@ function Extensions({ span = '' }: { span?: string }) {
                   </div>
                 ))}
                 <div className="flex gap-2 pt-1">
-                  <input value={repoUrl} onChange={(e) => setRepoUrl(e.target.value)} placeholder="https://…/index.json"
-                    autoCapitalize="none" autoCorrect="off"
+                  <input value={repoUrl} onChange={(e) => { setRepoUrl(e.target.value); setRepoError(null); }} placeholder="https://…/index.min.json"
+                    onKeyDown={(e) => { if (e.key === 'Enter' && !addingRepo) void addRepo(); }}
+                    aria-label={tr('Repository address')} autoCapitalize="none" autoCorrect="off" spellCheck={false} inputMode="url"
                     className="min-w-0 flex-1 rounded-lg border border-ink-700 bg-ink-850 px-2.5 py-1.5 text-xs text-fog-100 outline-hidden focus:border-accent" />
                   <button onClick={addRepo} disabled={addingRepo || !repoUrl.trim()} className="btn-accent shrink-0 px-3 py-1.5 text-xs disabled:opacity-50">
-                    {addingRepo ? 'Checking…' : 'Add'}
+                    {addingRepo ? tr('Checking…') : tr('Add')}
                   </button>
                 </div>
+                {/* The add can take a while (the engine re-reads every repository, up to four times, then tries
+                    the one alternative address), and a silent "Checking…" for a minute reads as a hang. */}
+                {addingRepo && (
+                  <p role="status" aria-live="polite" className="text-[10px] leading-relaxed text-fog-400">
+                    {tr('Checking the repository — this can take up to a minute.')}
+                  </p>
+                )}
+                {repoError && !addingRepo && (
+                  <p role="alert" className="text-[11px] leading-relaxed text-red-300">{repoError}</p>
+                )}
                 <p className="text-[10px] leading-relaxed text-fog-600">
-                  Uchiyomi doesn&apos;t host extensions, so you point it at a repository you trust — the same URL you&apos;d
-                  use in Mihon. If it hands back an empty list, Uchiyomi retries the full <code>index.json</code>, which is
-                  where most repositories now keep the real catalogue.
+                  {tr('An extension repository is a list of extensions that someone publishes. Uchiyomi doesn’t host any, so you add one you trust.')}{' '}
+                  {tr('Paste the same address you added in Mihon ({path}); a repository’s “Add to Mihon” link works too.', { path: tr('More → Settings → Browse → Extension repos') })}
                 </p>
               </div>
             )}
           </div>
+
+          {/* The step after a first repository is choosing extensions, and the trap in it is the source limit:
+              an extension carries one source per language, so a few multi-language ones fill it before the
+              banner below ever explains why search reaches fewer than were switched on. */}
+          {justAdded !== null && (
+            <div role="status" className="mb-2 flex flex-wrap items-center gap-2 rounded-lg border border-accent/30 bg-accent/10 px-2.5 py-2">
+              <p className="min-w-0 flex-1 text-[11px] leading-snug text-fog-200">
+                {tr('Next: choose extensions from the list below and press Add on each one you want.')}{' '}
+                <span className="text-fog-400">{tr('Tip: hide the languages you don’t read first — only {n} sources can be switched on at once.', { n: status.cap ?? 25 })}</span>
+              </p>
+              <button onClick={() => setShowLangs(true)} className="chip shrink-0 text-[11px]">{tr('Choose languages')}</button>
+            </div>
+          )}
 
           {/* languages — a standing instruction, applied now and on every later install */}
           <div className="mb-2 rounded-lg border border-ink-700/60 bg-ink-850/40 p-2">
@@ -2333,7 +2450,7 @@ function Extensions({ span = '' }: { span?: string }) {
             ))}
             {!list.length && !isFetching && (
               <p className="py-2 text-[11px] text-fog-600">
-                {cat?.total ? 'Nothing matches that search.' : 'No extensions yet — add a repository above to see what’s available.'}
+                {cat?.total ? tr('Nothing matches that search.') : tr('No extensions yet — add a repository above to see what’s available.')}
               </p>
             )}
             {isFetching && !list.length && <p className="py-2 text-[11px] text-fog-600">{tr('Loading…')}</p>}

@@ -337,6 +337,21 @@ jobs:
           for f in "win-x64/Uchiyomi-Setup-$dv.exe" "mac-arm64/Uchiyomi-$dv-arm64.dmg" "mac-x64/Uchiyomi-$dv-x64.dmg"; do
             [ -s "dist/desktop-dist-$f" ] || { echo "::error::dist/desktop-dist-$f is missing"; exit 1; }
           done
+          # Permanent download links (since v0.45.0): the same three files again under names with no version in
+          # them, so https://github.com/<repo>/releases/latest/download/Uchiyomi-Setup.exe always serves the
+          # newest installer -- the README, docs/DESKTOP.md and uchiyomi.com/download link to exactly these, and
+          # releasePipeline.test.ts holds every such link to a name uploaded here. The versioned names above stay
+          # what the update feeds name (electron-updater downloads the file latest.yml names; the copies are
+          # never in a feed). Copies of the checked files, byte for byte, so the Mac download notice
+          # (updates.js matches any asset ending -arm64.dmg / -x64.dmg) is handed the same dmg whichever it finds.
+          # Outside dist/ on purpose: the upload below finds its files there, and these are named explicitly.
+          # ⚠️ "latest" is whichever Release the `release` job made last, and this job runs 30-60 minutes after
+          # it: until it finishes (or while a red desktop leg waits for a re-run) the permanent links 404. The
+          # docs say so and point at the releases page for that window.
+          mkdir -p permanent
+          cp "dist/desktop-dist-win-x64/Uchiyomi-Setup-$dv.exe" permanent/Uchiyomi-Setup.exe
+          cp "dist/desktop-dist-mac-arm64/Uchiyomi-$dv-arm64.dmg" permanent/Uchiyomi-mac-arm64.dmg
+          cp "dist/desktop-dist-mac-x64/Uchiyomi-$dv-x64.dmg" permanent/Uchiyomi-mac-x64.dmg
           echo "DESKTOP_VERSION=$dv" >> "$GITHUB_ENV"
       - name: Upload the installers, then the update feeds
         env:
@@ -346,8 +361,9 @@ jobs:
           mapfile -t bins < <(find dist -type f \( -name '*.exe' -o -name '*.dmg' -o -name '*.zip' -o -name '*.blockmap' \) | sort)
           printf '%s\n' "${bins[@]}"
           [ "${#bins[@]}" -ge 5 ] || { echo "::error::expected at least the exe and two dmg + zip pairs"; exit 1; }
-          # --clobber: a re-run replaces its own earlier upload instead of failing on it.
-          gh release upload "$GITHUB_REF_NAME" --clobber "${bins[@]}"
+          # --clobber: a re-run replaces its own earlier upload instead of failing on it. The permanent copies go
+          # up with the installers: no feed names them, so they have no place in the ORDER below.
+          gh release upload "$GITHUB_REF_NAME" --clobber "${bins[@]}" permanent/Uchiyomi-Setup.exe permanent/Uchiyomi-mac-arm64.dmg permanent/Uchiyomi-mac-x64.dmg
           # Last, and on their own. Reintroduce by folding this into the call above: see ORDER in the job comment.
           gh release upload "$GITHUB_REF_NAME" --clobber feeds/latest.yml feeds/latest-mac.yml
       - name: Add the desktop downloads to the release notes
@@ -370,14 +386,19 @@ jobs:
           <!-- desktop-beta:start -->
           ## Uchiyomi Desktop (beta): downloads
 
-          Uchiyomi as a program on your own computer: the same app, with the library in a folder on your PC, and
-          no Docker or server to run. This is its first release, so it is a beta.
+          Uchiyomi as a program on your own computer, for Windows and Mac. On first launch it asks how you want to
+          use it: **on this computer** (the whole app, with the library in a folder on your PC and no Docker or
+          server to run) or **connected to your own Uchiyomi server** (a window onto the server you already run).
 
           | Your computer | Download |
           |---|---|
           | Windows (x64) | [Uchiyomi-Setup-$v.exe]($dl/Uchiyomi-Setup-$v.exe) |
           | Mac with Apple silicon (M1 or newer) | [Uchiyomi-$v-arm64.dmg]($dl/Uchiyomi-$v-arm64.dmg) |
           | Mac with an Intel processor | [Uchiyomi-$v-x64.dmg]($dl/Uchiyomi-$v-x64.dmg) |
+
+          Only those three are for you: the .zip, .blockmap and latest*.yml files are what the app's own updater
+          reads. The same installers are also here under names without a version (Uchiyomi-Setup.exe,
+          Uchiyomi-mac-arm64.dmg, Uchiyomi-mac-x64.dmg), which always lead to the newest release.
 
           The app is not signed yet, so the first launch takes one extra step:
 
@@ -389,9 +410,9 @@ jobs:
           Windows installs updates by itself. A Mac cannot update an unsigned app, so there a new version is a new
           download; the menu-bar icon and Admin → Health say when one is out.
 
-          Where your files live, the extension engine, backups, and what the desktop app leaves out:
-          [the README]($docs/README.md#download-the-desktop-app) and
-          [the desktop chapter of the guide]($docs/docs/USAGE.md#14-uchiyomi-desktop).
+          Step by step, with pictures -- which file, the first launch on each system, the two ways to use it, adding
+          sources, updates, backups, where files live and uninstalling:
+          [the desktop guide]($docs/docs/DESKTOP.md).
           <!-- desktop-beta:end -->
           EOF
           gh release edit "$GITHUB_REF_NAME" --notes-file notes.md

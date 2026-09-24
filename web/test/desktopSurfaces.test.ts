@@ -42,15 +42,24 @@ test('the desktop app is recognised in one place only', () => {
   assert.ok(files.length > 80, `only ${files.length} source files scanned -- the walk is broken`);
   const online: string[] = [];
   const marker: string[] = [];
+  const shellMarker: string[] = [];
   for (const f of files) {
     const rel = f.slice(ROOT.length + 1);
     if (rel === 'lib/desktop.ts') continue;
     const src = code(readFileSync(f, 'utf8'));
     if (/navigator\.onLine/.test(src)) online.push(rel);
     if (/uchiyomiDesktop/.test(src)) marker.push(rel);
+    if (/uchiyomiShell/.test(src)) shellMarker.push(rel);
   }
   assert.deepEqual(online, [], `navigator.onLine is read outside lib/desktop.ts: ${online.join(', ')}`);
   assert.deepEqual(marker, [], `the preload marker is read outside lib/desktop.ts: ${marker.join(', ')}`);
+  // v0.45.0: server mode's inert marker has one reader too (inDesktopWindow), and it never feeds isDesktop():
+  // in server mode the page is the ordinary server app. Reintroduce by testing `window.uchiyomiShell` in
+  // ProfileSettings: "the server-mode marker is read outside" fails; by `|| inDesktopWindow()` in isDesktop:
+  // "isDesktop() reads the server-mode marker" fails.
+  assert.deepEqual(shellMarker, [], `the server-mode marker is read outside lib/desktop.ts: ${shellMarker.join(', ')}`);
+  const lib = code(read('lib/desktop.ts'));
+  assert.match(lib, /export function isDesktop\(\): boolean \{\s*return desktopShell\(\) \|\| serverSaid;\s*\}/, 'isDesktop() reads the server-mode marker');
   // The five call sites the helper replaced still ask it (not merely stopped asking anything).
   for (const f of ['lib/auth.tsx', 'lib/offlineSync.ts', 'app/downloads/page.tsx', 'app/reader/page.tsx']) {
     assert.match(code(read(f)), /serverReachableHint\(\)/, `${f} no longer consults serverReachableHint()`);
@@ -111,7 +120,9 @@ test('per-person library access is hidden on desktop, and Extensions becomes the
   assert.ok(gate > 0, 'Extensions on desktop is still the Docker card');
   assert.ok(gate < ext.indexOf('if (!status.configured) {'), 'the Docker card is decided before the desktop one');
   assert.ok(gate > ext.indexOf('if (!status) return null;'), 'the engine card renders before the server has answered');
-  assert.match(ext, /docker compose up -d yomi-suwayomi/, 'the server\'s own Docker card changed');
+  // v0.45.0: the card names the shipped container (it named the development stack's); extensionRepoRow.test.ts
+  // pins the rest of its copy.
+  assert.match(ext, /<code key=\{i\} className="text-fog-300">uchiyomi-suwayomi<\/code>/, 'the server\'s own Docker card changed');
   assert.match(admin, /\{isDesktop\(\) \? ' Hide languages you don\\'t read\.' : ' Hide languages you don\\'t read, or raise SUWAYOMI_MAX_SOURCES\.'\}/, 'the source-limit line names an env var on desktop, or changed on the server');
   // The engine card is driven by the bridge only, and polls the server while the engine starts.
   const card = code(read('components/EngineInstall.tsx'));
@@ -145,6 +156,21 @@ test('the profile settings and connections hide what only other devices use', ()
   assert.match(settings, /\{!desktop && <DownloadsSection \/>\}/, 'Downloads shows on desktop');
   assert.match(settings, /\{!desktop && <DeviceSection \/>\}/, 'This device shows on desktop');
   assert.match(settings, /function DeviceSection\(/, 'DeviceSection was deleted rather than gated');
+  // v0.45.0: the desktop app's server mode is a plain window onto the server, so the server's own settings
+  // render there -- but the window IS the installed app. Reintroduce by dropping `|| inDesktopWindow()`:
+  // "Install Uchiyomi shows inside the desktop app" fails.
+  const device = settings.slice(settings.indexOf('function DeviceSection('));
+  assert.match(device, /setStandalone\(window\.matchMedia\('\(display-mode: standalone\)'\)\.matches \|\| \(navigator as any\)\.standalone === true \|\| inDesktopWindow\(\)\);/, 'Install Uchiyomi shows inside the desktop app');
+  assert.match(device, /\{!standalone && \(\s*<Row stacked label=\{tr\('Install Uchiyomi'\)\}>/, 'the install row is no longer gated on standalone');
+  // ...and the window has no push service (Electron ships none): the push switch there could only fail with
+  // "The browser did not grant it." (V2 review). Reintroduce by rendering the SwitchRow whatever `inApp` says:
+  // "the push switch is offered inside the desktop app" fails; by dropping `!inApp &&` from `supported`: "push
+  // counts as supported inside the desktop app" fails.
+  assert.match(device, /const \[inApp\] = useState\(\(\) => inDesktopWindow\(\)\);/, 'the device section no longer asks whether it is inside the desktop app');
+  assert.match(device, /const \[supported\] = useState\(\(\) => !inApp && typeof window !== 'undefined'/, 'push counts as supported inside the desktop app');
+  assert.match(device, /\{enabledSrv && \(inApp \? \(\s*<Row stacked label=\{tr\('New-chapter alerts'\)\}>\s*<p[^>]*>\{tr\('The desktop app cannot receive push notifications\./, 'the push switch is offered inside the desktop app');
+  // The server's own row is unchanged in a browser.
+  assert.match(device, /\) : \(\s*<SwitchRow label=\{tr\('New-chapter alerts'\)\}\s*help=\{supported \? tr\('Get a push notification when one of your favorites gets a new chapter\.'\) : tr\('Not supported on this browser\.'\)\}\s*on=\{on\} disabled=\{!supported\} onChange=\{toggle\} \/>/, 'the browser\'s push switch changed');
   const conn = code(read('components/ProfileConnections.tsx'));
   assert.match(conn, /<TrackerSection focus=\{focusTracking\} \/>\s*\{!desktop && <OpdsSection \/>\}\s*\{!desktop && <TokensSection \/>\}/, 'OPDS or API tokens show on desktop, or the trackers moved');
   for (const [f, src] of [['ProfileSettings', settings], ['ProfileConnections', conn]] as const) {
@@ -263,6 +289,7 @@ test('every string the desktop surfaces add is in all eight locale files', () =>
     'Uchiyomi closes your library, replaces its database and settings with the backup you choose, and opens again. Everything since that backup — reading progress, new series, settings — is replaced. The manga files themselves are not touched.',
     'New version available — {version}', 'New version available', 'Restart to update', 'Download',
     'If the PC is off then, it runs the next time Uchiyomi opens.',
+    'The desktop app cannot receive push notifications. Your server can still send new chapters to your phone, Home Assistant or Discord through a notification target, which an admin sets up under Admin → Settings → Notifications.',
   ]) keys.add(k);
   assert.ok(keys.size >= 25, `only ${keys.size} strings found -- the scan is broken`);
   const dir = join(ROOT, 'public/locales');

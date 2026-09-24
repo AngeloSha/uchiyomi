@@ -9,18 +9,22 @@ environment variables see [CONFIGURATION.md](CONFIGURATION.md).
 - [4. A series & its chapters](#4-a-series--its-chapters)
 - [5. The reader](#5-the-reader)
 - [6. Discover & add new series](#6-discover--add-new-series)
-- [7. Sources: MangaDex + Add-a-site](#7-sources-mangadex--add-a-site)
+- [7. Sources: extensions, add-a-site and MangaDex](#7-sources-extensions-add-a-site-and-mangadex)
 - [8. The admin panel](#8-the-admin-panel)
 - [9. Security: 2FA, sessions, password](#9-security-2fa-sessions-password)
-- [10. Tracking: AniList sync](#10-tracking-anilist-sync)
+- [10. Tracking: AniList, MyAnimeList and Kitsu](#10-tracking-anilist-myanimelist-and-kitsu)
 - [11. Install as an app & offline](#11-install-as-an-app--offline)
 - [12. Backups & restore](#12-backups--restore)
 - [13. Troubleshooting & FAQ](#13-troubleshooting--faq)
-- [14. Uchiyomi Desktop](#14-uchiyomi-desktop) — the Windows and macOS app (beta)
+- [14. Uchiyomi Desktop](#14-uchiyomi-desktop) — the Windows and macOS app (beta), now in [its own guide](DESKTOP.md)
 
 ---
 
 ## 1. First run & setup
+
+> 💻 **Using the Windows or Mac app?** Its first launch is different: it asks whether to run everything on the
+> computer or connect to your server, and on the computer there is no setup at all. That is all in
+> **[the desktop guide](DESKTOP.md)**; this section is about a server.
 
 ```bash
 docker compose up -d         # no config needed — secrets are generated automatically
@@ -46,6 +50,10 @@ built from source.
 ## 2. Signing in
 
 ![Login](shots/login.webp)
+
+> 💻 **In the desktop app** on the computer itself there is no sign-in screen: it opens signed in. Connected to
+> your server, it shows your server's own sign-in page, exactly as below
+> ([desktop guide](DESKTOP.md#4-connect-to-your-own-server)).
 
 **Signing in with your own identity provider.** If the admin has configured OIDC, a **Continue with …** button
 appears under the password form and you can sign in with Authentik, Authelia, Keycloak or anything else that
@@ -111,7 +119,7 @@ genres, description, and the **chapter list**.
 - **Mark all read** does what it says to every chapter of the series; **Filter** narrows the list to one
   translation group or hides the grey rows; **Select** picks chapters one by one for the actions described
   in *Selecting chapters* below.
-- The line under the title — *MangaDex · Asura Scans +2 · 4 not here yet ›* — is the series' source, who
+- The line under the title — *MangaDex · Example Scans +2 · 4 not here yet ›* — is the series' source, who
   translates it and how many chapters the sources have that this server does not. Tap it for **Sources &
   translations**, described below.
 
@@ -189,12 +197,12 @@ says how many are in hand. The chips:
 ### Sources & translations
 
 Under the title, every series carries one muted line that says where its chapters come from. On a phone it
-reads *MangaDex · Asura Scans +2 · 4 not here yet ›*: the main source with its favicon, then three small
+reads *MangaDex · Example Scans +2 · 4 not here yet ›*: the main source with its favicon, then three small
 group avatars and the busiest group's name, then how many chapters the sources list that this server does
 not hold (chapters below a *Latest N* floor are not in that count; they have their own line in the chapter
-list). On a wider screen the same line has room for *Translated by Asura Scans, Flame Comics (+1)* and
-*checked 2h ago*. When a phone is too narrow for all of it — a source called *Mangakakalot (Manganato)*,
-say — the source's name is shortened first and the group's name second; the count and the › never give, and
+list). On a wider screen the same line has room for *Translated by Example Scans, Sample Translations (+1)*
+and *checked 2h ago*. When a phone is too narrow for all of it — a source with a long name such as *Example
+Manga Collection (Mirror)*, say — the source's name is shortened first and the group's name second; the count and the › never give, and
 when even the busiest group's name will not fit, the avatars and *+n* stand on their own. The line follows
 the series' state rather than going blank: *not checked yet* on a series no sweep has looked at (a series
 added as *Nothing yet* has had its first check at the add, so it never reads this), *auto-update off* in
@@ -686,8 +694,13 @@ dialog and on the series page.
 ![Add a site](shots/admin-providers.webp)
 
 **MangaDex works out of the box** (the official public API), with nothing to set up. Everything else you add
-yourself in **Admin → Providers** by pasting a site's URL. Uchiyomi bundles generic **engines** for three common
-manga-site families (**Madara**, **MangaThemesia**, and **Manganato**), and most manga sites run one of them.
+yourself, two ways:
+
+- **A site by its address**, in **Admin → Providers** (below). Uchiyomi bundles generic **engines** for three
+  common manga-site families (**Madara**, **MangaThemesia**, and **Manganato**), and most manga sites run one of
+  them.
+- **Mihon / Tachiyomi extensions**, in **Admin → Extensions**, from an extension repository you add
+  ([below](#extensions-mihon--tachiyomi), step by step in [extensions.md](extensions.md#add-an-extension-repository--step-by-step)).
 
 ### Add a site — step by step
 
@@ -744,20 +757,32 @@ Uchiyomi doesn't support out of the box, typically an **API-only** site or a **J
 Those need a code-level adapter (a source plugin); the three bundled engines cover the large majority of manga
 sites, but not every one.
 
-> **Cloudflare:** many sites sit behind Cloudflare. The bundled `yomi-flaresolverr` service handles that
-> automatically; just make sure that container is running (it is, by default).
+> **Cloudflare:** many sites sit behind Cloudflare. The bundled FlareSolverr container (`uchiyomi-flaresolverr`;
+> `yomi-flaresolverr` in the development stack) handles that automatically; just make sure it is running (it
+> is, by default). The desktop app has its own Cloudflare helper instead, with nothing to run
+> ([desktop guide](DESKTOP.md#cloudflare)).
 
 ---
 
 ### Extensions (Mihon / Tachiyomi)
 
-Beyond the built-in engines, Uchiyomi can use the **Mihon / Tachiyomi extension ecosystem** — around 1,400 of
-them. Go to **Admin → Extensions**, add an extension repository you trust (once), then search and
-click **Add**. Installing switches that extension's sources on straight away, so it is searchable from Discover
-immediately.
+Beyond the built-in engines, Uchiyomi can use the **Mihon / Tachiyomi extension ecosystem**, well over a
+thousand of them. Uchiyomi ships none and has no repository built in, so the first step is yours:
 
-Adult extensions are hidden until you tap **18+**. Full detail, including how it works and how to turn it off,
-is in [docs/extensions.md](extensions.md).
+1. Open **Admin → Extensions**. With no repository yet, the repository row is already open.
+2. Paste the address of an **extension repository** you trust — the same one you added in Mihon (Mihon: **More →
+   Settings → Browse → Extension repos**), usually ending in `index.min.json`. A repository's *Add to Mihon* link
+   works too. Press **Add**; it can take up to a minute.
+3. **Added — {n} extensions from this repository.** Hide the languages you don't read (**Choose languages**),
+   then press **Add** on each extension you want. Its sources switch on straight away and are searchable from
+   Discover immediately.
+
+![The extension browser](shots/admin-extensions.webp)
+
+What to paste, what every message means, the 25-source limit and removing a repository:
+**[Add an extension repository — step by step](extensions.md#add-an-extension-repository--step-by-step)**.
+Adult extensions are hidden until you tap **18+**. The engine they run in is part of the Docker install and a
+one-time download in the desktop app ([what you need first](extensions.md#what-you-need-first-the-extension-engine)).
 
 ### The other direction: Uchiyomi *inside* Mihon or Tachimanga
 
@@ -775,7 +800,7 @@ The Mihon family only lets a *tracker* built into the app report reads, so an ex
 read in Mihon stays marked in Mihon. Needs Uchiyomi v0.29.0 or newer.
 
 **The Komga extension, with the Komga tracker** (since v0.38.0) — Mihon's built-in **Komga tracker** binds
-to the keiyoushi *Komga* extension and speaks a small set of Komga's endpoints, and Uchiyomi now answers
+to the *Komga* extension and speaks a small set of Komga's endpoints, and Uchiyomi now answers
 them. Mint a token with **read + write** (tick *Allow changes*; a read-only token browses and reads, but
 nothing syncs in either direction: Mihon retries a failed push a few times with backoff, then gives up
 quietly until the next chapter read), tick **Include 18+ libraries** on it if those shelves should show on
@@ -795,8 +820,6 @@ previous cookie is valid (up to 7 days) — revoke the old token instead. Reads 
 do not count towards streaks or Wrapped. Tachimanga's *enhanced tracking* is reported by a contributor to
 work against this too; it was not tested here. The full list of what is and is not carried is in
 [docs/extensions.md](extensions.md#komga-compatible-api).
-
-![The extension browser](shots/admin-extensions.webp)
 
 ## 8. The admin panel
 
@@ -1639,7 +1662,19 @@ scan; you can also force a rescan from the admin panel, or restart the stack.
 
 **I never set an admin password / can't sign in.** If no users exist yet, just open the app and the first-run
 screen lets you create the admin. If an admin already exists, reset the password under
-**Profile → Account → Signed in as → Change password**.
+**Profile → Account → Signed in as → Change password**. The desktop app used on the computer itself has no
+password at all — it signs itself in; if it says *Uchiyomi couldn't open your library*, see
+[the desktop guide](DESKTOP.md#9-if-something-goes-wrong).
+
+**The desktop app can't connect to my server.** Type the address exactly as you open it in a browser on that
+computer, with `http://` in full if it is not https; the message under the field says what went wrong, and
+[the desktop guide](DESKTOP.md#connecting) explains each one. A self-signed certificate is asked about once
+([details](DESKTOP.md#a-server-with-a-self-signed-certificate)); a password prompt on a reverse proxy (Basic
+Auth) is not supported by the app yet, while sign-in portals such as Authelia and single sign-on work.
+
+**The Extensions tab is empty / there are no extensions to add.** Uchiyomi ships none: add an extension
+repository first ([step by step](extensions.md#add-an-extension-repository--step-by-step)). In the desktop app
+on the computer itself, download the extension engine first, from the same tab.
 
 **A source/site won't add.** Paste the site's **base URL** (e.g. `https://example.com`), not a series page.
 Uchiyomi auto-detects the engine (Madara, MangaThemesia, Manganato); Cloudflare-protected sites are handled
@@ -1696,7 +1731,7 @@ one that surprises people: the service worker is what serves the app with no con
 register a service worker in a secure context. Over plain HTTP on a LAN address there is no worker, so
 opening the app with no network shows the browser's error page rather than your downloads — even though the
 chapters are on the device. Reading over HTTP while connected works fine. If you want offline, put it behind
-HTTPS.
+HTTPS. The same holds for the desktop app connected to a server over `http://`.
 
 **I lost my 2FA device.** Enter one of the recovery codes (shown when you enabled 2FA) on the login screen instead
 of the 6-digit code — that is the intended way back in, so keep them somewhere that is not the phone.
@@ -1716,248 +1751,23 @@ docker compose exec uchiyomi-db psql -U yomi -d yomi \
 
 ## 14. Uchiyomi Desktop
 
-**Uchiyomi Desktop (beta)** is Uchiyomi as a program for Windows or a Mac. It is the same app, screen for
-screen: the same server and the same web app, running on your own computer, with the manga in a folder there.
-There is no Docker, no server to keep running and no account to create. It opens already signed in, with an
-empty library, and you add sources, sites and extensions in Admin exactly as you would on a server.
+**Uchiyomi Desktop (beta)** is Uchiyomi as a program for Windows or a Mac. Since v0.45.0 it has two ways to
+work, chosen on first launch: **On this computer** (the whole app on the PC, the library in a folder there, no
+Docker and no account) or **Connect to my server** (a window onto the Uchiyomi server you already run).
 
-It is a beta, first released with v0.44.0: tested on GitHub's Windows and macOS machines, not yet on many real
-PCs. If something misbehaves, the logs folder (below) is what an issue report needs.
+Everything about it has moved to **[the desktop guide](DESKTOP.md)**, written for people who have never run a
+server:
 
-| | |
-|---|---|
-| Windows | x64, one installer: `Uchiyomi-Setup-<version>.exe` |
-| macOS | Apple silicon (`Uchiyomi-<version>-arm64.dmg`) and Intel (`Uchiyomi-<version>-x64.dmg`) |
-| Not available | Linux (use the Docker install), Windows on Arm |
-
-All three are on each [release](https://github.com/AngeloSha/uchiyomi/releases/latest), under *Uchiyomi
-Desktop (beta): downloads*.
-
-### Installing, and the first launch
-
-The app is **not signed yet**, so each system asks once whether you trust it.
-
-- **Windows.** Run `Uchiyomi-Setup-<version>.exe`. It installs for your account only, with no administrator
-  prompt, into `%LOCALAPPDATA%\Programs\uchiyomi-desktop`. SmartScreen shows *"Windows protected your PC"* the
-  first time: choose **More info**, then **Run anyway**. A PC with **Smart App Control** turned on blocks unsigned
-  programs outright, with no way past it; on that PC, use the Docker install instead.
-- **macOS.** Open the dmg and drag **Uchiyomi** into Applications. The first time you open it, macOS refuses to;
-  open **System Settings → Privacy & Security**, scroll down to the message about Uchiyomi, and choose **Open
-  Anyway**. (Since macOS 15 the old right-click → Open shortcut no longer does this.)
-
-On the very first launch Uchiyomi asks **"Where should Uchiyomi keep your manga?"** This is the folder your
-downloads are saved to, as ordinary files you can see and back up. The default is `Uchiyomi Library` in your
-home folder (`C:\Users\<you>\Uchiyomi Library`, `/Users/<you>/Uchiyomi Library`); **Choose…** picks another, and
-the free space on that drive is shown.
-
-- It has to be a folder you can write to, and it cannot be the app's own data folder (or inside or around it), a
-  drive root, or your home folder itself.
-- A folder a cloud service may sync — OneDrive, Documents, iCloud Drive, the Mac Desktop, Dropbox, Google
-  Drive — gets a warning, because the whole library could be uploaded, and "files on demand" placeholders fail
-  to read offline. **Use it anyway** is there if you mean it.
-- The choice is made once. Moving the library to another folder later is not in this version.
-
-Then the app opens, signed in. There is never a sign-in screen: the first start creates one local admin
-account named after your computer account, with no password.
-
-### The extension engine
-
-Mihon/Tachiyomi extensions run in the **extension engine** (Suwayomi-Server, a Java program), exactly as on a
-server — but it is not in the installer. The first time you open **Admin → Extensions** it offers
-**Download the extension engine (about 200 MB)**. One click:
-
-1. *Downloading the extension engine…*, with a bar and "X MB of Y MB". The download comes from this project's
-   own GitHub release for the engine, and is checked against a SHA-256 pinned inside the app before anything
-   is unpacked.
-2. *Installing the extension engine…*
-3. *Starting the extension engine…* — Uchiyomi restarts its own server once to connect to it, a blink of two or
-   three seconds, and reconnects by itself.
-4. The normal Extensions panel, with an **empty** repository list. Add an extension repository you trust, as on
-   a server; nothing is preinstalled.
-
-If it fails, *The extension engine could not be installed.* shows the reason and **Try again**. From then on
-the engine starts with Uchiyomi. It listens only on this computer, with a random password, and takes roughly
-another half a gigabyte of memory while it runs.
-
-⚠️ **Extensions that need an in-app web view do not work in the desktop app.** Suwayomi can download a
-Chromium build of its own (KCEF, about 230 MB more) for the few extensions that need one; the desktop app turns
-it off, because on macOS the engine crashed on every start with it on.
-
-### Cloudflare
-
-Sites behind Cloudflare work without FlareSolverr: the app has its own **Cloudflare helper**, built from the
-same browser engine as the window, and both the built-in site engines and the extension engine use it. When a
-site insists on a human check and you are at the computer, a window **"Uchiyomi needs you to verify
-<site>"** opens after about 30 seconds; tick the box and it carries on. If you are away, a tray item (and on a
-Mac a dock badge) waits for you instead of interrupting.
-
-In **Admin → Health** this helper is called *Cloudflare helper*; its address is never shown. The advice there
-for a helper, engine or solver problem is to quit Uchiyomi and open it again.
-
-### The tray (Windows) and menu-bar icon (macOS)
-
-**Closing the window does not quit Uchiyomi.** It keeps running from its icon, so scheduled checks and
-downloads carry on; Windows says so once, the first time. The icon's menu:
-
-- **Open Uchiyomi**
-- **Check for new chapters** — the same as the library update task; a notification confirms it started.
-- **Restore a backup…** (below)
-- when there is an update: **Restart to update to X** on Windows, **New version X — download** on a Mac
-- **Start when I log in** — off by default; when on, Uchiyomi starts in the tray without opening a window.
-- **Quit Uchiyomi** — stops everything in order: the server finishes the chapter it is writing, then the
-  extension engine and the database shut down cleanly.
-
-Shutting Windows down, restarting or signing out does the same ordered stop first; Windows may show
-*Uchiyomi is preventing shutdown* for the second or two it takes, then carries on by itself.
-
-The icon's own words, the first-run page and the dialogs follow your system's language (the same nine
-languages as the app).
-
-### Updates
-
-- **Windows** checks one minute after starting and then every six hours, downloads a new version in the
-  background, and installs it when you quit Uchiyomi — or at once from **Restart to update to X**. Shutting
-  Windows down or signing out does not install it (an installer cut off by the shutdown would leave a broken
-  app); it waits for the next time you quit.
-- **A Mac cannot update an unsigned app by itself.** When a new version is out, the menu-bar icon offers
-  **New version X — download**, and the Version card in **Admin → Health** says *New version available* with a
-  **Download** link. Both lead to the dmg for your kind of Mac; install it over the old one.
-
-The usual GitHub update check in Health → Version stays on as well.
-
-### Backups and restoring them
-
-The app backs itself up every night, exactly as a server does, to the `backups` folder in its data folder:
-one folder per run named by date and time, holding `db.sql.gz` (the whole database as plain SQL) and
-`config.zip` (the settings, custom sites and art; a server writes `config.tar.gz`). The time is the backup hour
-under **Admin → Settings → Updates & schedules**, 03:00 by default. A computer is not always on at 3 am, so:
-
-- If there has never been a backup, or the last one — or the last attempt — is more than a day old, one runs
-  about five minutes after Uchiyomi starts. *If the PC is off then, it runs the next time Uchiyomi opens.*
-- After the computer wakes from sleep, the next backup is re-aimed within about a minute, so a night that was
-  slept through catches up straight away.
-- A failed run counts as a run: it is not retried in a loop.
-
-**Admin → Tasks** has **Open backups folder** and **Restore a backup…**; the tray menu has **Restore a backup…**
-too. Restoring:
-
-1. Pick the `db.sql.gz` inside the backup folder you want, and confirm.
-2. Uchiyomi first saves a safety copy of what you have now to `backups/before-restore-<date>`. The nightly
-   clean-up never deletes those; delete them yourself when you are happy.
-3. It stops its server, replaces the database in **one transaction** (if anything goes wrong, nothing changes),
-   replaces the settings from that backup's `config.zip`, and starts again. The window signs itself back in.
-
-Your manga files are never touched by a restore. Moving a library *from a Docker server* into the desktop app
-is not in this version, so a server's backup (the one with `config.tar.gz` in its folder) is refused with a
-message rather than restored: its series point at the server's folders (`/library-dl`) and would not find
-their files here.
-
-### What the desktop app leaves out, and why
-
-Everything that exists only for other people, or for other devices, is hidden: it is one person on one
-computer, reached from nowhere else. The server answers *not found* for each of these, so they are gone, not
-just out of sight.
-
-| Left out | Why |
-|---|---|
-| The sign-in screen, passwords, two-factor, sessions, **Sign out**, single sign-on, registration | Your computer account is the sign-in. The window signs itself in through a private handshake with the app; nothing else on the computer can. |
-| Members, the per-library access line, the age caps per member | One person. Libraries themselves, 18+ libraries and age ratings stay. |
-| OPDS, the Komga-compatible API (and its "Show missing chapters in Mihon" setting), API tokens | They exist for other devices, and the desktop server does not listen to other devices at all (see below). |
-| Push notifications, *Install app* | The window has no push service. Notification targets — a webhook, Home Assistant, ntfy, Discord — still work, and are the way to hear about new chapters on a phone. |
-| **Save offline**, *Save all offline*, the Offline tab, the Downloads settings | They copy chapters into the browser's storage, and on this computer the chapters are already on the disk. |
-| The anonymous install count | Never sent from the desktop app, whatever a restored database says. |
-
-In the admin that means no Members or Sessions tabs (a link to either opens Overview), no Sessions tile and no
-member count; on the profile, no Account tab; under Settings no Downloads or This device sections; under
-Connections no OPDS or API tokens (progress tracking with AniList, MyAnimeList and Kitsu stays).
-
-A web browser pointed at the app's address gets no session and shows *"This library opens in the Uchiyomi app
-on this computer."* If the app ever cannot sign its own window in, it shows *"Uchiyomi couldn’t open your
-library"* with **Try again**, and after a second failure suggests quitting from the tray or menu-bar icon and
-opening it again.
-
-**It is local, on purpose.** The server listens on `127.0.0.1` only, so nothing on your network can reach it
-and the firewall never asks. It also refuses a request whose `Host` is not its own address (the defence
-against DNS rebinding), and ignores forwarded-for headers. No Wi-Fi does not mean "offline" here: the library is
-on this computer, so the app never switches to its offline mode; while its server restarts, it waits and
-retries.
-
-### How it differs underneath
-
-- **Schedules start sooner.** A computer is switched off and on far more than a server, so the first run of
-  each job after a start comes sooner: the new-chapter check and the extension check after 2 minutes, the
-  Cloudflare helper check after 1, the repair, read-chapter clean-up and import clean-up after 5, and the
-  daily source check 24 hours after its last run (at least 5 minutes after start). A server keeps its 10 to
-  30 minutes. After the computer sleeps, those other jobs can run one interval late; only the backup re-aims.
-- **Room.** Downloads stop when the library's drive has less than **5 GB** free (a server keeps 10), and the
-  image cache is capped at **4 GB** (16 on a server).
-- **Windows-safe folder names** (Windows only; Linux folders are unchanged): a series folder loses control
-  characters and trailing dots and spaces, and the names Windows reserves — `CON`, `PRN`, `AUX`, `NUL`,
-  `COM0`–`COM9`, `LPT0`–`LPT9`, also with an extension — get a `_` (`CON` becomes `CON_`). A custom site's name
-  is treated the same when it becomes the source folder.
-- **Case-insensitive disks** (NTFS, APFS): adding a series whose folder already exists in another case reuses
-  that folder; folders typed in **Admin → Library** and rename destinations take the spelling already on disk;
-  a case-only rename (*Title* → *title*) works; on Windows a typed `\` is a folder separator.
-- **Antivirus.** On Windows a download retries, for about a second and a half, a rename that a virus scanner
-  briefly blocks.
-- **Messages that talked about Docker** (a container, `PUID`, `shm_size`, `SUWAYOMI_MAX_SOURCES`) say what to do
-  on a computer instead: which folder cannot be written and how to fix its permissions, to quit and reopen
-  Uchiyomi, or to hide the languages you don't read.
-
-### Where your files live
-
-| | Windows | macOS |
-|---|---|---|
-| The app | `%LOCALAPPDATA%\Programs\uchiyomi-desktop` | `/Applications/Uchiyomi.app` |
-| Its data | `%LOCALAPPDATA%\Uchiyomi` | `~/Library/Application Support/Uchiyomi` |
-| Your manga | the folder chosen on first run | the folder chosen on first run |
-
-The data folder holds:
-
-- `config/` — the settings, custom sites (`sites.json`) and art; `backups/` — the nightly backups;
-- `db/pg16/` — the database (a bundled PostgreSQL 16, the same major version as the Docker image);
-- `cache/`, `sources/`, and `library/` (an empty read library; see *Hidden settings*);
-- `engine/` — the extension engine's own data, kept for good (its series ids live here); `engine-runtime/` and
-  `engine-tmp/` — the engine itself;
-- `logs/` — `desktop.log`, `bff.log` (the server), `postgres.log`, `engine.log`;
-- `electron/` — the window's own browser profile;
-- `state.json` (ports, the library folder, the hidden settings below) and `secrets.json` (the database and
-  engine passwords).
-
-On Windows, if the data folder's path has characters outside your system's code page (a user name like
-`Jösé 名前`), the database and the engine's runtime move to `C:\ProgramData\Uchiyomi-<random id>\` instead
-(its name is kept in `state.json` as `asciiBase`): PostgreSQL and Java cannot start from such a path. Uchiyomi
-makes that folder itself, locks it to your account (plus SYSTEM and Administrators), and checks it is still
-locked every time it starts. If another account can get into it, Uchiyomi refuses to start and says so rather
-than run anything from it.
-
-### If it won't start
-
-The loading page says *Uchiyomi could not start*, with **Try again** and **Open the logs folder**. The server's
-own log is `bff.log`; include the logs when you open an issue. Two things worth knowing:
-
-- The first launch after installing can take a little longer: the database is created then.
-- A second copy never starts: opening Uchiyomi again brings the running one to the front.
-
-**Hidden settings** in `state.json`, for troubleshooting. Quit Uchiyomi from its icon first, edit, then open it:
-
-| Setting | What it does |
-|---|---|
-| `"solverUserAgent": "native"` | the Cloudflare helper uses the app's own browser identity instead of the default, Chrome-shaped one |
-| `"flaresolverrUrl": "http://host:8191/"` | use an external FlareSolverr instead of the built-in helper |
-| `"readLibrary": "<folder>"` | add an existing manga folder as the read library (a server's `LIBRARY_PATH`). It must not be inside the download folder or contain it: the app refuses to start with the two nested, and says why in `bff.log` |
-
-Command-line flags: `--data-dir=<folder>`, `--library-dir=<folder>` (answers the first-run question),
-`--hidden` (start in the tray), `--quit-for-update` (stops a running copy in order), `--smoke` (a headless
-self-test that writes `logs/smoke-result.json`).
-
-### Uninstalling
-
-- **Windows:** **Settings → Apps → Uchiyomi → Uninstall**. It stops the app in order first. Your data folder
-  (`%LOCALAPPDATA%\Uchiyomi`) and your manga are kept; delete them yourself to remove everything, together with
-  any `C:\ProgramData\Uchiyomi-…` folder.
-- **macOS:** quit from the menu-bar icon, delete Uchiyomi from Applications, then delete
-  `~/Library/Application Support/Uchiyomi` and your manga folder if you want them gone too.
+- [which file to download](DESKTOP.md#1-download-the-right-file), and the permanent download links;
+- [the first launch on Windows and macOS](DESKTOP.md#2-install-it-and-open-it-the-first-time), step by step;
+- [on this computer](DESKTOP.md#3-on-this-computer): the library folder, adding your first sources and the
+  extension engine, the tray, how it differs from a server;
+- [connecting to your own server](DESKTOP.md#4-connect-to-your-own-server): the address, sign-in portals,
+  self-signed certificates, switching and forgetting a server;
+- [updates](DESKTOP.md#5-updates), [backups](DESKTOP.md#6-backups-and-restoring-them),
+  [where files live](DESKTOP.md#7-where-your-files-live), [uninstalling](DESKTOP.md#8-uninstalling),
+  [troubleshooting](DESKTOP.md#9-if-something-goes-wrong) and
+  [what it leaves out, and why](DESKTOP.md#10-what-the-desktop-app-leaves-out-and-why).
 
 ---
 

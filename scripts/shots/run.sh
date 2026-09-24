@@ -4,6 +4,8 @@
 #   bash scripts/shots/run.sh --yes                       # everything
 #   bash scripts/shots/run.sh --yes --only home,library   # a subset
 #   bash scripts/shots/run.sh --yes --site                # also refresh the marketing site's copies
+#   SHOT_NET=<net> SHOT_BASE=http://<app>:3000 bash scripts/shots/run.sh --yes --login user:pass --only admin-extensions
+#                                                         # a throwaway instance's own account; no database is touched
 #
 # Screenshots are GENERATED, never hand-taken. See docs/SCREENSHOTS.md.
 #
@@ -25,7 +27,7 @@ BFF_IMAGE=${BFF_IMAGE:-ghcr.io/angelosha/uchiyomi:latest}
 SHOT_USER=shotbot
 OUT_PNG=$(mktemp -d)
 OUT_WEBP="$REPO/docs/shots"
-ONLY=""; YES=0; SITE=""; RECORD=0
+ONLY=""; YES=0; SITE=""; RECORD=0; LOGIN=""
 SITE_DIR=${SITE_DIR:-}     # only for --site: where to ALSO publish shots (a marketing site checkout)
 
 while [ $# -gt 0 ]; do
@@ -37,12 +39,23 @@ while [ $# -gt 0 ]; do
       SITE="$SITE_DIR"; shift ;;
     --record) RECORD=1; shift ;;
     --site-dir) SITE="$2"; shift 2 ;;
+    # user:password of an account that already exists on SHOT_BASE -- a throwaway instance (web/test/e2e/up.sh
+    # with KEEP=1). Then nothing is written to any database. The fixture shots (extensions, providers) need no
+    # real library, so they are taken this way; never create accounts on someone's live server for them.
+    --login) LOGIN="$2"; shift 2 ;;
     *) echo "unknown option: $1" >&2; exit 2 ;;
   esac
 done
 
 psql() { docker exec -i "$DB" psql -h 127.0.0.1 -U "${PGUSER:-yomi}" -d "${PGDATABASE:-yomi}" -tAc "$1"; }
 
+if [ -n "$LOGIN" ]; then
+  SHOT_USER="${LOGIN%%:*}"; PW="${LOGIN#*:}"
+  echo "· signing in as '$SHOT_USER' on $BASE (--login: no account is created, no database is touched)"
+  SERIES_ID=${SHOT_SERIES_ID:-}; BOOK_ID=${SHOT_BOOK_ID:-}
+  cleanup() { docker run --rm -u 0 -v "$OUT_PNG":/t alpine sh -c 'rm -rf /t/* /t/.[!.]* 2>/dev/null' >/dev/null 2>&1 || true; rm -rf "$OUT_PNG"; }
+  trap cleanup EXIT INT TERM
+else
 cat <<EOF
 This will, against the LIVE database in container '$DB':
   • create a temporary admin account '$SHOT_USER' (random password)
@@ -84,6 +97,7 @@ BOOK_ID=${SHOT_BOOK_ID:-$(psql "SELECT b.id FROM lib_books b WHERE b.series_id='
   ORDER BY b.number LIMIT 1" | tr -d ' ')}
 [ -n "$BOOK_ID" ] || BOOK_ID=$(psql "SELECT id FROM lib_books WHERE pages > 3 ORDER BY random() LIMIT 1" | tr -d ' ')
 echo "· series $SERIES_ID · book $BOOK_ID"
+fi
 
 chmod 777 "$OUT_PNG"
 
@@ -93,6 +107,7 @@ if [ "$RECORD" = "1" ]; then
   docker run --rm --network "$NET" -w /home/pptruser \
     -e SHOT_BASE="$BASE" -e SHOT_OUT=/out -e SHOT_USER="$SHOT_USER" -e SHOT_PASS="$PW" \
     -e SHOT_SERIES_ID="$SERIES_ID" -e SHOT_BOOK_ID="$BOOK_ID" \
+    -e SHOT_PALETTE_QUERY -e SHOT_DISCOVER_QUERY \
     -v "$OUT_PNG":/out -v "$REPO/scripts/shots":/home/pptruser/shots:ro \
     ghcr.io/puppeteer/puppeteer:latest node /home/pptruser/shots/record.mjs
 

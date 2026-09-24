@@ -10,8 +10,11 @@ const electronPath = require.resolve('electron');
 const preloadPath = require.resolve('../src/preload.js');
 const { installBridge, fromOrigin, fromShellPage } = require('../src/bridge.js');
 
-/** Load preload.js as if it ran in a window at `url`, against a fake electron; returns what it exposed. */
-function loadPreload(url) {
+/**
+ * Load preload.js as if it ran in a window at `url`, against a fake electron; returns what it exposed. `mode` is
+ * the window's --uchiyomi-mode (main.js createWindow); null leaves the argument out.
+ */
+function loadPreload(url, mode = 'standalone') {
   const exposed = {};
   const calls = [];
   const listeners = new Map();
@@ -25,7 +28,7 @@ function loadPreload(url) {
   delete require.cache[preloadPath];
   const argv = process.argv;
   globalThis.location = new URL(url);
-  process.argv = [...argv, '--uchiyomi-version=0.44.0', '--uchiyomi-lang=de'];
+  process.argv = [...argv, '--uchiyomi-version=0.44.0', '--uchiyomi-lang=de', ...(mode ? [`--uchiyomi-mode=${mode}`] : [])];
   try {
     require(preloadPath);
   } finally {

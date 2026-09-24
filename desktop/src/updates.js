@@ -59,7 +59,8 @@ async function latestRelease(o = {}) {
 
 /**
  * Does this Quit install a downloaded Windows update? "Restart to update" and a plain Quit (the tray's Quit, or
- * app.quit() from the app menu: before-quit) do. ⚠️ A quit that ANOTHER installer asked for (`--quit-for-update`,
+ * app.quit() from the app menu: before-quit; in server mode, closing the window -- which IS Quit there, nothing
+ * runs locally to keep in the tray) do. ⚠️ A quit that ANOTHER installer asked for (`--quit-for-update`,
  * which build/installer.nsh runs before replacing files) must not: it would start a second installer beside the
  * one that is already running. Nor does "Try again" on the error page (a relaunch). Nor does Windows ending the
  * session ('session-end', sessionend.js): it never reaches before-quit, and an installer started while the
@@ -68,7 +69,7 @@ async function latestRelease(o = {}) {
  */
 function installOnQuit(reason, o = {}) {
   if (reason === 'session-end') return false;
-  return !!o.install || reason === 'tray' || reason === 'before-quit';
+  return !!o.install || reason === 'tray' || reason === 'before-quit' || reason === 'window-closed';
 }
 
 class Updates extends EventEmitter {

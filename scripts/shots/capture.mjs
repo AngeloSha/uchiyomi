@@ -18,6 +18,13 @@ const SERIES_ID = process.env.SHOT_SERIES_ID || '';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+// ---- fixtures: made-up extensions and sources, and neutral names on a real library -------------------------------
+// ⚠️ No screenshot may show a real extension, site, group or repository name (owner, v0.45.0): fixtures.mjs says
+// how each kind of shot is kept neutral.
+import {
+  FIXTURE_REPO, FIXTURE_REPO_STORED, extensionFixture, sourcesFixture, fixturePage, neutralNames, meetNames,
+} from './fixtures.mjs';
+
 // Viewports. `desk` matches the existing good assets and the app's own lg: breakpoint; phone is iPhone-14
 // metrics. Everything renders at 2x/3x so the images stay sharp on a retina README.
 const PROFILES = {
@@ -147,8 +154,12 @@ async function main() {
   const page = await ctx.newPage();
   await page.setViewport(PROFILES.desk);
   await page.emulateMediaFeatures([{ name: 'prefers-reduced-motion', value: 'reduce' }]);
+  // A real library: its sources' and groups' names are shown as made-up ones (fixtures.mjs neutralNames) --
+  // series.webp's supply line named a real site and its groups until v0.45.0.
+  await neutralNames(page);
   await login(page);
   console.log('  · signed in');
+  await meetNames(page, BASE);
 
   const go = async (path, extra = 0) => {
     await page.goto(`${BASE}${path}`, { waitUntil: 'networkidle2', timeout: 60000 });
@@ -218,15 +229,7 @@ async function main() {
     await settle(page, 1400);
     await shot(page, 'admin-health');
   }
-  // Extensions is its own tab since v0.39.0: Providers used to render the whole Extensions panel a second
-  // time under its own cards (and the search field with it); it now shows a link row instead.
-  if (want('admin-extensions') || want('crop-extensions') || want('ext-strip-1')) {
-    await adminTab('Extensions');
-    const f = await page.$('input[placeholder*="Search extensions"]');
-    if (f) { await f.type('manga'); await sleep(2500); await settle(page); }
-    if (want('admin-extensions')) await adminShot('admin-extensions', 'Extensions');
-  }
-  if (want('admin-providers')) { await adminTab('Providers'); await adminShot('admin-providers', 'Add a site'); }
+  // admin-extensions, admin-providers and the extension crops are taken on a fixture page: see "fixture shots".
   // Libraries sit at the top of the Library tab, above the removed-series list. v0.8.0 added the section
   // and nothing pictured it.
   if (want('admin-libraries')) { await adminTab('Library'); await adminShot('admin-libraries', 'Libraries'); }
@@ -279,19 +282,140 @@ async function main() {
   }
   if (want('crop-health')) { await adminTab('Health'); await cropCard('crop-health', 'Suspiciously short chapters'); }
   if (want('crop-addsite')) { await adminTab('Providers'); await cropCard('crop-addsite', 'Add a site'); }
-  if (want('crop-extensions') || want('ext-strip-1')) {
-    await adminTab('Extensions');
-    const f = await page.$('input[placeholder*="Search extensions"]');
-    if (f) { await f.type('scans'); await sleep(2500); await settle(page); }
-    await cropCard('crop-extensions', 'Extensions');
+  // ---- fixture shots (see "fixtures" at the top: invented extensions and sources, never the real ones) ----
+  const cropOn = async (p, name, headingText) => {
+    if (!want(name)) return;
+    const h = await p.evaluateHandle((t) => {
+      const el = [...document.querySelectorAll('h1,h2,h3,p,span')]
+        .find((e) => (e.textContent || '').trim().toLowerCase().startsWith(t.toLowerCase()));
+      const card = el?.closest('.card');
+      card?.scrollIntoView({ block: 'center', behavior: 'instant' });
+      return card || null;
+    }, headingText);
+    const el = h.asElement();
+    if (!el) throw new Error(`${name}: no card for ${JSON.stringify(headingText)}`);
+    await sleep(700);
+    await shot(p, name, { clip: el });
+  };
+  const tabOn = async (p, tab) => {
+    await p.goto(`${BASE}/admin/?tab=${tab}`, { waitUntil: 'networkidle2', timeout: 60000 });
+    await settle(p, 700);
+  };
+  const focusOn = async (p, headingText) => {
+    await p.evaluate((t) => {
+      const el = [...document.querySelectorAll('h1,h2,h3,p,span')]
+        .find((e) => (e.textContent || '').trim().toLowerCase() === t.toLowerCase());
+      (el?.closest('.card') || el)?.scrollIntoView({ block: 'center', behavior: 'instant' });
+    }, headingText);
+    await sleep(900);
+  };
+
+  // A first visit: no repository yet, so the row is open by itself with the address typed; then the add, with
+  // the next-step line under the row. Unlike the old shots, these fail loudly: a missing input or line is a
+  // thrown error, not a silently absent file.
+  if (want('crop-repo-empty') || want('crop-repo-added')) {
+    const state = { repos: [] };
+    const xp = await fixturePage(ctx, PROFILES.desk, [extensionFixture(state)]);
+    await tabOn(xp, 'Extensions');
+    const input = await xp.waitForSelector('input[placeholder="https://…/index.min.json"]', { timeout: 15000 });
+    await input.type(FIXTURE_REPO);
+    await sleep(400);
+    await cropOn(xp, 'crop-repo-empty', 'Extensions');
+    await clickText(xp, 'button', 'Add');
+    await xp.waitForFunction(() => document.body.innerText.includes('Checking the repository'), { timeout: 5000 });
+    await xp.waitForFunction(() => document.body.innerText.includes('extensions from this repository'), { timeout: 15000 });
+    await settle(xp, 200);
+    if (want('crop-repo-added')) {
+      // The repository row and the next-step line under it, not the whole card: the card is taller than the
+      // viewport by now, and an element clip that runs under the fixed top bar photographs the bar.
+      await xp.setViewport({ ...PROFILES.desk, height: 1400 });
+      await sleep(500);
+      const box = await xp.evaluate(() => {
+        const next = [...document.querySelectorAll('p')].find((e) => (e.textContent || '').startsWith('Next: choose extensions'));
+        const card = next?.closest('.card');
+        if (!card) return null;
+        card.scrollIntoView({ block: 'center', behavior: 'instant' });
+        const c = card.getBoundingClientRect(), n = next.closest('[role=status]').getBoundingClientRect();
+        return { x: c.left + window.scrollX, y: c.top + window.scrollY, width: c.width, height: n.bottom - c.top + 14 };
+      });
+      if (!box) throw new Error('crop-repo-added: no next-step line after the add');
+      await sleep(500);
+      await xp.screenshot({ path: `${OUT}/crop-repo-added.png`, clip: box });
+      console.log('  ✓ crop-repo-added');
+    }
+    await xp.close();
+  }
+
+  // The success toast the docs name as step 4 ("Added — {n} extensions from this repository"). It lasts 3.2 s
+  // and sits at the top of the window, away from the row, so the crops above never show it (they wait for it
+  // to go): it is photographed on its own, the moment the add answers.
+  if (want('crop-repo-toast')) {
+    const xp = await fixturePage(ctx, PROFILES.desk, [extensionFixture({ repos: [] })]);
+    await tabOn(xp, 'Extensions');
+    const input = await xp.waitForSelector('input[placeholder="https://…/index.min.json"]', { timeout: 15000 });
+    await input.type(FIXTURE_REPO);
+    await clickText(xp, 'button', 'Add');
+    const toast = await xp.waitForFunction(
+      () => [...document.querySelectorAll('.fixed.inset-x-0.top-0 *')].find((e) => /^Added — \d+ extensions? from this repository/.test((e.textContent || '').trim()) && e.className && String(e.className).includes('rounded-full')),
+      { timeout: 15000 },
+    );
+    await sleep(300);
+    const box = await xp.evaluate((el) => {
+      const r = el.getBoundingClientRect();
+      return { x: Math.max(0, r.left - 28), y: Math.max(0, r.top - 16), width: r.width + 56, height: r.height + 32 };
+    }, toast);
+    await xp.screenshot({ path: `${OUT}/crop-repo-toast.png`, clip: box });
+    console.log('  ✓ crop-repo-toast');
+    await xp.close();
+  }
+
+  // The same two moments at phone width, for the site's phone plates: the repository row alone (and, after the
+  // add, the next-step line under it), at native scale -- a desktop crop in a 390px column is unreadable.
+  if (want('phone-repo-empty') || want('phone-repo-added')) {
+    const xp = await fixturePage(ctx, PROFILES.phone, [extensionFixture({ repos: [] })]);
+    await tabOn(xp, 'Extensions');
+    const input = await xp.waitForSelector('input[placeholder="https://…/index.min.json"]', { timeout: 15000 });
+    await input.type(FIXTURE_REPO);
+    // The repository row is the bordered box around the field; after the add, down to the next-step line.
+    const rowBox = (withNext) => xp.evaluate((withNext) => {
+      const row = document.querySelector('input[placeholder="https://…/index.min.json"]')?.closest('div.rounded-lg');
+      if (!row) return null;
+      row.scrollIntoView({ block: 'start', behavior: 'instant' });
+      window.scrollBy(0, -90);
+      const next = withNext ? [...document.querySelectorAll('[role=status]')].find((e) => (e.textContent || '').startsWith('Next: choose extensions')) : null;
+      if (withNext && !next) return null;
+      const r = row.getBoundingClientRect(), b = (next || row).getBoundingClientRect();
+      return { x: r.left - 10 + window.scrollX, y: r.top - 10 + window.scrollY, width: r.width + 20, height: b.bottom - r.top + 20 };
+    }, withNext);
+    let box = await rowBox(false);
+    if (!box) throw new Error('phone-repo-empty: no repository row');
+    await sleep(600);
+    if (want('phone-repo-empty')) { await xp.screenshot({ path: `${OUT}/phone-repo-empty.png`, clip: box }); console.log('  ✓ phone-repo-empty'); }
+    await clickText(xp, 'button', 'Add');
+    await xp.waitForFunction(() => document.body.innerText.includes('extensions from this repository'), { timeout: 15000 });
+    // Let the toast go (3.2 s): it is fixed to the top of the viewport and would sit across the crop.
+    await sleep(4200);
+    box = await rowBox(true);
+    if (!box) throw new Error('phone-repo-added: no next-step line after the add');
+    await sleep(600);
+    if (want('phone-repo-added')) { await xp.screenshot({ path: `${OUT}/phone-repo-added.png`, clip: box }); console.log('  ✓ phone-repo-added'); }
+    await xp.close();
+  }
+
+  // The catalogue on a later visit: one repository (the row folded again), three extensions added, one out of date.
+  if (want('admin-extensions') || want('crop-extensions') || want('ext-strip-1')) {
+    const xp = await fixturePage(ctx, PROFILES.desk, [extensionFixture({ repos: [FIXTURE_REPO_STORED] })]);
+    await tabOn(xp, 'Extensions');
+    await xp.waitForFunction(() => document.body.innerText.includes('Example Manga (EN)'), { timeout: 15000 });
+    await settle(xp, 300);
+    if (want('admin-extensions')) { await focusOn(xp, 'Extensions'); await shot(xp, 'admin-extensions'); }
+    await cropOn(xp, 'crop-extensions', 'Extensions');
     // Icon-only strips for the marketing site's extension wall.
     //
-    // Deliberately NOT screenshots of the list: those are perfectly legible walls of third-party site names,
-    // and Uchiyomi's whole stated position is that it ships no site names and hosts nothing. The icons carry
-    // the visual just as well, so the wall is built from those alone. Adult extensions stay filtered out
-    // (the panel hides them by default), and the icons come from our own proxy, not from anyone's CDN.
+    // Deliberately NOT screenshots of the list, and since v0.45.0 not the real icons either: a site's icon is
+    // its logo, and a third of the old strips spelled the site's name. They are the fixture's generated tiles.
     if (want('ext-strip-1')) {
-      const icons = await page.evaluate(async () => {
+      const icons = await xp.evaluate(async () => {
         const list = [...document.querySelectorAll('div')]
           .find((d) => d.className && String(d.className).includes('overflow-y-auto') && d.querySelector('img'));
         if (!list) return [];
@@ -304,12 +428,11 @@ async function main() {
         return [...seen];
       });
       console.log(`  · collected ${icons.length} extension icons`);
-      if (icons.length >= 12) {
-        // Pull each icon through the ALREADY-authenticated page as a data URL. The icon route is
-        // cookie-authorised, and a second page cannot borrow that easily: about:blank has the wrong origin,
-        // injecting into the app gets overwritten when React hydrates, and request interception makes Chrome
-        // fail the image loads outright. Data URLs need neither auth nor network, so they just work.
-        const dataUrls = await page.evaluate(async (srcs) => {
+      if (icons.length < 12) throw new Error(`ext-strip: only ${icons.length} icons in the fixture list`);
+      {
+        // Pull each icon through the page that shows them as a data URL (the fixture answers the fetch): the
+        // strip page is about:blank, and data URLs need neither the app's origin nor the network.
+        const dataUrls = await xp.evaluate(async (srcs) => {
           const out = [];
           for (const src of srcs) {
             try {
@@ -339,12 +462,70 @@ async function main() {
         await strip.close();
       }
     }
+    await xp.close();
+  }
+
+  // The list at phone width for the site: the search row and the first extensions, at native scale.
+  if (want('phone-extensions')) {
+    const xp = await fixturePage(ctx, PROFILES.phone, [extensionFixture({ repos: [FIXTURE_REPO_STORED] })]);
+    await tabOn(xp, 'Extensions');
+    await xp.waitForFunction(() => document.body.innerText.includes('Sample Webtoons'), { timeout: 15000 });
+    await sleep(500);
+    const box = await xp.evaluate(() => {
+      const search = document.querySelector('input[placeholder^="Search extensions"]');
+      const rows = [...document.querySelectorAll('p')].filter((e) => /^(Example Manga \(EN\)|Example Manga \(FR\))/.test((e.textContent || '').trim()));
+      if (!search || rows.length < 2) return null;
+      const top = search.closest('div').getBoundingClientRect();
+      search.scrollIntoView({ block: 'start', behavior: 'instant' });
+      window.scrollBy(0, -100);
+      const a = search.closest('div').getBoundingClientRect(), b = rows[rows.length - 1].closest('div.rounded-lg').getBoundingClientRect();
+      return top && { x: a.left - 10 + window.scrollX, y: a.top - 10 + window.scrollY, width: a.width + 20, height: b.bottom - a.top + 20 };
+    });
+    if (!box) throw new Error('phone-extensions: no search row or extension rows');
+    await sleep(600);
+    await xp.screenshot({ path: `${OUT}/phone-extensions.png`, clip: box });
+    console.log('  ✓ phone-extensions');
+    await xp.close();
+  }
+
+  if (want('admin-providers') || want('phone-sources')) {
+    const pp = await fixturePage(ctx, PROFILES.desk, [sourcesFixture(), extensionFixture({ repos: [FIXTURE_REPO_STORED] })]);
+    await tabOn(pp, 'Providers');
+    await pp.waitForFunction(() => document.body.innerText.includes('Sample Comics'), { timeout: 15000 });
+    await settle(pp, 300);
+    if (want('admin-providers')) { await focusOn(pp, 'Add a site'); await shot(pp, 'admin-providers'); }
+    await pp.close();
+    if (want('phone-sources')) {
+      // The site's small-screen stand-in for admin-providers: the first source cards at phone width.
+      const ph2 = await fixturePage(ctx, PROFILES.phone, [sourcesFixture(), extensionFixture({ repos: [FIXTURE_REPO_STORED] })]);
+      await tabOn(ph2, 'Providers');
+      await ph2.waitForFunction(() => document.body.innerText.includes('Sample Comics'), { timeout: 15000 });
+      await settle(ph2, 300);
+      // Two cards, the built-in source and a site added by URL, as one clip.
+      const box = await ph2.evaluate((names) => {
+        const cards = names.map((n) => [...document.querySelectorAll('span')].find((e) => (e.textContent || '').trim().startsWith(n))?.closest('.card'));
+        if (cards.some((c) => !c)) return null;
+        cards[0].scrollIntoView({ block: 'start', behavior: 'instant' });
+        window.scrollBy(0, -16);
+        // Document coordinates: a screenshot clip is measured from the top of the page, not of the viewport.
+        const r = cards.map((c) => c.getBoundingClientRect());
+        const x = Math.min(...r.map((b) => b.left)) - 8 + window.scrollX, y = Math.min(...r.map((b) => b.top)) - 8 + window.scrollY;
+        return { x, y, width: Math.max(...r.map((b) => b.right)) + window.scrollX - x + 8, height: Math.max(...r.map((b) => b.bottom)) + window.scrollY - y + 8 };
+      }, ['MangaDex', 'Example Manga']);
+      if (!box) throw new Error('phone-sources: the MangaDex and Example Manga cards were not found');
+      await sleep(600);
+      await ph2.screenshot({ path: `${OUT}/phone-sources.png`, clip: box });
+      console.log('  ✓ phone-sources');
+      await ph2.close();
+    }
   }
 
   // ---- phone ----
   const ph = await ctx.newPage();
+  await neutralNames(ph);
   await ph.setViewport(PROFILES.phone);
   await ph.emulateMediaFeatures([{ name: 'prefers-reduced-motion', value: 'reduce' }]);
+  await meetNames(ph, BASE);
   if (want('phone-home')) {
     await ph.goto(`${BASE}/`, { waitUntil: 'networkidle2', timeout: 60000 });
     await settle(ph, 900); await shot(ph, 'phone-home');

@@ -1,0 +1,310 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<title>Uchiyomi</title>
+<!--
+  One shell page, four steps (main.js decides which through welcome:info):
+    choose   the first launch: "On this computer" or "Connect to my server"
+    address  the server's address -> Connect (probed by the main process; never trusted from this page)
+    cert     a certificate this computer does not trust: ask once, or -- for a host pinned before -- the loud
+             "certificate changed" warning, where trusting the new one takes a second, explicit click (and is
+             not offered at all when the certificate before was one this computer trusted)
+    error    server mode could not load the server: Try again / Change server / Use on this computer
+-->
+<style>
+  :root { color-scheme: dark; --ink-850: #0b0b0f; --ink-700: #1a1a22; --ink-600: #26262f; --ink-500: #3a3a47; --fog-100: #ececf2; --fog-400: #9292a3; --fog-500: #6f6f81; --accent: #7c5cff; --red: #fca5a5; --red-strong: #ef4444; }
+  [hidden] { display: none !important; }
+  html, body { margin: 0; height: 100%; background: #000; color: var(--fog-100); font: 15px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { min-height: 100%; display: grid; place-items: center; padding: 32px 24px; box-sizing: border-box; }
+  section { width: min(560px, 100%); }
+  section#choose { width: min(720px, 100%); }
+  h1 { font-size: 22px; font-weight: 650; margin: 0 0 10px; letter-spacing: -0.005em; }
+  p { margin: 0 0 22px; color: var(--fog-400); font-size: 14px; }
+  .choices { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 14px; }
+  /* The cards are buttons (one click, keyboard reachable): undo the pill styling below -- a button does not wrap. */
+  .choice { display: flex; flex-direction: column; gap: 8px; text-align: start; white-space: normal; background: var(--ink-850); border: 1px solid var(--ink-600); border-radius: 16px; padding: 18px 18px 16px; cursor: pointer; color: inherit; font: inherit; }
+  .choice:hover { border-color: var(--ink-500); }
+  .choice:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .choice .name { font-size: 16px; font-weight: 650; }
+  .choice .body { color: var(--fog-400); font-size: 13.5px; flex: 1; }
+  .choice .go { align-self: flex-start; margin-top: 8px; font-size: 13px; border-radius: 999px; padding: 7px 14px; border: 1px solid var(--ink-600); background: var(--ink-700); }
+  .choice.first .go { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+  .field { box-sizing: border-box; width: 100%; font: inherit; font-size: 15px; color: var(--fog-100); background: var(--ink-850); border: 1px solid var(--ink-600); border-radius: 12px; padding: 11px 14px; outline: none; direction: ltr; text-align: left; }
+  .field:focus { border-color: var(--accent); }
+  .hint { font-size: 12.5px; color: var(--fog-500); margin-top: 8px; }
+  .status { font-size: 13px; color: var(--fog-400); margin-top: 12px; min-height: 1em; }
+  button { font: inherit; font-size: 14px; border-radius: 999px; padding: 9px 18px; cursor: pointer; border: 1px solid var(--ink-600); background: var(--ink-700); color: var(--fog-100); white-space: nowrap; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+  button.danger { background: transparent; border-color: rgb(239 68 68 / 0.6); color: var(--red); }
+  button.danger.armed { background: var(--red-strong); border-color: var(--red-strong); color: #fff; font-weight: 600; }
+  button:disabled { opacity: 0.55; cursor: default; }
+  button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .actions { display: flex; flex-wrap: wrap; gap: 10px; justify-content: flex-end; margin-top: 22px; }
+  .actions .start { margin-inline-end: auto; }
+  .note { font-size: 13px; margin-top: 14px; border-radius: 12px; padding: 10px 14px; overflow-wrap: anywhere; }
+  .note.warn { color: #fcd34d; background: rgb(252 211 77 / 0.08); border: 1px solid rgb(252 211 77 / 0.25); }
+  .note.err { color: var(--red); background: rgb(252 165 165 / 0.08); border: 1px solid rgb(252 165 165 / 0.25); }
+  .note.ok { color: #86efac; background: rgb(134 239 172 / 0.08); border: 1px solid rgb(134 239 172 / 0.25); }
+  .loud { border: 1px solid rgb(239 68 68 / 0.55); background: rgb(239 68 68 / 0.09); border-radius: 16px; padding: 18px 18px 4px; margin-bottom: 16px; }
+  .loud h1 { color: var(--red); }
+  .loud p { color: #fecaca; }
+  dl { display: grid; grid-template-columns: max-content 1fr; gap: 8px 16px; margin: 0; background: var(--ink-850); border: 1px solid var(--ink-600); border-radius: 12px; padding: 12px 14px; font-size: 13px; }
+  dt { color: var(--fog-500); }
+  dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+  .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; direction: ltr; unicode-bidi: isolate; text-align: start; }
+  pre { white-space: pre-wrap; overflow-wrap: anywhere; color: var(--red); background: var(--ink-850); border: 1px solid var(--ink-600); border-radius: 12px; padding: 10px 14px; font-size: 12px; margin: 0; direction: ltr; text-align: start; }
+</style>
+</head>
+<body>
+<main>
+  <section id="choose" hidden>
+    <h1 data-s="welcome.title">How do you want to use Uchiyomi?</h1>
+    <p data-s="welcome.body">You can switch later from the Uchiyomi icon (in the system tray on Windows, the menu bar on a Mac).</p>
+    <div class="choices">
+      <button type="button" class="choice first" id="pickLocal">
+        <span class="name" data-s="welcome.local">On this computer</span>
+        <span class="body" data-s="welcome.localBody">Everything runs on this computer: your library, downloads and sources. Nothing else to set up.</span>
+        <span class="go" data-s="welcome.localGo">Use on this computer</span>
+      </button>
+      <button type="button" class="choice" id="pickServer">
+        <span class="name" data-s="welcome.server">Connect to my server</span>
+        <span class="body" data-s="welcome.serverBody">You already run an Uchiyomi server at home or online. This app opens it in its own window; your library stays on the server.</span>
+        <span class="go" data-s="welcome.serverGo">Connect to a server</span>
+      </button>
+    </div>
+  </section>
+
+  <section id="address" hidden>
+    <h1 data-s="welcome.addrTitle">Connect to your Uchiyomi server</h1>
+    <p data-s="welcome.addrBody">Type the address you open Uchiyomi at in your browser.</p>
+    <form id="addrForm" novalidate>
+      <input id="addr" class="field" type="text" inputmode="url" autocomplete="url" spellcheck="false" autocapitalize="off" placeholder="https://manga.example.com" aria-describedby="example">
+      <div class="hint" id="example" data-s="welcome.addrExample">For example https://manga.example.com or http://192.168.1.10:8080</div>
+      <div class="note warn" id="httpNote" data-s="welcome.httpNote" hidden>Over plain http, chapters cannot be saved for offline reading. An https address is recommended.</div>
+      <div class="status" id="status" role="status" aria-live="polite"></div>
+      <div class="note err" id="addrErr" role="alert" hidden></div>
+      <div class="note ok" id="connected" role="status" hidden></div>
+      <div class="note warn" id="moved" role="alert" hidden></div>
+      <div class="actions">
+        <button type="button" class="start" id="addrBack" data-s="welcome.back">Back</button>
+        <button type="button" id="portalGo" data-s="welcome.portalGo" hidden>Continue</button>
+        <button type="submit" class="primary" id="connect" data-s="welcome.connect">Connect</button>
+      </div>
+    </form>
+  </section>
+
+  <section id="cert" hidden>
+    <div id="certHead">
+      <h1 id="certTitle" data-s="cert.title">Trust this server's certificate?</h1>
+      <p id="certBody"></p>
+    </div>
+    <dl>
+      <dt data-s="cert.host">Server</dt><dd id="cHost" class="mono"></dd>
+      <dt id="cFpLabel" data-s="cert.fingerprint">SHA-256 fingerprint</dt><dd id="cFp" class="mono"></dd>
+      <dt data-s="cert.before" class="changed">Trusted before</dt><dd id="cBefore" class="mono changed"></dd>
+      <dt data-s="cert.issuer">Issued by</dt><dd id="cIssuer" class="mono"></dd>
+      <dt data-s="cert.expires">Valid until</dt><dd id="cExpires"></dd>
+    </dl>
+    <div class="actions">
+      <button type="button" id="certCancel" data-s="welcome.cancel">Cancel</button>
+      <button type="button" class="primary" id="trust" data-s="cert.trust">Trust this server</button>
+      <button type="button" class="danger" id="replace" data-s="cert.replace" hidden>Trust the new certificate…</button>
+    </div>
+  </section>
+
+  <section id="error" hidden>
+    <h1 id="errTitle"></h1>
+    <p id="errBody"></p>
+    <pre id="errDetail"></pre>
+    <div class="actions">
+      <button type="button" class="start" id="errLocal" data-s="server.local">Use on this computer instead</button>
+      <button type="button" id="errChange" data-s="server.change">Change server…</button>
+      <button type="button" class="primary" id="errRetry" data-s="server.retry">Try again</button>
+    </div>
+  </section>
+</main>
+<script>
+  const shell = window.uchiyomiShell;
+  let S = {};
+  let info = {};
+  let busy = false;
+  const $ = (id) => document.getElementById(id);
+  const t = (k, vars = {}) => (S[k] || k).replace(/\{(\w+)\}/g, (m, x) => (x in vars ? String(vars[x]) : m));
+  const STEPS = ['choose', 'address', 'cert', 'error'];
+
+  function show(step) {
+    for (const s of STEPS) $(s).hidden = s !== step;
+    const first = { choose: 'pickLocal', address: 'addr', cert: 'certCancel', error: 'errRetry' }[step];
+    if (first) $(first).focus();
+  }
+  function note(id, text) { $(id).hidden = !text; $(id).textContent = text || ''; }
+  function setBusy(b) {
+    busy = b;
+    for (const id of ['addr', 'connect', 'addrBack', 'portalGo']) $(id).disabled = b;
+  }
+
+  // ---- the address step
+  function why(r) {
+    const host = r.host || '';
+    const tryHttp = r.schemeAdded ? ` ${t('welcome.errTryHttp')}` : '';
+    switch (r.error) {
+      case 'empty': case 'busy': return '';
+      case 'invalid': return t('welcome.errInvalid');
+      case 'scheme': return t('welcome.errScheme');
+      case 'credentials': return t('welcome.errCredentials');
+      case 'unreachable': return t('welcome.errUnreachable', { host, detail: r.detail || '' }) + tryHttp;
+      case 'tls': return t('welcome.errTls', { host, detail: r.detail || '' }) + tryHttp;
+      case 'not-uchiyomi': return t('welcome.errNotUchiyomi', { host }) + (r.path ? ` ${t('welcome.errPath', { path: r.path })}` : '');
+      case 'desktop': return t('welcome.errDesktop');
+      case 'http': return t('welcome.errHttp', { host, status: r.status || '' });
+      case 'basic-auth': return t('welcome.errBasicAuth', { host });
+      default: return String(r.detail || r.error || '');
+    }
+  }
+  function onResult(r) {
+    note('addrErr', ''); note('connected', ''); note('moved', ''); $('portalGo').hidden = true;
+    if (r.ok) {
+      // A redirect: the address that is kept is where it ENDED, so say it. Sent on to another HOST, the person
+      // decides (Continue) -- over plain http that answer could be anyone's, and it would re-home the app.
+      note('connected', r.redirectedFrom ? t('welcome.connectedAt', { name: r.name, origin: r.origin }) : t('welcome.connected', { name: r.name }));
+      if (r.newHost) {
+        let from = r.redirectedFrom;
+        try { from = new URL(r.redirectedFrom).host; } catch { /* as it came */ }
+        note('moved', t('welcome.moved', { host: from, origin: r.origin }));
+        $('portalGo').hidden = false;
+        $('portalGo').focus();
+        return;
+      }
+      setBusy(true);
+      // A moment to read who answered, then on: main saves the server it just proved (never one from here).
+      setTimeout(() => { shell.welcome.use().then((u) => { if (!u || !u.ok) { setBusy(false); note('connected', ''); } }); }, 700);
+      return;
+    }
+    if (r.error === 'cert' && r.cert) return showCert(r.cert, true);
+    if (r.error === 'portal') {
+      // Sent to a sign-in page (its host is known), or a portal that answered 401/403 itself (it is not).
+      note('addrErr', r.portal ? t('welcome.portal', { host: r.host || '', portal: r.portal }) : t('welcome.signinFirst', { host: r.host || '', status: r.status || '' }));
+      $('portalGo').hidden = false;
+      $('portalGo').focus();
+      return;
+    }
+    const text = why(r);
+    note('addrErr', text);
+    $('addr').focus();
+  }
+  async function connect() {
+    if (busy) return;
+    setBusy(true);
+    note('addrErr', ''); note('connected', ''); note('moved', ''); $('portalGo').hidden = true;
+    $('status').textContent = t('welcome.connecting');
+    let r;
+    try { r = await shell.welcome.connect($('addr').value); } catch (e) { r = { ok: false, error: 'x', detail: String(e && e.message || e) }; }
+    $('status').textContent = '';
+    setBusy(false);
+    onResult(r);
+  }
+  function httpNote() { $('httpNote').hidden = !/^\s*http:\/\//i.test($('addr').value); }
+
+  // ---- the certificate step
+  let certCtx = null;
+  function showCert(c, fromConnect) {
+    certCtx = { cert: c, fromConnect };
+    const changed = !!c.changed;
+    // Trusted before BY THIS COMPUTER (servermode.js OS_PIN: a public or OS-trusted certificate), now one it does
+    // not recognise: not a renewal, so there is nothing to replace here at all -- only Cancel. "Forget this
+    // server" and connecting again is the way for someone who really moved to a certificate of their own.
+    const os = changed && c.pinned === 'os';
+    $('certHead').className = changed ? 'loud' : '';
+    $('certTitle').textContent = t(changed ? 'cert.changedTitle' : 'cert.title');
+    $('certBody').textContent = t(os ? 'cert.osBody' : changed ? 'cert.changedBody' : 'cert.body', { host: c.host });
+    $('cHost').textContent = c.host;
+    $('cFpLabel').textContent = t(changed ? 'cert.now' : 'cert.fingerprint');
+    $('cFp').textContent = c.fingerprint || '?';
+    for (const el of document.querySelectorAll('.changed')) el.hidden = !changed;
+    $('cBefore').textContent = os ? t('cert.beforeOs') : c.pinned || '';
+    $('cBefore').classList.toggle('mono', !os);
+    $('cIssuer').textContent = c.issuer || '';
+    let until = '';
+    try { until = c.validTo ? new Date(c.validTo).toLocaleDateString(shell.lang) : ''; } catch { until = c.validTo || ''; }
+    $('cExpires').textContent = until;
+    // Changed: nothing to trust in one click -- the first click only arms the replacement.
+    $('trust').hidden = changed;
+    $('replace').hidden = !changed || os;
+    $('replace').classList.remove('armed');
+    $('replace').textContent = t('cert.replace');
+    $('trust').disabled = !c.fingerprint;
+    $('replace').disabled = !c.fingerprint;
+    show('cert');
+  }
+  async function trust(replace) {
+    const c = certCtx && certCtx.cert;
+    if (!c) return;
+    $('trust').disabled = true; $('replace').disabled = true;
+    await shell.welcome.trust(c.host, c.fingerprint, replace).catch(() => null);
+    $('trust').disabled = false; $('replace').disabled = false;
+    // Trusted -- or refused because the server now presents yet another certificate ('stale'): either way ask
+    // the server again, which shows whatever it presents now.
+    if (certCtx.fromConnect) { show('address'); return connect(); }
+    shell.welcome.retry();
+  }
+
+  // ---- the server-mode error step
+  function showError(err, certRefused) {
+    const name = (info.server && info.server.name) || (err && err.host) || '';
+    $('errTitle').textContent = t('server.errTitle', { name });
+    $('errBody').textContent = certRefused ? t('server.certRefused') : t('server.errBody');
+    const detail = err ? [err.host, err.code].filter(Boolean).join(': ') : '';
+    $('errDetail').textContent = detail;
+    $('errDetail').hidden = !detail;
+    show('error');
+  }
+
+  $('pickLocal').onclick = () => shell.welcome.local();
+  $('pickServer').onclick = () => show('address');
+  $('addrForm').onsubmit = (e) => { e.preventDefault(); connect(); };
+  $('addr').oninput = httpNote;
+  $('addrBack').onclick = () => { if (info.from === 'first') show('choose'); else shell.welcome.cancel(); };
+  $('portalGo').onclick = () => { setBusy(true); shell.welcome.use().then((u) => { if (!u || !u.ok) setBusy(false); }); };
+  $('certCancel').onclick = () => {
+    if (certCtx && certCtx.fromConnect) { show('address'); return; }
+    showError(info.error || { host: certCtx && certCtx.cert.host }, true);
+  };
+  $('trust').onclick = () => trust(false);
+  let armedAt = 0;
+  $('replace').onclick = (e) => {
+    if (!$('replace').classList.contains('armed')) {
+      armedAt = Date.now();
+      $('replace').classList.add('armed');
+      $('replace').textContent = t('cert.replaceSure');
+      return;
+    }
+    // ⚠️ The second click must be a second DECISION: one double-click is two click events (detail 1, then 2),
+    // and it armed and confirmed in one go -- the pin was replaced (V1 review S3b). The rest of a double or
+    // triple click, and anything within 600 ms of arming (a key held down), is ignored.
+    if (e.detail > 1 || Date.now() - armedAt < 600) return;
+    trust(true);
+  };
+  $('errRetry').onclick = () => shell.welcome.retry();
+  $('errChange').onclick = () => show('address');
+  $('errLocal').onclick = () => shell.welcome.local();
+
+  async function init() {
+    document.documentElement.lang = shell.lang;
+    if (shell.lang === 'ar') document.documentElement.dir = 'rtl';
+    S = await shell.strings();
+    for (const el of document.querySelectorAll('[data-s]')) if (S[el.dataset.s]) el.textContent = S[el.dataset.s];
+    info = (await shell.welcome.info()) || {};
+    $('addrBack').textContent = info.from === 'first' ? t('welcome.back') : t('welcome.cancel');
+    if (info.address) $('addr').value = info.address;
+    httpNote();
+    if (info.step === 'cert' && info.cert) showCert(info.cert, false);
+    else if (info.step === 'error') showError(info.error, false);
+    else if (info.step === 'address') { show('address'); if (info.result) onResult(info.result); }
+    else show('choose');
+  }
+  if (shell && shell.welcome) init();
+</script>
+</body>
+</html>

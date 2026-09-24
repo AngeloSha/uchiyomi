@@ -391,6 +391,30 @@ test('repository urls are adopted from the engine, and put back when it loses th
   assert.ok(dB.audits.some((a) => a.event === 'extension.repo_restored'));
 });
 
+test('a repository the engine respelled after a restart is not "lost", and is never written back twice', async () => {
+  // Suwayomi v2.3.2243 reports a pasted index.min.json as typed until it restarts, then as the repo.json beside
+  // it; since v0.45.0 the add route saves the typed spelling as our copy. Measured on the real engine: every
+  // restart made the next check write [repo.json, index.min.json] and push "Extension repositories restored".
+  // Reintroduce by comparing live.includes(u) again: reposRestored is ['https://r/a/index.min.json'] and the
+  // engine gets a setRepos with both spellings.
+  const { runExtensionCheck } = await load();
+  const restarted = engine([upToDate('org.x.a', 'Alpha')], { repos: ['https://r/a/repo.json'] });
+  const st = store({ repos: ['https://r/a/index.min.json'] });
+  const d = deps(restarted, st);
+  const r = await runExtensionCheck({}, d.deps as any);
+  assert.deepEqual(r.reposRestored, [], 'a respelled repository was reported as lost');
+  assert.ok(!restarted.ops.includes('setRepos'), 'the check wrote the repository back as a duplicate');
+  assert.deepEqual(restarted.repos, ['https://r/a/repo.json']);
+  assert.ok(!d.pushes.some((p) => /restored/i.test(p.title)), 'admins were told a repository had been lost');
+
+  // A wiped engine still gets it back -- once, even when our copy holds two spellings of it.
+  const wiped = engine([upToDate('org.x.a', 'Alpha')], { repos: [] });
+  const stW = store({ repos: ['https://r/a/index.min.json', 'https://r/a/repo.json', 'https://r/b/index.min.json'] });
+  const rW = await runExtensionCheck({}, deps(wiped, stW).deps as any);
+  assert.deepEqual(rW.reposRestored, ['https://r/a/index.min.json', 'https://r/b/index.min.json']);
+  assert.deepEqual(wiped.repos, ['https://r/a/index.min.json', 'https://r/b/index.min.json']);
+});
+
 test('a wiped engine gets its extensions back; an admin uninstalling one does not', async () => {
   // The signature of a wiped volume is BOTH the repositories and the extensions being gone. With the
   // repositories intact, an extension disappearing is a person having uninstalled it, and reinstalling it

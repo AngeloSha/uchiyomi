@@ -26,9 +26,9 @@ Uchiyomi is a **bring-your-own-library reader** first: like Komga / Kavita / Cal
 *you* supply, and the library and reader work on nothing but files you already own.
 
 **It also fetches**, by two routes, and both ship in the default install. **Mihon / Tachiyomi extensions**:
-you point Uchiyomi at an extension repository you trust, and from then on its ~1,400 extensions are
-browsable in the admin panel, installable with one click and searchable immediately, run by a bundled engine
-that starts with the stack. And **generic engines** for the common manga-site families, where you paste a
+you point Uchiyomi at an extension repository you trust ([how](docs/extensions.md#add-an-extension-repository--step-by-step)),
+and from then on its extensions are browsable in the admin panel, installable with one click and searchable
+immediately, run by a bundled engine that starts with the stack. And **generic engines** for the common manga-site families, where you paste a
 site's URL yourself. Plus **MangaDex**, via its official public API.
 
 Uchiyomi hosts no sources, ships no extensions and compiles nothing into the image; no source is enabled
@@ -102,7 +102,8 @@ sites' terms and your local law.
 - **Progress sync** to AniList, MyAnimeList and Kitsu.
 - **Nine languages**, with right-to-left layout for Arabic.
 - **A Windows and macOS app (beta)** — the whole thing as a program on your own computer, with the library in a
-  folder there and no server to run: [download the desktop app](#download-the-desktop-app).
+  folder there and no server to run; or, if you already run a server, a window onto it:
+  [download the desktop app](#download-the-desktop-app).
 
 **Nothing phones home.** An update check reads GitHub's public releases page and sends nothing about your
 server; it can be turned off. An anonymous install count exists and is **off unless you turn it on**, and
@@ -136,39 +137,24 @@ Rather not run a server at all? The desktop app below is the same Uchiyomi on yo
 
 ## Download the desktop app
 
-**Uchiyomi Desktop (beta)** is the same app as a program for Windows or a Mac: the library lives in a folder
-on your own computer, and there is no Docker, no server and no account to create. It opens already signed in,
-on an empty library, and you add sources, sites and extensions in Admin exactly as on a server.
+**Uchiyomi Desktop (beta)** for Windows and Mac. On first launch it asks how you want to use it: **on this
+computer** (the whole app, with the library in a folder on your PC and no Docker, server or account) or
+**connected to your server** (a window onto the Uchiyomi you already run).
 
-| Your computer | From the [latest release](https://github.com/AngeloSha/uchiyomi/releases/latest) |
+| Your computer | Download (always the newest version) |
 |---|---|
-| Windows (x64) | `Uchiyomi-Setup-<version>.exe` |
-| Mac with Apple silicon (M1 or newer) | `Uchiyomi-<version>-arm64.dmg` |
-| Mac with an Intel processor | `Uchiyomi-<version>-x64.dmg` |
+| Windows (x64) | [Uchiyomi-Setup.exe](https://github.com/AngeloSha/uchiyomi/releases/latest/download/Uchiyomi-Setup.exe) |
+| Mac with Apple silicon (M1 or newer) | [Uchiyomi-mac-arm64.dmg](https://github.com/AngeloSha/uchiyomi/releases/latest/download/Uchiyomi-mac-arm64.dmg) |
+| Mac with an Intel processor | [Uchiyomi-mac-x64.dmg](https://github.com/AngeloSha/uchiyomi/releases/latest/download/Uchiyomi-mac-x64.dmg) |
 
-**It is not signed yet**, so the first launch takes one extra step:
+- **Windows:** run it; it installs for your account with no administrator prompt. The first time, choose
+  **More info** → **Run anyway** on *"Windows protected your PC"* (the app is not signed yet).
+- **Mac:** drag Uchiyomi to Applications. The first time, macOS refuses to open it; choose **Open Anyway** in
+  **System Settings → Privacy & Security**. Not sure which Mac? Apple menu → *About This Mac*: **Chip** means
+  Apple silicon, **Processor** means Intel.
 
-- **Windows:** the installer needs no administrator rights and installs for your account only. The first time,
-  Windows shows *"Windows protected your PC"*: choose **More info**, then **Run anyway**. On a PC with
-  **Smart App Control** turned on, Windows blocks unsigned apps with no way past it; use the Docker install
-  above on that machine.
-- **macOS:** open the dmg and drag **Uchiyomi** to Applications. The first time you open it, macOS refuses; go
-  to **System Settings → Privacy & Security**, find the message about Uchiyomi and choose **Open Anyway**.
-
-**Updates.** Windows downloads a new version in the background and installs it when you quit (or straight away
-from **Restart to update** in its tray menu). A Mac cannot update an unsigned app by itself, so there a new
-version is a new download: the menu-bar icon and the Version card under Admin → Health say when one is out,
-and link to it.
-
-**What is different from a server.** It is for one person on one computer, so what exists for other people and
-other devices is left out: the sign-in screen and passwords, members, OPDS, the Komga-compatible API, API
-tokens, push notifications, *Save offline*, and the install count. Closing the window keeps it running in the
-tray or menu bar, so new chapters still arrive. The Mihon/Tachiyomi **extension engine** is a separate download
-of about 200 MB, offered the first time you open Admin → Extensions, and extensions that need an in-app web view
-do not work in it. There is no Linux or Windows on Arm build; use Docker there.
-
-Where your files go, backups and restoring them, the tray, and uninstalling:
-**[the desktop chapter of the guide](docs/USAGE.md#14-uchiyomi-desktop)**.
+Everything else — step by step with pictures, the two modes, adding sources, updates, backups, where files live,
+uninstalling — is in **[the desktop guide](docs/DESKTOP.md)**. No Linux or Windows on Arm build; use Docker there.
 
 ## Documentation
 
@@ -176,9 +162,9 @@ Where your files go, backups and restoring them, the tray, and uninstalling:
 |---|---|
 | [Usage](docs/USAGE.md) | Every screen, with screenshots |
 | [Install](docs/INSTALL.md) | One-click stores, updating, HTTPS, external DB |
-| [Desktop app](docs/USAGE.md#14-uchiyomi-desktop) | Uchiyomi Desktop for Windows and macOS (beta) |
+| [Desktop app](docs/DESKTOP.md) | Uchiyomi Desktop for Windows and macOS (beta): on your computer, or a window onto your server |
 | [Configuration](docs/CONFIGURATION.md) | Environment variables and source paths |
-| [Extensions](docs/extensions.md) | The Mihon / Tachiyomi engine |
+| [Extensions](docs/extensions.md) | Adding an extension repository, step by step; the Mihon / Tachiyomi engine |
 | [API](docs/api.md) | REST reference |
 | [Migrating](docs/MIGRATING.md) | Moving between layouts and versions |
 | [Comparison](docs/COMPARISON.md) | How it differs from Komga, Kavita, Mihon and Suwayomi |

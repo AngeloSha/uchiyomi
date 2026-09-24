@@ -57,6 +57,23 @@ export function desktopShell(): boolean {
   return bridge() !== null;
 }
 
+/**
+ * Is this page inside Uchiyomi Desktop's own window in EITHER mode? Standalone carries the bridge above;
+ * "Connect to my server" (v0.45.0) is a plain window onto someone's own server and carries only an inert
+ * marker, `window.uchiyomiShell = { mode: 'server', version }` -- no functions, nothing to call.
+ *
+ * ⚠️ This is NOT `isDesktop()` and must never feed it: in server mode the page is the ordinary server app
+ * (sign-in, members, every tab), and treating it as the desktop build would hide all of that. The only thing
+ * it answers is "is there anything to install?" -- the window already IS the installed app, so the web
+ * app's "Install Uchiyomi" row has nothing to offer. Servers older than v0.45.0 ignore the marker.
+ */
+export function inDesktopWindow(): boolean {
+  if (desktopShell()) return true;
+  if (typeof window === 'undefined') return false;
+  const m = (window as unknown as { uchiyomiShell?: unknown }).uchiyomiShell;
+  return !!m && typeof m === 'object';
+}
+
 let serverSaid = false;
 
 /**

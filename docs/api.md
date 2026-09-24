@@ -1250,6 +1250,25 @@ stale catalogue.
 `POST /api/admin/extensions/update-all` re-reads the repositories first and then applies everything, which is
 the same work the scheduled check does with `forceUpdate`. It answers **409** while a check is running.
 
+`POST /api/admin/extensions/repos` takes `{ url }` -- what a person pasted, at most 2,000 characters. Since
+v0.45.0 the server decides what that means: it trims it, unwraps an *Add to Mihon* link
+(`mihon://add-repo?url=…`, `tachiyomi://add-repo?url=…`, or a web `…/add-repo?url=…`), adds `https://` when there
+is no scheme, and turns a GitHub `…/blob/<branch>/…` file link into the raw file (a branch is never guessed).
+A repository is kept only when it brought extensions, counted from the engine's per-extension `repo` field:
+**200** `{ ok, url, corrected, added, total, error? }`, where `added` is what THIS repository contributed and
+`total` the whole catalogue; `corrected` is true when the alternative address (`index.json` → the
+`index.min.json` beside it, or a folder → `<folder>/index.min.json`; the pinned engine reads a list-shaped index
+only at an address ending in `/index.min.json`) is the one that worked. Refusals carry a stable `error`:
+**400** `bad_url` or `github_page` (a repository page, not its index), **409** `exists` (the same repository
+compared without case, scheme, trailing slash or index file name; nothing is written), **422** `empty` (it
+yielded nothing and was removed again, with `reason` when the engine's refresh reported one -- v2.3.2243 logs
+a missing or unreadable repository without reporting it, so `reason` is usually absent -- and `removed: false`
+if the removal failed),
+**502** `unreachable` (the engine's list could not be read; nothing was written) or `engine_refused` (the
+engine refused the write, with `reason`; the previous list is put back). `DELETE` with `{ url }` removes every
+spelling of that repository and answers `{ ok, removed }`; both keep the scheduled check's own copy of the list
+in step, so a removed repository is not restored by the next check.
+
 `POST /api/admin/extensions/sources/bulk` takes `{ ids?, langs?, enabled }` (at least one selector) and
 switches every matching source in one statement and one registry reload, answering `changed` (rows that
 actually flipped), `hiddenLangs`, `registered` and `skipped`. `langs` also records the standing preference:
@@ -1337,7 +1356,7 @@ GET    /api/v2/users/me
 GET    /api/v2/series/:id/read-progress/tachiyomi
 PUT    /api/v2/series/:id/read-progress/tachiyomi
 ```
-Since v0.38.0. Enough of Komga's API for the keiyoushi **Komga** extension to browse and read this library
+Since v0.38.0. Enough of Komga's API for Mihon's **Komga** extension to browse and read this library
 and for Mihon's **Komga tracker** to sync reading progress back — the set of `GET`s the current extension
 actually calls (it uses none of Komga's newer `POST …/list` forms), plus the two tracker calls. How to set
 the phone up, and what the sync can and cannot do, is in [USAGE.md](USAGE.md#the-other-direction-uchiyomi-inside-mihon-or-tachimanga)

@@ -15,6 +15,10 @@ name: Desktop
 #                product smoke: fresh profile -> first run -> signed in on an empty library, no sign-in form ->
 #                  a MangaDex chapter downloaded and read -> engine installed from the bridge -> Extensions
 #                  reachable -> Quit leaves nothing -> relaunch signed in
+#                server-mode smoke: the staged bff + bundled Postgres started as a SERVER (no desktop switch) on
+#                  127.0.0.1 -> the app on a fresh profile with --server-url -> a password form and NO desktop
+#                  bridge -> signed in, library rendered -> no postgres/bff/java of its own, no secret ->
+#                  --quit-for-update waits, nothing left -> relaunch opens the saved server -> closing it quits
 #                S2 (Postgres on a non-ASCII profile, power-off, orphan), S5 (Windows NSIS update and install over
 #                a running app), S6 (macOS unsigned: dmg, quarantine, a rebuilt app on the same profile)
 #   Artifacts: desktop-dist-<platform> (installers, blockmaps, latest*.yml -- what the release uploads) and
@@ -256,6 +260,11 @@ jobs:
         continue-on-error: true
         working-directory: desktop
         run: node scripts/ci/product-smoke.mjs || node scripts/ci/record.mjs P-product-smoke-script FAIL "product-smoke.mjs itself failed (exit $?)"
+      # After the standalone smoke (whose profile s6-keychain.mjs reuses: this one never touches it).
+      - name: Product smoke, server mode (a window onto a server of the user's own)
+        continue-on-error: true
+        working-directory: desktop
+        run: node scripts/ci/product-smoke.mjs --server-mode || node scripts/ci/record.mjs P-server-mode-script FAIL "product-smoke.mjs --server-mode itself failed (exit $?)"
       - name: S2 postgres lifecycle (non-ASCII profile, power-off, orphan)
         continue-on-error: true
         working-directory: desktop

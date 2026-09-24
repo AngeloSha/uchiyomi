@@ -15,7 +15,7 @@ import { IcBell, IcCheck, IcDownload, IcMoments, IcSparkle } from '@/components/
 import { t as tr, LOCALES, keys } from '@/lib/i18n';
 import { useT } from '@/lib/I18nProvider';
 import { SETTINGS_GRID, Section, Row, SwitchRow, Segmented, NumberRow, RangeRow, LinkRow, useAutosave } from '@/components/settings';
-import { isDesktop } from '@/lib/desktop';
+import { inDesktopWindow, isDesktop } from '@/lib/desktop';
 
 /**
  * The profile's Settings tab: Appearance · Reading · Downloads · This device.
@@ -348,7 +348,11 @@ function urlB64ToUint8(s: string): Uint8Array {
  * the app already installed -- so the grid is the same shape on every device that has a decision left.
  */
 function DeviceSection() {
-  const [supported] = useState(() => typeof window !== 'undefined' && 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window);
+  // Uchiyomi Desktop's window onto a server (its server mode -- standalone hides this whole section) has no push
+  // service: Electron ships none, so the switch could only ever fail with "The browser did not grant it." There
+  // the row says where new-chapter alerts come from instead (V2 review, v0.45.0).
+  const [inApp] = useState(() => inDesktopWindow());
+  const [supported] = useState(() => !inApp && typeof window !== 'undefined' && 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window);
   const [enabledSrv, setEnabledSrv] = useState(false);
   const [key, setKey] = useState('');
   const [on, setOn] = useState(false);
@@ -419,7 +423,8 @@ function DeviceSection() {
   useEffect(() => {
     setCanInstall(!!(window as any).__yomiInstall);
     setIsIOS(/iphone|ipad|ipod/i.test(navigator.userAgent));
-    setStandalone(window.matchMedia('(display-mode: standalone)').matches || (navigator as any).standalone === true);
+    // Uchiyomi Desktop's window (either mode) is an installed app already: nothing to install from it.
+    setStandalone(window.matchMedia('(display-mode: standalone)').matches || (navigator as any).standalone === true || inDesktopWindow());
   }, []);
 
   const install = async () => {
@@ -436,11 +441,15 @@ function DeviceSection() {
 
   return (
     <Section id="device" title={tr('This device')} icon={<IcBell width={18} height={18} />}>
-      {enabledSrv && (
+      {enabledSrv && (inApp ? (
+        <Row stacked label={tr('New-chapter alerts')}>
+          <p className="max-w-prose text-sm text-fog-400">{tr('The desktop app cannot receive push notifications. Your server can still send new chapters to your phone, Home Assistant or Discord through a notification target, which an admin sets up under Admin → Settings → Notifications.')}</p>
+        </Row>
+      ) : (
         <SwitchRow label={tr('New-chapter alerts')}
           help={supported ? tr('Get a push notification when one of your favorites gets a new chapter.') : tr('Not supported on this browser.')}
           on={on} disabled={!supported} onChange={toggle} />
-      )}
+      ))}
       {/* Already installed: the row is about installing, so it unmounts rather than congratulating you. */}
       {!standalone && (
         <Row stacked label={tr('Install Uchiyomi')}>
