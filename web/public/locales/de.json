@@ -2,7 +2,7 @@
   "_meta": {
     "language": "de",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 1149
+    "strings": 1155
   },
   "1 check found something": "1 Prüfung hat etwas gefunden",
   "1 member": "1 Mitglied",
@@ -1152,5 +1152,11 @@
   "The engine said: {reason}": "Die Engine meldete: {reason}",
   "The extension engine refused that address: {reason}": "Die Erweiterungs-Engine hat diese Adresse abgelehnt: {reason}",
   "The standard Docker install runs one in the {name} container. If you turned it off by emptying SUWAYOMI_URL, put that line back in .env and run {command}.": "Die Standard-Docker-Installation betreibt eine im Container {name}. Wenn du sie ausgeschaltet hast, indem du SUWAYOMI_URL geleert hast, stelle diese Zeile in .env wieder her und führe {command} aus.",
-  "Tip: hide the languages you don’t read first — only {n} sources can be switched on at once.": "Tipp: Blende zuerst die Sprachen aus, die du nicht liest — es können nur {n} Quellen gleichzeitig aktiv sein."
+  "Tip: hide the languages you don’t read first — only {n} sources can be switched on at once.": "Tipp: Blende zuerst die Sprachen aus, die du nicht liest — es können nur {n} Quellen gleichzeitig aktiv sein.",
+  "Read a chapter first": "Erst ein Kapitel lesen",
+  "Reading from {source}. Nothing is added to your library and no progress is kept.": "Gelesen wird direkt von {source}. Nichts wird deiner Bibliothek hinzugefügt und kein Fortschritt gespeichert.",
+  "That source would not answer.": "Diese Quelle hat nicht geantwortet.",
+  "No chapters listed.": "Keine Kapitel aufgeführt.",
+  "That chapter would not load.": "Dieses Kapitel ließ sich nicht laden.",
+  "Ch. {n}": "Kap. {n}"
 }

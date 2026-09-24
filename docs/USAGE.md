@@ -640,6 +640,13 @@ again.
   cadence rule calls the group quiet, otherwise *last release {ago}*) — and *{n} chapters have more than one
   version*, from the chapter list it already fetched to count them. Sources that name no groups show nothing
   there.
+- **Read a chapter first:** under **Add to library**, this opens the title straight from the source without
+  adding it: pick a chapter from the list (one copy per number, the one an add would take), scroll it, and
+  step to the previous or next one. Nothing is written — no series, no files, no reading progress — and
+  **Add to library** is at the bottom of the chapter list when you have decided. Pages load through the
+  same server-side image proxy as Discover's covers, so the source's referer and Cloudflare session apply.
+  It is not offered for extension sources, whose pages live inside the extension engine; add those to read
+  them. The preview is a plain vertical scroll: your reader settings apply once the series is in the library.
 - **Also check the other sources that carry this title** (admins only — following a source is an admin
   act, as it is on the series page, and a member's add goes through as if the switch were off; their done
   step says *Other sources: an admin can follow them from Sources & translations.*): when the dialog
