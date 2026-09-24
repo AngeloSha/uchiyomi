@@ -19,6 +19,8 @@ import { t as tr } from '@/lib/i18n';
 import { FindMissingDialog } from '@/components/FindMissingDialog';
 import { normGroup } from '@/lib/scanlators';
 import { GHOST_CAP, mergeRows, whyLabel, runLabel, chunkNumbers, MARK_CHUNK } from '@/lib/chapterRows';
+import { CHAPTER_PAGE, clampPage, pageCount, pageOf, pageSlice } from '@/lib/chapterPages';
+import { fetchAllBooks } from '@/lib/seriesBooks';
 import { ALL_GROUPS, copySourceId, groupsOfRow, matchesGroup } from '@/lib/groupFilter';
 import { SourcesSheet, useSeriesGroups, useCheckNow } from '@/components/SourcesSheet';
 import { SourcesExplainer } from '@/components/SourcesExplainer';
@@ -756,6 +758,27 @@ function readShowGhosts(): boolean {
   try { return localStorage.getItem(SHOW_GHOSTS_KEY) !== 'off'; } catch { return true; }
 }
 
+/**
+ * Prev / a range picker / Next for the chapter list. The picker names each page by the rows it holds
+ * ("901–1000"), which is what a reader hunting for a chapter number actually scans for.
+ */
+function ChapterPager({ page, pages, total, onPage }: { page: number; pages: number; total: number; onPage: (p: number) => void }) {
+  const range = (p: number) => `${p * CHAPTER_PAGE + 1}–${Math.min(total, (p + 1) * CHAPTER_PAGE)}`;
+  return (
+    <nav aria-label={tr('Chapter pages')} className="my-2 flex items-center justify-center gap-2 text-xs">
+      <button type="button" onClick={() => onPage(0)} disabled={page === 0} className="chip px-2.5 py-1 disabled:opacity-40" aria-label={tr('First page')}>«</button>
+      <button type="button" onClick={() => onPage(page - 1)} disabled={page === 0} className="chip px-2.5 py-1 disabled:opacity-40">{tr('Previous')}</button>
+      <select value={page} onChange={(e) => onPage(Number(e.target.value))} aria-label={tr('Chapter pages')}
+        className="rounded-full border border-ink-700 bg-ink-850 px-3 py-1 text-fog-100">
+        {Array.from({ length: pages }, (_, p) => <option key={p} value={p}>{range(p)}</option>)}
+      </select>
+      <span className="text-fog-500">{tr('of {n}', { n: total })}</span>
+      <button type="button" onClick={() => onPage(page + 1)} disabled={page >= pages - 1} className="chip px-2.5 py-1 disabled:opacity-40">{tr('Next')}</button>
+      <button type="button" onClick={() => onPage(pages - 1)} disabled={page >= pages - 1} className="chip px-2.5 py-1 disabled:opacity-40" aria-label={tr('Last page')}>»</button>
+    </nav>
+  );
+}
+
 function SeriesInner() {
   const id = useSearchParams().get('id') || '';
   const router = useRouter();
@@ -810,7 +833,7 @@ function SeriesInner() {
   const { data: series } = useQuery({ queryKey: ['series', id], queryFn: () => api<Series>(`/api/series/${id}`), enabled: !!id });
   const { data: books } = useQuery({
     queryKey: ['series-books', id],
-    queryFn: () => api<Page<Book>>(`/api/series/${id}/books?size=1000&sort=metadata.numberSort,asc`),
+    queryFn: () => fetchAllBooks(id),
     enabled: !!id,
   });
   // What the sources list that the library lacks, as of the updater's last visit. A courtesy, never a
@@ -970,6 +993,27 @@ function SeriesInner() {
     const openable = (b: Book) => !b.pruned || downloaded.has(b.id);
     return c.find((b) => !b.readProgress?.completed && openable(b)) || c.find(openable) || c[0];
   }, [books, downloaded]);
+
+  // The list a page at a time (lib/chapterPages.ts). `null` = follow "Continue": the page holding
+  // `resumeBook`, so a reader on chapter 956 lands among the 900s. Any tap on the pager pins a page; a new
+  // series, sort or filter drops the pin and follows Continue again.
+  const [chapterPage, setChapterPage] = useState<number | null>(null);
+  useEffect(() => { setChapterPage(null); }, [id, asc, group, showGhosts]);
+  const autoPage = useMemo(() => (resumeBook ? pageOf(rows, (r) => r.kind === 'book' && r.book.id === resumeBook.id) : 0), [rows, resumeBook]);
+  const shownPage = clampPage(chapterPage ?? autoPage, rows.length);
+  const pages = pageCount(rows.length);
+  const pageRows = useMemo(() => pageSlice(rows, shownPage), [rows, shownPage]);
+  // A chip in Sources & translations jumps to a chapter's row, which may be on another page: turn to it
+  // first. A number with no row (folded into a run, or filtered out) leaves the page as it is.
+  const showChapter = (n: number) => {
+    const i = rows.findIndex((r) => (r.kind === 'book' && r.book.number === n) || (r.kind === 'ghost' && r.ghost.number === n));
+    if (i >= 0) setChapterPage(Math.floor(i / CHAPTER_PAGE));
+  };
+  const chaptersTop = useRef<HTMLDivElement>(null);
+  const goPage = (p: number, scroll: boolean) => {
+    setChapterPage(clampPage(p, rows.length));
+    if (scroll) chaptersTop.current?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+  };
 
   const inProgress = books?.content.some((b) => b.readProgress && !b.readProgress.completed);
 
@@ -1437,7 +1481,7 @@ function SeriesInner() {
   // How many of the Filter sheet's two choices are off their default; the chip wears the number.
   const activeFilters = (group !== ALL_GROUPS ? 1 : 0) + (showGhosts ? 0 : 1);
   const Chapters = (
-    <div>
+    <div ref={chaptersTop} className="scroll-mt-20">
       {/* The heading on its own line and ONE row of four short, text-only chips under it. Measured at
           390 px: with icons and the two long chips this was five chips on two rows plus two sentences;
           the four fit one row in English, and `flex-wrap` (never nowrap) is the safety valve for German
@@ -1469,8 +1513,9 @@ function SeriesInner() {
           {tr('{n} of {m} chapters match', { n: filteredBooks.length + filteredGhosts.length, m: allBooks.length + visibleGhosts.length })}
         </p>
       )}
+      {pages > 1 && <ChapterPager page={shownPage} pages={pages} total={rows.length} onPage={(p) => goPage(p, false)} />}
       <div className="lg:grid lg:gap-x-8 lg:[grid-template-columns:repeat(auto-fill,minmax(250px,1fr))]">
-        {rows.map((r) => {
+        {pageRows.map((r) => {
           if (r.kind === 'book') {
             const b = r.book;
             return (
@@ -1532,6 +1577,7 @@ function SeriesInner() {
         })}
         {!books && Array.from({ length: 8 }).map((_, i) => <div key={i} className="skeleton my-3 h-6 rounded" />)}
       </div>
+      {pages > 1 && <ChapterPager page={shownPage} pages={pages} total={rows.length} onPage={(p) => goPage(p, true)} />}
     </div>
   );
 
@@ -1636,7 +1682,8 @@ function SeriesInner() {
           onSaved={() => { for (const k of [['series', id], ['series-books', id], ['home'], ['library']]) qc.invalidateQueries({ queryKey: k }); }}
           onClose={() => setSourcesOpen(false)}
           onExplain={() => { setSourcesOpen(false); setExplaining(true); }}
-          onFindMissing={() => { setSourcesOpen(false); setFindingMissing(true); }} />
+          onFindMissing={() => { setSourcesOpen(false); setFindingMissing(true); }}
+          onShowChapter={showChapter} />
       )}
       {explaining && <SourcesExplainer onClose={() => { setExplaining(false); setSourcesOpen(true); }} />}
       {filterOpen && (
