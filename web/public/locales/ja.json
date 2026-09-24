@@ -667,6 +667,7 @@
   "Source not installed": "ソース未インストール",
   "Sources & translations": "ソースと翻訳",
   "Start reading": "読み始める",
+  "{chapter} · page {page} of {pages}": "{chapter} · {page} / {pages} ページ",
   "Stopped — device storage may be full": "停止しました — 端末の空き容量が不足している可能性があります",
   "This site does not name translation groups.": "このサイトは翻訳グループを示しません。",
   "Translated by {names}": "翻訳: {names}",

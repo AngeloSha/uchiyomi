@@ -667,6 +667,7 @@
   "Source not installed": "Source non installée",
   "Sources & translations": "Sources et traductions",
   "Start reading": "Commencer la lecture",
+  "{chapter} · page {page} of {pages}": "{chapter} · page {page} sur {pages}",
   "Stopped — device storage may be full": "Arrêté — le stockage de l’appareil est peut-être plein",
   "This site does not name translation groups.": "Ce site n’indique pas les groupes de traduction.",
   "Translated by {names}": "Traduit par {names}",

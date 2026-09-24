@@ -667,6 +667,7 @@
   "Source not installed": "المصدر غير مثبّت",
   "Sources & translations": "المصادر والترجمات",
   "Start reading": "ابدأ القراءة",
+  "{chapter} · page {page} of {pages}": "{chapter} · الصفحة {page} من {pages}",
   "Stopped — device storage may be full": "توقّف — قد تكون ذاكرة الجهاز ممتلئة",
   "This site does not name translation groups.": "هذا الموقع لا يذكر فرق الترجمة.",
   "Translated by {names}": "ترجمة {names}",

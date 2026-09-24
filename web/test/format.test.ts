@@ -2,7 +2,7 @@
 // "Ch. 1" misreads the library.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { isVolumeName, chapterLabel, bytes, progressOf } from '../lib/format';
+import { isVolumeName, chapterLabel, chapterName, bytes, progressOf } from '../lib/format';
 
 test('recognises volume-style names', () => {
   for (const n of ['Tome 01', 'tome12', 'Volume 12', 'Vol. 3', 'vol.3', 'T05', 'v01', 'Berserk T41', 'Naruto Tome 07 (FR)']) {
@@ -32,6 +32,18 @@ test('chapterLabel picks the right noun', () => {
   assert.equal(chapterLabel({ metadata: { number: '4.5' }, name: 'Chapter 4.5' }), 'Ch. 4.5');
   assert.equal(chapterLabel({ name: 'Extras' }), 'Extras', 'no number -> fall back to the name');
   assert.equal(chapterLabel({}), '');
+});
+
+test('chapterName shows a real name and hides the number said again', () => {
+  // A row reads `Ch. 12 · <name>`; a name that only restates the number would read `Ch. 12 · Chapter 12`.
+  // Reintroduce by returning the title unfiltered: the first assertion reads "Chapter 12".
+  assert.equal(chapterName({ number: 12, name: 'Chapter 12' }), '');
+  assert.equal(chapterName({ metadata: { number: '12', title: 'Ch. 12' }, name: 'Chapter 12' }), '');
+  assert.equal(chapterName({ metadata: { number: '4.5', title: 'Chapter 4.5' } }), '');
+  assert.equal(chapterName({ metadata: { number: '1', title: 'Romance Dawn' }, name: 'Chapter 1' }), 'Romance Dawn', 'the metadata title wins over the file name');
+  assert.equal(chapterName({ number: 12, name: 'Chapter 120' }), 'Chapter 120', 'another number is not this one');
+  assert.equal(chapterName({ name: 'Extras' }), 'Extras', 'no number: nothing to restate');
+  assert.equal(chapterName({}), '');
 });
 
 test('bytes formats human sizes', () => {

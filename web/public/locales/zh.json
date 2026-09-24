@@ -667,6 +667,7 @@
   "Source not installed": "来源未安装",
   "Sources & translations": "来源与翻译",
   "Start reading": "开始阅读",
+  "{chapter} · page {page} of {pages}": "{chapter} · 第 {page} 页，共 {pages} 页",
   "Stopped — device storage may be full": "已停止 — 设备存储空间可能已满",
   "This site does not name translation groups.": "此站点不会标明汉化组。",
   "Translated by {names}": "汉化组：{names}",

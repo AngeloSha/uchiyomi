@@ -667,6 +667,7 @@
   "Source not installed": "Источник не установлен",
   "Sources & translations": "Источники и переводы",
   "Start reading": "Начать чтение",
+  "{chapter} · page {page} of {pages}": "{chapter} · страница {page} из {pages}",
   "Stopped — device storage may be full": "Остановлено — возможно, память устройства заполнена",
   "This site does not name translation groups.": "Этот сайт не указывает группы перевода.",
   "Translated by {names}": "Перевод: {names}",
