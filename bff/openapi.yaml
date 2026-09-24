@@ -2257,6 +2257,94 @@ paths:
           description: Not authenticated
         "403":
           description: "Forbidden: token scope, account permission or age limit"
+  /api/sources/preview/chapters:
+    get:
+      tags:
+        - sources
+      summary: A source's chapter list, for reading a chapter before adding the series.
+      operationId: getApiSourcesPreviewChapters
+      description: >-
+        One copy per chapter number under the server-wide release preferences, so the list reads like the
+        one an add would produce. Nothing is written. Follows the by-id rule of GET /api/sources/detail: the
+        age cap answers 403, the 18+ reveal does not apply.
+      parameters:
+        - name: source
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: sourceId
+          in: query
+          required: true
+          schema:
+            type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [title, readingDirection, content]
+                properties:
+                  title: { type: string }
+                  readingDirection: { type: [string, "null"] }
+                  content:
+                    type: array
+                    items:
+                      type: object
+                      required: [chapterId, number, title, scanlator]
+                      properties:
+                        chapterId: { type: string }
+                        number: { type: number }
+                        title: { type: [string, "null"] }
+                        scanlator: { type: [string, "null"] }
+        "400": { description: source or sourceId missing, or no such source }
+        "403": { description: "Forbidden: account permission (canDownload) or the source is above this account's age cap" }
+        "502": { description: The source could not be read }
+  /api/sources/preview/pages:
+    get:
+      tags:
+        - sources
+      summary: The page image URLs of one source chapter, for the preview reader.
+      operationId: getApiSourcesPreviewPages
+      description: >-
+        The URLs are rendered through the existing `/img/sources/cover` proxy, never fetched by the browser
+        directly, so the proxy's auth and SSRF guard apply to every page. Nothing is written. Extension
+        sources are refused with 422: their page URLs are on the extension engine, which the proxy does not
+        fetch pages from.
+      parameters:
+        - name: source
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: chapterId
+          in: query
+          required: true
+          schema:
+            type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [source, chapterId, pages]
+                properties:
+                  source: { type: string }
+                  chapterId: { type: string }
+                  pages: { type: array, items: { type: string } }
+        "400": { description: source or chapterId missing, or no such source }
+        "403": { description: "Forbidden: account permission (canDownload), the source is above this account's age cap, or disabled by the admin" }
+        "404": { description: The source served no pages for this chapter }
+        "422": { description: "`preview_unsupported`: an extension source, whose pages the image proxy cannot fetch" }
+        "502": { description: The source could not be read }
   /api/sources/detail:
     get:
       tags:

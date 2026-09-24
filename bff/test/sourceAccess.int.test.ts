@@ -34,10 +34,36 @@ const CLEAN = 't-clean';
 const ADULT = 't-adult';
 const SLOW = 't-slow';
 const EMPTY = 't-empty';
+/** A source with chapters and pages, for the preview routes. */
+const PREVIEW = 't-preview';
+/** An extension-shaped id: its pages would live on the engine, which the image proxy does not fetch pages from. */
+const ENGINE = 'sw:990001';
 const USERS = ['sa-admin', 'sa-plain', 'sa-capped', 'sa-nodl', 'sa-emptyperms', 'sa-yesdl', 'sa-adminnodl'];
 
 /** Counts calls so the cache can be shown to be doing something rather than assumed to be. */
 const calls = { [CLEAN]: 0, [ADULT]: 0, [SLOW]: 0, [EMPTY]: 0 } as Record<string, number>;
+/** How often each source was asked for page URLs; the extension case must never reach its adapter. */
+const pageCalls: Record<string, number> = {};
+
+/** A source whose chapters and pages the preview can show: number 2 is listed twice, as two groups' copies. */
+function previewable(id: string, name: string) {
+  return {
+    id, name,
+    async search() { return []; },
+    async getSeries(sid: string) { return { sourceId: sid, source: id, title: `${name} Title` }; },
+    async listChapters() {
+      return [
+        { sourceId: `${id}-c1`, number: 1, scanlator: 'Group A' },
+        { sourceId: `${id}-c2a`, number: 2, scanlator: 'Group A' },
+        { sourceId: `${id}-c2b`, number: 2, scanlator: 'Group B' },
+      ];
+    },
+    async getPageUrls(chapterId: string) {
+      pageCalls[id] = (pageCalls[id] ?? 0) + 1;
+      return [1, 2, 3].map((n) => `https://img.example.test/${chapterId}/${n}.jpg`);
+    },
+  };
+}
 
 function fake(id: string, name: string, opts: { isNsfw?: boolean; hang?: boolean; empty?: boolean } = {}) {
   const series = (n: number) => ({ sourceId: `${id}-${n}`, source: id, title: `${name} Title ${n}` });
@@ -72,6 +98,8 @@ async function setup() {
   registerAdapter(fake(ADULT, 'Adult Source', { isNsfw: true }) as any);
   registerAdapter(fake(SLOW, 'Slow Source', { hang: true }) as any);
   registerAdapter(fake(EMPTY, 'Empty Source', { empty: true }) as any);
+  registerAdapter(previewable(PREVIEW, 'Preview Source') as any);
+  registerAdapter(previewable(ENGINE, 'Engine Source') as any);
 
   const mk = async (username: string, role: string, perms: any, cap: number | null) =>
     (await q<{ id: string }>(
@@ -107,6 +135,8 @@ const ROUTES: Array<{ method: 'GET' | 'POST'; url: string; payload?: any }> = [
   { method: 'GET', url: '/api/sources/search-all?q=title' },
   { method: 'GET', url: '/api/sources/find?q=title' },
   { method: 'GET', url: `/api/sources/detail?source=${CLEAN}&sourceId=${CLEAN}-1` },
+  { method: 'GET', url: `/api/sources/preview/chapters?source=${PREVIEW}&sourceId=${PREVIEW}-1` },
+  { method: 'GET', url: `/api/sources/preview/pages?source=${PREVIEW}&chapterId=${PREVIEW}-c1` },
   { method: 'GET', url: '/api/sources/jobs' },
   { method: 'GET', url: '/api/discover/trending' },
   { method: 'POST', url: '/api/sources/add', payload: { source: CLEAN, sourceId: `${CLEAN}-1` } },
@@ -146,6 +176,8 @@ test('sources: who may reach them, and how long they get', { skip }, async (t) =
         `/api/sources/latest?source=${ADULT}`,
         `/api/sources/search?source=${ADULT}&q=title`,
         `/api/sources/detail?source=${ADULT}&sourceId=${ADULT}-1`,
+        `/api/sources/preview/chapters?source=${ADULT}&sourceId=${ADULT}-1`,
+        `/api/sources/preview/pages?source=${ADULT}&chapterId=${ADULT}-c1`,
       ];
       for (const url of urls) {
         const r = await app.inject({ method: 'GET', url, headers: tok(ids.capped) });
@@ -170,6 +202,40 @@ test('sources: who may reach them, and how long they get', { skip }, async (t) =
         method: 'GET', url: `/api/sources/detail?source=${ADULT}&sourceId=${ADULT}-1`, headers: tok(ids.plain),
       });
       assert.equal(d.statusCode, 200);
+    });
+
+    await t.test('the preview reads a chapter and writes nothing', async () => {
+      // Read a chapter before adding the series: the list is one copy per number (what an add would land),
+      // the pages are the source's own URLs for the client to render through /img/sources/cover, and no
+      // series row appears. Reintroduce the row by persisting from either route; the count below fails.
+      const before = (await q<{ n: number }>('SELECT count(*)::int AS n FROM lib_series WHERE source_id = $1', [PREVIEW]))[0].n;
+      const list = await app.inject({
+        method: 'GET', url: `/api/sources/preview/chapters?source=${PREVIEW}&sourceId=${PREVIEW}-1`, headers: tok(ids.plain),
+      });
+      assert.equal(list.statusCode, 200);
+      const nums = list.json().content.map((c: any) => c.number);
+      assert.deepEqual([...nums].sort(), [1, 2], 'the preview listed a number twice, unlike the add it previews');
+      const pages = await app.inject({
+        method: 'GET', url: `/api/sources/preview/pages?source=${PREVIEW}&chapterId=${PREVIEW}-c1`, headers: tok(ids.plain),
+      });
+      assert.equal(pages.statusCode, 200);
+      assert.equal(pages.json().pages.length, 3);
+      const after = (await q<{ n: number }>('SELECT count(*)::int AS n FROM lib_series WHERE source_id = $1', [PREVIEW]))[0].n;
+      assert.equal(after, before, 'a preview wrote a series row');
+    });
+
+    await t.test('the preview refuses an extension source before asking the engine', async () => {
+      // Its page URLs are paths on the extension engine, a private address the image proxy only fetches
+      // thumbnails from; answering them would be a chapter of broken images. Refused by id, so the engine is
+      // never asked. Reintroduce by deleting the `isSwAdapterId` check in the pages route.
+      pageCalls[ENGINE] = 0;
+      const r = await app.inject({
+        method: 'GET', url: `/api/sources/preview/pages?source=${encodeURIComponent(ENGINE)}&chapterId=${encodeURIComponent(ENGINE)}-c1`,
+        headers: tok(ids.plain),
+      });
+      assert.equal(r.statusCode, 422);
+      assert.equal(r.json().error, 'preview_unsupported');
+      assert.equal(pageCalls[ENGINE], 0, 'the engine was asked for pages the proxy could never show');
     });
 
     await t.test('the fan-outs drop the adult source instead of failing', async () => {
@@ -437,6 +503,6 @@ test('sources: who may reach them, and how long they get', { skip }, async (t) =
   } finally {
     await app.close();
     await q('DELETE FROM users WHERE username = ANY($1)', [USERS]).catch(() => {});
-    await q('DELETE FROM source_health WHERE source_id = ANY($1)', [[CLEAN, ADULT, SLOW, EMPTY]]).catch(() => {});
+    await q('DELETE FROM source_health WHERE source_id = ANY($1)', [[CLEAN, ADULT, SLOW, EMPTY, PREVIEW, ENGINE]]).catch(() => {});
   }
 });

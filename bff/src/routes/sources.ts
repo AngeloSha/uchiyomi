@@ -1981,6 +1981,76 @@ export default async function sourceRoutes(app: FastifyInstance) {
     return { content: found.filter(Boolean) };
   });
 
+  /**
+   * A source's chapter list, for the preview reader: read a Discover result WITHOUT adding it.
+   *
+   * `/api/sources/detail` deliberately answers with counts and groups rather than the list itself -- the
+   * add dialog needs "120 chapters", not 120 rows -- so previewing gets its own route rather than making
+   * every add pay for a payload it does not read. One copy per number, chosen under the server's release
+   * preferences, so the list reads like the one an add would produce.
+   *
+   * Nothing is written by either preview route: no series row, no files, no progress. The age cap is the
+   * same one `detail` applies: this is a by-id request for a source the person just named, so the cap
+   * refuses it and the "Show 18+" reveal (which only hides what appears unasked) has no say.
+   */
+  app.get('/api/sources/preview/chapters', async (req, reply) => {
+    const { source, sourceId } = req.query as { source?: string; sourceId?: string };
+    const src = source ? getSource(source) : null;
+    if (!src || !sourceId) return reply.code(400).send({ error: 'bad_request' });
+    if (!sourceAllowedFor(src, vc(req).maxAgeRating)) return denySource(reply);
+    try {
+      const { series, chapters } = await seriesAndChapters(src, sourceId);
+      const chosen = chooseReleases(chapters, await effectivePrefsFor(null, 0)).releases;
+      return {
+        title: series?.title || '',
+        readingDirection: (series as any)?.readingDirection ?? null,
+        content: chosen
+          .filter((c) => c.sourceId)
+          .map((c) => ({ chapterId: c.sourceId, number: c.number, title: c.title ?? null, scanlator: c.scanlator ?? null })),
+      };
+    } catch (e: any) {
+      return reply.code(502).send({ error: 'unreadable', message: String(e?.message || e).slice(0, 200) });
+    }
+  });
+
+  /**
+   * The pages of one chapter, straight from the source, for the preview reader.
+   *
+   * It answers the source's own image URLs, and the client renders them through `/img/sources/cover`, which
+   * is the proxy that already exists for exactly this shape of problem -- a remote image named by a source,
+   * fetched with that source's referer and Cloudflare session, behind the SSRF guard and the root `/img/`
+   * authorization hook. Adding a second byte proxy for pages would mean re-solving all of that, and the note
+   * on `authorizeImageRequest` in routes/images.ts records what happened to one that was shipped without it.
+   *
+   * ⚠️ NOT FOR EXTENSION SOURCES. Their page URLs are paths on the extension engine, which is a private
+   * address; the cover proxy's one engine exemption is the thumbnail shape (`engineCoverUrl`), and widening
+   * it to pages would hand every signed-in reader an authenticated GET on the engine. So an extension source
+   * is answered `preview_unsupported` here, before the engine is asked for anything, rather than returning
+   * URLs every one of which the proxy would then refuse. The add dialog does not offer the preview for them.
+   */
+  app.get('/api/sources/preview/pages', async (req, reply) => {
+    const { source, chapterId } = req.query as { source?: string; chapterId?: string };
+    const src = source ? getSource(source) : null;
+    if (!src || !chapterId) return reply.code(400).send({ error: 'bad_request' });
+    if (!sourceAllowedFor(src, vc(req).maxAgeRating)) return denySource(reply);
+    if (isSwAdapterId(src.id)) {
+      return reply.code(422).send({ error: 'preview_unsupported', message: 'Pages from an extension source cannot be previewed; add the series to read it.' });
+    }
+    if (await isDisabled(src.id)) {
+      return reply.code(403).send({ error: 'disabled', message: `${src.name} is disabled by the admin.` });
+    }
+    try {
+      const urls = await src.getPageUrls(chapterId);
+      if (!urls?.length) {
+        return reply.code(404).send({ error: 'no_pages', message: 'That source served no pages for this chapter.' });
+      }
+      return { source: src.id, chapterId, pages: urls };
+    } catch (e: any) {
+      // Answered, not swallowed: a preview that fails silently looks like an empty chapter.
+      return reply.code(502).send({ error: 'unreadable', message: String(e?.message || e).slice(0, 200) });
+    }
+  });
+
   // Detail for one provider's match: description + chapter count/range (drives the add dialog).
   app.get('/api/sources/detail', async (req, reply) => {
     const { source, sourceId } = req.query as { source?: string; sourceId?: string };
