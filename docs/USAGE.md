@@ -1103,6 +1103,17 @@ This is about what turns up unasked, not about access. A link, a bookmark, an of
 progress all keep working while the library is hidden, because losing your place is not tidying. An age
 limit below 18 is the other thing entirely: those sources are refused by name whatever the button says.
 
+**The reveal can also cover genres and named sources.** Rating a whole library 18+ is the only thing the
+switch knew about, so keeping, say, *Ecchi* off the shelf meant moving those series into an 18+ library — a
+filing decision made to get a display outcome, and one the scanner argues with on the next rescan.
+**Admin → Settings → 18+ filter** says it directly instead: tick the genres (the list is the genres your
+library actually has) and, separately, any source that should count as adult although its extension does not
+say so. With **Show 18+** off, a series carrying one of those genres leaves the same places an 18+ library
+does, and a ticked source leaves Discover the way a self-declared adult one does. Nothing is refiled and
+nothing is refused: it is the same surfacing filter, with the same exceptions as above. One title that is
+tagged wrongly, or that you simply want to keep, can be let through on its own: **Edit details → Always show**
+on the series page. Both lists are empty until you tick something, so an existing server behaves as before.
+
 **Access.** **Access** on a library row lists who can open it. One thing worth knowing: a member with no
 limits set can open every library, including ones you add later. Unticking them here is what turns that into
 an explicit list -- so granting a library to an unrestricted member changes nothing, and revoking one is what

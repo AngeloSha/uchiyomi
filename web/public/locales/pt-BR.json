@@ -2,7 +2,7 @@
   "_meta": {
     "language": "pt-BR",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 1149
+    "strings": 1156
   },
   "1 check found something": "1 verificação encontrou algo",
   "1 member": "1 membro",
@@ -1152,5 +1152,12 @@
   "The engine said: {reason}": "O motor respondeu: {reason}",
   "The extension engine refused that address: {reason}": "O motor de extensões recusou esse endereço: {reason}",
   "The standard Docker install runs one in the {name} container. If you turned it off by emptying SUWAYOMI_URL, put that line back in .env and run {command}.": "A instalação padrão do Docker roda um no contêiner {name}. Se você o desativou deixando SUWAYOMI_URL vazio, coloque essa linha de volta no .env e execute {command}.",
-  "Tip: hide the languages you don’t read first — only {n} sources can be switched on at once.": "Dica: oculte primeiro os idiomas que você não lê — só {n} fontes podem ficar ativadas ao mesmo tempo."
+  "Tip: hide the languages you don’t read first — only {n} sources can be switched on at once.": "Dica: oculte primeiro os idiomas que você não lê — só {n} fontes podem ficar ativadas ao mesmo tempo.",
+  "18+ filter": "Filtro +18",
+  "Genres to keep off the shelf while “Show 18+” is off. This hides nothing from anyone who goes looking: links, bookmarks, downloads and reading progress are unaffected.": "Gêneros que ficam fora da estante enquanto “Mostrar +18” estiver desligado. Nada fica escondido de quem procura: links, marcadores, downloads e o progresso de leitura não mudam.",
+  "No genres yet.": "Ainda não há gêneros.",
+  "Sources to treat as adult, on top of the ones their extension already declares.": "Fontes a tratar como adultas, além das que a própria extensão já declara.",
+  "One series can be let through on its own page — Edit details ▸ “Always show”.": "Uma série específica pode ser liberada na própria página — Editar detalhes ▸ “Sempre mostrar”.",
+  "Always show": "Sempre mostrar",
+  "Keep this series on the shelf while “Show 18+” is off, even if one of its genres is on the 18+ filter.": "Mantém esta série na estante enquanto “Mostrar +18” estiver desligado, mesmo que um dos gêneros dela esteja no filtro +18."
 }
