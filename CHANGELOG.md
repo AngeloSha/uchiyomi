@@ -95,6 +95,25 @@ and read in the window, the extension engine installed through the app, Quit lea
 relaunch signed in — plus the Windows update and the macOS unsigned-update checks. It has not yet been tried on
 many real PCs, which is why it is a beta.
 
+**What was verified before tagging.** On Windows x64, macOS arm64 and macOS x64 (GitHub runners, the installers
+built from this commit): 31 product checks, none failing — the product smoke above with the *published* extension
+engine pack, the sign-in handshake's refusals (no secret, a wrong one, a foreign origin, a password login), the
+app's own backup, Postgres recovering from a power cut and from an orphaned server, a standard (non-administrator)
+Windows user, a Windows profile named `Jösé 名前` (database and extension engine both on the private ASCII
+fallback), the Windows installer run over a running app and a vN → vN+1 update keeping the data, and on both Macs
+a rebuilt unsigned app opening straight into the library, signed in, with nothing in the Keychain. The shell's
+own suite (88 tests, the solver's contract against the bff's real client and Suwayomi's DTOs, the solver in real
+hidden Electron windows). And the server, with the switch off: the whole bff suite on a fresh database (172 files,
+1837 tests, none failing), the web app's 421 tests, the production build, the browser end-to-end suite and walks
+v0.40–v0.43 each on its own instance, the layout at 1440 and 390 px and all nine languages.
+
+Real machines caught three things the Linux tests could not, all fixed here: an unsigned Mac kept the cookie key
+in the Keychain under the build's own signature, so an update hung behind a hidden password prompt and even a
+restart lost the session (cookie encryption stays off until the builds are signed); the window refused its own
+extension-engine progress while the server restarted after the install; and the review found that another account
+on the same PC could bind the app's port in the seconds before the server did and receive the sign-in secret — the
+shell now trusts the port only after its own server process reports holding it, and loads nothing from it before.
+
 ### For server installs: nothing changes
 
 The switch is read in `bff/src/lib/desktop.ts` alone, and every place that behaves differently asks it, with
