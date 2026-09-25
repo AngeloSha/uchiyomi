@@ -6,6 +6,7 @@ import { useSearchParams, useRouter } from 'next/navigation';
 import { AnimatePresence, motion } from 'framer-motion';
 import { useQuery } from '@tanstack/react-query';
 import { api, img } from '@/lib/api';
+import { fetchAllBooks } from '@/lib/seriesBooks';
 import { chapterOutcome } from '@/lib/readerState';
 import { openableChapters } from '@/lib/chapterRows';
 import { buildFlow, startIndex, renderWindow } from '@/lib/readerFlow';
@@ -208,7 +209,7 @@ function ReaderInner() {
       }
       // chapter list for prev/next/jump
       try {
-        const list = await api<Page<Book>>(`/api/series/${first.seriesId}/books?size=1000&sort=metadata.numberSort,asc`);
+        const list = await fetchAllBooks(first.seriesId);
         // ⚠️ A chapter the server's cleanup deleted is still a row in that list -- it has to be, it carries
         // everyone's progress -- and the first cut of "Chapter deleted" only handled the failure screen, so
         // next/prev walked straight onto the tombstone and showed it in the middle of a series that was
