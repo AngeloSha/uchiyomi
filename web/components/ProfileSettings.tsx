@@ -7,6 +7,7 @@ import { requestPersist, storageEstimate } from '@/lib/downloads';
 import { deviceId } from '@/lib/device';
 import { bytes } from '@/lib/format';
 import { readShownOnce } from '@/lib/shownOnce';
+import { setTypeToSearchOn, typeToSearchOn } from '@/lib/typeToSearch';
 import { ReaderPrefs, loadPrefs, savePrefs, syncPrefsFromServer } from '@/lib/readerPrefs';
 import { Avatar, AVATAR_EMOJIS, AVATAR_COLORS } from '@/components/Avatar';
 import { ProgressBar } from '@/components/ui';
@@ -112,6 +113,9 @@ function AppearanceSection() {
   // and its mirror (lib/effects.ts) -- then put back if the server refuses, so the switch never shows a
   // state the account does not hold.
   const reduceEffects = user?.settings?.reduceEffects === true;
+  // Read after mount: localStorage is not there during the static export's render.
+  const [typeSearch, setTypeSearch] = useState(true);
+  useEffect(() => { setTypeSearch(typeToSearchOn()); }, []);
   const saveReduceEffects = async (next: boolean) => {
     const prev = reduceEffects;
     setSettings({ reduceEffects: next });
@@ -168,6 +172,11 @@ function AppearanceSection() {
       <SwitchRow label={tr('Reduce effects')}
         help={tr('Turns off the animated background, blur, smooth scrolling and transitions. Try it if scrolling feels slow.')}
         on={reduceEffects} onChange={saveReduceEffects} />
+
+      {/* This device only (lib/typeToSearch.ts says why): single-key shortcuts must be possible to switch off. */}
+      <SwitchRow label={tr('Type anywhere to search')}
+        help={tr('Start typing a title on any page to open search with it. This also switches the / shortcut, on this device only.')}
+        on={typeSearch} onChange={(next) => { setTypeToSearchOn(next); setTypeSearch(next); }} />
 
       {/* Written to the server so it follows you to another device, and mirrored to localStorage so the login
           screen -- which nobody is signed in to -- is already translated. The note about machine assistance

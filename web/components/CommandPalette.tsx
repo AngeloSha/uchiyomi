@@ -12,7 +12,7 @@ import { Img } from './ui';
 import { IcSearch, IcSparkle, IcRefresh, IcBell, IcDownload, IcGrid, IcMoments } from './icons';
 import { t as tr } from '@/lib/i18n';
 import { hiddenOnDesktop, DESKTOP_HIDDEN } from '@/lib/desktop';
-import { isTypingTarget, typeToSearchKey } from '@/lib/typeToSearch';
+import { isTypingTarget, seedFor, typeToSearchKey, typeToSearchOn } from '@/lib/typeToSearch';
 
 interface Action { key: string; label: string; hint?: string; icon: React.ReactNode; run: () => void | Promise<void> }
 
@@ -39,6 +39,23 @@ export function CommandPalette({ open, seed = '', onClose }: { open: boolean; se
       setTimeout(() => inputRef.current?.focus(), 30);
     }
   }, [open]); // seed is read at open time only
+
+  // Focus can leave the box while the palette is open -- a click on a result, Tab. A letter typed then was
+  // swallowed: the seed only applies on open, and the global handler below now stands down for an open dialog.
+  // It goes into the box instead.
+  useEffect(() => {
+    if (!open) return;
+    const onKeyAnywhere = (e: KeyboardEvent) => {
+      if (document.activeElement === inputRef.current || isTypingTarget(document.activeElement)) return;
+      const ch = typeToSearchKey(e, { typing: false, modalOpen: false });
+      if (!ch) return;
+      e.preventDefault();
+      setQ((cur) => cur + ch);
+      inputRef.current?.focus();
+    };
+    document.addEventListener('keydown', onKeyAnywhere);
+    return () => document.removeEventListener('keydown', onKeyAnywhere);
+  }, [open]);
 
   // debounced instant search
   useEffect(() => {
@@ -112,6 +129,9 @@ export function CommandPalette({ open, seed = '', onClose }: { open: boolean; se
           <motion.div initial={{ opacity: 0, y: -10, scale: 0.98 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: -8, scale: 0.98 }}
             transition={{ duration: 0.18, ease: [0.22, 0.61, 0.36, 1] }}
             className="glass-strong grad-border mx-auto w-full max-w-xl overflow-hidden rounded-2xl border border-ink-700 shadow-lift"
+            // A dialog, said so: screen readers announce it as one, and every global key handler that stands down
+            // for an open `aria-modal` (type-to-search among them) now stands down for this one too.
+            role="dialog" aria-modal="true" aria-label={tr('Search')}
             onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center gap-2.5 border-b border-ink-800 px-4">
               <IcSearch width={17} height={17} className="shrink-0 text-fog-500" />
@@ -174,10 +194,12 @@ export function usePaletteHotkeys(setOpen: (fn: (o: boolean) => boolean) => void
     const onKey = (e: KeyboardEvent) => {
       const typing = isTypingTarget(document.activeElement);
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); onSeed?.(''); setOpen((o) => !o); return; }
+      // Single-key shortcuts from here on, which this device can switch off (Profile -> Settings).
+      if (!typeToSearchOn()) return;
       if (e.key === '/' && !typing) { e.preventDefault(); onSeed?.(''); setOpen(() => true); return; }
       if (!onSeed) return;
       const ch = typeToSearchKey(e, { typing, modalOpen: !!document.querySelector('[aria-modal="true"]') });
-      if (ch) { e.preventDefault(); onSeed(ch); setOpen(() => true); }
+      if (ch) { e.preventDefault(); onSeed(seedFor(ch, document.documentElement.lang)); setOpen(() => true); }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
