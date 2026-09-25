@@ -38,16 +38,22 @@ test('the reveal chip stays on screen while the reveal is on', () => {
 });
 
 test('the chip is anchored where a search cannot unmount it', () => {
-  // Reintroduce by moving `<AdultToggle .../>` into the SourcePicker chip row: it is mounted only for
-  // `mode === 'newest'` (the line below it), so the chip would vanish as soon as anyone searched.
+  // Reintroduce by moving `<AdultToggle .../>` into the SourcePicker chip row: the header is the one place
+  // that is the same in both modes, and the picker's row is a browse control whose mounting has changed
+  // before. SourcePicker used to be newest-only, which is why this anchor exists; it now stays mounted
+  // while searching too, because a search made with a source chosen is narrowed to that source and the
+  // picker is where that filter is shown and cleared. Reintroduce the old gating by wrapping it in
+  // `{mode === 'newest' && (...)}` again: "SourcePicker is gated on the mode" fails, and a narrowed search
+  // loses the only thing on screen that says it is narrowed.
   const page = code(read('app/discover/page.tsx'));
   const header = page.slice(page.indexOf('<header'), page.indexOf('</header>'));
   assert.ok(header.includes('<AdultToggle alsoWhen={showAdultChip}'),
     'the reveal chip is not in the Discover header any more');
-  assert.match(page, /\{mode === 'newest' && \(\s*<SourcePicker/,
-    'SourcePicker is no longer the newest-only component this anchor exists to avoid');
+  assert.ok(page.includes('<SourcePicker'), 'SourcePicker is gone from Discover');
+  assert.doesNotMatch(page, /mode === '(?:newest|search)'[^\n]*&& \(\s*<SourcePicker/,
+    'SourcePicker is gated on the mode, so a search hides the source filter it is narrowed to');
   assert.ok(page.indexOf('<AdultToggle alsoWhen={showAdultChip}') < page.indexOf('<SourcePicker'),
-    'the chip is rendered inside the newest-only region');
+    'the chip is rendered inside the picker region rather than the header');
 });
 
 test('AdultToggle renders for a second reason, and still for its first', () => {

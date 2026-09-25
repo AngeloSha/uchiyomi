@@ -2,7 +2,7 @@
   "_meta": {
     "language": "ja",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 1151
+    "strings": 1162
   },
   "1 check found something": "1 件のチェックで問題を検出",
   "1 member": "メンバー 1 人",
@@ -1154,5 +1154,16 @@
   "The standard Docker install runs one in the {name} container. If you turned it off by emptying SUWAYOMI_URL, put that line back in .env and run {command}.": "標準の Docker インストールでは {name} コンテナーでエンジンが動作します。SUWAYOMI_URL を空にして無効にした場合は、.env にその行を戻して {command} を実行してください。",
   "Tip: hide the languages you don’t read first — only {n} sources can be switched on at once.": "ヒント: まず読まない言語を隠しておきましょう — 同時に有効にできるソースは {n} 件までです。",
   "Type anywhere to search": "どこでも入力して検索",
-  "Start typing a title on any page to open search with it. This also switches the / shortcut, on this device only.": "どのページでもタイトルを入力し始めると、その内容で検索が開きます。/ ショートカットもここで切り替わります（この端末のみ）。"
+  "Start typing a title on any page to open search with it. This also switches the / shortcut, on this device only.": "どのページでもタイトルを入力し始めると、その内容で検索が開きます。/ ショートカットもここで切り替わります（この端末のみ）。",
+  "This source": "このソース",
+  "Use this reader for everything from {source}": "{source} のすべてにこのリーダー設定を使う",
+  "Forget the default for {source}": "{source} の既定を解除",
+  "Reading direction": "読む方向",
+  "Right to left": "右から左",
+  "Left to right": "左から右",
+  "Series default": "シリーズに従う",
+  "Chapter pages": "章のページ",
+  "First page": "最初のページ",
+  "Last page": "最後のページ",
+  "of {n}": "/ {n}"
 }

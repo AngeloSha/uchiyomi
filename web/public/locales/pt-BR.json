@@ -2,7 +2,7 @@
   "_meta": {
     "language": "pt-BR",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 1151
+    "strings": 1162
   },
   "1 check found something": "1 verificação encontrou algo",
   "1 member": "1 membro",
@@ -1154,5 +1154,16 @@
   "The standard Docker install runs one in the {name} container. If you turned it off by emptying SUWAYOMI_URL, put that line back in .env and run {command}.": "A instalação padrão do Docker roda um no contêiner {name}. Se você o desativou deixando SUWAYOMI_URL vazio, coloque essa linha de volta no .env e execute {command}.",
   "Tip: hide the languages you don’t read first — only {n} sources can be switched on at once.": "Dica: oculte primeiro os idiomas que você não lê — só {n} fontes podem ficar ativadas ao mesmo tempo.",
   "Type anywhere to search": "Digite em qualquer lugar para pesquisar",
-  "Start typing a title on any page to open search with it. This also switches the / shortcut, on this device only.": "Comece a digitar um título em qualquer página para abrir a pesquisa com ele. Também liga ou desliga o atalho /, somente neste dispositivo."
+  "Start typing a title on any page to open search with it. This also switches the / shortcut, on this device only.": "Comece a digitar um título em qualquer página para abrir a pesquisa com ele. Também liga ou desliga o atalho /, somente neste dispositivo.",
+  "This source": "Esta fonte",
+  "Use this reader for everything from {source}": "Usar este leitor para tudo de {source}",
+  "Forget the default for {source}": "Esquecer o padrão de {source}",
+  "Reading direction": "Direção de leitura",
+  "Right to left": "Da direita para a esquerda",
+  "Left to right": "Da esquerda para a direita",
+  "Series default": "Conforme a série",
+  "Chapter pages": "Páginas de capítulos",
+  "First page": "Primeira página",
+  "Last page": "Última página",
+  "of {n}": "de {n}"
 }

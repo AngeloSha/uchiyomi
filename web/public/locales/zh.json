@@ -2,7 +2,7 @@
   "_meta": {
     "language": "zh",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 1151
+    "strings": 1162
   },
   "1 check found something": "1 项检查发现问题",
   "1 member": "1 位成员",
@@ -1154,5 +1154,16 @@
   "The standard Docker install runs one in the {name} container. If you turned it off by emptying SUWAYOMI_URL, put that line back in .env and run {command}.": "标准 Docker 安装会在 {name} 容器中运行一个扩展引擎。如果你是通过清空 SUWAYOMI_URL 关闭的，请把那一行加回 .env，然后运行 {command}。",
   "Tip: hide the languages you don’t read first — only {n} sources can be switched on at once.": "提示：先隐藏你不读的语言 — 同时最多只能启用 {n} 个来源。",
   "Type anywhere to search": "在任意位置输入即可搜索",
-  "Start typing a title on any page to open search with it. This also switches the / shortcut, on this device only.": "在任意页面开始输入标题，即可带着它打开搜索。同时开启或关闭 / 快捷键，仅限此设备。"
+  "Start typing a title on any page to open search with it. This also switches the / shortcut, on this device only.": "在任意页面开始输入标题，即可带着它打开搜索。同时开启或关闭 / 快捷键，仅限此设备。",
+  "This source": "此来源",
+  "Use this reader for everything from {source}": "来自 {source} 的所有内容都使用此阅读器设置",
+  "Forget the default for {source}": "清除 {source} 的默认设置",
+  "Reading direction": "阅读方向",
+  "Right to left": "从右到左",
+  "Left to right": "从左到右",
+  "Series default": "跟随系列",
+  "Chapter pages": "章节分页",
+  "First page": "第一页",
+  "Last page": "最后一页",
+  "of {n}": "共 {n}"
 }

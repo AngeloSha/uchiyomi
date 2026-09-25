@@ -324,6 +324,11 @@ slot count) at a time, one lane for solver-fronted sources and one for the rest;
 budget is recorded as slow (never as a failure), one that throws is recorded against its health, and one that
 is disabled or in a cooldown is skipped rather than asked — exactly as the newest listing treats them.
 
+`&source=<id>` asks only that one source, which is what Discover sends while it is filtered to a source. It
+narrows the set described above and never widens it: an adult source without `adult=1`, one above your age
+limit, or an id that does not exist asks nobody and answers the empty shape. The entry is still keyed by the
+term alone, so a narrowed search reads whatever a full one already heard, and the other way round.
+
 `GET /api/sources/detail` is cached for ten minutes per source and series (it was ninety seconds), and
 concurrent requests for the same pair — the add dialog's pre-warm and the pick that follows it — collapse
 into one outbound fetch. A failed lookup is never cached, so an immediate retry asks the source again.
