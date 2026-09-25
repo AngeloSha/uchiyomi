@@ -6,7 +6,7 @@ import { komgaImage } from '../lib/komga';
 import { content as komga, NATIVE_PROGRESS } from '../lib/backend';
 import { UnsupportedFilter } from '../lib/ownedCatalog';
 import { cleanDescription } from '../lib/htmlText';
-import { viewCtxFor, SYSTEM_CTX, type ViewCtx, hideAdult, browsableIds, browsable, Params } from '../lib/visibility';
+import { viewCtxFor, SYSTEM_CTX, type ViewCtx, hideAdult, browsableIds, browsable, Params, adultFilterConfigured } from '../lib/visibility';
 
 /** The viewer attached by the preHandler above. */
 const vc = (req: FastifyRequest): ViewCtx => (req as any).viewCtx as ViewCtx;
@@ -25,6 +25,7 @@ import { ghostsEnabled } from '../lib/komgaGhosts';
 import { groupStats, type StatCopy } from '../lib/groupStats';
 import { groupsOf, normGroup } from '../lib/releases';
 import { getSource } from '../lib/sources';
+import { cleanSourceOrder } from '../lib/sourcePrefs';
 
 
 
@@ -118,6 +119,15 @@ export default async function catalogRoutes(app: FastifyInstance) {
   });
 
   app.get('/api/libraries', async (req) => komga.libraries(vc(req)));
+
+  // Whether "Show 18+" would reveal anything beyond 18+ libraries: an admin-named genre or source. The
+  // toggle renders only where there is something to reveal, and `/api/libraries` can only say that about
+  // libraries -- so without this, an install whose only adult content is a genre on the 18+ filter hid it
+  // with no off switch on the Library or Home page. A boolean, never the lists themselves.
+  app.get('/api/adult-filter', async (req) => {
+    const ctx = await viewCtxFor(userIdOf(req), roleOf(req), { hideAdult: true });
+    return { configured: adultFilterConfigured(ctx) };
+  });
 
   // No re-sort. SQL already ordered these by the database collation; sorting again in JS is byte order, so
   // every lowercase genre jumped to the end of the grid after every uppercase one.
@@ -361,8 +371,8 @@ export default async function catalogRoutes(app: FastifyInstance) {
     // apply admin metadata overrides (title/summary shown here; cover/banner are handled by the image server)
     const ov = await one<{ title: string | null; summary: string | null; cover: string | null; banner: string | null;
                           author: string | null; status: string | null; genres: string[] | null;
-                          age_rating: number | null; v: string }>(
-      `SELECT title, summary, cover, banner, author, status, genres, age_rating,
+                          age_rating: number | null; adult_exempt: boolean | null; v: string }>(
+      `SELECT title, summary, cover, banner, author, status, genres, age_rating, adult_exempt,
               EXTRACT(EPOCH FROM updated_at) * 1000 AS v FROM series_overrides WHERE series_id = $1`,
       [id],
     );
@@ -378,7 +388,8 @@ export default async function catalogRoutes(app: FastifyInstance) {
       // the edit modal seeds from these, so every overridable field has to come back or a save would
       // write back a blank and clear the very override the user opened the modal to keep
       out.overrides = { title: ov.title, summary: ov.summary, cover: ov.cover, banner: ov.banner,
-                        author: ov.author, status: ov.status, genres: ov.genres, ageRating: ov.age_rating };
+                        author: ov.author, status: ov.status, genres: ov.genres, ageRating: ov.age_rating,
+                        adultExempt: ov.adult_exempt === true };
       // The edit modal seeds from the override where one exists, so the effective rating has to reflect it
       // or reopening the modal would show the scanned value and saving would undo the correction.
       if (ov.age_rating != null && out.metadata) out.metadata.ageRating = ov.age_rating;
@@ -390,10 +401,20 @@ export default async function catalogRoutes(app: FastifyInstance) {
     // what is about to move. Members do not: it is the one field here that describes the host filesystem.
     // The series' own release preferences ride along for the same audience: the editor seeds from them, and
     // null (rather than absent) says "none of its own, the global ones apply".
+    // So does its own source order (lib/sourcePrefs.ts), for the Sources sheet's preferred-source chips: null
+    // means the server-wide order applies.
     if (roleOf(req) === 'admin') {
-      const f = await one<{ folder: string }>('SELECT folder FROM lib_series WHERE id = $1', [id]);
+      const f = await one<{ folder: string; source_prefs: { priority?: unknown } | null; borrow_names: boolean | null; server_borrow: boolean | null }>(
+        `SELECT folder, source_prefs, borrow_names, (SELECT borrow_names FROM server_settings WHERE id = 1) AS server_borrow
+           FROM lib_series WHERE id = $1`, [id]);
       if (f) out.folder = f.folder;
       out.scanlatorPrefs = await readSeriesPrefs(id).catch(() => null);
+      const order = cleanSourceOrder(f?.source_prefs?.priority);
+      out.sourcePrefs = order.length ? { priority: order } : null;
+      // Chapter-name borrowing (lib/borrowNames.ts): the series' own switch, null when it follows the server's,
+      // and what applies -- a control that showed only the former would read "off" while names were borrowed.
+      out.borrowNames = f?.borrow_names ?? null;
+      out.borrowNamesEffective = f?.borrow_names ?? !!f?.server_borrow;
     }
     return out;
   });
@@ -708,8 +729,10 @@ export default async function catalogRoutes(app: FastifyInstance) {
     const planShown = await browsableIds(favAll, vc(req));
     const favIds = favAll.filter((id) => planShown.has(id));
     const out: { bookId: string; seriesId: string }[] = [];
+    // Every chapter, not the first 1000: past chapter 1000 of One Piece the unread ones were all beyond
+    // the page and the plan came back empty.
     for (const sid of favIds) {
-      const raw = await komga.seriesBooks(vc(req), sid, 0, 1000, 'metadata.numberSort,asc').catch(() => null);
+      const raw = await komga.seriesBooks(vc(req), sid, 0, 100000, 'metadata.numberSort,asc').catch(() => null);
       if (!raw) continue;
       const books = await booksForUser(req, raw.content);
       // A pruned chapter has no pages to download; planning it would queue a manifest that answers 410.

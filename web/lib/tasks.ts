@@ -31,6 +31,8 @@ export function taskResult(r: any): string {
     const bits: string[] = [];
     if (r.stopped === 'shutdown') bits.push('stopped for a restart');
     if (r.stopped === 'disk') bits.push('stopped: the download disk is at its floor');
+    // Cancel on the download pill (#82): the counts after it are as far as it got.
+    if (r.stopped === 'cancelled') bits.push('cancelled');
     if (ran('count')) {
       // `uncounted` is the backlog: 30,000 chapter files have never been opened, so the first weeks of
       // nightly runs are a drain and "2000 stamped" alone looks like the job has finished.
@@ -46,6 +48,12 @@ export function taskResult(r: any): string {
     if (ran('gaps')) {
       const g = r.gaps || {};
       bits.push(`gaps: ${g.series ?? 0} series, ${g.followed ?? 0} followed, ${g.fetched ?? 0} chapter${g.fetched === 1 ? '' : 's'} fetched`);
+    }
+    // Group upgrades (#81) are off unless switched on, and a line that said "groups: off" every night would be
+    // noise about a feature nobody chose; with the switch on, it says what the step did.
+    if (ran('groups') && r.groups && !r.groups.off) {
+      const g = r.groups;
+      bits.push(`groups: ${g.replaced ?? 0} replaced${g.left ? `, ${g.left} left` : ''}`);
     }
     if (ran('failures')) {
       const n = r.failures?.reset ?? 0;
@@ -113,7 +121,8 @@ export function taskResult(r: any): string {
     return ` \u00b7 ${bits.join(', ')}`;
   }
   if (typeof r.added === 'number') {
-    const base = ` \u00b7 +${r.added} chapters`;
+    // A sweep an admin cancelled from the download pill (#82) is not a quiet night either.
+    const base = ` \u00b7 +${r.added} chapters${r.stopped === 'cancelled' ? ' \u00b7 cancelled' : ''}`;
     if (r.healthy === false) {
       const bits: string[] = [];
       if (r.failed) bits.push(`${r.failed} series did not answer`);

@@ -6,6 +6,7 @@ import { useSearchParams, useRouter } from 'next/navigation';
 import { AnimatePresence, motion } from 'framer-motion';
 import { useQuery } from '@tanstack/react-query';
 import { api, img } from '@/lib/api';
+import { fetchAllBooks } from '@/lib/seriesBooks';
 import { chapterOutcome } from '@/lib/readerState';
 import { openableChapters } from '@/lib/chapterRows';
 import { buildFlow, startIndex, renderWindow } from '@/lib/readerFlow';
@@ -15,9 +16,9 @@ import { chapterLabel } from '@/lib/format';
 import { deviceId } from '@/lib/device';
 import { getOfflineChapter, getPageBlob, queueProgress, noteOfflineProgress, listSeriesDownloads, setOfflinePageJunk } from '@/lib/downloads';
 import { applyCover, clearCover } from '@/lib/theme';
-import { ReaderPrefs, loadPrefs, savePrefs, loadSeriesPrefs, saveSeriesPrefs, syncPrefsFromServer, THEME_FILTER } from '@/lib/readerPrefs';
+import { ReaderPrefs, loadPrefs, savePrefs, loadSeriesPrefs, saveSeriesPrefs, syncPrefsFromServer, THEME_FILTER, loadSourcePrefs, saveSourcePrefs, clearSourcePrefs, globalPrefsChange, rememberSeriesSource, seriesSourceOf } from '@/lib/readerPrefs';
 import { ReaderSettings } from '@/components/ReaderSettings';
-import { Rail, SectionTitle, useImgRetry } from '@/components/ui';
+import { Rail, SectionTitle, useImgRetry, useRtl } from '@/components/ui';
 import { PageGrid } from '@/components/PageGrid';
 import { ChapterSheet } from '@/components/ChapterSheet';
 import { SeriesCard } from '@/components/cards';
@@ -98,6 +99,19 @@ function ReaderInner() {
   const [prefs, setPrefs] = useState<ReaderPrefs>(loadPrefs());
   const [zoom, setZoom] = useState(1);
   const [rtl, setRtl] = useState(false); // series reads right-to-left → double-spread pair order flips
+  // Paged mode's track direction: the reader setting (lib/readerPrefs.ts `pagedDirection`), or the series'
+  // own direction above when it says `series`. `trackSign` turns a slide index into a scrollLeft: an RTL
+  // track scrolls negative.
+  // ⚠️ The track states its `dir` either way rather than inheriting it. Under the Arabic UI <html> is
+  // dir="rtl", so the track used to inherit a right-to-left layout that the positive-scrollLeft maths below
+  // never expected: the page counter sat on 1 and a jump or a resume clamped to the first page.
+  const pagedRtl = prefs.mode === 'paged' && (prefs.pagedDirection === 'rtl' || (prefs.pagedDirection === 'series' && rtl));
+  const trackSign = pagedRtl ? -1 : 1;
+  // The direction the track was last laid out for, so the flip effect below acts only on a REAL flip.
+  const laidOutSign = useRef<number | null>(null);
+  // The interface's own direction, for the text that sits INSIDE the track and would otherwise take the
+  // track's: an Arabic caption in an LTR paragraph, or an English one in RTL on a right-to-left read.
+  const uiDir = useRtl() ? 'rtl' : 'ltr';
   const [scrubbing, setScrubbing] = useState(false); // slider drag in progress → show the page preview
 
   const [chrome, setChrome] = useState(true);
@@ -108,6 +122,8 @@ function ReaderInner() {
   const { user } = useAuth();
   /** Source id -> display name from the series' own followed sources (set with the reading direction). */
   const [seriesSourceNames, setSeriesSourceNames] = useState<Record<string, string>>({});
+  // The series' PRIMARY source, which keys the per-source reader default (lib/readerPrefs.ts seriesSourceOf).
+  const [seriesSource, setSeriesSource] = useState<{ id: string; name: string } | null>(null);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const [colW, setColW] = useState(0);
@@ -128,8 +144,13 @@ function ReaderInner() {
   const setPref = (p: Partial<ReaderPrefs>) =>
     setPrefs((cur) => {
       const n = { ...cur, ...p };
-      savePrefs(n);
-      if ((p.mode || p.theme || p.spread !== undefined) && seriesId0) saveSeriesPrefs(seriesId0, { mode: n.mode, theme: n.theme, spread: n.spread });
+      // The global default takes only what this change touched, and never a title's look while a title is
+      // open (globalPrefsChange says why): merged into what is STORED, not into `cur`, which carries the
+      // source's and the series' settings laid over the default.
+      const g = globalPrefsChange(p, !!seriesId0);
+      if (Object.keys(g).length) savePrefs({ ...loadPrefs(), ...g });
+      if ((p.mode || p.theme || p.spread !== undefined || p.pagedDirection) && seriesId0)
+        saveSeriesPrefs(seriesId0, { mode: n.mode, theme: n.theme, spread: n.spread, pagedDirection: n.pagedDirection });
       return n;
     });
   const applyZoom = (z: number) => {
@@ -195,7 +216,7 @@ function ReaderInner() {
       }
       // chapter list for prev/next/jump
       try {
-        const list = await api<Page<Book>>(`/api/series/${first.seriesId}/books?size=1000&sort=metadata.numberSort,asc`);
+        const list = await fetchAllBooks(first.seriesId);
         // ⚠️ A chapter the server's cleanup deleted is still a row in that list -- it has to be, it carries
         // everyone's progress -- and the first cut of "Chapter deleted" only handled the failure screen, so
         // next/prev walked straight onto the tombstone and showed it in the middle of a series that was
@@ -222,8 +243,18 @@ function ReaderInner() {
           // The followed sources' display names, for the caption on a page the source never served. Free:
           // this request is made anyway, and `sources` is sent to every viewer, unlike /api/sources.
           setSeriesSourceNames(Object.fromEntries((s?.sources ?? []).map((x) => [x.sourceId, x.name])));
+          const primary = (s?.sources ?? []).find((x) => x.primary) ?? s?.sources?.[0];
+          if (primary) {
+            const src = { id: primary.sourceId, name: primary.name };
+            setSeriesSource(src);
+            rememberSeriesSource(first.seriesId, src);
+          }
         }
-      } catch { /* offline: the downloaded record's direction, set above, stands */ }
+      } catch {
+        // offline: the downloaded record's direction, set above, stands, and the series' source is the one
+        // this device saw the last time it opened the series online.
+        if (alive) setSeriesSource(seriesSourceOf(first.seriesId));
+      }
       setReady(true);
     })();
     return () => {
@@ -259,9 +290,15 @@ function ReaderInner() {
    * `hide` still removes, for readers who want the page gone outright — but it goes through the same builder,
    * so it gets the corrected `firstOfChapter` and the per-chapter empty guard too.
    */
+  // Paged mode has no thin slide to collapse a page INTO -- every slide is one viewport wide -- so there a
+  // repeated page under Collapse is shown like any other and costs one swipe. It used to get a slide that never
+  // rendered (the render window skips collapsed pages): a blank screen with a faint page number. Shown, not
+  // removed: removing would give the two modes different flows, and switching mode mid-chapter would then land
+  // on a different page, because nothing re-anchors `current` when the flow is rebuilt.
+  const flowJunk = prefs.mode === 'paged' && prefs.junkPages === 'collapse' ? 'show' : prefs.junkPages;
   const flat: FlatItem[] = useMemo(
-    () => buildFlow(chapters, prefs.junkPages, expanded) as FlatItem[],
-    [chapters, prefs.junkPages, expanded],
+    () => buildFlow(chapters, flowJunk, expanded) as FlatItem[],
+    [chapters, flowJunk, expanded],
   );
   /** Vertical + `collapse`: a repeated page is drawn as a band of itself instead of being removed. */
   const collapsing = prefs.junkPages === 'collapse';
@@ -327,7 +364,9 @@ function ReaderInner() {
   useEffect(() => {
     const el = scrollRef.current;
     if (!el || !didInitScroll.current) return;
-    if (zoom > 1) el.scrollLeft = (el.scrollWidth - el.clientWidth) / 2;
+    // Centre a zoomed webtoon column. In paged mode scrollLeft is the PAGE: centring it jumped a double-tap
+    // to the middle of the chapter (and to page 1 on a right-to-left track).
+    if (zoom > 1 && prefs.mode === 'vertical') el.scrollLeft = (el.scrollWidth - el.clientWidth) / 2;
     if (prefs.mode === 'vertical' && tops[current] != null) el.scrollTop = tops[current];
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [zoom, colW]);
@@ -425,22 +464,39 @@ function ReaderInner() {
     const idx = Math.max(0, Math.min(flat.length - 1, startIndex(flat, 0, startPage)));
     if (prefs.mode === 'vertical' && scrollRef.current && idx > 0) scrollRef.current.scrollTop = tops[idx];
     if (prefs.mode === 'paged' && scrollRef.current && idx > 0)
-      scrollRef.current.scrollLeft = (slideOf[idx] ?? idx) * scrollRef.current.clientWidth;
+      scrollRef.current.scrollLeft = trackSign * (slideOf[idx] ?? idx) * scrollRef.current.clientWidth;
     setCurrent(idx);
     // Seed the dedupe key so landing here does not immediately ping progress. Opening a saved Moment is
     // looking something up, not reading it, and it should not move where you were or add a reading event.
     const at = flat[idx];
     if (at) lastSent.current = `${chapters[at.ci]?.id}:${at.number}`;
+    laidOutSign.current = trackSign;
     didInitScroll.current = true;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready, colW, tops]);
+
+  // Flipping the direction mid-chapter mirrors the track, and the old scrollLeft now points at another page
+  // (or clamps to page 1). Put the reader back on the page they were looking at.
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el || !didInitScroll.current || prefs.mode !== 'paged') return;
+    // ⚠️ Not in the commit that did the initial scroll. A streamed right-to-left series learns its direction in
+    // the same tick it becomes ready, so this ran straight after the resume scroll -- with `current` still 0
+    // in its closure -- and put every resume and every `?page=` link on a right-to-left series back on page 1.
+    if (laidOutSign.current === trackSign) return;
+    laidOutSign.current = trackSign;
+    el.scrollLeft = trackSign * (slideOf[current] ?? current) * el.clientWidth;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [trackSign]);
 
   // ---- track current page on scroll ----
   const onScroll = useCallback(() => {
     const el = scrollRef.current;
     if (!el) return;
     if (prefs.mode === 'paged') {
-      const s = Math.round(el.scrollLeft / Math.max(1, el.clientWidth));
+      // Math.abs: an RTL track scrolls from 0 into NEGATIVE scrollLeft (the spec'd behaviour every current
+      // engine follows), so page n sits at -n × width.
+      const s = Math.round(Math.abs(el.scrollLeft) / Math.max(1, el.clientWidth));
       const idxs = slides[Math.max(0, Math.min(slides.length - 1, s))];
       const i = idxs ? idxs[idxs.length - 1] : 0; // last page of a spread → completion fires on the final spread
       setCurrent((c) => (c === i ? c : i));
@@ -450,7 +506,7 @@ function ReaderInner() {
     let lo = 0, hi = tops.length - 1, ans = 0;
     while (lo <= hi) { const mid = (lo + hi) >> 1; if (tops[mid] <= probe) { ans = mid; lo = mid + 1; } else hi = mid - 1; }
     setCurrent((c) => (c === ans ? c : ans));
-  }, [tops, prefs.mode, slides]);
+  }, [tops, prefs.mode, slides]); // the sign-free Math.abs above needs no trackSign dep
 
   // ---- continuous reading: append next chapter near the end ----
   useEffect(() => {
@@ -568,8 +624,8 @@ function ReaderInner() {
     setCurrent(i);
     if (!el) return;
     if (prefs.mode === 'vertical') el.scrollTo({ top: tops[i] || 0 });
-    else el.scrollTo({ left: (slideOf[i] ?? i) * (el.clientWidth || 0) });
-  }, [flat.length, prefs.mode, tops, slideOf]);
+    else el.scrollTo({ left: trackSign * (slideOf[i] ?? i) * (el.clientWidth || 0) });
+  }, [flat.length, prefs.mode, tops, slideOf, trackSign]);
 
   /**
    * Mark or un-mark one page by hand, from the page grid.
@@ -658,15 +714,23 @@ function ReaderInner() {
     syncPrefsFromServer().then((p) => setPrefs((cur) => ({ ...cur, ...p }))).catch(() => {});
   }, []);
 
-  // ---- per-series memory (mode/theme/zoom) ----
+  // ---- per-source, then per-series, memory (mode/theme/spread/direction/zoom) ----
+  //
+  // Applied in that order so the precedence is global default < source default < this series: a source
+  // default fixes everything from it in one go, and a title someone has adjusted by hand still wins. Keyed by
+  // the SERIES' source, known before the reader is ready, so it holds for downloaded chapters and never
+  // changes mid-series.
+  const seriesSourceId = seriesSource?.id || '';
   useEffect(() => {
     if (!seriesId) return;
-    const sp = loadSeriesPrefs(seriesId);
-    if (sp.mode || sp.theme || sp.spread !== undefined)
-      setPrefs((cur) => ({ ...cur, ...(sp.mode ? { mode: sp.mode } : {}), ...(sp.theme ? { theme: sp.theme } : {}), ...(sp.spread !== undefined ? { spread: sp.spread } : {}) }));
+    const base = seriesSourceId ? loadSourcePrefs(seriesSourceId) : {};
+    const sp = { ...base, ...loadSeriesPrefs(seriesId) };
+    if (sp.mode || sp.theme || sp.spread !== undefined || sp.pagedDirection)
+      setPrefs((cur) => ({ ...cur, ...(sp.mode ? { mode: sp.mode } : {}), ...(sp.theme ? { theme: sp.theme } : {}),
+        ...(sp.spread !== undefined ? { spread: sp.spread } : {}), ...(sp.pagedDirection ? { pagedDirection: sp.pagedDirection } : {}) }));
     setZoom(sp.zoom && sp.zoom >= 1 ? sp.zoom : 1);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [seriesId]);
+  }, [seriesId, seriesSourceId]);
 
   // ---- auto-hide chrome ----
   useEffect(() => {
@@ -679,17 +743,50 @@ function ReaderInner() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const el = scrollRef.current;
+      // Alt+← is the browser's Back and Ctrl/Cmd+F its Find: a key with a modifier is never the reader's.
+      // (Shift is not a modifier here -- Shift+Space means "back a page", as in any scrolling view.)
+      if (e.altKey || e.ctrlKey || e.metaKey) return;
+      // An open sheet (settings, page grid, chapter list) is what the keys are for: turning pages underneath
+      // it, or leaving the reader on Escape, acted on the thing the reader was not looking at. None of the
+      // three listens for Escape itself, so it is handled here, and it closes the sheet.
+      if (showSettings || showPages || showChapters) {
+        if (e.key === 'Escape') { setShowSettings(false); setShowPages(false); setShowChapters(false); }
+        return;
+      }
+      const paged = prefs.mode === 'paged';
+      // Paged mode turns its own pages instead of leaving arrows to the browser: the track is a snap-x
+      // container, and a native arrow keypress only nudges it a few pixels before the snap pulls it back.
+      // ONE SLIDE FROM THE ONE ON SCREEN, never "one width from wherever the scroll is": a relative scrollBy
+      // stacked on a smooth scroll still in flight, so two quick presses (or a held key) landed one or two
+      // pages on. `d` is in reading order; the track's sign turns it into a scroll position.
+      const step = (d: 1 | -1) => {
+        if (!el) return;
+        const last = Math.max(0, el.children.length - 1); // page slides, then Up Next / the failure card
+        const to = Math.max(0, Math.min(last, (slideOf[current] ?? current) + d));
+        el.scrollTo({ left: trackSign * to * (el.clientWidth || window.innerWidth), behavior: 'smooth' });
+      };
+      // A focused control owns its keys: the page slider its arrows, a button or link its Space and Enter
+      // (turning the page instead swallowed the click), a text field everything.
+      const t = e.target as HTMLElement | null;
+      const owned = !!t && (t.tagName === 'INPUT' || t.tagName === 'SELECT' || t.tagName === 'TEXTAREA' || t.isContentEditable
+        || !!t.closest('button, a, [role="button"], [role="dialog"]'));
       if (e.key === '[') goChapter(prevId);
       else if (e.key === ']') goChapter(nextId);
       else if (e.key === 'f') toggleFullscreen();
       else if (e.key === 'Escape') back();
-      else if (el && prefs.mode === 'vertical' && (e.key === ' ' || e.key === 'ArrowDown')) { e.preventDefault(); el.scrollBy({ top: el.clientHeight * 0.88, behavior: 'smooth' }); }
-      else if (el && prefs.mode === 'vertical' && e.key === 'ArrowUp') { e.preventDefault(); el.scrollBy({ top: -el.clientHeight * 0.88, behavior: 'smooth' }); }
+      // ← and → are PHYSICAL, like the tap zones: on a right-to-left read the next page is to the left.
+      // Space, PageDown and ↓ mean "next" whichever way the pages run, and their opposites "back".
+      else if (el && paged && !owned && e.key === 'ArrowRight') { e.preventDefault(); step(trackSign as 1 | -1); }
+      else if (el && paged && !owned && e.key === 'ArrowLeft') { e.preventDefault(); step(-trackSign as 1 | -1); }
+      else if (el && paged && !owned && ((e.key === ' ' && !e.shiftKey) || e.key === 'ArrowDown' || e.key === 'PageDown')) { e.preventDefault(); step(1); }
+      else if (el && paged && !owned && ((e.key === ' ' && e.shiftKey) || e.key === 'ArrowUp' || e.key === 'PageUp')) { e.preventDefault(); step(-1); }
+      else if (el && prefs.mode === 'vertical' && !owned && ((e.key === ' ' && !e.shiftKey) || e.key === 'ArrowDown')) { e.preventDefault(); el.scrollBy({ top: el.clientHeight * 0.88, behavior: 'smooth' }); }
+      else if (el && prefs.mode === 'vertical' && !owned && ((e.key === ' ' && e.shiftKey) || e.key === 'ArrowUp')) { e.preventDefault(); el.scrollBy({ top: -el.clientHeight * 0.88, behavior: 'smooth' }); }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [prevId, nextId, prefs.mode, seriesId]);
+  }, [prevId, nextId, prefs.mode, seriesId, current, slideOf, trackSign, showSettings, showPages, showChapters]);
 
   // ---- tap / double-tap / pinch (no overlay -> native scroll works) ----
   const onPointerDown = (e: React.PointerEvent) => {
@@ -955,9 +1052,14 @@ function ReaderInner() {
         </div>
       ) : (
         <div ref={scrollRef} data-lenis-prevent onScroll={onScroll} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerEnd} onPointerCancel={onPointerEnd}
+          dir={pagedRtl ? 'rtl' : 'ltr'}
           className="hide-scrollbar flex h-screen-d snap-x snap-mandatory overflow-x-auto overflow-y-hidden" style={{ filter: THEME_FILTER[prefs.theme] }}>
           {slides.map((idxs) => {
-            const shown = rtl && idxs.length === 2 ? [idxs[1], idxs[0]] : idxs; // RTL manga: right page reads first
+            // RTL manga: right page reads first. On an RTL track `dir` already lays a spread out right to
+            // left, so flipping here as well would put it back the wrong way round. A right-to-left series
+            // forced to read left to right still swaps: the pages turn the other way, but a double-page spread
+            // is ONE drawing, and it only reassembles with its first page on the right.
+            const shown = rtl && !pagedRtl && idxs.length === 2 ? [idxs[1], idxs[0]] : idxs;
             return (
               <div key={flat[idxs[0]].key} className="relative flex h-full w-full shrink-0 snap-center items-center justify-center gap-1">
                 {shown.map((i) => {
@@ -972,7 +1074,7 @@ function ReaderInner() {
                       <div key={p.key} className={`relative flex h-full items-center justify-center ${idxs.length === 2 ? 'max-w-[50%]' : 'max-w-full'}`}
                         style={{ transform: zoom !== 1 ? `scale(${zoom})` : undefined }}>
                         <ReaderImg src={srcFor(i)!} alt={`Page ${p.number}`} className="max-h-full object-contain" />
-                        <MissingCaption number={p.number} source={sourceNameOf(chapters[p.ci]?.sourceId)} />
+                        <MissingCaption number={p.number} source={sourceNameOf(chapters[p.ci]?.sourceId)} dir={uiDir} />
                       </div>
                     );
                   }
@@ -986,12 +1088,12 @@ function ReaderInner() {
             );
           })}
           {ended && (
-            <div className="flex h-full w-full shrink-0 snap-center items-start justify-center overflow-y-auto">
+            <div dir={uiDir} className="flex h-full w-full shrink-0 snap-center items-start justify-center overflow-y-auto">
               {upNextCard}
             </div>
           )}
           {failed && !!flat.length && (
-            <div className="flex h-full w-full shrink-0 snap-center items-start justify-center overflow-y-auto">
+            <div dir={uiDir} className="flex h-full w-full shrink-0 snap-center items-start justify-center overflow-y-auto">
               {failureCard}
             </div>
           )}
@@ -1043,7 +1145,13 @@ function ReaderInner() {
 
             <motion.footer initial={{ y: 64, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 64, opacity: 0 }}
               className="absolute inset-x-0 bottom-0 z-40 bg-linear-to-t from-black/90 via-black/55 to-transparent px-4 pt-10 pb-[max(0.9rem,calc(env(safe-area-inset-bottom)+0.4rem))]">
-              <div className="relative mx-auto flex max-w-3xl items-center gap-2">
+              {/* In paged mode the bar follows the TRACK, both ways: on a right-to-left read the previous chapter
+                  is on the right, next on the left, and the slider fills from the right, so dragging it moves the
+                  way the pages do. On a left-to-right read it is stated LTR rather than inherited -- under the
+                  Arabic interface it used to inherit RTL and run opposite to its own pages. The chevrons swap to
+                  keep pointing outwards; the counter stays LTR so "12/40" never reorders. The webtoon column
+                  has no horizontal direction, so there the bar inherits the page's, as it always has. */}
+              <div dir={prefs.mode === 'paged' ? (pagedRtl ? 'rtl' : 'ltr') : undefined} className="relative mx-auto flex max-w-3xl items-center gap-2">
                 {/* scrubber preview: a small render of the target page while dragging */}
                 {scrubbing && flat[current] && (() => {
                   const it = flat[current];
@@ -1064,23 +1172,25 @@ function ReaderInner() {
                 })()}
                 <button onClick={() => goChapter(prevId)} disabled={!prevId}
                   className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-black/45 text-white backdrop-blur disabled:opacity-30">
-                  <IcChevronLeft width={18} height={18} />
+                  {pagedRtl ? <IcChevronRight width={18} height={18} /> : <IcChevronLeft width={18} height={18} />}
                 </button>
                 {/* The counter is the button. A long-press would be invisible on a phone, which this repo
                     already learned once from a hover-only affordance nobody found. */}
-                <button onClick={() => setShowPages(true)} aria-label={tr('Jump to a page')}
+                <button dir="ltr" onClick={() => setShowPages(true)} aria-label={tr('Jump to a page')}
                   className="shrink-0 rounded-full px-1.5 py-0.5 text-[11px] tabular-nums text-fog-300 transition hover:bg-white/10 hover:text-white">
                   {chapterPageCount ? `${pageInChapter}/${chapterPageCount}` : `${current + 1}/${total}`}
                 </button>
                 <input type="range" min={0} max={Math.max(0, total - 1)} value={current}
                   onPointerDown={() => setScrubbing(true)}
-                  onPointerUp={() => setScrubbing(false)}
+                  // Let go of focus after a drag: a slider that keeps it owns Space and the arrows, so in the
+                  // webtoon column Space stopped scrolling until the controls hid. Tab still reaches it.
+                  onPointerUp={(e) => { setScrubbing(false); e.currentTarget.blur(); }}
                   onPointerCancel={() => setScrubbing(false)}
                   onChange={(e) => jumpTo(Number(e.target.value))}
                   className="h-1 flex-1 accent-[rgb(var(--accent))]" />
                 <button onClick={() => goChapter(nextId)} disabled={!nextId}
                   className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-black/45 text-white backdrop-blur disabled:opacity-30">
-                  <IcChevronRight width={18} height={18} />
+                  {pagedRtl ? <IcChevronLeft width={18} height={18} /> : <IcChevronRight width={18} height={18} />}
                 </button>
               </div>
             </motion.footer>
@@ -1118,7 +1228,23 @@ function ReaderInner() {
       </AnimatePresence>
 
       <AnimatePresence>
-        {showSettings && <ReaderSettings prefs={prefs} set={setPref} onClose={() => setShowSettings(false)} />}
+        {showSettings && (
+          <ReaderSettings
+            prefs={prefs}
+            set={setPref}
+            onClose={() => setShowSettings(false)}
+            // The series' own source, by name. With no name there is no row at all: a raw source id is
+            // never shown (an extension's is nineteen digits).
+            sourceName={seriesSource?.name || undefined}
+            sourceDefault={!!(seriesSource && Object.keys(loadSourcePrefs(seriesSource.id)).length)}
+            onSourceDefault={(save) => {
+              if (!seriesSource) return;
+              if (save) saveSourcePrefs(seriesSource.id, { mode: prefs.mode, theme: prefs.theme, spread: prefs.spread, pagedDirection: prefs.pagedDirection });
+              else clearSourcePrefs(seriesSource.id);
+              setShowSettings(false);
+            }}
+          />
+        )}
       </AnimatePresence>
 
       {showPages && (
@@ -1197,9 +1323,9 @@ function ReaderImg({ src, alt, className, style }: {
  * pointerdown/up pair. There is nothing to do here by hand anyway: the retry is the server's, not the
  * reader's. Reintroduce by making the caption a <button>: a tap on a missing page stops toggling the chrome.
  */
-function MissingCaption({ number, source }: { number: number; source: string | null }) {
+function MissingCaption({ number, source, dir }: { number: number; source: string | null; dir?: 'ltr' | 'rtl' }) {
   return (
-    <div role="note" className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-1.5 px-6 text-center">
+    <div role="note" dir={dir} className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-1.5 px-6 text-center">
       <span className="text-sm font-medium text-fog-200">
         {source ? tr('Page {n} could not be fetched from {source}', { n: number, source }) : tr('Page {n} could not be fetched', { n: number })}
       </span>

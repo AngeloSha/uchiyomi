@@ -245,7 +245,8 @@ strictly better than before, where the 429 came back only after the whole chapte
 budget.
 
 `GET /api/sources/jobs` lists downloads in progress, and a card carries `seriesId` once its first chapter
-has been scanned in — the add that started it was answered before that row existed. A finished job is swept a few minutes after it ends; a
+has been scanned in — the add that started it was answered before that row existed. A finished job is swept a
+day after it ends (five minutes before v0.47.0); a
 **failed** one is never swept, because it is the only record that the download did not work, and it carries
 a `reason` naming the source and how far it got. `DELETE /api/sources/jobs/<folder>` dismisses a job that
 has stopped, and answers **409** `running` for one still downloading — or one whose auto-follow judgement
@@ -260,7 +261,33 @@ asked), `not_tried` (the 90-second wall ran out first, or the judgement itself f
 was asked — every candidate then reads so, rather than the card finishing with an empty list), `cap`
 (already following two) or `unavailable` (the primary itself, disabled, in a cooldown, not loaded, or
 outside the caller's age cap). A `none` add with candidates gets a card with `total: 0, status: "done"`
-just to carry this; it lives a few minutes after the judgement ends, so a closed dialog loses nothing.
+just to carry this; it lives a day after the judgement ends, so a closed dialog loses nothing.
+
+**Reading a chapter before adding it** (since v0.47.0, #91). `GET /api/sources/preview?source=&sourceId=` lists
+that series' chapters on the source — the add dialog's own cached listing, one copy per number — as
+`{title, content: [{number, title, scanlator}]}`; `GET /api/sources/preview/pages?…&number=` answers `{count}`;
+and `GET /img/sources/preview?…&number=&i=` is one page, by index. A chapter is named by its **number** in a
+listing the server fetched itself, and a page by its index: no URL and no chapter id from the caller ever
+reaches a source, because a site engine's page list is a fetch through the Cloudflare solver's browser, inside
+the network. Pages go through the same guard as covers (an extension's only from the engine's own origin),
+one at a time per source, and are served as the original bytes, `no-store`, only when they are an image.
+Nothing is written. An account with an age limit gets **403** `age_limited`; a disabled source **403**, one in
+a cooldown **429**; the messages are generic.
+
+**Cancelling, and the server's own runs** (since v0.47.0, #82). Every card carries `startedAt` and `mine` —
+whether this account started it. `POST /api/sources/jobs/<folder>/cancel` stops a running job after the
+chapter in flight (its starter or an admin; **403** for anyone else, **409** `not_running` once it has
+stopped): what landed stays, a re-fetch puts back every old copy it had set aside and did not reach, and the
+card ends `done` with `cancelled: true` and a `reason` saying how far it got; `cancelRequested` is set
+meanwhile. The response also carries `runs`: one card per run the server does by itself — `sweep` (checking
+every series for new chapters), `repair` (the library repair, `done`/`total` counting its steps, `step`
+naming the current one) and `newest` (a bulk "Fetch newest") — each `{kind, startedAt, finishedAt?, status:
+running|done|cancelled|error, done, total, fetched, failed, current?: {id, title}, step?, cancelRequested?,
+reason?, mine}`. An admin sees every run; the account that started a bulk run sees that one; nobody else
+sees any, because `current` names a series that may be in a library they cannot open (and is left out when
+the request hides that series anyway). `POST /api/sources/runs/<kind>/cancel` stops one the same way as a
+shutdown does — between series and between chapters, never mid-write — and `DELETE /api/sources/runs/<kind>`
+dismisses a finished one. Both cancels are audited as `download.cancel`.
 
 `GET /api/sources/popular?source=<id>&page=<n>` is the same listing sorted by the source's OWN popularity,
 not by anything this server computes: it is the page each site already publishes, reached with a different
@@ -324,6 +351,11 @@ slot count) at a time, one lane for solver-fronted sources and one for the rest;
 budget is recorded as slow (never as a failure), one that throws is recorded against its health, and one that
 is disabled or in a cooldown is skipped rather than asked — exactly as the newest listing treats them.
 
+`&source=<id>` asks only that one source, which is what Discover sends while it is filtered to a source. It
+narrows the set described above and never widens it: an adult source without `adult=1`, one above your age
+limit, or an id that does not exist asks nobody and answers the empty shape. The entry is still keyed by the
+term alone, so a narrowed search reads whatever a full one already heard, and the other way round.
+
 `GET /api/sources/detail` is cached for ten minutes per source and series (it was ninety seconds), and
 concurrent requests for the same pair — the add dialog's pre-warm and the pick that follows it — collapse
 into one outbound fetch. A failed lookup is never cached, so an immediate retry asks the source again.
@@ -370,8 +402,19 @@ appears unasked rather than about permission -- `max_age_rating` is the permissi
 
 It is deliberately **not** applied to endpoints that resolve one id you already hold: the series page, its
 chapter list, `GET /api/books/:id`, its pages, the offline manifest, next/previous, `PUT
-/api/books/:id/progress` and `/opds/book/:id/file` all work whether or not the library is hidden. A filter
-that refused to record what you read would lose data rather than tidy a screen.
+/api/books/:id/progress`, `/opds/book/:id/file`, and (since v0.46.0) `POST /api/sources/fill/scan` and `POST
+/api/sources/fetch` for the series they name all work whether or not the library is hidden. A filter that
+refused to record what you read would lose data rather than tidy a screen; the last two used to answer 404 for a
+hidden series, so "Find missing chapters" disappeared with the chip off.
+
+**Since v0.46.0 an admin can widen what the same default hides** (Admin → Settings → 18+ filter): named
+**genres** take a series off every listing as though it sat in an 18+ library -- matched case-blind against the
+series' genres, or the admin's genre override when it has one, and a per-series *Always show* (`adultExempt` on
+`PUT /api/admin/series/:id/meta`) lets one title through -- and named **sources** are treated like sources whose
+extension declares `isNsfw`, below. The lists are read in SQL from `server_settings`, never interpolated, and they
+reach every surface the default does: listings, OPDS, the Komga-compatible API, notification digests, and the
+automatic source hunt, which never follows a named source onto a series that is not itself adult. They widen
+what is hidden and never what is allowed: `max_age_rating` stays the only permission.
 
 **Since v0.42.0 the same default covers Discover's sources.** A source whose extension declares itself
 adult (`isNsfw`) is a listing like any other, and hiding 18+ libraries while painting twelve adult
@@ -402,11 +445,14 @@ Chapter downloads and page streaming work either way; the age cap is a permissio
 
 `GET /api/libraries` reports `adult: true` for such a library so a client can offer the reveal, and drops
 any library rated above the caller's own `max_age_rating` entirely.
+`GET /api/adult-filter` answers `{ configured: boolean }`: whether Admin → Settings → 18+ filter names any
+genre or source, so a client can offer the same reveal on an install with no 18+ library. Only the flag, never
+the lists, and always `false` for an account capped below 18.
 
 The Komga-compatible API cannot pass the parameter either, so the same preference lives on the **API
-token**: `POST /api/tokens { …, "showAdult": true }` (since v0.38.0; the *Include 18+ libraries* checkbox in
-the mint dialog, off by default; `GET /api/tokens` rows carry `showAdult`). It decides whether 18+ libraries
-appear in `/api/v1/libraries` and the series listings for that token; `/api/v1/series/:id`, its chapters,
+token**: `POST /api/tokens { …, "showAdult": true }` (since v0.38.0; the *Include 18+ content* checkbox in
+the mint dialog, off by default; `GET /api/tokens` rows carry `showAdult`). It decides whether 18+ libraries,
+and the genres and sources an admin named, appear in `/api/v1/libraries` and the series listings for that token; `/api/v1/series/:id`, its chapters,
 pages and progress resolve by id whatever it says, and the age cap is a permission and is unaffected. The
 flag changes nothing on `/api/*` proper, where `?adult=1` remains the reveal.
 
@@ -467,7 +513,7 @@ GET    /api/home                  GET    /api/featured
 GET    /api/foryou                GET    /api/trending
 GET    /api/random                GET    /api/genres
 GET    /api/genres/overview       GET    /api/libraries
-GET    /api/updates
+GET    /api/updates               GET    /api/adult-filter
 POST   /api/updates/seen          POST   /api/refresh
 GET    /api/series/:id            GET    /api/series/:id/books
 GET    /api/series/:id/similar    GET    /api/series/:id/color
@@ -487,7 +533,8 @@ any source the series has been followed on (`POST /api/admin/series/:id/sources`
 whether that adapter is loaded right now and `auto` whether the add-time auto-follow chose it rather than a
 person (always `false` for the primary; a person confirming the same source through a plan turns it
 `false`). Admins additionally get `scanlatorPrefs`: the series' own release
-preferences, or `null` when it has none and the server-wide ones apply. Every chapter object (this route's
+preferences, or `null` when it has none and the server-wide ones apply; and `sourcePrefs`, the series' own
+source order `{priority}` (below), or `null` when the server-wide order applies. Every chapter object (this route's
 `books`, `GET /api/books/:id`, `next`, the home shelves) carries `scanlator` — the group that released the
 file on disk, as the source showed it, a joint release reading `"A & B"` — and `sourceId`, the adapter it was
 downloaded from. Both are `null` for a chapter the scanner found rather than the downloader wrote, which
@@ -781,7 +828,11 @@ GET    /api/admin/audit           GET    /api/admin/tasks
 POST   /api/admin/tasks/:id/run   POST   /api/admin/library/scan
 POST   /api/admin/update          POST   /api/admin/update/:id
 GET    /api/sources/popular      GET    /img/sources/icon/:id
-DELETE /api/sources/jobs/:folder
+DELETE /api/sources/jobs/:folder  POST   /api/sources/jobs/:folder/cancel
+GET    /api/sources/preview       GET    /api/sources/preview/pages
+GET    /img/sources/preview
+POST   /api/sources/runs/:kind/cancel
+DELETE /api/sources/runs/:kind
 GET    /api/admin/sources         POST   /api/admin/sources/:id/:action
 POST   /api/admin/sources/:id/test
 POST   /api/admin/sources/check
@@ -825,7 +876,7 @@ PATCH  /api/admin/import/candidates/:cid
 **Server settings.** `GET /api/admin/settings` is the one row: `server_name`, `allow_registration`,
 `updater_hours`, `extension_hours`, `extension_auto_update`, `update_check`, `install_ping`, `install_ping_last`,
 `cleanup_read`, `cleanup_read_days`, `backup_hour`, `scanlator_prefs`, `auto_follow_on_failure`,
-`repair_enabled`, plus `extensions_configured` (computed). `auto_follow_on_failure` defaults to true and
+`repair_enabled`, `source_prefs`, `group_upgrade`, `borrow_names`, plus `extensions_configured` (computed). `auto_follow_on_failure` defaults to true and
 controls the bounded once-per-series-per-day source hunt after an ordinary scheduled-download failure; it
 never makes an interactive Add/Fetch hunt and never runs after a refusal. `PATCH
 /api/admin/settings` takes any subset of `serverName` (1–64 chars), `allowRegistration`, `updaterHours`
@@ -833,7 +884,9 @@ never makes an interactive Add/Fetch hunt and never runs after a refusal. `PATCH
 `cleanupReadDays` (0–3650; 0 is a value, "at the next run"), `backupHour` (0–23, the local hour of the nightly
 backup — the pending timer is re-armed at once, so the change applies to the next run rather than the one
 after; `GET /api/admin/tasks` shows the backup's `schedule` as `daily at HH:00` from the same column),
-`scanlatorPrefs` (below), `autoFollowOnFailure`, and `repairEnabled` (the nightly library repair, on by
+`scanlatorPrefs` and `sourcePrefs` (both below), `groupUpgrade` (the repair's group upgrades, off by default),
+`borrowNames` (chapter names from another source, off by default; switching it off clears the names it wrote),
+`autoFollowOnFailure`, and `repairEnabled` (the nightly library repair, on by
 default — switching it off stops the schedule only, since nothing it does deletes, merges or renumbers
 anything). Each field is written on its own, an out-of-range value is a **400** and nothing is written, and
 the audit row `settings.update` carries the body. The admin console's Settings tab sends one
@@ -974,7 +1027,7 @@ compared case-insensitively with spaces and punctuation ignored. The server-wide
 `scanlator_prefs` on `GET /api/admin/settings`, written whole through `PATCH /api/admin/settings
 {scanlatorPrefs}` (`priority` up to 50 names, `blocked` up to 200, `patienceDays` an integer 0–30 or
 `null`; the default is nothing ranked, nothing blocked, two days). A series can carry its own through
-`PATCH /api/admin/series/:id`, whose body is now `{autoUpdate?, scanlatorPrefs?}` — at least one, no other
+`PATCH /api/admin/series/:id`, whose body is now `{autoUpdate?, scanlatorPrefs?, sourcePrefs?, borrowNames?}` — at least one, no other
 fields, each written on its own, and `scanlatorPrefs: null` clears the series' set. The two merge:
 **blocked is the union**, a series **priority replaces** the global list, and a series `patienceDays` of
 `null` **falls back** to the global one. A copy whose known groups are all blocked is dropped before the
@@ -983,6 +1036,18 @@ never blocked — so a number that only blocked groups have released is absent f
 neither fetched nor counted as missing. A series only ever *waits* for a group when its effective priority
 list is non-empty: with none, the best available copy is taken at once, so a series from a source that
 names no groups is never held.
+
+**Source order** (since v0.47.0, from #93). When a series follows more than one source, the copy of a number
+it does not have yet is taken from the highest-ranked source that lists it. The order ranks **below** the
+release preferences and the hosted-before-external rule, so it decides only between copies those call equal —
+the choice the follow order used to make alone, where the primary won every tie. The server-wide order is
+`source_prefs` on `GET /api/admin/settings`, `{priority: [...]}`, written whole through `PATCH
+/api/admin/settings {sourcePrefs}`; a series can carry its own through `PATCH /api/admin/series/:id
+{sourcePrefs}`, which **replaces** the server's for that series rather than merging, and `null` or an empty
+`priority` clears it. Ids are kept as given — trimmed, de-duplicated, at most 100, anything outside letters,
+digits and `_ . : -` dropped — whether or not that source is loaded right now, so an order saved while the
+extension engine restarts keeps its extensions. A source the order does not name ranks below every one it
+does, in the series' follow order. It never replaces a chapter already held.
 
 `GET /api/admin/series/:id/scanlators` is what the series page's editor reads: `{checkedAt, prefs, global,
 effective: {priority, blocked, patienceDays}, groups: [GroupStat & {listed}]}`, the groups gathered from the
@@ -1158,8 +1223,15 @@ comes back. A shutdown stops it between batches; what it had marked stays marked
 library*, and the *Fix* / *Fill now* / *Retry now* / *Reset solver sessions* chips on the Health tab —
 *It's fine* is the separate `confirm-short` route below) runs the nightly repair now. It is **detached**, like `update` and `verify`, and answers **200**
 `{ok: true, started: true}`; the counts land on `GET /api/admin/tasks` as the `repair` entry's `lastResult`.
-It is the only task that takes a **body**: `{only?: ('solver' | 'count' | 'failures' | 'short' | 'gaps')[],
-seriesId?, bookId?, sourceId?}`. With no body it runs all five steps over the whole library, in that order.
+It is the only task that takes a **body**: `{only?: ('solver' | 'count' | 'failures' | 'short' | 'gaps' |
+'groups' | 'names')[], seriesId?, bookId?, sourceId?}`. With no body it runs all seven steps over the whole
+library, in that order. `groups` (since v0.47.0) does nothing unless group upgrades are switched on —
+`groupUpgrade` on `PATCH /api/admin/settings`, `group_upgrade` on its GET, off by default — and each swap it
+makes is audited as `book.group_upgraded`. `names` (also v0.47.0) borrows chapter names from another source
+and likewise does nothing unless `borrowNames` is on for the server or for a series (`borrow_names` on the
+settings GET, `borrowNames` on `PATCH /api/admin/series/:id`, where `null` follows the server); it writes
+`lib_books.chapter_name` only, marked with the donor in `chapter_name_source`, and switching it off clears
+exactly those.
 Each target belongs to exactly one step — `seriesId` to `gaps` (that series, ignoring the 24-hour re-check
 cooldown), `bookId` to `short` (that chapter), `sourceId` to `failures` (that source's failed chapters,
 whatever their age) — and a target sent **without** `only: ["<its step>"]` is a **400** `bad_request` with a

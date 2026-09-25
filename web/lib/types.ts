@@ -126,11 +126,19 @@ export interface Series {
   overrides?: {
     title: string | null; summary: string | null; cover: string | null; banner: string | null;
     author: string | null; status: string | null; genres: string[] | null; ageRating: number | null;
+    /** Let through the 18+ filter's genre rule (Admin → Settings → 18+ filter). Absent on older servers. */
+    adultExempt?: boolean;
   };
   /** Every source the updater asks for this series, primary first. Sent to every viewer. */
   sources?: SeriesSource[];
   /** This series' own scanlator overrides, or null when it follows the server defaults. Admins only. */
   scanlatorPrefs?: StoredPrefs | null;
+  /** This series' own source order, most preferred first; null when the server-wide order applies. Admins only. */
+  sourcePrefs?: { priority?: string[] } | null;
+  /** Admins only: this series' own chapter-name borrowing switch; null follows the server setting. */
+  borrowNames?: boolean | null;
+  /** Admins only: whether names are borrowed for this series once the server setting is applied. */
+  borrowNamesEffective?: boolean;
 }
 
 export interface ReadProgress {
@@ -163,6 +171,11 @@ export interface Book {
   scanlator?: string | null;
   /** The adapter this copy was fetched from. Null for files that arrived any other way. */
   sourceId?: string | null;
+  /**
+   * The chapter's own name, as its source gave it ("The Return"), or null when it gave none. Never derived from
+   * the filename: `name` and `metadata.title` are that, and on a library built by hand they are the file.
+   */
+  chapterName?: string | null;
   /**
    * The file was deleted by the server's read-chapter cleanup. The chapter is still part of the series and
    * still carries everyone's progress -- there are simply no pages behind it any more, and there will not
@@ -344,7 +357,7 @@ export type HealthAction =
   | 'test' | 'unblock' | 'disable' | 'merge' | 'solver_reset';
 
 /** One step of the nightly repair (`bff/src/lib/repair.ts`), as `POST /api/admin/tasks/repair/run` takes it. */
-export type RepairStep = 'solver' | 'count' | 'failures' | 'short' | 'gaps';
+export type RepairStep = 'solver' | 'count' | 'failures' | 'short' | 'gaps' | 'groups';
 
 export interface HealthItem {
   seriesId?: string;

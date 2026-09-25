@@ -285,7 +285,7 @@ the limits.
 1. In Uchiyomi, mint an API token under **Profile → Connections → API tokens → New token** (the form opens inline)
    with **read + write** — tick *Allow changes*. A read-only token browses and reads, but nothing syncs in
    either direction: Mihon retries a failed push a few times with backoff, then gives up quietly until the
-   next chapter read. Tick **Include 18+ libraries** if you want those shelves listed on the phone; the
+   next chapter read. Tick **Include 18+ content** if you want 18+ libraries and series listed on the phone; the
    account's age limit still applies whatever the token says.
 2. In Mihon, install the **Komga** extension from the extension repository you use there (it comes as three copies — *Komga*,
    *Komga (2)*, *Komga (3)* — for people with more than one server). In its settings, **Address** is your
@@ -337,7 +337,8 @@ this API as well; it is closed source and was not tested here — a report eithe
   counter, and this protocol has no place to type a 2FA code. Revoking the token, letting it expire or
   disabling the account ends the phone's session on its next request.
 - **What the phone sees** is what the token's account may see: library grants, the age limit and hidden
-  series apply, and an 18+ library is listed only when the token was minted with *Include 18+ libraries*
+  series apply, and an 18+ library, or a series the admin's 18+ filter hides, is listed only when the token was
+  minted with *Include 18+ content*
   (the extension has no reveal button of its own). Collections and read lists are always empty there, so
   that no id from a shelf the account cannot open is disclosed. Chapters deleted from the server are left
   out of the phone's chapter list but still count for progress. A fresh bind sends *0* as its progress, and

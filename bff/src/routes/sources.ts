@@ -60,19 +60,31 @@ import { logAudit } from '../lib/audit';
 import { autoFollow, refusals, MAX_AUTO_CANDIDATES, type FollowCandidate, type FollowResult } from '../lib/autoFollow';
 import { env } from '../env';
 import { runtime } from '../lib/runtime';
+import { dismissRun, listRuns, requestStop } from '../lib/downloadJobs';
 // The "already in library" annotation is deliberately library-wide: it answers "would adding this be a
 // duplicate on this server", which is a property of the server, not of the person asking.
 //
 // Which SOURCES you may reach is the opposite: entirely about who is asking, which is what `viewCtxFor` and
 // `sourceAllowedFor` answer.
-import { visibleToAll, viewCtxFor, sourceAllowedFor, browsable, seriesVisible, Params, type ViewCtx, hideAdult } from '../lib/visibility';
+import { visibleToAll, viewCtxFor, sourceAllowedFor, sourceBrowsableFor, browsable, visible, seriesVisible, Params, type ViewCtx, hideAdult } from '../lib/visibility';
 
 interface Job {
   title: string; total: number; done: number;
   status: 'downloading' | 'done' | 'error';
   reason?: string;
+  /** When it started, for the pill's "Finished today" list (#82). */
+  startedAt?: number;
   /** When it stopped, so a finished one can age out. A FAILED one never does: it is the only record. */
   finishedAt?: number;
+  /**
+   * Who started it: they may cancel it, as may an admin (#82). Never sent to a client -- the list says `mine`
+   * instead -- and absent on a card nobody started (the import, which is an admin's and awaits its own run).
+   */
+  by?: string;
+  /** Cancel was pressed: the job stops after the chapter in flight, never mid-write. */
+  cancelRequested?: boolean;
+  /** It stopped because of that. Such a job ends `done`, with `reason` saying how far it got. */
+  cancelled?: boolean;
   /**
    * The library id of the series this job is filling (#67), for "Open in library" to navigate by.
    *
@@ -107,8 +119,10 @@ const jobs = new Map<string, Job>();
 
 /** How long a completed download stays listed. `jobs.delete` had exactly one call site -- the chapter-1
  *  failure path -- so a successful job was never removed and the strip filled with green cards that only a
- *  restart cleared. Swept lazily on read rather than on a timer: the client polls this often enough. */
-const DONE_TTL = 5 * 60_000;
+ *  restart cleared. Swept lazily on read rather than on a timer: the client polls this often enough.
+ *  A day since #82 (it was five minutes): "what did it fetch this morning" is a question the pill's
+ *  Finished list answers now, while Discover's strip still shows only the last few minutes (web lib/jobs.ts). */
+const DONE_TTL = 24 * 3600_000;
 function sweepJobs(now = Date.now()): void {
   for (const [folder, j] of jobs) {
     if (j.status === 'done' && j.finishedAt && now - j.finishedAt > DONE_TTL) jobs.delete(folder);
@@ -151,7 +165,12 @@ export interface DownloadJobInput {
    * a chapter skipped by a refusal would leave its old file renamed away for good.
    */
   onSettled?: (ch: SourceChapter, landed: boolean) => Promise<void>;
+  /** Who asked: they may cancel it (#82). */
+  by?: string;
 }
+
+/** The sentence on a job that stopped because someone pressed Cancel. */
+const cancelledReason = (j: Job) => `Cancelled after ${j.done} of ${j.total} chapter${j.total === 1 ? '' : 's'}.`;
 
 /**
  * Fetch a list of chapters into a series folder as one job card, detached from the request.
@@ -175,7 +194,7 @@ export interface DownloadJobInput {
  */
 export function startDownloadJob(input: DownloadJobInput): { total: number } {
   const { folder, title, seriesId, chapters, meta } = input;
-  jobs.set(folder, { title, total: chapters.length, done: 0, status: 'downloading' });
+  jobs.set(folder, { title, total: chapters.length, done: 0, status: 'downloading', startedAt: Date.now(), ...(input.by ? { by: input.by } : {}) });
   const settle = async (ch: SourceChapter, landed: boolean) => {
     if (!input.onSettled) return;
     // A hook that throws must not take the job's tail with it: the scan and the stamps still have to run.
@@ -186,8 +205,11 @@ export function startDownloadJob(input: DownloadJobInput): { total: number } {
   void (async () => {
     let failures = 0;
     // What this job wrote, for the provenance stamp; a skipped copy was already on disk and is not ours.
-    const landed: Array<{ number: number; scanlator?: string; source?: string; missing?: number[] }> = [];
+    const landed: Array<{ number: number; scanlator?: string; source?: string; missing?: number[]; title?: string }> = [];
     const settled = new Set<SourceChapter>();
+    // Numbers that landed from a copy the person picked by name: stamped `picked_at` at the end, so the
+    // nightly group upgrade (lib/repair.ts stepGroups) never swaps a chosen version for another group's.
+    const pickedLanded: number[] = [];
     // A source that has refused once this job is not asked again, but the others still are: a rate-limited
     // primary must not stop the follower's chapters. Each source costs at most one strike per job. Written
     // by the helper (a copy that earns `blockStatus` puts its source here) and read by it.
@@ -213,6 +235,7 @@ export function startDownloadJob(input: DownloadJobInput): { total: number } {
     };
     for (const ch of chapters) {
       if (runtime.stopping) break; // between chapters, never mid-write
+      if (jobs.get(folder)?.cancelRequested) break; // Cancel (#82): the same place, for the same reason
       const via = ch.source ?? '';
       settled.add(ch);
       let out;
@@ -244,9 +267,10 @@ export function startDownloadJob(input: DownloadJobInput): { total: number } {
       const j = jobs.get(folder);
       if (out.kind === 'landed' || out.kind === 'partial') {
         landed.push({
-          number: ch.number, scanlator: out.chapterUsed.scanlator, source: out.via,
+          number: ch.number, scanlator: out.chapterUsed.scanlator, source: out.via, title: out.chapterUsed.title,
           ...(out.kind === 'partial' ? { missing: out.missing.map((i) => i + 1) } : {}),
         });
+        if (ch.pinned && !out.switched) pickedLanded.push(ch.number);
         if (j) {
           j.done++;
           if (out.switched) {
@@ -293,8 +317,17 @@ export function startDownloadJob(input: DownloadJobInput): { total: number } {
     await persistScan().catch(() => {});
     await setBookDates(folder, chapters).catch(() => {});
     await setBookMeta(folder, landed).catch(() => {});
+    if (pickedLanded.length) {
+      await q('UPDATE lib_books SET picked_at = now() WHERE series_id = $1 AND number = ANY($2::real[]) AND pruned_at IS NULL',
+        [seriesId, pickedLanded]).catch(() => {});
+    }
     const j = jobs.get(folder);
-    if (j && j.status !== 'error') { j.status = failures ? 'error' : 'done'; j.finishedAt = Date.now(); }
+    // A cancelled job says so, and ends `done`: stopping was the request, not a failure. A chapter that
+    // failed before the Cancel is still counted in the sentence, so nothing it lost goes unreported.
+    if (j && j.status !== 'error' && j.cancelRequested) {
+      j.cancelled = true; j.status = 'done'; j.finishedAt = Date.now();
+      j.reason = failures ? `${cancelledReason(j)} ${failures} could not be saved.` : cancelledReason(j);
+    } else if (j && j.status !== 'error') { j.status = failures ? 'error' : 'done'; j.finishedAt = Date.now(); }
   })();
 
   return { total: chapters.length };
@@ -412,6 +445,66 @@ export async function seriesAndChapters(src: SourceAdapter, sourceId: string):
 export function clearDetailCache(): void {
   detailCache.clear();
   detailInflight.clear();
+  previewPages.clear();
+}
+
+/**
+ * Reading a chapter from a source before adding the series (#91, @Squeaks72's idea, rebuilt).
+ *
+ * ⚠️ NO STRING FROM THE CALLER EVER REACHES A SOURCE'S PAGE FETCHER. The first version took a `chapterId` and
+ * handed it to `getPageUrls`, and for the add-a-site engines that is `cfGet(chapterId)`: FlareSolverr's
+ * browser, on the Docker network beside the database, visiting whatever a signed-in account named -- the same
+ * hole v0.45.1 closed in the cover proxy (docs: memory uchiyomi-solver-ssrf). A chapter here is named by its
+ * NUMBER in the listing the server itself fetched for that series (the add dialog's cached detail); the
+ * series id is the one thing the caller names, and every engine already forces it onto the source's own host
+ * (`rebase` in the site engines). The page bytes are then fetched by the server, by index, through the
+ * guarded image fetcher (routes/images.ts), never from a URL the client sends.
+ *
+ * Refused outright for an account with an age limit: a preview reads a site's pages before any library -- and
+ * so any library's rating -- is involved, and add-a-site sources declare nothing about their content.
+ * Disabled and cooling-down sources are refused as everywhere else, the listing and page list are bounded
+ * by the source's own time budget, and the answers are generic: a site's error text is not echoed back.
+ */
+export type PreviewRefusal = { code: 400 | 403 | 404 | 429 | 502; error: string; message: string };
+const refused = (code: PreviewRefusal['code'], error: string, message: string): PreviewRefusal => ({ code, error, message });
+export const isRefusal = (r: object): r is PreviewRefusal => 'code' in r && 'error' in r;
+
+/** One chapter's page list, briefly: a 40-page chapter is 40 image requests that each need it. */
+const PREVIEW_PAGES_TTL = 10 * 60_000;
+const PREVIEW_PAGES_MAX = 200;
+const previewPages = new Map<string, { at: number; urls: string[] }>();
+
+export async function previewChapters(ctx: ViewCtx, source: string | undefined, sourceId: string | undefined):
+  Promise<{ src: SourceAdapter; series: SourceSeries | null; chapters: SourceChapter[] } | PreviewRefusal> {
+  if (ctx.maxAgeRating != null) return refused(403, 'age_limited', 'Previews are not available on an account with an age limit.');
+  const src = source ? getSource(source) : null;
+  if (!src || !sourceId || sourceId.length > 2048) return refused(400, 'bad_request', 'Name a source and a series on it.');
+  if (!sourceAllowedFor(src, ctx.maxAgeRating)) return refused(403, 'source_denied', 'That source is not available on this account.');
+  if (await isDisabled(src.id).catch(() => false)) return refused(403, 'disabled', `${src.name} is switched off.`);
+  if (await blockedNow(src.id).catch(() => null)) return refused(429, 'cooldown', `${src.name} asked us to slow down. Try again later.`);
+  const { series, chapters } = await seriesAndChapters(src, sourceId);
+  // One copy per number, as an add would take it; an external link (pages === 0) cannot be read here either.
+  const chosen = chooseReleases(chapters, await effectivePrefsFor(null, 0)).releases.filter((c) => c.sourceId && c.pages !== 0);
+  if (!chosen.length) return refused(502, 'unreadable', 'That source did not list any chapters it can serve.');
+  return { src, series, chapters: chosen };
+}
+
+/** The page list of the chapter numbered `number` in that listing, or why not. */
+export async function previewPageList(ctx: ViewCtx, source: string | undefined, sourceId: string | undefined, number: unknown):
+  Promise<{ src: SourceAdapter; chapter: SourceChapter; urls: string[] } | PreviewRefusal> {
+  const r = await previewChapters(ctx, source, sourceId);
+  if (isRefusal(r)) return r;
+  const n = Number(number);
+  const chapter = Number.isFinite(n) ? r.chapters.find((c) => c.number === n) : undefined;
+  if (!chapter) return refused(404, 'not_listed', 'That chapter is not in the listing.');
+  const key = `${r.src.id}\u0000${chapter.sourceId}`;
+  const hit = previewPages.get(key);
+  if (hit && Date.now() - hit.at < PREVIEW_PAGES_TTL) return { src: r.src, chapter, urls: hit.urls };
+  const urls = await withTimeout(r.src.getPageUrls(chapter.sourceId), budgetFor(r.src, 20_000)).catch(() => null);
+  if (!urls?.length) return refused(502, 'unreadable', 'That chapter would not load from the source.');
+  if (previewPages.size >= PREVIEW_PAGES_MAX) previewPages.delete(previewPages.keys().next().value!);
+  previewPages.set(key, { at: Date.now(), urls });
+  return { src: r.src, chapter, urls };
 }
 const latestCache = new Map<string, { at: number; items: SourceSeries[] }>();
 const latestInflight = new Map<string, Promise<SourceSeries[]>>();
@@ -741,7 +834,7 @@ export async function addSeriesFromSource(opts: {
     // is minted purely to carry the results to the dialog's poll -- and only when there is something to
     // judge, as "nothing was fetched, queued or created" is what a plain nothing-yet add promises.
     if (opts.alsoFollow?.length) {
-      jobs.set(folder, { title, total: 0, done: 0, status: 'done' });
+      jobs.set(folder, { title, total: 0, done: 0, status: 'done', startedAt: Date.now() });
       judgeAlsoFollow(folder, id, opts);
     }
     if (series?.coverUrl) {
@@ -830,7 +923,7 @@ export async function addSeriesFromSource(opts: {
       // As on the nothing-yet branch: no download means no card, so one is minted purely to carry the
       // judgement to the dialog's poll, and only when there is something to judge.
       if (opts.alsoFollow?.length) {
-        jobs.set(folder, { title, total: 0, done: 0, status: 'done', seriesId: heldId });
+        jobs.set(folder, { title, total: 0, done: 0, status: 'done', seriesId: heldId, startedAt: Date.now() });
         judgeAlsoFollow(folder, heldId, opts);
       }
     }
@@ -845,7 +938,7 @@ export async function addSeriesFromSource(opts: {
     return { ok: true, status: 200, title, folder, chapters: 0, started: false, alreadyHere: selected.length, seriesId: heldId };
   }
 
-  jobs.set(folder, { title, total: toFetch.length, done: 0, status: 'downloading' });
+  jobs.set(folder, { title, total: toFetch.length, done: 0, status: 'downloading', startedAt: Date.now(), ...(opts.userId ? { by: opts.userId } : {}) });
 
   /**
    * Everything from here is the WORK, as opposed to the decision.
@@ -858,7 +951,7 @@ export async function addSeriesFromSource(opts: {
   const run = async (): Promise<AddResult> => {
     // Which chapters this run wrote, for the provenance stamp. Only what LANDED, never the selection: a
     // copy the downloader skipped because the file was already there is somebody else's work.
-    const landed: Array<{ number: number; scanlator?: string; source?: string; missing?: number[] }> = [];
+    const landed: Array<{ number: number; scanlator?: string; source?: string; missing?: number[]; title?: string }> = [];
     // The add has one source by definition, but it still goes through the same policy as every other
     // download path: pacing, refusal accounting and an explicit partial hold all live in the helper. There
     // are deliberately no alternates and no hunt here -- no followed series exists until chapter one has
@@ -879,7 +972,7 @@ export async function addSeriesFromSource(opts: {
       if (out.kind === 'landed' || out.kind === 'partial') {
         firstPages = out.pages;
         landed.push({
-          number: toFetch[0].number, scanlator: out.chapterUsed.scanlator, source: out.via,
+          number: toFetch[0].number, scanlator: out.chapterUsed.scanlator, source: out.via, title: out.chapterUsed.title,
           ...(out.kind === 'partial' ? { missing: out.missing.map((i) => i + 1) } : {}),
         });
         if (out.kind === 'partial') {
@@ -957,6 +1050,7 @@ export async function addSeriesFromSource(opts: {
     void (async () => {
       let failures = 0;
       for (const ch of toFetch.slice(1)) {
+        if (jobs.get(folder)?.cancelRequested) break; // Cancel (#82): between chapters, never mid-write
         let out: Awaited<ReturnType<typeof downloadWithFallback>>;
         try {
           out = await fetchOne(ch);
@@ -978,7 +1072,7 @@ export async function addSeriesFromSource(opts: {
         const j = jobs.get(folder);
         if (out.kind === 'landed' || out.kind === 'partial') {
           landed.push({
-            number: ch.number, scanlator: out.chapterUsed.scanlator, source: out.via,
+            number: ch.number, scanlator: out.chapterUsed.scanlator, source: out.via, title: out.chapterUsed.title,
             ...(out.kind === 'partial' ? { missing: out.missing.map((i: number) => i + 1) } : {}),
           });
           if (j) {
@@ -1025,7 +1119,10 @@ export async function addSeriesFromSource(opts: {
       await setBookDates(folder, selected).catch(() => {});
       await setBookMeta(folder, landed).catch(() => {});
       const j = jobs.get(folder);
-      if (j && j.status !== 'error') {
+      if (j && j.status !== 'error' && j.cancelRequested) {
+        j.cancelled = true; j.status = 'done'; j.finishedAt = Date.now();
+        j.reason = failures ? `${cancelledReason(j)} ${failures} could not be saved.` : cancelledReason(j);
+      } else if (j && j.status !== 'error') {
         // "Done" has to mean everything landed. A run that lost chapters ends as an error carrying the
         // count, because a green tick over a short library is worse than no tick at all: it tells you to
         // stop looking.
@@ -1231,8 +1328,10 @@ export default async function sourceRoutes(app: FastifyInstance) {
    * the very line `browsable()` draws against `visible()`.
    */
   const surfaceable = (req: FastifyRequest): SourceAdapter[] => {
-    const all = reachable(req);
-    return vc(req).hideAdultLibraries ? all.filter((s) => !s.isNsfw) : all;
+    // Through `sourceBrowsableFor` rather than `isNsfw` alone, so a source the admin NAMED as adult in
+    // server_settings.adult_sources drops out too, even though its extension does not flag itself.
+    const ctx = vc(req);
+    return reachable(req).filter((s) => sourceBrowsableFor(s, ctx));
   };
 
   app.get('/api/sources', async (req) => {
@@ -1385,16 +1484,19 @@ export default async function sourceRoutes(app: FastifyInstance) {
     const { seriesId, altTitle } = (req.body ?? {}) as { seriesId?: string; altTitle?: string };
     if (!seriesId) return reply.code(400).send({ error: 'bad_request' });
 
-    // Browsable by THIS viewer, not merely present: otherwise a capped member could learn about, and write
+    // Visible to THIS viewer, not merely present: otherwise a capped member could learn about, and write
     // into, a series they are walled off from. Fails closed, as the permission hook above does.
-    // One lookup, through browsable(): it carries the deleted/merged rule, the per-library grant and the age
+    // One lookup, through visible(): it carries the deleted/merged rule, the per-library grant and the age
     // cap together, so this route cannot drift from the others by hand-writing part of it. Fails closed --
-    // a database blip must not make a series someone cannot see fillable.
+    // a database blip must not make a series someone cannot see fillable. visible(), NOT browsable(): this
+    // acts on a series someone opened by id, and "Show 18+" is a surfacing preference, not a permission --
+    // through browsable() "Find missing chapters" answered 404 on any series in an 18+ library (and, with
+    // the configurable filter, on any series with a genre marked adult) whenever the switch was off.
     const p = new Params();
     const rows = await q<any>(
       `SELECT s.id, s.title, s.folder, s.source_id, s.source_series_id, s.summary, s.author, s.genres, s.web, s.status,
               s.chapter_floor, s.scanlator_prefs
-         FROM lib_series s WHERE s.id = ${p.add(seriesId)} AND ${browsable('s', vc(req), p)}`, p.values,
+         FROM lib_series s WHERE s.id = ${p.add(seriesId)} AND ${visible('s', vc(req), p)}`, p.values,
     ).then((r) => r, () => null);
     if (rows === null) return reply.code(503).send({ error: 'unavailable' });
     const s = rows[0];
@@ -1584,6 +1686,7 @@ export default async function sourceRoutes(app: FastifyInstance) {
         const candidate = getSource(id);
         return !!candidate && sourceAllowedFor(candidate, maxAgeRating);
       },
+      by: userIdOf(req),
     });
     return { ok: true, started: true, folder: s.folder, total };
   });
@@ -1653,12 +1756,13 @@ export default async function sourceRoutes(app: FastifyInstance) {
     const plain = [...new Set(b.data.numbers ?? [])].filter((n) => !pickOf.has(n)).sort((x, y) => x - y);
     const numbers = [...new Set([...plain, ...pickOf.keys()])].sort((x, y) => x - y);
 
-    // Browsable by THIS viewer, as the fill scan requires: a capped member must not be able to write into a
-    // series they are walled off from, or learn which of its numbers are listed. Fails closed.
+    // Visible to THIS viewer, as the fill scan requires: a capped member must not be able to write into a
+    // series they are walled off from, or learn which of its numbers are listed. Fails closed. visible(), not
+    // browsable(), for the fill scan's reason: a fetch on a series someone opened is not a listing.
     const p = new Params();
     const rows = await q<any>(
       `SELECT s.id, s.title, s.folder, s.summary, s.author, s.genres, s.web, s.status, s.source_id
-         FROM lib_series s WHERE s.id = ${p.add(seriesId)} AND ${browsable('s', vc(req), p)}`, p.values,
+         FROM lib_series s WHERE s.id = ${p.add(seriesId)} AND ${visible('s', vc(req), p)}`, p.values,
     ).then((r) => r, () => null);
     if (rows === null) return reply.code(503).send({ error: 'unavailable' });
     const s = rows[0];
@@ -1770,6 +1874,7 @@ export default async function sourceRoutes(app: FastifyInstance) {
         const candidate = getSource(id);
         return !!candidate && sourceAllowedFor(candidate, maxAgeRating);
       },
+      by: userIdOf(req),
     });
     return { ok: true, started: true, folder: s.folder, total, skipped };
   });
@@ -1781,7 +1886,7 @@ export default async function sourceRoutes(app: FastifyInstance) {
    * polls the same URL with a short `wait` until it is 0.
    */
   app.get('/api/sources/search-all', async (req) => {
-    const { q: rawQ, groupBy, wait } = req.query as { q?: string; groupBy?: string; wait?: string };
+    const { q: rawQ, groupBy, wait, source } = req.query as { q?: string; groupBy?: string; wait?: string; source?: string };
     const term = (rawQ || '').trim();
     if (!term) return { content: [], sources: [], pending: 0, asked: 0 };
     // Absent means the full first-answer wait, so a caller written before `wait` existed gets the most
@@ -1795,7 +1900,19 @@ export default async function sourceRoutes(app: FastifyInstance) {
     // "Show 18+" chip. The chip belongs here and not only in the shaping below, because a source left in
     // `ask` is a source this request STARTS -- an outbound query to an adult site on behalf of someone who
     // asked not to see one, and its results would then also land in the shared entry under this term.
-    const ask = surfaceable(req);
+    const all = surfaceable(req);
+    // `source` narrows the fan-out to one source, for a search made while Discover is filtered to it. The
+    // filter was display-only before, and did not survive a search at all: submitting a term asked every
+    // source and answered with everything, so choosing a source and then searching within it was not
+    // possible. Narrowing here rather than filtering the answer also makes it one outbound request instead
+    // of a dozen, which is the difference between an instant answer and the slowest source's timeout.
+    //
+    // It only ever narrows `surfaceable`, never widens it: an id outside that set -- an adult source with
+    // the reveal off, one an age cap puts out of reach, or one that does not exist -- leaves `ask` empty,
+    // nobody is asked, and the answer is the ordinary nothing-found shape. The entry is still keyed by the
+    // term alone, so a narrowed search and a full one share whatever the sources have already answered.
+    const only = typeof source === 'string' ? source : '';
+    const ask = only ? all.filter((s) => s.id === only) : all;
     const health = new Map((await healthAll().catch(() => [])).map((h) => [h.source_id, h] as const));
     const ans = await searchAll(term, ask, { waitMs, health });
     const byId = new Map(ask.map((s) => [s.id, s] as const));
@@ -1881,8 +1998,18 @@ export default async function sourceRoutes(app: FastifyInstance) {
 
   app.get('/api/sources/jobs', async (req) => {
     sweepJobs();
-    const all = [...jobs.entries()].map(([folder, j]) => ({ folder, ...j }));
-    if (!vc(req).hideAdultLibraries) return { content: all };
+    const me = userIdOf(req);
+    const admin = roleOf(req) === 'admin';
+    // Who started a job stays on the server; the list says whether it is this viewer's own, which is what
+    // decides whether the pill offers its Cancel (an admin's pill offers every one).
+    const all = [...jobs.entries()].map(([folder, { by, ...j }]) => ({ folder, ...j, mine: !!by && by === me }));
+    // The server's own runs (lib/downloadJobs.ts, #82): the sweep, the repair, a bulk "Fetch newest". An
+    // admin's to see and stop -- and a bulk run its starter's too, since it is their selection. Nobody
+    // else's: the series a sweep is on may be in a library this viewer cannot open.
+    const runs = listRuns()
+      .filter((r) => admin || (r.by !== null && r.by === me))
+      .map(({ by, ...r }) => ({ ...r, mine: !!by && by === me }));
+    if (!vc(req).hideAdultLibraries) return { content: all, runs };
     // A download job carries the series title, so the strip on Discover is a listing like any other. Jobs
     // are keyed by folder, which is exactly what lib_series.folder holds, so the filter is one lookup. A
     // job for a series not yet scanned in has no row and stays visible: it cannot be in a library yet.
@@ -1892,7 +2019,56 @@ export default async function sourceRoutes(app: FastifyInstance) {
       `SELECT s.folder FROM lib_series s WHERE s.folder = ANY(${arr}) AND NOT (${browsable('s', vc(req), p)})`,
       p.values as any[],
     ).catch(() => [])).map((r) => r.folder));
-    return { content: all.filter((j) => !hidden.has(j.folder)) };
+    // A run's "now on …" names a series as well, so it is held to the same rule: the count stays, the title
+    // of a series this viewer is hiding goes.
+    const p2 = new Params();
+    const ids = p2.add(runs.map((r) => r.current?.id).filter(Boolean) as string[]);
+    const hiddenIds = new Set((await q<{ id: string }>(
+      `SELECT s.id FROM lib_series s WHERE s.id = ANY(${ids}) AND NOT (${browsable('s', vc(req), p2)})`,
+      p2.values as any[],
+    ).catch(() => [])).map((r) => r.id));
+    return {
+      content: all.filter((j) => !hidden.has(j.folder)),
+      runs: runs.map((r) => (r.current && hiddenIds.has(r.current.id) ? { ...r, current: undefined } : r)),
+    };
+  });
+
+  /**
+   * Stop a running download after the chapter in flight (#82). Its starter may, and any admin; the loop
+   * checks the flag between chapters, so a half-written file is never the price of stopping. What already
+   * landed stays, and the card ends `done` saying how far it got.
+   */
+  app.post('/api/sources/jobs/:folder/cancel', async (req, reply) => {
+    const { folder } = req.params as { folder: string };
+    const j = jobs.get(folder);
+    if (!j) return reply.code(404).send({ error: 'not_found' });
+    if (roleOf(req) !== 'admin' && !(j.by && j.by === userIdOf(req))) return reply.code(403).send({ error: 'forbidden' });
+    if (j.status !== 'downloading') return reply.code(409).send({ error: 'not_running' });
+    j.cancelRequested = true;
+    await logAudit('download.cancel', { userId: userIdOf(req), detail: { folder, title: j.title }, req });
+    return { ok: true };
+  });
+
+  /** The same for one of the server's own runs: an admin, or the person who started a bulk "Fetch newest". */
+  app.post('/api/sources/runs/:kind/cancel', async (req, reply) => {
+    const { kind } = req.params as { kind: string };
+    const card = listRuns().find((r) => r.kind === kind && r.status === 'running');
+    if (!card) return reply.code(404).send({ error: 'not_found' });
+    if (roleOf(req) !== 'admin' && !(card.by && card.by === userIdOf(req))) return reply.code(403).send({ error: 'forbidden' });
+    requestStop(card.kind);
+    await logAudit('download.cancel', { userId: userIdOf(req), detail: { run: card.kind }, req });
+    return { ok: true };
+  });
+
+  /** Dismiss a finished run's card. A running one is cancelled, not dismissed. */
+  app.delete('/api/sources/runs/:kind', async (req, reply) => {
+    const { kind } = req.params as { kind: string };
+    const card = listRuns().find((r) => r.kind === kind);
+    if (!card) return reply.code(404).send({ error: 'not_found' });
+    if (roleOf(req) !== 'admin' && !(card.by && card.by === userIdOf(req))) return reply.code(403).send({ error: 'forbidden' });
+    const r = dismissRun(card.kind);
+    if (r === 'running') return reply.code(409).send({ error: 'running' });
+    return { ok: true };
   });
 
   /**
@@ -1979,6 +2155,28 @@ export default async function sourceRoutes(app: FastifyInstance) {
       }),
     );
     return { content: found.filter(Boolean) };
+  });
+
+  /**
+   * The chapters a preview may open (#91): the add dialog's own listing of that series on that source, one copy
+   * per number. Each is named by its number, which is all the page routes take -- see previewChapters.
+   */
+  app.get('/api/sources/preview', async (req, reply) => {
+    const { source, sourceId } = req.query as { source?: string; sourceId?: string };
+    const r = await previewChapters(vc(req), source, sourceId);
+    if (isRefusal(r)) return reply.code(r.code).send({ error: r.error, message: r.message });
+    return {
+      title: r.series?.title || '',
+      content: r.chapters.map((c) => ({ number: c.number, title: c.title ?? null, scanlator: c.scanlator ?? null })),
+    };
+  });
+
+  /** How many pages one of those chapters has. The pages themselves are GET /img/sources/preview, by index. */
+  app.get('/api/sources/preview/pages', async (req, reply) => {
+    const { source, sourceId, number } = req.query as { source?: string; sourceId?: string; number?: string };
+    const r = await previewPageList(vc(req), source, sourceId, number);
+    if (isRefusal(r)) return reply.code(r.code).send({ error: r.error, message: r.message });
+    return { count: r.urls.length };
   });
 
   // Detail for one provider's match: description + chapter count/range (drives the add dialog).

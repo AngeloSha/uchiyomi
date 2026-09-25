@@ -7,6 +7,8 @@ import { requestPersist, storageEstimate } from '@/lib/downloads';
 import { deviceId } from '@/lib/device';
 import { bytes } from '@/lib/format';
 import { readShownOnce } from '@/lib/shownOnce';
+import { setTypeToSearchOn, typeToSearchOn } from '@/lib/typeToSearch';
+import { compactChaptersOn, setCompactChaptersOn } from '@/lib/compactChapters';
 import { ReaderPrefs, loadPrefs, savePrefs, syncPrefsFromServer } from '@/lib/readerPrefs';
 import { Avatar, AVATAR_EMOJIS, AVATAR_COLORS } from '@/components/Avatar';
 import { ProgressBar } from '@/components/ui';
@@ -112,6 +114,11 @@ function AppearanceSection() {
   // and its mirror (lib/effects.ts) -- then put back if the server refuses, so the switch never shows a
   // state the account does not hold.
   const reduceEffects = user?.settings?.reduceEffects === true;
+  // Read after mount: localStorage is not there during the static export's render.
+  const [typeSearch, setTypeSearch] = useState(true);
+  useEffect(() => { setTypeSearch(typeToSearchOn()); }, []);
+  const [compactList, setCompactList] = useState(false);
+  useEffect(() => { setCompactList(compactChaptersOn()); }, []);
   const saveReduceEffects = async (next: boolean) => {
     const prev = reduceEffects;
     setSettings({ reduceEffects: next });
@@ -168,6 +175,17 @@ function AppearanceSection() {
       <SwitchRow label={tr('Reduce effects')}
         help={tr('Turns off the animated background, blur, smooth scrolling and transitions. Try it if scrolling feels slow.')}
         on={reduceEffects} onChange={saveReduceEffects} />
+
+      {/* This device only (lib/typeToSearch.ts says why): single-key shortcuts must be possible to switch off. */}
+      <SwitchRow label={tr('Type anywhere to search')}
+        help={tr('Start typing a title on any page to open search with it. This also switches the / shortcut, on this device only.')}
+        on={typeSearch} onChange={(next) => { setTypeToSearchOn(next); setTypeSearch(next); }} />
+
+      {/* This device only, and only a computer's rows change: lib/compactChapters.ts. Off by default -- the
+          default chapter row is the deliberate look, and taking part of it away is the reader's choice. */}
+      <SwitchRow label={tr('Compact chapter list')}
+        help={tr('On a computer, chapter rows without thumbnails, and their buttons appear when you point at a row. Phones and tablets are unchanged. This device only.')}
+        on={compactList} onChange={(next) => { setCompactChaptersOn(next); setCompactList(next); }} />
 
       {/* Written to the server so it follows you to another device, and mirrored to localStorage so the login
           screen -- which nobody is signed in to -- is already translated. The note about machine assistance
@@ -247,6 +265,11 @@ function ReadingSection({ weeklyGoal }: { weeklyGoal: number }) {
         <Choice label={tr('Pages per view')} value={prefs.spread ? 'double' : 'single'}
           options={[{ value: 'single', label: tr('Single') }, { value: 'double', label: tr('Double spread') }]}
           onChange={(v) => set({ spread: v === 'double' })} />
+      )}
+      {prefs.mode === 'paged' && (
+        <Choice label={tr('Reading direction')} value={prefs.pagedDirection}
+          options={[{ value: 'series', label: tr('Series default') }, { value: 'ltr', label: tr('Left to right') }, { value: 'rtl', label: tr('Right to left') }]}
+          onChange={(v) => set({ pagedDirection: v })} />
       )}
       {/* Set in both modes. ⚠️ It cannot LOOK the same in both: a page-by-page view has no thin slide --
           every slide is exactly one viewport wide -- so Collapse falls back to removing there, where an

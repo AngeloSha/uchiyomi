@@ -54,7 +54,11 @@ import { budgetFor } from './sources/budget';
 import { resetSolverSessions, solverPing } from './sources/flaresolverr';
 import { blockedNow, clearBlock, isDisabled } from './sourceHealth';
 import { copyToChapter, type ListingCopy } from './seriesListing';
+import { groupsOf, normGroup, type ReleasePrefs } from './releases';
+import { effectivePrefsFor, readSeriesPrefs } from './scanlatorPrefs';
+import { borrowNamesFor, NAMES_RETRY_MS } from './borrowNames';
 import { busyFolders } from './bulkNewest';
+import { beginRun, dismissRun, endRun, stopRequested, type RunCard } from './downloadJobs';
 import { updateSeries, CHAPTER_RETRY_CAP, type Landed } from './updater';
 import { huntCandidates, huntSource, followHunted, seriesIsAdult, sweepAllowedFor } from './sourceHunt';
 import { assess, gapsOf } from './fill';
@@ -64,11 +68,14 @@ import { assess, gapsOf } from './fill';
 import { solverBlaming } from './health';
 import { visibleToAll } from './visibility';
 
-/** Which of the five steps to run. `only` on the options picks a subset; the nightly runs them all. */
-export type RepairStep = 'solver' | 'count' | 'failures' | 'short' | 'gaps';
+/**
+ * Which of the seven steps to run. `only` on the options picks a subset; the nightly runs them all. `groups`
+ * and `names` (v0.47.0) do nothing unless an admin has switched them on -- see stepGroups and stepNames.
+ */
+export type RepairStep = 'solver' | 'count' | 'failures' | 'short' | 'gaps' | 'groups' | 'names';
 
 /** In the order the run takes them, which is also the order a caller's `only` is reported in. */
-export const REPAIR_STEPS: readonly RepairStep[] = ['solver', 'count', 'failures', 'short', 'gaps'];
+export const REPAIR_STEPS: readonly RepairStep[] = ['solver', 'count', 'failures', 'short', 'gaps', 'groups', 'names'];
 
 /**
  * An integer knob from the environment, clamped. Out-of-range, unparseable and absent all fall back to the
@@ -92,6 +99,19 @@ export const REPAIR_COUNT_MAX = envInt('REPAIR_COUNT_MAX', 2000, 1, 100_000);
 export const REPAIR_SHORT_MAX = envInt('REPAIR_SHORT_MAX', 20, 1, 500);
 /** Series one run searches other sources for, to fill a gap. Deliberately tiny: each one is a real search. */
 export const REPAIR_GAPS_MAX = envInt('REPAIR_GAPS_MAX', 5, 1, 100);
+/**
+ * Chapters one run may replace with a preferred group's copy (stepGroups). Each is a page list and a whole
+ * chapter download from a source, on top of the night's sweep, so the default is small: a library that
+ * followed the wrong group for two hundred chapters catches up over a few weeks, not in one night.
+ */
+export const REPAIR_GROUPS_MAX = envInt('REPAIR_GROUPS_MAX', 10, 1, 200);
+/** How long a chapter whose upgrade was tried, and failed, is left before it is tried again. */
+const GROUP_RETRY_DAYS = 7;
+/**
+ * Series one run may look for a chapter-name donor for (stepNames). Each is up to HUNT_MAX_SOURCES searches
+ * and two lookups per candidate judged, all for something cosmetic, so it is kept to a handful a night.
+ */
+export const REPAIR_NAMES_MAX = envInt('REPAIR_NAMES_MAX', 5, 1, 100);
 /**
  * The pause between two series the failures step retries, as the sweep paces itself. Tests set it to 0.
  *
@@ -189,6 +209,17 @@ export interface RepairResult {
     /** Gap chapters a followed source already lists, which the ordinary sweep will fetch. */
     sweep: number;
   };
+  /**
+   * Group upgrades (stepGroups): chapters looked at, replaced with the preferred group's copy, and left
+   * (the copy was shorter, did not answer, or would not download). `off` when the switch is off, which is
+   * the default, and then nothing was looked at.
+   */
+  groups: { off?: true; looked: number; replaced: number; left: number };
+  /**
+   * Chapter names borrowed from another source (stepNames): series looked at, and chapters named. `off` when
+   * neither the server nor any series has it switched on, which is the default.
+   */
+  names: { off?: true; series: number; named: number };
   failures: {
     /** Ledger rows put back to zero attempts. */
     reset: number;
@@ -205,8 +236,8 @@ export interface RepairResult {
   };
   /** The nightly switch is off and nobody asked for this run. */
   skipped?: 'disabled';
-  /** The run ended early: the server is going down, or the download disk is at its floor. */
-  stopped?: 'shutdown' | 'disk';
+  /** The run ended early: the server is going down, the download disk is at its floor, or an admin pressed Cancel. */
+  stopped?: 'shutdown' | 'disk' | 'cancelled';
 }
 
 /**
@@ -220,13 +251,24 @@ export const repairState: {
   lastResult: RepairResult | null;
 } = { running: false, startedAt: null, finishedAt: null, lastResult: null };
 
+/**
+ * The running repair's card on the download pill (lib/downloadJobs.ts, #82), set by runRepair. Its Cancel is
+ * obeyed everywhere a shutdown is: between series, between chapters, between steps -- never mid-write.
+ */
+let activeCard: RunCard | null = null;
+/** Why the run must stop now, if it must: the server going down, or someone pressing Cancel. */
+const halted = (): 'shutdown' | 'cancelled' | null =>
+  runtime.stopping ? 'shutdown' : stopRequested(activeCard) ? 'cancelled' : null;
+/** For updateSeries: the chapter loop's own between-chapters check. */
+const cancelled = () => stopRequested(activeCard);
+
 type Log = { info: (m: string) => void; warn: (m: string) => void; error: (m: unknown) => void };
 
 /** Work the post-run scan owes: what landed, so setBookDates/setBookMeta can stamp the rows it mints. */
 type Dated = { folder: string; chapters: SourceChapter[]; landed: Landed[] };
 
 /** The lists that go into the audit row, so "what did it actually touch" is answerable without the logs. */
-type Notes = { replaced: string[]; confirmed: string[]; followed: string[] };
+type Notes = { replaced: string[]; confirmed: string[]; followed: string[]; upgraded: string[] };
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -316,7 +358,7 @@ async function stepCount(r: RepairResult, log?: Log): Promise<void> {
       ORDER BY mtime DESC LIMIT $1`, [REPAIR_COUNT_MAX],
   );
   await mapLimit(rows, COUNT_CONCURRENCY, async (b) => {
-    if (runtime.stopping) return;
+    if (halted()) return;
     // A path that escapes its root is not a chapter to count; it is something for the health page. Left
     // unstamped as well as uncounted, exactly as the verify task leaves it out of `checked`.
     const abs = containedPath(b.root, b.file);
@@ -380,13 +422,13 @@ async function stepFailures(r: RepairResult, opts: RepairOpts, budget: { left: n
   let series = 0, added = 0, failed = 0;
   let stopped: RepairResult['stopped'];
   for (const id of wanted) {
-    if (runtime.stopping) { stopped = 'shutdown'; break; }
+    { const h = halted(); if (h) { stopped = h; break; } }
     const folder = folders.get(id);
     if (!folder || busyFolders.has(folder)) continue;
     series++;
     busyFolders.add(folder);
     try {
-      const up = await updateSeries(id, 10, { hunt: budget });
+      const up = await updateSeries(id, 10, { hunt: budget, cancelled });
       added += up.added;
       failed += up.failed;
       if (up.added && up.folder && up.chapters?.length) pending.push({ folder: up.folder, chapters: up.chapters, landed: up.landed });
@@ -470,12 +512,12 @@ async function stepShort(r: RepairResult, opts: RepairOpts, budget: { left: numb
 
   let stopped: RepairResult['stopped'];
   series: for (const [seriesId, rows] of bySeries) {
-    if (runtime.stopping) { stopped = 'shutdown'; break; }
+    { const h = halted(); if (h) { stopped = h; break; } }
     const folder = rows[0].folder;
     // Somebody else is already downloading into this folder (a series-page fetch, a Fetch newest run).
     // Two writers on one path is a lost file and a rate-limit strike each; this one simply waits a night.
     if (busyFolders.has(folder)) continue;
-    const allowed = sweepAllowedFor(await seriesIsAdult(seriesId).catch(() => false));
+    const allowed = await sweepAllowedFor(await seriesIsAdult(seriesId).catch(() => false));
     // The sources this series is actually followed on -- the primary pair plus series_sources, exactly as
     // listingAlternates builds it (lib/updater.ts). A listing row's source is trusted only while the
     // series still follows it: a copy left behind by a source somebody unfollowed is not ours to ask.
@@ -493,7 +535,7 @@ async function stepShort(r: RepairResult, opts: RepairOpts, budget: { left: numb
       await withTimeout(updateSeries(seriesId, 0), LISTING_REFRESH_MS).catch(() => {});
 
       for (const book of rows) {
-        if (runtime.stopping) { stopped = 'shutdown'; break series; }
+        { const h = halted(); if (h) { stopped = h; break series; } }
         r.short.looked++;
         const abs = join(book.root, book.file);
         const listing = await one<{ title: string | null; copies: ListingCopy[] }>(
@@ -646,6 +688,240 @@ async function replaceShort(
   return true;
 }
 
+type GroupBook = ShortBook & { scanlator: string; copies: ListingCopy[]; own_prefs: boolean };
+
+/**
+ * (f) Group upgrades: swap a chapter for the copy your preferred scanlation group released, once it exists.
+ *
+ * #81 (Wolf92s): "pull from several sources so you get your favourite group". Most of that already worked --
+ * a series follows up to three sources, the group ranking chooses across all of them, and a new chapter
+ * waits up to its patience for a ranked group. What did not: once the wait was over the chapter was taken
+ * from whoever had it, and when the preferred group's copy turned up a day later it was never looked at
+ * again, because what is on disk is never replaced by the sweep. This step is that second look. @Squeaks72's
+ * #93 tried it by SOURCE; it is done here by GROUP, which is what #81 asks for, and under the rules that
+ * PR's review set:
+ *
+ *   - OFF unless an admin switches it on (`server_settings.group_upgrade`). It replaces files on disk.
+ *   - Owned files only: the download root and the downloader's own filename, as the short step (and
+ *     `lib_books.source_id` is NOT that test -- setBookMeta stamps it on files in both roots).
+ *   - Never a shorter copy: the preferred copy's page list is counted BEFORE anything is downloaded, and
+ *     fewer pages than the file on disk means no. A one-page "chapter removed" notice from the right group
+ *     is exactly what this rule is for. And never a partial copy, whatever it would beat.
+ *   - Only a file whose group is KNOWN and ranks below a group the preferences name. A file with no group
+ *     could already be the preferred group's, and "unranked beats unranked" would re-fetch the library.
+ *   - Never a chapter someone picked a copy for by hand (`picked_at`), a deleted one, one with pages missing
+ *     (the sweep's completion pass owns those), or one in a series no longer updated.
+ *   - The busy-folder hold, a listing refresh first, and a series is skipped when it did not answer.
+ *   - REPAIR_GROUPS_MAX downloads a night; a chapter whose attempt failed waits GROUP_RETRY_DAYS.
+ *   - restampBook afterwards, so pages, source and group describe the new file, and an audit row per swap.
+ *
+ * Reading progress and bookmarks stay, as with the short step: the file is written over the same row.
+ */
+async function stepGroups(r: RepairResult, opts: RepairOpts, notes: Notes, log?: Log): Promise<RepairResult['stopped']> {
+  const on = await one<{ on: boolean }>('SELECT group_upgrade AS "on" FROM server_settings WHERE id = 1').catch(() => null);
+  if (!on?.on) { r.groups.off = true; return undefined; }
+
+  const rows0 = await q<GroupBook>(
+    `SELECT b.id, b.series_id, b.number::float8 AS number, b.pages, b.root, b.file, b.source_id, b.scanlator,
+            s.title, s.folder, s.summary, s.author, s.genres, s.web, s.status,
+            (s.scanlator_prefs IS NOT NULL) AS own_prefs, l.copies
+       FROM lib_books b
+       JOIN lib_series s ON s.id = b.series_id AND s.auto_update AND ${visibleToAll('s')}
+       JOIN series_listing l ON l.series_id = b.series_id AND l.number = b.number
+      WHERE b.root = $1 AND b.pruned_at IS NULL AND b.missing_pages IS NULL AND b.picked_at IS NULL
+        AND b.pages > 0 AND btrim(COALESCE(b.scanlator, '')) <> ''
+        AND (b.upgrade_tried_at IS NULL OR b.upgrade_tried_at < now() - make_interval(days => $2))
+      ORDER BY b.mtime DESC LIMIT 2000`,
+    [DL_ROOT, GROUP_RETRY_DAYS],
+  ).catch(() => [] as GroupBook[]);
+
+  // The preferences per series, read once each: the series' own when it has any, the server's otherwise.
+  const prefsOf = new Map<string, ReleasePrefs>();
+  const prefsFor = async (b: GroupBook) => {
+    let p = prefsOf.get(b.series_id);
+    if (!p) { p = await effectivePrefsFor(b.own_prefs ? await readSeriesPrefs(b.series_id) : null); prefsOf.set(b.series_id, p); }
+    return p;
+  };
+  /** A listing copy's groups, as the release rules read them (`scanlator` is nullable there). */
+  const groupsOfCopy = (c: ListingCopy) => groupsOf({ groups: c.groups, scanlator: c.scanlator ?? undefined });
+  /** The best copy on offer whose group outranks the file's, or null. Followed sources only, never blocked, never external. */
+  const betterCopy = (b: GroupBook, copies: ListingCopy[], prefs: ReleasePrefs, followed: Set<string> | null): ListingCopy | null => {
+    const blocked = new Set(prefs.blocked.map(normGroup));
+    const priority = prefs.priority.map(normGroup).filter((k) => k && !blocked.has(k));
+    const rankOf = (groups: string[]) => Math.min(Infinity, ...groups.map((g) => priority.indexOf(normGroup(g))).filter((i) => i >= 0));
+    const held = rankOf(groupsOf({ scanlator: b.scanlator }));
+    let best: ListingCopy | null = null;
+    let bestRank = held;
+    for (const c of copies ?? []) {
+      if (followed && !followed.has(c.source)) continue;
+      if (c.pages === 0) continue; // an external link cannot be downloaded
+      const keys = groupsOfCopy(c).map(normGroup);
+      if (!keys.length || keys.every((k) => blocked.has(k))) continue;
+      const rank = rankOf(groupsOfCopy(c));
+      if (rank < bestRank) { best = c; bestRank = rank; }
+    }
+    return best;
+  };
+
+  // The candidates, in TypeScript as well as in SQL: the downloader's own filename, and a better group on offer.
+  const candidates: GroupBook[] = [];
+  for (const b of rows0) {
+    if (candidates.length >= REPAIR_GROUPS_MAX) break;
+    if (b.file !== chapterFileRel(b.folder, Number(b.number))) continue;
+    if (betterCopy(b, b.copies, await prefsFor(b), null)) candidates.push(b);
+  }
+  if (!candidates.length) return undefined;
+
+  const bySeries = new Map<string, GroupBook[]>();
+  for (const b of candidates) {
+    if (!bySeries.has(b.series_id)) bySeries.set(b.series_id, []);
+    bySeries.get(b.series_id)!.push(b);
+  }
+
+  let stopped: RepairResult['stopped'];
+  series: for (const [seriesId, rows] of bySeries) {
+    { const h = halted(); if (h) { stopped = h; break; } }
+    const folder = rows[0].folder;
+    if (busyFolders.has(folder)) continue;
+    const allowed = await sweepAllowedFor(await seriesIsAdult(seriesId).catch(() => false));
+    const primary = await one<{ source_id: string | null }>('SELECT source_id FROM lib_series WHERE id = $1', [seriesId]).catch(() => null);
+    const followed = new Set<string>(
+      (await q<{ source_id: string }>('SELECT source_id FROM series_sources WHERE series_id = $1', [seriesId]).catch(() => [])).map((x) => x.source_id),
+    );
+    if (primary?.source_id) followed.add(primary.source_id);
+
+    busyFolders.add(folder);
+    try {
+      // The listing is as old as the last sweep: refreshed first, so the copy judged is one the sources list
+      // now. A series whose refresh did not come back is left for tomorrow -- a stale listing is how a copy
+      // a site has since taken down would be "the preferred group's version".
+      const refreshed = await withTimeout(updateSeries(seriesId, 0), LISTING_REFRESH_MS).catch(() => null);
+      if (!refreshed || refreshed.outcome !== 'ok') { r.groups.left += rows.length; continue; }
+      for (const book of rows) {
+        { const h = halted(); if (h) { stopped = h; break series; } }
+        r.groups.looked++;
+        await q('UPDATE lib_books SET upgrade_tried_at = now() WHERE id = $1', [book.id]).catch(() => {});
+        const listing = await one<{ title: string | null; copies: ListingCopy[] }>(
+          'SELECT title, copies FROM series_listing WHERE series_id = $1 AND number = $2::real', [seriesId, book.number],
+        ).catch(() => null);
+        const copy = listing && betterCopy(book, listing.copies, await prefsFor(book), followed);
+        if (!copy || !allowed(copy.source)) { r.groups.left++; continue; }
+        const chapter = copyToChapter(copy, { number: book.number, title: listing!.title });
+        const count = await pageCount(copy.source, copy.sourceId, allowed);
+        // ⚠️ Decided BEFORE the download: never a shorter copy, and silence is not a yes.
+        // Reintroduce by dropping the page test: "a shorter copy never replaces a longer one" in
+        // groupUpgrade.int.test.ts finds the notice written over the chapter.
+        if (count === null || count < book.pages) {
+          r.groups.left++;
+          if (count !== null) log?.info(`repair: "${book.title}" ch ${book.number}: ${copy.scanlator ?? copy.source} has ${count} page(s) to our ${book.pages}; kept`);
+          continue;
+        }
+        const done = await replaceWithGroup(book, chapter, copy, opts, notes, log);
+        if (done === 'disk') { stopped = 'disk'; break series; }
+        if (done) r.groups.replaced++;
+        else r.groups.left++;
+      }
+    } finally {
+      busyFolders.delete(folder);
+    }
+  }
+  return stopped;
+}
+
+/**
+ * The page count of one copy, or null when it was not asked or did not answer -- the short step's `ask`, for
+ * the group step. Never reported to source_health: a page list asked on our own initiative must not be what
+ * puts a source into a cooldown. An EMPTY list is silence, not zero pages (see stepShort).
+ */
+async function pageCount(sourceId: string, chapterSourceId: string, allowed: (s: string) => boolean): Promise<number | null> {
+  const src = getSource(sourceId);
+  if (!src || !allowed(sourceId)) return null;
+  if (await isDisabled(sourceId).catch(() => false)) return null;
+  if (await blockedNow(sourceId).catch(() => null)) return null;
+  try {
+    const urls = await withTimeout(src.getPageUrls(chapterSourceId), budgetFor(src, SHORT_PAGES_MS));
+    return urls.length || null;
+  } catch {
+    return null;
+  }
+}
+
+/** Write the preferred group's copy over the file, whole or not at all, and stamp and audit it. */
+async function replaceWithGroup(
+  book: GroupBook, chapter: SourceChapter, copy: ListingCopy, opts: RepairOpts, notes: Notes, log?: Log,
+): Promise<boolean | 'disk'> {
+  const via = copy.source;
+  const meta: DownloadInput['meta'] = {
+    series: book.title, summary: book.summary ?? undefined, author: book.author ?? undefined,
+    genres: book.genres ?? undefined, url: book.web ?? undefined, status: book.status ?? undefined,
+  };
+  try {
+    // writeAtomic underneath: the file on disk is untouched until the new one is entirely there. A copy
+    // that arrives short is offered as a hold (e.partial) and REFUSED here -- a partial is a downgrade.
+    const landed = await downloadChapter({ sourceId: via, seriesFolder: book.folder, chapter, meta }, { replace: true });
+    if (!landed) return false;
+  } catch (e: any) {
+    if (e?.diskFull) return 'disk';
+    return false;
+  }
+  const abs = join(book.root, book.file);
+  const group = groupsOf({ groups: copy.groups, scanlator: copy.scanlator ?? undefined }).join(' & ') || copy.scanlator || undefined;
+  // A restamp that throws must not take the rest of the night's repair with it: the new file is whole on
+  // disk, and the count step re-measures a row whose numbers are stale.
+  try {
+    await restampBook(book.id, abs, [], { source: via, scanlator: group });
+  } catch (e) {
+    log?.warn(`repair: "${book.title}" ch ${book.number} was replaced but could not be restamped: ${(e as Error)?.message || e}`);
+  }
+  const now = await one<{ pages: number }>('SELECT pages FROM lib_books WHERE id = $1', [book.id]);
+  const readers = await one<{ n: number }>('SELECT count(*)::int AS n FROM read_progress WHERE book_id = $1', [book.id]).catch(() => null);
+  await logAudit('book.group_upgraded', {
+    userId: opts.userId ?? null,
+    detail: {
+      bookId: book.id, seriesId: book.series_id, title: book.title, number: book.number,
+      from: { source: book.source_id, group: book.scanlator }, to: { source: via, group },
+      pages: [book.pages, now?.pages ?? 0], readers: readers?.n ?? 0,
+    },
+  });
+  notes.upgraded.push(`${book.title} ch ${book.number} (${book.scanlator} -> ${group})`);
+  log?.info(`repair: "${book.title}" ch ${book.number}: ${book.scanlator} -> ${group} from ${via}`);
+  return true;
+}
+
+/**
+ * (g) Chapter names from another source (lib/borrowNames.ts, #85): for up to REPAIR_NAMES_MAX series with a
+ * chapter that has no name, one whose own source names nothing, find a source whose numbering matches and take
+ * the names from it. Off unless the server or the series switches it on. Writes names only -- never a file,
+ * never `title` -- so it needs no busy-folder hold; it stops between series for a Cancel or a shutdown.
+ */
+async function stepNames(r: RepairResult, log?: Log): Promise<RepairResult['stopped']> {
+  const rows = await q<{ id: string; title: string }>(
+    `SELECT s.id, s.title FROM lib_series s
+      WHERE ${visibleToAll('s')}
+        AND COALESCE(s.borrow_names, (SELECT borrow_names FROM server_settings WHERE id = 1)) IS TRUE
+        AND EXISTS (SELECT 1 FROM lib_books b WHERE b.series_id = s.id AND b.pruned_at IS NULL AND b.chapter_name IS NULL)
+        AND COALESCE((s.name_donor->>'none')::bigint, 0) <= $1
+      ORDER BY s.latest_mtime DESC NULLS LAST
+      LIMIT $2`,
+    [Date.now() - NAMES_RETRY_MS, REPAIR_NAMES_MAX],
+  ).catch(() => [] as Array<{ id: string; title: string }>);
+  if (!rows.length) {
+    const on = await one<{ on: boolean }>(
+      'SELECT COALESCE((SELECT borrow_names FROM server_settings WHERE id = 1), false) OR EXISTS (SELECT 1 FROM lib_series WHERE borrow_names) AS "on"',
+    ).catch(() => null);
+    if (!on?.on) r.names.off = true;
+    return undefined;
+  }
+  for (const s of rows) {
+    { const h = halted(); if (h) return h; }
+    const res = await borrowNamesFor(s.id).catch(() => null);
+    r.names.series++;
+    r.names.named += res?.named ?? 0;
+    if (res?.named) log?.info(`repair: "${s.title}": ${res.named} chapter name(s) from ${res.donor}`);
+  }
+  return undefined;
+}
+
 /** What one series' gap hunt concluded, stored on lib_series.gaps_result for the Health page to read. */
 interface GapsResult {
   at: string;
@@ -719,7 +995,7 @@ async function stepGaps(r: RepairResult, opts: RepairOpts, budget: { left: numbe
 
   let stopped: RepairResult['stopped'];
   for (const s of ranked.slice(0, REPAIR_GAPS_MAX)) {
-    if (runtime.stopping) { stopped = 'shutdown'; break; }
+    { const h = halted(); if (h) { stopped = h; break; } }
     if (busyFolders.has(s.folder)) continue;
 
     const gapSet = new Set(s.gapNums);
@@ -759,7 +1035,7 @@ async function stepGaps(r: RepairResult, opts: RepairOpts, budget: { left: numbe
     };
 
     if (unlisted.size) {
-      const allowed = sweepAllowedFor(await seriesIsAdult(s.id).catch(() => false));
+      const allowed = await sweepAllowedFor(await seriesIsAdult(s.id).catch(() => false));
       const found = await huntCandidates(s.id, {
         allowed, budget, reason: 'gap', force: !!opts.seriesId,
         // The candidate must be able to fill a hole nobody else lists. `assess` over the RAW list it
@@ -790,7 +1066,7 @@ async function stepGaps(r: RepairResult, opts: RepairOpts, budget: { left: numbe
       if (out.followed) {
         busyFolders.add(s.folder);
         try {
-          const up = await updateSeries(s.id, REPAIR_GAP_CHAPTERS, { hunt: false });
+          const up = await updateSeries(s.id, REPAIR_GAP_CHAPTERS, { hunt: false, cancelled });
           const fetched = up.landed.filter((l) => gapSet.has(Math.floor(l.number)));
           out.fetched = fetched.length;
           // ⚠️ Two different numbers, and both are reported. The fetch is the ordinary sweep of the
@@ -831,6 +1107,8 @@ function blank(): RepairResult {
     ok: true, ms: 0, counted: 0, uncounted: 0,
     short: { looked: 0, replaced: 0, confirmed: 0, left: 0 },
     gaps: { series: 0, followed: 0, fetched: 0, unfillable: 0, sweep: 0 },
+    groups: { looked: 0, replaced: 0, left: 0 },
+    names: { series: 0, named: 0 },
     failures: { reset: 0 },
     solver: { reset: false, unblocked: 0, expired: 0 },
   };
@@ -841,7 +1119,9 @@ function summaryOf(r: RepairResult): string {
   return `${r.counted} counted (${r.uncounted} left), short ${r.short.replaced} replaced / ${r.short.confirmed} confirmed `
     + `/ ${r.short.left} left of ${r.short.looked}, gaps ${r.gaps.series} series / ${r.gaps.followed} followed / `
     + `${r.gaps.fetched} fetched, ${r.failures.reset} failures reset, solver ${r.solver.reset ? 'reset' : 'untouched'} `
-    + `(${r.solver.unblocked} unblocked, ${r.solver.expired} expired)`;
+    + `(${r.solver.unblocked} unblocked, ${r.solver.expired} expired), groups `
+    + (r.groups.off ? 'off' : `${r.groups.replaced} replaced / ${r.groups.left} left of ${r.groups.looked}`)
+    + ', names ' + (r.names.off ? 'off' : `${r.names.named} named in ${r.names.series} series`);
 }
 
 /** One pass. Exported for the tests; everything else goes through runRepair, which owns the flags. */
@@ -859,13 +1139,16 @@ export async function repairLibrary(log?: Log, opts: RepairOpts = {}): Promise<R
   const want = (s: RepairStep) => !opts.only?.length || opts.only.includes(s);
   const budget = { left: REPAIR_HUNT_BUDGET };
   const pending: Dated[] = [];
-  const notes: Notes = { replaced: [], confirmed: [], followed: [] };
+  const notes: Notes = { replaced: [], confirmed: [], followed: [], upgraded: [] };
   let stopped: RepairResult['stopped'];
 
+  const steps = REPAIR_STEPS.filter(want);
+  if (activeCard) activeCard.total = steps.length;
   for (const step of REPAIR_STEPS) {
-    if (runtime.stopping) { stopped = 'shutdown'; break; }
+    { const h = halted(); if (h) { stopped = h; break; } }
     if (stopped) break;
     if (!want(step)) continue;
+    if (activeCard) activeCard.step = step;
     if (step === 'solver') await stepSolver(r, log);
     else if (step === 'count') await stepCount(r, log);
     else if (step === 'failures') stopped = await stepFailures(r, opts, budget, pending, log);
@@ -879,6 +1162,13 @@ export async function repairLibrary(log?: Log, opts: RepairOpts = {}): Promise<R
       stopped = await stepShort(r, opts, reserve, notes, log);
       budget.left -= had - reserve.left;
     } else if (step === 'gaps') stopped = await stepGaps(r, opts, budget, pending, notes, log);
+    else if (step === 'groups') stopped = await stepGroups(r, opts, notes, log);
+    else if (step === 'names') stopped = await stepNames(r, log);
+    if (activeCard) {
+      activeCard.done++;
+      activeCard.fetched = r.short.replaced + r.gaps.fetched + r.groups.replaced + (r.failures.retried?.added ?? 0);
+      activeCard.failed = r.short.left + (r.failures.retried?.failed ?? 0);
+    }
   }
 
   // What landed needs rows, and the rows need their dates and provenance: persistScan is what mints them
@@ -907,6 +1197,7 @@ export async function repairLibrary(log?: Log, opts: RepairOpts = {}): Promise<R
       replaced: notes.replaced.slice(0, REPAIR_SHORT_MAX),
       confirmed: notes.confirmed.slice(0, REPAIR_SHORT_MAX),
       followed: notes.followed.slice(0, REPAIR_GAPS_MAX),
+      upgraded: notes.upgraded.slice(0, REPAIR_GROUPS_MAX),
     },
   });
   return out;
@@ -928,9 +1219,14 @@ export function runRepair(log?: Log, opts: RepairOpts = {}): Promise<RepairResul
   runtime.repairing = true;
   repairState.startedAt = Date.now();
   repairState.finishedAt = null;
+  const card = activeCard = beginRun('repair', opts.userId ?? null);
   return (async () => {
     try {
       const r = await repairLibrary(log, opts);
+      // A nightly run the switch turned away did nothing, and a card saying "Library repair: done" would
+      // claim otherwise; it goes, rather than ending.
+      if (r.skipped) dismissRun('repair');
+      else endRun(card, r.stopped === 'disk' ? 'error' : 'done', r.stopped === 'disk' ? 'The library disk is full.' : undefined);
       repairState.finishedAt = Date.now();
       repairState.lastResult = r;
       // Persisted like the cleanup's and the verify's: the Tasks panel promises to keep the last run, and a
@@ -948,11 +1244,13 @@ export function runRepair(log?: Log, opts: RepairOpts = {}): Promise<RepairResul
       repairState.finishedAt = Date.now();
       repairState.lastResult = null;
       await q('UPDATE server_settings SET repair_last_run = now(), repair_last_result = NULL WHERE id = 1').catch(() => {});
+      endRun(card, 'error', 'The repair failed. The server log has the details.');
       log?.error(e);
       throw e;
     } finally {
       repairState.running = false;
       runtime.repairing = false;
+      activeCard = null;
     }
   })();
 }

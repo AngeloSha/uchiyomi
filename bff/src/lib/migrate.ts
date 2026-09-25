@@ -1062,6 +1062,48 @@ END $$;
 -- Deliberately NOT constrained: reading_events is an append-only record of things that actually happened and
 -- feeds stats, streaks, Wrapped and the leaderboard -- cascading it would rewrite someone's history because a
 -- file moved. offline_downloads describes bytes on a user's phone, which the server cannot reconcile anyway.
+
+-- v0.46.0: what the 18+ switch hides, beyond libraries rated 18+.
+--
+-- Library ratings alone could not express "keep ecchi off the shelf": that meant moving series into an
+-- 18+ library, which is a filing decision made to get a display outcome, and it fought the scanner every
+-- time a folder was rescanned. These two lists say it directly -- genres to treat as adult, and sources
+-- to treat as adult on top of whatever their extension declares -- and they change nothing about where a
+-- series is filed or who may open it. Empty by default, so an existing install behaves exactly as before.
+ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS adult_genres  jsonb NOT NULL DEFAULT '[]'::jsonb;
+ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS adult_sources jsonb NOT NULL DEFAULT '[]'::jsonb;
+-- "Hide everything tagged Mature, except this one." Without it the genre list is all-or-nothing, and one
+-- wrongly-tagged classic is enough to make somebody turn the whole filter off.
+ALTER TABLE series_overrides ADD COLUMN IF NOT EXISTS adult_exempt boolean;
+
+-- v0.46.0: a chapter's own name, as its source gave it (lib/library.ts chapterName). Its OWN column, never
+-- lib_books.title: title is the filename's -- "One Piece v02 c012 [Digital]" on a library built by hand -- and
+-- writing names into it showed filenames as names and dropped the number from everything printing it alone.
+-- (No backticks in this string: it is a template literal.)
+ALTER TABLE lib_books ADD COLUMN IF NOT EXISTS chapter_name text;
+
+-- v0.47.0: which sources a series is preferred to come from, most preferred first (lib/sourcePrefs.ts), from
+-- #93. Server-wide, and per series, where it replaces the server's rather than merging with it. It only
+-- chooses among copies of a chapter not held yet; nothing already on disk is replaced because of it. An empty
+-- order and a NULL series order both mean "the follow order", which is how every series chose until now.
+ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS source_prefs jsonb NOT NULL DEFAULT '{"priority": []}'::jsonb;
+ALTER TABLE lib_series      ADD COLUMN IF NOT EXISTS source_prefs jsonb;
+
+-- v0.47.0: group upgrades, the nightly repair's sixth step (lib/repair.ts stepGroups, #81). OFF by default:
+-- it replaces files on disk. picked_at marks a chapter somebody chose a copy for by hand, which an upgrade
+-- never overrides; upgrade_tried_at spaces out a chapter whose upgrade failed.
+ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS group_upgrade boolean NOT NULL DEFAULT false;
+ALTER TABLE lib_books ADD COLUMN IF NOT EXISTS picked_at timestamptz;
+ALTER TABLE lib_books ADD COLUMN IF NOT EXISTS upgrade_tried_at timestamptz;
+
+-- v0.47.0: chapter names borrowed from another source (lib/borrowNames.ts, #85), the repair's seventh step. Off
+-- by default for the server; a series' own switch is NULL to follow it. name_donor remembers the source whose
+-- numbering matched, or when a search found none. chapter_name_source names the donor of a borrowed name --
+-- NULL is the chapter's own -- so a borrowed name is always replaceable by an own one and removable in bulk.
+ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS borrow_names boolean NOT NULL DEFAULT false;
+ALTER TABLE lib_series ADD COLUMN IF NOT EXISTS borrow_names boolean;
+ALTER TABLE lib_series ADD COLUMN IF NOT EXISTS name_donor jsonb;
+ALTER TABLE lib_books ADD COLUMN IF NOT EXISTS chapter_name_source text;
 `;
 
 // Serialises migrate() across processes. CREATE TABLE IF NOT EXISTS is not safe to run concurrently:

@@ -20,9 +20,12 @@ import { AddSeriesDialog, AddSeed } from '@/components/AddSeriesDialog';
 import { AdultToggle, useAdultShown } from '@/components/AdultToggle';
 import { IcChevronLeft, IcSearch, IcSparkle, IcX } from '@/components/icons';
 import type { AutoFollow } from '@/lib/types';
+import { forStrip } from '@/lib/jobs';
 
 interface Job {
   folder: string; title: string; total: number; done: number; status: string; reason?: string;
+  /** When it ended, and whether a Cancel ended it (#82): such a job is `done` but did not fetch everything. */
+  finishedAt?: number; cancelled?: boolean;
   /** The add-time auto-follow (v0.36.0) riding on the card; the only job a nothing-yet add leaves behind. */
   autoFollow?: AutoFollow;
 }
@@ -211,12 +214,15 @@ export default function DiscoverPage() {
    * same term again inside five minutes is instant, and leaving search mode stops the polling by itself.
    */
   const searchQ = useQuery({
-    queryKey: ['search-all', term],
+    // `selected` is part of the key: narrowing to a source is a different question, and must not be
+    // answered from the unfiltered search's cache.
+    queryKey: ['search-all', term, selected],
     queryFn: ({ signal, queryKey, client }) => {
       // ⚠️ Only the first request may wait the long wait. A poll that also waited six seconds would hold
       // its answer until the server's grace expired, so the wall would fill in six seconds late every time.
       const first = (client.getQueryState(queryKey)?.dataUpdateCount ?? 0) === 0;
-      return api<SearchAnswer>(`/api/sources/search-all?q=${encodeURIComponent(term)}&wait=${first ? SEARCH_FIRST_WAIT_MS : SEARCH_POLL_WAIT_MS}`, { signal });
+      const only = selected ? `&source=${encodeURIComponent(selected)}` : '';
+      return api<SearchAnswer>(`/api/sources/search-all?q=${encodeURIComponent(term)}&wait=${first ? SEARCH_FIRST_WAIT_MS : SEARCH_POLL_WAIT_MS}${only}`, { signal });
     },
     enabled: mode === 'search' && !!term,
     // A failed search is shown as one; retrying it would be another fan-out to every source.
@@ -227,11 +233,18 @@ export default function DiscoverPage() {
   });
   // The grouped hits as wall rows, under today's mapping: the first provider's ids are the card's, the badge
   // counts every provider. Derived, so a poll's answer replaces the rows without anything being cleared.
-  const searchHits = useMemo<SourceItem[]>(() => (searchQ.data?.content ?? []).map((g) => ({
-    source: g.providers[0]?.source ?? '', sourceId: g.providers[0]?.sourceId ?? g.title,
-    title: g.title, coverUrl: g.coverUrl, updatedAt: g.updatedAt,
-    inLibrary: g.inLibrary, providerCount: g.providers.length,
-  })), [searchQ.data]);
+  const searchHits = useMemo<SourceItem[]>(() => (searchQ.data?.content ?? []).flatMap((g) => {
+    // With a source chosen the server has already asked only that one, so this is belt-and-braces: keep
+    // the card only if that source is among its providers, and let that provider be the card's own, so
+    // tapping it opens the source being browsed rather than whichever the fold happened to rank first.
+    const pick = selected ? g.providers.find((p) => p.source === selected) : g.providers[0];
+    if (!pick) return [];
+    return [{
+      source: pick.source ?? '', sourceId: pick.sourceId ?? g.title,
+      title: g.title, coverUrl: g.coverUrl, updatedAt: g.updatedAt,
+      inLibrary: g.inLibrary, providerCount: g.providers.length,
+    }];
+  }), [searchQ.data, selected]);
   const groupsRef = useRef<Record<string, SearchGroup['providers']>>({});
   // What each search stored, keyed the way the wall's own fold is, so open() offers the providers of a hit
   // the same way it offers the providers of a folded card. Written from the answer, never from state.
@@ -346,7 +359,9 @@ export default function DiscoverPage() {
     // Polled hard only while something is actually downloading. It used to poll every four seconds forever.
     refetchInterval: (qy) => ((qy.state.data?.content ?? []).some((j) => j.status === 'downloading') ? 2500 : 30_000),
   });
-  const jobs = jobsData?.content ?? [];
+  // A finished job stays on the server for a day now (the download pill lists them, #82); this strip keeps
+  // showing the last few minutes of them, as it always did (lib/jobs.ts `forStrip`).
+  const jobs = forStrip(jobsData?.content ?? []);
 
   /**
    * The hero's slides: everything with wide key art first, then topped up from the rest.
@@ -449,18 +464,22 @@ export default function DiscoverPage() {
         </div>
       </header>
 
-      {mode === 'newest' && (
-        <SourcePicker
-          sources={budget} states={states} settled={settled} total={budget.length}
-          // The chip's number is the whole pool, not the budget and not the ranked list: the budget widens
-          // as sources answer empty, and a count that ticks upward on its own reads as a bug; the ranked
-          // list is capped at twelve, and "12 sources" on a 14-source install is simply false.
-          count={pool.length}
-          selected={selected} onSelect={setSelected}
-          mode={listMode}
-          onMode={(m) => { setListMode(m); setSelected(null); setPage(1); }}
-        />
-      )}
+      {/*
+        In both modes, not just while browsing. The picker is the only place the chosen source is visible or
+        clearable, so hiding it during a search -- while the search itself is narrowed to that source --
+        would leave the results silently filtered with nothing on screen to say why. Choosing a list tab is
+        a browse action, so from a search it returns to browsing that list.
+      */}
+      <SourcePicker
+        sources={budget} states={states} settled={settled} total={budget.length}
+        // The chip's number is the whole pool, not the budget and not the ranked list: the budget widens
+        // as sources answer empty, and a count that ticks upward on its own reads as a bug; the ranked
+        // list is capped at twelve, and "12 sources" on a 14-source install is simply false.
+        count={pool.length}
+        selected={selected} onSelect={setSelected}
+        mode={listMode}
+        onMode={(m) => { setListMode(m); setSelected(null); setPage(1); if (mode === 'search') backToNewest(); }}
+      />
 
       {/* One mounted child per budgeted source. Renders nothing; owns one request.
           The key carries the listing mode, so switching Newest/Popular REMOUNTS these and they fetch the
@@ -487,6 +506,9 @@ export default function DiscoverPage() {
                 // A download killed by a rate-limit used to vanish from this strip entirely, taking its
                 // reason with it: the row was filtered to `downloading` and `reason` was never declared.
                 <p className="mt-1 text-[11px] text-amber-300">{j.reason || tr('Fetch stopped. Try another source or wait.')}</p>
+              ) : j.cancelled ? (
+                // Stopped by its Cancel (#82): `done`, but "Fetched" in emerald would claim the whole run landed.
+                <p className="mt-1 text-[11px] text-fog-400">{j.reason || tr('Cancelled; what landed is kept.')}</p>
               ) : j.total === 0 && j.autoFollow ? (
                 // A "Nothing yet" add that asked for the other sources leaves a card with no chapters on it,
                 // only the judgement: it is not a fetch and must not read as one. "Fetched" in emerald sat

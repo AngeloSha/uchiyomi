@@ -2,7 +2,7 @@
 // "Ch. 1" misreads the library.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { isVolumeName, chapterLabel, bytes, progressOf } from '../lib/format';
+import { isVolumeName, chapterLabel, chapterName, bytes, progressOf } from '../lib/format';
 
 test('recognises volume-style names', () => {
   for (const n of ['Tome 01', 'tome12', 'Volume 12', 'Vol. 3', 'vol.3', 'T05', 'v01', 'Berserk T41', 'Naruto Tome 07 (FR)']) {
@@ -32,6 +32,16 @@ test('chapterLabel picks the right noun', () => {
   assert.equal(chapterLabel({ metadata: { number: '4.5' }, name: 'Chapter 4.5' }), 'Ch. 4.5');
   assert.equal(chapterLabel({ name: 'Extras' }), 'Extras', 'no number -> fall back to the name');
   assert.equal(chapterLabel({}), '');
+});
+
+test("chapterName is the server's name for the chapter, and never the file's", () => {
+  // The server strips the number off the front and keeps only a real name (bff lib/library.ts chapterName, which
+  // has its own tests). Here: nothing else is ever shown. Reintroduce the fallback to `name`/`metadata.title` and
+  // the second assertion reads the filename -- which is what #84 as first written did on a hand-built library.
+  assert.equal(chapterName({ chapterName: 'Romance Dawn' }), 'Romance Dawn');
+  assert.equal(chapterName({ chapterName: null, name: 'One Piece v02 c012 [Digital]', metadata: { title: 'One Piece v02 c012 [Digital]', number: '12' } } as any), '');
+  assert.equal(chapterName({ chapterName: '  ' }), '');
+  assert.equal(chapterName({}), '');
 });
 
 test('bytes formats human sizes', () => {

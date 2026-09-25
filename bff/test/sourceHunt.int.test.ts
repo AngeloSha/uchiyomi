@@ -85,7 +85,7 @@ after(async () => {
 
 test('the adult rule filters before search, then an adult series may find and follow that source', { skip }, async () => {
   await seed(MAIN);
-  const cleanRule = sweepAllowedFor(await seriesIsAdult(MAIN));
+  const cleanRule = await sweepAllowedFor(await seriesIsAdult(MAIN));
   assert.equal(cleanRule(ADULT), false);
   const firstBudget = { left: 5 };
   const none = await huntSource(MAIN, 11, { allowed: cleanRule, budget: firstBudget });
@@ -94,7 +94,7 @@ test('the adult rule filters before search, then an adult series may find and fo
 
   await q('UPDATE lib_series SET age_rating = 18, source_hunt_at = NULL WHERE id = $1', [MAIN]);
   searches.clear();
-  const adultRule = sweepAllowedFor(await seriesIsAdult(MAIN));
+  const adultRule = await sweepAllowedFor(await seriesIsAdult(MAIN));
   assert.equal(adultRule(ADULT), true);
   const found = await huntSource(MAIN, 11, { allowed: adultRule, budget: { left: 5 } });
   assert.equal(found.why, 'followed');
@@ -288,4 +288,22 @@ test('reason reaches the audit row, and followHunted carries the caller\'s detai
       (e: any) => e?.why === 'no_candidate',
     );
   } finally { hitOn = false; }
+});
+
+test('a source the admin named adult is kept off a clean series, like one whose extension says so', { skip }, async () => {
+  // Admin -> Settings -> 18+ filter. The hunt read only the extension's own flag, so a source named adult could
+  // still be followed onto a clean series by the failure hunt or the nightly repair. Reintroduce by dropping the
+  // named set from sweepAllowedFor: the first assertion fails.
+  const { invalidateAdultFilter } = await import('../src/lib/visibility');
+  await q(`UPDATE server_settings SET adult_sources = $1::jsonb WHERE id = 1`, [JSON.stringify([CLEAN.toUpperCase()])]);
+  invalidateAdultFilter();
+  try {
+    const clean = await sweepAllowedFor(false);
+    assert.equal(clean(CLEAN), false, 'a named source was allowed on a clean series');
+    assert.equal(clean(OWN), true, 'the rule took an unnamed source too');
+    assert.equal((await sweepAllowedFor(true))(CLEAN), true, 'an adult series may still reach it');
+  } finally {
+    await q(`UPDATE server_settings SET adult_sources = '[]'::jsonb WHERE id = 1`);
+    invalidateAdultFilter();
+  }
 });

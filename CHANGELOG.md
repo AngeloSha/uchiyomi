@@ -1,5 +1,176 @@
 # Changelog
 
+## v0.47.0 — 2026-09-25
+
+**The four pull requests that could not be merged, rebuilt — and the two issues behind them answered.**
+[@Squeaks72](https://github.com/Squeaks72) opened twelve pull requests in one day. Eight went into
+[v0.46.0](https://github.com/AngeloSha/uchiyomi/releases/tag/v0.46.0); these four could not go in as they were, because each had a problem that needed the feature
+restructured rather than patched — one of them a security hole. Every one is here, built the way it had to be,
+and credited in its commit. Nothing below is on by default except the preview button and the compact list's
+switch: the three that write or replace anything are off until you ask for them.
+
+### Read a chapter before you add the series
+
+Under **Add to library** there is now **Read a chapter first** ([#91](https://github.com/AngeloSha/uchiyomi/pull/91)):
+it opens the title straight from the source, you pick a chapter, scroll it, step to the next, and add it when
+you have decided. Nothing is written — no series, no files, no reading progress.
+
+The original passed the chapter id from the browser to the source, and for a site added by URL that means a
+request from the bundled Cloudflare solver's browser, which sits on your Docker network beside the database —
+the same shape of hole [v0.45.1](https://github.com/AngeloSha/uchiyomi/releases/tag/v0.45.1) closed in the cover proxy. Here a chapter is named by its **number**
+in a listing the server fetched itself, and a page by its **index**: no address from the browser ever reaches
+a source. The server fetches each page through the same guard your covers go through and serves it without
+storing it. Not offered to an account with an age limit — a preview reads a site before any library's rating
+applies.
+
+### Which source a new chapter comes from
+
+**Admin → Settings → Source order** ([#93](https://github.com/AngeloSha/uchiyomi/pull/93), first half) ranks
+your sources, and a series can have its own order on its *Sources & translations* sheet. When two followed
+sources both have a chapter and your scanlation-group preferences do not decide between them, the higher-ranked
+source wins — the choice that used to go to whichever source the series was added from. It only decides where
+chapters you do not have yet come from; nothing already downloaded is replaced because of it.
+
+An order keeps every source you put in it, including one that is not loaded at the moment: the original built
+its list from the sources registered right now, and the extension engine restarting is enough to make that
+list empty, so one press of an arrow saved an order with every extension silently gone from it.
+
+### Your preferred group's version, once it exists
+
+This is what issue [#81](https://github.com/AngeloSha/uchiyomi/issues/81) was really asking for. A new chapter
+waits for a group you rank only as long as its patience; after that it is taken from whoever has it, and the
+preferred group's copy turning up a day later was never looked at again. **Admin → Settings → Scanlators →
+Upgrade chapters to a preferred group** (off by default) gives the nightly repair a step that takes that second
+look, and swaps the chapter for the better group's copy.
+
+It replaces files on disk, so it is careful, and the rules are the reason the original half of #93 was not
+merged: only files Uchiyomi downloaded itself, **never** a copy with fewer pages than the one you have (a
+one-page "chapter removed" notice from the right group does not win), never one that arrives incomplete, never
+a chapter somebody picked a version for by hand, at most ten a night, and a failed swap waits a week. Reading
+progress and bookmarks are kept — the file is written over the same row.
+
+### Chapter names from a source that has them
+
+Some sources publish no chapter titles at all; every row reads *Ch. 12*, while another source has had *Romance
+Dawn* all along. **Borrow chapter names from other sources** ([#85](https://github.com/AngeloSha/uchiyomi/pull/85),
+off by default, per server and per series) lets the nightly repair take the names from that other source.
+
+The hazard is numbering, not names: past the point where two sources number a work differently every borrowed
+name would be wrong, and a plausible wrong title is exactly what you pick the next chapter by. So a donor has
+to pass the same check a source must pass before Uchiyomi will *follow* it, names are matched by exact number,
+and only a source in the same language is asked. The original searched through the machinery that reports
+slow sources to the health page, so a lookup only for names could put your main source into a cooldown and
+stop real downloads; nothing here reports. A borrowed name never touches the file, the chapter's own source
+naming it later always wins, and switching it off takes back exactly what was borrowed.
+
+### What the server is downloading, and stopping it
+
+Issue [#82](https://github.com/AngeloSha/uchiyomi/issues/82) asked where to see what is downloading. The pill in
+the corner only knew the jobs you started from a button; everything the server did by itself was invisible and
+could not be stopped. Now every running download has a **Cancel** — it stops after the chapter in flight, so a
+file is never left half-written, and what already arrived stays — and an admin also sees the server's own runs:
+*Checking for new chapters*, *Library repair* and a bulk *Fetch newest*, each with how far it has got, which
+series it is on, and a Cancel of its own. Downloads that finished in the last day are listed under the rest;
+Discover's strip still shows only the last few minutes.
+
+### A leaner chapter list, if you want one
+
+**Profile → Settings → Compact chapter list** ([#88](https://github.com/AngeloSha/uchiyomi/pull/88)) drops the
+thumbnail and the status dot and shows the row's buttons on hover, on a computer. It is a per-device choice:
+the original made it everyone's default, and the thumbnail is each chapter's own first page — it carries the
+read dimming, the progress bar and a deleted chapter's dashed box.
+
+### Upgrading
+
+The database gains columns and nothing is rewritten; the upgrade runs by itself on start. An older version
+still starts on an upgraded database, so rolling back stays possible.
+
+## v0.46.0 — 2026-09-25
+
+**Eight pull requests from [@Squeaks72](https://github.com/Squeaks72) -- seven merged with fixes on top, one as it
+was -- and a memory cap on the extension engine.** Most of this release is theirs: right-to-left paging, one key
+per page, settings pinned to a source, type-to-search, chapter names, a chapter list that pages past chapter 1000,
+a Discover search that keeps its source, and an 18+ filter an admin can widen. Every one of them was reviewed line by line, and the fixes are separate
+commits on their branches, so the history says who did what.
+
+### The extension engine can no longer eat the machine
+
+The extension engine is [Suwayomi-Server](https://github.com/Suwayomi/Suwayomi-Server), run headless: it is what
+runs Mihon and Tachiyomi extensions, and you never open it. Discussion
+[#72](https://github.com/AngeloSha/uchiyomi/discussions/72) came from someone who had left Suwayomi and found it
+running underneath, "eating my ram and cpu". It ran with no memory limit at all, and a JVM without one sizes its
+heap from the host: a quarter of its memory, 15.7 GiB on a 62 GB server. Every compose file now gives it the
+desktop app's own numbers for the same engine, a 768 MB heap and the serial collector under a 1.5 GB ceiling.
+`SUWAYOMI_MEM_LIMIT` and `SUWAYOMI_JAVA_OPTS` raise both for a very long extension list.
+
+⚠️ **Updating the image does not update your compose file.** An install set up before v0.46.0 gets the cap by
+downloading [`deploy/docker-compose.yml`](deploy/docker-compose.yml) again, or by adding two lines under
+`uchiyomi-suwayomi`:
+
+```yaml
+    mem_limit: 1536m
+    environment:
+      JAVA_TOOL_OPTIONS: "-Xmx768m -XX:+UseSerialGC"
+```
+
+The README and the install files now say what the engine is, that it ships on, and that MangaDex and sites added
+by URL work without it. The split layout's Cloudflare solver also gets the `/dev/shm` headroom, memory cap and
+healthcheck the other layouts already had.
+
+### Reading
+
+- **Paged mode can read right to left** ([#90](https://github.com/AngeloSha/uchiyomi/pull/90)): *Reading
+  direction* in the reader's settings, for one series or pinned to a source, and as your default under
+  Profile → Settings. *Series default* follows a series that says it reads right to left, which today means a
+  Komga library that records it; Uchiyomi's own library does not record a direction yet, so nothing turns
+  around by itself on update. Under the Arabic interface the paged track used to inherit right-to-left, and
+  the page counter stuck on page 1; it no longer does. Fixed on top: resume and `?page=` links
+  on a right-to-left series opened page 1, the bottom bar ran opposite to its pages under Arabic, text inside the
+  track took the track's direction, and a double-tap zoom in paged mode jumped to mid-chapter.
+- **One key is one page** in paged mode ([#92](https://github.com/AngeloSha/uchiyomi/pull/92)). Fixed on top:
+  quick presses could land two pages on, Alt+← turned a page instead of going Back, Ctrl+F opened Find *and*
+  toggled fullscreen (already on main), keys acted under an open sheet, Escape left the reader instead of closing
+  the sheet, and Space on a focused button turned the page.
+- **Reader settings can be pinned to a source** ([#95](https://github.com/AngeloSha/uchiyomi/pull/95)): a webtoon
+  site continuous, a manga site paged right to left. Fixed on top: the reader's look used to be saved as the
+  global default whenever you changed it with a title open, the pin never applied to downloaded chapters, and a
+  raw 19-digit extension id could appear instead of a name. ⚠️ **Behaviour change:** changing mode, theme, spread
+  or direction inside the reader now applies to that series only; the global default lives under
+  Profile → Settings.
+- In paged mode with *Collapse*, a repeated page showed as a blank slide with a faint number. It is shown like any
+  other page there now. The reader settings sheet was in English in every language; it is translated.
+
+### The library
+
+- **Chapter names** ([#84](https://github.com/AngeloSha/uchiyomi/pull/84)): "Ch. 12 · The Return" on the series
+  page, and Continue says which chapter it opens. Names come from the source, in their own column: "Vol.3
+  Chapter 12: The Return" is named "The Return", and "Chapter 12" or "第12話" is the number again, so no name.
+  A library built by hand never shows a filename as a name. Chapters already downloaded are named the next time
+  their series is checked.
+- **Chapters past 1000** ([#89](https://github.com/AngeloSha/uchiyomi/pull/89)): Continue opened chapter 1 for
+  anyone reading past chapter 1000, and the reader's chapter list stopped there. Long lists page 100 at a time,
+  named by the chapter numbers each page shows, and opening on the page that holds Continue.
+- **Discover keeps your chosen source through a search** ([#87](https://github.com/AngeloSha/uchiyomi/pull/87)).
+- **Type anywhere to search** ([#94](https://github.com/AngeloSha/uchiyomi/pull/94)): start typing a title on any
+  page. Under Japanese or Chinese it opens empty so the input method composes properly, and Profile → Settings →
+  *Type anywhere to search* switches it and "/" off on that device.
+
+### 18+
+
+**An admin can mark genres and sources as 18+** ([#86](https://github.com/AngeloSha/uchiyomi/pull/86)), Admin →
+Settings → 18+ filter, with a per-series *Always show*. They widen what "Show 18+" hides everywhere, including
+OPDS, the Komga-compatible API, notification digests and the automatic source hunt. They never widen what anyone
+may open: the age cap is still the only permission. Fixed on top: the genre list is read in SQL rather than
+pasted into it, "Find missing chapters" and Fetch no longer answer 404 for a series the switch hides (already true
+of 18+ libraries on main), and source ids keep their `_`.
+
+### Housekeeping
+
+- Desktop builds on a pull request are signed the way pushes to main are, so macOS CI stopped failing on every
+  pull request. Desktop type-checks under TypeScript 7.
+- Node majors and `@types/node` majors are taken deliberately, onto the next LTS, not from weekly Dependabot pull
+  requests; `bff` is back on Node 24's types.
+
 ## v0.45.1 — 2026-09-25
 
 **A security fix. If anyone other than you has an account on your server, update.**
