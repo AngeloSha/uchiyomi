@@ -2190,8 +2190,14 @@ paths:
         `cap` (the series already follows two sources) or `unavailable` (the primary itself, disabled, in a
         cooldown, not loaded, or outside the caller's age cap). A nothing-yet add with candidates gets a
         card with `total: 0` and `status: done` purely to carry this. Results survive the dialog closing:
-        the card lives a few minutes after the judgement ends, and cannot be dismissed (DELETE answers 409
-        `running`) until `autoFollow.done`.
+        the card lives a day after the judgement ends, and cannot be dismissed (DELETE answers 409
+        `running`) until `autoFollow.done`. Since v0.47.0 (#82) a finished card stays listed for a day
+        rather than five minutes, every card carries `startedAt` and `mine` (whether this account started
+        it, which is who may cancel it besides an admin), a card whose Cancel was pressed carries
+        `cancelRequested` until the chapter in flight is done and then ends `done` with `cancelled: true`
+        and a `reason` saying how far it got; and `runs` lists the server's own runs -- the chapter sweep,
+        the library repair, a bulk "Fetch newest" -- as one card each, to an admin, and a bulk run to the
+        account that started it as well.
       security:
         - bearer: []
       responses:
@@ -2231,10 +2237,134 @@ paths:
                           type: integer
                           minimum: 0
                           description: Chapters in this job saved with repair placeholders.
+                        startedAt: { type: integer }
+                        mine:
+                          type: boolean
+                          description: This account started the job, so it may cancel it (an admin may cancel any).
+                        cancelRequested:
+                          type: boolean
+                          description: Cancel was pressed; the job stops after the chapter in flight.
+                        cancelled:
+                          type: boolean
+                          description: The job stopped because of a Cancel. It ends `done`, with `reason` saying how far it got.
+                  runs:
+                    type: array
+                    description: >-
+                      The server's own runs, one card each: `sweep` (checking every series for new chapters),
+                      `repair` (the library repair; `done`/`total` count its steps and `step` names the one it
+                      is on) and `newest` (a bulk "Fetch newest"). An admin sees every run, the account that
+                      started a bulk run sees that one; nobody else sees any. A finished run stays listed for a
+                      day. `current` is the series it is inside, left out when this request hides that series.
+                    items:
+                      type: object
+                      additionalProperties: false
+                      required: [kind, startedAt, status, done, total, fetched, failed, mine]
+                      properties:
+                        kind: { type: string, enum: [sweep, repair, newest] }
+                        startedAt: { type: integer }
+                        finishedAt: { type: integer }
+                        status: { type: string, enum: [running, done, cancelled, error] }
+                        done: { type: integer, minimum: 0 }
+                        total: { type: integer, minimum: 0 }
+                        fetched: { type: integer, minimum: 0, description: Chapters it saved. }
+                        failed: { type: integer, minimum: 0, description: Chapters that would not save. }
+                        current:
+                          type: object
+                          properties:
+                            id: { type: string }
+                            title: { type: string }
+                        step: { type: string }
+                        cancelRequested: { type: boolean }
+                        reason: { type: string }
+                        mine: { type: boolean }
         "401":
           description: Not authenticated
         "403":
           description: "Forbidden: token scope, account permission or age limit"
+  /api/sources/jobs/{folder}/cancel:
+    post:
+      tags:
+        - sources
+      summary: Stop a running download after the chapter in flight.
+      operationId: postApiSourcesJobsFolderCancel
+      description: >-
+        Since v0.47.0 (#82). The account that started the job may, and any admin; anyone else gets 403.
+        The job checks between chapters, so a file is never left half-written: what already landed stays,
+        and the card ends `done` with `cancelled: true` and a `reason` saying how far it got. A re-fetch
+        that set old copies aside puts back every one it did not reach. Audited as `download.cancel`.
+      parameters:
+        - name: folder
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission, or a job this account did not start"
+        "404":
+          description: No such job
+        "409":
+          description: "Conflict: `not_running` -- the job has already stopped"
+  /api/sources/runs/{kind}/cancel:
+    post:
+      tags:
+        - sources
+      summary: Stop one of the server's own runs (sweep, repair, bulk Fetch newest) after the chapter in flight.
+      operationId: postApiSourcesRunsKindCancel
+      description: >-
+        Since v0.47.0 (#82). An admin, or the account that started a bulk "Fetch newest". Checked between
+        chapters and between series, like a shutdown: what already landed stays, the card ends `cancelled`,
+        and the Tasks panel's result for that run says so. Audited as `download.cancel`.
+      parameters:
+        - name: kind
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [sweep, repair, newest]
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission, or a run this account may not stop"
+        "404":
+          description: No run of that kind is running
+  /api/sources/runs/{kind}:
+    delete:
+      tags:
+        - sources
+      summary: Dismiss a finished run's card; 409 while it is still running.
+      operationId: deleteApiSourcesRunsKind
+      parameters:
+        - name: kind
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [sweep, repair, newest]
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission, or a run this account may not see"
+        "404":
+          description: No card of that kind
+        "409":
+          description: "Conflict: `running` -- cancel it instead"
   /api/sources/jobs/{folder}:
     delete:
       tags:

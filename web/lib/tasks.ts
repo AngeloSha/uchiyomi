@@ -31,6 +31,8 @@ export function taskResult(r: any): string {
     const bits: string[] = [];
     if (r.stopped === 'shutdown') bits.push('stopped for a restart');
     if (r.stopped === 'disk') bits.push('stopped: the download disk is at its floor');
+    // Cancel on the download pill (#82): the counts after it are as far as it got.
+    if (r.stopped === 'cancelled') bits.push('cancelled');
     if (ran('count')) {
       // `uncounted` is the backlog: 30,000 chapter files have never been opened, so the first weeks of
       // nightly runs are a drain and "2000 stamped" alone looks like the job has finished.
@@ -113,7 +115,8 @@ export function taskResult(r: any): string {
     return ` \u00b7 ${bits.join(', ')}`;
   }
   if (typeof r.added === 'number') {
-    const base = ` \u00b7 +${r.added} chapters`;
+    // A sweep an admin cancelled from the download pill (#82) is not a quiet night either.
+    const base = ` \u00b7 +${r.added} chapters${r.stopped === 'cancelled' ? ' \u00b7 cancelled' : ''}`;
     if (r.healthy === false) {
       const bits: string[] = [];
       if (r.failed) bits.push(`${r.failed} series did not answer`);

@@ -55,6 +55,7 @@ import { resetSolverSessions, solverPing } from './sources/flaresolverr';
 import { blockedNow, clearBlock, isDisabled } from './sourceHealth';
 import { copyToChapter, type ListingCopy } from './seriesListing';
 import { busyFolders } from './bulkNewest';
+import { beginRun, dismissRun, endRun, stopRequested, type RunCard } from './downloadJobs';
 import { updateSeries, CHAPTER_RETRY_CAP, type Landed } from './updater';
 import { huntCandidates, huntSource, followHunted, seriesIsAdult, sweepAllowedFor } from './sourceHunt';
 import { assess, gapsOf } from './fill';
@@ -205,8 +206,8 @@ export interface RepairResult {
   };
   /** The nightly switch is off and nobody asked for this run. */
   skipped?: 'disabled';
-  /** The run ended early: the server is going down, or the download disk is at its floor. */
-  stopped?: 'shutdown' | 'disk';
+  /** The run ended early: the server is going down, the download disk is at its floor, or an admin pressed Cancel. */
+  stopped?: 'shutdown' | 'disk' | 'cancelled';
 }
 
 /**
@@ -219,6 +220,17 @@ export const repairState: {
   finishedAt: number | null;
   lastResult: RepairResult | null;
 } = { running: false, startedAt: null, finishedAt: null, lastResult: null };
+
+/**
+ * The running repair's card on the download pill (lib/downloadJobs.ts, #82), set by runRepair. Its Cancel is
+ * obeyed everywhere a shutdown is: between series, between chapters, between steps -- never mid-write.
+ */
+let activeCard: RunCard | null = null;
+/** Why the run must stop now, if it must: the server going down, or someone pressing Cancel. */
+const halted = (): 'shutdown' | 'cancelled' | null =>
+  runtime.stopping ? 'shutdown' : stopRequested(activeCard) ? 'cancelled' : null;
+/** For updateSeries: the chapter loop's own between-chapters check. */
+const cancelled = () => stopRequested(activeCard);
 
 type Log = { info: (m: string) => void; warn: (m: string) => void; error: (m: unknown) => void };
 
@@ -316,7 +328,7 @@ async function stepCount(r: RepairResult, log?: Log): Promise<void> {
       ORDER BY mtime DESC LIMIT $1`, [REPAIR_COUNT_MAX],
   );
   await mapLimit(rows, COUNT_CONCURRENCY, async (b) => {
-    if (runtime.stopping) return;
+    if (halted()) return;
     // A path that escapes its root is not a chapter to count; it is something for the health page. Left
     // unstamped as well as uncounted, exactly as the verify task leaves it out of `checked`.
     const abs = containedPath(b.root, b.file);
@@ -380,13 +392,13 @@ async function stepFailures(r: RepairResult, opts: RepairOpts, budget: { left: n
   let series = 0, added = 0, failed = 0;
   let stopped: RepairResult['stopped'];
   for (const id of wanted) {
-    if (runtime.stopping) { stopped = 'shutdown'; break; }
+    { const h = halted(); if (h) { stopped = h; break; } }
     const folder = folders.get(id);
     if (!folder || busyFolders.has(folder)) continue;
     series++;
     busyFolders.add(folder);
     try {
-      const up = await updateSeries(id, 10, { hunt: budget });
+      const up = await updateSeries(id, 10, { hunt: budget, cancelled });
       added += up.added;
       failed += up.failed;
       if (up.added && up.folder && up.chapters?.length) pending.push({ folder: up.folder, chapters: up.chapters, landed: up.landed });
@@ -470,7 +482,7 @@ async function stepShort(r: RepairResult, opts: RepairOpts, budget: { left: numb
 
   let stopped: RepairResult['stopped'];
   series: for (const [seriesId, rows] of bySeries) {
-    if (runtime.stopping) { stopped = 'shutdown'; break; }
+    { const h = halted(); if (h) { stopped = h; break; } }
     const folder = rows[0].folder;
     // Somebody else is already downloading into this folder (a series-page fetch, a Fetch newest run).
     // Two writers on one path is a lost file and a rate-limit strike each; this one simply waits a night.
@@ -493,7 +505,7 @@ async function stepShort(r: RepairResult, opts: RepairOpts, budget: { left: numb
       await withTimeout(updateSeries(seriesId, 0), LISTING_REFRESH_MS).catch(() => {});
 
       for (const book of rows) {
-        if (runtime.stopping) { stopped = 'shutdown'; break series; }
+        { const h = halted(); if (h) { stopped = h; break series; } }
         r.short.looked++;
         const abs = join(book.root, book.file);
         const listing = await one<{ title: string | null; copies: ListingCopy[] }>(
@@ -719,7 +731,7 @@ async function stepGaps(r: RepairResult, opts: RepairOpts, budget: { left: numbe
 
   let stopped: RepairResult['stopped'];
   for (const s of ranked.slice(0, REPAIR_GAPS_MAX)) {
-    if (runtime.stopping) { stopped = 'shutdown'; break; }
+    { const h = halted(); if (h) { stopped = h; break; } }
     if (busyFolders.has(s.folder)) continue;
 
     const gapSet = new Set(s.gapNums);
@@ -790,7 +802,7 @@ async function stepGaps(r: RepairResult, opts: RepairOpts, budget: { left: numbe
       if (out.followed) {
         busyFolders.add(s.folder);
         try {
-          const up = await updateSeries(s.id, REPAIR_GAP_CHAPTERS, { hunt: false });
+          const up = await updateSeries(s.id, REPAIR_GAP_CHAPTERS, { hunt: false, cancelled });
           const fetched = up.landed.filter((l) => gapSet.has(Math.floor(l.number)));
           out.fetched = fetched.length;
           // ⚠️ Two different numbers, and both are reported. The fetch is the ordinary sweep of the
@@ -862,10 +874,13 @@ export async function repairLibrary(log?: Log, opts: RepairOpts = {}): Promise<R
   const notes: Notes = { replaced: [], confirmed: [], followed: [] };
   let stopped: RepairResult['stopped'];
 
+  const steps = REPAIR_STEPS.filter(want);
+  if (activeCard) activeCard.total = steps.length;
   for (const step of REPAIR_STEPS) {
-    if (runtime.stopping) { stopped = 'shutdown'; break; }
+    { const h = halted(); if (h) { stopped = h; break; } }
     if (stopped) break;
     if (!want(step)) continue;
+    if (activeCard) activeCard.step = step;
     if (step === 'solver') await stepSolver(r, log);
     else if (step === 'count') await stepCount(r, log);
     else if (step === 'failures') stopped = await stepFailures(r, opts, budget, pending, log);
@@ -879,6 +894,11 @@ export async function repairLibrary(log?: Log, opts: RepairOpts = {}): Promise<R
       stopped = await stepShort(r, opts, reserve, notes, log);
       budget.left -= had - reserve.left;
     } else if (step === 'gaps') stopped = await stepGaps(r, opts, budget, pending, notes, log);
+    if (activeCard) {
+      activeCard.done++;
+      activeCard.fetched = r.short.replaced + r.gaps.fetched + (r.failures.retried?.added ?? 0);
+      activeCard.failed = r.short.left + (r.failures.retried?.failed ?? 0);
+    }
   }
 
   // What landed needs rows, and the rows need their dates and provenance: persistScan is what mints them
@@ -928,9 +948,14 @@ export function runRepair(log?: Log, opts: RepairOpts = {}): Promise<RepairResul
   runtime.repairing = true;
   repairState.startedAt = Date.now();
   repairState.finishedAt = null;
+  const card = activeCard = beginRun('repair', opts.userId ?? null);
   return (async () => {
     try {
       const r = await repairLibrary(log, opts);
+      // A nightly run the switch turned away did nothing, and a card saying "Library repair: done" would
+      // claim otherwise; it goes, rather than ending.
+      if (r.skipped) dismissRun('repair');
+      else endRun(card, r.stopped === 'disk' ? 'error' : 'done', r.stopped === 'disk' ? 'The library disk is full.' : undefined);
       repairState.finishedAt = Date.now();
       repairState.lastResult = r;
       // Persisted like the cleanup's and the verify's: the Tasks panel promises to keep the last run, and a
@@ -948,11 +973,13 @@ export function runRepair(log?: Log, opts: RepairOpts = {}): Promise<RepairResul
       repairState.finishedAt = Date.now();
       repairState.lastResult = null;
       await q('UPDATE server_settings SET repair_last_run = now(), repair_last_result = NULL WHERE id = 1').catch(() => {});
+      endRun(card, 'error', 'The repair failed. The server log has the details.');
       log?.error(e);
       throw e;
     } finally {
       repairState.running = false;
       runtime.repairing = false;
+      activeCard = null;
     }
   })();
 }

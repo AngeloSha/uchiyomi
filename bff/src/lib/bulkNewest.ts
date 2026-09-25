@@ -28,6 +28,7 @@ import { updateSeries, type Landed } from './updater';
 import { persistScan, setBookDates, setBookMeta } from './library';
 import { runtime } from './runtime';
 import type { SourceChapter } from './sources';
+import { beginRun, endRun, stopRequested, type RunCard } from './downloadJobs';
 
 export type NewestOutcome = 'downloaded' | 'up_to_date' | 'skipped' | 'failed';
 
@@ -119,11 +120,15 @@ export function startBulkNewest(input: BulkNewestInput): { total: number } | fal
   state.startedAt = new Date().toISOString();
   state.results = [];
   startedBy = input.userId;
-  void run(input).catch((e) => {
+  // The run's card on the download pill (lib/downloadJobs.ts, #82), with a Cancel for an admin: "select all"
+  // fans this out over hundreds of series, a second and a half apart.
+  const card = beginRun('newest', input.userId, input.ids.length);
+  void run(input, card).catch((e) => {
     // The loop below settles every series itself; only something outside it (a state write) can reach
     // here, and the run must still end, or every later click is a 409 until a restart.
     console.warn(`[bulk/newest] run failed: ${(e as Error)?.message || e}`);
-  }).finally(() => { state.running = false; });
+    endRun(card, 'error', 'The run failed. The server log has the details.');
+  }).finally(() => { state.running = false; if (card.status === 'running') endRun(card, 'done'); });
   return { total: input.ids.length };
 }
 
@@ -160,15 +165,24 @@ function explain(r: Awaited<ReturnType<typeof updateSeries>>): { outcome: Newest
   }
 }
 
-async function run(input: BulkNewestInput): Promise<void> {
+async function run(input: BulkNewestInput, card?: RunCard): Promise<void> {
   const pace = input.paceMs ?? PACE_MS;
   // Collected rather than scanned per series: persistScan walks the whole library, and "select all" fans
   // this out over hundreds of series. One scan at the end, then the stamps against the rows it minted.
   const dated: { folder: string; chapters: SourceChapter[]; landed: Landed[] }[] = [];
-  const settle = (r: NewestResult) => { state.results.push(r); state.done++; };
+  const settle = (r: NewestResult) => {
+    state.results.push(r);
+    state.done++;
+    if (card) {
+      card.done = state.done;
+      if (r.outcome === 'downloaded') card.fetched++;
+      if (r.outcome === 'failed') card.failed++;
+    }
+  };
 
   for (const id of input.ids) {
     if (runtime.stopping) { settle({ id, title: '', outcome: 'skipped', reason: 'The server is shutting down.' }); continue; }
+    if (stopRequested(card)) { settle({ id, title: '', outcome: 'skipped', reason: 'Cancelled.' }); continue; }
     if (!input.live.has(id)) { settle({ id, title: '', outcome: 'skipped', reason: 'Not in your library.' }); continue; }
     // Folder and title read here rather than trusted from the caller: the busy check is keyed by folder,
     // and a series hidden between the request and its turn is `gone` below, not a stale title.
@@ -179,8 +193,9 @@ async function run(input: BulkNewestInput): Promise<void> {
     // A throw counts as asked: the check may have died anywhere, including mid-listing.
     let asked = true;
     busyFolders.add(row.folder);
+    if (card) card.current = { id, title: row.title };
     try {
-      const r = await updateSeries(id, 1, { newestOnly: true, sourceAllowed: input.sourceAllowed });
+      const r = await updateSeries(id, 1, { newestOnly: true, sourceAllowed: input.sourceAllowed, ...(card ? { cancelled: () => stopRequested(card) } : {}) });
       // Only a run that actually asked a source for a listing pays the pause below. The earlier rule
       // (`outcome !== 'gone' && !== 'unrouted'`) counted a cooldown as asked, so 500 series on one
       // cooled-down source slept 12.5 minutes to say "in a cooldown" 500 times; updateSeries now says
@@ -195,7 +210,10 @@ async function run(input: BulkNewestInput): Promise<void> {
         // A file that was on disk with no row behind it gets its row from the scan below, same as a
         // download would; the date stamp is what makes it sort with its neighbours.
         if (r.newest?.state === 'on_disk' && r.folder && r.chapters?.length) dated.push({ folder: r.folder, chapters: r.chapters, landed: [] });
-        settle({ id, title: r.title || row.title, ...explain(r) });
+        // Queued with nothing added and nothing failed is updateSeries's between-chapters stop: after a
+        // Cancel that is the cancel, not "could not be saved" and a trip to the Health page.
+        const stoppedHere = stopRequested(card) && !r.failed && r.newest?.state === 'queued';
+        settle({ id, title: r.title || row.title, ...(stoppedHere ? { outcome: 'skipped' as const, reason: 'Cancelled.' } : explain(r)) });
       }
     } catch (e) {
       // updateSeries throwing outright (the database going away mid-run) is this series' failure, and the

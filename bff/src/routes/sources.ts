@@ -60,6 +60,7 @@ import { logAudit } from '../lib/audit';
 import { autoFollow, refusals, MAX_AUTO_CANDIDATES, type FollowCandidate, type FollowResult } from '../lib/autoFollow';
 import { env } from '../env';
 import { runtime } from '../lib/runtime';
+import { dismissRun, listRuns, requestStop } from '../lib/downloadJobs';
 // The "already in library" annotation is deliberately library-wide: it answers "would adding this be a
 // duplicate on this server", which is a property of the server, not of the person asking.
 //
@@ -71,8 +72,19 @@ interface Job {
   title: string; total: number; done: number;
   status: 'downloading' | 'done' | 'error';
   reason?: string;
+  /** When it started, for the pill's "Finished today" list (#82). */
+  startedAt?: number;
   /** When it stopped, so a finished one can age out. A FAILED one never does: it is the only record. */
   finishedAt?: number;
+  /**
+   * Who started it: they may cancel it, as may an admin (#82). Never sent to a client -- the list says `mine`
+   * instead -- and absent on a card nobody started (the import, which is an admin's and awaits its own run).
+   */
+  by?: string;
+  /** Cancel was pressed: the job stops after the chapter in flight, never mid-write. */
+  cancelRequested?: boolean;
+  /** It stopped because of that. Such a job ends `done`, with `reason` saying how far it got. */
+  cancelled?: boolean;
   /**
    * The library id of the series this job is filling (#67), for "Open in library" to navigate by.
    *
@@ -107,8 +119,10 @@ const jobs = new Map<string, Job>();
 
 /** How long a completed download stays listed. `jobs.delete` had exactly one call site -- the chapter-1
  *  failure path -- so a successful job was never removed and the strip filled with green cards that only a
- *  restart cleared. Swept lazily on read rather than on a timer: the client polls this often enough. */
-const DONE_TTL = 5 * 60_000;
+ *  restart cleared. Swept lazily on read rather than on a timer: the client polls this often enough.
+ *  A day since #82 (it was five minutes): "what did it fetch this morning" is a question the pill's
+ *  Finished list answers now, while Discover's strip still shows only the last few minutes (web lib/jobs.ts). */
+const DONE_TTL = 24 * 3600_000;
 function sweepJobs(now = Date.now()): void {
   for (const [folder, j] of jobs) {
     if (j.status === 'done' && j.finishedAt && now - j.finishedAt > DONE_TTL) jobs.delete(folder);
@@ -151,7 +165,12 @@ export interface DownloadJobInput {
    * a chapter skipped by a refusal would leave its old file renamed away for good.
    */
   onSettled?: (ch: SourceChapter, landed: boolean) => Promise<void>;
+  /** Who asked: they may cancel it (#82). */
+  by?: string;
 }
+
+/** The sentence on a job that stopped because someone pressed Cancel. */
+const cancelledReason = (j: Job) => `Cancelled after ${j.done} of ${j.total} chapter${j.total === 1 ? '' : 's'}.`;
 
 /**
  * Fetch a list of chapters into a series folder as one job card, detached from the request.
@@ -175,7 +194,7 @@ export interface DownloadJobInput {
  */
 export function startDownloadJob(input: DownloadJobInput): { total: number } {
   const { folder, title, seriesId, chapters, meta } = input;
-  jobs.set(folder, { title, total: chapters.length, done: 0, status: 'downloading' });
+  jobs.set(folder, { title, total: chapters.length, done: 0, status: 'downloading', startedAt: Date.now(), ...(input.by ? { by: input.by } : {}) });
   const settle = async (ch: SourceChapter, landed: boolean) => {
     if (!input.onSettled) return;
     // A hook that throws must not take the job's tail with it: the scan and the stamps still have to run.
@@ -213,6 +232,7 @@ export function startDownloadJob(input: DownloadJobInput): { total: number } {
     };
     for (const ch of chapters) {
       if (runtime.stopping) break; // between chapters, never mid-write
+      if (jobs.get(folder)?.cancelRequested) break; // Cancel (#82): the same place, for the same reason
       const via = ch.source ?? '';
       settled.add(ch);
       let out;
@@ -294,7 +314,12 @@ export function startDownloadJob(input: DownloadJobInput): { total: number } {
     await setBookDates(folder, chapters).catch(() => {});
     await setBookMeta(folder, landed).catch(() => {});
     const j = jobs.get(folder);
-    if (j && j.status !== 'error') { j.status = failures ? 'error' : 'done'; j.finishedAt = Date.now(); }
+    // A cancelled job says so, and ends `done`: stopping was the request, not a failure. A chapter that
+    // failed before the Cancel is still counted in the sentence, so nothing it lost goes unreported.
+    if (j && j.status !== 'error' && j.cancelRequested) {
+      j.cancelled = true; j.status = 'done'; j.finishedAt = Date.now();
+      j.reason = failures ? `${cancelledReason(j)} ${failures} could not be saved.` : cancelledReason(j);
+    } else if (j && j.status !== 'error') { j.status = failures ? 'error' : 'done'; j.finishedAt = Date.now(); }
   })();
 
   return { total: chapters.length };
@@ -741,7 +766,7 @@ export async function addSeriesFromSource(opts: {
     // is minted purely to carry the results to the dialog's poll -- and only when there is something to
     // judge, as "nothing was fetched, queued or created" is what a plain nothing-yet add promises.
     if (opts.alsoFollow?.length) {
-      jobs.set(folder, { title, total: 0, done: 0, status: 'done' });
+      jobs.set(folder, { title, total: 0, done: 0, status: 'done', startedAt: Date.now() });
       judgeAlsoFollow(folder, id, opts);
     }
     if (series?.coverUrl) {
@@ -830,7 +855,7 @@ export async function addSeriesFromSource(opts: {
       // As on the nothing-yet branch: no download means no card, so one is minted purely to carry the
       // judgement to the dialog's poll, and only when there is something to judge.
       if (opts.alsoFollow?.length) {
-        jobs.set(folder, { title, total: 0, done: 0, status: 'done', seriesId: heldId });
+        jobs.set(folder, { title, total: 0, done: 0, status: 'done', seriesId: heldId, startedAt: Date.now() });
         judgeAlsoFollow(folder, heldId, opts);
       }
     }
@@ -845,7 +870,7 @@ export async function addSeriesFromSource(opts: {
     return { ok: true, status: 200, title, folder, chapters: 0, started: false, alreadyHere: selected.length, seriesId: heldId };
   }
 
-  jobs.set(folder, { title, total: toFetch.length, done: 0, status: 'downloading' });
+  jobs.set(folder, { title, total: toFetch.length, done: 0, status: 'downloading', startedAt: Date.now(), ...(opts.userId ? { by: opts.userId } : {}) });
 
   /**
    * Everything from here is the WORK, as opposed to the decision.
@@ -957,6 +982,7 @@ export async function addSeriesFromSource(opts: {
     void (async () => {
       let failures = 0;
       for (const ch of toFetch.slice(1)) {
+        if (jobs.get(folder)?.cancelRequested) break; // Cancel (#82): between chapters, never mid-write
         let out: Awaited<ReturnType<typeof downloadWithFallback>>;
         try {
           out = await fetchOne(ch);
@@ -1025,7 +1051,10 @@ export async function addSeriesFromSource(opts: {
       await setBookDates(folder, selected).catch(() => {});
       await setBookMeta(folder, landed).catch(() => {});
       const j = jobs.get(folder);
-      if (j && j.status !== 'error') {
+      if (j && j.status !== 'error' && j.cancelRequested) {
+        j.cancelled = true; j.status = 'done'; j.finishedAt = Date.now();
+        j.reason = failures ? `${cancelledReason(j)} ${failures} could not be saved.` : cancelledReason(j);
+      } else if (j && j.status !== 'error') {
         // "Done" has to mean everything landed. A run that lost chapters ends as an error carrying the
         // count, because a green tick over a short library is worse than no tick at all: it tells you to
         // stop looking.
@@ -1589,6 +1618,7 @@ export default async function sourceRoutes(app: FastifyInstance) {
         const candidate = getSource(id);
         return !!candidate && sourceAllowedFor(candidate, maxAgeRating);
       },
+      by: userIdOf(req),
     });
     return { ok: true, started: true, folder: s.folder, total };
   });
@@ -1776,6 +1806,7 @@ export default async function sourceRoutes(app: FastifyInstance) {
         const candidate = getSource(id);
         return !!candidate && sourceAllowedFor(candidate, maxAgeRating);
       },
+      by: userIdOf(req),
     });
     return { ok: true, started: true, folder: s.folder, total, skipped };
   });
@@ -1899,8 +1930,18 @@ export default async function sourceRoutes(app: FastifyInstance) {
 
   app.get('/api/sources/jobs', async (req) => {
     sweepJobs();
-    const all = [...jobs.entries()].map(([folder, j]) => ({ folder, ...j }));
-    if (!vc(req).hideAdultLibraries) return { content: all };
+    const me = userIdOf(req);
+    const admin = roleOf(req) === 'admin';
+    // Who started a job stays on the server; the list says whether it is this viewer's own, which is what
+    // decides whether the pill offers its Cancel (an admin's pill offers every one).
+    const all = [...jobs.entries()].map(([folder, { by, ...j }]) => ({ folder, ...j, mine: !!by && by === me }));
+    // The server's own runs (lib/downloadJobs.ts, #82): the sweep, the repair, a bulk "Fetch newest". An
+    // admin's to see and stop -- and a bulk run its starter's too, since it is their selection. Nobody
+    // else's: the series a sweep is on may be in a library this viewer cannot open.
+    const runs = listRuns()
+      .filter((r) => admin || (r.by !== null && r.by === me))
+      .map(({ by, ...r }) => ({ ...r, mine: !!by && by === me }));
+    if (!vc(req).hideAdultLibraries) return { content: all, runs };
     // A download job carries the series title, so the strip on Discover is a listing like any other. Jobs
     // are keyed by folder, which is exactly what lib_series.folder holds, so the filter is one lookup. A
     // job for a series not yet scanned in has no row and stays visible: it cannot be in a library yet.
@@ -1910,7 +1951,56 @@ export default async function sourceRoutes(app: FastifyInstance) {
       `SELECT s.folder FROM lib_series s WHERE s.folder = ANY(${arr}) AND NOT (${browsable('s', vc(req), p)})`,
       p.values as any[],
     ).catch(() => [])).map((r) => r.folder));
-    return { content: all.filter((j) => !hidden.has(j.folder)) };
+    // A run's "now on …" names a series as well, so it is held to the same rule: the count stays, the title
+    // of a series this viewer is hiding goes.
+    const p2 = new Params();
+    const ids = p2.add(runs.map((r) => r.current?.id).filter(Boolean) as string[]);
+    const hiddenIds = new Set((await q<{ id: string }>(
+      `SELECT s.id FROM lib_series s WHERE s.id = ANY(${ids}) AND NOT (${browsable('s', vc(req), p2)})`,
+      p2.values as any[],
+    ).catch(() => [])).map((r) => r.id));
+    return {
+      content: all.filter((j) => !hidden.has(j.folder)),
+      runs: runs.map((r) => (r.current && hiddenIds.has(r.current.id) ? { ...r, current: undefined } : r)),
+    };
+  });
+
+  /**
+   * Stop a running download after the chapter in flight (#82). Its starter may, and any admin; the loop
+   * checks the flag between chapters, so a half-written file is never the price of stopping. What already
+   * landed stays, and the card ends `done` saying how far it got.
+   */
+  app.post('/api/sources/jobs/:folder/cancel', async (req, reply) => {
+    const { folder } = req.params as { folder: string };
+    const j = jobs.get(folder);
+    if (!j) return reply.code(404).send({ error: 'not_found' });
+    if (roleOf(req) !== 'admin' && !(j.by && j.by === userIdOf(req))) return reply.code(403).send({ error: 'forbidden' });
+    if (j.status !== 'downloading') return reply.code(409).send({ error: 'not_running' });
+    j.cancelRequested = true;
+    await logAudit('download.cancel', { userId: userIdOf(req), detail: { folder, title: j.title }, req });
+    return { ok: true };
+  });
+
+  /** The same for one of the server's own runs: an admin, or the person who started a bulk "Fetch newest". */
+  app.post('/api/sources/runs/:kind/cancel', async (req, reply) => {
+    const { kind } = req.params as { kind: string };
+    const card = listRuns().find((r) => r.kind === kind && r.status === 'running');
+    if (!card) return reply.code(404).send({ error: 'not_found' });
+    if (roleOf(req) !== 'admin' && !(card.by && card.by === userIdOf(req))) return reply.code(403).send({ error: 'forbidden' });
+    requestStop(card.kind);
+    await logAudit('download.cancel', { userId: userIdOf(req), detail: { run: card.kind }, req });
+    return { ok: true };
+  });
+
+  /** Dismiss a finished run's card. A running one is cancelled, not dismissed. */
+  app.delete('/api/sources/runs/:kind', async (req, reply) => {
+    const { kind } = req.params as { kind: string };
+    const card = listRuns().find((r) => r.kind === kind);
+    if (!card) return reply.code(404).send({ error: 'not_found' });
+    if (roleOf(req) !== 'admin' && !(card.by && card.by === userIdOf(req))) return reply.code(403).send({ error: 'forbidden' });
+    const r = dismissRun(card.kind);
+    if (r === 'running') return reply.code(409).send({ error: 'running' });
+    return { ok: true };
   });
 
   /**

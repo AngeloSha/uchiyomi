@@ -41,7 +41,7 @@ export const runtime: {
     series: number; visited?: number; added: number; failed?: number; chapterFailures?: number;
     /** Chapters recovered from another source, saved with placeholders, or completed from an earlier run. */
     switched?: number; partial?: number; completed?: number;
-    healthy?: boolean; stopped?: 'budget' | 'disk' | 'shutdown';
+    healthy?: boolean; stopped?: 'budget' | 'disk' | 'shutdown' | 'cancelled';
   } | null;
   updating: boolean;
   /**

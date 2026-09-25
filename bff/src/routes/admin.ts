@@ -735,7 +735,7 @@ export default async function adminRoutes(app: FastifyInstance) {
       // Never awaited: a sweep is minutes to hours, and the caller is an admin clicking a button. runSweep
       // marks it running, keeps the result, logs the summary and refuses to start on top of another one --
       // everything this path used to skip, which is why the panel showed a manual sweep as idle throughout.
-      if (!runSweep({ maxNew: 10 }, app.log)) return { ok: false, error: 'busy' };
+      if (!runSweep({ maxNew: 10, by: userIdOf(req) }, app.log)) return { ok: false, error: 'busy' };
       return { ok: true, started: true };
     }
     if (id === 'extensions') {
@@ -1703,6 +1703,9 @@ export default async function adminRoutes(app: FastifyInstance) {
       folder: s.folder, title: s.title, seriesId: id,
       chapters: todo.map((t) => t.chapter).sort((a, b) => a.number - b.number),
       meta: { series: s.title, summary: s.summary, author: s.author, genres: s.genres, url: s.web, status: s.status },
+      by: userIdOf(req),
+      // A Cancel (#82) settles every chapter the job did not reach as not landed, so each set-aside copy
+      // below is put back exactly as for a chapter that failed.
       onSettled: async (ch, landed) => {
         const r = byNumber.get(ch.number);
         if (!r) return;

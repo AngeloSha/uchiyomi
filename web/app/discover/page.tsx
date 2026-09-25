@@ -20,9 +20,12 @@ import { AddSeriesDialog, AddSeed } from '@/components/AddSeriesDialog';
 import { AdultToggle, useAdultShown } from '@/components/AdultToggle';
 import { IcChevronLeft, IcSearch, IcSparkle, IcX } from '@/components/icons';
 import type { AutoFollow } from '@/lib/types';
+import { forStrip } from '@/lib/jobs';
 
 interface Job {
   folder: string; title: string; total: number; done: number; status: string; reason?: string;
+  /** When it ended, and whether a Cancel ended it (#82): such a job is `done` but did not fetch everything. */
+  finishedAt?: number; cancelled?: boolean;
   /** The add-time auto-follow (v0.36.0) riding on the card; the only job a nothing-yet add leaves behind. */
   autoFollow?: AutoFollow;
 }
@@ -356,7 +359,9 @@ export default function DiscoverPage() {
     // Polled hard only while something is actually downloading. It used to poll every four seconds forever.
     refetchInterval: (qy) => ((qy.state.data?.content ?? []).some((j) => j.status === 'downloading') ? 2500 : 30_000),
   });
-  const jobs = jobsData?.content ?? [];
+  // A finished job stays on the server for a day now (the download pill lists them, #82); this strip keeps
+  // showing the last few minutes of them, as it always did (lib/jobs.ts `forStrip`).
+  const jobs = forStrip(jobsData?.content ?? []);
 
   /**
    * The hero's slides: everything with wide key art first, then topped up from the rest.
@@ -501,6 +506,9 @@ export default function DiscoverPage() {
                 // A download killed by a rate-limit used to vanish from this strip entirely, taking its
                 // reason with it: the row was filtered to `downloading` and `reason` was never declared.
                 <p className="mt-1 text-[11px] text-amber-300">{j.reason || tr('Fetch stopped. Try another source or wait.')}</p>
+              ) : j.cancelled ? (
+                // Stopped by its Cancel (#82): `done`, but "Fetched" in emerald would claim the whole run landed.
+                <p className="mt-1 text-[11px] text-fog-400">{j.reason || tr('Cancelled; what landed is kept.')}</p>
               ) : j.total === 0 && j.autoFollow ? (
                 // A "Nothing yet" add that asked for the other sources leaves a card with no chapters on it,
                 // only the judgement: it is not a fetch and must not read as one. "Fetched" in emerald sat

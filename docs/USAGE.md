@@ -399,6 +399,21 @@ once per series per day, against six candidates, for no more than five series pe
 follows per series. A clean series never searches an adult source. Interactive Add and Fetch requests do
 not hunt behind the person's back.
 
+### What is downloading, and stopping it
+
+Anything the server is fetching shows as a small pill in the bottom corner (*Fetching {n} chapters*); tap it for
+the list. Each download you started has a **Cancel**, and an admin sees one on everybody's. Cancel stops it
+**after the chapter in flight** — a file is never left half-written — so the pill says *Stopping after this
+chapter…* for as long as that chapter takes; what already arrived stays, and the card then says how far it got.
+A re-fetch you cancel puts back every old copy it had set aside and not yet replaced.
+
+Since v0.47.0 an admin also sees what the server does **by itself**, one card per run: *Checking for new
+chapters* (the scheduled update, or *Run now*), *Library repair* and a bulk *Fetch newest* — how many series
+it has been through, how many chapters it saved, which series it is on, and a Cancel that stops it the same
+way. Whoever started a bulk *Fetch newest* sees that one too. Downloads that finished in the last day are
+under **Finished today** in the same list; the strip on Discover still shows only the last few minutes. The
+**Downloads** tab is something else: copies saved on this device for reading offline.
+
 ### Chapters the sources have that you don't
 
 The chapter list also shows, greyed out, every chapter the followed sources list that this server does not

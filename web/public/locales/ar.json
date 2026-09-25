@@ -2,7 +2,7 @@
   "_meta": {
     "language": "ar",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 1181
+    "strings": 1193
   },
   "1 check found something": "فحص واحد وجد شيئًا",
   "1 member": "عضو واحد",
@@ -1184,5 +1184,17 @@
   "Preferred source for this series: new chapters come from it when it has them, after your group preferences. Chapters already here stay as they are.": "المصدر المفضّل لهذه السلسلة: تأتي الفصول الجديدة منه حين تتوفر فيه، بعد تفضيلات الفرق. أما الفصول الموجودة هنا فتبقى كما هي.",
   "Preferring {name}": "تفضيل {name}",
   "Back to the server default": "عاد إلى الإعداد الافتراضي للخادم",
-  "Use the server default": "استخدم الإعداد الافتراضي للخادم"
+  "Use the server default": "استخدم الإعداد الافتراضي للخادم",
+  "Checking for new chapters": "البحث عن فصول جديدة",
+  "Library repair": "إصلاح المكتبة",
+  "step {done} of {total}": "الخطوة {done} من {total}",
+  "{done} of {total} series": "{done} من {total} سلسلة",
+  "{n} chapters saved": "حُفظ {n} فصل",
+  "{n} could not be saved": "تعذّر حفظ {n}",
+  "Could not do that": "تعذّر ذلك",
+  "Stopping after this chapter…": "يتوقف بعد هذا الفصل…",
+  "Now: {title}": "الآن: {title}",
+  "Stopped.": "توقّف.",
+  "Finished today ({n})": "انتهى اليوم ({n})",
+  "Cancelled; what landed is kept.": "أُلغي؛ ما وصل يبقى محفوظًا."
 }

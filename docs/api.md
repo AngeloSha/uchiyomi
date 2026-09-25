@@ -245,7 +245,8 @@ strictly better than before, where the 429 came back only after the whole chapte
 budget.
 
 `GET /api/sources/jobs` lists downloads in progress, and a card carries `seriesId` once its first chapter
-has been scanned in — the add that started it was answered before that row existed. A finished job is swept a few minutes after it ends; a
+has been scanned in — the add that started it was answered before that row existed. A finished job is swept a
+day after it ends (five minutes before v0.47.0); a
 **failed** one is never swept, because it is the only record that the download did not work, and it carries
 a `reason` naming the source and how far it got. `DELETE /api/sources/jobs/<folder>` dismisses a job that
 has stopped, and answers **409** `running` for one still downloading — or one whose auto-follow judgement
@@ -260,7 +261,22 @@ asked), `not_tried` (the 90-second wall ran out first, or the judgement itself f
 was asked — every candidate then reads so, rather than the card finishing with an empty list), `cap`
 (already following two) or `unavailable` (the primary itself, disabled, in a cooldown, not loaded, or
 outside the caller's age cap). A `none` add with candidates gets a card with `total: 0, status: "done"`
-just to carry this; it lives a few minutes after the judgement ends, so a closed dialog loses nothing.
+just to carry this; it lives a day after the judgement ends, so a closed dialog loses nothing.
+
+**Cancelling, and the server's own runs** (since v0.47.0, #82). Every card carries `startedAt` and `mine` —
+whether this account started it. `POST /api/sources/jobs/<folder>/cancel` stops a running job after the
+chapter in flight (its starter or an admin; **403** for anyone else, **409** `not_running` once it has
+stopped): what landed stays, a re-fetch puts back every old copy it had set aside and did not reach, and the
+card ends `done` with `cancelled: true` and a `reason` saying how far it got; `cancelRequested` is set
+meanwhile. The response also carries `runs`: one card per run the server does by itself — `sweep` (checking
+every series for new chapters), `repair` (the library repair, `done`/`total` counting its steps, `step`
+naming the current one) and `newest` (a bulk "Fetch newest") — each `{kind, startedAt, finishedAt?, status:
+running|done|cancelled|error, done, total, fetched, failed, current?: {id, title}, step?, cancelRequested?,
+reason?, mine}`. An admin sees every run; the account that started a bulk run sees that one; nobody else
+sees any, because `current` names a series that may be in a library they cannot open (and is left out when
+the request hides that series anyway). `POST /api/sources/runs/<kind>/cancel` stops one the same way as a
+shutdown does — between series and between chapters, never mid-write — and `DELETE /api/sources/runs/<kind>`
+dismisses a finished one. Both cancels are audited as `download.cancel`.
 
 `GET /api/sources/popular?source=<id>&page=<n>` is the same listing sorted by the source's OWN popularity,
 not by anything this server computes: it is the page each site already publishes, reached with a different
@@ -801,7 +817,9 @@ GET    /api/admin/audit           GET    /api/admin/tasks
 POST   /api/admin/tasks/:id/run   POST   /api/admin/library/scan
 POST   /api/admin/update          POST   /api/admin/update/:id
 GET    /api/sources/popular      GET    /img/sources/icon/:id
-DELETE /api/sources/jobs/:folder
+DELETE /api/sources/jobs/:folder  POST   /api/sources/jobs/:folder/cancel
+POST   /api/sources/runs/:kind/cancel
+DELETE /api/sources/runs/:kind
 GET    /api/admin/sources         POST   /api/admin/sources/:id/:action
 POST   /api/admin/sources/:id/test
 POST   /api/admin/sources/check

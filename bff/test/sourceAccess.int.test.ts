@@ -100,7 +100,7 @@ async function setup() {
 }
 
 /** Every route in sources.ts, as the URL a client actually calls. */
-const ROUTES: Array<{ method: 'GET' | 'POST'; url: string; payload?: any }> = [
+const ROUTES: Array<{ method: 'GET' | 'POST' | 'DELETE'; url: string; payload?: any }> = [
   { method: 'GET', url: '/api/sources' },
   { method: 'GET', url: `/api/sources/latest?source=${CLEAN}` },
   { method: 'GET', url: `/api/sources/search?source=${CLEAN}&q=title` },
@@ -114,6 +114,11 @@ const ROUTES: Array<{ method: 'GET' | 'POST'; url: string; payload?: any }> = [
   // is a preHandler on the whole plugin, so the only way to know a new route is covered is to name it.
   { method: 'POST', url: '/api/sources/fill/scan', payload: { seriesId: 's_nope' } },
   { method: 'POST', url: '/api/sources/fill', payload: { planId: 'fp_nope', source: CLEAN, sourceSeriesId: 'x', numbers: [1] } },
+  // The cancels and the run cards' dismiss (#82): stopping someone's download is as much the server's
+  // downloading as starting one.
+  { method: 'POST', url: '/api/sources/jobs/nope/cancel' },
+  { method: 'POST', url: '/api/sources/runs/sweep/cancel' },
+  { method: 'DELETE', url: '/api/sources/runs/sweep' },
 ];
 
 test('sources: who may reach them, and how long they get', { skip }, async (t) => {
