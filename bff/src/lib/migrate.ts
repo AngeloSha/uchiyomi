@@ -1062,6 +1062,12 @@ END $$;
 -- Deliberately NOT constrained: reading_events is an append-only record of things that actually happened and
 -- feeds stats, streaks, Wrapped and the leaderboard -- cascading it would rewrite someone's history because a
 -- file moved. offline_downloads describes bytes on a user's phone, which the server cannot reconcile anyway.
+
+-- v0.46.0: a chapter's own name, as its source gave it (lib/library.ts chapterName). Its OWN column, never
+-- lib_books.title: title is the filename's -- "One Piece v02 c012 [Digital]" on a library built by hand -- and
+-- writing names into it showed filenames as names and dropped the number from everything printing it alone.
+-- (No backticks in this string: it is a template literal.)
+ALTER TABLE lib_books ADD COLUMN IF NOT EXISTS chapter_name text;
 `;
 
 // Serialises migrate() across processes. CREATE TABLE IF NOT EXISTS is not safe to run concurrently:

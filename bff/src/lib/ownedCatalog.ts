@@ -66,7 +66,7 @@ const browseSrc = (ctx: ViewCtx, p: Params, alias = 'sv') => seriesSrcWith(brows
  */
 const booksSrc = (ctx: ViewCtx, p: Params, alias = 'bv') => `(
   SELECT b.id, b.series_id, b.source, b.file, b.root, b.pages, b.mtime, b.published_at, b.page_dims,
-         b.updated_at, b.fingerprint, b.scanlator, b.source_id, b.pruned_at, b.size, b.missing_pages,
+         b.updated_at, b.fingerprint, b.scanlator, b.source_id, b.pruned_at, b.size, b.missing_pages, b.chapter_name,
          COALESCE(ov.number, b.number) AS number,
          COALESCE(ov.title,  b.title)  AS title
     FROM lib_books b
@@ -150,6 +150,9 @@ function bookDto(r: any) {
     number: num,
     media: { pagesCount: r.pages ?? 0, mediaType: 'application/vnd.comicbook+zip', status: 'READY' },
     metadata: { title: r.title, number: String(num), numberSort: num, summary: '', releaseDate: released },
+    // The chapter's own name as its source gave it (lib/library.ts chapterName), null when it had none. NOT
+    // `name`/`metadata.title`, which are the filename's and keep saying so for every client that prints them.
+    chapterName: r.chapter_name ?? null,
     // Who released the file on disk and which adapter it came from (setBookMeta in lib/library.ts). Both
     // null for a book the scanner found rather than the downloader wrote. These are read through booksSrc's
     // explicit column list above: a name dropped there does not error, it silently reads as null here.

@@ -583,23 +583,10 @@ export async function persistScan(): Promise<{ series: number; books: number; ms
           // proof was about the bytes that are no longer there.
           // Reintroduce by dropping the CASE (always NULL): "a scan that finds the same file leaves a
           // confirmed-short chapter confirmed" in repair.int.test.ts reads null.
-          //
-          // The title is the filename's, EXCEPT when the filename says nothing but the number and the row
-          // already holds a real name. A downloaded file is named `Chapter 12.cbz` whatever the source
-          // called it, and the chapter's own name is stored on the row afterwards (setBookMeta, and the
-          // listing heal in lib/seriesListing.ts). This upsert runs on every add, every sweep and every
-          // manual scan, so taking the filename unconditionally would wipe every name in the library each
-          // time anything anywhere was fetched. A file that carries a name of its own still wins.
-          // Reintroduce by going back to `title=EXCLUDED.title`: "a rescan keeps a chapter's stored name" in
-          // chapterNames.int.test.ts reads `Chapter 3`.
           await qq(
             `INSERT INTO lib_books (id, series_id, source, file, number, title, mtime, root) VALUES ${tuples.join(',')}
              ON CONFLICT (root, file) DO UPDATE SET series_id=EXCLUDED.series_id, number=EXCLUDED.number,
-               title = CASE WHEN EXCLUDED.title ~* ('^(ch(apter|\\.)?|episode|ep\\.?)?\\s*0*' || EXCLUDED.number || '\\s*$')
-                             AND lib_books.title !~* ('^(ch(apter|\\.)?|episode|ep\\.?)?\\s*0*' || EXCLUDED.number || '\\s*$')
-                             AND btrim(lib_books.title) <> ''
-                            THEN lib_books.title ELSE EXCLUDED.title END,
-               mtime=EXCLUDED.mtime, updated_at=now(), pruned_at=NULL,
+               title=EXCLUDED.title, mtime=EXCLUDED.mtime, updated_at=now(), pruned_at=NULL,
                short_confirmed_at = CASE WHEN lib_books.mtime <> EXCLUDED.mtime THEN NULL ELSE lib_books.short_confirmed_at END`,
             params,
           );
@@ -661,24 +648,33 @@ export async function setBookDates(folder: string, chapters: { number: number; p
   );
 }
 
+// A volume marker in front of the chapter: "Vol.3", "Volume 3 -", "Tome 3,".
+const VOLUME = String.raw`(?:(?:vol(?:ume)?|tome|band|том)\.?\s*\d+(?:\.\d+)?\s*[,:.\-–—]?\s*)?`;
+// The word a source puts before the number, in the languages sources are written in.
+const CHAPTER_WORD = String.raw`(?:(?:ch(?:apter|ap)?|episode|ep|capítulo|capitulo|cap|chapitre|kapitel|глава|розділ|chương|bölüm|bab|rozdział)\.?\s*)?`;
+// After the number, the separators between it and a real name.
+const SEPARATOR = String.raw`\s*(?:[:.\-–—|~]+\s*)?`;
+
 /**
- * The chapter's own name, when the source gave one worth keeping.
+ * The chapter's own name, when the source gave one: what is left once the volume, the chapter word and the
+ * number are taken off the front. Null when nothing is left -- the title only said the number again.
  *
- * A downloaded chapter's FILE is named from its number alone -- `Chapter 12.cbz`, for the reasons
- * lib/downloader.ts sets out -- so the title the scanner derives from that filename is the number said a
- * second time. Sources usually know better ("Log. 12", "The Sound of Thunder"), and the downloader already
- * writes that into the CBZ's ComicInfo; nothing has ever read it back, so a chapter with a real name never
- * showed one anywhere in the app.
- *
- * Filtered, because most sources also just say "Chapter 12": replacing one restatement of the number with
- * another is churn, and would make every row read `Ch. 12 · Chapter 12`.
+ * A downloaded file is named from its number alone (lib/downloader.ts explains why), so the scanner's title
+ * is the number twice. Sources usually know better, and the downloader writes it into the CBZ's ComicInfo,
+ * but nothing read it back. Most sources also just say "Chapter 12", in several languages and often behind a
+ * volume ("Vol.3 Chapter 12", "Capítulo 12", "第12話"): each of those is the number again, and "Vol.3 Chapter
+ * 12: The Return" is named "The Return".
  */
 export function chapterName(title: string | undefined | null, number: number): string | null {
   const t = (title ?? '').trim();
   if (!t) return null;
   const n = String(number).replace('.', '\\.');
-  if (new RegExp(`^(?:ch(?:apter|\\.)?|episode|ep\\.?)?\\s*0*${n}\\s*$`, 'i').test(t)) return null;
-  return t;
+  // `(?!\.?\d)`: 12 must not match the front of 120 or 12.5.
+  const re = new RegExp(`^${VOLUME}${CHAPTER_WORD}(?:第\\s*)?0*${n}(?!\\.?\\d)(?:\\s*(?:話|话|章|回|화|편))?${SEPARATOR}`, 'iu');
+  const m = re.exec(t);
+  if (!m) return t;
+  const rest = t.slice(m[0].length).trim();
+  return rest || null;
 }
 
 /**
@@ -694,8 +690,9 @@ export function chapterName(title: string | undefined | null, number: number): s
  * and its absence writes NULL: a complete copy landing over a partial one -- a refetch, the completion
  * pass falling through to another source -- clears the mark in the same stamp that records who wrote it.
  *
- * `title` is what the source called the chapter. It is written only when it is a real name (chapterName,
- * above), so a copy whose source says only "Chapter 12" never replaces a name an earlier copy supplied.
+ * `title` is what the source called the chapter. Its name (chapterName, above) goes to `chapter_name` -- never
+ * to `title`, which is the filename's -- and only when there is one, so a copy whose source says only "Chapter
+ * 12" never replaces a name an earlier copy supplied.
  */
 export async function setBookMeta(folder: string, landed: Array<{ number: number; scanlator?: string; source?: string; missing?: number[]; title?: string }>): Promise<void> {
   const rows = landed.filter((c) => Number.isFinite(c.number));
@@ -708,12 +705,12 @@ export async function setBookMeta(folder: string, landed: Array<{ number: number
   }
   await q(
     `UPDATE lib_books b SET scanlator = v.grp, source_id = v.src, missing_pages = v.miss,
-            title = COALESCE(v.name, b.title)
+            chapter_name = COALESCE(v.name, b.chapter_name)
      FROM (VALUES ${values.join(',')}) AS v(n, grp, src, miss, name), lib_series s
      WHERE s.folder = $1 AND b.series_id = s.id AND b.number = v.n
        AND (b.scanlator IS DISTINCT FROM v.grp OR b.source_id IS DISTINCT FROM v.src
             OR b.missing_pages IS DISTINCT FROM v.miss
-            OR (v.name IS NOT NULL AND b.title IS DISTINCT FROM v.name))`,
+            OR (v.name IS NOT NULL AND b.chapter_name IS DISTINCT FROM v.name))`,
     params,
   );
 }

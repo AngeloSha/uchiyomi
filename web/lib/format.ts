@@ -33,21 +33,15 @@ export function chapterLabel(b: { metadata?: { number?: string; title?: string }
 }
 
 /**
- * The chapter's own name, when it says something its number does not.
+ * The chapter's own name, for `Ch. 12 · The Return`: the server's `chapterName`, and nothing else.
  *
- * Rows show `chapterLabel` -- "Ch. 12" -- and nothing else, so a chapter that has a real name never
- * showed one: not in the list, not beside Continue, nowhere. Sources do supply names, and the server now
- * keeps them (lib/library.ts `chapterName`), so the remaining job is to not print the number twice:
- * most sources title a chapter "Chapter 12", which next to "Ch. 12" is noise.
+ * The server has already taken the number (in any of the ways sources say it) off the front and kept only a
+ * real name (lib/library.ts `chapterName`). There is deliberately NO fallback to `name` or `metadata.title`:
+ * those are the filename's, and on a library built by hand that put `One Piece v02 c012 [Digital]` beside the
+ * chapter number on most rows.
  */
-export function chapterName(b: { name?: string; number?: number; metadata?: { title?: string; number?: string } }): string {
-  const t = (b.metadata?.title || b.name || '').trim();
-  if (!t) return '';
-  const n = b.metadata?.number ?? (b.number != null ? String(b.number) : '');
-  if (!n) return t;
-  const esc = n.replace('.', '\\.');
-  if (new RegExp(`^(?:ch(?:apter|\\.)?|episode|ep\\.?)?\\s*0*${esc}\\s*$`, 'i').test(t)) return '';
-  return t;
+export function chapterName(b: { chapterName?: string | null }): string {
+  return (b.chapterName ?? '').trim();
 }
 
 export function relativeTime(iso?: string | null): string {

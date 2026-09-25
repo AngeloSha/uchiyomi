@@ -19,6 +19,7 @@ import { q, one, tx } from './db';
 import { getSource, type SourceChapter } from './sources';
 import { groupsOf, normGroup } from './releases';
 import { CHAPTER_RETRY_CAP } from './updater';
+import { chapterName } from './library';
 import { effectivePrefsFor, readSeriesPrefs } from './scanlatorPrefs';
 
 export type ListingStatus = 'available' | 'held' | 'blocked';
@@ -158,30 +159,34 @@ export async function replaceListing(seriesId: string, rows: ListingRow[]): Prom
     }
 
     /**
-     * Give a chapter its own name, when the listing knows one and the book does not.
+     * Give a chapter its own name, when the listing knows one and the book has none yet.
      *
-     * A downloaded file is named from its NUMBER alone (lib/downloader.ts explains why), so the title the
-     * scanner derives from the filename is the number said twice, and every chapter fetched before the
-     * downloader learned to record the source's name is stuck that way. The listing being written right
-     * here is the same data, for the same chapters, already in hand -- so the repair costs one statement
-     * per check rather than a migration that can only run once.
-     *
-     * Only rows whose title is still a bare restatement of the number are touched, and only from a listing
-     * title that is not itself one: many sources genuinely call every chapter "Chapter 12", and replacing
-     * one restatement with another would be churn. Nothing an admin set by hand matches that pattern, so
-     * an overridden title is never overwritten.
+     * Every chapter fetched before the downloader recorded the source's name has none, and the listing being
+     * written right here is the same data, for the same chapters, already in hand -- so the repair costs a
+     * statement per check rather than a migration that can only run once. The name is worked out by the same
+     * rule the downloader's stamp uses (library.ts chapterName, which knows "Vol.3 Chapter 12" and "第12話"
+     * for the number again), in JavaScript, and written to `chapter_name` only -- never to `title`, the
+     * filename's. A name already there is kept: the copy on disk named it.
      */
-    await qq(
-      `UPDATE lib_books b
-          SET title = l.title, updated_at = now()
-         FROM series_listing l
-        WHERE l.series_id = $1 AND b.series_id = $1
-          AND abs(l.number - b.number) < 0.001
-          AND l.title IS NOT NULL AND btrim(l.title) <> ''
-          AND l.title !~* ('^(ch(apter|\\.)?|episode|ep\\.?)?\\s*0*' || l.number || '\\s*$')
-          AND b.title ~* ('^(ch(apter|\\.)?|episode|ep\\.?)?\\s*0*' || b.number || '\\s*$')`,
-      [seriesId],
-    );
+    const named = new Map<number, string>();
+    for (const r of rows) {
+      const name = Number.isFinite(r.number) ? chapterName(r.title, r.number) : null;
+      if (name && !named.has(r.number)) named.set(r.number, name);
+    }
+    const all = [...named];
+    for (let i = 0; i < all.length; i += 1000) {        // well inside Postgres's 65 535 parameters
+      const params: unknown[] = [seriesId];
+      const values = all.slice(i, i + 1000).map(([n, name]) => {
+        params.push(n, name);
+        return `($${params.length - 1}::real, $${params.length}::text)`;
+      });
+      await qq(
+        `UPDATE lib_books b SET chapter_name = v.name, updated_at = now()
+           FROM (VALUES ${values.join(',')}) AS v(n, name)
+          WHERE b.series_id = $1 AND b.number = v.n AND b.chapter_name IS NULL`,
+        params,
+      );
+    }
   });
 }
 

@@ -1364,10 +1364,12 @@ function SeriesInner() {
       */}
       {!nothingYet && resumeBook && (
         <p className="-mt-1 truncate text-center text-xs text-fog-500">
+          {/* The page only once there is one: "Mark unread" writes page 0, which read "page 0 of 23". */}
           {resumeBook.readProgress && !resumeBook.readProgress.completed && resumeBook.media?.pagesCount
+            && (resumeBook.readProgress.page ?? 0) >= 1
             ? tr('{chapter} · page {page} of {pages}', {
                 chapter: [chapterLabel(resumeBook), chapterName(resumeBook)].filter(Boolean).join(' · '),
-                page: resumeBook.readProgress.page ?? 1,
+                page: resumeBook.readProgress.page,
                 pages: resumeBook.media.pagesCount,
               })
             : [chapterLabel(resumeBook), chapterName(resumeBook)].filter(Boolean).join(' · ')}

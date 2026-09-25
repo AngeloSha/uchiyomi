@@ -34,15 +34,13 @@ test('chapterLabel picks the right noun', () => {
   assert.equal(chapterLabel({}), '');
 });
 
-test('chapterName shows a real name and hides the number said again', () => {
-  // A row reads `Ch. 12 · <name>`; a name that only restates the number would read `Ch. 12 · Chapter 12`.
-  // Reintroduce by returning the title unfiltered: the first assertion reads "Chapter 12".
-  assert.equal(chapterName({ number: 12, name: 'Chapter 12' }), '');
-  assert.equal(chapterName({ metadata: { number: '12', title: 'Ch. 12' }, name: 'Chapter 12' }), '');
-  assert.equal(chapterName({ metadata: { number: '4.5', title: 'Chapter 4.5' } }), '');
-  assert.equal(chapterName({ metadata: { number: '1', title: 'Romance Dawn' }, name: 'Chapter 1' }), 'Romance Dawn', 'the metadata title wins over the file name');
-  assert.equal(chapterName({ number: 12, name: 'Chapter 120' }), 'Chapter 120', 'another number is not this one');
-  assert.equal(chapterName({ name: 'Extras' }), 'Extras', 'no number: nothing to restate');
+test("chapterName is the server's name for the chapter, and never the file's", () => {
+  // The server strips the number off the front and keeps only a real name (bff lib/library.ts chapterName, which
+  // has its own tests). Here: nothing else is ever shown. Reintroduce the fallback to `name`/`metadata.title` and
+  // the second assertion reads the filename -- which is what #84 as first written did on a hand-built library.
+  assert.equal(chapterName({ chapterName: 'Romance Dawn' }), 'Romance Dawn');
+  assert.equal(chapterName({ chapterName: null, name: 'One Piece v02 c012 [Digital]', metadata: { title: 'One Piece v02 c012 [Digital]', number: '12' } } as any), '');
+  assert.equal(chapterName({ chapterName: '  ' }), '');
   assert.equal(chapterName({}), '');
 });
 
