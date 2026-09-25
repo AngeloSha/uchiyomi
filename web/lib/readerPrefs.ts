@@ -199,6 +199,29 @@ export interface SeriesPrefs {
   theme?: ReaderTheme;
   zoom?: number;
   spread?: boolean;
+  pagedDirection?: ReaderPrefs['pagedDirection'];
+}
+
+/**
+ * The settings that describe how a TITLE reads -- remembered per series and per source, never taken as the
+ * global default from inside the reader.
+ */
+export const LOOK_KEYS = ['mode', 'theme', 'spread', 'pagedDirection'] as const;
+
+/**
+ * What a change made in the reader should write to the GLOBAL default.
+ *
+ * Only what the change itself touched, and never a look key while a title is open: that goes to the title.
+ * The reader's live prefs are the global default with the source's and the series' settings laid over it, so
+ * saving them wholesale -- what the sheet did -- turned one series' or one source's look into everyone's
+ * default, even on a change to brightness. The global default is set under Profile -> Settings.
+ * Reintroduce by returning `p` unchanged: readerSourcePrefs.test.ts's global-default cases fail.
+ */
+export function globalPrefsChange(p: Partial<ReaderPrefs>, inSeries: boolean): Partial<ReaderPrefs> {
+  if (!inSeries) return { ...p };
+  const out: Partial<ReaderPrefs> = { ...p };
+  for (const k of LOOK_KEYS) delete out[k];
+  return out;
 }
 
 export function loadSeriesPrefs(seriesId: string): SeriesPrefs {
@@ -262,6 +285,27 @@ export function clearSourcePrefs(sourceId: string) {
   if (!sourceId) return;
   try { localStorage.removeItem(`${SOURCE_KEY}${sourceId}`); } catch {}
   queueSync();
+}
+
+/**
+ * The source a series reads from, remembered on this device.
+ *
+ * The per-source default is keyed by the SERIES' source, not by the chapter in hand: a downloaded chapter is
+ * read from its offline record, which names no source, and a series can mix copies from several sources --
+ * keying by the chapter applied the default to nothing downloaded and flipped the look mid-series. The reader
+ * learns the series' primary source when it loads the series; this keeps it for opening one offline.
+ */
+const SERIES_SOURCE_KEY = 'yomi_srcof_';
+export function rememberSeriesSource(seriesId: string, src: { id: string; name: string }) {
+  if (!seriesId || !src.id) return;
+  try { localStorage.setItem(`${SERIES_SOURCE_KEY}${seriesId}`, JSON.stringify(src)); } catch {}
+}
+export function seriesSourceOf(seriesId: string): { id: string; name: string } | null {
+  if (typeof window === 'undefined' || !seriesId) return null;
+  try {
+    const v = JSON.parse(localStorage.getItem(`${SERIES_SOURCE_KEY}${seriesId}`) || 'null');
+    return v && typeof v.id === 'string' && v.id ? { id: v.id, name: typeof v.name === 'string' ? v.name : '' } : null;
+  } catch { return null; }
 }
 
 /** Every per-source default held locally, capped like the per-series map for the same reason. */

@@ -15,7 +15,7 @@ import { chapterLabel } from '@/lib/format';
 import { deviceId } from '@/lib/device';
 import { getOfflineChapter, getPageBlob, queueProgress, noteOfflineProgress, listSeriesDownloads, setOfflinePageJunk } from '@/lib/downloads';
 import { applyCover, clearCover } from '@/lib/theme';
-import { ReaderPrefs, loadPrefs, savePrefs, loadSeriesPrefs, saveSeriesPrefs, syncPrefsFromServer, THEME_FILTER, loadSourcePrefs, saveSourcePrefs, clearSourcePrefs } from '@/lib/readerPrefs';
+import { ReaderPrefs, loadPrefs, savePrefs, loadSeriesPrefs, saveSeriesPrefs, syncPrefsFromServer, THEME_FILTER, loadSourcePrefs, saveSourcePrefs, clearSourcePrefs, globalPrefsChange, rememberSeriesSource, seriesSourceOf } from '@/lib/readerPrefs';
 import { ReaderSettings } from '@/components/ReaderSettings';
 import { Rail, SectionTitle, useImgRetry, useRtl } from '@/components/ui';
 import { PageGrid } from '@/components/PageGrid';
@@ -121,6 +121,8 @@ function ReaderInner() {
   const { user } = useAuth();
   /** Source id -> display name from the series' own followed sources (set with the reading direction). */
   const [seriesSourceNames, setSeriesSourceNames] = useState<Record<string, string>>({});
+  // The series' PRIMARY source, which keys the per-source reader default (lib/readerPrefs.ts seriesSourceOf).
+  const [seriesSource, setSeriesSource] = useState<{ id: string; name: string } | null>(null);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const [colW, setColW] = useState(0);
@@ -141,8 +143,13 @@ function ReaderInner() {
   const setPref = (p: Partial<ReaderPrefs>) =>
     setPrefs((cur) => {
       const n = { ...cur, ...p };
-      savePrefs(n);
-      if ((p.mode || p.theme || p.spread !== undefined) && seriesId0) saveSeriesPrefs(seriesId0, { mode: n.mode, theme: n.theme, spread: n.spread });
+      // The global default takes only what this change touched, and never a title's look while a title is
+      // open (globalPrefsChange says why): merged into what is STORED, not into `cur`, which carries the
+      // source's and the series' settings laid over the default.
+      const g = globalPrefsChange(p, !!seriesId0);
+      if (Object.keys(g).length) savePrefs({ ...loadPrefs(), ...g });
+      if ((p.mode || p.theme || p.spread !== undefined || p.pagedDirection) && seriesId0)
+        saveSeriesPrefs(seriesId0, { mode: n.mode, theme: n.theme, spread: n.spread, pagedDirection: n.pagedDirection });
       return n;
     });
   const applyZoom = (z: number) => {
@@ -235,8 +242,18 @@ function ReaderInner() {
           // The followed sources' display names, for the caption on a page the source never served. Free:
           // this request is made anyway, and `sources` is sent to every viewer, unlike /api/sources.
           setSeriesSourceNames(Object.fromEntries((s?.sources ?? []).map((x) => [x.sourceId, x.name])));
+          const primary = (s?.sources ?? []).find((x) => x.primary) ?? s?.sources?.[0];
+          if (primary) {
+            const src = { id: primary.sourceId, name: primary.name };
+            setSeriesSource(src);
+            rememberSeriesSource(first.seriesId, src);
+          }
         }
-      } catch { /* offline: the downloaded record's direction, set above, stands */ }
+      } catch {
+        // offline: the downloaded record's direction, set above, stands, and the series' source is the one
+        // this device saw the last time it opened the series online.
+        if (alive) setSeriesSource(seriesSourceOf(first.seriesId));
+      }
       setReady(true);
     })();
     return () => {
@@ -690,20 +707,23 @@ function ReaderInner() {
     syncPrefsFromServer().then((p) => setPrefs((cur) => ({ ...cur, ...p }))).catch(() => {});
   }, []);
 
-  // ---- per-source, then per-series, memory (mode/theme/zoom) ----
+  // ---- per-source, then per-series, memory (mode/theme/spread/direction/zoom) ----
   //
   // Applied in that order so the precedence is global default < source default < this series: a source
-  // default fixes everything from it in one go, and a title someone has adjusted by hand still wins.
+  // default fixes everything from it in one go, and a title someone has adjusted by hand still wins. Keyed by
+  // the SERIES' source, known before the reader is ready, so it holds for downloaded chapters and never
+  // changes mid-series.
+  const seriesSourceId = seriesSource?.id || '';
   useEffect(() => {
     if (!seriesId) return;
-    const src = chapters[0]?.sourceId || '';
-    const base = src ? loadSourcePrefs(src) : {};
+    const base = seriesSourceId ? loadSourcePrefs(seriesSourceId) : {};
     const sp = { ...base, ...loadSeriesPrefs(seriesId) };
-    if (sp.mode || sp.theme || sp.spread !== undefined)
-      setPrefs((cur) => ({ ...cur, ...(sp.mode ? { mode: sp.mode } : {}), ...(sp.theme ? { theme: sp.theme } : {}), ...(sp.spread !== undefined ? { spread: sp.spread } : {}) }));
+    if (sp.mode || sp.theme || sp.spread !== undefined || sp.pagedDirection)
+      setPrefs((cur) => ({ ...cur, ...(sp.mode ? { mode: sp.mode } : {}), ...(sp.theme ? { theme: sp.theme } : {}),
+        ...(sp.spread !== undefined ? { spread: sp.spread } : {}), ...(sp.pagedDirection ? { pagedDirection: sp.pagedDirection } : {}) }));
     setZoom(sp.zoom && sp.zoom >= 1 ? sp.zoom : 1);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [seriesId, chapters[0]?.sourceId]);
+  }, [seriesId, seriesSourceId]);
 
   // ---- auto-hide chrome ----
   useEffect(() => {
@@ -1206,13 +1226,14 @@ function ReaderInner() {
             prefs={prefs}
             set={setPref}
             onClose={() => setShowSettings(false)}
-            sourceName={sourceNameOf(chapters[0]?.sourceId) || (chapters[0]?.sourceId ?? undefined)}
-            sourceDefault={!!(chapters[0]?.sourceId && Object.keys(loadSourcePrefs(chapters[0].sourceId!)).length)}
+            // The series' own source, by name. With no name there is no row at all: a raw source id is
+            // never shown (an extension's is nineteen digits).
+            sourceName={seriesSource?.name || undefined}
+            sourceDefault={!!(seriesSource && Object.keys(loadSourcePrefs(seriesSource.id)).length)}
             onSourceDefault={(save) => {
-              const src = chapters[0]?.sourceId;
-              if (!src) return;
-              if (save) saveSourcePrefs(src, { mode: prefs.mode, theme: prefs.theme, spread: prefs.spread });
-              else clearSourcePrefs(src);
+              if (!seriesSource) return;
+              if (save) saveSourcePrefs(seriesSource.id, { mode: prefs.mode, theme: prefs.theme, spread: prefs.spread, pagedDirection: prefs.pagedDirection });
+              else clearSourcePrefs(seriesSource.id);
               setShowSettings(false);
             }}
           />

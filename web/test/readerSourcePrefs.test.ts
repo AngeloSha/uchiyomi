@@ -99,3 +99,33 @@ test('a pull adopts source defaults saved on another device', async (t) => {
   assert.deepEqual(prefs.loadSourcePrefs('manga-src'), { mode: 'paged', spread: true });
   assert.deepEqual(prefs.loadSeriesPrefs('manga-src'), {}, 'a source default was adopted as a series override');
 });
+
+test("a change made in the reader never makes a title's look the global default", () => {
+  // The reader's live prefs are the global default with the source's and the series' settings laid over it.
+  // Saving them wholesale made one source's paged mode everyone's default -- even on a brightness change.
+  const inSeries = prefs.globalPrefsChange({ mode: 'paged', theme: 'sepia', spread: true, pagedDirection: 'rtl', brightness: 80 } as any, true);
+  assert.deepEqual(inSeries, { brightness: 80 }, 'only the non-look change reaches the global default');
+  assert.deepEqual(prefs.globalPrefsChange({ mode: 'paged' }, true), {}, 'a look change alone writes nothing global');
+  // Outside a title (the profile's reader defaults) everything is the global default, as before.
+  assert.deepEqual(prefs.globalPrefsChange({ mode: 'paged', theme: 'sepia' }, false), { mode: 'paged', theme: 'sepia' });
+});
+
+test("the series' source is remembered for opening it offline, and junk reads back as nothing", () => {
+  // Downloaded chapters name no source, so the per-source default is keyed by the series' source, which the
+  // reader learns online and keeps here.
+  prefs.rememberSeriesSource('series-1', { id: '8683375824843625513', name: 'Aqua Manga' });
+  assert.deepEqual(prefs.seriesSourceOf('series-1'), { id: '8683375824843625513', name: 'Aqua Manga' });
+  assert.equal(prefs.seriesSourceOf('series-never-opened'), null);
+  localStorage.setItem('yomi_srcof_series-2', '{not json');
+  assert.equal(prefs.seriesSourceOf('series-2'), null);
+  localStorage.setItem('yomi_srcof_series-3', JSON.stringify({ id: '', name: 'x' }));
+  assert.equal(prefs.seriesSourceOf('series-3'), null, 'an empty id is no source');
+});
+
+test('the reading direction is part of a series\' and a source\'s remembered look', () => {
+  prefs.saveSourcePrefs('src-manga', { mode: 'paged', pagedDirection: 'rtl' });
+  assert.equal(prefs.loadSourcePrefs('src-manga').pagedDirection, 'rtl');
+  prefs.saveSeriesPrefs('series-9', { pagedDirection: 'ltr' });
+  assert.equal(prefs.loadSeriesPrefs('series-9').pagedDirection, 'ltr');
+  assert.ok(prefs.LOOK_KEYS.includes('pagedDirection'));
+});
