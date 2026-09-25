@@ -9,7 +9,10 @@ import { linkSeries } from '../lib/trackers';
 import { LIBRARY_ROOT, cbzPageAt } from '../lib/library';
 import { cfSession } from '../lib/sources/flaresolverr';
 import { solverMayVisit } from '../lib/sources/imageHosts';
-import { getSource } from '../lib/sources';
+import { getSource, isSwAdapterId } from '../lib/sources';
+import type { SourceAdapter, SourceChapter } from '../lib/sources/types';
+import { fetchPages } from '../lib/downloader';
+import { previewPageList, isRefusal } from './sources';
 import { assertPublicHost, isBlockedHost, BlockedAddress } from '../lib/ssrfGuard';
 import { suwayomiUrl, suwayomiBase, suwayomiImageHeaders } from '../lib/sources/suwayomi/client';
 import { env } from '../env';
@@ -585,6 +588,63 @@ export const serveLibBookPage = async (req: FastifyRequest, reply: FastifyReply,
   });
 };
 
+/** A preview page bigger than this is not served (#91): a page is a few hundred kilobytes, a video is not. */
+const PREVIEW_MAX_BYTES = 15 * 1024 * 1024;
+/** The pause between two preview pages from one source, as the downloader paces its own. */
+const PREVIEW_GAP_MS = 250;
+const previewChains = new Map<string, Promise<unknown>>();
+/** One preview page at a time per source, PREVIEW_GAP_MS apart: an <img> per page must not become a burst. */
+function previewGate<T>(sourceId: string, fn: () => Promise<T>): Promise<T> {
+  const prev = previewChains.get(sourceId) ?? Promise.resolve();
+  const next = prev.catch(() => {}).then(async () => {
+    try { return await fn(); } finally { await new Promise((r) => setTimeout(r, PREVIEW_GAP_MS)); }
+  });
+  previewChains.set(sourceId, next);
+  void next.catch(() => {}).finally(() => { if (previewChains.get(sourceId) === next) previewChains.delete(sourceId); });
+  return next;
+}
+
+/**
+ * What the bytes are, from the bytes: only an image is served. A site that answers a page with HTML must not
+ * have it rendered from this origin, so anything else is refused rather than labelled and sent.
+ */
+export function sniffImage(b: Buffer): string | null {
+  if (b.length >= 3 && b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff) return 'image/jpeg';
+  if (b.length >= 8 && b.subarray(0, 8).equals(Buffer.from('89504e470d0a1a0a', 'hex'))) return 'image/png';
+  if (b.length >= 12 && b.subarray(0, 4).toString('latin1') === 'RIFF' && b.subarray(8, 12).toString('latin1') === 'WEBP') return 'image/webp';
+  if (b.length >= 6 && /^GIF8[79]a$/.test(b.subarray(0, 6).toString('latin1'))) return 'image/gif';
+  if (b.length >= 12 && b.subarray(4, 8).toString('latin1') === 'ftyp' && /^avi[fs]$/.test(b.subarray(8, 12).toString('latin1'))) return 'image/avif';
+  return null;
+}
+
+/**
+ * One page's bytes for a preview. Everything but an extension source goes through fetchCoverImage -- the DNS
+ * check before any connection, redirects followed by hand with every hop re-checked, the source's referer and
+ * solver cookies. The URL is one the source's own page list gave the SERVER, so it is not caller-supplied, but
+ * a site is still somebody else's server, and nothing it names is fetched from inside the network.
+ *
+ * An extension's pages are on the extension engine, a private address by design: fetched the way the
+ * downloader fetches them, and only when the URL really is on the engine's configured origin.
+ */
+async function previewPageBytes(src: SourceAdapter, chapter: SourceChapter, urls: string[], idx: number): Promise<Buffer | null> {
+  const u = urls[idx];
+  if (isSwAdapterId(src.id)) {
+    let same = false;
+    try { same = new URL(u).origin === new URL(suwayomiBase()).origin; } catch { same = false; }
+    if (!same) return null;
+    const res = await fetchPages(src, urls, [idx], { chapterSourceId: chapter.sourceId, retry: false });
+    return res.page[idx] ?? null;
+  }
+  return fetchCoverImage(u, src.id);
+}
+
+/** The add dialog's own permission: a member who may not add series may not read one in first either. */
+async function mayDownload(userId: string | null): Promise<boolean> {
+  if (!userId) return false;
+  const me = await one<{ role: string; perms: { canDownload?: boolean } | null }>('SELECT role, perms FROM users WHERE id = $1', [userId]).catch(() => null);
+  return !!me && (me.role === 'admin' || me.perms?.canDownload !== false);
+}
+
 export default async function imageRoutes(app: FastifyInstance) {
   // Belt and braces. server.ts guards the whole /img/ prefix at the root -- that is the protection that
   // cannot be opted out of, and it is what covers a future plugin serving bytes under /img/. This second
@@ -739,6 +799,30 @@ export default async function imageRoutes(app: FastifyInstance) {
       // per paint.
       return { buffer: await letterTile(src.name || src.id), contentType: 'image/webp' };
     });
+  });
+
+  /**
+   * One page of a preview (#91): the chapter by its NUMBER in the listing the server fetched for that series,
+   * the page by its INDEX -- never a URL, never a chapter id from the client (routes/sources.ts
+   * previewChapters). Served as the original bytes, `no-store`, and not through the image cache: a preview is
+   * a look, and a year of cached pages for a series nobody added is exactly what it must not leave behind.
+   * Every failure is the same flat answer, so this cannot be used to learn what a site returned.
+   */
+  app.get('/img/sources/preview', async (req, reply) => {
+    const { source, sourceId, number, i } = req.query as { source?: string; sourceId?: string; number?: string; i?: string };
+    const ctx = vc(req);
+    if (!(await mayDownload(ctx.userId))) return reply.code(403).send({ error: 'forbidden' });
+    const r = await previewPageList(ctx, source, sourceId, number);
+    if (isRefusal(r)) return reply.code(r.code).send({ error: r.error });
+    const idx = Number(i);
+    if (!Number.isInteger(idx) || idx < 0 || idx >= r.urls.length) return reply.code(404).send({ error: 'not_found' });
+    const buf = await previewGate(r.src.id, () => previewPageBytes(r.src, r.chapter, r.urls, idx)).catch(() => null);
+    const type = buf && buf.length <= PREVIEW_MAX_BYTES ? sniffImage(buf) : null;
+    if (!buf || !type) return reply.code(502).send({ error: 'unavailable' });
+    reply.header('cache-control', 'private, no-store');
+    reply.header('x-content-type-options', 'nosniff');
+    reply.type(type);
+    return reply.send(buf);
   });
 
   app.get('/img/sources/cover', async (req, reply) => {

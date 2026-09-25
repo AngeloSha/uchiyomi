@@ -263,6 +263,17 @@ was asked — every candidate then reads so, rather than the card finishing with
 outside the caller's age cap). A `none` add with candidates gets a card with `total: 0, status: "done"`
 just to carry this; it lives a day after the judgement ends, so a closed dialog loses nothing.
 
+**Reading a chapter before adding it** (since v0.47.0, #91). `GET /api/sources/preview?source=&sourceId=` lists
+that series' chapters on the source — the add dialog's own cached listing, one copy per number — as
+`{title, content: [{number, title, scanlator}]}`; `GET /api/sources/preview/pages?…&number=` answers `{count}`;
+and `GET /img/sources/preview?…&number=&i=` is one page, by index. A chapter is named by its **number** in a
+listing the server fetched itself, and a page by its index: no URL and no chapter id from the caller ever
+reaches a source, because a site engine's page list is a fetch through the Cloudflare solver's browser, inside
+the network. Pages go through the same guard as covers (an extension's only from the engine's own origin),
+one at a time per source, and are served as the original bytes, `no-store`, only when they are an image.
+Nothing is written. An account with an age limit gets **403** `age_limited`; a disabled source **403**, one in
+a cooldown **429**; the messages are generic.
+
 **Cancelling, and the server's own runs** (since v0.47.0, #82). Every card carries `startedAt` and `mine` —
 whether this account started it. `POST /api/sources/jobs/<folder>/cancel` stops a running job after the
 chapter in flight (its starter or an admin; **403** for anyone else, **409** `not_running` once it has
@@ -818,6 +829,8 @@ POST   /api/admin/tasks/:id/run   POST   /api/admin/library/scan
 POST   /api/admin/update          POST   /api/admin/update/:id
 GET    /api/sources/popular      GET    /img/sources/icon/:id
 DELETE /api/sources/jobs/:folder  POST   /api/sources/jobs/:folder/cancel
+GET    /api/sources/preview       GET    /api/sources/preview/pages
+GET    /img/sources/preview
 POST   /api/sources/runs/:kind/cancel
 DELETE /api/sources/runs/:kind
 GET    /api/admin/sources         POST   /api/admin/sources/:id/:action

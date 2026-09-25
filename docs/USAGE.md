@@ -722,6 +722,13 @@ again.
   cadence rule calls the group quiet, otherwise *last release {ago}*) — and *{n} chapters have more than one
   version*, from the chapter list it already fetched to count them. Sources that name no groups show nothing
   there.
+- **Read a chapter first** (since v0.47.0, from a pull request by @Squeaks72): under **Add to library**, this
+  opens the title straight from the source without adding it. Pick a chapter from its list — one copy per
+  number, the one an add would take — scroll it, and step to the previous or next one; **Add to library** is
+  there when you have decided, and Escape goes back a step without closing the dialog. Nothing is written: no
+  series, no files, no reading progress. The server fetches each page for you, one at a time, so a site's
+  pages never reach the browser directly. It is not offered to an account with an age limit — a preview reads
+  a site before any library's rating applies — and a source that is switched off or asking us to wait says so.
 - **Also check the other sources that carry this title** (admins only — following a source is an admin
   act, as it is on the series page, and a member's add goes through as if the switch were off; their done
   step says *Other sources: an admin can follow them from Sources & translations.*): when the dialog

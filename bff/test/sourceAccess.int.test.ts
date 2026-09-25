@@ -117,6 +117,9 @@ const ROUTES: Array<{ method: 'GET' | 'POST' | 'DELETE'; url: string; payload?: 
   // The cancels and the run cards' dismiss (#82): stopping someone's download is as much the server's
   // downloading as starting one.
   { method: 'POST', url: '/api/sources/jobs/nope/cancel' },
+  // The preview (#91): reading a source's chapter is reading it in, as much as adding it is.
+  { method: 'GET', url: `/api/sources/preview?source=${CLEAN}&sourceId=${CLEAN}-1` },
+  { method: 'GET', url: `/api/sources/preview/pages?source=${CLEAN}&sourceId=${CLEAN}-1&number=1` },
   { method: 'POST', url: '/api/sources/runs/sweep/cancel' },
   { method: 'DELETE', url: '/api/sources/runs/sweep' },
 ];

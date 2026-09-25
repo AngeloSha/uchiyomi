@@ -445,6 +445,66 @@ export async function seriesAndChapters(src: SourceAdapter, sourceId: string):
 export function clearDetailCache(): void {
   detailCache.clear();
   detailInflight.clear();
+  previewPages.clear();
+}
+
+/**
+ * Reading a chapter from a source before adding the series (#91, @Squeaks72's idea, rebuilt).
+ *
+ * ⚠️ NO STRING FROM THE CALLER EVER REACHES A SOURCE'S PAGE FETCHER. The first version took a `chapterId` and
+ * handed it to `getPageUrls`, and for the add-a-site engines that is `cfGet(chapterId)`: FlareSolverr's
+ * browser, on the Docker network beside the database, visiting whatever a signed-in account named -- the same
+ * hole v0.45.1 closed in the cover proxy (docs: memory uchiyomi-solver-ssrf). A chapter here is named by its
+ * NUMBER in the listing the server itself fetched for that series (the add dialog's cached detail); the
+ * series id is the one thing the caller names, and every engine already forces it onto the source's own host
+ * (`rebase` in the site engines). The page bytes are then fetched by the server, by index, through the
+ * guarded image fetcher (routes/images.ts), never from a URL the client sends.
+ *
+ * Refused outright for an account with an age limit: a preview reads a site's pages before any library -- and
+ * so any library's rating -- is involved, and add-a-site sources declare nothing about their content.
+ * Disabled and cooling-down sources are refused as everywhere else, the listing and page list are bounded
+ * by the source's own time budget, and the answers are generic: a site's error text is not echoed back.
+ */
+export type PreviewRefusal = { code: 400 | 403 | 404 | 429 | 502; error: string; message: string };
+const refused = (code: PreviewRefusal['code'], error: string, message: string): PreviewRefusal => ({ code, error, message });
+export const isRefusal = (r: object): r is PreviewRefusal => 'code' in r && 'error' in r;
+
+/** One chapter's page list, briefly: a 40-page chapter is 40 image requests that each need it. */
+const PREVIEW_PAGES_TTL = 10 * 60_000;
+const PREVIEW_PAGES_MAX = 200;
+const previewPages = new Map<string, { at: number; urls: string[] }>();
+
+export async function previewChapters(ctx: ViewCtx, source: string | undefined, sourceId: string | undefined):
+  Promise<{ src: SourceAdapter; series: SourceSeries | null; chapters: SourceChapter[] } | PreviewRefusal> {
+  if (ctx.maxAgeRating != null) return refused(403, 'age_limited', 'Previews are not available on an account with an age limit.');
+  const src = source ? getSource(source) : null;
+  if (!src || !sourceId || sourceId.length > 2048) return refused(400, 'bad_request', 'Name a source and a series on it.');
+  if (!sourceAllowedFor(src, ctx.maxAgeRating)) return refused(403, 'source_denied', 'That source is not available on this account.');
+  if (await isDisabled(src.id).catch(() => false)) return refused(403, 'disabled', `${src.name} is switched off.`);
+  if (await blockedNow(src.id).catch(() => null)) return refused(429, 'cooldown', `${src.name} asked us to slow down. Try again later.`);
+  const { series, chapters } = await seriesAndChapters(src, sourceId);
+  // One copy per number, as an add would take it; an external link (pages === 0) cannot be read here either.
+  const chosen = chooseReleases(chapters, await effectivePrefsFor(null, 0)).releases.filter((c) => c.sourceId && c.pages !== 0);
+  if (!chosen.length) return refused(502, 'unreadable', 'That source did not list any chapters it can serve.');
+  return { src, series, chapters: chosen };
+}
+
+/** The page list of the chapter numbered `number` in that listing, or why not. */
+export async function previewPageList(ctx: ViewCtx, source: string | undefined, sourceId: string | undefined, number: unknown):
+  Promise<{ src: SourceAdapter; chapter: SourceChapter; urls: string[] } | PreviewRefusal> {
+  const r = await previewChapters(ctx, source, sourceId);
+  if (isRefusal(r)) return r;
+  const n = Number(number);
+  const chapter = Number.isFinite(n) ? r.chapters.find((c) => c.number === n) : undefined;
+  if (!chapter) return refused(404, 'not_listed', 'That chapter is not in the listing.');
+  const key = `${r.src.id}\u0000${chapter.sourceId}`;
+  const hit = previewPages.get(key);
+  if (hit && Date.now() - hit.at < PREVIEW_PAGES_TTL) return { src: r.src, chapter, urls: hit.urls };
+  const urls = await withTimeout(r.src.getPageUrls(chapter.sourceId), budgetFor(r.src, 20_000)).catch(() => null);
+  if (!urls?.length) return refused(502, 'unreadable', 'That chapter would not load from the source.');
+  if (previewPages.size >= PREVIEW_PAGES_MAX) previewPages.delete(previewPages.keys().next().value!);
+  previewPages.set(key, { at: Date.now(), urls });
+  return { src: r.src, chapter, urls };
 }
 const latestCache = new Map<string, { at: number; items: SourceSeries[] }>();
 const latestInflight = new Map<string, Promise<SourceSeries[]>>();
@@ -2095,6 +2155,28 @@ export default async function sourceRoutes(app: FastifyInstance) {
       }),
     );
     return { content: found.filter(Boolean) };
+  });
+
+  /**
+   * The chapters a preview may open (#91): the add dialog's own listing of that series on that source, one copy
+   * per number. Each is named by its number, which is all the page routes take -- see previewChapters.
+   */
+  app.get('/api/sources/preview', async (req, reply) => {
+    const { source, sourceId } = req.query as { source?: string; sourceId?: string };
+    const r = await previewChapters(vc(req), source, sourceId);
+    if (isRefusal(r)) return reply.code(r.code).send({ error: r.error, message: r.message });
+    return {
+      title: r.series?.title || '',
+      content: r.chapters.map((c) => ({ number: c.number, title: c.title ?? null, scanlator: c.scanlator ?? null })),
+    };
+  });
+
+  /** How many pages one of those chapters has. The pages themselves are GET /img/sources/preview, by index. */
+  app.get('/api/sources/preview/pages', async (req, reply) => {
+    const { source, sourceId, number } = req.query as { source?: string; sourceId?: string; number?: string };
+    const r = await previewPageList(vc(req), source, sourceId, number);
+    if (isRefusal(r)) return reply.code(r.code).send({ error: r.error, message: r.message });
+    return { count: r.urls.length };
   });
 
   // Detail for one provider's match: description + chapter count/range (drives the add dialog).

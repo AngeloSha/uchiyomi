@@ -2281,6 +2281,90 @@ paths:
           description: Not authenticated
         "403":
           description: "Forbidden: token scope, account permission or age limit"
+  /api/sources/preview:
+    get:
+      tags:
+        - sources
+      summary: The chapters of a series on a source, for reading one before adding it.
+      operationId: getApiSourcesPreview
+      description: >-
+        Since v0.47.0 (#91). The add dialog's own listing of that series (cached ten minutes, one copy per
+        number, as an add would take it), named by NUMBER: no chapter id and no URL is returned, and the page
+        routes take nothing else. Nothing is written. Refused (403 `age_limited`) for an account with an age
+        limit, 403 `disabled` for a disabled source, 429 `cooldown` for one in a cooldown, and 502
+        `unreadable` when the source lists nothing readable; the messages are generic, never the site's own.
+      parameters:
+        - { name: source, in: query, required: true, schema: { type: string } }
+        - { name: sourceId, in: query, required: true, description: The series' id on the source, as search returned it., schema: { type: string } }
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: The chapters.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [title, content]
+                properties:
+                  title: { type: string }
+                  content:
+                    type: array
+                    items:
+                      type: object
+                      required: [number]
+                      properties:
+                        number: { type: number }
+                        title: { type: [string, "null"] }
+                        scanlator: { type: [string, "null"] }
+        "400":
+          description: No source, or no series named
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission, an age limit, or a disabled source"
+        "429":
+          description: The source is in a cooldown
+        "502":
+          description: The source lists nothing readable
+  /api/sources/preview/pages:
+    get:
+      tags:
+        - sources
+      summary: How many pages one previewed chapter has.
+      operationId: getApiSourcesPreviewPages
+      description: >-
+        Since v0.47.0 (#91). The chapter is named by its number in GET /api/sources/preview's listing; a number
+        that listing does not have is 404 `not_listed`, and the source is never asked for it. The pages are
+        GET /img/sources/preview, by index. Same refusals as the listing.
+      parameters:
+        - { name: source, in: query, required: true, schema: { type: string } }
+        - { name: sourceId, in: query, required: true, schema: { type: string } }
+        - { name: number, in: query, required: true, schema: { type: number } }
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: The page count.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [count]
+                properties:
+                  count: { type: integer, minimum: 1 }
+        "400":
+          description: No source, or no series named
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission, an age limit, or a disabled source"
+        "404":
+          description: The listing has no chapter with that number
+        "429":
+          description: The source is in a cooldown
+        "502":
+          description: The chapter would not load from the source
   /api/sources/jobs/{folder}/cancel:
     post:
       tags:
@@ -4425,6 +4509,42 @@ paths:
           description: OK
         "401":
           description: Not authenticated
+  /img/sources/preview:
+    get:
+      tags:
+        - images
+      summary: One page of a previewed chapter, by the chapter's number and the page's index.
+      operationId: getImgSourcesPreview
+      description: >-
+        Since v0.47.0 (#91). The chapter is named by its number in GET /api/sources/preview's listing and the
+        page by its index -- never a URL or a chapter id from the caller. The page is fetched by the server
+        through the same guard as /img/sources/cover (an extension's page only from the engine's own origin),
+        one at a time per source, and served as the original bytes with `cache-control: private, no-store`,
+        only when they are an image (JPEG, PNG, WebP, GIF or AVIF) and at most 15 MB. Refused for an account
+        with an age limit or without the download permission, and for a disabled source or one in a cooldown;
+        any fetch failure is a flat 502.
+      parameters:
+        - { name: source, in: query, required: true, schema: { type: string } }
+        - { name: sourceId, in: query, required: true, schema: { type: string } }
+        - { name: number, in: query, required: true, schema: { type: number } }
+        - { name: i, in: query, required: true, description: The page index, from 0., schema: { type: integer, minimum: 0 } }
+      security:
+        - imgCookie: []
+        - bearer: []
+        - opdsBasic: []
+      responses:
+        "200":
+          description: The page's bytes.
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: an age limit, no download permission, or a disabled source"
+        "404":
+          description: No such chapter in the listing, or no such page
+        "429":
+          description: The source is in a cooldown
+        "502":
+          description: The page could not be fetched, or was not an image
   /opds:
     get:
       tags:

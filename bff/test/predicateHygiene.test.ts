@@ -99,6 +99,7 @@ const GATED: Record<string, string> = {
   '/img/lib/books/:id/page/:n': 'bookFileAbs -> visibleBookFile',
   '/img/extensions/icon/:pkgName': 'n/a: extension icon from the engine, not library content',
   '/img/sources/cover': 'n/a: remote source cover, not library content',
+  '/img/sources/preview': 'no library content; mayDownload + previewPageList (no age limit, disabled/cooldown refused, chapter by number from the server\'s own listing, page by index) and the guarded fetcher (preview.int.test.ts)',
   // The id is looked up in the source registry before anything is fetched, so the outbound URL comes from
   // the operator's own configured sources and never from the request -- a caller cannot point this at an
   // address of their choosing. No library content is involved either way.
