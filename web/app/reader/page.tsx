@@ -17,7 +17,7 @@ import { getOfflineChapter, getPageBlob, queueProgress, noteOfflineProgress, lis
 import { applyCover, clearCover } from '@/lib/theme';
 import { ReaderPrefs, loadPrefs, savePrefs, loadSeriesPrefs, saveSeriesPrefs, syncPrefsFromServer, THEME_FILTER } from '@/lib/readerPrefs';
 import { ReaderSettings } from '@/components/ReaderSettings';
-import { Rail, SectionTitle, useImgRetry } from '@/components/ui';
+import { Rail, SectionTitle, useImgRetry, useRtl } from '@/components/ui';
 import { PageGrid } from '@/components/PageGrid';
 import { ChapterSheet } from '@/components/ChapterSheet';
 import { SeriesCard } from '@/components/cards';
@@ -106,6 +106,11 @@ function ReaderInner() {
   // never expected: the page counter sat on 1 and a jump or a resume clamped to the first page.
   const pagedRtl = prefs.mode === 'paged' && (prefs.pagedDirection === 'rtl' || (prefs.pagedDirection === 'series' && rtl));
   const trackSign = pagedRtl ? -1 : 1;
+  // The direction the track was last laid out for, so the flip effect below acts only on a REAL flip.
+  const laidOutSign = useRef<number | null>(null);
+  // The interface's own direction, for the text that sits INSIDE the track and would otherwise take the
+  // track's: an Arabic caption in an LTR paragraph, or an English one in RTL on a right-to-left read.
+  const uiDir = useRtl() ? 'rtl' : 'ltr';
   const [scrubbing, setScrubbing] = useState(false); // slider drag in progress → show the page preview
 
   const [chrome, setChrome] = useState(true);
@@ -335,7 +340,9 @@ function ReaderInner() {
   useEffect(() => {
     const el = scrollRef.current;
     if (!el || !didInitScroll.current) return;
-    if (zoom > 1) el.scrollLeft = (el.scrollWidth - el.clientWidth) / 2;
+    // Centre a zoomed webtoon column. In paged mode scrollLeft is the PAGE: centring it jumped a double-tap
+    // to the middle of the chapter (and to page 1 on a right-to-left track).
+    if (zoom > 1 && prefs.mode === 'vertical') el.scrollLeft = (el.scrollWidth - el.clientWidth) / 2;
     if (prefs.mode === 'vertical' && tops[current] != null) el.scrollTop = tops[current];
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [zoom, colW]);
@@ -439,6 +446,7 @@ function ReaderInner() {
     // looking something up, not reading it, and it should not move where you were or add a reading event.
     const at = flat[idx];
     if (at) lastSent.current = `${chapters[at.ci]?.id}:${at.number}`;
+    laidOutSign.current = trackSign;
     didInitScroll.current = true;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready, colW, tops]);
@@ -448,6 +456,11 @@ function ReaderInner() {
   useEffect(() => {
     const el = scrollRef.current;
     if (!el || !didInitScroll.current || prefs.mode !== 'paged') return;
+    // ⚠️ Not in the commit that did the initial scroll. A streamed right-to-left series learns its direction in
+    // the same tick it becomes ready, so this ran straight after the resume scroll -- with `current` still 0
+    // in its closure -- and put every resume and every `?page=` link on a right-to-left series back on page 1.
+    if (laidOutSign.current === trackSign) return;
+    laidOutSign.current = trackSign;
     el.scrollLeft = trackSign * (slideOf[current] ?? current) * el.clientWidth;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [trackSign]);
@@ -978,7 +991,9 @@ function ReaderInner() {
           className="hide-scrollbar flex h-screen-d snap-x snap-mandatory overflow-x-auto overflow-y-hidden" style={{ filter: THEME_FILTER[prefs.theme] }}>
           {slides.map((idxs) => {
             // RTL manga: right page reads first. On an RTL track `dir` already lays a spread out right to
-            // left, so flipping here as well would put it back the wrong way round.
+            // left, so flipping here as well would put it back the wrong way round. A right-to-left series
+            // forced to read left to right still swaps: the pages turn the other way, but a double-page spread
+            // is ONE drawing, and it only reassembles with its first page on the right.
             const shown = rtl && !pagedRtl && idxs.length === 2 ? [idxs[1], idxs[0]] : idxs;
             return (
               <div key={flat[idxs[0]].key} className="relative flex h-full w-full shrink-0 snap-center items-center justify-center gap-1">
@@ -994,7 +1009,7 @@ function ReaderInner() {
                       <div key={p.key} className={`relative flex h-full items-center justify-center ${idxs.length === 2 ? 'max-w-[50%]' : 'max-w-full'}`}
                         style={{ transform: zoom !== 1 ? `scale(${zoom})` : undefined }}>
                         <ReaderImg src={srcFor(i)!} alt={`Page ${p.number}`} className="max-h-full object-contain" />
-                        <MissingCaption number={p.number} source={sourceNameOf(chapters[p.ci]?.sourceId)} />
+                        <MissingCaption number={p.number} source={sourceNameOf(chapters[p.ci]?.sourceId)} dir={uiDir} />
                       </div>
                     );
                   }
@@ -1008,12 +1023,12 @@ function ReaderInner() {
             );
           })}
           {ended && (
-            <div className="flex h-full w-full shrink-0 snap-center items-start justify-center overflow-y-auto">
+            <div dir={uiDir} className="flex h-full w-full shrink-0 snap-center items-start justify-center overflow-y-auto">
               {upNextCard}
             </div>
           )}
           {failed && !!flat.length && (
-            <div className="flex h-full w-full shrink-0 snap-center items-start justify-center overflow-y-auto">
+            <div dir={uiDir} className="flex h-full w-full shrink-0 snap-center items-start justify-center overflow-y-auto">
               {failureCard}
             </div>
           )}
@@ -1065,11 +1080,13 @@ function ReaderInner() {
 
             <motion.footer initial={{ y: 64, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 64, opacity: 0 }}
               className="absolute inset-x-0 bottom-0 z-40 bg-linear-to-t from-black/90 via-black/55 to-transparent px-4 pt-10 pb-[max(0.9rem,calc(env(safe-area-inset-bottom)+0.4rem))]">
-              {/* `dir` mirrors the bar with the track on a right-to-left read: previous chapter on the right, next
-                  on the left, and the slider fills from the right, so dragging it moves the same way the pages
-                  do. The chevrons swap to keep pointing outwards; the counter stays LTR so "12/40" never
-                  reorders. Otherwise the bar inherits the page's direction, as it always has. */}
-              <div dir={pagedRtl ? 'rtl' : undefined} className="relative mx-auto flex max-w-3xl items-center gap-2">
+              {/* In paged mode the bar follows the TRACK, both ways: on a right-to-left read the previous chapter
+                  is on the right, next on the left, and the slider fills from the right, so dragging it moves the
+                  way the pages do. On a left-to-right read it is stated LTR rather than inherited -- under the
+                  Arabic interface it used to inherit RTL and run opposite to its own pages. The chevrons swap to
+                  keep pointing outwards; the counter stays LTR so "12/40" never reorders. The webtoon column
+                  has no horizontal direction, so there the bar inherits the page's, as it always has. */}
+              <div dir={prefs.mode === 'paged' ? (pagedRtl ? 'rtl' : 'ltr') : undefined} className="relative mx-auto flex max-w-3xl items-center gap-2">
                 {/* scrubber preview: a small render of the target page while dragging */}
                 {scrubbing && flat[current] && (() => {
                   const it = flat[current];
@@ -1223,9 +1240,9 @@ function ReaderImg({ src, alt, className, style }: {
  * pointerdown/up pair. There is nothing to do here by hand anyway: the retry is the server's, not the
  * reader's. Reintroduce by making the caption a <button>: a tap on a missing page stops toggling the chrome.
  */
-function MissingCaption({ number, source }: { number: number; source: string | null }) {
+function MissingCaption({ number, source, dir }: { number: number; source: string | null; dir?: 'ltr' | 'rtl' }) {
   return (
-    <div role="note" className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-1.5 px-6 text-center">
+    <div role="note" dir={dir} className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-1.5 px-6 text-center">
       <span className="text-sm font-medium text-fog-200">
         {source ? tr('Page {n} could not be fetched from {source}', { n: number, source }) : tr('Page {n} could not be fetched', { n: number })}
       </span>
