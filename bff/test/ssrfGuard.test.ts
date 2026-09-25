@@ -70,10 +70,19 @@ test('literal private hosts are refused, in both notations, including bracketed 
     assert.equal(isBlockedHost(h), false, `${h} is public and must be allowed`);
 });
 
-test('a bare container hostname is NOT refused by the sync check — DNS is what catches it', () => {
-  // Stated as an assertion so the division of labour is not mistaken for an oversight. `yomi-db` is just a
-  // name; nothing about it is private until it resolves. assertPublicHost does the resolving, which is why
-  // the literal check alone is not the guard.
-  assert.equal(isBlockedHost('yomi-db'), false);
-  assert.equal(isBlockedHost('yomi-suwayomi'), false);
+test('a bare container hostname is refused by the sync check, not left to DNS', () => {
+  // This asserted the opposite until v0.45.1, on purpose: `yomi-db` is just a name until it resolves, and
+  // assertPublicHost did the resolving. That division of labour held only while nothing reached the network
+  // before the DNS half ran -- and in v0.45.0 the Cloudflare solver did, so `http://uchiyomi-suwayomi:4567/`
+  // went to FlareSolverr's browser unchecked (coverSolverGuard.test.ts). No public host is a single label, so
+  // refusing one here costs nothing and closes that class of mistake for whatever comes next.
+  // Reintroduce by deleting the dotless-name line in isBlockedHost: every one of these is allowed again.
+  for (const h of ['yomi-db', 'yomi-suwayomi', 'uchiyomi-suwayomi', 'uchiyomi-flaresolverr', 'nas', 'YOMI-DB'])
+    assert.equal(isBlockedHost(h), true, `${h} must be refused`);
+});
+
+test('a trailing dot names the same host', () => {
+  for (const h of ['localhost.', 'yomi-db.', '127.0.0.1.', 'db.internal.'])
+    assert.equal(isBlockedHost(h), true, `${h} must be refused`);
+  assert.equal(isBlockedHost('cdn.example.com.'), false, 'a public name with a trailing dot is still public');
 });

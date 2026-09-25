@@ -6,6 +6,7 @@ import { readdirSync } from 'fs';
 import { join } from 'path';
 import type { SourceAdapter, SourceHost } from './types';
 import { cfGet, cfPost, cfSession } from './flaresolverr';
+import { learnImageHosts } from './imageHosts';
 
 const registry = new Map<string, SourceAdapter>();
 // host services injected into a plugin's register(host) so plugins never import core internals by path.
@@ -20,6 +21,9 @@ function isAdapter(x: any): x is SourceAdapter {
 export function registerAdapter(a: SourceAdapter): boolean {
   if (!isAdapter(a)) return false;
   if (registry.has(a.id)) { console.warn(`[sources] duplicate id '${a.id}' ignored`); return false; }
+  // Every source enters here, so this is where the cover hosts it serves are learned -- the only hosts the
+  // Cloudflare solver may open for a caller-supplied cover URL (see imageHosts.ts).
+  learnImageHosts(a);
   registry.set(a.id, a);
   return true;
 }

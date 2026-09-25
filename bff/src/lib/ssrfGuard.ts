@@ -91,10 +91,16 @@ export function isPrivateAddress(ip: string): boolean {
  * Synchronous, so the cheap URL predicate can use it without becoming async.
  */
 export function isBlockedHost(hostname: string): boolean {
-  const h = hostname.toLowerCase().replace(/^\[|\]$/g, ''); // URL keeps IPv6 literals in brackets
+  // URL keeps IPv6 literals in brackets; a trailing dot names the same host (`localhost.` IS localhost).
+  const h = hostname.toLowerCase().replace(/^\[|\]$/g, '').replace(/\.$/, '');
   if (!h) return true;
   if (h === 'localhost' || LOCAL_SUFFIXES.some((s) => h.endsWith(s))) return true;
   if (isIP(h)) return isPrivateAddress(h);
+  // A name with no dot is never a public internet host: it resolves only through a search domain or, where
+  // this runs, Docker's embedded DNS -- which is exactly where `yomi-db` and `uchiyomi-suwayomi` live. This was
+  // once left to the DNS half on purpose, and that held only while nothing touched the network before the DNS
+  // half ran. In v0.45.0 the Cloudflare solver did, and a bare name went straight to it.
+  if (!h.includes('.')) return true;
   return false;
 }
 

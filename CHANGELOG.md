@@ -1,5 +1,36 @@
 # Changelog
 
+## v0.45.1 — 2026-09-25
+
+**A security fix. If anyone other than you has an account on your server, update.**
+
+### The cover proxy no longer lets an account steer the Cloudflare solver
+
+Covers from sites behind Cloudflare are fetched with the help of the bundled solver, FlareSolverr: a real
+browser, running on the same Docker network as the extension engine and the database. The cover proxy takes the
+image's address from the request, and for a Cloudflare-protected source it handed that address to the solver
+*before* checking that it was a public address. The check that did run first knew private IP addresses, but not
+bare container names like the ones in the install file. So any signed-in account could make the solver open
+addresses inside your network. Nothing it found came back to them, but the requests were made, and a browser
+does more than fetch: it follows redirects and runs the scripts of the page it opens.
+
+It needs a signed-in account. Nobody without one could reach it.
+
+Three changes, each with a test that fails without it:
+
+- **The public-address check runs before anything touches the network**, the solver included.
+- **A host name with no dot is refused outright.** No public host is a single word; container names are.
+- **For an address that came from a request, the solver only opens hosts the source vouched for**: the site an
+  admin added, or a host that source has actually served covers from. Library covers come from your own database
+  and are fetched as before, which matters: some sites keep their covers on a separate Cloudflare-protected CDN
+  that answers 403 without the solver.
+
+Readers see no difference. Covers load as they did.
+
+Found while reviewing [#91](https://github.com/AngeloSha/uchiyomi/pull/91), a chapter preview from
+[@Squeaks72](https://github.com/Squeaks72) that had the same shape of problem in a new route; it is being rebuilt
+around this fix.
+
 ## v0.45.0 — 2026-09-24
 
 **The desktop app can also be a window onto your own server; adding an extension repository is spelled out,
