@@ -25,6 +25,7 @@ import { ghostsEnabled } from '../lib/komgaGhosts';
 import { groupStats, type StatCopy } from '../lib/groupStats';
 import { groupsOf, normGroup } from '../lib/releases';
 import { getSource } from '../lib/sources';
+import { cleanSourceOrder } from '../lib/sourcePrefs';
 
 
 
@@ -400,10 +401,15 @@ export default async function catalogRoutes(app: FastifyInstance) {
     // what is about to move. Members do not: it is the one field here that describes the host filesystem.
     // The series' own release preferences ride along for the same audience: the editor seeds from them, and
     // null (rather than absent) says "none of its own, the global ones apply".
+    // So does its own source order (lib/sourcePrefs.ts), for the Sources sheet's preferred-source chips: null
+    // means the server-wide order applies.
     if (roleOf(req) === 'admin') {
-      const f = await one<{ folder: string }>('SELECT folder FROM lib_series WHERE id = $1', [id]);
+      const f = await one<{ folder: string; source_prefs: { priority?: unknown } | null }>(
+        'SELECT folder, source_prefs FROM lib_series WHERE id = $1', [id]);
       if (f) out.folder = f.folder;
       out.scanlatorPrefs = await readSeriesPrefs(id).catch(() => null);
+      const order = cleanSourceOrder(f?.source_prefs?.priority);
+      out.sourcePrefs = order.length ? { priority: order } : null;
     }
     return out;
   });

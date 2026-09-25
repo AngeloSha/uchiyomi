@@ -19,6 +19,7 @@ import { heldBooks } from './chapterCleanup';
 import { downloadWithFallback, type FallbackOutcome } from './chapterFallback';
 import { huntSource, seriesIsAdult, sweepAllowedFor, HUNT_MAX_PER_SWEEP } from './sourceHunt';
 import { completePartial, PARTIAL_COMPLETE_MAX } from './partial';
+import { effectiveSourcePriority, rankSources } from './sourcePrefs';
 
 /**
  * Why a series produced nothing this run.
@@ -153,7 +154,7 @@ const nothing = (title: string, outcome: UpdateOutcome): UpdateResult =>
   ({ title, added: 0, available: 0, outcome, failed: 0, waiting: 0, switched: 0, partial: 0, landed: [], asked: false });
 
 export async function updateSeries(seriesId: string, maxNew = 10, opts: UpdateOpts = {}): Promise<UpdateResult> {
-  const s = await one<any>(`SELECT id,title,source_id,source_series_id,web,folder,summary,author,genres,status,chapter_floor,scanlator_prefs FROM lib_series s WHERE s.id=$1 AND ${visibleToAll('s')}`, [seriesId]);
+  const s = await one<any>(`SELECT id,title,source_id,source_series_id,web,folder,summary,author,genres,status,chapter_floor,scanlator_prefs,source_prefs FROM lib_series s WHERE s.id=$1 AND ${visibleToAll('s')}`, [seriesId]);
   if (!s) return nothing('', 'gone');
 
   // Everything the series is followed on: the primary pair first, then series_sources in the order they
@@ -225,8 +226,16 @@ export async function updateSeries(seriesId: string, maxNew = 10, opts: UpdateOp
   // code, so a number held for the preferred group is held on both. The series' row is only parsed when it
   // has something of its own, which almost none do.
   const prefs = await effectivePrefsFor(s.scanlator_prefs == null ? null : await readSeriesPrefs(seriesId));
-  const rank = new Map(followed.map((f, i) => [f.source, i]));
-  const chooseOpts = { sourceRank: (id?: string) => rank.get(id ?? '') ?? followed.length };
+  // The source order (lib/sourcePrefs.ts), the series' own or the server's, ranks the copies of a number ahead
+  // of the follow order: a listed source before every unlisted one, the follow order breaking what is left.
+  // It sits below the group ranking and the hosted-before-external rule in `releaseOrder`, so it only decides
+  // between copies the release rules call equal -- the decision the follow order used to make alone, where
+  // the primary won every tie. With no order set this is the follow order, unchanged. An order that will not
+  // load is no order: the sweep goes on as it always did rather than failing a series over a preference.
+  // Reintroduce by going back to the follow order alone: "a new chapter comes from the higher-ranked source"
+  // in sourceOrder.int.test.ts takes it from the primary.
+  const priority = await effectiveSourcePriority(s.source_prefs).catch(() => null);
+  const chooseOpts = { sourceRank: rankSources(priority, followed.map((f) => f.source)) };
   const { releases, waiting: held } = chooseReleases(tagged, prefs, chooseOpts);
 
   // A series added as "latest N" carries a floor, and what the source lists below it is not this job's

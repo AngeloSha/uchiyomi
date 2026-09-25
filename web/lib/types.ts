@@ -133,6 +133,8 @@ export interface Series {
   sources?: SeriesSource[];
   /** This series' own scanlator overrides, or null when it follows the server defaults. Admins only. */
   scanlatorPrefs?: StoredPrefs | null;
+  /** This series' own source order, most preferred first; null when the server-wide order applies. Admins only. */
+  sourcePrefs?: { priority?: string[] } | null;
 }
 
 export interface ReadProgress {

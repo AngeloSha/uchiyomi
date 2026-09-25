@@ -315,6 +315,21 @@ components:
           properties:
             age: { type: integer }
             restriction: { type: string }
+    SourceOrder:
+      type: object
+      description: >-
+        Which sources to take a chapter from, most preferred first, when a series follows more than one. It
+        ranks below the scanlation group preferences and the hosted-before-external rule, so it decides only
+        between copies those consider equal, and it only ever chooses among copies of a chapter the server
+        does not have yet. Stored server-wide on the settings row and, optionally, per series, where it
+        replaces the server's order rather than merging with it.
+      required: [priority]
+      properties:
+        priority:
+          type: array
+          maxItems: 100
+          items: { type: string, minLength: 1, maxLength: 120 }
+          description: Source ids, best first. Sources not named here rank below every named one, in the series' follow order.
     ScanlatorPrefs:
       type: object
       description: >-
@@ -1159,6 +1174,13 @@ paths:
                       server-wide ones apply.
                     oneOf:
                       - $ref: "#/components/schemas/ScanlatorPrefs"
+                      - type: "null"
+                  sourcePrefs:
+                    description: >-
+                      Admins only. The series' own source order, most preferred first, or null when the
+                      server-wide order applies. See sourcePrefs on PATCH /api/admin/series/{id}.
+                    oneOf:
+                      - $ref: "#/components/schemas/SourceOrder"
                       - type: "null"
         "401":
           description: Not authenticated
@@ -4654,6 +4676,8 @@ paths:
                     items:
                       type: string
                     description: The source ids the 18+ filter treats as adult. See adultSources on PATCH.
+                  source_prefs:
+                    $ref: "#/components/schemas/SourceOrder"
         "401":
           description: Not authenticated
         "403":
@@ -4770,6 +4794,16 @@ paths:
                     type: string
                     minLength: 1
                     maxLength: 120
+                sourcePrefs:
+                  description: >-
+                    The server-wide source order, replaced whole. When a series follows more than one
+                    source, a chapter the server does not have yet is taken from the highest-ranked source
+                    that lists it, after the scanlation group preferences; sources the order does not name
+                    keep the follow order behind the ones it does. Chapters already downloaded are never
+                    replaced because of it. Ids are kept as given (trimmed, de-duplicated, anything outside
+                    letters, digits and _ . : - dropped), whether or not the source is loaded right now.
+                    Empty by default, which is the follow order.
+                  $ref: "#/components/schemas/SourceOrder"
       security:
         - bearer: []
       responses:
@@ -5089,6 +5123,14 @@ paths:
                     blocked list is added to it, and a null patienceDays inherits.
                   oneOf:
                     - $ref: "#/components/schemas/ScanlatorPrefs"
+                    - type: "null"
+                sourcePrefs:
+                  description: >-
+                    The series' own source order, which replaces the server-wide one for this series rather
+                    than merging with it; null or an empty priority clears it. Same rules as sourcePrefs on
+                    PATCH /api/admin/settings.
+                  oneOf:
+                    - $ref: "#/components/schemas/SourceOrder"
                     - type: "null"
       security:
         - bearer: []

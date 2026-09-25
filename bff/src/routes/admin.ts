@@ -39,6 +39,7 @@ import { ART_DIR, artFile, artOverview } from '../lib/seriesArt';
 import { writePreflight } from '../lib/fsGuard';
 // Admin stats report on the whole library by definition; this route is already behind requireAdmin.
 import { NO_LIBRARIES, SYSTEM_CTX, visibleToAll, sanitiseAdultList, sanitiseSourceIds, invalidateAdultFilter } from '../lib/visibility';
+import { cleanSourceOrder, invalidateSourcePrefs } from '../lib/sourcePrefs';
 import { addSeriesFromSource, findBestMatch, resolveCandidate, norm, jobBusy, startDownloadJob, FILL_MAX_CHAPTERS, REFRESH_BUDGET_MS } from './sources';
 import { confirmsTitle } from '../lib/confirmTitle';
 import { chapterFileRel } from '../lib/downloader';
@@ -418,7 +419,7 @@ export default async function adminRoutes(app: FastifyInstance) {
   // ---- server settings ----
   const SETTINGS_COLS = 'server_name, allow_registration, updater_hours, extension_hours, extension_auto_update, '
     + 'update_check, install_ping, install_ping_last, scanlator_prefs, cleanup_read, cleanup_read_days, backup_hour, auto_follow_on_failure, '
-    + 'repair_enabled, komga_ghost_chapters, adult_genres, adult_sources';
+    + 'repair_enabled, komga_ghost_chapters, adult_genres, adult_sources, source_prefs';
   // `extensions_configured` is not a column: extension_hours has a NOT NULL default, so its presence says
   // nothing about whether there is an engine to check. The settings page needs to know, or it offers two
   // controls for a job that can never run.
@@ -515,6 +516,12 @@ export default async function adminRoutes(app: FastifyInstance) {
        */
       adultGenres: z.array(z.string().min(1).max(60)).max(60).optional(),
       adultSources: z.array(z.string().min(1).max(120)).max(200).optional(),
+      /**
+       * Source ids, most preferred first (lib/sourcePrefs.ts): which copy of a chapter the server does not
+       * have yet is taken, when a series follows more than one source. Checked by shape, not against the
+       * sources registered now, so an order saved while the extension engine restarts keeps its extensions.
+       */
+      sourcePrefs: z.object({ priority: z.array(z.string().min(1).max(120)).max(100) }).optional(),
     }).parse(req.body);
     if (b.serverName !== undefined) await q('UPDATE server_settings SET server_name = $1, updated_at = now() WHERE id = 1', [b.serverName]);
     if (b.allowRegistration !== undefined) await q('UPDATE server_settings SET allow_registration = $1, updated_at = now() WHERE id = 1', [b.allowRegistration]);
@@ -546,6 +553,11 @@ export default async function adminRoutes(app: FastifyInstance) {
     // The view context caches these for a few seconds; a save must take effect on the next request,
     // not whenever that window happens to lapse.
     if (b.adultGenres !== undefined || b.adultSources !== undefined) invalidateAdultFilter();
+    if (b.sourcePrefs !== undefined) {
+      await q('UPDATE server_settings SET source_prefs = $1::jsonb, updated_at = now() WHERE id = 1',
+        [JSON.stringify({ priority: cleanSourceOrder(b.sourcePrefs.priority) })]);
+      invalidateSourcePrefs();
+    }
     await logAudit('settings.update', { userId: userIdOf(req), detail: b, req });
     return settingsRow();
   });
@@ -856,15 +868,17 @@ export default async function adminRoutes(app: FastifyInstance) {
   // Per-series settings. auto_update could only ever be chosen at add time, and the UI never read it back,
   // so there was no way to stop the updater chasing a series you had finished with. scanlatorPrefs is the
   // series' own release preferences (lib/releases.ts); null clears them, so the series inherits the global
-  // ones again. Each field is written on its own, so a body naming only one leaves the other alone.
+  // ones again. sourcePrefs is the series' own source order (lib/sourcePrefs.ts), which REPLACES the server's;
+  // null, or an empty list, clears it. Each field is written on its own, so a body naming one leaves the rest.
   app.patch('/api/admin/series/:id', async (req, reply) => {
     const { id } = req.params as { id: string };
     const b = z.object({
       autoUpdate: z.boolean().optional(),
       scanlatorPrefs: prefsSchema.nullable().optional(),
+      sourcePrefs: z.object({ priority: z.array(z.string().min(1).max(120)).max(100) }).nullable().optional(),
     }).strict().safeParse(req.body);
     if (!b.success) return reply.code(400).send({ error: 'bad_request' });
-    if (b.data.autoUpdate === undefined && b.data.scanlatorPrefs === undefined) {
+    if (b.data.autoUpdate === undefined && b.data.scanlatorPrefs === undefined && b.data.sourcePrefs === undefined) {
       return reply.code(400).send({ error: 'bad_request', message: 'Nothing to change.' });
     }
     const row = await getSeriesRow(id);
@@ -878,6 +892,13 @@ export default async function adminRoutes(app: FastifyInstance) {
       await q('UPDATE lib_series SET scanlator_prefs = $2::jsonb WHERE id = $1',
         [id, b.data.scanlatorPrefs === null ? null : JSON.stringify(b.data.scanlatorPrefs)]);
       detail.scanlatorPrefs = b.data.scanlatorPrefs;
+    }
+    if (b.data.sourcePrefs !== undefined) {
+      // An empty order is stored as NULL, not as an empty list: both mean "the server's order applies", and one
+      // spelling of that is what the series page reads back to show "Server default".
+      const order = b.data.sourcePrefs === null ? [] : cleanSourceOrder(b.data.sourcePrefs.priority);
+      await q('UPDATE lib_series SET source_prefs = $2::jsonb WHERE id = $1', [id, order.length ? JSON.stringify({ priority: order }) : null]);
+      detail.sourcePrefs = order.length ? { priority: order } : null;
     }
     await logAudit('series.settings', { userId: userIdOf(req), detail, req });
     return { ok: true, ...(b.data.autoUpdate !== undefined ? { autoUpdate: b.data.autoUpdate } : {}) };

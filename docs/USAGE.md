@@ -363,6 +363,21 @@ the main one, the line's *{n} not here yet* counts the chapters missing across a
 and the scanlator preferences above apply to the merged list — so a group you prefer is taken from whichever
 source carries it.
 
+### Preferring one source
+
+When two followed sources both have a chapter and your scanlator preferences do not decide between the
+copies, the source the series was added from used to win. A **source order** changes that (since v0.47.0,
+from a pull request by @Squeaks72): **Admin → Settings → Source order** ranks sources for the whole server
+(↑ ↓ to move one, ✕ to take it off, a chip to add one), and an admin can override it for one series with the
+source chips in its *Sources & translations* sheet — tapping one makes it that series' first choice, **Use
+the server default** clears it. A series' own order replaces the server's rather than merging with it, and
+a source the order does not name ranks below every one it does.
+
+It only decides where chapters you **do not have yet** come from. A chapter already downloaded is never
+fetched again because another source ranks higher. An order is kept exactly as saved, including a source
+that is not available at the moment (an extension while the extension engine restarts, say): it is listed
+as *Not available right now* and keeps its place until you take it off.
+
 ### When a source or page fails
 
 The downloader learns a source's pace. A 429 makes later chapters use one page worker and longer gaps, and

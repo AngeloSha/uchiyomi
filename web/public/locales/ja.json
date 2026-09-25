@@ -2,7 +2,7 @@
   "_meta": {
     "language": "ja",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 1172
+    "strings": 1181
   },
   "1 check found something": "1 件のチェックで問題を検出",
   "1 member": "メンバー 1 人",
@@ -1175,5 +1175,14 @@
   "Last page": "最後のページ",
   "of {n}": "/ {n}",
   "Compact chapter list": "コンパクトな章リスト",
-  "On a computer, chapter rows without thumbnails, and their buttons appear when you point at a row. Phones and tablets are unchanged. This device only.": "パソコンでは、章の行にサムネイルを表示せず、行にポインターを合わせるとボタンが表示されます。スマートフォンとタブレットは変わりません。この端末のみ。"
+  "On a computer, chapter rows without thumbnails, and their buttons appear when you point at a row. Phones and tablets are unchanged. This device only.": "パソコンでは、章の行にサムネイルを表示せず、行にポインターを合わせるとボタンが表示されます。スマートフォンとタブレットは変わりません。この端末のみ。",
+  "Source order": "ソースの順位",
+  "When a series follows more than one source, a new chapter is taken from the highest one here that has it, after your scanlation group preferences. Chapters you already have are never replaced because of it. A series can have its own order in its Sources & translations.": "シリーズが複数のソースをフォローしている場合、新しい話はスキャンレーショングループの優先設定のあと、ここで最も上位にあり、その話があるソースから取得されます。すでにある話がこれによって置き換えられることはありません。シリーズごとに「ソースと翻訳」で独自の順位を設定できます。",
+  "No order set: each series prefers the source it was added from.": "順位は未設定です。各シリーズは追加元のソースを優先します。",
+  "Not available right now": "現在利用できません",
+  "Add a source to the order": "順位にソースを追加",
+  "Preferred source for this series: new chapters come from it when it has them, after your group preferences. Chapters already here stay as they are.": "このシリーズの優先ソース：新しい話は、グループの優先設定のあと、このソースにあればここから取得されます。すでにある話はそのままです。",
+  "Preferring {name}": "{name} を優先",
+  "Back to the server default": "サーバーの既定に戻しました",
+  "Use the server default": "サーバーの既定を使う"
 }

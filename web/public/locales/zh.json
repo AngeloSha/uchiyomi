@@ -2,7 +2,7 @@
   "_meta": {
     "language": "zh",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 1172
+    "strings": 1181
   },
   "1 check found something": "1 项检查发现问题",
   "1 member": "1 位成员",
@@ -1175,5 +1175,14 @@
   "Last page": "最后一页",
   "of {n}": "共 {n}",
   "Compact chapter list": "紧凑章节列表",
-  "On a computer, chapter rows without thumbnails, and their buttons appear when you point at a row. Phones and tablets are unchanged. This device only.": "在电脑上：章节行不显示缩略图，指向某行时才显示其按钮。手机和平板不受影响。仅限此设备。"
+  "On a computer, chapter rows without thumbnails, and their buttons appear when you point at a row. Phones and tablets are unchanged. This device only.": "在电脑上：章节行不显示缩略图，指向某行时才显示其按钮。手机和平板不受影响。仅限此设备。",
+  "Source order": "来源排序",
+  "When a series follows more than one source, a new chapter is taken from the highest one here that has it, after your scanlation group preferences. Chapters you already have are never replaced because of it. A series can have its own order in its Sources & translations.": "当一部作品关注了多个来源时，新章节会在汉化组偏好之后，从此处排名最高且有该章节的来源获取。你已有的章节绝不会因此被替换。每部作品也可以在“来源与翻译”中设置自己的排序。",
+  "No order set: each series prefers the source it was added from.": "尚未设置排序：每部作品优先使用添加它时的来源。",
+  "Not available right now": "暂时不可用",
+  "Add a source to the order": "将来源加入排序",
+  "Preferred source for this series: new chapters come from it when it has them, after your group preferences. Chapters already here stay as they are.": "此作品的首选来源：在汉化组偏好之后，新章节有则从它获取。已有的章节保持不变。",
+  "Preferring {name}": "优先使用 {name}",
+  "Back to the server default": "已恢复为服务器默认",
+  "Use the server default": "使用服务器默认"
 }

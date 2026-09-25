@@ -1081,6 +1081,13 @@ ALTER TABLE series_overrides ADD COLUMN IF NOT EXISTS adult_exempt boolean;
 -- writing names into it showed filenames as names and dropped the number from everything printing it alone.
 -- (No backticks in this string: it is a template literal.)
 ALTER TABLE lib_books ADD COLUMN IF NOT EXISTS chapter_name text;
+
+-- v0.47.0: which sources a series is preferred to come from, most preferred first (lib/sourcePrefs.ts), from
+-- #93. Server-wide, and per series, where it replaces the server's rather than merging with it. It only
+-- chooses among copies of a chapter not held yet; nothing already on disk is replaced because of it. An empty
+-- order and a NULL series order both mean "the follow order", which is how every series chose until now.
+ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS source_prefs jsonb NOT NULL DEFAULT '{"priority": []}'::jsonb;
+ALTER TABLE lib_series      ADD COLUMN IF NOT EXISTS source_prefs jsonb;
 `;
 
 // Serialises migrate() across processes. CREATE TABLE IF NOT EXISTS is not safe to run concurrently:

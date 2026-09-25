@@ -506,7 +506,8 @@ any source the series has been followed on (`POST /api/admin/series/:id/sources`
 whether that adapter is loaded right now and `auto` whether the add-time auto-follow chose it rather than a
 person (always `false` for the primary; a person confirming the same source through a plan turns it
 `false`). Admins additionally get `scanlatorPrefs`: the series' own release
-preferences, or `null` when it has none and the server-wide ones apply. Every chapter object (this route's
+preferences, or `null` when it has none and the server-wide ones apply; and `sourcePrefs`, the series' own
+source order `{priority}` (below), or `null` when the server-wide order applies. Every chapter object (this route's
 `books`, `GET /api/books/:id`, `next`, the home shelves) carries `scanlator` — the group that released the
 file on disk, as the source showed it, a joint release reading `"A & B"` — and `sourceId`, the adapter it was
 downloaded from. Both are `null` for a chapter the scanner found rather than the downloader wrote, which
@@ -844,7 +845,7 @@ PATCH  /api/admin/import/candidates/:cid
 **Server settings.** `GET /api/admin/settings` is the one row: `server_name`, `allow_registration`,
 `updater_hours`, `extension_hours`, `extension_auto_update`, `update_check`, `install_ping`, `install_ping_last`,
 `cleanup_read`, `cleanup_read_days`, `backup_hour`, `scanlator_prefs`, `auto_follow_on_failure`,
-`repair_enabled`, plus `extensions_configured` (computed). `auto_follow_on_failure` defaults to true and
+`repair_enabled`, `source_prefs`, plus `extensions_configured` (computed). `auto_follow_on_failure` defaults to true and
 controls the bounded once-per-series-per-day source hunt after an ordinary scheduled-download failure; it
 never makes an interactive Add/Fetch hunt and never runs after a refusal. `PATCH
 /api/admin/settings` takes any subset of `serverName` (1–64 chars), `allowRegistration`, `updaterHours`
@@ -852,7 +853,7 @@ never makes an interactive Add/Fetch hunt and never runs after a refusal. `PATCH
 `cleanupReadDays` (0–3650; 0 is a value, "at the next run"), `backupHour` (0–23, the local hour of the nightly
 backup — the pending timer is re-armed at once, so the change applies to the next run rather than the one
 after; `GET /api/admin/tasks` shows the backup's `schedule` as `daily at HH:00` from the same column),
-`scanlatorPrefs` (below), `autoFollowOnFailure`, and `repairEnabled` (the nightly library repair, on by
+`scanlatorPrefs` and `sourcePrefs` (both below), `autoFollowOnFailure`, and `repairEnabled` (the nightly library repair, on by
 default — switching it off stops the schedule only, since nothing it does deletes, merges or renumbers
 anything). Each field is written on its own, an out-of-range value is a **400** and nothing is written, and
 the audit row `settings.update` carries the body. The admin console's Settings tab sends one
@@ -993,7 +994,7 @@ compared case-insensitively with spaces and punctuation ignored. The server-wide
 `scanlator_prefs` on `GET /api/admin/settings`, written whole through `PATCH /api/admin/settings
 {scanlatorPrefs}` (`priority` up to 50 names, `blocked` up to 200, `patienceDays` an integer 0–30 or
 `null`; the default is nothing ranked, nothing blocked, two days). A series can carry its own through
-`PATCH /api/admin/series/:id`, whose body is now `{autoUpdate?, scanlatorPrefs?}` — at least one, no other
+`PATCH /api/admin/series/:id`, whose body is now `{autoUpdate?, scanlatorPrefs?, sourcePrefs?}` — at least one, no other
 fields, each written on its own, and `scanlatorPrefs: null` clears the series' set. The two merge:
 **blocked is the union**, a series **priority replaces** the global list, and a series `patienceDays` of
 `null` **falls back** to the global one. A copy whose known groups are all blocked is dropped before the
@@ -1002,6 +1003,18 @@ never blocked — so a number that only blocked groups have released is absent f
 neither fetched nor counted as missing. A series only ever *waits* for a group when its effective priority
 list is non-empty: with none, the best available copy is taken at once, so a series from a source that
 names no groups is never held.
+
+**Source order** (since v0.47.0, from #93). When a series follows more than one source, the copy of a number
+it does not have yet is taken from the highest-ranked source that lists it. The order ranks **below** the
+release preferences and the hosted-before-external rule, so it decides only between copies those call equal —
+the choice the follow order used to make alone, where the primary won every tie. The server-wide order is
+`source_prefs` on `GET /api/admin/settings`, `{priority: [...]}`, written whole through `PATCH
+/api/admin/settings {sourcePrefs}`; a series can carry its own through `PATCH /api/admin/series/:id
+{sourcePrefs}`, which **replaces** the server's for that series rather than merging, and `null` or an empty
+`priority` clears it. Ids are kept as given — trimmed, de-duplicated, at most 100, anything outside letters,
+digits and `_ . : -` dropped — whether or not that source is loaded right now, so an order saved while the
+extension engine restarts keeps its extensions. A source the order does not name ranks below every one it
+does, in the series' follow order. It never replaces a chapter already held.
 
 `GET /api/admin/series/:id/scanlators` is what the series page's editor reads: `{checkedAt, prefs, global,
 effective: {priority, blocked, patienceDays}, groups: [GroupStat & {listed}]}`, the groups gathered from the

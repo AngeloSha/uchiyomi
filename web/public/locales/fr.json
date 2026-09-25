@@ -2,7 +2,7 @@
   "_meta": {
     "language": "fr",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 1172
+    "strings": 1181
   },
   "1 check found something": "1 vérification a trouvé quelque chose",
   "1 member": "1 membre",
@@ -1175,5 +1175,14 @@
   "Last page": "Dernière page",
   "of {n}": "sur {n}",
   "Compact chapter list": "Liste de chapitres compacte",
-  "On a computer, chapter rows without thumbnails, and their buttons appear when you point at a row. Phones and tablets are unchanged. This device only.": "Sur un ordinateur : des lignes de chapitres sans vignettes, dont les boutons apparaissent au survol. Téléphones et tablettes inchangés. Sur cet appareil uniquement."
+  "On a computer, chapter rows without thumbnails, and their buttons appear when you point at a row. Phones and tablets are unchanged. This device only.": "Sur un ordinateur : des lignes de chapitres sans vignettes, dont les boutons apparaissent au survol. Téléphones et tablettes inchangés. Sur cet appareil uniquement.",
+  "Source order": "Ordre des sources",
+  "When a series follows more than one source, a new chapter is taken from the highest one here that has it, after your scanlation group preferences. Chapters you already have are never replaced because of it. A series can have its own order in its Sources & translations.": "Quand une série suit plusieurs sources, un nouveau chapitre est pris à la première source de cette liste qui l’a, après vos préférences de groupes de scantrad. Les chapitres que vous avez déjà ne sont jamais remplacés pour autant. Une série peut avoir son propre ordre dans Sources et traductions.",
+  "No order set: each series prefers the source it was added from.": "Aucun ordre défini : chaque série préfère la source depuis laquelle elle a été ajoutée.",
+  "Not available right now": "Indisponible pour le moment",
+  "Add a source to the order": "Ajouter une source à l’ordre",
+  "Preferred source for this series: new chapters come from it when it has them, after your group preferences. Chapters already here stay as they are.": "Source préférée pour cette série : les nouveaux chapitres viennent d’elle quand elle les a, après vos préférences de groupes. Les chapitres déjà présents restent tels quels.",
+  "Preferring {name}": "{name} est préférée",
+  "Back to the server default": "Retour au réglage du serveur",
+  "Use the server default": "Utiliser le réglage du serveur"
 }
