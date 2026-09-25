@@ -2,8 +2,10 @@
 
 ## v0.47.1 — 2026-09-25
 
-**A double-click in the reader zooms, and only zooms.** From [@Squeaks72](https://github.com/Squeaks72)
-([#99](https://github.com/AngeloSha/uchiyomi/pull/99)), with one fix on top.
+**A double-click in the reader zooms, and only zooms — and every panel that scrolls can be scrolled with a
+mouse wheel again.** Both from [@Squeaks72](https://github.com/Squeaks72)
+([#99](https://github.com/AngeloSha/uchiyomi/pull/99), [#103](https://github.com/AngeloSha/uchiyomi/pull/103)),
+each with a fix on top.
 
 ### Double-click to zoom no longer turns the page
 
@@ -22,6 +24,19 @@ chapter finished the moment it shows, so a slow double-click whose first click l
 the chapter read — Continue moved on, and read-chapter cleanup could remove the file. A page turn from a click
 is now not reported as reading until it can no longer be undone. Found in a real browser: at a 650 ms
 double-click the pull request as opened sent "completed"; with the fix nothing is sent until the turn is final.
+
+### Panels a mouse wheel could not scroll
+
+On a short window, the reader's settings sheet ended at *Pages per view*: the rows below it (reading direction,
+repeated pages, the per-source default) were there, but the wheel would not bring them up
+([#103](https://github.com/AngeloSha/uchiyomi/pull/103)). The app's smooth scrolling takes every wheel event
+and scrolls the page, unless the element under the pointer is marked as scrolling on its own, and four overlays
+never were: the reader settings, confirmation dialogs, the console's group sheet and the downloads panel.
+
+The same gap was in v0.47.0's **Read a chapter first**: on a computer the wheel scrolled the page behind the
+preview, so a previewed chapter could not be scrolled at all. Smaller lists inside pages had it too — *Edit
+series*, *Add to collection*, the admin's folder picker, row dialogs and import review. All of them scroll now,
+and a test reads every page and component in the app, so a new panel that forgets cannot ship.
 
 ### Dependencies
 
