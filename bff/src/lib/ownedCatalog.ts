@@ -14,7 +14,7 @@ function page<T>(content: T[], total: number, p: number, size: number): Page<T> 
 // ⚠️ Every name here must ALSO be produced by the inner SELECT of `seriesSrcWith` below, which enumerates
 // its columns explicitly. Adding one to only one of the two makes EVERY series read fail with "column does
 // not exist" -- the series page, the library grid, search, the home rails, OPDS, all of it.
-const SERIES_COLS = 'id, title, summary, status, genres, author, age_rating, books_count, cover_book_id, web, created_at, latest_mtime, auto_update, library_id, library_pinned, source_chapters, source_missing, source_checked_at';
+const SERIES_COLS = 'id, title, summary, status, genres, author, age_rating, reading_direction, books_count, cover_book_id, web, created_at, latest_mtime, auto_update, library_id, library_pinned, source_chapters, source_missing, source_checked_at';
 
 /**
  * The one place a series is read from.
@@ -35,6 +35,8 @@ const seriesSrcWith = (gate: Gate, ctx: ViewCtx, p: Params, alias: string) => `(
          COALESCE(o.status, s.status) AS status, COALESCE(o.genres, s.genres) AS genres,
          COALESCE(o.author, s.author) AS author,
          COALESCE(o.age_rating, s.age_rating) AS age_rating,
+         -- The admin's direction, else what the evidence said (lib/readingDirection.ts), else NULL: unknown.
+         COALESCE(o.reading_direction, s.reading_direction) AS reading_direction,
          s.books_count, s.cover_book_id, s.web, s.created_at, s.latest_mtime,
          s.auto_update, s.library_id, s.library_pinned,
          -- What the source last said, so "how far behind is this?" is a column rather than a network call.
@@ -108,7 +110,13 @@ function seriesDto(r: any) {
       title: r.title,
       status: r.status ? String(r.status).toUpperCase() : '',
       summary,
-      readingDirection: 'WEBTOON',
+      // The series' own direction, WEBTOON when nothing knows it (#102). This was that constant for every
+      // series, so the reader's "Series default" never read right to left, a right-to-left spread was never
+      // put back together, a downloaded chapter carried WEBTOON offline, and the Komga-compatible API told
+      // Mihon that every manga was a webtoon -- all four read this one field. Reintroduce the constant:
+      // readingDirection.int.test.ts "THE POINT: a right-to-left series says so to the reader, offline and to
+      // Mihon" finds WEBTOON on all three.
+      readingDirection: r.reading_direction ?? 'WEBTOON',
       author: r.author ?? '',
       publisher: r.author ?? '',
       genres,

@@ -1104,6 +1104,15 @@ ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS borrow_names boolean NOT NU
 ALTER TABLE lib_series ADD COLUMN IF NOT EXISTS borrow_names boolean;
 ALTER TABLE lib_series ADD COLUMN IF NOT EXISTS name_donor jsonb;
 ALTER TABLE lib_books ADD COLUMN IF NOT EXISTS chapter_name_source text;
+
+-- v0.48.0: which way a series reads (lib/readingDirection.ts, #102). Until now every series answered WEBTOON,
+-- so the reader's "Series default" direction could never turn a page right to left. reading_direction is one
+-- of Komga's four values, NULL meaning nobody knows, which still reads as WEBTOON. reading_direction_from names
+-- the evidence -- 'comicinfo', 'source' or 'anilist', most trusted first -- so a weaker signal never overwrites
+-- a stronger one. The admin's choice is an override like the others, and beats all three.
+ALTER TABLE lib_series       ADD COLUMN IF NOT EXISTS reading_direction text;
+ALTER TABLE lib_series       ADD COLUMN IF NOT EXISTS reading_direction_from text;
+ALTER TABLE series_overrides ADD COLUMN IF NOT EXISTS reading_direction text;
 `;
 
 // Serialises migrate() across processes. CREATE TABLE IF NOT EXISTS is not safe to run concurrently:

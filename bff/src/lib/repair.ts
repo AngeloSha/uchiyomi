@@ -67,15 +67,17 @@ import { assess, gapsOf } from './fill';
 // question the page answers or the button and the page disagree about whether there is anything to do.
 import { solverBlaming } from './health';
 import { visibleToAll } from './visibility';
+import { detectDirections } from './readingDirection';
 
 /**
- * Which of the seven steps to run. `only` on the options picks a subset; the nightly runs them all. `groups`
+ * Which of the eight steps to run. `only` on the options picks a subset; the nightly runs them all. `groups`
  * and `names` (v0.47.0) do nothing unless an admin has switched them on -- see stepGroups and stepNames.
+ * `directions` (v0.48.0) only reads: it asks MangaDex and AniList which way series read (stepDirections).
  */
-export type RepairStep = 'solver' | 'count' | 'failures' | 'short' | 'gaps' | 'groups' | 'names';
+export type RepairStep = 'solver' | 'count' | 'failures' | 'short' | 'gaps' | 'groups' | 'names' | 'directions';
 
 /** In the order the run takes them, which is also the order a caller's `only` is reported in. */
-export const REPAIR_STEPS: readonly RepairStep[] = ['solver', 'count', 'failures', 'short', 'gaps', 'groups', 'names'];
+export const REPAIR_STEPS: readonly RepairStep[] = ['solver', 'count', 'failures', 'short', 'gaps', 'groups', 'names', 'directions'];
 
 /**
  * An integer knob from the environment, clamped. Out-of-range, unparseable and absent all fall back to the
@@ -112,6 +114,11 @@ const GROUP_RETRY_DAYS = 7;
  * and two lookups per candidate judged, all for something cosmetic, so it is kept to a handful a night.
  */
 export const REPAIR_NAMES_MAX = envInt('REPAIR_NAMES_MAX', 5, 1, 100);
+/**
+ * Series one run may ask about their reading direction, per signal (stepDirections). MangaDex answers 100 per
+ * request and AniList 50, so the default is at most five and ten requests a night.
+ */
+export const REPAIR_DIRECTIONS_MAX = envInt('REPAIR_DIRECTIONS_MAX', 500, 1, 5000);
 /**
  * The pause between two series the failures step retries, as the sweep paces itself. Tests set it to 0.
  *
@@ -220,6 +227,11 @@ export interface RepairResult {
    * neither the server nor any series has it switched on, which is the default.
    */
   names: { off?: true; series: number; named: number };
+  /**
+   * Reading directions (stepDirections): series a service answered for, and ones whose stored direction
+   * changed because of it.
+   */
+  directions: { asked: number; learned: number };
   failures: {
     /** Ledger rows put back to zero attempts. */
     reset: number;
@@ -922,6 +934,21 @@ async function stepNames(r: RepairResult, log?: Log): Promise<RepairResult['stop
   return undefined;
 }
 
+/**
+ * (h) Reading directions (#102): which way series read, for the ones nothing has said about yet.
+ *
+ * The scanner learns it from ComicInfo and an add from its source and its AniList match, but a series added
+ * before v0.48.0 had neither, and without this every one of them would read as a webtoon until somebody set
+ * it by hand. Two batch requests' worth a night at most (lib/readingDirection.ts detectDirections); it only
+ * ever writes the direction, and never over an admin's choice, which lives on series_overrides.
+ */
+async function stepDirections(r: RepairResult, log?: Log): Promise<void> {
+  r.directions = await detectDirections({ max: REPAIR_DIRECTIONS_MAX, log }).catch((e) => {
+    log?.warn(`repair: reading directions: ${(e as Error)?.message || e}`);
+    return { asked: 0, learned: 0 };
+  });
+}
+
 /** What one series' gap hunt concluded, stored on lib_series.gaps_result for the Health page to read. */
 interface GapsResult {
   at: string;
@@ -1109,6 +1136,7 @@ function blank(): RepairResult {
     gaps: { series: 0, followed: 0, fetched: 0, unfillable: 0, sweep: 0 },
     groups: { looked: 0, replaced: 0, left: 0 },
     names: { series: 0, named: 0 },
+    directions: { asked: 0, learned: 0 },
     failures: { reset: 0 },
     solver: { reset: false, unblocked: 0, expired: 0 },
   };
@@ -1121,7 +1149,8 @@ function summaryOf(r: RepairResult): string {
     + `${r.gaps.fetched} fetched, ${r.failures.reset} failures reset, solver ${r.solver.reset ? 'reset' : 'untouched'} `
     + `(${r.solver.unblocked} unblocked, ${r.solver.expired} expired), groups `
     + (r.groups.off ? 'off' : `${r.groups.replaced} replaced / ${r.groups.left} left of ${r.groups.looked}`)
-    + ', names ' + (r.names.off ? 'off' : `${r.names.named} named in ${r.names.series} series`);
+    + ', names ' + (r.names.off ? 'off' : `${r.names.named} named in ${r.names.series} series`)
+    + `, directions ${r.directions.learned} learned of ${r.directions.asked} asked`;
 }
 
 /** One pass. Exported for the tests; everything else goes through runRepair, which owns the flags. */
@@ -1164,6 +1193,7 @@ export async function repairLibrary(log?: Log, opts: RepairOpts = {}): Promise<R
     } else if (step === 'gaps') stopped = await stepGaps(r, opts, budget, pending, notes, log);
     else if (step === 'groups') stopped = await stepGroups(r, opts, notes, log);
     else if (step === 'names') stopped = await stepNames(r, log);
+    else if (step === 'directions') await stepDirections(r, log);
     if (activeCard) {
       activeCard.done++;
       activeCard.fetched = r.short.replaced + r.gaps.fetched + r.groups.replaced + (r.failures.retried?.added ?? 0);

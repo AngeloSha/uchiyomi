@@ -159,7 +159,7 @@ export function komgaReadingDirection(v: unknown): ReadingDirection {
   if (s === 'LTR') return 'LEFT_TO_RIGHT';
   if (s === 'RTL' || s === 'MANGA') return 'RIGHT_TO_LEFT';
   if (s === 'LONGSTRIP' || s === 'LONG_STRIP' || s === 'CONTINUOUS') return 'WEBTOON';
-  // What lib/ownedCatalog's seriesDto says for everything today; a reader for scraped manhwa/manga.
+  // What lib/ownedCatalog's seriesDto says for a series whose direction nothing knows (lib/readingDirection.ts).
   return 'WEBTOON';
 }
 

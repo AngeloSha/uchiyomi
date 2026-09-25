@@ -5,6 +5,7 @@ import { komga, komgaImage } from '../lib/komga';
 import { serveImage, getOrFetch } from '../lib/imageCache';
 import { dominantHex } from '../lib/color';
 import { fetchAniListArt } from '../lib/anilist';
+import { learnDirection, directionFromAniListMatch } from '../lib/readingDirection';
 import { linkSeries } from '../lib/trackers';
 import { LIBRARY_ROOT, cbzPageAt } from '../lib/library';
 import { cfSession } from '../lib/sources/flaresolverr';
@@ -339,7 +340,11 @@ async function backdropRecipe(id: string, hero: boolean, ar: HeroAr, ctx: ViewCt
         [id, fetched.banner, fetched.cover],
       );
       // the same match also anchors tracker sync — record it while we have it
-      if (fetched.mediaId) await linkSeries(id, fetched.mediaId, fetched.mediaTitle ?? null);
+      if (fetched.mediaId) {
+        await linkSeries(id, fetched.mediaId, fetched.mediaTitle ?? null);
+        // and, when the entry is visibly this series, where it comes from: the weakest evidence of its direction
+        await learnDirection({ id }, directionFromAniListMatch(title, fetched as { country?: string | null; titles?: string[] }), 'anilist').catch(() => {});
+      }
       art = fetched;
     } catch {
       art = { banner: null, cover: null }; // transient AniList error: don't cache; fall back this view

@@ -1,6 +1,7 @@
 // MangaDex built-in source — official public API (no key, no scraping, no Cloudflare). The most defensible
 // source, so it's bundled in the core and always on. Docs: https://api.mangadex.org/docs/
 import { SourceAdapter, SourceSeries, SourceChapter } from './types';
+import { directionFromLanguage } from '../directionSignals';
 
 const API = 'https://api.mangadex.org';
 const HEADERS = { 'user-agent': 'Uchiyomi/1.0 (self-hosted personal reader)' };
@@ -36,7 +37,29 @@ function toSeries(m: any): SourceSeries {
     coverUrl: cover?.attributes?.fileName ? `https://uploads.mangadex.org/covers/${m.id}/${cover.attributes.fileName}` : undefined,
     url: `https://mangadex.org/title/${m.id}`,
     updatedAt: a.updatedAt || a.createdAt || undefined,
+    // Japanese reads right to left, Korean and Chinese as a long strip (lib/readingDirection.ts, #102).
+    readingDirection: directionFromLanguage(a.originalLanguage) ?? undefined,
   };
+}
+
+/**
+ * The original language of many titles at once, for the repair's reading-direction backfill
+ * (lib/readingDirection.ts detectDirections). `ids[]` takes up to 100 per request, so a whole library of
+ * MangaDex series is a handful of calls. Every content rating is asked for: this is a lookup by id of titles
+ * already in the library, and the default filter would silently answer nothing for an adult one.
+ */
+export async function mangadexOriginalLanguages(ids: string[]): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  for (let i = 0; i < ids.length; i += 100) {
+    const chunk = ids.slice(i, i + 100);
+    const qs = chunk.map((id) => `ids[]=${encodeURIComponent(id)}`).join('&');
+    const j = await jget(`${API}/manga?${qs}&limit=100&${RATINGS}&contentRating[]=pornographic`);
+    for (const m of j.data || []) {
+      const lang = m?.attributes?.originalLanguage;
+      if (typeof m?.id === 'string' && typeof lang === 'string' && lang) out.set(m.id, lang);
+    }
+  }
+  return out;
 }
 
 

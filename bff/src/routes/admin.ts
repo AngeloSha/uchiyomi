@@ -59,6 +59,8 @@ import { open as unseal } from '../lib/secretbox';
 import { runHealthChecks } from '../lib/health';
 import { titlesFromMangadexList, entriesFromMangadexList } from '../lib/mangadexList';
 import { fetchAniListArt, fetchAniListCandidates, fetchAnimeBanner } from '../lib/anilist';
+import { READING_DIRECTIONS } from '../lib/komgaDto';
+import { learnDirection, directionFromAniListMatch } from '../lib/readingDirection';
 import { fetchKitsuBanner } from '../lib/kitsu';
 import { randomBytes } from 'crypto';
 import { appVersion } from '../lib/appVersion';
@@ -1286,6 +1288,15 @@ export default async function adminRoutes(app: FastifyInstance) {
        * ordinary retitle would quietly clear the exemption.
        */
       adultExempt: z.boolean().nullish(),
+      /**
+       * Which way the series reads (#102), one of Komga's four, or null for "automatic": whatever ComicInfo,
+       * the source or AniList said (lib/readingDirection.ts), WEBTOON when none did.
+       *
+       * ABSENT leaves it as it is and NULL clears it -- the three states the column needs. A COALESCE, as
+       * adultExempt has, cannot clear, and writing it unconditionally like the rest would let an edit modal
+       * from before this field (a cached PWA) wipe the direction on every retitle.
+       */
+      readingDirection: z.enum(READING_DIRECTIONS).nullable().optional(),
     }).safeParse(req.body);
     if (!b.success) return reply.code(400).send({ error: 'bad_request' });
     const norm = (v: string | null | undefined) => { const s = (v ?? '').trim(); return s ? s : null; };
@@ -1312,14 +1323,18 @@ export default async function adminRoutes(app: FastifyInstance) {
     // save from the edit modal 500'd -- not just rating changes: retitling, the summary, the author and the
     // genres all failed the same way, under a message that only said "Could not save". `?? null` because
     // the field is nullish: absent and null both mean "inherit whatever ComicInfo said".
+    const sentDirection = b.data.readingDirection !== undefined;
     await q(
-      `INSERT INTO series_overrides (series_id, title, summary, author, status, genres, age_rating, adult_exempt, updated_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, now())
+      `INSERT INTO series_overrides (series_id, title, summary, author, status, genres, age_rating, adult_exempt, reading_direction, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $10, now())
        ON CONFLICT (series_id) DO UPDATE SET title = $2, summary = $3, author = $4, status = $5,
          genres = $6, age_rating = $7,
-         adult_exempt = COALESCE($8, series_overrides.adult_exempt), updated_at = now()`,
+         adult_exempt = COALESCE($8, series_overrides.adult_exempt),
+         reading_direction = CASE WHEN $9::boolean THEN $10 ELSE series_overrides.reading_direction END,
+         updated_at = now()`,
       [id, norm(b.data.title), norm(b.data.summary), norm(b.data.author), norm(b.data.status),
-       normGenres(b.data.genres), b.data.ageRating ?? null, b.data.adultExempt ?? null],
+       normGenres(b.data.genres), b.data.ageRating ?? null, b.data.adultExempt ?? null,
+       sentDirection, b.data.readingDirection ?? null],
     );
     await logAudit('series.meta_override', { userId: userIdOf(req), detail: { id }, req });
     return { ok: true };
@@ -2270,7 +2285,10 @@ export default async function adminRoutes(app: FastifyInstance) {
                  cover  = COALESCE(EXCLUDED.cover,  series_art.cover), fetched_at = now()`,
               [t.id, art.banner, art.cover],
             );
-            if ((art as any).mediaId) await linkSeries(t.id, (art as any).mediaId, (art as any).mediaTitle ?? null);
+            if ((art as any).mediaId) {
+              await linkSeries(t.id, (art as any).mediaId, (art as any).mediaTitle ?? null);
+              await learnDirection({ id: t.id }, directionFromAniListMatch(t.title, art as any), 'anilist').catch(() => {});
+            }
             if (art.banner) job.banners++;
             else job.covers++;
           } else job.misses++;
@@ -2703,7 +2721,11 @@ export default async function adminRoutes(app: FastifyInstance) {
       for (const t of targets) {
         try {
           const m = await fetchAniListArt(t.title);
-          if (m.mediaId) { await linkSeries(t.id, m.mediaId, m.mediaTitle ?? null); job.linked++; }
+          if (m.mediaId) {
+            await linkSeries(t.id, m.mediaId, m.mediaTitle ?? null);
+            await learnDirection({ id: t.id }, directionFromAniListMatch(t.title, m), 'anilist').catch(() => {});
+            job.linked++;
+          }
           else job.misses++;
         } catch { job.misses++; }
         job.done++;

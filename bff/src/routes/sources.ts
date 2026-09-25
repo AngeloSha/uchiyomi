@@ -39,6 +39,7 @@ import { copyToChapter, listingRows, replaceListing, type ListingCopy } from '..
 import { haveNumbers } from '../lib/libraryNumbers';
 import { groupStats } from '../lib/groupStats';
 import { fetchAniListArt, fetchTrendingManhwa, TrendingItem } from '../lib/anilist';
+import { learnDirection, directionFromAniListMatch } from '../lib/readingDirection';
 import { q, one } from '../lib/db';
 import { healthAll, isDisabled, blockedNow, reportLatest, reportFail, reportSlow, classify } from '../lib/sourceHealth';
 import { diagnose, EMPTY_SUSPECT } from '../lib/sourceDiagnosis';
@@ -841,9 +842,13 @@ export async function addSeriesFromSource(opts: {
       await q(`INSERT INTO series_art (series_id, cover) VALUES ($1, $2)
         ON CONFLICT (series_id) DO UPDATE SET cover = COALESCE(series_art.cover, EXCLUDED.cover)`, [id, series.coverUrl]).catch(() => {});
     }
+    await learnDirection({ id }, series?.readingDirection, 'source').catch(() => {});
     fetchAniListArt(title)
-      .then((a) => q(`INSERT INTO series_art (series_id, banner, cover) VALUES ($1, $2, $3)
-        ON CONFLICT (series_id) DO UPDATE SET banner = COALESCE(series_art.banner, EXCLUDED.banner), cover = COALESCE(series_art.cover, EXCLUDED.cover)`, [id, a.banner, a.cover]))
+      .then(async (a) => {
+        await q(`INSERT INTO series_art (series_id, banner, cover) VALUES ($1, $2, $3)
+          ON CONFLICT (series_id) DO UPDATE SET banner = COALESCE(series_art.banner, EXCLUDED.banner), cover = COALESCE(series_art.cover, EXCLUDED.cover)`, [id, a.banner, a.cover]).catch(() => {});
+        await learnDirection({ id }, directionFromAniListMatch(title, a), 'anilist');
+      })
       .catch(() => {});
     return { ok: true, status: 200, title, folder, chapters: 0, started: false, nothing: true, seriesId: id };
   }
@@ -915,6 +920,7 @@ export async function addSeriesFromSource(opts: {
     const heldId = (await q<{ id: string }>('SELECT id FROM lib_series WHERE folder = $1', [folder]).catch(() => []))[0]?.id;
     await q('UPDATE lib_series SET auto_update = $1, source_id = $2, source_series_id = $3, chapter_floor = $5 WHERE folder = $4',
       [autoUpdate !== false, source, sourceId, folder, floor]).catch(() => {});
+    await learnDirection({ folder }, series?.readingDirection, 'source').catch(() => {});
     // The same call the run makes on its full selection, and for the same reason: these dates are the
     // source's own, and the chapters they belong to are here -- they were simply fetched by somebody else.
     await setBookDates(folder, selected).catch(() => {});
@@ -932,8 +938,13 @@ export async function addSeriesFromSource(opts: {
         ON CONFLICT (series_id) DO UPDATE SET cover = COALESCE(series_art.cover, EXCLUDED.cover)`, [series.coverUrl, folder]).catch(() => {});
     }
     fetchAniListArt(title)
-      .then((a) => q(`INSERT INTO series_art (series_id, banner, cover) SELECT id, $1, $2 FROM lib_series WHERE folder = $3
-        ON CONFLICT (series_id) DO UPDATE SET banner = COALESCE(series_art.banner, EXCLUDED.banner), cover = COALESCE(series_art.cover, EXCLUDED.cover)`, [a.banner, a.cover, folder]))
+      .then(async (a) => {
+        await q(`INSERT INTO series_art (series_id, banner, cover) SELECT id, $1, $2 FROM lib_series WHERE folder = $3
+          ON CONFLICT (series_id) DO UPDATE SET banner = COALESCE(series_art.banner, EXCLUDED.banner), cover = COALESCE(series_art.cover, EXCLUDED.cover)`, [a.banner, a.cover, folder]).catch(() => {});
+        // The same match's country, as the weakest evidence of the reading direction, when the entry is visibly
+        // this title (lib/directionSignals.ts directionFromAniListMatch).
+        await learnDirection({ folder }, directionFromAniListMatch(title, a), 'anilist');
+      })
       .catch(() => {});
     return { ok: true, status: 200, title, folder, chapters: 0, started: false, alreadyHere: selected.length, seriesId: heldId };
   }
@@ -1020,6 +1031,9 @@ export async function addSeriesFromSource(opts: {
     // writers use the one expression -- and from `selected`, which is what was asked for.
     await q('UPDATE lib_series SET auto_update = $1, source_id = $2, source_series_id = $3, chapter_floor = $5 WHERE folder = $4',
       [autoUpdate !== false, source, sourceId, folder, floor]).catch(() => {});
+    // Which way it reads, when the source can say (MangaDex: the original language). After persistScan, so
+    // the row exists; below a ComicInfo that already said otherwise (lib/readingDirection.ts).
+    await learnDirection({ folder }, series?.readingDirection, 'source').catch(() => {});
     // The listing the series page and "Who scanlates this" read is written here from the chapters this add
     // already fetched -- no second call to the source -- so a title opened straight from Discover shows
     // its groups and versions at once instead of only what is on disk until the sweep reaches it. Held is
@@ -1044,8 +1058,13 @@ export async function addSeriesFromSource(opts: {
         ON CONFLICT (series_id) DO UPDATE SET cover = COALESCE(series_art.cover, EXCLUDED.cover)`, [series.coverUrl, folder]).catch(() => {});
     }
     fetchAniListArt(title)
-      .then((a) => q(`INSERT INTO series_art (series_id, banner, cover) SELECT id, $1, $2 FROM lib_series WHERE folder = $3
-        ON CONFLICT (series_id) DO UPDATE SET banner = COALESCE(series_art.banner, EXCLUDED.banner), cover = COALESCE(series_art.cover, EXCLUDED.cover)`, [a.banner, a.cover, folder]))
+      .then(async (a) => {
+        await q(`INSERT INTO series_art (series_id, banner, cover) SELECT id, $1, $2 FROM lib_series WHERE folder = $3
+          ON CONFLICT (series_id) DO UPDATE SET banner = COALESCE(series_art.banner, EXCLUDED.banner), cover = COALESCE(series_art.cover, EXCLUDED.cover)`, [a.banner, a.cover, folder]).catch(() => {});
+        // The same match's country, as the weakest evidence of the reading direction, when the entry is visibly
+        // this title (lib/directionSignals.ts directionFromAniListMatch).
+        await learnDirection({ folder }, directionFromAniListMatch(title, a), 'anilist');
+      })
       .catch(() => {});
     void (async () => {
       let failures = 0;

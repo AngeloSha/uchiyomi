@@ -371,8 +371,8 @@ export default async function catalogRoutes(app: FastifyInstance) {
     // apply admin metadata overrides (title/summary shown here; cover/banner are handled by the image server)
     const ov = await one<{ title: string | null; summary: string | null; cover: string | null; banner: string | null;
                           author: string | null; status: string | null; genres: string[] | null;
-                          age_rating: number | null; adult_exempt: boolean | null; v: string }>(
-      `SELECT title, summary, cover, banner, author, status, genres, age_rating, adult_exempt,
+                          age_rating: number | null; adult_exempt: boolean | null; reading_direction: string | null; v: string }>(
+      `SELECT title, summary, cover, banner, author, status, genres, age_rating, adult_exempt, reading_direction,
               EXTRACT(EPOCH FROM updated_at) * 1000 AS v FROM series_overrides WHERE series_id = $1`,
       [id],
     );
@@ -389,7 +389,7 @@ export default async function catalogRoutes(app: FastifyInstance) {
       // write back a blank and clear the very override the user opened the modal to keep
       out.overrides = { title: ov.title, summary: ov.summary, cover: ov.cover, banner: ov.banner,
                         author: ov.author, status: ov.status, genres: ov.genres, ageRating: ov.age_rating,
-                        adultExempt: ov.adult_exempt === true };
+                        adultExempt: ov.adult_exempt === true, readingDirection: ov.reading_direction };
       // The edit modal seeds from the override where one exists, so the effective rating has to reflect it
       // or reopening the modal would show the scanned value and saving would undo the correction.
       if (ov.age_rating != null && out.metadata) out.metadata.ageRating = ov.age_rating;
@@ -404,8 +404,10 @@ export default async function catalogRoutes(app: FastifyInstance) {
     // So does its own source order (lib/sourcePrefs.ts), for the Sources sheet's preferred-source chips: null
     // means the server-wide order applies.
     if (roleOf(req) === 'admin') {
-      const f = await one<{ folder: string; source_prefs: { priority?: unknown } | null; borrow_names: boolean | null; server_borrow: boolean | null }>(
-        `SELECT folder, source_prefs, borrow_names, (SELECT borrow_names FROM server_settings WHERE id = 1) AS server_borrow
+      const f = await one<{ folder: string; source_prefs: { priority?: unknown } | null; borrow_names: boolean | null; server_borrow: boolean | null;
+                            reading_direction: string | null; reading_direction_from: string | null }>(
+        `SELECT folder, source_prefs, borrow_names, (SELECT borrow_names FROM server_settings WHERE id = 1) AS server_borrow,
+                reading_direction, reading_direction_from
            FROM lib_series WHERE id = $1`, [id]);
       if (f) out.folder = f.folder;
       out.scanlatorPrefs = await readSeriesPrefs(id).catch(() => null);
@@ -415,6 +417,9 @@ export default async function catalogRoutes(app: FastifyInstance) {
       // and what applies -- a control that showed only the former would read "off" while names were borrowed.
       out.borrowNames = f?.borrow_names ?? null;
       out.borrowNamesEffective = f?.borrow_names ?? !!f?.server_borrow;
+      // What the evidence says about the reading direction, and which evidence (lib/readingDirection.ts), so
+      // the edit modal's "Automatic" can name what it would fall back to. null when nothing has said.
+      out.detectedDirection = f?.reading_direction ? { direction: f.reading_direction, from: f.reading_direction_from } : null;
     }
     return out;
   });

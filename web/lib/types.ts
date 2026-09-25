@@ -128,7 +128,14 @@ export interface Series {
     author: string | null; status: string | null; genres: string[] | null; ageRating: number | null;
     /** Let through the 18+ filter's genre rule (Admin → Settings → 18+ filter). Absent on older servers. */
     adultExempt?: boolean;
+    /** The admin's reading direction for this series; null follows `detectedDirection`. Absent before v0.48.0. */
+    readingDirection?: SeriesMetadata['readingDirection'] | null;
   };
+  /**
+   * Admins only (v0.48.0): what the evidence alone says about the reading direction, and which evidence --
+   * the chapter's ComicInfo, the followed source, or AniList. null when nothing has said.
+   */
+  detectedDirection?: { direction: NonNullable<SeriesMetadata['readingDirection']>; from: 'comicinfo' | 'source' | 'anilist' | null } | null;
   /** Every source the updater asks for this series, primary first. Sent to every viewer. */
   sources?: SeriesSource[];
   /** This series' own scanlator overrides, or null when it follows the server defaults. Admins only. */

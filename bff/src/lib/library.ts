@@ -10,6 +10,7 @@ import { fingerprintChapter } from './fingerprint';
 import { findRematch, applyRematch, logRematch, MIN_BOOKS } from './rematch';
 import { numFromName, naturalCmp } from './naming';
 import { parseComicInfoAgeRating } from './ageRating';
+import { directionFromComicInfo } from './directionSignals';
 import { reconcileListingProgress } from './listingProgress';
 
 // node-stream-zip reads the central directory only (cheap) and can stream a single entry.
@@ -533,13 +534,20 @@ export async function persistScan(): Promise<{ series: number; books: number; ms
               // one. Recomputing on every scan would mean that declaring a library, before its series were
               // reassigned, made the conflict target miss and mint a second row with a new id -- which is
               // the one thing that strands everyone's reading progress. Reassignment is a deliberate UPDATE.
-              `INSERT INTO lib_series (id, source, title, summary, author, status, genres, web, folder, books_count, library_id, age_rating, scanned_at)
-               VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12, now())
+              `INSERT INTO lib_series (id, source, title, summary, author, status, genres, web, folder, books_count, library_id, age_rating,
+                                       reading_direction, reading_direction_from, scanned_at)
+               VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14, now())
                ON CONFLICT (library_id, folder) DO UPDATE SET source=EXCLUDED.source, title=EXCLUDED.title, summary=EXCLUDED.summary,
                  author=EXCLUDED.author, status=EXCLUDED.status, genres=EXCLUDED.genres, web=EXCLUDED.web,
                  -- Never overwrite a rating we have with one we do not: a chapter whose ComicInfo omits
                  -- AgeRating must not silently un-rate a series a previous scan or an admin rated.
                  age_rating=COALESCE(EXCLUDED.age_rating, lib_series.age_rating),
+                 -- The same for the reading direction (lib/readingDirection.ts), and more so: a file that says
+                 -- nothing must not erase what MangaDex or AniList said. When it DOES say, it is the most
+                 -- trusted evidence there is and replaces theirs, provenance and all.
+                 reading_direction=COALESCE(EXCLUDED.reading_direction, lib_series.reading_direction),
+                 reading_direction_from=CASE WHEN EXCLUDED.reading_direction IS NOT NULL
+                   THEN EXCLUDED.reading_direction_from ELSE lib_series.reading_direction_from END,
                  scanned_at=now()
                RETURNING id`,
               [
@@ -549,6 +557,8 @@ export async function persistScan(): Promise<{ series: number; books: number; ms
                 field(firstXml, 'Web'), folderRel, files.length,
                 known?.library_id ?? libraryIdFor(folderRel, libs),
                 parseComicInfoAgeRating(field(firstXml, 'AgeRating')),
+                directionFromComicInfo(field(firstXml, 'Manga')),
+                directionFromComicInfo(field(firstXml, 'Manga')) ? 'comicinfo' : null,
               ],
             );
             id = rows[0].id;
