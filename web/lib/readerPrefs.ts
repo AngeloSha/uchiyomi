@@ -11,6 +11,16 @@ export type ReaderTheme = 'amoled' | 'sepia' | 'gray';
 export type JunkPages = 'show' | 'collapse' | 'hide';
 const JUNK_MODES: readonly JunkPages[] = ['show', 'collapse', 'hide'];
 
+/**
+ * Which way paged mode lays its pages out. `rtl` is the manga way: the next page is to the LEFT (swipe right,
+ * tap the left edge, ←), and a double spread puts its first page on the right. `series` follows the series'
+ * own `readingDirection` -- RIGHT_TO_LEFT reads right to left, anything else left to right. Only a Komga
+ * backend reports a real direction today; the built-in library answers WEBTOON for every series
+ * (lib/ownedCatalog seriesDto), so there `series` reads left to right.
+ */
+export type PagedDirection = 'ltr' | 'rtl' | 'series';
+const PAGED_DIRECTIONS: readonly PagedDirection[] = ['ltr', 'rtl', 'series'];
+
 export interface ReaderPrefs {
   gap: number; // px between pages (0 = seamless webtoon)
   brightness: number; // 0.25 .. 1
@@ -19,6 +29,13 @@ export interface ReaderPrefs {
   fitWidth: boolean;
   theme: ReaderTheme;
   spread: boolean; // paged mode: two pages side by side (manga double-page convention)
+  /**
+   * Paged mode's page order (see `PagedDirection`). `series` by default: a series that says it reads right to
+   * left finally gets a right-to-left track, and every other series -- all of them on the built-in library --
+   * reads left to right exactly as before. `ltr`/`rtl` are overrides. Stored settings without the key pick
+   * up the default through the spread in `migratePrefs`.
+   */
+  pagedDirection: PagedDirection;
   junkPages: JunkPages; // what to do with pages that repeat across chapters
   /**
    * @deprecated Superseded by `junkPages`, and kept ONLY so that an older build does not fight this one.
@@ -37,6 +54,7 @@ export const DEFAULT_PREFS: ReaderPrefs = {
   fitWidth: true,
   theme: 'amoled',
   spread: false,
+  pagedDirection: 'series',
 };
 
 const KEY = 'yomi_reader_prefs';
@@ -77,6 +95,7 @@ export function migratePrefs(raw: unknown): ReaderPrefs {
   const chosen = JUNK_MODES.includes(r.junkPages as JunkPages);
   const p = { ...DEFAULT_PREFS, ...r };
   if (!chosen) p.junkPages = r.skipJunk === false ? 'show' : DEFAULT_PREFS.junkPages;
+  if (!PAGED_DIRECTIONS.includes(p.pagedDirection)) p.pagedDirection = DEFAULT_PREFS.pagedDirection;
   p.skipJunk = p.junkPages !== 'show';
   return p;
 }
@@ -106,7 +125,7 @@ function queueSync() {
     syncTimer = null;
     pushing++;
     void import('./api')
-      .then(({ api }) => api('/api/settings', { method: 'PUT', json: { reader: loadPrefs(), readerSeries: allSeriesPrefs() } }))
+      .then(({ api }) => api('/api/settings', { method: 'PUT', json: { reader: loadPrefs(), readerSeries: allSeriesPrefs(), readerSource: allSourcePrefs() } }))
       .catch(() => {})
       .finally(() => { pushing--; });
   }, SYNC_DELAY);
@@ -130,7 +149,7 @@ export async function syncPrefsFromServer(): Promise<ReaderPrefs> {
   if (syncTimer || pushing) return loadPrefs();
   try {
     const { api } = await import('./api');
-    const s = await api<{ reader?: Partial<ReaderPrefs>; readerSeries?: Record<string, SeriesPrefs> }>('/api/settings');
+    const s = await api<{ reader?: Partial<ReaderPrefs>; readerSeries?: Record<string, SeriesPrefs>; readerSource?: Record<string, SourcePrefs> }>('/api/settings');
     if (s?.reader && typeof s.reader === 'object') {
       // Through the same reconciliation as a local read: a settings row written by an older build carries
       // `skipJunk` and no `junkPages`, and must not land here as a raw object.
@@ -140,6 +159,13 @@ export async function syncPrefsFromServer(): Promise<ReaderPrefs> {
       for (const [id, sp] of Object.entries(s.readerSeries)) {
         if (id && sp && typeof sp === 'object') {
           localStorage.setItem(`yomi_rs_${id}`, JSON.stringify({ ...loadSeriesPrefs(id), ...sp }));
+        }
+      }
+    }
+    if (s?.readerSource && typeof s.readerSource === 'object') {
+      for (const [id, sp] of Object.entries(s.readerSource)) {
+        if (id && sp && typeof sp === 'object') {
+          localStorage.setItem(`${SOURCE_KEY}${id}`, JSON.stringify({ ...loadSourcePrefs(id), ...sp }));
         }
       }
     }
@@ -165,12 +191,37 @@ function allSeriesPrefs(): Record<string, SeriesPrefs> {
   return out;
 }
 
+const SOURCE_KEY = 'yomi_rp_';
+
 // ---- per-series memory (mode/theme/zoom remembered per title) ----
 export interface SeriesPrefs {
   mode?: ReaderPrefs['mode'];
   theme?: ReaderTheme;
   zoom?: number;
   spread?: boolean;
+  pagedDirection?: ReaderPrefs['pagedDirection'];
+}
+
+/**
+ * The settings that describe how a TITLE reads -- remembered per series and per source, never taken as the
+ * global default from inside the reader.
+ */
+export const LOOK_KEYS = ['mode', 'theme', 'spread', 'pagedDirection'] as const;
+
+/**
+ * What a change made in the reader should write to the GLOBAL default.
+ *
+ * Only what the change itself touched, and never a look key while a title is open: that goes to the title.
+ * The reader's live prefs are the global default with the source's and the series' settings laid over it, so
+ * saving them wholesale -- what the sheet did -- turned one series' or one source's look into everyone's
+ * default, even on a change to brightness. The global default is set under Profile -> Settings.
+ * Reintroduce by returning `p` unchanged: readerSourcePrefs.test.ts's global-default cases fail.
+ */
+export function globalPrefsChange(p: Partial<ReaderPrefs>, inSeries: boolean): Partial<ReaderPrefs> {
+  if (!inSeries) return { ...p };
+  const out: Partial<ReaderPrefs> = { ...p };
+  for (const k of LOOK_KEYS) delete out[k];
+  return out;
 }
 
 export function loadSeriesPrefs(seriesId: string): SeriesPrefs {
@@ -189,6 +240,90 @@ export function saveSeriesPrefs(seriesId: string, partial: SeriesPrefs) {
     localStorage.setItem(`yomi_rs_${seriesId}`, JSON.stringify({ ...cur, ...partial }));
   } catch {}
   queueSync();
+}
+
+// ---- per-source memory (the source is the best proxy the app has for the FORMAT) ----
+/**
+ * Reader settings remembered per SOURCE.
+ *
+ * Which source a chapter came from is the most reliable signal available for what it actually is: a webtoon
+ * site serves long strips, a manga site serves paged volumes. Those want opposite readers -- one continuous
+ * vertical scroll, the other right-to-left paged spreads -- and until now the only options were a single global
+ * default that was wrong for half the library, or correcting it on every title forever.
+ *
+ * Same shape as the per-series memory, and resolved between it and the global default:
+ *
+ *     global default  <  source default  <  this series
+ *
+ * so setting a source fixes everything from it at once, and a title you have adjusted by hand still wins.
+ *
+ * Stored under `yomi_rp_` rather than `yomi_rs_` deliberately: `allSeriesPrefs()` collects by that prefix,
+ * and a key that began with it would be pushed up as a series override under a source's id.
+ */
+export type SourcePrefs = SeriesPrefs;
+
+export function loadSourcePrefs(sourceId: string): SourcePrefs {
+  if (typeof window === 'undefined' || !sourceId) return {};
+  try {
+    return JSON.parse(localStorage.getItem(`${SOURCE_KEY}${sourceId}`) || '{}');
+  } catch {
+    return {};
+  }
+}
+
+export function saveSourcePrefs(sourceId: string, partial: SourcePrefs) {
+  if (!sourceId) return;
+  try {
+    const cur = loadSourcePrefs(sourceId);
+    localStorage.setItem(`${SOURCE_KEY}${sourceId}`, JSON.stringify({ ...cur, ...partial }));
+  } catch {}
+  queueSync();
+}
+
+/** Forget a source's default, so its titles fall back to the global one. */
+export function clearSourcePrefs(sourceId: string) {
+  if (!sourceId) return;
+  try { localStorage.removeItem(`${SOURCE_KEY}${sourceId}`); } catch {}
+  queueSync();
+}
+
+/**
+ * The source a series reads from, remembered on this device.
+ *
+ * The per-source default is keyed by the SERIES' source, not by the chapter in hand: a downloaded chapter is
+ * read from its offline record, which names no source, and a series can mix copies from several sources --
+ * keying by the chapter applied the default to nothing downloaded and flipped the look mid-series. The reader
+ * learns the series' primary source when it loads the series; this keeps it for opening one offline.
+ */
+const SERIES_SOURCE_KEY = 'yomi_srcof_';
+export function rememberSeriesSource(seriesId: string, src: { id: string; name: string }) {
+  if (!seriesId || !src.id) return;
+  try { localStorage.setItem(`${SERIES_SOURCE_KEY}${seriesId}`, JSON.stringify(src)); } catch {}
+}
+export function seriesSourceOf(seriesId: string): { id: string; name: string } | null {
+  if (typeof window === 'undefined' || !seriesId) return null;
+  try {
+    const v = JSON.parse(localStorage.getItem(`${SERIES_SOURCE_KEY}${seriesId}`) || 'null');
+    return v && typeof v.id === 'string' && v.id ? { id: v.id, name: typeof v.name === 'string' ? v.name : '' } : null;
+  } catch { return null; }
+}
+
+/** Every per-source default held locally, capped like the per-series map for the same reason. */
+function allSourcePrefs(): Record<string, SourcePrefs> {
+  const out: Record<string, SourcePrefs> = {};
+  try {
+    const keys: string[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k?.startsWith(SOURCE_KEY)) keys.push(k);
+    }
+    for (const k of keys.slice(-SERIES_CAP)) {
+      const id = k.slice(SOURCE_KEY.length);
+      const v = loadSourcePrefs(id);
+      if (Object.keys(v).length) out[id] = v;
+    }
+  } catch {}
+  return out;
 }
 
 export const THEME_FILTER: Record<ReaderTheme, string> = {

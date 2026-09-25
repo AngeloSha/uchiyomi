@@ -126,6 +126,8 @@ export interface Series {
   overrides?: {
     title: string | null; summary: string | null; cover: string | null; banner: string | null;
     author: string | null; status: string | null; genres: string[] | null; ageRating: number | null;
+    /** Let through the 18+ filter's genre rule (Admin → Settings → 18+ filter). Absent on older servers. */
+    adultExempt?: boolean;
   };
   /** Every source the updater asks for this series, primary first. Sent to every viewer. */
   sources?: SeriesSource[];

@@ -2,7 +2,7 @@
   "_meta": {
     "language": "es",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 1150
+    "strings": 1170
   },
   "1 check found something": "1 comprobación encontró algo",
   "1 member": "1 miembro",
@@ -487,7 +487,6 @@
   "{n} notes": "{n} notas",
   "Reading pace, busiest day {n} chapters": "Ritmo de lectura, día más activo {n} capítulos",
   "{n} days of reading, {t} chapters in total": "{n} días de lectura, {t} capítulos en total",
-  "Include 18+ libraries in this reader": "Incluir bibliotecas +18 en este lector",
   "Off by default. Your age limit, if you have one, still applies whatever this says.": "Desactivado por defecto. Tu límite de edad, si tienes uno, sigue aplicándose digas lo que digas aquí.",
   "Sort by": "Ordenar por",
   "Sorted by {name}": "Ordenado por {name}",
@@ -864,7 +863,6 @@
   "Forgotten. 1 member's history on it is gone.": "Olvidada. El historial de 1 miembro sobre ella ha desaparecido.",
   "Forgotten. {n} members' history on it is gone.": "Olvidada. El historial de {n} miembros sobre ella ha desaparecido.",
   "Could not forget it": "No se pudo olvidar",
-  "Include 18+ libraries": "Incluir bibliotecas +18",
   "18+": "+18",
   "Type {title} to confirm": "Escribe {title} para confirmar",
   "Put back": "Restaurar",
@@ -1153,5 +1151,27 @@
   "The engine said: {reason}": "El motor dijo: {reason}",
   "The extension engine refused that address: {reason}": "El motor de extensiones rechazó esa dirección: {reason}",
   "The standard Docker install runs one in the {name} container. If you turned it off by emptying SUWAYOMI_URL, put that line back in .env and run {command}.": "La instalación estándar de Docker ejecuta uno en el contenedor {name}. Si lo desactivaste dejando vacío SUWAYOMI_URL, vuelve a poner esa línea en .env y ejecuta {command}.",
-  "Tip: hide the languages you don’t read first — only {n} sources can be switched on at once.": "Consejo: oculta primero los idiomas que no lees — solo se pueden activar {n} fuentes a la vez."
+  "Tip: hide the languages you don’t read first — only {n} sources can be switched on at once.": "Consejo: oculta primero los idiomas que no lees — solo se pueden activar {n} fuentes a la vez.",
+  "Include 18+ content in this reader": "Incluir contenido +18 en este lector",
+  "Include 18+ content": "Incluir contenido +18",
+  "18+ filter": "Filtro +18",
+  "Genres to keep off the shelf while “Show 18+” is off. This hides nothing from anyone who goes looking: links, bookmarks, downloads and reading progress are unaffected.": "Géneros que no se muestran en la estantería mientras «Mostrar +18» esté desactivado. No oculta nada a quien lo busque: los enlaces, marcadores, descargas y el progreso de lectura no cambian.",
+  "No genres yet.": "Todavía no hay géneros.",
+  "Sources to treat as adult, on top of the ones their extension already declares.": "Fuentes que se tratan como para adultos, además de las que su extensión ya declara.",
+  "One series can be let through on its own page — Edit details ▸ “Always show”.": "Una serie concreta puede dejarse pasar desde su propia página — Editar detalles ▸ «Mostrar siempre».",
+  "Always show": "Mostrar siempre",
+  "Keep this series on the shelf while “Show 18+” is off, even if one of its genres is on the 18+ filter.": "Mantiene esta serie en la estantería mientras «Mostrar +18» esté desactivado, aunque alguno de sus géneros esté en el filtro +18.",
+  "Type anywhere to search": "Escribe en cualquier parte para buscar",
+  "Start typing a title on any page to open search with it. This also switches the / shortcut, on this device only.": "Empieza a escribir un título en cualquier página para abrir la búsqueda con él. También activa o desactiva el atajo /, solo en este dispositivo.",
+  "This source": "Esta fuente",
+  "Use this reader for everything from {source}": "Usar este lector para todo lo de {source}",
+  "Forget the default for {source}": "Olvidar el valor predeterminado de {source}",
+  "Reading direction": "Dirección de lectura",
+  "Right to left": "De derecha a izquierda",
+  "Left to right": "De izquierda a derecha",
+  "Series default": "Según la serie",
+  "Chapter pages": "Páginas de capítulos",
+  "First page": "Primera página",
+  "Last page": "Última página",
+  "of {n}": "de {n}"
 }

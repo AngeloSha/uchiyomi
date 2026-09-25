@@ -62,6 +62,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const path = usePathname();
   const router = useRouter();
   const [palette, setPalette] = useState(false);
+  const [paletteSeed, setPaletteSeed] = useState('');
 
   /**
    * An offline launch arrives at `/` -- the manifest's `start_url` -- which is a home screen assembled
@@ -75,8 +76,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     if (path.startsWith('/downloads') || path.startsWith('/reader')) return;
     router.replace('/downloads/');
   }, [status, path, router]);
-  // Ctrl/Cmd+K or "/" anywhere in the app (reader keeps its own keys; palette skipped there)
-  usePaletteHotkeys(setPalette, status === 'authed' && !path.startsWith('/reader'));
+  // Ctrl/Cmd+K, "/", or just typing, anywhere in the app (reader keeps its own keys; palette skipped there)
+  usePaletteHotkeys(setPalette, status === 'authed' && !path.startsWith('/reader'), setPaletteSeed);
 
   // smart offline: keep favorites' latest unread chapters downloaded. Never on desktop, where "Save offline"
   // is hidden: it would copy chapters already on this disk into the window's storage (lib/desktop.ts).
@@ -112,14 +113,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     <>
       <CinematicFX />
       {status === 'offline' && <OfflineBanner name={user?.displayName || ''} />}
-      <TopNav onSearchFocus={() => setPalette(true)} />
+      <TopNav onSearchFocus={() => { setPaletteSeed(''); setPalette(true); }} />
       <main className="shell relative z-[1] pb-28 lg:pb-12">
         <PageTransition>{children}</PageTransition>
       </main>
       <BottomNav />
       {/* Renders nothing unless something is downloading or has failed. */}
       {status === 'authed' && <DownloadsIndicator />}
-      {status === 'authed' && <CommandPalette open={palette} onClose={() => setPalette(false)} />}
+      {status === 'authed' && <CommandPalette open={palette} seed={paletteSeed} onClose={() => setPalette(false)} />}
     </>
   );
 }

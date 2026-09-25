@@ -39,7 +39,7 @@ import { chooseReleases, type ReleasePrefs } from './releases';
 import { effectivePrefsFor, readSeriesPrefs } from './scanlatorPrefs';
 import { MIN_HAVE } from './fill';
 import { logAudit } from './audit';
-import { ADULT_RATING } from './visibility';
+import { ADULT_RATING, adultFilter } from './visibility';
 
 /** How long after one hunt a series may be hunted for again, whatever became of the first. */
 export const HUNT_COOLDOWN_MS = 24 * 3600_000;
@@ -102,11 +102,15 @@ export async function seriesIsAdult(seriesId: string): Promise<boolean> {
 
 /**
  * The sweep's rule for which sources it may reach on a series' behalf: any source for an adult series,
- * and only sources that do not declare themselves adult for every other. A viewer-driven path passes the
- * viewer's own cap (visibility.sourceAllowedFor) instead; this is for the paths that have no viewer.
+ * and for every other only sources that are not adult -- neither declared so by their extension nor named so
+ * by the admin (Admin -> Settings -> 18+ filter). The admin's list used to be ignored here, so a source named
+ * adult could still be followed onto a clean series by the failure hunt or the nightly repair. A viewer-driven
+ * path passes the viewer's own cap (visibility.sourceAllowedFor) instead; this is for paths with no viewer.
  */
-export function sweepAllowedFor(adult: boolean): (sourceId: string) => boolean {
-  return (id) => !getSource(id)?.isNsfw || adult;
+export async function sweepAllowedFor(adult: boolean): Promise<(sourceId: string) => boolean> {
+  if (adult) return () => true;
+  const named = new Set((await adultFilter().catch(() => ({ sources: [] as string[] }))).sources);
+  return (id) => !getSource(id)?.isNsfw && !named.has(String(id).toLowerCase());
 }
 
 async function huntOn(): Promise<boolean> {

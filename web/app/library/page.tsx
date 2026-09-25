@@ -13,7 +13,7 @@ import { triggerRefresh } from '@/lib/refresh';
 import { useToast } from '@/components/Toast';
 import { Modal, ConfirmDialog, msgOf } from '@/components/ConfirmDialog';
 import { useAuth, canDownload } from '@/lib/auth';
-import { AdultToggle, useAdultShown, useLibraries } from '@/components/AdultToggle';
+import { AdultToggle, useAdultFilterConfigured, useAdultShown, useLibraries } from '@/components/AdultToggle';
 import { LibraryFilters, SORTS, READ_STATES, STATUSES } from '@/components/LibraryFilters';
 import { Sheet } from '@/components/ui';
 import { t as tr } from '@/lib/i18n';
@@ -44,6 +44,8 @@ function LibraryInner() {
   // by their grants -- so the tab row doubles as an honest answer to "what do I actually have access to".
   const lib = params.get('lib') || '';
   const { data: allLibs } = useLibraries();
+  // The 18+ filter can hide series by genre on an install with no 18+ library; the reveal must still render.
+  const adultFilter = useAdultFilterConfigured();
   const adultOn = useAdultShown();
   // An 18+ library's own tab goes with its contents: leaving it there while the grid it opens is empty is
   // worse than not offering it, and the toggle beside the sorts is what brings both back.
@@ -295,7 +297,7 @@ function LibraryInner() {
             {tr('Filters')}{activeCount > 0 ? ` · ${activeCount}` : ''}
           </button>
           {/* A session reveal, not a filter: it is not in the panel because `Clear all` cannot clear it. */}
-          <AdultToggle />
+          <AdultToggle alsoWhen={adultFilter} />
           {/* A mode, not a filter, for the same reason. */}
           <button onClick={() => { setSelecting((v) => !v); setPicked(new Set()); }}
             className={`chip whitespace-nowrap ${selecting ? 'chip-active' : ''}`}>

@@ -1063,6 +1063,19 @@ END $$;
 -- feeds stats, streaks, Wrapped and the leaderboard -- cascading it would rewrite someone's history because a
 -- file moved. offline_downloads describes bytes on a user's phone, which the server cannot reconcile anyway.
 
+-- v0.46.0: what the 18+ switch hides, beyond libraries rated 18+.
+--
+-- Library ratings alone could not express "keep ecchi off the shelf": that meant moving series into an
+-- 18+ library, which is a filing decision made to get a display outcome, and it fought the scanner every
+-- time a folder was rescanned. These two lists say it directly -- genres to treat as adult, and sources
+-- to treat as adult on top of whatever their extension declares -- and they change nothing about where a
+-- series is filed or who may open it. Empty by default, so an existing install behaves exactly as before.
+ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS adult_genres  jsonb NOT NULL DEFAULT '[]'::jsonb;
+ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS adult_sources jsonb NOT NULL DEFAULT '[]'::jsonb;
+-- "Hide everything tagged Mature, except this one." Without it the genre list is all-or-nothing, and one
+-- wrongly-tagged classic is enough to make somebody turn the whole filter off.
+ALTER TABLE series_overrides ADD COLUMN IF NOT EXISTS adult_exempt boolean;
+
 -- v0.46.0: a chapter's own name, as its source gave it (lib/library.ts chapterName). Its OWN column, never
 -- lib_books.title: title is the filename's -- "One Piece v02 c012 [Digital]" on a library built by hand -- and
 -- writing names into it showed filenames as names and dropped the number from everything printing it alone.

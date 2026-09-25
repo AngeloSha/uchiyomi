@@ -65,7 +65,7 @@ import { runtime } from '../lib/runtime';
 //
 // Which SOURCES you may reach is the opposite: entirely about who is asking, which is what `viewCtxFor` and
 // `sourceAllowedFor` answer.
-import { visibleToAll, viewCtxFor, sourceAllowedFor, browsable, seriesVisible, Params, type ViewCtx, hideAdult } from '../lib/visibility';
+import { visibleToAll, viewCtxFor, sourceAllowedFor, sourceBrowsableFor, browsable, visible, seriesVisible, Params, type ViewCtx, hideAdult } from '../lib/visibility';
 
 interface Job {
   title: string; total: number; done: number;
@@ -1231,8 +1231,10 @@ export default async function sourceRoutes(app: FastifyInstance) {
    * the very line `browsable()` draws against `visible()`.
    */
   const surfaceable = (req: FastifyRequest): SourceAdapter[] => {
-    const all = reachable(req);
-    return vc(req).hideAdultLibraries ? all.filter((s) => !s.isNsfw) : all;
+    // Through `sourceBrowsableFor` rather than `isNsfw` alone, so a source the admin NAMED as adult in
+    // server_settings.adult_sources drops out too, even though its extension does not flag itself.
+    const ctx = vc(req);
+    return reachable(req).filter((s) => sourceBrowsableFor(s, ctx));
   };
 
   app.get('/api/sources', async (req) => {
@@ -1385,16 +1387,19 @@ export default async function sourceRoutes(app: FastifyInstance) {
     const { seriesId, altTitle } = (req.body ?? {}) as { seriesId?: string; altTitle?: string };
     if (!seriesId) return reply.code(400).send({ error: 'bad_request' });
 
-    // Browsable by THIS viewer, not merely present: otherwise a capped member could learn about, and write
+    // Visible to THIS viewer, not merely present: otherwise a capped member could learn about, and write
     // into, a series they are walled off from. Fails closed, as the permission hook above does.
-    // One lookup, through browsable(): it carries the deleted/merged rule, the per-library grant and the age
+    // One lookup, through visible(): it carries the deleted/merged rule, the per-library grant and the age
     // cap together, so this route cannot drift from the others by hand-writing part of it. Fails closed --
-    // a database blip must not make a series someone cannot see fillable.
+    // a database blip must not make a series someone cannot see fillable. visible(), NOT browsable(): this
+    // acts on a series someone opened by id, and "Show 18+" is a surfacing preference, not a permission --
+    // through browsable() "Find missing chapters" answered 404 on any series in an 18+ library (and, with
+    // the configurable filter, on any series with a genre marked adult) whenever the switch was off.
     const p = new Params();
     const rows = await q<any>(
       `SELECT s.id, s.title, s.folder, s.source_id, s.source_series_id, s.summary, s.author, s.genres, s.web, s.status,
               s.chapter_floor, s.scanlator_prefs
-         FROM lib_series s WHERE s.id = ${p.add(seriesId)} AND ${browsable('s', vc(req), p)}`, p.values,
+         FROM lib_series s WHERE s.id = ${p.add(seriesId)} AND ${visible('s', vc(req), p)}`, p.values,
     ).then((r) => r, () => null);
     if (rows === null) return reply.code(503).send({ error: 'unavailable' });
     const s = rows[0];
@@ -1653,12 +1658,13 @@ export default async function sourceRoutes(app: FastifyInstance) {
     const plain = [...new Set(b.data.numbers ?? [])].filter((n) => !pickOf.has(n)).sort((x, y) => x - y);
     const numbers = [...new Set([...plain, ...pickOf.keys()])].sort((x, y) => x - y);
 
-    // Browsable by THIS viewer, as the fill scan requires: a capped member must not be able to write into a
-    // series they are walled off from, or learn which of its numbers are listed. Fails closed.
+    // Visible to THIS viewer, as the fill scan requires: a capped member must not be able to write into a
+    // series they are walled off from, or learn which of its numbers are listed. Fails closed. visible(), not
+    // browsable(), for the fill scan's reason: a fetch on a series someone opened is not a listing.
     const p = new Params();
     const rows = await q<any>(
       `SELECT s.id, s.title, s.folder, s.summary, s.author, s.genres, s.web, s.status, s.source_id
-         FROM lib_series s WHERE s.id = ${p.add(seriesId)} AND ${browsable('s', vc(req), p)}`, p.values,
+         FROM lib_series s WHERE s.id = ${p.add(seriesId)} AND ${visible('s', vc(req), p)}`, p.values,
     ).then((r) => r, () => null);
     if (rows === null) return reply.code(503).send({ error: 'unavailable' });
     const s = rows[0];
@@ -1781,7 +1787,7 @@ export default async function sourceRoutes(app: FastifyInstance) {
    * polls the same URL with a short `wait` until it is 0.
    */
   app.get('/api/sources/search-all', async (req) => {
-    const { q: rawQ, groupBy, wait } = req.query as { q?: string; groupBy?: string; wait?: string };
+    const { q: rawQ, groupBy, wait, source } = req.query as { q?: string; groupBy?: string; wait?: string; source?: string };
     const term = (rawQ || '').trim();
     if (!term) return { content: [], sources: [], pending: 0, asked: 0 };
     // Absent means the full first-answer wait, so a caller written before `wait` existed gets the most
@@ -1795,7 +1801,19 @@ export default async function sourceRoutes(app: FastifyInstance) {
     // "Show 18+" chip. The chip belongs here and not only in the shaping below, because a source left in
     // `ask` is a source this request STARTS -- an outbound query to an adult site on behalf of someone who
     // asked not to see one, and its results would then also land in the shared entry under this term.
-    const ask = surfaceable(req);
+    const all = surfaceable(req);
+    // `source` narrows the fan-out to one source, for a search made while Discover is filtered to it. The
+    // filter was display-only before, and did not survive a search at all: submitting a term asked every
+    // source and answered with everything, so choosing a source and then searching within it was not
+    // possible. Narrowing here rather than filtering the answer also makes it one outbound request instead
+    // of a dozen, which is the difference between an instant answer and the slowest source's timeout.
+    //
+    // It only ever narrows `surfaceable`, never widens it: an id outside that set -- an adult source with
+    // the reveal off, one an age cap puts out of reach, or one that does not exist -- leaves `ask` empty,
+    // nobody is asked, and the answer is the ordinary nothing-found shape. The entry is still keyed by the
+    // term alone, so a narrowed search and a full one share whatever the sources have already answered.
+    const only = typeof source === 'string' ? source : '';
+    const ask = only ? all.filter((s) => s.id === only) : all;
     const health = new Map((await healthAll().catch(() => [])).map((h) => [h.source_id, h] as const));
     const ans = await searchAll(term, ask, { waitMs, health });
     const byId = new Map(ask.map((s) => [s.id, s] as const));
