@@ -39,6 +39,8 @@ import { ART_DIR, artFile, artOverview } from '../lib/seriesArt';
 import { writePreflight } from '../lib/fsGuard';
 // Admin stats report on the whole library by definition; this route is already behind requireAdmin.
 import { NO_LIBRARIES, SYSTEM_CTX, visibleToAll, sanitiseAdultList, sanitiseSourceIds, invalidateAdultFilter } from '../lib/visibility';
+import { cleanSourceOrder, invalidateSourcePrefs } from '../lib/sourcePrefs';
+import { borrowNamesFor, clearBorrowedNames } from '../lib/borrowNames';
 import { addSeriesFromSource, findBestMatch, resolveCandidate, norm, jobBusy, startDownloadJob, FILL_MAX_CHAPTERS, REFRESH_BUDGET_MS } from './sources';
 import { confirmsTitle } from '../lib/confirmTitle';
 import { chapterFileRel } from '../lib/downloader';
@@ -418,7 +420,7 @@ export default async function adminRoutes(app: FastifyInstance) {
   // ---- server settings ----
   const SETTINGS_COLS = 'server_name, allow_registration, updater_hours, extension_hours, extension_auto_update, '
     + 'update_check, install_ping, install_ping_last, scanlator_prefs, cleanup_read, cleanup_read_days, backup_hour, auto_follow_on_failure, '
-    + 'repair_enabled, komga_ghost_chapters, adult_genres, adult_sources';
+    + 'repair_enabled, komga_ghost_chapters, adult_genres, adult_sources, source_prefs, group_upgrade, borrow_names';
   // `extensions_configured` is not a column: extension_hours has a NOT NULL default, so its presence says
   // nothing about whether there is an engine to check. The settings page needs to know, or it offers two
   // controls for a job that can never run.
@@ -515,6 +517,22 @@ export default async function adminRoutes(app: FastifyInstance) {
        */
       adultGenres: z.array(z.string().min(1).max(60)).max(60).optional(),
       adultSources: z.array(z.string().min(1).max(120)).max(200).optional(),
+      /**
+       * Source ids, most preferred first (lib/sourcePrefs.ts): which copy of a chapter the server does not
+       * have yet is taken, when a series follows more than one source. Checked by shape, not against the
+       * sources registered now, so an order saved while the extension engine restarts keeps its extensions.
+       */
+      sourcePrefs: z.object({ priority: z.array(z.string().min(1).max(120)).max(100) }).optional(),
+      /**
+       * Group upgrades (lib/repair.ts stepGroups, #81): the nightly repair replaces a chapter with the
+       * preferred group's copy once it exists. Off by default -- it replaces files on disk.
+       */
+      groupUpgrade: z.boolean().optional(),
+      /**
+       * Chapter names borrowed from another source (lib/borrowNames.ts, #85), the repair's seventh step. Off by
+       * default. Off takes back the names it gave every series that follows this switch.
+       */
+      borrowNames: z.boolean().optional(),
     }).parse(req.body);
     if (b.serverName !== undefined) await q('UPDATE server_settings SET server_name = $1, updated_at = now() WHERE id = 1', [b.serverName]);
     if (b.allowRegistration !== undefined) await q('UPDATE server_settings SET allow_registration = $1, updated_at = now() WHERE id = 1', [b.allowRegistration]);
@@ -546,6 +564,17 @@ export default async function adminRoutes(app: FastifyInstance) {
     // The view context caches these for a few seconds; a save must take effect on the next request,
     // not whenever that window happens to lapse.
     if (b.adultGenres !== undefined || b.adultSources !== undefined) invalidateAdultFilter();
+    if (b.groupUpgrade !== undefined) await q('UPDATE server_settings SET group_upgrade = $1, updated_at = now() WHERE id = 1', [b.groupUpgrade]);
+    if (b.borrowNames !== undefined) {
+      await q('UPDATE server_settings SET borrow_names = $1, updated_at = now() WHERE id = 1', [b.borrowNames]);
+      // "Stop doing that" means the names it wrote go too; a series switched on for itself keeps its own.
+      if (!b.borrowNames) await clearBorrowedNames('following-server').catch(() => 0);
+    }
+    if (b.sourcePrefs !== undefined) {
+      await q('UPDATE server_settings SET source_prefs = $1::jsonb, updated_at = now() WHERE id = 1',
+        [JSON.stringify({ priority: cleanSourceOrder(b.sourcePrefs.priority) })]);
+      invalidateSourcePrefs();
+    }
     await logAudit('settings.update', { userId: userIdOf(req), detail: b, req });
     return settingsRow();
   });
@@ -723,7 +752,7 @@ export default async function adminRoutes(app: FastifyInstance) {
       // Never awaited: a sweep is minutes to hours, and the caller is an admin clicking a button. runSweep
       // marks it running, keeps the result, logs the summary and refuses to start on top of another one --
       // everything this path used to skip, which is why the panel showed a manual sweep as idle throughout.
-      if (!runSweep({ maxNew: 10 }, app.log)) return { ok: false, error: 'busy' };
+      if (!runSweep({ maxNew: 10, by: userIdOf(req) }, app.log)) return { ok: false, error: 'busy' };
       return { ok: true, started: true };
     }
     if (id === 'extensions') {
@@ -856,15 +885,20 @@ export default async function adminRoutes(app: FastifyInstance) {
   // Per-series settings. auto_update could only ever be chosen at add time, and the UI never read it back,
   // so there was no way to stop the updater chasing a series you had finished with. scanlatorPrefs is the
   // series' own release preferences (lib/releases.ts); null clears them, so the series inherits the global
-  // ones again. Each field is written on its own, so a body naming only one leaves the other alone.
+  // ones again. sourcePrefs is the series' own source order (lib/sourcePrefs.ts), which REPLACES the server's;
+  // null, or an empty list, clears it. borrowNames switches chapter-name borrowing (lib/borrowNames.ts) for this
+  // series, null to follow the server. Each field is written on its own, so a body naming one leaves the rest.
   app.patch('/api/admin/series/:id', async (req, reply) => {
     const { id } = req.params as { id: string };
     const b = z.object({
       autoUpdate: z.boolean().optional(),
       scanlatorPrefs: prefsSchema.nullable().optional(),
+      sourcePrefs: z.object({ priority: z.array(z.string().min(1).max(120)).max(100) }).nullable().optional(),
+      borrowNames: z.boolean().nullable().optional(),
     }).strict().safeParse(req.body);
     if (!b.success) return reply.code(400).send({ error: 'bad_request' });
-    if (b.data.autoUpdate === undefined && b.data.scanlatorPrefs === undefined) {
+    if (b.data.autoUpdate === undefined && b.data.scanlatorPrefs === undefined && b.data.sourcePrefs === undefined
+        && b.data.borrowNames === undefined) {
       return reply.code(400).send({ error: 'bad_request', message: 'Nothing to change.' });
     }
     const row = await getSeriesRow(id);
@@ -878,6 +912,23 @@ export default async function adminRoutes(app: FastifyInstance) {
       await q('UPDATE lib_series SET scanlator_prefs = $2::jsonb WHERE id = $1',
         [id, b.data.scanlatorPrefs === null ? null : JSON.stringify(b.data.scanlatorPrefs)]);
       detail.scanlatorPrefs = b.data.scanlatorPrefs;
+    }
+    if (b.data.sourcePrefs !== undefined) {
+      // An empty order is stored as NULL, not as an empty list: both mean "the server's order applies", and one
+      // spelling of that is what the series page reads back to show "Server default".
+      const order = b.data.sourcePrefs === null ? [] : cleanSourceOrder(b.data.sourcePrefs.priority);
+      await q('UPDATE lib_series SET source_prefs = $2::jsonb WHERE id = $1', [id, order.length ? JSON.stringify({ priority: order }) : null]);
+      detail.sourcePrefs = order.length ? { priority: order } : null;
+    }
+    if (b.data.borrowNames !== undefined) {
+      await q('UPDATE lib_series SET borrow_names = $2 WHERE id = $1', [id, b.data.borrowNames]);
+      detail.borrowNames = b.data.borrowNames;
+      const own = await one<{ borrow_names: boolean | null }>('SELECT borrow_names FROM lib_series WHERE id = $1', [id]).catch(() => null);
+      const on = own?.borrow_names ?? !!(await one<{ b: boolean }>('SELECT borrow_names AS b FROM server_settings WHERE id = 1').catch(() => null))?.b;
+      // On is a request for names now, for this one series -- bounded like a night's step, and not awaited.
+      // Off takes back what it wrote, which is the only honest meaning of "stop doing that".
+      if (on) void borrowNamesFor(id, { force: true }).catch(() => {});
+      else await clearBorrowedNames({ seriesId: id }).catch(() => 0);
     }
     await logAudit('series.settings', { userId: userIdOf(req), detail, req });
     return { ok: true, ...(b.data.autoUpdate !== undefined ? { autoUpdate: b.data.autoUpdate } : {}) };
@@ -1682,11 +1733,20 @@ export default async function adminRoutes(app: FastifyInstance) {
       folder: s.folder, title: s.title, seriesId: id,
       chapters: todo.map((t) => t.chapter).sort((a, b) => a.number - b.number),
       meta: { series: s.title, summary: s.summary, author: s.author, genres: s.genres, url: s.web, status: s.status },
+      by: userIdOf(req),
+      // A Cancel (#82) settles every chapter the job did not reach as not landed, so each set-aside copy
+      // below is put back exactly as for a chapter that failed.
       onSettled: async (ch, landed) => {
         const r = byNumber.get(ch.number);
         if (!r) return;
         const bak = `${r.abs}${REFETCH_BAK}`;
-        if (landed) { await rm(bak, { force: true }); return; }
+        if (landed) {
+          await rm(bak, { force: true });
+          // A copy picked by name is the admin's choice, and the nightly group upgrade (lib/repair.ts
+          // stepGroups) leaves it alone; a plain Fetch again hands the choice back to the preferences.
+          await q('UPDATE lib_books SET picked_at = $2 WHERE id = $1', [r.id, pickOf.has(r.id) ? new Date() : null]).catch(() => {});
+          return;
+        }
         // Not landed: put the old copy back if it was set aside, and un-mark the row whenever a file is
         // there to read -- the restored one, or the original a failed rename left in place. A row that had
         // no file to begin with (a tombstone being fetched again) keeps its mark: the bytes are still gone.

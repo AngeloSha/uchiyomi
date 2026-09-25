@@ -133,6 +133,12 @@ export interface Series {
   sources?: SeriesSource[];
   /** This series' own scanlator overrides, or null when it follows the server defaults. Admins only. */
   scanlatorPrefs?: StoredPrefs | null;
+  /** This series' own source order, most preferred first; null when the server-wide order applies. Admins only. */
+  sourcePrefs?: { priority?: string[] } | null;
+  /** Admins only: this series' own chapter-name borrowing switch; null follows the server setting. */
+  borrowNames?: boolean | null;
+  /** Admins only: whether names are borrowed for this series once the server setting is applied. */
+  borrowNamesEffective?: boolean;
 }
 
 export interface ReadProgress {
@@ -351,7 +357,7 @@ export type HealthAction =
   | 'test' | 'unblock' | 'disable' | 'merge' | 'solver_reset';
 
 /** One step of the nightly repair (`bff/src/lib/repair.ts`), as `POST /api/admin/tasks/repair/run` takes it. */
-export type RepairStep = 'solver' | 'count' | 'failures' | 'short' | 'gaps';
+export type RepairStep = 'solver' | 'count' | 'failures' | 'short' | 'gaps' | 'groups';
 
 export interface HealthItem {
   seriesId?: string;

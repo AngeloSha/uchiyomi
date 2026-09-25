@@ -8,6 +8,7 @@ import { deviceId } from '@/lib/device';
 import { bytes } from '@/lib/format';
 import { readShownOnce } from '@/lib/shownOnce';
 import { setTypeToSearchOn, typeToSearchOn } from '@/lib/typeToSearch';
+import { compactChaptersOn, setCompactChaptersOn } from '@/lib/compactChapters';
 import { ReaderPrefs, loadPrefs, savePrefs, syncPrefsFromServer } from '@/lib/readerPrefs';
 import { Avatar, AVATAR_EMOJIS, AVATAR_COLORS } from '@/components/Avatar';
 import { ProgressBar } from '@/components/ui';
@@ -116,6 +117,8 @@ function AppearanceSection() {
   // Read after mount: localStorage is not there during the static export's render.
   const [typeSearch, setTypeSearch] = useState(true);
   useEffect(() => { setTypeSearch(typeToSearchOn()); }, []);
+  const [compactList, setCompactList] = useState(false);
+  useEffect(() => { setCompactList(compactChaptersOn()); }, []);
   const saveReduceEffects = async (next: boolean) => {
     const prev = reduceEffects;
     setSettings({ reduceEffects: next });
@@ -177,6 +180,12 @@ function AppearanceSection() {
       <SwitchRow label={tr('Type anywhere to search')}
         help={tr('Start typing a title on any page to open search with it. This also switches the / shortcut, on this device only.')}
         on={typeSearch} onChange={(next) => { setTypeToSearchOn(next); setTypeSearch(next); }} />
+
+      {/* This device only, and only a computer's rows change: lib/compactChapters.ts. Off by default -- the
+          default chapter row is the deliberate look, and taking part of it away is the reader's choice. */}
+      <SwitchRow label={tr('Compact chapter list')}
+        help={tr('On a computer, chapter rows without thumbnails, and their buttons appear when you point at a row. Phones and tablets are unchanged. This device only.')}
+        on={compactList} onChange={(next) => { setCompactChaptersOn(next); setCompactList(next); }} />
 
       {/* Written to the server so it follows you to another device, and mirrored to localStorage so the login
           screen -- which nobody is signed in to -- is already translated. The note about machine assistance
