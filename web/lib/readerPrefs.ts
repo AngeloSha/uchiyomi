@@ -11,6 +11,16 @@ export type ReaderTheme = 'amoled' | 'sepia' | 'gray';
 export type JunkPages = 'show' | 'collapse' | 'hide';
 const JUNK_MODES: readonly JunkPages[] = ['show', 'collapse', 'hide'];
 
+/**
+ * Which way paged mode lays its pages out. `rtl` is the manga way: the next page is to the LEFT (swipe right,
+ * tap the left edge, ←), and a double spread puts its first page on the right. `series` follows the series'
+ * own `readingDirection` -- RIGHT_TO_LEFT reads right to left, anything else left to right. Only a Komga
+ * backend reports a real direction today; the built-in library answers WEBTOON for every series
+ * (lib/ownedCatalog seriesDto), so there `series` reads left to right.
+ */
+export type PagedDirection = 'ltr' | 'rtl' | 'series';
+const PAGED_DIRECTIONS: readonly PagedDirection[] = ['ltr', 'rtl', 'series'];
+
 export interface ReaderPrefs {
   gap: number; // px between pages (0 = seamless webtoon)
   brightness: number; // 0.25 .. 1
@@ -19,6 +29,13 @@ export interface ReaderPrefs {
   fitWidth: boolean;
   theme: ReaderTheme;
   spread: boolean; // paged mode: two pages side by side (manga double-page convention)
+  /**
+   * Paged mode's page order (see `PagedDirection`). `series` by default: a series that says it reads right to
+   * left finally gets a right-to-left track, and every other series -- all of them on the built-in library --
+   * reads left to right exactly as before. `ltr`/`rtl` are overrides. Stored settings without the key pick
+   * up the default through the spread in `migratePrefs`.
+   */
+  pagedDirection: PagedDirection;
   junkPages: JunkPages; // what to do with pages that repeat across chapters
   /**
    * @deprecated Superseded by `junkPages`, and kept ONLY so that an older build does not fight this one.
@@ -37,6 +54,7 @@ export const DEFAULT_PREFS: ReaderPrefs = {
   fitWidth: true,
   theme: 'amoled',
   spread: false,
+  pagedDirection: 'series',
 };
 
 const KEY = 'yomi_reader_prefs';
@@ -77,6 +95,7 @@ export function migratePrefs(raw: unknown): ReaderPrefs {
   const chosen = JUNK_MODES.includes(r.junkPages as JunkPages);
   const p = { ...DEFAULT_PREFS, ...r };
   if (!chosen) p.junkPages = r.skipJunk === false ? 'show' : DEFAULT_PREFS.junkPages;
+  if (!PAGED_DIRECTIONS.includes(p.pagedDirection)) p.pagedDirection = DEFAULT_PREFS.pagedDirection;
   p.skipJunk = p.junkPages !== 'show';
   return p;
 }

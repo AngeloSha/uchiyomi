@@ -248,6 +248,11 @@ function ReadingSection({ weeklyGoal }: { weeklyGoal: number }) {
           options={[{ value: 'single', label: tr('Single') }, { value: 'double', label: tr('Double spread') }]}
           onChange={(v) => set({ spread: v === 'double' })} />
       )}
+      {prefs.mode === 'paged' && (
+        <Choice label={tr('Reading direction')} value={prefs.pagedDirection}
+          options={[{ value: 'series', label: tr('Series default') }, { value: 'ltr', label: tr('Left to right') }, { value: 'rtl', label: tr('Right to left') }]}
+          onChange={(v) => set({ pagedDirection: v })} />
+      )}
       {/* Set in both modes. ⚠️ It cannot LOOK the same in both: a page-by-page view has no thin slide --
           every slide is exactly one viewport wide -- so Collapse falls back to removing there, where an
           unwanted page costs one swipe rather than a scroll and there is no flow to interrupt. */}

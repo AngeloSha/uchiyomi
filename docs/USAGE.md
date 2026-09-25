@@ -546,10 +546,22 @@ you keep scrolling through a series without interruption.
 - **Per-series memory:** your zoom/theme choices are remembered per title.
 - **Jump to a chapter:** the chapter button in the top bar opens the full list, at every screen size. On a
   desktop `[` / `]` step to the previous/next chapter as well.
+- **Keyboard:** in paged mode **→** / **↓** / **Page Down** / **Space** turn to the next page and **←** / **↑** /
+  **Page Up** to the previous one, one press per page, the same as tapping the edge of the page. In webtoon
+  scroll, **Space** / **↓** and **↑** scroll by most of a screen.
 - **Jump to a page:** tap the page counter (`4/18`) in the bottom bar for a thumbnail grid of the chapter.
 - **Desktop:** the page is centered with comfortable margins.
 
 It remembers your scroll position, so closing and reopening drops you right back where you were.
+
+**Right-to-left paged reading.** In paged mode, *Reading direction* (in the reader's settings sheet and under
+Profile → Settings → Reading) can lay the pages out right to left, the way manga is printed: the next page is
+to the left, so you swipe right, tap the left edge or press ←. A double spread puts its first page on the
+right, and the bottom bar mirrors with it — the page slider fills from the right, and the next-chapter button
+moves to the left. The default, *Series default*, does this only for a series whose metadata says it reads
+right to left (a Komga library can say so; the built-in library does not yet, so there every series reads left
+to right as before). *Left to right* and *Right to left* override it for every series. The webtoon scroll is
+unaffected.
 
 **Reader defaults** — mode (webtoon scroll or paged), theme, repeated pages, fit, page gap, auto-scroll and
 brightness — live under **Profile → Settings → Reading**, where each one saves as you change it and says
