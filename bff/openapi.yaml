@@ -1182,6 +1182,12 @@ paths:
                     oneOf:
                       - $ref: "#/components/schemas/SourceOrder"
                       - type: "null"
+                  borrowNames:
+                    description: Admins only. This series' own chapter-name borrowing switch; null follows the server's.
+                    type: [boolean, "null"]
+                  borrowNamesEffective:
+                    description: Admins only. Whether names are borrowed for this series once the server setting is applied.
+                    type: boolean
         "401":
           description: Not authenticated
         "404":
@@ -4931,6 +4937,9 @@ paths:
                   group_upgrade:
                     type: boolean
                     description: Whether the nightly repair swaps chapters for a preferred group's copy. See groupUpgrade on PATCH.
+                  borrow_names:
+                    type: boolean
+                    description: Whether the nightly repair borrows chapter names from another source. See borrowNames on PATCH.
         "401":
           description: Not authenticated
         "403":
@@ -5068,6 +5077,16 @@ paths:
                     chapter someone picked a copy for by hand, and at most REPAIR_GROUPS_MAX (10) a night; a
                     chapter whose upgrade failed is left for a week. Each swap is audited as
                     `book.group_upgraded`.
+                borrowNames:
+                  description: >-
+                    Chapter names borrowed from another source (since v0.47.0, #85), the nightly repair's
+                    seventh step. Off by default. A donor must pass the same identity and numbering
+                    judgement an automatic follow must pass, must be in the series' own language, and names
+                    are matched by exact number; only `lib_books.chapter_name` is written, marked with the
+                    donor, so the chapter's own source replaces it the moment it supplies one. Switching
+                    this off clears exactly the names it wrote for every series that follows this setting
+                    (a series switched on for itself keeps its own).
+                  type: boolean
       security:
         - bearer: []
       responses:
@@ -5179,14 +5198,14 @@ paths:
                 only:
                   type: array
                   minItems: 1
-                  maxItems: 6
+                  maxItems: 7
                   description: >-
-                    Which steps to run, each at most once. Omitted means all six, in this order. `groups`
-                    (since v0.47.0) does nothing unless group upgrades are switched on (groupUpgrade on
-                    PATCH /api/admin/settings).
+                    Which steps to run, each at most once. Omitted means all seven, in this order. `groups`
+                    and `names` (since v0.47.0) do nothing unless group upgrades, or chapter-name borrowing,
+                    are switched on (groupUpgrade and borrowNames on PATCH /api/admin/settings).
                   items:
                     type: string
-                    enum: [solver, count, failures, short, gaps, groups]
+                    enum: [solver, count, failures, short, gaps, groups, names]
                 seriesId:
                   type: string
                   description: >-
@@ -5398,6 +5417,12 @@ paths:
                   oneOf:
                     - $ref: "#/components/schemas/SourceOrder"
                     - type: "null"
+                borrowNames:
+                  description: >-
+                    Chapter-name borrowing for this series (since v0.47.0, #85): true or false overrides the
+                    server setting, null follows it. Switching it on asks for names now; switching it off
+                    clears the ones borrowed for this series.
+                  type: [boolean, "null"]
       security:
         - bearer: []
       responses:

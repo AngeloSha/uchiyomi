@@ -135,6 +135,10 @@ export interface Series {
   scanlatorPrefs?: StoredPrefs | null;
   /** This series' own source order, most preferred first; null when the server-wide order applies. Admins only. */
   sourcePrefs?: { priority?: string[] } | null;
+  /** Admins only: this series' own chapter-name borrowing switch; null follows the server setting. */
+  borrowNames?: boolean | null;
+  /** Admins only: whether names are borrowed for this series once the server setting is applied. */
+  borrowNamesEffective?: boolean;
 }
 
 export interface ReadProgress {

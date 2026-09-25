@@ -166,7 +166,8 @@ export async function replaceListing(seriesId: string, rows: ListingRow[]): Prom
      * statement per check rather than a migration that can only run once. The name is worked out by the same
      * rule the downloader's stamp uses (library.ts chapterName, which knows "Vol.3 Chapter 12" and "第12話"
      * for the number again), in JavaScript, and written to `chapter_name` only -- never to `title`, the
-     * filename's. A name already there is kept: the copy on disk named it.
+     * filename's. A name already there is kept: the copy on disk named it -- unless it was BORROWED from
+     * another source (lib/borrowNames.ts, `chapter_name_source`), which the chapter's own source outranks.
      */
     const named = new Map<number, string>();
     for (const r of rows) {
@@ -181,9 +182,9 @@ export async function replaceListing(seriesId: string, rows: ListingRow[]): Prom
         return `($${params.length - 1}::real, $${params.length}::text)`;
       });
       await qq(
-        `UPDATE lib_books b SET chapter_name = v.name, updated_at = now()
+        `UPDATE lib_books b SET chapter_name = v.name, chapter_name_source = NULL, updated_at = now()
            FROM (VALUES ${values.join(',')}) AS v(n, name)
-          WHERE b.series_id = $1 AND b.number = v.n AND b.chapter_name IS NULL`,
+          WHERE b.series_id = $1 AND b.number = v.n AND (b.chapter_name IS NULL OR b.chapter_name_source IS NOT NULL)`,
         params,
       );
     }

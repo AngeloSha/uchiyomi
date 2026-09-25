@@ -56,6 +56,7 @@ import { blockedNow, clearBlock, isDisabled } from './sourceHealth';
 import { copyToChapter, type ListingCopy } from './seriesListing';
 import { groupsOf, normGroup, type ReleasePrefs } from './releases';
 import { effectivePrefsFor, readSeriesPrefs } from './scanlatorPrefs';
+import { borrowNamesFor, NAMES_RETRY_MS } from './borrowNames';
 import { busyFolders } from './bulkNewest';
 import { beginRun, dismissRun, endRun, stopRequested, type RunCard } from './downloadJobs';
 import { updateSeries, CHAPTER_RETRY_CAP, type Landed } from './updater';
@@ -68,13 +69,13 @@ import { solverBlaming } from './health';
 import { visibleToAll } from './visibility';
 
 /**
- * Which of the six steps to run. `only` on the options picks a subset; the nightly runs them all. `groups`
- * (v0.47.0) does nothing unless an admin has switched group upgrades on -- see stepGroups.
+ * Which of the seven steps to run. `only` on the options picks a subset; the nightly runs them all. `groups`
+ * and `names` (v0.47.0) do nothing unless an admin has switched them on -- see stepGroups and stepNames.
  */
-export type RepairStep = 'solver' | 'count' | 'failures' | 'short' | 'gaps' | 'groups';
+export type RepairStep = 'solver' | 'count' | 'failures' | 'short' | 'gaps' | 'groups' | 'names';
 
 /** In the order the run takes them, which is also the order a caller's `only` is reported in. */
-export const REPAIR_STEPS: readonly RepairStep[] = ['solver', 'count', 'failures', 'short', 'gaps', 'groups'];
+export const REPAIR_STEPS: readonly RepairStep[] = ['solver', 'count', 'failures', 'short', 'gaps', 'groups', 'names'];
 
 /**
  * An integer knob from the environment, clamped. Out-of-range, unparseable and absent all fall back to the
@@ -106,6 +107,11 @@ export const REPAIR_GAPS_MAX = envInt('REPAIR_GAPS_MAX', 5, 1, 100);
 export const REPAIR_GROUPS_MAX = envInt('REPAIR_GROUPS_MAX', 10, 1, 200);
 /** How long a chapter whose upgrade was tried, and failed, is left before it is tried again. */
 const GROUP_RETRY_DAYS = 7;
+/**
+ * Series one run may look for a chapter-name donor for (stepNames). Each is up to HUNT_MAX_SOURCES searches
+ * and two lookups per candidate judged, all for something cosmetic, so it is kept to a handful a night.
+ */
+export const REPAIR_NAMES_MAX = envInt('REPAIR_NAMES_MAX', 5, 1, 100);
 /**
  * The pause between two series the failures step retries, as the sweep paces itself. Tests set it to 0.
  *
@@ -209,6 +215,11 @@ export interface RepairResult {
    * the default, and then nothing was looked at.
    */
   groups: { off?: true; looked: number; replaced: number; left: number };
+  /**
+   * Chapter names borrowed from another source (stepNames): series looked at, and chapters named. `off` when
+   * neither the server nor any series has it switched on, which is the default.
+   */
+  names: { off?: true; series: number; named: number };
   failures: {
     /** Ledger rows put back to zero attempts. */
     reset: number;
@@ -877,6 +888,40 @@ async function replaceWithGroup(
   return true;
 }
 
+/**
+ * (g) Chapter names from another source (lib/borrowNames.ts, #85): for up to REPAIR_NAMES_MAX series with a
+ * chapter that has no name, one whose own source names nothing, find a source whose numbering matches and take
+ * the names from it. Off unless the server or the series switches it on. Writes names only -- never a file,
+ * never `title` -- so it needs no busy-folder hold; it stops between series for a Cancel or a shutdown.
+ */
+async function stepNames(r: RepairResult, log?: Log): Promise<RepairResult['stopped']> {
+  const rows = await q<{ id: string; title: string }>(
+    `SELECT s.id, s.title FROM lib_series s
+      WHERE ${visibleToAll('s')}
+        AND COALESCE(s.borrow_names, (SELECT borrow_names FROM server_settings WHERE id = 1)) IS TRUE
+        AND EXISTS (SELECT 1 FROM lib_books b WHERE b.series_id = s.id AND b.pruned_at IS NULL AND b.chapter_name IS NULL)
+        AND COALESCE((s.name_donor->>'none')::bigint, 0) <= $1
+      ORDER BY s.latest_mtime DESC NULLS LAST
+      LIMIT $2`,
+    [Date.now() - NAMES_RETRY_MS, REPAIR_NAMES_MAX],
+  ).catch(() => [] as Array<{ id: string; title: string }>);
+  if (!rows.length) {
+    const on = await one<{ on: boolean }>(
+      'SELECT COALESCE((SELECT borrow_names FROM server_settings WHERE id = 1), false) OR EXISTS (SELECT 1 FROM lib_series WHERE borrow_names) AS "on"',
+    ).catch(() => null);
+    if (!on?.on) r.names.off = true;
+    return undefined;
+  }
+  for (const s of rows) {
+    { const h = halted(); if (h) return h; }
+    const res = await borrowNamesFor(s.id).catch(() => null);
+    r.names.series++;
+    r.names.named += res?.named ?? 0;
+    if (res?.named) log?.info(`repair: "${s.title}": ${res.named} chapter name(s) from ${res.donor}`);
+  }
+  return undefined;
+}
+
 /** What one series' gap hunt concluded, stored on lib_series.gaps_result for the Health page to read. */
 interface GapsResult {
   at: string;
@@ -1063,6 +1108,7 @@ function blank(): RepairResult {
     short: { looked: 0, replaced: 0, confirmed: 0, left: 0 },
     gaps: { series: 0, followed: 0, fetched: 0, unfillable: 0, sweep: 0 },
     groups: { looked: 0, replaced: 0, left: 0 },
+    names: { series: 0, named: 0 },
     failures: { reset: 0 },
     solver: { reset: false, unblocked: 0, expired: 0 },
   };
@@ -1074,7 +1120,8 @@ function summaryOf(r: RepairResult): string {
     + `/ ${r.short.left} left of ${r.short.looked}, gaps ${r.gaps.series} series / ${r.gaps.followed} followed / `
     + `${r.gaps.fetched} fetched, ${r.failures.reset} failures reset, solver ${r.solver.reset ? 'reset' : 'untouched'} `
     + `(${r.solver.unblocked} unblocked, ${r.solver.expired} expired), groups `
-    + (r.groups.off ? 'off' : `${r.groups.replaced} replaced / ${r.groups.left} left of ${r.groups.looked}`);
+    + (r.groups.off ? 'off' : `${r.groups.replaced} replaced / ${r.groups.left} left of ${r.groups.looked}`)
+    + ', names ' + (r.names.off ? 'off' : `${r.names.named} named in ${r.names.series} series`);
 }
 
 /** One pass. Exported for the tests; everything else goes through runRepair, which owns the flags. */
@@ -1116,6 +1163,7 @@ export async function repairLibrary(log?: Log, opts: RepairOpts = {}): Promise<R
       budget.left -= had - reserve.left;
     } else if (step === 'gaps') stopped = await stepGaps(r, opts, budget, pending, notes, log);
     else if (step === 'groups') stopped = await stepGroups(r, opts, notes, log);
+    else if (step === 'names') stopped = await stepNames(r, log);
     if (activeCard) {
       activeCard.done++;
       activeCard.fetched = r.short.replaced + r.gaps.fetched + r.groups.replaced + (r.failures.retried?.added ?? 0);

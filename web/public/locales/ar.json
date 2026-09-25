@@ -2,7 +2,7 @@
   "_meta": {
     "language": "ar",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 1203
+    "strings": 1208
   },
   "1 check found something": "فحص واحد وجد شيئًا",
   "1 member": "عضو واحد",
@@ -1206,5 +1206,10 @@
   "That chapter would not load.": "تعذّر تحميل هذا الفصل.",
   "Page {n} could not be loaded.": "تعذّر تحميل الصفحة {n}.",
   "Previous chapter": "الفصل السابق",
-  "Next chapter": "الفصل التالي"
+  "Next chapter": "الفصل التالي",
+  "Borrow chapter names from other sources": "استعارة أسماء الفصول من مصادر أخرى",
+  "Borrow chapter names from another source. Only a source whose numbering matches this series is used; switching this off takes those names back.": "استعارة أسماء الفصول من مصدر آخر. لا يُستخدم إلا مصدر يطابق ترقيمه هذه السلسلة؛ وإيقاف هذا الخيار يستردّ تلك الأسماء.",
+  "Looking for chapter names…": "جارٍ البحث عن أسماء الفصول…",
+  "Borrowed chapter names removed": "أُزيلت أسماء الفصول المستعارة",
+  "Off by default. When a series’ own source only ever says “Chapter 12”, take the names from another source whose numbering was checked against this one — a source that numbers the chapters differently is never used, and the names go into the chapter name only, never the file. The chapter’s own source naming it later wins, and switching this off takes the borrowed names back.": "متوقف افتراضيًا. حين لا يقول مصدر السلسلة سوى «الفصل 12»، تُؤخذ الأسماء من مصدر آخر جرى التحقّق من تطابق ترقيمه مع هذه السلسلة — ولا يُستخدم أبدًا مصدر يرقّم الفصول بطريقة مختلفة، وتوضع الأسماء في اسم الفصل فقط لا في الملف. وإذا سمّى مصدر السلسلة نفسه الفصل لاحقًا فهو الأولى، وإيقاف هذا يسترجع الأسماء المستعارة."
 }

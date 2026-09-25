@@ -681,6 +681,11 @@ function ScanlatorsSection({ data, save }: { data: any; save: Save }) {
       </div>
       {/* Group upgrades (#81): the nightly repair's sixth step. Off by default, because it replaces files on
           disk; the help says every rule it keeps, so switching it on is not a leap in the dark. */}
+      {/* Off by default: outbound traffic to sources that carry nothing else for a series. A series can
+          switch it for itself on its Sources & translations sheet. */}
+      <SwitchRow label={tr('Borrow chapter names from other sources')}
+        help={tr('Off by default. When a series’ own source only ever says “Chapter 12”, take the names from another source whose numbering was checked against this one — a source that numbers the chapters differently is never used, and the names go into the chapter name only, never the file. The chapter’s own source naming it later wins, and switching this off takes the borrowed names back.')}
+        on={data.borrow_names === true} onChange={(next) => save({ borrowNames: next })} />
       <SwitchRow label={tr('Upgrade chapters to a preferred group')}
         help={tr('Off by default. Once a night, a chapter you already have from another group is replaced when a group you rank higher releases it on a source the series follows — only files Uchiyomi downloaded itself, never with a copy that has fewer pages, never a chapter someone picked a version for by hand, and at most ten a night unless the server is told otherwise. Reading progress is kept.')}
         on={data.group_upgrade === true} onChange={(next) => save({ groupUpgrade: next })} />

@@ -1095,6 +1095,15 @@ ALTER TABLE lib_series      ADD COLUMN IF NOT EXISTS source_prefs jsonb;
 ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS group_upgrade boolean NOT NULL DEFAULT false;
 ALTER TABLE lib_books ADD COLUMN IF NOT EXISTS picked_at timestamptz;
 ALTER TABLE lib_books ADD COLUMN IF NOT EXISTS upgrade_tried_at timestamptz;
+
+-- v0.47.0: chapter names borrowed from another source (lib/borrowNames.ts, #85), the repair's seventh step. Off
+-- by default for the server; a series' own switch is NULL to follow it. name_donor remembers the source whose
+-- numbering matched, or when a search found none. chapter_name_source names the donor of a borrowed name --
+-- NULL is the chapter's own -- so a borrowed name is always replaceable by an own one and removable in bulk.
+ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS borrow_names boolean NOT NULL DEFAULT false;
+ALTER TABLE lib_series ADD COLUMN IF NOT EXISTS borrow_names boolean;
+ALTER TABLE lib_series ADD COLUMN IF NOT EXISTS name_donor jsonb;
+ALTER TABLE lib_books ADD COLUMN IF NOT EXISTS chapter_name_source text;
 `;
 
 // Serialises migrate() across processes. CREATE TABLE IF NOT EXISTS is not safe to run concurrently:

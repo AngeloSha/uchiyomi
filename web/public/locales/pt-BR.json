@@ -2,7 +2,7 @@
   "_meta": {
     "language": "pt-BR",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 1203
+    "strings": 1208
   },
   "1 check found something": "1 verificação encontrou algo",
   "1 member": "1 membro",
@@ -1206,5 +1206,10 @@
   "That chapter would not load.": "Esse capítulo não carregou.",
   "Page {n} could not be loaded.": "Não foi possível carregar a página {n}.",
   "Previous chapter": "Capítulo anterior",
-  "Next chapter": "Próximo capítulo"
+  "Next chapter": "Próximo capítulo",
+  "Borrow chapter names from other sources": "Pegar nomes de capítulos de outras fontes",
+  "Borrow chapter names from another source. Only a source whose numbering matches this series is used; switching this off takes those names back.": "Pegar nomes de capítulos de outra fonte. Só é usada uma fonte cuja numeração bate com esta série; desativar remove esses nomes.",
+  "Looking for chapter names…": "Procurando nomes de capítulos…",
+  "Borrowed chapter names removed": "Nomes de capítulos pegos removidos",
+  "Off by default. When a series’ own source only ever says “Chapter 12”, take the names from another source whose numbering was checked against this one — a source that numbers the chapters differently is never used, and the names go into the chapter name only, never the file. The chapter’s own source naming it later wins, and switching this off takes the borrowed names back.": "Desativado por padrão. Quando a fonte da própria série só diz “Capítulo 12”, os nomes vêm de outra fonte cuja numeração foi conferida com a desta série — uma fonte que numera de outro jeito nunca é usada, e os nomes vão só para o nome do capítulo, nunca para o arquivo. Se a fonte própria nomear depois, ela ganha, e desativar isso devolve os nomes emprestados."
 }

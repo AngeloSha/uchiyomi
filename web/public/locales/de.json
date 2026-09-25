@@ -2,7 +2,7 @@
   "_meta": {
     "language": "de",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 1203
+    "strings": 1208
   },
   "1 check found something": "1 Prüfung hat etwas gefunden",
   "1 member": "1 Mitglied",
@@ -1206,5 +1206,10 @@
   "That chapter would not load.": "Dieses Kapitel ließ sich nicht laden.",
   "Page {n} could not be loaded.": "Seite {n} ließ sich nicht laden.",
   "Previous chapter": "Vorheriges Kapitel",
-  "Next chapter": "Nächstes Kapitel"
+  "Next chapter": "Nächstes Kapitel",
+  "Borrow chapter names from other sources": "Kapitelnamen von anderen Quellen übernehmen",
+  "Borrow chapter names from another source. Only a source whose numbering matches this series is used; switching this off takes those names back.": "Kapitelnamen von einer anderen Quelle übernehmen. Nur eine Quelle, deren Nummerierung zu dieser Serie passt, wird verwendet; Ausschalten nimmt die Namen wieder zurück.",
+  "Looking for chapter names…": "Suche nach Kapitelnamen…",
+  "Borrowed chapter names removed": "Übernommene Kapitelnamen entfernt",
+  "Off by default. When a series’ own source only ever says “Chapter 12”, take the names from another source whose numbering was checked against this one — a source that numbers the chapters differently is never used, and the names go into the chapter name only, never the file. The chapter’s own source naming it later wins, and switching this off takes the borrowed names back.": "Standardmäßig aus. Wenn die eigene Quelle einer Serie immer nur „Kapitel 12“ sagt, werden die Namen von einer anderen Quelle übernommen, deren Nummerierung gegen diese Serie geprüft wurde – eine Quelle, die anders nummeriert, wird nie verwendet, und die Namen landen nur im Kapitelnamen, nie in der Datei. Benennt die eigene Quelle das Kapitel später selbst, gewinnt sie, und das Ausschalten nimmt die geliehenen Namen zurück."
 }

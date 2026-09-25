@@ -876,7 +876,7 @@ PATCH  /api/admin/import/candidates/:cid
 **Server settings.** `GET /api/admin/settings` is the one row: `server_name`, `allow_registration`,
 `updater_hours`, `extension_hours`, `extension_auto_update`, `update_check`, `install_ping`, `install_ping_last`,
 `cleanup_read`, `cleanup_read_days`, `backup_hour`, `scanlator_prefs`, `auto_follow_on_failure`,
-`repair_enabled`, `source_prefs`, `group_upgrade`, plus `extensions_configured` (computed). `auto_follow_on_failure` defaults to true and
+`repair_enabled`, `source_prefs`, `group_upgrade`, `borrow_names`, plus `extensions_configured` (computed). `auto_follow_on_failure` defaults to true and
 controls the bounded once-per-series-per-day source hunt after an ordinary scheduled-download failure; it
 never makes an interactive Add/Fetch hunt and never runs after a refusal. `PATCH
 /api/admin/settings` takes any subset of `serverName` (1–64 chars), `allowRegistration`, `updaterHours`
@@ -885,6 +885,7 @@ never makes an interactive Add/Fetch hunt and never runs after a refusal. `PATCH
 backup — the pending timer is re-armed at once, so the change applies to the next run rather than the one
 after; `GET /api/admin/tasks` shows the backup's `schedule` as `daily at HH:00` from the same column),
 `scanlatorPrefs` and `sourcePrefs` (both below), `groupUpgrade` (the repair's group upgrades, off by default),
+`borrowNames` (chapter names from another source, off by default; switching it off clears the names it wrote),
 `autoFollowOnFailure`, and `repairEnabled` (the nightly library repair, on by
 default — switching it off stops the schedule only, since nothing it does deletes, merges or renumbers
 anything). Each field is written on its own, an out-of-range value is a **400** and nothing is written, and
@@ -1026,7 +1027,7 @@ compared case-insensitively with spaces and punctuation ignored. The server-wide
 `scanlator_prefs` on `GET /api/admin/settings`, written whole through `PATCH /api/admin/settings
 {scanlatorPrefs}` (`priority` up to 50 names, `blocked` up to 200, `patienceDays` an integer 0–30 or
 `null`; the default is nothing ranked, nothing blocked, two days). A series can carry its own through
-`PATCH /api/admin/series/:id`, whose body is now `{autoUpdate?, scanlatorPrefs?, sourcePrefs?}` — at least one, no other
+`PATCH /api/admin/series/:id`, whose body is now `{autoUpdate?, scanlatorPrefs?, sourcePrefs?, borrowNames?}` — at least one, no other
 fields, each written on its own, and `scanlatorPrefs: null` clears the series' set. The two merge:
 **blocked is the union**, a series **priority replaces** the global list, and a series `patienceDays` of
 `null` **falls back** to the global one. A copy whose known groups are all blocked is dropped before the
@@ -1223,10 +1224,14 @@ library*, and the *Fix* / *Fill now* / *Retry now* / *Reset solver sessions* chi
 *It's fine* is the separate `confirm-short` route below) runs the nightly repair now. It is **detached**, like `update` and `verify`, and answers **200**
 `{ok: true, started: true}`; the counts land on `GET /api/admin/tasks` as the `repair` entry's `lastResult`.
 It is the only task that takes a **body**: `{only?: ('solver' | 'count' | 'failures' | 'short' | 'gaps' |
-'groups')[], seriesId?, bookId?, sourceId?}`. With no body it runs all six steps over the whole library, in that
-order; `groups` (since v0.47.0) does nothing unless group upgrades are switched on — `groupUpgrade` on `PATCH
-/api/admin/settings`, `group_upgrade` on its GET, off by default — and each swap it makes is audited as
-`book.group_upgraded`.
+'groups' | 'names')[], seriesId?, bookId?, sourceId?}`. With no body it runs all seven steps over the whole
+library, in that order. `groups` (since v0.47.0) does nothing unless group upgrades are switched on —
+`groupUpgrade` on `PATCH /api/admin/settings`, `group_upgrade` on its GET, off by default — and each swap it
+makes is audited as `book.group_upgraded`. `names` (also v0.47.0) borrows chapter names from another source
+and likewise does nothing unless `borrowNames` is on for the server or for a series (`borrow_names` on the
+settings GET, `borrowNames` on `PATCH /api/admin/series/:id`, where `null` follows the server); it writes
+`lib_books.chapter_name` only, marked with the donor in `chapter_name_source`, and switching it off clears
+exactly those.
 Each target belongs to exactly one step — `seriesId` to `gaps` (that series, ignoring the 24-hour re-check
 cooldown), `bookId` to `short` (that chapter), `sourceId` to `failures` (that source's failed chapters,
 whatever their age) — and a target sent **without** `only: ["<its step>"]` is a **400** `bad_request` with a

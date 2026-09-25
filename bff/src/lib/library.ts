@@ -704,8 +704,10 @@ export async function setBookMeta(folder: string, landed: Array<{ number: number
     values.push(`($${params.length - 4}::real, $${params.length - 3}::text, $${params.length - 2}::text, $${params.length - 1}::int[], $${params.length}::text)`);
   }
   await q(
+    // An own name replaces a borrowed one (lib/borrowNames.ts), and takes its donor mark with it.
     `UPDATE lib_books b SET scanlator = v.grp, source_id = v.src, missing_pages = v.miss,
-            chapter_name = COALESCE(v.name, b.chapter_name)
+            chapter_name = COALESCE(v.name, b.chapter_name),
+            chapter_name_source = CASE WHEN v.name IS NOT NULL THEN NULL ELSE b.chapter_name_source END
      FROM (VALUES ${values.join(',')}) AS v(n, grp, src, miss, name), lib_series s
      WHERE s.folder = $1 AND b.series_id = s.id AND b.number = v.n
        AND (b.scanlator IS DISTINCT FROM v.grp OR b.source_id IS DISTINCT FROM v.src

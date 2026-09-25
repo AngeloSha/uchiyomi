@@ -2,7 +2,7 @@
   "_meta": {
     "language": "ja",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 1203
+    "strings": 1208
   },
   "1 check found something": "1 件のチェックで問題を検出",
   "1 member": "メンバー 1 人",
@@ -1206,5 +1206,10 @@
   "That chapter would not load.": "その話を読み込めませんでした。",
   "Page {n} could not be loaded.": "{n}ページ目を読み込めませんでした。",
   "Previous chapter": "前の話",
-  "Next chapter": "次の話"
+  "Next chapter": "次の話",
+  "Borrow chapter names from other sources": "話のタイトルを他のソースから借りる",
+  "Borrow chapter names from another source. Only a source whose numbering matches this series is used; switching this off takes those names back.": "話のタイトルを別のソースから借ります。番号の付け方がこのシリーズと一致するソースだけを使い、オフにすると借りたタイトルは元に戻ります。",
+  "Looking for chapter names…": "話のタイトルを探しています…",
+  "Borrowed chapter names removed": "借りた話のタイトルを削除しました",
+  "Off by default. When a series’ own source only ever says “Chapter 12”, take the names from another source whose numbering was checked against this one — a source that numbers the chapters differently is never used, and the names go into the chapter name only, never the file. The chapter’s own source naming it later wins, and switching this off takes the borrowed names back.": "既定ではオフ。シリーズ自身のソースが「第12話」としか言わない場合、このシリーズと番号の付け方が一致することを確認した別のソースから名前を借ります。番号の付け方が異なるソースは決して使いません。名前は話のタイトルにのみ入り、ファイルには入りません。後から自身のソースが名前を付ければそちらが優先され、オフにすると借りた名前は取り消されます。"
 }

@@ -223,6 +223,8 @@ ever hit.
 - `REPAIR_GAPS_MAX` (default `5`, 1–100): series one run searches another source for.
 - `REPAIR_GROUPS_MAX` (default `10`, 1–200): chapters one run may swap for a preferred group's copy, when
   group upgrades are switched on (step 6 below).
+- `REPAIR_NAMES_MAX` (default `5`, 1–100): series one run may look for a chapter-name donor for, when name
+  borrowing is switched on (step 7 below).
 - `REPAIR_PACE_MS` (default `1500`, 0 or more): the pause between two series the repair's *Retry now* step
   re-checks. `0` is a legitimate value and means no pause at all.
 - `MIN_FREE_GB` (default `10`): refuse to start a download when the download disk has less than this free.
@@ -240,7 +242,7 @@ causes an adult source to be followed. There is intentionally no environment var
 
 On by default, under **Admin → Settings → Library housekeeping → Repair the library nightly**, and listed as
 **Admin → Tasks → Repair library**. Once every `REPAIR_HOURS` it does the five things on the Health page that
-are reversible or provable on their own, and a sixth only when you switch it on, in this order:
+are reversible or provable on their own, and two more only when you switch them on, in this order:
 
 1. **Cloudflare state.** If the solver answers *and* sources are blaming it, the remembered sessions and
    "could not be solved" marks are cleared and those sources come out of their cooldown; while the solver
@@ -273,6 +275,15 @@ are reversible or provable on their own, and a sixth only when you switch it on,
    the listing is refreshed first, the preferred copy's page list is counted before anything is downloaded,
    and a copy with fewer pages than the file on disk, or one that arrives incomplete, never replaces it. A
    chapter someone picked a version for by hand is never touched, and one whose swap failed waits a week.
+7. **Chapter names from another source** (since v0.47.0), **off** until **Admin → Settings → Scanlators →
+   Borrow chapter names from other sources** is switched on, or a series ticks the box on its own sheet.
+   `REPAIR_NAMES_MAX` series that hold a chapter with no name: a donor is searched for across at most
+   `HUNT_MAX_SOURCES` sources in the series' own language, and used only if it passes the same identity and
+   numbering judgement an automatic follow must pass. Names are matched by exact number, written to the
+   chapter name alone, and marked with the donor, so the chapter's own source replaces them the moment it
+   supplies one and switching the setting off takes back exactly what was borrowed. A search that found no
+   donor stands for a week. Nothing here is reported to source health: a lookup for names must never be what
+   puts a source into a cooldown.
 
 Fixed rather than configurable, because they are the blast radius rather than a preference: 5 searches for a
 whole run, shared by steps 3–5, of which the short step may spend at most 2 — so a library full of short

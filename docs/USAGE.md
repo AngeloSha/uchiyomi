@@ -124,7 +124,8 @@ genres, description, and the **chapter list**.
 - **Chapter names.** A row reads *Ch. 12 · The Sound of Thunder* when the source names its chapters. The
   name is taken when a chapter is downloaded, and chapters downloaded before this was kept pick theirs up
   on the series' next source check (nightly, or **Check now**). Many sources only ever say *Chapter 12*;
-  those rows show the number alone, since repeating it adds nothing.
+  those rows show the number alone, since repeating it adds nothing — unless you switch on **borrowing**
+  (below), which takes the names from another source.
 - **Favorite** (heart) adds it to your favorites + smart offline sync.
 - **Save all offline** copies every chapter to this device for reading with no connection.
 - Click any chapter to read it; the ⬇ on a chapter saves just that one to this device. Toggle
@@ -330,6 +331,21 @@ careful — only files Uchiyomi downloaded itself, never a copy with fewer pages
 one-page "chapter removed" notice from the right group does not win), never one that arrives incomplete,
 never a chapter someone picked a version for by hand (*Replace…*, or a pick in the versions list), ten a
 night, and a chapter whose swap failed is left for a week. Reading progress and bookmarks stay.
+
+**Borrowing chapter names** (since v0.47.0, from a pull request by @Squeaks72, off by default). Some sources
+publish no chapter titles at all — every row reads *Ch. 12* — while another source has had *Romance Dawn*
+all along. Switch on **Admin → Settings → Scanlators → Borrow chapter names from other sources**, or tick
+the box on one series' *Sources & translations* sheet, and the nightly repair looks for a source that carries
+the same work and takes the names from it.
+
+The hazard is numbering, not names: past the point where two sources number a work differently, every
+borrowed name would be wrong — and a plausible wrong title is exactly what you pick the next chapter by. So
+a donor has to pass the same check a source must pass before Uchiyomi will *follow* it: its own title is this
+series' title, and its numbering lines up with yours both ways. Names are matched by exact number, only from
+a source in the same language, and only for chapters that have no name at all. A borrowed name never touches
+the file or the chapter list's own title, the chapter's own source naming it later always wins, and switching
+the box off takes back exactly the names that were borrowed. A search that finds no donor is not repeated for
+a week.
 
 ### Following a second source
 
@@ -951,7 +967,9 @@ are reversible or provable on their own, and a sixth only when you switch it on,
   page list ends the proof, and the chapter is looked at again another night;
 * **looks for a source that can fill a gap** (five series a night) and fetches what it finds;
 * **swaps a chapter for your preferred group's copy** once that group has released it, if you switched it
-  on under **Admin → Settings → Scanlators** (see *Choosing a scanlation group*).
+  on under **Admin → Settings → Scanlators** (see *Choosing a scanlation group*);
+* **borrows chapter names** from another source for series whose own source names nothing, if you switched
+  that on as well (below).
 
 A whole run starts at most five searches, however many findings there are, shared between the steps that
 need one — and the short chapters may take at most two of them, so a library full of short chapters cannot
