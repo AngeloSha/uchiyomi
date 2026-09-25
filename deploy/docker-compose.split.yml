@@ -127,6 +127,24 @@ services:
     image: ghcr.io/flaresolverr/flaresolverr:latest
     container_name: uchiyomi-flaresolverr
     restart: unless-stopped
+    # Chrome writes its shared-memory segments here, and Docker's default /dev/shm is 64 MB. Under that,
+    # chromedriver dies mid-challenge and FlareSolverr reports "Service /app/chromedriver unexpectedly
+    # exited" or fails to reach its own session -- which looks, from the app's side, exactly like the manga
+    # site blocking us. Measured on one install: seven such failures in 24 hours across four sources.
+    shm_size: 1gb
+    # The leak is the other half of the problem. FlareSolverr grew to 2.5 GB over 62 days of uptime on one
+    # install, and a bloated solver starts failing mid-challenge rather than dying cleanly, which reads from
+    # the app's side as the SITES being broken. A cap plus `restart: unless-stopped` turns an unbounded leak
+    # into an automatic restart: idle it sits around 150 MB, so 2 GB is generous headroom for a real solve.
+    mem_limit: 2g
+    # It had no healthcheck at all, so `docker ps` said "Up 2 months" while it was crashing on every request.
+    # The root endpoint answers with a readiness sentence, which is the only honest signal it offers.
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8191/ | grep -q 'FlareSolverr is ready' || exit 1"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
     environment:
       LOG_LEVEL: warning
     networks: [uchiyomi_app]
@@ -138,8 +156,18 @@ services:
     image: ghcr.io/suwayomi/suwayomi-server:v2.3.2243
     container_name: uchiyomi-suwayomi
     restart: unless-stopped
+    # The engine is a JVM, and a JVM with no limit sizes its heap from the HOST's memory -- a quarter of it:
+    # 15.7 GiB on a 62 GB machine, measured 2026-09-25 against this image. It idles near 780 MB, so without a
+    # cap a small NAS is at its mercy (discussion #72). These are the desktop app's own numbers for the same
+    # engine (desktop/src/engine.js): a 768 MB heap and the serial collector, under a hard ceiling that leaves
+    # room for metaspace and native memory. The ceiling turns a runaway into a restart, which the restart
+    # policy above handles. SUWAYOMI_MEM_LIMIT and SUWAYOMI_JAVA_OPTS raise both for a big extension list.
+    mem_limit: ${SUWAYOMI_MEM_LIMIT:-1536m}
     environment:
       TZ: ${TZ:-UTC}
+      # The heap cap itself. The image's startup script runs a bare `java -jar` with no options of its own, so
+      # JAVA_TOOL_OPTIONS -- which every JVM reads when it starts -- is the way in.
+      JAVA_TOOL_OPTIONS: "${SUWAYOMI_JAVA_OPTS:--Xmx768m -XX:+UseSerialGC}"
       # Uchiyomi owns the library and does the downloading; this must never write into it.
       AUTO_DOWNLOAD_CHAPTERS: "false"
       DOWNLOAD_AS_CBZ: "true"

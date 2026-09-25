@@ -152,6 +152,14 @@ jobs:
     needs: prebuild
     runs-on: ${{ matrix.os }}
     timeout-minutes: 75
+    env:
+      # electron-builder skips signing on a pull request ("Current build is a part of pull request, code signing
+      # will be skipped"), even with the ad-hoc `identity: "-"` in electron-builder.yml. On macOS that left the
+      # app with Electron's own stale signature, so S6-signatures and S6-zip-integrity failed on EVERY pull
+      # request (`codesign --verify`: "code has no resources but signature indicates they must be present")
+      # while every push to main was green. Ad-hoc signing needs no certificate and this workflow reads no
+      # secrets, so forcing it makes a pull request build exactly what a push builds.
+      CSC_FOR_PULL_REQUEST: "true"
     strategy:
       fail-fast: false
       matrix:

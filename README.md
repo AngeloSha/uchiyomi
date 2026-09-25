@@ -28,7 +28,7 @@ Uchiyomi is a **bring-your-own-library reader** first: like Komga / Kavita / Cal
 **It also fetches**, by two routes, and both ship in the default install. **Mihon / Tachiyomi extensions**:
 you point Uchiyomi at an extension repository you trust ([how](docs/extensions.md#add-an-extension-repository--step-by-step)),
 and from then on its extensions are browsable in the admin panel, installable with one click and searchable
-immediately, run by a bundled engine that starts with the stack. And **generic engines** for the common manga-site families, where you paste a
+immediately, run by a bundled engine (Suwayomi-Server, headless: you never open it) that starts with the stack and is optional; MangaDex and sites you add by URL work without it. And **generic engines** for the common manga-site families, where you paste a
 site's URL yourself. Plus **MangaDex**, via its official public API.
 
 Uchiyomi hosts no sources, ships no extensions and compiles nothing into the image; no source is enabled

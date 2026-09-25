@@ -8,6 +8,7 @@ import { fetchAniListArt } from '../lib/anilist';
 import { linkSeries } from '../lib/trackers';
 import { LIBRARY_ROOT, cbzPageAt } from '../lib/library';
 import { cfSession } from '../lib/sources/flaresolverr';
+import { solverMayVisit } from '../lib/sources/imageHosts';
 import { getSource } from '../lib/sources';
 import { assertPublicHost, isBlockedHost, BlockedAddress } from '../lib/ssrfGuard';
 import { suwayomiUrl, suwayomiBase, suwayomiImageHeaders } from '../lib/sources/suwayomi/client';
@@ -133,8 +134,9 @@ export class UnfetchableCoverUrl extends Error {
 }
 
 /** Fetch a remote cover image as raw bytes. Sends browser-ish headers (AniList/MangaDex CDNs reject bare
- *  requests) and, for Cloudflare-protected source hosts (Aqua/ManhuaPlus), attaches FlareSolverr cookies. */
-export async function fetchCoverImage(u: string, source?: string): Promise<Buffer> {
+ *  requests) and, for Cloudflare-protected source hosts (Aqua/ManhuaPlus), attaches FlareSolverr cookies.
+ *  `callerSupplied`: `u` came from a request, not from our database -- see `sourceCoverInput`. */
+export async function fetchCoverImage(u: string, source?: string, opts: { callerSupplied?: boolean } = {}): Promise<Buffer> {
   // ⚠️ THE EXTENSION ENGINE IS NOT THE PUBLIC INTERNET, AND ITS COVERS ARE NOT AN SSRF TARGET.
   //
   // Suwayomi proxies every cover through itself, so an extension source's `coverUrl` is an absolute URL on
@@ -178,6 +180,17 @@ export async function fetchCoverImage(u: string, source?: string): Promise<Buffe
   // Before anything else, and before any network call: everything below assumes a real http(s) URL.
   const parsed = fetchableCoverUrl(u);
   if (!parsed) throw new UnfetchableCoverUrl(u);
+  // ⚠️ AND THE DNS HALF, BEFORE THE SOLVER. Until v0.45.1 this ran only inside the redirect loop below, after
+  // the requiresCloudflare block had already handed `u` to cfSession -- FlareSolverr's browser, on the same
+  // Docker network as the engine and the database -- so a name that resolves privately was opened by the
+  // solver first and refused second. Nothing below may touch the network until this has passed.
+  // Reintroduce by moving this below the requiresCloudflare block: coverSolverGuard.test.ts's DNS case fails.
+  try {
+    await assertPublicHost(parsed.hostname);
+  } catch (e) {
+    if (e instanceof BlockedAddress) throw new UnfetchableCoverUrl(u);
+    throw e;
+  }
   const src = source ? getSource(source) : null;
   const staticReferer = typeof src?.imageReferer === 'string' ? src.imageReferer : undefined;
   const headers: Record<string, string> = {
@@ -188,7 +201,11 @@ export async function fetchCoverImage(u: string, source?: string): Promise<Buffe
     referer: staticReferer ?? `${parsed.origin}/`,
     ...(typeof src?.imageHeaders === 'function' ? src.imageHeaders(u) : src?.imageHeaders ?? {}),
   };
-  if (src?.requiresCloudflare) {
+  // A caller-supplied URL reaches the solver only on a host this source vouched for -- its own site, or one it
+  // has served covers from (imageHosts.ts). The solver follows redirects and runs page scripts, so a public page
+  // the caller controls could otherwise walk it into the network. Library covers come from series_art, not
+  // from a caller, and keep the solver unconditionally: Aqua's CDN answers 403 without clearance.
+  if (src?.requiresCloudflare && (!opts.callerSupplied || solverMayVisit(src, parsed.hostname))) {
     // Best-effort: many sources host covers on a separate CDN that ISN'T Cloudflare-protected, where
     // FlareSolverr fails to "solve a challenge". Don't let that abort the cover — the Referer alone is
     // usually enough. Attach cf cookies when we can; otherwise fall through to a plain fetch.
@@ -240,6 +257,15 @@ export async function fetchCoverImage(u: string, source?: string): Promise<Buffe
   if (!r.ok) throw Object.assign(new Error('cover'), { statusCode: 502 });
   return Buffer.from(await r.arrayBuffer());
 }
+
+/**
+ * The cover route's fetch. `u` is whatever the caller put in the query string, so the Cloudflare solver is held
+ * to the hosts the source vouched for. Exported so coverSolverGuard.test.ts drives the route's own call rather
+ * than a restatement of it. Reintroduce by calling fetchCoverImage without `callerSupplied`: that test's route
+ * case sees the solver asked.
+ */
+export const sourceCoverInput = (u: string, source?: string): Promise<Buffer> =>
+  fetchCoverImage(u, source, { callerSupplied: true });
 
 // ---- series backdrop recipes (module-level so the pre-warmer can build them without a request) ----
 const bookFileAbs = async (id: string, ctx: ViewCtx): Promise<string | null> => {
@@ -731,7 +757,7 @@ export default async function imageRoutes(app: FastifyInstance) {
     return serveImage(req, reply, `srccover2:${width}:${u}`, async () => {
       let input: Buffer;
       try {
-        input = await fetchCoverImage(u, source);
+        input = await sourceCoverInput(u, source);
       } catch (e) {
         // A value that is not a URL is a caller's mistake, not a bad minute on someone's CDN: it cannot be
         // retried into working, and every affected tile answered 500 with a TypeError in the log. Serve the

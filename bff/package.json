@@ -1,6 +1,6 @@
 {
   "name": "yomi-bff",
-  "version": "0.45.0",
+  "version": "0.45.1",
   "private": true,
   "type": "commonjs",
   "engines": {
@@ -36,7 +36,7 @@
     "zod": "^4.6.5"
   },
   "devDependencies": {
-    "@types/node": "^26.6.2",
+    "@types/node": "^24.13.6",
     "@types/pg": "^8.11.10",
     "@types/qrcode": "^1.5.5",
     "tsx": "^4.23.13",

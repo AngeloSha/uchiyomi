@@ -5,6 +5,12 @@ updates:
   - package-ecosystem: npm
     directory: /bff
     schedule: { interval: weekly, day: monday }
+    ignore:
+      # @types/node follows the RUNTIME's major -- node:24 in the Dockerfiles, `engines: >=24` -- and types for a
+      # newer Node describe APIs that do not exist at runtime, which TypeScript would then let code call. A move
+      # to the next Node LTS bumps the runtime and these types together, on purpose (#62, #77 proposed 26).
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
     groups:
       bff-minor-and-patch:
         update-types: [minor, patch]
@@ -12,6 +18,12 @@ updates:
   - package-ecosystem: npm
     directory: /web
     schedule: { interval: weekly, day: monday }
+    ignore:
+      # @types/node follows the RUNTIME's major -- node:24 in the Dockerfiles, `engines: >=24` -- and types for a
+      # newer Node describe APIs that do not exist at runtime, which TypeScript would then let code call. A move
+      # to the next Node LTS bumps the runtime and these types together, on purpose (#62, #77 proposed 26).
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
     groups:
       web-minor-and-patch:
         update-types: [minor, patch]
@@ -24,6 +36,12 @@ updates:
   - package-ecosystem: npm
     directory: /desktop
     schedule: { interval: weekly, day: monday }
+    ignore:
+      # @types/node follows the RUNTIME's major -- node:24 in the Dockerfiles, `engines: >=24` -- and types for a
+      # newer Node describe APIs that do not exist at runtime, which TypeScript would then let code call. A move
+      # to the next Node LTS bumps the runtime and these types together, on purpose (#62, #77 proposed 26).
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
     groups:
       desktop-minor-and-patch:
         update-types: [minor, patch]
@@ -35,9 +53,27 @@ updates:
   - package-ecosystem: docker
     directory: /
     schedule: { interval: weekly, day: monday }
+    ignore:
+      # A Node major is a deliberate step onto the next even-numbered LTS, not a weekly pull request. Odd majors
+      # (25, 27) never become LTS and reach end of life within months; #73-#75 proposed node:25-alpine after it
+      # already had. Minor and patch updates of the current major still arrive here as before.
+      - dependency-name: "node"
+        update-types: ["version-update:semver-major"]
   - package-ecosystem: docker
     directory: /bff
     schedule: { interval: weekly, day: monday }
+    ignore:
+      # A Node major is a deliberate step onto the next even-numbered LTS, not a weekly pull request. Odd majors
+      # (25, 27) never become LTS and reach end of life within months; #73-#75 proposed node:25-alpine after it
+      # already had. Minor and patch updates of the current major still arrive here as before.
+      - dependency-name: "node"
+        update-types: ["version-update:semver-major"]
   - package-ecosystem: docker
     directory: /web
     schedule: { interval: weekly, day: monday }
+    ignore:
+      # A Node major is a deliberate step onto the next even-numbered LTS, not a weekly pull request. Odd majors
+      # (25, 27) never become LTS and reach end of life within months; #73-#75 proposed node:25-alpine after it
+      # already had. Minor and patch updates of the current major still arrive here as before.
+      - dependency-name: "node"
+        update-types: ["version-update:semver-major"]
