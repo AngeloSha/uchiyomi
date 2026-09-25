@@ -1,7 +1,7 @@
 'use client';
-// Global command palette (Ctrl/Cmd+K or "/"): instant series search + quick actions.
+// Global command palette (Ctrl/Cmd+K, "/", or just start typing): instant series search + quick actions.
 // No dependency — a fixed overlay + debounced POST /api/series/search, keyboard-navigable.
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { AnimatePresence, motion } from 'framer-motion';
 import { api, img } from '@/lib/api';
@@ -12,10 +12,11 @@ import { Img } from './ui';
 import { IcSearch, IcSparkle, IcRefresh, IcBell, IcDownload, IcGrid, IcMoments } from './icons';
 import { t as tr } from '@/lib/i18n';
 import { hiddenOnDesktop, DESKTOP_HIDDEN } from '@/lib/desktop';
+import { isTypingTarget, seedFor, typeToSearchKey, typeToSearchOn } from '@/lib/typeToSearch';
 
 interface Action { key: string; label: string; hint?: string; icon: React.ReactNode; run: () => void | Promise<void> }
 
-export function CommandPalette({ open, onClose }: { open: boolean; onClose: () => void }) {
+export function CommandPalette({ open, seed = '', onClose }: { open: boolean; seed?: string; onClose: () => void }) {
   const router = useRouter();
   const toast = useToast();
   const [q, setQ] = useState('');
@@ -25,14 +26,35 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
   const inputRef = useRef<HTMLInputElement>(null);
   const seq = useRef(0);
 
-  // reset on open; focus the input
-  useEffect(() => {
+  // Reset on open (to the typed-to-open character, if any) and focus the input. A layout effect, focusing
+  // in the same commit that mounts the input: with type-to-search the NEXT keystroke is usually already on
+  // its way, and a deferred focus let it land on <body> and vanish. The timeout stays as a backstop for
+  // the enter animation.
+  useLayoutEffect(() => {
     if (open) {
-      setQ('');
+      setQ(seed);
       setResults([]);
       setSel(0);
+      inputRef.current?.focus();
       setTimeout(() => inputRef.current?.focus(), 30);
     }
+  }, [open]); // seed is read at open time only
+
+  // Focus can leave the box while the palette is open -- a click on a result, Tab. A letter typed then was
+  // swallowed: the seed only applies on open, and the global handler below now stands down for an open dialog.
+  // It goes into the box instead.
+  useEffect(() => {
+    if (!open) return;
+    const onKeyAnywhere = (e: KeyboardEvent) => {
+      if (document.activeElement === inputRef.current || isTypingTarget(document.activeElement)) return;
+      const ch = typeToSearchKey(e, { typing: false, modalOpen: false });
+      if (!ch) return;
+      e.preventDefault();
+      setQ((cur) => cur + ch);
+      inputRef.current?.focus();
+    };
+    document.addEventListener('keydown', onKeyAnywhere);
+    return () => document.removeEventListener('keydown', onKeyAnywhere);
   }, [open]);
 
   // debounced instant search
@@ -107,6 +129,9 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
           <motion.div initial={{ opacity: 0, y: -10, scale: 0.98 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: -8, scale: 0.98 }}
             transition={{ duration: 0.18, ease: [0.22, 0.61, 0.36, 1] }}
             className="glass-strong grad-border mx-auto w-full max-w-xl overflow-hidden rounded-2xl border border-ink-700 shadow-lift"
+            // A dialog, said so: screen readers announce it as one, and every global key handler that stands down
+            // for an open `aria-modal` (type-to-search among them) now stands down for this one too.
+            role="dialog" aria-modal="true" aria-label={tr('Search')}
             onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center gap-2.5 border-b border-ink-800 px-4">
               <IcSearch width={17} height={17} className="shrink-0 text-fog-500" />
@@ -159,17 +184,24 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
   );
 }
 
-/** Global open-palette keybindings: Ctrl/Cmd+K anywhere, "/" when not typing. */
-export function usePaletteHotkeys(setOpen: (fn: (o: boolean) => boolean) => void, enabled: boolean) {
+/**
+ * Global open-palette keybindings: Ctrl/Cmd+K anywhere, "/" when not typing, and type-to-search -- a letter
+ * or digit when not typing opens the palette with that character already in it (lib/typeToSearch.ts).
+ */
+export function usePaletteHotkeys(setOpen: (fn: (o: boolean) => boolean) => void, enabled: boolean, onSeed?: (seed: string) => void) {
   useEffect(() => {
     if (!enabled) return;
     const onKey = (e: KeyboardEvent) => {
-      const el = document.activeElement as HTMLElement | null;
-      const typing = !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable);
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); setOpen((o) => !o); }
-      else if (e.key === '/' && !typing) { e.preventDefault(); setOpen(() => true); }
+      const typing = isTypingTarget(document.activeElement);
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); onSeed?.(''); setOpen((o) => !o); return; }
+      // Single-key shortcuts from here on, which this device can switch off (Profile -> Settings).
+      if (!typeToSearchOn()) return;
+      if (e.key === '/' && !typing) { e.preventDefault(); onSeed?.(''); setOpen(() => true); return; }
+      if (!onSeed) return;
+      const ch = typeToSearchKey(e, { typing, modalOpen: !!document.querySelector('[aria-modal="true"]') });
+      if (ch) { e.preventDefault(); onSeed(seedFor(ch, document.documentElement.lang)); setOpen(() => true); }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [setOpen, enabled]);
+  }, [setOpen, enabled, onSeed]);
 }
