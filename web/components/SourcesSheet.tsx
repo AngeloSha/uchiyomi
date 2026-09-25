@@ -252,7 +252,7 @@ function GroupRow({ g, blocked, serverBlocked, haveNumbers, seriesStatus, contro
  * turn "follows the defaults" into a per-series copy of them on the first tap -- a copy that then stops
  * following when the defaults change. Blank patience means the same thing for the same reason.
  */
-export function SourcesSheet({ id, series, groups, admin, error, isLoading, haveNumbers, checkedAt, onSaved, onClose, onExplain, onFindMissing }: {
+export function SourcesSheet({ id, series, groups, admin, error, isLoading, haveNumbers, checkedAt, onSaved, onClose, onExplain, onFindMissing, onShowChapter }: {
   id: string;
   series: Series | undefined;
   groups: GroupStat[];
@@ -270,6 +270,12 @@ export function SourcesSheet({ id, series, groups, admin, error, isLoading, have
   onExplain: () => void;
   /** Open Find missing chapters. The page closes this sheet first: a Modal (z-50) opened under a Sheet (z-60) is unreachable. */
   onFindMissing: () => void;
+  /**
+   * Put chapter `n`'s row on screen before the jump scrolls to it. The chapter list shows 100 rows a page
+   * (lib/chapterPages.ts), so the row a chip names may be on a page that is not rendered at all, and
+   * `getElementById` finds nothing.
+   */
+  onShowChapter?: (n: number) => void;
 }) {
   const toast = useToast();
   const qc = useQueryClient();
@@ -377,6 +383,7 @@ export function SourcesSheet({ id, series, groups, admin, error, isLoading, have
   // anyone can see. The frame after the close, the sheet is gone and the row is there.
   const jump = (n: number) => {
     onClose();
+    onShowChapter?.(n);
     requestAnimationFrame(() => document.getElementById(`ch-${n}`)?.scrollIntoView({ block: 'center', behavior: 'smooth' }));
   };
 
