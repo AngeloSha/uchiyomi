@@ -40,3 +40,17 @@ test('an empty page ends the walk even when the count promised more', async () =
   assert.equal(res.content.length, 900);
   assert.equal(r.urls.length, 2);
 });
+
+test('a book handed back twice across the batch boundary is kept once', async () => {
+  // A scan landing between the two requests shifts the order, so the second batch starts one book early.
+  // Reintroduce by pushing every book of a batch unchecked: 1194 rows, and a duplicate React key on the page.
+  const all = Array.from({ length: 1193 }, (_, i) => ({ id: `b${i + 1}`, number: i + 1 }) as unknown as Book);
+  const get = async (url: string): Promise<Page<Book>> => {
+    const page = Number(new URL(url, 'http://x').searchParams.get('page'));
+    const content = page === 0 ? all.slice(0, BATCH) : all.slice(BATCH - 1);
+    return { content, totalElements: 1193, totalPages: 2, number: page, size: BATCH, first: page === 0, last: page === 1 } as Page<Book>;
+  };
+  const res = await fetchAllBooks('s1', get);
+  assert.equal(res.content.length, 1193);
+  assert.equal(new Set(res.content.map((b) => b.id)).size, 1193);
+});

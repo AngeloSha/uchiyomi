@@ -18,8 +18,8 @@ import { IcChevronLeft, IcHeart, IcStar, IcPlay, IcDownload, IcCloudDownload, Ic
 import { t as tr } from '@/lib/i18n';
 import { FindMissingDialog } from '@/components/FindMissingDialog';
 import { normGroup } from '@/lib/scanlators';
-import { GHOST_CAP, mergeRows, whyLabel, runLabel, chunkNumbers, MARK_CHUNK } from '@/lib/chapterRows';
-import { CHAPTER_PAGE, clampPage, pageCount, pageOf, pageSlice } from '@/lib/chapterPages';
+import { GHOST_CAP, mergeRows, whyLabel, runLabel, chunkNumbers, MARK_CHUNK, type Row } from '@/lib/chapterRows';
+import { CHAPTER_PAGE, clampPage, pageCount, pageLabel, pageOf, pageSlice } from '@/lib/chapterPages';
 import { fetchAllBooks } from '@/lib/seriesBooks';
 import { ALL_GROUPS, copySourceId, groupsOfRow, matchesGroup } from '@/lib/groupFilter';
 import { SourcesSheet, useSeriesGroups, useCheckNow } from '@/components/SourcesSheet';
@@ -759,11 +759,12 @@ function readShowGhosts(): boolean {
 }
 
 /**
- * Prev / a range picker / Next for the chapter list. The picker names each page by the rows it holds
- * ("901–1000"), which is what a reader hunting for a chapter number actually scans for.
+ * Prev / a range picker / Next for the chapter list. The picker names each page by the first and last chapter
+ * numbers it shows ("901–1000", or "1193–1094" newest first), which is what a reader hunting for a chapter
+ * number actually scans for; `total` is chapters, not rows.
  */
-function ChapterPager({ page, pages, total, onPage }: { page: number; pages: number; total: number; onPage: (p: number) => void }) {
-  const range = (p: number) => `${p * CHAPTER_PAGE + 1}–${Math.min(total, (p + 1) * CHAPTER_PAGE)}`;
+function ChapterPager({ page, pages, rows, asc, total, onPage }: { page: number; pages: number; rows: readonly Row[]; asc: boolean; total: number; onPage: (p: number) => void }) {
+  const range = (p: number) => pageLabel(rows, p, asc);
   return (
     <nav aria-label={tr('Chapter pages')} className="my-2 flex items-center justify-center gap-2 text-xs">
       <button type="button" onClick={() => onPage(0)} disabled={page === 0} className="chip px-2.5 py-1 disabled:opacity-40" aria-label={tr('First page')}>«</button>
@@ -994,12 +995,16 @@ function SeriesInner() {
     return c.find((b) => !b.readProgress?.completed && openable(b)) || c.find(openable) || c[0];
   }, [books, downloaded]);
 
-  // The list a page at a time (lib/chapterPages.ts). `null` = follow "Continue": the page holding
-  // `resumeBook`, so a reader on chapter 956 lands among the 900s. Any tap on the pager pins a page; a new
-  // series, sort or filter drops the pin and follows Continue again.
+  // The list a page at a time (lib/chapterPages.ts). It opens on the page holding `resumeBook`, so a reader
+  // on chapter 956 lands among the 900s, and then STAYS there: the page is decided once per series, sort and
+  // filter, when the chapters and the sources' listing have both arrived (its ghost rows land between
+  // chapters and would shift a page picked before them). Following Continue live made the list jump away
+  // from what the reader was doing -- expanding an older-chapters run or "Show all" inserts rows ahead of
+  // it, and "Mark all read" sends Continue back to chapter 1.
   const [chapterPage, setChapterPage] = useState<number | null>(null);
   useEffect(() => { setChapterPage(null); }, [id, asc, group, showGhosts]);
   const autoPage = useMemo(() => (resumeBook ? pageOf(rows, (r) => r.kind === 'book' && r.book.id === resumeBook.id) : 0), [rows, resumeBook]);
+  useEffect(() => { if (chapterPage === null && books && listingSettled) setChapterPage(autoPage); }, [chapterPage, books, listingSettled, autoPage]);
   const shownPage = clampPage(chapterPage ?? autoPage, rows.length);
   const pages = pageCount(rows.length);
   const pageRows = useMemo(() => pageSlice(rows, shownPage), [rows, shownPage]);
@@ -1513,7 +1518,7 @@ function SeriesInner() {
           {tr('{n} of {m} chapters match', { n: filteredBooks.length + filteredGhosts.length, m: allBooks.length + visibleGhosts.length })}
         </p>
       )}
-      {pages > 1 && <ChapterPager page={shownPage} pages={pages} total={rows.length} onPage={(p) => goPage(p, false)} />}
+      {pages > 1 && <ChapterPager page={shownPage} pages={pages} rows={rows} asc={asc} total={filteredBooks.length + filteredGhosts.length} onPage={(p) => goPage(p, false)} />}
       <div className="lg:grid lg:gap-x-8 lg:[grid-template-columns:repeat(auto-fill,minmax(250px,1fr))]">
         {pageRows.map((r) => {
           if (r.kind === 'book') {
@@ -1577,7 +1582,7 @@ function SeriesInner() {
         })}
         {!books && Array.from({ length: 8 }).map((_, i) => <div key={i} className="skeleton my-3 h-6 rounded" />)}
       </div>
-      {pages > 1 && <ChapterPager page={shownPage} pages={pages} total={rows.length} onPage={(p) => goPage(p, true)} />}
+      {pages > 1 && <ChapterPager page={shownPage} pages={pages} rows={rows} asc={asc} total={filteredBooks.length + filteredGhosts.length} onPage={(p) => goPage(p, true)} />}
     </div>
   );
 

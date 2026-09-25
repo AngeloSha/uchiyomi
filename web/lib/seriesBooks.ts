@@ -15,12 +15,15 @@ export async function fetchAllBooks(seriesId: string, get: (url: string) => Prom
   const url = (p: number) => `/api/series/${seriesId}/books?page=${p}&size=${BATCH}&sort=metadata.numberSort,asc`;
   const first = await get(url(0));
   const content = [...(first.content ?? [])];
+  const seen = new Set(content.map((b) => b.id));
   const total = first.totalElements ?? content.length;
   for (let p = 1; content.length < total && p < MAX_BATCHES; p++) {
     const next = await get(url(p));
     // An empty page ends it even short of `total`: the route may hide rows from this viewer after counting.
     if (!next.content?.length) break;
-    content.push(...next.content);
+    // A scan landing between two requests shifts the order, so the batch boundary can hand back a book
+    // already taken -- twice on the page, and a duplicate React key. Kept once.
+    for (const b of next.content) if (!seen.has(b.id)) { seen.add(b.id); content.push(b); }
   }
   return { ...first, content, size: content.length, totalPages: 1, first: true, last: true };
 }
