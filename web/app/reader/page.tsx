@@ -10,6 +10,7 @@ import { fetchAllBooks } from '@/lib/seriesBooks';
 import { chapterOutcome } from '@/lib/readerState';
 import { openableChapters } from '@/lib/chapterRows';
 import { buildFlow, startIndex, renderWindow } from '@/lib/readerFlow';
+import { readTap, undoLeft, undoWindow, type TapZone } from '@/lib/readerGesture';
 import { Book, Page, PageInfo, Series } from '@/lib/types';
 import { useAuth, canDownload } from '@/lib/auth';
 import { chapterLabel } from '@/lib/format';
@@ -137,6 +138,15 @@ function ReaderInner() {
   const tap = useRef<{ x: number; y: number; t: number } | null>(null);
   const lastTapAt = useRef(0);
   const tapTimer = useRef<any>(null);
+  /**
+   * What a tap did, and when -- so a `dblclick` that arrives after it can take it back. Only a mouse gets
+   * that far: the OS decides how long a double-click may take (Windows defaults to 500 ms), so the single
+   * click of a slow double-click has already acted by the time the browser says the two were one gesture.
+   */
+  const acted = useRef<{ kind: 'turn'; slide: number; at: number } | { kind: 'chrome'; at: number } | null>(null);
+  /** When the pointer path handled a double-tap itself. A touch double-tap also raises `dblclick`, and
+   *  zooming for both halves of the same gesture would put the zoom straight back where it started. */
+  const handledDouble = useRef(0);
   const pointers = useRef<Map<number, { x: number; y: number }>>(new Map());
   const pinch = useRef<{ dist: number; zoom: number } | null>(null);
 
@@ -539,6 +549,8 @@ function ReaderInner() {
   // lingering (webtoon fast-scroll can even skip it entirely), so finished chapters never counted as read.
   const completedSent = useRef(new Set<string>());
   const prevPos = useRef<{ ci: number } | null>(null);
+  /** Bumped when a tap's page turn can no longer be taken back, so the progress below is read again. */
+  const [turnSettled, setTurnSettled] = useState(0);
   const sendProgress = useCallback((chId: string, sId: string, page: number, completed: boolean) => {
     // `at` is what lets the server refuse a stale write. The offline outbox always sent it; the live path
     // never did, so every live ping took the "no timestamp" leg of the guard and applied unconditionally --
@@ -550,6 +562,17 @@ function ReaderInner() {
   }, []);
   useEffect(() => {
     if (!ready || !flat.length) return;
+    // A tap's page turn is not reading until a double-click can no longer take it back (lib/readerGesture.ts).
+    // ⚠️ Completion goes out the moment a chapter's last page shows, so a slow mouse double-click whose first
+    // click turned onto that page marked the chapter read -- and the undo put the page back but not the
+    // progress, which is what moves Continue and lets read-chapter cleanup take the file. Held, not dropped:
+    // `prevPos` is left alone while held, so a chapter crossed during the hold still counts as finished.
+    const a = acted.current;
+    const hold = a?.kind === 'turn' ? undoLeft(a.at, Date.now()) : 0;
+    if (hold > 0) {
+      const t = setTimeout(() => setTurnSettled((n) => n + 1), hold + 20);
+      return () => clearTimeout(t);
+    }
     const it = flat[current];
     if (!it) return;
     const ch = chapters[it.ci];
@@ -584,7 +607,7 @@ function ReaderInner() {
     }, 600);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [current, ready, flat.length]);
+  }, [current, ready, flat.length, turnSettled]);
 
   // ---- auto-scroll ----
   useEffect(() => {
@@ -821,25 +844,80 @@ function ReaderInner() {
     if (wasPinch) return;
     const s = tap.current; tap.current = null;
     if (!s) return;
-    if (Math.abs(e.clientX - s.x) > 10 || Math.abs(e.clientY - s.y) > 10 || Date.now() - s.t > 300) return; // scroll/long-press
     const now = Date.now();
-    if (now - lastTapAt.current < 300) {
-      if (tapTimer.current) { clearTimeout(tapTimer.current); tapTimer.current = null; }
+    // A mouse is NOT double-detected here: `onTrackDoubleClick` below takes it, because the interval that
+    // defines a double-click is an OS setting this page cannot read. Two detectors for one gesture zoom in
+    // and then straight back out.
+    const act = readTap({
+      from: s,
+      to: { x: e.clientX, y: e.clientY, t: now },
+      width: scrollRef.current?.clientWidth || window.innerWidth,
+      lastTapAt: lastTapAt.current,
+      doubleDetect: e.pointerType !== 'mouse',
+    });
+    if (act.kind === 'none') return; // a scroll, or a press held long enough to be something else
+    if (act.kind === 'double') {
+      cancelPendingTap();
       lastTapAt.current = 0;
+      handledDouble.current = now;
       applyZoom(zoom > 1 ? 1 : 2);
       return;
     }
+    // ⚠️ Cancel first. A mouse's second click also lands here (it is not double-detected), and leaving the
+    // first one's timer running would turn the page from a gesture that only ever meant zoom.
+    cancelPendingTap();
     lastTapAt.current = now;
-    const x = e.clientX;
-    tapTimer.current = setTimeout(() => {
-      tapTimer.current = null;
-      if (prefs.mode === 'paged') {
-        const w = scrollRef.current?.clientWidth || window.innerWidth;
-        if (x < w * 0.3) scrollRef.current?.scrollBy({ left: -w, behavior: 'smooth' });
-        else if (x > w * 0.7) scrollRef.current?.scrollBy({ left: w, behavior: 'smooth' });
-        else setChrome((c) => !c);
-      } else setChrome((c) => !c);
-    }, 260);
+    const zone = act.zone;
+    tapTimer.current = setTimeout(() => { tapTimer.current = null; runTap(zone); }, act.after);
+  };
+
+  const cancelPendingTap = () => {
+    if (tapTimer.current) { clearTimeout(tapTimer.current); tapTimer.current = null; }
+  };
+
+  /** The slide the paged track is on, the way `onScroll` reads it -- an RTL track counts in negative px. */
+  const slideNow = () => {
+    const el = scrollRef.current;
+    return el ? Math.round(Math.abs(el.scrollLeft) / Math.max(1, el.clientWidth)) : 0;
+  };
+
+  /** What a tap does once the double window has closed, remembered well enough to be taken back. */
+  const runTap = (zone: TapZone) => {
+    const el = scrollRef.current;
+    if (prefs.mode === 'paged' && el && zone !== 'chrome') {
+      const w = el.clientWidth || window.innerWidth;
+      // Physical, as the arrow keys are: an RTL track turns the other way round, but the left edge of the
+      // screen is still the left edge of the screen.
+      acted.current = { kind: 'turn', slide: slideNow(), at: Date.now() };
+      el.scrollBy({ left: zone === 'back' ? -w : w, behavior: 'smooth' });
+      return;
+    }
+    acted.current = { kind: 'chrome', at: Date.now() };
+    setChrome((c) => !c);
+  };
+
+  /**
+   * A mouse's double-click: zoom, and only zoom.
+   *
+   * The browser knows the reader's actual double-click setting and this page does not, so the pairing is
+   * left to it -- but that means the first click may already have turned a page by the time this arrives.
+   * Undo that: a double-click is one gesture, and this one means zoom. See lib/readerGesture.ts.
+   */
+  const onTrackDoubleClick = (e: React.MouseEvent) => {
+    // A touch double-tap raises this too, and the pointer path has already zoomed for it.
+    if (Date.now() - handledDouble.current < 700) return;
+    // A repeated-page strip owns its own clicks (it stops the pointer gesture for the same reason).
+    if ((e.target as HTMLElement).closest?.('button, a')) return;
+    cancelPendingTap();
+    lastTapAt.current = 0;
+    const a = acted.current;
+    acted.current = null;
+    if (a && undoWindow(a.at, Date.now())) {
+      const el = scrollRef.current;
+      if (a.kind === 'turn' && el) el.scrollTo({ left: trackSign * a.slide * (el.clientWidth || window.innerWidth) });
+      else if (a.kind === 'chrome') setChrome((c) => !c);
+    }
+    applyZoom(zoom > 1 ? 1 : 2);
   };
 
   const total = flat.length;
@@ -971,7 +1049,7 @@ function ReaderInner() {
           DOM -- is the only model of the layout there is. A browser that quietly adjusts scrollTop to keep
           content in view desynchronises it from `current` with no symptom and no way to detect it. */}
       {prefs.mode === 'vertical' ? (
-        <div ref={scrollRef} data-lenis-prevent style={{ overflowAnchor: 'none' }} onScroll={onScroll} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerEnd} onPointerCancel={onPointerEnd}
+        <div ref={scrollRef} data-lenis-prevent style={{ overflowAnchor: 'none' }} onScroll={onScroll} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerEnd} onPointerCancel={onPointerEnd} onDoubleClick={onTrackDoubleClick}
           className={`h-screen-d touch-pan-y overflow-y-auto overscroll-contain ${zoom > 1 ? 'overflow-x-auto' : 'overflow-x-hidden'}`}>
           <div className="mx-auto" style={{ width: colW || '100%', filter: THEME_FILTER[prefs.theme] }}>
             <div className="h-2" />
@@ -1051,7 +1129,7 @@ function ReaderInner() {
           </div>
         </div>
       ) : (
-        <div ref={scrollRef} data-lenis-prevent onScroll={onScroll} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerEnd} onPointerCancel={onPointerEnd}
+        <div ref={scrollRef} data-lenis-prevent onScroll={onScroll} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerEnd} onPointerCancel={onPointerEnd} onDoubleClick={onTrackDoubleClick}
           dir={pagedRtl ? 'rtl' : 'ltr'}
           className="hide-scrollbar flex h-screen-d snap-x snap-mandatory overflow-x-auto overflow-y-hidden" style={{ filter: THEME_FILTER[prefs.theme] }}>
           {slides.map((idxs) => {
