@@ -622,7 +622,8 @@ The centerpiece: a smooth **vertical webtoon scroll**. It auto-appends the next 
 you keep scrolling through a series without interruption.
 
 - **Tap** the middle to show/hide the chrome (top bar + controls).
-- **Pinch / double-tap** to zoom (width multiplier).
+- **Pinch / double-tap** to zoom (width multiplier); with a mouse, **double-click**. A double-click only zooms: it
+  never turns the page as well, however slow your computer's double-click setting is (since v0.47.1).
 - **Themes:** AMOLED black, sepia, or gray, from the reader settings.
 - **Per-series memory:** your zoom/theme choices are remembered per title.
 - **Jump to a chapter:** the chapter button in the top bar opens the full list, at every screen size. On a

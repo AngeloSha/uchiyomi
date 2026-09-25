@@ -1,5 +1,41 @@
 # Changelog
 
+## v0.47.1 — 2026-09-25
+
+**A double-click in the reader zooms, and only zooms.** From [@Squeaks72](https://github.com/Squeaks72)
+([#99](https://github.com/AngeloSha/uchiyomi/pull/99)), with one fix on top.
+
+### Double-click to zoom no longer turns the page
+
+A mouse double-click on a page used to zoom *and* turn the page. Repeated to get a closer look, it walked you
+several pages into the chapter. The reader acted on a single click after 260 ms, but a second click still
+counted as a double for 300 ms, so every double-click with its clicks 260–300 ms apart did both. A slower
+double-click (Windows allows up to 900 ms) turned the page twice and never zoomed.
+
+For a mouse the reader now leaves the question to the browser, which knows your operating system's
+double-click setting. If the first click has already turned the page by the time the browser says it was a
+double-click, the turn is taken back. On a touchscreen one window governs both halves: a tap acts only once a
+second tap can no longer arrive. A single click still turns the page, 40 ms later than before.
+
+The fix on top: taking a turn back put the page back but not the progress. A chapter's last page reports the
+chapter finished the moment it shows, so a slow double-click whose first click landed there had already marked
+the chapter read — Continue moved on, and read-chapter cleanup could remove the file. A page turn from a click
+is now not reported as reading until it can no longer be undone. Found in a real browser: at a 650 ms
+double-click the pull request as opened sent "completed"; with the fix nothing is sent until the turn is final.
+
+### Dependencies
+
+- Web: `@tanstack/react-query` 5.103.2, `@types/node` 24.13.6, `tsx` 4.23.15
+  ([#97](https://github.com/AngeloSha/uchiyomi/pull/97)).
+- Desktop app: TypeScript 7.0.2 for its build checks ([#79](https://github.com/AngeloSha/uchiyomi/pull/79)).
+- **Held back:** `undici` 8.11.0 ([#96](https://github.com/AngeloSha/uchiyomi/pull/96)). With it installed,
+  Node's built-in `fetch` speaks HTTP/2 to MangaDex and hands back the compressed body without decompressing
+  it, so every built-in source would have returned nothing. v0.47.0 added a test that catches this.
+
+### Upgrading
+
+Nothing to do: no database changes.
+
 ## v0.47.0 — 2026-09-25
 
 **The four pull requests that could not be merged, rebuilt — and the two issues behind them answered.**
