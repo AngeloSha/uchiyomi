@@ -157,7 +157,7 @@ function GroupSheet<T extends string>({ groups, ariaLabel, current, footer, onPi
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-ink-950/70 backdrop-blur-xs sm:items-center" onClick={onClose}>
       <div ref={ref} className="glass max-h-[80vh] w-full overflow-y-auto rounded-t-2xl border border-ink-700 p-5 pb-[calc(5.5rem+env(safe-area-inset-bottom))] sm:pb-[max(1.25rem,env(safe-area-inset-bottom))] sm:max-w-md sm:rounded-2xl"
-        role="dialog" aria-modal="true" aria-label={ariaLabel} onClick={(e) => e.stopPropagation()}>
+        role="dialog" aria-modal="true" aria-label={ariaLabel} data-lenis-prevent onClick={(e) => e.stopPropagation()}>
         <div className="mb-4 flex items-start justify-between gap-3">
           <h3 className="font-display text-lg font-semibold leading-tight">{ariaLabel}</h3>
           <button onClick={onClose} aria-label={tr('Close')} className="shrink-0 text-fog-500 hover:text-fog-200">✕</button>
