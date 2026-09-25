@@ -49,6 +49,12 @@ export function taskResult(r: any): string {
       const g = r.gaps || {};
       bits.push(`gaps: ${g.series ?? 0} series, ${g.followed ?? 0} followed, ${g.fetched ?? 0} chapter${g.fetched === 1 ? '' : 's'} fetched`);
     }
+    // Group upgrades (#81) are off unless switched on, and a line that said "groups: off" every night would be
+    // noise about a feature nobody chose; with the switch on, it says what the step did.
+    if (ran('groups') && r.groups && !r.groups.off) {
+      const g = r.groups;
+      bits.push(`groups: ${g.replaced ?? 0} replaced${g.left ? `, ${g.left} left` : ''}`);
+    }
     if (ran('failures')) {
       const n = r.failures?.reset ?? 0;
       bits.push(`${n} failure${n === 1 ? '' : 's'} reset`);

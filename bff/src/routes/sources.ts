@@ -207,6 +207,9 @@ export function startDownloadJob(input: DownloadJobInput): { total: number } {
     // What this job wrote, for the provenance stamp; a skipped copy was already on disk and is not ours.
     const landed: Array<{ number: number; scanlator?: string; source?: string; missing?: number[]; title?: string }> = [];
     const settled = new Set<SourceChapter>();
+    // Numbers that landed from a copy the person picked by name: stamped `picked_at` at the end, so the
+    // nightly group upgrade (lib/repair.ts stepGroups) never swaps a chosen version for another group's.
+    const pickedLanded: number[] = [];
     // A source that has refused once this job is not asked again, but the others still are: a rate-limited
     // primary must not stop the follower's chapters. Each source costs at most one strike per job. Written
     // by the helper (a copy that earns `blockStatus` puts its source here) and read by it.
@@ -267,6 +270,7 @@ export function startDownloadJob(input: DownloadJobInput): { total: number } {
           number: ch.number, scanlator: out.chapterUsed.scanlator, source: out.via, title: out.chapterUsed.title,
           ...(out.kind === 'partial' ? { missing: out.missing.map((i) => i + 1) } : {}),
         });
+        if (ch.pinned && !out.switched) pickedLanded.push(ch.number);
         if (j) {
           j.done++;
           if (out.switched) {
@@ -313,6 +317,10 @@ export function startDownloadJob(input: DownloadJobInput): { total: number } {
     await persistScan().catch(() => {});
     await setBookDates(folder, chapters).catch(() => {});
     await setBookMeta(folder, landed).catch(() => {});
+    if (pickedLanded.length) {
+      await q('UPDATE lib_books SET picked_at = now() WHERE series_id = $1 AND number = ANY($2::real[]) AND pruned_at IS NULL',
+        [seriesId, pickedLanded]).catch(() => {});
+    }
     const j = jobs.get(folder);
     // A cancelled job says so, and ends `done`: stopping was the request, not a failure. A chapter that
     // failed before the Cancel is still counted in the sentence, so nothing it lost goes unreported.

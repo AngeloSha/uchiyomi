@@ -10,9 +10,9 @@ import { one } from './db';
  * ⚠️ IT ONLY EVER CHOOSES AMONG COPIES OF A CHAPTER THE SERVER DOES NOT HAVE YET. #93 also re-downloaded held
  * chapters from a higher-ranked source, and that half was not taken: it trusted `lib_books.source_id` as "we
  * downloaded this" when `setBookMeta` stamps it on files in both roots, and nothing stopped a one-page "chapter
- * removed" notice from replacing a full chapter. Replacing what is on disk is a different decision with rules of
- * its own -- owned files only, never a shorter copy, off unless an admin turns it on -- and what #81 asks it to
- * follow is the scanlation group, not the source.
+ * removed" notice from replacing a full chapter. Replacing what is on disk is the nightly repair's group step
+ * (lib/repair.ts stepGroups), with rules of its own -- owned files only, never a shorter copy, off unless an
+ * admin turns it on -- and it follows the scanlation group, which is what #81 asks for, not the source.
  *
  * Where it sits in the ranking (lib/releases.ts `releaseOrder`): below the group preferences and the
  * hosted-before-external rule, above the follow order. So it decides between two copies the release rules

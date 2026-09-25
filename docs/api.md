@@ -863,7 +863,7 @@ PATCH  /api/admin/import/candidates/:cid
 **Server settings.** `GET /api/admin/settings` is the one row: `server_name`, `allow_registration`,
 `updater_hours`, `extension_hours`, `extension_auto_update`, `update_check`, `install_ping`, `install_ping_last`,
 `cleanup_read`, `cleanup_read_days`, `backup_hour`, `scanlator_prefs`, `auto_follow_on_failure`,
-`repair_enabled`, `source_prefs`, plus `extensions_configured` (computed). `auto_follow_on_failure` defaults to true and
+`repair_enabled`, `source_prefs`, `group_upgrade`, plus `extensions_configured` (computed). `auto_follow_on_failure` defaults to true and
 controls the bounded once-per-series-per-day source hunt after an ordinary scheduled-download failure; it
 never makes an interactive Add/Fetch hunt and never runs after a refusal. `PATCH
 /api/admin/settings` takes any subset of `serverName` (1–64 chars), `allowRegistration`, `updaterHours`
@@ -871,7 +871,8 @@ never makes an interactive Add/Fetch hunt and never runs after a refusal. `PATCH
 `cleanupReadDays` (0–3650; 0 is a value, "at the next run"), `backupHour` (0–23, the local hour of the nightly
 backup — the pending timer is re-armed at once, so the change applies to the next run rather than the one
 after; `GET /api/admin/tasks` shows the backup's `schedule` as `daily at HH:00` from the same column),
-`scanlatorPrefs` and `sourcePrefs` (both below), `autoFollowOnFailure`, and `repairEnabled` (the nightly library repair, on by
+`scanlatorPrefs` and `sourcePrefs` (both below), `groupUpgrade` (the repair's group upgrades, off by default),
+`autoFollowOnFailure`, and `repairEnabled` (the nightly library repair, on by
 default — switching it off stops the schedule only, since nothing it does deletes, merges or renumbers
 anything). Each field is written on its own, an out-of-range value is a **400** and nothing is written, and
 the audit row `settings.update` carries the body. The admin console's Settings tab sends one
@@ -1208,8 +1209,11 @@ comes back. A shutdown stops it between batches; what it had marked stays marked
 library*, and the *Fix* / *Fill now* / *Retry now* / *Reset solver sessions* chips on the Health tab —
 *It's fine* is the separate `confirm-short` route below) runs the nightly repair now. It is **detached**, like `update` and `verify`, and answers **200**
 `{ok: true, started: true}`; the counts land on `GET /api/admin/tasks` as the `repair` entry's `lastResult`.
-It is the only task that takes a **body**: `{only?: ('solver' | 'count' | 'failures' | 'short' | 'gaps')[],
-seriesId?, bookId?, sourceId?}`. With no body it runs all five steps over the whole library, in that order.
+It is the only task that takes a **body**: `{only?: ('solver' | 'count' | 'failures' | 'short' | 'gaps' |
+'groups')[], seriesId?, bookId?, sourceId?}`. With no body it runs all six steps over the whole library, in that
+order; `groups` (since v0.47.0) does nothing unless group upgrades are switched on — `groupUpgrade` on `PATCH
+/api/admin/settings`, `group_upgrade` on its GET, off by default — and each swap it makes is audited as
+`book.group_upgraded`.
 Each target belongs to exactly one step — `seriesId` to `gaps` (that series, ignoring the 24-hour re-check
 cooldown), `bookId` to `short` (that chapter), `sourceId` to `failures` (that source's failed chapters,
 whatever their age) — and a target sent **without** `only: ["<its step>"]` is a **400** `bad_request` with a

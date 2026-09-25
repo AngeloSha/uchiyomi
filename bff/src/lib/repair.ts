@@ -54,6 +54,8 @@ import { budgetFor } from './sources/budget';
 import { resetSolverSessions, solverPing } from './sources/flaresolverr';
 import { blockedNow, clearBlock, isDisabled } from './sourceHealth';
 import { copyToChapter, type ListingCopy } from './seriesListing';
+import { groupsOf, normGroup, type ReleasePrefs } from './releases';
+import { effectivePrefsFor, readSeriesPrefs } from './scanlatorPrefs';
 import { busyFolders } from './bulkNewest';
 import { beginRun, dismissRun, endRun, stopRequested, type RunCard } from './downloadJobs';
 import { updateSeries, CHAPTER_RETRY_CAP, type Landed } from './updater';
@@ -65,11 +67,14 @@ import { assess, gapsOf } from './fill';
 import { solverBlaming } from './health';
 import { visibleToAll } from './visibility';
 
-/** Which of the five steps to run. `only` on the options picks a subset; the nightly runs them all. */
-export type RepairStep = 'solver' | 'count' | 'failures' | 'short' | 'gaps';
+/**
+ * Which of the six steps to run. `only` on the options picks a subset; the nightly runs them all. `groups`
+ * (v0.47.0) does nothing unless an admin has switched group upgrades on -- see stepGroups.
+ */
+export type RepairStep = 'solver' | 'count' | 'failures' | 'short' | 'gaps' | 'groups';
 
 /** In the order the run takes them, which is also the order a caller's `only` is reported in. */
-export const REPAIR_STEPS: readonly RepairStep[] = ['solver', 'count', 'failures', 'short', 'gaps'];
+export const REPAIR_STEPS: readonly RepairStep[] = ['solver', 'count', 'failures', 'short', 'gaps', 'groups'];
 
 /**
  * An integer knob from the environment, clamped. Out-of-range, unparseable and absent all fall back to the
@@ -93,6 +98,14 @@ export const REPAIR_COUNT_MAX = envInt('REPAIR_COUNT_MAX', 2000, 1, 100_000);
 export const REPAIR_SHORT_MAX = envInt('REPAIR_SHORT_MAX', 20, 1, 500);
 /** Series one run searches other sources for, to fill a gap. Deliberately tiny: each one is a real search. */
 export const REPAIR_GAPS_MAX = envInt('REPAIR_GAPS_MAX', 5, 1, 100);
+/**
+ * Chapters one run may replace with a preferred group's copy (stepGroups). Each is a page list and a whole
+ * chapter download from a source, on top of the night's sweep, so the default is small: a library that
+ * followed the wrong group for two hundred chapters catches up over a few weeks, not in one night.
+ */
+export const REPAIR_GROUPS_MAX = envInt('REPAIR_GROUPS_MAX', 10, 1, 200);
+/** How long a chapter whose upgrade was tried, and failed, is left before it is tried again. */
+const GROUP_RETRY_DAYS = 7;
 /**
  * The pause between two series the failures step retries, as the sweep paces itself. Tests set it to 0.
  *
@@ -190,6 +203,12 @@ export interface RepairResult {
     /** Gap chapters a followed source already lists, which the ordinary sweep will fetch. */
     sweep: number;
   };
+  /**
+   * Group upgrades (stepGroups): chapters looked at, replaced with the preferred group's copy, and left
+   * (the copy was shorter, did not answer, or would not download). `off` when the switch is off, which is
+   * the default, and then nothing was looked at.
+   */
+  groups: { off?: true; looked: number; replaced: number; left: number };
   failures: {
     /** Ledger rows put back to zero attempts. */
     reset: number;
@@ -238,7 +257,7 @@ type Log = { info: (m: string) => void; warn: (m: string) => void; error: (m: un
 type Dated = { folder: string; chapters: SourceChapter[]; landed: Landed[] };
 
 /** The lists that go into the audit row, so "what did it actually touch" is answerable without the logs. */
-type Notes = { replaced: string[]; confirmed: string[]; followed: string[] };
+type Notes = { replaced: string[]; confirmed: string[]; followed: string[]; upgraded: string[] };
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -658,6 +677,206 @@ async function replaceShort(
   return true;
 }
 
+type GroupBook = ShortBook & { scanlator: string; copies: ListingCopy[]; own_prefs: boolean };
+
+/**
+ * (f) Group upgrades: swap a chapter for the copy your preferred scanlation group released, once it exists.
+ *
+ * #81 (Wolf92s): "pull from several sources so you get your favourite group". Most of that already worked --
+ * a series follows up to three sources, the group ranking chooses across all of them, and a new chapter
+ * waits up to its patience for a ranked group. What did not: once the wait was over the chapter was taken
+ * from whoever had it, and when the preferred group's copy turned up a day later it was never looked at
+ * again, because what is on disk is never replaced by the sweep. This step is that second look. @Squeaks72's
+ * #93 tried it by SOURCE; it is done here by GROUP, which is what #81 asks for, and under the rules that
+ * PR's review set:
+ *
+ *   - OFF unless an admin switches it on (`server_settings.group_upgrade`). It replaces files on disk.
+ *   - Owned files only: the download root and the downloader's own filename, as the short step (and
+ *     `lib_books.source_id` is NOT that test -- setBookMeta stamps it on files in both roots).
+ *   - Never a shorter copy: the preferred copy's page list is counted BEFORE anything is downloaded, and
+ *     fewer pages than the file on disk means no. A one-page "chapter removed" notice from the right group
+ *     is exactly what this rule is for. And never a partial copy, whatever it would beat.
+ *   - Only a file whose group is KNOWN and ranks below a group the preferences name. A file with no group
+ *     could already be the preferred group's, and "unranked beats unranked" would re-fetch the library.
+ *   - Never a chapter someone picked a copy for by hand (`picked_at`), a deleted one, one with pages missing
+ *     (the sweep's completion pass owns those), or one in a series no longer updated.
+ *   - The busy-folder hold, a listing refresh first, and a series is skipped when it did not answer.
+ *   - REPAIR_GROUPS_MAX downloads a night; a chapter whose attempt failed waits GROUP_RETRY_DAYS.
+ *   - restampBook afterwards, so pages, source and group describe the new file, and an audit row per swap.
+ *
+ * Reading progress and bookmarks stay, as with the short step: the file is written over the same row.
+ */
+async function stepGroups(r: RepairResult, opts: RepairOpts, notes: Notes, log?: Log): Promise<RepairResult['stopped']> {
+  const on = await one<{ on: boolean }>('SELECT group_upgrade AS "on" FROM server_settings WHERE id = 1').catch(() => null);
+  if (!on?.on) { r.groups.off = true; return undefined; }
+
+  const rows0 = await q<GroupBook>(
+    `SELECT b.id, b.series_id, b.number::float8 AS number, b.pages, b.root, b.file, b.source_id, b.scanlator,
+            s.title, s.folder, s.summary, s.author, s.genres, s.web, s.status,
+            (s.scanlator_prefs IS NOT NULL) AS own_prefs, l.copies
+       FROM lib_books b
+       JOIN lib_series s ON s.id = b.series_id AND s.auto_update AND ${visibleToAll('s')}
+       JOIN series_listing l ON l.series_id = b.series_id AND l.number = b.number
+      WHERE b.root = $1 AND b.pruned_at IS NULL AND b.missing_pages IS NULL AND b.picked_at IS NULL
+        AND b.pages > 0 AND btrim(COALESCE(b.scanlator, '')) <> ''
+        AND (b.upgrade_tried_at IS NULL OR b.upgrade_tried_at < now() - make_interval(days => $2))
+      ORDER BY b.mtime DESC LIMIT 2000`,
+    [DL_ROOT, GROUP_RETRY_DAYS],
+  ).catch(() => [] as GroupBook[]);
+
+  // The preferences per series, read once each: the series' own when it has any, the server's otherwise.
+  const prefsOf = new Map<string, ReleasePrefs>();
+  const prefsFor = async (b: GroupBook) => {
+    let p = prefsOf.get(b.series_id);
+    if (!p) { p = await effectivePrefsFor(b.own_prefs ? await readSeriesPrefs(b.series_id) : null); prefsOf.set(b.series_id, p); }
+    return p;
+  };
+  /** A listing copy's groups, as the release rules read them (`scanlator` is nullable there). */
+  const groupsOfCopy = (c: ListingCopy) => groupsOf({ groups: c.groups, scanlator: c.scanlator ?? undefined });
+  /** The best copy on offer whose group outranks the file's, or null. Followed sources only, never blocked, never external. */
+  const betterCopy = (b: GroupBook, copies: ListingCopy[], prefs: ReleasePrefs, followed: Set<string> | null): ListingCopy | null => {
+    const blocked = new Set(prefs.blocked.map(normGroup));
+    const priority = prefs.priority.map(normGroup).filter((k) => k && !blocked.has(k));
+    const rankOf = (groups: string[]) => Math.min(Infinity, ...groups.map((g) => priority.indexOf(normGroup(g))).filter((i) => i >= 0));
+    const held = rankOf(groupsOf({ scanlator: b.scanlator }));
+    let best: ListingCopy | null = null;
+    let bestRank = held;
+    for (const c of copies ?? []) {
+      if (followed && !followed.has(c.source)) continue;
+      if (c.pages === 0) continue; // an external link cannot be downloaded
+      const keys = groupsOfCopy(c).map(normGroup);
+      if (!keys.length || keys.every((k) => blocked.has(k))) continue;
+      const rank = rankOf(groupsOfCopy(c));
+      if (rank < bestRank) { best = c; bestRank = rank; }
+    }
+    return best;
+  };
+
+  // The candidates, in TypeScript as well as in SQL: the downloader's own filename, and a better group on offer.
+  const candidates: GroupBook[] = [];
+  for (const b of rows0) {
+    if (candidates.length >= REPAIR_GROUPS_MAX) break;
+    if (b.file !== chapterFileRel(b.folder, Number(b.number))) continue;
+    if (betterCopy(b, b.copies, await prefsFor(b), null)) candidates.push(b);
+  }
+  if (!candidates.length) return undefined;
+
+  const bySeries = new Map<string, GroupBook[]>();
+  for (const b of candidates) {
+    if (!bySeries.has(b.series_id)) bySeries.set(b.series_id, []);
+    bySeries.get(b.series_id)!.push(b);
+  }
+
+  let stopped: RepairResult['stopped'];
+  series: for (const [seriesId, rows] of bySeries) {
+    { const h = halted(); if (h) { stopped = h; break; } }
+    const folder = rows[0].folder;
+    if (busyFolders.has(folder)) continue;
+    const allowed = await sweepAllowedFor(await seriesIsAdult(seriesId).catch(() => false));
+    const primary = await one<{ source_id: string | null }>('SELECT source_id FROM lib_series WHERE id = $1', [seriesId]).catch(() => null);
+    const followed = new Set<string>(
+      (await q<{ source_id: string }>('SELECT source_id FROM series_sources WHERE series_id = $1', [seriesId]).catch(() => [])).map((x) => x.source_id),
+    );
+    if (primary?.source_id) followed.add(primary.source_id);
+
+    busyFolders.add(folder);
+    try {
+      // The listing is as old as the last sweep: refreshed first, so the copy judged is one the sources list
+      // now. A series whose refresh did not come back is left for tomorrow -- a stale listing is how a copy
+      // a site has since taken down would be "the preferred group's version".
+      const refreshed = await withTimeout(updateSeries(seriesId, 0), LISTING_REFRESH_MS).catch(() => null);
+      if (!refreshed || refreshed.outcome !== 'ok') { r.groups.left += rows.length; continue; }
+      for (const book of rows) {
+        { const h = halted(); if (h) { stopped = h; break series; } }
+        r.groups.looked++;
+        await q('UPDATE lib_books SET upgrade_tried_at = now() WHERE id = $1', [book.id]).catch(() => {});
+        const listing = await one<{ title: string | null; copies: ListingCopy[] }>(
+          'SELECT title, copies FROM series_listing WHERE series_id = $1 AND number = $2::real', [seriesId, book.number],
+        ).catch(() => null);
+        const copy = listing && betterCopy(book, listing.copies, await prefsFor(book), followed);
+        if (!copy || !allowed(copy.source)) { r.groups.left++; continue; }
+        const chapter = copyToChapter(copy, { number: book.number, title: listing!.title });
+        const count = await pageCount(copy.source, copy.sourceId, allowed);
+        // ⚠️ Decided BEFORE the download: never a shorter copy, and silence is not a yes.
+        // Reintroduce by dropping the page test: "a shorter copy never replaces a longer one" in
+        // groupUpgrade.int.test.ts finds the notice written over the chapter.
+        if (count === null || count < book.pages) {
+          r.groups.left++;
+          if (count !== null) log?.info(`repair: "${book.title}" ch ${book.number}: ${copy.scanlator ?? copy.source} has ${count} page(s) to our ${book.pages}; kept`);
+          continue;
+        }
+        const done = await replaceWithGroup(book, chapter, copy, opts, notes, log);
+        if (done === 'disk') { stopped = 'disk'; break series; }
+        if (done) r.groups.replaced++;
+        else r.groups.left++;
+      }
+    } finally {
+      busyFolders.delete(folder);
+    }
+  }
+  return stopped;
+}
+
+/**
+ * The page count of one copy, or null when it was not asked or did not answer -- the short step's `ask`, for
+ * the group step. Never reported to source_health: a page list asked on our own initiative must not be what
+ * puts a source into a cooldown. An EMPTY list is silence, not zero pages (see stepShort).
+ */
+async function pageCount(sourceId: string, chapterSourceId: string, allowed: (s: string) => boolean): Promise<number | null> {
+  const src = getSource(sourceId);
+  if (!src || !allowed(sourceId)) return null;
+  if (await isDisabled(sourceId).catch(() => false)) return null;
+  if (await blockedNow(sourceId).catch(() => null)) return null;
+  try {
+    const urls = await withTimeout(src.getPageUrls(chapterSourceId), budgetFor(src, SHORT_PAGES_MS));
+    return urls.length || null;
+  } catch {
+    return null;
+  }
+}
+
+/** Write the preferred group's copy over the file, whole or not at all, and stamp and audit it. */
+async function replaceWithGroup(
+  book: GroupBook, chapter: SourceChapter, copy: ListingCopy, opts: RepairOpts, notes: Notes, log?: Log,
+): Promise<boolean | 'disk'> {
+  const via = copy.source;
+  const meta: DownloadInput['meta'] = {
+    series: book.title, summary: book.summary ?? undefined, author: book.author ?? undefined,
+    genres: book.genres ?? undefined, url: book.web ?? undefined, status: book.status ?? undefined,
+  };
+  try {
+    // writeAtomic underneath: the file on disk is untouched until the new one is entirely there. A copy
+    // that arrives short is offered as a hold (e.partial) and REFUSED here -- a partial is a downgrade.
+    const landed = await downloadChapter({ sourceId: via, seriesFolder: book.folder, chapter, meta }, { replace: true });
+    if (!landed) return false;
+  } catch (e: any) {
+    if (e?.diskFull) return 'disk';
+    return false;
+  }
+  const abs = join(book.root, book.file);
+  const group = groupsOf({ groups: copy.groups, scanlator: copy.scanlator ?? undefined }).join(' & ') || copy.scanlator || undefined;
+  // A restamp that throws must not take the rest of the night's repair with it: the new file is whole on
+  // disk, and the count step re-measures a row whose numbers are stale.
+  try {
+    await restampBook(book.id, abs, [], { source: via, scanlator: group });
+  } catch (e) {
+    log?.warn(`repair: "${book.title}" ch ${book.number} was replaced but could not be restamped: ${(e as Error)?.message || e}`);
+  }
+  const now = await one<{ pages: number }>('SELECT pages FROM lib_books WHERE id = $1', [book.id]);
+  const readers = await one<{ n: number }>('SELECT count(*)::int AS n FROM read_progress WHERE book_id = $1', [book.id]).catch(() => null);
+  await logAudit('book.group_upgraded', {
+    userId: opts.userId ?? null,
+    detail: {
+      bookId: book.id, seriesId: book.series_id, title: book.title, number: book.number,
+      from: { source: book.source_id, group: book.scanlator }, to: { source: via, group },
+      pages: [book.pages, now?.pages ?? 0], readers: readers?.n ?? 0,
+    },
+  });
+  notes.upgraded.push(`${book.title} ch ${book.number} (${book.scanlator} -> ${group})`);
+  log?.info(`repair: "${book.title}" ch ${book.number}: ${book.scanlator} -> ${group} from ${via}`);
+  return true;
+}
+
 /** What one series' gap hunt concluded, stored on lib_series.gaps_result for the Health page to read. */
 interface GapsResult {
   at: string;
@@ -843,6 +1062,7 @@ function blank(): RepairResult {
     ok: true, ms: 0, counted: 0, uncounted: 0,
     short: { looked: 0, replaced: 0, confirmed: 0, left: 0 },
     gaps: { series: 0, followed: 0, fetched: 0, unfillable: 0, sweep: 0 },
+    groups: { looked: 0, replaced: 0, left: 0 },
     failures: { reset: 0 },
     solver: { reset: false, unblocked: 0, expired: 0 },
   };
@@ -853,7 +1073,8 @@ function summaryOf(r: RepairResult): string {
   return `${r.counted} counted (${r.uncounted} left), short ${r.short.replaced} replaced / ${r.short.confirmed} confirmed `
     + `/ ${r.short.left} left of ${r.short.looked}, gaps ${r.gaps.series} series / ${r.gaps.followed} followed / `
     + `${r.gaps.fetched} fetched, ${r.failures.reset} failures reset, solver ${r.solver.reset ? 'reset' : 'untouched'} `
-    + `(${r.solver.unblocked} unblocked, ${r.solver.expired} expired)`;
+    + `(${r.solver.unblocked} unblocked, ${r.solver.expired} expired), groups `
+    + (r.groups.off ? 'off' : `${r.groups.replaced} replaced / ${r.groups.left} left of ${r.groups.looked}`);
 }
 
 /** One pass. Exported for the tests; everything else goes through runRepair, which owns the flags. */
@@ -871,7 +1092,7 @@ export async function repairLibrary(log?: Log, opts: RepairOpts = {}): Promise<R
   const want = (s: RepairStep) => !opts.only?.length || opts.only.includes(s);
   const budget = { left: REPAIR_HUNT_BUDGET };
   const pending: Dated[] = [];
-  const notes: Notes = { replaced: [], confirmed: [], followed: [] };
+  const notes: Notes = { replaced: [], confirmed: [], followed: [], upgraded: [] };
   let stopped: RepairResult['stopped'];
 
   const steps = REPAIR_STEPS.filter(want);
@@ -894,9 +1115,10 @@ export async function repairLibrary(log?: Log, opts: RepairOpts = {}): Promise<R
       stopped = await stepShort(r, opts, reserve, notes, log);
       budget.left -= had - reserve.left;
     } else if (step === 'gaps') stopped = await stepGaps(r, opts, budget, pending, notes, log);
+    else if (step === 'groups') stopped = await stepGroups(r, opts, notes, log);
     if (activeCard) {
       activeCard.done++;
-      activeCard.fetched = r.short.replaced + r.gaps.fetched + (r.failures.retried?.added ?? 0);
+      activeCard.fetched = r.short.replaced + r.gaps.fetched + r.groups.replaced + (r.failures.retried?.added ?? 0);
       activeCard.failed = r.short.left + (r.failures.retried?.failed ?? 0);
     }
   }
@@ -927,6 +1149,7 @@ export async function repairLibrary(log?: Log, opts: RepairOpts = {}): Promise<R
       replaced: notes.replaced.slice(0, REPAIR_SHORT_MAX),
       confirmed: notes.confirmed.slice(0, REPAIR_SHORT_MAX),
       followed: notes.followed.slice(0, REPAIR_GAPS_MAX),
+      upgraded: notes.upgraded.slice(0, REPAIR_GROUPS_MAX),
     },
   });
   return out;

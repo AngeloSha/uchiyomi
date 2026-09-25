@@ -4808,6 +4808,9 @@ paths:
                     description: The source ids the 18+ filter treats as adult. See adultSources on PATCH.
                   source_prefs:
                     $ref: "#/components/schemas/SourceOrder"
+                  group_upgrade:
+                    type: boolean
+                    description: Whether the nightly repair swaps chapters for a preferred group's copy. See groupUpgrade on PATCH.
         "401":
           description: Not authenticated
         "403":
@@ -4934,6 +4937,17 @@ paths:
                     letters, digits and _ . : - dropped), whether or not the source is loaded right now.
                     Empty by default, which is the follow order.
                   $ref: "#/components/schemas/SourceOrder"
+                groupUpgrade:
+                  type: boolean
+                  description: >-
+                    Group upgrades (since v0.47.0, #81), the nightly repair's sixth step: a chapter held from
+                    one scanlation group is replaced once a group the release preferences rank higher has
+                    released it on a source the series follows. Off by default. Only files the server
+                    downloaded itself (the download root and the downloader's own file name), never with a
+                    copy whose page list is shorter than the file on disk, never a partial copy, never a
+                    chapter someone picked a copy for by hand, and at most REPAIR_GROUPS_MAX (10) a night; a
+                    chapter whose upgrade failed is left for a week. Each swap is audited as
+                    `book.group_upgraded`.
       security:
         - bearer: []
       responses:
@@ -5045,12 +5059,14 @@ paths:
                 only:
                   type: array
                   minItems: 1
-                  maxItems: 5
+                  maxItems: 6
                   description: >-
-                    Which steps to run, each at most once. Omitted means all five, in this order.
+                    Which steps to run, each at most once. Omitted means all six, in this order. `groups`
+                    (since v0.47.0) does nothing unless group upgrades are switched on (groupUpgrade on
+                    PATCH /api/admin/settings).
                   items:
                     type: string
-                    enum: [solver, count, failures, short, gaps]
+                    enum: [solver, count, failures, short, gaps, groups]
                 seriesId:
                   type: string
                   description: >-

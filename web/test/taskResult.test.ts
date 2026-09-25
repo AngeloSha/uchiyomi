@@ -226,3 +226,20 @@ test('the repair branch is read before the verify branch', () => {
   assert.match(r, /5 page counts stamped/);
   assert.doesNotMatch(r, /checked/, 'a repair result was rendered as a verify run');
 });
+
+test('group upgrades say what they did when switched on, and nothing when off (#81)', () => {
+  const base = {
+    counted: 0, uncounted: 0,
+    short: { looked: 0, replaced: 0, confirmed: 0, left: 0 },
+    gaps: { series: 0, followed: 0, fetched: 0, unfillable: 0, sweep: 0 },
+    failures: { reset: 0 }, solver: { reset: false, unblocked: 0, expired: 0 },
+  };
+  // Off is the default, and "groups: off" on every night's line would be noise about a feature nobody chose.
+  assert.doesNotMatch(taskResult({ ...base, groups: { off: true, looked: 0, replaced: 0, left: 0 } }), /groups/);
+  // A result from before v0.47.0 has no `groups` at all.
+  assert.doesNotMatch(taskResult(base), /groups/);
+  assert.match(taskResult({ ...base, groups: { looked: 3, replaced: 2, left: 1 } }), / · groups: 2 replaced, 1 left/);
+  assert.equal(taskResult({ counted: 0, uncounted: 0, only: ['groups'], groups: { looked: 1, replaced: 1, left: 0 } }), ' · groups: 1 replaced');
+  // A cancelled run (the download pill, #82) leads with it, like the other stops.
+  assert.match(taskResult({ ...base, stopped: 'cancelled' }), /^ · cancelled · /);
+});

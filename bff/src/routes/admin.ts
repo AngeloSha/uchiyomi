@@ -419,7 +419,7 @@ export default async function adminRoutes(app: FastifyInstance) {
   // ---- server settings ----
   const SETTINGS_COLS = 'server_name, allow_registration, updater_hours, extension_hours, extension_auto_update, '
     + 'update_check, install_ping, install_ping_last, scanlator_prefs, cleanup_read, cleanup_read_days, backup_hour, auto_follow_on_failure, '
-    + 'repair_enabled, komga_ghost_chapters, adult_genres, adult_sources, source_prefs';
+    + 'repair_enabled, komga_ghost_chapters, adult_genres, adult_sources, source_prefs, group_upgrade';
   // `extensions_configured` is not a column: extension_hours has a NOT NULL default, so its presence says
   // nothing about whether there is an engine to check. The settings page needs to know, or it offers two
   // controls for a job that can never run.
@@ -522,6 +522,11 @@ export default async function adminRoutes(app: FastifyInstance) {
        * sources registered now, so an order saved while the extension engine restarts keeps its extensions.
        */
       sourcePrefs: z.object({ priority: z.array(z.string().min(1).max(120)).max(100) }).optional(),
+      /**
+       * Group upgrades (lib/repair.ts stepGroups, #81): the nightly repair replaces a chapter with the
+       * preferred group's copy once it exists. Off by default -- it replaces files on disk.
+       */
+      groupUpgrade: z.boolean().optional(),
     }).parse(req.body);
     if (b.serverName !== undefined) await q('UPDATE server_settings SET server_name = $1, updated_at = now() WHERE id = 1', [b.serverName]);
     if (b.allowRegistration !== undefined) await q('UPDATE server_settings SET allow_registration = $1, updated_at = now() WHERE id = 1', [b.allowRegistration]);
@@ -553,6 +558,7 @@ export default async function adminRoutes(app: FastifyInstance) {
     // The view context caches these for a few seconds; a save must take effect on the next request,
     // not whenever that window happens to lapse.
     if (b.adultGenres !== undefined || b.adultSources !== undefined) invalidateAdultFilter();
+    if (b.groupUpgrade !== undefined) await q('UPDATE server_settings SET group_upgrade = $1, updated_at = now() WHERE id = 1', [b.groupUpgrade]);
     if (b.sourcePrefs !== undefined) {
       await q('UPDATE server_settings SET source_prefs = $1::jsonb, updated_at = now() WHERE id = 1',
         [JSON.stringify({ priority: cleanSourceOrder(b.sourcePrefs.priority) })]);
@@ -1710,7 +1716,13 @@ export default async function adminRoutes(app: FastifyInstance) {
         const r = byNumber.get(ch.number);
         if (!r) return;
         const bak = `${r.abs}${REFETCH_BAK}`;
-        if (landed) { await rm(bak, { force: true }); return; }
+        if (landed) {
+          await rm(bak, { force: true });
+          // A copy picked by name is the admin's choice, and the nightly group upgrade (lib/repair.ts
+          // stepGroups) leaves it alone; a plain Fetch again hands the choice back to the preferences.
+          await q('UPDATE lib_books SET picked_at = $2 WHERE id = $1', [r.id, pickOf.has(r.id) ? new Date() : null]).catch(() => {});
+          return;
+        }
         // Not landed: put the old copy back if it was set aside, and un-mark the row whenever a file is
         // there to read -- the restored one, or the original a failed rename left in place. A row that had
         // no file to begin with (a tombstone being fetched again) keeps its mark: the bytes are still gone.

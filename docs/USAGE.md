@@ -321,6 +321,16 @@ the only Save button on that tab). The two combine sensibly: a group blocked on 
 every series, a series with its own ranking ignores the server's ranking, and a series with no patience of
 its own uses the server's.
 
+**Upgrading to your preferred group** (since v0.47.0, off by default). Patience only goes so far: when the
+wait is over a new chapter is taken from whoever has it, and until now a copy from the group you prefer that
+turned up a day later was never looked at again. Switch on **Admin → Settings → Scanlators → Upgrade
+chapters to a preferred group** and the nightly repair does that second look: a chapter you already have from
+another group is replaced when a group you rank higher has released it on a source the series follows. It is
+careful — only files Uchiyomi downloaded itself, never a copy with fewer pages than the file you have (a
+one-page "chapter removed" notice from the right group does not win), never one that arrives incomplete,
+never a chapter someone picked a version for by hand (*Replace…*, or a pick in the versions list), ten a
+night, and a chapter whose swap failed is left for a week. Reading progress and bookmarks stay.
+
 ### Following a second source
 
 A series is added from one source, and that source is where new chapters come from. When it is slow, or
@@ -919,7 +929,7 @@ without you pressing anything.
 
 **What fixes itself.** Once a day — **Admin → Settings → Library housekeeping → Repair the library nightly**,
 on by default, and **Admin → Tasks → Repair library** with a *Run now* — Uchiyomi does the five things that
-are reversible or provable on their own, in this order:
+are reversible or provable on their own, and a sixth only when you switch it on, in this order:
 
 * **clears stale Cloudflare state** when sources are blaming the solver: the remembered sessions, the "could
   not be solved" marks and any cooldown that lapsed more than a day ago. No site is contacted;
@@ -932,7 +942,9 @@ are reversible or provable on their own, in this order:
   **marks it confirmed short**, but only when every one of those copies really answered *two pages*: a
   source that was silent, in a cooldown, left unasked by that cap of three, or that handed back an empty
   page list ends the proof, and the chapter is looked at again another night;
-* **looks for a source that can fill a gap** (five series a night) and fetches what it finds.
+* **looks for a source that can fill a gap** (five series a night) and fetches what it finds;
+* **swaps a chapter for your preferred group's copy** once that group has released it, if you switched it
+  on under **Admin → Settings → Scanlators** (see *Choosing a scanlation group*).
 
 A whole run starts at most five searches, however many findings there are, shared between the steps that
 need one — and the short chapters may take at most two of them, so a library full of short chapters cannot
@@ -1330,7 +1342,7 @@ when to run it and what it will not do. Like the sweep, it starts in the backgro
 it found when it is done.
 
 **Repair library** is the nightly that fixes what Health used to only report (the Health section above lists
-the five things it does and the two it never does). Its schedule reads *every 24h · never during a chapter
+what it does and the two things it never does). Its schedule reads *every 24h · never during a chapter
 sweep*, or *switched off · on demand* when the switch under **Admin → Settings → Library housekeeping** is
 off — and *Run now* works either way, because nothing it does deletes, merges or renumbers anything. Like
 the sweep it is detached, so the toast only says it started; its line shows what it did when it is done and

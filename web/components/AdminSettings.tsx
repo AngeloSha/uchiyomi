@@ -679,6 +679,11 @@ function ScanlatorsSection({ data, save }: { data: any; save: Save }) {
             disabled={!dirty} className="btn-accent px-4 py-2 text-sm disabled:opacity-50">{tr('Save scanlator defaults')}</button>
         </div>
       </div>
+      {/* Group upgrades (#81): the nightly repair's sixth step. Off by default, because it replaces files on
+          disk; the help says every rule it keeps, so switching it on is not a leap in the dark. */}
+      <SwitchRow label={tr('Upgrade chapters to a preferred group')}
+        help={tr('Off by default. Once a night, a chapter you already have from another group is replaced when a group you rank higher releases it on a source the series follows — only files Uchiyomi downloaded itself, never with a copy that has fewer pages, never a chapter someone picked a version for by hand, and at most ten a night unless the server is told otherwise. Reading progress is kept.')}
+        on={data.group_upgrade === true} onChange={(next) => save({ groupUpgrade: next })} />
     </Section>
   );
 }

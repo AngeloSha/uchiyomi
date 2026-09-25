@@ -221,6 +221,8 @@ ever hit.
 - `REPAIR_COUNT_MAX` (default `2000`, 1–100000): chapter files whose pages one repair run counts.
 - `REPAIR_SHORT_MAX` (default `20`, 1–500): one- or two-page chapters one run investigates.
 - `REPAIR_GAPS_MAX` (default `5`, 1–100): series one run searches another source for.
+- `REPAIR_GROUPS_MAX` (default `10`, 1–200): chapters one run may swap for a preferred group's copy, when
+  group upgrades are switched on (step 6 below).
 - `REPAIR_PACE_MS` (default `1500`, 0 or more): the pause between two series the repair's *Retry now* step
   re-checks. `0` is a legitimate value and means no pause at all.
 - `MIN_FREE_GB` (default `10`): refuse to start a download when the download disk has less than this free.
@@ -238,7 +240,7 @@ causes an adult source to be followed. There is intentionally no environment var
 
 On by default, under **Admin → Settings → Library housekeeping → Repair the library nightly**, and listed as
 **Admin → Tasks → Repair library**. Once every `REPAIR_HOURS` it does the five things on the Health page that
-are reversible or provable on their own, in this order:
+are reversible or provable on their own, and a sixth only when you switch it on, in this order:
 
 1. **Cloudflare state.** If the solver answers *and* sources are blaming it, the remembered sessions and
    "could not be solved" marks are cleared and those sources come out of their cooldown; while the solver
@@ -265,6 +267,12 @@ are reversible or provable on their own, in this order:
    source is followed only under the same 90%-numbering rule as every other automatic follow, and at most
    20 chapters are fetched per series. A series the run has no searches left for is not marked as checked:
    it keeps its place and is looked at on the next run rather than skipped for a day.
+6. **Group upgrades** (since v0.47.0), **off** until **Admin → Settings → Scanlators → Upgrade chapters to a
+   preferred group** is switched on. `REPAIR_GROUPS_MAX` chapters Uchiyomi downloaded itself whose group
+   ranks below one your release preferences name, when that group's copy is on a source the series follows:
+   the listing is refreshed first, the preferred copy's page list is counted before anything is downloaded,
+   and a copy with fewer pages than the file on disk, or one that arrives incomplete, never replaces it. A
+   chapter someone picked a version for by hand is never touched, and one whose swap failed waits a week.
 
 Fixed rather than configurable, because they are the blast radius rather than a preference: 5 searches for a
 whole run, shared by steps 3–5, of which the short step may spend at most 2 — so a library full of short

@@ -2,7 +2,7 @@
   "_meta": {
     "language": "ru",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 1193
+    "strings": 1195
   },
   "1 check found something": "1 проверка нашла проблему",
   "1 member": "1 участник",
@@ -1196,5 +1196,7 @@
   "Now: {title}": "Сейчас: {title}",
   "Stopped.": "Остановлено.",
   "Finished today ({n})": "Готово сегодня ({n})",
-  "Cancelled; what landed is kept.": "Отменено; уже загруженное сохранено."
+  "Cancelled; what landed is kept.": "Отменено; уже загруженное сохранено.",
+  "Upgrade chapters to a preferred group": "Переводить главы на предпочитаемую группу",
+  "Off by default. Once a night, a chapter you already have from another group is replaced when a group you rank higher releases it on a source the series follows — only files Uchiyomi downloaded itself, never with a copy that has fewer pages, never a chapter someone picked a version for by hand, and at most ten a night unless the server is told otherwise. Reading progress is kept.": "По умолчанию выключено. Раз в ночь глава, которая у вас уже есть от другой группы, заменяется, когда группа с более высоким приоритетом выпускает её в источнике, который отслеживает серия, — только файлы, скачанные самим Uchiyomi, никогда на копию с меньшим числом страниц, никогда главу, версию которой кто-то выбрал вручную, и не больше десяти за ночь, если сервер не настроен иначе. Прогресс чтения сохраняется."
 }
