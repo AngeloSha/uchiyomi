@@ -19,20 +19,31 @@ export function ReaderSettings({
   prefs,
   set,
   onClose,
+  sourceName,
+  sourceDefault,
+  onSourceDefault,
 }: {
   prefs: ReaderPrefs;
   set: (p: Partial<ReaderPrefs>) => void;
   onClose: () => void;
+  /** The source this chapter came from, named for the button. Absent for a copy with no source on record. */
+  sourceName?: string;
+  /** Whether that source already has a default saved, which decides what the button offers. */
+  sourceDefault?: boolean;
+  /** Save the current mode/theme/spread as that source's default, or clear it when `false` is passed. */
+  onSourceDefault?: (save: boolean) => void;
 }) {
   return (
     <motion.div className="fixed inset-0 z-50" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
       <div className="absolute inset-0 bg-black/60" onClick={onClose} />
+      {/* Capped and scrollable: with the reading-direction and this-source rows, the sheet outgrew a short
+          phone and pushed its first rows off the top. */}
       <motion.div
         initial={{ y: '100%' }}
         animate={{ y: 0 }}
         exit={{ y: '100%' }}
         transition={{ type: 'spring', stiffness: 360, damping: 36 }}
-        className="absolute inset-x-0 bottom-0 rounded-t-4xl border-t border-ink-700 bg-ink-900/95 px-5 pt-4 backdrop-blur-xl pb-[max(1.5rem,calc(env(safe-area-inset-bottom)+1rem))]"
+        className="absolute inset-x-0 bottom-0 max-h-[85dvh] overflow-y-auto overscroll-contain rounded-t-4xl border-t border-ink-700 bg-ink-900/95 px-5 pt-4 backdrop-blur-xl pb-[max(1.5rem,calc(env(safe-area-inset-bottom)+1rem))]"
       >
         <div className="mx-auto mb-3 h-1.5 w-10 rounded-full bg-ink-600" />
         <div className="mb-1 flex items-center justify-between">
@@ -40,39 +51,39 @@ export function ReaderSettings({
           <button onClick={onClose} className="text-fog-500"><IcX width={20} height={20} /></button>
         </div>
 
-        <Row label="Mode">
+        <Row label={tr('Mode')}>
           <div className="grid grid-cols-2 gap-2">
             {(['vertical', 'paged'] as const).map((m) => (
               <button
                 key={m}
                 onClick={() => set({ mode: m })}
-                className={`rounded-2xl border py-3 text-sm capitalize ${prefs.mode === m ? 'border-accent bg-accent-soft text-accent' : 'border-ink-700 text-fog-300'}`}
+                className={`rounded-2xl border py-3 text-sm ${prefs.mode === m ? 'border-accent bg-accent-soft text-accent' : 'border-ink-700 text-fog-300'}`}
               >
-                {m === 'vertical' ? 'Webtoon (scroll)' : 'Paged (swipe)'}
+                {m === 'vertical' ? tr('Webtoon (scroll)') : tr('Paged (swipe)')}
               </button>
             ))}
           </div>
         </Row>
 
-        <Row label="Theme">
+        <Row label={tr('Theme')}>
           <div className="grid grid-cols-3 gap-2">
             {(['amoled', 'sepia', 'gray'] as const).map((t) => (
               <button key={t} onClick={() => set({ theme: t })}
-                className={`rounded-2xl border py-3 text-sm capitalize ${prefs.theme === t ? 'border-accent bg-accent-soft text-accent' : 'border-ink-700 text-fog-300'}`}>
-                {t === 'amoled' ? 'AMOLED' : t}
+                className={`rounded-2xl border py-3 text-sm ${prefs.theme === t ? 'border-accent bg-accent-soft text-accent' : 'border-ink-700 text-fog-300'}`}>
+                {t === 'amoled' ? tr('AMOLED') : t === 'sepia' ? tr('Sepia') : tr('Gray')}
               </button>
             ))}
           </div>
         </Row>
 
-        <Row label={`Brightness · ${Math.round(prefs.brightness * 100)}%`}>
+        <Row label={`${tr('Brightness')} · ${Math.round(prefs.brightness * 100)}%`}>
           <input type="range" min={0.25} max={1} step={0.05} value={prefs.brightness}
             onChange={(e) => set({ brightness: Number(e.target.value) })}
             className="w-full accent-[rgb(var(--accent))]" />
         </Row>
 
         {prefs.mode === 'paged' && (
-          <Row label="Pages per view">
+          <Row label={tr('Pages per view')}>
             <div className="grid grid-cols-2 gap-2">
               <button onClick={() => set({ spread: false })}
                 className={`rounded-2xl border py-3 text-sm ${!prefs.spread ? 'border-accent bg-accent-soft text-accent' : 'border-ink-700 text-fog-300'}`}>{tr('Single')}</button>
@@ -94,8 +105,9 @@ export function ReaderSettings({
         )}
 
         {/* Set in both modes. ⚠️ It cannot LOOK the same in both: a page-by-page view has no thin slide --
-            every slide is exactly one viewport wide -- so Collapse falls back to removing there, where an
-            unwanted page costs one swipe rather than a scroll and there is no flow to interrupt. */}
+            every slide is exactly one viewport wide -- so under Collapse a repeated page is shown there like
+            any other, where it costs one swipe rather than a scroll. (Not removed: that would give the two modes
+            different page orders, and switching mode mid-chapter would land on another page. Hide removes.) */}
         <Row label={tr('Repeated pages')}>
           <div className="grid grid-cols-3 gap-2">
             <button onClick={() => set({ junkPages: 'show' })}
@@ -112,12 +124,12 @@ export function ReaderSettings({
 
         {prefs.mode === 'vertical' && (
           <>
-            <Row label={`Page gap · ${prefs.gap}px`}>
+            <Row label={`${tr('Page gap')} · ${prefs.gap}px`}>
               <input type="range" min={0} max={40} step={2} value={prefs.gap}
                 onChange={(e) => set({ gap: Number(e.target.value) })}
                 className="w-full accent-[rgb(var(--accent))]" />
             </Row>
-            <Row label={`Auto-scroll · ${prefs.autoScroll === 0 ? 'off' : prefs.autoScroll.toFixed(1)}`}>
+            <Row label={`${tr('Auto-scroll')} · ${prefs.autoScroll === 0 ? tr('off') : prefs.autoScroll.toFixed(1)}`}>
               <input type="range" min={0} max={6} step={0.5} value={prefs.autoScroll}
                 onChange={(e) => set({ autoScroll: Number(e.target.value) })}
                 className="w-full accent-[rgb(var(--accent))]" />
@@ -125,7 +137,7 @@ export function ReaderSettings({
           </>
         )}
 
-        <Row label="Fit">
+        <Row label={tr('Fit')}>
           <div className="grid grid-cols-2 gap-2">
             <button onClick={() => set({ fitWidth: true })}
               className={`rounded-2xl border py-3 text-sm ${prefs.fitWidth ? 'border-accent bg-accent-soft text-accent' : 'border-ink-700 text-fog-300'}`}>{tr('Fit width')}</button>
@@ -133,6 +145,29 @@ export function ReaderSettings({
               className={`rounded-2xl border py-3 text-sm ${!prefs.fitWidth ? 'border-accent bg-accent-soft text-accent' : 'border-ink-700 text-fog-300'}`}>{tr('Original')}</button>
           </div>
         </Row>
+
+        {/*
+          One source is a good proxy for one FORMAT: a webtoon source wants continuous vertical scroll, a
+          manga source wants paged right-to-left. Pinning the current look to the source fixes every title
+          from it at once, instead of the global default being wrong for half the library or each series
+          having to be corrected by hand. A series you have already adjusted still wins over this.
+        */}
+        {sourceName && onSourceDefault && (
+          <Row label={tr('This source')}>
+            <div className="grid gap-2">
+              <button onClick={() => onSourceDefault(true)}
+                className="rounded-2xl border border-ink-700 py-3 text-sm text-fog-300">
+                {tr('Use this reader for everything from {source}', { source: sourceName })}
+              </button>
+              {sourceDefault && (
+                <button onClick={() => onSourceDefault(false)}
+                  className="rounded-2xl border border-ink-700 py-2 text-xs text-fog-500">
+                  {tr('Forget the default for {source}', { source: sourceName })}
+                </button>
+              )}
+            </div>
+          </Row>
+        )}
       </motion.div>
     </motion.div>
   );

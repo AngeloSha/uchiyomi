@@ -574,6 +574,15 @@ brightness — live under **Profile → Settings → Reading**, where each one s
 you have adjusted keeps its own memory, which wins over the defaults. The weekly goal, offline downloads and
 new-chapter alerts are on the same tab.
 
+**A default per source.** A source is usually one format: a webtoon site wants the continuous vertical scroll,
+a manga site wants paged right-to-left. At the bottom of the reader's settings sheet, **Use this reader for
+everything from *Source*** saves the current mode, theme and two-page spread for every title from the source
+the chapter came from, so one choice fixes that whole part of the library. The order is *your defaults <
+the source's default < this series*: a title you have adjusted by hand still keeps its own settings. **Forget
+the default for *Source*** removes it again. Like the per-series memory it is saved to your account, so it
+follows you to your other devices. A downloaded chapter opened offline carries no source, so the button does
+not appear there.
+
 ### Skipping the pages that are not the story
 
 Most scanlated chapters open with the same credit page, and some carry an advert or a "read the rest at…"
