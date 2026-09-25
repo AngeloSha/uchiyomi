@@ -32,6 +32,18 @@ export function chapterLabel(b: { metadata?: { number?: string; title?: string }
   return b.name || '';
 }
 
+/**
+ * The chapter's own name, for `Ch. 12 · The Return`: the server's `chapterName`, and nothing else.
+ *
+ * The server has already taken the number (in any of the ways sources say it) off the front and kept only a
+ * real name (lib/library.ts `chapterName`). There is deliberately NO fallback to `name` or `metadata.title`:
+ * those are the filename's, and on a library built by hand that put `One Piece v02 c012 [Digital]` beside the
+ * chapter number on most rows.
+ */
+export function chapterName(b: { chapterName?: string | null }): string {
+  return (b.chapterName ?? '').trim();
+}
+
 export function relativeTime(iso?: string | null): string {
   if (!iso) return '';
   const d = new Date(iso).getTime();

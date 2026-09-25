@@ -186,7 +186,7 @@ export function startDownloadJob(input: DownloadJobInput): { total: number } {
   void (async () => {
     let failures = 0;
     // What this job wrote, for the provenance stamp; a skipped copy was already on disk and is not ours.
-    const landed: Array<{ number: number; scanlator?: string; source?: string; missing?: number[] }> = [];
+    const landed: Array<{ number: number; scanlator?: string; source?: string; missing?: number[]; title?: string }> = [];
     const settled = new Set<SourceChapter>();
     // A source that has refused once this job is not asked again, but the others still are: a rate-limited
     // primary must not stop the follower's chapters. Each source costs at most one strike per job. Written
@@ -244,7 +244,7 @@ export function startDownloadJob(input: DownloadJobInput): { total: number } {
       const j = jobs.get(folder);
       if (out.kind === 'landed' || out.kind === 'partial') {
         landed.push({
-          number: ch.number, scanlator: out.chapterUsed.scanlator, source: out.via,
+          number: ch.number, scanlator: out.chapterUsed.scanlator, source: out.via, title: out.chapterUsed.title,
           ...(out.kind === 'partial' ? { missing: out.missing.map((i) => i + 1) } : {}),
         });
         if (j) {
@@ -858,7 +858,7 @@ export async function addSeriesFromSource(opts: {
   const run = async (): Promise<AddResult> => {
     // Which chapters this run wrote, for the provenance stamp. Only what LANDED, never the selection: a
     // copy the downloader skipped because the file was already there is somebody else's work.
-    const landed: Array<{ number: number; scanlator?: string; source?: string; missing?: number[] }> = [];
+    const landed: Array<{ number: number; scanlator?: string; source?: string; missing?: number[]; title?: string }> = [];
     // The add has one source by definition, but it still goes through the same policy as every other
     // download path: pacing, refusal accounting and an explicit partial hold all live in the helper. There
     // are deliberately no alternates and no hunt here -- no followed series exists until chapter one has
@@ -879,7 +879,7 @@ export async function addSeriesFromSource(opts: {
       if (out.kind === 'landed' || out.kind === 'partial') {
         firstPages = out.pages;
         landed.push({
-          number: toFetch[0].number, scanlator: out.chapterUsed.scanlator, source: out.via,
+          number: toFetch[0].number, scanlator: out.chapterUsed.scanlator, source: out.via, title: out.chapterUsed.title,
           ...(out.kind === 'partial' ? { missing: out.missing.map((i) => i + 1) } : {}),
         });
         if (out.kind === 'partial') {
@@ -978,7 +978,7 @@ export async function addSeriesFromSource(opts: {
         const j = jobs.get(folder);
         if (out.kind === 'landed' || out.kind === 'partial') {
           landed.push({
-            number: ch.number, scanlator: out.chapterUsed.scanlator, source: out.via,
+            number: ch.number, scanlator: out.chapterUsed.scanlator, source: out.via, title: out.chapterUsed.title,
             ...(out.kind === 'partial' ? { missing: out.missing.map((i: number) => i + 1) } : {}),
           });
           if (j) {

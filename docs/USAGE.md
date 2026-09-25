@@ -119,6 +119,12 @@ genres, description, and the **chapter list**.
 
 - **Start reading** jumps to where you left off (or chapter 1). A series with no chapter on disk yet shows
   *Nothing to read yet* instead (see *Chapters the sources have that you don't*).
+  The line under the button names the chapter it opens — *Ch. 12 · The Sound of Thunder · page 7 of 23*
+  when you are part-way through one — so *Continue* is never a guess.
+- **Chapter names.** A row reads *Ch. 12 · The Sound of Thunder* when the source names its chapters. The
+  name is taken when a chapter is downloaded, and chapters downloaded before this was kept pick theirs up
+  on the series' next source check (nightly, or **Check now**). Many sources only ever say *Chapter 12*;
+  those rows show the number alone, since repeating it adds nothing.
 - **Favorite** (heart) adds it to your favorites + smart offline sync.
 - **Save all offline** copies every chapter to this device for reading with no connection.
 - Click any chapter to read it; the ⬇ on a chapter saves just that one to this device. Toggle

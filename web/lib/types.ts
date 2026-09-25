@@ -166,6 +166,11 @@ export interface Book {
   /** The adapter this copy was fetched from. Null for files that arrived any other way. */
   sourceId?: string | null;
   /**
+   * The chapter's own name, as its source gave it ("The Return"), or null when it gave none. Never derived from
+   * the filename: `name` and `metadata.title` are that, and on a library built by hand they are the file.
+   */
+  chapterName?: string | null;
+  /**
    * The file was deleted by the server's read-chapter cleanup. The chapter is still part of the series and
    * still carries everyone's progress -- there are simply no pages behind it any more, and there will not
    * be again. Nothing may offer to open or download it.

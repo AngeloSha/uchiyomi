@@ -74,8 +74,8 @@ async function stampChecked(seriesId: string, chapters: number | null, missing: 
   ).catch(() => {});
 }
 
-/** A chapter that landed in this run, and what setBookMeta stamps onto the book the scan mints for it. `missing` = 1-based placeholder pages of a partial (lib/partial.ts). */
-export type Landed = { number: number; scanlator?: string; source?: string; missing?: number[] };
+/** A chapter that landed in this run, and what setBookMeta stamps onto the book the scan mints for it. `missing` = 1-based placeholder pages of a partial (lib/partial.ts); `title` = the source's name for it. */
+export type Landed = { number: number; scanlator?: string; source?: string; missing?: number[]; title?: string };
 
 export interface UpdateResult {
   title: string;
@@ -395,7 +395,7 @@ export async function updateSeries(seriesId: string, maxNew = 10, opts: UpdateOp
       if (out.switched) switched++;
       if (out.kind === 'partial') partial++;
       landed.push({
-        number: ch.number, scanlator: out.chapterUsed.scanlator, source: out.via,
+        number: ch.number, scanlator: out.chapterUsed.scanlator, source: out.via, title: out.chapterUsed.title,
         // 1-based, as setBookMeta writes lib_books.missing_pages; the helper reports indices.
         ...(out.kind === 'partial' ? { missing: out.missing.map((i) => i + 1) } : {}),
       });

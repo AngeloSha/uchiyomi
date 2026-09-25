@@ -2,7 +2,7 @@
   "_meta": {
     "language": "ru",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 1169
+    "strings": 1170
   },
   "1 check found something": "1 проверка нашла проблему",
   "1 member": "1 участник",
@@ -487,7 +487,6 @@
   "{n} notes": "заметок: {n}",
   "Reading pace, busiest day {n} chapters": "Темп чтения, самый активный день — {n} глав",
   "{n} days of reading, {t} chapters in total": "{n} дн. чтения, всего {t} глав",
-  "Include 18+ content in this reader": "Показывать контент 18+ в этой читалке",
   "Off by default. Your age limit, if you have one, still applies whatever this says.": "По умолчанию выключено. Ваше возрастное ограничение, если оно есть, действует в любом случае.",
   "Sort by": "Сортировка",
   "Sorted by {name}": "Сортировка: {name}",
@@ -667,6 +666,7 @@
   "Source not installed": "Источник не установлен",
   "Sources & translations": "Источники и переводы",
   "Start reading": "Начать чтение",
+  "{chapter} · page {page} of {pages}": "{chapter} · страница {page} из {pages}",
   "Stopped — device storage may be full": "Остановлено — возможно, память устройства заполнена",
   "This site does not name translation groups.": "Этот сайт не указывает группы перевода.",
   "Translated by {names}": "Перевод: {names}",
@@ -863,7 +863,6 @@
   "Forgotten. 1 member's history on it is gone.": "Забыта. История 1 участника по ней удалена.",
   "Forgotten. {n} members' history on it is gone.": "Забыта. История {n} участников по ней удалена.",
   "Could not forget it": "Не удалось забыть",
-  "Include 18+ content": "Включить контент 18+",
   "18+": "18+",
   "Type {title} to confirm": "Введите {title} для подтверждения",
   "Put back": "Вернуть",
@@ -1153,6 +1152,8 @@
   "The extension engine refused that address: {reason}": "Движок расширений отклонил этот адрес: {reason}",
   "The standard Docker install runs one in the {name} container. If you turned it off by emptying SUWAYOMI_URL, put that line back in .env and run {command}.": "Стандартная установка Docker запускает его в контейнере {name}. Если вы отключили его, очистив SUWAYOMI_URL, верните эту строку в .env и выполните {command}.",
   "Tip: hide the languages you don’t read first — only {n} sources can be switched on at once.": "Совет: сначала скройте языки, которые вы не читаете, — одновременно можно включить не больше {n} источников.",
+  "Include 18+ content in this reader": "Показывать контент 18+ в этой читалке",
+  "Include 18+ content": "Включить контент 18+",
   "18+ filter": "Фильтр 18+",
   "Genres to keep off the shelf while “Show 18+” is off. This hides nothing from anyone who goes looking: links, bookmarks, downloads and reading progress are unaffected.": "Жанры, которые не показываются на полке, пока «Показать 18+» выключено. От того, кто ищет сам, ничего не скрывается: ссылки, закладки, загрузки и прогресс чтения не затрагиваются.",
   "No genres yet.": "Жанров пока нет.",

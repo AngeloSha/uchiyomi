@@ -1075,6 +1075,12 @@ ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS adult_sources jsonb NOT NUL
 -- "Hide everything tagged Mature, except this one." Without it the genre list is all-or-nothing, and one
 -- wrongly-tagged classic is enough to make somebody turn the whole filter off.
 ALTER TABLE series_overrides ADD COLUMN IF NOT EXISTS adult_exempt boolean;
+
+-- v0.46.0: a chapter's own name, as its source gave it (lib/library.ts chapterName). Its OWN column, never
+-- lib_books.title: title is the filename's -- "One Piece v02 c012 [Digital]" on a library built by hand -- and
+-- writing names into it showed filenames as names and dropped the number from everything printing it alone.
+-- (No backticks in this string: it is a template literal.)
+ALTER TABLE lib_books ADD COLUMN IF NOT EXISTS chapter_name text;
 `;
 
 // Serialises migrate() across processes. CREATE TABLE IF NOT EXISTS is not safe to run concurrently:
