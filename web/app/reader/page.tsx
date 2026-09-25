@@ -17,7 +17,7 @@ import { chapterLabel } from '@/lib/format';
 import { deviceId } from '@/lib/device';
 import { getOfflineChapter, getPageBlob, queueProgress, noteOfflineProgress, listSeriesDownloads, setOfflinePageJunk } from '@/lib/downloads';
 import { applyCover, clearCover } from '@/lib/theme';
-import { ReaderPrefs, loadPrefs, savePrefs, loadSeriesPrefs, saveSeriesPrefs, syncPrefsFromServer, THEME_FILTER, loadSourcePrefs, saveSourcePrefs, clearSourcePrefs, globalPrefsChange, rememberSeriesSource, seriesSourceOf } from '@/lib/readerPrefs';
+import { ReaderPrefs, loadPrefs, savePrefs, loadSeriesPrefs, saveSeriesPrefs, syncPrefsFromServer, THEME_FILTER, loadSourcePrefs, saveSourcePrefs, clearSourcePrefs, globalPrefsChange, seriesPinChange, withTitleLook, rememberSeriesSource, seriesSourceOf } from '@/lib/readerPrefs';
 import { ReaderSettings } from '@/components/ReaderSettings';
 import { Rail, SectionTitle, useImgRetry, useRtl } from '@/components/ui';
 import { PageGrid } from '@/components/PageGrid';
@@ -41,6 +41,30 @@ const DIVIDER_H = 60;
  * without being tall enough to interrupt a scroll. A sibling of DIVIDER_H, and reserved the same way.
  */
 const STRIP_H = 48;
+
+/** How long a track must have been still before slides are added to it (see untilStill). */
+const STILL_MS = 250;
+
+/**
+ * Resolve once a right-to-left paged track has stopped moving -- at once for any other track.
+ *
+ * ⚠️ Chrome keeps an in-flight smooth scroll's destination in physical pixels from the LEFT edge, and a
+ * right-to-left track grows leftwards. The reader appends the next chapter four pages before the end, which
+ * is while a page turn (or a swipe's snap) is still animating, so the destination moved by the whole width
+ * added and the reader landed deep inside the next chapter: fourteen pages on, measured on a twelve-page
+ * chapter, and one page on when only the Up Next card was added. A still track keeps its place when content
+ * is added, so a right-to-left track is appended to only once it has been still for a moment. Left-to-right
+ * tracks grow away from their origin and never moved, so they do not wait. Bounded, so a track that never
+ * settles still gets its next chapter, as it always did.
+ * This was reachable since v0.46.0 by choosing Right to left; #102 made it the default for every Japanese
+ * series, which is why it was found. It is a browser behaviour, so no unit test can hold it; the guard is
+ * test/e2e/walk48.mjs step 3, "every press moves exactly one page" -- the same fourteen presses, traced before
+ * this existed, moved one page thirteen times and fourteen pages once.
+ */
+async function untilStill(lastMoved: { current: number }, rtl: boolean): Promise<void> {
+  if (!rtl) return;
+  for (let i = 0; i < 40 && Date.now() - lastMoved.current < STILL_MS; i++) await new Promise((r) => setTimeout(r, 100));
+}
 
 async function loadChapter(bookId: string): Promise<Chapter | null> {
   const off = await getOfflineChapter(bookId);
@@ -110,6 +134,8 @@ function ReaderInner() {
   const trackSign = pagedRtl ? -1 : 1;
   // The direction the track was last laid out for, so the flip effect below acts only on a REAL flip.
   const laidOutSign = useRef<number | null>(null);
+  /** When the track last moved -- a scroll event, or a smooth scroll this code started. See untilStill. */
+  const lastMoved = useRef(0);
   // The interface's own direction, for the text that sits INSIDE the track and would otherwise take the
   // track's: an Arabic caption in an LTR paragraph, or an English one in RTL on a right-to-left read.
   const uiDir = useRtl() ? 'rtl' : 'ltr';
@@ -159,8 +185,10 @@ function ReaderInner() {
       // source's and the series' settings laid over the default.
       const g = globalPrefsChange(p, !!seriesId0);
       if (Object.keys(g).length) savePrefs({ ...loadPrefs(), ...g });
-      if ((p.mode || p.theme || p.spread !== undefined || p.pagedDirection) && seriesId0)
-        saveSeriesPrefs(seriesId0, { mode: n.mode, theme: n.theme, spread: n.spread, pagedDirection: n.pagedDirection });
+      // The title's own memory takes the look, and the direction only when it was the direction that changed
+      // (seriesPinChange says why: pinning it on every change kept the profile's direction out, #102).
+      const pin = seriesId0 ? seriesPinChange(p, n) : null;
+      if (pin) saveSeriesPrefs(seriesId0, pin);
       return n;
     });
   const applyZoom = (z: number) => {
@@ -501,6 +529,7 @@ function ReaderInner() {
 
   // ---- track current page on scroll ----
   const onScroll = useCallback(() => {
+    lastMoved.current = Date.now();
     const el = scrollRef.current;
     if (!el) return;
     if (prefs.mode === 'paged') {
@@ -523,6 +552,8 @@ function ReaderInner() {
     if (!ready || !flat.length || appending.current || noMore.current) return;
     if (current < flat.length - 4) return;
     appending.current = true;
+    // Every slide added below lands on a still track when the track runs right to left (untilStill).
+    const rtlTrack = pagedRtl;
     (async () => {
       const last = chapters[chapters.length - 1];
       // We do not know the shape of this series -- the list never arrived. Stop appending, but do NOT claim
@@ -531,9 +562,10 @@ function ReaderInner() {
       if (!chapterRefs.length) { noMore.current = true; appending.current = false; return; }
       const idx = chapterRefs.findIndex((c) => c.id === last?.id);
       const next = idx >= 0 ? chapterRefs[idx + 1] : null;
-      if (!next) { noMore.current = true; setEnded(true); appending.current = false; return; }
+      if (!next) { noMore.current = true; await untilStill(lastMoved, rtlTrack); setEnded(true); appending.current = false; return; }
       const ch = await loadChapter(next.id);
       const outcome = chapterOutcome(ch);
+      await untilStill(lastMoved, rtlTrack);
       if (outcome === 'ok') setChapters((cs) => (cs.some((c) => c.id === ch!.id) ? cs : [...cs, ch!]));
       // There IS a next chapter -- chapterRefs says so -- and it would not load. Claiming the series is
       // finished here is how a corrupt file or a dropped connection came to read as an ending.
@@ -748,9 +780,7 @@ function ReaderInner() {
     if (!seriesId) return;
     const base = seriesSourceId ? loadSourcePrefs(seriesSourceId) : {};
     const sp = { ...base, ...loadSeriesPrefs(seriesId) };
-    if (sp.mode || sp.theme || sp.spread !== undefined || sp.pagedDirection)
-      setPrefs((cur) => ({ ...cur, ...(sp.mode ? { mode: sp.mode } : {}), ...(sp.theme ? { theme: sp.theme } : {}),
-        ...(sp.spread !== undefined ? { spread: sp.spread } : {}), ...(sp.pagedDirection ? { pagedDirection: sp.pagedDirection } : {}) }));
+    if (sp.mode || sp.theme || sp.spread !== undefined || sp.pagedDirection) setPrefs((cur) => withTitleLook(cur, sp));
     setZoom(sp.zoom && sp.zoom >= 1 ? sp.zoom : 1);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [seriesId, seriesSourceId]);
@@ -786,6 +816,7 @@ function ReaderInner() {
         if (!el) return;
         const last = Math.max(0, el.children.length - 1); // page slides, then Up Next / the failure card
         const to = Math.max(0, Math.min(last, (slideOf[current] ?? current) + d));
+        lastMoved.current = Date.now(); // before the first scroll event arrives
         el.scrollTo({ left: trackSign * to * (el.clientWidth || window.innerWidth), behavior: 'smooth' });
       };
       // A focused control owns its keys: the page slider its arrows, a button or link its Space and Enter
@@ -889,6 +920,7 @@ function ReaderInner() {
       // Physical, as the arrow keys are: an RTL track turns the other way round, but the left edge of the
       // screen is still the left edge of the screen.
       acted.current = { kind: 'turn', slide: slideNow(), at: Date.now() };
+      lastMoved.current = Date.now();
       el.scrollBy({ left: zone === 'back' ? -w : w, behavior: 'smooth' });
       return;
     }

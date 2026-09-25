@@ -12,6 +12,7 @@
     "test:e2e:v041": "node test/e2e/walk41.mjs",
     "test:e2e:v042": "node test/e2e/walk42.mjs",
     "test:e2e:v043": "node test/e2e/walk43.mjs",
+    "test:e2e:v048": "node test/e2e/walk48.mjs",
     "test:i18n": "node test/e2e/i18n.mjs"
   },
   "dependencies": {

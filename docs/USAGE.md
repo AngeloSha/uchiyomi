@@ -640,10 +640,23 @@ It remembers your scroll position, so closing and reopening drops you right back
 Profile → Settings → Reading) can lay the pages out right to left, the way manga is printed: the next page is
 to the left, so you swipe right, tap the left edge or press ←. A double spread puts its first page on the
 right, and the bottom bar mirrors with it — the page slider fills from the right, and the next-chapter button
-moves to the left. The default, *Series default*, does this only for a series whose metadata says it reads
-right to left (a Komga library can say so; the built-in library does not yet, so there every series reads left
-to right as before). *Left to right* and *Right to left* override it for every series. The webtoon scroll is
-unaffected.
+moves to the left. The webtoon scroll is unaffected.
+
+- **Series default** (the default) reads each series the way the series says it reads. Since v0.48.0 every
+  series in the built-in library has a direction: the chapter's own `ComicInfo.xml` when it says
+  `<Manga>YesAndRightToLeft</Manga>`, otherwise the source it follows (MangaDex knows each title's original
+  language — Japanese reads right to left, Korean and Chinese as a long strip), otherwise AniList's country of
+  origin. A series nothing speaks for reads left to right, as every series did before. An admin can see and
+  correct it under the series' **Edit details → Reading direction**. When a right-to-left series is read left
+  to right anyway, a double spread's two halves are swapped so the drawing still joins up.
+- **Left to right** and **Right to left** override it for every series.
+
+Choose it under **Profile → Settings** for everything. Choosing it in the reader's sheet while a title is open
+sets it for **that title only**, and the title keeps it when the profile changes — including *Series default*,
+if that is what you picked for it. Changing anything else in the sheet (mode, theme, two-page spread) does not
+fix the title's direction: it keeps following the profile. (Before v0.48.0 it did, so a title you had adjusted
+kept reading left to right whatever the profile said; those accidental *Series default* pins are ignored now.
+A *Left to right* or *Right to left* chosen for one title in those versions is kept.)
 
 **Reader defaults** — mode (webtoon scroll or paged), theme, repeated pages, fit, page gap, auto-scroll and
 brightness — live under **Profile → Settings → Reading**, where each one saves as you change it and says
@@ -959,8 +972,8 @@ Since v0.41.0 every finding also carries the button that fixes it, and most of t
 without you pressing anything.
 
 **What fixes itself.** Once a day — **Admin → Settings → Library housekeeping → Repair the library nightly**,
-on by default, and **Admin → Tasks → Repair library** with a *Run now* — Uchiyomi does the five things that
-are reversible or provable on their own, and a sixth only when you switch it on, in this order:
+on by default, and **Admin → Tasks → Repair library** with a *Run now* — Uchiyomi does the six things that
+are reversible or provable on their own, and two more only when you switch them on, in this order:
 
 * **clears stale Cloudflare state** when sources are blaming the solver: the remembered sessions, the "could
   not be solved" marks and any cooldown that lapsed more than a day ago. No site is contacted;
@@ -977,7 +990,11 @@ are reversible or provable on their own, and a sixth only when you switch it on,
 * **swaps a chapter for your preferred group's copy** once that group has released it, if you switched it
   on under **Admin → Settings → Scanlators** (see *Choosing a scanlation group*);
 * **borrows chapter names** from another source for series whose own source names nothing, if you switched
-  that on as well (below).
+  that on as well (below);
+* **learns which way series read** (since v0.48.0) for the ones nothing has said about yet: it asks MangaDex
+  for the original language of every series that follows it, then AniList for the country of origin of every
+  series linked there — a few batch requests a night, at most 500 series each. It only ever writes the reading
+  direction, never over one you set by hand.
 
 A whole run starts at most five searches, however many findings there are, shared between the steps that
 need one — and the short chapters may take at most two of them, so a library full of short chapters cannot
@@ -1259,6 +1276,13 @@ external OPDS app. Admins are never limited.
 
 Ratings themselves come from `ComicInfo.xml` when a chapter carries one, and you can set or correct any
 series from its own page under **Edit details**. Your correction survives a rescan.
+
+**Reading direction** sits in the same **Edit details** dialog. *Automatic* says what it currently resolves to
+and what said so — the chapter files, the source or AniList — and a series nothing speaks for reads as a
+webtoon (left to right). Pick *Right to left*, *Left to right*, *Webtoon* or *Vertical* to overrule it; the
+choice survives rescans and wins over everything detected, and *Automatic* hands it back. It is what the
+reader's *Series default* direction follows, what a downloaded chapter carries offline, and what the
+Komga-compatible API reports to Mihon and other Komga clients.
 
 **A series with no rating stays visible to everyone.** That is deliberate: almost nothing in a real library
 is rated, so hiding unrated content would empty a child's account rather than filter it, and would read as

@@ -138,5 +138,37 @@ def main(root: str) -> None:
     print(f'  seeded {d}')
 
 
+def rtl(root: str) -> None:
+    """The v0.48.0 walk's library (walk48.mjs, #102): which way a series reads.
+
+    Only on request (`seed.py <root> --rtl`), so the main run's library -- and every count it asserts -- is
+    unchanged. Two series: one whose ComicInfo says `<Manga>YesAndRightToLeft</Manga>`, in two twelve-page
+    chapters so a page turn can cross a chapter boundary (the reader appends the next chapter four pages
+    before the end), and one that says nothing. Every page differs from every other, so the walk can tell
+    which page is on screen from its URL and no page is taken for a repeated one.
+    """
+    manga = os.path.join(root, 'Test Source', 'Right To Left')
+    os.makedirs(manga, exist_ok=True)
+    for ch in (1, 2):
+        with zipfile.ZipFile(os.path.join(manga, f'Chapter {ch:03d}.cbz'), 'w') as z:
+            for i in range(1, 13):
+                z.writestr(f'{i:03d}.png', bands(300, 450, ch * 100 + i))
+            z.writestr('ComicInfo.xml', '<?xml version="1.0"?><ComicInfo><Series>Right To Left</Series>'
+                       f'<Number>{ch}</Number><Manga>YesAndRightToLeft</Manga></ComicInfo>')
+    # Named so that no AniList entry is called that: a search answers with its best guess whatever it is asked,
+    # and "No Direction" came back as an unrelated Japanese manga (the direction ignores such a guess now).
+    plain = os.path.join(root, 'Test Source', 'Walk Forty Eight Plain')
+    os.makedirs(plain, exist_ok=True)
+    with zipfile.ZipFile(os.path.join(plain, 'Chapter 001.cbz'), 'w') as z:
+        for i in range(1, 13):
+            z.writestr(f'{i:03d}.png', bands(300, 450, 900 + i))
+        z.writestr('ComicInfo.xml', '<?xml version="1.0"?><ComicInfo><Series>Walk Forty Eight Plain</Series>'
+                   '<Number>1</Number><Manga>No</Manga></ComicInfo>')
+    print(f'  seeded {manga} and {plain}')
+
+
 if __name__ == '__main__':
-    main(sys.argv[1])
+    if '--rtl' in sys.argv[2:]:
+        rtl(sys.argv[1])
+    else:
+        main(sys.argv[1])
