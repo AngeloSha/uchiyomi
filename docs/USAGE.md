@@ -617,6 +617,9 @@ again.
   about six seconds); source rows show *Searching…*, empty, failed, disabled or cooling-down states while
   the rest arrive. Repeating the same search continues the in-flight work and a recent term opens from the
   five-minute cache. Results are still filtered for the signed-in account, including its age limit.
+  With one source chosen in the chip, a search asks **only that source** and the chip stays on screen while
+  the results are up, so you can see the search is narrowed and clear it with its × (which searches every
+  source again). Switching the toggle to *Newest* or *Popular* goes back to browsing.
 - **Add:** tap a card and pick which source to add it from — each with its favicon, the first marked *most
   used* (skipped when only one has it). The dialog then opens with *From {source} · Change*. Choose
   **Chapters to fetch now** (All, First N, Latest N, or **Nothing yet — pick chapters later**), toggle

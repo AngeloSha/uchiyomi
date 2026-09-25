@@ -263,6 +263,36 @@ test('an empty term answers the same shape without asking anyone', { skip }, asy
   assert.deepEqual(r.json(), { content: [], sources: [], pending: 0, asked: 0 });
 });
 
+test('source= narrows the fan-out to that one source, and cannot reach past the caller\'s own set', { skip }, async () => {
+  // Discover filtered to one source keeps that filter through a search. Narrowing is done on the ASK, not on
+  // the answer, so the other sources are not even asked: one outbound request rather than a dozen, and the
+  // answer comes as soon as that source does. Reintroduce by ignoring `source` in the route: the other
+  // sources' counters move and `sources` lists all of them.
+  const before = { ...calls };
+  const r = await app.inject({ method: 'GET', url: `/api/sources/search-all?q=Narrowed%20Term&source=${FAST}`, headers: tok(ids.plain) });
+  assert.equal(r.statusCode, 200);
+  const j = r.json();
+  assert.deepEqual(j.sources.map((x: any) => x.id), [FAST], 'the answer covers more than the chosen source');
+  assert.equal(j.asked, 1);
+  assert.ok(j.content.length > 0 && j.content.every((g: any) => g.providers.every((p: any) => p.source === FAST)),
+    'a card came from a source that was not chosen');
+  assert.equal(calls[FAST] - before[FAST], 1, 'PREMISE: the chosen source was not asked');
+  const others = ALL.filter((id) => id !== FAST && calls[id] !== before[id]);
+  assert.deepEqual(others, [], `sources outside the filter were asked: ${others.join(', ')}`);
+
+  // The filter only ever narrows `surfaceable`: naming an adult source without the reveal, or naming one an
+  // age cap puts out of reach even with it, asks nobody and answers the ordinary empty shape.
+  const adultBefore = calls[ADULT];
+  for (const [url, who] of [
+    [`/api/sources/search-all?q=Narrowed%20Adult&source=${ADULT}`, ids.plain],
+    [`/api/sources/search-all?q=Narrowed%20Adult&source=${ADULT}&adult=1`, ids.capped],
+  ] as const) {
+    const a = (await app.inject({ method: 'GET', url, headers: tok(who) })).json();
+    assert.deepEqual([a.content, a.sources, a.asked], [[], [], 0], `${url} reached a source outside the caller's set`);
+  }
+  assert.equal(calls[ADULT], adultBefore, 'naming the adult source asked it');
+});
+
 test('after the TTL the sources are asked again', { skip }, async () => {
   // Reintroduce by dropping the TTL check at the top of searchAll: the entry answers forever and the
   // counter does not move.

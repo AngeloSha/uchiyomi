@@ -42,10 +42,16 @@ const PAGE = 'app/discover/page.tsx';
 test('the search is a query keyed on the submitted term, not on the field', () => {
   // `q` is whatever is in the field; `term` is what was submitted. Keyed on `q`, every keystroke would be a
   // fan-out to every source, and keyed on a constant, a new term would paint under the old term's answer
-  // until its own landed. Reintroduce by writing `queryKey: ['search-all', q]`: "keyed on the field" fails;
-  // by bringing back `setSearchHits`: "the imperative search is back" fails.
+  // until its own landed. The chosen source is part of the key too: a search narrowed to one source is a
+  // different question (it sends `&source=`), and answering it from the unfiltered search's cache, or the
+  // other way round, would show one under the other. Reintroduce by writing `queryKey: ['search-all', q]`:
+  // "keyed on the field" fails; by dropping `selected` from the key: the same assertion fails; by dropping
+  // `&source=` from the request: "the chosen source is not sent" fails; by bringing back `setSearchHits`:
+  // "the imperative search is back" fails.
   const src = code(read(PAGE));
-  assert.match(src, /queryKey: \['search-all', term\]/, 'the search is not keyed on the submitted term (or is keyed on the field)');
+  assert.match(src, /queryKey: \['search-all', term, selected\]/, 'the search is not keyed on the submitted term and the chosen source (or is keyed on the field)');
+  assert.match(src, /const only = selected \? `&source=\$\{encodeURIComponent\(selected\)\}` : '';/, 'the chosen source is not sent');
+  assert.match(src, /SEARCH_POLL_WAIT_MS\}\$\{only\}`, \{ signal \}\)/, 'the chosen source is not sent');
   assert.match(src, /const \[term, setTerm\] = useState\(''\)/, 'there is no separate submitted term');
   assert.match(src, /enabled: mode === 'search' && !!term/, 'the search runs outside search mode or with an empty term');
   assert.doesNotMatch(src, /setSearchHits|setSearching|useState<SourceItem\[\]>\(\[\]\)/, 'the imperative search is back');
@@ -127,12 +133,17 @@ test('the wall pins still hold, and the hits are derived from the answer', () =>
   // wall.test.ts pins `return foldByTitle(out, nameOf, rankOf);` and `wall.groups[key] ??
   // groupsRef.current[key]` byte for byte; both survive the rebuild, and the hits and the groups are now
   // DERIVED from the answer (a memo and an effect on `searchQ.data`) rather than set by a handler, so a
-  // poll's answer replaces the rows without anything being cleared first. Reintroduce by filling groupsRef
-  // inside the queryFn: "groups are not filled from the answer" fails.
+  // poll's answer replaces the rows without anything being cleared first. With a source chosen, a hit keeps
+  // only if that source is among its providers, and that provider is the card's own, so tapping it opens the
+  // source being browsed rather than whichever one the fold ranked first. Reintroduce by filling groupsRef
+  // inside the queryFn: "groups are not filled from the answer" fails; by going back to `providers[0]`
+  // regardless of the filter: "a hit's provider ignores the chosen source" fails.
   const src = read(PAGE);
   assert.match(src, /return foldByTitle\(out, nameOf, rankOf\);/, 'the wall is not folded');
   assert.match(src, /wall\.groups\[key\] \?\? groupsRef\.current\[key\]/, "open() does not read the wall's groups");
-  assert.match(code(src), /const searchHits = useMemo<SourceItem\[\]>\(\(\) => \(searchQ\.data\?\.content \?\? \[\]\)\.map\(/, 'the hits are not derived from the answer');
+  assert.match(code(src), /const searchHits = useMemo<SourceItem\[\]>\(\(\) => \(searchQ\.data\?\.content \?\? \[\]\)\.flatMap\(/, 'the hits are not derived from the answer');
+  assert.match(code(src), /const pick = selected \? g\.providers\.find\(\(p\) => p\.source === selected\) : g\.providers\[0\];/, "a hit's provider ignores the chosen source");
+  assert.match(code(src), /\}\), \[searchQ\.data, selected\]\);/, 'the hits are not re-derived when the chosen source changes');
   assert.match(code(src), /useEffect\(\(\) => \{\s*groupsRef\.current = \{\};\s*\(searchQ\.data\?\.content \?\? \[\]\)\.forEach\(\(g\) => \{ groupsRef\.current\[normTitle\(g\.title\)\] = g\.providers; \}\);\s*\}, \[searchQ\.data\]\);/, 'groups are not replaced from the latest answer');
 });
 
