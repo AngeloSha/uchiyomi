@@ -87,7 +87,10 @@ Search opens the **command palette**: one box that finds any series in the libra
 on a Mac) or **/** open it empty, and simply **starting to type** a title opens it with that first letter
 already in the box, so *"one p"* typed on the library page is a search. Only letters and digits do this, and
 only when nothing else wants the key: not while you are typing in a field, not with a dialog open, not with
-Ctrl, Alt or ⌘ held, and never in the reader, which keeps its own keys.
+Ctrl, Alt or ⌘ held, and never in the reader, which keeps its own keys. Under a Japanese or Chinese
+interface the palette opens empty instead, so the input method composes the whole title. **Profile → Settings →
+Appearance → Type anywhere to search** switches the typing, and the **/** shortcut with it, off on that device;
+**Ctrl+K** keeps working.
 
 ### What counts as a chapter
 
@@ -138,6 +141,10 @@ genres, description, and the **chapter list**.
   page holding the chapter *Continue* would open, so a reader on chapter 956 lands among the 900s. Picking a
   page keeps you there; a new series, sort order or filter goes back to following *Continue*. Every chapter
   is listed — before this, the list and the reader's chapter list stopped at chapter 1000.
+- **Compact chapter list** (since v0.47.0, **Profile → Settings → Appearance**, off by default, this device
+  only): on a computer, rows without the thumbnail and the status dot, with a row's buttons appearing when
+  you point at it — more chapters on one screen. The title's colour still says read or unread; the
+  thumbnail's progress bar is what the row gives up. Phones and tablets keep the full row.
 - The line under the title — *MangaDex · Example Scans +2 · 4 not here yet ›* — is the series' source, who
   translates it and how many chapters the sources have that this server does not. Tap it for **Sources &
   translations**, described below.
