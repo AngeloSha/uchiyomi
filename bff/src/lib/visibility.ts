@@ -40,6 +40,16 @@ export interface ViewCtx {
    * an older ViewCtx literal degrades to, so nothing silently starts filtering.
    */
   readonly hideAdultLibraries: boolean;
+  /**
+   * Genres the 18+ switch treats as adult, as saved (see `sanitiseAdultList`). Only tells whether the genre
+   * filter is configured (`adultFilterConfigured`): `browsable()` reads the list from the database itself.
+   *
+   * Only consulted while `hideAdultLibraries` is on, and only by `browsable()`. Empty means the switch
+   * behaves exactly as it did when libraries were the only thing it knew about.
+   */
+  readonly adultGenres: readonly string[];
+  /** Source ids the 18+ switch treats as adult, on top of whatever the extension itself declares. */
+  readonly adultSources: readonly string[];
 }
 
 /**
@@ -105,7 +115,69 @@ export const SYSTEM_CTX: ViewCtx = {
   userId: null, libraryIds: null, maxAgeRating: null,
   // Background work and admin reporting count what is there, not what someone wants on screen.
   hideAdultLibraries: false,
+  adultGenres: [], adultSources: [],
 };
+
+/**
+ * The configured genre list, tidied: trimmed, de-duplicated case-blind, at most 60 characters each, no control
+ * characters. Anything that is not a string list is empty.
+ *
+ * Kept as the admin typed it, not lowercased: the comparison folds case in SQL, on BOTH sides, in one place
+ * (`browsable()`), so a genre with letters JavaScript and the database's collation lowercase differently still
+ * matches. Genres never reach a query string -- `browsable()` reads the list from `server_settings` itself --
+ * so there is no character this has to refuse for safety: "Boys’ Love" and Thai or Devanagari genres are fine.
+ */
+export function sanitiseAdultList(values: unknown): string[] {
+  if (!Array.isArray(values)) return [];
+  const out = new Map<string, string>();
+  for (const v of values) {
+    if (typeof v !== 'string' && typeof v !== 'number') continue;
+    const t = String(v).trim();
+    if (!t || t.length > 60 || /[\p{Cc}]/u.test(t)) continue;
+    if (!out.has(t.toLowerCase())) out.set(t.toLowerCase(), t);
+  }
+  return [...out.values()];
+}
+
+/**
+ * The configured adult SOURCE list: source ids, not genre names, so held to what an id looks like (`aqua`,
+ * `sw:8683375824843625513`, `my_site.v2`) and up to 120 characters -- the genre shape above dropped `_` and
+ * capped at 60, so a real id was silently lost between saving and the next read. Lowercased: ids are compared
+ * lowercased in `sourceBrowsableFor`.
+ */
+export function sanitiseSourceIds(values: unknown): string[] {
+  if (!Array.isArray(values)) return [];
+  const out = new Set<string>();
+  for (const v of values) {
+    if (typeof v !== 'string' && typeof v !== 'number') continue;
+    const t = String(v).trim().toLowerCase();
+    if (t && /^[\p{L}\p{N}_.:\-]{1,120}$/u.test(t)) out.add(t);
+  }
+  return [...out];
+}
+
+/**
+ * The configured lists, cached briefly.
+ *
+ * Read on every request that builds a view context, so it is cached for a few seconds and dropped
+ * whenever the settings are written. A read that fails yields empty lists: this is a surfacing filter, and
+ * the failure mode of showing something that would have been tidied away is the right one -- the
+ * permission (`maxAgeRating`) is a different field and is never sourced from here.
+ */
+let adultCache: { at: number; genres: string[]; sources: string[] } | null = null;
+const ADULT_CACHE_MS = 15_000;
+export function invalidateAdultFilter(): void { adultCache = null; }
+export async function adultFilter(): Promise<{ genres: string[]; sources: string[] }> {
+  if (adultCache && Date.now() - adultCache.at < ADULT_CACHE_MS) return adultCache;
+  const row = await one<{ adult_genres: unknown; adult_sources: unknown }>(
+    'SELECT adult_genres, adult_sources FROM server_settings WHERE id = 1').catch(() => null);
+  adultCache = {
+    at: Date.now(),
+    genres: sanitiseAdultList(row?.adult_genres),
+    sources: sanitiseSourceIds(row?.adult_sources),
+  };
+  return adultCache;
+}
 
 /**
  * The predicate for anything that LISTS series: `visible()`, plus the 18+ hide.
@@ -125,8 +197,34 @@ export function browsable(alias: string, ctx: ViewCtx, p: Params): string {
   // interpolate the result into queries whose parameter arrays are hand-written, so a bound parameter would
   // emit a `$N` nothing ever binds -- and `q()` would either throw or, worse, collide with the caller's own
   // $1. ADULT_RATING is a code constant, never user input, so interpolating it is safe.
-  return `${base} AND NOT EXISTS (
-    SELECT 1 FROM libraries l_ad WHERE l_ad.id = ${alias}.library_id AND l_ad.age_rating >= ${ADULT_RATING})`;
+  const parts = [base, `NOT EXISTS (
+    SELECT 1 FROM libraries l_ad WHERE l_ad.id = ${alias}.library_id AND l_ad.age_rating >= ${ADULT_RATING})`];
+  // Genres the admin has named as adult, READ HERE, IN SQL, from server_settings -- never interpolated. This
+  // function cannot bind (see above), and an admin-entered list is not a code constant, so the list stays
+  // in the database and the query only names the column. That also makes the rule hold for EVERY context
+  // that hides 18+, including one built without the lists (the notification digest's), and folds case once,
+  // with `lower(btrim())` on both sides, the same fold the genre overview applies. The first branch is
+  // uncorrelated, so Postgres evaluates it once per query: with no genre configured, no row pays for the rest.
+  // An admin override of a series' genres wins over what the scan read, as the age rating does in `visible()`,
+  // and an `adult_exempt` override lets one series through.
+  parts.push(`(
+    NOT EXISTS (SELECT 1 FROM server_settings s_ad
+                 WHERE s_ad.id = 1 AND jsonb_typeof(s_ad.adult_genres) = 'array' AND jsonb_array_length(s_ad.adult_genres) > 0)
+    OR NOT (
+      EXISTS (
+        SELECT 1 FROM unnest(COALESCE(
+          (SELECT o_ad.genres FROM series_overrides o_ad WHERE o_ad.series_id = ${alias}.id),
+          ${alias}.genres
+        )) AS g_ad
+        WHERE lower(btrim(g_ad)) IN (
+          SELECT lower(btrim(x_ad)) FROM server_settings s2_ad, jsonb_array_elements_text(s2_ad.adult_genres) AS x_ad
+           WHERE s2_ad.id = 1 AND jsonb_typeof(s2_ad.adult_genres) = 'array')
+      )
+      AND NOT COALESCE(
+        (SELECT o_ex.adult_exempt FROM series_overrides o_ex WHERE o_ex.series_id = ${alias}.id), false)
+    )
+  )`);
+  return parts.join(' AND ');
 }
 
 /**
@@ -200,6 +298,45 @@ export function sourceAllowedFor(src: { isNsfw?: boolean } | null | undefined, m
 }
 
 /**
+ * Whether the 18+ filter has anything configured beyond 18+ libraries, as this viewer would meet it.
+ *
+ * Only a yes/no, never the lists: the genre and source names are admin settings, and a member needs to
+ * know that a reveal would change something, not what it would change. `ctx` must be built with
+ * `hideAdult: true`, because `viewCtxFor` only loads the lists for a request that is hiding.
+ *
+ * False for an account capped below 18, for the same reason `/api/libraries` drops 18+ libraries for it:
+ * the reveal is never offered to someone the lists are treating as too young, so their filter stays on.
+ */
+export function adultFilterConfigured(ctx: ViewCtx): boolean {
+  if (ctx.maxAgeRating !== null && ctx.maxAgeRating < ADULT_RATING) return false;
+  return (ctx.adultGenres ?? []).length > 0 || (ctx.adultSources ?? []).length > 0;
+}
+
+/**
+ * Whether a source belongs in a LISTING for this viewer: Discover's source list, the latest and popular
+ * rails, and the cross-source search fan-out.
+ *
+ * This is to `sourceAllowedFor` what `browsable()` is to `visible()`. The permission is unchanged and still
+ * lives in `sourceAllowedFor`; this adds the same 18+ SURFACING filter every library listing already
+ * applies. Without it "Show 18+" was half a switch: 18+ libraries left the shelf while Discover went on
+ * offering the adult sources they came from, so adult covers still turned up unasked -- which is the one
+ * thing the switch exists to answer. An admin, or any member with no age cap, saw them whatever it was set
+ * to, because the age cap was the only input.
+ *
+ * Deliberately NOT used by the by-id routes. A source asked for by name gets the same deal a hidden library
+ * gets: a link, a bookmark and a download already running all keep working while the switch is off. Hiding
+ * is tidying. Refusing something explicitly asked for is a permission, and the permission is the age cap.
+ */
+export function sourceBrowsableFor(src: { id?: string; isNsfw?: boolean } | null | undefined, ctx: ViewCtx): boolean {
+  if (!sourceAllowedFor(src, ctx.maxAgeRating)) return false;
+  if (!ctx.hideAdultLibraries) return true;
+  if (src?.isNsfw) return false;
+  // Named by the admin as adult even though its extension does not say so. The list is lowercased on the
+  // way in, so the comparison is too.
+  return !(src?.id && (ctx.adultSources ?? []).includes(String(src.id).toLowerCase()));
+}
+
+/**
  * The viewer for one request.
  *
  * Called once per handler. Everything downstream -- every SQL source, the image server, OPDS -- inherits
@@ -228,8 +365,17 @@ export async function viewCtxFor(
   // a model this backend does not have. Only an EXPLICIT 'komga' takes this branch: with `!== 'owned'` an
   // unset or misspelled variable handed every account an unrestricted context on the path that governs page
   // bytes and OPDS downloads. Fail closed, into the restricted model below.
-  if (process.env.LIBRARY_BACKEND === 'komga') return { userId, libraryIds: null, maxAgeRating: null, hideAdultLibraries: false };
-  if (!userId || role === 'admin') return { userId, libraryIds: null, maxAgeRating: null, hideAdultLibraries };
+  if (process.env.LIBRARY_BACKEND === 'komga') {
+    return { userId, libraryIds: null, maxAgeRating: null, hideAdultLibraries: false, adultGenres: [], adultSources: [] };
+  }
+  // Loaded even for an admin: the 18+ switch is a surfacing preference everyone has, not a restriction
+  // only capped accounts carry, and an admin is exactly who turns it on to tidy their own home screen.
+  const { genres: adultGenres, sources: adultSources } = hideAdultLibraries
+    ? await adultFilter()
+    : { genres: [] as string[], sources: [] as string[] };
+  if (!userId || role === 'admin') {
+    return { userId, libraryIds: null, maxAgeRating: null, hideAdultLibraries, adultGenres, adultSources };
+  }
   // Deliberately NOT caught. Both restrictions are expressed by a NON-null value, so any fallback here is a
   // fallback to "unrestricted": `.catch(() => [])` collapsed through `rows.length ? ... : null` into
   // `libraryIds: null`, and `.catch(() => null)` into `maxAgeRating: null`. A database hiccup therefore handed
@@ -249,6 +395,8 @@ export async function viewCtxFor(
     libraryIds: rows.length ? rows.map((r) => r.library_id) : null,
     maxAgeRating: cap?.max_age_rating ?? null,
     hideAdultLibraries,
+    adultGenres,
+    adultSources,
   };
 }
 

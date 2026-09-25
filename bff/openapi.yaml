@@ -893,6 +893,32 @@ paths:
           description: OK
         "401":
           description: Not authenticated
+  /api/adult-filter:
+    get:
+      tags:
+        - library
+      summary: Whether the 18+ filter names any genre or source, so a client can offer the reveal without an 18+ library.
+      operationId: getApiAdultFilter
+      description: >-
+        `configured` is true when Admin → Settings → 18+ filter lists at least one genre or source
+        (adult_genres / adult_sources), i.e. when "Show 18+" would reveal something even on an install with
+        no library rated 18+. Only the flag is returned, never the lists. Always false for an account whose
+        age limit is below 18, which is never offered the reveal. Does not depend on `adult`.
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [configured]
+                properties:
+                  configured:
+                    type: boolean
+        "401":
+          description: Not authenticated
   /api/genres:
     get:
       tags:
@@ -4618,6 +4644,16 @@ paths:
                       Whether the nightly library repair runs on its own. On by default. Off stops the
                       schedule only: Run now and the Health page's chips still work, because nothing the
                       repair does is destructive (it never deletes, merges or renumbers anything).
+                  adult_genres:
+                    type: array
+                    items:
+                      type: string
+                    description: The 18+ filter's genres, lowercased. See adultGenres on PATCH.
+                  adult_sources:
+                    type: array
+                    items:
+                      type: string
+                    description: The source ids the 18+ filter treats as adult. See adultSources on PATCH.
         "401":
           description: Not authenticated
         "403":
@@ -4627,7 +4663,8 @@ paths:
         - admin
       summary: "Change server settings: name, open registration, update interval, backup hour, extension check
         interval and its kill switch, the update check, the opt-in install count, the opt-in read-chapter
-        cleanup, the bounded failed-chapter source hunt, and the server-wide scanlation-group preferences."
+        cleanup, the bounded failed-chapter source hunt, the server-wide scanlation-group preferences, and what
+        the 18+ switch hides besides 18+ libraries."
       operationId: patchApiAdminSettings
       description: >-
         Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. Answers
@@ -4706,6 +4743,33 @@ paths:
                     booksUnreadCount, so a fully read series still reports COMPLETED -- and they never
                     affect lastReadContinuousNumberSort. Nothing outside /api/v1 and /api/v2 changes.
                   type: boolean
+                adultGenres:
+                  description: >-
+                    Genres the "Show 18+" switch hides besides 18+ libraries, replaced whole. While a request
+                    does not carry adult=1, every listing leaves out a series whose genres (an admin genre
+                    override wins over the scanned list) include one of these, unless the series is exempted
+                    (adultExempt on PUT /api/admin/series/{id}/meta). Surfacing only: by-id routes, links,
+                    downloads and progress are unaffected, and the permission is still the member's age
+                    limit. Stored lowercased and trimmed; a name with a character outside letters, digits,
+                    space and ' - + / & ( ) . ! : is dropped, not stored. Empty by default.
+                  type: array
+                  maxItems: 60
+                  items:
+                    type: string
+                    minLength: 1
+                    maxLength: 60
+                adultSources:
+                  description: >-
+                    Source ids to treat as adult on top of the ones whose extension declares itself NSFW,
+                    replaced whole. While a request does not carry adult=1 they drop out of the routes that
+                    list sources or fan out over them (GET /api/sources, search-all, latest, popular). By-id
+                    routes are unaffected. Same normalisation as adultGenres. Empty by default.
+                  type: array
+                  maxItems: 200
+                  items:
+                    type: string
+                    minLength: 1
+                    maxLength: 120
       security:
         - bearer: []
       responses:
@@ -5508,7 +5572,7 @@ paths:
     put:
       tags:
         - admin
-      summary: Override a series' metadata (title, summary, author, genres, status, age rating); survives rescans.
+      summary: Override a series' metadata (title, summary, author, genres, status, age rating, 18+ filter exemption); survives rescans.
       operationId: putApiAdminSeriesIdMeta
       description: Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
       parameters:
@@ -5538,6 +5602,13 @@ paths:
                   type: string
                 ageRating:
                   type: integer
+                adultExempt:
+                  type: [boolean, "null"]
+                  description: >-
+                    Keep this series in listings while "Show 18+" is off even when one of its genres is on
+                    the 18+ filter (adultGenres on PATCH /api/admin/settings). Absent or null leaves the
+                    current value alone; every other field here is written as sent. Does not affect 18+
+                    libraries or the age limit.
       security:
         - bearer: []
       responses:

@@ -73,6 +73,9 @@ function SeriesEditModal({ id, series, onClose, onSaved }: { id: string; series:
   );
   const [genres, setGenres] = useState<string[]>(series.overrides?.genres ?? series.metadata?.genres ?? []);
   const [genreDraft, setGenreDraft] = useState('');
+  // Kept visible while "Show 18+" is off even if one of its genres is on the admin's 18+ list. Surfacing
+  // only: it changes nothing about who may open the series, which is the age rating above.
+  const [adultExempt, setAdultExempt] = useState(series.overrides?.adultExempt === true);
   const [busy, setBusy] = useState(false);
   const addGenre = (raw: string) => {
     const t = raw.trim().replace(/,$/, '').trim();
@@ -96,7 +99,7 @@ function SeriesEditModal({ id, series, onClose, onSaved }: { id: string; series:
   const saveText = async () => {
     setBusy(true);
     try {
-      await api(`/api/admin/series/${id}/meta`, { method: 'PUT', json: { title, summary, author, status, genres, ageRating: ageRating === '' ? null : Number(ageRating) } });
+      await api(`/api/admin/series/${id}/meta`, { method: 'PUT', json: { title, summary, author, status, genres, ageRating: ageRating === '' ? null : Number(ageRating), adultExempt } });
       toast('Saved', 'success');
       onSaved();
     } catch (e) { toast(msgOf(e, 'Could not save'), 'error'); }
@@ -191,6 +194,13 @@ function SeriesEditModal({ id, series, onClose, onSaved }: { id: string; series:
           />
         </div>
         <p className="mt-1 text-[11px] text-fog-500">Genres drive Browse and the recommendation rails. Clearing them all means this series genuinely has none.</p>
+        <label className="mt-3 flex cursor-pointer items-center justify-between gap-3 text-sm">
+          <span>
+            <span className="text-fog-100">{tr('Always show')}</span>
+            <span className="mt-0.5 block text-[11px] leading-relaxed text-fog-500">{tr('Keep this series on the shelf while “Show 18+” is off, even if one of its genres is on the 18+ filter.')}</span>
+          </span>
+          <input type="checkbox" checked={adultExempt} onChange={(e) => setAdultExempt(e.target.checked)} className="size-4 shrink-0 accent-accent" />
+        </label>
         <button onClick={saveText} disabled={busy} className="btn-accent mt-3 w-full py-2 text-sm disabled:opacity-50">{tr('Save details')}</button>
         <div className="mt-4 rounded-xl border border-ink-700 p-3">
           <label className="flex cursor-pointer items-center justify-between gap-3 text-sm">

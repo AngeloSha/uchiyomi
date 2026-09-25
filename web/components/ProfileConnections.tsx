@@ -325,7 +325,7 @@ function OpdsSection() {
 
       {st?.exists && (
         <SwitchRow
-          label={tr('Include 18+ libraries in this reader')}
+          label={tr('Include 18+ content in this reader')}
           help={tr('Off by default. Your age limit, if you have one, still applies whatever this says.')}
           on={!!st.showAdult}
           disabled={busy}
@@ -434,7 +434,7 @@ function TokensSection() {
           {/* Mirrors the OPDS link's switch. The Komga-compatible API (Mihon, Tachimanga) reads the library
               through a token, and without this the 18+ libraries are simply absent from it. */}
           <label className="flex items-center gap-2 text-xs text-fog-300">
-            <input type="checkbox" checked={adult} onChange={(e) => setAdult(e.target.checked)} className="accent-accent" />{tr('Include 18+ libraries')}</label>
+            <input type="checkbox" checked={adult} onChange={(e) => setAdult(e.target.checked)} className="accent-accent" />{tr('Include 18+ content')}</label>
           <div className="flex flex-wrap gap-2 pt-1">
             {/* An admin-scoped token never expires and can do anything its owner can, so it costs one more
                 deliberate step. The rest of the form is unchanged. */}

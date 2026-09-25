@@ -6,7 +6,7 @@ import { komgaImage } from '../lib/komga';
 import { content as komga, NATIVE_PROGRESS } from '../lib/backend';
 import { UnsupportedFilter } from '../lib/ownedCatalog';
 import { cleanDescription } from '../lib/htmlText';
-import { viewCtxFor, SYSTEM_CTX, type ViewCtx, hideAdult, browsableIds, browsable, Params } from '../lib/visibility';
+import { viewCtxFor, SYSTEM_CTX, type ViewCtx, hideAdult, browsableIds, browsable, Params, adultFilterConfigured } from '../lib/visibility';
 
 /** The viewer attached by the preHandler above. */
 const vc = (req: FastifyRequest): ViewCtx => (req as any).viewCtx as ViewCtx;
@@ -118,6 +118,15 @@ export default async function catalogRoutes(app: FastifyInstance) {
   });
 
   app.get('/api/libraries', async (req) => komga.libraries(vc(req)));
+
+  // Whether "Show 18+" would reveal anything beyond 18+ libraries: an admin-named genre or source. The
+  // toggle renders only where there is something to reveal, and `/api/libraries` can only say that about
+  // libraries -- so without this, an install whose only adult content is a genre on the 18+ filter hid it
+  // with no off switch on the Library or Home page. A boolean, never the lists themselves.
+  app.get('/api/adult-filter', async (req) => {
+    const ctx = await viewCtxFor(userIdOf(req), roleOf(req), { hideAdult: true });
+    return { configured: adultFilterConfigured(ctx) };
+  });
 
   // No re-sort. SQL already ordered these by the database collation; sorting again in JS is byte order, so
   // every lowercase genre jumped to the end of the grid after every uppercase one.
@@ -361,8 +370,8 @@ export default async function catalogRoutes(app: FastifyInstance) {
     // apply admin metadata overrides (title/summary shown here; cover/banner are handled by the image server)
     const ov = await one<{ title: string | null; summary: string | null; cover: string | null; banner: string | null;
                           author: string | null; status: string | null; genres: string[] | null;
-                          age_rating: number | null; v: string }>(
-      `SELECT title, summary, cover, banner, author, status, genres, age_rating,
+                          age_rating: number | null; adult_exempt: boolean | null; v: string }>(
+      `SELECT title, summary, cover, banner, author, status, genres, age_rating, adult_exempt,
               EXTRACT(EPOCH FROM updated_at) * 1000 AS v FROM series_overrides WHERE series_id = $1`,
       [id],
     );
@@ -378,7 +387,8 @@ export default async function catalogRoutes(app: FastifyInstance) {
       // the edit modal seeds from these, so every overridable field has to come back or a save would
       // write back a blank and clear the very override the user opened the modal to keep
       out.overrides = { title: ov.title, summary: ov.summary, cover: ov.cover, banner: ov.banner,
-                        author: ov.author, status: ov.status, genres: ov.genres, ageRating: ov.age_rating };
+                        author: ov.author, status: ov.status, genres: ov.genres, ageRating: ov.age_rating,
+                        adultExempt: ov.adult_exempt === true };
       // The edit modal seeds from the override where one exists, so the effective rating has to reflect it
       // or reopening the modal would show the scanned value and saving would undo the correction.
       if (ov.age_rating != null && out.metadata) out.metadata.ageRating = ov.age_rating;

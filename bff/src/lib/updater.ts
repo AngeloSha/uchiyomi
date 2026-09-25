@@ -356,7 +356,7 @@ export async function updateSeries(seriesId: string, maxNew = 10, opts: UpdateOp
   // cap when a viewer drove the run. The chosen copy itself is not gated -- a person followed that source.
   // Asked only when there is something to download: a listing refresh (maxNew 0) costs no extra query.
   const adult = queue.length > 0 && maxNew > 0 ? await seriesIsAdult(seriesId) : false;
-  const sweepRule = sweepAllowedFor(adult);
+  const sweepRule = await sweepAllowedFor(adult);
   const allowed = (id: string) => sweepRule(id) && (opts.sourceAllowed?.(id) ?? true);
   const huntBudget = opts.hunt === false || opts.newestOnly ? null : (opts.hunt ?? { left: HUNT_MAX_PER_SWEEP });
   const meta = { series: s.title, summary: s.summary, author: s.author, genres: s.genres, url: s.web, status: s.status };
@@ -541,7 +541,7 @@ export async function runUpdateAll(opts: { onlyFavorites?: boolean; maxNew?: num
       if (spent >= sweepMax) { stopped = 'budget'; break; }
       spent++;
       try {
-        const allowed = sweepAllowedFor(await seriesIsAdult(b.series_id));
+        const allowed = await sweepAllowedFor(await seriesIsAdult(b.series_id));
         const r = await completePartial(
           { ...b, number: Number(b.number) },
           {

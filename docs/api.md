@@ -375,8 +375,19 @@ appears unasked rather than about permission -- `max_age_rating` is the permissi
 
 It is deliberately **not** applied to endpoints that resolve one id you already hold: the series page, its
 chapter list, `GET /api/books/:id`, its pages, the offline manifest, next/previous, `PUT
-/api/books/:id/progress` and `/opds/book/:id/file` all work whether or not the library is hidden. A filter
-that refused to record what you read would lose data rather than tidy a screen.
+/api/books/:id/progress`, `/opds/book/:id/file`, and (since v0.46.0) `POST /api/sources/fill/scan` and `POST
+/api/sources/fetch` for the series they name all work whether or not the library is hidden. A filter that
+refused to record what you read would lose data rather than tidy a screen; the last two used to answer 404 for a
+hidden series, so "Find missing chapters" disappeared with the chip off.
+
+**Since v0.46.0 an admin can widen what the same default hides** (Admin → Settings → 18+ filter): named
+**genres** take a series off every listing as though it sat in an 18+ library -- matched case-blind against the
+series' genres, or the admin's genre override when it has one, and a per-series *Always show* (`adultExempt` on
+`PUT /api/admin/series/:id/meta`) lets one title through -- and named **sources** are treated like sources whose
+extension declares `isNsfw`, below. The lists are read in SQL from `server_settings`, never interpolated, and they
+reach every surface the default does: listings, OPDS, the Komga-compatible API, notification digests, and the
+automatic source hunt, which never follows a named source onto a series that is not itself adult. They widen
+what is hidden and never what is allowed: `max_age_rating` stays the only permission.
 
 **Since v0.42.0 the same default covers Discover's sources.** A source whose extension declares itself
 adult (`isNsfw`) is a listing like any other, and hiding 18+ libraries while painting twelve adult
@@ -407,11 +418,14 @@ Chapter downloads and page streaming work either way; the age cap is a permissio
 
 `GET /api/libraries` reports `adult: true` for such a library so a client can offer the reveal, and drops
 any library rated above the caller's own `max_age_rating` entirely.
+`GET /api/adult-filter` answers `{ configured: boolean }`: whether Admin → Settings → 18+ filter names any
+genre or source, so a client can offer the same reveal on an install with no 18+ library. Only the flag, never
+the lists, and always `false` for an account capped below 18.
 
 The Komga-compatible API cannot pass the parameter either, so the same preference lives on the **API
-token**: `POST /api/tokens { …, "showAdult": true }` (since v0.38.0; the *Include 18+ libraries* checkbox in
-the mint dialog, off by default; `GET /api/tokens` rows carry `showAdult`). It decides whether 18+ libraries
-appear in `/api/v1/libraries` and the series listings for that token; `/api/v1/series/:id`, its chapters,
+token**: `POST /api/tokens { …, "showAdult": true }` (since v0.38.0; the *Include 18+ content* checkbox in
+the mint dialog, off by default; `GET /api/tokens` rows carry `showAdult`). It decides whether 18+ libraries,
+and the genres and sources an admin named, appear in `/api/v1/libraries` and the series listings for that token; `/api/v1/series/:id`, its chapters,
 pages and progress resolve by id whatever it says, and the age cap is a permission and is unaffected. The
 flag changes nothing on `/api/*` proper, where `?adult=1` remains the reveal.
 
@@ -472,7 +486,7 @@ GET    /api/home                  GET    /api/featured
 GET    /api/foryou                GET    /api/trending
 GET    /api/random                GET    /api/genres
 GET    /api/genres/overview       GET    /api/libraries
-GET    /api/updates
+GET    /api/updates               GET    /api/adult-filter
 POST   /api/updates/seen          POST   /api/refresh
 GET    /api/series/:id            GET    /api/series/:id/books
 GET    /api/series/:id/similar    GET    /api/series/:id/color
