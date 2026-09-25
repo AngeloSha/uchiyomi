@@ -136,7 +136,7 @@ test('the token form offers 18+ libraries, off by default, and sends it as showA
   const src = code(read('components/ProfileConnections.tsx'));
   assert.match(src, /const \[adult, setAdult\] = useState\(false\)/, 'the checkbox must start unchecked');
   assert.match(src, /json: \{ name: name\.trim\(\), scopes, showAdult: adult \}/, 'showAdult is not sent with the mint');
-  assert.match(src, /checked=\{adult\}[\s\S]{0,140}?\/>\{tr\('Include 18\+ libraries'\)\}/, 'the checkbox has no label');
+  assert.match(src, /checked=\{adult\}[\s\S]{0,140}?\/>\{tr\('Include 18\+ content'\)\}/, 'the checkbox has no label');
   assert.match(src, /t\.showAdult \? ` · \$\{tr\('18\+'\)\}` : ''/, 'the list does not show which tokens see 18+');
   assert.match(src, /setAdmin\(false\); setAdult\(false\); setOpen\(false\)/, 'the form must reset the checkbox after a mint');
 });
