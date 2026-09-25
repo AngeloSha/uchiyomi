@@ -215,8 +215,18 @@ services:
     image: ghcr.io/suwayomi/suwayomi-server:v2.3.2243
     container_name: yomi-suwayomi
     restart: unless-stopped
+    # The engine is a JVM, and a JVM with no limit sizes its heap from the HOST's memory -- a quarter of it:
+    # 15.7 GiB on a 62 GB machine, measured 2026-09-25 against this image. It idles near 780 MB, so without a
+    # cap a small NAS is at its mercy (discussion #72). These are the desktop app's own numbers for the same
+    # engine (desktop/src/engine.js): a 768 MB heap and the serial collector, under a hard ceiling that leaves
+    # room for metaspace and native memory. The ceiling turns a runaway into a restart, which the restart
+    # policy above handles. SUWAYOMI_MEM_LIMIT and SUWAYOMI_JAVA_OPTS raise both for a big extension list.
+    mem_limit: ${SUWAYOMI_MEM_LIMIT:-1536m}
     environment:
       TZ: UTC
+      # The heap cap itself. The image's startup script runs a bare `java -jar` with no options of its own, so
+      # JAVA_TOOL_OPTIONS -- which every JVM reads when it starts -- is the way in.
+      JAVA_TOOL_OPTIONS: "${SUWAYOMI_JAVA_OPTS:--Xmx768m -XX:+UseSerialGC}"
       # Uchiyomi does the downloading and owns the library; this instance must never write into it.
       AUTO_DOWNLOAD_CHAPTERS: "false"
       DOWNLOAD_AS_CBZ: "true"
