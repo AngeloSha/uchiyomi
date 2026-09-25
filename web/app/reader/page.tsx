@@ -289,9 +289,15 @@ function ReaderInner() {
    * `hide` still removes, for readers who want the page gone outright — but it goes through the same builder,
    * so it gets the corrected `firstOfChapter` and the per-chapter empty guard too.
    */
+  // Paged mode has no thin slide to collapse a page INTO -- every slide is one viewport wide -- so there a
+  // repeated page under Collapse is shown like any other and costs one swipe. It used to get a slide that never
+  // rendered (the render window skips collapsed pages): a blank screen with a faint page number. Shown, not
+  // removed: removing would give the two modes different flows, and switching mode mid-chapter would then land
+  // on a different page, because nothing re-anchors `current` when the flow is rebuilt.
+  const flowJunk = prefs.mode === 'paged' && prefs.junkPages === 'collapse' ? 'show' : prefs.junkPages;
   const flat: FlatItem[] = useMemo(
-    () => buildFlow(chapters, prefs.junkPages, expanded) as FlatItem[],
-    [chapters, prefs.junkPages, expanded],
+    () => buildFlow(chapters, flowJunk, expanded) as FlatItem[],
+    [chapters, flowJunk, expanded],
   );
   /** Vertical + `collapse`: a repeated page is drawn as a band of itself instead of being removed. */
   const collapsing = prefs.junkPages === 'collapse';
