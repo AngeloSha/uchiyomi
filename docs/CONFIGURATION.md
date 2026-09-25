@@ -201,6 +201,11 @@ ever hit.
   own rate limits towards the site, so the one-at-a-time pacing above was only slowing extension downloads
   down for nothing. The first 429 from the engine drops the chapter back to one page at a time for the rest
   of the download.
+- `SUWAYOMI_MEM_LIMIT` (default `1536m`) and `SUWAYOMI_JAVA_OPTS` (default `-Xmx768m -XX:+UseSerialGC`): the
+  extension engine's memory ceiling and its Java options. These are read by Docker Compose for the engine's
+  own container, not by Uchiyomi. Without them a JVM sizes its heap from the host — a quarter of its memory —
+  so they are set in every shipped compose file; raise both together for a very long extension list, keeping
+  the ceiling well above the `-Xmx` heap for the memory Java uses outside it.
 - `DOWNLOAD_RESUME_WAIT_MS` (default `5000,10000,20000`): waits before the three attempts to resume a
   chapter after a 429. A source's longer `Retry-After` is always the floor. A 429 also raises that source's
   in-memory pace level (0–4): slowed levels use one page worker and double gaps up to four seconds; ten

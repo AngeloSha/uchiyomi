@@ -165,7 +165,7 @@ function quitForUpdateClient(gotLockHere) {
 }
 
 // ---------------------------------------------------------------- shared by the app and --smoke
-/** @type {Supervisor | null} */
+/** @type {InstanceType<typeof Supervisor> | null} */
 let sup = null;
 /** @type {BrowserWindow | null} */
 let win = null;
@@ -176,9 +176,9 @@ let quitting = false;
 let stopped = false;
 let lang = 'en';
 let t = translator('en');
-/** @type {Updates | null} */
+/** @type {InstanceType<typeof Updates> | null} */
 let updates = null;
-/** @type {ShellSession | null} */
+/** @type {InstanceType<typeof ShellSession> | null} */
 let shellSession = null;
 let needsHuman = '';
 
@@ -1029,7 +1029,7 @@ function onNeedsHuman(host) {
 /**
  * The Tasks panel's "Run now" on the chapter sweep, with the app's own session (the same exchange the window
  * makes, from the main process).
- * @param {ShellSession} ss
+ * @param {InstanceType<typeof ShellSession>} ss
  */
 async function runSweepNow(ss) {
   const r = await ss.fetch('/api/admin/tasks/update/run', { method: 'POST' });
@@ -1089,7 +1089,7 @@ async function restoreBackupFlow({ fromWeb = false } = {}) {
     });
     if (ask.response !== 0) return;
   }
-  const s = /** @type {Supervisor} */ (sup);
+  const s = /** @type {InstanceType<typeof Supervisor>} */ (sup);
   log.info('restore: starting', { dump: b.dump, config: b.config });
   try {
     const r = await restore({
@@ -1246,7 +1246,7 @@ async function runSmoke() {
     // "Restore a backup", the shell's flow, on the backup the bff just wrote: safety copy -> stop the bff ->
     // psql in one transaction -> config.zip swapped in -> the bff back up -> the window's handshake still works.
     if (c.bffBackup?.pass) {
-      const s = /** @type {Supervisor} */ (sup);
+      const s = /** @type {InstanceType<typeof Supervisor>} */ (sup);
       const t0 = Date.now();
       try {
         const b = inspectBackup(path.join(L.backups, c.bffBackup.dir, 'db.sql.gz'));
@@ -1289,7 +1289,7 @@ async function runSmoke() {
 
 /** Install the engine the way the Extensions card does, then check the bff sees it. */
 async function smokeEngine(base, token) {
-  const s = /** @type {Supervisor} */ (sup);
+  const s = /** @type {InstanceType<typeof Supervisor>} */ (sup);
   const seen = [];
   s.on('engine-status', (x) => { if (seen[seen.length - 1] !== x.state) seen.push(x.state); });
   const t0 = Date.now();

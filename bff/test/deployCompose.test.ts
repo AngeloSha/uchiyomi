@@ -73,6 +73,47 @@ test('a wedged extension engine is visible to docker, not just to the app', () =
   }
 });
 
+/** The body of the Cloudflare solver's service, read the same way as the engine's. */
+function solverBlock(file: string): string {
+  const src = readFileSync(join(REPO, file), 'utf8');
+  const start = src.search(/^ {2}[a-z-]*flaresolverr:$/m);
+  assert.ok(start >= 0, `${file} has no flaresolverr service`);
+  const rest = src.slice(src.indexOf('\n', start) + 1);
+  const end = rest.search(/^ {0,2}[a-z][a-z-]*:$/m);
+  return rest.slice(0, end < 0 ? undefined : end);
+}
+
+/**
+ * Discussion #72: the engine is a JVM, and a JVM with no limit sizes its heap from the HOST -- 15.7 GiB on a
+ * 62 GB machine, measured 2026-09-25 against v2.3.2243 -- and it ran uncapped in every layout while the solver
+ * beside it had a reasoned 2 GB cap. The desktop app starts the same engine with -Xmx768m.
+ *
+ * Both halves are needed. The heap flag keeps the JVM from growing into the ceiling; the ceiling turns what the
+ * heap flag does not cover (metaspace, threads, native buffers) into a restart instead of a host that swaps.
+ * Reintroduce by deleting either line from any one file: the assertion names the file.
+ */
+test("the extension engine's memory is bounded in every layout", () => {
+  for (const file of FILES) {
+    const block = instructions(suwayomiBlock(file));
+    assert.match(block, /^\s+mem_limit:\s*\S+/m, `${file}: the engine has no memory ceiling, so the JVM sizes itself from the host`);
+    assert.match(block, /JAVA_TOOL_OPTIONS:.*-Xmx\d+[mMgG]/, `${file}: the engine's heap is not capped (-Xmx in JAVA_TOOL_OPTIONS)`);
+  }
+});
+
+/**
+ * The split layout's solver had none of these while the others did: no /dev/shm headroom (chromedriver dies
+ * mid-challenge at Docker's 64 MB default, which reads from the app's side as the SITE blocking us), no memory
+ * cap on a known leak, no healthcheck. Reintroduce by deleting any one from any one file.
+ */
+test('the Cloudflare solver has the same protections in every layout', () => {
+  for (const file of FILES.filter((f) => f.startsWith('deploy/'))) {
+    const block = instructions(solverBlock(file));
+    assert.match(block, /^\s+shm_size:\s*1gb/m, `${file}: the solver keeps Docker's 64 MB /dev/shm, so chromedriver dies mid-challenge`);
+    assert.match(block, /^\s+mem_limit:\s*\S+/m, `${file}: the solver's leak is not capped`);
+    assert.match(block, /^\s+healthcheck:/m, `${file}: a crashing solver reads as running`);
+  }
+});
+
 test('the optional engine is not made mandatory by a depends_on', () => {
   // The file says "Remove this service ... to drop it". A depends_on pointing at a removed service makes
   // `docker compose up` fail outright with "depends on undefined service", turning an optional feature into

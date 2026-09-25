@@ -94,6 +94,15 @@ test('dependencies and actions are watched weekly, grouped so CI is not run thir
   assert.ok(d.updates.some((u: any) => u['package-ecosystem'] === 'github-actions'), 'actions are not watched');
   const docker = d.updates.filter((u: any) => u['package-ecosystem'] === 'docker').map((u: any) => u.directory).sort();
   assert.deepEqual(docker, ['/', '/bff', '/web'], 'not every Dockerfile has its base image watched');
+  // A Node major is taken deliberately, onto an even LTS line: never a weekly PR for an odd, short-lived release
+  // (#73-#75 proposed node:25 after its end of life), and never @types/node ahead of the runtime (#62, #77).
+  // Reintroduce by deleting either ignore rule from any one entry: the assertion names the directory.
+  const ignores = (u: any, dep: string) =>
+    (u.ignore ?? []).some((i: any) => i['dependency-name'] === dep && (i['update-types'] ?? []).includes('version-update:semver-major'));
+  for (const u of d.updates.filter((u: any) => u['package-ecosystem'] === 'docker'))
+    assert.ok(ignores(u, 'node'), `docker ${u.directory}: Node majors arrive as weekly PRs`);
+  for (const u of d.updates.filter((u: any) => u['package-ecosystem'] === 'npm'))
+    assert.ok(ignores(u, '@types/node'), `npm ${u.directory}: @types/node can run ahead of the Node runtime`);
   const cq = parseYaml(read('.github/workflows/codeql.yml'));
   assert.match(JSON.stringify(cq), /javascript-typescript/);
   assert.equal(cq.permissions['security-events'], 'write');

@@ -4,8 +4,8 @@
   // test runs the .ts sources directly under tsx, so the solver is checked by both.
   "compilerOptions": {
     "target": "ES2022",
-    "module": "commonjs",
-    "moduleResolution": "node",
+    "module": "node16",
+    "moduleResolution": "node16",
     "lib": ["ES2022", "DOM"],
     "rootDir": ".",
     "outDir": "out",

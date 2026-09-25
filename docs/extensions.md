@@ -194,7 +194,16 @@ downloads, updates, users and UI; the engine only answers "search this", "list t
 chapter's pages".
 
 The cost is honest: it is a JVM, and it uses about 750 MB of memory once running (731 MiB measured on a
-server with 22 extensions installed; the desktop app caps its Java heap at 768 MB).
+server with 22 extensions installed).
+
+**Since v0.46.0 the compose files cap it**, with the desktop app's own numbers: a 768 MB Java heap under a
+1.5 GB ceiling for the container. Before that there was no cap at all, and a JVM without one sizes its heap
+from the host's memory — up to a quarter of it, 15.7 GiB on a 62 GB server — so on a small NAS the engine could
+take far more than 750 MB. A long extension list may need more: set `SUWAYOMI_MEM_LIMIT` and
+`SUWAYOMI_JAVA_OPTS` ([CONFIGURATION.md](CONFIGURATION.md)). ⚠️ **Updating the image does not update your compose
+file.** An install set up before v0.46.0 gets the cap by downloading the current
+[`deploy/docker-compose.yml`](../deploy/docker-compose.yml) again, or by adding its two lines — `mem_limit` and
+`JAVA_TOOL_OPTIONS` under `uchiyomi-suwayomi` — to the file you have.
 
 ## How it behaves
 
@@ -229,8 +238,9 @@ Two things worth knowing:
 ## Turning it off
 
 On Docker: set `SUWAYOMI_URL=` (empty) in `.env` and restart the app; the Extensions tab then says no engine is
-set up, and nothing else changes. To reclaim the memory as well, `docker compose stop uchiyomi-suwayomi`
-(`yomi-suwayomi` in the development stack). The desktop app has no switch for it: an engine that was never
+set up, and nothing else changes. To reclaim the memory as well, delete the `uchiyomi-suwayomi` service from
+your compose file (`yomi-suwayomi` in the development stack) and run `docker compose up -d --remove-orphans`.
+`docker compose stop` only lasts until the next `docker compose up`, which starts it again. The desktop app has no switch for it: an engine that was never
 downloaded costs nothing, and one that was only runs while Uchiyomi does.
 
 ## Settings
