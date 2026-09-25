@@ -1,5 +1,5 @@
 'use client';
-import { Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { Children, Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import Link from 'next/link';
 import { motion } from 'framer-motion';
 import { useSearchParams, useRouter } from 'next/navigation';
@@ -20,6 +20,7 @@ import { FindMissingDialog } from '@/components/FindMissingDialog';
 import { normGroup } from '@/lib/scanlators';
 import { GHOST_CAP, mergeRows, whyLabel, runLabel, chunkNumbers, MARK_CHUNK, type Row } from '@/lib/chapterRows';
 import { CHAPTER_PAGE, clampPage, pageCount, pageLabel, pageOf, pageSlice } from '@/lib/chapterPages';
+import { buttonsClass, compactChaptersOn, dotHide, rowClass, thumbHide } from '@/lib/compactChapters';
 import { fetchAllBooks } from '@/lib/seriesBooks';
 import { ALL_GROUPS, copySourceId, groupsOfRow, matchesGroup } from '@/lib/groupFilter';
 import { SourcesSheet, useSeriesGroups, useCheckNow } from '@/components/SourcesSheet';
@@ -511,8 +512,21 @@ function RowDate({ iso, className = '' }: { iso: string; className?: string }) {
   );
 }
 
-function ChapterRow({ book, downloaded, sourceNames, primarySource, versions, onReader, onToggleDownload, onMark, onEdit, onVersions, selectable, selected, onToggle }: {
+/**
+ * The row's buttons. In the compact list (lib/compactChapters.ts) they sit in a wrapper that appears on hover or
+ * focus; otherwise there is no wrapper at all, so the default row is exactly what it was. An empty wrapper -- a
+ * row showing none of its buttons -- renders nothing, or it would still take a flex gap.
+ */
+function ButtonsWrap({ compact, menuOpen, children }: { compact: boolean; menuOpen: boolean; children: ReactNode }) {
+  if (!compact) return <>{children}</>;
+  if (!Children.toArray(children).length) return null;
+  return <div className={buttonsClass(menuOpen)}>{children}</div>;
+}
+
+function ChapterRow({ book, downloaded, sourceNames, primarySource, versions, onReader, onToggleDownload, onMark, onEdit, onVersions, selectable, selected, onToggle, compact }: {
   book: Book;
+  /** The opt-in compact chapter list (lib/compactChapters.ts). Off: the row is exactly as it always was. */
+  compact?: boolean;
   downloaded: boolean;
   /** Select mode: the row toggles instead of opening, shows the ✓ bubble, and hides its own two controls. */
   selectable?: boolean; selected?: boolean; onToggle?: () => void;
@@ -554,19 +568,19 @@ function ChapterRow({ book, downloaded, sourceNames, primarySource, versions, on
     // the dot, the date and two 36-px buttons -- exactly a group name with its avatar -- and a two-digit
     // day ("29d") took 4 of them back. Five gaps at 10 rather than 12 return ten. GhostRow matches.
     <div id={`ch-${book.number}`} className="border-b border-ink-800/70">
-    <div className="flex items-center gap-3 py-2.5 lg:gap-2.5">
+    <div className={rowClass(!!compact)}>
       {/* In select mode a pruned chapter is still selectable -- Mark read and Fetch again are exactly the
           things one wants for it -- so the disable only applies to opening. */}
       <button onClick={selectable ? onToggle : onReader} disabled={pruned && !selectable} aria-pressed={selectable ? !!selected : undefined}
         className="flex min-w-0 flex-1 items-center gap-3 text-start disabled:cursor-default">
-        <div className={`relative h-14 w-10 shrink-0 overflow-hidden rounded-lg border ${state === 'read' ? 'border-ink-800 opacity-45' : 'border-ink-700'} ${book.pruned && !downloaded ? 'border-dashed border-ink-600' : ''}`}>
+        <div className={`relative h-14 w-10 shrink-0${thumbHide(!!compact, !!selectable)} overflow-hidden rounded-lg border ${state === 'read' ? 'border-ink-800 opacity-45' : 'border-ink-700'} ${book.pruned && !downloaded ? 'border-dashed border-ink-600' : ''}`}>
           {/* A tombstone has no file to draw a thumbnail from; asking would be a 404 per row on every visit.
               The dashed empty box is the ghost row's, so "no pages here" reads the same in both places. */}
           {!(book.pruned && !downloaded) && <Img src={img.bookThumb(book.id)} alt="" className="h-full w-full" />}
           {state === 'reading' && <span className="absolute inset-x-0 bottom-0 h-0.5 bg-accent" />}
           {selectable && <SelectBubble selected={!!selected} />}
         </div>
-        <span className={`h-2 w-2 shrink-0 rounded-full ${state === 'read' ? 'bg-ink-600' : state === 'reading' ? 'bg-accent' : 'bg-accent/40'}`} />
+        <span className={`h-2 w-2 shrink-0 rounded-full${dotHide(!!compact)} ${state === 'read' ? 'bg-ink-600' : state === 'reading' ? 'bg-accent' : 'bg-accent/40'}`} />
         <div className="min-w-0">
           <p className={`truncate text-sm ${state === 'read' ? 'text-fog-500' : 'text-fog-100'}`}>
             {chapterLabel(book)}
@@ -580,7 +594,7 @@ function ChapterRow({ book, downloaded, sourceNames, primarySource, versions, on
         </div>
       </button>
       {book.metadata?.releaseDate && <RowDate iso={book.metadata.releaseDate} />}
-      {!selectable && <>
+      {!selectable && <ButtonsWrap compact={!!compact} menuOpen={menu}>
       {/* Not on Uchiyomi Desktop (lib/desktop.ts): the chapter is already a file on this computer. */}
       {!isDesktop() && <button
         onClick={async () => {
@@ -630,7 +644,7 @@ function ChapterRow({ book, downloaded, sourceNames, primarySource, versions, on
           </>
         )}
       </div>
-      </>}
+      </ButtonsWrap>}
     </div>
     </div>
   );
@@ -663,8 +677,10 @@ function SelectBubble({ selected }: { selected: boolean }) {
  * dimmed, because "this server does not have it" is still true. The mark lives in its own table and becomes
  * ordinary progress when the chapter lands (bff lib/listingProgress).
  */
-function GhostRow({ ghost, sourceNames, primarySource, selectable, selected, onToggle, onFetch, onOpen, onMark }: {
+function GhostRow({ ghost, sourceNames, primarySource, selectable, selected, onToggle, onFetch, onOpen, onMark, compact }: {
   ghost: Ghost;
+  /** ChapterRow's compact list, so the two kinds of row still line up where they interleave. */
+  compact?: boolean;
   sourceNames?: Record<string, string>;
   primarySource?: string;
   selectable?: boolean; selected?: boolean; onToggle?: () => void;
@@ -702,18 +718,20 @@ function GhostRow({ ghost, sourceNames, primarySource, selectable, selected, onT
     <div id={`ch-${ghost.number}`} className="border-b border-ink-800/70">
     {/* The dimming is the opener's and the date's, not the row's: the fetch button at the end of the line
         is a live control, and a child cannot undo its parent's opacity. */}
-    <div className="flex items-center gap-3 py-2.5 lg:gap-2.5">
+    <div className={rowClass(!!compact)}>
       <button type="button" onClick={selectable ? onToggle : onOpen} aria-pressed={selectable ? !!selected : undefined} aria-haspopup={selectable ? undefined : 'dialog'}
         className={`flex min-w-0 flex-1 items-center gap-3 text-start ${selected ? '' : 'opacity-60'}`}>
-        <div className="relative grid h-14 w-10 shrink-0 place-items-center rounded-lg border border-dashed border-ink-600">
+        <div className={`relative grid h-14 w-10 shrink-0${thumbHide(!!compact, !!selectable)} place-items-center rounded-lg border border-dashed border-ink-600`}>
           {read && !selectable && (
             <span role="img" aria-label={tr('Read · not on the server')} className="text-fog-500"><IcCheck width={14} height={14} /></span>
           )}
           {selectable && <SelectBubble selected={!!selected} />}
         </div>
-        <span className={`h-2 w-2 shrink-0 rounded-full ${read ? 'bg-ink-600' : 'border border-ink-600'}`} />
+        <span className={`h-2 w-2 shrink-0 rounded-full${dotHide(!!compact)} ${read ? 'bg-ink-600' : 'border border-ink-600'}`} />
         <div className="min-w-0">
           <p className={`truncate text-sm ${read ? 'text-fog-500' : 'text-fog-300'}`}>
+            {/* Compact hides the box, and its tick's label with it: say it once for screen readers. */}
+            {compact && read && !selectable && <span className="sr-only hidden lg:pointer-fine:inline">{tr('Read · not on the server')} </span>}
             {chapterLabel({ number: ghost.number })}
             {showTitle && <span className="text-fog-500"> · {title}</span>}
           </p>
@@ -724,6 +742,7 @@ function GhostRow({ ghost, sourceNames, primarySource, selectable, selected, onT
         </div>
       </button>
       {ghost.publishedAt && <RowDate iso={ghost.publishedAt} className={selected ? '' : 'opacity-60'} />}
+      <ButtonsWrap compact={!!compact} menuOpen={menu}>
       {/* The cloud, not the ⬇ of the row above: that arrow saves a chapter to THIS DEVICE, this one brings
           it onto the server, and the same glyph for both would promise the wrong thing on one of them. */}
       {onFetch && !selectable && (
@@ -757,6 +776,7 @@ function GhostRow({ ghost, sourceNames, primarySource, selectable, selected, onT
           )}
         </div>
       )}
+      </ButtonsWrap>
     </div>
     </div>
   );
@@ -1015,6 +1035,10 @@ function SeriesInner() {
   // chapters and would shift a page picked before them). Following Continue live made the list jump away
   // from what the reader was doing -- expanding an older-chapters run or "Show all" inserts rows ahead of
   // it, and "Mark all read" sends Continue back to chapter 1.
+  // This device's choice of the compact chapter list (lib/compactChapters.ts), read after mount: the static
+  // export renders without localStorage, and the default row is the one to render until we know.
+  const [compact, setCompact] = useState(false);
+  useEffect(() => { setCompact(compactChaptersOn()); }, []);
   const [chapterPage, setChapterPage] = useState<number | null>(null);
   useEffect(() => { setChapterPage(null); }, [id, asc, group, showGhosts]);
   const autoPage = useMemo(() => (resumeBook ? pageOf(rows, (r) => r.kind === 'book' && r.book.id === resumeBook.id) : 0), [rows, resumeBook]);
@@ -1556,7 +1580,7 @@ function SeriesInner() {
           if (r.kind === 'book') {
             const b = r.book;
             return (
-              <ChapterRow key={b.id} book={b} downloaded={downloaded.has(b.id)} sourceNames={sourceNames} primarySource={primarySource}
+              <ChapterRow key={b.id} book={b} compact={compact} downloaded={downloaded.has(b.id)} sourceNames={sourceNames} primarySource={primarySource}
                 onReader={() => router.push(`/reader/?book=${b.id}`)} onToggleDownload={() => toggleDownload(b.id)}
                 onMark={(mode) => markChapter(b, mode)}
                 onEdit={isAdmin ? () => setEditChapter(b) : undefined}
@@ -1567,7 +1591,7 @@ function SeriesInner() {
           }
           if (r.kind === 'ghost') {
             return (
-              <GhostRow key={`g${r.ghost.number}`} ghost={r.ghost} sourceNames={sourceNames} primarySource={primarySource}
+              <GhostRow key={`g${r.ghost.number}`} ghost={r.ghost} compact={compact} sourceNames={sourceNames} primarySource={primarySource}
                 selectable={selecting} selected={pickedGhosts.has(r.ghost.number)} onToggle={() => togglePickGhost(r.ghost.number)}
                 onOpen={() => setChapterSheet({ number: r.ghost.number, ghost: r.ghost })}
                 // Same audience and same exclusion as the bar's Fetch (`fetchable`): a row only blocked
