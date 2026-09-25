@@ -43,6 +43,7 @@ export function ReaderSettings({
         animate={{ y: 0 }}
         exit={{ y: '100%' }}
         transition={{ type: 'spring', stiffness: 360, damping: 36 }}
+        data-lenis-prevent
         className="absolute inset-x-0 bottom-0 max-h-[85dvh] overflow-y-auto overscroll-contain rounded-t-4xl border-t border-ink-700 bg-ink-900/95 px-5 pt-4 backdrop-blur-xl pb-[max(1.5rem,calc(env(safe-area-inset-bottom)+1rem))]"
       >
         <div className="mx-auto mb-3 h-1.5 w-10 rounded-full bg-ink-600" />

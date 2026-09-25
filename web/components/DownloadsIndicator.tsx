@@ -70,7 +70,7 @@ export function DownloadsIndicator() {
   return (
     <div className="safe-bottom fixed bottom-20 end-3 z-40 lg:bottom-5 lg:end-5">
       {open && (
-        <div className="card mb-2 max-h-[50vh] w-[min(20rem,calc(100vw-1.5rem))] overflow-y-auto p-3 shadow-lift">
+        <div data-lenis-prevent className="card mb-2 max-h-[50vh] w-[min(20rem,calc(100vw-1.5rem))] overflow-y-auto p-3 shadow-lift">
           {[...active, ...failed].map((j) => (
             <div key={j.folder} className="border-b border-ink-700/60 py-2 last:border-0">
               <p className="truncate text-xs font-medium text-fog-100">{j.title}</p>

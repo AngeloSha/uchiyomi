@@ -65,6 +65,7 @@ export function Modal({
         role="dialog"
         aria-modal="true"
         aria-label={title}
+        data-lenis-prevent
         className={`glass max-h-[calc(100dvh-7.5rem-env(safe-area-inset-bottom))] w-full lg:max-h-[88vh] ${wide ? 'max-w-lg' : 'max-w-md'} overflow-y-auto rounded-2xl border border-ink-700 p-5`}
         onClick={(e) => e.stopPropagation()}
       >
