@@ -126,6 +126,55 @@ try {
     return true;
   };
 
+  /**
+   * `p.setViewport(vp)`, and when that reloads the page, wait for the reloaded app to finish signing in
+   * before anything navigates it.
+   *
+   * ⚠️ THIS WAS THE "REPEATED PAGES" FLAKE (failed 3 runs of 5 on 2026-09-25). Puppeteer RELOADS the page
+   * whenever `isMobile` or `hasTouch` changes, and `reload()` resolves on `load`, before the app has booted.
+   * The app's first act is `POST /auth/refresh`, which ROTATES the refresh cookie. The suite navigated
+   * straight away, which abandoned that request after the server had rotated the token but before its
+   * `Set-Cookie` reached the jar. The jar kept the old token, the server's rotation grace
+   * (REFRESH_GRACE_MS, 60 s, bff/src/lib/auth.ts) kept answering it without rotating anything, and the first
+   * refresh after that minute was refused and signed out every tab. Which check happened to boot a tab
+   * next was a matter of seconds: the repeated-pages tab (a sign-in form, so "collapsed nothing"), or the
+   * deep link a few steps later (recovered by ensureSignedIn, so the run passed). Instrumented: the only
+   * unanswered refresh of a failing run was the one after this block's switch back to 1440.
+   * Reintroduce by calling `page.setViewport` directly at the phone block's toggles: the next tab that boots
+   * about a minute later is signed out. Driven on its own, 8 toggles left 7-8 of 16 refreshes unanswered and the
+   * session gone 62 s later; with this, none, and still signed in.
+   *
+   * ⚠️ It waits for the one REQUEST the reloaded document sends, not for any refresh response. A refresh the
+   * OLD document had in flight can still be answered after the reload commits (seen once, a full second
+   * late), and settling on that answer would leave the new document's own refresh unguarded.
+   */
+  const setViewportSettled = async (p, vp) => {
+    const cur = p.viewport() || {};
+    if (!!cur.isMobile === !!vp.isMobile && !!cur.hasTouch === !!vp.hasTouch) return p.setViewport(vp);
+    let reloaded = false;
+    let mine = null;
+    let settle;
+    const settled = new Promise((resolve) => { settle = resolve; });
+    const onNav = (f) => { if (f === p.mainFrame()) reloaded = true; };
+    const onRequest = (r) => { if (reloaded && !mine && new URL(r.url()).pathname === '/auth/refresh') mine = r; };
+    const onEnd = (r) => { if (r === mine) settle(); };
+    p.on('framenavigated', onNav);
+    p.on('request', onRequest);
+    p.on('requestfinished', onEnd);
+    p.on('requestfailed', onEnd);
+    const giveUp = setTimeout(settle, 20000);
+    try {
+      await p.setViewport(vp);
+      await settled;
+    } finally {
+      clearTimeout(giveUp);
+      p.off('framenavigated', onNav);
+      p.off('request', onRequest);
+      p.off('requestfinished', onEnd);
+      p.off('requestfailed', onEnd);
+    }
+  };
+
   // ---------------------------------------------------------------- every screen
   for (const [name, path] of [['home', '/'], ['library', '/library'], ['search', '/search'],
                               ['collections', '/collections'], ['downloads', '/downloads'],
@@ -624,7 +673,7 @@ try {
 
   // ---------------------------------------------------------------- phone
   console.log('\n  phone 390x844');
-  await page.setViewport({ width: 390, height: 844, isMobile: true, hasTouch: true });
+  await setViewportSettled(page, { width: 390, height: 844, isMobile: true, hasTouch: true });
   // The reader is measured here and nowhere else: layout.mjs cannot reach it, because its PAGES are static
   // paths and the reader needs a book id. Its header gained a chapter button that used to be desktop-only,
   // which is exactly the kind of change that pushes a 390px header sideways.
@@ -697,7 +746,7 @@ try {
     }
   }
 
-  await page.setViewport({ width: 1440, height: 900 });
+  await setViewportSettled(page, { width: 1440, height: 900 });
   await page.goto(`${BASE}/library`, { waitUntil: 'networkidle2', timeout: 60000 }).catch(() => {});
   await sleep(2200);
   {
@@ -750,14 +799,14 @@ try {
     }
   }
   await shot('library-filters-desktop');
-  await page.setViewport({ width: 390, height: 844, isMobile: true, hasTouch: true });
+  await setViewportSettled(page, { width: 390, height: 844, isMobile: true, hasTouch: true });
 
   // ------------------------------------------------- what the install count shows before you consent
   //
   // The unit tests pin what the payload CONTAINS. This checks the part that makes it consent rather than a
   // policy document: that an admin is shown the literal object, in the page, without having to turn
   // anything on first. A privacy promise nobody is shown is not one.
-  await page.setViewport({ width: 1440, height: 900 });
+  await setViewportSettled(page, { width: 1440, height: 900 });
   await page.goto(`${BASE}/admin/`, { waitUntil: 'networkidle2', timeout: 60000 }).catch(() => {});
   await sleep(2500);
   if (await ensureSignedIn(page, 'the settings tab')) {
@@ -819,7 +868,7 @@ try {
       await shot('admin-install-count');
     }
   }
-  await page.setViewport({ width: 390, height: 844, isMobile: true, hasTouch: true });
+  await setViewportSettled(page, { width: 390, height: 844, isMobile: true, hasTouch: true });
 
   // ---------------------------------------------------------------- the rails move
   //
@@ -990,27 +1039,59 @@ try {
           } else {
             ok(`the API flags only the repeated credit page (1 of ${pj.length})`);
 
+            // ⚠️ SET EVERYTHING THIS CHECK DEPENDS ON, HERE, instead of inheriting it from a dozen blocks
+            // above. A strip is drawn only when the reader is SIGNED IN, has `junkPages: 'collapse'`, and is
+            // in VERTICAL mode -- paged mode shows a repeated page like any other (`flowJunk` in
+            // app/reader/page.tsx). Each of those is state an earlier block, a helper script run against a kept
+            // instance, or another tab can change, and each one missing reads as "the feature is broken".
+            //
+            // The preferences go to the SERVER as well as to localStorage: the reader paints from
+            // localStorage, then adopts `/api/settings`, and the server copy wins (syncPrefsFromServer in
+            // lib/readerPrefs.ts). A local write alone is undone by whatever an earlier click, or a script,
+            // PUT. `junkPages` exists only globally; the mode is set on the SERIES because that level beats
+            // the global and per-source defaults (global < source < series).
+            // Reintroduce by PUTting `{"reader":{"mode":"paged"}}` for this user before the suite runs: without
+            // these writes the reader opens paged and nothing collapses.
+            const cur = await fetch(`${BASE}/api/settings`, { headers: { authorization: `Bearer ${tok}` } })
+              .then((r) => r.json()).catch(() => ({}));
+            const stored = await fetch(`${BASE}/api/settings`, {
+              method: 'PUT', headers: { 'content-type': 'application/json', authorization: `Bearer ${tok}` },
+              body: JSON.stringify({
+                reader: { ...(cur?.reader || {}), junkPages: 'collapse' },
+                readerSeries: { ...(cur?.readerSeries || {}), [sid]: { ...(cur?.readerSeries?.[sid] || {}), mode: 'vertical' } },
+              }),
+            }).then((r) => r.ok).catch(() => false);
+            if (!stored) bad('could not store the reader preferences the repeated-pages check depends on');
+            // localStorage is per ORIGIN, so writing it from `page` (on /library, same origin) is writing it for
+            // the tab below -- which then needs exactly ONE load. Loading the reader to write it and loading
+            // it again started a second navigation while the first one's `/auth/refresh` could still be in
+            // flight, which is the lost rotation described at setViewportSettled.
+            await page.evaluate((id) => {
+              const edit = (k, v) => {
+                let was = {};
+                try { was = JSON.parse(localStorage.getItem(k) || '{}'); } catch {}
+                localStorage.setItem(k, JSON.stringify({ ...was, ...v }));
+              };
+              edit('yomi_reader_prefs', { junkPages: 'collapse' });
+              edit(`yomi_rs_${id}`, { mode: 'vertical' });
+            }, sid);
+
             // ⚠️ Its own tab. The shared `page` has been driven through a dozen blocks by now and carries
-            // the reader state they left behind -- per-series prefs, a resume position, a warm service
-            // worker. This is about what a reader sees when they OPEN a chapter, so it gets a clean one.
-            // Cookies are per browser context, so the new tab is already signed in.
+            // the reader state they left behind -- a resume position, a warm service worker. This is about
+            // what a reader sees when they OPEN a chapter, so it gets a clean one. Cookies are per browser
+            // context, so the new tab shares the session -- and if that session is gone, the tab is a
+            // sign-in page, so it signs back in (and says so) rather than judge a login form.
             const tab = await browser.newPage();
             await tab.setViewport({ width: 1440, height: 900 });
             try {
-              // ⚠️ SET THE PREFERENCE THIS CHECK IS ABOUT, instead of inheriting whatever an earlier block
-              // left. Reader preferences live in localStorage, which is per ORIGIN and therefore shared with
-              // every other tab in this context -- the phone pass above opens this very chapter, and the
-              // chapter sheet it drives can write `junkPages`. Under one Chrome build that left `collapse`
-              // and under the next it did not, and the check read as "the feature is broken" either way.
-              // Reintroduce by deleting these four lines: the check passes or fails on block order.
-              await tab.goto(`${BASE}/reader/?book=${book.id}`, { waitUntil: 'domcontentloaded', timeout: 60000 });
-              await tab.evaluate(() => {
-                const k = 'yomi_reader_prefs';
-                const cur = (() => { try { return JSON.parse(localStorage.getItem(k) || '{}'); } catch { return {}; } })();
-                localStorage.setItem(k, JSON.stringify({ ...cur, junkPages: 'collapse' }));
-              });
               await tab.goto(`${BASE}/reader/?book=${book.id}`, { waitUntil: 'networkidle2', timeout: 60000 });
               await sleep(8000);
+              if (await tab.$('input[type=password]')) {
+                if (await ensureSignedIn(tab, 'the repeated-pages check')) {
+                  await tab.goto(`${BASE}/reader/?book=${book.id}`, { waitUntil: 'networkidle2', timeout: 60000 });
+                  await sleep(8000);
+                }
+              }
               const vp = tab.viewport();
               await tab.mouse.click(Math.round(vp.width / 2), Math.round(vp.height / 2));
               await sleep(900);
@@ -1018,17 +1099,32 @@ try {
               // band of itself where it always was. So the assertions are about that element existing, being
               // thin, and the rest of the chapter still rendering -- three things a floating chip could
               // never prove, since it sat at a fixed place on the screen whatever the flow did.
-              const seen = await tab.evaluate(() => {
+              const seen = await tab.evaluate((id) => {
                 const el = [...document.querySelectorAll('[aria-label]')]
                   .find((x) => /show repeated page/i.test(x.getAttribute('aria-label') || ''));
+                const local = (k) => { try { return JSON.parse(localStorage.getItem(k) || '{}'); } catch { return {}; } };
+                const counter = [...document.querySelectorAll('button')]
+                  .find((x) => /jump to a page/i.test(x.getAttribute('aria-label') || ''));
                 return {
                   strip: el ? el.getAttribute('aria-label') : null,
                   stripH: el ? Math.round(el.getBoundingClientRect().height) : null,
                   imgs: [...document.querySelectorAll('img')].filter((i) => i.naturalWidth > 0).length,
+                  // What the reader was doing, so a failure names its own cause. The flake this replaced
+                  // took an instrumented run to learn that the "reader" was a sign-in page.
+                  signedOut: !!document.querySelector('input[type=password]'),
+                  mode: document.querySelector('.snap-x') ? 'paged'
+                    : document.querySelector('.touch-pan-y.overflow-y-auto') ? 'vertical' : 'no reader',
+                  at: counter ? (counter.textContent || '').trim() : null,
+                  junkPages: local('yomi_reader_prefs').junkPages ?? null,
+                  seriesMode: local(`yomi_rs_${id}`).mode ?? null,
+                  labels: [...document.querySelectorAll('[aria-label]')].map((x) => x.getAttribute('aria-label')).slice(0, 12),
                 };
-              });
-              if (!seen.strip) bad('a chapter with a repeated credit page collapsed nothing');
-              else if (!(seen.stripH > 0 && seen.stripH < 120)) {
+              }, sid);
+              if (!seen.strip) {
+                bad(`a chapter with a repeated credit page collapsed nothing (${seen.signedOut ? 'the reader was a sign-in page'
+                  : `${seen.mode} mode, on page ${seen.at}, junkPages ${seen.junkPages}, series mode ${seen.seriesMode}`}; `
+                  + `labels ${JSON.stringify(seen.labels)})`);
+              } else if (!(seen.stripH > 0 && seen.stripH < 120)) {
                 // The literal product claim: it is a LINE you scroll past, not a page. This fails the moment
                 // the collapsed height stops reaching the layout model.
                 bad(`the collapsed page is ${seen.stripH}px tall — that is not a strip`);
@@ -1126,7 +1222,7 @@ try {
   }
 
   console.log('\n  an 18+ library');
-  await page.setViewport({ width: 1440, height: 900 });
+  await setViewportSettled(page, { width: 1440, height: 900 });
   const adminTok0 = await login(USER, PASS);
   const libList = adminTok0
     ? await (await fetch(`${BASE}/api/admin/libraries`, { headers: { authorization: `Bearer ${adminTok0}` } })).json().catch(() => null)
@@ -1214,7 +1310,7 @@ try {
   // The setup runs over plain HTTP from here rather than inside the page: `/auth/refresh` ROTATES the
   // refresh cookie, so minting a token from the browser fights the app's own session for it.
   console.log('\n  a member who may not add series');
-  await page.setViewport({ width: 1440, height: 900 });
+  await setViewportSettled(page, { width: 1440, height: 900 });
   const NODL = { username: 'e2e-nodl', password: 'e2e-nodl-passw0rd-1' };
 
   /** A real sign-out: the refresh cookie is HttpOnly, so only /auth/logout can drop it. */
