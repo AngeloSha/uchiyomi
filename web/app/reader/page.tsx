@@ -1166,12 +1166,12 @@ function ReaderInner() {
             );
           })}
           {ended && (
-            <div dir={uiDir} className="flex h-full w-full shrink-0 snap-center items-start justify-center overflow-y-auto">
+            <div data-lenis-prevent dir={uiDir} className="flex h-full w-full shrink-0 snap-center items-start justify-center overflow-y-auto">
               {upNextCard}
             </div>
           )}
           {failed && !!flat.length && (
-            <div dir={uiDir} className="flex h-full w-full shrink-0 snap-center items-start justify-center overflow-y-auto">
+            <div data-lenis-prevent dir={uiDir} className="flex h-full w-full shrink-0 snap-center items-start justify-center overflow-y-auto">
               {failureCard}
             </div>
           )}
@@ -1346,7 +1346,7 @@ function ReaderInner() {
       )}
       {/* Nothing loaded at all. `ready` alone used to clear the overlay here and leave the bare backdrop. */}
       {ready && failed && !flat.length && (
-        <div className="absolute inset-0 z-50 flex items-center justify-center overflow-y-auto bg-ink-950">
+        <div data-lenis-prevent className="absolute inset-0 z-50 flex items-center justify-center overflow-y-auto bg-ink-950">
           {failureCard}
         </div>
       )}

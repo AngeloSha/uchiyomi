@@ -102,7 +102,7 @@ export function PreviewReader({ source, sourceName, sourceId, title, onClose, on
           <IcX width={18} height={18} />
         </button>
       </div>
-      <div className="flex-1 overflow-y-auto overscroll-contain px-2 py-3 lg:px-4">
+      <div data-lenis-prevent className="flex-1 overflow-y-auto overscroll-contain px-2 py-3 lg:px-4">
         <div className="mx-auto max-w-3xl">{body}</div>
       </div>
       {onAdd && (

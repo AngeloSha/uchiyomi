@@ -989,7 +989,7 @@ function ArtPicker({ row, onClose, onApplied }: { row: ArtRow; onClose: () => vo
   };
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-ink-950/70 p-4 backdrop-blur-xs" onClick={onClose}>
-      <div className="glass max-h-[88vh] w-full max-w-2xl overflow-y-auto rounded-2xl border border-ink-700 p-5" onClick={(e) => e.stopPropagation()}>
+      <div data-lenis-prevent className="glass max-h-[88vh] w-full max-w-2xl overflow-y-auto rounded-2xl border border-ink-700 p-5" onClick={(e) => e.stopPropagation()}>
         <div className="mb-3 flex items-start justify-between gap-3">
           <h3 className="font-display text-lg font-semibold leading-tight">{row.title}</h3>
           <button onClick={onClose} className="shrink-0 text-fog-500 hover:text-fog-200">✕</button>
@@ -1405,7 +1405,7 @@ function FolderPicker({ value, onPick }: { value: string; onPick: (p: string) =>
           className="chip shrink-0 text-[11px] disabled:opacity-40">↑</button>
         <p className="truncate font-mono text-[11px] text-fog-400">{at || tr('Library root')}</p>
       </div>
-      <div className="max-h-44 overflow-y-auto p-1.5">
+      <div data-lenis-prevent className="max-h-44 overflow-y-auto p-1.5">
         {isFetching && !data ? (
           <p className="px-2 py-3 text-center text-[11px] text-fog-600">{tr('Loading…')}</p>
         ) : !data?.folders.length ? (
@@ -2422,7 +2422,7 @@ function Extensions({ span = '' }: { span?: string }) {
             <p className="mb-1 text-[10px] text-fog-600">Showing {cat.shown} of {cat.matched} matches — narrow the search to see the rest.</p>
           )}
 
-          <div className="max-h-96 space-y-1 overflow-y-auto">
+          <div data-lenis-prevent className="max-h-96 space-y-1 overflow-y-auto">
             {list.map((e) => (
               <div key={e.pkgName} className="flex items-center gap-2 rounded-lg border border-ink-700/60 bg-ink-850/40 px-2.5 py-1.5">
                 {e.iconUrl

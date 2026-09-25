@@ -134,7 +134,7 @@ function SeriesEditModal({ id, series, onClose, onSaved }: { id: string; series:
   const { checking, checkNow } = useCheckNow(id, onSaved);
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-ink-950/70 p-4 backdrop-blur-xs" onClick={onClose}>
-      <div className="glass max-h-[88vh] w-full max-w-md overflow-y-auto rounded-2xl border border-ink-700 p-5" onClick={(e) => e.stopPropagation()}>
+      <div data-lenis-prevent className="glass max-h-[88vh] w-full max-w-md overflow-y-auto rounded-2xl border border-ink-700 p-5" onClick={(e) => e.stopPropagation()}>
         <div className="mb-3 flex items-start justify-between gap-3">
           <h3 className="font-display text-lg font-semibold leading-tight">{tr('Edit series')}</h3>
           <button onClick={onClose} className="shrink-0 text-fog-500 hover:text-fog-200">✕</button>
@@ -263,7 +263,7 @@ function CollectionSheet({ seriesId, onClose }: { seriesId: string; onClose: () 
         {isLoading ? (
           <div className="skeleton h-24 rounded-xl" />
         ) : (
-          <div className="max-h-64 space-y-1.5 overflow-y-auto">
+          <div data-lenis-prevent className="max-h-64 space-y-1.5 overflow-y-auto">
             {(data?.content ?? []).map((c) => (
               <button key={c.id} onClick={() => add(c)}
                 className="flex w-full items-center gap-2.5 rounded-xl border border-ink-700 px-3 py-2.5 text-start transition hover:border-accent/50">

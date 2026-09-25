@@ -447,7 +447,7 @@ function RunCard({ batch, items, runIds, runTotal, note, onStartOver }: {
         </p>
       )}
       <ProgressBar value={total ? done / total : 0} />
-      <ul className="mt-3 max-h-96 space-y-1 overflow-y-auto">
+      <ul data-lenis-prevent className="mt-3 max-h-96 space-y-1 overflow-y-auto">
         {targeted.map((c) => (
           <li key={c.id} className="flex items-center gap-2 text-xs">
             <span className={c.status === 'added' ? 'text-emerald-400' : c.status === 'already' ? 'text-fog-500' : c.status ? 'text-red-400' : 'text-fog-600'}>
