@@ -19,6 +19,8 @@ import { heldBooks } from './chapterCleanup';
 import { downloadWithFallback, type FallbackOutcome } from './chapterFallback';
 import { huntSource, seriesIsAdult, sweepAllowedFor, HUNT_MAX_PER_SWEEP } from './sourceHunt';
 import { completePartial, PARTIAL_COMPLETE_MAX } from './partial';
+import { effectiveSourcePriority, rankSources } from './sourcePrefs';
+import { beginRun, endRun, stopRequested, type RunCard } from './downloadJobs';
 
 /**
  * Why a series produced nothing this run.
@@ -64,7 +66,8 @@ const SWEEP_MAX = Number(process.env.UPDATER_SWEEP_MAX) || 150;
  */
 export const CHAPTER_RETRY_CAP = Math.max(1, Number(process.env.CHAPTER_RETRY_CAP) || 3);
 
-export type SweepStop = 'budget' | 'disk' | 'shutdown';
+/** `cancelled`: an admin pressed Cancel on the run's card (lib/downloadJobs.ts), and it stopped after the chapter in flight. */
+export type SweepStop = 'budget' | 'disk' | 'shutdown' | 'cancelled';
 
 /** What the source said, kept on the row. See the migrate comment on source_chapters. */
 async function stampChecked(seriesId: string, chapters: number | null, missing: number | null): Promise<void> {
@@ -147,13 +150,19 @@ export interface UpdateOpts {
    * never hunts: a person is watching a bulk progress surface, and the sweep tonight will.
    */
   hunt?: { left: number } | false;
+  /**
+   * Asked between chapters, beside `runtime.stopping`: true stops the run after the chapter in flight. The
+   * sweep, the repair and a bulk "Fetch newest" pass their run card's cancel flag (lib/downloadJobs.ts, #82);
+   * nothing else stops a series part-way.
+   */
+  cancelled?: () => boolean;
 }
 
 const nothing = (title: string, outcome: UpdateOutcome): UpdateResult =>
   ({ title, added: 0, available: 0, outcome, failed: 0, waiting: 0, switched: 0, partial: 0, landed: [], asked: false });
 
 export async function updateSeries(seriesId: string, maxNew = 10, opts: UpdateOpts = {}): Promise<UpdateResult> {
-  const s = await one<any>(`SELECT id,title,source_id,source_series_id,web,folder,summary,author,genres,status,chapter_floor,scanlator_prefs FROM lib_series s WHERE s.id=$1 AND ${visibleToAll('s')}`, [seriesId]);
+  const s = await one<any>(`SELECT id,title,source_id,source_series_id,web,folder,summary,author,genres,status,chapter_floor,scanlator_prefs,source_prefs FROM lib_series s WHERE s.id=$1 AND ${visibleToAll('s')}`, [seriesId]);
   if (!s) return nothing('', 'gone');
 
   // Everything the series is followed on: the primary pair first, then series_sources in the order they
@@ -225,8 +234,16 @@ export async function updateSeries(seriesId: string, maxNew = 10, opts: UpdateOp
   // code, so a number held for the preferred group is held on both. The series' row is only parsed when it
   // has something of its own, which almost none do.
   const prefs = await effectivePrefsFor(s.scanlator_prefs == null ? null : await readSeriesPrefs(seriesId));
-  const rank = new Map(followed.map((f, i) => [f.source, i]));
-  const chooseOpts = { sourceRank: (id?: string) => rank.get(id ?? '') ?? followed.length };
+  // The source order (lib/sourcePrefs.ts), the series' own or the server's, ranks the copies of a number ahead
+  // of the follow order: a listed source before every unlisted one, the follow order breaking what is left.
+  // It sits below the group ranking and the hosted-before-external rule in `releaseOrder`, so it only decides
+  // between copies the release rules call equal -- the decision the follow order used to make alone, where
+  // the primary won every tie. With no order set this is the follow order, unchanged. An order that will not
+  // load is no order: the sweep goes on as it always did rather than failing a series over a preference.
+  // Reintroduce by going back to the follow order alone: "a new chapter comes from the higher-ranked source"
+  // in sourceOrder.int.test.ts takes it from the primary.
+  const priority = await effectiveSourcePriority(s.source_prefs).catch(() => null);
+  const chooseOpts = { sourceRank: rankSources(priority, followed.map((f) => f.source)) };
   const { releases, waiting: held } = chooseReleases(tagged, prefs, chooseOpts);
 
   // A series added as "latest N" carries a floor, and what the source lists below it is not this job's
@@ -364,7 +381,7 @@ export async function updateSeries(seriesId: string, maxNew = 10, opts: UpdateOp
   // are still the only gap once a series is fully downloaded. (`queue` is `eligible` unless newestOnly.)
   for (const ch of queue) {
     if (attempts >= maxNew) break;
-    if (runtime.stopping) break; // between chapters, never mid-write
+    if (runtime.stopping || opts.cancelled?.()) break; // between chapters, never mid-write
     const via = ch.source ?? (s.source_id as string);
     attempts++;
     let out: FallbackOutcome;
@@ -444,7 +461,11 @@ export async function updateSeries(seriesId: string, maxNew = 10, opts: UpdateOp
  * cooldown parks its own queue and nobody else's; attempts stop at SWEEP_MAX; a full disk stops everything
  * and says so. Chapters already on disk cost nothing against the budget.
  */
-export async function runUpdateAll(opts: { onlyFavorites?: boolean; maxNew?: number; sweepMax?: number } = {}): Promise<{
+export async function runUpdateAll(opts: {
+  onlyFavorites?: boolean; maxNew?: number; sweepMax?: number;
+  /** The run's card (lib/downloadJobs.ts): progress written to it as the sweep goes, and its cancel flag obeyed. */
+  card?: RunCard;
+} = {}): Promise<{
   series: number; visited: number; added: number; failed: number; chapterFailures: number; capped: number;
   outcomes: Record<UpdateOutcome | 'threw' | 'skipped', number>; healthy: boolean; stopped?: SweepStop;
   /** Of `added`, chapters taken from another source than the chosen copy's, and chapters saved with pages missing. */
@@ -459,8 +480,11 @@ export async function runUpdateAll(opts: { onlyFavorites?: boolean; maxNew?: num
   // Rows never checked sort first, so the first sweep after this change visits in the old order.
   const order = 'ORDER BY s.source_checked_at ASC NULLS FIRST, s.latest_mtime DESC';
   const rows = opts.onlyFavorites
-      ? await q<{ id: string; source_id: string | null }>(`SELECT DISTINCT s.id, s.source_id, s.source_checked_at, s.latest_mtime FROM favorites f JOIN lib_series s ON s.id = f.series_id WHERE s.auto_update AND ${visibleToAll('s')} ${order}`)
-      : await q<{ id: string; source_id: string | null }>(`SELECT s.id, s.source_id FROM lib_series s WHERE s.auto_update AND ${visibleToAll('s')} ${order}`);
+      ? await q<{ id: string; source_id: string | null; title: string }>(`SELECT DISTINCT s.id, s.source_id, s.title, s.source_checked_at, s.latest_mtime FROM favorites f JOIN lib_series s ON s.id = f.series_id WHERE s.auto_update AND ${visibleToAll('s')} ${order}`)
+      : await q<{ id: string; source_id: string | null; title: string }>(`SELECT s.id, s.source_id, s.title FROM lib_series s WHERE s.auto_update AND ${visibleToAll('s')} ${order}`);
+  const card = opts.card;
+  const titles = new Map(rows.map((r) => [r.id, r.title] as const));
+  if (card) card.total = rows.length;
 
   const queues = new Map<string, string[]>();
   for (const r of rows) {
@@ -495,11 +519,15 @@ export async function runUpdateAll(opts: { onlyFavorites?: boolean; maxNew?: num
       if (!ids.length) { queues.delete(src); continue; }
       if (parked.has(src)) continue;
       if (runtime.stopping) { stopped = 'shutdown'; break sweep; }
+      if (stopRequested(card)) { stopped = 'cancelled'; break sweep; }
       if (spent >= sweepMax) { stopped = 'budget'; break sweep; }
       const id = ids.shift()!;
       progressed = true;
       visited++;
-      const r = await updateSeries(id, Math.min(opts.maxNew ?? 10, Math.max(1, sweepMax - spent)), { hunt: huntBudget })
+      if (card) card.current = { id, title: titles.get(id) ?? '' };
+      // The card's cancel reaches INSIDE the series too: a series with ten new chapters is a few minutes of
+      // downloading, and "Cancel" that waits for all ten reads as "Cancel does nothing".
+      const r = await updateSeries(id, Math.min(opts.maxNew ?? 10, Math.max(1, sweepMax - spent)), { hunt: huntBudget, ...(card ? { cancelled: () => stopRequested(card) } : {}) })
         .catch(() => ({ added: 0, outcome: 'threw' as const, failed: 0, landed: [] } as { added: number; outcome: 'threw'; failed: number; folder?: string; chapters?: SourceChapter[]; landed: Landed[]; diskFull?: boolean; switched?: number; partial?: number }));
       added += r.added;
       chapterFailures += r.failed ?? 0;
@@ -511,6 +539,7 @@ export async function runUpdateAll(opts: { onlyFavorites?: boolean; maxNew?: num
       if (r.added && r.folder && r.chapters?.length) dated.push({ folder: r.folder, chapters: r.chapters, landed: r.landed });
       // The throw fallback above has `added: 0` and no title, so it can never reach the digest.
       if (r.added && (r as { title?: string }).title) newChapters.push({ id, title: (r as { title: string }).title, added: r.added });
+      if (card) { card.done = visited; card.fetched = added; card.failed = chapterFailures; }
       if (r.diskFull) { stopped = 'disk'; break sweep; }
       if (r.outcome === 'blocked') parked.add(src);
       await new Promise((res) => setTimeout(res, 1500));
@@ -538,6 +567,7 @@ export async function runUpdateAll(opts: { onlyFavorites?: boolean; maxNew?: num
     ).catch(() => []);
     for (const b of partials) {
       if (runtime.stopping) { stopped = 'shutdown'; break; }
+      if (stopRequested(card)) { stopped = 'cancelled'; break; }
       if (spent >= sweepMax) { stopped = 'budget'; break; }
       spent++;
       try {
@@ -624,13 +654,21 @@ export type SweepResult = Awaited<ReturnType<typeof runUpdateAll>>;
  * Reintroduce by dropping `runtime.repairing` from the check: "the sweep stands down while a repair runs"
  * in updater.int.test.ts gets a promise instead of false.
  */
-export function runSweep(opts: SweepOpts, log: SweepLog, sweep: typeof runUpdateAll = runUpdateAll): Promise<SweepResult | null> | false {
+export function runSweep(opts: SweepOpts & { by?: string | null }, log: SweepLog, sweep: typeof runUpdateAll = runUpdateAll): Promise<SweepResult | null> | false {
   if (runtime.updating || runtime.repairing) return false;
   // Set before the first await, so two starts in the same turn of the event loop cannot both get through.
   runtime.updating = true;
+  // The run's card on the download pill (lib/downloadJobs.ts, #82): the sweep writes its progress there and
+  // stops when an admin presses its Cancel. `by` is who pressed Run now; the schedule is nobody.
+  const { by, ...sweepOpts } = opts ?? {};
+  const card = beginRun('sweep', by ?? null);
   return (async () => {
     try {
-      const r = await sweep(opts);
+      const r = await sweep({ ...sweepOpts, card });
+      endRun(card, r.stopped === 'disk' ? 'error' : 'done',
+        r.stopped === 'disk' ? 'The library disk is full.'
+          : r.stopped === 'budget' ? "Stopped at this run's chapter limit; the rest wait for the next one."
+          : undefined);
       runtime.lastUpdate = Date.now();
       // Persisted so a restart schedules the remainder of the interval rather than a whole new one.
       await q(`UPDATE server_settings SET updater_last_run = now() WHERE id = 1`).catch(() => {});
@@ -670,6 +708,7 @@ export function runSweep(opts: SweepOpts, log: SweepLog, sweep: typeof runUpdate
       // were this one. Last run moves to now, the result is cleared, and the reason is in `docker logs`.
       runtime.lastUpdate = Date.now();
       runtime.lastUpdateResult = null;
+      endRun(card, 'error', 'The update run failed. The server log has the details.');
       log.error(e);
       return null;
     } finally {

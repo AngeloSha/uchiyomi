@@ -20,6 +20,7 @@ import { normTitle } from '@/lib/normTitle';
 import { cadenceText } from '@/lib/cadence';
 import { jobNoteLines, type JobCardNotes } from '@/lib/jobNotes';
 import { isDesktop } from '@/lib/desktop';
+import { PreviewReader } from '@/components/PreviewReader';
 
 export interface Provider { source: string; name: string; sourceId: string; title: string; coverUrl?: string }
 interface Detail {
@@ -174,6 +175,9 @@ export function AddSeriesDialog({ seed, sources, mayFollow, onClose, onAdded }: 
   // The duplicate prompt: the server's sentence, and the id of the copy it found -- present only when the
   // server was willing to hand it over, which it is not for a series this account may not open.
   const [dup, setDup] = useState<{ message: string; id?: string } | null>(null);
+  // Reading before deciding (#91). Kept in this dialog because everything it needs -- the source, the id on
+  // that source, the title -- is resolved here, and the expected end of a preview is this dialog's own Add.
+  const [previewing, setPreviewing] = useState(false);
   const [done, setDone] = useState<AddAnswer | null>(null);
   const [opening, setOpening] = useState(false);
   const title = seed.kind === 'result' ? seed.provider.title : seed.title;
@@ -620,8 +624,27 @@ export function AddSeriesDialog({ seed, sources, mayFollow, onClose, onAdded }: 
           <button onClick={() => add(!!dup)} disabled={adding || !detail} className="btn-accent mt-4 w-full py-2.5 text-sm disabled:opacity-50">
             {adding ? tr('Working…') : dup ? tr('Add anyway') : tr('Add to library')}
           </button>
+          {/* Whether a title is worth keeping is usually one chapter's worth of question; this answers it and
+              leaves nothing behind. Every source, extensions included: the server fetches the pages itself. */}
+          {picked && (
+            <button type="button" onClick={() => setPreviewing(true)}
+              className="mt-2 w-full rounded-full border border-ink-700 py-2.5 text-sm text-fog-300">
+              {tr('Read a chapter first')}
+            </button>
+          )}
         </div>
       </div>
+      {previewing && picked && (
+        <PreviewReader
+          source={picked.source}
+          sourceName={picked.name || picked.source}
+          sourceId={picked.sourceId}
+          title={picked.title || title}
+          onClose={() => setPreviewing(false)}
+          canAdd={!adding && !!detail}
+          onAdd={() => { if (adding || !detail) return; setPreviewing(false); void add(!!dup); }}
+        />
+      )}
     </Modal>
   );
 }

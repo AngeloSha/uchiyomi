@@ -10,7 +10,8 @@
 // says "Saved" in one place. The only Save button left is the scanlators' one, because those are lists
 // that are edited in several steps and must land as one write. Since v0.43.0 a fifth, Notifications
 // (components/AdminNotifications.tsx), follows them; its dialog saves a whole target at once. After it, the
-// 18+ filter: which genres and sources the "Show 18+" switch hides besides 18+ libraries.
+// 18+ filter: which genres and sources the "Show 18+" switch hides besides 18+ libraries. Last, the source order:
+// which followed source a new chapter is taken from.
 //
 // Toasts survive on exactly two rows, and only for the sentence the inline tick cannot say: the install count
 // ("Thank you — counted" / "No longer counted", because opting out destroys the identifier) and the
@@ -31,6 +32,7 @@ import { suggestGroups } from '@/lib/groupSuggest';
 import { NotificationsSection } from '@/components/AdminNotifications';
 import { isDesktop } from '@/lib/desktop';
 import { adultShown } from '@/lib/adult';
+import { addable, moveIn, orderRows } from '@/lib/sourceOrder';
 
 /** One PATCH. Resolves once the server has answered, so the row that called it can show its tick. */
 type Save = (body: Record<string, unknown>) => Promise<unknown>;
@@ -63,6 +65,7 @@ export function AdminSettings() {
           their order. Its rows and its one dialog live in their own file; it reads its own endpoint. */}
       <NotificationsSection />
       <AdultFilterSection data={data} save={save} />
+      <SourceOrderSection data={data} save={save} />
     </div>
   );
 }
@@ -162,6 +165,90 @@ function AdultFilterSection({ data, save }: { data: any; save: Save }) {
       <p className="py-3 text-[11px] leading-relaxed text-fog-500">
         {tr('One series can be let through on its own page — Edit details ▸ “Always show”.')}
       </p>
+    </Section>
+  );
+}
+
+/**
+ * Which followed source a chapter the server does not have yet is taken from (#93, from @Squeaks72).
+ *
+ * Ranked after the scanlation group preferences, so it only decides between copies those call equal -- the
+ * choice the follow order made alone until now, where the source a series was added from won every tie. A
+ * series can have its own order, from its Sources & translations sheet, which replaces this one for it.
+ *
+ * Nothing already downloaded is replaced because of it, and the help says so: #93's switch that re-fetched
+ * held chapters from a better-ranked source was not taken (lib/sourcePrefs.ts says why).
+ *
+ * Held locally and saved whole on every change, re-seeded when the settings refetch, like the 18+ filter
+ * above: read straight from `data`, two quick arrows both moved the list as it was before either save
+ * landed, and the second quietly undid the first. EVERY STORED ID IS KEPT (lib/sourceOrder.ts): the list of
+ * sources is the registry's, which has no extensions while the engine restarts, and #93 saved an order built
+ * from it -- one arrow then, and every extension was gone from the order.
+ *
+ * Arrows rather than dragging: a short list that changes rarely, and two buttons work on a phone, from a
+ * keyboard and with a screen reader.
+ */
+function SourceOrderSection({ data, save }: { data: any; save: Save }) {
+  const toast = useToast();
+  const fromServer = (): string[] => (Array.isArray(data.source_prefs?.priority) ? data.source_prefs.priority : []);
+  const [order, setOrder] = useState<string[]>(fromServer);
+  useEffect(() => { setOrder(fromServer()); }, [data.source_prefs]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Every source, with the reveal ON whatever this browser has it set to: the admin console's `allSourcesUrl`
+  // (app/admin/page.tsx) and the 18+ filter above ask the same way under the same key, so the three share one
+  // answer. `?adult=1` only when the reveal is off -- lib/api.ts adds its own when it is on.
+  const { data: srcList } = useQuery({
+    queryKey: ['sources', 'all'],
+    queryFn: () => api<{ content: Array<{ id: string; name: string }> }>(adultShown() ? '/api/sources' : '/api/sources?adult=1'),
+    staleTime: 5 * 60_000,
+  });
+  const all = srcList?.content ?? [];
+  const rows = orderRows(order, all);
+  const rest = addable(order, all);
+  // A failed save puts the list back and says so, rather than leaving an order on screen that is not stored.
+  const commit = (next: string[]) => {
+    const was = order;
+    setOrder(next);
+    save({ sourcePrefs: { priority: next } }).catch(() => { setOrder(was); toast(tr('Could not save'), 'error'); });
+  };
+
+  return (
+    <Section title={tr('Source order')} icon={<IcRefresh width={18} height={18} />}>
+      <p className="py-3 max-w-prose text-[11px] leading-relaxed text-fog-500">
+        {tr('When a series follows more than one source, a new chapter is taken from the highest one here that has it, after your scanlation group preferences. Chapters you already have are never replaced because of it. A series can have its own order in its Sources & translations.')}
+      </p>
+      {rows.length === 0 && (
+        <p className="pb-3 text-[11px] text-fog-500">{tr('No order set: each series prefers the source it was added from.')}</p>
+      )}
+      {rows.length > 0 && (
+        <ol className="space-y-1 pb-3">
+          {rows.map((r, i) => (
+            <li key={r.id} className="flex items-center gap-2 rounded-lg bg-ink-900/60 px-3 py-2">
+              <span className="w-5 shrink-0 text-[11px] tabular-nums text-fog-500">{i + 1}</span>
+              {r.name
+                ? <span className="truncate text-sm text-fog-200">{r.name}</span>
+                : <span className="truncate text-sm text-fog-500" title={r.id}>{tr('Not available right now')}</span>}
+              <span className="ms-auto flex shrink-0 gap-1">
+                <button type="button" onClick={() => commit(moveIn(order, i, -1))} disabled={i === 0}
+                  aria-label={tr('Move up')} className="chip px-2 py-0.5 text-xs disabled:opacity-30">↑</button>
+                <button type="button" onClick={() => commit(moveIn(order, i, 1))} disabled={i === rows.length - 1}
+                  aria-label={tr('Move down')} className="chip px-2 py-0.5 text-xs disabled:opacity-30">↓</button>
+                <button type="button" onClick={() => commit(order.filter((x) => x !== r.id))}
+                  aria-label={tr('Remove')} className="chip px-2 py-0.5 text-xs">✕</button>
+              </span>
+            </li>
+          ))}
+        </ol>
+      )}
+      {rest.length > 0 && (
+        <div className="pb-3">
+          <p className="mb-1.5 text-[11px] text-fog-500">{tr('Add a source to the order')}</p>
+          <div className="flex flex-wrap gap-1.5">
+            {rest.map((x) => (
+              <button key={x.id} type="button" onClick={() => commit([...order, x.id])} className="chip text-xs">{x.name}</button>
+            ))}
+          </div>
+        </div>
+      )}
     </Section>
   );
 }
@@ -592,6 +679,16 @@ function ScanlatorsSection({ data, save }: { data: any; save: Save }) {
             disabled={!dirty} className="btn-accent px-4 py-2 text-sm disabled:opacity-50">{tr('Save scanlator defaults')}</button>
         </div>
       </div>
+      {/* Group upgrades (#81): the nightly repair's sixth step. Off by default, because it replaces files on
+          disk; the help says every rule it keeps, so switching it on is not a leap in the dark. */}
+      {/* Off by default: outbound traffic to sources that carry nothing else for a series. A series can
+          switch it for itself on its Sources & translations sheet. */}
+      <SwitchRow label={tr('Borrow chapter names from other sources')}
+        help={tr('Off by default. When a series’ own source only ever says “Chapter 12”, take the names from another source whose numbering was checked against this one — a source that numbers the chapters differently is never used, and the names go into the chapter name only, never the file. The chapter’s own source naming it later wins, and switching this off takes the borrowed names back.')}
+        on={data.borrow_names === true} onChange={(next) => save({ borrowNames: next })} />
+      <SwitchRow label={tr('Upgrade chapters to a preferred group')}
+        help={tr('Off by default. Once a night, a chapter you already have from another group is replaced when a group you rank higher releases it on a source the series follows — only files Uchiyomi downloaded itself, never with a copy that has fewer pages, never a chapter someone picked a version for by hand, and at most ten a night unless the server is told otherwise. Reading progress is kept.')}
+        on={data.group_upgrade === true} onChange={(next) => save({ groupUpgrade: next })} />
     </Section>
   );
 }

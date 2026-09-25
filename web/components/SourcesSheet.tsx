@@ -25,6 +25,7 @@ import { hasGroup, normGroup, reorder, withoutGroup } from '@/lib/scanlators';
 import { cadenceLine, cadenceText } from '@/lib/cadence';
 import { activityStatus, weeksOf } from '@/lib/activity';
 import { namesGroups } from '@/lib/supplyLine';
+import { preferFirst } from '@/lib/sourceOrder';
 
 // The patience field, and only that: `w-14`, not the page's `w-full` field class, so "Patience [ 2 ] days ·
 // Currently 2" and the two buttons share one row -- on a phone the footer sits under the sheet's cap and
@@ -280,6 +281,7 @@ export function SourcesSheet({ id, series, groups, admin, error, isLoading, have
   const toast = useToast();
   const qc = useQueryClient();
   const [busy, setBusy] = useState(false);
+  const [savingPref, setSavingPref] = useState(false);
   const isAdmin = !!admin;
   const sources = series?.sources ?? [];
 
@@ -375,6 +377,19 @@ export function SourcesSheet({ id, series, groups, admin, error, isLoading, have
     } catch (e) { toast(msgOf(e, tr('Could not remove that')), 'error'); }
     setUnfollowing(null);
   };
+  // Chapter-name borrowing for this series (bff lib/borrowNames.ts, #85). The box shows what APPLIES -- the
+  // server's setting included -- and a tap writes this series' own choice: on asks for names at once, off
+  // takes back every name borrowed for it. `null` puts it back under the server's switch.
+  const [borrowing, setBorrowing] = useState(false);
+  const setBorrow = async (on: boolean | null) => {
+    setBorrowing(true);
+    try {
+      await api(`/api/admin/series/${encodeURIComponent(id)}`, { method: 'PATCH', json: { borrowNames: on } });
+      onSaved();
+      toast(on === null ? tr('Back to the server default') : on ? tr('Looking for chapter names…') : tr('Borrowed chapter names removed'), 'success');
+    } catch (e) { toast(msgOf(e, tr('Could not save')), 'error'); }
+    setBorrowing(false);
+  };
   const { checking, checkNow } = useCheckNow(id, () => { onSaved(); for (const k of ['series-scanlators', 'series-groups', 'series-listing', 'series-versions']) qc.invalidateQueries({ queryKey: [k, id] }); });
 
   // `getElementById`, not `querySelector('#ch-12.5')`: a chapter number with a decimal point is not a valid
@@ -388,6 +403,24 @@ export function SourcesSheet({ id, series, groups, admin, error, isLoading, have
   };
 
   const serverDefault = admin?.global.patienceDays ?? 2;
+  /** The series' own first choice of source (lib/sourceOrder.ts), or null when the server-wide order applies. */
+  const preferredId: string | null = series?.sourcePrefs?.priority?.[0] ?? null;
+  /** Put one source at the head of this series' order, or clear the series' order (null). From #93. */
+  const setPreferred = async (sourceId: string | null) => {
+    setSavingPref(true);
+    try {
+      await api(`/api/admin/series/${encodeURIComponent(id)}`, {
+        method: 'PATCH', json: { sourcePrefs: sourceId ? { priority: preferFirst(sourceId, sources.map((x) => x.sourceId)) } : null },
+      });
+      onSaved();
+      toast(sourceId
+        ? tr('Preferring {name}', { name: sources.find((x) => x.sourceId === sourceId)?.name ?? '' })
+        : tr('Back to the server default'), 'success');
+    } catch (e) {
+      toast(msgOf(e, tr('Could not save that')), 'error');
+    }
+    setSavingPref(false);
+  };
   const main = sources.find((s) => s.primary) ?? sources[0];
   // A site read by the built-in engine cannot say who translated a chapter; an extension or MangaDex series
   // with no groups yet simply has not been checked (or nothing on it is tagged).
@@ -434,6 +467,31 @@ export function SourcesSheet({ id, series, groups, admin, error, isLoading, have
               ))}
             </div>
           : <p className="text-xs text-fog-500">{tr('No source — the chapters were scanned from disk.')}</p>}
+        {/* Which source a NEW chapter is taken from when more than one has it (bff lib/sourcePrefs.ts). It
+            replaces the server-wide source order for this series, and never touches a chapter already here. */}
+        {isAdmin && sources.length > 1 && (
+          <div className="mt-3">
+            <p className="mb-1.5 max-w-prose text-[11px] leading-relaxed text-fog-500">
+              {tr('Preferred source for this series: new chapters come from it when it has them, after your group preferences. Chapters already here stay as they are.')}
+            </p>
+            <div className="flex flex-wrap gap-1.5">
+              {sources.map((x) => (
+                <button key={x.sourceId} type="button" disabled={savingPref}
+                  onClick={() => setPreferred(preferredId === x.sourceId ? null : x.sourceId)}
+                  aria-pressed={preferredId === x.sourceId}
+                  className={`chip text-xs disabled:opacity-50 ${preferredId === x.sourceId ? 'chip-active' : ''}`}>
+                  {x.name}
+                </button>
+              ))}
+              {preferredId && (
+                <button type="button" disabled={savingPref} onClick={() => setPreferred(null)}
+                  className="chip text-xs text-fog-500 disabled:opacity-50">
+                  {tr('Use the server default')}
+                </button>
+              )}
+            </div>
+          </div>
+        )}
         {isAdmin && (
           <div className="mt-2 flex flex-wrap gap-1.5">
             {sources.length > 0 && (
@@ -442,6 +500,20 @@ export function SourcesSheet({ id, series, groups, admin, error, isLoading, have
               </button>
             )}
             <button type="button" onClick={onFindMissing} className="chip text-xs">{tr('Add one from Find missing chapters')}</button>
+          </div>
+        )}
+        {isAdmin && series?.borrowNamesEffective !== undefined && (
+          <div className="mt-3">
+            <label className="flex items-start gap-2 text-[11px] leading-relaxed text-fog-500">
+              <input type="checkbox" className="mt-0.5 accent-[rgb(var(--accent))]"
+                checked={series.borrowNamesEffective} disabled={borrowing}
+                onChange={(e) => setBorrow(e.target.checked)} />
+              <span>{tr('Borrow chapter names from another source. Only a source whose numbering matches this series is used; switching this off takes those names back.')}</span>
+            </label>
+            {series.borrowNames !== null && series.borrowNames !== undefined && (
+              <button type="button" disabled={borrowing} onClick={() => setBorrow(null)}
+                className="mt-1 ms-6 text-[11px] text-fog-500 underline disabled:opacity-50">{tr('Use the server default')}</button>
+            )}
           </div>
         )}
       </section>

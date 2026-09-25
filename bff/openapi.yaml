@@ -6,7 +6,7 @@
 openapi: 3.1.0
 info:
   title: Uchiyomi API
-  version: 0.46.0
+  version: 0.47.0
   description: "Everything the web app does, it does over this API. Session JWTs are for the browser; scripts
     use a personal API token (Profile -> Connections -> API tokens), sent as `Authorization: Bearer uy_...`.
     Scopes: read (every token; GET plus the library search POST, which is a query), write (anything that changes data), admin (the /api/admin surface, which also
@@ -315,6 +315,21 @@ components:
           properties:
             age: { type: integer }
             restriction: { type: string }
+    SourceOrder:
+      type: object
+      description: >-
+        Which sources to take a chapter from, most preferred first, when a series follows more than one. It
+        ranks below the scanlation group preferences and the hosted-before-external rule, so it decides only
+        between copies those consider equal, and it only ever chooses among copies of a chapter the server
+        does not have yet. Stored server-wide on the settings row and, optionally, per series, where it
+        replaces the server's order rather than merging with it.
+      required: [priority]
+      properties:
+        priority:
+          type: array
+          maxItems: 100
+          items: { type: string, minLength: 1, maxLength: 120 }
+          description: Source ids, best first. Sources not named here rank below every named one, in the series' follow order.
     ScanlatorPrefs:
       type: object
       description: >-
@@ -1160,6 +1175,19 @@ paths:
                     oneOf:
                       - $ref: "#/components/schemas/ScanlatorPrefs"
                       - type: "null"
+                  sourcePrefs:
+                    description: >-
+                      Admins only. The series' own source order, most preferred first, or null when the
+                      server-wide order applies. See sourcePrefs on PATCH /api/admin/series/{id}.
+                    oneOf:
+                      - $ref: "#/components/schemas/SourceOrder"
+                      - type: "null"
+                  borrowNames:
+                    description: Admins only. This series' own chapter-name borrowing switch; null follows the server's.
+                    type: [boolean, "null"]
+                  borrowNamesEffective:
+                    description: Admins only. Whether names are borrowed for this series once the server setting is applied.
+                    type: boolean
         "401":
           description: Not authenticated
         "404":
@@ -2168,8 +2196,14 @@ paths:
         `cap` (the series already follows two sources) or `unavailable` (the primary itself, disabled, in a
         cooldown, not loaded, or outside the caller's age cap). A nothing-yet add with candidates gets a
         card with `total: 0` and `status: done` purely to carry this. Results survive the dialog closing:
-        the card lives a few minutes after the judgement ends, and cannot be dismissed (DELETE answers 409
-        `running`) until `autoFollow.done`.
+        the card lives a day after the judgement ends, and cannot be dismissed (DELETE answers 409
+        `running`) until `autoFollow.done`. Since v0.47.0 (#82) a finished card stays listed for a day
+        rather than five minutes, every card carries `startedAt` and `mine` (whether this account started
+        it, which is who may cancel it besides an admin), a card whose Cancel was pressed carries
+        `cancelRequested` until the chapter in flight is done and then ends `done` with `cancelled: true`
+        and a `reason` saying how far it got; and `runs` lists the server's own runs -- the chapter sweep,
+        the library repair, a bulk "Fetch newest" -- as one card each, to an admin, and a bulk run to the
+        account that started it as well.
       security:
         - bearer: []
       responses:
@@ -2209,10 +2243,218 @@ paths:
                           type: integer
                           minimum: 0
                           description: Chapters in this job saved with repair placeholders.
+                        startedAt: { type: integer }
+                        mine:
+                          type: boolean
+                          description: This account started the job, so it may cancel it (an admin may cancel any).
+                        cancelRequested:
+                          type: boolean
+                          description: Cancel was pressed; the job stops after the chapter in flight.
+                        cancelled:
+                          type: boolean
+                          description: The job stopped because of a Cancel. It ends `done`, with `reason` saying how far it got.
+                  runs:
+                    type: array
+                    description: >-
+                      The server's own runs, one card each: `sweep` (checking every series for new chapters),
+                      `repair` (the library repair; `done`/`total` count its steps and `step` names the one it
+                      is on) and `newest` (a bulk "Fetch newest"). An admin sees every run, the account that
+                      started a bulk run sees that one; nobody else sees any. A finished run stays listed for a
+                      day. `current` is the series it is inside, left out when this request hides that series.
+                    items:
+                      type: object
+                      additionalProperties: false
+                      required: [kind, startedAt, status, done, total, fetched, failed, mine]
+                      properties:
+                        kind: { type: string, enum: [sweep, repair, newest] }
+                        startedAt: { type: integer }
+                        finishedAt: { type: integer }
+                        status: { type: string, enum: [running, done, cancelled, error] }
+                        done: { type: integer, minimum: 0 }
+                        total: { type: integer, minimum: 0 }
+                        fetched: { type: integer, minimum: 0, description: Chapters it saved. }
+                        failed: { type: integer, minimum: 0, description: Chapters that would not save. }
+                        current:
+                          type: object
+                          properties:
+                            id: { type: string }
+                            title: { type: string }
+                        step: { type: string }
+                        cancelRequested: { type: boolean }
+                        reason: { type: string }
+                        mine: { type: boolean }
         "401":
           description: Not authenticated
         "403":
           description: "Forbidden: token scope, account permission or age limit"
+  /api/sources/preview:
+    get:
+      tags:
+        - sources
+      summary: The chapters of a series on a source, for reading one before adding it.
+      operationId: getApiSourcesPreview
+      description: >-
+        Since v0.47.0 (#91). The add dialog's own listing of that series (cached ten minutes, one copy per
+        number, as an add would take it), named by NUMBER: no chapter id and no URL is returned, and the page
+        routes take nothing else. Nothing is written. Refused (403 `age_limited`) for an account with an age
+        limit, 403 `disabled` for a disabled source, 429 `cooldown` for one in a cooldown, and 502
+        `unreadable` when the source lists nothing readable; the messages are generic, never the site's own.
+      parameters:
+        - { name: source, in: query, required: true, schema: { type: string } }
+        - { name: sourceId, in: query, required: true, description: The series' id on the source, as search returned it., schema: { type: string } }
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: The chapters.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [title, content]
+                properties:
+                  title: { type: string }
+                  content:
+                    type: array
+                    items:
+                      type: object
+                      required: [number]
+                      properties:
+                        number: { type: number }
+                        title: { type: [string, "null"] }
+                        scanlator: { type: [string, "null"] }
+        "400":
+          description: No source, or no series named
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission, an age limit, or a disabled source"
+        "429":
+          description: The source is in a cooldown
+        "502":
+          description: The source lists nothing readable
+  /api/sources/preview/pages:
+    get:
+      tags:
+        - sources
+      summary: How many pages one previewed chapter has.
+      operationId: getApiSourcesPreviewPages
+      description: >-
+        Since v0.47.0 (#91). The chapter is named by its number in GET /api/sources/preview's listing; a number
+        that listing does not have is 404 `not_listed`, and the source is never asked for it. The pages are
+        GET /img/sources/preview, by index. Same refusals as the listing.
+      parameters:
+        - { name: source, in: query, required: true, schema: { type: string } }
+        - { name: sourceId, in: query, required: true, schema: { type: string } }
+        - { name: number, in: query, required: true, schema: { type: number } }
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: The page count.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [count]
+                properties:
+                  count: { type: integer, minimum: 1 }
+        "400":
+          description: No source, or no series named
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission, an age limit, or a disabled source"
+        "404":
+          description: The listing has no chapter with that number
+        "429":
+          description: The source is in a cooldown
+        "502":
+          description: The chapter would not load from the source
+  /api/sources/jobs/{folder}/cancel:
+    post:
+      tags:
+        - sources
+      summary: Stop a running download after the chapter in flight.
+      operationId: postApiSourcesJobsFolderCancel
+      description: >-
+        Since v0.47.0 (#82). The account that started the job may, and any admin; anyone else gets 403.
+        The job checks between chapters, so a file is never left half-written: what already landed stays,
+        and the card ends `done` with `cancelled: true` and a `reason` saying how far it got. A re-fetch
+        that set old copies aside puts back every one it did not reach. Audited as `download.cancel`.
+      parameters:
+        - name: folder
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission, or a job this account did not start"
+        "404":
+          description: No such job
+        "409":
+          description: "Conflict: `not_running` -- the job has already stopped"
+  /api/sources/runs/{kind}/cancel:
+    post:
+      tags:
+        - sources
+      summary: Stop one of the server's own runs (sweep, repair, bulk Fetch newest) after the chapter in flight.
+      operationId: postApiSourcesRunsKindCancel
+      description: >-
+        Since v0.47.0 (#82). An admin, or the account that started a bulk "Fetch newest". Checked between
+        chapters and between series, like a shutdown: what already landed stays, the card ends `cancelled`,
+        and the Tasks panel's result for that run says so. Audited as `download.cancel`.
+      parameters:
+        - name: kind
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [sweep, repair, newest]
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission, or a run this account may not stop"
+        "404":
+          description: No run of that kind is running
+  /api/sources/runs/{kind}:
+    delete:
+      tags:
+        - sources
+      summary: Dismiss a finished run's card; 409 while it is still running.
+      operationId: deleteApiSourcesRunsKind
+      parameters:
+        - name: kind
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [sweep, repair, newest]
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission, or a run this account may not see"
+        "404":
+          description: No card of that kind
+        "409":
+          description: "Conflict: `running` -- cancel it instead"
   /api/sources/jobs/{folder}:
     delete:
       tags:
@@ -4273,6 +4515,42 @@ paths:
           description: OK
         "401":
           description: Not authenticated
+  /img/sources/preview:
+    get:
+      tags:
+        - images
+      summary: One page of a previewed chapter, by the chapter's number and the page's index.
+      operationId: getImgSourcesPreview
+      description: >-
+        Since v0.47.0 (#91). The chapter is named by its number in GET /api/sources/preview's listing and the
+        page by its index -- never a URL or a chapter id from the caller. The page is fetched by the server
+        through the same guard as /img/sources/cover (an extension's page only from the engine's own origin),
+        one at a time per source, and served as the original bytes with `cache-control: private, no-store`,
+        only when they are an image (JPEG, PNG, WebP, GIF or AVIF) and at most 15 MB. Refused for an account
+        with an age limit or without the download permission, and for a disabled source or one in a cooldown;
+        any fetch failure is a flat 502.
+      parameters:
+        - { name: source, in: query, required: true, schema: { type: string } }
+        - { name: sourceId, in: query, required: true, schema: { type: string } }
+        - { name: number, in: query, required: true, schema: { type: number } }
+        - { name: i, in: query, required: true, description: The page index, from 0., schema: { type: integer, minimum: 0 } }
+      security:
+        - imgCookie: []
+        - bearer: []
+        - opdsBasic: []
+      responses:
+        "200":
+          description: The page's bytes.
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: an age limit, no download permission, or a disabled source"
+        "404":
+          description: No such chapter in the listing, or no such page
+        "429":
+          description: The source is in a cooldown
+        "502":
+          description: The page could not be fetched, or was not an image
   /opds:
     get:
       tags:
@@ -4654,6 +4932,14 @@ paths:
                     items:
                       type: string
                     description: The source ids the 18+ filter treats as adult. See adultSources on PATCH.
+                  source_prefs:
+                    $ref: "#/components/schemas/SourceOrder"
+                  group_upgrade:
+                    type: boolean
+                    description: Whether the nightly repair swaps chapters for a preferred group's copy. See groupUpgrade on PATCH.
+                  borrow_names:
+                    type: boolean
+                    description: Whether the nightly repair borrows chapter names from another source. See borrowNames on PATCH.
         "401":
           description: Not authenticated
         "403":
@@ -4770,6 +5056,37 @@ paths:
                     type: string
                     minLength: 1
                     maxLength: 120
+                sourcePrefs:
+                  description: >-
+                    The server-wide source order, replaced whole. When a series follows more than one
+                    source, a chapter the server does not have yet is taken from the highest-ranked source
+                    that lists it, after the scanlation group preferences; sources the order does not name
+                    keep the follow order behind the ones it does. Chapters already downloaded are never
+                    replaced because of it. Ids are kept as given (trimmed, de-duplicated, anything outside
+                    letters, digits and _ . : - dropped), whether or not the source is loaded right now.
+                    Empty by default, which is the follow order.
+                  $ref: "#/components/schemas/SourceOrder"
+                groupUpgrade:
+                  type: boolean
+                  description: >-
+                    Group upgrades (since v0.47.0, #81), the nightly repair's sixth step: a chapter held from
+                    one scanlation group is replaced once a group the release preferences rank higher has
+                    released it on a source the series follows. Off by default. Only files the server
+                    downloaded itself (the download root and the downloader's own file name), never with a
+                    copy whose page list is shorter than the file on disk, never a partial copy, never a
+                    chapter someone picked a copy for by hand, and at most REPAIR_GROUPS_MAX (10) a night; a
+                    chapter whose upgrade failed is left for a week. Each swap is audited as
+                    `book.group_upgraded`.
+                borrowNames:
+                  description: >-
+                    Chapter names borrowed from another source (since v0.47.0, #85), the nightly repair's
+                    seventh step. Off by default. A donor must pass the same identity and numbering
+                    judgement an automatic follow must pass, must be in the series' own language, and names
+                    are matched by exact number; only `lib_books.chapter_name` is written, marked with the
+                    donor, so the chapter's own source replaces it the moment it supplies one. Switching
+                    this off clears exactly the names it wrote for every series that follows this setting
+                    (a series switched on for itself keeps its own).
+                  type: boolean
       security:
         - bearer: []
       responses:
@@ -4881,12 +5198,14 @@ paths:
                 only:
                   type: array
                   minItems: 1
-                  maxItems: 5
+                  maxItems: 7
                   description: >-
-                    Which steps to run, each at most once. Omitted means all five, in this order.
+                    Which steps to run, each at most once. Omitted means all seven, in this order. `groups`
+                    and `names` (since v0.47.0) do nothing unless group upgrades, or chapter-name borrowing,
+                    are switched on (groupUpgrade and borrowNames on PATCH /api/admin/settings).
                   items:
                     type: string
-                    enum: [solver, count, failures, short, gaps]
+                    enum: [solver, count, failures, short, gaps, groups, names]
                 seriesId:
                   type: string
                   description: >-
@@ -5090,6 +5409,20 @@ paths:
                   oneOf:
                     - $ref: "#/components/schemas/ScanlatorPrefs"
                     - type: "null"
+                sourcePrefs:
+                  description: >-
+                    The series' own source order, which replaces the server-wide one for this series rather
+                    than merging with it; null or an empty priority clears it. Same rules as sourcePrefs on
+                    PATCH /api/admin/settings.
+                  oneOf:
+                    - $ref: "#/components/schemas/SourceOrder"
+                    - type: "null"
+                borrowNames:
+                  description: >-
+                    Chapter-name borrowing for this series (since v0.47.0, #85): true or false overrides the
+                    server setting, null follows it. Switching it on asks for names now; switching it off
+                    clears the ones borrowed for this series.
+                  type: [boolean, "null"]
       security:
         - bearer: []
       responses:

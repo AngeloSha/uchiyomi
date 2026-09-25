@@ -87,7 +87,10 @@ Search opens the **command palette**: one box that finds any series in the libra
 on a Mac) or **/** open it empty, and simply **starting to type** a title opens it with that first letter
 already in the box, so *"one p"* typed on the library page is a search. Only letters and digits do this, and
 only when nothing else wants the key: not while you are typing in a field, not with a dialog open, not with
-Ctrl, Alt or ⌘ held, and never in the reader, which keeps its own keys.
+Ctrl, Alt or ⌘ held, and never in the reader, which keeps its own keys. Under a Japanese or Chinese
+interface the palette opens empty instead, so the input method composes the whole title. **Profile → Settings →
+Appearance → Type anywhere to search** switches the typing, and the **/** shortcut with it, off on that device;
+**Ctrl+K** keeps working.
 
 ### What counts as a chapter
 
@@ -124,7 +127,8 @@ genres, description, and the **chapter list**.
 - **Chapter names.** A row reads *Ch. 12 · The Sound of Thunder* when the source names its chapters. The
   name is taken when a chapter is downloaded, and chapters downloaded before this was kept pick theirs up
   on the series' next source check (nightly, or **Check now**). Many sources only ever say *Chapter 12*;
-  those rows show the number alone, since repeating it adds nothing.
+  those rows show the number alone, since repeating it adds nothing — unless you switch on **borrowing**
+  (below), which takes the names from another source.
 - **Favorite** (heart) adds it to your favorites + smart offline sync.
 - **Save all offline** copies every chapter to this device for reading with no connection.
 - Click any chapter to read it; the ⬇ on a chapter saves just that one to this device. Toggle
@@ -137,6 +141,10 @@ genres, description, and the **chapter list**.
   page holding the chapter *Continue* would open, so a reader on chapter 956 lands among the 900s. Picking a
   page keeps you there; a new series, sort order or filter goes back to following *Continue*. Every chapter
   is listed — before this, the list and the reader's chapter list stopped at chapter 1000.
+- **Compact chapter list** (since v0.47.0, **Profile → Settings → Appearance**, off by default, this device
+  only): on a computer, rows without the thumbnail and the status dot, with a row's buttons appearing when
+  you point at it — more chapters on one screen. The title's colour still says read or unread; the
+  thumbnail's progress bar is what the row gives up. Phones and tablets keep the full row.
 - The line under the title — *MangaDex · Example Scans +2 · 4 not here yet ›* — is the series' source, who
   translates it and how many chapters the sources have that this server does not. Tap it for **Sources &
   translations**, described below.
@@ -321,6 +329,31 @@ the only Save button on that tab). The two combine sensibly: a group blocked on 
 every series, a series with its own ranking ignores the server's ranking, and a series with no patience of
 its own uses the server's.
 
+**Upgrading to your preferred group** (since v0.47.0, off by default). Patience only goes so far: when the
+wait is over a new chapter is taken from whoever has it, and until now a copy from the group you prefer that
+turned up a day later was never looked at again. Switch on **Admin → Settings → Scanlators → Upgrade
+chapters to a preferred group** and the nightly repair does that second look: a chapter you already have from
+another group is replaced when a group you rank higher has released it on a source the series follows. It is
+careful — only files Uchiyomi downloaded itself, never a copy with fewer pages than the file you have (a
+one-page "chapter removed" notice from the right group does not win), never one that arrives incomplete,
+never a chapter someone picked a version for by hand (*Replace…*, or a pick in the versions list), ten a
+night, and a chapter whose swap failed is left for a week. Reading progress and bookmarks stay.
+
+**Borrowing chapter names** (since v0.47.0, from a pull request by @Squeaks72, off by default). Some sources
+publish no chapter titles at all — every row reads *Ch. 12* — while another source has had *Romance Dawn*
+all along. Switch on **Admin → Settings → Scanlators → Borrow chapter names from other sources**, or tick
+the box on one series' *Sources & translations* sheet, and the nightly repair looks for a source that carries
+the same work and takes the names from it.
+
+The hazard is numbering, not names: past the point where two sources number a work differently, every
+borrowed name would be wrong — and a plausible wrong title is exactly what you pick the next chapter by. So
+a donor has to pass the same check a source must pass before Uchiyomi will *follow* it: its own title is this
+series' title, and its numbering lines up with yours both ways. Names are matched by exact number, only from
+a source in the same language, and only for chapters that have no name at all. A borrowed name never touches
+the file or the chapter list's own title, the chapter's own source naming it later always wins, and switching
+the box off takes back exactly the names that were borrowed. A search that finds no donor is not repeated for
+a week.
+
 ### Following a second source
 
 A series is added from one source, and that source is where new chapters come from. When it is slow, or
@@ -363,6 +396,21 @@ the main one, the line's *{n} not here yet* counts the chapters missing across a
 and the scanlator preferences above apply to the merged list — so a group you prefer is taken from whichever
 source carries it.
 
+### Preferring one source
+
+When two followed sources both have a chapter and your scanlator preferences do not decide between the
+copies, the source the series was added from used to win. A **source order** changes that (since v0.47.0,
+from a pull request by @Squeaks72): **Admin → Settings → Source order** ranks sources for the whole server
+(↑ ↓ to move one, ✕ to take it off, a chip to add one), and an admin can override it for one series with the
+source chips in its *Sources & translations* sheet — tapping one makes it that series' first choice, **Use
+the server default** clears it. A series' own order replaces the server's rather than merging with it, and
+a source the order does not name ranks below every one it does.
+
+It only decides where chapters you **do not have yet** come from. A chapter already downloaded is never
+fetched again because another source ranks higher. An order is kept exactly as saved, including a source
+that is not available at the moment (an extension while the extension engine restarts, say): it is listed
+as *Not available right now* and keeps its place until you take it off.
+
 ### When a source or page fails
 
 The downloader learns a source's pace. A 429 makes later chapters use one page worker and longer gaps, and
@@ -383,6 +431,21 @@ chapters on other sources** on (the default). The sweep may search for a matchin
 once per series per day, against six candidates, for no more than five series per sweep and two extra
 follows per series. A clean series never searches an adult source. Interactive Add and Fetch requests do
 not hunt behind the person's back.
+
+### What is downloading, and stopping it
+
+Anything the server is fetching shows as a small pill in the bottom corner (*Fetching {n} chapters*); tap it for
+the list. Each download you started has a **Cancel**, and an admin sees one on everybody's. Cancel stops it
+**after the chapter in flight** — a file is never left half-written — so the pill says *Stopping after this
+chapter…* for as long as that chapter takes; what already arrived stays, and the card then says how far it got.
+A re-fetch you cancel puts back every old copy it had set aside and not yet replaced.
+
+Since v0.47.0 an admin also sees what the server does **by itself**, one card per run: *Checking for new
+chapters* (the scheduled update, or *Run now*), *Library repair* and a bulk *Fetch newest* — how many series
+it has been through, how many chapters it saved, which series it is on, and a Cancel that stops it the same
+way. Whoever started a bulk *Fetch newest* sees that one too. Downloads that finished in the last day are
+under **Finished today** in the same list; the strip on Discover still shows only the last few minutes. The
+**Downloads** tab is something else: copies saved on this device for reading offline.
 
 ### Chapters the sources have that you don't
 
@@ -682,6 +745,13 @@ again.
   cadence rule calls the group quiet, otherwise *last release {ago}*) — and *{n} chapters have more than one
   version*, from the chapter list it already fetched to count them. Sources that name no groups show nothing
   there.
+- **Read a chapter first** (since v0.47.0, from a pull request by @Squeaks72): under **Add to library**, this
+  opens the title straight from the source without adding it. Pick a chapter from its list — one copy per
+  number, the one an add would take — scroll it, and step to the previous or next one; **Add to library** is
+  there when you have decided, and Escape goes back a step without closing the dialog. Nothing is written: no
+  series, no files, no reading progress. The server fetches each page for you, one at a time, so a site's
+  pages never reach the browser directly. It is not offered to an account with an age limit — a preview reads
+  a site before any library's rating applies — and a source that is switched off or asking us to wait says so.
 - **Also check the other sources that carry this title** (admins only — following a source is an admin
   act, as it is on the series page, and a member's add goes through as if the switch were off; their done
   step says *Other sources: an admin can follow them from Sources & translations.*): when the dialog
@@ -889,7 +959,7 @@ without you pressing anything.
 
 **What fixes itself.** Once a day — **Admin → Settings → Library housekeeping → Repair the library nightly**,
 on by default, and **Admin → Tasks → Repair library** with a *Run now* — Uchiyomi does the five things that
-are reversible or provable on their own, in this order:
+are reversible or provable on their own, and a sixth only when you switch it on, in this order:
 
 * **clears stale Cloudflare state** when sources are blaming the solver: the remembered sessions, the "could
   not be solved" marks and any cooldown that lapsed more than a day ago. No site is contacted;
@@ -902,7 +972,11 @@ are reversible or provable on their own, in this order:
   **marks it confirmed short**, but only when every one of those copies really answered *two pages*: a
   source that was silent, in a cooldown, left unasked by that cap of three, or that handed back an empty
   page list ends the proof, and the chapter is looked at again another night;
-* **looks for a source that can fill a gap** (five series a night) and fetches what it finds.
+* **looks for a source that can fill a gap** (five series a night) and fetches what it finds;
+* **swaps a chapter for your preferred group's copy** once that group has released it, if you switched it
+  on under **Admin → Settings → Scanlators** (see *Choosing a scanlation group*);
+* **borrows chapter names** from another source for series whose own source names nothing, if you switched
+  that on as well (below).
 
 A whole run starts at most five searches, however many findings there are, shared between the steps that
 need one — and the short chapters may take at most two of them, so a library full of short chapters cannot
@@ -1300,7 +1374,7 @@ when to run it and what it will not do. Like the sweep, it starts in the backgro
 it found when it is done.
 
 **Repair library** is the nightly that fixes what Health used to only report (the Health section above lists
-the five things it does and the two it never does). Its schedule reads *every 24h · never during a chapter
+what it does and the two things it never does). Its schedule reads *every 24h · never during a chapter
 sweep*, or *switched off · on demand* when the switch under **Admin → Settings → Library housekeeping** is
 off — and *Run now* works either way, because nothing it does deletes, merges or renumbers anything. Like
 the sweep it is detached, so the toast only says it started; its line shows what it did when it is done and
