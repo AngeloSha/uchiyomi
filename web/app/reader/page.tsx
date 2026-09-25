@@ -10,7 +10,7 @@ import { fetchAllBooks } from '@/lib/seriesBooks';
 import { chapterOutcome } from '@/lib/readerState';
 import { openableChapters } from '@/lib/chapterRows';
 import { buildFlow, startIndex, renderWindow } from '@/lib/readerFlow';
-import { readTap, undoWindow, type TapZone } from '@/lib/readerGesture';
+import { readTap, undoLeft, undoWindow, type TapZone } from '@/lib/readerGesture';
 import { Book, Page, PageInfo, Series } from '@/lib/types';
 import { useAuth, canDownload } from '@/lib/auth';
 import { chapterLabel } from '@/lib/format';
@@ -549,6 +549,8 @@ function ReaderInner() {
   // lingering (webtoon fast-scroll can even skip it entirely), so finished chapters never counted as read.
   const completedSent = useRef(new Set<string>());
   const prevPos = useRef<{ ci: number } | null>(null);
+  /** Bumped when a tap's page turn can no longer be taken back, so the progress below is read again. */
+  const [turnSettled, setTurnSettled] = useState(0);
   const sendProgress = useCallback((chId: string, sId: string, page: number, completed: boolean) => {
     // `at` is what lets the server refuse a stale write. The offline outbox always sent it; the live path
     // never did, so every live ping took the "no timestamp" leg of the guard and applied unconditionally --
@@ -560,6 +562,17 @@ function ReaderInner() {
   }, []);
   useEffect(() => {
     if (!ready || !flat.length) return;
+    // A tap's page turn is not reading until a double-click can no longer take it back (lib/readerGesture.ts).
+    // ⚠️ Completion goes out the moment a chapter's last page shows, so a slow mouse double-click whose first
+    // click turned onto that page marked the chapter read -- and the undo put the page back but not the
+    // progress, which is what moves Continue and lets read-chapter cleanup take the file. Held, not dropped:
+    // `prevPos` is left alone while held, so a chapter crossed during the hold still counts as finished.
+    const a = acted.current;
+    const hold = a?.kind === 'turn' ? undoLeft(a.at, Date.now()) : 0;
+    if (hold > 0) {
+      const t = setTimeout(() => setTurnSettled((n) => n + 1), hold + 20);
+      return () => clearTimeout(t);
+    }
     const it = flat[current];
     if (!it) return;
     const ch = chapters[it.ci];
@@ -594,7 +607,7 @@ function ReaderInner() {
     }, 600);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [current, ready, flat.length]);
+  }, [current, ready, flat.length, turnSettled]);
 
   // ---- auto-scroll ----
   useEffect(() => {

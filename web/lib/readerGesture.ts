@@ -103,3 +103,12 @@ export function readTap(args: {
 export function undoWindow(at: number | null, now: number): boolean {
   return at != null && now - at <= UNDO_WINDOW_MS;
 }
+
+/**
+ * How much longer, in ms, a single click's action from `at` can still be taken back: above 0 exactly when
+ * `undoWindow` says yes. The reader holds a tapped page turn's reading progress for this long, because an
+ * undone turn must not have been written down as reading first.
+ */
+export function undoLeft(at: number | null, now: number): number {
+  return at == null ? 0 : Math.max(0, UNDO_WINDOW_MS + 1 - (now - at));
+}

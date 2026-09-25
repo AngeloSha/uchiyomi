@@ -6,7 +6,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  TAP_WINDOW_MS, UNDO_WINDOW_MS, isTap, readTap, singleTapDelay, tapZone, undoWindow,
+  TAP_WINDOW_MS, UNDO_WINDOW_MS, isTap, readTap, singleTapDelay, tapZone, undoLeft, undoWindow,
 } from '../lib/readerGesture';
 
 const at = (t: number, x = 500, y = 400) => ({ x, y, t });
@@ -70,4 +70,14 @@ test('a dblclick takes back a click that has already acted, but not an old one',
   assert.equal(undoWindow(1000, 1000 + 480), true, 'a slow double-click is still one gesture');
   assert.equal(undoWindow(1000, 1000 + UNDO_WINDOW_MS + 1), false, 'a click from a minute ago stays done');
   assert.equal(undoWindow(null, 1000), false, 'nothing to take back');
+});
+
+test('a turn is held from progress for exactly as long as it can still be undone', () => {
+  // The reader holds a tapped turn's progress for undoLeft ms. Were the hold shorter than the undo window,
+  // a slow double-click could turn onto a chapter's last page, send "completed", and only then be undone.
+  for (let d = 0; d <= UNDO_WINDOW_MS + 5; d++) {
+    assert.equal(undoLeft(1000, 1000 + d) > 0, undoWindow(1000, 1000 + d), `disagree ${d} ms after the click`);
+  }
+  assert.equal(undoLeft(null, 1000), 0, 'nothing acted, nothing held');
+  assert.equal(undoLeft(1000, 1000 + 200), UNDO_WINDOW_MS + 1 - 200);
 });
