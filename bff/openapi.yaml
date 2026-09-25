@@ -2014,6 +2014,16 @@ paths:
           schema:
             type: string
           description: "`1` to include adult sources in the fan-out. Absent means they are not asked."
+        - name: source
+          in: query
+          required: false
+          schema:
+            type: string
+          description: >-
+            Ask only this source id (what Discover sends while it is filtered to one source). Narrows the
+            fan-out within the sources the caller may be shown, never past them: an id outside that set
+            (an adult source without `adult=1`, one above the account's age limit, an unknown id) asks
+            nobody and answers the empty shape. Absent means every source.
         - name: groupBy
           in: query
           required: false

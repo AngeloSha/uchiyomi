@@ -54,3 +54,18 @@ test('everything else on the object is left alone', () => {
   assert.equal(out.brightness, 0.5);
   assert.equal(out.mode, DEFAULT_PREFS.mode, 'and missing keys still come from the defaults');
 });
+
+// `pagedDirection` (paged mode laid out as the series says, or forced either way) arrived after everyone
+// already had stored settings. It follows the series by default, which leaves every left-to-right series --
+// every series on the built-in library, which answers WEBTOON -- exactly as it was; only a series that says
+// RIGHT_TO_LEFT changes, and a deliberate 'ltr'/'rtl' always wins.
+// Reintroduce by defaulting it to 'rtl': every stored reader without the key turns its pages the other way.
+test('paged mode follows the series unless overridden', () => {
+  assert.equal(DEFAULT_PREFS.pagedDirection, 'series');
+  assert.equal(migratePrefs({ mode: 'paged', spread: true }).pagedDirection, 'series');
+  assert.equal(migratePrefs({}).pagedDirection, 'series');
+  assert.equal(migratePrefs({ pagedDirection: 'rtl' }).pagedDirection, 'rtl');
+  assert.equal(migratePrefs({ pagedDirection: 'ltr' }).pagedDirection, 'ltr');
+  // Anything else out of storage (a typo, a future value an older build does not know) is not trusted.
+  assert.equal(migratePrefs({ pagedDirection: 'sideways' as never }).pagedDirection, 'series');
+});

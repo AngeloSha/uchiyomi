@@ -718,8 +718,10 @@ export default async function catalogRoutes(app: FastifyInstance) {
     const planShown = await browsableIds(favAll, vc(req));
     const favIds = favAll.filter((id) => planShown.has(id));
     const out: { bookId: string; seriesId: string }[] = [];
+    // Every chapter, not the first 1000: past chapter 1000 of One Piece the unread ones were all beyond
+    // the page and the plan came back empty.
     for (const sid of favIds) {
-      const raw = await komga.seriesBooks(vc(req), sid, 0, 1000, 'metadata.numberSort,asc').catch(() => null);
+      const raw = await komga.seriesBooks(vc(req), sid, 0, 100000, 'metadata.numberSort,asc').catch(() => null);
       if (!raw) continue;
       const books = await booksForUser(req, raw.content);
       // A pruned chapter has no pages to download; planning it would queue a manifest that answers 410.

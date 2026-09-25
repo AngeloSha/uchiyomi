@@ -2,7 +2,7 @@
   "_meta": {
     "language": "ru",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 1156
+    "strings": 1169
   },
   "1 check found something": "1 проверка нашла проблему",
   "1 member": "1 участник",
@@ -1159,5 +1159,18 @@
   "Sources to treat as adult, on top of the ones their extension already declares.": "Источники, которые считаются взрослыми, в дополнение к тем, что уже отмечены таковыми в своём расширении.",
   "One series can be let through on its own page — Edit details ▸ “Always show”.": "Отдельную серию можно пропустить на её собственной странице — Изменить сведения ▸ «Показывать всегда».",
   "Always show": "Показывать всегда",
-  "Keep this series on the shelf while “Show 18+” is off, even if one of its genres is on the 18+ filter.": "Оставлять эту серию на полке, пока «Показать 18+» выключено, даже если один из её жанров есть в фильтре 18+."
+  "Keep this series on the shelf while “Show 18+” is off, even if one of its genres is on the 18+ filter.": "Оставлять эту серию на полке, пока «Показать 18+» выключено, даже если один из её жанров есть в фильтре 18+.",
+  "Type anywhere to search": "Поиск при наборе на любой странице",
+  "Start typing a title on any page to open search with it. This also switches the / shortcut, on this device only.": "Начните вводить название на любой странице, чтобы открыть с ним поиск. Также включает или выключает сочетание /, только на этом устройстве.",
+  "This source": "Этот источник",
+  "Use this reader for everything from {source}": "Использовать эту читалку для всего из {source}",
+  "Forget the default for {source}": "Сбросить настройки по умолчанию для {source}",
+  "Reading direction": "Направление чтения",
+  "Right to left": "Справа налево",
+  "Left to right": "Слева направо",
+  "Series default": "Как у серии",
+  "Chapter pages": "Страницы глав",
+  "First page": "Первая страница",
+  "Last page": "Последняя страница",
+  "of {n}": "из {n}"
 }

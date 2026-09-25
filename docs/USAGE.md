@@ -82,6 +82,13 @@ filters currently show.
 The top bar has **Home** (a daily-pick hero + "For you" rails), **Library**, **Lists** and **Discover**,
 plus search, the updates bell, a refresh button, and your profile.
 
+Search opens the **command palette**: one box that finds any series in the library and runs the quick actions
+(Surprise me, Updates, Refresh library and so on). With a keyboard there are three ways in: **Ctrl+K** (**⌘K**
+on a Mac) or **/** open it empty, and simply **starting to type** a title opens it with that first letter
+already in the box, so *"one p"* typed on the library page is a search. Only letters and digits do this, and
+only when nothing else wants the key: not while you are typing in a field, not with a dialog open, not with
+Ctrl, Alt or ⌘ held, and never in the reader, which keeps its own keys.
+
 ### What counts as a chapter
 
 Point `LIBRARY_PATH` at what you already have. A chapter can be any of:
@@ -119,6 +126,11 @@ genres, description, and the **chapter list**.
 - **Mark all read** does what it says to every chapter of the series; **Filter** narrows the list to one
   translation group or hides the grey rows; **Select** picks chapters one by one for the actions described
   in *Selecting chapters* below.
+- A long series shows its chapters **100 at a time**, with a pager above and below the list (first,
+  previous, a picker named by the rows each page holds — *901–1000* — next, last). The list opens on the
+  page holding the chapter *Continue* would open, so a reader on chapter 956 lands among the 900s. Picking a
+  page keeps you there; a new series, sort order or filter goes back to following *Continue*. Every chapter
+  is listed — before this, the list and the reader's chapter list stopped at chapter 1000.
 - The line under the title — *MangaDex · Example Scans +2 · 4 not here yet ›* — is the series' source, who
   translates it and how many chapters the sources have that this server does not. Tap it for **Sources &
   translations**, described below.
@@ -546,16 +558,37 @@ you keep scrolling through a series without interruption.
 - **Per-series memory:** your zoom/theme choices are remembered per title.
 - **Jump to a chapter:** the chapter button in the top bar opens the full list, at every screen size. On a
   desktop `[` / `]` step to the previous/next chapter as well.
+- **Keyboard:** in paged mode **→** / **↓** / **Page Down** / **Space** turn to the next page and **←** / **↑** /
+  **Page Up** to the previous one, one press per page, the same as tapping the edge of the page. In webtoon
+  scroll, **Space** / **↓** and **↑** scroll by most of a screen.
 - **Jump to a page:** tap the page counter (`4/18`) in the bottom bar for a thumbnail grid of the chapter.
 - **Desktop:** the page is centered with comfortable margins.
 
 It remembers your scroll position, so closing and reopening drops you right back where you were.
+
+**Right-to-left paged reading.** In paged mode, *Reading direction* (in the reader's settings sheet and under
+Profile → Settings → Reading) can lay the pages out right to left, the way manga is printed: the next page is
+to the left, so you swipe right, tap the left edge or press ←. A double spread puts its first page on the
+right, and the bottom bar mirrors with it — the page slider fills from the right, and the next-chapter button
+moves to the left. The default, *Series default*, does this only for a series whose metadata says it reads
+right to left (a Komga library can say so; the built-in library does not yet, so there every series reads left
+to right as before). *Left to right* and *Right to left* override it for every series. The webtoon scroll is
+unaffected.
 
 **Reader defaults** — mode (webtoon scroll or paged), theme, repeated pages, fit, page gap, auto-scroll and
 brightness — live under **Profile → Settings → Reading**, where each one saves as you change it and says
 *Saved* beside the row. The reader's own sheet still changes them for the session you are in, and a series
 you have adjusted keeps its own memory, which wins over the defaults. The weekly goal, offline downloads and
 new-chapter alerts are on the same tab.
+
+**A default per source.** A source is usually one format: a webtoon site wants the continuous vertical scroll,
+a manga site wants paged right-to-left. At the bottom of the reader's settings sheet, **Use this reader for
+everything from *Source*** saves the current mode, theme and two-page spread for every title from the source
+the chapter came from, so one choice fixes that whole part of the library. The order is *your defaults <
+the source's default < this series*: a title you have adjusted by hand still keeps its own settings. **Forget
+the default for *Source*** removes it again. Like the per-series memory it is saved to your account, so it
+follows you to your other devices. A downloaded chapter opened offline carries no source, so the button does
+not appear there.
 
 ### Skipping the pages that are not the story
 
@@ -617,6 +650,9 @@ again.
   about six seconds); source rows show *Searching…*, empty, failed, disabled or cooling-down states while
   the rest arrive. Repeating the same search continues the in-flight work and a recent term opens from the
   five-minute cache. Results are still filtered for the signed-in account, including its age limit.
+  With one source chosen in the chip, a search asks **only that source** and the chip stays on screen while
+  the results are up, so you can see the search is narrowed and clear it with its × (which searches every
+  source again). Switching the toggle to *Newest* or *Popular* goes back to browsing.
 - **Add:** tap a card and pick which source to add it from — each with its favicon, the first marked *most
   used* (skipped when only one has it). The dialog then opens with *From {source} · Change*. Choose
   **Chapters to fetch now** (All, First N, Latest N, or **Nothing yet — pick chapters later**), toggle
