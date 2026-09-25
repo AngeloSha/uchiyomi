@@ -119,6 +119,11 @@ genres, description, and the **chapter list**.
 - **Mark all read** does what it says to every chapter of the series; **Filter** narrows the list to one
   translation group or hides the grey rows; **Select** picks chapters one by one for the actions described
   in *Selecting chapters* below.
+- A long series shows its chapters **100 at a time**, with a pager above and below the list (first,
+  previous, a picker named by the rows each page holds — *901–1000* — next, last). The list opens on the
+  page holding the chapter *Continue* would open, so a reader on chapter 956 lands among the 900s. Picking a
+  page keeps you there; a new series, sort order or filter goes back to following *Continue*. Every chapter
+  is listed — before this, the list and the reader's chapter list stopped at chapter 1000.
 - The line under the title — *MangaDex · Example Scans +2 · 4 not here yet ›* — is the series' source, who
   translates it and how many chapters the sources have that this server does not. Tap it for **Sources &
   translations**, described below.
@@ -638,6 +643,9 @@ again.
   about six seconds); source rows show *Searching…*, empty, failed, disabled or cooling-down states while
   the rest arrive. Repeating the same search continues the in-flight work and a recent term opens from the
   five-minute cache. Results are still filtered for the signed-in account, including its age limit.
+  With one source chosen in the chip, a search asks **only that source** and the chip stays on screen while
+  the results are up, so you can see the search is narrowed and clear it with its × (which searches every
+  source again). Switching the toggle to *Newest* or *Popular* goes back to browsing.
 - **Add:** tap a card and pick which source to add it from — each with its favicon, the first marked *most
   used* (skipped when only one has it). The dialog then opens with *From {source} · Change*. Choose
   **Chapters to fetch now** (All, First N, Latest N, or **Nothing yet — pick chapters later**), toggle
