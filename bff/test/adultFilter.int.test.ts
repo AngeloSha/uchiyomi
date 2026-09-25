@@ -9,7 +9,7 @@
 //     client (the edit modal of an older build, a script) leaves the field out;
 //   - a source on `adult_sources` leaves the source list and the cross-source fan-out exactly as a
 //     self-declared NSFW source does, and is not asked at all;
-//   - the genre list reaches SQL by interpolation (browsable() cannot bind), so a hostile value stored
+//   - the genre list is read in SQL from its column (browsable() cannot bind), so a hostile value stored
 //     straight into the column, past the PATCH route, must neither break a listing nor change its answer,
 //     and a legitimate name with an apostrophe must still match.
 //
@@ -78,7 +78,7 @@ test('the 18+ filter hides named genres and sources, and nothing else', { skip }
   await q(`INSERT INTO libraries (id, name, path, age_rating) VALUES ($1,'AF Clean Shelf','/af-clean',NULL)`, [LIB]);
   // Every series sits on an UNRATED library, so nothing here can be hidden by the library rule; the only
   // thing that can take one off a listing is the genre list under test. Mixed case and a stray space on
-  // purpose: the filter stores lowercase keys and must still match what the scanner wrote.
+  // purpose: the filter folds case and trims in SQL, on both sides, and must still match what the scanner wrote.
   const genresOf: Record<string, string[]> = {
     [TAGGED]: ['Action', 'ZzzAF Ecchi '],
     [EXEMPT]: ['ZzzAF Ecchi'],
@@ -158,12 +158,29 @@ test('the 18+ filter hides named genres and sources, and nothing else', { skip }
 
     await t.test('a named genre leaves the listing, and ?adult=1 brings it back', async () => {
       const row = await patch({ adultGenres: ['  ZZZAF Ecchi', "zzzaf boys' love"] });
-      assert.deepEqual(row.adult_genres, ['zzzaf ecchi', "zzzaf boys' love"], 'stored in the folded form it is matched in');
+      assert.deepEqual(row.adult_genres, ['ZZZAF Ecchi', "zzzaf boys' love"], 'stored as typed, trimmed; case is folded where it is matched');
       // RETAGGED stays: its override says Action only. The apostrophe genre is hidden, so quoting kept it
       // a match rather than a syntax error or a silent miss.
       assert.deepEqual(await listed(), [PLAIN, RETAGGED].sort(),
         'the named genres did not hide exactly the series carrying them');
       assert.deepEqual(await listed(true), [...SERIES].sort(), 'the reveal did not bring them back');
+    });
+
+    await t.test("the digest's context carries no lists and still hides the named genres", async () => {
+      // notify/index.ts builds { ...viewer, hideAdultLibraries: !includeAdult } without loading the lists, so a
+      // target that excluded 18+ still named genre-tagged series. Reintroduce by interpolating ctx.adultGenres
+      // into browsable() again: TAGGED, EXEMPT and QUOTED come back.
+      const { browsableIds, SYSTEM_CTX } = await import('../src/lib/visibility');
+      const allowed = await browsableIds(SERIES, { ...SYSTEM_CTX, hideAdultLibraries: true });
+      assert.deepEqual([...allowed].sort(), [PLAIN, RETAGGED].sort());
+    });
+
+    await t.test('a series the switch hides is still fillable by id', async () => {
+      // "Show 18+" is a surfacing preference. A route acting on a series someone opened answers to the
+      // permission, visible(), not to it: through browsable(), "Find missing chapters" was a 404 -- for an 18+
+      // library already on main, and for every genre-tagged series once genres could be named.
+      const r = await app.inject({ method: 'POST', url: '/api/sources/fill/scan', headers, payload: { seriesId: TAGGED } });
+      assert.notEqual(r.statusCode, 404, `fill/scan refused a series its viewer opened: ${r.body}`);
     });
 
     await t.test('adult_exempt lets one series through, and a save that omits it keeps it', async () => {
@@ -180,10 +197,12 @@ test('the 18+ filter hides named genres and sources, and nothing else', { skip }
       assert.ok(!(await listed()).includes(EXEMPT), 'the exemption could not be turned off');
     });
 
-    await t.test('the PATCH route drops a name outside the allowed shape instead of storing it', async () => {
-      // Every rejected value here carries a character outside the shape (`=`, `;`, backslash, `$`, `"`).
-      const row = await patch({ adultGenres: ["x' OR 'a'='a", 'a;b', 'ok genre', 'back\\slash', '$1', 'a"b'] });
-      assert.deepEqual(row.adult_genres, ['ok genre']);
+    await t.test('the PATCH route keeps any label and drops only what is not one', async () => {
+      // Nothing configured here ever reaches a query string, so no character needs refusing for safety: a
+      // curly apostrophe or a non-Latin script is a real genre, and the old whitelist was dropping both.
+      // Control characters are not labels.
+      const row = await patch({ adultGenres: ['ok genre', 'Boys’ Love', 'line\nbreak', "x' OR 'a'='a", 'อีโรติก'] });
+      assert.deepEqual(row.adult_genres, ['ok genre', 'Boys’ Love', "x' OR 'a'='a", 'อีโรติก']);
     });
 
     await t.test('a hostile value stored past the route neither breaks a listing nor widens it', async () => {
@@ -195,10 +214,10 @@ test('the 18+ filter hides named genres and sources, and nothing else', { skip }
       ];
       await q('UPDATE server_settings SET adult_genres = $1::jsonb WHERE id = 1', [JSON.stringify(hostile)]);
       invalidateAdultFilter();
-      // The `;`, `=`, `$` and backslash values are dropped. The first one is made only of allowed
-      // characters and survives -- as one inert, quoted literal that matches no genre. So exactly the
-      // plain 'zzzaf ecchi' series are hidden (EXEMPT's exemption was switched off above): no error (the
-      // listing answers 200 inside `listed`), nothing hidden that should not be, nothing shown that should not.
+      // Every value is data the query COMPARES and never parses, so none can do anything but fail to match a
+      // genre. Exactly the plain 'zzzaf ecchi' series are hidden (EXEMPT's exemption was switched off above):
+      // no error (the listing answers 200 inside `listed`), nothing hidden that should not be, nothing shown
+      // that should not.
       assert.deepEqual(await listed(), [PLAIN, QUOTED, RETAGGED].sort());
       const n = await q<{ n: string }>('SELECT count(*)::text AS n FROM lib_series WHERE id = ANY($1)', [SERIES]);
       assert.equal(Number(n[0].n), SERIES.length);

@@ -55,7 +55,7 @@ test('every string Forget and the token checkbox render is in the locale files, 
                        "This erases the series and everyone's reading history on it — progress, bookmarks, notes, ratings, favourites, tracker links.",
                        'Stats and Wrapped change. If the files ever reappear it comes back as a new series with no history. This cannot be undone.',
                        'Forgotten. Nobody had read it.', "Forgotten. 1 member's history on it is gone.", "Forgotten. {n} members' history on it is gone.",
-                       'Could not forget it', 'Include 18+ libraries', '18+']) {
+                       'Could not forget it', 'Include 18+ content', '18+']) {
     assert.ok(label in es, `"${label}" renders through tr() but is in no locale file`);
   }
 });

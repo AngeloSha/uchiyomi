@@ -65,7 +65,7 @@ import { runtime } from '../lib/runtime';
 //
 // Which SOURCES you may reach is the opposite: entirely about who is asking, which is what `viewCtxFor` and
 // `sourceAllowedFor` answer.
-import { visibleToAll, viewCtxFor, sourceAllowedFor, sourceBrowsableFor, browsable, seriesVisible, Params, type ViewCtx, hideAdult } from '../lib/visibility';
+import { visibleToAll, viewCtxFor, sourceAllowedFor, sourceBrowsableFor, browsable, visible, seriesVisible, Params, type ViewCtx, hideAdult } from '../lib/visibility';
 
 interface Job {
   title: string; total: number; done: number;
@@ -1387,16 +1387,19 @@ export default async function sourceRoutes(app: FastifyInstance) {
     const { seriesId, altTitle } = (req.body ?? {}) as { seriesId?: string; altTitle?: string };
     if (!seriesId) return reply.code(400).send({ error: 'bad_request' });
 
-    // Browsable by THIS viewer, not merely present: otherwise a capped member could learn about, and write
+    // Visible to THIS viewer, not merely present: otherwise a capped member could learn about, and write
     // into, a series they are walled off from. Fails closed, as the permission hook above does.
-    // One lookup, through browsable(): it carries the deleted/merged rule, the per-library grant and the age
+    // One lookup, through visible(): it carries the deleted/merged rule, the per-library grant and the age
     // cap together, so this route cannot drift from the others by hand-writing part of it. Fails closed --
-    // a database blip must not make a series someone cannot see fillable.
+    // a database blip must not make a series someone cannot see fillable. visible(), NOT browsable(): this
+    // acts on a series someone opened by id, and "Show 18+" is a surfacing preference, not a permission --
+    // through browsable() "Find missing chapters" answered 404 on any series in an 18+ library (and, with
+    // the configurable filter, on any series with a genre marked adult) whenever the switch was off.
     const p = new Params();
     const rows = await q<any>(
       `SELECT s.id, s.title, s.folder, s.source_id, s.source_series_id, s.summary, s.author, s.genres, s.web, s.status,
               s.chapter_floor, s.scanlator_prefs
-         FROM lib_series s WHERE s.id = ${p.add(seriesId)} AND ${browsable('s', vc(req), p)}`, p.values,
+         FROM lib_series s WHERE s.id = ${p.add(seriesId)} AND ${visible('s', vc(req), p)}`, p.values,
     ).then((r) => r, () => null);
     if (rows === null) return reply.code(503).send({ error: 'unavailable' });
     const s = rows[0];
@@ -1655,12 +1658,13 @@ export default async function sourceRoutes(app: FastifyInstance) {
     const plain = [...new Set(b.data.numbers ?? [])].filter((n) => !pickOf.has(n)).sort((x, y) => x - y);
     const numbers = [...new Set([...plain, ...pickOf.keys()])].sort((x, y) => x - y);
 
-    // Browsable by THIS viewer, as the fill scan requires: a capped member must not be able to write into a
-    // series they are walled off from, or learn which of its numbers are listed. Fails closed.
+    // Visible to THIS viewer, as the fill scan requires: a capped member must not be able to write into a
+    // series they are walled off from, or learn which of its numbers are listed. Fails closed. visible(), not
+    // browsable(), for the fill scan's reason: a fetch on a series someone opened is not a listing.
     const p = new Params();
     const rows = await q<any>(
       `SELECT s.id, s.title, s.folder, s.summary, s.author, s.genres, s.web, s.status, s.source_id
-         FROM lib_series s WHERE s.id = ${p.add(seriesId)} AND ${browsable('s', vc(req), p)}`, p.values,
+         FROM lib_series s WHERE s.id = ${p.add(seriesId)} AND ${visible('s', vc(req), p)}`, p.values,
     ).then((r) => r, () => null);
     if (rows === null) return reply.code(503).send({ error: 'unavailable' });
     const s = rows[0];

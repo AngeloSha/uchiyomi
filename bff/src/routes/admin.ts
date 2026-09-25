@@ -38,7 +38,7 @@ import sharp from 'sharp';
 import { ART_DIR, artFile, artOverview } from '../lib/seriesArt';
 import { writePreflight } from '../lib/fsGuard';
 // Admin stats report on the whole library by definition; this route is already behind requireAdmin.
-import { NO_LIBRARIES, SYSTEM_CTX, visibleToAll, sanitiseAdultList, invalidateAdultFilter } from '../lib/visibility';
+import { NO_LIBRARIES, SYSTEM_CTX, visibleToAll, sanitiseAdultList, sanitiseSourceIds, invalidateAdultFilter } from '../lib/visibility';
 import { addSeriesFromSource, findBestMatch, resolveCandidate, norm, jobBusy, startDownloadJob, FILL_MAX_CHAPTERS, REFRESH_BUDGET_MS } from './sources';
 import { confirmsTitle } from '../lib/confirmTitle';
 import { chapterFileRel } from '../lib/downloader';
@@ -541,7 +541,7 @@ export default async function adminRoutes(app: FastifyInstance) {
     }
     if (b.adultSources !== undefined) {
       await q('UPDATE server_settings SET adult_sources = $1::jsonb, updated_at = now() WHERE id = 1',
-        [JSON.stringify(sanitiseAdultList(b.adultSources))]);
+        [JSON.stringify(sanitiseSourceIds(b.adultSources))]);
     }
     // The view context caches these for a few seconds; a save must take effect on the next request,
     // not whenever that window happens to lapse.

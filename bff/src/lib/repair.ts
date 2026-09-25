@@ -475,7 +475,7 @@ async function stepShort(r: RepairResult, opts: RepairOpts, budget: { left: numb
     // Somebody else is already downloading into this folder (a series-page fetch, a Fetch newest run).
     // Two writers on one path is a lost file and a rate-limit strike each; this one simply waits a night.
     if (busyFolders.has(folder)) continue;
-    const allowed = sweepAllowedFor(await seriesIsAdult(seriesId).catch(() => false));
+    const allowed = await sweepAllowedFor(await seriesIsAdult(seriesId).catch(() => false));
     // The sources this series is actually followed on -- the primary pair plus series_sources, exactly as
     // listingAlternates builds it (lib/updater.ts). A listing row's source is trusted only while the
     // series still follows it: a copy left behind by a source somebody unfollowed is not ours to ask.
@@ -759,7 +759,7 @@ async function stepGaps(r: RepairResult, opts: RepairOpts, budget: { left: numbe
     };
 
     if (unlisted.size) {
-      const allowed = sweepAllowedFor(await seriesIsAdult(s.id).catch(() => false));
+      const allowed = await sweepAllowedFor(await seriesIsAdult(s.id).catch(() => false));
       const found = await huntCandidates(s.id, {
         allowed, budget, reason: 'gap', force: !!opts.seriesId,
         // The candidate must be able to fill a hole nobody else lists. `assess` over the RAW list it

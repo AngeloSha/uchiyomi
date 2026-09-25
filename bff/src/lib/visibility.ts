@@ -41,7 +41,8 @@ export interface ViewCtx {
    */
   readonly hideAdultLibraries: boolean;
   /**
-   * Genres the 18+ switch treats as adult, lowercased and already sanitised (see `sanitiseAdultList`).
+   * Genres the 18+ switch treats as adult, as saved (see `sanitiseAdultList`). Only tells whether the genre
+   * filter is configured (`adultFilterConfigured`): `browsable()` reads the list from the database itself.
    *
    * Only consulted while `hideAdultLibraries` is on, and only by `browsable()`. Empty means the switch
    * behaves exactly as it did when libraries were the only thing it knew about.
@@ -118,44 +119,42 @@ export const SYSTEM_CTX: ViewCtx = {
 };
 
 /**
- * The shape a configured genre or source name is allowed to have.
+ * The configured genre list, tidied: trimmed, de-duplicated case-blind, at most 60 characters each, no control
+ * characters. Anything that is not a string list is empty.
  *
- * `browsable()` may not bind parameters (see the note inside it), so the genre list is interpolated into
- * SQL. The library clause beside it gets away with interpolation because ADULT_RATING is a code constant;
- * an admin-configured list is not, so it is held to this shape before it can reach a query. Anything
- * outside the shape is DROPPED rather than escaped: genres are short human labels, and nothing legitimate
- * needs a control character, a backslash, a `$` or a semicolon.
- *
- * Why this is enough, spelled out because the safety of every listing query rests on it:
- *   - the allowed set is letters, digits, space and ` ' - + / & ( ) . ! : ` -- the punctuation real genre
- *     and source names use ("Boys' Love", "Sci-Fi", "4-Koma", "Shoujo Ai (GL)");
- *   - inside a standard single-quoted Postgres literal the ONLY character that ends the literal is `'`,
- *     and `sqlLiterals` doubles it. `standard_conforming_strings` has been on by default since 9.1 and
- *     the literal is never written with an `E` prefix, so a backslash would be inert anyway -- and it is
- *     excluded regardless;
- *   - `$` is excluded, so a value can neither open a dollar-quoted string nor look like a `$N` placeholder
- *     to anything that counts them; NUL and every other control character fall outside `\p{L}\p{N}`;
- *   - 60 characters at most, and the settings route caps the list at 60 entries, so the clause stays small.
- * `browsable()` re-applies this function at the interpolation site as well as trusting what `viewCtxFor`
- * loaded, so the guarantee is local to the one place that needs it and a hand-built ViewCtx cannot skip it.
+ * Kept as the admin typed it, not lowercased: the comparison folds case in SQL, on BOTH sides, in one place
+ * (`browsable()`), so a genre with letters JavaScript and the database's collation lowercase differently still
+ * matches. Genres never reach a query string -- `browsable()` reads the list from `server_settings` itself --
+ * so there is no character this has to refuse for safety: "Boys’ Love" and Thai or Devanagari genres are fine.
  */
-const ADULT_NAME_OK = /^[\p{L}\p{N} '\-+/&().!:]{1,60}$/u;
-
-/** Lowercased, trimmed, de-duplicated, and filtered to `ADULT_NAME_OK`. Anything that is not a string list is empty. */
 export function sanitiseAdultList(values: unknown): string[] {
+  if (!Array.isArray(values)) return [];
+  const out = new Map<string, string>();
+  for (const v of values) {
+    if (typeof v !== 'string' && typeof v !== 'number') continue;
+    const t = String(v).trim();
+    if (!t || t.length > 60 || /[\p{Cc}]/u.test(t)) continue;
+    if (!out.has(t.toLowerCase())) out.set(t.toLowerCase(), t);
+  }
+  return [...out.values()];
+}
+
+/**
+ * The configured adult SOURCE list: source ids, not genre names, so held to what an id looks like (`aqua`,
+ * `sw:8683375824843625513`, `my_site.v2`) and up to 120 characters -- the genre shape above dropped `_` and
+ * capped at 60, so a real id was silently lost between saving and the next read. Lowercased: ids are compared
+ * lowercased in `sourceBrowsableFor`.
+ */
+export function sanitiseSourceIds(values: unknown): string[] {
   if (!Array.isArray(values)) return [];
   const out = new Set<string>();
   for (const v of values) {
     if (typeof v !== 'string' && typeof v !== 'number') continue;
     const t = String(v).trim().toLowerCase();
-    if (t && ADULT_NAME_OK.test(t)) out.add(t);
+    if (t && /^[\p{L}\p{N}_.:\-]{1,120}$/u.test(t)) out.add(t);
   }
   return [...out];
 }
-
-/** Values that already passed `sanitiseAdultList`, as SQL string literals. The quote doubling is load-bearing: `'` is in the shape. */
-const sqlLiterals = (values: readonly string[]): string =>
-  values.map((v) => `'${v.replace(/'/g, "''")}'`).join(', ');
 
 /**
  * The configured lists, cached briefly.
@@ -168,14 +167,14 @@ const sqlLiterals = (values: readonly string[]): string =>
 let adultCache: { at: number; genres: string[]; sources: string[] } | null = null;
 const ADULT_CACHE_MS = 15_000;
 export function invalidateAdultFilter(): void { adultCache = null; }
-async function adultFilter(): Promise<{ genres: string[]; sources: string[] }> {
+export async function adultFilter(): Promise<{ genres: string[]; sources: string[] }> {
   if (adultCache && Date.now() - adultCache.at < ADULT_CACHE_MS) return adultCache;
   const row = await one<{ adult_genres: unknown; adult_sources: unknown }>(
     'SELECT adult_genres, adult_sources FROM server_settings WHERE id = 1').catch(() => null);
   adultCache = {
     at: Date.now(),
     genres: sanitiseAdultList(row?.adult_genres),
-    sources: sanitiseAdultList(row?.adult_sources),
+    sources: sanitiseSourceIds(row?.adult_sources),
   };
   return adultCache;
 }
@@ -200,24 +199,31 @@ export function browsable(alias: string, ctx: ViewCtx, p: Params): string {
   // $1. ADULT_RATING is a code constant, never user input, so interpolating it is safe.
   const parts = [base, `NOT EXISTS (
     SELECT 1 FROM libraries l_ad WHERE l_ad.id = ${alias}.library_id AND l_ad.age_rating >= ${ADULT_RATING})`];
-  // Genres, when the admin has named any. Sanitised again HERE, at the interpolation, and then quoted --
-  // this function cannot bind (see above), and `ADULT_NAME_OK` says why that pair is sufficient. An admin
-  // override of the genre list wins over what the scan read, exactly as it does for the age rating in
-  // `visible()`, and an `adult_exempt` override lets one series through. `lower(btrim())` is the same fold
-  // the genre overview applies, so a key picked from that list matches the rows it was counted from.
-  const genres = sqlLiterals(sanitiseAdultList(ctx.adultGenres));
-  if (genres) {
-    parts.push(`NOT (
+  // Genres the admin has named as adult, READ HERE, IN SQL, from server_settings -- never interpolated. This
+  // function cannot bind (see above), and an admin-entered list is not a code constant, so the list stays
+  // in the database and the query only names the column. That also makes the rule hold for EVERY context
+  // that hides 18+, including one built without the lists (the notification digest's), and folds case once,
+  // with `lower(btrim())` on both sides, the same fold the genre overview applies. The first branch is
+  // uncorrelated, so Postgres evaluates it once per query: with no genre configured, no row pays for the rest.
+  // An admin override of a series' genres wins over what the scan read, as the age rating does in `visible()`,
+  // and an `adult_exempt` override lets one series through.
+  parts.push(`(
+    NOT EXISTS (SELECT 1 FROM server_settings s_ad
+                 WHERE s_ad.id = 1 AND jsonb_typeof(s_ad.adult_genres) = 'array' AND jsonb_array_length(s_ad.adult_genres) > 0)
+    OR NOT (
       EXISTS (
         SELECT 1 FROM unnest(COALESCE(
           (SELECT o_ad.genres FROM series_overrides o_ad WHERE o_ad.series_id = ${alias}.id),
           ${alias}.genres
-        )) AS g_ad WHERE lower(btrim(g_ad)) IN (${genres})
+        )) AS g_ad
+        WHERE lower(btrim(g_ad)) IN (
+          SELECT lower(btrim(x_ad)) FROM server_settings s2_ad, jsonb_array_elements_text(s2_ad.adult_genres) AS x_ad
+           WHERE s2_ad.id = 1 AND jsonb_typeof(s2_ad.adult_genres) = 'array')
       )
       AND NOT COALESCE(
         (SELECT o_ex.adult_exempt FROM series_overrides o_ex WHERE o_ex.series_id = ${alias}.id), false)
-    )`);
-  }
+    )
+  )`);
   return parts.join(' AND ');
 }
 
