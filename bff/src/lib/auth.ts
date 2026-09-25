@@ -1,4 +1,4 @@
-import { createHash, randomBytes } from 'node:crypto';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { q, one } from './db';
 import { env } from '../env';
@@ -135,13 +135,6 @@ export async function resolveOpdsBasic(authHeader?: string): Promise<OpdsIdentit
 }
 
 /**
- * Issue a fresh opaque refresh token and persist its hash. Returns the raw token.
- *
- * `replaces` marks this as a rotation: the old row is revoked and pointed at the new one. Rotating through
- * here rather than with a bare revoke is what lets `validateRefreshForRotation` tell a device that simply
- * moved on from a session someone deliberately ended.
- */
-/**
  * When a refresh token minted right now would expire, in ms since the epoch.
  *
  * Published to the client so an installed app can honour the SAME expiry offline that the server would
@@ -151,22 +144,18 @@ export async function resolveOpdsBasic(authHeader?: string): Promise<OpdsIdentit
  */
 export const refreshExpiresAt = () => Date.now() + env.REFRESH_TTL_DAYS * 24 * 60 * 60 * 1000;
 
+/** Issue a fresh opaque refresh token for a new sign-in and persist its hash. Returns the raw token. */
 export async function issueRefreshToken(
   userId: string,
-  opts: { deviceId?: string; deviceName?: string; ip?: string | null; userAgent?: string | null; replaces?: string } = {},
+  opts: { deviceId?: string; deviceName?: string; ip?: string | null; userAgent?: string | null } = {},
 ): Promise<string> {
   const token = randomBytes(48).toString('hex');
   const expires = new Date(refreshExpiresAt());
-  const row = await one<{ id: string }>(
+  await q(
     `INSERT INTO refresh_tokens (user_id, token_hash, device_id, device_name, expires_at, ip, user_agent, last_seen)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, now())
-     RETURNING id`,
+     VALUES ($1, $2, $3, $4, $5, $6, $7, now())`,
     [userId, sha256(token), opts.deviceId ?? null, opts.deviceName ?? null, expires, opts.ip ?? null, (opts.userAgent ?? null)?.slice(0, 200) ?? null],
   );
-  if (opts.replaces) {
-    await q('UPDATE refresh_tokens SET revoked_at = now(), replaced_by = $2 WHERE id = $1 AND revoked_at IS NULL',
-      [opts.replaces, row!.id]);
-  }
   return token;
 }
 
@@ -191,38 +180,179 @@ export async function validateRefreshToken(
  * sync. Two tabs left open collide on that schedule forever. The loser's request was already in flight
  * carrying the token the winner had just rotated, and answering it by clearing the cookie deleted the good
  * token the winner had written one moment earlier -- signing out the tab, the other tab, and the device.
+ *
+ * It is also how long the refresh endpoint waits for a winner's answer to land before deciding it never will
+ * (`planRefresh`, step 5).
  */
 export const REFRESH_GRACE_MS = 60_000;
 
 /**
- * Validate for the refresh endpoint, which forgives a token this device rotated a moment ago.
- *
- * `stale` marks the loser of that race. Only a ROTATED token qualifies, because only a rotation sets
- * `replaced_by`: a token killed by logout, by an admin, or by sign-out-everywhere has it null and is refused
- * on the spot, so ending a session still means ending it.
+ * How far along a session's rotations the refresh endpoint (and sign-out) follows a superseded token. A token
+ * that many links behind is refused without looking further: every link but a recovery is a use, so the
+ * answer would be "something newer was used" (step 4) anyway.
  */
-export async function validateRefreshForRotation(
-  token: string,
-  graceMs: number = REFRESH_GRACE_MS,
-): Promise<{ userId: string; id: string; deviceId: string | null; deviceName: string | null; stale: boolean; expiresAt: Date } | null> {
-  const row = await one<{ id: string; user_id: string; device_id: string | null; device_name: string | null; revoked_at: Date | null; expires_at: Date }>(
-    `SELECT id, user_id, device_id, device_name, revoked_at, expires_at FROM refresh_tokens
-     WHERE token_hash = $1
-       AND expires_at > now()
-       AND (revoked_at IS NULL
-            OR (replaced_by IS NOT NULL AND revoked_at > now() - make_interval(secs => $2)))
-     LIMIT 1`,
+const CHAIN_MAX = 32;
+
+interface PresentedToken {
+  id: string; user_id: string; device_id: string | null; device_name: string | null; expires_at: Date;
+  replaced_by: string | null; revoked: boolean; used: boolean; in_grace: boolean;
+}
+interface ChainLink {
+  id: string; replaced_by: string | null; device_id: string | null; device_name: string | null; expires_at: Date;
+  live: boolean; used: boolean; fresh: boolean;
+}
+
+/** What the refresh endpoint does with a presented token. Read-only; `exchangeRefreshToken` acts on it. */
+export type RefreshPlan =
+  | { kind: 'refuse'; endSession?: string }
+  | { kind: 'rotate' | 'grace'; token: PresentedToken }
+  | { kind: 'recover'; token: PresentedToken; head: ChainLink };
+
+/**
+ * Decide what a presented refresh token is worth.
+ *
+ * Every refresh supersedes the token it was given (`replaced_by`, `used_at`). A session is therefore a chain
+ * of tokens with exactly one live one at the end -- the head -- and a token that is no longer the head is
+ * judged by what has happened AFTER it:
+ *
+ *   1. The chain ends in a token someone revoked (logout, an admin, sign-out-everywhere, a password change):
+ *      refused. Checked first, so ending a session ends it at once, grace or no grace. It did not before:
+ *      a token superseded a moment earlier was forgiven by the grace window even after sign-out-everywhere.
+ *   2. Superseded less than `REFRESH_GRACE_MS` ago: a slower tab of the same browser. The winner's cookie is
+ *      in the jar, or about to be, so it gets an access token and the cookie is not touched.
+ *   3. Superseded by a recovery (step 5) before its holder ever used it -- or before `used_at` existed -- and
+ *      presented after the grace: two cookie jars are holding one session, and only one of them can be the
+ *      device it was issued to. Refused, and the session is ended so neither keeps it (`exchangeRefreshToken`).
+ *   4. A later token in the chain has been used: the device moved on and this is an old token. Refused.
+ *   5. Nothing later has EVER been used. The device's cookie jar never received what this token was
+ *      exchanged for: the answer was lost -- the page reloaded or navigated while its refresh was in flight,
+ *      the tab was closed, the network dropped the response. The server rotated; the browser kept the old
+ *      token. This used to sign the device out one grace window later. Once the newest token is older than the
+ *      grace window (so a winner's Set-Cookie can no longer be on its way), it is recovered: the head is
+ *      superseded by a new token and THAT is set. Until then, step 2's answer.
+ *
+ * Step 5 never hands out a fresh lifetime: a recovered token expires when the head it replaces would have,
+ * so a recovery re-delivers what was lost and extends nothing. Only a token that was used (rotated by its
+ * holder) qualifies, so a token superseded by a recovery never recovers anything itself -- which is what
+ * keeps two holders of one session from trading it back and forth forever (step 3 ends that instead).
+ */
+export async function planRefresh(token: string, graceMs: number = REFRESH_GRACE_MS): Promise<RefreshPlan> {
+  const row = await one<PresentedToken>(
+    `SELECT id, user_id, device_id, device_name, expires_at, replaced_by,
+            revoked_at IS NOT NULL AS revoked, used_at IS NOT NULL AS used,
+            COALESCE(revoked_at > now() - make_interval(secs => $2), false) AS in_grace
+       FROM refresh_tokens
+      WHERE token_hash = $1 AND expires_at > now()
+      LIMIT 1`,
     [sha256(token), graceMs / 1000],
   );
-  if (!row) return null;
-  return {
-    userId: row.user_id, id: row.id, deviceId: row.device_id, deviceName: row.device_name,
-    stale: row.revoked_at != null,
-    // ⚠️ The row's OWN expiry, for the stale-race branch in routes/auth.ts, which rotates nothing. Answering
-    // that branch with `refreshExpiresAt()` would hand the device a full fresh TTL every time two tabs raced
-    // -- an offline grace that renews itself without a single token ever being issued.
-    expiresAt: row.expires_at,
-  };
+  if (!row) return { kind: 'refuse' };
+  if (!row.revoked) return { kind: 'rotate', token: row };
+  // Revoked without a successor: logout, an admin, sign-out-everywhere, a password change. Final.
+  if (!row.replaced_by) return { kind: 'refuse' };
+
+  const chain = await q<ChainLink>(
+    `WITH RECURSIVE chain AS (
+       SELECT id, replaced_by, 1 AS depth FROM refresh_tokens WHERE id = $1
+       UNION ALL
+       SELECT r.id, r.replaced_by, c.depth + 1
+         FROM chain c JOIN refresh_tokens r ON r.id = c.replaced_by
+        WHERE c.depth < $2
+     )
+     SELECT r.id, r.replaced_by, r.device_id, r.device_name, r.expires_at,
+            (r.revoked_at IS NULL AND r.expires_at > now()) AS live,
+            r.used_at IS NOT NULL AS used,
+            r.created_at > now() - make_interval(secs => $3) AS fresh
+       FROM chain c JOIN refresh_tokens r ON r.id = c.id
+      ORDER BY c.depth`,
+    [row.replaced_by, CHAIN_MAX, graceMs / 1000],
+  );
+  const head = chain[chain.length - 1];
+  // 1. Ended, or not reached: a head that still points on is a chain longer than CHAIN_MAX (or a broken one).
+  if (!head || head.replaced_by || !head.live) return { kind: 'refuse' };
+  // 2.
+  if (row.in_grace) return { kind: 'grace', token: row };
+  // 3.
+  if (!row.used) return { kind: 'refuse', endSession: head.id };
+  // 4.
+  if (chain.some((t) => t.used)) return { kind: 'refuse' };
+  // 5.
+  return head.fresh ? { kind: 'grace', token: row } : { kind: 'recover', token: row, head };
+}
+
+/**
+ * Supersede the live token `oldId` with a new one, in ONE statement: the new row exists only if the old one
+ * was still live when this ran. Two requests racing on one token therefore cannot both succeed, where the
+ * old insert-then-revoke let both insert and left two live tokens for one device. Null when it lost.
+ */
+async function supersede(
+  oldId: string,
+  o: { used: boolean; expiresAt: Date; deviceId: string | null; deviceName: string | null; ip: string | null; userAgent: string | null },
+): Promise<string | null> {
+  const token = randomBytes(48).toString('hex');
+  const row = await one<{ id: string }>(
+    `WITH old AS (
+       UPDATE refresh_tokens
+          SET revoked_at = now(), replaced_by = $1, used_at = CASE WHEN $2 THEN now() ELSE used_at END
+        WHERE id = $3 AND revoked_at IS NULL
+        RETURNING user_id
+     )
+     INSERT INTO refresh_tokens (id, user_id, token_hash, device_id, device_name, expires_at, ip, user_agent, last_seen)
+     SELECT $1, user_id, $4, $5, $6, $7, $8, $9, now() FROM old
+     RETURNING id`,
+    [randomUUID(), o.used, oldId, sha256(token), o.deviceId, o.deviceName, o.expiresAt, o.ip, o.userAgent?.slice(0, 200) ?? null],
+  );
+  return row ? token : null;
+}
+
+export type RefreshExchange =
+  | { kind: 'refused' }
+  | { kind: 'disabled' }
+  | { kind: 'grace'; userId: string; role: string; expiresAt: number }
+  | { kind: 'rotated' | 'recovered'; userId: string; role: string; token: string; expiresAt: number };
+
+/**
+ * The refresh endpoint's whole decision: plan (`planRefresh`), then carry the plan out.
+ *
+ * `grace` hands back an access token and must leave the cookie alone; `rotated` and `recovered` carry a new
+ * token to set. `expiresAt` is always the expiry of the token the device will hold afterwards -- a fresh
+ * lifetime only for a real rotation. ⚠️ `grace` reports the presented token's OWN expiry: answering it with
+ * `refreshExpiresAt()` would hand the device a full fresh TTL every time two tabs raced -- an offline grace
+ * that renews itself without a single token ever being issued.
+ */
+export async function exchangeRefreshToken(
+  token: string,
+  meta: { ip: string | null; userAgent: string | null },
+): Promise<RefreshExchange> {
+  for (let attempt = 0; ; attempt++) {
+    const plan = await planRefresh(token);
+    if (plan.kind === 'refuse') {
+      // Step 3. The jar that presented this is cleared by the 401 either way, so ending the session costs the
+      // device nothing it was not already losing; what it takes away is the OTHER holder's token.
+      if (plan.endSession) await q('UPDATE refresh_tokens SET revoked_at = now() WHERE id = $1 AND revoked_at IS NULL', [plan.endSession]);
+      return { kind: 'refused' };
+    }
+    const t = plan.token;
+    const user = await one<{ disabled: boolean; role: string }>('SELECT disabled, role FROM users WHERE id = $1', [t.user_id]);
+    if (user?.disabled) {
+      await revokeAllSessions(t.user_id);
+      return { kind: 'disabled' };
+    }
+    const role = user?.role ?? 'user';
+    // Three lost races in a row: every plan said this token is good, so answer without touching the cookie.
+    if (plan.kind === 'grace' || attempt >= 3) return { kind: 'grace', userId: t.user_id, role, expiresAt: t.expires_at.getTime() };
+
+    if (plan.kind === 'rotate') {
+      const expiresAt = new Date(refreshExpiresAt());
+      const next = await supersede(t.id, { used: true, expiresAt, deviceId: t.device_id, deviceName: t.device_name, ...meta });
+      if (next) return { kind: 'rotated', userId: t.user_id, role, token: next, expiresAt: expiresAt.getTime() };
+    } else if (plan.kind === 'recover') {
+      const h = plan.head;
+      const next = await supersede(h.id, { used: false, expiresAt: h.expires_at, deviceId: h.device_id, deviceName: h.device_name, ...meta });
+      if (next) return { kind: 'recovered', userId: t.user_id, role, token: next, expiresAt: h.expires_at.getTime() };
+    }
+    // Another request moved this session on between the plan and the write. Plan again from where it left it.
+  }
 }
 
 // ---- account security: brute-force lockout + password policy ----
@@ -277,10 +407,28 @@ export function clientIp(req: FastifyRequest): string | null {
   return (xff.split(',')[0].trim() || req.ip || '').slice(0, 64) || null;
 }
 
+/**
+ * Sign-out: end the session this token belongs to, not just the token.
+ *
+ * The cookie being signed out with is not always the session's current token. When a refresh answer was lost
+ * (`planRefresh`, step 5) the jar still holds the token before it, and revoking only that one left the newer
+ * token live -- which the old token could then have recovered, bringing the session back after a sign-out.
+ * So walk forward from the presented token and revoke whatever is still live. Revoking without `replaced_by`
+ * is what makes the end final (step 1).
+ */
 export async function revokeRefreshToken(token: string): Promise<void> {
-  await q(`UPDATE refresh_tokens SET revoked_at = now() WHERE token_hash = $1 AND revoked_at IS NULL`, [
-    sha256(token),
-  ]);
+  await q(
+    `WITH RECURSIVE chain AS (
+       SELECT id, replaced_by, 1 AS depth FROM refresh_tokens WHERE token_hash = $1
+       UNION ALL
+       SELECT r.id, r.replaced_by, c.depth + 1
+         FROM chain c JOIN refresh_tokens r ON r.id = c.replaced_by
+        WHERE c.depth < $2
+     )
+     UPDATE refresh_tokens SET revoked_at = now()
+      WHERE id IN (SELECT id FROM chain) AND revoked_at IS NULL`,
+    [sha256(token), CHAIN_MAX],
+  );
 }
 
 export async function revokeRefreshTokenById(id: string): Promise<void> {

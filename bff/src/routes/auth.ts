@@ -25,7 +25,7 @@ import {
   touchSession,
   userIdOf,
   validateRefreshToken,
-  validateRefreshForRotation,
+  exchangeRefreshToken,
   refreshExpiresAt,
 } from '../lib/auth';
 import { generateRecoveryCodes, generateSecret, otpauthURL, sha256, verifyTotp } from '../lib/totp';
@@ -388,35 +388,26 @@ export default async function authRoutes(app: FastifyInstance) {
   app.post('/auth/refresh', async (req, reply) => {
     const token = req.cookies?.[REFRESH_COOKIE];
     if (!token) return reply.code(401).send({ error: 'no_refresh' });
-    const valid = await validateRefreshForRotation(token);
-    if (!valid) {
+    // The decision and its reasons live in planRefresh (lib/auth.ts).
+    const r = await exchangeRefreshToken(token, { ip: clientIp(req), userAgent: (req.headers['user-agent'] as string) || null });
+    if (r.kind === 'refused') {
       reply.clearCookie(REFRESH_COOKIE, { path: '/' });
       return reply.code(401).send({ error: 'invalid_refresh' });
     }
-    const disabled = await one<{ disabled: boolean; role: string }>('SELECT disabled, role FROM users WHERE id = $1', [valid.userId]);
-    if (disabled?.disabled) {
-      await revokeAllSessions(valid.userId);
+    if (r.kind === 'disabled') {
       reply.clearCookie(REFRESH_COOKIE, { path: '/' });
       return reply.code(403).send({ error: 'disabled' });
     }
-    // Lost a rotation race against one of this device's own other tabs. The winner has already written a good
-    // token to the cookie jar both tabs share, so the one thing we must not do here is touch the cookie --
-    // clearing it, which is what this used to do, throws away the winner's token and signs the device out.
-    // Hand back a fresh access token, rotate nothing, and leave the jar exactly as the winner left it.
-    if (valid.stale) {
-      setImgCookie(app, reply, valid.userId);
-      return reply.send({ ...signAccess(app, valid.userId, disabled?.role ?? 'user'), user: await userPayload(valid.userId), refreshExpiresAt: valid.expiresAt.getTime() });
+    // `grace`: lost a rotation race -- to another tab, or to the page before a reload -- and the winner's token
+    // is in the cookie jar they share, or on its way there. The one thing we must not do here is touch the
+    // cookie: clearing it, which is what this used to do, throws away the winner's token and signs the device out.
+    // `rotated` and `recovered` carry the token the device holds from now on, and the cookie lives exactly as
+    // long as it does: a recovered token keeps the lifetime of the one it replaces.
+    if (r.kind !== 'grace') {
+      reply.setCookie(REFRESH_COOKIE, r.token, { ...cookieOptions(), maxAge: Math.max(1, Math.floor((r.expiresAt - Date.now()) / 1000)) });
     }
-    const next = await issueRefreshToken(valid.userId, {
-      deviceId: valid.deviceId ?? undefined,
-      deviceName: valid.deviceName ?? undefined,
-      ip: clientIp(req),
-      userAgent: (req.headers['user-agent'] as string) || null,
-      replaces: valid.id, // revokes the old row AND records that a rotation, not a logout, is what killed it
-    });
-    reply.setCookie(REFRESH_COOKIE, next, cookieOptions());
-    setImgCookie(app, reply, valid.userId);
-    return reply.send({ ...signAccess(app, valid.userId, disabled?.role ?? 'user'), user: await userPayload(valid.userId), refreshExpiresAt: refreshExpiresAt() });
+    setImgCookie(app, reply, r.userId);
+    return reply.send({ ...signAccess(app, r.userId, r.role), user: await userPayload(r.userId), refreshExpiresAt: r.expiresAt });
   });
 
   app.post('/auth/logout', async (req, reply) => {

@@ -348,11 +348,17 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS password_changed_at timestamptz NOT N
 ALTER TABLE refresh_tokens ADD COLUMN IF NOT EXISTS last_seen  timestamptz NOT NULL DEFAULT now();
 ALTER TABLE refresh_tokens ADD COLUMN IF NOT EXISTS ip         text;
 ALTER TABLE refresh_tokens ADD COLUMN IF NOT EXISTS user_agent text;
--- Which token replaced this one, set only when a refresh rotated it. It is what separates "this device
--- already moved on" from "this session was ended", and only the former is forgiven inside the grace window
--- in validateRefreshForRotation. A logout, an admin revoke and sign-out-everywhere all leave it null, so
--- they still take effect the instant they are written.
+-- Which token replaced this one, set only when a refresh superseded it (a rotation, or a recovery of a lost
+-- one). It is what separates "this device already moved on" from "this session was ended", and only the
+-- former is forgiven by planRefresh (lib/auth.ts). A logout, an admin revoke and sign-out-everywhere all
+-- leave it null, so they still take effect the instant they are written.
 ALTER TABLE refresh_tokens ADD COLUMN IF NOT EXISTS replaced_by uuid;
+-- When this token's holder presented it and got the next one: proof that the device's cookie jar received
+-- it. Null on the live token, on one that was lost in transit, and on one a recovery superseded before its
+-- holder used it. planRefresh (lib/auth.ts) recovers a lost refresh answer only when no later token in the
+-- session was ever used. Rows from before this column are all null, which makes them ineligible to recover
+-- anything -- the old behaviour, so the upgrade needs no backfill.
+ALTER TABLE refresh_tokens ADD COLUMN IF NOT EXISTS used_at timestamptz;
 
 -- audit / activity feed (logins, admin actions, downloads, blocks)
 CREATE TABLE IF NOT EXISTS audit_log (
