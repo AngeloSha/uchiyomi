@@ -55,6 +55,13 @@ export function taskResult(r: any): string {
       const g = r.groups;
       bits.push(`groups: ${g.replaced ?? 0} replaced${g.left ? `, ${g.left} left` : ''}`);
     }
+    // Reading directions (#102) are learned quietly most nights once a library has been through it once, so the
+    // clause appears when one was learned -- and always on a run that asked for nothing else, where an empty
+    // line would read as a button that did nothing.
+    if (ran('directions') && r.directions && (r.directions.learned || (only?.length === 1))) {
+      const n = r.directions.learned ?? 0;
+      bits.push(`${n} reading direction${n === 1 ? '' : 's'} learned`);
+    }
     if (ran('failures')) {
       const n = r.failures?.reset ?? 0;
       bits.push(`${n} failure${n === 1 ? '' : 's'} reset`);

@@ -157,7 +157,8 @@ components:
         `metadata.status` is ENDED | ONGOING | ABANDONED | HIATUS for the statuses this server knows
         (Completed, Ongoing, On Hiatus, Cancelled and their synonyms) and otherwise the stored value
         upper-cased, which the client shows as UNKNOWN. `readingDirection` is one of LEFT_TO_RIGHT |
-        RIGHT_TO_LEFT | VERTICAL | WEBTOON. The three read counts are real on GET /api/v1/series/{id}
+        RIGHT_TO_LEFT | VERTICAL | WEBTOON: the series' own direction since v0.48.0 (WEBTOON when unknown, and
+        for every series before). The three read counts are real on GET /api/v1/series/{id}
         (Mihon derives UNREAD / READING / COMPLETED from them) and zero read / all unread in listings.
       required: [id, libraryId, name, url, fileLastModified, booksCount, booksReadCount, booksUnreadCount, booksInProgressCount, deleted, oneshot, metadata, booksMetadata]
       properties:
@@ -1188,6 +1189,22 @@ paths:
                   borrowNamesEffective:
                     description: Admins only. Whether names are borrowed for this series once the server setting is applied.
                     type: boolean
+                  detectedDirection:
+                    description: >-
+                      Admins only (since v0.48.0). What the evidence says about the series' reading direction
+                      and which evidence said it -- `comicinfo`, `source` or `anilist`, most trusted first --
+                      or null when nothing has. `metadata.readingDirection` is the effective value: an admin's
+                      override (`overrides.readingDirection`), else this, else WEBTOON.
+                    oneOf:
+                      - type: object
+                        properties:
+                          direction:
+                            type: string
+                            enum: [LEFT_TO_RIGHT, RIGHT_TO_LEFT, VERTICAL, WEBTOON]
+                          from:
+                            type: string
+                            enum: [comicinfo, source, anilist]
+                      - type: "null"
         "401":
           description: Not authenticated
         "404":
@@ -5198,14 +5215,16 @@ paths:
                 only:
                   type: array
                   minItems: 1
-                  maxItems: 7
+                  maxItems: 8
                   description: >-
-                    Which steps to run, each at most once. Omitted means all seven, in this order. `groups`
+                    Which steps to run, each at most once. Omitted means all eight, in this order. `groups`
                     and `names` (since v0.47.0) do nothing unless group upgrades, or chapter-name borrowing,
                     are switched on (groupUpgrade and borrowNames on PATCH /api/admin/settings).
+                    `directions` (since v0.48.0) asks MangaDex and AniList which way series with no known
+                    reading direction read, at most REPAIR_DIRECTIONS_MAX (500) series per service.
                   items:
                     type: string
-                    enum: [solver, count, failures, short, gaps, groups, names]
+                    enum: [solver, count, failures, short, gaps, groups, names, directions]
                 seriesId:
                   type: string
                   description: >-
@@ -5905,7 +5924,7 @@ paths:
     put:
       tags:
         - admin
-      summary: Override a series' metadata (title, summary, author, genres, status, age rating, 18+ filter exemption); survives rescans.
+      summary: Override a series' metadata (title, summary, author, genres, status, age rating, 18+ filter exemption, reading direction); survives rescans.
       operationId: putApiAdminSeriesIdMeta
       description: Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
       parameters:
@@ -5942,6 +5961,16 @@ paths:
                     the 18+ filter (adultGenres on PATCH /api/admin/settings). Absent or null leaves the
                     current value alone; every other field here is written as sent. Does not affect 18+
                     libraries or the age limit.
+                readingDirection:
+                  type: [string, "null"]
+                  enum: [LEFT_TO_RIGHT, RIGHT_TO_LEFT, VERTICAL, WEBTOON, null]
+                  description: >-
+                    Which way the series reads (since v0.48.0). null goes back to automatic: what the first
+                    chapter's ComicInfo, the followed source (MangaDex's original language) or AniList's
+                    country of origin said, in that order of trust, and WEBTOON when none did. Absent leaves
+                    the current override alone. It is what `metadata.readingDirection` reports everywhere --
+                    the reader's "Series default" direction, the offline manifest, and the Komga-compatible
+                    API.
       security:
         - bearer: []
       responses:

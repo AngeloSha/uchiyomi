@@ -2,7 +2,7 @@
   "_meta": {
     "language": "fr",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 1208
+    "strings": 1215
   },
   "1 check found something": "1 vérification a trouvé quelque chose",
   "1 member": "1 membre",
@@ -1211,5 +1211,12 @@
   "Borrow chapter names from another source. Only a source whose numbering matches this series is used; switching this off takes those names back.": "Emprunter les noms de chapitre à une autre source. Seule une source dont la numérotation correspond à cette série est utilisée ; désactiver retire ces noms.",
   "Looking for chapter names…": "Recherche des noms de chapitre…",
   "Borrowed chapter names removed": "Noms de chapitre empruntés retirés",
-  "Off by default. When a series’ own source only ever says “Chapter 12”, take the names from another source whose numbering was checked against this one — a source that numbers the chapters differently is never used, and the names go into the chapter name only, never the file. The chapter’s own source naming it later wins, and switching this off takes the borrowed names back.": "Désactivé par défaut. Quand la source d’une série ne dit jamais que « Chapitre 12 », les noms sont pris sur une autre source dont la numérotation a été vérifiée avec celle-ci — une source qui numérote autrement n’est jamais utilisée, et les noms ne vont que dans le nom du chapitre, jamais dans le fichier. Si la source propre le nomme plus tard, c’est elle qui gagne, et désactiver reprend les noms empruntés."
+  "Off by default. When a series’ own source only ever says “Chapter 12”, take the names from another source whose numbering was checked against this one — a source that numbers the chapters differently is never used, and the names go into the chapter name only, never the file. The chapter’s own source naming it later wins, and switching this off takes the borrowed names back.": "Désactivé par défaut. Quand la source d’une série ne dit jamais que « Chapitre 12 », les noms sont pris sur une autre source dont la numérotation a été vérifiée avec celle-ci — une source qui numérote autrement n’est jamais utilisée, et les noms ne vont que dans le nom du chapitre, jamais dans le fichier. Si la source propre le nomme plus tard, c’est elle qui gagne, et désactiver reprend les noms empruntés.",
+  "Automatic — {direction}, from the chapter files": "Automatique — {direction}, d’après les fichiers des chapitres",
+  "Automatic — {direction}, from the source": "Automatique — {direction}, d’après la source",
+  "Automatic — {direction}, from AniList": "Automatique — {direction}, d’après AniList",
+  "Automatic — not known, reads as a webtoon": "Automatique — inconnu, se lit comme un webtoon",
+  "Webtoon": "Webtoon",
+  "Vertical": "Vertical",
+  "What “Series default” in the reader follows. Automatic takes it from the chapter files, then the source, then AniList.": "C’est ce que suit « Selon la série » dans le lecteur. En automatique, il vient des fichiers des chapitres, puis de la source, puis d’AniList."
 }

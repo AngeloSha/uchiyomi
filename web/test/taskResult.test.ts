@@ -243,3 +243,13 @@ test('group upgrades say what they did when switched on, and nothing when off (#
   // A cancelled run (the download pill, #82) leads with it, like the other stops.
   assert.match(taskResult({ ...base, stopped: 'cancelled' }), /^ · cancelled · /);
 });
+
+test('the repair says when it learned reading directions, and a directions-only run always answers', () => {
+  // #102. Quiet most nights once a library has been through it, so the nightly line only grows a clause when
+  // something was learned -- but a run that asked for nothing else must not render an empty line.
+  const base = { counted: 0, uncounted: 0, short: {}, gaps: {}, failures: { reset: 0 }, solver: {} };
+  assert.match(taskResult({ ...base, directions: { asked: 40, learned: 3 } }), /3 reading directions learned/);
+  assert.doesNotMatch(taskResult({ ...base, directions: { asked: 40, learned: 0 } }), /reading direction/);
+  assert.equal(taskResult({ ...base, only: ['directions'], directions: { asked: 2, learned: 0 } }), ' · 0 reading directions learned');
+  assert.equal(taskResult({ ...base, only: ['directions'], directions: { asked: 1, learned: 1 } }), ' · 1 reading direction learned');
+});

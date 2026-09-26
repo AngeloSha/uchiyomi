@@ -534,7 +534,20 @@ whether that adapter is loaded right now and `auto` whether the add-time auto-fo
 person (always `false` for the primary; a person confirming the same source through a plan turns it
 `false`). Admins additionally get `scanlatorPrefs`: the series' own release
 preferences, or `null` when it has none and the server-wide ones apply; and `sourcePrefs`, the series' own
-source order `{priority}` (below), or `null` when the server-wide order applies. Every chapter object (this route's
+source order `{priority}` (below), or `null` when the server-wide order applies.
+
+**Which way a series reads** (since v0.48.0). `metadata.readingDirection` is one of Komga's four —
+`LEFT_TO_RIGHT`, `RIGHT_TO_LEFT`, `VERTICAL`, `WEBTOON` — and was `WEBTOON` for every series before. It is now the
+admin's override (`readingDirection` on `PUT /api/admin/series/:id/meta`, echoed as `overrides.readingDirection`)
+if there is one, else what the evidence said, else still `WEBTOON`. The evidence, most trusted first: the first
+chapter's `ComicInfo.xml` saying `<Manga>YesAndRightToLeft</Manga>` (read by every scan); the followed source —
+MangaDex's original language, Japanese → `RIGHT_TO_LEFT`, Korean and Chinese → `WEBTOON`, read when a series is
+added and by the repair's `directions` step; and AniList's country of origin by the same rule, from the match that
+finds the art and from a tracker link. A weaker signal never replaces a stronger one. Admins also get
+`detectedDirection: {direction, from} | null`, what the evidence alone says. The same value reaches the reader's
+*Series default* direction, the offline download manifest and the Komga-compatible API.
+
+Every chapter object (this route's
 `books`, `GET /api/books/:id`, `next`, the home shelves) carries `scanlator` — the group that released the
 file on disk, as the source showed it, a joint release reading `"A & B"` — and `sourceId`, the adapter it was
 downloaded from. Both are `null` for a chapter the scanner found rather than the downloader wrote, which
@@ -1224,8 +1237,12 @@ library*, and the *Fix* / *Fill now* / *Retry now* / *Reset solver sessions* chi
 *It's fine* is the separate `confirm-short` route below) runs the nightly repair now. It is **detached**, like `update` and `verify`, and answers **200**
 `{ok: true, started: true}`; the counts land on `GET /api/admin/tasks` as the `repair` entry's `lastResult`.
 It is the only task that takes a **body**: `{only?: ('solver' | 'count' | 'failures' | 'short' | 'gaps' |
-'groups' | 'names')[], seriesId?, bookId?, sourceId?}`. With no body it runs all seven steps over the whole
-library, in that order. `groups` (since v0.47.0) does nothing unless group upgrades are switched on —
+'groups' | 'names' | 'directions')[], seriesId?, bookId?, sourceId?}`. With no body it runs all eight steps over
+the whole library, in that order. `directions` (since v0.48.0) asks MangaDex (the original language of every
+series that follows it) and AniList (the country of origin of every linked series) about the series whose
+reading direction nothing has said yet — at most `REPAIR_DIRECTIONS_MAX` (500) series per service a night, 100
+ids per MangaDex request and 50 per AniList request — and reports `directions: {asked, learned}`.
+`groups` (since v0.47.0) does nothing unless group upgrades are switched on —
 `groupUpgrade` on `PATCH /api/admin/settings`, `group_upgrade` on its GET, off by default — and each swap it
 makes is audited as `book.group_upgraded`. `names` (also v0.47.0) borrows chapter names from another source
 and likewise does nothing unless `borrowNames` is on for the server or for a series (`borrow_names` on the

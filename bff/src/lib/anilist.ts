@@ -4,7 +4,16 @@
 // than re-resolved later by another fuzzy title search.
 import { plainText } from './htmlText';
 
-const QUERY = `query($s:String){Media(search:$s,type:MANGA,sort:SEARCH_MATCH){id title{romaji english}coverImage{extraLarge}bannerImage relations{edges{node{type bannerImage}}}}}`;
+// `countryOfOrigin` rides along for the series' reading direction (lib/readingDirection.ts), with every title
+// the entry goes by so the direction is taken only from an entry that is visibly the series searched for
+// (directionFromAniListMatch): the same match, the same request, no extra rate cost.
+const QUERY = `query($s:String){Media(search:$s,type:MANGA,sort:SEARCH_MATCH){id title{romaji english native}synonyms countryOfOrigin coverImage{extraLarge}bannerImage relations{edges{node{type bannerImage}}}}}`;
+
+/** Every name an entry goes by: its three titles and its synonyms. */
+function titlesOf(m: any): string[] {
+  return [m?.title?.romaji, m?.title?.english, m?.title?.native, ...(Array.isArray(m?.synonyms) ? m.synonyms : [])]
+    .filter((t): t is string => typeof t === 'string' && !!t.trim());
+}
 
 function clean(t: string): string {
   return t
@@ -24,7 +33,7 @@ function clean(t: string): string {
 export async function fetchAniListArt(
   rawTitle: string,
   retry = 0,
-): Promise<{ banner: string | null; cover: string | null; mediaId?: number | null; mediaTitle?: string | null }> {
+): Promise<{ banner: string | null; cover: string | null; mediaId?: number | null; mediaTitle?: string | null; country?: string | null; titles?: string[] }> {
   const s = clean(rawTitle);
   if (!s) return { banner: null, cover: null };
   const r = await fetch('https://graphql.anilist.co', {
@@ -52,7 +61,46 @@ export async function fetchAniListArt(
     cover: m?.coverImage?.extraLarge ?? null,
     mediaId: m?.id ?? null,
     mediaTitle: m?.title?.english || m?.title?.romaji || null,
+    country: typeof m?.countryOfOrigin === 'string' ? m.countryOfOrigin : null,
+    titles: titlesOf(m),
   };
+}
+
+const COUNTRIES = `query($ids:[Int]){Page(perPage:50){media(id_in:$ids,type:MANGA){id countryOfOrigin title{romaji english native}synonyms}}}`;
+
+/**
+ * `countryOfOrigin` and every title for many linked entries at once (series_trackers' AniList ids), fifty per
+ * request, for the repair's reading-direction backfill (lib/readingDirection.ts detectDirections). Public data:
+ * no token. Paced like the art jobs between pages, and a 429 is waited out as fetchAniListArt waits it out;
+ * anything else throws, so the caller stops asking for the night instead of recording nothing as an answer.
+ */
+export async function fetchAniListCountries(ids: number[]): Promise<Map<number, { country: string; titles: string[] }>> {
+  const out = new Map<number, { country: string; titles: string[] }>();
+  for (let i = 0; i < ids.length; i += 50) {
+    if (i) await new Promise((res) => setTimeout(res, 2200)); // stay under AniList's ~30 req/min
+    const chunk = ids.slice(i, i + 50);
+    let j: any = null;
+    for (let retry = 0; ; retry++) {
+      const r = await fetch('https://graphql.anilist.co', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', accept: 'application/json' },
+        body: JSON.stringify({ query: COUNTRIES, variables: { ids: chunk } }),
+        signal: AbortSignal.timeout(10000),
+      });
+      if (r.status === 429 && retry < 2) {
+        const wait = Math.min(6, Number(r.headers.get('retry-after')) || 4);
+        await new Promise((res) => setTimeout(res, (wait + 0.5) * 1000));
+        continue;
+      }
+      if (!r.ok) throw new Error(`anilist ${r.status}`);
+      j = await r.json();
+      break;
+    }
+    for (const m of j?.data?.Page?.media ?? []) {
+      if (Number.isInteger(m?.id) && typeof m?.countryOfOrigin === 'string') out.set(m.id, { country: m.countryOfOrigin, titles: titlesOf(m) });
+    }
+  }
+  return out;
 }
 
 const ANIME_QUERY = `query($s:String){Media(search:$s,type:ANIME,sort:SEARCH_MATCH){bannerImage}}`;

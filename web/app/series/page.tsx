@@ -15,7 +15,7 @@ import { useToast } from '@/components/Toast';
 import { ConfirmDialog, Modal, msgOf } from '@/components/ConfirmDialog';
 import { useAuth, canDownload } from '@/lib/auth';
 import { IcChevronLeft, IcHeart, IcStar, IcPlay, IcDownload, IcCloudDownload, IcCheck, IcTrash, IcMoments } from '@/components/icons';
-import { t as tr } from '@/lib/i18n';
+import { t as tr, keys } from '@/lib/i18n';
 import { FindMissingDialog } from '@/components/FindMissingDialog';
 import { normGroup } from '@/lib/scanlators';
 import { GHOST_CAP, mergeRows, whyLabel, runLabel, chunkNumbers, MARK_CHUNK, type Row } from '@/lib/chapterRows';
@@ -56,6 +56,23 @@ function ArtEditor({ label, kind, busy, onUpload, onSetUrl, onReset }: { label: 
   );
 }
 
+/** Komga's four directions, as the edit modal offers them: what the server stores, and the label for each. */
+const DIRECTION_LABELS = keys('Right to left', 'Left to right', 'Webtoon', 'Vertical');
+const DIRECTIONS = (['RIGHT_TO_LEFT', 'LEFT_TO_RIGHT', 'WEBTOON', 'VERTICAL'] as const).map((v, i) => [v, DIRECTION_LABELS[i]] as const);
+
+/**
+ * The "Automatic" choice, saying what automatic currently means and what said so -- so an admin can see
+ * whether the files, the source or AniList placed the series before deciding to overrule it.
+ */
+function autoDirectionLabel(d: Series['detectedDirection']): string {
+  const label = DIRECTIONS.find(([v]) => v === d?.direction)?.[1];
+  if (!d || !label) return tr('Automatic — not known, reads as a webtoon');
+  const direction = tr(label);
+  if (d.from === 'comicinfo') return tr('Automatic — {direction}, from the chapter files', { direction });
+  if (d.from === 'anilist') return tr('Automatic — {direction}, from AniList', { direction });
+  return tr('Automatic — {direction}, from the source', { direction });
+}
+
 function SeriesEditModal({ id, series, onClose, onSaved }: { id: string; series: Series; onClose: () => void; onSaved: () => void }) {
   const toast = useToast();
   const [title, setTitle] = useState(series.metadata?.title || series.name || '');
@@ -77,6 +94,12 @@ function SeriesEditModal({ id, series, onClose, onSaved }: { id: string; series:
   // Kept visible while "Show 18+" is off even if one of its genres is on the admin's 18+ list. Surfacing
   // only: it changes nothing about who may open the series, which is the age rating above.
   const [adultExempt, setAdultExempt] = useState(series.overrides?.adultExempt === true);
+  // Which way the series reads (#102): what the reader's "Series default" direction follows. '' is automatic --
+  // the chapter files, then the source, then AniList (bff lib/readingDirection.ts), a webtoon when none says.
+  // Seeded from the OVERRIDE only, never from the effective value: seeding from that would turn whatever was
+  // detected into a hand-set override on the first unrelated save, and a later, better signal could never
+  // reach the series again.
+  const [direction, setDirection] = useState<string>(series.overrides?.readingDirection ?? '');
   const [busy, setBusy] = useState(false);
   const addGenre = (raw: string) => {
     const t = raw.trim().replace(/,$/, '').trim();
@@ -100,7 +123,7 @@ function SeriesEditModal({ id, series, onClose, onSaved }: { id: string; series:
   const saveText = async () => {
     setBusy(true);
     try {
-      await api(`/api/admin/series/${id}/meta`, { method: 'PUT', json: { title, summary, author, status, genres, ageRating: ageRating === '' ? null : Number(ageRating), adultExempt } });
+      await api(`/api/admin/series/${id}/meta`, { method: 'PUT', json: { title, summary, author, status, genres, ageRating: ageRating === '' ? null : Number(ageRating), adultExempt, readingDirection: direction || null } });
       toast('Saved', 'success');
       onSaved();
     } catch (e) { toast(msgOf(e, 'Could not save'), 'error'); }
@@ -175,6 +198,12 @@ function SeriesEditModal({ id, series, onClose, onSaved }: { id: string; series:
           Members with an age limit below this will not see the series anywhere: not in the library, search,
           the reader, or an external OPDS app.
         </p>
+        <label className="mb-1 mt-3 block text-xs font-semibold uppercase tracking-wider text-fog-500">{tr('Reading direction')}</label>
+        <select value={direction} onChange={(e) => setDirection(e.target.value)} className={fld}>
+          <option value="">{autoDirectionLabel(series.detectedDirection)}</option>
+          {DIRECTIONS.map(([v, label]) => <option key={v} value={v}>{tr(label)}</option>)}
+        </select>
+        <p className="mt-1 text-[11px] text-fog-500">{tr('What “Series default” in the reader follows. Automatic takes it from the chapter files, then the source, then AniList.')}</p>
         <label className="mb-1 mt-3 block text-xs font-semibold uppercase tracking-wider text-fog-500">{tr('Genres')}</label>
         <div className="flex flex-wrap gap-1.5 rounded-lg border border-ink-700 bg-ink-900/60 p-2">
           {genres.map((g) => (

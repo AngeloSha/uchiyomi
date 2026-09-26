@@ -14,9 +14,10 @@ const JUNK_MODES: readonly JunkPages[] = ['show', 'collapse', 'hide'];
 /**
  * Which way paged mode lays its pages out. `rtl` is the manga way: the next page is to the LEFT (swipe right,
  * tap the left edge, ←), and a double spread puts its first page on the right. `series` follows the series'
- * own `readingDirection` -- RIGHT_TO_LEFT reads right to left, anything else left to right. Only a Komga
- * backend reports a real direction today; the built-in library answers WEBTOON for every series
- * (lib/ownedCatalog seriesDto), so there `series` reads left to right.
+ * own `readingDirection` -- RIGHT_TO_LEFT reads right to left, anything else left to right. Since v0.48.0
+ * (#102) the built-in library knows it: from the chapter's ComicInfo, the source, AniList, or the admin
+ * (bff lib/readingDirection.ts). Before that it answered WEBTOON for every series, so `series` could only
+ * ever read left to right.
  */
 export type PagedDirection = 'ltr' | 'rtl' | 'series';
 const PAGED_DIRECTIONS: readonly PagedDirection[] = ['ltr', 'rtl', 'series'];
@@ -31,9 +32,9 @@ export interface ReaderPrefs {
   spread: boolean; // paged mode: two pages side by side (manga double-page convention)
   /**
    * Paged mode's page order (see `PagedDirection`). `series` by default: a series that says it reads right to
-   * left finally gets a right-to-left track, and every other series -- all of them on the built-in library --
-   * reads left to right exactly as before. `ltr`/`rtl` are overrides. Stored settings without the key pick
-   * up the default through the spread in `migratePrefs`.
+   * left gets a right-to-left track, and every other series reads left to right exactly as before.
+   * `ltr`/`rtl` are overrides. Stored settings without the key pick up the default through the spread in
+   * `migratePrefs`.
    */
   pagedDirection: PagedDirection;
   junkPages: JunkPages; // what to do with pages that repeat across chapters
@@ -200,6 +201,12 @@ export interface SeriesPrefs {
   zoom?: number;
   spread?: boolean;
   pagedDirection?: ReaderPrefs['pagedDirection'];
+  /**
+   * The direction above was CHOSEN for this title in the reader, rather than copied into its memory along
+   * with a change to something else. Only a series' memory carries it; see `seriesPinChange` and
+   * `normaliseSeriesPrefs` for why a pin of `series` means nothing without it.
+   */
+  directionChosen?: true;
 }
 
 /**
@@ -224,10 +231,67 @@ export function globalPrefsChange(p: Partial<ReaderPrefs>, inSeries: boolean): P
   return out;
 }
 
+/**
+ * A title's look laid over the reader's current settings: only the keys its memory (or its source's default)
+ * actually holds, so whatever it does not hold -- the direction, for most titles now -- stays the default's.
+ * The reader applies this once it knows the series and again once it knows the series' source.
+ */
+export function withTitleLook(cur: ReaderPrefs, sp: SeriesPrefs): ReaderPrefs {
+  return {
+    ...cur,
+    ...(sp.mode ? { mode: sp.mode } : {}),
+    ...(sp.theme ? { theme: sp.theme } : {}),
+    ...(sp.spread !== undefined ? { spread: sp.spread } : {}),
+    ...(sp.pagedDirection ? { pagedDirection: sp.pagedDirection } : {}),
+  };
+}
+
+/**
+ * What a change made in the reader, with a title open, pins to that title's memory -- or null for nothing.
+ *
+ * Any change to the look pins the look as it now stands (mode, theme, spread): that is how a title keeps what
+ * it was set to while the defaults move. ⚠️ The DIRECTION is pinned only when the change WAS the direction.
+ * v0.46.0 pinned `n.pagedDirection` on every look change, and `n.pagedDirection` is usually `series` inherited
+ * from the defaults -- so switching a manga to paged, or to sepia, silently fixed its direction at whatever the
+ * profile said that day, and Profile → Settings → Reading direction never reached that title again (#102):
+ * the sheet showed "Series default" for it whatever the profile said. `directionChosen` marks a pin the reader
+ * made on purpose, which is what lets a deliberate "Series default" for one title outlive a profile change.
+ * Reintroduce by adding `pagedDirection: n.pagedDirection` to the look: readerSourcePrefs.test.ts "a change to
+ * the look does not pin the direction" finds it pinned.
+ */
+export function seriesPinChange(p: Partial<ReaderPrefs>, n: ReaderPrefs): SeriesPrefs | null {
+  if (!(p.mode || p.theme || p.spread !== undefined || p.pagedDirection)) return null;
+  const out: SeriesPrefs = { mode: n.mode, theme: n.theme, spread: n.spread };
+  if (p.pagedDirection) { out.pagedDirection = p.pagedDirection; out.directionChosen = true; }
+  return out;
+}
+
+/**
+ * A title's stored memory, with the one kind of pin that is not a pin taken out.
+ *
+ * v0.46.0 and v0.47.0 wrote the direction in force into a title's memory on ANY change of mode, theme or
+ * spread (see `seriesPinChange`). A stored `series` from those builds is therefore almost never a choice --
+ * it is the default of the day, and it is exactly the pin that kept the profile's direction away from every
+ * title someone had adjusted. It carries no `directionChosen`, so it is dropped here, on every read, and the
+ * title follows its source's default and the profile again. A stored `ltr` or `rtl` is kept: it may equally be
+ * the default of the day, but it is also what choosing a direction for one title wrote in those builds -- the
+ * very workaround #102 describes -- and a choice is not ours to throw away. A pin the reader makes now carries
+ * the mark, so a deliberate "Series default" for one title is kept like any other.
+ * Reading, not rewriting: the cleaned memory is what the next save writes back, locally and to the account.
+ * Reintroduce by returning `raw` unchanged: readerSourcePrefs.test.ts "a stored Series default pin from before
+ * v0.48 no longer hides the profile's direction" reads `series` back.
+ */
+export function normaliseSeriesPrefs(raw: unknown): SeriesPrefs {
+  const sp: SeriesPrefs = raw && typeof raw === 'object' && !Array.isArray(raw) ? { ...(raw as SeriesPrefs) } : {};
+  if (sp.pagedDirection === 'series' && sp.directionChosen !== true) delete sp.pagedDirection;
+  if (!sp.pagedDirection) delete sp.directionChosen;
+  return sp;
+}
+
 export function loadSeriesPrefs(seriesId: string): SeriesPrefs {
   if (typeof window === 'undefined' || !seriesId) return {};
   try {
-    return JSON.parse(localStorage.getItem(`yomi_rs_${seriesId}`) || '{}');
+    return normaliseSeriesPrefs(JSON.parse(localStorage.getItem(`yomi_rs_${seriesId}`) || '{}'));
   } catch {
     return {};
   }

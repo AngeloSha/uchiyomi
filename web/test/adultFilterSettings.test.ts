@@ -66,7 +66,8 @@ test('the edit dialog seeds "Always show" from the override and sends it on save
   // Raw, not `code()`: this page has `/*` inside string literals, which the comment stripper would eat.
   const src = read('app/series/page.tsx');
   assert.match(src, /const \[adultExempt, setAdultExempt\] = useState\(series\.overrides\?\.adultExempt === true\);/, 'the checkbox is not seeded from the override');
-  assert.match(src, /ageRating: ageRating === '' \? null : Number\(ageRating\), adultExempt \}/, 'the save does not send the flag');
+  // `adultExempt` then whatever follows it (readingDirection since v0.48.0): what matters is that it is sent.
+  assert.match(src, /ageRating: ageRating === '' \? null : Number\(ageRating\), adultExempt[,} ]/, 'the save does not send the flag');
   assert.match(src, /checked=\{adultExempt\} onChange=\{\(e\) => setAdultExempt\(e\.target\.checked\)\}/);
 });
 

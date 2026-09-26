@@ -1,5 +1,6 @@
 // A source adapter knows how to talk to one content provider (MangaDex API, Aqua Manga site, ...).
 // The downloader/updater are written against this interface, so adding a source = adding one adapter.
+import type { ReadingDirection } from '../komgaDto';
 export interface SourceSeries {
   sourceId: string; // id within the source
   source: string; // adapter id, e.g. 'mangadex'
@@ -19,6 +20,12 @@ export interface SourceSeries {
    * Never a routable id here (`sourceId` is), and never shown to a reader (`url` is the web link).
    */
   path?: string;
+  /**
+   * Which way the title reads, when the source can say (#102): MangaDex from the title's original language.
+   * Absent means the source does not know, which is every scraped site. Learned onto the series when it is
+   * added (lib/readingDirection.ts), below ComicInfo's own word and above AniList's.
+   */
+  readingDirection?: ReadingDirection;
 }
 
 export interface SourceChapter {

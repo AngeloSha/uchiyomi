@@ -129,3 +129,100 @@ test('the reading direction is part of a series\' and a source\'s remembered loo
   assert.equal(prefs.loadSeriesPrefs('series-9').pagedDirection, 'ltr');
   assert.ok(prefs.LOOK_KEYS.includes('pagedDirection'));
 });
+
+// ---- #102: the profile's reading direction has to reach a title someone has adjusted ----
+//
+// v0.46.0 pinned the direction in force into a title's memory on EVERY change of mode, theme or spread. The
+// direction in force is usually `series`, inherited from the profile, so a manga switched to paged or to sepia
+// was frozen at "Series default" from then on and Profile → Settings → Reading direction never reached it.
+
+test('a change to the look does not pin the direction', () => {
+  // Reintroduce by adding `pagedDirection: n.pagedDirection` to seriesPinChange's look.
+  const n = { ...prefs.DEFAULT_PREFS, mode: 'paged' as const, theme: 'sepia' as const, pagedDirection: 'series' as const };
+  assert.deepEqual(prefs.seriesPinChange({ theme: 'sepia' }, n), { mode: 'paged', theme: 'sepia', spread: false },
+    'a theme change pinned the inherited direction too');
+  assert.deepEqual(prefs.seriesPinChange({ mode: 'paged' }, n), { mode: 'paged', theme: 'sepia', spread: false });
+  assert.deepEqual(prefs.seriesPinChange({ spread: true }, { ...n, spread: true }), { mode: 'paged', theme: 'sepia', spread: true });
+  // A change to the direction IS a choice, and says so.
+  assert.deepEqual(prefs.seriesPinChange({ pagedDirection: 'rtl' }, { ...n, pagedDirection: 'rtl' }),
+    { mode: 'paged', theme: 'sepia', spread: false, pagedDirection: 'rtl', directionChosen: true });
+  // Nothing about the look changed: nothing is pinned.
+  assert.equal(prefs.seriesPinChange({ brightness: 0.5 }, n), null);
+  assert.equal(prefs.seriesPinChange({ gap: 4 }, n), null);
+});
+
+test("the profile's direction reaches a title whose look was changed in the reader", async (t) => {
+  // The whole chain the reader runs: the sheet's change goes through setPref's rule into the title's memory,
+  // the profile then changes, and the reader lays the title's memory over the (new) default.
+  // (Mock timers and a flush so the save's debounced push does not outlive the test: a pull yields to a
+  // pending push, and a later test's pull would silently adopt nothing.)
+  mock.timers.enable({ apis: ['setTimeout'] });
+  t.after(() => { mock.timers.reset(); mem.clear(); putBodies.length = 0; });
+  mem.clear(); putBodies.length = 0;
+  // The profile said Left to right when the title was adjusted -- an inherited value normaliseSeriesPrefs
+  // cannot tell from a choice, so only seriesPinChange keeps it out of the title's memory.
+  const before = { ...prefs.DEFAULT_PREFS, pagedDirection: 'ltr' as const };
+  const shown = { ...before, mode: 'paged' as const, theme: 'sepia' as const };
+  prefs.saveSeriesPrefs('manga-1', prefs.seriesPinChange({ mode: 'paged', theme: 'sepia' }, shown)!);
+
+  const profile = { ...prefs.DEFAULT_PREFS, pagedDirection: 'rtl' as const };
+  const look = prefs.withTitleLook(profile, prefs.loadSeriesPrefs('manga-1'));
+  assert.equal(look.pagedDirection, 'rtl', 'the profile\'s Right to left did not reach the adjusted title');
+  assert.equal(look.mode, 'paged', 'the title lost its own mode');
+  assert.equal(look.theme, 'sepia', 'the title lost its own theme');
+  await flush();
+  assert.equal(putBodies.at(-1).readerSeries['manga-1'].pagedDirection, undefined, 'the inherited direction was pushed as a pin');
+});
+
+test('a stored Series default pin from before v0.48 no longer hides the profile\'s direction', async (t) => {
+  // What v0.46.0/v0.47.0 left in every adjusted title's memory, locally and in the account's settings row.
+  // Reintroduce by returning `raw` unchanged from normaliseSeriesPrefs.
+  mock.timers.enable({ apis: ['setTimeout'] });
+  t.after(() => { mock.timers.reset(); mem.clear(); putBodies.length = 0; });
+  mem.clear(); putBodies.length = 0;
+  mem.set('yomi_rs_manga-2', JSON.stringify({ mode: 'paged', theme: 'sepia', spread: false, pagedDirection: 'series', zoom: 1.2 }));
+
+  assert.deepEqual(prefs.loadSeriesPrefs('manga-2'), { mode: 'paged', theme: 'sepia', spread: false, zoom: 1.2 });
+  const profile = { ...prefs.DEFAULT_PREFS, mode: 'paged' as const, pagedDirection: 'rtl' as const };
+  assert.equal(prefs.withTitleLook(profile, prefs.loadSeriesPrefs('manga-2')).pagedDirection, 'rtl');
+
+  // The same pin arriving from the account (another device, or this one before an update) is read the same way.
+  serverBlob = { readerSeries: { 'manga-3': { mode: 'paged', pagedDirection: 'series' } } };
+  await prefs.syncPrefsFromServer();
+  assert.deepEqual(prefs.loadSeriesPrefs('manga-3'), { mode: 'paged' });
+
+  // And the cleaned memory is what goes back up, so the account's row stops carrying it.
+  prefs.saveSeriesPrefs('manga-2', { zoom: 1.5 });
+  await flush();
+  assert.deepEqual(putBodies.at(-1).readerSeries['manga-2'], { mode: 'paged', theme: 'sepia', spread: false, zoom: 1.5 });
+  assert.equal(putBodies.at(-1).readerSeries['manga-3'].pagedDirection, undefined);
+});
+
+test('a direction chosen for one title is kept, Series default included', async (t) => {
+  // The mark is what separates "Series default, chosen for this title while the profile says Right to left"
+  // from the inherited pin above; without it the choice would be dropped on the next read.
+  mock.timers.enable({ apis: ['setTimeout'] });
+  t.after(() => { mock.timers.reset(); mem.clear(); putBodies.length = 0; });
+  mem.clear(); putBodies.length = 0;
+  const n = { ...prefs.DEFAULT_PREFS, mode: 'paged' as const, pagedDirection: 'series' as const };
+  prefs.saveSeriesPrefs('webtoon-1', prefs.seriesPinChange({ pagedDirection: 'series' }, n)!);
+  assert.equal(prefs.loadSeriesPrefs('webtoon-1').pagedDirection, 'series');
+  const profile = { ...prefs.DEFAULT_PREFS, pagedDirection: 'rtl' as const };
+  assert.equal(prefs.withTitleLook(profile, prefs.loadSeriesPrefs('webtoon-1')).pagedDirection, 'series');
+
+  // A later look change leaves the chosen direction where it was.
+  prefs.saveSeriesPrefs('webtoon-1', prefs.seriesPinChange({ theme: 'gray' }, { ...n, theme: 'gray' })!);
+  assert.equal(prefs.loadSeriesPrefs('webtoon-1').pagedDirection, 'series');
+
+  // Right to left or left to right stored by those builds is kept: it is what choosing one for a title wrote,
+  // the very workaround #102 describes, and a choice is not ours to throw away.
+  mem.set('yomi_rs_manga-4', JSON.stringify({ mode: 'paged', pagedDirection: 'rtl' }));
+  assert.equal(prefs.loadSeriesPrefs('manga-4').pagedDirection, 'rtl');
+  // Junk in storage reads as nothing rather than throwing.
+  mem.set('yomi_rs_manga-5', JSON.stringify(['x']));
+  assert.deepEqual(prefs.loadSeriesPrefs('manga-5'), {});
+  // The mark travels with the pin to the account, so another device keeps the choice too.
+  await flush();
+  assert.deepEqual(putBodies.at(-1).readerSeries['webtoon-1'],
+    { mode: 'paged', theme: 'gray', spread: false, pagedDirection: 'series', directionChosen: true });
+});
