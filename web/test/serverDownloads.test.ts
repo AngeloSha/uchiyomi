@@ -42,5 +42,6 @@ test("the pill comes up for the server's downloads too, after a person's own", (
   // Reintroduce by dropping `serverChapters`: a followed source's check downloads with no pill at all.
   assert.equal(pillLabel(0, 0, [], 0, 3), 'Fetching 3 chapters');
   assert.equal(pillLabel(1, 5, [], 0, 3), 'Fetching 5 chapters', "a person's own job still names its own count");
+  assert.equal(pillLabel(0, 0, [], 0, 1), 'Fetching 1 chapter', 'one chapter, not "1 chapters"');
   assert.equal(pillLabel(0, 0, [], 0, 0), null);
 });

@@ -2,7 +2,7 @@
   "_meta": {
     "language": "es",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 1241
+    "strings": 1242
   },
   "1 check found something": "1 comprobación encontró algo",
   "1 member": "1 miembro",
@@ -1244,5 +1244,6 @@
   "All downloads": "Todas las descargas",
   "On the server": "En el servidor",
   "{n} saved with pages missing": "{n} guardados con páginas faltantes",
-  "Ch. {n} could not be saved": "No se pudo guardar el cap. {n}"
+  "Ch. {n} could not be saved": "No se pudo guardar el cap. {n}",
+  "Fetching 1 chapter": "Obteniendo 1 capítulo"
 }

@@ -92,8 +92,9 @@ export function runProgress(r: RunCard): string {
  * the server's runs, then failures.
  */
 export function pillLabel(active: number, chaptersLeft: number, runs: readonly RunCard[], failed: number, serverChapters = 0): string | null {
-  if (active) return tr('Fetching {n} chapters', { n: chaptersLeft });
-  if (serverChapters) return tr('Fetching {n} chapters', { n: serverChapters });
+  const fetching = (n: number) => (n === 1 ? tr('Fetching 1 chapter') : tr('Fetching {n} chapters', { n }));
+  if (active) return fetching(chaptersLeft);
+  if (serverChapters) return fetching(serverChapters);
   const run = runs.find((r) => r.status === 'running');
   if (run) return runTitle(run.kind);
   if (failed) return tr('{n} failed', { n: failed });
