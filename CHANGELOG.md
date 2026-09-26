@@ -27,9 +27,10 @@ Reported by @ZukiFen and @Maaster.
 ### Nothing goes missing quietly any more
 
 - **Health → Downloads missing from the library** compares every chapter file in the downloads folder with the
-  library and lists each one that is not in it, per folder, with the reason when the scan knows it, and which
-  kind of filesystem the folder is on. It does not depend on the scan having noticed, which is exactly what failed
-  twice. The six-hourly check includes it, so the admin warning comes up by itself.
+  library and lists each one that is not in it, per folder, with the reason when it can tell, and which kind of
+  filesystem the folder is on. It does not depend on the scan having noticed, which is exactly what failed twice.
+  The six-hourly check includes it, so the admin warning comes up by itself. A file of your own that the scan never
+  reads as a chapter (straight in the downloads folder, say) is listed but never turns it red.
 - **An add or a Fetch whose chapters land on disk but not in the library ends as an error that says so**, not
   "done". v0.48.0 only checked the chapters that were already on disk.
 - **Scans no longer overlap.** A scan asked for while one is running waits for one more after it, so a chapter
@@ -40,9 +41,9 @@ Reported by @ZukiFen and @Maaster.
 The scheduled check for new chapters and the nightly repair only started when `LIBRARY_BACKEND=owned` was set.
 The compose files set it; the all-in-one image and the Unraid template don't, so on those installs a followed
 series was only ever checked when someone pressed *Run now*. Both now start on every install. **After updating,
-the first check runs about ten minutes after the server starts** and fetches what your followed series are
-missing, within the usual limits (up to 5 new chapters per series, 150 series per check); the repair follows
-half an hour after start.
+the first check runs within about ten minutes of the server starting** (or six hours after one you ran by hand)
+and fetches what your followed series are missing, within the usual limits: up to 5 new chapters per series and
+150 downloads per check. The nightly repair runs within half an hour (or a day after one you ran by hand).
 
 ### Also
 

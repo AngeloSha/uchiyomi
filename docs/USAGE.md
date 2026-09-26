@@ -1009,7 +1009,8 @@ and before v0.48.2 each of them was skipped.
 the library and lists each one that is not in it, one line per folder, with the reason when the scan knows it
 and an **Open** for the series when there is one. A chapter that landed after the last scan began is left for the
 next scan, not counted as missing, and chapters of a series someone removed are only counted (Admin → Removed
-puts it back). It reads the disk and the database directly, so it holds even when the scan itself did not notice
+puts it back). A file of your own where the scan never reads chapters — straight in the downloads folder, or in a
+subfolder of a series — is listed dimmed and never turns the check red. It reads the disk and the database directly, so it holds even when the scan itself did not notice
 what it left out. An add or a *Fetch* whose chapters land on disk but not in the library also ends as an error
 on its card that says so.
 

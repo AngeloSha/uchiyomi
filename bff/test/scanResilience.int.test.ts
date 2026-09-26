@@ -41,6 +41,8 @@ if (DSN) {
   process.env.MIN_FREE_GB = '0';
   process.env.DOWNLOAD_MIN_GAP_MS = '0';
   process.env.DOWNLOAD_PAGE_GAP_MS = '0';
+  // Files here land seconds before a scan; the census's allowance for a NAS clock would call them all pending.
+  process.env.CENSUS_CLOCK_SKEW_MS = '0';
 }
 const skip = DSN ? false : 'set TEST_DATABASE_URL to run';
 
@@ -245,21 +247,27 @@ function registerDownloader() {
   } as any));
 }
 
-test('requests during a scan share one follow-up, and a chapter that landed meanwhile is in it', { skip }, async () => {
-  // Reintroduce by starting a scan on every call: the calls get three different scans, overlapping.
+test('requests during a scan share one follow-up, and nobody waits for a third scan', { skip }, async () => {
+  // Reintroduce by starting a scan on every call: five calls, five scans. Reintroduce the first version's
+  // `return persistScan()` in the follow-up: a caller that asks again the moment its own scan ends starts the
+  // second scan first, and the follow-up then chains a THIRD behind it.
+  const { scanCount } = (await import('../src/lib/library')) as any;
   await persistScan(); // nothing of an earlier test's still running: `first` must start a scan of its own
+  const n0 = scanCount();
   const first = persistScan();
-  cbz(join(DL, 'Zsr/Meanwhile', 'Chapter 1.cbz'), 'Meanwhile');
   const second = persistScan();
   const third = persistScan();
   assert.notEqual(first, second, 'a request during a scan was answered with the scan already running');
-  assert.equal(second, third, 'two requests during one scan started two more scans');
-  await Promise.all([first, second, third]);
-  assert.deepEqual((await books('Zsr/Meanwhile')).map((b) => b.n), [1], 'the follow-up scan did not see the chapter');
-  // And nothing left running or queued: the next call starts a fresh scan of its own.
+  assert.equal(second, third, 'two requests during one scan got two different follow-ups');
+  // The first caller asks again the moment its scan ends, before the follow-up has run.
+  const again = first.then(() => persistScan());
+  await Promise.all([first, second, third, again]);
+  assert.equal(scanCount() - n0, 2, 'one scan and one follow-up were not enough for four requests');
+  // Nothing left running or queued: the next call starts a fresh scan of its own.
   const next = persistScan();
   assert.notEqual(next, second);
   await next;
+  assert.equal(scanCount() - n0, 3);
 });
 
 test('a Fetch whose download the scan never indexes ends as an error that says so', { skip }, async () => {
@@ -332,10 +340,75 @@ test('Admin → Health → Downloads missing from the library lists them, with t
   assert.match(item('(the folder itself)')?.detail ?? '', /straight in the downloads folder: only a folder can be a series/);
   assert.equal(item('Zsr/Late'), undefined, 'a chapter newer than the last scan was called missing');
   assert.match(c.note ?? '', /1 landed after the last scan began/);
+  // A stray file of the person's own, where the scan never reads chapters: listed, dimmed, never counted.
+  assert.equal(item('(the folder itself)')?.info, true, 'a stray file of the person\'s own turns Health red');
+  assert.match(c.note ?? '', /1 folder holds files of your own where the scan never reads chapters/);
   // Every indexed download is present, and not listed.
   assert.equal(item('Zsr/Downloaded'), undefined);
   rmSync(join(DL, 'Loose.cbz'), { force: true });
   clearCensusCache();
+});
+
+test('a removed series\' files are counted, not listed; a chapter still marked deleted is not in the library', { skip }, async () => {
+  const { clearCensusCache, notInLibrary } = await import('../src/lib/downloadCensus');
+  // Removed while a download was still going: files with no rows in a folder whose every row is removed.
+  // Reintroduce by deciding "removed" from the rows alone: this folder is listed as missing, with no reason.
+  await q(`INSERT INTO lib_series (id, source, title, folder, books_count, library_id, deleted_at)
+           VALUES ('s_sr_gone','Zsr','Gone','Zsr/Gone',0,'lib', now())`);
+  cbz(join(DL, 'Zsr/Gone', 'Chapter 1.cbz'), 'Gone');
+  // A tombstone at the very path a Fetch writes to (Fetch again marks the old copy deleted first). Only the
+  // scan that reads the new file clears it, and this folder is one the scan never gets through. Reintroduce by
+  // dropping `pruned_at IS NULL` from notInLibrary: the tombstone reads as the chapter, and the card says done.
+  await q(`INSERT INTO lib_books (id, series_id, source, file, number, title, mtime, root, pruned_at)
+           VALUES ('b_sr_tomb','s_sr_refused','Zsr','Zsr/Refused/Chapter 1.cbz',1,'Chapter 1',0,$1, now())`, [DL]);
+  try {
+    await persistScan();
+    clearCensusCache();
+    const report = await runHealthChecks();
+    const c = report.checks.find((x: any) => x.id === 'downloads-missing');
+    const item = (folder: string) => c.items.find((i: any) => i.title === `Downloads / ${folder}`);
+    assert.equal(item('Zsr/Gone'), undefined, 'a removed series\' download is listed as missing');
+    assert.match(c.note ?? '', /1 belongs to series someone removed/);
+    assert.ok(item('Zsr/Refused'), 'a chapter still marked deleted counts as in the library');
+    assert.deepEqual(await notInLibrary('Zsr/Refused', [1]), [1], 'a tombstone at the path counts as the chapter');
+  } finally {
+    await q(`DELETE FROM lib_books WHERE id = 'b_sr_tomb'`).catch(() => {});
+    await q(`DELETE FROM lib_series WHERE id = 's_sr_gone'`).catch(() => {});
+    rmSync(join(DL, 'Zsr/Gone'), { recursive: true, force: true });
+    clearCensusCache();
+  }
+});
+
+test('the census is taken again once a scan has run, not five minutes later', { skip }, async () => {
+  // Reintroduce by caching on age alone: the second census is the first one, and still says missing.
+  const { downloadCensus, clearCensusCache } = await import('../src/lib/downloadCensus');
+  clearCensusCache();
+  cbz(join(DL, 'Zsr/Cached', 'Chapter 1.cbz'), 'Cached');
+  await new Promise((r) => setTimeout(r, 20));
+  await q(`DROP TRIGGER IF EXISTS sr_boom_cached ON lib_series`);
+  // Refused first, so it is missing; then let through, and scanned.
+  await q(`CREATE OR REPLACE FUNCTION sr_boom_cached() RETURNS trigger AS $$
+             BEGIN IF NEW.folder = 'Zsr/Cached' THEN RAISE EXCEPTION 'not yet'; END IF; RETURN NEW; END $$ LANGUAGE plpgsql`);
+  await q('CREATE TRIGGER sr_boom_cached BEFORE INSERT OR UPDATE ON lib_series FOR EACH ROW EXECUTE FUNCTION sr_boom_cached()');
+  try {
+    await persistScan();
+    await new Promise((r) => setTimeout(r, 20));
+    const a = await downloadCensus();
+    assert.ok(a.missing.some((m: any) => m.folder === 'Zsr/Cached'), JSON.stringify(a.missing));
+    await q('DROP TRIGGER sr_boom_cached ON lib_series');
+    await persistScan();
+    const b = await downloadCensus();
+    assert.ok(!b.missing.some((m: any) => m.folder === 'Zsr/Cached'), 'the census from before the scan was reused');
+    // And one census at a time: two askers at once share it.
+    clearCensusCache();
+    const [x, y] = [downloadCensus(), downloadCensus()];
+    assert.equal(x, y, 'two askers walked the downloads folder twice');
+    await x;
+  } finally {
+    await q('DROP TRIGGER IF EXISTS sr_boom_cached ON lib_series').catch(() => {});
+    await q('DROP FUNCTION IF EXISTS sr_boom_cached()').catch(() => {});
+    clearCensusCache();
+  }
 });
 
 const asRoot = typeof process.getuid === 'function' && process.getuid() === 0;

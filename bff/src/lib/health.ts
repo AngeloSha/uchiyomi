@@ -24,7 +24,7 @@ import { CHAPTER_RETRY_CAP } from './updater';
 import { diagnose } from './sourceDiagnosis';
 import { haveNumbers } from './libraryNumbers';
 import { DL_ROOT, LIBRARY_ROOT, lastScanReport, QUIET_WALK, type WalkReason } from './library';
-import { downloadCensus, fsTypeOf } from './downloadCensus';
+import { countsAsMissing, downloadCensus, fsTypeOf } from './downloadCensus';
 import { chapterFileRel } from './downloader';
 import { forDesktop } from './desktop';
 
@@ -1003,22 +1003,30 @@ async function downloadsMissing(): Promise<HealthCheck> {
   if (c instanceof Error) {
     return { ...base, status: 'warn', summary: `could not be checked just now: ${String(c.message).slice(0, 160)}`, items: [] };
   }
-  const n = c.missingFiles;
   const s = (k: number, one: string, many: string) => (k === 1 ? one : many);
+  // What needs someone: everything but a stray file of the person's own where the scan never reads chapters
+  // (lib/downloadCensus.ts countsAsMissing). Those are listed, dimmed, and never turn the check red -- the only
+  // way to clear one would be to move the person's own file.
+  const counted = c.missing.filter(countsAsMissing);
+  const n = counted.reduce((k, m) => k + m.files.length, 0);
+  const strays = c.missing.length - counted.length;
   const notes = [
     `Every chapter file under ${c.root}${c.fsType ? ` (${c.fsType})` : ''}, against the library.`,
+    ...(c.noScan ? ['No library scan has run since the server started; Admin → Tasks → Library scan runs one.'] : []),
+    ...(c.scanCapped ? ['The last scan stopped at its folder limit, so some folders were never looked into.'] : []),
     ...(c.pending ? [`${c.pending} landed after the last scan began and ${s(c.pending, 'waits', 'wait')} for the next one.`] : []),
     ...(c.removed ? [`${c.removed} belong${s(c.removed, 's', '')} to series someone removed (Admin → Removed puts one back).`] : []),
+    ...(strays ? [`${strays} folder${s(strays, ' holds', 's hold')} files of your own where the scan never reads chapters; listed, not counted.`] : []),
     ...(c.truncated ? ['The folder is too big to check completely; the counts are a floor.'] : []),
   ];
   return {
     ...base,
     status: n || c.unreadable.length ? 'problem' : 'ok',
     summary: n
-      ? `${n} downloaded chapter${s(n, '', 's')} in ${c.missing.length} folder${s(c.missing.length, '', 's')} ${s(n, 'is', 'are')} on disk but not in the library`
+      ? `${n} downloaded chapter${s(n, '', 's')} in ${counted.length} folder${s(counted.length, '', 's')} ${s(n, 'is', 'are')} on disk but not in the library`
       : c.unreadable.length
         ? `${c.unreadable.length} folder${s(c.unreadable.length, '', 's')} in the downloads could not be read`
-        : `all ${c.files} chapter file${s(c.files, '', 's')} in the downloads folder are in the library`,
+        : `every chapter file in the downloads folder is in the library (${c.files} checked)`,
     note: notes.join(' '),
     items: [
       ...c.unreadable.map((u) => ({ title: `Downloads / ${u.folder || '(the folder itself)'}`, detail: `could not be read (${u.error})` })),
@@ -1026,6 +1034,7 @@ async function downloadsMissing(): Promise<HealthCheck> {
         title: `Downloads / ${m.folder || '(the folder itself)'}`,
         detail: `${m.files.length} chapter${s(m.files.length, '', 's')} not in the library (${m.files.slice(0, 3).join(', ')}${m.files.length > 3 ? ', …' : ''})${m.reason ? `: ${m.reason}` : ''}`,
         ...(m.seriesId ? { seriesId: m.seriesId } : {}),
+        ...(countsAsMissing(m) ? {} : { info: true }),
       })),
     ].slice(0, MAX_ITEMS),
   };

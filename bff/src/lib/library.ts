@@ -676,6 +676,9 @@ export const lastScanReport = (): ScanReport | null => lastScan;
 export type ScanResult = { series: number; books: number; ms: number; skipped: number };
 let scanning: Promise<ScanResult> | null = null;
 let again: Promise<ScanResult> | null = null;
+let scansStarted = 0;
+/** How many scans this process has started: for the tests, which count them. */
+export const scanCount = (): number => scansStarted;
 /**
  * Scan every root into lib_series/lib_books. One scan at a time.
  *
@@ -692,14 +695,18 @@ export function persistScan(): Promise<ScanResult> {
     scanning = scanOnce().finally(() => { scanning = null; });
     return scanning;
   }
+  // `scanning ??`: by the time this runs the scan it waited for has ended, so a scan running NOW was started
+  // after every caller sharing this follow-up made its call -- a caller that asked again the moment its own scan
+  // ended starts one before this line runs, and chaining another behind that would be a third scan for nothing.
   again ??= scanning.catch(() => undefined).then(() => {
     again = null;
-    return persistScan();
+    return scanning ?? persistScan();
   });
   return again;
 }
 
 async function scanOnce(): Promise<ScanResult> {
+  scansStarted++;
   const t0 = Date.now();
   let nBooks = 0;
   const skipped: ScanSkip[] = [];
@@ -874,8 +881,12 @@ async function scanOnce(): Promise<ScanResult> {
       }
     }
   }
+  // Best effort, like everything after the folders: every folder is already committed, and one series row this
+  // UPDATE cannot write (a lock, a constraint) must not throw the whole scan away at its last step -- the report
+  // below would never be written, and the Health page would go on describing the scan before.
   await q(`UPDATE lib_series s SET books_count = c.n, latest_mtime = COALESCE(c.mt, 0)
-           FROM (SELECT series_id, count(*) AS n, max(mtime) AS mt FROM lib_books GROUP BY series_id) c WHERE c.series_id = s.id`);
+           FROM (SELECT series_id, count(*) AS n, max(mtime) AS mt FROM lib_books GROUP BY series_id) c WHERE c.series_id = s.id`)
+    .catch((e) => console.warn(`[scan] chapter counts not refreshed: ${(e as Error)?.message || e}`));
   // A chapter that has landed is no longer a failure. Cheap: the ledger only ever holds what is still missing.
   await q(`DELETE FROM chapter_failures f USING lib_books b WHERE b.series_id = f.series_id AND b.number = f.number`).catch(() => {});
   // The same "a chapter has landed" moment for a reader's marks (#69): a number somebody ticked read while
