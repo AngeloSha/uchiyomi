@@ -667,13 +667,24 @@ GET    /api/sources/detail        GET    /api/sources/search
 GET    /api/sources/search-all    GET    /api/sources/latest
 GET    /api/sources/jobs          POST   /api/sources/add
 GET    /api/discover/trending     POST   /api/sources/fill/scan
-POST   /api/sources/fill          POST   /api/sources/fetch
+GET    /api/sources/fill/scan/:id POST   /api/sources/fill
+POST   /api/sources/fetch
 ```
 
 **Filling a series' gaps.** `POST /api/sources/fill/scan` takes `{seriesId, altTitle?}` and answers with what
 is missing, a short-lived `planId`, and every source that was checked — including the ones it refused, with
 the reason and the measured overlap. `POST /api/sources/fill` then takes
 `{planId, source, sourceSeriesId, numbers[]}`.
+
+Since v0.48.4 the scan answers as it goes. A source behind Cloudflare can take 90 s to answer, and a scan
+that waited for the slowest source outlasted the timeout of the reverse proxy in front of it. The POST
+starts the scan, or joins the one the same person is already running for the same series and title, and
+answers after `SCAN_FIRST_ANSWER_MS` (2.5 s) with what has arrived: `done`, `scanId`, the candidates so far,
+`asking` (the sources it is waiting for, `{source, name}`) and `waiting` (how many have not had a turn).
+`GET /api/sources/fill/scan/:id` answers the same shape with the rest, to the person who started the scan
+only (`404 scan_gone` to anyone else, and once a finished scan has aged out with its plan). `refusal` comes
+with `done`. The plan is usable while the scan runs: a candidate appears only once its chapters are in it.
+One person may run three scans at once; a fourth answers `429 busy`.
 
 The split is deliberate. Chapter URLs never leave the server: the client names chapter NUMBERS, and only ones
 that the quoted plan actually offered for that source. A chapter fetched from the wrong series would land as

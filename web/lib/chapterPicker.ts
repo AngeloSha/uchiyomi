@@ -63,3 +63,20 @@ export function offerOf(
   if (c.why === 'ok' && c.fillable.length) return { mode: 'fill', numbers: [...c.fillable].sort((a, b) => a - b) };
   return { mode: 'none', numbers: [] };
 }
+
+/**
+ * A scan that is still asking its sources is read again every two seconds (v0.48.4). The server answers the
+ * first request after a moment with what has arrived, and the rest from GET /api/sources/fill/scan/:id -- a
+ * scan used to be one request that waited for the slowest source, and a proxy's timeout ended it first.
+ */
+export const SCAN_POLL_MS = 2000;
+export function scanPoll(d: { done?: boolean } | null | undefined): number | false {
+  return d && d.done === false ? SCAN_POLL_MS : false;
+}
+
+/** Who a scan is still waiting for: up to `max` names, and how many more besides (asking or not yet asked). */
+export function stillAsking(asking: readonly { name: string }[], waiting: number, max = 3): { names: string[]; more: number } | null {
+  if (!asking.length && waiting <= 0) return null;
+  const names = asking.slice(0, max).map((a) => a.name);
+  return { names, more: asking.length - names.length + Math.max(0, waiting) };
+}

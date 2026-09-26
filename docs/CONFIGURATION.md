@@ -157,6 +157,8 @@ deployment.
 The shared source-work limits are `SOLVER_CONCURRENCY` (default `4`) and `SOLVER_BUDGET_MS` (default
 `90000`) for Cloudflare-backed work; `SCAN_CONCURRENCY` defaults to that solver slot count, while
 `SCAN_ENOUGH` (default `3`) is how many matching candidates make a missing-chapter scan stop widening.
+`SCAN_FIRST_ANSWER_MS` (default `2500`, since v0.48.4) is how long Find missing chapters waits before showing
+what has arrived; the rest comes in as each source answers, so no request waits on the slowest source.
 
 ## Downloading
 

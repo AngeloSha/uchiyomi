@@ -4,7 +4,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'fs';
 import { join } from 'path';
-import { offerOf, runState, runsOf, toggleOne, toggleRun } from '../lib/chapterPicker';
+import { offerOf, runState, runsOf, scanPoll, stillAsking, toggleOne, toggleRun } from '../lib/chapterPicker';
 import { followable } from '../lib/scanlators';
 import { fetchingLabel, fetchingToast, joinSentences } from '../lib/jobs';
 
@@ -80,6 +80,32 @@ test('one chapter reads as one chapter, in the dialog, the toasts and the pill, 
   for (const f of readdirSync(join(root, 'public', 'locales')).filter((x) => x.endsWith('.json'))) {
     const d = JSON.parse(readFileSync(join(root, 'public', 'locales', f), 'utf8'));
     for (const k of keys) {
+      assert.ok(String(d[k] ?? '').trim(), `${f} has no "${k}"`);
+      for (const ph of k.match(/\{\w+\}/g) ?? []) assert.ok(d[k].includes(ph), `${f}: "${k}" lost ${ph}`);
+    }
+  }
+});
+
+test('a scan still asking its sources is read again every two seconds, and says who it waits for (v0.48.4)', () => {
+  // The owner's scans failed: one request waited for the slowest source and the proxy gave up first. Now the
+  // server answers at once and the dialog reads the rest. Reintroduce by never polling: the cards of every
+  // source slower than the first answer never arrive.
+  assert.equal(scanPoll({ done: false }), 2000);
+  assert.equal(scanPoll({ done: true }), false);
+  assert.equal(scanPoll({}), false, 'a scan that never started (too few chapters) is polled');
+  assert.equal(scanPoll(undefined), false);
+  assert.deepEqual(stillAsking([{ name: 'aqua' }, { name: 'MangaDex' }], 0), { names: ['aqua', 'MangaDex'], more: 0 });
+  assert.deepEqual(stillAsking([{ name: 'a' }, { name: 'b' }, { name: 'c' }, { name: 'd' }], 2), { names: ['a', 'b', 'c'], more: 3 });
+  assert.equal(stillAsking([], 0), null);
+  const root = join(__dirname, '..');
+  const src = readFileSync(join(root, 'components', 'FindMissingDialog.tsx'), 'utf8');
+  assert.match(src, /api<Scan>\(`\/api\/sources\/fill\/scan\/\$\{encodeURIComponent\(cur\.id\)\}`\)/, 'the dialog never reads the scan as it goes');
+  assert.match(src, /refetchInterval: \(qy\) => scanPoll\(qy\.state\.data\)/, 'the dialog does not read a running scan again');
+  // "No source could supply what is missing" is a verdict, and there is none while sources are still answering.
+  assert.match(src, /!offering\.length && !scan\.isLoading && d\.done !== false/, 'the dialog says nothing can supply it while sources are still being asked');
+  for (const f of readdirSync(join(root, 'public', 'locales')).filter((x) => x.endsWith('.json'))) {
+    const d = JSON.parse(readFileSync(join(root, 'public', 'locales', f), 'utf8'));
+    for (const k of ['Still asking 1 source…', 'Still asking {n} sources…', 'Still asking {s}…', 'The scan failed. Try again.', 'and {n} more']) {
       assert.ok(String(d[k] ?? '').trim(), `${f} has no "${k}"`);
       for (const ph of k.match(/\{\w+\}/g) ?? []) assert.ok(d[k].includes(ph), `${f}: "${k}" lost ${ph}`);
     }

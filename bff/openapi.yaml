@@ -6,7 +6,7 @@
 openapi: 3.1.0
 info:
   title: Uchiyomi API
-  version: 0.48.3
+  version: 0.48.4
   description: "Everything the web app does, it does over this API. Session JWTs are for the browser; scripts
     use a personal API token (Profile -> Connections -> API tokens), sent as `Authorization: Bearer uy_...`.
     Scopes: read (every token; GET plus the library search POST, which is a query), write (anything that changes data), admin (the /api/admin surface, which also
@@ -1897,6 +1897,27 @@ paths:
                     type: array
                     items: { type: string }
                     description: Source ids the updater already merges into this series, in the order they were followed.
+                  done:
+                    type: boolean
+                    description: >-
+                      v0.48.4. False while sources are still being asked; read the rest from
+                      GET /api/sources/fill/scan/{id}. Always true on the too_few_chapters early answer.
+                  scanId:
+                    type: string
+                  asking:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        source: { type: string }
+                        name: { type: string }
+                    description: The sources the scan is waiting for right now.
+                  waiting:
+                    type: integer
+                    description: Sources that have not had a turn yet.
+                  failed:
+                    type: string
+                    description: Present when the scan itself broke, rather than one source.
         "400":
           description: Malformed body or parameter
         "401":
@@ -1905,6 +1926,39 @@ paths:
           description: "Forbidden: token scope, account permission or age limit"
         "404":
           description: Not found, or not visible to this account
+        "429":
+          description: "busy: this person already has three scans asking the sources"
+  /api/sources/fill/scan/{id}:
+    get:
+      tags:
+        - sources
+      summary: The rest of a Find missing chapters scan, as each source answers (v0.48.4).
+      operationId: getApiSourcesFillScanById
+      description: >-
+        Same shape as the POST that started the scan. Read it until `done` is true; the dialog asks every two
+        seconds. Answers only the person who started the scan.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope or account permission"
+        "404":
+          description: "scan_gone: not this person's scan, or a finished one that aged out with its plan"
   /api/sources/fill:
     post:
       tags:

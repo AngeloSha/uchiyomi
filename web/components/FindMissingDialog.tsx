@@ -10,7 +10,7 @@
  * Sources that were checked and rejected are shown too, with the reason and the measured overlap, because
  * "MangaDex has this but numbers it differently" is worth knowing and a silently shortened list is not.
  */
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, ApiError } from '@/lib/api';
 import { Modal, msgOf } from '@/components/ConfirmDialog';
@@ -20,7 +20,7 @@ import { useToast } from '@/components/Toast';
 import { useAuth } from '@/lib/auth';
 import { t as tr } from '@/lib/i18n';
 import { followable } from '@/lib/scanlators';
-import { offerOf, runState, runsOf, toggleOne, toggleRun, type OfferMode } from '@/lib/chapterPicker';
+import { offerOf, runState, runsOf, scanPoll, stillAsking, toggleOne, toggleRun, type OfferMode } from '@/lib/chapterPicker';
 import type { SeriesSource } from '@/lib/types';
 import { jobNoteLines, type JobCardNotes } from '@/lib/jobNotes';
 import { fetchingToast, joinSentences } from '@/lib/jobs';
@@ -44,6 +44,14 @@ interface Scan {
   /** Source ids the updater already asks for this series, so a followed one offers no second follow button. */
   following?: string[];
   refusal: { code: string; message: string } | null;
+  /** v0.48.4: the scan answers as it goes. Absent from a scan that never started (too few chapters). */
+  scanId?: string;
+  done?: boolean;
+  /** The sources it is waiting for right now, and how many have not had a turn yet. */
+  asking?: { source: string; name: string }[];
+  waiting?: number;
+  /** The scan itself broke (not one source): said instead of a list. */
+  failed?: string;
 }
 interface Job extends JobCardNotes { folder: string; title: string; total: number; done: number; status: string; reason?: string }
 
@@ -136,9 +144,31 @@ export function FindMissingDialog({ seriesId, onClose }: { seriesId: string; onC
   /** Each source's chosen chapters, by `${source}:${sourceSeriesId}`; absent means everything it offers. */
   const [picked, setPicked] = useState<Record<string, number[]>>({});
 
+  // One scan per title: POST starts it (or joins the one already running) and answers after a moment with what
+  // has arrived; every read after that is the scan's own route, every two seconds until it is done. A scan used to
+  // be one request that waited for the slowest source, and a proxy gave up first: "The scan failed." (v0.48.4)
+  const scanRef = useRef<{ key: string; id: string } | null>(null);
+  const scanKey = `${seriesId}\u0000${term}`;
   const scan = useQuery({
     queryKey: ['fill-scan', seriesId, term],
-    queryFn: () => api<Scan>('/api/sources/fill/scan', { method: 'POST', json: { seriesId, altTitle: term || undefined } }),
+    queryFn: async () => {
+      const cur = scanRef.current?.key === scanKey ? scanRef.current : null;
+      let res: Scan | null = null;
+      if (cur) {
+        try {
+          res = await api<Scan>(`/api/sources/fill/scan/${encodeURIComponent(cur.id)}`);
+        } catch (e) {
+          // A blip keeps what is on screen and asks again in two seconds; a scan the server no longer has (it
+          // restarted, or the scan aged out) is started again.
+          const prev = qc.getQueryData<Scan>(['fill-scan', seriesId, term]);
+          if (codeOf(e) !== 'scan_gone' && prev) return prev;
+        }
+      }
+      res ??= await api<Scan>('/api/sources/fill/scan', { method: 'POST', json: { seriesId, altTitle: term || undefined } });
+      scanRef.current = res.scanId && res.done === false ? { key: scanKey, id: res.scanId } : null;
+      return res;
+    },
+    refetchInterval: (qy) => scanPoll(qy.state.data),
     staleTime: 60_000,
     retry: false,
   });
@@ -207,6 +237,7 @@ export function FindMissingDialog({ seriesId, onClose }: { seriesId: string; onC
   // A scan is good for five minutes (bff lib/fill.ts). One read at leisure is older than that: ask the sources again
   // rather than leave the person with an error and no way back to a fresh list.
   const stale = () => {
+    scanRef.current = null;
     void scan.refetch();
     toast(tr('That list was too old, so the sources were asked again. Press it again.'), 'info');
   };
@@ -312,6 +343,11 @@ export function FindMissingDialog({ seriesId, onClose }: { seriesId: string; onC
   const alsoFollow = isAdmin ? (d?.candidates || []).filter((c) => !offering.includes(c) && followable(c)) : [];
   const rejected = (d?.candidates || []).filter((c) => !offering.includes(c) && !alsoFollow.includes(c));
   const max = d?.fillMax ?? 300;
+  // "Still asking aqua, MangaDex and 2 more…", while the scan is not done.
+  const still = d?.done === false ? stillAsking(d.asking ?? [], d.waiting ?? 0) : null;
+  const asking = !still ? null
+    : !still.names.length ? (still.more === 1 ? tr('Still asking 1 source…') : tr('Still asking {n} sources…', { n: still.more }))
+    : tr('Still asking {s}…', { s: still.more ? `${still.names.join(', ')} ${tr('and {n} more', { n: still.more })}` : still.names.join(', ') });
 
   const header = (c: Candidate) => (
     <div className="flex gap-3">
@@ -347,7 +383,7 @@ export function FindMissingDialog({ seriesId, onClose }: { seriesId: string; onC
   return (
     <Modal title={tr('Find missing chapters')} onClose={onClose}>
       {scan.isLoading && <p className="text-sm text-fog-400">{tr('Asking your sources…')}</p>}
-      {scan.error && <p className="text-sm text-rose-300">{msgOf(scan.error, tr('The scan failed.'))}</p>}
+      {scan.error && !d && <p className="text-sm text-rose-300">{msgOf(scan.error, tr('The scan failed.'))}</p>}
 
       {d && (
         <>
@@ -360,6 +396,14 @@ export function FindMissingDialog({ seriesId, onClose }: { seriesId: string; onC
           </p>
 
           {d.refusal && <p className="mt-3 text-sm text-amber-300">{d.refusal.message}</p>}
+          {d.failed && <p className="mt-3 text-sm text-rose-300">{tr(d.failed)}</p>}
+          {/* Each source's card comes in as that source answers; this says who it is still waiting for. */}
+          {asking && (
+            <p className="mt-3 flex items-center gap-2 text-xs text-fog-400" aria-live="polite">
+              <span aria-hidden className="h-1.5 w-1.5 shrink-0 animate-pulse-soft rounded-full bg-accent" />
+              {asking}
+            </p>
+          )}
 
           {offering.map((c) => {
             const key = `${c.source}:${c.sourceSeriesId}`;
@@ -407,7 +451,7 @@ export function FindMissingDialog({ seriesId, onClose }: { seriesId: string; onC
             );
           })}
 
-          {!offering.length && !scan.isLoading && !d.refusal && (
+          {!offering.length && !scan.isLoading && d.done !== false && !d.refusal && !d.failed && (
             <p className="mt-3 text-sm text-fog-400">{tr('No source could supply what is missing.')}</p>
           )}
 
