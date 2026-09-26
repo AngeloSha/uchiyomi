@@ -111,12 +111,14 @@ test('sanitize: truncation can leave trailing whitespace, unlike the trim before
   assert.equal(sanitize(withSpaceAtTheCut), 'y'.repeat(149) + ' ');
 });
 
-test('sanitize: leading and trailing dots are preserved, so ".." stays ".."', () => {
-  // Not a traversal risk on its own — the chapter still lands inside DL_ROOT (asserted above) — but it does
-  // mean a title of ".." writes into the source directory rather than a subfolder of it.
-  assert.equal(sanitize('..'), '..');
-  assert.equal(sanitize('.hidden'), '.hidden');
-  assert.equal(resolve(join(DL_ROOT, `Aqua/${sanitize('..')}`)), DL_ROOT);
+test('sanitize: a leading dot is dropped, so ".." is no longer the folder above', () => {
+  // It used to be kept, and this test documented what that meant: a title of ".." wrote into the source directory
+  // rather than a subfolder of it, and ".hidden" landed in a folder the scanner skips as hidden (SKIP_DIR), so it
+  // never reached the library (#109, v0.48.2). Trailing dots are still kept on Linux (Windows strips them).
+  assert.equal(sanitize('..'), 'untitled');
+  assert.equal(sanitize('.hidden'), 'hidden');
+  assert.equal(sanitize('Title.'), 'Title.');
+  assert.equal(resolve(join(DL_ROOT, `Aqua/${sanitize('..')}`)), join(DL_ROOT, 'Aqua', 'untitled'));
 });
 
 test('sanitize: Windows reserved device names are not special-cased', () => {

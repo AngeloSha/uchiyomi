@@ -1,7 +1,7 @@
 // Path containment and the writability preflight.
 //
 // There was no path-containment check anywhere in this codebase before file operations existed, and
-// sanitize() in the downloader strips path separators but lets `..` survive as a whole segment --
+// sanitize() in the downloader strips path separators and (since v0.48.2) a leading dot, but a path can still be built elsewhere --
 // sanitize.test.ts records that as an asserted behaviour. So containment is the backstop that has to hold
 // even when a caller passes something it should not have.
 //
