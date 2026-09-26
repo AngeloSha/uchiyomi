@@ -56,7 +56,8 @@ import { titlesFromBackup, entriesFromBackup, type BackupEntry } from '../lib/ta
 import { linkSeries, seedTrackerFloor } from '../lib/trackers';
 import { ADAPTERS, PROVIDERS, LIST_STATUSES, TRACKER_LIST_MAX, type Provider, type LibraryEntry } from '../lib/trackerProviders';
 import { open as unseal } from '../lib/secretbox';
-import { runHealthChecks } from '../lib/health';
+import { findingOf, runHealthChecks } from '../lib/health';
+import { IGNORABLE_CHECKS, ignoreFinding, unignoreFinding } from '../lib/healthIgnore';
 import { readHealthSummary, storeHealthSummary } from '../lib/healthSummary';
 import { titlesFromMangadexList, entriesFromMangadexList } from '../lib/mangadexList';
 import { fetchAniListArt, fetchAniListCandidates, fetchAnimeBanner } from '../lib/anilist';
@@ -2721,6 +2722,35 @@ export default async function adminRoutes(app: FastifyInstance) {
   });
   // The header's question, answered from what is stored: never runs the checks (lib/healthSummary.ts).
   app.get('/api/admin/health/summary', async () => ({ summary: await readHealthSummary() }));
+
+  /**
+   * Ignore a Health finding, or stop ignoring it (v0.48.3, lib/healthIgnore.ts).
+   *
+   * The finding is looked up again here, by its key, rather than trusting what the page sent: an ignore covers
+   * everything the finding is about -- every missing number of a gap, not the hundred the page carries -- and a
+   * finding that is gone by the time the button is pressed is answered 404 rather than recorded. Admin-only by
+   * the prefix hook, audited both ways; no confirmation, because nothing is deleted and "Stop ignoring" undoes it.
+   */
+  const ignoreBody = z.object({
+    check: z.enum(IGNORABLE_CHECKS),
+    key: z.string().min(1).max(500),
+    ignored: z.boolean(),
+  });
+  app.post('/api/admin/health/ignore', async (req, reply) => {
+    const b = ignoreBody.safeParse(req.body ?? {});
+    if (!b.success) return reply.code(400).send({ error: 'bad_request', message: b.error.issues[0]?.message ?? 'Bad body' });
+    const { check, key, ignored } = b.data;
+    if (ignored) {
+      const f = await findingOf(check, key);
+      if (!f) return reply.code(404).send({ error: 'gone', message: 'That finding is not there any more.' });
+      await ignoreFinding(check, key, f, userIdOf(req) ?? null);
+      await logAudit('health.ignore', { userId: userIdOf(req), detail: { check, key, title: f.title, members: f.members.length }, req });
+    } else {
+      await unignoreFinding(check, key);
+      await logAudit('health.unignore', { userId: userIdOf(req), detail: { check, key }, req });
+    }
+    return { ok: true };
+  });
 
   // ---- link existing series to AniList entries so tracker sync has an anchor ----
   // Art was matched long before trackers existed, so those series have cached art but no link. This

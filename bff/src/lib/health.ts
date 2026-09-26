@@ -25,6 +25,7 @@ import { diagnose } from './sourceDiagnosis';
 import { haveNumbers } from './libraryNumbers';
 import { DL_ROOT, LIBRARY_ROOT, lastScanReport, QUIET_WALK, type WalkReason } from './library';
 import { countsAsMissing, downloadCensus, fsTypeOf } from './downloadCensus';
+import { applyIgnores, ignoredTail, keepIgnoresAlive, loadIgnores, noIgnores, type Finding, type IgnorableCheck, type IgnoreCtx } from './healthIgnore';
 import { chapterFileRel } from './downloader';
 import { forDesktop } from './desktop';
 
@@ -41,7 +42,8 @@ export type HealthStatus = 'ok' | 'warn' | 'problem';
  * two-page chapter"), and it is a toggle: an item that already carries `fixed` is asking to be re-checked.
  */
 export type HealthAction =
-  | 'fix_short' | 'confirm_short' | 'delete' | 'fill' | 'retry' | 'test' | 'unblock' | 'disable' | 'merge' | 'solver_reset';
+  | 'fix_short' | 'confirm_short' | 'delete' | 'fill' | 'retry' | 'test' | 'unblock' | 'disable' | 'merge' | 'solver_reset'
+  | 'ignore' | 'unignore';
 
 export interface HealthItem {
   seriesId?: string;
@@ -77,6 +79,13 @@ export interface HealthItem {
    * about. Kept as data rather than folded into `detail` so the page can show it as a state.
    */
   fixed?: { at: string; what: string };
+  /**
+   * What an Ignore of this finding is recorded under (lib/healthIgnore.ts): stable across runs, per check --
+   * `series:ID`, `source:ID`, `folder:PATH`, `anilist:ID`. Absent: this finding cannot be ignored.
+   */
+  key?: string;
+  /** An admin chose to stop being told about this, and when. The item is then `info`. */
+  ignored?: { at: string; by: string | null };
 }
 
 export interface HealthCheck {
@@ -227,7 +236,7 @@ function gapConclusion(g: StoredGaps): string {
  * definitions of one fact is how that happens; there is now one. The numbers themselves come from
  * `haveNumbers` for the same reason (see heldBySeries above).
  */
-async function chapterGaps(held: HeldSeries[]): Promise<HealthCheck> {
+async function chapterGaps(held: HeldSeries[], ctx: IgnoreCtx = noIgnores()): Promise<HealthCheck> {
   const rows = held
     .map((s) => {
       const gaps = gapsOf(s.numbers);
@@ -238,7 +247,7 @@ async function chapterGaps(held: HeldSeries[]): Promise<HealthCheck> {
     .filter((r) => r.missing > 0)
     .sort((a, b) => b.missing - a.missing);
 
-  const items: HealthItem[] = rows.map((r) => {
+  const items: Array<HealthItem & { members?: string[] }> = rows.map((r) => {
     const ranges = rangeText(r.gaps);
     const g = r.s.gapsResult;
     const checked = r.s.gapsCheckedAt ? new Date(r.s.gapsCheckedAt) : null;
@@ -264,13 +273,18 @@ async function chapterGaps(held: HeldSeries[]): Promise<HealthCheck> {
         + (checked && what ? `; ${what}, checked ${checked.toISOString().slice(0, 10)}` : ''),
       numbers: r.numbers,
       actions: ['fill'] as HealthAction[],
+      // Ignored while every missing number is one that was missing when it was ignored: a gap that shrinks
+      // stays quiet, a newly missing chapter is a new finding. All of them, not the hundred shown.
+      key: `series:${r.s.id}`,
+      members: r.gaps.flatMap((g) => Array.from({ length: Math.max(0, g.hi - g.lo + 1) }, (_, i) => String(g.lo + i))),
       ...(checked && what ? { fixed: { at: checked.toISOString(), what } } : {}),
       ...(info ? { info: true } : {}),
     };
   });
+  const ignored = applyIgnores('chapter-gaps', items, ctx);
   const { items: shown, hidden } = truncate(items);
   const live = items.filter((i) => !i.info).length;
-  const quiet = items.length - live;
+  const quiet = items.length - live - ignored;
   return {
     id: 'chapter-gaps',
     title: 'Chapter gaps',
@@ -278,7 +292,8 @@ async function chapterGaps(held: HeldSeries[]): Promise<HealthCheck> {
     summary: (live
       ? `${live} series ${live === 1 ? 'has' : 'have'} missing chapters`
       : 'No gaps that need attention')
-      + (quiet ? `; ${quiet} already looked into` : ''),
+      + (quiet ? `; ${quiet} already looked into` : '')
+      + ignoredTail(ignored),
     note:
       'Gaps are normal when a source skipped a number or a series is still being downloaded. "Fill now" runs the ' +
       'repair\'s gap search for one series: it looks for another source that carries our numbering on both sides of ' +
@@ -353,12 +368,14 @@ async function shortChapters(): Promise<HealthCheck> {
  * failing, and how many times it has been tried. Before the ledger existed one night's sweep lost 164 of 226
  * series to a single chapter and no surface, not even the log, said so.
  */
-async function chapterFailures(): Promise<HealthCheck> {
+async function chapterFailures(ctx: IgnoreCtx = noIgnores()): Promise<HealthCheck> {
   const rows = await q<{
     source_id: string; chapters: number; series: number; since: string; attempts: number; capped: number;
-    latest_title: string; latest_number: number; latest_status: string; latest_reason: string | null;
+    latest_title: string; latest_number: number; latest_status: string; latest_reason: string | null; failing: string[];
   }>(
     `SELECT f.source_id,
+            -- What an ignore of this source's row covers: a newly failing chapter is a new finding.
+            array_agg(f.series_id || ':' || f.number ORDER BY f.series_id, f.number) AS failing,
             count(*)::int AS chapters,
             count(DISTINCT f.series_id)::int AS series,
             min(f.at) AS since,
@@ -371,9 +388,11 @@ async function chapterFailures(): Promise<HealthCheck> {
        FROM chapter_failures f JOIN lib_series ls ON ls.id = f.series_id AND ${visibleToAll('ls')}
       GROUP BY f.source_id ORDER BY chapters DESC`,
   ).catch(() => [] as any[]);
-  const items: HealthItem[] = rows.slice(0, 20).map((r) => ({
+  const all: Array<HealthItem & { members?: string[] }> = rows.map((r) => ({
     title: r.source_id,
     sourceId: r.source_id,
+    key: `source:${r.source_id}`,
+    members: r.failing ?? [],
     // One chip, and it is the repair's failures step for THIS source: it clears the attempt counts whatever
     // their age and re-checks up to ten of the source's series. The nightly does the same thing on its own
     // for rows that have sat at the cap for a week -- this is "the site is back up, try now".
@@ -387,14 +406,17 @@ async function chapterFailures(): Promise<HealthCheck> {
       // page 12: 404)` -- and that tail is the part that says WHICH theory is right. At 80 it was cut.
       `${r.latest_reason ? `: ${String(r.latest_reason).slice(0, 160)}` : ''})`,
   }));
-  const total = rows.reduce((n, r) => n + r.chapters, 0);
+  const ignored = applyIgnores('chapter-failures', all, ctx);
+  const live = rows.filter((_, i) => !all[i].info);
+  const items = [...all].sort((a, b) => Number(!!a.info) - Number(!!b.info)).slice(0, 20);
+  const total = live.reduce((n, r) => n + r.chapters, 0);
   return {
     id: 'chapter-failures',
     title: 'Chapters that would not download',
-    status: rows.length ? 'warn' : 'ok',
-    summary: rows.length
-      ? `${total} chapter${total === 1 ? '' : 's'} across ${rows.length} source${rows.length === 1 ? '' : 's'} keep failing`
-      : 'Every attempted chapter landed',
+    status: verdict(all),
+    summary: (live.length
+      ? `${total} chapter${total === 1 ? '' : 's'} across ${live.length} source${live.length === 1 ? '' : 's'} keep failing`
+      : 'Every attempted chapter landed') + ignoredTail(ignored),
     note:
       'One entry per source, counting chapters still missing after an attempt and how often each has been tried. ' +
       `They clear themselves the moment the chapter lands. After ${CHAPTER_RETRY_CAP} failed tries the nightly sweep leaves a chapter alone ` +
@@ -416,7 +438,7 @@ async function chapterFailures(): Promise<HealthCheck> {
  * ever asked -- and the fill scan never even pins them. Live: one series, 31 chapters, frozen since its
  * extension was uninstalled twelve days earlier, and no surface anywhere said so.
  */
-async function frozenSeries(): Promise<HealthCheck> {
+async function frozenSeries(ctx: IgnoreCtx = noIgnores()): Promise<HealthCheck> {
   const rows = await q<{ id: string; title: string; source_id: string | null; books_count: number; switched_off: boolean; still_enabled: boolean }>(
     // A source that is still installed but switched off (by hand, or by hiding its language) is a different
     // finding from one that is gone: the fix is a button, not a reinstall.
@@ -454,13 +476,17 @@ async function frozenSeries(): Promise<HealthCheck> {
     // Enabled yet unregistered is the third case: dropped by SUWAYOMI_MAX_SOURCES, which the cap check
     // above names but a series page cannot see.
     r.switched_off ? 'switched off' : r.still_enabled ? forDesktop('over the source limit (SUWAYOMI_MAX_SOURCES)', 'over the source limit') : 'no longer installed';
-  const items: HealthItem[] = frozen.slice(0, 20).map((r) => ({
+  const found: HealthItem[] = frozen.map((r) => ({
     seriesId: r.id,
     title: r.title,
+    key: `series:${r.id}`,
     detail: r.source_id
       ? `${r.books_count} chapters; its source ${r.source_id} is ${why(r)}`
       : `${r.books_count} chapters; no source recorded`,
   }));
+  const ignored = applyIgnores('frozen-series', found, ctx);
+  const stuck = found.filter((i) => !i.info).length;
+  const items = [...found].sort((a, b) => Number(!!a.info) - Number(!!b.info)).slice(0, 20);
   for (const r of covered.slice(0, 20)) {
     items.push({
       seriesId: r.id,
@@ -472,11 +498,12 @@ async function frozenSeries(): Promise<HealthCheck> {
   return {
     id: 'frozen-series',
     title: 'Series that can no longer update',
-    status: frozen.length ? 'warn' : 'ok',
-    summary: (frozen.length
-      ? `${frozen.length} series ${frozen.length === 1 ? 'has' : 'have'} no working source`
+    status: stuck ? 'warn' : 'ok',
+    summary: (stuck
+      ? `${stuck} series ${stuck === 1 ? 'has' : 'have'} no working source`
       : 'Every series has a working source') +
-      (covered.length ? `; ${covered.length} lost ${covered.length === 1 ? 'its' : 'their'} primary but still follow${covered.length === 1 ? 's' : ''} another` : ''),
+      (covered.length ? `; ${covered.length} lost ${covered.length === 1 ? 'its' : 'their'} primary but still follow${covered.length === 1 ? 's' : ''} another` : '') +
+      ignoredTail(ignored),
     note:
       'These read fine, but nothing can fetch new chapters for them and "find missing chapters" will not offer ' +
       'their own source. Switch the source back on, re-add the extension, or re-point the series at a source that carries it.' +
@@ -485,7 +512,7 @@ async function frozenSeries(): Promise<HealthCheck> {
   };
 }
 
-async function sourceTrouble(): Promise<HealthCheck> {
+async function sourceTrouble(ctx: IgnoreCtx = noIgnores()): Promise<HealthCheck> {
   const rows = await q<{
     source_id: string; status: string; consecutive: number; disabled: boolean;
     blocked_until: string | null; last_error: string | null; empty_streak: number; last_ok_at: string | null;
@@ -532,22 +559,9 @@ async function sourceTrouble(): Promise<HealthCheck> {
   // Still listed, and still a real finding the moment it is in a cooldown or somebody adds a series to it.
   const unused = (r: typeof rows[number]) =>
     !r.disabled && r.series === 0 && !(r.blocked_until && new Date(r.blocked_until).getTime() > now);
-  const live = rows.filter((r) => !r.disabled && !unused(r));
   const off = rows.filter((r) => r.disabled).length;
   const idle = rows.filter((r) => !r.disabled && unused(r)).length;
-  return {
-    id: 'sources',
-    title: 'Source health',
-    status: live.length ? 'warn' : 'ok',
-    summary: (live.length
-      ? `${live.length} source${live.length === 1 ? ' is' : 's are'} failing or blocked`
-      : 'All sources responding normally')
-      + (off ? `; ${off} turned off by you` : '')
-      + (idle ? `; ${idle} no series use` : ''),
-    note: 'A blocked source usually means the site returned 403 or a Cloudflare challenge we could not solve. '
-        + 'If several fail at once and all of them mention the solver, check the solver rather than the sites. '
-        + 'A source no series uses is listed for reference only: nothing in your library depends on it.',
-    items: rows.map((r) => {
+  const items: HealthItem[] = rows.map((r) => {
       const until = r.blocked_until ? new Date(r.blocked_until).getTime() : 0;
       // A block whose deadline has passed is not actually holding anything back; say so rather than
       // leaving the operator thinking the source is still down.
@@ -587,14 +601,31 @@ async function sourceTrouble(): Promise<HealthCheck> {
           ...(r.blocked_until ? ['unblock' as const] : []),
           ...(r.disabled ? [] : ['disable' as const]),
         ] as HealthAction[],
-        ...(r.disabled || unused(r) ? { info: true } : {}),
+        // Only a real finding can be ignored: a source switched off or used by nothing is already quiet.
+        ...(r.disabled || unused(r) ? { info: true } : { key: `source:${r.source_id}` }),
       };
-    }),
+    });
+  const ignored = applyIgnores('sources', items, ctx);
+  const live = items.filter((i) => !i.info).length;
+  return {
+    id: 'sources',
+    title: 'Source health',
+    status: live ? 'warn' : 'ok',
+    summary: (live
+      ? `${live} source${live === 1 ? ' is' : 's are'} failing or blocked`
+      : 'All sources responding normally')
+      + (off ? `; ${off} turned off by you` : '')
+      + (idle ? `; ${idle} no series use` : '')
+      + ignoredTail(ignored),
+    note: 'A blocked source usually means the site returned 403 or a Cloudflare challenge we could not solve. '
+        + 'If several fail at once and all of them mention the solver, check the solver rather than the sites. '
+        + 'A source no series uses is listed for reference only: nothing in your library depends on it.',
+    items,
   };
 }
 
 /** The same manga added twice, spotted by two local series resolving to one AniList entry. */
-async function duplicateSeries(): Promise<HealthCheck> {
+async function duplicateSeries(ctx: IgnoreCtx = noIgnores()): Promise<HealthCheck> {
   const rows = await q<{ external_id: string; titles: string; ids: string[] }>(
     `SELECT t.external_id, string_agg(ls.title, ' + ' ORDER BY ls.title) AS titles,
             array_agg(ls.id ORDER BY ls.title) AS ids
@@ -626,18 +657,7 @@ async function duplicateSeries(): Promise<HealthCheck> {
       const y = rank.get(b) ?? { books: 0, readers: 0, created: 0 };
       return y.books - x.books || y.readers - x.readers || x.created - y.created;
     })[0];
-  return {
-    id: 'duplicates',
-    title: 'Duplicate series',
-    status: rows.length ? 'warn' : 'ok',
-    summary: rows.length
-      ? `${rows.length} title${rows.length === 1 ? ' appears' : 's appear'} to be in the library twice`
-      : 'No duplicates found',
-    note:
-      'Detected by two series matching the same AniList entry, so it catches copies added from different ' +
-      'sources under different names. Progress tracking works best with one copy of each. Merging is one-way and ' +
-      'never automatic: the nightly repair leaves these alone and you confirm each one.',
-    items: rows.map((r) => {
+  const items: Array<HealthItem & { members?: string[] }> = rows.map((r) => {
       const keep = keepOf(r.ids);
       return {
         seriesId: r.ids[0],
@@ -645,13 +665,30 @@ async function duplicateSeries(): Promise<HealthCheck> {
         titles: r.titles.split(' + '),
         title: r.titles,
         keep,
+        // Ignored while the copies are the same ones: a third copy of the entry is a new finding.
+        key: `anilist:${r.external_id}`,
+        members: [...r.ids].sort(),
         // Only a pair gets the chip. Three copies of one entry is two merges in an order somebody has to
         // choose, and a button that quietly picks one is how a library loses a series it cannot get back.
         ...(r.ids.length === 2 ? { actions: ['merge' as const] } : {}),
         detail: 'Same AniList entry'
           + (r.ids.length > 2 ? `; ${r.ids.length} copies — merge them one pair at a time` : ''),
       };
-    }),
+    });
+  const ignored = applyIgnores('duplicates', items, ctx);
+  const live = items.filter((i) => !i.info).length;
+  return {
+    id: 'duplicates',
+    title: 'Duplicate series',
+    status: verdict(items),
+    summary: (live
+      ? `${live} title${live === 1 ? ' appears' : 's appear'} to be in the library twice`
+      : 'No duplicates found') + ignoredTail(ignored),
+    note:
+      'Detected by two series matching the same AniList entry, so it catches copies added from different ' +
+      'sources under different names. Progress tracking works best with one copy of each. Merging is one-way and ' +
+      'never automatic: the nightly repair leaves these alone and you confirm each one.',
+    items,
   };
 }
 
@@ -663,7 +700,7 @@ function median(sorted: number[]): number {
 }
 
 /** Chapter numbers far beyond the rest of the series: the sidebar-widget scraping bug's signature. */
-async function outlierChapters(held: HeldSeries[]): Promise<HealthCheck> {
+async function outlierChapters(held: HeldSeries[], ctx: IgnoreCtx = noIgnores()): Promise<HealthCheck> {
   const rows = held
     .map((s) => {
       // Positive numbers only, as the SQL this replaced did: a chapter 0 is a legitimate prologue and
@@ -679,7 +716,7 @@ async function outlierChapters(held: HeldSeries[]): Promise<HealthCheck> {
     .filter((r): r is NonNullable<typeof r> => !!r)
     .sort((a, b) => b.hi - a.hi);
 
-  const items: HealthItem[] = [];
+  const items: Array<HealthItem & { members?: string[] }> = [];
   for (const r of rows) {
     // The rows behind the numbers, so the Delete chip can name them. Same override rule as haveNumbers
     // (the same COALESCE, spelled out only because HAVE_SQL answers with numbers and a delete needs ids),
@@ -706,15 +743,22 @@ async function outlierChapters(held: HeldSeries[]): Promise<HealthCheck> {
       bookIds: books.slice(0, MAX_BOOK_IDS).map((b) => b.id),
       numbers: books.slice(0, MAX_BOOK_IDS).map((b) => Number(b.number)),
       actions: ['delete'],
+      // Ignored while the chapters are these ones -- a chapter numbered 9001 that really is 9001 (a
+      // hundred-volume series' specials), say. Another out-of-range chapter is a new finding.
+      key: `series:${r.s.id}`,
+      members: books.map((b) => b.id).sort(),
     });
   }
+  const ignored = applyIgnores('outliers', items, ctx);
+  const live = items.filter((i) => !i.info).length;
+  items.sort((a, b) => Number(!!a.info) - Number(!!b.info));
   return {
     id: 'outliers',
     title: 'Impossible chapter numbers',
     status: verdict(items, 'problem'),
-    summary: items.length
-      ? `${items.length} series ${items.length === 1 ? 'has' : 'have'} chapters numbered far beyond the rest`
-      : 'No out-of-range chapters',
+    summary: (live
+      ? `${live} series ${live === 1 ? 'has' : 'have'} chapters numbered far beyond the rest`
+      : 'No out-of-range chapters') + ignoredTail(ignored),
     note:
       'Catches chapters scraped from a site\'s sidebar widget, which belong to a different series. The parser ' +
       'now guards against this, so anything here predates that fix. Deleting is never automatic and the nightly ' +
@@ -997,7 +1041,7 @@ async function rootsNote(): Promise<string | undefined> {
  * knows one. Compares the disk with the database directly (lib/downloadCensus.ts), so it does not depend on the
  * scanner having noticed what it dropped -- which is exactly what it failed to do for #109, twice.
  */
-async function downloadsMissing(): Promise<HealthCheck> {
+async function downloadsMissing(ctx: IgnoreCtx = noIgnores()): Promise<HealthCheck> {
   const base = { id: 'downloads-missing', title: 'Downloads missing from the library' };
   const c = await downloadCensus().catch((e) => e as Error);
   if (c instanceof Error) {
@@ -1007,9 +1051,24 @@ async function downloadsMissing(): Promise<HealthCheck> {
   // What needs someone: everything but a stray file of the person's own where the scan never reads chapters
   // (lib/downloadCensus.ts countsAsMissing). Those are listed, dimmed, and never turn the check red -- the only
   // way to clear one would be to move the person's own file.
-  const counted = c.missing.filter(countsAsMissing);
-  const n = counted.reduce((k, m) => k + m.files.length, 0);
-  const strays = c.missing.length - counted.length;
+  const strays = c.missing.filter((m) => !countsAsMissing(m)).length;
+  const all: Array<HealthItem & { members?: string[] }> = [
+    ...c.unreadable.map((u) => ({
+      title: `Downloads / ${u.folder || '(the folder itself)'}`, detail: `could not be read (${u.error})`,
+      key: `unreadable:${u.folder}`,
+    })),
+    ...c.missing.map((m) => ({
+      title: `Downloads / ${m.folder || '(the folder itself)'}`,
+      detail: `${m.files.length} chapter${s(m.files.length, '', 's')} not in the library (${m.files.slice(0, 3).join(', ')}${m.files.length > 3 ? ', …' : ''})${m.reason ? `: ${m.reason}` : ''}`,
+      ...(m.seriesId ? { seriesId: m.seriesId } : {}),
+      // Ignored while the files are these ones: another chapter landing in the folder unseen is a new finding.
+      ...(countsAsMissing(m) ? { key: `folder:${m.folder}`, members: m.files } : { info: true }),
+    })),
+  ];
+  const ignored = applyIgnores('downloads-missing', all, ctx);
+  const live = c.missing.filter((m) => countsAsMissing(m) && all.some((it) => it.key === `folder:${m.folder}` && !it.info));
+  const n = live.reduce((k, m) => k + m.files.length, 0);
+  const unread = all.filter((it) => it.key?.startsWith('unreadable:') && !it.info).length;
   const notes = [
     `Every chapter file under ${c.root}${c.fsType ? ` (${c.fsType})` : ''}, against the library.`,
     ...(c.noScan ? ['No library scan has run since the server started; Admin → Tasks → Library scan runs one.'] : []),
@@ -1019,24 +1078,17 @@ async function downloadsMissing(): Promise<HealthCheck> {
     ...(strays ? [`${strays} folder${s(strays, ' holds', 's hold')} files of your own where the scan never reads chapters; listed, not counted.`] : []),
     ...(c.truncated ? ['The folder is too big to check completely; the counts are a floor.'] : []),
   ];
+  const { items } = truncate(all);
   return {
     ...base,
-    status: n || c.unreadable.length ? 'problem' : 'ok',
-    summary: n
-      ? `${n} downloaded chapter${s(n, '', 's')} in ${counted.length} folder${s(counted.length, '', 's')} ${s(n, 'is', 'are')} on disk but not in the library`
-      : c.unreadable.length
-        ? `${c.unreadable.length} folder${s(c.unreadable.length, '', 's')} in the downloads could not be read`
-        : `every chapter file in the downloads folder is in the library (${c.files} checked)`,
+    status: n || unread ? 'problem' : 'ok',
+    summary: (n
+      ? `${n} downloaded chapter${s(n, '', 's')} in ${live.length} folder${s(live.length, '', 's')} ${s(n, 'is', 'are')} on disk but not in the library`
+      : unread
+        ? `${unread} folder${s(unread, '', 's')} in the downloads could not be read`
+        : `every chapter file in the downloads folder is in the library (${c.files} checked)`) + ignoredTail(ignored),
     note: notes.join(' '),
-    items: [
-      ...c.unreadable.map((u) => ({ title: `Downloads / ${u.folder || '(the folder itself)'}`, detail: `could not be read (${u.error})` })),
-      ...c.missing.map((m) => ({
-        title: `Downloads / ${m.folder || '(the folder itself)'}`,
-        detail: `${m.files.length} chapter${s(m.files.length, '', 's')} not in the library (${m.files.slice(0, 3).join(', ')}${m.files.length > 3 ? ', …' : ''})${m.reason ? `: ${m.reason}` : ''}`,
-        ...(m.seriesId ? { seriesId: m.seriesId } : {}),
-        ...(countsAsMissing(m) ? {} : { info: true }),
-      })),
-    ].slice(0, MAX_ITEMS),
+    items,
   };
 }
 
@@ -1046,23 +1098,45 @@ export async function runHealthChecks(): Promise<HealthReport> {
   // The two checks that reason about chapter NUMBERS share one read of what every series holds, because
   // that read applies the override and tombstone rules per series and is the expensive part of this page.
   const held = await heldBySeries();
+  // What an admin chose to ignore (lib/healthIgnore.ts), read once for the whole run.
+  const ctx = await loadIgnores();
   // Independent read-only queries: run them together rather than serially.
   const checks = await Promise.all([
-    chapterGaps(held),
+    chapterGaps(held, ctx),
     shortChapters(),
-    outlierChapters(held),
-    duplicateSeries(),
-    sourceTrouble(),
-    chapterFailures(),
-    frozenSeries(),
+    outlierChapters(held, ctx),
+    duplicateSeries(ctx),
+    sourceTrouble(ctx),
+    chapterFailures(ctx),
+    frozenSeries(ctx),
     solverHealth(),
     updateCheck(),
     libraryScan(),
-    downloadsMissing(),
+    downloadsMissing(ctx),
     ...(suwayomiConfigured() ? [extensionCap()] : []),
   ]);
+  await keepIgnoresAlive(ctx);
   // worst first, so the page opens on whatever needs attention
   const rank: Record<HealthStatus, number> = { problem: 0, warn: 1, ok: 2 };
   checks.sort((a, b) => rank[a.status] - rank[b.status]);
   return { generatedAt: new Date().toISOString(), checks };
+}
+
+/**
+ * One finding, as its check sees it right now: what the Ignore route records. Recomputed rather than taken from
+ * the page, because the page carries at most a hundred of a gap's numbers and an ignore must cover all of them.
+ * Null when the finding is no longer there.
+ */
+export async function findingOf(check: IgnorableCheck, key: string): Promise<Finding | null> {
+  const ctx = noIgnores();
+  switch (check) {
+    case 'chapter-gaps': await chapterGaps(await heldBySeries(), ctx); break;
+    case 'outliers': await outlierChapters(await heldBySeries(), ctx); break;
+    case 'chapter-failures': await chapterFailures(ctx); break;
+    case 'sources': await sourceTrouble(ctx); break;
+    case 'frozen-series': await frozenSeries(ctx); break;
+    case 'duplicates': await duplicateSeries(ctx); break;
+    case 'downloads-missing': await downloadsMissing(ctx); break;
+  }
+  return ctx.found.get(`${check}\u0000${key}`) ?? null;
 }

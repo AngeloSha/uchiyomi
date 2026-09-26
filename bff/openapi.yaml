@@ -7103,6 +7103,48 @@ paths:
           description: Not authenticated
         "403":
           description: "Forbidden: token scope, account permission or age limit"
+  /api/admin/health/ignore:
+    post:
+      tags:
+        - admin
+      summary: "Ignore a Health finding, or stop ignoring it (since v0.48.3)."
+      operationId: postApiAdminHealthIgnore
+      description: >-
+        Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
+        Body {check, key, ignored}: `check` is one of chapter-gaps, chapter-failures, sources, frozen-series,
+        duplicates, outliers, downloads-missing, and `key` is the finding's `key` as GET /api/admin/health reports
+        it. The server looks the finding up again and records everything it is about (every missing number of a
+        gap, not only the hundred the report carries); it then reports it greyed with `ignored` and an `unignore`
+        action, and stays quiet while what it is about is part of that. A finding gone for a day forgets its
+        ignore. 404 {error: 'gone'} when the finding is no longer there. Short chapters use confirm-short instead.
+      security:
+        - bearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [check, key, ignored]
+              properties:
+                check:
+                  type: string
+                  enum: [chapter-gaps, chapter-failures, sources, frozen-series, duplicates, outliers, downloads-missing]
+                key:
+                  type: string
+                ignored:
+                  type: boolean
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: Bad request
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+        "404":
+          description: The finding is no longer there
   /api/admin/trackers/relink:
     post:
       tags:

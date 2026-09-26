@@ -1884,6 +1884,10 @@ function Health() {
   });
   const checks = data?.checks || [];
   const bad = checks.filter((c) => c.status !== 'ok').length;
+  // After anything on this page changes a finding -- a fix, an ignore -- the page is checked again, and the
+  // header's mark with it: the refetch stores a new summary, and the header reads that summary.
+  const qc = useQueryClient();
+  const recheck = () => { void refetch().then(() => qc.invalidateQueries({ queryKey: ['health-summary'] })); };
 
   // One card per check, and a failing one earns the full width of the board -- the same severity rule the
   // overview uses, so the shape of the panel is the verdict.
@@ -1898,7 +1902,7 @@ function Health() {
           {data && <> · checked {relativeTime(data.generatedAt)}</>}
         </p>
         <div className="flex shrink-0 items-center gap-2">
-          <HealthFixAll checks={checks} onDone={() => { void refetch(); }} />
+          <HealthFixAll checks={checks} onDone={recheck} />
           <button onClick={() => refetch()} disabled={isFetching} className="chip shrink-0 text-xs disabled:opacity-50">
             {isFetching ? 'Checking…' : 'Re-check'}
           </button>
@@ -1937,7 +1941,7 @@ function Health() {
                   <span className="shrink-0 text-xs text-fog-500">{isOpen ? 'Hide' : 'Show'}</span>
                 )}
               </button>
-              <HealthCheckActions check={c} onDone={() => { void refetch(); }} />
+              <HealthCheckActions check={c} onDone={recheck} />
             </div>
             {c.id === 'update' && <DesktopUpdateNote />}
 
@@ -1954,7 +1958,7 @@ function Health() {
                         <p className="truncate text-sm text-fog-100">{it.title}</p>
                         <p className="text-[11px] text-fog-500">{it.detail}</p>
                       </div>
-                      <HealthActions check={c.id} item={it} onDone={() => { void refetch(); }} />
+                      <HealthActions check={c.id} item={it} onDone={recheck} />
                       {/* To the chapter the finding is about, not just its series (lib/healthLinks.ts). */}
                       {healthLinks(c.id, it).map((l) => (
                         <Link key={l.href} href={l.href} className="chip shrink-0 text-xs" title={l.label} aria-label={l.label ? `${tr('Open')}: ${l.label}` : undefined}>{tr('Open')}</Link>

@@ -361,7 +361,8 @@ export interface Page<T> {
  */
 export type HealthAction =
   | 'fix_short' | 'confirm_short' | 'delete' | 'fill' | 'retry'
-  | 'test' | 'unblock' | 'disable' | 'merge' | 'solver_reset';
+  | 'test' | 'unblock' | 'disable' | 'merge' | 'solver_reset'
+  | 'ignore' | 'unignore';
 
 /** One step of the nightly repair (`bff/src/lib/repair.ts`), as `POST /api/admin/tasks/repair/run` takes it. */
 export type RepairStep = 'solver' | 'count' | 'failures' | 'short' | 'gaps' | 'groups' | 'names' | 'directions';
@@ -390,6 +391,10 @@ export interface HealthItem {
   actions?: HealthAction[];
   /** Already dealt with, and when -- a confirmed-short chapter, a gap nobody lists. */
   fixed?: { at: string; what: string };
+  /** What an Ignore of this finding is recorded under (bff lib/healthIgnore.ts). Absent: it cannot be ignored. */
+  key?: string;
+  /** An admin chose to stop being told about this, and when. The item is then `info`. */
+  ignored?: { at: string; by: string | null };
 }
 
 export interface HealthCheck {

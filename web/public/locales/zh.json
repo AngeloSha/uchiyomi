@@ -2,7 +2,7 @@
   "_meta": {
     "language": "zh",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 1254
+    "strings": 1258
   },
   "1 check found something": "1 项检查发现问题",
   "1 member": "1 位成员",
@@ -1257,5 +1257,9 @@
   "Chapters that would not download ({n} sources): try them all again now": "无法下载的章节（{n} 个来源）：现在全部重试",
   "Cloudflare solver: start its sessions afresh": "Cloudflare 解算器：重新开始其会话",
   "One run takes up to {short} short chapters and {gaps} series with gaps. The nightly repair carries on with the rest, or press Fix all issues again.": "每次最多处理 {short} 个过短章节和 {gaps} 部有缺口的系列。其余的由每晚的修复继续处理，也可以再次点击“修复所有问题”。",
-  "Nothing is deleted or merged, and no source is unblocked or switched off: those stay on their own rows.": "不会删除或合并任何内容，也不会解除封锁或关闭任何来源：这些仍在各自的行里操作。"
+  "Nothing is deleted or merged, and no source is unblocked or switched off: those stay on their own rows.": "不会删除或合并任何内容，也不会解除封锁或关闭任何来源：这些仍在各自的行里操作。",
+  "Ignore": "忽略",
+  "Stop ignoring": "取消忽略",
+  "Ignored — it stays quiet until something about it changes": "已忽略——在情况变化之前不再提醒",
+  "Back on the list": "已重新列出"
 }

@@ -273,8 +273,9 @@ test('a source you turned off is listed but never a warning', { skip: DSN ? fals
     assert.match(unused.detail, /no series use it/);
     // The chips act on the source by id, never by parsing the title.
     assert.equal(down.sourceId, DOWN, 'every source row names its source');
-    assert.deepEqual(down.actions, ['test', 'disable'], 'a live failing source offers Test and Turn off');
-    assert.deepEqual(off.actions, ['test'], 'one already turned off is not offered Turn off again');
+    // ...and, since v0.48.3, Ignore: a real finding can be silenced (lib/healthIgnore.ts).
+    assert.deepEqual(down.actions, ['test', 'disable', 'ignore'], 'a live failing source offers Test and Turn off');
+    assert.deepEqual(off.actions, ['test'], 'one already turned off is not offered Turn off again (nor Ignore: it is quiet already)');
 
     await q('DELETE FROM lib_series WHERE id = $1', [S_DOWN]);
     await q('DELETE FROM source_health WHERE source_id = ANY($1::text[])', [[DOWN, UNUSED]]);
@@ -312,7 +313,7 @@ test('a blocked source offers Clear block, and a source with a cooldown is a fin
     // A cooldown is happening NOW, so it is a finding whether or not a series uses the source: something is
     // being waited on, and the waiting is the thing an admin may want to end.
     assert.notEqual(row.info, true, 'a source in a cooldown is a finding even with nothing on it');
-    assert.deepEqual(row.actions, ['test', 'unblock', 'disable']);
+    assert.deepEqual(row.actions, ['test', 'unblock', 'disable', 'ignore']);
   } finally {
     await q('DELETE FROM source_health WHERE source_id = $1', [BLOCKED]);
   }
@@ -447,7 +448,7 @@ test('a deliberate deletion is not a gap, a file that went missing is, and a ren
     assert.ok(item, 'the missing file is a gap');
     assert.match(item.detail, /^1 missing — 3/, `only the missing one (${item.detail})`);
     assert.deepEqual(item.numbers, [3], 'the chip is told which numbers, so it can say so');
-    assert.deepEqual(item.actions, ['fill'], 'and offers to look for a source that has them');
+    assert.deepEqual(item.actions, ['fill', 'ignore'], 'and offers to look for a source that has them (or to stop being told)');
 
     // An admin renumbers chapter 5 to 3 through the series page: the hole is filled by a row that is
     // already there, and the finding must clear itself.
@@ -491,7 +492,7 @@ test('an impossible chapter number is offered for deletion, unless it was renumb
     assert.match(item.detail, /1 chapter\(s\) up to 10000/);
     assert.deepEqual(item.bookIds, [`b_${S_OUT}_10000`], 'the chip is told exactly which chapter to delete');
     assert.deepEqual(item.numbers, [10000]);
-    assert.deepEqual(item.actions, ['delete'], 'deleting is the action, and it is never automatic');
+    assert.deepEqual(item.actions, ['delete', 'ignore'], 'deleting is the action, and it is never automatic');
 
     await q(`INSERT INTO book_overrides (book_id, number) VALUES ($1, 6)`, [`b_${S_OUT}_10000`]);
     assert.equal(await outlier(), undefined, 'correcting the number clears the finding');
@@ -669,7 +670,7 @@ test('a duplicate pair suggests the copy with the most to lose as the one to kee
     assert.ok(pair, 'the pair is reported');
     assert.deepEqual([...pair.seriesIds].sort(), [D1, D2].sort());
     assert.equal(pair.keep, D1, 'chapters first: three beats one, read or not');
-    assert.deepEqual(pair.actions, ['merge'], 'and merging is offered, one pair at a time');
+    assert.deepEqual(pair.actions, ['merge', 'ignore'], 'and merging is offered, one pair at a time');
 
     // Both down to one live chapter: the copy somebody has read wins over the older one.
     await q(`UPDATE lib_books SET pruned_at = now(), pruned_reason = 'deleted' WHERE id = ANY($1::text[])`,

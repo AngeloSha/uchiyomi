@@ -58,6 +58,9 @@ const ACTIONS: { action: string; labels: string[]; wants: RegExp }[] = [
   { action: 'disable', labels: ["tr('Turn off')"], wants: /setAsking\('disable'\)/ },
   { action: 'merge', labels: ["tr('Merge')"], wants: /setAsking\('merge'\)/ },
   { action: 'solver_reset', labels: ["tr('Reset solver sessions')"], wants: /postRepair\(\{ only: \['solver'\] \}, toast\)/ },
+  // v0.48.3: the owner's "no button to ignore this warning so it never repeats again".
+  { action: 'ignore', labels: ["tr('Ignore')"], wants: /postIgnore\(check, item, true, toast\)/ },
+  { action: 'unignore', labels: ["tr('Stop ignoring')"], wants: /postIgnore\(check, item, false, toast\)/ },
 ];
 
 test('every action the health check can offer renders one chip, with the label and the request it promises', () => {
@@ -82,6 +85,16 @@ test('every action the health check can offer renders one chip, with the label a
   // A chip that does nothing when there is nothing to act on is worse than no chip: it reads as a broken
   // button. An item with no `actions` renders nothing at all.
   assert.match(src, /const actions = item\.actions \|\| \[\];\n  if \(!actions\.length\) return null;/, 'an item without actions still renders a chip row');
+});
+
+test('Ignore posts the finding\'s key and says it stays quiet until something changes', () => {
+  // The server records everything the finding is about (lib/healthIgnore.ts); the page only names it.
+  // Reintroduce by posting `numbers` instead of the key: a gap's ignore would cover only the hundred shown.
+  const src = code(read(CHIPS));
+  const fn = src.slice(src.indexOf('async function postIgnore'), src.indexOf('/** One action.'));
+  assert.match(fn, /api\('\/api\/admin\/health\/ignore', \{ method: 'POST', json: \{ check, key: item\.key, ignored \} \}\)/);
+  assert.match(fn, /tr\('Ignored — it stays quiet until something about it changes'\)/);
+  assert.match(fn, /tr\('Back on the list'\)/);
 });
 
 test('a chip is disabled while a request is in flight, and the row always asks Health again afterwards', () => {
@@ -232,7 +245,7 @@ test('Fix all issues runs ONE repair with every step that has findings, and chec
   assert.match(block, /One run takes up to \{short\} short chapters and \{gaps\} series with gaps/);
   assert.match(block, /Nothing is deleted or merged, and no source is unblocked or switched off/);
   const page = code(read('app/admin/page.tsx'));
-  assert.match(page, /<HealthFixAll checks=\{checks\} onDone=\{\(\) => \{ void refetch\(\); \}\} \/>/, 'the button is not on the Health page');
+  assert.match(page, /<HealthFixAll checks=\{checks\} onDone=\{recheck\} \/>/, 'the button is not on the Health page');
 });
 
 test('the chips are mounted beside the Health disclosure, never inside it, and the disclosure is unchanged', () => {
@@ -249,7 +262,9 @@ test('the chips are mounted beside the Health disclosure, never inside it, and t
   const mount = health.indexOf('<HealthCheckActions');
   assert.ok(hdr > 0 && close > hdr, 'the Health disclosure button is gone');
   assert.ok(mount > close, 'the check-level chips are inside the disclosure button, or before it');
-  assert.match(health, /<HealthActions check=\{c\.id\} item=\{it\} onDone=\{\(\) => \{ void refetch\(\); \}\} \/>/, 'the per-item chips are not mounted, or do not refetch Health');
+  assert.match(health, /<HealthActions check=\{c\.id\} item=\{it\} onDone=\{recheck\} \/>/, 'the per-item chips are not mounted, or do not refetch Health');
+  // ...and the header's mark with it (v0.48.3): an ignored or fixed finding must not leave the header amber.
+  assert.match(health, /const recheck = \(\) => \{ void refetch\(\)\.then\(\(\) => qc\.invalidateQueries\(\{ queryKey: \['health-summary'\] \}\)\); \};/, 'the header mark is not refreshed after a change on the page');
   assert.doesNotMatch(health, /setMerge\(/, 'the old inline merge dialog is still in the page as a second place to merge');
   // The three fragments partialSurfaces.test.ts pins, verbatim, because this file rewrote the rows around them.
   assert.match(health, /const expandable = !!c\.items\.length \|\| !!c\.note;/, 'a note without findings cannot make its Health card expandable');

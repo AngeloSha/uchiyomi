@@ -54,6 +54,19 @@ async function postRepair(body: RepairBody, toast: Toast, started = tr('Started 
   }
 }
 
+/**
+ * Ignore one finding, or stop ignoring it (v0.48.3). The server looks the finding up again and records all of it;
+ * nothing is deleted, so there is no confirmation -- "Stop ignoring" is the way back.
+ */
+async function postIgnore(check: string, item: HealthItem, ignored: boolean, toast: Toast): Promise<void> {
+  try {
+    await api('/api/admin/health/ignore', { method: 'POST', json: { check, key: item.key, ignored } });
+    toast(ignored ? tr('Ignored — it stays quiet until something about it changes') : tr('Back on the list'), 'success');
+  } catch (e) {
+    toast(msgOf(e, tr('Could not save that')), 'error');
+  }
+}
+
 /** One action. Disabled while its own request is in flight, never while a sibling's is. */
 function Chip({ action, label, busy, danger, onClick }: {
   action: string; label: string; busy: boolean; danger?: boolean; onClick: () => void;
@@ -225,6 +238,12 @@ export function HealthActions({ check, item, onDone }: { check: string; item: He
       case 'solver_reset':
         return <Chip key={a} action={a} label={tr('Reset solver sessions')} busy={b}
           onClick={() => act(a, () => postRepair({ only: ['solver'] }, toast).then(() => {}))} />;
+      case 'ignore':
+        return <Chip key={a} action={a} label={tr('Ignore')} busy={b}
+          onClick={() => act(a, () => postIgnore(check, item, true, toast))} />;
+      case 'unignore':
+        return <Chip key={a} action={a} label={tr('Stop ignoring')} busy={b}
+          onClick={() => act(a, () => postIgnore(check, item, false, toast))} />;
       default:
         return null;
     }

@@ -2,7 +2,7 @@
   "_meta": {
     "language": "ru",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 1254
+    "strings": 1258
   },
   "1 check found something": "1 проверка нашла проблему",
   "1 member": "1 участник",
@@ -1257,5 +1257,9 @@
   "Chapters that would not download ({n} sources): try them all again now": "Главы, которые не скачивались ({n} источников): попробовать все ещё раз сейчас",
   "Cloudflare solver: start its sessions afresh": "Обход Cloudflare: начать его сессии заново",
   "One run takes up to {short} short chapters and {gaps} series with gaps. The nightly repair carries on with the rest, or press Fix all issues again.": "Один запуск берёт до {short} коротких глав и {gaps} серий с пропусками. Остальное доделает ночной ремонт — или нажмите «Исправить всё» ещё раз.",
-  "Nothing is deleted or merged, and no source is unblocked or switched off: those stay on their own rows.": "Ничего не удаляется и не объединяется, ни один источник не разблокируется и не отключается: это остаётся в их собственных строках."
+  "Nothing is deleted or merged, and no source is unblocked or switched off: those stay on their own rows.": "Ничего не удаляется и не объединяется, ни один источник не разблокируется и не отключается: это остаётся в их собственных строках.",
+  "Ignore": "Игнорировать",
+  "Stop ignoring": "Не игнорировать",
+  "Ignored — it stays quiet until something about it changes": "Игнорируется — предупреждения не будет, пока что-то не изменится",
+  "Back on the list": "Снова в списке"
 }

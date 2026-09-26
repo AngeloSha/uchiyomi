@@ -1125,6 +1125,22 @@ ALTER TABLE refresh_tokens ADD COLUMN IF NOT EXISTS used_at timestamptz;
 -- header must never run the ten checks -- they read what every series holds -- so it reads this instead,
 -- written whenever the Health page runs and every six hours by the server itself.
 ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS health_summary jsonb;
+
+-- v0.48.3: Health findings an admin chose to ignore (lib/healthIgnore.ts). One row per finding: the check and
+-- a key the check builds (series:ID, source:ID, folder:PATH, pair:ID+ID). members is everything the finding was
+-- about when it was ignored -- the missing chapter numbers of a gap, the files of a folder -- and the finding
+-- stays quiet only while what it is about now is part of that. seen_at is the last time the finding was still
+-- there: a row not seen for a day is dropped, so a finding that went away and came back is a new one.
+CREATE TABLE IF NOT EXISTS health_ignored (
+  check_id text NOT NULL,
+  item_key text NOT NULL,
+  members  text[] NOT NULL DEFAULT '{}',
+  title    text,
+  by_user  uuid REFERENCES users(id) ON DELETE SET NULL,
+  at       timestamptz NOT NULL DEFAULT now(),
+  seen_at  timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (check_id, item_key)
+);
 `;
 
 // Serialises migrate() across processes. CREATE TABLE IF NOT EXISTS is not safe to run concurrently:
