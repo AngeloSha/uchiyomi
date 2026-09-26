@@ -198,7 +198,8 @@ export function usePaletteHotkeys(setOpen: (fn: (o: boolean) => boolean) => void
       if (!typeToSearchOn()) return;
       if (e.key === '/' && !typing) { e.preventDefault(); onSeed?.(''); setOpen(() => true); return; }
       if (!onSeed) return;
-      const ch = typeToSearchKey(e, { typing, modalOpen: !!document.querySelector('[aria-modal="true"]') });
+      // An open right-click menu counts as modal (#100): letters typed at it must not open the palette behind it.
+      const ch = typeToSearchKey(e, { typing, modalOpen: !!document.querySelector('[aria-modal="true"], [role="menu"]') });
       if (ch) { e.preventDefault(); onSeed(seedFor(ch, document.documentElement.lang)); setOpen(() => true); }
     };
     window.addEventListener('keydown', onKey);

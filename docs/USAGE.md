@@ -82,6 +82,12 @@ filters currently show.
 The top bar has **Home** (a daily-pick hero + "For you" rails), **Library**, **Lists** and **Discover**,
 plus search, the updates bell, a refresh button, and your profile.
 
+**Right-click a series** anywhere it appears — the library grid, Home's rails, Up next in the reader — or press
+and hold it on a touchscreen, for a short menu (since v0.48.0): **Open in a new tab**, **Copy link**,
+**Favourite**, **Mark all read** / **unread**, and for an admin **Check for new chapters**. Shift+right-click still
+opens the browser's own menu, and so does a right-click on selected text or in a text field. **Profile →
+Settings → Appearance → Right-click menus** turns them off on that device; the ⋯ buttons keep working either way.
+
 Search opens the **command palette**: one box that finds any series in the library and runs the quick actions
 (Surprise me, Updates, Refresh library and so on). With a keyboard there are three ways in: **Ctrl+K** (**⌘K**
 on a Mac) or **/** open it empty, and simply **starting to type** a title opens it with that first letter
@@ -141,6 +147,9 @@ genres, description, and the **chapter list**.
   page holding the chapter *Continue* would open, so a reader on chapter 956 lands among the 900s. Picking a
   page keeps you there; a new series, sort order or filter goes back to following *Continue*. Every chapter
   is listed — before this, the list and the reader's chapter list stopped at chapter 1000.
+- **Right-click a chapter** (or press and hold it on a touchscreen, or Shift+F10 on the keyboard) for the same
+  menu its ⋯ button opens: mark it read or unread, mark everything before it read, its versions, and for an
+  admin its number and title (since v0.48.0).
 - **Compact chapter list** (since v0.47.0, **Profile → Settings → Appearance**, off by default, this device
   only): on a computer, rows without the thumbnail and the status dot, with a row's buttons appearing when
   you point at it — more chapters on one screen. The title's colour still says read or unread; the

@@ -9,6 +9,7 @@ import { bytes } from '@/lib/format';
 import { readShownOnce } from '@/lib/shownOnce';
 import { setTypeToSearchOn, typeToSearchOn } from '@/lib/typeToSearch';
 import { compactChaptersOn, setCompactChaptersOn } from '@/lib/compactChapters';
+import { contextMenusOn, setContextMenusOn } from '@/lib/contextMenus';
 import { ReaderPrefs, loadPrefs, savePrefs, syncPrefsFromServer } from '@/lib/readerPrefs';
 import { Avatar, AVATAR_EMOJIS, AVATAR_COLORS } from '@/components/Avatar';
 import { ProgressBar } from '@/components/ui';
@@ -119,6 +120,8 @@ function AppearanceSection() {
   useEffect(() => { setTypeSearch(typeToSearchOn()); }, []);
   const [compactList, setCompactList] = useState(false);
   useEffect(() => { setCompactList(compactChaptersOn()); }, []);
+  const [contextMenus, setContextMenus] = useState(true);
+  useEffect(() => { setContextMenus(contextMenusOn()); }, []);
   const saveReduceEffects = async (next: boolean) => {
     const prev = reduceEffects;
     setSettings({ reduceEffects: next });
@@ -183,6 +186,12 @@ function AppearanceSection() {
 
       {/* This device only, and only a computer's rows change: lib/compactChapters.ts. Off by default -- the
           default chapter row is the deliberate look, and taking part of it away is the reader's choice. */}
+      {/* This device only, like the two above (lib/contextMenus.ts, #100). On by default: the menus only take the
+          right-click where the browser's offers nothing worth keeping, and Shift+right-click still gets it. */}
+      <SwitchRow label={tr('Right-click menus')}
+        help={tr('Right-click a series or a chapter, or press and hold one on a touchscreen, for its actions. Shift+right-click still opens the browser’s own menu. This device only.')}
+        on={contextMenus} onChange={(next) => { setContextMenusOn(next); setContextMenus(next); }} />
+
       <SwitchRow label={tr('Compact chapter list')}
         help={tr('On a computer, chapter rows without thumbnails, and their buttons appear when you point at a row. Phones and tablets are unchanged. This device only.')}
         on={compactList} onChange={(next) => { setCompactChaptersOn(next); setCompactList(next); }} />

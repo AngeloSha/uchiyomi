@@ -31,6 +31,7 @@ import { ChapterVersionsSheet } from '@/components/ChapterVersionsSheet';
 import { GroupAvatar } from '@/components/GroupAvatar';
 import { supplyLine } from '@/lib/supplyLine';
 import { isDesktop } from '@/lib/desktop';
+import { useContextMenu } from '@/components/ContextMenu';
 
 // The four the scanner itself writes from ComicInfo's PublishingStatus. Kept as a suggestion list rather
 // than a hard enum, because a file can carry anything and rejecting it would reject Uchiyomi's own data.
@@ -574,9 +575,16 @@ function ChapterRow({ book, downloaded, sourceNames, primarySource, versions, on
   onVersions?: () => void;
 }) {
   const [busy, setBusy] = useState(false);
-  const [menu, setMenu] = useState(false);
   const rp = book.readProgress;
   const state = rp?.completed ? 'read' : rp ? 'reading' : 'unread';
+  // The ⋯ button's menu, which right-click, a press-and-hold and Shift+F10 on the row now open as well (#100,
+  // components/ContextMenu.tsx). It was a hand-rolled popover that clipped at the screen's edge.
+  const menu = useContextMenu(() => [
+    { label: rp?.completed ? tr('Mark unread') : tr('Mark read'), onSelect: () => onMark(rp?.completed ? 'unread' : 'read') },
+    { label: tr('Mark previous as read'), onSelect: () => onMark('previous') },
+    ...(onVersions ? [{ label: tr('Versions'), divider: true, onSelect: onVersions }] : []),
+    ...(onEdit ? [{ label: tr('Edit number & title'), divider: true, onSelect: onEdit }] : []),
+  ], { label: tr('Chapter actions') });
   // Only a name is shown; an id that resolves to nothing (a source since removed) shows no caption at all.
   const altSource = book.sourceId && book.sourceId !== primarySource ? (sourceNames?.[book.sourceId] ?? null) : null;
   /**
@@ -597,7 +605,7 @@ function ChapterRow({ book, downloaded, sourceNames, primarySource, versions, on
     // the dot, the date and two 36-px buttons -- exactly a group name with its avatar -- and a two-digit
     // day ("29d") took 4 of them back. Five gaps at 10 rather than 12 return ten. GhostRow matches.
     <div id={`ch-${book.number}`} className="border-b border-ink-800/70">
-    <div className={rowClass(!!compact)}>
+    <div className={rowClass(!!compact)} {...(selectable ? {} : menu.bind)}>
       {/* In select mode a pruned chapter is still selectable -- Mark read and Fetch again are exactly the
           things one wants for it -- so the disable only applies to opening. */}
       <button onClick={selectable ? onToggle : onReader} disabled={pruned && !selectable} aria-pressed={selectable ? !!selected : undefined}
@@ -623,7 +631,7 @@ function ChapterRow({ book, downloaded, sourceNames, primarySource, versions, on
         </div>
       </button>
       {book.metadata?.releaseDate && <RowDate iso={book.metadata.releaseDate} />}
-      {!selectable && <ButtonsWrap compact={!!compact} menuOpen={menu}>
+      {!selectable && <ButtonsWrap compact={!!compact} menuOpen={menu.open}>
       {/* Not on Uchiyomi Desktop (lib/desktop.ts): the chapter is already a file on this computer. */}
       {!isDesktop() && <button
         onClick={async () => {
@@ -643,37 +651,13 @@ function ChapterRow({ book, downloaded, sourceNames, primarySource, versions, on
         {busy ? <span className="text-[10px] font-semibold text-accent">…</span> : downloaded ? <IcCheck width={16} height={16} /> : <IcDownload width={16} height={16} />}
       </button>}
       <div className="relative shrink-0">
-        <button onClick={() => setMenu((m) => !m)} aria-label={tr('Chapter actions')}
+        <button onClick={(e) => menu.openFrom(e.currentTarget)} aria-label={tr('Chapter actions')} aria-haspopup="menu" aria-expanded={menu.open}
           className="grid h-9 w-9 place-items-center rounded-full border border-ink-700 text-fog-500">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.8" /><circle cx="12" cy="12" r="1.8" /><circle cx="19" cy="12" r="1.8" /></svg>
         </button>
-        {menu && (
-          <>
-            <div className="fixed inset-0 z-20" onClick={() => setMenu(false)} />
-            <div className="absolute end-0 top-10 z-30 w-48 overflow-hidden rounded-xl border border-ink-700 bg-ink-900 shadow-lift">
-              <button onClick={() => { setMenu(false); onMark(rp?.completed ? 'unread' : 'read'); }}
-                className="block w-full px-3.5 py-2.5 text-start text-xs text-fog-200 hover:bg-ink-800">
-                {rp?.completed ? tr('Mark unread') : tr('Mark read')}
-              </button>
-              <button onClick={() => { setMenu(false); onMark('previous'); }}
-                className="block w-full px-3.5 py-2.5 text-start text-xs text-fog-200 hover:bg-ink-800">{tr('Mark previous as read')}</button>
-              {onVersions && (
-                <button onClick={() => { setMenu(false); onVersions(); }}
-                  className="block w-full border-t border-ink-800 px-3.5 py-2.5 text-start text-xs text-fog-200 hover:bg-ink-800">
-                  {tr('Versions')}
-                </button>
-              )}
-              {onEdit && (
-                <button onClick={() => { setMenu(false); onEdit(); }}
-                  className="block w-full border-t border-ink-800 px-3.5 py-2.5 text-start text-xs text-fog-200 hover:bg-ink-800">
-                  {tr('Edit number & title')}
-                </button>
-              )}
-            </div>
-          </>
-        )}
       </div>
       </ButtonsWrap>}
+      {menu.element}
     </div>
     </div>
   );
@@ -728,8 +712,12 @@ function GhostRow({ ghost, sourceNames, primarySource, selectable, selected, onT
   onMark?: (completed: boolean) => void;
 }) {
   const [busy, setBusy] = useState(false);
-  const [menu, setMenu] = useState(false);
   const read = ghost.read === true;
+  // The one action that applies to a chapter that is not here, on the same menu as a chapter row's (#100).
+  const menu = useContextMenu(() => (onMark ? [
+    { label: read ? tr('Mark unread') : tr('Mark read'), onSelect: () => onMark(!read) },
+  ] : []), { label: tr('Chapter actions') });
+  const menuBind = onMark && !selectable ? menu.bind : {};
   const label = whyLabel(ghost);
   // The same rule as the chapter row's caption: the series' own source is the normal case, not news. The
   // listing carries the source's name, so an id the followed list no longer resolves still gets one --
@@ -747,7 +735,7 @@ function GhostRow({ ghost, sourceNames, primarySource, selectable, selected, onT
     <div id={`ch-${ghost.number}`} className="border-b border-ink-800/70">
     {/* The dimming is the opener's and the date's, not the row's: the fetch button at the end of the line
         is a live control, and a child cannot undo its parent's opacity. */}
-    <div className={rowClass(!!compact)}>
+    <div className={rowClass(!!compact)} {...menuBind}>
       <button type="button" onClick={selectable ? onToggle : onOpen} aria-pressed={selectable ? !!selected : undefined} aria-haspopup={selectable ? undefined : 'dialog'}
         className={`flex min-w-0 flex-1 items-center gap-3 text-start ${selected ? '' : 'opacity-60'}`}>
         <div className={`relative grid h-14 w-10 shrink-0${thumbHide(!!compact, !!selectable)} place-items-center rounded-lg border border-dashed border-ink-600`}>
@@ -771,7 +759,7 @@ function GhostRow({ ghost, sourceNames, primarySource, selectable, selected, onT
         </div>
       </button>
       {ghost.publishedAt && <RowDate iso={ghost.publishedAt} className={selected ? '' : 'opacity-60'} />}
-      <ButtonsWrap compact={!!compact} menuOpen={menu}>
+      <ButtonsWrap compact={!!compact} menuOpen={menu.open}>
       {/* The cloud, not the ⬇ of the row above: that arrow saves a chapter to THIS DEVICE, this one brings
           it onto the server, and the same glyph for both would promise the wrong thing on one of them. */}
       {onFetch && !selectable && (
@@ -788,24 +776,14 @@ function GhostRow({ ghost, sourceNames, primarySource, selectable, selected, onT
       {/* The chapter row's ⋯, with the one action that applies to a chapter that is not here. */}
       {onMark && !selectable && (
         <div className="relative shrink-0">
-          <button type="button" onClick={() => setMenu((m) => !m)} aria-label={tr('Chapter actions')}
+          <button type="button" onClick={(e) => menu.openFrom(e.currentTarget)} aria-label={tr('Chapter actions')} aria-haspopup="menu" aria-expanded={menu.open}
             className="grid h-9 w-9 place-items-center rounded-full border border-ink-700 text-fog-500">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.8" /><circle cx="12" cy="12" r="1.8" /><circle cx="19" cy="12" r="1.8" /></svg>
           </button>
-          {menu && (
-            <>
-              <div className="fixed inset-0 z-20" onClick={() => setMenu(false)} />
-              <div className="absolute end-0 top-10 z-30 w-48 overflow-hidden rounded-xl border border-ink-700 bg-ink-900 shadow-lift">
-                <button type="button" onClick={() => { setMenu(false); onMark(!read); }}
-                  className="block w-full px-3.5 py-2.5 text-start text-xs text-fog-200 hover:bg-ink-800">
-                  {read ? tr('Mark unread') : tr('Mark read')}
-                </button>
-              </div>
-            </>
-          )}
         </div>
       )}
       </ButtonsWrap>
+      {menu.element}
     </div>
     </div>
   );

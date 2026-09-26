@@ -2,7 +2,7 @@
   "_meta": {
     "language": "fr",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 1217
+    "strings": 1229
   },
   "1 check found something": "1 vérification a trouvé quelque chose",
   "1 member": "1 membre",
@@ -1220,5 +1220,17 @@
   "Vertical": "Vertical",
   "What “Series default” in the reader follows. Automatic takes it from the chapter files, then the source, then AniList.": "C’est ce que suit « Selon la série » dans le lecteur. En automatique, il vient des fichiers des chapitres, puis de la source, puis d’AniList.",
   "Take a look": "Jeter un œil",
-  "Not now": "Pas maintenant"
+  "Not now": "Pas maintenant",
+  "Open in a new tab": "Ouvrir dans un nouvel onglet",
+  "Copy link": "Copier le lien",
+  "Link copied": "Lien copié",
+  "Could not copy the link": "Impossible de copier le lien",
+  "Remove from favourites": "Retirer des favoris",
+  "Added to favourites": "Ajoutée aux favoris",
+  "Removed from favourites": "Retirée des favoris",
+  "Mark all unread": "Tout marquer comme non lu",
+  "Checking for new chapters…": "Recherche de nouveaux chapitres…",
+  "That series is no longer in the library": "Cette série n’est plus dans la bibliothèque",
+  "Right-click menus": "Menus du clic droit",
+  "Right-click a series or a chapter, or press and hold one on a touchscreen, for its actions. Shift+right-click still opens the browser’s own menu. This device only.": "Clic droit sur une série ou un chapitre, ou appui long sur un écran tactile, pour ses actions. Maj+clic droit ouvre toujours le menu du navigateur. Sur cet appareil uniquement."
 }

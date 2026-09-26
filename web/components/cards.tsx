@@ -12,6 +12,7 @@ import { SourceIcon } from './SourcePicker';
 import { useOfflineSeries } from '@/lib/useOfflineSeries';
 import { effectsReduced } from '@/lib/effects';
 import { t as tr } from '@/lib/i18n';
+import { useSeriesMenu } from './SeriesMenu';
 
 /** Pointer-tracked 3D tilt + moving glare for cover cards. Desktop-only (hover+fine pointer),
  *  disabled under prefers-reduced-motion; on touch the handlers never fire so nothing changes. */
@@ -81,8 +82,11 @@ export function SeriesCard({ series, w = 'w-32', eager = false }: { series: Seri
   const savedOffline = useOfflineSeries().has(series.id);
   const tilt = useTilt();
   const tint = useTileTint(series.color);
+  // Right-click, press-and-hold or Shift+F10 (#100, components/SeriesMenu.tsx).
+  const menu = useSeriesMenu(series);
   return (
-    <Link href={`/series/?id=${series.id}`} className={`group shrink-0 ${w} [scroll-snap-align:start]`}>
+    <>
+    <Link href={`/series/?id=${series.id}`} className={`group shrink-0 ${w} [scroll-snap-align:start]`} {...menu.bind}>
       <div
         onPointerMove={tilt.onPointerMove}
         onPointerLeave={tilt.onPointerLeave}
@@ -117,6 +121,8 @@ export function SeriesCard({ series, w = 'w-32', eager = false }: { series: Seri
         {series.metadata?.title || series.name}
       </p>
     </Link>
+    {menu.element}
+    </>
   );
 }
 
@@ -163,11 +169,14 @@ export function SeriesTile({ series, eager = false, selectable, selected, onTogg
   const unread = series.yomi?.unread ?? series.booksUnreadCount ?? 0;
   const savedOffline = useOfflineSeries().has(series.id);
   const tint = useTileTint(series.color);
+  // Not in Select mode: there a press toggles the tile, and the Library's own bar holds the actions (#100).
+  const menu = useSeriesMenu(series);
   const Wrap: any = selectable ? 'button' : Link;
   const wrapProps = selectable
     ? { type: 'button', onClick: onToggle, className: 'group w-full text-left' }
-    : { href: `/series/?id=${series.id}`, className: 'group' };
+    : { href: `/series/?id=${series.id}`, className: 'group', ...menu.bind };
   return (
+    <>
     <Wrap {...wrapProps}>
       <div style={tint} className="grad-border relative aspect-[2/3] overflow-hidden rounded-2xl border border-ink-700/60 transition-all duration-300 group-hover:-translate-y-1 group-hover:shadow-glow group-active:scale-[0.97]">
         <Img src={img.seriesThumb(series.id)} alt={series.metadata?.title || series.name} eager={eager} className="h-full w-full transition-transform duration-500 group-hover:scale-[1.07]" />
@@ -203,6 +212,8 @@ export function SeriesTile({ series, eager = false, selectable, selected, onTogg
         {series.metadata?.title || series.name}
       </p>
     </Wrap>
+    {!selectable && menu.element}
+    </>
   );
 }
 

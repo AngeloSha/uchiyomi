@@ -500,8 +500,9 @@ try {
     await sleep(300);
     return row;
   };
-  const menuRow = await menuOf(10);
-  const menuItem = await menuRow.$$eval('button', (bs) => bs.map((b) => (b.textContent || '').trim()).filter(Boolean));
+  await menuOf(10);
+  // The menu is portalled to <body> since v0.48.0 (#100, components/ContextMenu.tsx): read it there, not in the row.
+  const menuItem = await page.$$eval('[role="menu"] [role="menuitem"]', (bs) => bs.map((b) => (b.textContent || '').trim()).filter(Boolean));
   check(menuItem.includes('Mark read'), 'its ⋯ menu offers Mark read', `the grey row's menu held ${JSON.stringify(menuItem)}`);
   await shot('ghost-menu-open');
   await noSideways('the series page with a grey row\'s menu open');
