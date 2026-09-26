@@ -27,6 +27,7 @@ const SCAN_CONCURRENCY = Math.max(1, Number(process.env.SCAN_CONCURRENCY || SOLV
 const SCAN_ENOUGH = Math.max(1, Number(process.env.SCAN_ENOUGH || 3));
 const SCAN_SEARCH_MS = Number(process.env.SCAN_SEARCH_MS) || 45_000;
 import { persistScan, setBookDates, setBookMeta, libraryIdFor, type LibraryRow, LIBRARY_ROOT, DL_ROOT } from '../lib/library';
+import { notInLibrary, notInLibraryReason } from '../lib/downloadCensus';
 import { diskSpelling } from '../lib/libraryAdmin';
 import { isDesktop } from '../lib/desktop';
 import { newSeriesId } from '../lib/ids';
@@ -355,15 +356,14 @@ export function startDownloadJob(input: DownloadJobInput): { total: number } {
     // Settled BEFORE the scan, so a copy the hook puts back is on disk when the scanner looks.
     for (const ch of chapters) if (!settled.has(ch)) await settle(ch, false);
     await persistScan().catch((e) => console.warn(`[download] ${folder}: the library scan after the job threw: ${(e as Error)?.message || e}`));
-    // On disk and still not in the library after that scan: the file is there and the scanner cannot index it
-    // (Admin → Health → Library scan names the folder and why). Said on the card, because a Fetch that ends
-    // in a second with nothing added looks exactly like a Fetch that worked (#109).
-    const unindexed = onDisk.length
-      ? await q<{ number: number }>(
-        'SELECT number::float8 AS number FROM lib_books WHERE series_id = $1 AND number = ANY($2::real[]) AND pruned_at IS NULL',
-        [seriesId, onDisk],
-      ).then((rows) => { const have = new Set(rows.map((r) => Number(r.number))); return onDisk.filter((n) => !have.has(n)); }, () => [])
-      : [];
+    // On disk and still not in the library after that scan: the file is there and the scanner did not index it.
+    // Said on the card, because a Fetch that ends in a second with nothing added looks exactly like a Fetch that
+    // worked (#109). EVERY chapter this job put there -- landed or found already on disk -- and by its FILE:
+    // v0.48.0 checked only the ones found on disk, by series and number, so a chapter that downloaded into a
+    // folder the scan never reached ended "done", and one the library held from another folder read as fine.
+    // Reintroduce by checking `onDisk` alone: "a Fetch whose download the scan never reaches says so" in
+    // scanResilience.int.test.ts ends `done`.
+    const unindexed = await notInLibrary(folder, [...landed.map((l) => l.number), ...onDisk]).catch(() => [] as number[]);
     await setBookDates(folder, chapters).catch(() => {});
     await setBookMeta(folder, landed).catch(() => {});
     if (pickedLanded.length) {
@@ -372,9 +372,8 @@ export function startDownloadJob(input: DownloadJobInput): { total: number } {
     }
     const j = jobs.get(folder);
     if (j && unindexed.length) {
-      const list = unindexed.slice(0, 5).join(', ') + (unindexed.length > 5 ? ` and ${unindexed.length - 5} more` : '');
       j.status = 'error'; j.finishedAt = Date.now();
-      j.reason = `Chapter${unindexed.length === 1 ? '' : 's'} ${list} ${unindexed.length === 1 ? 'is' : 'are'} already on disk, but the library scan could not add ${unindexed.length === 1 ? 'it' : 'them'}. Admin → Health → Library scan says why.`;
+      j.reason = notInLibraryReason(folder, unindexed);
     }
     // A cancelled job says so, and ends `done`: stopping was the request, not a failure. A chapter that
     // failed before the Cancel is still counted in the sentence, so nothing it lost goes unreported.
@@ -1030,6 +1029,8 @@ export async function addSeriesFromSource(opts: {
       alternates: async () => [], refusing, allowed: opts.sourceAllowed, hunt: undefined,
     });
     let firstPages = 0; let blockReason: string | null = null; let diskFull: string | null = null;
+    // Found already on disk: part of the result, so checked against the library at the end like what landed.
+    const onDisk: number[] = [];
     try {
       // `toFetch`, not `selected`: the first chapter this run actually has to go and get. A selection
       // whose first chapters are already in the library starts at the first one that is not (#65).
@@ -1049,6 +1050,7 @@ export async function addSeriesFromSource(opts: {
         }
       } else if (out.kind === 'skipped' && out.why === 'on_disk') {
         firstPages = 1;
+        onDisk.push(toFetch[0].number);
       } else if (out.kind === 'failed') {
         blockReason = out.err?.blockStatus || null;
       }
@@ -1162,6 +1164,7 @@ export async function addSeriesFromSource(opts: {
           // An old file in a revived folder is part of the requested result; a refusal is not. With no
           // alternate source the latter leaves every remaining chapter nowhere to go, so stop at one strike.
           if (out.why === 'on_disk') {
+            onDisk.push(ch.number);
             if (j) { j.done++; if (j.done % 5 === 0) await persistScan().catch(logScanError); }
             continue;
           }
@@ -1192,6 +1195,17 @@ export async function addSeriesFromSource(opts: {
       await setBookDates(folder, selected).catch(() => {});
       await setBookMeta(folder, landed).catch(() => {});
       const j = jobs.get(folder);
+      // The same check a Fetch makes (#109): an add whose folder the scan never reaches downloaded every chapter
+      // into it and ended "done" -- the series nowhere in the library, the card green. Whatever else the run
+      // says, this is what the person needs to know first, so it wins over a cancel or a count of failures.
+      // Reintroduce by dropping it: "an add whose download the scan never reaches says so" in
+      // scanResilience.int.test.ts ends `done`.
+      const unindexed = await notInLibrary(folder, [...landed.map((l) => l.number), ...onDisk]).catch(() => [] as number[]);
+      if (j && unindexed.length) {
+        j.status = 'error'; j.finishedAt = Date.now();
+        j.reason = notInLibraryReason(folder, unindexed);
+        return;
+      }
       if (j && j.status !== 'error' && j.cancelRequested) {
         j.cancelled = true; j.status = 'done'; j.finishedAt = Date.now();
         j.reason = failures ? `${cancelledReason(j)} ${failures} could not be saved.` : cancelledReason(j);

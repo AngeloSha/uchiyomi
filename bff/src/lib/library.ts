@@ -1,6 +1,6 @@
 // Owned library scanner: reads the CBZ folder Suwayomi writes (replacing Komga's library role).
 // Layout: <root>/<source>/<series title>/<chapter>.cbz ; each cbz carries ComicInfo.xml + page images.
-import { readdir, stat, readFile, realpath } from 'fs/promises';
+import { readdir, stat, lstat, readFile, realpath } from 'fs/promises';
 import { join } from 'path';
 import sharp from 'sharp';
 import { q, one, tx } from './db';
@@ -92,6 +92,78 @@ function chapterKind(path: string): ChapterKind {
 const ARCHIVE = /\.(cbz|cbr|zip|rar|pdf|epub)$/i;
 
 /**
+ * The filesystem calls the scan makes, as a parameter.
+ *
+ * The failures #109 turned on happen on Unraid's user shares, network mounts and FUSE layers, and cannot be
+ * made on a test machine's own disk: two different folders reporting one disk id, a listing that fails because
+ * one entry in it cannot be checked. The tests hand in a filesystem that does exactly that.
+ */
+export interface WalkFs {
+  /** Exact ids: `{ bigint: true }`. A JavaScript number rounds an id above 2^53 onto its neighbours. */
+  stat(p: string): Promise<{ dev: bigint | number; ino: bigint | number }>;
+  readdirTyped(p: string): Promise<Array<{ name: string; isFile(): boolean; isDirectory(): boolean; isSymbolicLink(): boolean }>>;
+  readdirNames(p: string): Promise<string[]>;
+  lstat(p: string): Promise<{ isFile(): boolean; isDirectory(): boolean; isSymbolicLink(): boolean }>;
+}
+export const nodeFs: WalkFs = {
+  stat: (p) => stat(p, { bigint: true }),
+  readdirTyped: (p) => readdir(p, { withFileTypes: true }),
+  readdirNames: (p) => readdir(p),
+  lstat: (p) => lstat(p),
+};
+
+export type EntryKind = 'file' | 'dir' | 'link' | 'other';
+export interface Listing {
+  entries: Array<{ name: string; kind: EntryKind }>;
+  /** The folder itself could not be read (an errno code), so it lists nothing. */
+  error?: string;
+  /** Listed, but the entry could not be checked, so nobody can say whether it is a chapter or a series. */
+  unchecked?: string[];
+}
+const kindOf = (e: { isFile(): boolean; isDirectory(): boolean; isSymbolicLink(): boolean }): EntryKind =>
+  e.isFile() ? 'file' : e.isDirectory() ? 'dir' : e.isSymbolicLink() ? 'link' : 'other';
+export const errCode = (e: unknown): string =>
+  (e as NodeJS.ErrnoException)?.code || String((e as Error)?.message || e).slice(0, 160);
+
+/**
+ * One folder's entries, and never all-or-nothing (#109).
+ *
+ * ⚠️ `readdir(..., { withFileTypes: true })` is all-or-nothing on a filesystem that does not report entry types
+ * (many FUSE and network mounts): Node then `lstat`s every entry itself, and the FIRST one that fails rejects
+ * the whole listing -- a name that is not valid UTF-8 (Node can never open it), a file renamed away mid-scan.
+ * Every caller caught that as "empty", so one bad entry hid every series in its folder, on every scan, and
+ * nothing said so. Here a failed typed listing falls back to the names and checks each entry on its own: one
+ * bad entry costs itself, and is named. An entry that vanished (ENOENT, with a readable name) was a temporary
+ * file being renamed into place, and is not a finding.
+ * Reintroduce by returning `[]` from the catch: "a listing that fails on one entry still lists the rest" in
+ * scanWalk.test.ts finds the series missing.
+ */
+export async function listDir(abs: string, fsx: WalkFs = nodeFs): Promise<Listing> {
+  try {
+    return { entries: (await fsx.readdirTyped(abs)).map((e) => ({ name: e.name, kind: kindOf(e) })) };
+  } catch {
+    // fall through: the folder may be unreadable, or one entry may be
+  }
+  let names: string[];
+  try {
+    names = await fsx.readdirNames(abs);
+  } catch (e) {
+    return { entries: [], error: errCode(e) };
+  }
+  const entries: Listing['entries'] = [];
+  const unchecked: string[] = [];
+  for (const name of names) {
+    try {
+      entries.push({ name, kind: kindOf(await fsx.lstat(join(abs, name))) });
+    } catch (e) {
+      if (errCode(e) === 'ENOENT' && !name.includes('�')) continue;
+      unchecked.push(name);
+    }
+  }
+  return unchecked.length ? { entries, unchecked } : { entries };
+}
+
+/**
  * Is this subfolder a chapter made of loose images -- as opposed to a SERIES that happens to hold a cover?
  *
  * ⚠️ "CONTAINS AN IMAGE" IS NOT ENOUGH, AND THAT ONE TEST EMPTIED WHOLE LIBRARIES. Tranga, Komga, Kavita and
@@ -109,15 +181,15 @@ const ARCHIVE = /\.(cbz|cbr|zip|rar|pdf|epub)$/i;
  * Reintroduce by going back to `.some((n) => IMG.test(n))`: the Tranga fixture in scanLayouts.int.test.ts
  * scans to zero series again.
  */
-async function isImageChapterDir(abs: string): Promise<boolean> {
-  const entries = await readdir(abs, { withFileTypes: true }).catch(() => []);
+async function isImageChapterDir(abs: string, fsx: WalkFs = nodeFs): Promise<boolean> {
+  const { entries } = await listDir(abs, fsx);
   let images = 0;
   for (const e of entries) {
-    if (e.isFile()) {
+    if (e.kind === 'file') {
       if (ARCHIVE.test(e.name)) return false;
       if (IMG.test(e.name)) images++;
-    } else if (e.isDirectory() && !SKIP_DIR.test(e.name)) {
-      const inner = await readdir(join(abs, e.name)).catch(() => []);
+    } else if (e.kind === 'dir' && !SKIP_DIR.test(e.name)) {
+      const inner = await fsx.readdirNames(join(abs, e.name)).catch(() => [] as string[]);
       if (inner.some((n) => IMG.test(n) || ARCHIVE.test(n))) return false;
     }
   }
@@ -125,16 +197,22 @@ async function isImageChapterDir(abs: string): Promise<boolean> {
 }
 
 /** Chapter entries in a series folder: cbz/cbr/zip/rar/pdf files, image EPUBs, + subfolders of images. */
-export async function listChapters(folderAbs: string): Promise<string[]> {
+export async function listChapters(folderAbs: string, opts: {
+  fsx?: WalkFs;
+  /** The folder's listing, when the caller has already read it. */
+  listing?: Listing;
+} = {}): Promise<string[]> {
+  const fsx = opts.fsx ?? nodeFs;
   const out: string[] = [];
-  for (const e of await readdir(folderAbs, { withFileTypes: true }).catch(() => [])) {
-    if (e.isFile() && /\.(cbz|cbr|zip|rar|pdf)$/i.test(e.name)) out.push(e.name);
+  for (const e of (opts.listing ?? await listDir(folderAbs, fsx)).entries) {
+    if (e.kind === 'file' && /\.(cbz|cbr|zip|rar|pdf)$/i.test(e.name)) out.push(e.name);
     // An EPUB counts only if it actually holds pages. A reflowable novel has none, so it is skipped here
     // rather than becoming a chapter that opens to nothing -- which is what "skips ebooks" really meant.
-    else if (e.isFile() && /\.epub$/i.test(e.name)) {
+    // (A damaged one reads as none too: epubPages catches its own errors.)
+    else if (e.kind === 'file' && /\.epub$/i.test(e.name)) {
       if ((await epubPages(join(folderAbs, e.name))).length) out.push(e.name);
     }
-    else if (e.isDirectory() && !SKIP_DIR.test(e.name) && (await isImageChapterDir(join(folderAbs, e.name)))) out.push(e.name);
+    else if (e.kind === 'dir' && !SKIP_DIR.test(e.name) && (await isImageChapterDir(join(folderAbs, e.name), fsx))) out.push(e.name);
   }
   return out.sort(naturalCmp);
 }
@@ -308,12 +386,14 @@ export const DL_ROOT = process.env.DL_ROOT || '/library-dl';
 // (Comics/Manga/Author/Series is four) without turning a LIBRARY_PATH accidentally pointed at / into an
 // all-night crawl. Set LIBRARY_MAX_DEPTH=2 to reproduce the old behaviour exactly.
 const MAX_DEPTH = Number(process.env.LIBRARY_MAX_DEPTH) || 6;
+/** For the downloads census (lib/downloadCensus.ts): a folder deeper than this is one the scan never looks in. */
+export const SCAN_MAX_DEPTH = MAX_DEPTH;
 const MAX_DIRS = 200_000; // a pathological mount stops the scan rather than the process
 
 // Never library content. @eaDir is the one that matters: Synology fills it with generated thumbnails, and
 // listChapters() already counts it as a chapter folder, so today every series on a Synology has a phantom
 // "@eaDir" chapter. Recursing would promote that from one bad chapter to one bad series.
-const SKIP_DIR = /^(?:\.|@eaDir$|#recycle$|lost\+found$|__MACOSX$|\$RECYCLE\.BIN$|System Volume Information$)/i;
+export const SKIP_DIR = /^(?:\.|@eaDir$|#recycle$|lost\+found$|__MACOSX$|\$RECYCLE\.BIN$|System Volume Information$)/i;
 
 export interface FoundSeries {
   /** posix, relative to the root, no leading or trailing slash */
@@ -326,23 +406,46 @@ export interface FoundSeries {
 }
 
 /**
- * The symlink-loop guard's name for a directory: the same directory must get the same key however it was
- * reached, and two different directories must never share one.
+ * The loop guard's name for a directory: the same directory gets the same key however it was reached.
  *
  * ⚠️ Not dev:ino on Windows. NTFS file ids are 64-bit and lose precision in a JavaScript number, so two
- * different folders can share a key and the second is silently never scanned; FAT and exFAT drives (most
- * USB sticks and SD cards) have no stable id at all. The real path, case-folded because NTFS is
- * case-insensitive, names a folder exactly once there. POSIX keeps dev:ino. `platform` and `real` are
- * parameters for the test. Reintroduce by returning dev:ino on every platform: relPath.test.ts "the loop
- * guard on Windows" finds two folders under one key.
+ * different folders can share a key; FAT and exFAT drives (most USB sticks and SD cards) have no stable id at
+ * all. The real path, case-folded because NTFS is case-insensitive, names a folder exactly once there. POSIX
+ * keeps dev:ino, read EXACTLY (`nodeFs.stat` asks for bigints). `platform` and `real` are parameters for the
+ * test. Reintroduce by returning dev:ino on every platform: relPath.test.ts "the loop guard on Windows" finds
+ * two folders under one key.
+ *
+ * ⚠️ A shared key is NOT proof of one directory, even exact (#109). Unraid's user shares are one FUSE mount
+ * over several disks and report each disk's own inode numbers, so a folder on the cache pool and one on an
+ * array disk can report the same dev:ino; network and union mounts can too. `findSeriesDirs` therefore
+ * refuses a folder only when it repeats one of its own ancestors, with the same entries.
  */
 export async function dirKey(
   abs: string,
-  st: { dev: number; ino: number },
+  st: { dev: number | bigint; ino: number | bigint },
   platform: NodeJS.Platform = process.platform,
   real: (p: string) => Promise<string> = realpath,
 ): Promise<string> {
   return platform === 'win32' ? (await real(abs).catch(() => abs)).toLowerCase() : `${st.dev}:${st.ino}`;
+}
+
+/** Why the walk left a folder out, or looked no further. Every one of these used to be silent (#109). */
+export type WalkReason = 'loop' | 'unreadable' | 'unchecked' | 'stat' | 'depth' | 'limit';
+export interface WalkIssue {
+  /** Relative to the root; '' is the root itself, or the walk as a whole for `depth` and `limit`. */
+  folder: string;
+  reason: WalkReason;
+  detail: string;
+}
+export interface WalkResult {
+  found: FoundSeries[];
+  issues: WalkIssue[];
+  /**
+   * Folders that reported a disk id another folder had already reported, and were scanned all the same. Up to
+   * v0.48.1 each of them was skipped with its whole subtree, silently: the count is what lets a Health
+   * screenshot say whether that is what an install was hitting.
+   */
+  sharedIds: number;
 }
 
 /**
@@ -363,24 +466,70 @@ export async function dirKey(
  *
  * A directory already claimed as a chapter is never descended into: an "extras" folder nested inside a
  * loose-image chapter would otherwise become a series and count those pages twice.
+ *
+ * Nothing is left out silently any more (#109): a folder that cannot be read, entries that cannot be checked,
+ * a loop, and the depth and folder caps all come back in `issues`, which the scan report and Admin → Health →
+ * Library scan carry. `fsx` and `platform` are parameters for the test.
  */
-async function findSeriesDirs(root: string): Promise<FoundSeries[]> {
-  const out: FoundSeries[] = [];
-  const seenInode = new Set<string>(); // symlink loop guard: `ln -s .. current` is not hypothetical on a NAS
+export async function findSeriesDirs(root: string, fsx: WalkFs = nodeFs, platform: NodeJS.Platform = process.platform): Promise<WalkResult> {
+  const found: FoundSeries[] = [];
+  const issues: WalkIssue[] = [];
+  const reported = new Set<string>();
+  let sharedIds = 0;
   let visited = 0;
+  let tooDeep = 0;
+  let capped = false;
 
-  const walk = async (abs: string, rel: string, depth: number): Promise<void> => {
-    if (depth > MAX_DEPTH || visited >= MAX_DIRS) return;
+  const walk = async (abs: string, rel: string, depth: number, chain: Array<{ key: string; rel: string; names: string }>): Promise<void> => {
+    if (depth > MAX_DEPTH) { tooDeep++; return; }
+    if (visited >= MAX_DIRS) { capped = true; return; }
     visited++;
 
-    // stat, not lstat: a symlinked library directory should still work. We follow it once, then decline.
-    const st = await stat(abs).catch(() => null);
+    // Gone since its parent was listed (moved, or a Remove deleting it) is not a finding.
+    const st = await fsx.stat(abs).catch((e) => {
+      if (errCode(e) !== 'ENOENT') issues.push({ folder: rel, reason: 'stat', detail: errCode(e) });
+      return null;
+    });
     if (!st) return;
-    const key = await dirKey(abs, st);
-    if (seenInode.has(key)) return;
-    seenInode.add(key);
+    const key = await dirKey(abs, st, platform);
+    const listing = await listDir(abs, fsx);
+    const names = () => listing.entries.map((e) => e.name).sort().join('\n');
 
-    const chapters = await listChapters(abs);
+    /**
+     * ⚠️ THE LOOP GUARD, AND WHY IT IS NARROW (#109). It used to be one set of every dev:ino seen in the root,
+     * and a folder whose id was already in it was dropped, with everything under it, without a word. It never
+     * met a real loop -- the walk does not follow symlinks (their entries are `link`, not `dir`) -- but it met
+     * Unraid: a user share is one FUSE mount over several disks and reports each disk's own inode numbers, so
+     * two unrelated series folders could share an id, and one of them never reached the library. Moving it
+     * into /library "fixed" it (another walk, new ids), a rescan never did, and the Health page said all was
+     * well. And the id was a JavaScript number, so above 2^53 neighbouring ids rounded onto one another.
+     *
+     * A walk that cannot follow a symlink can only loop through a bind mount of an ancestor, and that is the
+     * same directory: an ancestor's id AND its entries. Anything less is two folders, and both are scanned.
+     * Reintroduce by refusing every repeated id: "two folders that report one disk id are both scanned" in
+     * scanWalk.test.ts finds one of them missing.
+     */
+    const ancestor = chain.find((a) => a.key === key);
+    if (ancestor && ancestor.names === names()) {
+      issues.push({ folder: rel, reason: 'loop', detail: `the same folder as ${ancestor.rel ? `"${ancestor.rel}"` : 'the root'}, reached again through a mount` });
+      return;
+    }
+    if (reported.has(key)) sharedIds++;
+    else reported.add(key);
+
+    if (listing.error) {
+      if (listing.error !== 'ENOENT') issues.push({ folder: rel, reason: 'unreadable', detail: listing.error });
+      return;
+    }
+    if (listing.unchecked?.length) {
+      const n = listing.unchecked.length;
+      issues.push({
+        folder: rel, reason: 'unchecked',
+        detail: `${n} entr${n === 1 ? 'y' : 'ies'} could not be checked: ${listing.unchecked.slice(0, 3).map((x) => `"${x}"`).join(', ')}${n > 3 ? ', …' : ''}`,
+      });
+    }
+
+    const chapters = await listChapters(abs, { fsx, listing });
     // Chapters win: this directory is a series, and we do not descend. Its chapter subfolders are
     // chapters, not series.
     //
@@ -390,18 +539,23 @@ async function findSeriesDirs(root: string): Promise<FoundSeries[]> {
     // chapter-ish in the first place; this is the second lock on the same door, and it is the one-line fix
     // @ThomasRunting proposed in #34.
     if (chapters.length && rel) {
-      out.push({ folderRel: rel, folderAbs: abs, source: rel.split('/').slice(-2, -1)[0] || 'Library', chapters });
+      found.push({ folderRel: rel, folderAbs: abs, source: rel.split('/').slice(-2, -1)[0] || 'Library', chapters });
       return;
     }
 
-    for (const e of await readdir(abs, { withFileTypes: true }).catch(() => [])) {
-      if (!e.isDirectory() || SKIP_DIR.test(e.name)) continue;
-      await walk(join(abs, e.name), rel ? `${rel}/${e.name}` : e.name, depth + 1);
+    const below = [...chain, { key, rel, names: names() }];
+    for (const e of listing.entries) {
+      if (e.kind !== 'dir' || SKIP_DIR.test(e.name)) continue;
+      await walk(join(abs, e.name), rel ? `${rel}/${e.name}` : e.name, depth + 1, below);
     }
   };
 
-  await walk(root, '', 0);
-  return out;
+  await walk(root, '', 0, []);
+  if (tooDeep) {
+    issues.push({ folder: '', reason: 'depth', detail: `${tooDeep} folder${tooDeep === 1 ? ' is' : 's are'} more than ${MAX_DEPTH} levels deep and ${tooDeep === 1 ? 'was' : 'were'} not looked into (LIBRARY_MAX_DEPTH)` });
+  }
+  if (capped) issues.push({ folder: '', reason: 'limit', detail: `the walk stopped after ${MAX_DIRS.toLocaleString('en-US')} folders; the rest were not looked into` });
+  return { found, issues, sharedIds };
 }
 
 export interface LibraryRow { id: string; path: string }
@@ -431,15 +585,6 @@ export function libraryIdFor(folderRel: string, libs: LibraryRow[]): string {
     if (!best || l.path.length > best.path.length) best = l;
   }
   return best?.id ?? 'lib';
-}
-
-/** Every series folder that exists under either root right now, at any depth. */
-async function foldersOnDisk(): Promise<string[]> {
-  const out: string[] = [];
-  for (const root of [LIBRARY_ROOT, DL_ROOT]) {
-    for (const f of await findSeriesDirs(root)) out.push(f.folderRel);
-  }
-  return out;
 }
 
 /**
@@ -495,8 +640,30 @@ async function tryRematch(
 
 /** A folder the last scan could not index, and why (#109). */
 export interface ScanSkip { root: 'library' | 'downloads'; folder: string; error: string }
-export interface ScanReport { at: string; series: number; books: number; ms: number; skipped: ScanSkip[]; skippedTotal: number }
-/** How many skipped folders a report names. The total is always counted. */
+/** Something the walk left out or looked no further into, and why (#109). */
+export interface ScanWalkIssue extends WalkIssue { root: 'library' | 'downloads' }
+export interface ScanReport {
+  /** When the scan finished, and when it began: a file newer than `startedAt` may simply not be scanned yet. */
+  at: string;
+  startedAt: string;
+  series: number;
+  books: number;
+  ms: number;
+  skipped: ScanSkip[];
+  skippedTotal: number;
+  /** What the walk left out, before any folder reached the database: problems first, then what is only noted. */
+  walk: ScanWalkIssue[];
+  walkTotal: number;
+  /** Of `walkTotal`, the ones that leave chapters out: everything but a refused loop and the depth note. */
+  walkProblems: number;
+  /** Folders that shared a disk id with another folder and were scanned all the same (see `findSeriesDirs`). */
+  sharedIds: number;
+  /** Folders passed over because their series was removed: on purpose, and put back under Admin → Removed. */
+  removed: number;
+}
+/** Walk findings that leave nothing out: a loop refused is the guard working, and the depth cap is a setting. */
+export const QUIET_WALK: ReadonlySet<WalkReason> = new Set<WalkReason>(['loop', 'depth']);
+/** How many skipped folders, and walk findings, a report names. The totals are always counted. */
 const SKIPS_KEPT = 50;
 let lastScan: ScanReport | null = null;
 /**
@@ -506,22 +673,63 @@ let lastScan: ScanReport | null = null;
  */
 export const lastScanReport = (): ScanReport | null => lastScan;
 
-export async function persistScan(): Promise<{ series: number; books: number; ms: number; skipped: number }> {
+export type ScanResult = { series: number; books: number; ms: number; skipped: number };
+let scanning: Promise<ScanResult> | null = null;
+let again: Promise<ScanResult> | null = null;
+/**
+ * Scan every root into lib_series/lib_books. One scan at a time.
+ *
+ * ⚠️ A caller that arrives while a scan is running waits for ONE more scan after it, never for the running
+ * one: that scan may already have walked past the caller's folder before its chapter landed, and answering
+ * with it would say "scanned" about a file it never saw. Every caller that arrives meanwhile shares the same
+ * follow-up. Scans used to overlap freely -- `/api/refresh` alone started one per library, all at once -- and
+ * two scans racing one folder is how a series gets minted twice.
+ * Reintroduce by returning `scanOnce()` every time: "requests during a scan share one follow-up" in
+ * scanResilience.int.test.ts finds three scans and a follow-up that is not the same promise.
+ */
+export function persistScan(): Promise<ScanResult> {
+  if (!scanning) {
+    scanning = scanOnce().finally(() => { scanning = null; });
+    return scanning;
+  }
+  again ??= scanning.catch(() => undefined).then(() => {
+    again = null;
+    return persistScan();
+  });
+  return again;
+}
+
+async function scanOnce(): Promise<ScanResult> {
   const t0 = Date.now();
   let nBooks = 0;
   const skipped: ScanSkip[] = [];
   let skippedTotal = 0;
+  let removed = 0;
   // folderRel -> series id, so the second root reuses the row the first root created. The same relative
   // folder legitimately exists under both roots (a series part-fetched by the engine, part downloaded here),
   // and merging them into one series is deliberate.
   const seenFolders = new Map<string, string>();
+  // Both roots are walked once, up front (the rematch needs every folder on disk before the first is indexed).
+  // The walk reports rather than throws; the catch is the last word: a walk that fails outright costs its root,
+  // named, never the scan.
+  const walks: Array<{ root: string; label: 'library' | 'downloads' } & WalkResult> = [];
+  for (const root of [LIBRARY_ROOT, DL_ROOT]) {
+    const label = root === DL_ROOT ? 'downloads' as const : 'library' as const;
+    walks.push({
+      root, label,
+      ...(await findSeriesDirs(root).catch((e): WalkResult => ({
+        found: [], sharedIds: 0, issues: [{ folder: '', reason: 'unreadable', detail: `the walk failed: ${errCode(e)}` }],
+      }))),
+    });
+  }
+  const walkIssues: ScanWalkIssue[] = walks.flatMap((w) => w.issues.map((i) => ({ ...i, root: w.label })));
   // Every folder that exists on disk this pass. A series still sitting at its own path has not moved, so it
   // must never be offered as the answer for a different folder.
-  const onDisk = await foldersOnDisk();
+  const onDisk = walks.flatMap((w) => w.found.map((f) => f.folderRel));
   // Loaded once per scan. Longest prefix wins, so a declared subdirectory beats library zero.
   const libs = await q<LibraryRow>('SELECT id, path FROM libraries ORDER BY length(path) DESC');
-  for (const root of [LIBRARY_ROOT, DL_ROOT]) {
-    for (const found of await findSeriesDirs(root)) {
+  for (const { root, found: foundInRoot } of walks) {
+    for (const found of foundInRoot) {
       const { folderRel, folderAbs, source: srcName, chapters: files } = found;
       // ⚠️ ONE FOLDER, NOT THE SCAN (#109). A folder the scanner cannot index -- a ComicInfo field Postgres
       // refuses, a constraint, anything -- used to throw out of the whole pass, and every caller swallowed it
@@ -548,7 +756,7 @@ export async function persistScan(): Promise<{ series: number; books: number; ms
         );
         // Deleted: leave it alone entirely. Reviving it would mint a new id and strand everything attached
         // to the old one -- favourites, ratings, notes, reading history.
-        if (known?.deleted_at) continue;
+        if (known?.deleted_at) { removed++; continue; }
         // Merged away: its files belong to the survivor now. Without this the books get pulled back out by
         // `ON CONFLICT (root, file) DO UPDATE SET series_id = EXCLUDED.series_id` and the merge silently undoes.
         const mergeTarget = known?.merged_into || null;
@@ -678,7 +886,14 @@ export async function persistScan(): Promise<{ series: number; books: number; ms
   // never fail over it, and the marks keep until the next scan.
   await reconcileListingProgress().catch((e) => console.warn('[scan] listing marks not reconciled:', (e as Error).message));
   const ms = Date.now() - t0;
-  lastScan = { at: new Date().toISOString(), series: seenFolders.size, books: nBooks, ms, skipped, skippedTotal };
+  const loud = walkIssues.filter((i) => !QUIET_WALK.has(i.reason));
+  lastScan = {
+    at: new Date().toISOString(), startedAt: new Date(t0).toISOString(), series: seenFolders.size, books: nBooks, ms, skipped, skippedTotal,
+    walk: [...loud, ...walkIssues.filter((i) => QUIET_WALK.has(i.reason))].slice(0, SKIPS_KEPT),
+    walkTotal: walkIssues.length, walkProblems: loud.length,
+    sharedIds: walks.reduce((n, w) => n + w.sharedIds, 0), removed,
+  };
+  if (loud.length) console.warn(`[scan] ${loud.length} folder(s) or file(s) were left out by the walk; Admin → Health → Library scan lists them`);
   if (skippedTotal) console.warn(`[scan] ${skippedTotal} folder(s) could not be indexed; Admin → Health → Library scan lists them`);
   return { series: seenFolders.size, books: nBooks, ms, skipped: skippedTotal };
 }

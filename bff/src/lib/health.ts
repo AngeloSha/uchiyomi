@@ -23,7 +23,8 @@ import { gapsOf } from './fill';
 import { CHAPTER_RETRY_CAP } from './updater';
 import { diagnose } from './sourceDiagnosis';
 import { haveNumbers } from './libraryNumbers';
-import { DL_ROOT, lastScanReport } from './library';
+import { DL_ROOT, LIBRARY_ROOT, lastScanReport, QUIET_WALK, type WalkReason } from './library';
+import { downloadCensus, fsTypeOf } from './downloadCensus';
 import { chapterFileRel } from './downloader';
 import { forDesktop } from './desktop';
 
@@ -928,25 +929,105 @@ async function extensionCap(): Promise<HealthCheck> {
  * keeps the rest of the library current -- and would leave that one folder's chapters silently missing, on
  * disk and absent from the series page, if nothing said so. The error is the scanner's own, so the admin
  * has something to act on (a file to replace, a permission to fix) rather than a symptom.
+ *
+ * v0.48.2: and what the WALK left out, before any folder reached the database -- a folder it could not read,
+ * entries it could not check, the folder cap. v0.48.0 reported the database's refusals only, so a download
+ * the walk dropped left this check green while the chapters stayed missing.
  */
-function libraryScan(): HealthCheck {
+async function libraryScan(): Promise<HealthCheck> {
   const r = lastScanReport();
+  const where = await rootsNote();
   if (!r) {
-    return { id: 'library-scan', title: 'Library scan', status: 'ok', summary: 'no scan has run since the server started', items: [] };
+    return { id: 'library-scan', title: 'Library scan', status: 'ok', summary: 'no scan has run since the server started', note: where, items: [] };
   }
   const n = r.skippedTotal;
+  const w = r.walkProblems;
+  const s = (k: number, one: string, many: string) => (k === 1 ? one : many);
+  const parts = [
+    ...(n ? [`could not index ${n} folder${s(n, '', 's')}`] : []),
+    ...(w ? [`left out ${w} folder${s(w, '', 's')} or file${s(w, '', 's')} it could not read`] : []),
+  ];
+  const label = (root: 'library' | 'downloads', folder: string) =>
+    `${root === 'downloads' ? 'Downloads' : 'Library'} / ${folder || '(the folder itself)'}`;
+  const notes = [
+    'Runs after every download, sweep and manual scan. Every other folder is still indexed when one fails.',
+    ...(r.sharedIds
+      ? [`${r.sharedIds} folder${s(r.sharedIds, ' shares', 's share')} a disk id with another folder (Unraid user shares and some network drives report ids like this). All of them were scanned; before v0.48.2 each one was skipped, with everything in it.`]
+      : []),
+    ...(r.removed ? [`${r.removed} folder${s(r.removed, ' belongs', 's belong')} to series someone removed, and ${s(r.removed, 'was', 'were')} left alone; Admin → Removed puts a series back.`] : []),
+    ...(where ? [where] : []),
+  ];
   return {
     id: 'library-scan',
     title: 'Library scan',
-    status: n ? 'problem' : 'ok',
-    summary: n
-      ? `the last scan could not index ${n} folder${n === 1 ? '' : 's'}; ${n === 1 ? 'its' : 'their'} chapters are on disk but not in the library`
+    status: n || w ? 'problem' : 'ok',
+    summary: parts.length
+      ? `the last scan ${parts.join(' and ')}; ${n + w === 1 ? 'its' : 'their'} chapters are on disk but not in the library`
       : `the last scan indexed ${r.series} series, ${r.books} chapters`,
-    note: 'Runs after every download, sweep and manual scan. Every other folder is still indexed when one fails.',
-    items: r.skipped.slice(0, MAX_ITEMS).map((k) => ({
-      title: `${k.root === 'downloads' ? 'Downloads' : 'Library'} / ${k.folder}`,
-      detail: k.error,
-    })),
+    note: notes.join(' '),
+    items: [
+      ...r.skipped.map((k) => ({ title: label(k.root, k.folder), detail: k.error })),
+      ...r.walk.map((i) => ({
+        title: label(i.root, i.folder),
+        detail: WALK_WORDS[i.reason](i.detail),
+        ...(QUIET_WALK.has(i.reason) ? { info: true } : {}),
+      })),
+    ].slice(0, MAX_ITEMS),
+  };
+}
+
+const WALK_WORDS: Record<WalkReason, (detail: string) => string> = {
+  unreadable: (d) => `could not be read (${d}), so nothing in it is in the library`,
+  unchecked: (d) => d,
+  stat: (d) => `could not be checked (${d}), so nothing in it is in the library`,
+  loop: (d) => `not scanned twice: ${d}`,
+  depth: (d) => d,
+  limit: (d) => d,
+};
+
+/** Which filesystem each root is on: the first thing anyone needs to know about a folder that goes missing. */
+async function rootsNote(): Promise<string | undefined> {
+  const [lib, dl] = await Promise.all([fsTypeOf(LIBRARY_ROOT), fsTypeOf(DL_ROOT)]);
+  const parts = [...(lib ? [`Library: ${lib}`] : []), ...(dl ? [`Downloads: ${dl}`] : [])];
+  return parts.length ? `${parts.join(' · ')}.` : undefined;
+}
+
+/**
+ * Every chapter file in the downloads folder that is not in the library (#109), with the reason when the scan
+ * knows one. Compares the disk with the database directly (lib/downloadCensus.ts), so it does not depend on the
+ * scanner having noticed what it dropped -- which is exactly what it failed to do for #109, twice.
+ */
+async function downloadsMissing(): Promise<HealthCheck> {
+  const base = { id: 'downloads-missing', title: 'Downloads missing from the library' };
+  const c = await downloadCensus().catch((e) => e as Error);
+  if (c instanceof Error) {
+    return { ...base, status: 'warn', summary: `could not be checked just now: ${String(c.message).slice(0, 160)}`, items: [] };
+  }
+  const n = c.missingFiles;
+  const s = (k: number, one: string, many: string) => (k === 1 ? one : many);
+  const notes = [
+    `Every chapter file under ${c.root}${c.fsType ? ` (${c.fsType})` : ''}, against the library.`,
+    ...(c.pending ? [`${c.pending} landed after the last scan began and ${s(c.pending, 'waits', 'wait')} for the next one.`] : []),
+    ...(c.removed ? [`${c.removed} belong${s(c.removed, 's', '')} to series someone removed (Admin → Removed puts one back).`] : []),
+    ...(c.truncated ? ['The folder is too big to check completely; the counts are a floor.'] : []),
+  ];
+  return {
+    ...base,
+    status: n || c.unreadable.length ? 'problem' : 'ok',
+    summary: n
+      ? `${n} downloaded chapter${s(n, '', 's')} in ${c.missing.length} folder${s(c.missing.length, '', 's')} ${s(n, 'is', 'are')} on disk but not in the library`
+      : c.unreadable.length
+        ? `${c.unreadable.length} folder${s(c.unreadable.length, '', 's')} in the downloads could not be read`
+        : `all ${c.files} chapter file${s(c.files, '', 's')} in the downloads folder are in the library`,
+    note: notes.join(' '),
+    items: [
+      ...c.unreadable.map((u) => ({ title: `Downloads / ${u.folder || '(the folder itself)'}`, detail: `could not be read (${u.error})` })),
+      ...c.missing.map((m) => ({
+        title: `Downloads / ${m.folder || '(the folder itself)'}`,
+        detail: `${m.files.length} chapter${s(m.files.length, '', 's')} not in the library (${m.files.slice(0, 3).join(', ')}${m.files.length > 3 ? ', …' : ''})${m.reason ? `: ${m.reason}` : ''}`,
+        ...(m.seriesId ? { seriesId: m.seriesId } : {}),
+      })),
+    ].slice(0, MAX_ITEMS),
   };
 }
 
@@ -968,6 +1049,7 @@ export async function runHealthChecks(): Promise<HealthReport> {
     solverHealth(),
     updateCheck(),
     libraryScan(),
+    downloadsMissing(),
     ...(suwayomiConfigured() ? [extensionCap()] : []),
   ]);
   // worst first, so the page opens on whatever needs attention

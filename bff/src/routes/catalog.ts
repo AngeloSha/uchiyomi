@@ -213,7 +213,10 @@ export default async function catalogRoutes(app: FastifyInstance) {
     runtime.lastScan = now;
     // A rescan walks the disk on everyone's behalf, so it is deliberately not a per-viewer read.
     const libs = await komga.libraries(SYSTEM_CTX).catch(() => [] as any[]);
-    await Promise.all(libs.map((l: any) => komga.scanLibrary(SYSTEM_CTX, l.id).catch(() => {})));
+    // ⚠️ The owned library has ONE scan, of every root, whatever library id it is handed (lib/ownedCatalog.ts):
+    // one call per library started that whole scan once per library, all at the same time. Komga scans each.
+    const targets = NATIVE_PROGRESS ? libs : [libs[0] ?? { id: 'lib' }];
+    await Promise.all(targets.map((l: any) => komga.scanLibrary(SYSTEM_CTX, l.id).catch(() => {})));
     return { scanned: true, libraries: libs.length };
   });
 
