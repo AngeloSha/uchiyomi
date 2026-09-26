@@ -14,6 +14,7 @@ import { pool, q, one } from './lib/db';
 import { runtime } from './lib/runtime';
 import { reapStaleTemp } from './lib/fsAtomic';
 import { DL_ROOT } from './lib/library';
+import { OWNED } from './lib/backend';
 import { migrate } from './lib/migrate';
 import { loadSources, loadCustomSites, loadBuiltins, listSources, loadSuwayomiSources, scheduleSuwayomiRetry, suwayomiConfigured } from './lib/sources';
 import { scheduleFingerprintBackfill } from './lib/fingerprintJob';
@@ -184,7 +185,11 @@ async function main() {
   startSweeper();
 
   // Periodic new-chapter check (owned mode), self-rescheduling so the admin can change the interval live.
-  if (process.env.LIBRARY_BACKEND === 'owned') {
+  // ⚠️ `OWNED`, never `LIBRARY_BACKEND === 'owned'`: the all-in-one image and the Unraid template do not set
+  // the variable, and unset means owned everywhere else (lib/backend.ts). Written as `=== 'owned'`, this check
+  // and the nightly repair below simply never started on those installs -- every followed series waited for
+  // someone to press Run now. backendGate.test.ts refuses the old spelling anywhere in src/.
+  if (OWNED) {
     const tick = async () => {
       let hours = 6;
       let retryIn = 0;
@@ -391,9 +396,9 @@ async function main() {
    * run used to be pushed out by six hours. The floor is thirty minutes rather than the sweep's ten: this
    * job opens two thousand archives, and a server that has just booted should be answering readers first.
    * Owned mode only: everything it repairs lives in lib_books and DL_ROOT, which a Komga-backed install
-   * does not have.
+   * does not have. `OWNED`, for the reason given at the sweep above.
    */
-  if (process.env.LIBRARY_BACKEND === 'owned') {
+  if (OWNED) {
     const tick = async () => {
       let next = REPAIR_HOURS * 60 * 60 * 1000;
       try {
