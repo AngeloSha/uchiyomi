@@ -10,6 +10,8 @@
 // as raw bytes and `r.json()` threw. Nothing but the desktop app's MangaDex smoke saw it, as "latest answered
 // 200 with 0 candidates" -- the same line a rate-limited runner prints, which is how it nearly got re-run
 // and merged. Here it is local: an HTTPS server that offers HTTP/2 as MangaDex does, and gzips its answer.
+// undici 8.11.2 passes it (and MangaDex answers again), so v0.48.0 takes that instead of #96's 8.11.0; the test
+// stays, because the next minor can bring the same break back.
 import test, { before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
