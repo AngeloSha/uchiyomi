@@ -56,7 +56,8 @@ export function HealthBanner() {
   const dismiss = () => { writeSeen(data.key); setSeen(data.key); };
   return (
     <div role="status" data-health-banner
-      className={`relative z-[2] flex flex-wrap items-center justify-center gap-x-3 gap-y-1 px-4 py-2 text-xs ${tone === 'problem' ? 'bg-red-500/10 text-red-200' : 'bg-amber-400/10 text-amber-100'}`}>
+      // safe-top: on a phone the banner is the first thing on the page, under an installed app's status bar.
+      className={`safe-top relative z-[2] flex flex-wrap items-center justify-center gap-x-3 gap-y-1 px-4 pb-2 text-xs lg:pt-2 ${tone === 'problem' ? 'bg-red-500/10 text-red-200' : 'bg-amber-400/10 text-amber-100'}`}>
       <IcAlert width={14} height={14} className="shrink-0" />
       <span className="min-w-0">{data.headline ?? countLine(data.count)}</span>
       {data.count > 1 && <span className="text-fog-400">{countLine(data.count)}</span>}

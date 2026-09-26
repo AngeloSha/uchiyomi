@@ -4,7 +4,7 @@ import { createPortal } from 'react-dom';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { msgOf } from '@/components/ConfirmDialog';
-import { IcX } from '@/components/icons';
+import { IcChevronLeft, IcX } from '@/components/icons';
 import { chapterLabel } from '@/lib/format';
 import { t as tr } from '@/lib/i18n';
 import { inOrder, neighbours, previewCountUrl, previewListUrl, previewPageUrl, type PreviewChapter } from '@/lib/preview';
@@ -26,6 +26,13 @@ import { inOrder, neighbours, previewCountUrl, previewListUrl, previewPageUrl, t
  * page squeezed into the dialog's width. And ⚠️ Escape is caught in the CAPTURE phase and stopped: the dialog
  * underneath closes on any Escape that reaches the document, so the first Escape here used to throw away the add
  * dialog as well. Here it goes back one step -- pages to the list, the list to the dialog.
+ *
+ * ⚠️ AND THE PHONE'S BACK GESTURE DOES THE SAME. On a phone there was no way out of a chapter but Add to
+ * library: the top bar sat under the status bar of an installed app (no safe-area inset, where every page
+ * header in the app has one), its two controls were 18-pixel targets, and Back left Discover altogether. So the
+ * bar clears the inset, its controls are 40 pixels, and each level (the list, a chapter) is a history entry:
+ * Back, Escape and the Chapters button all step out through history, so they cannot disagree. The entries
+ * carry Next's own history state, which is what keeps its router treating them as this same page.
  */
 export function PreviewReader({ source, sourceName, sourceId, title, onClose, onAdd, canAdd }: {
   source: string;
@@ -44,17 +51,57 @@ export function PreviewReader({ source, sourceName, sourceId, title, onClose, on
   numberRef.current = number;
   const closeRef = useRef(onClose);
   closeRef.current = onClose;
+  const addRef = useRef(onAdd);
+  addRef.current = onAdd;
+  /** How many history entries this viewer has pushed: 1 while the list is up, 2 inside a chapter. */
+  const depth = useRef(0);
+  /** Set by Add: run once the unwinding Back has landed, so the add never races the history. */
+  const afterUnwind = useRef<(() => void) | null>(null);
+  const push = (d: number) => {
+    try { window.history.pushState({ ...(window.history.state ?? {}), uchiyomiPreview: d }, ''); depth.current = d; } catch { /* no history API */ }
+  };
+  /** One level out: a chapter to the list, the list to the dialog. */
+  const back = () => {
+    if (depth.current > 0) { window.history.back(); return; }
+    if (numberRef.current !== null) setNumber(null); else closeRef.current();
+  };
+  /** Out entirely, taking this viewer's history entries with it. */
+  const unwind = (then: () => void) => {
+    const n = depth.current;
+    if (n <= 0) { then(); return; }
+    afterUnwind.current = then;
+    window.history.go(-n);
+  };
   useEffect(() => {
+    push(1);
+    // Where a Back lands decides the level. Anything below 1 is the page underneath: close.
+    const onPop = (e: PopStateEvent) => {
+      const d = typeof e.state?.uchiyomiPreview === 'number' ? e.state.uchiyomiPreview : 0;
+      depth.current = d;
+      if (d >= 2) return;
+      if (d === 1) { setNumber(null); return; }
+      const then = afterUnwind.current;
+      afterUnwind.current = null;
+      (then ?? closeRef.current)();
+    };
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
       e.stopPropagation();
       e.preventDefault();
-      if (numberRef.current !== null) setNumber(null);
-      else closeRef.current();
+      back();
     };
+    window.addEventListener('popstate', onPop);
     window.addEventListener('keydown', onKey, true);
-    return () => window.removeEventListener('keydown', onKey, true);
+    return () => {
+      window.removeEventListener('popstate', onPop);
+      window.removeEventListener('keydown', onKey, true);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+  const openChapter = (n: number) => {
+    setNumber(n);
+    if (depth.current === 1) push(2);
+  };
 
   const list = useQuery({
     queryKey: ['preview', source, sourceId],
@@ -75,7 +122,7 @@ export function PreviewReader({ source, sourceName, sourceId, title, onClose, on
       {list.isSuccess && chapters.length === 0 && <p className="py-8 text-center text-sm text-fog-500">{tr('No chapters listed.')}</p>}
       <div className="space-y-1">
         {chapters.map((c) => (
-          <button key={c.number} type="button" onClick={() => setNumber(c.number)}
+          <button key={c.number} type="button" onClick={() => openChapter(c.number)}
             className="flex w-full items-baseline gap-2 rounded-lg px-3 py-2 text-start text-sm text-fog-200 hover:bg-ink-800">
             <span className="shrink-0 tabular-nums">{chapterLabel({ number: c.number })}</span>
             {c.title && <span className="truncate text-fog-500">{c.title}</span>}
@@ -90,16 +137,20 @@ export function PreviewReader({ source, sourceName, sourceId, title, onClose, on
 
   return createPortal(
     <div className="fixed inset-0 z-[70] flex flex-col bg-black" role="dialog" aria-modal="true" aria-label={`${tr('Preview')}: ${title}`}>
-      <div className="flex items-center gap-3 border-b border-ink-800 bg-black/85 px-4 py-2">
+      <div className="flex items-center gap-1 border-b border-ink-800 bg-black/85 px-2 pb-1.5 pt-[max(0.375rem,env(safe-area-inset-top))]">
         {number !== null && (
-          <button type="button" onClick={() => setNumber(null)} className="text-sm text-fog-400 hover:text-fog-100">{tr('Chapters')}</button>
+          <button type="button" onClick={back}
+            className="inline-flex h-10 shrink-0 items-center gap-1 rounded-full ps-2 pe-3 text-sm text-fog-300 hover:bg-ink-800 hover:text-fog-100">
+            <IcChevronLeft width={18} height={18} className="rtl:rotate-180" />{tr('Chapters')}
+          </button>
         )}
-        <span className="truncate text-sm text-fog-200">
+        <span className="min-w-0 flex-1 truncate px-2 text-sm text-fog-200">
           {title}{number !== null ? ` · ${chapterLabel({ number })}` : ''}
         </span>
-        <span className="ms-auto shrink-0 text-[11px] text-fog-600">{tr('Preview')}</span>
-        <button type="button" onClick={onClose} aria-label={tr('Close')} className="shrink-0 text-fog-400 hover:text-fog-100">
-          <IcX width={18} height={18} />
+        <span className="shrink-0 text-[11px] text-fog-600">{tr('Preview')}</span>
+        <button type="button" onClick={() => unwind(() => closeRef.current())} aria-label={tr('Close')}
+          className="grid h-10 w-10 shrink-0 place-items-center rounded-full text-fog-300 hover:bg-ink-800 hover:text-fog-100">
+          <IcX width={20} height={20} />
         </button>
       </div>
       <div data-lenis-prevent className="flex-1 overflow-y-auto overscroll-contain px-2 py-3 lg:px-4">
@@ -107,7 +158,7 @@ export function PreviewReader({ source, sourceName, sourceId, title, onClose, on
       </div>
       {onAdd && (
         <div className="border-t border-ink-800 bg-black/85 px-4 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
-          <button type="button" onClick={onAdd} disabled={canAdd === false}
+          <button type="button" onClick={() => unwind(() => addRef.current?.())} disabled={canAdd === false}
             className="btn-accent mx-auto block w-full max-w-md py-2.5 text-sm disabled:opacity-50">{tr('Add to library')}</button>
         </div>
       )}
