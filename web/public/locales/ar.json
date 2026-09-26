@@ -2,7 +2,7 @@
   "_meta": {
     "language": "ar",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 1258
+    "strings": 1267
   },
   "1 check found something": "فحص واحد وجد شيئًا",
   "1 member": "عضو واحد",
@@ -1261,5 +1261,14 @@
   "Ignore": "تجاهل",
   "Stop ignoring": "إيقاف التجاهل",
   "Ignored — it stays quiet until something about it changes": "تم التجاهل — لن ينبّه حتى يتغير فيه شيء",
-  "Back on the list": "عاد إلى القائمة"
+  "Back on the list": "عاد إلى القائمة",
+  "Select none": "إلغاء تحديد الكل",
+  "Pick chapters one by one": "اختيار الفصول واحدًا واحدًا",
+  "Download {n} chapters": "تنزيل {n} فصول",
+  "Follow {s} and download {n} chapters": "متابعة {s} وتنزيل {n} فصول",
+  "{n} chapters newer than yours": "{n} فصول أحدث مما لديك",
+  "Up to {max} at a time: the rest can be fetched once this finishes.": "حتى {max} في المرة الواحدة: يمكن جلب الباقي بعد أن ينتهي هذا.",
+  "Now following {s}. It is checked for new chapters every few hours; download what it has now below.": "أنت تتابع {s} الآن. يُفحص بحثًا عن فصول جديدة كل بضع ساعات؛ نزّل ما لديه الآن من الأسفل.",
+  "Downloading {n} chapters. {m} are not listed yet and come with the next check.": "جارٍ تنزيل {n} فصول. {m} غير مدرجة بعد وستأتي مع الفحص التالي.",
+  "Has everything you have and nothing newer yet. Following one means new chapters are taken from whichever source has them first.": "فيه كل ما لديك ولا شيء أحدث بعد. متابعة مصدر تعني أن الفصول الجديدة تُؤخذ من المصدر الذي تظهر فيه أولًا."
 }

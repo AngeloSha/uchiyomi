@@ -2,7 +2,7 @@
   "_meta": {
     "language": "ja",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 1258
+    "strings": 1267
   },
   "1 check found something": "1 件のチェックで問題を検出",
   "1 member": "メンバー 1 人",
@@ -1261,5 +1261,14 @@
   "Ignore": "無視",
   "Stop ignoring": "無視をやめる",
   "Ignored — it stays quiet until something about it changes": "無視しました — 何か変化があるまで表示しません",
-  "Back on the list": "リストに戻しました"
+  "Back on the list": "リストに戻しました",
+  "Select none": "選択を解除",
+  "Pick chapters one by one": "章を1つずつ選ぶ",
+  "Download {n} chapters": "{n} 章をダウンロード",
+  "Follow {s} and download {n} chapters": "{s} をフォローして {n} 章をダウンロード",
+  "{n} chapters newer than yours": "手持ちより新しい章が {n} 件",
+  "Up to {max} at a time: the rest can be fetched once this finishes.": "一度に {max} 件まで：残りはこれが終わってから取得できます。",
+  "Now following {s}. It is checked for new chapters every few hours; download what it has now below.": "{s} をフォローしました。数時間ごとに新しい章を確認します。今ある章は下からダウンロードできます。",
+  "Downloading {n} chapters. {m} are not listed yet and come with the next check.": "{n} 章をダウンロード中。{m} 章はまだ一覧になく、次の確認で取得されます。",
+  "Has everything you have and nothing newer yet. Following one means new chapters are taken from whichever source has them first.": "手持ちの章はすべてあり、新しい章はまだありません。フォローすると、新しい章は最初に掲載したソースから取得されます。"
 }

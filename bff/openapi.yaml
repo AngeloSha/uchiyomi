@@ -1963,7 +1963,9 @@ paths:
         carries `source` and `sourceId`), its source must be followed and available, and it IGNORES the group
         rules including the blocklist -- an explicit choice of one copy -- but never `already_here`. A number
         named in both lists is fetched as its pick; a second pick for the same number is skipped as
-        `duplicate`. At least one of `numbers` / `picks`, at most 300 combined.
+        `duplicate`. At least one of `numbers` / `picks`, at most 300 combined. `floored: true` (since
+        v0.48.3) reads `numbers` as WHOLE chapters -- 12 takes every listed chapter from 12 up to 13, so 12 and
+        12.5 -- which is what the fill scan's numbers are; a whole number nothing lists is `not_listed`.
       requestBody:
         required: true
         content:
@@ -1986,6 +1988,9 @@ paths:
                   maxItems: 300
                   items:
                     $ref: "#/components/schemas/Pick"
+                floored:
+                  type: boolean
+                  description: Read `numbers` as whole chapter numbers (since v0.48.3).
       security:
         - bearer: []
       responses:

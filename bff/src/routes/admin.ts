@@ -1121,6 +1121,12 @@ export default async function adminRoutes(app: FastifyInstance) {
       [id, source, sourceSeriesId, cand.title || null, cand.coverage, userIdOf(req)],
     );
     await logAudit('series.follow_source', { userId: userIdOf(req), detail: { id, title: row.title, source, sourceSeriesId, coverage: cand.coverage }, req });
+    // The listing again, now with this source in it, as an unfollow does (below): the chapters it has that the
+    // series lacks show up on the series page at once, as rows to fetch, instead of at the next sweep -- which
+    // is when the owner expected them and saw nothing (v0.48.3). Not waited for: a Cloudflare source can take
+    // a minute to list, and the Find missing dialog's "Follow and download" asks the fetch route, which
+    // refreshes the listing itself before it picks a copy.
+    void updateSeries(id, 0).catch(() => {});
     return { ok: true, sources: await seriesSourcesFor(id) };
   });
 

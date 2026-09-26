@@ -10,7 +10,7 @@
  * Sources that were checked and rejected are shown too, with the reason and the measured overlap, because
  * "MangaDex has this but numbers it differently" is worth knowing and a silently shortened list is not.
  */
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { Modal, msgOf } from '@/components/ConfirmDialog';
@@ -20,6 +20,7 @@ import { useToast } from '@/components/Toast';
 import { useAuth } from '@/lib/auth';
 import { t as tr } from '@/lib/i18n';
 import { followable } from '@/lib/scanlators';
+import { offerOf, runState, runsOf, toggleOne, toggleRun, type OfferMode } from '@/lib/chapterPicker';
 import type { SeriesSource } from '@/lib/types';
 import { jobNoteLines, type JobCardNotes } from '@/lib/jobNotes';
 
@@ -61,6 +62,59 @@ function whyText(c: Candidate): string {
   }
 }
 
+/**
+ * The chapters one source can supply, as chips (v0.48.3): a run of consecutive chapters is one chip, and its
+ * "⋯" opens it into one chip per chapter. Everything starts selected -- "the rest of the missing chapters" is
+ * what the owner came for -- and a tap takes a run, or a chapter, out.
+ */
+function ChapterPicker({ numbers, selected, onChange }: {
+  numbers: number[]; selected: ReadonlySet<number>; onChange: (next: Set<number>) => void;
+}) {
+  const runs = useMemo(() => runsOf(numbers), [numbers]);
+  const [open, setOpen] = useState<number | null>(null);
+  const opened = runs.find((r) => r.lo === open);
+  const count = numbers.filter((n) => selected.has(n)).length;
+  return (
+    <div className="mt-3">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-fog-500">
+        <span>{tr('{n} selected', { n: count })}</span>
+        <button type="button" onClick={() => onChange(new Set(numbers))} className="hover:text-fog-200">{tr('Select all')}</button>
+        <button type="button" onClick={() => onChange(new Set())} className="hover:text-fog-200">{tr('Select none')}</button>
+      </div>
+      <div className="mt-2 flex flex-wrap gap-1.5">
+        {runs.map((r) => {
+          const state = runState(r, selected);
+          return (
+            <span key={r.lo} className="inline-flex items-center gap-0.5">
+              <button
+                type="button"
+                aria-pressed={state === 'all'}
+                onClick={() => onChange(toggleRun(selected, r))}
+                className={`chip text-xs ${state === 'all' ? 'border-accent/60 text-accent' : state === 'some' ? 'border-accent/30 text-fog-200' : 'text-fog-500 line-through decoration-fog-600'}`}
+              >
+                {/* <bdi>: a number range stays one unit inside an Arabic sentence. */}
+                <bdi>{r.lo === r.hi ? tr('Ch. {n}', { n: r.lo }) : tr('Ch. {a}–{b}', { a: r.lo, b: r.hi })}</bdi>
+              </button>
+              {r.nums.length > 1 && (
+                <button type="button" aria-label={tr('Pick chapters one by one')} aria-expanded={open === r.lo}
+                  onClick={() => setOpen(open === r.lo ? null : r.lo)} className="chip px-2 text-xs text-fog-400">⋯</button>
+              )}
+            </span>
+          );
+        })}
+      </div>
+      {opened && (
+        <div className="mt-2 flex max-h-40 flex-wrap gap-1 overflow-y-auto" data-lenis-prevent>
+          {opened.nums.map((n) => (
+            <button key={n} type="button" aria-pressed={selected.has(n)} onClick={() => onChange(toggleOne(selected, n))}
+              className={`chip px-2 text-[11px] ${selected.has(n) ? 'border-accent/60 text-accent' : 'text-fog-500'}`}>{n}</button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function FindMissingDialog({ seriesId, onClose }: { seriesId: string; onClose: () => void }) {
   const toast = useToast();
   const qc = useQueryClient();
@@ -69,6 +123,8 @@ export function FindMissingDialog({ seriesId, onClose }: { seriesId: string; onC
   const [term, setTerm] = useState('');
   const [started, setStarted] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  /** Each source's chosen chapters, by `${source}:${sourceSeriesId}`; absent means everything it offers. */
+  const [picked, setPicked] = useState<Record<string, number[]>>({});
 
   const scan = useQuery({
     queryKey: ['fill-scan', seriesId, term],
@@ -112,9 +168,10 @@ export function FindMissingDialog({ seriesId, onClose }: { seriesId: string; onC
   // the server can refuse a stale scan the same way. The scan's `following` is patched in place rather than
   // refetched: a refetch is a fresh scan, which asks every source again and costs a cooldown when one is
   // slow, all to learn a fact the response already carries.
-  const follow = async (c: Candidate) => {
-    if (!scan.data) return;
-    setBusy(true);
+  // `announce` false when "Follow and download" follows on the way to downloading: the download says the rest.
+  const follow = async (c: Candidate, announce = true): Promise<boolean> => {
+    if (!scan.data) return false;
+    if (announce) setBusy(true);
     try {
       const res = await api<{ ok: true; sources: SeriesSource[] }>(`/api/admin/series/${seriesId}/sources`, {
         method: 'POST',
@@ -123,9 +180,54 @@ export function FindMissingDialog({ seriesId, onClose }: { seriesId: string; onC
       const following = res.sources.map((x) => x.sourceId);
       qc.setQueryData<Scan>(['fill-scan', seriesId, term], (old) => (old ? { ...old, following } : old));
       qc.invalidateQueries({ queryKey: ['series', seriesId] });
-      toast(tr('Now following {s}').replace('{s}', c.name), 'success');
+      // The follow refreshes the series' listing in the background, which is where its chapters appear.
+      qc.invalidateQueries({ queryKey: ['series-listing', seriesId] });
+      // Said plainly, because a follow on its own downloads nothing today: that is what the owner read as broken.
+      if (announce) toast(tr('Now following {s}. It is checked for new chapters every few hours; download what it has now below.', { s: c.name }), 'success');
+      return true;
     } catch (e) {
       toast(msgOf(e, tr('Could not follow that source.')), 'error');
+      return false;
+    } finally {
+      if (announce) setBusy(false);
+    }
+  };
+
+  /**
+   * Download what was picked, now. Through the fetch route for the series' own source and the ones it follows
+   * (it refreshes the listing and takes the best copy of each chapter across them), following the source first
+   * where it has to -- following is what puts its chapters in the listing. By WHOLE number (`floored`): the
+   * scan compares sources by whole chapter numbers, so 12 here means 12 and 12.5 there. A source nobody follows
+   * fills its holes through the fill plan, as before.
+   */
+  const download = async (c: Candidate, mode: OfferMode, numbers: number[]) => {
+    if (!scan.data || !numbers.length) return;
+    const max = scan.data.fillMax ?? 300;
+    setBusy(true);
+    try {
+      if (mode === 'fill') {
+        const res = await api<{ folder: string }>('/api/sources/fill', {
+          method: 'POST',
+          json: { planId: scan.data.planId, source: c.source, sourceSeriesId: c.sourceSeriesId, numbers: numbers.slice(0, max) },
+        });
+        setStarted(res.folder);
+        toast(tr('Fetching {n} chapters…').replace('{n}', String(Math.min(numbers.length, max))), 'info');
+      } else {
+        if (mode === 'follow') {
+          if (!(await follow(c, false))) return;
+        }
+        const res = await api<{ folder: string; total: number; skipped?: Array<{ number: number; reason: string }> }>('/api/sources/fetch', { method: 'POST', json: { seriesId, numbers: numbers.slice(0, max), floored: true } });
+        setStarted(res.folder);
+        const later = (res.skipped ?? []).filter((x) => x.reason === 'not_listed').length;
+        toast(later
+          ? tr('Downloading {n} chapters. {m} are not listed yet and come with the next check.', { n: res.total, m: later })
+          : tr('Fetching {n} chapters…').replace('{n}', String(res.total)), 'info');
+      }
+      qc.invalidateQueries({ queryKey: ['source-jobs'] });
+      qc.invalidateQueries({ queryKey: ['series-listing', seriesId] });
+      qc.invalidateQueries({ queryKey: ['series-books', seriesId] });
+    } catch (e) {
+      toast(msgOf(e, tr('Could not start.')), 'error');
     } finally {
       setBusy(false);
     }
@@ -168,11 +270,43 @@ export function FindMissingDialog({ seriesId, onClose }: { seriesId: string; onC
   }
 
   const d = scan.data;
-  const usable = (d?.candidates || []).filter((c) => c.why === 'ok');
-  // A source that matches us and has nothing we lack is not usable for a fill, but it is exactly the kind
-  // worth following -- so for an admin it leaves the rejected list and gets its own, with the button.
-  const alsoFollow = isAdmin ? (d?.candidates || []).filter((c) => c.why === 'nothing_to_fill' && followable(c)) : [];
-  const rejected = (d?.candidates || []).filter((c) => c.why !== 'ok' && !alsoFollow.includes(c));
+  const following = new Set(d?.following ?? []);
+  const offer = (c: Candidate) => offerOf(c, { following, isAdmin, followable });
+  // Every source that can give this person a chapter the series lacks, in the scan's order: interior holes,
+  // AND the chapters past the last one held -- which is where "the rest of the missing chapters" usually are,
+  // and which the dialog used to show only as a follow button, under a line calling the source up to date.
+  const offering = (d?.candidates || []).filter((c) => offer(c).mode !== 'none' || (c.pinned && c.older.length > 0));
+  // Matches our numbering and has nothing we lack yet: worth following for what comes next.
+  const alsoFollow = isAdmin ? (d?.candidates || []).filter((c) => !offering.includes(c) && followable(c)) : [];
+  const rejected = (d?.candidates || []).filter((c) => !offering.includes(c) && !alsoFollow.includes(c));
+  const max = d?.fillMax ?? 300;
+
+  const header = (c: Candidate) => (
+    <div className="flex gap-3">
+      <Img src={sourceCover(c.source, c.coverUrl)} alt="" className="h-16 w-12 shrink-0 rounded-lg object-cover" />
+      <div className="min-w-0">
+        <p className="truncate text-sm font-semibold text-white">{c.name}</p>
+        {/* Their title, verbatim. If it is not this series, this line is where a person notices. */}
+        <p className="truncate text-xs text-fog-400">{tr('Listed there as')} “{c.title}”</p>
+        <p className="mt-1 text-xs text-fog-500">
+          {c.count} {tr('chapters')} ({c.first}–{c.last}) · {tr('matches {m} of your {n}')
+            .replace('{m}', String(c.matched)).replace('{n}', String(d?.have.count ?? 0))}
+          {c.pinned && ` · ${tr('this series’ own source')}`}
+        </p>
+        {c.newer.length > 0 && <p className="mt-1 text-xs text-fog-300">{tr('{n} chapters newer than yours', { n: c.newer.length })}</p>}
+        {/* A warning, never a filter: hiding a source with a streak would deadlock it, because only a
+            successful download clears the streak. The person decides, with the record in front of them. */}
+        {c.health && (
+          <p className="mt-1 text-xs text-amber-300">
+            {tr('Recently unreliable')} · {c.health.status === 'rate_limited' ? tr('rate-limited us')
+              : c.health.status === 'blocked' ? tr('refused us') : tr('did not answer')}
+            {c.health.consecutive > 1 && ` ${tr('{n} times in a row').replace('{n}', String(c.health.consecutive))}`}
+            {!c.health.lastOkAt && ` · ${tr('never completed a download here')}`}
+          </p>
+        )}
+      </div>
+    </div>
+  );
 
   return (
     <Modal title={tr('Find missing chapters')} onClose={onClose}>
@@ -191,59 +325,51 @@ export function FindMissingDialog({ seriesId, onClose }: { seriesId: string; onC
 
           {d.refusal && <p className="mt-3 text-sm text-amber-300">{d.refusal.message}</p>}
 
-          {usable.map((c) => (
-            <div key={`${c.source}:${c.sourceSeriesId}`} className="mt-4 rounded-2xl border border-ink-700 p-3">
-              <div className="flex gap-3">
-                <Img src={sourceCover(c.source, c.coverUrl)} alt="" className="h-16 w-12 shrink-0 rounded-lg object-cover" />
-                <div className="min-w-0">
-                  <p className="truncate text-sm font-semibold text-white">{c.name}</p>
-                  {/* Their title, verbatim. If it is not this series, this line is where a person notices. */}
-                  <p className="truncate text-xs text-fog-400">{tr('Listed there as')} “{c.title}”</p>
-                  <p className="mt-1 text-xs text-fog-500">
-                    {c.count} {tr('chapters')} ({c.first}–{c.last}) · {tr('matches {m} of your {n}')
-                      .replace('{m}', String(c.matched)).replace('{n}', String(d.have.count))}
-                    {c.pinned && ` · ${tr('this series’ own source')}`}
-                  </p>
-                  {/* A warning, never a filter: hiding a source with a streak would deadlock it, because only a
-                      successful download clears the streak. The person decides, with the record in front of them. */}
-                  {c.health && (
-                    <p className="mt-1 text-xs text-amber-300">
-                      {tr('Recently unreliable')} · {c.health.status === 'rate_limited' ? tr('rate-limited us')
-                        : c.health.status === 'blocked' ? tr('refused us') : tr('did not answer')}
-                      {c.health.consecutive > 1 && ` ${tr('{n} times in a row').replace('{n}', String(c.health.consecutive))}`}
-                      {!c.health.lastOkAt && ` · ${tr('never completed a download here')}`}
-                    </p>
-                  )}
-                </div>
+          {offering.map((c) => {
+            const key = `${c.source}:${c.sourceSeriesId}`;
+            const { mode, numbers } = offer(c);
+            const selected = new Set(picked[key] ?? numbers);
+            const chosen = numbers.filter((n) => selected.has(n));
+            const n = Math.min(chosen.length, max);
+            return (
+              <div key={key} data-find-missing-source={c.source} className="mt-4 rounded-2xl border border-ink-700 p-3">
+                {header(c)}
+                {mode !== 'none' && (
+                  <>
+                    <ChapterPicker numbers={numbers} selected={selected} onChange={(next) => setPicked((p) => ({ ...p, [key]: [...next] }))} />
+                    <button
+                      disabled={busy || !n}
+                      onClick={() => download(c, mode, chosen)}
+                      className="btn-accent mt-3 w-full text-sm disabled:opacity-50"
+                    >
+                      {mode === 'follow' ? tr('Follow {s} and download {n} chapters', { s: c.name, n })
+                        : mode === 'fill' ? tr('Fetch {n} chapters from {s}', { n, s: c.name })
+                        : tr('Download {n} chapters', { n })}
+                    </button>
+                    {chosen.length > max && (
+                      <p className="mt-1 text-xs text-fog-500">{tr('Up to {max} at a time: the rest can be fetched once this finishes.', { max })}</p>
+                    )}
+                  </>
+                )}
+                {/* The chapters a "Latest N" add left behind, from the series' own source only. */}
+                {c.older.length > 0 && (
+                  <button
+                    disabled={busy}
+                    onClick={() => run(c, 'older')}
+                    className={`${mode !== 'none' ? 'btn-ghost' : 'btn-accent'} mt-2 w-full text-sm disabled:opacity-50`}
+                  >
+                    {tr('Fetch {n} older chapters from {s}')
+                      .replace('{n}', String(Math.min(c.older.length, max)))
+                      .replace('{s}', c.name)}
+                  </button>
+                )}
+                {/* Following alone, for what comes next without downloading anything now. */}
+                {followButton(c)}
               </div>
-              {c.fillable.length > 0 && (
-                <button
-                  disabled={busy}
-                  onClick={() => run(c)}
-                  className="btn-accent mt-3 w-full text-sm disabled:opacity-50"
-                >
-                  {tr('Fetch {n} chapters from {s}')
-                    .replace('{n}', String(c.fillable.length))
-                    .replace('{s}', c.name)}
-                </button>
-              )}
-              {/* The chapters a "Latest N" add left behind, from the series' own source only. */}
-              {c.older.length > 0 && (
-                <button
-                  disabled={busy}
-                  onClick={() => run(c, 'older')}
-                  className={`${c.fillable.length ? 'btn-ghost' : 'btn-accent'} mt-2 w-full text-sm disabled:opacity-50`}
-                >
-                  {tr('Fetch {n} older chapters from {s}')
-                    .replace('{n}', String(Math.min(c.older.length, scan.data?.fillMax ?? 300)))
-                    .replace('{s}', c.name)}
-                </button>
-              )}
-              {followButton(c)}
-            </div>
-          ))}
+            );
+          })}
 
-          {!usable.length && !scan.isLoading && !d.refusal && (
+          {!offering.length && !scan.isLoading && !d.refusal && (
             <p className="mt-3 text-sm text-fog-400">{tr('No source could supply what is missing.')}</p>
           )}
 
@@ -266,7 +392,7 @@ export function FindMissingDialog({ seriesId, onClose }: { seriesId: string; onC
           {alsoFollow.length > 0 && (
             <div className="mt-5">
               <p className="text-xs uppercase tracking-wide text-fog-600">{tr('Could also be followed')}</p>
-              <p className="mt-1 text-xs text-fog-500">{tr('Up to date with what you have. Following one means new chapters are taken from whichever source has them first.')}</p>
+              <p className="mt-1 text-xs text-fog-500">{tr('Has everything you have and nothing newer yet. Following one means new chapters are taken from whichever source has them first.')}</p>
               {alsoFollow.map((c) => (
                 <div key={`${c.source}:${c.sourceSeriesId}`} className="mt-2 rounded-2xl border border-ink-700 p-3">
                   <div className="flex gap-3">

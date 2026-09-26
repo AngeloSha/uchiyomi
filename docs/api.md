@@ -694,7 +694,7 @@ writes into the ComicInfo and, since v0.34.0, to every series' `metadata.summary
 `GET /api/series/:id` and the listings — so a series added before v0.34.0 whose stored summary still holds
 `**Year:** 1997 ---` reads clean without a migration.
 
-**Fetching ghost chapters.** `POST /api/sources/fetch {seriesId, numbers?[], picks?[]}` (at least one of
+**Fetching ghost chapters.** `POST /api/sources/fetch {seriesId, numbers?[], picks?[], floored?}` (at least one of
 the two, at most 300 combined; numbers 0–1,000,000) fetches chapters from the listing above. What authorises a fetch is the *listing*: a client
 names chapter numbers, and only a number the sources list has anything to fetch from — the same footing
 as the fill plan, and for the same reason (no chapter URL ever crosses the wire). The listing is refreshed
@@ -702,7 +702,9 @@ first (a check with no downloads), so what is fetched is the copy the release ru
 ranked a minute ago counts; a source that does not answer leaves the last listing standing. A `held`
 number is fetched regardless of patience, because a person clicking Fetch on a "waiting for group B" row
 is saying they will take it, but the blocklist is never ignored — a `blocked` number has no copy to fetch;
-unblock the group and check again. A manual fetch resets the chapter's retry cap. The answer is
+unblock the group and check again. A manual fetch resets the chapter's retry cap. With `floored: true` (since
+v0.48.3) `numbers` are whole chapters: 12 takes every listed chapter from 12 up to 13, so 12 and 12.5 — the
+numbers the fill scan reports, which is what the Find missing chapters dialog sends. The answer is
 `{ok, started, folder, total, skipped: [{number, reason}]}` with `reason` one of `not_listed` (run
 **Check for new chapters** first), `blocked_group`, `already_here` (a live chapter, not a tombstone),
 `source_unavailable` (adapter not loaded or disabled, or a source the series no longer follows), `cooldown`;

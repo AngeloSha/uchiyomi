@@ -1818,6 +1818,13 @@ export default async function sourceRoutes(app: FastifyInstance) {
         source: z.string().min(1).max(200),
         sourceId: z.string().min(1).max(200),
       })).max(FILL_MAX_CHAPTERS).optional(),
+      /**
+       * `numbers` name WHOLE chapters (v0.48.3): every listed chapter whose number floors to one of them -- 12
+       * takes 12 and 12.5. What the Find missing dialog sends, because the fill scan compares sources by whole
+       * numbers (lib/fill.ts assess): its "newer than yours" list says 50 for a source that lists 50.5, and an
+       * exact match would find nothing to fetch.
+       */
+      floored: z.boolean().optional(),
     })
       // One cap over both lists: the job is one job whichever way its chapters were named, and 300 numbers
       // plus 300 picks would be a 600-chapter job through a route documented as 300.
@@ -1841,8 +1848,8 @@ export default async function sourceRoutes(app: FastifyInstance) {
       if (!pickOf.has(pk.number)) pickOf.set(pk.number, pk);
       else skipped.push({ number: pk.number, reason: 'duplicate', source: pk.source, sourceId: pk.sourceId });
     }
-    const plain = [...new Set(b.data.numbers ?? [])].filter((n) => !pickOf.has(n)).sort((x, y) => x - y);
-    const numbers = [...new Set([...plain, ...pickOf.keys()])].sort((x, y) => x - y);
+    let plain = [...new Set(b.data.numbers ?? [])].filter((n) => !pickOf.has(n)).sort((x, y) => x - y);
+    let numbers = [...new Set([...plain, ...pickOf.keys()])].sort((x, y) => x - y);
 
     // Visible to THIS viewer, as the fill scan requires: a capped member must not be able to write into a
     // series they are walled off from, or learn which of its numbers are listed. Fails closed. visible(), not
@@ -1871,6 +1878,21 @@ export default async function sourceRoutes(app: FastifyInstance) {
     // proxy's timeout first while the job starts anyway. Ten seconds covers every direct source; past that
     // the stale listing serves and the refresh finishes in the background for the next click.
     await withTimeout(updateSeries(seriesId, 0), REFRESH_BUDGET_MS).catch(() => {});
+    if (b.data.floored && plain.length) {
+      // Whole numbers become every listed chapter they cover. A whole number nothing lists stays in the list,
+      // so it is reported `not_listed` like any other; the cap holds over what it expanded to.
+      const wholes = plain.map((n) => Math.floor(n));
+      const expanded = (await q<{ number: number }>(
+        // `number` as stored (real), not cast to float8: 12.1 read back through float8 is 12.100000381..., which
+        // then matches no listing row keyed by the real's own spelling.
+        'SELECT DISTINCT number FROM series_listing WHERE series_id = $1 AND floor(number) = ANY($2::float8[])',
+        [seriesId, wholes],
+      )).map((r) => Number(r.number));
+      const covered = new Set(expanded.map((n) => Math.floor(n)));
+      plain = [...new Set([...expanded, ...wholes.filter((w) => !covered.has(w))])].filter((n) => !pickOf.has(n)).sort((x, y) => x - y);
+      if (plain.length + pickOf.size > FILL_MAX_CHAPTERS) plain = plain.slice(0, FILL_MAX_CHAPTERS - pickOf.size);
+      numbers = [...new Set([...plain, ...pickOf.keys()])].sort((x, y) => x - y);
+    }
     const listed = new Map((await q<{ number: number; title: string | null; source_id: string; status: string; chosen: SourceChapter; copies: ListingCopy[] }>(
       'SELECT number, title, source_id, status, chosen, copies FROM series_listing WHERE series_id = $1 AND number = ANY($2::real[])',
       [seriesId, numbers],

@@ -2,7 +2,7 @@
   "_meta": {
     "language": "zh",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 1258
+    "strings": 1267
   },
   "1 check found something": "1 项检查发现问题",
   "1 member": "1 位成员",
@@ -1261,5 +1261,14 @@
   "Ignore": "忽略",
   "Stop ignoring": "取消忽略",
   "Ignored — it stays quiet until something about it changes": "已忽略——在情况变化之前不再提醒",
-  "Back on the list": "已重新列出"
+  "Back on the list": "已重新列出",
+  "Select none": "全不选",
+  "Pick chapters one by one": "逐章选择",
+  "Download {n} chapters": "下载 {n} 章",
+  "Follow {s} and download {n} chapters": "关注 {s} 并下载 {n} 章",
+  "{n} chapters newer than yours": "比你的更新的章节：{n} 章",
+  "Up to {max} at a time: the rest can be fetched once this finishes.": "每次最多 {max} 章：其余的可在完成后再获取。",
+  "Now following {s}. It is checked for new chapters every few hours; download what it has now below.": "已关注 {s}。每隔几小时会检查一次新章节；现有的章节可以在下方下载。",
+  "Downloading {n} chapters. {m} are not listed yet and come with the next check.": "正在下载 {n} 章。还有 {m} 章尚未列出，会在下次检查时获取。",
+  "Has everything you have and nothing newer yet. Following one means new chapters are taken from whichever source has them first.": "你有的它都有，暂时没有更新的章节。关注后，新章节会从最先有它们的来源获取。"
 }
