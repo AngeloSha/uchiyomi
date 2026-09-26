@@ -2,7 +2,7 @@
   "_meta": {
     "language": "pt-BR",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 1286
+    "strings": 1290
   },
   "1 check found something": "1 verificação encontrou algo",
   "1 member": "1 membro",
@@ -1289,5 +1289,9 @@
   "1 could not be fetched now.": "1 não pôde ser obtido agora.",
   "{m} could not be fetched now.": "{m} não puderam ser obtidos agora.",
   "Fetch 1 older chapter from {s}": "Buscar 1 capítulo anterior de {s}",
-  "You have 1 chapter": "Você tem 1 capítulo"
+  "You have 1 chapter": "Você tem 1 capítulo",
+  "Still asking 1 source…": "Aguardando 1 fonte…",
+  "Still asking {n} sources…": "Aguardando {n} fontes…",
+  "Still asking {s}…": "Aguardando {s}…",
+  "The scan failed. Try again.": "A busca falhou. Tente de novo."
 }

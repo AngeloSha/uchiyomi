@@ -1,6 +1,7 @@
 // Search across sources and add a new series to the library (queues its download). Backed by the source
 // adapters + the downloader. The cover proxy lives under /img (cookie auth) so <img> tags can load it.
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import { randomBytes } from 'node:crypto';
 import { z } from 'zod';
 import { authenticate, userIdOf, roleOf } from '../lib/auth';
 import { getSource, listSources, isSwAdapterId, SW_PREFIX, swAdapterId, withTimeout } from '../lib/sources';
@@ -26,6 +27,51 @@ import { SOLVER_CONCURRENCY } from '../lib/sources/flaresolverr';
 const SCAN_CONCURRENCY = Math.max(1, Number(process.env.SCAN_CONCURRENCY || SOLVER_CONCURRENCY));
 const SCAN_ENOUGH = Math.max(1, Number(process.env.SCAN_ENOUGH || 3));
 const SCAN_SEARCH_MS = Number(process.env.SCAN_SEARCH_MS) || 45_000;
+/** How long a scan's first answer waits for the sources before saying what it has so far (v0.48.4). */
+const SCAN_FIRST_ANSWER_MS = Number(process.env.SCAN_FIRST_ANSWER_MS) || 2500;
+/** Scans one person may have running at once. */
+const FILL_SCANS_PER_PERSON = 3;
+
+/** A Find missing chapters scan in progress, or finished and still readable (see the fill/scan route). */
+interface FillScan {
+  id: string;
+  /** Person, series and title: a second POST with the same key while this one runs joins it. */
+  key: string;
+  userId: string;
+  endedAt: number | null;
+  settled: Promise<void>;
+  plan: ReturnType<typeof putPlan>;
+  /** The sources being asked right now, and how many are still waiting for a turn. */
+  asking: Map<string, { source: string; name: string }>;
+  waiting: number;
+  refusal: { code: string; message: string } | null;
+  failed: string | null;
+  head: {
+    seriesId: string; title: string; folder: string; have: { count: number; first: number; last: number };
+    gaps: ReturnType<typeof gapsOf>; following: string[]; planId: string; expiresIn: number; fillMax: number;
+  };
+}
+const fillScans = new Map<string, FillScan>();
+/** A finished scan stays readable as long as its plan does. */
+function sweepFillScans(now = Date.now()): void {
+  for (const [id, st] of fillScans) if (st.endedAt !== null && now - st.endedAt > PLAN_TTL) fillScans.delete(id);
+}
+/** Usable first, the series' own source ahead of the rest, then by how much each would repair. */
+const byUse = (x: PlanCandidate, y: PlanCandidate) =>
+  Number(y.why === 'ok') - Number(x.why === 'ok') || Number(y.pinned) - Number(x.pinned) || y.fillable.length - x.fillable.length;
+/** What POST and GET answer: the scan so far, and `done` once every source it will ask has answered. */
+function fillScanView(st: FillScan) {
+  const done = st.endedAt !== null;
+  return {
+    scanId: st.id, done, ...st.head,
+    candidates: [...st.plan.candidates].sort(byUse),
+    asking: [...st.asking.values()], waiting: st.waiting,
+    refusal: done && !st.failed ? st.refusal : null,
+    ...(st.failed ? { failed: st.failed } : {}),
+  };
+}
+/** Test seam. */
+export function _clearFillScans(): void { fillScans.clear(); }
 import { persistScan, setBookDates, setBookMeta, libraryIdFor, type LibraryRow, LIBRARY_ROOT, DL_ROOT } from '../lib/library';
 import { notInLibrary, notInLibraryReason } from '../lib/downloadCensus';
 import { diskSpelling } from '../lib/libraryAdmin';
@@ -1558,14 +1604,26 @@ export default async function sourceRoutes(app: FastifyInstance) {
   // Search a title across ALL enabled providers at once, grouped so one card carries every source that
   // has it — the UI then lets you choose which source to add from (like the trending flow).
   /**
-   * What is missing from a series, and who could supply it.
+   * What is missing from a series, and who could supply it -- answered as it goes (v0.48.4).
    *
    * Read-only. Answers with a plan id; the chapter URLs stay on this side of the wire and the fill below
    * quotes the id back. The client therefore names a chapter NUMBER and nothing else, so no request can
    * point the downloader at content a person was never shown.
    *
+   * The scan asks every reachable source for the title and lists the chapters of each one that has it, and a
+   * source behind Cloudflare may take SOLVER_BUDGET_MS (90 s) for either. It used to be one request that waited
+   * for the slowest of them all: on an install whose series mostly come from such a source it ran 84 to 180 s,
+   * the reverse proxy in front cut it off (nginx's proxy_read_timeout is 60 s by default), and the dialog said
+   * "The scan failed." -- while the ☁ on a ghost chapter, which asks only the series' own sources, worked. So
+   * the scan runs on its own now. POST starts it, or joins the one this person is already running for the same
+   * series and title, and answers with whatever has arrived after SCAN_FIRST_ANSWER_MS (all of it, when every
+   * source answers quickly). GET /api/sources/fill/scan/:id answers with the rest as it lands. No request waits
+   * on a slow source, so no proxy's limit applies, and each source's card appears when THAT source answers:
+   * the series' own source is listed from the start instead of after every other source has searched.
+   *
    * POST rather than GET because it fans out across every reachable source, and a GET would be prefetchable
-   * and service-worker-cacheable -- the same reasoning as `latestPage` above.
+   * and service-worker-cacheable -- the same reasoning as `latestPage` above. The progress route is a GET: it
+   * starts nothing, and it answers only the person who started the scan.
    */
   app.post('/api/sources/fill/scan', async (req, reply) => {
     const { seriesId, altTitle } = (req.body ?? {}) as { seriesId?: string; altTitle?: string };
@@ -1602,64 +1660,89 @@ export default async function sourceRoutes(app: FastifyInstance) {
     ).catch(() => [])).map((r) => r.source_id);
     // Coverage measured against two chapters proves nothing at all: any long series covers them.
     if (have.length < MIN_HAVE) {
-      return { seriesId, title: s.title, have: { count: have.length }, gaps: [], candidates: [], following,
+      return { done: true, seriesId, title: s.title, have: { count: have.length }, gaps: [], candidates: [], following,
+        asking: [], waiting: 0,
         refusal: { code: 'too_few_chapters', message: 'Too few chapters here to match against another source.' } };
     }
-    const gaps = gapsOf(have);
 
-    // Candidates: the series' own source first (no cross-source guessing at all -- it is where the series
-    // already comes from), then one best match per other reachable source.
-    const terms = [...new Set([s.title, (altTitle || '').trim()].filter(Boolean))] as string[];
-    // `reachable`, deliberately NOT `surfaceable`: filling is an explicit act on a series already in the
-    // library, so the 18+ chip must not reach it -- a series whose own source is adult would otherwise
-    // become unfillable the moment the chip is off, which is data loss dressed up as tidying (#64).
-    const allowed = new Set(reachable(req).map((x) => x.id));
-    const found: { source: string; name: string; sourceId: string; title: string; coverUrl?: string; pinned: boolean }[] = [];
-    if (s.source_id && s.source_series_id && allowed.has(s.source_id)) {
-      const own = getSource(s.source_id);
-      if (own) found.push({ source: own.id, name: own.name, sourceId: s.source_series_id, title: s.title, pinned: true });
+    // One scan per person, series and title at a time: a second POST while one runs -- a double tap, the dialog
+    // opened again, a refetch -- joins it rather than asking every source a second time.
+    const me = userIdOf(req);
+    const term = (altTitle || '').trim();
+    const key = `${me}\u0000${seriesId}\u0000${term}`;
+    sweepFillScans();
+    let st = [...fillScans.values()].find((x) => x.key === key && x.endedAt === null);
+    if (!st) {
+      // A person asking under title after title would otherwise start a fan-out across every source per
+      // keystroke of patience. Three at once is more than the dialog ever needs.
+      const mine = [...fillScans.values()].filter((x) => x.userId === me && x.endedAt === null).length;
+      if (mine >= FILL_SCANS_PER_PERSON) {
+        return reply.code(429).send({ error: 'busy', message: 'Your other scans are still asking the sources. Try again when one finishes.' });
+      }
+      // `reachable`, deliberately NOT `surfaceable`: filling is an explicit act on a series already in the
+      // library, so the 18+ chip must not reach it -- a series whose own source is adult would otherwise
+      // become unfillable the moment the chip is off, which is data loss dressed up as tidying (#64). Read
+      // now: the scan outlives this request, and nothing after this line may look at `req`.
+      const allowed = new Set(reachable(req).map((x) => x.id));
+      st = startFillScan({ s, seriesId, have, following, term, key, me, allowed });
     }
-    // Sources that were asked and did not answer, and sources never asked because enough already had the
-    // title. Both are shown; neither is "does not have it", and the old scan called all of them `unreachable`.
-    const unreachable: { source: string; name: string }[] = [];
-    const notTried: { source: string; name: string }[] = [];
-    const ownSrc = s.source_id ? getSource(s.source_id) : null;
-    const order = scanOrder(
-      findOrder().filter((id) => allowed.has(id)).map((id) => getSource(id)).filter((x): x is NonNullable<typeof x> => !!x),
-      ownSrc ? { id: ownSrc.id, lang: ownSrc.lang } : null,
-    );
-    // A slot is held before the search starts, so the timeout measures the search and not the queue. The
-    // queue is FIFO, so relevance order is the order sources actually get asked in.
-    let inFlight = 0;
-    const waiting: Array<() => void> = [];
-    const slot = async () => { if (inFlight >= SCAN_CONCURRENCY) await new Promise<void>((r) => waiting.push(r)); inFlight++; };
-    const free = () => { inFlight--; waiting.shift()?.(); };
-    const enough = () => found.filter((f) => !f.pinned).length >= SCAN_ENOUGH;
-    await Promise.all(order.map(async (id) => {
-      if (found.some((f) => f.source === id && f.pinned)) return;
-      await slot();
-      try {
-        const src = getSource(id);
-        if (!src || await isDisabled(id).catch(() => false)) return;
-        if (enough()) { notTried.push({ source: src.id, name: src.name }); return; }
-        let failed = false;
-        for (const term of terms) {
-          try {
-            const hit = pickBest(await withTimeout(src.search(term), budgetFor(src, SCAN_SEARCH_MS)), term);
-            if (hit?.sourceId) {
-              found.push({ source: src.id, name: src.name, sourceId: hit.sourceId, title: hit.title, coverUrl: hit.coverUrl, pinned: false });
-              return;
-            }
-          } catch { failed = true; /* one source failing is not the scan failing -- but it must not be silent */ }
-        }
-        if (failed) unreachable.push({ source: src.id, name: src.name });
-      } finally { free(); }
-    }));
+    // Whatever has arrived after a moment -- everything, for a scan whose sources all answer quickly. The timer is
+    // cleared when the scan wins: left running, it held the process open for the rest of SCAN_FIRST_ANSWER_MS,
+    // which in four test files pinned to 60 s kept each one alive a minute after its last test.
+    let timer: NodeJS.Timeout | undefined;
+    await Promise.race([st.settled, new Promise((r) => { timer = setTimeout(r, SCAN_FIRST_ANSWER_MS); })]);
+    clearTimeout(timer);
+    return fillScanView(st);
+  });
 
-    // Only now, and only for sources that produced a match, do we pay for a chapter list. Routed through the
-    // shared lookup so it reuses whatever the add dialog already fetched.
-    const chapters = new Map<string, SourceChapter[]>();
-    const candidates: PlanCandidate[] = [];
+  /** The rest of a scan, as it lands: the dialog asks every two seconds until `done`. */
+  app.get('/api/sources/fill/scan/:id', async (req, reply) => {
+    const st = fillScans.get((req.params as { id: string }).id);
+    // Only to the person who started it: what a series lacks, and who has it, is what they asked about.
+    if (!st || st.userId !== userIdOf(req)) {
+      return reply.code(404).send({ error: 'scan_gone', message: 'That scan has ended. Scan again.' });
+    }
+    return fillScanView(st);
+  });
+
+  /** Starts a scan and returns at once; `settled` resolves when it has asked everyone it is going to ask. */
+  function startFillScan(o: {
+    s: any; seriesId: string; have: number[]; following: string[]; term: string; key: string; me: string; allowed: Set<string>;
+  }): FillScan {
+    const { s, seriesId, have } = o;
+    // The plan exists from the start and fills in as candidates land, so a card is usable the moment it shows.
+    const plan = putPlan({ seriesId, folder: s.folder, chapters: new Map(), candidates: [] });
+    const st: FillScan = {
+      id: `fs_${randomBytes(9).toString('hex')}`, key: o.key, userId: o.me, endedAt: null, settled: Promise.resolve(),
+      plan, asking: new Map(), waiting: 0, refusal: null, failed: null,
+      head: {
+        seriesId, title: s.title, folder: s.folder,
+        have: { count: have.length, first: Math.min(...have), last: Math.max(...have) },
+        gaps: gapsOf(have), following: o.following, planId: plan.id, expiresIn: PLAN_TTL, fillMax: FILL_MAX_CHAPTERS,
+      },
+    };
+    fillScans.set(st.id, st);
+    st.settled = runFillScan(st, o)
+      .catch((e) => {
+        console.warn(`[fill] the scan of ${seriesId} failed: ${(e as Error)?.message || e}`);
+        st.failed = 'The scan failed. Try again.';
+      })
+      .finally(() => {
+        const end = Date.now();
+        st.asking.clear();
+        st.waiting = 0;
+        st.endedAt = end;
+        // The plan's five minutes start when the list is complete, not when the first source was asked: a
+        // scan that took three minutes would otherwise leave two to read it in.
+        plan.at = end;
+      });
+    return st;
+  }
+
+  async function runFillScan(st: FillScan, o: { s: any; seriesId: string; have: number[]; term: string; allowed: Set<string> }): Promise<void> {
+    const { s, seriesId, have, allowed } = o;
+    const plan = st.plan;
+    const terms = [...new Set([s.title, o.term].filter(Boolean))] as string[];
     // The series' own release preferences over the global ones, with patience off: a person is choosing
     // from this list now, and holding a chapter for a group that may never post here would read as "not
     // on this source".
@@ -1667,70 +1750,114 @@ export default async function sourceRoutes(app: FastifyInstance) {
     // One read for every source, rather than one blockedNow() per candidate: the same row answers "is it
     // in a cooldown" and "what is its record", and the record is what the dialog was never told.
     const health = new Map((await healthAll().catch(() => [])).map((h) => [h.source_id, h]));
-    await Promise.all(found.map(async (f) => {
+
+    type Found = { source: string; name: string; sourceId: string; title: string; coverUrl?: string; pinned: boolean };
+    const found: Found[] = [];
+    const listings: Promise<void>[] = [];
+    // A match's chapter list, fetched the moment the match is found -- not after every other source has
+    // searched -- and routed through the shared lookup so it reuses whatever the add dialog already fetched.
+    const assessOne = async (f: Found): Promise<void> => {
       const src = getSource(f.source);
       if (!src) return;
-      let raw: SourceChapter[] = [];
-      let why: Refusal = 'ok';
-      const h = health.get(f.source);
-      if (h?.blocked_until && new Date(h.blocked_until).getTime() > Date.now()) why = 'blocked';
-      else {
-        try { raw = (await seriesAndChapters(src, f.sourceId)).chapters; }
-        catch { why = 'no_chapters'; }
-      }
-      // One copy per number BEFORE the list is assessed or stored in the plan. `authorise` filters the
-      // stored list by number, so a plan holding two copies of chapter 5 would answer a fill of [5] with
-      // both: the second is skipped at the file check, but the job's total counts it, and the bar ends
-      // one short of full on a fill that did everything it was asked.
-      const list = chooseReleases(raw, prefs).releases;
-      const nums = list.map((c) => c.number);
-      // The run below a "Latest N" add is offered from the series' own source and nowhere else: this is the
-      // dialog the add hint sends people to for the older chapters, and it must be able to deliver them.
-      const a = assess(have, nums, { older: f.pinned && s.chapter_floor != null });
-      chapters.set(planKey(f.source, f.sourceId), list);
-      candidates.push({
-        source: f.source, name: f.name, sourceSeriesId: f.sourceId, title: f.title, coverUrl: f.coverUrl,
-        count: list.length, first: nums.length ? Math.min(...nums) : null, last: nums.length ? Math.max(...nums) : null,
-        coverage: Math.round(a.coverage * 100) / 100, matched: a.matched,
-        fillable: a.fillable, newer: a.newer, older: a.older,
-        why: why === 'ok' ? verdict(a, list.length) : why,
-        pinned: f.pinned,
-        health: h && (h.status !== 'ok' || h.consecutive > 0)
-          ? { status: h.status, consecutive: h.consecutive, lastFailAt: h.last_fail_at, lastOkAt: h.last_ok_at }
-          : null,
-      });
-    }));
-
-    for (const u of notTried) {
-      candidates.push({
-        source: u.source, name: u.name, sourceSeriesId: '', title: '',
-        count: 0, first: null, last: null, coverage: 0, matched: 0,
-        fillable: [], newer: [], older: [], why: 'not_tried', pinned: false,
-      });
-    }
-    for (const u of unreachable) {
-      candidates.push({
-        source: u.source, name: u.name, sourceSeriesId: '', title: '',
-        count: 0, first: null, last: null, coverage: 0, matched: 0,
-        fillable: [], newer: [], older: [], why: 'unreachable', pinned: false,
-      });
-    }
-
-    // Usable first, the series' own source ahead of the rest, then by how much each would repair.
-    candidates.sort((x, y) =>
-      Number(y.why === 'ok') - Number(x.why === 'ok') ||
-      Number(y.pinned) - Number(x.pinned) ||
-      y.fillable.length - x.fillable.length);
-
-    const plan = putPlan({ seriesId, folder: s.folder, chapters, candidates });
-    return {
-      seriesId, title: s.title, folder: s.folder,
-      have: { count: have.length, first: Math.min(...have), last: Math.max(...have) },
-      gaps, candidates, following, planId: plan.id, expiresIn: PLAN_TTL, fillMax: FILL_MAX_CHAPTERS,
-      refusal: gaps.length || candidates.some((c) => c.newer.length || c.older.length) ? null
-        : { code: 'no_gaps', message: 'Nothing is missing between the chapters you already have.' },
+      st.asking.set(f.source, { source: f.source, name: f.name });
+      try {
+        let raw: SourceChapter[] = [];
+        let why: Refusal = 'ok';
+        const h = health.get(f.source);
+        if (h?.blocked_until && new Date(h.blocked_until).getTime() > Date.now()) why = 'blocked';
+        else {
+          try { raw = (await seriesAndChapters(src, f.sourceId)).chapters; }
+          catch { why = 'no_chapters'; }
+        }
+        // One copy per number BEFORE the list is assessed or stored in the plan. `authorise` filters the
+        // stored list by number, so a plan holding two copies of chapter 5 would answer a fill of [5] with
+        // both: the second is skipped at the file check, but the job's total counts it, and the bar ends
+        // one short of full on a fill that did everything it was asked.
+        const list = chooseReleases(raw, prefs).releases;
+        const nums = list.map((c) => c.number);
+        // The run below a "Latest N" add is offered from the series' own source and nowhere else: this is the
+        // dialog the add hint sends people to for the older chapters, and it must be able to deliver them.
+        const a = assess(have, nums, { older: f.pinned && s.chapter_floor != null });
+        // The list first, then the card: a card is only ever shown once a fill of it can be authorised.
+        plan.chapters.set(planKey(f.source, f.sourceId), list);
+        plan.candidates.push({
+          source: f.source, name: f.name, sourceSeriesId: f.sourceId, title: f.title, coverUrl: f.coverUrl,
+          count: list.length, first: nums.length ? Math.min(...nums) : null, last: nums.length ? Math.max(...nums) : null,
+          coverage: Math.round(a.coverage * 100) / 100, matched: a.matched,
+          fillable: a.fillable, newer: a.newer, older: a.older,
+          why: why === 'ok' ? verdict(a, list.length) : why,
+          pinned: f.pinned,
+          health: h && (h.status !== 'ok' || h.consecutive > 0)
+            ? { status: h.status, consecutive: h.consecutive, lastFailAt: h.last_fail_at, lastOkAt: h.last_ok_at }
+            : null,
+        });
+      } finally { st.asking.delete(f.source); }
     };
-  });
+    const also = (source: string, name: string, why: Refusal) => plan.candidates.push({
+      source, name, sourceSeriesId: '', title: '',
+      count: 0, first: null, last: null, coverage: 0, matched: 0,
+      fillable: [], newer: [], older: [], why, pinned: false,
+    });
+
+    // The series' own source first (no cross-source guessing at all -- it is where the series already comes
+    // from), listed straight away, then one best match per other reachable source.
+    if (s.source_id && s.source_series_id && allowed.has(s.source_id)) {
+      const own = getSource(s.source_id);
+      if (own) {
+        const f = { source: own.id, name: own.name, sourceId: s.source_series_id, title: s.title, pinned: true };
+        found.push(f);
+        listings.push(assessOne(f));
+      }
+    }
+    // Sources that were asked and did not answer (`unreachable`), and sources never asked because enough
+    // already had the title (`not_tried`). Both are shown; neither is "does not have it", and the old scan
+    // called all of them `unreachable`.
+    const ownSrc = s.source_id ? getSource(s.source_id) : null;
+    const order = scanOrder(
+      findOrder().filter((id) => allowed.has(id)).map((id) => getSource(id)).filter((x): x is NonNullable<typeof x> => !!x),
+      ownSrc ? { id: ownSrc.id, lang: ownSrc.lang } : null,
+    ).filter((id) => !found.some((f) => f.source === id && f.pinned));
+    // A slot is held before the search starts, so the timeout measures the search and not the queue. The
+    // queue is FIFO, so relevance order is the order sources actually get asked in.
+    let inFlight = 0;
+    const queue: Array<() => void> = [];
+    const slot = async () => { if (inFlight >= SCAN_CONCURRENCY) await new Promise<void>((r) => queue.push(r)); inFlight++; };
+    const free = () => { inFlight--; queue.shift()?.(); };
+    const enough = () => found.filter((f) => !f.pinned).length >= SCAN_ENOUGH;
+    st.waiting = order.length;
+    await Promise.all(order.map(async (id) => {
+      await slot();
+      st.waiting--;
+      try {
+        const src = getSource(id);
+        if (!src || await isDisabled(id).catch(() => false)) return;
+        if (enough()) { also(src.id, src.name, 'not_tried'); return; }
+        st.asking.set(src.id, { source: src.id, name: src.name });
+        let failed = false;
+        try {
+          for (const term of terms) {
+            try {
+              const hit = pickBest(await withTimeout(src.search(term), budgetFor(src, SCAN_SEARCH_MS)), term);
+              if (hit?.sourceId) {
+                const f = { source: src.id, name: src.name, sourceId: hit.sourceId, title: hit.title, coverUrl: hit.coverUrl, pinned: false };
+                found.push(f);
+                listings.push(assessOne(f));
+                return;
+              }
+            } catch { failed = true; /* one source failing is not the scan failing -- but it must not be silent */ }
+          }
+        } finally {
+          // Unless its chapter list has already taken over the entry.
+          if (!found.some((f) => f.source === src.id)) st.asking.delete(src.id);
+        }
+        if (failed) also(src.id, src.name, 'unreachable');
+      } finally { free(); }
+    }));
+    await Promise.all(listings);
+
+    st.refusal = st.head.gaps.length || plan.candidates.some((c) => c.newer.length || c.older.length) ? null
+      : { code: 'no_gaps', message: 'Nothing is missing between the chapters you already have.' };
+  }
 
   /** Fetch the chapters a person picked, from the source they picked, and nothing else. */
   app.post('/api/sources/fill', async (req, reply) => {

@@ -21,7 +21,7 @@ permissions:
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   # Pull requests: cancel superseded runs, since only the latest push matters.
-  # main: never cancel. The Tests job runs 38-39 minutes, see the test job (integration tests are serial
+  # main: never cancel. The Tests job runs close to an hour, see the test job (integration tests are serial
   # against a real Postgres on purpose), so two commits landing inside that window used to kill the earlier
   # run mid-job -- and GitHub renders a *cancelled* run as a red "failing" badge even when every job that
   # finished had passed. That badge is the first line of the README.
@@ -106,10 +106,11 @@ jobs:
   test:
     name: Tests
     runs-on: ubuntu-latest
-    # ⚠️ The integration tests run serially and the job takes 38-39 minutes on every green run (measured over
-    # the last five, 2026-09-17..19), so this is 1.5x that, not a round number: a hung test used to sit for
-    # GitHub's 360-minute default. Pinned by releasePipeline.test.ts, together with the build jobs' timeouts.
-    timeout-minutes: 60
+    # ⚠️ The integration tests run serially and the job grows with the suite: 38-39 minutes on every green run
+    # 2026-09-17..19, 54-58 minutes 2026-09-25..26 -- and v0.48.4's first run was cancelled at the old 60, one
+    # second after its last test passed. So this is about 1.5x the latest, not a round number: a hung test used
+    # to sit for GitHub's 360-minute default. Pinned by releasePipeline.test.ts, with the build jobs' timeouts.
+    timeout-minutes: 90
     services:
       postgres:
         image: postgres:16-alpine

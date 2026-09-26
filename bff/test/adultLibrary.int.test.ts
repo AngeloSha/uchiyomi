@@ -33,6 +33,9 @@ if (DSN) {
   process.env.JWT_SECRET = process.env.JWT_SECRET || 'test-secret-at-least-16-chars';
   process.env.CONFIG_DIR = process.env.CONFIG_DIR || '/tmp/uchiyomi-test-config';
   process.env.LIBRARY_BACKEND = 'owned';
+  // These read a scan's whole answer from POST: let its first answer wait for every source (v0.48.4 answers
+  // after SCAN_FIRST_ANSWER_MS with what it has, and a slow machine must not see half a scan).
+  process.env.SCAN_FIRST_ANSWER_MS = '60000';
 }
 const skip = DSN ? false : 'set TEST_DATABASE_URL to run';
 

@@ -1,5 +1,25 @@
 # Changelog
 
+## v0.48.4 — 2026-09-26
+
+**Find missing chapters no longer fails on slow sources.**
+
+### Find missing chapters shows each source as it answers
+
+Find missing chapters asked every source and waited for the slowest before showing anything. A source behind
+Cloudflare can take a minute and a half to answer, so on a library that comes mostly from such sources a scan
+took up to three minutes. A reverse proxy in front of Uchiyomi usually ends it first (nginx gives up after 60
+seconds unless told otherwise), and the dialog said *The scan failed.* The ☁ on a ghost chapter, which asks only
+the series' own sources, kept working, which made it look like the scan was broken rather than slow.
+
+Now the dialog shows each source as soon as it answers, the series' own source first, and says which ones it is
+still waiting for. Nothing waits on the slowest source any more, so no proxy's timeout applies, and a source's
+chapters can be downloaded from the moment its card appears.
+
+### Upgrading
+
+Nothing to do. If you raised a proxy timeout to get the scan through, you can put it back.
+
 ## v0.48.3 — 2026-09-26
 
 **The Health page does what it says, and Find missing chapters downloads what it finds.**
