@@ -1,5 +1,57 @@
 # Changelog
 
+## v0.48.2 — 2026-09-26
+
+**Downloads that never reached the library, found for real this time (#109), and automatic checks on Unraid.**
+
+### Downloads that never reached the library
+
+v0.48.0 fixed one way a download could stay out of the library — a folder the database refused, which stopped
+the whole scan — and reported it. On Unraid it kept happening, with the Health page saying all was well.
+Reported by @ZukiFen and @Maaster.
+
+- **The scan skipped folders it thought it had already seen.** To guard against loops it remembered every
+  folder's disk id, and passed over any folder whose id it had met before, with everything inside it. On
+  Unraid's user shares (`/mnt/user`) folders on different disks can report the same id, so some series — always
+  the same ones — never reached the library however often it was scanned, and moving the folder into the library
+  folder "fixed" it. A folder is now passed over only when it really is one of the folders above it again, which
+  is the only way the scan can loop; everything else is scanned. *Health → Library scan* says how many folders
+  share an id, so a screenshot shows whether an install was hit.
+- **One entry could hide a whole folder.** On a filesystem that does not say what each entry is (many network
+  and FUSE mounts), one entry the scan could not check — a name that is not valid text, a file renamed mid-scan —
+  made it read the whole folder as empty. Now only that entry is left out, and it is named.
+- **A folder the scan cannot read is named** on *Health → Library scan*, instead of being passed over in silence.
+- **A title that starts with a dot** (`.hack//Link`) was downloaded into a folder the scan treats as hidden. New
+  downloads no longer start with one.
+
+### Nothing goes missing quietly any more
+
+- **Health → Downloads missing from the library** compares every chapter file in the downloads folder with the
+  library and lists each one that is not in it, per folder, with the reason when the scan knows it, and which
+  kind of filesystem the folder is on. It does not depend on the scan having noticed, which is exactly what failed
+  twice. The six-hourly check includes it, so the admin warning comes up by itself.
+- **An add or a Fetch whose chapters land on disk but not in the library ends as an error that says so**, not
+  "done". v0.48.0 only checked the chapters that were already on disk.
+- **Scans no longer overlap.** A scan asked for while one is running waits for one more after it, so a chapter
+  that just landed is always included. *Refresh* started one full scan per library, all at the same time.
+
+### Unraid and all-in-one installs: the automatic checks now run
+
+The scheduled check for new chapters and the nightly repair only started when `LIBRARY_BACKEND=owned` was set.
+The compose files set it; the all-in-one image and the Unraid template don't, so on those installs a followed
+series was only ever checked when someone pressed *Run now*. Both now start on every install. **After updating,
+the first check runs about ten minutes after the server starts** and fetches what your followed series are
+missing, within the usual limits (up to 5 new chapters per series, 150 series per check); the repair follows
+half an hour after start.
+
+### Also
+
+- **Open on the Health page opens the series** it names. It went to the home screen.
+
+### Upgrading
+
+Nothing to do: no database changes.
+
 ## v0.48.1 — 2026-09-26
 
 **See everything the server downloads, and a way out of a previewed chapter on a phone.**

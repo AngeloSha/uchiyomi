@@ -1000,7 +1000,18 @@ is opened; the top bar only ever reads the stored result. Other accounts see non
 reason. The scan used to stop at such a folder — silently, and on every run — which left every folder after it
 unindexed: downloaded chapters on disk that never appeared, and a *Fetch* that found the file already there
 and did nothing (#109). Now it steps over that one folder, indexes everything else, and says which one it
-skipped.
+skipped. Since v0.48.2 it also names what the scan could not look into at all — a folder it cannot read,
+entries it cannot check — and says which filesystem each folder is on. If it says some folders *share a disk
+id*, the install is on a filesystem that reports ids that way (Unraid's user shares do); they are all scanned,
+and before v0.48.2 each of them was skipped.
+
+**Downloads missing from the library** (since v0.48.2) compares every chapter file in the downloads folder with
+the library and lists each one that is not in it, one line per folder, with the reason when the scan knows it
+and an **Open** for the series when there is one. A chapter that landed after the last scan began is left for the
+next scan, not counted as missing, and chapters of a series someone removed are only counted (Admin → Removed
+puts it back). It reads the disk and the database directly, so it holds even when the scan itself did not notice
+what it left out. An add or a *Fetch* whose chapters land on disk but not in the library also ends as an error
+on its card that says so.
 
 **What fixes itself.** Once a day — **Admin → Settings → Library housekeeping → Repair the library nightly**,
 on by default, and **Admin → Tasks → Repair library** with a *Run now* — Uchiyomi does the six things that

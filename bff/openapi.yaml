@@ -6,7 +6,7 @@
 openapi: 3.1.0
 info:
   title: Uchiyomi API
-  version: 0.48.1
+  version: 0.48.2
   description: "Everything the web app does, it does over this API. Session JWTs are for the browser; scripts
     use a personal API token (Profile -> Connections -> API tokens), sent as `Authorization: Bearer uy_...`.
     Scopes: read (every token; GET plus the library search POST, which is a query), write (anything that changes data), admin (the /api/admin surface, which also
@@ -7052,7 +7052,7 @@ paths:
       tags:
         - admin
       summary: "Library health checks: chapter gaps, short chapters, duplicates, failing sources, frozen series, the
-        solver."
+        solver, the library scan, downloads missing from the library."
       operationId: getApiAdminHealth
       description: >-
         Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
