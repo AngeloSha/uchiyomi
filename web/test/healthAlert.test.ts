@@ -1,6 +1,8 @@
 // #101: when an admin's header and banner speak up about the Health page (lib/healthAlert.ts).
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'fs';
+import { join } from 'path';
 import { alertTone, bannerWanted, type HealthSummary } from '../lib/healthAlert';
 
 const summary = (o: Partial<HealthSummary> = {}): HealthSummary => ({
@@ -52,4 +54,23 @@ test('the banner shows once per finding set: dismissed for a key, it stays away 
 test('never on the admin console, where the Health tab is one click away', () => {
   assert.equal(bannerWanted(summary(), null, '/admin/'), false);
   assert.equal(bannerWanted(summary(), null, '/admin'), false);
+});
+
+test('a dialog covers the banner: it is never on a higher layer than the page', () => {
+  // Every dialog is a `fixed inset-0` inside <main>, whose own z-index makes it one layer; the banner is its
+  // sibling, just before it. Reintroduce by putting the banner back on z-[2] (v0.48.0): it paints over every
+  // dialog, on a phone over a tall one's title and close button.
+  // The z-[n] in the element's own className, not in a comment near it.
+  const zOf = (src: string, marker: RegExp) => {
+    const at = src.search(marker);
+    assert.ok(at >= 0, `${marker} not found`);
+    const cls = src.indexOf('className=', at);
+    const z = /^className=\{?[`"][^`"]*?\bz-\[(\d+)\]/.exec(src.slice(cls, cls + 300));
+    assert.ok(z, `no z-[n] in the className after ${marker}`);
+    return Number(z[1]);
+  };
+  const shell = readFileSync(join(__dirname, '..', 'components', 'AppShell.tsx'), 'utf8');
+  const alert = readFileSync(join(__dirname, '..', 'components', 'HealthAlert.tsx'), 'utf8');
+  assert.ok(shell.indexOf('<HealthBanner />') < shell.indexOf('<main '), 'the banner is no longer just before <main>');
+  assert.ok(zOf(alert, /data-health-banner/) <= zOf(shell, /<main /), 'the banner sits on a higher layer than the page');
 });

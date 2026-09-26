@@ -4,7 +4,7 @@
 
 **The Health page does what it says, and Find missing chapters downloads what it finds.**
 
-### Health
+### Health findings you can open, fix all at once, or ignore
 
 - **Open takes you to the chapter.** It went to the home screen for every finding (fixed in v0.48.2), and even
   pointed right it only named the series. A short chapter now opens in the reader; a gap or an impossible chapter
@@ -22,8 +22,12 @@
 - **A header warning you dismissed stays dismissed** when a check goes quiet — fixed, or its last finding
   ignored. It came back whenever the set of checks with findings changed at all; now only a new problem, or one
   getting worse, brings it back.
+- **That warning no longer covers dialogs.** It was drawn over every open dialog; on a phone it hid the title
+  and close button of a tall one, such as Find missing chapters.
+- The admin console's header says "1 chapter behind" rather than "1 chapters behind across 1 series", and says
+  it in your language; that line was English in every language.
 
-### Find missing chapters
+### Find missing chapters downloads what it finds
 
 It only offered to follow a source for the chapters after your last one, and following downloads nothing until
 the next scheduled check — then five at a time. Now every source that has chapters you lack, gaps and newer ones
@@ -31,6 +35,9 @@ alike, shows them as a picker: runs of chapters as chips, all selected, *⋯* to
 downloads the selection now — from the series' own source or one it follows, taking the best copy of each chapter
 across them, or, for a source it does not follow yet, *Follow and download* (admins). Following on its own lists
 the source's chapters on the series page at once, and says that new ones come with the checks.
+
+One chapter now reads as one chapter: the ☁ on a single ghost chapter said *Fetching 1 chapters…*, and so did
+the dialog's buttons and counts.
 
 ### Upgrading
 

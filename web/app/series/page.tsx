@@ -24,6 +24,7 @@ import { effectsReduced } from '@/lib/effects';
 import { CHAPTER_PAGE, clampPage, pageCount, pageLabel, pageOf, pageSlice } from '@/lib/chapterPages';
 import { buttonsClass, compactChaptersOn, dotHide, rowClass, thumbHide } from '@/lib/compactChapters';
 import { fetchAllBooks } from '@/lib/seriesBooks';
+import { fetchingToast } from '@/lib/jobs';
 import { ALL_GROUPS, copySourceId, groupsOfRow, matchesGroup } from '@/lib/groupFilter';
 import { SourcesSheet, useSeriesGroups, useCheckNow } from '@/components/SourcesSheet';
 import { SourcesExplainer } from '@/components/SourcesExplainer';
@@ -1299,7 +1300,7 @@ function SeriesInner() {
     try {
       const res = await api<{ folder: string; total: number }>(path, { method: 'POST', json: body });
       setStarted({ folder: res.folder, at: Date.now() });
-      toast(tr('Fetching {n} chapters…', { n: res.total }), 'info');
+      toast(fetchingToast(res.total), 'info');
       invalidateChapters();
       leaveSelect();
     } catch (e) {
@@ -1346,7 +1347,7 @@ function SeriesInner() {
         const res = await api<{ folder: string; total: number }>('/api/sources/fetch', { method: 'POST', json: { seriesId: id, numbers: chunk } });
         setStarted({ folder: res.folder, at: Date.now() });
         if (i === 0) {
-          toast(tr('Fetching {n} chapters…', { n: numbers.length }), 'info');
+          toast(fetchingToast(numbers.length), 'info');
           invalidateChapters();
           leaveSelect();
         }

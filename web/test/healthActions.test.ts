@@ -298,6 +298,22 @@ test('the nightly repair has one switch, under Library housekeeping, on unless t
   assert.match(src, /Nothing is deleted or merged without you\./, 'the help does not say what the nightly never does');
 });
 
+test('the header counts chapters behind in words that agree, in every language', () => {
+  // A live Health tab read "1 chapters behind across 1 series", and the line was in no locale file, so it was
+  // English in every language. Reintroduce by dropping either singular, or one locale's entry.
+  const src = code(read(PAGE));
+  assert.match(src, /stats\.backlog\.chapters === 1 \? tr\('1 chapter behind'\)\s*: stats\.backlog\.series === 1 \? tr\('\{n\} chapters behind in 1 series', \{ n: stats\.backlog\.chapters \}\)/,
+    'one chapter, or one series, is counted as many');
+  const lines = ['1 chapter behind', '{n} chapters behind in 1 series', '{n} chapters behind across {m} series'];
+  for (const f of readdirSync(join(ROOT, 'public/locales')).filter((x) => x.endsWith('.json'))) {
+    const d = JSON.parse(read(`public/locales/${f}`));
+    for (const k of lines) {
+      assert.ok(String(d[k] ?? '').trim(), `${f} has no "${k}"`);
+      for (const ph of k.match(/\{\w+\}/g) ?? []) assert.ok(d[k].includes(ph), `${f}: "${k}" lost ${ph}`);
+    }
+  }
+});
+
 test('every string the chips render is in all eight locale files', () => {
   // The parity test (library.test.ts) only compares the eight files with each other, so a string that
   // reaches none of them falls back to English in every language without anything failing. This reads the

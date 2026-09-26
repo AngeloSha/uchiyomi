@@ -23,6 +23,7 @@ import { followable } from '@/lib/scanlators';
 import { offerOf, runState, runsOf, toggleOne, toggleRun, type OfferMode } from '@/lib/chapterPicker';
 import type { SeriesSource } from '@/lib/types';
 import { jobNoteLines, type JobCardNotes } from '@/lib/jobNotes';
+import { fetchingToast, joinSentences } from '@/lib/jobs';
 
 interface Candidate {
   source: string; name: string; sourceSeriesId: string; title: string; coverUrl?: string;
@@ -59,7 +60,8 @@ function whyText(c: Candidate): string {
         ` (${Math.round(c.coverage * 100)}%` + tr(' of yours match') + ')';
     // A member sees a matching source with newer chapters here (only an admin can follow it): not "nothing".
     case 'nothing_to_fill': return c.newer.length
-      ? tr('Has {n} chapters newer than yours; an admin can follow it', { n: c.newer.length })
+      ? c.newer.length === 1 ? tr('Has 1 chapter newer than yours; an admin can follow it')
+        : tr('Has {n} chapters newer than yours; an admin can follow it', { n: c.newer.length })
       : tr('Has nothing you are missing');
     case 'no_chapters': return tr('Listed no chapters');
     case 'blocked': return tr('Temporarily unavailable');
@@ -163,7 +165,7 @@ export function FindMissingDialog({ seriesId, onClose }: { seriesId: string; onC
       });
       setStarted(res.folder);
       qc.invalidateQueries({ queryKey: ['source-jobs'] });
-      toast(tr('Fetching {n} chapters…').replace('{n}', String(numbers.length)), 'info');
+      toast(fetchingToast(numbers.length), 'info');
     } catch (e) {
       toast(msgOf(e, tr('Could not start.')), 'error');
     } finally {
@@ -228,7 +230,7 @@ export function FindMissingDialog({ seriesId, onClose }: { seriesId: string; onC
           json: { planId: scan.data.planId, source: c.source, sourceSeriesId: c.sourceSeriesId, numbers: numbers.slice(0, max) },
         });
         setStarted(res.folder);
-        toast(tr('Fetching {n} chapters…').replace('{n}', String(Math.min(numbers.length, max))), 'info');
+        toast(fetchingToast(Math.min(numbers.length, max)), 'info');
       } else {
         if (mode === 'follow') {
           if (!(await follow(c, false))) return;
@@ -239,11 +241,14 @@ export function FindMissingDialog({ seriesId, onClose }: { seriesId: string; onC
         const skipped = res.skipped ?? [];
         const later = skipped.filter((x) => x.reason === 'not_listed').length;
         const other = skipped.filter((x) => x.reason !== 'not_listed' && x.reason !== 'already_here').length;
-        toast(later
-          ? tr('Downloading {n} chapters. {m} are not listed yet and come with the next check.', { n: res.total, m: later })
+        // Two sentences, each with its own count, so both agree at one: "1 is not listed yet", "Downloading 1 chapter."
+        const also = later
+          ? later === 1 ? tr('1 is not listed yet and comes with the next check.') : tr('{m} are not listed yet and come with the next check.', { m: later })
           : other
-            ? tr('Downloading {n} chapters. {m} could not be fetched now.', { n: res.total, m: other })
-            : tr('Fetching {n} chapters…').replace('{n}', String(res.total)), 'info');
+            ? other === 1 ? tr('1 could not be fetched now.') : tr('{m} could not be fetched now.', { m: other })
+            : '';
+        const downloading = res.total === 1 ? tr('Downloading 1 chapter.') : tr('Downloading {n} chapters.', { n: res.total });
+        toast(also ? joinSentences(downloading, also) : fetchingToast(res.total), 'info');
       }
       qc.invalidateQueries({ queryKey: ['source-jobs'] });
       qc.invalidateQueries({ queryKey: ['series-listing', seriesId] });
@@ -320,7 +325,11 @@ export function FindMissingDialog({ seriesId, onClose }: { seriesId: string; onC
             .replace('{m}', String(c.matched)).replace('{n}', String(d?.have.count ?? 0))}
           {c.pinned && ` · ${tr('this series’ own source')}`}
         </p>
-        {c.newer.length > 0 && <p className="mt-1 text-xs text-fog-300">{tr('{n} chapters newer than yours', { n: c.newer.length })}</p>}
+        {c.newer.length > 0 && (
+          <p className="mt-1 text-xs text-fog-300">
+            {c.newer.length === 1 ? tr('1 chapter newer than yours') : tr('{n} chapters newer than yours', { n: c.newer.length })}
+          </p>
+        )}
         {/* A warning, never a filter: hiding a source with a streak would deadlock it, because only a
             successful download clears the streak. The person decides, with the record in front of them. */}
         {c.health && (
@@ -343,7 +352,7 @@ export function FindMissingDialog({ seriesId, onClose }: { seriesId: string; onC
       {d && (
         <>
           <p className="text-sm text-fog-300">
-            {tr('You have {n} chapters').replace('{n}', String(d.have.count))}
+            {d.have.count === 1 ? tr('You have 1 chapter') : tr('You have {n} chapters').replace('{n}', String(d.have.count))}
             {d.have.first != null && `, ${d.have.first}–${d.have.last}`}
             {d.gaps.length
               ? `. ${tr('Missing')}: ${d.gaps.map((g) => (g.lo === g.hi ? g.lo : `${g.lo}–${g.hi}`)).join(', ')}`
@@ -369,9 +378,11 @@ export function FindMissingDialog({ seriesId, onClose }: { seriesId: string; onC
                       onClick={() => download(c, mode, chosen)}
                       className="btn-accent mt-3 w-full text-sm disabled:opacity-50"
                     >
-                      {mode === 'follow' ? tr('Follow {s} and download {n} chapters', { s: c.name, n })
-                        : mode === 'fill' ? tr('Fetch {n} chapters from {s}', { n, s: c.name })
-                        : tr('Download {n} chapters', { n })}
+                      {mode === 'follow'
+                        ? n === 1 ? tr('Follow {s} and download 1 chapter', { s: c.name }) : tr('Follow {s} and download {n} chapters', { s: c.name, n })
+                        : mode === 'fill'
+                          ? n === 1 ? tr('Fetch 1 chapter from {s}', { s: c.name }) : tr('Fetch {n} chapters from {s}', { n, s: c.name })
+                          : n === 1 ? tr('Download 1 chapter') : tr('Download {n} chapters', { n })}
                     </button>
                     {chosen.length > max && (
                       <p className="mt-1 text-xs text-fog-500">{tr('Up to {max} at a time: the rest can be fetched once this finishes.', { max })}</p>
@@ -385,8 +396,8 @@ export function FindMissingDialog({ seriesId, onClose }: { seriesId: string; onC
                     onClick={() => run(c, 'older')}
                     className={`${mode !== 'none' ? 'btn-ghost' : 'btn-accent'} mt-2 w-full text-sm disabled:opacity-50`}
                   >
-                    {tr('Fetch {n} older chapters from {s}')
-                      .replace('{n}', String(Math.min(c.older.length, max)))
+                    {(Math.min(c.older.length, max) === 1 ? tr('Fetch 1 older chapter from {s}')
+                      : tr('Fetch {n} older chapters from {s}').replace('{n}', String(Math.min(c.older.length, max))))
                       .replace('{s}', c.name)}
                   </button>
                 )}

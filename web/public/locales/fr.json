@@ -2,7 +2,7 @@
   "_meta": {
     "language": "fr",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 1271
+    "strings": 1286
   },
   "1 check found something": "1 vérification a trouvé quelque chose",
   "1 member": "1 membre",
@@ -1266,13 +1266,28 @@
   "{n} chapters newer than yours": "{n} chapitres plus récents que les vôtres",
   "Up to {max} at a time: the rest can be fetched once this finishes.": "Jusqu’à {max} à la fois : le reste pourra être téléchargé une fois ceci terminé.",
   "Now following {s}. It is checked for new chapters every few hours; download what it has now below.": "Vous suivez maintenant {s}. Elle est vérifiée toutes les quelques heures ; téléchargez ci-dessous ce qu’elle a déjà.",
-  "Downloading {n} chapters. {m} are not listed yet and come with the next check.": "Téléchargement de {n} chapitres. {m} ne sont pas encore listés et viendront à la prochaine vérification.",
   "Has everything you have and nothing newer yet. Following one means new chapters are taken from whichever source has them first.": "A tout ce que vous avez, et rien de plus récent pour l’instant. En suivre une signifie que les nouveaux chapitres viennent de la source qui les a en premier.",
   "Short chapters: look for a longer copy of up to {n} of them, and replace one only when a longer copy is found": "Chapitres courts : chercher une copie plus longue pour jusqu’à {n} d’entre eux, et ne remplacer que si on en trouve une",
   "Chapter gaps: search the sources for up to {n} series, follow one that has the missing chapters, and download them": "Chapitres manquants : chercher dans les sources pour jusqu’à {n} séries, suivre celle qui les a et les télécharger",
   "Chapters that would not download ({n} sources): all of them get another try, up to ten series straight away and the rest with the next check": "Chapitres qui ne se téléchargeaient pas ({n} sources) : tous ont une nouvelle chance, jusqu’à dix séries tout de suite et le reste à la prochaine vérification",
   "That list was too old, so the sources were asked again. Press it again.": "Cette liste était trop ancienne ; les sources ont été interrogées de nouveau. Appuyez encore une fois.",
   "Now following {s}. It is still listing its chapters: press Download again in a minute.": "Vous suivez maintenant {s}. Elle liste encore ses chapitres : appuyez de nouveau sur Télécharger dans une minute.",
-  "Downloading {n} chapters. {m} could not be fetched now.": "Téléchargement de {n} chapitres. {m} n’ont pas pu être récupérés pour l’instant.",
-  "Has {n} chapters newer than yours; an admin can follow it": "A {n} chapitres plus récents que les vôtres ; un administrateur peut la suivre"
+  "Has {n} chapters newer than yours; an admin can follow it": "A {n} chapitres plus récents que les vôtres ; un administrateur peut la suivre",
+  "1 chapter behind": "1 chapitre de retard",
+  "{n} chapters behind in 1 series": "{n} chapitres de retard dans 1 série",
+  "{n} chapters behind across {m} series": "{n} chapitres de retard sur {m} séries",
+  "Fetching 1 chapter…": "Récupération d’1 chapitre…",
+  "Follow {s} and download 1 chapter": "Suivre {s} et télécharger 1 chapitre",
+  "Fetch 1 chapter from {s}": "Récupérer 1 chapitre depuis {s}",
+  "Download 1 chapter": "Télécharger 1 chapitre",
+  "1 chapter newer than yours": "1 chapitre plus récent que les vôtres",
+  "Has 1 chapter newer than yours; an admin can follow it": "A 1 chapitre plus récent que les vôtres ; un administrateur peut la suivre",
+  "Downloading 1 chapter.": "Téléchargement d’1 chapitre.",
+  "Downloading {n} chapters.": "Téléchargement de {n} chapitres.",
+  "1 is not listed yet and comes with the next check.": "1 n’est pas encore listé et viendra à la prochaine vérification.",
+  "{m} are not listed yet and come with the next check.": "{m} ne sont pas encore listés et viendront à la prochaine vérification.",
+  "1 could not be fetched now.": "1 n’a pas pu être récupéré pour l’instant.",
+  "{m} could not be fetched now.": "{m} n’ont pas pu être récupérés pour l’instant.",
+  "Fetch 1 older chapter from {s}": "Récupérer 1 chapitre plus ancien depuis {s}",
+  "You have 1 chapter": "Vous avez 1 chapitre"
 }

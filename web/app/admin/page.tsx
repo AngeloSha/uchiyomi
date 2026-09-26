@@ -185,7 +185,9 @@ function AdminHero({ onBack }: { onBack: () => void; onScan?: undefined }) {
     stats?.lastScan ? tr('scanned {when}', { when: relativeTime(new Date(stats.lastScan).toISOString()) }) : null,
     // From what the sources said the last time the updater asked. Absent until a sweep has stamped it.
     stats?.backlog?.chapters
-      ? tr('{n} chapters behind across {m} series', { n: stats.backlog.chapters, m: stats.backlog.series })
+      ? stats.backlog.chapters === 1 ? tr('1 chapter behind')
+        : stats.backlog.series === 1 ? tr('{n} chapters behind in 1 series', { n: stats.backlog.chapters })
+        : tr('{n} chapters behind across {m} series', { n: stats.backlog.chapters, m: stats.backlog.series })
       : null,
   ].filter(Boolean) as string[];
 

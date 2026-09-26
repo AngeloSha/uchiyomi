@@ -86,15 +86,26 @@ export function runProgress(r: RunCard): string {
   return bits.join(' · ');
 }
 
+/** "Fetching 1 chapter" or "Fetching {n} chapters": the pill's label, and the add dialog's line under it. */
+export const fetchingLabel = (n: number): string => (n === 1 ? tr('Fetching 1 chapter') : tr('Fetching {n} chapters', { n }));
+
+/**
+ * The toast every Fetch starts with. It read "Fetching 1 chapters…" for the ☁ on a single ghost chapter,
+ * which is the commonest fetch there is.
+ */
+export const fetchingToast = (n: number): string => (n === 1 ? tr('Fetching 1 chapter…') : tr('Fetching {n} chapters…', { n }));
+
+/** Two sentences in one line. No space after a CJK full stop, which ends a sentence by itself. */
+export const joinSentences = (a: string, b: string): string => (/[。！？]$/.test(a) ? a + b : `${a} ${b}`);
+
 /**
  * The pill's own label, in the order a person cares: their downloads, then the chapters the server is fetching
  * by itself (a followed source's check, the scheduled check -- `serverChapters`, lib/serverDownloads.ts), then
  * the server's runs, then failures.
  */
 export function pillLabel(active: number, chaptersLeft: number, runs: readonly RunCard[], failed: number, serverChapters = 0): string | null {
-  const fetching = (n: number) => (n === 1 ? tr('Fetching 1 chapter') : tr('Fetching {n} chapters', { n }));
-  if (active) return fetching(chaptersLeft);
-  if (serverChapters) return fetching(serverChapters);
+  if (active) return fetchingLabel(chaptersLeft);
+  if (serverChapters) return fetchingLabel(serverChapters);
   const run = runs.find((r) => r.status === 'running');
   if (run) return runTitle(run.kind);
   if (failed) return tr('{n} failed', { n: failed });

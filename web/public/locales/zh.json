@@ -2,7 +2,7 @@
   "_meta": {
     "language": "zh",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 1271
+    "strings": 1286
   },
   "1 check found something": "1 项检查发现问题",
   "1 member": "1 位成员",
@@ -1266,13 +1266,28 @@
   "{n} chapters newer than yours": "比你的更新的章节：{n} 章",
   "Up to {max} at a time: the rest can be fetched once this finishes.": "每次最多 {max} 章：其余的可在完成后再获取。",
   "Now following {s}. It is checked for new chapters every few hours; download what it has now below.": "已关注 {s}。每隔几小时会检查一次新章节；现有的章节可以在下方下载。",
-  "Downloading {n} chapters. {m} are not listed yet and come with the next check.": "正在下载 {n} 章。还有 {m} 章尚未列出，会在下次检查时获取。",
   "Has everything you have and nothing newer yet. Following one means new chapters are taken from whichever source has them first.": "你有的它都有，暂时没有更新的章节。关注后，新章节会从最先有它们的来源获取。",
   "Short chapters: look for a longer copy of up to {n} of them, and replace one only when a longer copy is found": "过短的章节：为最多 {n} 章寻找更长的版本，只有找到时才替换",
   "Chapter gaps: search the sources for up to {n} series, follow one that has the missing chapters, and download them": "章节缺口：为最多 {n} 部系列搜索来源，关注有缺失章节的来源并下载",
   "Chapters that would not download ({n} sources): all of them get another try, up to ten series straight away and the rest with the next check": "无法下载的章节（{n} 个来源）：全部重新尝试，最多十部系列立即进行，其余在下次检查时",
   "That list was too old, so the sources were asked again. Press it again.": "该列表已过期，已重新询问来源。请再点一次。",
   "Now following {s}. It is still listing its chapters: press Download again in a minute.": "已关注 {s}。它仍在列出章节：请一分钟后再次点击下载。",
-  "Downloading {n} chapters. {m} could not be fetched now.": "正在下载 {n} 章。{m} 章暂时无法获取。",
-  "Has {n} chapters newer than yours; an admin can follow it": "有 {n} 章比你的更新；管理员可以关注它"
+  "Has {n} chapters newer than yours; an admin can follow it": "有 {n} 章比你的更新；管理员可以关注它",
+  "1 chapter behind": "落后 1 话",
+  "{n} chapters behind in 1 series": "1 个系列落后 {n} 话",
+  "{n} chapters behind across {m} series": "{m} 个系列共落后 {n} 话",
+  "Fetching 1 chapter…": "正在获取 1 章…",
+  "Follow {s} and download 1 chapter": "关注 {s} 并下载 1 章",
+  "Fetch 1 chapter from {s}": "从 {s} 获取 1 章",
+  "Download 1 chapter": "下载 1 章",
+  "1 chapter newer than yours": "比你的更新的章节：1 章",
+  "Has 1 chapter newer than yours; an admin can follow it": "有 1 章比你的更新；管理员可以关注它",
+  "Downloading 1 chapter.": "正在下载 1 章。",
+  "Downloading {n} chapters.": "正在下载 {n} 章。",
+  "1 is not listed yet and comes with the next check.": "还有 1 章尚未列出，会在下次检查时获取。",
+  "{m} are not listed yet and come with the next check.": "还有 {m} 章尚未列出，会在下次检查时获取。",
+  "1 could not be fetched now.": "1 章暂时无法获取。",
+  "{m} could not be fetched now.": "{m} 章暂时无法获取。",
+  "Fetch 1 older chapter from {s}": "从 {s} 获取更早的 1 章",
+  "You have 1 chapter": "你有 1 章"
 }

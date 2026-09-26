@@ -16,6 +16,7 @@ import { ActivityDots } from '@/components/ActivityDots';
 import { activityStatus, weeksOf } from '@/lib/activity';
 import { relativeTime } from '@/lib/format';
 import { t as tr } from '@/lib/i18n';
+import { fetchingLabel } from '@/lib/jobs';
 import { normTitle } from '@/lib/normTitle';
 import { cadenceText } from '@/lib/cadence';
 import { jobNoteLines, type JobCardNotes } from '@/lib/jobNotes';
@@ -399,7 +400,7 @@ export function AddSeriesDialog({ seed, sources, mayFollow, onClose, onAdded }: 
                   read "Fetching 1192 chapters" and then downloaded them all over again. */}
               {done.nothing ? tr('Added — new chapters will be fetched as they come out')
                 : done.alreadyHere ? tr('All {n} chapters are already in your library', { n: done.alreadyHere })
-                : done.chapters > 0 ? tr('Fetching {n} chapters', { n: done.chapters })
+                : done.chapters > 0 ? fetchingLabel(done.chapters)
                 : tr('Already in your library')}
             </p>
           </div>

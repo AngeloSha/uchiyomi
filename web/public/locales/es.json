@@ -2,7 +2,7 @@
   "_meta": {
     "language": "es",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 1271
+    "strings": 1286
   },
   "1 check found something": "1 comprobación encontró algo",
   "1 member": "1 miembro",
@@ -1266,13 +1266,28 @@
   "{n} chapters newer than yours": "{n} capítulos más nuevos que los tuyos",
   "Up to {max} at a time: the rest can be fetched once this finishes.": "Hasta {max} a la vez: el resto se puede descargar cuando esto termine.",
   "Now following {s}. It is checked for new chapters every few hours; download what it has now below.": "Ahora sigues {s}. Se comprueba cada pocas horas si hay capítulos nuevos; descarga abajo lo que tiene ahora.",
-  "Downloading {n} chapters. {m} are not listed yet and come with the next check.": "Descargando {n} capítulos. {m} aún no aparecen en la lista y llegarán con la próxima comprobación.",
   "Has everything you have and nothing newer yet. Following one means new chapters are taken from whichever source has them first.": "Tiene todo lo que tú tienes y nada más nuevo todavía. Seguir una significa que los capítulos nuevos se toman de la fuente que los tenga primero.",
   "Short chapters: look for a longer copy of up to {n} of them, and replace one only when a longer copy is found": "Capítulos cortos: buscar una copia más larga de hasta {n} de ellos y sustituir solo si se encuentra",
   "Chapter gaps: search the sources for up to {n} series, follow one that has the missing chapters, and download them": "Huecos de capítulos: buscar en las fuentes para hasta {n} series, seguir una que tenga los que faltan y descargarlos",
   "Chapters that would not download ({n} sources): all of them get another try, up to ten series straight away and the rest with the next check": "Capítulos que no se descargaban ({n} fuentes): todos tienen otro intento, hasta diez series ahora mismo y el resto en la próxima comprobación",
   "That list was too old, so the sources were asked again. Press it again.": "Esa lista era demasiado antigua; se ha vuelto a preguntar a las fuentes. Púlsalo otra vez.",
   "Now following {s}. It is still listing its chapters: press Download again in a minute.": "Ahora sigues {s}. Aún está listando sus capítulos: pulsa Descargar otra vez dentro de un minuto.",
-  "Downloading {n} chapters. {m} could not be fetched now.": "Descargando {n} capítulos. {m} no se pudieron obtener ahora.",
-  "Has {n} chapters newer than yours; an admin can follow it": "Tiene {n} capítulos más nuevos que los tuyos; un administrador puede seguirla"
+  "Has {n} chapters newer than yours; an admin can follow it": "Tiene {n} capítulos más nuevos que los tuyos; un administrador puede seguirla",
+  "1 chapter behind": "1 capítulo de retraso",
+  "{n} chapters behind in 1 series": "{n} capítulos de retraso en 1 serie",
+  "{n} chapters behind across {m} series": "{n} capítulos de retraso en {m} series",
+  "Fetching 1 chapter…": "Obteniendo 1 capítulo…",
+  "Follow {s} and download 1 chapter": "Seguir {s} y descargar 1 capítulo",
+  "Fetch 1 chapter from {s}": "Obtener 1 capítulo de {s}",
+  "Download 1 chapter": "Descargar 1 capítulo",
+  "1 chapter newer than yours": "1 capítulo más nuevo que los tuyos",
+  "Has 1 chapter newer than yours; an admin can follow it": "Tiene 1 capítulo más nuevo que los tuyos; un administrador puede seguirla",
+  "Downloading 1 chapter.": "Descargando 1 capítulo.",
+  "Downloading {n} chapters.": "Descargando {n} capítulos.",
+  "1 is not listed yet and comes with the next check.": "1 aún no aparece en la lista y llegará con la próxima comprobación.",
+  "{m} are not listed yet and come with the next check.": "{m} aún no aparecen en la lista y llegarán con la próxima comprobación.",
+  "1 could not be fetched now.": "1 no se pudo obtener ahora.",
+  "{m} could not be fetched now.": "{m} no se pudieron obtener ahora.",
+  "Fetch 1 older chapter from {s}": "Obtener 1 capítulo anterior de {s}",
+  "You have 1 chapter": "Tienes 1 capítulo"
 }

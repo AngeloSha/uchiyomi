@@ -2,7 +2,7 @@
   "_meta": {
     "language": "ar",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 1271
+    "strings": 1286
   },
   "1 check found something": "فحص واحد وجد شيئًا",
   "1 member": "عضو واحد",
@@ -1266,13 +1266,28 @@
   "{n} chapters newer than yours": "{n} فصول أحدث مما لديك",
   "Up to {max} at a time: the rest can be fetched once this finishes.": "حتى {max} في المرة الواحدة: يمكن جلب الباقي بعد أن ينتهي هذا.",
   "Now following {s}. It is checked for new chapters every few hours; download what it has now below.": "أنت تتابع {s} الآن. يُفحص بحثًا عن فصول جديدة كل بضع ساعات؛ نزّل ما لديه الآن من الأسفل.",
-  "Downloading {n} chapters. {m} are not listed yet and come with the next check.": "جارٍ تنزيل {n} فصول. {m} غير مدرجة بعد وستأتي مع الفحص التالي.",
   "Has everything you have and nothing newer yet. Following one means new chapters are taken from whichever source has them first.": "فيه كل ما لديك ولا شيء أحدث بعد. متابعة مصدر تعني أن الفصول الجديدة تُؤخذ من المصدر الذي تظهر فيه أولًا.",
   "Short chapters: look for a longer copy of up to {n} of them, and replace one only when a longer copy is found": "فصول قصيرة: البحث عن نسخة أطول لما يصل إلى {n} منها، والاستبدال فقط عند العثور على نسخة أطول",
   "Chapter gaps: search the sources for up to {n} series, follow one that has the missing chapters, and download them": "فجوات في الفصول: البحث في المصادر لما يصل إلى {n} سلاسل، ومتابعة مصدر فيه الفصول الناقصة، وتنزيلها",
   "Chapters that would not download ({n} sources): all of them get another try, up to ten series straight away and the rest with the next check": "فصول لم يكتمل تنزيلها ({n} مصادر): تحصل كلها على محاولة جديدة، حتى عشر سلاسل فورًا والباقي مع الفحص التالي",
   "That list was too old, so the sources were asked again. Press it again.": "كانت تلك القائمة قديمة جدًا، لذا سُئلت المصادر من جديد. اضغط مرة أخرى.",
   "Now following {s}. It is still listing its chapters: press Download again in a minute.": "أنت تتابع {s} الآن. ما زال يسرد فصوله: اضغط تنزيل مرة أخرى بعد دقيقة.",
-  "Downloading {n} chapters. {m} could not be fetched now.": "جارٍ تنزيل {n} فصول. تعذّر جلب {m} الآن.",
-  "Has {n} chapters newer than yours; an admin can follow it": "فيه {n} فصول أحدث مما لديك؛ يستطيع المشرف متابعته"
+  "Has {n} chapters newer than yours; an admin can follow it": "فيه {n} فصول أحدث مما لديك؛ يستطيع المشرف متابعته",
+  "1 chapter behind": "فصل واحد متأخر",
+  "{n} chapters behind in 1 series": "{n} فصل متأخر في سلسلة واحدة",
+  "{n} chapters behind across {m} series": "{n} فصل متأخر في {m} سلسلة",
+  "Fetching 1 chapter…": "جارٍ جلب فصل واحد…",
+  "Follow {s} and download 1 chapter": "متابعة {s} وتنزيل فصل واحد",
+  "Fetch 1 chapter from {s}": "جلب فصل واحد من {s}",
+  "Download 1 chapter": "تنزيل فصل واحد",
+  "1 chapter newer than yours": "فصل واحد أحدث مما لديك",
+  "Has 1 chapter newer than yours; an admin can follow it": "فيه فصل واحد أحدث مما لديك؛ يستطيع المشرف متابعته",
+  "Downloading 1 chapter.": "جارٍ تنزيل فصل واحد.",
+  "Downloading {n} chapters.": "جارٍ تنزيل {n} فصول.",
+  "1 is not listed yet and comes with the next check.": "فصل واحد غير مدرج بعد وسيأتي مع الفحص التالي.",
+  "{m} are not listed yet and come with the next check.": "{m} غير مدرجة بعد وستأتي مع الفحص التالي.",
+  "1 could not be fetched now.": "تعذّر جلب فصل واحد الآن.",
+  "{m} could not be fetched now.": "تعذّر جلب {m} الآن.",
+  "Fetch 1 older chapter from {s}": "جلب فصل واحد أقدم من {s}",
+  "You have 1 chapter": "لديك فصل واحد"
 }
