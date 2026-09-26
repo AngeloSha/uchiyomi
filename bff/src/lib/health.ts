@@ -23,7 +23,7 @@ import { gapsOf } from './fill';
 import { CHAPTER_RETRY_CAP } from './updater';
 import { diagnose } from './sourceDiagnosis';
 import { haveNumbers } from './libraryNumbers';
-import { DL_ROOT } from './library';
+import { DL_ROOT, lastScanReport } from './library';
 import { chapterFileRel } from './downloader';
 import { forDesktop } from './desktop';
 
@@ -921,6 +921,35 @@ async function extensionCap(): Promise<HealthCheck> {
   };
 }
 
+/**
+ * Folders the last library scan could not index (#109).
+ *
+ * The scan now steps over a folder it cannot index instead of stopping (lib/library.ts persistScan), which
+ * keeps the rest of the library current -- and would leave that one folder's chapters silently missing, on
+ * disk and absent from the series page, if nothing said so. The error is the scanner's own, so the admin
+ * has something to act on (a file to replace, a permission to fix) rather than a symptom.
+ */
+function libraryScan(): HealthCheck {
+  const r = lastScanReport();
+  if (!r) {
+    return { id: 'library-scan', title: 'Library scan', status: 'ok', summary: 'no scan has run since the server started', items: [] };
+  }
+  const n = r.skippedTotal;
+  return {
+    id: 'library-scan',
+    title: 'Library scan',
+    status: n ? 'problem' : 'ok',
+    summary: n
+      ? `the last scan could not index ${n} folder${n === 1 ? '' : 's'}; ${n === 1 ? 'its' : 'their'} chapters are on disk but not in the library`
+      : `the last scan indexed ${r.series} series, ${r.books} chapters`,
+    note: 'Runs after every download, sweep and manual scan. Every other folder is still indexed when one fails.',
+    items: r.skipped.slice(0, MAX_ITEMS).map((k) => ({
+      title: `${k.root === 'downloads' ? 'Downloads' : 'Library'} / ${k.folder}`,
+      detail: k.error,
+    })),
+  };
+}
+
 // ---- report -----------------------------------------------------------------
 
 export async function runHealthChecks(): Promise<HealthReport> {
@@ -938,6 +967,7 @@ export async function runHealthChecks(): Promise<HealthReport> {
     frozenSeries(),
     solverHealth(),
     updateCheck(),
+    libraryScan(),
     ...(suwayomiConfigured() ? [extensionCap()] : []),
   ]);
   // worst first, so the page opens on whatever needs attention

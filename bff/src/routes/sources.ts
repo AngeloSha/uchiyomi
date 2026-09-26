@@ -193,6 +193,9 @@ const cancelledReason = (j: Job) => `Cancelled after ${j.done} of ${j.total} cha
  *
  * The caller has already authorised the chapters and recorded the audit line; this function does neither.
  */
+/** A scan that throws is logged, never swallowed: with nothing in the log, #109 had nothing to go on. */
+const logScanError = (e: unknown) => console.warn(`[scan] library scan threw: ${(e as Error)?.message || e}`);
+
 export function startDownloadJob(input: DownloadJobInput): { total: number } {
   const { folder, title, seriesId, chapters, meta } = input;
   jobs.set(folder, { title, total: chapters.length, done: 0, status: 'downloading', startedAt: Date.now(), ...(input.by ? { by: input.by } : {}) });
@@ -211,6 +214,9 @@ export function startDownloadJob(input: DownloadJobInput): { total: number } {
     // Numbers that landed from a copy the person picked by name: stamped `picked_at` at the end, so the
     // nightly group upgrade (lib/repair.ts stepGroups) never swaps a chosen version for another group's.
     const pickedLanded: number[] = [];
+    // Chapters whose file was already on disk (#109): nothing to fetch, but the scan at the end has to pick
+    // them up, and when it does not the card says so instead of ending quietly after a second.
+    const onDisk: number[] = [];
     // A source that has refused once this job is not asked again, but the others still are: a rate-limited
     // primary must not stop the follower's chapters. Each source costs at most one strike per job. Written
     // by the helper (a copy that earns `blockStatus` puts its source here) and read by it.
@@ -286,12 +292,13 @@ export function startDownloadJob(input: DownloadJobInput): { total: number } {
             j.partial = (j.partial ?? 0) + 1;
             j.reason = `Chapter ${ch.number} saved with ${out.missing.length} page${out.missing.length === 1 ? '' : 's'} missing`;
           }
-          if (j.done % 5 === 0) await persistScan().catch(() => {});
+          if (j.done % 5 === 0) await persistScan().catch(logScanError);
         }
         await settle(ch, true);
       } else if (out.kind === 'skipped') {
         // On disk already, or its source is refusing with nothing else to ask: neither is this job's
         // failure, and neither advances the bar.
+        if (out.why === 'on_disk') onDisk.push(ch.number);
         await settle(ch, false);
       } else {
         failures++;
@@ -315,7 +322,16 @@ export function startDownloadJob(input: DownloadJobInput): { total: number } {
     }
     // Settled BEFORE the scan, so a copy the hook puts back is on disk when the scanner looks.
     for (const ch of chapters) if (!settled.has(ch)) await settle(ch, false);
-    await persistScan().catch(() => {});
+    await persistScan().catch((e) => console.warn(`[download] ${folder}: the library scan after the job threw: ${(e as Error)?.message || e}`));
+    // On disk and still not in the library after that scan: the file is there and the scanner cannot index it
+    // (Admin → Health → Library scan names the folder and why). Said on the card, because a Fetch that ends
+    // in a second with nothing added looks exactly like a Fetch that worked (#109).
+    const unindexed = onDisk.length
+      ? await q<{ number: number }>(
+        'SELECT number::float8 AS number FROM lib_books WHERE series_id = $1 AND number = ANY($2::real[]) AND pruned_at IS NULL',
+        [seriesId, onDisk],
+      ).then((rows) => { const have = new Set(rows.map((r) => Number(r.number))); return onDisk.filter((n) => !have.has(n)); }, () => [])
+      : [];
     await setBookDates(folder, chapters).catch(() => {});
     await setBookMeta(folder, landed).catch(() => {});
     if (pickedLanded.length) {
@@ -323,6 +339,11 @@ export function startDownloadJob(input: DownloadJobInput): { total: number } {
         [seriesId, pickedLanded]).catch(() => {});
     }
     const j = jobs.get(folder);
+    if (j && unindexed.length) {
+      const list = unindexed.slice(0, 5).join(', ') + (unindexed.length > 5 ? ` and ${unindexed.length - 5} more` : '');
+      j.status = 'error'; j.finishedAt = Date.now();
+      j.reason = `Chapter${unindexed.length === 1 ? '' : 's'} ${list} ${unindexed.length === 1 ? 'is' : 'are'} already on disk, but the library scan could not add ${unindexed.length === 1 ? 'it' : 'them'}. Admin → Health → Library scan says why.`;
+    }
     // A cancelled job says so, and ends `done`: stopping was the request, not a failure. A chapter that
     // failed before the Cancel is still counted in the sentence, so nothing it lost goes unreported.
     if (j && j.status !== 'error' && j.cancelRequested) {
@@ -1024,7 +1045,7 @@ export async function addSeriesFromSource(opts: {
       return { ok: false, status: 422, error: 'undownloadable', message: `${why} Try a different source.` };
     }
     const j0 = jobs.get(folder); if (j0) j0.done = 1;
-    await persistScan().catch(() => {});
+    await persistScan().catch(logScanError);
     await setBookDates(folder, selected).catch(() => {});
     await setBookMeta(folder, landed).catch(() => {});
     // The floor the person's selection earns, computed above the "nothing left to fetch" branch so both
@@ -1100,7 +1121,7 @@ export async function addSeriesFromSource(opts: {
               j.partial = (j.partial ?? 0) + 1;
               j.reason = `Chapter ${ch.number} saved with ${out.missing.length} page${out.missing.length === 1 ? '' : 's'} missing`;
             }
-            if (j.done % 5 === 0) await persistScan().catch(() => {});
+            if (j.done % 5 === 0) await persistScan().catch(logScanError);
           }
           continue;
         }
@@ -1108,7 +1129,7 @@ export async function addSeriesFromSource(opts: {
           // An old file in a revived folder is part of the requested result; a refusal is not. With no
           // alternate source the latter leaves every remaining chapter nowhere to go, so stop at one strike.
           if (out.why === 'on_disk') {
-            if (j) { j.done++; if (j.done % 5 === 0) await persistScan().catch(() => {}); }
+            if (j) { j.done++; if (j.done % 5 === 0) await persistScan().catch(logScanError); }
             continue;
           }
           if (j) {
@@ -1134,7 +1155,7 @@ export async function addSeriesFromSource(opts: {
         // the bar. The next chapter may still be healthy, so keep going as the old loop did.
         if (j) j.reason = `${failures} chapter${failures === 1 ? '' : 's'} could not be saved: ${String(out.err?.message || out.err).slice(0, 120)}`;
       }
-      await persistScan().catch(() => {});
+      await persistScan().catch(logScanError);
       await setBookDates(folder, selected).catch(() => {});
       await setBookMeta(folder, landed).catch(() => {});
       const j = jobs.get(folder);

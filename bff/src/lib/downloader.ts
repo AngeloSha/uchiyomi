@@ -8,7 +8,7 @@ import { join, dirname, posix } from 'path';
 import sharp from 'sharp';
 import { getSource, SourceAdapter, SourceChapter, SourceSeries } from './sources';
 import { cfSession } from './sources/flaresolverr';
-import { DL_ROOT } from './library';
+import { DL_ROOT, XML_FORBIDDEN } from './library';
 import { classify, reportOk, reportFail, SourceStatus } from './sourceHealth';
 import { withGate } from './gate';
 import { imageExt } from './imageExt';
@@ -43,7 +43,9 @@ function winSafe(name: string): string {
 }
 
 function comicInfo(d: { series: string; number: number; title?: string; summary?: string; author?: string; genres?: string[]; web?: string; status?: string; scanlator?: string }): string {
-  const esc = (x: any = '') => String(x ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  // XML_FORBIDDEN out first: a source's text is copied in verbatim, and a NUL in a description made a file
+  // no XML reader should accept and one the scan could not index (#109, lib/library.ts).
+  const esc = (x: any = '') => String(x ?? '').replace(XML_FORBIDDEN, '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   return [
     '<?xml version="1.0" encoding="UTF-8"?>',
     '<ComicInfo>',

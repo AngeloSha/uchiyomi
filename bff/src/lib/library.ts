@@ -48,10 +48,21 @@ export interface ScanSeries {
   books: ScanBook[];
 }
 
+/**
+ * The C0 control characters XML 1.0 forbids (everything below 0x20 but tab, newline and return).
+ *
+ * ⚠️ NUL is the one that matters: Postgres refuses it in any text value, so a ComicInfo field carrying one
+ * made the scan's INSERT throw -- and before the scan isolated its folders (#109) that one throw ended the
+ * whole pass, silently, leaving every folder after it unindexed. A source whose description held a `\u0000`
+ * was enough, because the downloader copied it into the file (`comicInfo` in downloader.ts strips them too).
+ */
+// eslint-disable-next-line no-control-regex
+export const XML_FORBIDDEN = /[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g;
+
 function field(xml: string, tag: string): string | null {
   // allow an optional XML namespace prefix, e.g. <ty:PublishingStatusTachiyomi>
   const m = xml.match(new RegExp(`<(?:\\w+:)?${tag}\\b[^>]*>([\\s\\S]*?)</(?:\\w+:)?${tag}>`, 'i'));
-  return m ? m[1].replace(/<!\[CDATA\[|\]\]>/g, '').trim() : null;
+  return m ? m[1].replace(/<!\[CDATA\[|\]\]>/g, '').replace(XML_FORBIDDEN, '').trim() : null;
 }
 // Some source pages leak an inline <style>/<script> block into the summary. Detect CSS/JS so a garbage
 // ComicInfo can never become a series description (a lone stray brace in real prose is fine).
@@ -482,9 +493,24 @@ async function tryRematch(
   return { id: match.seriesId, oldFolder: match.oldFolder };
 }
 
-export async function persistScan(): Promise<{ series: number; books: number; ms: number }> {
+/** A folder the last scan could not index, and why (#109). */
+export interface ScanSkip { root: 'library' | 'downloads'; folder: string; error: string }
+export interface ScanReport { at: string; series: number; books: number; ms: number; skipped: ScanSkip[]; skippedTotal: number }
+/** How many skipped folders a report names. The total is always counted. */
+const SKIPS_KEPT = 50;
+let lastScan: ScanReport | null = null;
+/**
+ * The last completed scan, for the Health page: a folder the scanner cannot index is otherwise invisible --
+ * its chapters are on disk, the series page says they are missing, and a Fetch finds the file there and does
+ * nothing. Null until the first scan since the server started.
+ */
+export const lastScanReport = (): ScanReport | null => lastScan;
+
+export async function persistScan(): Promise<{ series: number; books: number; ms: number; skipped: number }> {
   const t0 = Date.now();
   let nBooks = 0;
+  const skipped: ScanSkip[] = [];
+  let skippedTotal = 0;
   // folderRel -> series id, so the second root reuses the row the first root created. The same relative
   // folder legitimately exists under both roots (a series part-fetched by the engine, part downloaded here),
   // and merging them into one series is deliberate.
@@ -497,12 +523,27 @@ export async function persistScan(): Promise<{ series: number; books: number; ms
   for (const root of [LIBRARY_ROOT, DL_ROOT]) {
     for (const found of await findSeriesDirs(root)) {
       const { folderRel, folderAbs, source: srcName, chapters: files } = found;
+      // ⚠️ ONE FOLDER, NOT THE SCAN (#109). A folder the scanner cannot index -- a ComicInfo field Postgres
+      // refuses, a constraint, anything -- used to throw out of the whole pass, and every caller swallowed it
+      // (`persistScan().catch(() => {})`). The scan simply stopped there, on every run, and everything after
+      // that folder -- the downloads root is walked second, so every chapter this server fetched -- stayed
+      // unindexed with nothing in the log: files on disk, "missing" on the series page, and a Fetch that found
+      // the file already there and did nothing. Its own transaction rolls back; the rest of the library goes on.
+      // Reintroduce by removing the catch: "one folder that cannot be indexed does not stop the scan" in
+      // scanResilience.int.test.ts finds the folders after it missing.
+      try {
 
         // One folder per transaction: a half-applied folder is a corrupt library, not a stale one.
         // A folder can already be spoken for in ways the scanner must respect, or delete and merge both
         // undo themselves on the next pass: this runs on every add, every updater sweep and every manual scan.
+        // A folder is unique per LIBRARY, not overall, so it can have a deleted twin beside a live row (a series
+        // deleted in one library and the folder later assigned to another). The live one is the one its files
+        // belong to: unordered, the deleted twin could come back first and the `continue` below skipped the
+        // folder for good. Reintroduce by dropping the ORDER BY: "a deleted twin does not hide the live row"
+        // in scanResilience.int.test.ts finds its books missing.
         const known = await one<{ id: string; deleted_at: string | null; merged_into: string | null; library_id: string }>(
-          `SELECT id, deleted_at, merged_into, library_id FROM lib_series WHERE folder = $1`,
+          `SELECT id, deleted_at, merged_into, library_id FROM lib_series WHERE folder = $1
+            ORDER BY (deleted_at IS NOT NULL), (merged_into IS NOT NULL), created_at LIMIT 1`,
           [folderRel],
         );
         // Deleted: leave it alone entirely. Reviving it would mint a new id and strand everything attached
@@ -617,6 +658,12 @@ export async function persistScan(): Promise<{ series: number; books: number; ms
           return id;
         });
         void seriesId;
+      } catch (e) {
+        skippedTotal++;
+        const error = String((e as Error)?.message || e).slice(0, 300);
+        if (skipped.length < SKIPS_KEPT) skipped.push({ root: root === DL_ROOT ? 'downloads' : 'library', folder: folderRel, error });
+        console.warn(`[scan] skipped ${root}/${folderRel}: ${error}`);
+      }
     }
   }
   await q(`UPDATE lib_series s SET books_count = c.n, latest_mtime = COALESCE(c.mt, 0)
@@ -630,7 +677,10 @@ export async function persistScan(): Promise<{ series: number; books: number; ms
   // read-chapter cleanup delete what the sweep just fetched. Best effort, like the ledger above: a scan must
   // never fail over it, and the marks keep until the next scan.
   await reconcileListingProgress().catch((e) => console.warn('[scan] listing marks not reconciled:', (e as Error).message));
-  return { series: seenFolders.size, books: nBooks, ms: Date.now() - t0 };
+  const ms = Date.now() - t0;
+  lastScan = { at: new Date().toISOString(), series: seenFolders.size, books: nBooks, ms, skipped, skippedTotal };
+  if (skippedTotal) console.warn(`[scan] ${skippedTotal} folder(s) could not be indexed; Admin → Health → Library scan lists them`);
+  return { series: seenFolders.size, books: nBooks, ms, skipped: skippedTotal };
 }
 
 /**
