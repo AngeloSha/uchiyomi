@@ -2221,6 +2221,11 @@ paths:
         and a `reason` saying how far it got; and `runs` lists the server's own runs -- the chapter sweep,
         the library repair, a bulk "Fetch newest" -- as one card each, to an admin, and a bulk run to the
         account that started it as well.
+        Since v0.48.1 the response also carries `activity: {active, recent}` -- every chapter the server is
+        downloading or finished in the last day, whatever started it: `{id, seriesId, folder, title, number, source,
+        origin: add|fetch|fill|check|sweep|repair|bulk|refetch|server, status: queued|downloading|done|partial|failed,
+        startedAt, finishedAt?, pages?, reason?, mine}`, limited to the series this viewer can browse (a folder that
+        is not a series yet: its starter and admins).
       security:
         - bearer: []
       responses:

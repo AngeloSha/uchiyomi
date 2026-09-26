@@ -289,6 +289,15 @@ the request hides that series anyway). `POST /api/sources/runs/<kind>/cancel` st
 shutdown does — between series and between chapters, never mid-write — and `DELETE /api/sources/runs/<kind>`
 dismisses a finished one. Both cancels are audited as `download.cancel`.
 
+**Every chapter coming in** (since v0.48.1). The response also carries `activity: {active, recent}`: each chapter
+the server is downloading (`active`, oldest first) or finished in the last day (`recent`, newest first), whatever
+started it — `{id, seriesId, folder, title, number, source, origin, status, startedAt, finishedAt?, pages?, reason?,
+mine}`, where `origin` is `add`, `fetch`, `fill` (Find missing chapters), `check` (Check for new chapters, which
+is also how a newly followed source's chapters arrive), `sweep` (the scheduled check), `repair`, `bulk` (Fetch
+newest), `refetch` or `server`, and `status` is `queued` (waiting its turn at the source), `downloading`, `done`,
+`partial` or `failed`. A file already on disk is not listed. Each viewer gets the series they can browse; a
+folder that is not a series yet (an add's first chapter) goes to whoever started it and to admins.
+
 `GET /api/sources/popular?source=<id>&page=<n>` is the same listing sorted by the source's OWN popularity,
 not by anything this server computes: it is the page each site already publishes, reached with a different
 sort. Every guard on the newest listing applies identically. A source that cannot offer one reports

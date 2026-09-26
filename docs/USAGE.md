@@ -452,9 +452,18 @@ A re-fetch you cancel puts back every old copy it had set aside and not yet repl
 Since v0.47.0 an admin also sees what the server does **by itself**, one card per run: *Checking for new
 chapters* (the scheduled update, or *Run now*), *Library repair* and a bulk *Fetch newest* — how many series
 it has been through, how many chapters it saved, which series it is on, and a Cancel that stops it the same
-way. Whoever started a bulk *Fetch newest* sees that one too. Downloads that finished in the last day are
-under **Finished today** in the same list; the strip on Discover still shows only the last few minutes. The
-**Downloads** tab is something else: copies saved on this device for reading offline.
+way. Whoever started a bulk *Fetch newest* sees that one too. The strip on Discover still shows only the last
+few minutes.
+
+**Every chapter coming in, whatever started it** (since v0.48.1). Under the cards, **Downloading now** lists
+each chapter the server is fetching that no card above already shows — a source you followed from *Find missing
+chapters* downloads at the series' next check, and the scheduled check, *Check for new chapters*, the repair and
+*Fetch newest* all download chapters of their own — with the series, the chapter, what started it and whether it
+is still waiting its turn at the source. **Came in today** lists what arrived, one line per series. The same two
+lists sit at the top of the **Offline** tab under **On the server**, where they are also there when nothing is
+running, with any chapter that could not be saved and why. You see the series you can open; a brand-new add's
+first chapter is shown to whoever added it and to admins. The rest of the Offline tab is something else: copies
+saved on this device for reading offline.
 
 ### Chapters the sources have that you don't
 
