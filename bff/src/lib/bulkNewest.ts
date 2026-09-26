@@ -29,6 +29,7 @@ import { persistScan, setBookDates, setBookMeta } from './library';
 import { runtime } from './runtime';
 import type { SourceChapter } from './sources';
 import { beginRun, endRun, stopRequested, type RunCard } from './downloadJobs';
+import { withOrigin } from './downloadActivity';
 
 export type NewestOutcome = 'downloaded' | 'up_to_date' | 'skipped' | 'failed';
 
@@ -123,7 +124,7 @@ export function startBulkNewest(input: BulkNewestInput): { total: number } | fal
   // The run's card on the download pill (lib/downloadJobs.ts, #82), with a Cancel for an admin: "select all"
   // fans this out over hundreds of series, a second and a half apart.
   const card = beginRun('newest', input.userId, input.ids.length);
-  void run(input, card).catch((e) => {
+  void withOrigin('bulk', input.userId ?? null, () => run(input, card)).catch((e) => {
     // The loop below settles every series itself; only something outside it (a state write) can reach
     // here, and the run must still end, or every later click is a 409 until a restart.
     console.warn(`[bulk/newest] run failed: ${(e as Error)?.message || e}`);

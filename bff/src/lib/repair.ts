@@ -68,6 +68,7 @@ import { assess, gapsOf } from './fill';
 import { solverBlaming } from './health';
 import { visibleToAll } from './visibility';
 import { detectDirections } from './readingDirection';
+import { withOrigin } from './downloadActivity';
 
 /**
  * Which of the eight steps to run. `only` on the options picks a subset; the nightly runs them all. `groups`
@@ -1250,7 +1251,7 @@ export function runRepair(log?: Log, opts: RepairOpts = {}): Promise<RepairResul
   repairState.startedAt = Date.now();
   repairState.finishedAt = null;
   const card = activeCard = beginRun('repair', opts.userId ?? null);
-  return (async () => {
+  return withOrigin('repair', opts.userId ?? null, async () => {
     try {
       const r = await repairLibrary(log, opts);
       // A nightly run the switch turned away did nothing, and a card saying "Library repair: done" would
@@ -1282,5 +1283,5 @@ export function runRepair(log?: Log, opts: RepairOpts = {}): Promise<RepairResul
       runtime.repairing = false;
       activeCard = null;
     }
-  })();
+  });
 }

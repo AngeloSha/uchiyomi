@@ -10,6 +10,8 @@ import { t as tr } from '@/lib/i18n';
 import { chaptersLeft } from '@/lib/chapterRows';
 import { jobNoteLines, type JobCardNotes } from '@/lib/jobNotes';
 import { finished, mayCancel, pillLabel, runProgress, runTitle, type RunCard } from '@/lib/jobs';
+import { beyondJobs, chapterSpan, groupRecent, originLabel, type Activity } from '@/lib/serverDownloads';
+import Link from 'next/link';
 
 // lib/jobs.ts JobCard's fields, spelled out beside the notes so this stays the one Job type the notes pin reads.
 interface Job extends JobCardNotes {
@@ -47,13 +49,13 @@ export function DownloadsIndicator() {
     // The same key and endpoint Discover uses. Sharing is required, not incidental: one query key must map
     // to exactly one endpoint, and this is the same data.
     queryKey: ['source-jobs'],
-    queryFn: () => api<{ content: Job[]; runs?: RunCard[] }>('/api/sources/jobs'),
+    queryFn: () => api<{ content: Job[]; runs?: RunCard[]; activity?: Activity }>('/api/sources/jobs'),
     enabled: mayAdd,
     // Hard while a download of a person's is moving; gentler while only the server's own run is, which can go
     // on for an hour a series and a half apart.
     refetchInterval: (qy) => {
       const d = qy.state.data;
-      if ((d?.content ?? []).some((j) => j.status === 'downloading')) return 2500;
+      if ((d?.content ?? []).some((j) => j.status === 'downloading') || (d?.activity?.active.length ?? 0) > 0) return 2500;
       if ((d?.runs ?? []).some((r) => r.status === 'running')) return 5000;
       return 30_000;
     },
@@ -65,6 +67,11 @@ export function DownloadsIndicator() {
   const failed = jobs.filter((j) => j.status === 'error');
   const done = finished(jobs);
   const running = runs.filter((r) => r.status === 'running');
+  // Every chapter the server is fetching that no job card above already shows: a followed source's check, the
+  // scheduled check, Check now, the repair (lib/serverDownloads.ts). Before this the pill knew only the jobs a
+  // button started, so all of that came in unseen.
+  const serverActive = beyondJobs(data?.activity?.active ?? [], new Set(active.map((j) => j.folder)));
+  const cameIn = groupRecent(data?.activity?.recent ?? []);
   // Names for the "took chapter 12 from …" lines. Asked for only once a card has a switch to name, and the
   // pill already exists only for a viewer who may download, which is who the route answers.
   const { data: sources } = useQuery({
@@ -80,7 +87,7 @@ export function DownloadsIndicator() {
   // used to sum each job's `total`: a 300-chapter job at 290/300 read "Fetching 300 chapters" over its own
   // `290/300` line. Nothing to say when nothing is happening: a finished download is listed under the rest
   // while the pill is up for something else, and does not raise the pill by itself.
-  const label = pillLabel(active.length, chaptersLeft(active), runs, failed.length);
+  const label = pillLabel(active.length, chaptersLeft(active), runs, failed.length, serverActive.length);
   if (!mayAdd || !label) return null;
 
   const refresh = () => qc.invalidateQueries({ queryKey: ['source-jobs'] });
@@ -155,32 +162,59 @@ export function DownloadsIndicator() {
               ))}
             </div>
           ))}
-          {done.length > 0 && (
+          {serverActive.length > 0 && (
+            <div className="border-b border-ink-700/60 py-2 last:border-0">
+              <p className="text-xs font-medium text-fog-100">{tr('Downloading now')}</p>
+              {serverActive.slice(0, 8).map((e) => (
+                <div key={e.id} className="mt-1.5">
+                  <p className="truncate text-[11px] text-fog-300">{e.title} · {tr('Ch. {n}', { n: e.number })}</p>
+                  <p className="truncate text-[11px] text-fog-500">
+                    {originLabel(e.origin)} · {e.source}{e.status === 'queued' ? ` · ${tr('waiting for the source')}` : ''}
+                  </p>
+                </div>
+              ))}
+              {serverActive.length > 8 && <p className="mt-1.5 text-[11px] text-fog-500">{tr('and {n} more', { n: serverActive.length - 8 })}</p>}
+            </div>
+          )}
+          {/* What came in today, whatever started it: the scheduled check's overnight chapters included. The
+              jobs' own Finished list is kept for a cancelled job's reason and its Dismiss. */}
+          {(cameIn.length > 0 || done.length > 0) && (
             <div className="pt-2">
               <button type="button" onClick={() => setShowFinished((v) => !v)} aria-expanded={showFinished}
                 className="text-[11px] text-fog-500 hover:text-fog-200">
-                {tr('Finished today ({n})', { n: done.length })}
+                {tr('Came in today ({n})', { n: cameIn.reduce((a, g) => a + g.numbers.length, 0) })}
               </button>
-              {showFinished && done.map((j) => (
+              {showFinished && cameIn.slice(0, 12).map((g) => (
+                <div key={g.key} className="mt-1.5">
+                  <p className="truncate text-[11px] text-fog-300">{g.title}{g.numbers.length ? ` · ${chapterSpan(g.numbers)}` : ''}</p>
+                  <p className="truncate text-[11px] text-fog-500">{g.origins.map(originLabel).join(', ')}</p>
+                  {g.failed.length > 0 && <p className="text-[11px] text-amber-300">{tr('{n} could not be saved', { n: g.failed.length })}</p>}
+                </div>
+              ))}
+              {showFinished && done.filter((j) => j.cancelled).map((j) => (
                 <div key={j.folder} className="mt-1.5 flex items-start gap-2">
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-[11px] text-fog-300">{j.title}</p>
-                    <p className="text-[11px] text-fog-500">{j.cancelled ? j.reason : tr('{n} chapters', { n: j.done })}</p>
+                    <p className="text-[11px] text-fog-500">{j.reason}</p>
                   </div>
                   <button onClick={() => dismiss(j.folder)} className="shrink-0 text-[11px] text-fog-500 hover:text-fog-200">{tr('Dismiss')}</button>
                 </div>
               ))}
             </div>
           )}
+          {/* The whole list, with what failed and why, on the Offline tab (its download icon is where people look). */}
+          <Link href="/downloads/" onClick={() => setOpen(false)} className="mt-2 block text-[11px] font-medium text-accent hover:underline">
+            {tr('All downloads')}
+          </Link>
         </div>
       )}
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
-        className={`chip shadow-lift text-xs ${failed.length && !active.length && !running.length ? 'border-amber-500/50 text-amber-300' : ''}`}
+        className={`chip shadow-lift text-xs ${failed.length && !active.length && !running.length && !serverActive.length ? 'border-amber-500/50 text-amber-300' : ''}`}
       >
-        <span aria-hidden className={`h-1.5 w-1.5 shrink-0 rounded-full ${active.length || running.length ? 'animate-pulse-soft bg-accent' : 'bg-amber-400'}`} />
+        <span aria-hidden className={`h-1.5 w-1.5 shrink-0 rounded-full ${active.length || running.length || serverActive.length ? 'animate-pulse-soft bg-accent' : 'bg-amber-400'}`} />
         {label}
       </button>
     </div>

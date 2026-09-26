@@ -9,6 +9,7 @@ import sharp from 'sharp';
 import { getSource, SourceAdapter, SourceChapter, SourceSeries } from './sources';
 import { cfSession } from './sources/flaresolverr';
 import { DL_ROOT, XML_FORBIDDEN } from './library';
+import { beginDownload, startedDownload, endDownload, holdPartial } from './downloadActivity';
 import { classify, reportOk, reportFail, SourceStatus } from './sourceHealth';
 import { withGate } from './gate';
 import { imageExt } from './imageExt';
@@ -265,7 +266,22 @@ export async function downloadChapter(input: DownloadInput, opts: { replace?: bo
   if (!opts.replace && await stat(abs).then(() => true).catch(() => false)) return null;
   await assertFreeSpace();
 
-  return underGate(input.sourceId, () => fetchChapter(src, input, rel));
+  // Recorded HERE, the one function every download path ends in, so the downloads view sees all of them --
+  // an add, a Fetch, a followed source's check, the nightly sweep, the repair (lib/downloadActivity.ts).
+  const act = beginDownload({
+    folder: input.seriesFolder, title: input.meta?.series || input.seriesFolder.split('/').pop() || input.seriesFolder,
+    number: input.chapter.number, source: input.sourceId,
+  });
+  try {
+    const r = await underGate(input.sourceId, () => { startedDownload(act); return fetchChapter(src, input, rel); });
+    endDownload(act, { status: 'done', pages: r.pages });
+    return r;
+  } catch (e) {
+    const hold = (e as Partial<ChapterShortfall>)?.partial;
+    if (hold) holdPartial(act, hold);
+    else endDownload(act, { status: 'failed', reason: String((e as Error)?.message || e).slice(0, 160) });
+    throw e;
+  }
 }
 
 export interface PageCtx {

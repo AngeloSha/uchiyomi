@@ -86,9 +86,14 @@ export function runProgress(r: RunCard): string {
   return bits.join(' · ');
 }
 
-/** The pill's own label, in the order a person cares: their downloads, then the server's, then failures. */
-export function pillLabel(active: number, chaptersLeft: number, runs: readonly RunCard[], failed: number): string | null {
+/**
+ * The pill's own label, in the order a person cares: their downloads, then the chapters the server is fetching
+ * by itself (a followed source's check, the scheduled check -- `serverChapters`, lib/serverDownloads.ts), then
+ * the server's runs, then failures.
+ */
+export function pillLabel(active: number, chaptersLeft: number, runs: readonly RunCard[], failed: number, serverChapters = 0): string | null {
   if (active) return tr('Fetching {n} chapters', { n: chaptersLeft });
+  if (serverChapters) return tr('Fetching {n} chapters', { n: serverChapters });
   const run = runs.find((r) => r.status === 'running');
   if (run) return runTitle(run.kind);
   if (failed) return tr('{n} failed', { n: failed });

@@ -21,6 +21,7 @@ import { huntSource, seriesIsAdult, sweepAllowedFor, HUNT_MAX_PER_SWEEP } from '
 import { completePartial, PARTIAL_COMPLETE_MAX } from './partial';
 import { effectiveSourcePriority, rankSources } from './sourcePrefs';
 import { beginRun, endRun, stopRequested, type RunCard } from './downloadJobs';
+import { withOrigin } from './downloadActivity';
 
 /**
  * Why a series produced nothing this run.
@@ -662,7 +663,8 @@ export function runSweep(opts: SweepOpts & { by?: string | null }, log: SweepLog
   // stops when an admin presses its Cancel. `by` is who pressed Run now; the schedule is nobody.
   const { by, ...sweepOpts } = opts ?? {};
   const card = beginRun('sweep', by ?? null);
-  return (async () => {
+  // Every chapter this run downloads is the sweep's, for the downloads view (lib/downloadActivity.ts).
+  return withOrigin('sweep', by ?? null, async () => {
     try {
       const r = await sweep({ ...sweepOpts, card });
       endRun(card, r.stopped === 'disk' ? 'error' : 'done',
@@ -714,5 +716,5 @@ export function runSweep(opts: SweepOpts & { by?: string | null }, log: SweepLog
     } finally {
       runtime.updating = false;
     }
-  })();
+  });
 }

@@ -2,7 +2,7 @@
   "_meta": {
     "language": "pt-BR",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 1229
+    "strings": 1241
   },
   "1 check found something": "1 verificação encontrou algo",
   "1 member": "1 membro",
@@ -1232,5 +1232,17 @@
   "Checking for new chapters…": "Procurando capítulos novos…",
   "That series is no longer in the library": "Essa série não está mais na biblioteca",
   "Right-click menus": "Menus do clique direito",
-  "Right-click a series or a chapter, or press and hold one on a touchscreen, for its actions. Shift+right-click still opens the browser’s own menu. This device only.": "Clique com o botão direito numa série ou num capítulo, ou mantenha pressionado numa tela de toque, para ver as ações. Shift+clique direito continua abrindo o menu do navegador. Só neste dispositivo."
+  "Right-click a series or a chapter, or press and hold one on a touchscreen, for its actions. Shift+right-click still opens the browser’s own menu. This device only.": "Clique com o botão direito numa série ou num capítulo, ou mantenha pressionado numa tela de toque, para ver as ações. Shift+clique direito continua abrindo o menu do navegador. Só neste dispositivo.",
+  "Added from Discover": "Adicionada pelo Descobrir",
+  "Scheduled check": "Verificação agendada",
+  "The server": "O servidor",
+  "Ch. {n}": "Cap. {n}",
+  "Downloading now": "Baixando agora",
+  "waiting for the source": "aguardando a fonte",
+  "Came in today ({n})": "Chegaram hoje ({n})",
+  "Came in today": "Chegaram hoje",
+  "All downloads": "Todos os downloads",
+  "On the server": "No servidor",
+  "{n} saved with pages missing": "{n} salvos com páginas faltando",
+  "Ch. {n} could not be saved": "Não foi possível salvar o cap. {n}"
 }

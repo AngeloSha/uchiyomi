@@ -11,6 +11,7 @@ import { IcTrash, IcPlay, IcDownload, IcWifiOff, IcRefresh } from '@/components/
 import { t as tr } from '@/lib/i18n';
 import { useRouter } from 'next/navigation';
 import { isDesktop, serverReachableHint } from '@/lib/desktop';
+import { ServerDownloads } from '@/components/ServerDownloads';
 
 export default function DownloadsPage() {
   const [items, setItems] = useState<OfflineChapter[]>([]);
@@ -106,6 +107,9 @@ export default function DownloadsPage() {
           </div>
         )}
       </header>
+
+      {/* The server's downloads, above this device's: nothing else shows what came in overnight (#82 follow-up). */}
+      <ServerDownloads online={online} />
 
       {loaded && items.length === 0 ? (
         <EmptyState art={ART.emptyDownloads} title={tr('No downloads yet')}

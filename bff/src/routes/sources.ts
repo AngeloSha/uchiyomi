@@ -153,6 +153,8 @@ export interface DownloadJobInput {
   chapters: Array<SourceChapter & { pinned?: boolean }>;
   /** OUR series row's metadata, never a candidate's -- see the note on `meta` inside the loop. */
   meta: DownloadInput['meta'];
+  /** What the downloads view says started it (lib/downloadActivity.ts). Default: a Fetch. */
+  origin?: Origin;
   /**
    * Which sources THIS viewer may reach (visibility.sourceAllowedFor), for the copies the job may fall
    * back to: a capped member's fetch must not have the server take a chapter from an adult source on
@@ -196,6 +198,34 @@ const cancelledReason = (j: Job) => `Cancelled after ${j.done} of ${j.total} cha
 /** A scan that throws is logged, never swallowed: with nothing in the log, #109 had nothing to go on. */
 const logScanError = (e: unknown) => console.warn(`[scan] library scan threw: ${(e as Error)?.message || e}`);
 
+/**
+ * The download activity (lib/downloadActivity.ts) as one viewer may see it: every chapter coming in, whatever
+ * started it, for the series this viewer can browse -- the same rule as the series themselves, since a title
+ * is a listing. A download for a folder that is not a series yet (an add's first chapter) is its starter's and
+ * an admin's. Who started a download is not sent, only whether it was this viewer.
+ */
+async function activityFor(ctx: ViewCtx, me: string | null, admin: boolean) {
+  const { active, recent } = listActivity();
+  const folders = [...new Set([...active, ...recent].map((e) => e.folder))];
+  const p = new Params();
+  const rows = folders.length
+    ? await q<{ id: string; folder: string; ok: boolean }>(
+      `SELECT s.id, s.folder, (${browsable('s', ctx, p)}) AS ok FROM lib_series s
+        WHERE s.folder = ANY(${p.add(folders)}) AND s.deleted_at IS NULL`,
+      p.values as any[],
+    ).catch(() => [])
+    : [];
+  const bySeries = new Map(rows.map((r) => [r.folder, r]));
+  const shown = (e: ActivityEntry) => {
+    const s = bySeries.get(e.folder);
+    return s ? s.ok : admin || (!!e.by && e.by === me);
+  };
+  const out = ({ by, heldAt: _h, source, ...e }: ActivityEntry) => ({
+    ...e, seriesId: bySeries.get(e.folder)?.id ?? null, source: getSource(source)?.name ?? source, mine: !!by && by === me,
+  });
+  return { active: active.filter(shown).map(out), recent: recent.filter(shown).map(out) };
+}
+
 export function startDownloadJob(input: DownloadJobInput): { total: number } {
   const { folder, title, seriesId, chapters, meta } = input;
   jobs.set(folder, { title, total: chapters.length, done: 0, status: 'downloading', startedAt: Date.now(), ...(input.by ? { by: input.by } : {}) });
@@ -206,7 +236,7 @@ export function startDownloadJob(input: DownloadJobInput): { total: number } {
   };
   const nameOf = (id: string) => getSource(id)?.name ?? id;
 
-  void (async () => {
+  void withOrigin(input.origin ?? 'fetch', input.by ?? null, async () => {
     let failures = 0;
     // What this job wrote, for the provenance stamp; a skipped copy was already on disk and is not ours.
     const landed: Array<{ number: number; scanlator?: string; source?: string; missing?: number[]; title?: string }> = [];
@@ -350,7 +380,7 @@ export function startDownloadJob(input: DownloadJobInput): { total: number } {
       j.cancelled = true; j.status = 'done'; j.finishedAt = Date.now();
       j.reason = failures ? `${cancelledReason(j)} ${failures} could not be saved.` : cancelledReason(j);
     } else if (j && j.status !== 'error') { j.status = failures ? 'error' : 'done'; j.finishedAt = Date.now(); }
-  })();
+  });
 
   return { total: chapters.length };
 }
@@ -369,6 +399,7 @@ function findOrder(): string[] {
 // v0.40.0 so the source hunt -- a lib -- can apply it without importing this route. Re-exported so the
 // type keeps its old address for anyone who imported it from here.
 import { pickBest, pickBestScored, type MatchConfidence } from '../lib/titleMatch';
+import { withOrigin, listActivity, type Origin, type ActivityEntry } from '../lib/downloadActivity';
 export type { MatchConfidence };
 
 /**
@@ -1184,7 +1215,7 @@ export async function addSeriesFromSource(opts: {
   // ⚠️ The only branch that cannot answer with a series id: this returns before `run()` has fetched
   // anything, so on a first add persistScan has not minted the row yet. A revive already has its id;
   // everything else reads it off the job card once chapter one is scanned (`Job.seriesId`).
-  void run().catch(() => {});
+  void withOrigin('add', opts.userId ?? null, run).catch(() => {});
   return { ok: true, status: 200, title, folder, chapters: toFetch.length, started: true, seriesId: existing?.id };
 }
 
@@ -1719,6 +1750,7 @@ export default async function sourceRoutes(app: FastifyInstance) {
     });
     // Every copy stamped with the source the person picked: the shared loop routes each chapter by its own.
     const { total } = startDownloadJob({
+      origin: 'fill',
       folder: s.folder, title: s.title, seriesId: plan.seriesId,
       chapters: picked.map((c) => ({ ...c, source })),
       meta: { series: s.title, summary: s.summary, author: s.author, genres: s.genres, url: s.web, status: s.status },
@@ -2049,7 +2081,8 @@ export default async function sourceRoutes(app: FastifyInstance) {
     const runs = listRuns()
       .filter((r) => admin || (r.by !== null && r.by === me))
       .map(({ by, ...r }) => ({ ...r, mine: !!by && by === me }));
-    if (!vc(req).hideAdultLibraries) return { content: all, runs };
+    const activity = await activityFor(vc(req), me, admin);
+    if (!vc(req).hideAdultLibraries) return { content: all, runs, activity };
     // A download job carries the series title, so the strip on Discover is a listing like any other. Jobs
     // are keyed by folder, which is exactly what lib_series.folder holds, so the filter is one lookup. A
     // job for a series not yet scanned in has no row and stays visible: it cannot be in a library yet.
@@ -2070,6 +2103,7 @@ export default async function sourceRoutes(app: FastifyInstance) {
     return {
       content: all.filter((j) => !hidden.has(j.folder)),
       runs: runs.map((r) => (r.current && hiddenIds.has(r.current.id) ? { ...r, current: undefined } : r)),
+      activity,
     };
   });
 

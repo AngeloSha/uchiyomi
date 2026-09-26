@@ -2,7 +2,7 @@
   "_meta": {
     "language": "ar",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 1229
+    "strings": 1241
   },
   "1 check found something": "فحص واحد وجد شيئًا",
   "1 member": "عضو واحد",
@@ -1232,5 +1232,17 @@
   "Checking for new chapters…": "جارٍ البحث عن فصول جديدة…",
   "That series is no longer in the library": "لم تعد هذه السلسلة في المكتبة",
   "Right-click menus": "قوائم النقر بزر الفأرة الأيمن",
-  "Right-click a series or a chapter, or press and hold one on a touchscreen, for its actions. Shift+right-click still opens the browser’s own menu. This device only.": "انقر بزر الفأرة الأيمن على سلسلة أو فصل، أو اضغط عليه مطوّلًا على شاشة لمس، لعرض إجراءاته. يظل Shift مع النقر الأيمن يفتح قائمة المتصفح نفسه. على هذا الجهاز فقط."
+  "Right-click a series or a chapter, or press and hold one on a touchscreen, for its actions. Shift+right-click still opens the browser’s own menu. This device only.": "انقر بزر الفأرة الأيمن على سلسلة أو فصل، أو اضغط عليه مطوّلًا على شاشة لمس، لعرض إجراءاته. يظل Shift مع النقر الأيمن يفتح قائمة المتصفح نفسه. على هذا الجهاز فقط.",
+  "Added from Discover": "أُضيفت من «اكتشف»",
+  "Scheduled check": "فحص مجدول",
+  "The server": "الخادم",
+  "Ch. {n}": "الفصل {n}",
+  "Downloading now": "قيد التنزيل الآن",
+  "waiting for the source": "بانتظار المصدر",
+  "Came in today ({n})": "وصلت اليوم ({n})",
+  "Came in today": "وصلت اليوم",
+  "All downloads": "كل التنزيلات",
+  "On the server": "على الخادم",
+  "{n} saved with pages missing": "{n} حُفظت مع صفحات ناقصة",
+  "Ch. {n} could not be saved": "تعذّر حفظ الفصل {n}"
 }

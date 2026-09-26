@@ -66,6 +66,7 @@ import { fetchKitsuBanner } from '../lib/kitsu';
 import { randomBytes } from 'crypto';
 import { appVersion } from '../lib/appVersion';
 import { PING_URL, buildPayload, installFacts, monthlyId, newSecret, sendForget } from '../lib/installPing';
+import { withOrigin } from '../lib/downloadActivity';
 
 type ImportJob = { running: boolean; total: number; done: number; added: number; already: number; notFound: number; failed: number; startedAt: number; details: Array<{ title: string; status: string; source?: string }> };
 let importJob: ImportJob | null = null;
@@ -402,7 +403,7 @@ export default async function adminRoutes(app: FastifyInstance) {
   app.post('/api/admin/library/scan', async () => persistScan());
 
   // Owned downloader/updater (Phase 2): pull new chapters from the source for one series or the whole library.
-  app.post('/api/admin/update/:id', async (req) => updateSeries((req.params as { id: string }).id, Number((req.body as any)?.maxNew) || 10));
+  app.post('/api/admin/update/:id', async (req) => withOrigin('check', userIdOf(req), () => updateSeries((req.params as { id: string }).id, Number((req.body as any)?.maxNew) || 10)));
   app.post('/api/admin/update', async (req) => runUpdateAll({ onlyFavorites: !!(req.body as any)?.favorites, maxNew: Number((req.body as any)?.maxNew) || 10 }));
 
   app.get('/api/admin/users', async () => ({
@@ -1145,7 +1146,8 @@ export default async function adminRoutes(app: FastifyInstance) {
     const row = await getSeriesRow(id);
     if (!row) return reply.code(404).send({ error: 'not_found' });
     seriesChecks.set(id, { running: true, startedAt: Date.now() });
-    void updateSeries(id, Number((req.body as any)?.maxNew) || 10)
+    // A followed source's chapters arrive through this check, so its downloads are the check's (#82 follow-up).
+    void withOrigin('check', userIdOf(req), () => updateSeries(id, Number((req.body as any)?.maxNew) || 10))
       .then(async (r) => {
         // A downloaded file is only a file until a scan makes it a book. The sweep scans after its loop;
         // this path never did, so a chapter "Check" had just fetched stayed invisible until the next sweep
@@ -1746,6 +1748,7 @@ export default async function adminRoutes(app: FastifyInstance) {
       req,
     });
     const { total } = startDownloadJob({
+      origin: 'refetch',
       folder: s.folder, title: s.title, seriesId: id,
       chapters: todo.map((t) => t.chapter).sort((a, b) => a.number - b.number),
       meta: { series: s.title, summary: s.summary, author: s.author, genres: s.genres, url: s.web, status: s.status },
