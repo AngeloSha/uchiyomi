@@ -1686,8 +1686,12 @@ export default async function sourceRoutes(app: FastifyInstance) {
       const allowed = new Set(reachable(req).map((x) => x.id));
       st = startFillScan({ s, seriesId, have, following, term, key, me, allowed });
     }
-    // Whatever has arrived after a moment -- everything, for a scan whose sources all answer quickly.
-    await Promise.race([st.settled, new Promise((r) => setTimeout(r, SCAN_FIRST_ANSWER_MS))]);
+    // Whatever has arrived after a moment -- everything, for a scan whose sources all answer quickly. The timer is
+    // cleared when the scan wins: left running, it held the process open for the rest of SCAN_FIRST_ANSWER_MS,
+    // which in four test files pinned to 60 s kept each one alive a minute after its last test.
+    let timer: NodeJS.Timeout | undefined;
+    await Promise.race([st.settled, new Promise((r) => { timer = setTimeout(r, SCAN_FIRST_ANSWER_MS); })]);
+    clearTimeout(timer);
     return fillScanView(st);
   });
 

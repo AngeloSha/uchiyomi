@@ -115,8 +115,9 @@ test('every CI job has a timeout, and installs from the lockfile', () => {
   // integration test sat for GitHub's 360-minute default with the whole queue behind it. Reintroduce by
   // removing timeout-minutes from the test job: this names it.
   for (const j of Object.keys(ci.jobs)) assert.ok(ci.jobs[j]['timeout-minutes'], `ci.yml job "${j}" has no timeout`);
-  // And not a timeout the job cannot meet: Tests takes 38-39 minutes on every green run.
-  assert.ok(ci.jobs.test['timeout-minutes'] >= 45, 'the test job timeout is below what a green run needs');
+  // And not a timeout the job cannot meet: Tests took 54-58 minutes on every green run 2026-09-25..26, and
+  // v0.48.4's first run was cancelled at a 60-minute limit with all 1988 tests passed.
+  assert.ok(ci.jobs.test['timeout-minutes'] >= 80, 'the test job timeout is below what a green run needs');
   // `npm install` may resolve differently from package-lock.json and rewrites it on the runner, so a
   // Dependabot lockfile bump was never what CI tested; `npm ci` refuses a lockfile that disagrees.
   // Reintroduce by changing one `npm ci` back to `npm install`: this names the step.
