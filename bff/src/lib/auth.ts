@@ -193,13 +193,27 @@ export const REFRESH_GRACE_MS = 60_000;
  */
 const CHAIN_MAX = 32;
 
+/**
+ * How long after a lost rotation its old token can still recover the session (`planRefresh`, step 5).
+ *
+ * The recovery is what makes a refresh answer that never arrived harmless, and it is also the one place a
+ * token that was rotated away is worth anything after the grace window: a copy of an old cookie (a backup of a
+ * browser profile, a synced jar) could take the session over until the real device next refreshes, and the
+ * device only ends that when it returns. Unbounded, that is as long as the app stays closed. A lost answer is
+ * redeemed by the device's next refresh -- within minutes while the app is open, at its next launch otherwise
+ * -- so a day covers the case the recovery exists for, and past it the device signs in again, as it did
+ * before any of this. Reintroduce by dropping the `recoverable` test: "a lost answer older than a day is not
+ * recovered" in refreshLost.int.test.ts gets a 200.
+ */
+export const REFRESH_RECOVER_MS = 24 * 3600_000;
+
 interface PresentedToken {
   id: string; user_id: string; device_id: string | null; device_name: string | null; expires_at: Date;
   replaced_by: string | null; revoked: boolean; used: boolean; in_grace: boolean;
 }
 interface ChainLink {
   id: string; replaced_by: string | null; device_id: string | null; device_name: string | null; expires_at: Date;
-  live: boolean; used: boolean; fresh: boolean;
+  live: boolean; used: boolean; fresh: boolean; recoverable: boolean;
 }
 
 /** What the refresh endpoint does with a presented token. Read-only; `exchangeRefreshToken` acts on it. */
@@ -229,14 +243,16 @@ export type RefreshPlan =
  *      the tab was closed, the network dropped the response. The server rotated; the browser kept the old
  *      token. This used to sign the device out one grace window later. Once the newest token is older than the
  *      grace window (so a winner's Set-Cookie can no longer be on its way), it is recovered: the head is
- *      superseded by a new token and THAT is set. Until then, step 2's answer.
+ *      superseded by a new token and THAT is set. Until then, step 2's answer. Not after REFRESH_RECOVER_MS:
+ *      a lost answer is redeemed within minutes or at the next launch, and an old token that turns up days
+ *      later is more likely a copy than the device.
  *
  * Step 5 never hands out a fresh lifetime: a recovered token expires when the head it replaces would have,
  * so a recovery re-delivers what was lost and extends nothing. Only a token that was used (rotated by its
  * holder) qualifies, so a token superseded by a recovery never recovers anything itself -- which is what
  * keeps two holders of one session from trading it back and forth forever (step 3 ends that instead).
  */
-export async function planRefresh(token: string, graceMs: number = REFRESH_GRACE_MS): Promise<RefreshPlan> {
+export async function planRefresh(token: string, graceMs: number = REFRESH_GRACE_MS, recoverMs: number = REFRESH_RECOVER_MS): Promise<RefreshPlan> {
   const row = await one<PresentedToken>(
     `SELECT id, user_id, device_id, device_name, expires_at, replaced_by,
             revoked_at IS NOT NULL AS revoked, used_at IS NOT NULL AS used,
@@ -262,10 +278,11 @@ export async function planRefresh(token: string, graceMs: number = REFRESH_GRACE
      SELECT r.id, r.replaced_by, r.device_id, r.device_name, r.expires_at,
             (r.revoked_at IS NULL AND r.expires_at > now()) AS live,
             r.used_at IS NOT NULL AS used,
-            r.created_at > now() - make_interval(secs => $3) AS fresh
+            r.created_at > now() - make_interval(secs => $3) AS fresh,
+            r.created_at > now() - make_interval(secs => $4) AS recoverable
        FROM chain c JOIN refresh_tokens r ON r.id = c.id
       ORDER BY c.depth`,
-    [row.replaced_by, CHAIN_MAX, graceMs / 1000],
+    [row.replaced_by, CHAIN_MAX, graceMs / 1000, recoverMs / 1000],
   );
   const head = chain[chain.length - 1];
   // 1. Ended, or not reached: a head that still points on is a chain longer than CHAIN_MAX (or a broken one).
@@ -276,8 +293,9 @@ export async function planRefresh(token: string, graceMs: number = REFRESH_GRACE
   if (!row.used) return { kind: 'refuse', endSession: head.id };
   // 4.
   if (chain.some((t) => t.used)) return { kind: 'refuse' };
-  // 5.
-  return head.fresh ? { kind: 'grace', token: row } : { kind: 'recover', token: row, head };
+  // 5. Within a day of the lost rotation (REFRESH_RECOVER_MS); after that, sign in again.
+  if (head.fresh) return { kind: 'grace', token: row };
+  return head.recoverable ? { kind: 'recover', token: row, head } : { kind: 'refuse' };
 }
 
 /**

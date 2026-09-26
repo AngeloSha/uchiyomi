@@ -114,6 +114,21 @@ test('a refresh whose answer never arrived', { skip }, async (t) => {
       assert.equal(await live(), 1, 'still ONE session for the device, not one per recovery');
     });
 
+    await t.test('a lost answer older than a day is not recovered', async () => {
+      // The bound on the recovery (REFRESH_RECOVER_MS): a token that was rotated away is worth something after
+      // the grace window only for a day. Past that the device signs in again, as it did before the recovery.
+      const t0 = await fresh();
+      await lostRotation(t0);
+      await q(
+        `UPDATE refresh_tokens SET created_at = created_at - interval '25 hours',
+                revoked_at = revoked_at - interval '25 hours', last_seen = last_seen - interval '25 hours'
+          WHERE user_id = $1`, [userId]);
+      const res = await refresh(app, t0);
+      assert.equal(res.statusCode, 401, 'an old token turning up a day after its rotation must not take the session');
+      assert.equal(rtCookie(res), '', 'and the jar is cleared, as any refused refresh clears it');
+      assert.equal(await live(), 1, 'the session itself is left alone: the device holding the head still refreshes');
+    });
+
     await t.test('a recovered token keeps the lifetime of the one it replaces', async () => {
       const t0 = await fresh();
       await lostRotation(t0);
