@@ -27,14 +27,44 @@ export function alertTone(s: HealthSummary | null | undefined): HealthTone | nul
 }
 
 /**
- * Whether the banner shows. Once per finding set: dismissed (or followed) for `key`, it stays away until
- * `key` changes -- a new kind of problem, or one getting worse -- and never on the admin console itself,
- * where the Health tab is one click away and saying it twice is noise.
+ * What a dismissal remembers (v0.48.3): which checks were finding something, and how badly -- not a hash of the
+ * set. A hash changes when a check goes QUIET too (fixed, or its last finding ignored), and brought back a banner
+ * the admin had already dismissed, over nothing new: the complaint Ignore exists to answer.
+ */
+export function seenValue(s: HealthSummary): string {
+  return JSON.stringify({ v: 2, checks: s.checks.filter((c) => c.status !== 'ok').map((c) => `${c.id}:${c.status}`) });
+}
+function seenChecks(seen: string | null): Map<string, string> | null {
+  if (!seen || !seen.startsWith('{')) return null;
+  try {
+    const v = JSON.parse(seen);
+    return Array.isArray(v?.checks) ? new Map(v.checks.map((x: string) => { const i = x.lastIndexOf(':'); return [x.slice(0, i), x.slice(i + 1)]; })) : null;
+  } catch { return null; }
+}
+
+/**
+ * Whether the banner shows. Once per finding set: dismissed (or followed), it stays away until a check that was
+ * NOT finding anything then is finding something now, or one gets worse (warn to problem) -- and never on the
+ * admin console itself, where the Health tab is one click away and saying it twice is noise. A check that goes
+ * quiet brings nothing back. A dismissal stored by an older version (the bare key) is compared as it always was.
  */
 export function bannerWanted(s: HealthSummary | null | undefined, seen: string | null, path: string): boolean {
   if (!alertTone(s) || !s!.key) return false;
   if (path.startsWith('/admin')) return false;
-  return s!.key !== seen;
+  const was = seenChecks(seen);
+  if (!was) return s!.key !== seen;
+  return s!.checks.some((c) => c.status !== 'ok' && (!was.has(c.id) || (c.status === 'problem' && was.get(c.id) !== 'problem')));
+}
+
+/**
+ * The dismissal to keep when the banner is NOT wanted: today's set, which is inside what was dismissed. Stored back
+ * so a check that has gone quiet leaves it -- and is news again if it ever returns -- rather than staying
+ * dismissed on this device for good. Null when nothing needs writing.
+ */
+export function prunedSeen(s: HealthSummary | null | undefined, seen: string | null): string | null {
+  if (!s || !seenChecks(seen)) return null;
+  const next = seenValue(s);
+  return next === seen ? null : next;
 }
 
 const SEEN = 'uchiyomi.healthSeen';

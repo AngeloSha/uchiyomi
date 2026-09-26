@@ -3,7 +3,7 @@
 // The owner: "there is no button to ignore this warning so it never repeats again". An ignored finding stays
 // on its card, greyed, and out of the check's verdict; it stays quiet while everything it is about was already
 // part of what was ignored (a gap that shrinks), comes back when something new is part of it (another missing
-// chapter), and its ignore is forgotten once the finding has been gone for a day.
+// chapter), and its ignore is forgotten once the finding has been gone for a week.
 //
 // Skipped automatically unless TEST_DATABASE_URL is set.
 import test, { before, after } from 'node:test';
@@ -105,7 +105,7 @@ test('Stop ignoring puts it back; a finding that is gone is answered 404; short 
   assert.equal(short.statusCode, 400, 'short chapters take a generic ignore beside their own "It\'s fine"');
 });
 
-test('an ignore whose finding has been gone for a day is forgotten, and one still there is kept alive', { skip }, async () => {
+test('an ignore whose finding has been gone for a week is forgotten, and one still there is kept alive', { skip }, async () => {
   await post({ check: 'chapter-gaps', key: KEY, ignored: true });
   // Still there: its seen_at is refreshed however old it was.
   await q(`UPDATE health_ignored SET seen_at = now() - interval '3 days' WHERE item_key = $1`, [KEY]);
@@ -113,10 +113,29 @@ test('an ignore whose finding has been gone for a day is forgotten, and one stil
   const kept = await q(`SELECT seen_at FROM health_ignored WHERE item_key = $1`, [KEY]);
   assert.equal(kept.length, 1, 'an ignore of a finding that is still there was dropped');
   assert.ok(Date.now() - new Date(kept[0].seen_at).getTime() < 60_000, 'seen_at was not refreshed');
-  // Gone: fill the gap, and let a day pass since it was last seen.
+  // Gone: fill the gap. Two days since it was last seen is not enough (a source slow every few days must not keep
+  // coming back); eight is.
   for (const n of [4, 6, 8, 9]) await book(n);
   await q(`UPDATE health_ignored SET seen_at = now() - interval '2 days' WHERE item_key = $1`, [KEY]);
   await runHealthChecks();
+  assert.equal((await q(`SELECT 1 FROM health_ignored WHERE item_key = $1`, [KEY])).length, 1, 'an ignore was forgotten after two days');
+  await q(`UPDATE health_ignored SET seen_at = now() - interval '8 days' WHERE item_key = $1`, [KEY]);
+  await runHealthChecks();
   // Reintroduce by never pruning: a gap that comes back months later is hidden by today's ignore.
   assert.equal((await q(`SELECT 1 FROM health_ignored WHERE item_key = $1`, [KEY])).length, 0, 'the ignore outlived its finding');
+});
+
+test('a gap of thousands is recorded as its runs, not one entry per missing chapter', { skip }, async () => {
+  // A chapter numbered 9001 by mistake opens a gap of nine thousand. Reintroduce by recording one member per
+  // missing number: the ignore row carries ~9000 of them, recomputed on every Health run.
+  await q(`DELETE FROM health_ignored WHERE item_key = $1`, [KEY]);
+  await book(9001);
+  const r = await post({ check: 'chapter-gaps', key: KEY, ignored: true });
+  assert.equal(r.statusCode, 200, r.body);
+  const row = (await q(`SELECT members FROM health_ignored WHERE item_key = $1`, [KEY]))[0];
+  assert.ok(row.members.length < 10, `recorded ${row.members.length} members for one gap`);
+  assert.ok(row.members.includes('11-9000'), JSON.stringify(row.members));
+  assert.equal((await gapItem()).item.info, true, 'the big gap is not ignored');
+  await q(`DELETE FROM lib_books WHERE id = 'b_hign_9001'`);
+  await q(`DELETE FROM health_ignored WHERE item_key = $1`, [KEY]);
 });

@@ -377,7 +377,13 @@ chapter" from it would be the wrong book.
 - **Find missing chapters** on the series page. Every source it scans and finds to line up with the
   chapters you already hold — at least 90% of your chapter numbers listed there, and the numbering
   agreeing — is offered with **Also follow this source**; one that is already followed says so. You are
-  looking at each candidate, so the title's spelling on the other source is yours to judge.
+  looking at each candidate, so the title's spelling on the other source is yours to judge. Since v0.48.3 a
+  source that has chapters you lack — holes, or chapters after your last one — also shows them as a picker
+  (runs of chapters as chips, all selected, *⋯* to pick one by one) with one button that downloads the
+  selection **now**: *Download* for the series' own source or one it already follows (the best copy of each
+  chapter across them), *Follow and download* for one it does not follow yet. Following on its own downloads
+  nothing until the next check; it lists the source's chapters on the series page straight away, as rows you
+  can fetch.
 - **The add dialog**, at the moment an admin adds a series (section 6). When it already holds the list of
   sources that carry the title, the options step offers **Also check the other sources that carry this
   title**; with the switch on, the sources it found are checked once the series' own listing is written,
@@ -987,7 +993,20 @@ numbers that can't be real, and any source that is failing or blocked. Each chec
 it cannot see. Hit **Re-check** to run them again.
 
 Since v0.41.0 every finding also carries the button that fixes it, and most of them fix themselves overnight
-without you pressing anything.
+without you pressing anything. Since v0.48.3:
+
+- **Fix all issues**, at the top, runs the repair once with every step that has something to do — longer copies
+  for short chapters, gaps, every source's failed chapters tried again now, and the solver — after a
+  confirmation that says how much one run takes on and what it never does (delete, merge, unblock, switch off).
+  The page checks itself again when the run ends.
+- **Open** goes to the chapter the finding is about: a short chapter opens in the reader; a gap or an impossible
+  number opens the series with its list turned to that chapter and the row lit up (for a gap, the chapter just
+  before it).
+- **Ignore** stops a finding from warning you — it stays on its card, greyed, with *Stop ignoring*, and out of
+  the check's verdict and the header's warning. It stays quiet while nothing new is part of it (a gap that
+  shrinks stays ignored; a newly missing chapter brings it back), and an ignore whose finding has been gone for a
+  week is forgotten. Short chapters use *It's fine* instead, which the nightly repair also respects. A header
+  warning you dismissed stays dismissed when a check goes quiet; only a new problem, or a worse one, brings it back.
 
 **You don't have to go and look** (since v0.48.0). While the last report found something, an admin's top bar
 shows a warning mark beside the Updates bell — amber, or red for a problem — whose tooltip is the worst

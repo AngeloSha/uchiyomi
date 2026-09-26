@@ -6,7 +6,7 @@
 //
 // An ignored finding is not deleted and not hidden: it stays on its card, greyed, with "Stop ignoring". It stays
 // quiet while everything it is about NOW was already part of what was ignored -- a gap that shrinks stays quiet,
-// a newly missing chapter makes it a new finding -- and an ignore whose finding has been gone for a day is
+// a newly missing chapter makes it a new finding -- and an ignore whose finding has been gone for a week is
 // dropped, so a problem that went away and came back is news again. Ignoring means "don't tell me"; it never
 // stops the repair from fixing the thing.
 //
@@ -30,8 +30,34 @@ interface IgnoreRow { members: Set<string>; at: string; by: string | null }
 export interface IgnoreCtx {
   ign: Map<string, IgnoreRow>;
   found: Map<string, Finding>;
+  /**
+   * The checks that produced their whole list this run. Only their ignores are kept alive or forgotten: a check
+   * that could not read its data reports nothing, and that must not read as "every finding went away".
+   */
+  ran: Set<string>;
 }
-export const noIgnores = (): IgnoreCtx => ({ ign: new Map(), found: new Map() });
+export const noIgnores = (): IgnoreCtx => ({ ign: new Map(), found: new Map(), ran: new Set() });
+
+/**
+ * A gap is recorded as its runs, "13-40", not one entry per missing chapter: a single chapter numbered 9001 by
+ * mistake makes a gap of nine thousand, on every run. What is ignored is covered while every missing run now lies
+ * inside a run that was ignored -- a gap that shrinks, or splits because a chapter landed in the middle.
+ */
+const RANGE = /^(-?\d+(?:\.\d+)?)-(-?\d+(?:\.\d+)?)$/;
+function parseRange(m: string): [number, number] | null {
+  const r = RANGE.exec(m);
+  return r ? [Number(r[1]), Number(r[2])] : null;
+}
+function covered(members: string[], row: Set<string>, ranges: boolean): boolean {
+  if (!ranges) return members.every((m) => row.has(m));
+  const held = [...row].map(parseRange).filter((x): x is [number, number] => !!x);
+  return members.every((m) => {
+    const r = parseRange(m);
+    return !!r && held.some(([lo, hi]) => r[0] >= lo && r[1] <= hi);
+  });
+}
+/** The checks whose members are runs of chapter numbers rather than names. */
+const RANGED: ReadonlySet<string> = new Set(['chapter-gaps']);
 
 const k = (check: string, key: string) => `${check}\u0000${key}`;
 
@@ -44,6 +70,7 @@ export async function loadIgnores(): Promise<IgnoreCtx> {
   return {
     ign: new Map(rows.map((r) => [k(r.check_id, r.item_key), { members: new Set(r.members ?? []), at: new Date(r.at).toISOString(), by: r.by }])),
     found: new Map(),
+    ran: new Set(),
   };
 }
 
@@ -56,7 +83,12 @@ export async function loadIgnores(): Promise<IgnoreCtx> {
  * a gap the repair has already looked into turns amber again a week later, and that is exactly the one to silence.
  * Returns how many are ignored, for the summary.
  */
-export function applyIgnores(check: IgnorableCheck, items: Array<HealthItem & { members?: string[] }>, ctx: IgnoreCtx): number {
+export function applyIgnores(
+  check: IgnorableCheck, items: Array<HealthItem & { members?: string[] }>, ctx: IgnoreCtx,
+  /** False when the check could not read everything it looks at: its ignores are then neither refreshed nor forgotten. */
+  complete = true,
+): number {
+  if (complete) ctx.ran.add(check);
   let ignored = 0;
   for (const it of items) {
     if (!it.key) continue;
@@ -64,7 +96,7 @@ export function applyIgnores(check: IgnorableCheck, items: Array<HealthItem & { 
     ctx.found.set(k(check, it.key), { title: it.title, members });
     delete it.members;
     const row = ctx.ign.get(k(check, it.key));
-    if (row && members.every((m) => row.members.has(m))) {
+    if (row && covered(members, row.members, RANGED.has(check))) {
       ignored++;
       it.info = true;
       it.ignored = { at: row.at, by: row.by };
@@ -80,8 +112,12 @@ export function applyIgnores(check: IgnorableCheck, items: Array<HealthItem & { 
 /** The summary's tail for ignored findings: "; 2 ignored". */
 export const ignoredTail = (n: number): string => (n ? `; ${n} ignored` : '');
 
-/** How long an ignore outlives its finding. Short enough that a recurrence is news, long enough for a bad hour. */
-const FORGET_AFTER = '1 day';
+/**
+ * How long an ignore outlives its finding. A week, not a day: a source that is slow every few days is exactly what
+ * someone ignores, and it must not come back each time it has one good day. A problem gone for a week and back
+ * is news again.
+ */
+const FORGET_AFTER = '7 days';
 
 /**
  * After a run: the ignores whose findings are still there are marked seen; one not seen for a day is dropped.
@@ -97,7 +133,10 @@ export async function keepIgnoresAlive(ctx: IgnoreCtx): Promise<void> {
       [still.map((x) => x[0]), still.map((x) => x[1])],
     ).catch(() => {});
   }
-  await q(`DELETE FROM health_ignored WHERE seen_at < now() - interval '${FORGET_AFTER}'`).catch(() => {});
+  // Only for checks that ran whole this time (IgnoreCtx.ran).
+  if (ctx.ran.size) {
+    await q(`DELETE FROM health_ignored WHERE check_id = ANY($1) AND seen_at < now() - interval '${FORGET_AFTER}'`, [[...ctx.ran]]).catch(() => {});
+  }
 }
 
 /** Record an ignore: the finding's members as they are right now, which the route has just recomputed. */

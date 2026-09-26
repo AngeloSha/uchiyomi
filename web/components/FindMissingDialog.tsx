@@ -12,7 +12,7 @@
  */
 import { useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { api } from '@/lib/api';
+import { api, ApiError } from '@/lib/api';
 import { Modal, msgOf } from '@/components/ConfirmDialog';
 import { Img, ProgressBar } from '@/components/ui';
 import { sourceCover } from '@/components/cards';
@@ -46,13 +46,21 @@ interface Scan {
 }
 interface Job extends JobCardNotes { folder: string; title: string; total: number; done: number; status: string; reason?: string }
 
+/** The error code in an API refusal (`{error: 'plan_stale'}`), or null. */
+function codeOf(e: unknown): string | null {
+  try { return e instanceof ApiError ? (JSON.parse(e.body)?.error ?? null) : null; } catch { return null; }
+}
+
 /** Why a source was not offered, in words rather than a code. */
 function whyText(c: Candidate): string {
   switch (c.why) {
     case 'numbering_mismatch':
       return tr('Numbers its chapters differently') +
         ` (${Math.round(c.coverage * 100)}%` + tr(' of yours match') + ')';
-    case 'nothing_to_fill': return tr('Has nothing you are missing');
+    // A member sees a matching source with newer chapters here (only an admin can follow it): not "nothing".
+    case 'nothing_to_fill': return c.newer.length
+      ? tr('Has {n} chapters newer than yours; an admin can follow it', { n: c.newer.length })
+      : tr('Has nothing you are missing');
     case 'no_chapters': return tr('Listed no chapters');
     case 'blocked': return tr('Temporarily unavailable');
     case 'unreachable': return tr('Could not be reached (timed out or refused)');
@@ -186,11 +194,19 @@ export function FindMissingDialog({ seriesId, onClose }: { seriesId: string; onC
       if (announce) toast(tr('Now following {s}. It is checked for new chapters every few hours; download what it has now below.', { s: c.name }), 'success');
       return true;
     } catch (e) {
-      toast(msgOf(e, tr('Could not follow that source.')), 'error');
+      if (codeOf(e) === 'plan_stale') stale();
+      else toast(msgOf(e, tr('Could not follow that source.')), 'error');
       return false;
     } finally {
       if (announce) setBusy(false);
     }
+  };
+
+  // A scan is good for five minutes (bff lib/fill.ts). One read at leisure is older than that: ask the sources again
+  // rather than leave the person with an error and no way back to a fresh list.
+  const stale = () => {
+    void scan.refetch();
+    toast(tr('That list was too old, so the sources were asked again. Press it again.'), 'info');
   };
 
   /**
@@ -204,6 +220,7 @@ export function FindMissingDialog({ seriesId, onClose }: { seriesId: string; onC
     if (!scan.data || !numbers.length) return;
     const max = scan.data.fillMax ?? 300;
     setBusy(true);
+    let followedNow = false;
     try {
       if (mode === 'fill') {
         const res = await api<{ folder: string }>('/api/sources/fill', {
@@ -215,19 +232,29 @@ export function FindMissingDialog({ seriesId, onClose }: { seriesId: string; onC
       } else {
         if (mode === 'follow') {
           if (!(await follow(c, false))) return;
+          followedNow = true;
         }
         const res = await api<{ folder: string; total: number; skipped?: Array<{ number: number; reason: string }> }>('/api/sources/fetch', { method: 'POST', json: { seriesId, numbers: numbers.slice(0, max), floored: true } });
         setStarted(res.folder);
-        const later = (res.skipped ?? []).filter((x) => x.reason === 'not_listed').length;
+        const skipped = res.skipped ?? [];
+        const later = skipped.filter((x) => x.reason === 'not_listed').length;
+        const other = skipped.filter((x) => x.reason !== 'not_listed' && x.reason !== 'already_here').length;
         toast(later
           ? tr('Downloading {n} chapters. {m} are not listed yet and come with the next check.', { n: res.total, m: later })
-          : tr('Fetching {n} chapters…').replace('{n}', String(res.total)), 'info');
+          : other
+            ? tr('Downloading {n} chapters. {m} could not be fetched now.', { n: res.total, m: other })
+            : tr('Fetching {n} chapters…').replace('{n}', String(res.total)), 'info');
       }
       qc.invalidateQueries({ queryKey: ['source-jobs'] });
       qc.invalidateQueries({ queryKey: ['series-listing', seriesId] });
       qc.invalidateQueries({ queryKey: ['series-books', seriesId] });
     } catch (e) {
-      toast(msgOf(e, tr('Could not start.')), 'error');
+      const code = codeOf(e);
+      if (code === 'plan_stale') stale();
+      // Followed, but a slow source (a Cloudflare challenge can take a minute) has not listed its chapters yet:
+      // the follow stands, and the card now offers a plain Download for when it has.
+      else if (followedNow && code === 'nothing_to_fetch') toast(tr('Now following {s}. It is still listing its chapters: press Download again in a minute.', { s: c.name }), 'info');
+      else toast(msgOf(e, tr('Could not start.')), 'error');
     } finally {
       setBusy(false);
     }

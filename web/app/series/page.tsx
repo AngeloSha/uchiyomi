@@ -844,7 +844,10 @@ function SeriesInner() {
   // "there are 12 more of these" is the news this page exists to carry; off is for a phone that only ever
   // reads what is already here.
   const [showGhosts, setShowGhosts] = useState(true);
-  useEffect(() => { setShowGhosts(readShowGhosts()); }, []);
+  // Whether this device's choice has been read yet: a `?ch=` jump waits for it, or the switch arriving one render
+  // later resets the chapter page under a jump that already happened (a series still cached from a minute ago).
+  const [ghostsRead, setGhostsRead] = useState(false);
+  useEffect(() => { setShowGhosts(readShowGhosts()); setGhostsRead(true); }, []);
   const [showAll, setShowAll] = useState(false);
   // Select mode, the library's pattern. Two sets because a chapter is picked by id and a ghost has none --
   // it is picked by number, which is what the fetch route takes. Cleared whenever the list under it
@@ -1063,7 +1066,7 @@ function SeriesInner() {
   const [litCh, setLitCh] = useState<number | null>(null);
   const jumpedTo = useRef<string | null>(null);
   useEffect(() => {
-    if (wantCh === null || !books || !listingSettled) return;
+    if (wantCh === null || !ghostsRead || !books || !listingSettled) return;
     const key = `${id}:${wantCh}`;
     if (jumpedTo.current === key) return;
     jumpedTo.current = key;
@@ -1083,7 +1086,7 @@ function SeriesInner() {
     // selector: `ch-12.5` is not a valid one.
     requestAnimationFrame(() => requestAnimationFrame(() =>
       document.getElementById(`ch-${n}`)?.scrollIntoView({ block: 'center', behavior: still ? 'auto' : 'smooth' })));
-  }, [wantCh, id, books, listingSettled, rows]);
+  }, [wantCh, ghostsRead, id, books, listingSettled, rows]);
   useEffect(() => {
     if (litCh === null) return;
     const t = setTimeout(() => setLitCh(null), 2600);

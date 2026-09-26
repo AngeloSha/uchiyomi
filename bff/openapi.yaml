@@ -6,7 +6,7 @@
 openapi: 3.1.0
 info:
   title: Uchiyomi API
-  version: 0.48.2
+  version: 0.48.3
   description: "Everything the web app does, it does over this API. Session JWTs are for the browser; scripts
     use a personal API token (Profile -> Connections -> API tokens), sent as `Authorization: Bearer uy_...`.
     Scopes: read (every token; GET plus the library search POST, which is a query), write (anything that changes data), admin (the /api/admin surface, which also
@@ -7120,7 +7120,7 @@ paths:
         duplicates, outliers, downloads-missing, and `key` is the finding's `key` as GET /api/admin/health reports
         it. The server looks the finding up again and records everything it is about (every missing number of a
         gap, not only the hundred the report carries); it then reports it greyed with `ignored` and an `unignore`
-        action, and stays quiet while what it is about is part of that. A finding gone for a day forgets its
+        action, and stays quiet while what it is about is part of that. A finding gone for a week forgets its
         ignore. 404 {error: 'gone'} when the finding is no longer there. Short chapters use confirm-short instead.
       security:
         - bearer: []

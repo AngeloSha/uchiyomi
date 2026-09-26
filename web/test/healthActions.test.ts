@@ -101,9 +101,10 @@ test('a chip is disabled while a request is in flight, and the row always asks H
   // A chip that leaves a fixed item on screen reads as a chip that did nothing (#34's shape). `onDone` is
   // in a `finally`, so a failed request refetches too -- the failure may itself be the item having been
   // dealt with elsewhere. Reintroduce by moving `onDone()` into the try: a repair that 500s leaves the
-  // page showing the finding as though nothing was attempted.
+  // page showing the finding as though nothing was attempted. And the chip stays busy until Health has
+  // ANSWERED (v0.48.3): woken before the re-check landed, Ignore still read Ignore over an unchanged row.
   const src = code(read(CHIPS));
-  assert.match(src, /try \{ await run\(\); \} finally \{ setBusy\(null\); onDone\(\); \}/, 'the chips do not refetch Health after every attempt');
+  assert.match(src, /try \{ await run\(\); \} finally \{ await onDone\(\); setBusy\(null\); \}/, 'the chips do not wait for Health to answer again');
   assert.match(src, /const act = \(a: HealthAction, run: \(\) => Promise<void>\) => \{\n    if \(busy\) return;/, 'a second tap can start a second request');
   assert.match(src, /const b = !!busy;/, 'only the tapped chip goes quiet, so its siblings are enabled buttons that do nothing');
   assert.match(src, /disabled=\{busy\}/, 'the chip element is not disabled while its row is working');
@@ -234,11 +235,19 @@ test('Fix all issues runs ONE repair with every step that has findings, and chec
   // The cards' own steps, in the repair's order: nothing that merges, deletes or unblocks is reachable.
   assert.match(src, /const PAGE_STEPS: RepairStep\[\] = \['solver', 'failures', 'short', 'gaps'\];/);
   assert.match(block, /FIX_ALL\[x\.id\] === step/, 'the page button runs steps the cards do not');
-  assert.match(block, /c\.items\.filter\(\(it\) => !it\.info\)/, 'info rows count as something to fix');
+  assert.match(block, /c\.items\.filter\(\(it\) => !it\.info && /, 'info rows count as something to fix');
   // `now` only with the failures step: the server refuses it anywhere else.
   assert.match(block, /plan\.some\(\(p\) => p\.step === 'failures'\) \? \{ now: true \} : \{\}/);
-  // Re-checked when the repair's lastRun moves from what it was at the press -- never at the press.
-  assert.match(block, /\(repair\.lastRun \?\? null\) === waitingFrom\) return;/);
+  // A step joins the plan only when a finding offers its chip (the solver offers its reset only while it answers).
+  assert.match(block, /\(it\.actions \?\? \[\]\)\.includes\(STEP_ACTION\[step\]\)/);
+  // Re-checked when a run ENDS -- ours (its lastRun moved), or any run seen running, whoever started it -- never
+  // at the press; and the tasks list is polled while any repair runs, or a run begun elsewhere reads "Fixing…"
+  // for good (the review's first finding).
+  assert.match(block, /const ended = wasRunning\.current && !running;/);
+  assert.match(block, /\(repair\.lastRun \?\? null\) !== waitingFrom/);
+  assert.match(block, /refetchInterval: \(q\) => \(waiting \|\| q\.state\.data\?\.content\?\.find\(\(t\) => t\.id === 'repair'\)\?\.running \? 4000 : false\)/);
+  // A run that threw leaves no result: that is not "The repair finished".
+  assert.match(block, /if \(!repair!\.lastResult \|\| repair!\.lastResult\.stopped\)/);
   const start = block.slice(block.indexOf('const start'), block.indexOf('const line'));
   assert.doesNotMatch(start, /onDone\(\)|done\.current\(\)/, 'Health is checked again at the press, before anything changed');
   // The confirmation says how much one run takes on, and what it never does.
@@ -264,7 +273,7 @@ test('the chips are mounted beside the Health disclosure, never inside it, and t
   assert.ok(mount > close, 'the check-level chips are inside the disclosure button, or before it');
   assert.match(health, /<HealthActions check=\{c\.id\} item=\{it\} onDone=\{recheck\} \/>/, 'the per-item chips are not mounted, or do not refetch Health');
   // ...and the header's mark with it (v0.48.3): an ignored or fixed finding must not leave the header amber.
-  assert.match(health, /const recheck = \(\) => \{ void refetch\(\)\.then\(\(\) => qc\.invalidateQueries\(\{ queryKey: \['health-summary'\] \}\)\); \};/, 'the header mark is not refreshed after a change on the page');
+  assert.match(health, /const recheck = \(\) => refetch\(\)\.then\(\(\) => qc\.invalidateQueries\(\{ queryKey: \['health-summary'\] \}\)\);/, 'the header mark is not refreshed after a change on the page, or the chips cannot wait for it');
   assert.doesNotMatch(health, /setMerge\(/, 'the old inline merge dialog is still in the page as a second place to merge');
   // The three fragments partialSurfaces.test.ts pins, verbatim, because this file rewrote the rows around them.
   assert.match(health, /const expandable = !!c\.items\.length \|\| !!c\.note;/, 'a note without findings cannot make its Health card expandable');

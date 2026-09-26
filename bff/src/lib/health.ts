@@ -273,10 +273,11 @@ async function chapterGaps(held: HeldSeries[], ctx: IgnoreCtx = noIgnores()): Pr
         + (checked && what ? `; ${what}, checked ${checked.toISOString().slice(0, 10)}` : ''),
       numbers: r.numbers,
       actions: ['fill'] as HealthAction[],
-      // Ignored while every missing number is one that was missing when it was ignored: a gap that shrinks
-      // stays quiet, a newly missing chapter is a new finding. All of them, not the hundred shown.
+      // Ignored while every missing run lies inside a run that was missing when it was ignored: a gap that
+      // shrinks (or splits) stays quiet, a newly missing chapter is a new finding. As runs, not one entry per
+      // number: a single chapter numbered 9001 by mistake is a gap of nine thousand (lib/healthIgnore.ts).
       key: `series:${r.s.id}`,
-      members: r.gaps.flatMap((g) => Array.from({ length: Math.max(0, g.hi - g.lo + 1) }, (_, i) => String(g.lo + i))),
+      members: r.gaps.map((g) => `${g.lo}-${g.hi}`),
       ...(checked && what ? { fixed: { at: checked.toISOString(), what } } : {}),
       ...(info ? { info: true } : {}),
     };
@@ -369,6 +370,7 @@ async function shortChapters(): Promise<HealthCheck> {
  * series to a single chapter and no surface, not even the log, said so.
  */
 async function chapterFailures(ctx: IgnoreCtx = noIgnores()): Promise<HealthCheck> {
+  let readFailed = false;
   const rows = await q<{
     source_id: string; chapters: number; series: number; since: string; attempts: number; capped: number;
     latest_title: string; latest_number: number; latest_status: string; latest_reason: string | null; failing: string[];
@@ -387,7 +389,7 @@ async function chapterFailures(ctx: IgnoreCtx = noIgnores()): Promise<HealthChec
             (array_agg(f.reason  ORDER BY f.at DESC))[1] AS latest_reason
        FROM chapter_failures f JOIN lib_series ls ON ls.id = f.series_id AND ${visibleToAll('ls')}
       GROUP BY f.source_id ORDER BY chapters DESC`,
-  ).catch(() => [] as any[]);
+  ).catch(() => { readFailed = true; return [] as any[]; });
   const all: Array<HealthItem & { members?: string[] }> = rows.map((r) => ({
     title: r.source_id,
     sourceId: r.source_id,
@@ -406,7 +408,7 @@ async function chapterFailures(ctx: IgnoreCtx = noIgnores()): Promise<HealthChec
       // page 12: 404)` -- and that tail is the part that says WHICH theory is right. At 80 it was cut.
       `${r.latest_reason ? `: ${String(r.latest_reason).slice(0, 160)}` : ''})`,
   }));
-  const ignored = applyIgnores('chapter-failures', all, ctx);
+  const ignored = applyIgnores('chapter-failures', all, ctx, !readFailed);
   const live = rows.filter((_, i) => !all[i].info);
   const items = [...all].sort((a, b) => Number(!!a.info) - Number(!!b.info)).slice(0, 20);
   const total = live.reduce((n, r) => n + r.chapters, 0);
@@ -439,6 +441,7 @@ async function chapterFailures(ctx: IgnoreCtx = noIgnores()): Promise<HealthChec
  * extension was uninstalled twelve days earlier, and no surface anywhere said so.
  */
 async function frozenSeries(ctx: IgnoreCtx = noIgnores()): Promise<HealthCheck> {
+  let readFailed = false;
   const rows = await q<{ id: string; title: string; source_id: string | null; books_count: number; switched_off: boolean; still_enabled: boolean }>(
     // A source that is still installed but switched off (by hand, or by hiding its language) is a different
     // finding from one that is gone: the fix is a button, not a reinstall.
@@ -450,7 +453,7 @@ async function frozenSeries(ctx: IgnoreCtx = noIgnores()): Promise<HealthCheck> 
         AND (ls.source_id IS NULL OR ls.source_series_id IS NULL OR ls.source_id NOT IN (SELECT source_id FROM suwayomi_sources WHERE enabled)
              OR ls.source_id LIKE 'sw:%')
       ORDER BY ls.books_count DESC`,
-  ).catch(() => [] as any[]);
+  ).catch(() => { readFailed = true; return [] as any[]; });
   // The SQL over-selects on purpose (it cannot know which adapters are loaded); the loaded registry decides.
   const unrouted = rows.filter((r) => !r.source_id || !getSource(r.source_id));
   // A series whose primary is gone but which follows another source that IS loaded still updates: the
@@ -484,7 +487,7 @@ async function frozenSeries(ctx: IgnoreCtx = noIgnores()): Promise<HealthCheck> 
       ? `${r.books_count} chapters; its source ${r.source_id} is ${why(r)}`
       : `${r.books_count} chapters; no source recorded`,
   }));
-  const ignored = applyIgnores('frozen-series', found, ctx);
+  const ignored = applyIgnores('frozen-series', found, ctx, !readFailed);
   const stuck = found.filter((i) => !i.info).length;
   const items = [...found].sort((a, b) => Number(!!a.info) - Number(!!b.info)).slice(0, 20);
   for (const r of covered.slice(0, 20)) {
@@ -717,6 +720,7 @@ async function outlierChapters(held: HeldSeries[], ctx: IgnoreCtx = noIgnores())
     .sort((a, b) => b.hi - a.hi);
 
   const items: Array<HealthItem & { members?: string[] }> = [];
+  let readFailed = false;
   for (const r of rows) {
     // The rows behind the numbers, so the Delete chip can name them. Same override rule as haveNumbers
     // (the same COALESCE, spelled out only because HAVE_SQL answers with numbers and a delete needs ids),
@@ -734,7 +738,7 @@ async function outlierChapters(held: HeldSeries[], ctx: IgnoreCtx = noIgnores())
         WHERE b.series_id = $1 AND b.pruned_at IS NULL AND COALESCE(o.number, b.number) > $2
         ORDER BY 2 DESC`,
       [r.s.id, r.limit],
-    ).catch(() => []);
+    ).catch(() => { readFailed = true; return [] as Array<{ id: string; number: number }>; });
     if (!books.length) continue;
     items.push({
       seriesId: r.s.id,
@@ -749,7 +753,7 @@ async function outlierChapters(held: HeldSeries[], ctx: IgnoreCtx = noIgnores())
       members: books.map((b) => b.id).sort(),
     });
   }
-  const ignored = applyIgnores('outliers', items, ctx);
+  const ignored = applyIgnores('outliers', items, ctx, !readFailed);
   const live = items.filter((i) => !i.info).length;
   items.sort((a, b) => Number(!!a.info) - Number(!!b.info));
   return {

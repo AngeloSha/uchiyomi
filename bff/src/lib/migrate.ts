@@ -1128,9 +1128,9 @@ ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS health_summary jsonb;
 
 -- v0.48.3: Health findings an admin chose to ignore (lib/healthIgnore.ts). One row per finding: the check and
 -- a key the check builds (series:ID, source:ID, folder:PATH, pair:ID+ID). members is everything the finding was
--- about when it was ignored -- the missing chapter numbers of a gap, the files of a folder -- and the finding
+-- about when it was ignored -- the runs of missing chapters of a gap, the files of a folder -- and the finding
 -- stays quiet only while what it is about now is part of that. seen_at is the last time the finding was still
--- there: a row not seen for a day is dropped, so a finding that went away and came back is a new one.
+-- there: a row not seen for a week is dropped, so a finding that went away and came back is a new one.
 CREATE TABLE IF NOT EXISTS health_ignored (
   check_id text NOT NULL,
   item_key text NOT NULL,

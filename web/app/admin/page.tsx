@@ -1887,7 +1887,7 @@ function Health() {
   // After anything on this page changes a finding -- a fix, an ignore -- the page is checked again, and the
   // header's mark with it: the refetch stores a new summary, and the header reads that summary.
   const qc = useQueryClient();
-  const recheck = () => { void refetch().then(() => qc.invalidateQueries({ queryKey: ['health-summary'] })); };
+  const recheck = () => refetch().then(() => qc.invalidateQueries({ queryKey: ['health-summary'] }));
 
   // One card per check, and a failing one earns the full width of the board -- the same severity rule the
   // overview uses, so the shape of the panel is the verdict.
@@ -1960,8 +1960,12 @@ function Health() {
                       </div>
                       <HealthActions check={c.id} item={it} onDone={recheck} />
                       {/* To the chapter the finding is about, not just its series (lib/healthLinks.ts). */}
+                      {/* A duplicate pair gets one per copy, each naming its copy: two bare "Open"s cannot be told
+                          apart on a phone, where there is no tooltip. */}
                       {healthLinks(c.id, it).map((l) => (
-                        <Link key={l.href} href={l.href} className="chip shrink-0 text-xs" title={l.label} aria-label={l.label ? `${tr('Open')}: ${l.label}` : undefined}>{tr('Open')}</Link>
+                        <Link key={l.href} href={l.href} className="chip max-w-[11rem] shrink-0 truncate text-xs" title={l.label} aria-label={l.label ? `${tr('Open')}: ${l.label}` : undefined}>
+                          {l.label ? `${tr('Open')} · ${l.label}` : tr('Open')}
+                        </Link>
                       ))}
                     </div>
                   ))}

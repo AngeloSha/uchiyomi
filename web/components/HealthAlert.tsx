@@ -6,7 +6,7 @@ import { useQuery } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { t as tr } from '@/lib/i18n';
-import { alertTone, bannerWanted, readSeen, writeSeen, type HealthSummary } from '@/lib/healthAlert';
+import { alertTone, bannerWanted, prunedSeen, readSeen, seenValue, writeSeen, type HealthSummary } from '@/lib/healthAlert';
 import { IcAlert } from './icons';
 
 // lib/healthAlert.ts says what this is for and why it never runs the checks itself (#101).
@@ -51,9 +51,16 @@ export function HealthBanner() {
   // Read after mount: storage is not there during the static export's render.
   const [seen, setSeen] = useState<string | null | undefined>(undefined);
   useEffect(() => { setSeen(readSeen()); }, []);
-  if (seen === undefined || !data || !bannerWanted(data, seen, path)) return null;
+  const wanted = seen !== undefined && !!data && bannerWanted(data, seen, path);
+  // While it stays away, the dismissal follows the checks down (never up): one that went quiet leaves it.
+  useEffect(() => {
+    if (seen === undefined || wanted) return;
+    const next = prunedSeen(data, seen);
+    if (next) { writeSeen(next); setSeen(next); }
+  }, [data, seen, wanted]);
+  if (!wanted || !data) return null;
   const tone = alertTone(data)!;
-  const dismiss = () => { writeSeen(data.key); setSeen(data.key); };
+  const dismiss = () => { const v = seenValue(data); writeSeen(v); setSeen(v); };
   return (
     <div role="status" data-health-banner
       // safe-top: on a phone the banner is the first thing on the page, under an installed app's status bar.

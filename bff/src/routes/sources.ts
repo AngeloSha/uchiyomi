@@ -1890,7 +1890,12 @@ export default async function sourceRoutes(app: FastifyInstance) {
       )).map((r) => Number(r.number));
       const covered = new Set(expanded.map((n) => Math.floor(n)));
       plain = [...new Set([...expanded, ...wholes.filter((w) => !covered.has(w))])].filter((n) => !pickOf.has(n)).sort((x, y) => x - y);
-      if (plain.length + pickOf.size > FILL_MAX_CHAPTERS) plain = plain.slice(0, FILL_MAX_CHAPTERS - pickOf.size);
+      // Past the cap (a whole number can cover several listed chapters), the highest are left for another press,
+      // and said so: a number dropped silently is a chapter somebody picked and never got.
+      if (plain.length + pickOf.size > FILL_MAX_CHAPTERS) {
+        for (const n of plain.slice(FILL_MAX_CHAPTERS - pickOf.size)) skipped.push({ number: n, reason: 'over_cap' });
+        plain = plain.slice(0, FILL_MAX_CHAPTERS - pickOf.size);
+      }
       numbers = [...new Set([...plain, ...pickOf.keys()])].sort((x, y) => x - y);
     }
     const listed = new Map((await q<{ number: number; title: string | null; source_id: string; status: string; chosen: SourceChapter; copies: ListingCopy[] }>(

@@ -47,7 +47,10 @@ test('the dialog downloads the selection now, by whole number, and follows first
   assert.match(src, /\('\/api\/sources\/fetch', \{ method: 'POST', json: \{ seriesId, numbers: numbers\.slice\(0, max\), floored: true \} \}\)/,
     'the download does not go through the fetch route by whole numbers');
   // Reintroduce by fetching without the follow: a source not yet followed is not in the listing, and nothing lands.
-  assert.match(src, /if \(mode === 'follow'\) \{\s*if \(!\(await follow\(c, false\)\)\) return;\s*\}\s*const res = await api/, 'Follow and download does not follow first');
+  assert.match(src, /if \(mode === 'follow'\) \{\s*if \(!\(await follow\(c, false\)\)\) return;\s*followedNow = true;\s*\}\s*const res = await api/, 'Follow and download does not follow first');
+  // A slow source that has not listed yet is not an error once it is followed, and a stale scan is asked again.
+  assert.match(src, /else if \(followedNow && code === 'nothing_to_fetch'\) toast\(tr\('Now following \{s\}\. It is still listing its chapters/);
+  assert.match(src, /if \(code === 'plan_stale'\) stale\(\);/);
   // The false line the owner read: "Up to date with what you have" over a source holding newer chapters.
   assert.doesNotMatch(src, /Up to date with what you have/);
 });

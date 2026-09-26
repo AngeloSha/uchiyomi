@@ -1,5 +1,41 @@
 # Changelog
 
+## v0.48.3 — 2026-09-26
+
+**The Health page does what it says, and Find missing chapters downloads what it finds.**
+
+### Health
+
+- **Open takes you to the chapter.** It went to the home screen for every finding (fixed in v0.48.2), and even
+  pointed right it only named the series. A short chapter now opens in the reader; a gap or an impossible chapter
+  number opens the series with the chapter list turned to that page and the row lit up for a moment — for a gap,
+  the chapter just before it, where it begins. A duplicate gets an Open for each copy.
+- **Fix all issues**, once, for the whole page. It runs the repair with every step that has something to do —
+  looking for longer copies of short chapters, filling gaps, and trying every source's failed chapters again
+  now — after a confirmation that says how much one run takes on and that it never deletes, merges, unblocks or
+  switches anything off. The page checks itself again when the run ends, not when you press the button.
+- **Ignore** a finding and it stops warning you: the row stays on its card, greyed, with *Stop ignoring*, and
+  leaves the check (and the warning in the header) alone. It stays quiet while nothing new is part of it — a gap
+  that gets smaller stays ignored, a newly missing chapter brings it back — and an ignore whose finding has been
+  gone for a week is forgotten, so a problem that comes back later is news again. Short chapters keep their own
+  *It's fine*, which does the same.
+- **A header warning you dismissed stays dismissed** when a check goes quiet — fixed, or its last finding
+  ignored. It came back whenever the set of checks with findings changed at all; now only a new problem, or one
+  getting worse, brings it back.
+
+### Find missing chapters
+
+It only offered to follow a source for the chapters after your last one, and following downloads nothing until
+the next scheduled check — then five at a time. Now every source that has chapters you lack, gaps and newer ones
+alike, shows them as a picker: runs of chapters as chips, all selected, *⋯* to choose one by one. One press
+downloads the selection now — from the series' own source or one it follows, taking the best copy of each chapter
+across them, or, for a source it does not follow yet, *Follow and download* (admins). Following on its own lists
+the source's chapters on the series page at once, and says that new ones come with the checks.
+
+### Upgrading
+
+Nothing to do. One new table (`health_ignored`) is created on start.
+
 ## v0.48.2 — 2026-09-26
 
 **Downloads that never reached the library, found for real this time (#109), and automatic checks on Unraid.**

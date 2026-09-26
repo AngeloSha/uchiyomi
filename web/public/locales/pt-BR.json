@@ -2,7 +2,7 @@
   "_meta": {
     "language": "pt-BR",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 1267
+    "strings": 1271
   },
   "1 check found something": "1 verificação encontrou algo",
   "1 member": "1 membro",
@@ -1252,9 +1252,6 @@
   "Fixing — this page updates when it is done": "Corrigindo — esta página se atualiza quando terminar",
   "The repair finished": "O reparo terminou",
   "The repair stopped before it finished": "O reparo parou antes de terminar",
-  "Short chapters ({n}): look for a longer copy of each, and replace one only when a longer copy is found": "Capítulos curtos ({n}): procurar uma cópia mais longa de cada um e só substituir quando uma for encontrada",
-  "Chapter gaps ({n} series): search the sources, follow one that has the missing chapters, and download them": "Lacunas de capítulos ({n} séries): procurar nas fontes, seguir uma que tenha os capítulos que faltam e baixá-los",
-  "Chapters that would not download ({n} sources): try them all again now": "Capítulos que não baixavam ({n} fontes): tentar todos de novo agora",
   "Cloudflare solver: start its sessions afresh": "Solucionador do Cloudflare: recomeçar as sessões",
   "One run takes up to {short} short chapters and {gaps} series with gaps. The nightly repair carries on with the rest, or press Fix all issues again.": "Cada execução cuida de até {short} capítulos curtos e {gaps} séries com lacunas. O reparo noturno continua com o resto, ou toque em \"Corrigir todos os problemas\" de novo.",
   "Nothing is deleted or merged, and no source is unblocked or switched off: those stay on their own rows.": "Nada é apagado nem mesclado, e nenhuma fonte é desbloqueada ou desativada: isso fica em cada linha.",
@@ -1270,5 +1267,12 @@
   "Up to {max} at a time: the rest can be fetched once this finishes.": "Até {max} de cada vez: o resto pode ser baixado quando isto terminar.",
   "Now following {s}. It is checked for new chapters every few hours; download what it has now below.": "Agora você segue {s}. Ela é verificada a cada poucas horas; baixe abaixo o que ela já tem.",
   "Downloading {n} chapters. {m} are not listed yet and come with the next check.": "Baixando {n} capítulos. {m} ainda não aparecem na lista e virão na próxima verificação.",
-  "Has everything you have and nothing newer yet. Following one means new chapters are taken from whichever source has them first.": "Tem tudo o que você tem e nada mais novo ainda. Seguir uma significa que os capítulos novos vêm da fonte que os tiver primeiro."
+  "Has everything you have and nothing newer yet. Following one means new chapters are taken from whichever source has them first.": "Tem tudo o que você tem e nada mais novo ainda. Seguir uma significa que os capítulos novos vêm da fonte que os tiver primeiro.",
+  "Short chapters: look for a longer copy of up to {n} of them, and replace one only when a longer copy is found": "Capítulos curtos: procurar uma cópia mais longa de até {n} deles e só substituir quando uma for encontrada",
+  "Chapter gaps: search the sources for up to {n} series, follow one that has the missing chapters, and download them": "Lacunas de capítulos: procurar nas fontes para até {n} séries, seguir uma que tenha os capítulos que faltam e baixá-los",
+  "Chapters that would not download ({n} sources): all of them get another try, up to ten series straight away and the rest with the next check": "Capítulos que não baixavam ({n} fontes): todos ganham outra tentativa, até dez séries agora e o resto na próxima verificação",
+  "That list was too old, so the sources were asked again. Press it again.": "Essa lista estava velha demais, então as fontes foram consultadas de novo. Toque de novo.",
+  "Now following {s}. It is still listing its chapters: press Download again in a minute.": "Agora você segue {s}. Ela ainda está listando os capítulos: toque em Baixar de novo daqui a um minuto.",
+  "Downloading {n} chapters. {m} could not be fetched now.": "Baixando {n} capítulos. {m} não puderam ser obtidos agora.",
+  "Has {n} chapters newer than yours; an admin can follow it": "Tem {n} capítulos mais novos que os seus; um administrador pode segui-la"
 }

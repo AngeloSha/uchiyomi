@@ -2,7 +2,7 @@
   "_meta": {
     "language": "ar",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 1267
+    "strings": 1271
   },
   "1 check found something": "فحص واحد وجد شيئًا",
   "1 member": "عضو واحد",
@@ -1252,9 +1252,6 @@
   "Fixing — this page updates when it is done": "جارٍ الإصلاح — تتحدث هذه الصفحة عند الانتهاء",
   "The repair finished": "انتهى الإصلاح",
   "The repair stopped before it finished": "توقف الإصلاح قبل أن ينتهي",
-  "Short chapters ({n}): look for a longer copy of each, and replace one only when a longer copy is found": "فصول قصيرة ({n}): البحث عن نسخة أطول لكل منها، والاستبدال فقط عند العثور على نسخة أطول",
-  "Chapter gaps ({n} series): search the sources, follow one that has the missing chapters, and download them": "فجوات في الفصول ({n} سلسلة): البحث في المصادر، ومتابعة مصدر فيه الفصول الناقصة، وتنزيلها",
-  "Chapters that would not download ({n} sources): try them all again now": "فصول لم يكتمل تنزيلها ({n} مصادر): إعادة المحاولة لها كلها الآن",
   "Cloudflare solver: start its sessions afresh": "حلّال Cloudflare: بدء جلساته من جديد",
   "One run takes up to {short} short chapters and {gaps} series with gaps. The nightly repair carries on with the rest, or press Fix all issues again.": "يعالج التشغيل الواحد حتى {short} فصلًا قصيرًا و{gaps} سلاسل فيها فجوات. يكمل الإصلاح الليلي الباقي، أو اضغط «إصلاح كل المشكلات» مرة أخرى.",
   "Nothing is deleted or merged, and no source is unblocked or switched off: those stay on their own rows.": "لا يُحذف شيء ولا يُدمج، ولا يُرفع الحظر عن أي مصدر ولا يُوقف: هذه تبقى في صفوفها.",
@@ -1270,5 +1267,12 @@
   "Up to {max} at a time: the rest can be fetched once this finishes.": "حتى {max} في المرة الواحدة: يمكن جلب الباقي بعد أن ينتهي هذا.",
   "Now following {s}. It is checked for new chapters every few hours; download what it has now below.": "أنت تتابع {s} الآن. يُفحص بحثًا عن فصول جديدة كل بضع ساعات؛ نزّل ما لديه الآن من الأسفل.",
   "Downloading {n} chapters. {m} are not listed yet and come with the next check.": "جارٍ تنزيل {n} فصول. {m} غير مدرجة بعد وستأتي مع الفحص التالي.",
-  "Has everything you have and nothing newer yet. Following one means new chapters are taken from whichever source has them first.": "فيه كل ما لديك ولا شيء أحدث بعد. متابعة مصدر تعني أن الفصول الجديدة تُؤخذ من المصدر الذي تظهر فيه أولًا."
+  "Has everything you have and nothing newer yet. Following one means new chapters are taken from whichever source has them first.": "فيه كل ما لديك ولا شيء أحدث بعد. متابعة مصدر تعني أن الفصول الجديدة تُؤخذ من المصدر الذي تظهر فيه أولًا.",
+  "Short chapters: look for a longer copy of up to {n} of them, and replace one only when a longer copy is found": "فصول قصيرة: البحث عن نسخة أطول لما يصل إلى {n} منها، والاستبدال فقط عند العثور على نسخة أطول",
+  "Chapter gaps: search the sources for up to {n} series, follow one that has the missing chapters, and download them": "فجوات في الفصول: البحث في المصادر لما يصل إلى {n} سلاسل، ومتابعة مصدر فيه الفصول الناقصة، وتنزيلها",
+  "Chapters that would not download ({n} sources): all of them get another try, up to ten series straight away and the rest with the next check": "فصول لم يكتمل تنزيلها ({n} مصادر): تحصل كلها على محاولة جديدة، حتى عشر سلاسل فورًا والباقي مع الفحص التالي",
+  "That list was too old, so the sources were asked again. Press it again.": "كانت تلك القائمة قديمة جدًا، لذا سُئلت المصادر من جديد. اضغط مرة أخرى.",
+  "Now following {s}. It is still listing its chapters: press Download again in a minute.": "أنت تتابع {s} الآن. ما زال يسرد فصوله: اضغط تنزيل مرة أخرى بعد دقيقة.",
+  "Downloading {n} chapters. {m} could not be fetched now.": "جارٍ تنزيل {n} فصول. تعذّر جلب {m} الآن.",
+  "Has {n} chapters newer than yours; an admin can follow it": "فيه {n} فصول أحدث مما لديك؛ يستطيع المشرف متابعته"
 }

@@ -386,8 +386,8 @@ Useful as a nightly cron that emails you only when `status` isn't `ok`.
 
 `POST /api/admin/health/ignore` (since v0.48.3) takes `{check, key, ignored}` and ignores one finding, or stops
 ignoring it: the finding is then reported greyed (`ignored`, `info`), stays quiet while what it is about (a gap's
-missing numbers, a folder's files) is part of what was ignored, and its ignore is forgotten once it has been gone
-for a day. Short chapters use confirm-short, which already records the same judgement.
+missing runs, a folder's files) is part of what was ignored, and its ignore is forgotten once it has been gone
+for a week. Short chapters use confirm-short, which already records the same judgement.
 
 `GET /api/admin/health/summary` (since v0.48.0) is the cheap question the app's header asks: the last report
 boiled down to `{at, worst, count, headline, key, checks}`, answered from what the Health tab or the server's
@@ -707,7 +707,8 @@ v0.48.3) `numbers` are whole chapters: 12 takes every listed chapter from 12 up 
 numbers the fill scan reports, which is what the Find missing chapters dialog sends. The answer is
 `{ok, started, folder, total, skipped: [{number, reason}]}` with `reason` one of `not_listed` (run
 **Check for new chapters** first), `blocked_group`, `already_here` (a live chapter, not a tombstone),
-`source_unavailable` (adapter not loaded or disabled, or a source the series no longer follows), `cooldown`;
+`source_unavailable` (adapter not loaded or disabled, or a source the series no longer follows), `cooldown`,
+`over_cap` (with `floored`, a chapter past the 300 the expansion reached — press again for the rest);
 **409** `nothing_to_fetch` (with `skipped`) when nothing is fetchable, **409** `busy` while a download for
 that series is running — since v0.37.0 that includes the series a bulk *Fetch newest* run is currently
 inside, for that one series and only while the run is on it (the same test guards `/api/sources/fill` and

@@ -97,7 +97,7 @@ const keptIndex = (it: HealthItem): number => {
  * title on a laptop and wrap under it at 390 px, and the Test chip's diagnosis takes a full line of its
  * own (`basis-full`) because a fix is a sentence, not a label.
  */
-export function HealthActions({ check, item, onDone }: { check: string; item: HealthItem; onDone: () => void }) {
+export function HealthActions({ check, item, onDone }: { check: string; item: HealthItem; onDone: () => void | Promise<unknown> }) {
   const toast = useToast();
   const [busy, setBusy] = useState<HealthAction | null>(null);
   const [asking, setAsking] = useState<'delete' | 'disable' | 'merge' | null>(null);
@@ -120,11 +120,14 @@ export function HealthActions({ check, item, onDone }: { check: string; item: He
   // Every chip ends the same way: the row's request, one toast, then Health is asked again -- a chip that
   // leaves a fixed item on screen reads as a chip that did nothing. The refetch runs even after a failure,
   // because the failure may itself be the item having already been dealt with elsewhere.
+  // ⚠️ The row stays busy until Health has ANSWERED again, not merely been asked (v0.48.3): the re-check takes
+  // seconds, and a chip that woke up at once over an unchanged row -- Ignore still saying Ignore -- read as a
+  // chip that did nothing, and invited a second press.
   const act = (a: HealthAction, run: () => Promise<void>) => {
     if (busy) return;
     setBusy(a);
     void (async () => {
-      try { await run(); } finally { setBusy(null); onDone(); }
+      try { await run(); } finally { await onDone(); setBusy(null); }
     })();
   };
 
@@ -442,6 +445,12 @@ interface RepairTask { id: string; running?: boolean; lastRun?: number | null; l
 
 /** The steps "Fix all issues" can run, in the order the repair runs them (REPAIR_STEPS in bff/src/lib/repair.ts). */
 const PAGE_STEPS: RepairStep[] = ['solver', 'failures', 'short', 'gaps'];
+/**
+ * The chip each step's findings carry. A step joins the plan only when some finding offers it: the solver check
+ * offers its reset only while the solver answers (the step refuses otherwise), and the Health payload is capped,
+ * so counting a card's rows would count what it happened to show.
+ */
+const STEP_ACTION: Record<string, HealthAction> = { short: 'fix_short', gaps: 'fill', failures: 'retry', solver: 'solver_reset' };
 
 /**
  * "Fix all issues" for the whole Health page (v0.48.3).
@@ -450,47 +459,57 @@ const PAGE_STEPS: RepairStep[] = ['solver', 'failures', 'short', 'gaps'];
  * second while the first was running only got "the repair is already running". This is ONE run of the repair
  * with every step that has something to do -- the same steps the cards' Fix all chips run, so nothing here is a
  * new remedy -- behind a confirmation that says what it will do, how much one run takes on, and what it never
- * touches. For the failures it asks for `now`: every source's failed chapters tried again straight away, as each
- * source's Retry now would (without it the step only reconsiders rows a week old).
+ * touches. For the failures it asks for `now`: every source's failed chapters tried again, as each source's
+ * Retry now would (without it the step only reconsiders rows a week old).
  *
- * ⚠️ Health is checked again when the run ENDS, not when it starts. Refetching at once -- what the cards' chips
- * do -- shows the same findings a second later, which reads as a button that did nothing. The tasks list says
- * when: this watches the repair's `lastRun` change from what it was at the press.
+ * ⚠️ Health is checked again when a run ENDS -- this one, or one that was already going when the page opened,
+ * or one that finished while the page was elsewhere -- not when it starts. The tasks list is polled while the
+ * repair runs, whoever started it, and the moment it stops the page asks Health again.
  */
-export function HealthFixAll({ checks, onDone }: { checks: HealthCheck[]; onDone: () => void }) {
+export function HealthFixAll({ checks, onDone }: { checks: HealthCheck[]; onDone: () => void | Promise<unknown> }) {
   const toast = useToast();
   const [asking, setAsking] = useState(false);
   const [posting, setPosting] = useState(false);
-  /** The repair's `lastRun` when our run was started; undefined while we are not waiting on one. */
+  /** The repair's `lastRun` when OUR run was started; undefined while we are not waiting on one. */
   const [waitingFrom, setWaitingFrom] = useState<number | null | undefined>(undefined);
   const waiting = waitingFrom !== undefined;
   const { data: tasks } = useQuery({
     queryKey: ['admin-tasks'],
     queryFn: () => api<{ content: RepairTask[] }>('/api/admin/tasks'),
-    refetchInterval: waiting ? 4000 : false,
+    // While OUR run is starting, and while ANY repair is running: a run begun elsewhere, or before a tab
+    // switch, must still end in a re-check instead of leaving this reading "Fixing…" for good.
+    refetchInterval: (q) => (waiting || q.state.data?.content?.find((t) => t.id === 'repair')?.running ? 4000 : false),
   });
   const repair = tasks?.content?.find((t) => t.id === 'repair');
   const running = !!repair?.running;
   const done = useRef(onDone);
   done.current = onDone;
+  const wasRunning = useRef(running);
 
   useEffect(() => {
-    if (!waiting || !repair || repair.running) return;
-    if ((repair.lastRun ?? null) === waitingFrom) return; // not finished yet (or not even started)
+    const ended = wasRunning.current && !running;
+    wasRunning.current = running;
+    const oursEnded = waiting && !!repair && !repair.running && (repair.lastRun ?? null) !== waitingFrom;
+    if (!ended && !oursEnded) return;
+    void done.current();
+    if (!oursEnded) return;
     setWaitingFrom(undefined);
-    done.current();
-    const line = taskResult(repair.lastResult);
-    if (repair.lastResult?.stopped) toast(`${tr('The repair stopped before it finished')}${line ? ` · ${line}` : ''}`, 'error');
-    else toast(line || tr('The repair finished'), 'success');
-  }, [waiting, waitingFrom, repair, toast]);
+    // A run that threw leaves no result at all: that is not "finished".
+    const line = taskResult(repair!.lastResult).replace(/^\s*·\s*/, '');
+    if (!repair!.lastResult || repair!.lastResult.stopped) {
+      toast(`${tr('The repair stopped before it finished')}${line ? ` · ${line}` : ''}`, 'error');
+    } else {
+      toast(line || tr('The repair finished'), 'success');
+    }
+  }, [waiting, waitingFrom, repair, running, toast]);
 
-  // What there is to do: a step whose card has at least one real finding. `info` rows are statements.
+  // What there is to do: a step some finding offers. `info` rows are statements, not findings.
   const plan = PAGE_STEPS.flatMap((step) => {
     const c = checks.find((x) => FIX_ALL[x.id] === step);
-    const n = c ? c.items.filter((it) => !it.info).length : 0;
+    const n = c ? c.items.filter((it) => !it.info && (it.actions ?? []).includes(STEP_ACTION[step])).length : 0;
     return n ? [{ step, n }] : [];
   });
-  if (!plan.length && !waiting) return null;
+  if (!plan.length && !waiting && !running) return null;
   const caps = repair?.caps ?? { short: 20, gaps: 5 };
 
   const start = async () => {
@@ -505,10 +524,12 @@ export function HealthFixAll({ checks, onDone }: { checks: HealthCheck[]; onDone
     if (ok) setWaitingFrom(from);
   };
 
+  // What one run really does, per step -- not "every row on the card": the payload is capped, and the gap step
+  // chooses its own series (followed ones, not searched in the last day).
   const line: Record<string, (n: number) => string> = {
-    short: (n) => tr('Short chapters ({n}): look for a longer copy of each, and replace one only when a longer copy is found', { n }),
-    gaps: (n) => tr('Chapter gaps ({n} series): search the sources, follow one that has the missing chapters, and download them', { n }),
-    failures: (n) => tr('Chapters that would not download ({n} sources): try them all again now', { n }),
+    short: () => tr('Short chapters: look for a longer copy of up to {n} of them, and replace one only when a longer copy is found', { n: caps.short }),
+    gaps: () => tr('Chapter gaps: search the sources for up to {n} series, follow one that has the missing chapters, and download them', { n: caps.gaps }),
+    failures: (n) => tr('Chapters that would not download ({n} sources): all of them get another try, up to ten series straight away and the rest with the next check', { n }),
     solver: () => tr('Cloudflare solver: start its sessions afresh'),
   };
 
