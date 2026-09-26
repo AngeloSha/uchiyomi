@@ -2,7 +2,7 @@
   "_meta": {
     "language": "de",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 1242
+    "strings": 1254
   },
   "1 check found something": "1 Prüfung hat etwas gefunden",
   "1 member": "1 Mitglied",
@@ -1245,5 +1245,17 @@
   "On the server": "Auf dem Server",
   "{n} saved with pages missing": "{n} mit fehlenden Seiten gespeichert",
   "Ch. {n} could not be saved": "Kap. {n} konnte nicht gespeichert werden",
-  "Fetching 1 chapter": "1 Kapitel wird geholt"
+  "Fetching 1 chapter": "1 Kapitel wird geholt",
+  "Fix all issues": "Alle Probleme beheben",
+  "Fix everything the repair can fix?": "Alles beheben, was die Reparatur beheben kann?",
+  "Fixing…": "Wird behoben…",
+  "Fixing — this page updates when it is done": "Wird behoben – diese Seite aktualisiert sich, wenn es fertig ist",
+  "The repair finished": "Die Reparatur ist fertig",
+  "The repair stopped before it finished": "Die Reparatur hat vor dem Ende aufgehört",
+  "Short chapters ({n}): look for a longer copy of each, and replace one only when a longer copy is found": "Kurze Kapitel ({n}): für jedes nach einer längeren Kopie suchen und es nur ersetzen, wenn eine gefunden wird",
+  "Chapter gaps ({n} series): search the sources, follow one that has the missing chapters, and download them": "Kapitellücken ({n} Serien): die Quellen durchsuchen, einer mit den fehlenden Kapiteln folgen und sie herunterladen",
+  "Chapters that would not download ({n} sources): try them all again now": "Kapitel, die sich nicht laden ließen ({n} Quellen): jetzt alle erneut versuchen",
+  "Cloudflare solver: start its sessions afresh": "Cloudflare-Löser: seine Sitzungen neu starten",
+  "One run takes up to {short} short chapters and {gaps} series with gaps. The nightly repair carries on with the rest, or press Fix all issues again.": "Ein Durchlauf übernimmt bis zu {short} kurze Kapitel und {gaps} Serien mit Lücken. Den Rest erledigt die nächtliche Reparatur – oder tippe noch einmal auf „Alle Probleme beheben“.",
+  "Nothing is deleted or merged, and no source is unblocked or switched off: those stay on their own rows.": "Nichts wird gelöscht oder zusammengeführt, und keine Quelle wird entsperrt oder abgeschaltet: Das bleibt bei den einzelnen Zeilen."
 }

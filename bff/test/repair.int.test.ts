@@ -664,6 +664,25 @@ test('a source in a cooldown has its ledger reset but nothing is re-checked behi
   assert.equal(r.failures.retried, undefined, 'asking a source that is refusing us would just be a second refusal');
 });
 
+test("Fix all issues tries every source's failures now, never hunting, and never for a source that is switched off", { skip }, async () => {
+  // The Health page's page-wide Fix all (v0.48.3) sends `now`. Reintroduce by re-checking every series whose
+  // rows were reset: the one failing on a switched-off source is asked for its listing anyway.
+  const { setDisabled } = await import('../src/lib/sourceHealth');
+  await ledger(FAIL, 1, 3, 0);       // capped today: the nightly would wait a week for this one
+  await ledger(FAIL, 2, 1, 0);       // not capped: reset all the same, as one source's Retry now does
+  await ledger(LISTED, 11, 3, 0, B); // failing on a source that is switched off
+  await setDisabled(B, true);
+  try {
+    const r = await runRepair(undefined, { only: ['failures'], now: true, userId: null });
+    assert.equal(r.failures.reset, 3, 'every row of every source, whatever its age');
+    assert.equal(r.failures.retried?.series, 1, 'a series was re-checked on behalf of a source that is switched off');
+    assert.deepEqual(searches, [], 'Fix all spent the search budget the gaps step needs');
+    assert.equal((await audits('library.repair'))[0]?.detail?.now, true, 'the audit does not say it was everything, now');
+  } finally {
+    await setDisabled(B, false);
+  }
+});
+
 // ── (e) the solver ──────────────────────────────────────────────────────────────────────────────────────
 
 test('when the solver answers and sources blame it, what this process remembers about it is cleared with their cooldowns', { skip }, async () => {

@@ -112,6 +112,10 @@ test('a body that would widen a one-row chip into a whole nightly run is refused
     [{ only: ['short'], seriesId: 'x' }, 'a series id on the short-chapter step'],
     [{ only: ['gaps'], bookId: 'x' }, 'a book id on the gap step'],
     [{ only: ['gaps', 'short'], seriesId: 'x' }, 'a series id on a two-step run'],
+    // "Fix all issues" (v0.48.3): for the whole library only, and only where the failures step runs.
+    // Reintroduce by dropping the two `now` refines: both of these start a run.
+    [{ only: ['failures'], sourceId: 'x', now: true }, '"everything now" narrowed to one source'],
+    [{ only: ['short', 'gaps'], now: true }, '"everything now" on steps it does not change'],
   ] as const) {
     const res = await run(payload);
     assert.equal(res.statusCode, 400, `${why}: ${res.body}`);

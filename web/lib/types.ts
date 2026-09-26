@@ -364,7 +364,7 @@ export type HealthAction =
   | 'test' | 'unblock' | 'disable' | 'merge' | 'solver_reset';
 
 /** One step of the nightly repair (`bff/src/lib/repair.ts`), as `POST /api/admin/tasks/repair/run` takes it. */
-export type RepairStep = 'solver' | 'count' | 'failures' | 'short' | 'gaps' | 'groups';
+export type RepairStep = 'solver' | 'count' | 'failures' | 'short' | 'gaps' | 'groups' | 'names' | 'directions';
 
 export interface HealthItem {
   seriesId?: string;

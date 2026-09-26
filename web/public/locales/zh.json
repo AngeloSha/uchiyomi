@@ -2,7 +2,7 @@
   "_meta": {
     "language": "zh",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 1242
+    "strings": 1254
   },
   "1 check found something": "1 项检查发现问题",
   "1 member": "1 位成员",
@@ -1245,5 +1245,17 @@
   "On the server": "在服务器上",
   "{n} saved with pages missing": "{n} 话保存时缺页",
   "Ch. {n} could not be saved": "第{n}话无法保存",
-  "Fetching 1 chapter": "正在获取 1 话"
+  "Fetching 1 chapter": "正在获取 1 话",
+  "Fix all issues": "修复所有问题",
+  "Fix everything the repair can fix?": "修复所有能修复的问题？",
+  "Fixing…": "正在修复…",
+  "Fixing — this page updates when it is done": "正在修复——完成后此页面会自动更新",
+  "The repair finished": "修复已完成",
+  "The repair stopped before it finished": "修复在完成前停止了",
+  "Short chapters ({n}): look for a longer copy of each, and replace one only when a longer copy is found": "过短的章节（{n}）：为每一章寻找更长的版本，只有找到时才替换",
+  "Chapter gaps ({n} series): search the sources, follow one that has the missing chapters, and download them": "章节缺口（{n} 部系列）：搜索来源，关注有缺失章节的来源并下载",
+  "Chapters that would not download ({n} sources): try them all again now": "无法下载的章节（{n} 个来源）：现在全部重试",
+  "Cloudflare solver: start its sessions afresh": "Cloudflare 解算器：重新开始其会话",
+  "One run takes up to {short} short chapters and {gaps} series with gaps. The nightly repair carries on with the rest, or press Fix all issues again.": "每次最多处理 {short} 个过短章节和 {gaps} 部有缺口的系列。其余的由每晚的修复继续处理，也可以再次点击“修复所有问题”。",
+  "Nothing is deleted or merged, and no source is unblocked or switched off: those stay on their own rows.": "不会删除或合并任何内容，也不会解除封锁或关闭任何来源：这些仍在各自的行里操作。"
 }

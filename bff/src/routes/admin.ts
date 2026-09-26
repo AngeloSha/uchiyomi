@@ -15,7 +15,7 @@ import { runBackup } from '../lib/backup';
 import { runUpdateAll, updateSeries, runSweep } from '../lib/updater';
 import { runChapterCleanup, cleanupSettings, dueCountCached, tombstoneBooks } from '../lib/chapterCleanup';
 import { runVerify, verifyState } from '../lib/verifyFiles';
-import { runRepair, repairState, REPAIR_HOURS, REPAIR_STEPS, type RepairStep } from '../lib/repair';
+import { runRepair, repairState, REPAIR_HOURS, REPAIR_STEPS, REPAIR_SHORT_MAX, REPAIR_GAPS_MAX, type RepairStep } from '../lib/repair';
 import { authenticate, requireAdmin, userIdOf, revokeAllSessions, revokeRefreshTokenById, passwordError } from '../lib/auth';
 import { logAudit, recentAudit } from '../lib/audit';
 import { healthAll, setDisabled, clearBlock, SourceHealth, pruneOrphanedHealth, isDisabled, blockedNow } from '../lib/sourceHealth';
@@ -649,6 +649,8 @@ export default async function adminRoutes(app: FastifyInstance) {
         lastRun: repairState.finishedAt || (s?.repair_last_run ? new Date(s.repair_last_run).getTime() : null),
         lastResult: repairState.finishedAt ? repairState.lastResult : (s?.repair_last_result ?? null),
         running: repairState.running,
+        // What one run takes on at most, so the Health page's "Fix all issues" can say so rather than guess.
+        caps: { short: REPAIR_SHORT_MAX, gaps: REPAIR_GAPS_MAX },
       },
       // Only when it is switched on -- same rule as the extension task below. This one additionally must
       // not be listed while it is off because a "Run now" button beside a job an admin has not consented to
@@ -691,7 +693,13 @@ export default async function adminRoutes(app: FastifyInstance) {
     seriesId: z.string().min(1).max(64).optional(),
     bookId: z.string().min(1).max(64).optional(),
     sourceId: z.string().min(1).max(100).optional(),
+    // "Fix all issues" on the Health page (lib/repair.ts RepairOpts.now). Only for the whole library -- with a
+    // target it would widen a one-row chip into every source -- and only where the failures step runs, the one
+    // step it changes; anywhere else it would be a flag that does nothing and is audited as if it had.
+    now: z.boolean().optional(),
   })
+    .refine((b) => !b.now || (!b.seriesId && !b.bookId && !b.sourceId), { message: 'now is for the whole library, not one target' })
+    .refine((b) => !b.now || !b.only || b.only.includes('failures'), { message: 'now only changes the failures step' })
     // Each of the three targets belongs to exactly one step, and a target without its step is not a smaller
     // run -- it is a FULL nightly with an argument the other four steps ignore, which is the opposite of
     // what a chip on one Health row means. Refused here rather than quietly widened.

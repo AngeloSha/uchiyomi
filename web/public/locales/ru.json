@@ -2,7 +2,7 @@
   "_meta": {
     "language": "ru",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 1242
+    "strings": 1254
   },
   "1 check found something": "1 проверка нашла проблему",
   "1 member": "1 участник",
@@ -1245,5 +1245,17 @@
   "On the server": "На сервере",
   "{n} saved with pages missing": "{n} сохранено без части страниц",
   "Ch. {n} could not be saved": "Не удалось сохранить гл. {n}",
-  "Fetching 1 chapter": "Загружается 1 глава"
+  "Fetching 1 chapter": "Загружается 1 глава",
+  "Fix all issues": "Исправить всё",
+  "Fix everything the repair can fix?": "Исправить всё, что может исправить ремонт?",
+  "Fixing…": "Исправляется…",
+  "Fixing — this page updates when it is done": "Исправляется — страница обновится, когда всё закончится",
+  "The repair finished": "Ремонт завершён",
+  "The repair stopped before it finished": "Ремонт остановился, не закончив",
+  "Short chapters ({n}): look for a longer copy of each, and replace one only when a longer copy is found": "Короткие главы ({n}): искать более длинную копию каждой и заменять главу, только если она найдена",
+  "Chapter gaps ({n} series): search the sources, follow one that has the missing chapters, and download them": "Пропуски глав ({n} серий): поискать в источниках, подписаться на тот, где есть недостающие главы, и скачать их",
+  "Chapters that would not download ({n} sources): try them all again now": "Главы, которые не скачивались ({n} источников): попробовать все ещё раз сейчас",
+  "Cloudflare solver: start its sessions afresh": "Обход Cloudflare: начать его сессии заново",
+  "One run takes up to {short} short chapters and {gaps} series with gaps. The nightly repair carries on with the rest, or press Fix all issues again.": "Один запуск берёт до {short} коротких глав и {gaps} серий с пропусками. Остальное доделает ночной ремонт — или нажмите «Исправить всё» ещё раз.",
+  "Nothing is deleted or merged, and no source is unblocked or switched off: those stay on their own rows.": "Ничего не удаляется и не объединяется, ни один источник не разблокируется и не отключается: это остаётся в их собственных строках."
 }

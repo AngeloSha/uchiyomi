@@ -15,15 +15,17 @@
 //
 // The chips live here rather than in app/admin/page.tsx because that file is already 2,200 lines and the
 // branching is real: ten actions, three confirmations and a diagnosis panel.
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { api } from '@/lib/api';
+import { taskResult } from '@/lib/tasks';
 import { ConfirmDialog, msgOf } from '@/components/ConfirmDialog';
 import { useToast } from '@/components/Toast';
 import { t as tr } from '@/lib/i18n';
 import type { HealthAction, HealthCheck, HealthItem, RepairStep } from '@/lib/types';
 
 type Toast = (msg: string, type?: 'info' | 'success' | 'error') => void;
-interface RepairBody { only: RepairStep[]; seriesId?: string; bookId?: string; sourceId?: string }
+interface RepairBody { only: RepairStep[]; seriesId?: string; bookId?: string; sourceId?: string; now?: boolean }
 
 /**
  * Ask the repair to run one step, for one thing.
@@ -33,7 +35,7 @@ interface RepairBody { only: RepairStep[]; seriesId?: string; bookId?: string; s
  * repair and the chapter sweep never overlap, by design) while `busy` is "it is already doing this". A
  * shared "Failed" for both sent an admin looking for a broken button in the first case.
  */
-async function postRepair(body: RepairBody, toast: Toast): Promise<boolean> {
+async function postRepair(body: RepairBody, toast: Toast, started = tr('Started — the Tasks line shows what it did')): Promise<boolean> {
   try {
     const r = await api<{ ok?: boolean; error?: string; started?: boolean }>('/api/admin/tasks/repair/run', { method: 'POST', json: body });
     if (r?.ok === false) {
@@ -44,7 +46,7 @@ async function postRepair(body: RepairBody, toast: Toast): Promise<boolean> {
     }
     // Detached, like Verify chapter files: the counts cannot be in this answer, and "Started" followed by
     // nothing changing is what #34 reported as "the run now buttons don't work". Say where to look.
-    toast(tr('Started — the Tasks line shows what it did'), 'success');
+    toast(started, 'success');
     return true;
   } catch (e) {
     toast(msgOf(e, tr('Could not start the repair')), 'error');
@@ -413,5 +415,115 @@ export function HealthCheckActions({ check, onDone }: { check: HealthCheck; onDo
         />
       )}
     </div>
+  );
+}
+
+/** The repair's row in GET /api/admin/tasks, as far as "Fix all issues" reads it. */
+interface RepairTask { id: string; running?: boolean; lastRun?: number | null; lastResult?: any; caps?: { short: number; gaps: number } }
+
+/** The steps "Fix all issues" can run, in the order the repair runs them (REPAIR_STEPS in bff/src/lib/repair.ts). */
+const PAGE_STEPS: RepairStep[] = ['solver', 'failures', 'short', 'gaps'];
+
+/**
+ * "Fix all issues" for the whole Health page (v0.48.3).
+ *
+ * The owner: "there is no button to fix all issues at once". There were four, one per card, and pressing a
+ * second while the first was running only got "the repair is already running". This is ONE run of the repair
+ * with every step that has something to do -- the same steps the cards' Fix all chips run, so nothing here is a
+ * new remedy -- behind a confirmation that says what it will do, how much one run takes on, and what it never
+ * touches. For the failures it asks for `now`: every source's failed chapters tried again straight away, as each
+ * source's Retry now would (without it the step only reconsiders rows a week old).
+ *
+ * ⚠️ Health is checked again when the run ENDS, not when it starts. Refetching at once -- what the cards' chips
+ * do -- shows the same findings a second later, which reads as a button that did nothing. The tasks list says
+ * when: this watches the repair's `lastRun` change from what it was at the press.
+ */
+export function HealthFixAll({ checks, onDone }: { checks: HealthCheck[]; onDone: () => void }) {
+  const toast = useToast();
+  const [asking, setAsking] = useState(false);
+  const [posting, setPosting] = useState(false);
+  /** The repair's `lastRun` when our run was started; undefined while we are not waiting on one. */
+  const [waitingFrom, setWaitingFrom] = useState<number | null | undefined>(undefined);
+  const waiting = waitingFrom !== undefined;
+  const { data: tasks } = useQuery({
+    queryKey: ['admin-tasks'],
+    queryFn: () => api<{ content: RepairTask[] }>('/api/admin/tasks'),
+    refetchInterval: waiting ? 4000 : false,
+  });
+  const repair = tasks?.content?.find((t) => t.id === 'repair');
+  const running = !!repair?.running;
+  const done = useRef(onDone);
+  done.current = onDone;
+
+  useEffect(() => {
+    if (!waiting || !repair || repair.running) return;
+    if ((repair.lastRun ?? null) === waitingFrom) return; // not finished yet (or not even started)
+    setWaitingFrom(undefined);
+    done.current();
+    const line = taskResult(repair.lastResult);
+    if (repair.lastResult?.stopped) toast(`${tr('The repair stopped before it finished')}${line ? ` · ${line}` : ''}`, 'error');
+    else toast(line || tr('The repair finished'), 'success');
+  }, [waiting, waitingFrom, repair, toast]);
+
+  // What there is to do: a step whose card has at least one real finding. `info` rows are statements.
+  const plan = PAGE_STEPS.flatMap((step) => {
+    const c = checks.find((x) => FIX_ALL[x.id] === step);
+    const n = c ? c.items.filter((it) => !it.info).length : 0;
+    return n ? [{ step, n }] : [];
+  });
+  if (!plan.length && !waiting) return null;
+  const caps = repair?.caps ?? { short: 20, gaps: 5 };
+
+  const start = async () => {
+    setPosting(true);
+    const from = repair?.lastRun ?? null;
+    const ok = await postRepair(
+      { only: plan.map((p) => p.step), ...(plan.some((p) => p.step === 'failures') ? { now: true } : {}) },
+      toast, tr('Fixing — this page updates when it is done'),
+    );
+    setPosting(false);
+    setAsking(false);
+    if (ok) setWaitingFrom(from);
+  };
+
+  const line: Record<string, (n: number) => string> = {
+    short: (n) => tr('Short chapters ({n}): look for a longer copy of each, and replace one only when a longer copy is found', { n }),
+    gaps: (n) => tr('Chapter gaps ({n} series): search the sources, follow one that has the missing chapters, and download them', { n }),
+    failures: (n) => tr('Chapters that would not download ({n} sources): try them all again now', { n }),
+    solver: () => tr('Cloudflare solver: start its sessions afresh'),
+  };
+
+  return (
+    <>
+      <button
+        type="button"
+        data-health-fix-all-page
+        disabled={posting || waiting || running}
+        onClick={() => setAsking(true)}
+        className="chip shrink-0 text-xs hover:border-accent/50 hover:text-accent disabled:opacity-50"
+      >
+        {waiting || running ? tr('Fixing…') : tr('Fix all issues')}
+      </button>
+      {asking && (
+        <ConfirmDialog
+          title={tr('Fix everything the repair can fix?')}
+          confirmLabel={tr('Fix all issues')}
+          busy={posting}
+          body={
+            <>
+              <ul className="space-y-2">
+                {plan.map((p) => (
+                  <li key={p.step} className="rounded-lg border border-ink-700 px-3 py-2 text-sm text-fog-100">{line[p.step](p.n)}</li>
+                ))}
+              </ul>
+              <p className="mt-3">{tr('One run takes up to {short} short chapters and {gaps} series with gaps. The nightly repair carries on with the rest, or press Fix all issues again.', caps)}</p>
+              <p className="mt-2 text-fog-500">{tr('Nothing is deleted or merged, and no source is unblocked or switched off: those stay on their own rows.')}</p>
+            </>
+          }
+          onConfirm={() => { void start(); }}
+          onClose={() => setAsking(false)}
+        />
+      )}
+    </>
   );
 }

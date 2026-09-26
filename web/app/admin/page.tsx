@@ -14,7 +14,7 @@ import { ConfirmDialog, Modal, msgOf } from '@/components/ConfirmDialog';
 import { Avatar } from '@/components/Avatar';
 import { IcChevronLeft, IcChevronRight, IcTrash, IcPlus, IcRefresh, IcInfo } from '@/components/icons';
 import { SourcesExplainer } from '@/components/SourcesExplainer';
-import { HealthActions, HealthCheckActions } from '@/components/HealthActions';
+import { HealthActions, HealthCheckActions, HealthFixAll } from '@/components/HealthActions';
 import { Backdrop, Img } from '@/components/ui';
 import { SeriesCard } from '@/components/cards';
 import { ConsoleNav } from '@/components/ConsoleNav';
@@ -1889,16 +1889,20 @@ function Health() {
   // overview uses, so the shape of the panel is the verdict.
   return (
     <div className="board">
-      <div className="full flex items-center justify-between gap-3">
+      {/* Wraps: at phone width the sentence and two chips do not fit on one line (v0.48.3). */}
+      <div className="full flex flex-wrap items-center justify-between gap-3">
         <p className="text-xs text-fog-500">
           {!data ? 'Checking your library…'
             : bad ? `${bad} of ${checks.length} checks found something`
             : 'Everything looks healthy'}
           {data && <> · checked {relativeTime(data.generatedAt)}</>}
         </p>
-        <button onClick={() => refetch()} disabled={isFetching} className="chip shrink-0 text-xs disabled:opacity-50">
-          {isFetching ? 'Checking…' : 'Re-check'}
-        </button>
+        <div className="flex shrink-0 items-center gap-2">
+          <HealthFixAll checks={checks} onDone={() => { void refetch(); }} />
+          <button onClick={() => refetch()} disabled={isFetching} className="chip shrink-0 text-xs disabled:opacity-50">
+            {isFetching ? 'Checking…' : 'Re-check'}
+          </button>
+        </div>
       </div>
 
       {checks.map((c) => {

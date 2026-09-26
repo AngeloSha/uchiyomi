@@ -2,7 +2,7 @@
   "_meta": {
     "language": "pt-BR",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 1242
+    "strings": 1254
   },
   "1 check found something": "1 verificação encontrou algo",
   "1 member": "1 membro",
@@ -1245,5 +1245,17 @@
   "On the server": "No servidor",
   "{n} saved with pages missing": "{n} salvos com páginas faltando",
   "Ch. {n} could not be saved": "Não foi possível salvar o cap. {n}",
-  "Fetching 1 chapter": "Buscando 1 capítulo"
+  "Fetching 1 chapter": "Buscando 1 capítulo",
+  "Fix all issues": "Corrigir todos os problemas",
+  "Fix everything the repair can fix?": "Corrigir tudo o que o reparo consegue corrigir?",
+  "Fixing…": "Corrigindo…",
+  "Fixing — this page updates when it is done": "Corrigindo — esta página se atualiza quando terminar",
+  "The repair finished": "O reparo terminou",
+  "The repair stopped before it finished": "O reparo parou antes de terminar",
+  "Short chapters ({n}): look for a longer copy of each, and replace one only when a longer copy is found": "Capítulos curtos ({n}): procurar uma cópia mais longa de cada um e só substituir quando uma for encontrada",
+  "Chapter gaps ({n} series): search the sources, follow one that has the missing chapters, and download them": "Lacunas de capítulos ({n} séries): procurar nas fontes, seguir uma que tenha os capítulos que faltam e baixá-los",
+  "Chapters that would not download ({n} sources): try them all again now": "Capítulos que não baixavam ({n} fontes): tentar todos de novo agora",
+  "Cloudflare solver: start its sessions afresh": "Solucionador do Cloudflare: recomeçar as sessões",
+  "One run takes up to {short} short chapters and {gaps} series with gaps. The nightly repair carries on with the rest, or press Fix all issues again.": "Cada execução cuida de até {short} capítulos curtos e {gaps} séries com lacunas. O reparo noturno continua com o resto, ou toque em \"Corrigir todos os problemas\" de novo.",
+  "Nothing is deleted or merged, and no source is unblocked or switched off: those stay on their own rows.": "Nada é apagado nem mesclado, e nenhuma fonte é desbloqueada ou desativada: isso fica em cada linha."
 }

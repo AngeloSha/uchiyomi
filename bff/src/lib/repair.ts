@@ -178,6 +178,15 @@ export interface RepairOpts {
   /** Failures step only: this source's ledger rows are reset whatever their age, then its series retried. */
   sourceId?: string;
   /**
+   * The Health page's "Fix all issues" (v0.48.3): a person asked for everything, now. The failures step does
+   * for EVERY source what one source's Retry now does -- every row back to zero attempts whatever its age, and
+   * up to REPAIR_RETRY_SERIES of the series re-checked straight away -- except that it never re-checks on
+   * behalf of a source that is cooling down or switched off, and never hunts: the run's search budget is the
+   * gaps step's, and spending it here would leave the gaps with nothing. The short and gaps caps stay as they
+   * are, because they protect the sources rather than pace the nightly.
+   */
+  now?: boolean;
+  /**
    * Who asked. Absent means NOBODY asked -- the nightly tick -- which is the one case that honours the
    * `repair_enabled` switch. An admin pressing Run now passes their id and the run happens whatever the
    * switch says: the switch exists to stop the server doing this by itself, and nothing here destroys
@@ -405,30 +414,53 @@ async function stepCount(r: RepairResult, log?: Log): Promise<void> {
  * retry would be a guaranteed second refusal and a second strike with it.
  */
 async function stepFailures(r: RepairResult, opts: RepairOpts, budget: { left: number }, pending: Dated[], log?: Log): Promise<RepairResult['stopped']> {
+  // "Fix all issues": every source's rows, as each source's Retry now would (see RepairOpts.now).
+  const wide = !!opts.now && !opts.sourceId;
   const reset = opts.sourceId
-    ? await q<{ series_id: string }>(
-        `UPDATE chapter_failures SET attempts = 0, at = now() WHERE source_id = $1 RETURNING series_id`, [opts.sourceId])
-    : await q<{ series_id: string }>(
+    ? await q<{ series_id: string; source_id: string }>(
+        `UPDATE chapter_failures SET attempts = 0, at = now() WHERE source_id = $1 RETURNING series_id, source_id`, [opts.sourceId])
+    : wide
+    ? await q<{ series_id: string; source_id: string }>(
+        `UPDATE chapter_failures f SET attempts = 0, at = now()
+          WHERE (f.series_id, f.number) IN (SELECT series_id, number FROM chapter_failures ORDER BY at ASC)
+          RETURNING f.series_id, f.source_id`)
+    : await q<{ series_id: string; source_id: string }>(
         `UPDATE chapter_failures f SET attempts = 0, at = now()
           WHERE (f.series_id, f.number) IN (
             SELECT series_id, number FROM chapter_failures
              WHERE attempts >= $1 AND at < now() - interval '7 days'
              ORDER BY at ASC LIMIT $2)
-          RETURNING f.series_id`, [CHAPTER_RETRY_CAP, REPAIR_FAILURES_MAX]);
+          RETURNING f.series_id, f.source_id`, [CHAPTER_RETRY_CAP, REPAIR_FAILURES_MAX]);
   r.failures.reset = reset.length;
   if (r.failures.reset) log?.info(`repair: ${r.failures.reset} capped chapter failure(s) given another chance`);
-  if (!opts.sourceId || !reset.length) return undefined;
+  if (!reset.length || (!opts.sourceId && !wide)) return undefined;
 
-  if (await blockedNow(opts.sourceId).catch(() => null)) {
+  if (opts.sourceId && await blockedNow(opts.sourceId).catch(() => null)) {
     log?.info(`repair: ${opts.sourceId} is in a cooldown; its ledger was reset but nothing was re-checked yet`);
     return undefined;
   }
-  if (await isDisabled(opts.sourceId).catch(() => false)) {
+  if (opts.sourceId && await isDisabled(opts.sourceId).catch(() => false)) {
     log?.info(`repair: ${opts.sourceId} is switched off; its ledger was reset but nothing was re-checked`);
     return undefined;
   }
 
-  const wanted = [...new Set(reset.map((x) => x.series_id))].slice(0, REPAIR_RETRY_SERIES);
+  // The same two refusals, per source, when the run is for every source: a series is re-checked only for a
+  // failing source that can be asked now. Its rows are reset regardless, so the sweep tries them once the
+  // source is back. Reintroduce by re-checking every series: "Fix all never asks a source that is switched off"
+  // in repair.int.test.ts sees it asked.
+  const askable = new Map<string, boolean>();
+  const canAsk = async (src: string): Promise<boolean> => {
+    if (!askable.has(src)) {
+      askable.set(src, !(await blockedNow(src).catch(() => null)) && !(await isDisabled(src).catch(() => false)));
+    }
+    return askable.get(src)!;
+  };
+  const wanted: string[] = [];
+  for (const row of reset) {
+    if (wanted.length >= REPAIR_RETRY_SERIES) break;
+    if (wanted.includes(row.series_id)) continue;
+    if (!wide || await canAsk(row.source_id)) wanted.push(row.series_id);
+  }
   const folders = new Map((await q<{ id: string; folder: string }>(
     `SELECT s.id, s.folder FROM lib_series s WHERE s.id = ANY($1) AND ${visibleToAll('s')}`, [wanted],
   ).catch(() => [])).map((s) => [s.id, s.folder]));
@@ -441,7 +473,8 @@ async function stepFailures(r: RepairResult, opts: RepairOpts, budget: { left: n
     series++;
     busyFolders.add(folder);
     try {
-      const up = await updateSeries(id, 10, { hunt: budget, cancelled });
+      // Never hunting for "Fix all": its search budget belongs to the gaps step, which runs after this one.
+      const up = await updateSeries(id, 10, { hunt: wide ? false : budget, cancelled });
       added += up.added;
       failed += up.failed;
       if (up.added && up.folder && up.chapters?.length) pending.push({ folder: up.folder, chapters: up.chapters, landed: up.landed });
@@ -1221,6 +1254,7 @@ export async function repairLibrary(log?: Log, opts: RepairOpts = {}): Promise<R
       ...(opts.seriesId ? { seriesId: opts.seriesId } : {}),
       ...(opts.bookId ? { bookId: opts.bookId } : {}),
       ...(opts.sourceId ? { sourceId: opts.sourceId } : {}),
+      ...(opts.now ? { now: true } : {}),
       summary: summaryOf(out),
       ...(stopped ? { stopped } : {}),
       // Capped lists, not counts: enough to answer "which chapters did it touch last night" from the audit

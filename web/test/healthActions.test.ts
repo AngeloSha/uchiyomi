@@ -211,6 +211,30 @@ test('Fix all exists only for the steps the nightly is allowed to do by itself',
   assert.match(block, /postRepair\(\{ only: \[step\] \}, toast\)/, 'Fix all does not narrow the repair to one step');
 });
 
+test('Fix all issues runs ONE repair with every step that has findings, and checks Health again when it ends', () => {
+  // v0.48.3, the owner: "there is no button to fix all issues at once". Reintroduce by calling onDone right
+  // after the press (as the cards' chips do): Health shows the same findings a second later and the button
+  // reads as broken.
+  const src = code(read(CHIPS));
+  const block = src.slice(src.indexOf('export function HealthFixAll'));
+  assert.ok(block.length > 100, 'HealthFixAll is gone -- update this test');
+  // The cards' own steps, in the repair's order: nothing that merges, deletes or unblocks is reachable.
+  assert.match(src, /const PAGE_STEPS: RepairStep\[\] = \['solver', 'failures', 'short', 'gaps'\];/);
+  assert.match(block, /FIX_ALL\[x\.id\] === step/, 'the page button runs steps the cards do not');
+  assert.match(block, /c\.items\.filter\(\(it\) => !it\.info\)/, 'info rows count as something to fix');
+  // `now` only with the failures step: the server refuses it anywhere else.
+  assert.match(block, /plan\.some\(\(p\) => p\.step === 'failures'\) \? \{ now: true \} : \{\}/);
+  // Re-checked when the repair's lastRun moves from what it was at the press -- never at the press.
+  assert.match(block, /\(repair\.lastRun \?\? null\) === waitingFrom\) return;/);
+  const start = block.slice(block.indexOf('const start'), block.indexOf('const line'));
+  assert.doesNotMatch(start, /onDone\(\)|done\.current\(\)/, 'Health is checked again at the press, before anything changed');
+  // The confirmation says how much one run takes on, and what it never does.
+  assert.match(block, /One run takes up to \{short\} short chapters and \{gaps\} series with gaps/);
+  assert.match(block, /Nothing is deleted or merged, and no source is unblocked or switched off/);
+  const page = code(read('app/admin/page.tsx'));
+  assert.match(page, /<HealthFixAll checks=\{checks\} onDone=\{\(\) => \{ void refetch\(\); \}\} \/>/, 'the button is not on the Health page');
+});
+
 test('the chips are mounted beside the Health disclosure, never inside it, and the disclosure is unchanged', () => {
   // A button inside a button is invalid HTML and browsers repair it by hoisting the inner one out of the
   // header entirely. ⚠️ And the check-level chips come AFTER the disclosure, because walk40.mjs opens a
