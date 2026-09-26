@@ -88,7 +88,8 @@ function adapter(id: string, name: string, title: string, readingDirection?: str
 function stubNetwork() {
   globalThis.fetch = (async (input: any, init?: RequestInit) => {
     const url = String(input?.url ?? input);
-    if (url.startsWith('https://graphql.anilist.co')) {
+    // By host, not by prefix: `https://graphql.anilist.co.example` must not be taken for AniList (CodeQL).
+    if (URL.canParse(url) && new URL(url).host === 'graphql.anilist.co') {
       const body = JSON.parse(String(init?.body ?? '{}'));
       const s: string = body?.variables?.s ?? '';
       const media = s.includes('Wrong Match')
