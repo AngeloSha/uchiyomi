@@ -1,5 +1,89 @@
 # Changelog
 
+## v0.48.0 — 2026-09-26
+
+**Every open issue and pull request, in one release.** Downloads that never reached the library (#109), right to
+left that finally works on "Series default" (#102), right-click menus (#100), an admin who is told when the
+library needs attention (#101), a device that no longer signs itself out after a flaky refresh (#108), and the
+undici update that was held back last time. Three of these started as [@Squeaks72](https://github.com/Squeaks72)'s
+proposals and reports; #109 was reported by ZukiFen and Maaster.
+
+### Downloaded chapters that never appeared in the library
+
+On two Unraid installs, chapters downloaded but never showed up ([#109](https://github.com/AngeloSha/uchiyomi/issues/109)):
+a *Fetch* said "Fetching 1 chapters" for a second and added nothing, a series added from Discover never
+appeared, a manual *Library Scan* changed nothing, and nothing was logged — while the same files moved into the
+library folder were picked up at once.
+
+The library scan went through every folder in one pass, and one folder it could not index stopped the whole pass
+— silently, on every run, because nothing that started a scan reported its failure. The download folder is
+scanned second, so everything this server fetched stayed out of the library. Now a folder the scan cannot index
+is stepped over, logged, and named under **Admin → Health → Library scan** with the scanner's reason, and
+everything else is indexed. A *Fetch* whose chapter is on disk but still not in the library says so on its card
+instead of ending quietly.
+
+One real way to get there is fixed outright: a control character (a NUL) in a source's description was copied
+into the chapter's ComicInfo, which Postgres refuses. Those are now stripped both when a chapter is written and
+when it is read. And a folder with a deleted twin in another library is now matched to the live series.
+
+If you were affected: update, then run **Admin → Tasks → Library scan**. Your chapters should appear; if
+**Admin → Health → Library scan** still names a folder, its reason is what to fix — and we would like to hear it.
+
+### "Series default" can read right to left
+
+Every series used to say it read like a webtoon, so the reader's *Series default* direction could never turn a
+page right to left ([#102](https://github.com/AngeloSha/uchiyomi/issues/102), reported by @Squeaks72). A series
+now has a reading direction, taken from its chapter files (ComicInfo's `Manga` field), then its source
+(MangaDex's original language), then AniList's country of origin — a weaker signal never overrides a stronger
+one — and an admin can set it under **Edit details → Reading direction**. Series already in the library are
+asked about by a new nightly repair step. The Komga-compatible API reports it too.
+
+The other half of #102 was ours: since v0.46.0, changing a series' theme or layout in the reader also pinned its
+direction, so the profile's *Reading direction* never reached that series again. Only a direction you choose for
+a series is pinned now, and the accidental pins are ignored. Found on the way: turning pages on a right-to-left
+track while the next chapter was loading jumped fourteen pages into it; it moves one.
+
+### Right-click menus
+
+Right-click a series anywhere it appears — the library grid, Home, Up next — or press and hold it on a
+touchscreen, or press Shift+F10, for a short menu: **Open in a new tab**, **Copy link**, **Favourite**, **Mark all
+read** / **unread**, and for an admin **Check for new chapters** ([#100](https://github.com/AngeloSha/uchiyomi/issues/100),
+@Squeaks72's proposal). A chapter row's right-click opens the same menu as its ⋯ button, which now works from
+the keyboard and no longer clips at the edge of the screen. The browser's own menu is left alone on selected
+text, in text fields and with Shift held, and **Profile → Settings → Appearance → Right-click menus** turns
+them off on a device.
+
+### The admin is told when the library needs attention
+
+**Admin → Health** only spoke to someone who went to look. Now, while its last report found something, an
+admin's top bar shows a warning mark beside the Updates bell whose tooltip is the worst finding, and a one-line
+banner says it once, with **Take a look** and **Not now**
+([#101](https://github.com/AngeloSha/uchiyomi/issues/101), @Squeaks72's proposal). *Not now* holds until a
+different check finds something. The server runs the checks every six hours for this; the top bar only reads the
+stored result, so it costs nothing on every page load. Other accounts see none of it.
+
+### Staying signed in on a flaky connection
+
+When the answer to a session refresh was lost — a page reloaded mid-refresh, a mobile connection dropped the
+response — the server had moved on and the browser had not, and the device was signed out a minute later
+([#108](https://github.com/AngeloSha/uchiyomi/pull/108)). Reproduced on a 200 ms connection with two reloads in
+a row; invisible on a LAN. The server now recognises a lost answer and hands the device its session back —
+within a day of the loss; after that it signs in again, as before. Signing out, signing out everywhere and a
+password change still end a session at once, and two devices holding one session now end it rather than share
+it.
+
+### Also
+
+- **undici 8.11.2.** The 8.11.0 update was held back from v0.47.1 because it left every built-in source empty;
+  8.11.2 fixes that upstream, and the test that caught it stays.
+- The flaky browser check behind a red CI run and several local failures this week was a signed-out tab, not the
+  feature it was checking ([#107](https://github.com/AngeloSha/uchiyomi/pull/107)).
+
+### Upgrading
+
+The database gains columns and nothing is rewritten; the upgrade runs by itself on start. An older version still
+starts on an upgraded database.
+
 ## v0.47.1 — 2026-09-25
 
 **A double-click in the reader zooms, and only zooms — and every panel that scrolls can be scrolled with a
