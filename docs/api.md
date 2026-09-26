@@ -373,6 +373,11 @@ an item flagged `info` is listed for reference (a source you turned off, a sourc
 already confirmed short, a gap the nightly repair has already searched for) and never decides the verdict.
 Useful as a nightly cron that emails you only when `status` isn't `ok`.
 
+`GET /api/admin/health/summary` (since v0.48.0) is the cheap question the app's header asks: the last report
+boiled down to `{at, worst, count, headline, key, checks}`, answered from what the Health tab or the server's
+own six-hourly run stored, never by running the checks. `key` changes only when *which* checks found something
+changes, so an alert dismissed for one problem comes back for a new one.
+
 Since v0.41.0 an item also carries what can be **done** about it, so the same finding is actionable from a
 script: `actions` is an ordered list of `fix_short`, `confirm_short`, `delete`, `fill`, `retry`, `test`,
 `unblock`, `disable`, `merge`, `solver_reset`; `bookId`, `bookIds`, `seriesId`, `seriesIds`, `sourceId` and
@@ -829,6 +834,7 @@ DELETE /api/downloads/:bookId     GET    /api/books/:id/download-manifest
 ### Admin
 ```
 GET    /api/admin/stats           GET    /api/admin/health
+GET    /api/admin/health/summary
 GET    /api/admin/settings        PATCH  /api/admin/settings
 GET    /api/admin/notify-targets  POST   /api/admin/notify-targets
 PATCH  /api/admin/notify-targets/:id DELETE /api/admin/notify-targets/:id

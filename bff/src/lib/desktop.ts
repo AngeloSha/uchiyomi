@@ -61,6 +61,7 @@ export const DESKTOP_FLOORS = Object.freeze({
   importSweep: 5 * 60 * 1000,
   installPing: 10 * 60 * 1000,
   backupCatchUp: 5 * 60 * 1000,
+  healthSummary: 5 * 60 * 1000,
 });
 export type DesktopFloor = keyof typeof DESKTOP_FLOORS;
 

@@ -19,6 +19,7 @@ import { loadSources, loadCustomSites, loadBuiltins, listSources, loadSuwayomiSo
 import { scheduleFingerprintBackfill } from './lib/fingerprintJob';
 import { schedulePageHashBackfill } from './lib/pageHashJob';
 import { solverHealth } from './lib/health';
+import { refreshHealthSummary } from './lib/healthSummary';
 import { notifyAdmins } from './lib/push';
 import { runSourceCheck } from './lib/sourceWatchdog';
 import { runSweep } from './lib/updater';
@@ -273,6 +274,26 @@ async function main() {
       setTimeout(tick, HOUR).unref();
     };
     setTimeout(tick, firstRunFloor(10 * 60 * 1000, 'solverHealth')).unref();
+  }
+
+  /**
+   * The header's view of the Health page (#101, lib/healthSummary.ts): the checks run here every six hours so
+   * an admin's header can say "something needs attention" without the page ever having been opened -- which
+   * is the whole point, since the page only speaks to somebody who already went to look. Every six hours is
+   * well inside how long any of its findings takes to matter, and the Health page refreshes it too.
+   */
+  {
+    const SIX_HOURS = 6 * 60 * 60 * 1000;
+    const tick = async () => {
+      try {
+        const s = await refreshHealthSummary();
+        if (s.count) app.log.info(`health: ${s.count} check(s) found something -- ${s.headline}`);
+      } catch (e) {
+        app.log.warn(`health summary: ${(e as Error)?.message || e}`);
+      }
+      setTimeout(tick, SIX_HOURS).unref();
+    };
+    setTimeout(tick, firstRunFloor(20 * 60 * 1000, 'healthSummary')).unref();
   }
 
   /**

@@ -353,12 +353,6 @@ ALTER TABLE refresh_tokens ADD COLUMN IF NOT EXISTS user_agent text;
 -- former is forgiven by planRefresh (lib/auth.ts). A logout, an admin revoke and sign-out-everywhere all
 -- leave it null, so they still take effect the instant they are written.
 ALTER TABLE refresh_tokens ADD COLUMN IF NOT EXISTS replaced_by uuid;
--- When this token's holder presented it and got the next one: proof that the device's cookie jar received
--- it. Null on the live token, on one that was lost in transit, and on one a recovery superseded before its
--- holder used it. planRefresh (lib/auth.ts) recovers a lost refresh answer only when no later token in the
--- session was ever used. Rows from before this column are all null, which makes them ineligible to recover
--- anything -- the old behaviour, so the upgrade needs no backfill.
-ALTER TABLE refresh_tokens ADD COLUMN IF NOT EXISTS used_at timestamptz;
 
 -- audit / activity feed (logins, admin actions, downloads, blocks)
 CREATE TABLE IF NOT EXISTS audit_log (
@@ -1119,6 +1113,18 @@ ALTER TABLE lib_books ADD COLUMN IF NOT EXISTS chapter_name_source text;
 ALTER TABLE lib_series       ADD COLUMN IF NOT EXISTS reading_direction text;
 ALTER TABLE lib_series       ADD COLUMN IF NOT EXISTS reading_direction_from text;
 ALTER TABLE series_overrides ADD COLUMN IF NOT EXISTS reading_direction text;
+
+-- v0.48.0: when a refresh token's holder presented it and got the next one (#108): proof that the device's
+-- cookie jar received it. Null on the live token, on one that was lost in transit, and on one a recovery
+-- superseded before its holder used it. planRefresh (lib/auth.ts) recovers a lost refresh answer only when no
+-- later token in the session was ever used. Rows from before this column are all null, which makes them
+-- ineligible to recover anything -- the old behaviour, so the upgrade needs no backfill.
+ALTER TABLE refresh_tokens ADD COLUMN IF NOT EXISTS used_at timestamptz;
+
+-- v0.48.0: the last Health report, boiled down to what the header needs (lib/healthSummary.ts, #101). The
+-- header must never run the ten checks -- they read what every series holds -- so it reads this instead,
+-- written whenever the Health page runs and every six hours by the server itself.
+ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS health_summary jsonb;
 `;
 
 // Serialises migrate() across processes. CREATE TABLE IF NOT EXISTS is not safe to run concurrently:

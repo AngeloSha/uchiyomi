@@ -7075,6 +7075,29 @@ paths:
           description: Not authenticated
         "403":
           description: "Forbidden: token scope, account permission or age limit"
+  /api/admin/health/summary:
+    get:
+      tags:
+        - admin
+      summary: "The last Health report, boiled down for the header (since v0.48.0)."
+      operationId: getApiAdminHealthSummary
+      description: >-
+        Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
+        {summary: {at, worst: 'ok'|'warn'|'problem', count, headline, key, checks: [{id, title, status, summary}]}
+        | null}. Never runs the checks: it answers from what GET /api/admin/health stored when it last ran, or
+        what the server's own six-hourly run stored. `count` is how many checks found something, `headline` the
+        worst one's "Title: summary", and `key` changes only when WHICH checks found something (or how badly)
+        changes -- not when a count inside one moves -- so a client can re-show a dismissed alert exactly then.
+        `summary` is null until the first report after an upgrade.
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
   /api/admin/trackers/relink:
     post:
       tags:

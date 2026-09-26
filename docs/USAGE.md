@@ -971,6 +971,19 @@ it cannot see. Hit **Re-check** to run them again.
 Since v0.41.0 every finding also carries the button that fixes it, and most of them fix themselves overnight
 without you pressing anything.
 
+**You don't have to go and look** (since v0.48.0). While the last report found something, an admin's top bar
+shows a warning mark beside the Updates bell — amber, or red for a problem — whose tooltip is the worst
+check's own sentence, and a one-line banner says the same once, with **Take a look** and **Not now**. *Not now*
+lasts until a different check finds something (or one gets worse); a count moving inside the same check does
+not bring it back. The server runs the checks by itself every six hours for this, and whenever the Health page
+is opened; the top bar only ever reads the stored result. Other accounts see none of it.
+
+**Library scan** (since v0.48.0) lists any folder the library scan could not index, with the scanner's own
+reason. The scan used to stop at such a folder — silently, and on every run — which left every folder after it
+unindexed: downloaded chapters on disk that never appeared, and a *Fetch* that found the file already there
+and did nothing (#109). Now it steps over that one folder, indexes everything else, and says which one it
+skipped.
+
 **What fixes itself.** Once a day — **Admin → Settings → Library housekeeping → Repair the library nightly**,
 on by default, and **Admin → Tasks → Repair library** with a *Run now* — Uchiyomi does the six things that
 are reversible or provable on their own, and two more only when you switch them on, in this order:

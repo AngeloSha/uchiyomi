@@ -6,6 +6,7 @@ import { runSmartOffline } from '@/lib/offlineSync';
 import { BottomNav } from './BottomNav';
 import { TopNav } from './TopNav';
 import { DownloadsIndicator } from './DownloadsIndicator';
+import { HealthBanner } from './HealthAlert';
 import { LoginScreen } from './LoginScreen';
 import { DesktopReconnect } from './DesktopReconnect';
 import { CinematicFX } from './CinematicFX';
@@ -114,6 +115,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       <CinematicFX />
       {status === 'offline' && <OfflineBanner name={user?.displayName || ''} />}
       <TopNav onSearchFocus={() => { setPaletteSeed(''); setPalette(true); }} />
+      {status === 'authed' && <HealthBanner />}
       <main className="shell relative z-[1] pb-28 lg:pb-12">
         <PageTransition>{children}</PageTransition>
       </main>

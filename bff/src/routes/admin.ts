@@ -57,6 +57,7 @@ import { linkSeries, seedTrackerFloor } from '../lib/trackers';
 import { ADAPTERS, PROVIDERS, LIST_STATUSES, TRACKER_LIST_MAX, type Provider, type LibraryEntry } from '../lib/trackerProviders';
 import { open as unseal } from '../lib/secretbox';
 import { runHealthChecks } from '../lib/health';
+import { readHealthSummary, storeHealthSummary } from '../lib/healthSummary';
 import { titlesFromMangadexList, entriesFromMangadexList } from '../lib/mangadexList';
 import { fetchAniListArt, fetchAniListCandidates, fetchAnimeBanner } from '../lib/anilist';
 import { READING_DIRECTIONS } from '../lib/komgaDto';
@@ -2701,7 +2702,14 @@ export default async function adminRoutes(app: FastifyInstance) {
   // ---- library health ----
   // Read-only aggregate over the library. Every check is a plain query, so this is safe to hit whenever
   // the tab is opened rather than needing a background job.
-  app.get('/api/admin/health', async () => runHealthChecks());
+  app.get('/api/admin/health', async () => {
+    const report = await runHealthChecks();
+    // What the header shows (#101): refreshed whenever somebody looks, so it never disagrees with the page.
+    await storeHealthSummary(report).catch(() => {});
+    return report;
+  });
+  // The header's question, answered from what is stored: never runs the checks (lib/healthSummary.ts).
+  app.get('/api/admin/health/summary', async () => ({ summary: await readHealthSummary() }));
 
   // ---- link existing series to AniList entries so tracker sync has an anchor ----
   // Art was matched long before trackers existed, so those series have cached art but no link. This

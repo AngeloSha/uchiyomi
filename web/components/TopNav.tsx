@@ -9,6 +9,7 @@ import { triggerRefresh } from '@/lib/refresh';
 import { api } from '@/lib/api';
 import { useAuth, canDownload } from '@/lib/auth';
 import { Avatar } from './Avatar';
+import { HealthMarker } from './HealthAlert';
 import { useToast } from './Toast';
 import { keys, t as tr } from '@/lib/i18n';
 
@@ -80,6 +81,8 @@ export function TopNav({ onSearchFocus }: { onSearchFocus?: () => void }) {
           className={`grid h-10 w-10 place-items-center rounded-full border border-ink-700 transition hover:text-accent ${path.startsWith('/moments') ? 'text-accent' : 'text-fog-300'}`}>
           <IcMoments width={19} height={19} />
         </Link>
+        {/* Admins only, and only while the last Health report was not clean (#101). */}
+        <HealthMarker />
         <Link href="/updates" title={tr('Updates')} className="relative grid h-10 w-10 place-items-center rounded-full border border-ink-700 text-fog-300 hover:text-accent">
           <IcBell width={19} height={19} />
           {updCount > 0 && <span className="absolute -right-0.5 -top-0.5 grid h-4 min-w-4 place-items-center rounded-full bg-accent px-1 text-[10px] font-bold text-black">{updCount > 9 ? '9+' : updCount}</span>}

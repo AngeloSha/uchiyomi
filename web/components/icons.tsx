@@ -95,6 +95,9 @@ export const IcRefresh = (p: P) => (
 export const IcInfo = (p: P) => (
   <svg {...base(p)}><circle cx="12" cy="12" r="9" /><path d="M12 11v5" /><path d="M12 8h.01" /></svg>
 );
+export const IcAlert = (p: P) => (
+  <svg {...base(p)}><path d="M12 3.5 2.5 20h19L12 3.5Z" /><path d="M12 10v4.5" /><path d="M12 17.5h.01" /></svg>
+);
 export const IcFilter = (p: P) => (
   <svg {...base(p)}><path d="M4 5h16" /><path d="M7 12h10" /><path d="M10 19h4" /></svg>
 );
