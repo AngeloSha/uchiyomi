@@ -33,7 +33,8 @@ test('series and reader links use the query shape the static export serves', () 
   assert.deepEqual(offenders, [], `write /series/?id=… (and /reader/?…) instead:\n${offenders.join('\n')}`);
 });
 
-test('the Health tab opens the series it names', () => {
+test('the Health tab builds its Open links in one place', () => {
+  // Where each finding's Open goes is lib/healthLinks.ts, tested in healthLinks.test.ts.
   const admin = readFileSync(join(ROOT, 'app', 'admin', 'page.tsx'), 'utf8');
-  assert.match(admin, /href=\{`\/series\/\?id=\$\{encodeURIComponent\(it\.seriesId\)\}`\}/);
+  assert.match(admin, /healthLinks\(c\.id, it\)\.map/);
 });

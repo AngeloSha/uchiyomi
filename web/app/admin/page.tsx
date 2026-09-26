@@ -25,6 +25,8 @@ import { groupProviders, type ProviderGroup, type ProviderSrc } from '@/lib/prov
 import { adultShown } from '@/lib/adult';
 import { bridge, hiddenOnDesktop, isDesktop, visibleGroups, DESKTOP_HIDDEN, type EngineStatus, type UpdateStatus } from '@/lib/desktop';
 import { EngineInstall } from '@/components/EngineInstall';
+import Link from 'next/link';
+import { healthLinks } from '@/lib/healthLinks';
 
 /**
  * `/api/sources` as an ADMIN needs it: every source the server has, adult ones included.
@@ -1949,9 +1951,10 @@ function Health() {
                         <p className="text-[11px] text-fog-500">{it.detail}</p>
                       </div>
                       <HealthActions check={c.id} item={it} onDone={() => { void refetch(); }} />
-                      {it.seriesId && (
-                        <a href={`/series/?id=${encodeURIComponent(it.seriesId)}`} className="chip shrink-0 text-xs">{tr('Open')}</a>
-                      )}
+                      {/* To the chapter the finding is about, not just its series (lib/healthLinks.ts). */}
+                      {healthLinks(c.id, it).map((l) => (
+                        <Link key={l.href} href={l.href} className="chip shrink-0 text-xs" title={l.label} aria-label={l.label ? `${tr('Open')}: ${l.label}` : undefined}>{tr('Open')}</Link>
+                      ))}
                     </div>
                   ))}
                 </div>

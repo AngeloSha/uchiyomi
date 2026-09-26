@@ -19,6 +19,8 @@ import { t as tr, keys } from '@/lib/i18n';
 import { FindMissingDialog } from '@/components/FindMissingDialog';
 import { normGroup } from '@/lib/scanlators';
 import { GHOST_CAP, mergeRows, whyLabel, runLabel, chunkNumbers, MARK_CHUNK, type Row } from '@/lib/chapterRows';
+import { chParam, landingNumber } from '@/lib/healthLinks';
+import { effectsReduced } from '@/lib/effects';
 import { CHAPTER_PAGE, clampPage, pageCount, pageLabel, pageOf, pageSlice } from '@/lib/chapterPages';
 import { buttonsClass, compactChaptersOn, dotHide, rowClass, thumbHide } from '@/lib/compactChapters';
 import { fetchAllBooks } from '@/lib/seriesBooks';
@@ -553,8 +555,10 @@ function ButtonsWrap({ compact, menuOpen, children }: { compact: boolean; menuOp
   return <div className={buttonsClass(menuOpen)}>{children}</div>;
 }
 
-function ChapterRow({ book, downloaded, sourceNames, primarySource, versions, onReader, onToggleDownload, onMark, onEdit, onVersions, selectable, selected, onToggle, compact }: {
+function ChapterRow({ book, downloaded, sourceNames, primarySource, versions, onReader, onToggleDownload, onMark, onEdit, onVersions, selectable, selected, onToggle, compact, lit }: {
   book: Book;
+  /** Lit for a moment: the chapter a `?ch=` link (Health's Open) came to see. */
+  lit?: boolean;
   /** The opt-in compact chapter list (lib/compactChapters.ts). Off: the row is exactly as it always was. */
   compact?: boolean;
   downloaded: boolean;
@@ -604,7 +608,7 @@ function ChapterRow({ book, downloaded, sourceNames, primarySource, versions, on
     // the desktop grid a 287-px cell (three columns at 1280) leaves the caption ≈90 px beside the thumb,
     // the dot, the date and two 36-px buttons -- exactly a group name with its avatar -- and a two-digit
     // day ("29d") took 4 of them back. Five gaps at 10 rather than 12 return ten. GhostRow matches.
-    <div id={`ch-${book.number}`} className="border-b border-ink-800/70">
+    <div id={`ch-${book.number}`} className={`border-b border-ink-800/70${lit ? ' rounded-lg bg-accent/10 ring-1 ring-inset ring-accent/50' : ''}`}>
     <div className={rowClass(!!compact)} {...(selectable ? {} : menu.bind)}>
       {/* In select mode a pruned chapter is still selectable -- Mark read and Fetch again are exactly the
           things one wants for it -- so the disable only applies to opening. */}
@@ -823,6 +827,7 @@ function ChapterPager({ page, pages, rows, asc, total, onPage }: { page: number;
 
 function SeriesInner() {
   const id = useSearchParams().get('id') || '';
+  const wantCh = chParam(useSearchParams().get('ch'));
   const router = useRouter();
   const qc = useQueryClient();
   const toast = useToast();
@@ -1050,6 +1055,40 @@ function SeriesInner() {
   useEffect(() => { setChapterPage(null); }, [id, asc, group, showGhosts]);
   const autoPage = useMemo(() => (resumeBook ? pageOf(rows, (r) => r.kind === 'book' && r.book.id === resumeBook.id) : 0), [rows, resumeBook]);
   useEffect(() => { if (chapterPage === null && books && listingSettled) setChapterPage(autoPage); }, [chapterPage, books, listingSettled, autoPage]);
+  // A link to ONE chapter -- Health's Open (lib/healthLinks.ts) -- turns the list to that chapter's page, brings
+  // the row into view and lights it for a moment. A number the library does not hold (a gap) lands on the chapter
+  // just before it, where the gap begins. Once, when the chapters and the sources' listing have both arrived --
+  // declared after the effect above, so its page wins over Continue's -- and `ch` then leaves the URL (the
+  // router's own history state kept), so a reload or Back does not jump again.
+  const [litCh, setLitCh] = useState<number | null>(null);
+  const jumpedTo = useRef<string | null>(null);
+  useEffect(() => {
+    if (wantCh === null || !books || !listingSettled) return;
+    const key = `${id}:${wantCh}`;
+    if (jumpedTo.current === key) return;
+    jumpedTo.current = key;
+    try {
+      const u = new URL(window.location.href);
+      u.searchParams.delete('ch');
+      window.history.replaceState(window.history.state, '', `${u.pathname}${u.search}${u.hash}`);
+    } catch { /* the jump happens regardless */ }
+    const held = rows.flatMap((r) => (r.kind === 'book' ? [r.book.number] : []));
+    const n = landingNumber(held, wantCh);
+    const i = n === null ? -1 : rows.findIndex((r) => r.kind === 'book' && r.book.number === n);
+    if (n === null || i < 0) return;
+    setChapterPage(Math.floor(i / CHAPTER_PAGE));
+    setLitCh(n);
+    const still = effectsReduced() || window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    // Two frames: the page switch renders first, then the row exists to scroll to. getElementById, not a
+    // selector: `ch-12.5` is not a valid one.
+    requestAnimationFrame(() => requestAnimationFrame(() =>
+      document.getElementById(`ch-${n}`)?.scrollIntoView({ block: 'center', behavior: still ? 'auto' : 'smooth' })));
+  }, [wantCh, id, books, listingSettled, rows]);
+  useEffect(() => {
+    if (litCh === null) return;
+    const t = setTimeout(() => setLitCh(null), 2600);
+    return () => clearTimeout(t);
+  }, [litCh]);
   const shownPage = clampPage(chapterPage ?? autoPage, rows.length);
   const pages = pageCount(rows.length);
   const pageRows = useMemo(() => pageSlice(rows, shownPage), [rows, shownPage]);
@@ -1587,7 +1626,7 @@ function SeriesInner() {
           if (r.kind === 'book') {
             const b = r.book;
             return (
-              <ChapterRow key={b.id} book={b} compact={compact} downloaded={downloaded.has(b.id)} sourceNames={sourceNames} primarySource={primarySource}
+              <ChapterRow key={b.id} book={b} compact={compact} lit={litCh === b.number} downloaded={downloaded.has(b.id)} sourceNames={sourceNames} primarySource={primarySource}
                 onReader={() => router.push(`/reader/?book=${b.id}`)} onToggleDownload={() => toggleDownload(b.id)}
                 onMark={(mode) => markChapter(b, mode)}
                 onEdit={isAdmin ? () => setEditChapter(b) : undefined}
