@@ -25,7 +25,8 @@ const skip = DSN ? false : 'set TEST_DATABASE_URL to run';
 const S = 's_fsp_series';
 const OWN = 'fsp-own', FAST = 'fsp-fast', SLOW = 'fsp-slow';
 /** The series' own source lists slowly (a solver), another source searches even more slowly. */
-const OWN_LIST_MS = 1500, SLOW_SEARCH_MS = 3000;
+// Wide margins on purpose: the first answer comes after 300 ms, and a loaded CI runner must not make it look slow.
+const OWN_LIST_MS = 3000, SLOW_SEARCH_MS = 6000;
 let q: any, app: any, auth: Record<string, string>, otherAuth: Record<string, string>;
 let getPlan: any, authorise: any;
 
