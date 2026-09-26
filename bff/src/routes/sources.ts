@@ -210,12 +210,14 @@ async function activityFor(ctx: ViewCtx, me: string | null, admin: boolean) {
   const p = new Params();
   const rows = folders.length
     ? await q<{ id: string; folder: string; ok: boolean }>(
-      `SELECT s.id, s.folder, (${browsable('s', ctx, p)}) AS ok FROM lib_series s
-        WHERE s.folder = ANY(${p.add(folders)}) AND s.deleted_at IS NULL`,
+      `SELECT s.id, s.folder, (${browsable('s', ctx, p)}) AS ok FROM lib_series s WHERE s.folder = ANY(${p.add(folders)})`,
       p.values as any[],
     ).catch(() => [])
     : [];
-  const bySeries = new Map(rows.map((r) => [r.folder, r]));
+  // A folder can have a deleted twin beside its live row (lib/library.ts persistScan): the row this viewer can
+  // browse is the one that speaks for it. `browsable` already refuses a deleted or merged row.
+  const bySeries = new Map<string, { id: string; folder: string; ok: boolean }>();
+  for (const r of rows) if (!bySeries.has(r.folder) || (r.ok && !bySeries.get(r.folder)!.ok)) bySeries.set(r.folder, r);
   const shown = (e: ActivityEntry) => {
     const s = bySeries.get(e.folder);
     return s ? s.ok : admin || (!!e.by && e.by === me);
