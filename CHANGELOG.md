@@ -1,5 +1,40 @@
 # Changelog
 
+## v0.48.1 — 2026-09-26
+
+**See everything the server downloads, and a way out of a previewed chapter on a phone.**
+
+### Everything the server downloads, in one place
+
+The downloads pill only ever showed what a button started — in practice, an add from Discover. Chapters from a
+source you followed through *Find missing chapters* arrive at the series' next check; the scheduled check
+downloads for every series; so do *Check for new chapters*, the library repair and *Fetch newest*. None of that
+showed anywhere.
+
+Now every chapter the server downloads is recorded with what started it, and:
+
+- **the pill** comes up for all of it and lists what is downloading right now — the series, the chapter, what
+  started it, and whether it is still waiting its turn at the source — plus what came in today;
+- **the Offline tab** (the download icon) has an **On the server** section: what is downloading, and what came
+  in today, one line per series — *Walk Tale · Ch. 1–7 · Check for new chapters · 2 h ago* — with any chapter
+  that could not be saved and why. It is there when nothing is running too, so this morning's chapters from the
+  night are one tap away.
+
+Each person sees the series they can open; a brand-new add's first chapter is shown to whoever added it and to
+admins. The list is a day deep; new chapters in your favourites also stay on the Updates page until you have seen
+them.
+
+### "Read a chapter first" on a phone
+
+In the installed app on a phone, the preview's top bar sat under the status bar, so its ✕ and *Chapters* could
+not be pressed and the only way out was *Add to library*. The bar now clears the status bar, both controls are
+full-size, and the phone's back gesture steps out the way Escape does: from the chapter to the list, then back to
+the add dialog, staying on Discover. The v0.48.0 admin banner had the same status-bar problem, also fixed.
+
+### Upgrading
+
+Nothing to do: no database changes.
+
 ## v0.48.0 — 2026-09-26
 
 **Every open issue and pull request, in one release.** Downloads that never reached the library (#109), right to
