@@ -112,7 +112,11 @@ test('refresh under a rotation race', { skip }, async (t) => {
 
     await t.test('a rotation older than the grace window is refused', async () => {
       const tok = await issueRefreshToken(userId, { deviceName: 'tab-a' });
-      await refresh(app, tok);                          // rotates it, setting replaced_by
+      const next = rtCookie(await refresh(app, tok));   // rotates it, setting replaced_by
+      // ... and the device goes on to USE what it got. Without this step the successor has never been seen
+      // again, which is exactly a refresh whose answer was lost -- recovered, not refused, since
+      // refreshLost.int.test.ts. An old token is refused because the device has moved past it.
+      assert.equal((await refresh(app, next!)).statusCode, 200, 'precondition: the device used its new token');
       // age the revocation past the window rather than sleeping through it
       await q(`UPDATE refresh_tokens SET revoked_at = now() - interval '10 minutes'
                WHERE user_id = $1 AND replaced_by IS NOT NULL`, [userId]);
