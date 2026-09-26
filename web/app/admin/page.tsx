@@ -1950,7 +1950,7 @@ function Health() {
                       </div>
                       <HealthActions check={c.id} item={it} onDone={() => { void refetch(); }} />
                       {it.seriesId && (
-                        <a href={`/series/${it.seriesId}`} className="chip shrink-0 text-xs">{tr('Open')}</a>
+                        <a href={`/series/?id=${encodeURIComponent(it.seriesId)}`} className="chip shrink-0 text-xs">{tr('Open')}</a>
                       )}
                     </div>
                   ))}

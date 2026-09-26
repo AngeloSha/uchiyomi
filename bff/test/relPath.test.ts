@@ -93,11 +93,27 @@ test('sanitize on win32: names Explorer cannot open or delete are made safe', as
 test('sanitize on Linux is byte-for-byte what it was', async () => {
   // The server's half. The expression is copied from v0.43.0 on purpose: if it ever changes, it changes here too,
   // deliberately. Reintroduce by applying the Windows rules on every platform: `CON` and `Title.` change.
+  // Changed once, in v0.48.2, and only for a title that STARTS with a dot (the test below): every existing folder
+  // is spelt as it was, because a folder that started with one never reached the library to be found by.
   const { sanitize } = await import('../src/lib/downloader');
   const v043 = (s: string) => (s || '').replace(/[\/\\:*?"<>|]+/g, '_').replace(/\s+/g, ' ').trim().slice(0, 150) || 'untitled';
-  for (const s of ['CON', 'nul.txt', 'Title.', 'Title...', '...', '..', 'a\u0001b', '  Solo   Leveling  ', 'a/b\\c:d', 'x'.repeat(200), '', 'COM1']) {
+  for (const s of ['CON', 'nul.txt', 'Title.', 'Title...', 'a\u0001b', '  Solo   Leveling  ', 'a/b\\c:d', 'x'.repeat(200), '', 'COM1', 'Mid.dot. Title']) {
     assert.equal(sanitize(s, 'linux'), v043(s), JSON.stringify(s));
     assert.equal(sanitize(s), v043(s), `default platform, ${JSON.stringify(s)}`);
+  }
+});
+
+test('a title that starts with a dot is not a hidden folder, and ".." is not the parent', async () => {
+  // The scanner skips every folder that starts with a dot (SKIP_DIR), so `.hack//Link` downloaded into a folder
+  // it never looked at (#109). Reintroduce by dropping the leading-dot strip in sanitize(): `.hack_Link`.
+  const { sanitize } = await import('../src/lib/downloader');
+  for (const platform of ['linux', 'win32'] as const) {
+    assert.equal(sanitize('.hack//Link', platform), 'hack_Link', platform);
+    assert.equal(sanitize('...Hello', platform), 'Hello', platform);
+    assert.equal(sanitize(' . Hello', platform), 'Hello', platform);
+    assert.equal(sanitize('..', platform), 'untitled', `${platform}: ".." would be the parent folder`);
+    assert.equal(sanitize('.', platform), 'untitled', platform);
+    assert.equal(sanitize('...', platform), 'untitled', platform);
   }
 });
 

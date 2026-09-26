@@ -17,8 +17,16 @@ import { writeAtomic } from './fsAtomic';
 import { paceFor, paceLevel, noteRateLimited, MAX_PAGE_GAP_MS } from './pace';
 import { pageName, placeholderPng, PARTIAL_MANIFEST, type PartialManifest } from './partial';
 
+/**
+ * A title as a folder name.
+ *
+ * ⚠️ No leading dot. The scanner skips every folder that starts with one (`SKIP_DIR` in library.ts: `.git`,
+ * `.Trash-1000`, `.thumbnails`), so `.hack//Link` downloaded into `.hack_Link` and never reached the library,
+ * with nothing to say why; a title of `..` would have named the parent folder itself. Reintroduce by dropping
+ * the `^[.\s]+` strip: relPath.test.ts "a title that starts with a dot" finds the dot.
+ */
 export function sanitize(s: string, platform: NodeJS.Platform = process.platform): string {
-  const name = (s || '').replace(/[\/\\:*?"<>|]+/g, '_').replace(/\s+/g, ' ').trim().slice(0, 150) || 'untitled';
+  const name = (s || '').replace(/[\/\\:*?"<>|]+/g, '_').replace(/\s+/g, ' ').trim().replace(/^[.\s]+/, '').slice(0, 150) || 'untitled';
   return platform === 'win32' ? winSafe(name) : name;
 }
 
