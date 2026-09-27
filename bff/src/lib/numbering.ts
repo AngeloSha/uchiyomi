@@ -655,10 +655,25 @@ export async function planFor(seriesId: string, mode: RenumberMode): Promise<{ p
  * held and the plan can be confirmed again.
  */
 export async function requestNumbering(
-  seriesId: string, mode: NumberingChoice, opts: { confirm?: boolean; userId?: string | null } = {},
+  seriesId: string, mode: NumberingChoice | 'remap', opts: { confirm?: boolean; userId?: string | null } = {},
 ): Promise<{ state: 'applied' | 'pending' | 'needs_confirm' | 'unchanged'; plan?: RenumberPlan; tracker?: boolean } | null> {
   const s = await one<NumberingRow & { source_id: string | null }>(`SELECT source_id, ${NUMBERING_COLUMNS} FROM lib_series WHERE id = $1`, [seriesId]);
   if (!s) return null;
+  if (mode === 'remap') {
+    // The source's own numbers moved under the files (an extension setting changed, routes/numbering.ts): the
+    // numbering is the same, only the matching is new, so a remap is confirmed as it stands and never chosen.
+    if (s.numbering_pending !== 'remap') return { state: 'unchanged' };
+    if (!opts.confirm) {
+      const p = await planFor(seriesId, 'remap');
+      return { state: 'needs_confirm', ...(p ? { plan: p.plan, tracker: p.tracker } : {}) };
+    }
+    const r = await updateSeries(seriesId, 0, { confirmRenumber: true });
+    await logAudit('series.numbering', { userId: opts.userId ?? null, detail: { id: seriesId, mode, state: r.renumber?.state ?? r.outcome } });
+    return {
+      state: r.renumber?.state === 'applied' ? 'applied' : 'pending',
+      ...(r.renumber?.plan ? { plan: r.renumber.plan, tracker: r.renumber.tracker } : {}),
+    };
+  }
   if (mode === 'auto') {
     await q(`UPDATE lib_series SET numbering_by = NULL,
                     numbering = CASE WHEN numbering = 'source' THEN NULL ELSE numbering END,

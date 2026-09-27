@@ -248,6 +248,8 @@ export interface Listing {
   /** When the updater last wrote this list, or null when it never has. Stale beats empty, so the age is shown. */
   checkedAt: string | null;
   content: Ghost[];
+  /** How the series is numbered and what waits for an admin (v0.49.0, #116; lib/numbering.ts). Absent from an older server. */
+  numbering?: import('./numbering').NumberingSummary | null;
 }
 
 /** How often a group ships, read off the median gap of its last dated releases. `unknown` with fewer than two dates. */
@@ -310,6 +312,8 @@ export interface VersionCopy {
   blocked: boolean;
   /** The file on this server for the number came from this copy. */
   onDisk: boolean;
+  /** The copy's own title (v0.49.0): posts that share a number are told apart by it (lib/versions.ts). */
+  title?: string | null;
 }
 
 export interface Versions {

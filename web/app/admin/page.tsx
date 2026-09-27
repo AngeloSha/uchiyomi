@@ -25,6 +25,7 @@ import { groupProviders, type ProviderGroup, type ProviderSrc } from '@/lib/prov
 import { adultShown } from '@/lib/adult';
 import { bridge, hiddenOnDesktop, isDesktop, visibleGroups, DESKTOP_HIDDEN, type EngineStatus, type UpdateStatus } from '@/lib/desktop';
 import { EngineInstall } from '@/components/EngineInstall';
+import { ExtensionSettings, useExtensionSettingsParam } from '@/components/ExtensionSettings';
 import { StatusEdge, StatusMark } from '@/components/StatusMark';
 import { TONE_SURFACE, engineMark, healthMark, sourceMark, type ProviderStatus } from '@/lib/status';
 import Link from 'next/link';
@@ -2082,6 +2083,8 @@ function Extensions({ span = '' }: { span?: string }) {
   const [repoError, setRepoError] = useState<string | null>(null);
   const [showLangs, setShowLangs] = useState(false);
   const [hiding, setHiding] = useState<ExtLang | null>(null);
+  // An extension's own settings (#116), from a row's Settings or the `?settings=` deep link.
+  const [settingsFor, setSettingsFor] = useExtensionSettingsParam();
 
   const { data: status } = useQuery({ queryKey: ['ext-status'], queryFn: () => api<ExtStatus>('/api/admin/extensions/status') });
   // Fetched only while the block is open: it is the full source list joined with usage counts, and most
@@ -2465,6 +2468,9 @@ function Extensions({ span = '' }: { span?: string }) {
                     {busy === e.pkgName ? '…' : 'Update'}
                   </button>
                 )}
+                {e.installed && (
+                  <button onClick={() => setSettingsFor({ pkgName: e.pkgName, name: e.name })} className="btn-key">{tr('Settings')}</button>
+                )}
                 <button onClick={() => act(e, e.installed ? 'uninstall' : 'install')} disabled={busy === e.pkgName}
                   className={`btn-key ${e.installed ? 'btn-key-danger' : 'btn-key-primary'}`}>
                   {busy === e.pkgName ? '…' : e.installed ? 'Remove' : 'Add'}
@@ -2480,6 +2486,7 @@ function Extensions({ span = '' }: { span?: string }) {
           </div>
         </>
       )}
+      {settingsFor && status.reachable && <ExtensionSettings target={settingsFor} onClose={() => setSettingsFor(null)} />}
     </div>
   );
 }

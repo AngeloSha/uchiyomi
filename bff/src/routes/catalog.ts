@@ -20,6 +20,7 @@ import { seriesSourcesFor } from '../lib/seriesSources';
 import { readSeriesPrefs, effectivePrefsFor } from '../lib/scanlatorPrefs';
 import { listingFor, type ListingCopy } from '../lib/seriesListing';
 import { chapterName } from '../lib/naming';
+import { numberingSummary } from '../lib/numbering';
 import { markNumbers, unmarkNumbers, LISTING_MARK_MAX } from '../lib/listingProgress';
 import { pushSeriesProgressAsync } from '../lib/trackers';
 import { ghostsEnabled } from '../lib/komgaGhosts';
@@ -528,7 +529,13 @@ export default async function catalogRoutes(app: FastifyInstance) {
     await komga.series(vc(req), id);
     const f = await one<{ chapter_floor: number | null }>('SELECT chapter_floor FROM lib_series WHERE id = $1', [id]);
     const floor = f?.chapter_floor == null ? null : Number(f.chapter_floor);
-    return listingFor(id, { floor, admin: roleOf(req) === 'admin', userId: userIdOf(req) });
+    // How the series is numbered and why (#116): the series page's notice. Every viewer who can open the series
+    // reads it -- it explains the numbers they see; the controls beside it are the admin's.
+    const [listing, numbering] = await Promise.all([
+      listingFor(id, { floor, admin: roleOf(req) === 'admin', userId: userIdOf(req) }),
+      numberingSummary(id),
+    ]);
+    return { ...listing, numbering };
   });
 
   /**

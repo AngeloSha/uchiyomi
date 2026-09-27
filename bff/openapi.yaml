@@ -1320,6 +1320,9 @@ paths:
         the downloader's last error text, is present for admins only. `read: true` marks a number the caller
         ticked read without it being here (POST /api/series/{id}/listing-progress). A chapter matches its
         listing number by its override-aware number, so a chapter an admin renumbered is not also a ghost.
+        `numbering` (v0.49.0, #116) says how the series is numbered and why: { mode (null = automatic, source,
+        posting_order), by (auto, manual), pending (posting_order, source, remap: a change waiting for an
+        admin), note (the detector's last verdict), changedAt, sourceName, extSourceId? }.
       parameters:
         - name: id
           in: path
@@ -1498,7 +1501,8 @@ paths:
       operationId: getApiSeriesIdVersions
       description: >-
         One entry per chapter number the sources listed at the last check, each with every copy they list
-        (group, language, page count, date, source) flagged `chosen`, `blocked` and `onDisk`. A `source` and
+        (group, language, page count, date, source, and since v0.49.0 its own `title`) flagged `chosen`,
+        `blocked` and `onDisk`. A `source` and
         `sourceId` from here make a Pick for POST /api/sources/fetch or the admin refetch. A number listed
         before v0.33.0 has an empty `copies` until its next check. Any account that can open the series may
         read it.
@@ -2668,7 +2672,11 @@ paths:
         `count`, `first` and `last` describe one copy per chapter number under the server-wide release
         preferences (what the add would land). `groups` is the who-scanlates-this panel built from the same
         chapter list (no second source call), with `onDisk` 0 since nothing is on disk yet; `versions` is how
-        many numbers the source lists in more than one copy.
+        many numbers the source lists in more than one copy. `numbering` (v0.49.0, #116) is the detector's word
+        on the listing: { verdict (strong, hint, none), applied (posting_order when the add will number the
+        posts 1..K in posting order, else source), ordered, posts, numbers, biggest { number, posts }, examples,
+        alt { count, first, last } (the other reading, for the dialog's switch), extSourceId? }; `count`,
+        `first` and `last` follow `applied`.
         This route deliberately does NOT honour the 18+ reveal (v0.42.0), and neither does POST
         /api/sources/add: both are explicit acts on a source and a series the caller just named, and the
         reveal governs what appears unasked. The age cap does apply and answers 403 by id.
@@ -2766,6 +2774,14 @@ paths:
                   type: boolean
                 force:
                   type: boolean
+                numbering:
+                  type: string
+                  enum: [auto, source, posting_order]
+                  description: >-
+                    How to number the series (v0.49.0, #116). `auto` (the default) numbers by posting order when
+                    the source gives many different posts one number; `source` keeps the source's numbers;
+                    `posting_order` numbers the posts 1..K whatever the detector says. `alsoFollow` is ignored
+                    under posting order.
                 alsoFollow:
                   type: array
                   maxItems: 6
@@ -5935,6 +5951,91 @@ paths:
           description: "Forbidden: token scope, account permission or age limit"
         "404":
           description: Not found, or not visible to this account
+  /api/admin/series/{id}/numbering:
+    get:
+      tags:
+        - admin
+      summary: "The plan a numbering change would carry out on one series, changing nothing (#116)."
+      operationId: getApiAdminSeriesIdNumbering
+      description: >-
+        Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. From a fresh,
+        bounded listing of the series' numbering source. `mode` defaults to the change waiting for review, else
+        the other numbering. The plan lists every file's move { bookId, from, to, fromFile, file, via (rename,
+        row, override, none), how (id, pick, stored, name, date, listing), title }, the books no post matched
+        (`parked`), the numbers two books would share (`collisions`), whether it could be applied unattended
+        (`clean`, with `reasons`), and the floor it moves to; `tracker` says a tracker is linked.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: mode
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [posting_order, source, remap]
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: "OK: { mode, plan, tracker, numbering }"
+        "400":
+          description: Unknown mode
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+        "404":
+          description: Not found, or not visible to this account
+        "502":
+          description: The source did not answer, so there is no plan (unreachable)
+    post:
+      tags:
+        - admin
+      summary: "Choose how one series is numbered: by posting order, by the source, or automatically (#116)."
+      operationId: postApiAdminSeriesIdNumbering
+      description: >-
+        Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. `auto` hands the
+        series back to the detector. `posting_order` and `source` without `confirm` answer `needs_confirm` with
+        the plan and change nothing; with it they rename the files in place (book ids, reading progress,
+        bookmarks and notes are kept) and answer `applied`. Choosing the numbering the series already has
+        (Keep the source's numbers on a series waiting for review) renames nothing and answers `unchanged`.
+        `remap` confirms the remap an extension setting queued. `pending` means the change could not be applied
+        yet (the source did not answer, or it took longer than a minute and carries on); the series stays held.
+        A manual choice is never undone by the detector.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [mode]
+              properties:
+                mode: { type: string, enum: [auto, source, posting_order, remap] }
+                confirm: { type: boolean }
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: "OK: { state (applied, pending, needs_confirm, unchanged), plan?, tracker?, numbering }"
+        "400":
+          description: Malformed body
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+        "404":
+          description: Not found, or not visible to this account
+        "409":
+          description: "busy: chapters are being fetched for this series; try again when that ends"
   /api/admin/series/{id}/restore:
     post:
       tags:
@@ -6854,7 +6955,10 @@ paths:
         - admin
       summary: "Sources the installed extensions provide, with which are enabled; plus a per-language overview (langs) and the hidden languages, unfiltered."
       operationId: getApiAdminExtensionsSources
-      description: Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
+      description: >-
+        Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. Each row
+        carries the `pkgName` of the extension it comes from (v0.49.0), and `pkg` narrows the list to one
+        extension's sources -- one per language -- as the extension settings sheet's language select reads it.
       parameters:
         - name: q
           in: query
@@ -6864,6 +6968,12 @@ paths:
         - name: lang
           in: query
           required: false
+          schema:
+            type: string
+        - name: pkg
+          in: query
+          required: false
+          description: One extension's package name, e.g. eu.kanade.tachiyomi.extension.all.webtoons.
           schema:
             type: string
       security:
@@ -6949,6 +7059,95 @@ paths:
           description: "Forbidden: token scope, account permission or age limit"
         "404":
           description: Not found, or not visible to this account
+  /api/admin/extensions/sources/{id}/preferences:
+    get:
+      tags:
+        - admin
+      summary: "One extension source's own settings, the preference screen Mihon shows for it (#116)."
+      operationId: getApiAdminExtensionsSourcesIdPreferences
+      description: >-
+        Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. Read through
+        the extension engine. `preferences` lists every setting in screen order as { key, type (switch,
+        checkbox, list, multiselect or text), title, summary, visible, enabled, value, default, entries?,
+        entryValues?, dialogTitle?, dialogMessage?, numbering }; `numbering` marks a setting that changes the
+        chapter numbers the source gives (Webtoons' "Use sequential chapter numbering"). No position is ever
+        answered: a write names the key. `siblings` are the extension's other sources (one per language);
+        `usedBy` counts the library's series from this source and `renumbers` those a numbering change would
+        renumber (the ones not numbered by posting order).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: The engine's source id (a 64-bit integer, as a string).
+          schema:
+            type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: "OK: { source { id, name, lang, pkgName, extensionName }, siblings, preferences, usedBy, renumbers }"
+        "400":
+          description: Malformed id, or no extension server configured
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+        "404":
+          description: The extension server has no such source (unknown_source)
+        "502":
+          description: The extension server did not answer (unreachable)
+    post:
+      tags:
+        - admin
+      summary: "Change one of an extension source's own settings, addressed by key (#116)."
+      operationId: postApiAdminExtensionsSourcesIdPreferences
+      description: >-
+        Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. The server
+        reads the preference screen again, finds the key's current position, checks the value against the
+        setting's type and choices, and only then writes it: the engine addresses a write by position, which an
+        extension update can move. A change to a numbering setting marks every series from this source that uses
+        the source's numbers for a remap (`numbering_pending = 'remap'`): each waits for an admin to confirm its
+        renaming (POST /api/admin/series/{id}/numbering, mode remap) before it updates again; series numbered by
+        posting order are unaffected. A text setting's value is audited by its length only.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [key, value]
+              properties:
+                key: { type: string, maxLength: 256 }
+                value:
+                  description: A boolean (switch, checkbox), a string (list, text) or a list of strings (multiselect).
+                  oneOf:
+                    - type: boolean
+                    - type: string
+                      maxLength: 4096
+                    - type: array
+                      maxItems: 200
+                      items: { type: string }
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: "OK: { ok, changed, applied (the engine holds the value), remap (series marked), preferences, usedBy, renumbers }"
+        "400":
+          description: "bad_request, unknown_pref, ambiguous_pref, disabled, bad_value (not one of the setting's choices), or not_configured"
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+        "404":
+          description: The extension server has no such source (unknown_source)
+        "502":
+          description: The extension server did not answer (unreachable)
   /api/admin/extensions/catalog:
     get:
       tags:

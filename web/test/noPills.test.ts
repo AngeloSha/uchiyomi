@@ -33,6 +33,12 @@ const SURFACES = [
   // Step 6, the notices that replaced the capsule toasts.
   'components/Toast.tsx',
   'lib/notices.ts',
+  // Step 17 (#116): the numbering notice and its plan sheet, the extension settings sheet, and the versions sheet
+  // whose markers became squared tags and whose Fetch / Replace… became keys.
+  'components/NumberingNotice.tsx',
+  'components/NumberingSheet.tsx',
+  'components/ExtensionSettings.tsx',
+  'components/ChapterVersionsSheet.tsx',
 ];
 
 /**
@@ -152,7 +158,8 @@ test('the admin console\'s status badges are marks and its actions keys: the sli
   assert.ok(engine.split('\n').length < 20, `the engine slice is ${engine.split('\n').length} lines: a marker moved`);
   assert.equal(keys(repos), 4, 'the repository Add, Choose languages, a language\'s Hide/Show and Update all are not all keys');
   assert.doesNotMatch(repos, /value=\{q2\}|setShowAdult/, 'the repositories slice runs into the filter chips');
-  assert.equal(keys(rows), 2, 'a catalogue row\'s Update and Add/Remove are not keys');
+  // #116 added Settings on an installed row: Update, Settings and Add/Remove.
+  assert.equal(keys(rows), 3, 'a catalogue row\'s Update, Settings and Add/Remove are not keys');
   // Reintroduce `btn-accent` on either: the capsule scan fails, and so does this.
   assert.match(calls, /onClick=\{addSite\}[^>]*className="btn-key btn-key-primary"/, "Add a site's Add is not a key");
   assert.match(calls, /router\.push\('\/admin\/import\/'\)\} className="btn-key btn-key-primary w-full"/, '"Import and review matches" is not a key');
