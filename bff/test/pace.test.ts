@@ -9,6 +9,7 @@ import {
   noteRateLimited, paceLevel, paceFor, clearPace, setPaceClock, PACE_MAX_LEVEL, PACE_DECAY_MS, MAX_PAGE_GAP_MS,
   pagePace, slowPace, withSlowPace, resumePace,
 } from '../src/lib/pace';
+import { drawGap } from '../src/lib/archivePace';
 
 let now = 1_000_000;
 beforeEach(() => { now = 1_000_000; setPaceClock(() => now); clearPace(); });
@@ -208,4 +209,24 @@ test('at the ceiling a range keeps a spread, so the rest of the chapter is not a
   assert.deepEqual(resumePace(twice).jitter, [3000, 4000], 'and settles there');
   assert.deepEqual(resumePace({ gap: 3500, jitter: [3500, 4000] }).jitter, [3500, 4000], 'a narrower range keeps its own width');
   assert.deepEqual(resumePace({ gap: 2000, jitter: [2000, 2000] }).jitter, [MAX_PAGE_GAP_MS, MAX_PAGE_GAP_MS], 'a fixed gap stays a fixed gap');
+});
+
+test('after 429s at the ceiling the pages still draw their own gaps, never below the last ones', () => {
+  // What fetchPages does with the resumed pace: every page is drawGap(jitter, gap), and the gap is a floor under
+  // the draw, so a range alone proves nothing. Reintroduce by doubling `gap` on its own beside the range in
+  // resumePace (`gap: up(p.gap)`): after two 429s from the default range it is 4000 beside [3000, 4000], every
+  // page draws exactly 4000, and the `not all equal` assertion fails.
+  let k = 0;
+  const rand = () => (k++ % 1000) / 1000;
+  let pace: { gap: number; jitter?: [number, number] } = { gap: 1500, jitter: [1500, 4000] };
+  for (let n = 1; n <= 3; n++) {
+    const was = Math.max(pace.gap, pace.jitter![0]);
+    pace = resumePace(pace);
+    const draws = Array.from({ length: 1000 }, () => drawGap(pace.jitter!, pace.gap, rand));
+    const min = Math.min(...draws);
+    const max = Math.max(...draws);
+    assert.ok(new Set(draws).size > 100, `after ${n} 429s: ${JSON.stringify(pace)} draws ${min}..${max}, not all equal`);
+    assert.ok(min >= was, `after ${n} 429s: a page drew ${min} ms, below the ${was} ms it was at`);
+    assert.ok(max <= MAX_PAGE_GAP_MS, `after ${n} 429s: a page drew ${max} ms, above the ceiling`);
+  }
 });

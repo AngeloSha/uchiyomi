@@ -144,17 +144,21 @@ export function pagePace(
  * takes the default [1500, 4000] to [3000, 4000] and then to [4000, 4000], every page exactly 4 s apart for the
  * rest of the chapter. The low end stays at least a quarter of the top below it (or the range's own width, when
  * that is narrower), so [3000, 4000] is where it settles. A range that was one value to begin with stays one.
+ *
+ * ⚠️ With a range, `gap` is the low end, never doubled on its own. Every page is drawGap(jitter, gap): the gap is
+ * a floor under the draw, so a gap doubled to 4000 beside a range kept at [3000, 4000] drew exactly 4000 for
+ * every page, the metronome the spread was kept to avoid. It still never drops below where it was.
  */
 export function resumePace(
   p: { gap: number; jitter?: [number, number] },
   ceiling: number = MAX_PAGE_GAP_MS,
 ): { gap: number; jitter?: [number, number] } {
   const up = (g: number): number => Math.max(g, Math.min(g * 2, ceiling));
-  const gap = p.gap ? up(p.gap) : 0;
-  if (!p.jitter) return { gap };
+  if (!p.jitter) return { gap: p.gap ? up(p.gap) : 0 };
   const [lo, hi] = p.jitter;
   const top = up(hi);
-  return { gap, jitter: [Math.min(up(lo), top - Math.min(hi - lo, top / 4)), top] };
+  const low = Math.min(up(lo), top - Math.min(hi - lo, top / 4));
+  return { gap: Math.max(p.gap, low), jitter: [low, top] };
 }
 
 /** Tests only: forget every source's level, so one file's 429 does not slow the next file's chapters. */

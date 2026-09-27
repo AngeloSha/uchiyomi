@@ -252,17 +252,35 @@ test('a closed window says when it opens, by the local clock', () => {
 
 test('the running cycle follows real chapters, and one long wait cannot swamp it', () => {
   // Reintroduce by dropping the cap in ewmaCycle: the night-long sample moves the average to about 2.9 hours
-  // and the `capped` assertion fails.
+  // and the `capped` assertion fails. Reintroduce the looser cap of three cycles and the longest long break: a
+  // night at the default rate moves the average from 15 to 30 minutes, not 27, and the same assertion fails.
   const cfg = 15 * MIN;
   assert.equal(ewmaCycle(null, 20 * MIN, cfg), 20 * MIN, 'the first sample is the average');
   assert.equal(ewmaCycle(0, 20 * MIN, cfg), 20 * MIN);
   assert.equal(ewmaCycle(15 * MIN, 25 * MIN, cfg), 17 * MIN, 'a fifth of the way towards each new sample');
   const afterNight = ewmaCycle(15 * MIN, 14 * HOUR, cfg);
-  assert.equal(afterNight, Math.round(15 * MIN + 0.2 * (90 * MIN - 15 * MIN)), 'capped at three cycles and the longest long break');
-  assert.equal(ewmaCycle(null, 14 * HOUR, cfg), 90 * MIN, 'the first sample is capped too');
+  assert.equal(afterNight, Math.round(15 * MIN + 0.2 * (75 * MIN - 15 * MIN)), 'capped at two cycles and the longest long break');
+  assert.equal(ewmaCycle(null, 14 * HOUR, cfg), 75 * MIN, 'the first sample is capped too');
   assert.equal(ewmaCycle(15 * MIN, -5, cfg), Math.round(15 * MIN * 0.8), 'a clock that went backwards counts as 0');
   // A chapter with a long break on top is a real cycle, not an outlier: counted in full.
   assert.equal(ewmaCycle(null, 60 * MIN, cfg), 60 * MIN);
+});
+
+test('the cap never cuts a real cycle: the longest break after the slowest chapter counts in full', () => {
+  // The cap is only for time that is not a chapter's. The longest cycle nextBreakMs can make -- the short break
+  // at the top of its range and a 45-minute long break on top -- must come through whole, or every such cycle
+  // is cut and the ETA reads short. Reintroduce a cap of one cycle and the longest long break (60 minutes at the
+  // default): a 4-minute chapter's longest cycle is 60.6 minutes, and the `counts in full` assertion fails.
+  const top = 1 - 1e-12;
+  for (const [perHour, chapterMs] of [[4, 4 * MIN], [4, 30_000], [4, 20 * MIN], [30, 30_000], [30, 5 * MIN], [12, 3 * MIN], [1, 30 * MIN]]) {
+    const draws = [top, 0, top];
+    const brk = nextBreakMs({ perHour, chapterMs, rand: () => draws.shift()! });
+    assert.equal(brk.long, true);
+    const sample = chapterMs + brk.ms;
+    const expected = expectedCycleMs({ perHour, chapterMs });
+    assert.equal(ewmaCycle(null, sample, expected), sample,
+      `${perHour} an hour, ${chapterMs / 1000} s chapters: a ${(sample / MIN).toFixed(1)}-minute cycle counts in full`);
+  }
 });
 
 test('an ETA from the running cycle comes out at the time the chapters really take', () => {

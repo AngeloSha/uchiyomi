@@ -221,16 +221,24 @@ const EWMA_ALPHA = 0.2;
 
 /**
  * The running average of real time per chapter on a source, breaks and waits included -- what the ETA is
- * built from, so the time lost to a busy source or a closed window shows up in it.
+ * built from, so the time lost to a busy source shows up in it.
  *
- * `expectedMs` is expectedCycleMs for the chapter the sample is from. Each sample is capped at three of those
- * plus the longest long break first: one night outside the window, or a restart that sat out a 12-hour
- * backoff, is not how long a chapter takes, and uncapped it would read "about 40 days" for a week afterwards.
- * ⚠️ But a long break is: a cycle that took one is real and counts in full. Capped at three cycles alone,
- * every long break at 30 an hour (three cycles = 6 minutes) was cut, and the ETA read a quarter to a third short.
+ * `expectedMs` is expectedCycleMs for the chapter the sample is from. Each sample is capped at the longest cycle
+ * a chapter really has -- one expected cycle, the longest long break on top, and a second expected cycle of
+ * headroom for a short break drawn high and a chapter that ran slow -- so 75 minutes at the default 4 an hour.
+ * One night outside the window, or a restart that sat out a 12-hour backoff, is not how long a chapter takes:
+ * uncapped it would read "about 40 days" for a week afterwards. ⚠️ But a long break is: a cycle that took one is
+ * real and counts in full. Capped at three cycles alone, every long break at 30 an hour (6 minutes) was cut, and
+ * the ETA read a quarter to a third short; capped at three cycles AND the long break, one closed-window night at
+ * the default rate moved the average from 15 to 30 minutes, and the ETA doubled the next morning.
+ *
+ * ⚠️ The cap only limits the damage. The scheduler (lib/archive.ts) must take the time a source spent outside its
+ * window, or in a refusal's backoff, OFF a sample before it feeds it in: that time is the window's and the
+ * site's, not the chapter's, and even capped a night still moves this average from 15 to 27 minutes.
  */
 export function ewmaCycle(prev: number | null | undefined, sampleMs: number, expectedMs: number): number {
-  const cap = 3 * Math.max(0, expectedMs) + ARCHIVE_DEFAULTS.longBreakMs[1];
+  const expected = Math.max(0, expectedMs);
+  const cap = expected + ARCHIVE_DEFAULTS.longBreakMs[1] + expected;
   const s = Math.min(Math.max(0, sampleMs), cap);
   if (prev == null || !(prev > 0)) return Math.round(s);
   return Math.round(prev + EWMA_ALPHA * (s - prev));

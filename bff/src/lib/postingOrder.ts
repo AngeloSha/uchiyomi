@@ -311,14 +311,17 @@ export function assignPostingNumbers<T extends SourceChapter>(seq: readonly T[],
     const g = groupKey(c);
     const slot = slots.get(slotKey);
     let n: number;
+    // A copy of an earlier post (a version) shares that post's number wherever it turns up in the walk.
+    let version = false;
     if (matched[i]) {
       n = numKey(matched[i]!.number);
       if (!slot) slots.set(slotKey, { number: n, groups: new Set([g]) });
-      else if (slot.number === n) slot.groups.add(g);
+      else if (slot.number === n) { slot.groups.add(g); version = true; }
     } else {
       if (slot && !slot.groups.has(g)) {
         n = slot.number;
         slot.groups.add(g);
+        version = true;
       } else {
         const before = nextKnown[i];
         let at = before === undefined ? Math.floor(top) + 1 : freeBetween(prev, before, taken);
@@ -334,11 +337,13 @@ export function assignPostingNumbers<T extends SourceChapter>(seq: readonly T[],
     taken.add(n);
     top = Math.max(top, n);
     numbers[i] = n;
-    // Never backwards: a copy that joined an EARLIER post's number, or a stored version walked late, says
-    // nothing about where the next new post goes. `prev = n` put a post inserted after such a copy just above
-    // the old number (2.5 beside chapter 2, not 9.5 between 9 and 10), for good, since numbers are never
-    // recomputed. A known post that really went backwards then leaves no room, and takes the conflict path.
-    prev = Math.max(prev, n);
+    // A version says nothing about where the next new post goes: it joined an EARLIER post's number, wherever it
+    // was posted. Moving `prev` back to it put a post inserted after a late copy just above the old number (2.5
+    // beside chapter 2, not 9.5 between 9 and 10), for good, since numbers are never recomputed. ⚠️ Only a
+    // version: a known post of its own that the listing now shows earlier (a6 re-dated between a2 and a3) does
+    // say where the posts after it go. `prev = max(prev, n)` kept prev at 6 there, so a post inserted after a3
+    // found no room below a4 and took the conflict path to the end of the series (11, not 3.5).
+    if (!version) prev = n;
   });
 
   const rows: PostNumber[] = seq.map((c, i) => rowOf(c, numbers[i]));
@@ -517,6 +522,13 @@ const baseName = (file: string): string => {
   return dot > 0 ? b.slice(0, dot) : b;
 };
 
+/**
+ * A file's own name for itself: its base name without renumberedFile's collision rank. `Chapter 5 (2)` is the
+ * second book on 5, and '(2)' is Uchiyomi's count, not something the file or its post says -- read as a name,
+ * it matched a post titled 'Chapter 5 (2)' (a two-part episode on Webtoons) by 'name', and the plan read clean.
+ */
+const ownName = (file: string): string => baseName(file).replace(/ \(\d+\)$/, '');
+
 /** A name, as written and with its number taken off, both normalised; '' dropped. */
 function forms(name: string | null | undefined, n: number): string[] {
   const t = displayTitle(name);
@@ -600,7 +612,10 @@ export function planRenumber(books: readonly PlanBook[], target: RenumberTarget,
     // a weaker spelling.
     const byName = hits(b.chapterNameSource ? [] : forms(b.chapterName, b.number));
     if (byName.length) return unique(byName);
-    return unique(hits([...namedForms(b.title, b.number), ...namedForms(baseName(b.file), b.number)]));
+    // The scanner's title is the filename's, collision rank and all, so a title that IS the file name loses it too.
+    const file = ownName(b.file);
+    const title = b.title?.trim() === baseName(b.file) ? file : b.title;
+    return unique(hits([...namedForms(title, b.number), ...namedForms(file, b.number)]));
   });
   pass('date', (b) => {
     if (untrusted(b)) return undefined;

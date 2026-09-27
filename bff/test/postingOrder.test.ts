@@ -289,6 +289,38 @@ test('a copy that joins an earlier number does not pull the next new post back b
   assert.equal(n('ins'), 9.5, 'the inserted post goes between its neighbours, 9 and 10');
   assert.equal(n('a10'), 10);
   assert.equal(second.conflict, undefined);
+
+  // Stored now, the late copy is a known post, and still a version: a post inserted right after it goes between
+  // 9 and 9.5. Reintroduce by not counting a matched copy that joins its slot as a version (drop `version = true`
+  // from the matched branch): prev goes back to 2, and the `right after the stored copy` assertion reads 2.5.
+  const later = [...next.slice(0, 10), { sourceId: 'ins2', number: 9, title: 'Chapter 9: Omake', scanlator: 'Alpha', order: 10.5, publishedAt: at(9.3) }, ...next.slice(10)];
+  const third = assignPostingNumbers(postingSequence(later), second.rows);
+  const n3 = (id: string) => third.rows.find((r) => r.postId === id)!.number;
+  assert.equal(n3('b2'), 2);
+  assert.equal(n3('ins2'), 9.25, 'a post right after the stored copy still goes between 9 and 9.5');
+  assert.equal(n3('ins'), 9.5);
+  assert.equal(third.conflict, undefined);
+});
+
+test('a known post the listing now shows earlier still says where the next new post goes', () => {
+  // Alpha has posted 1..10. The site re-dates chapter 6 to between 2 and 3, and Alpha inserts a post after 3.
+  // Chapter 6 keeps its number; chapter 3, walked after it, is where the walk is again. Reintroduce by never
+  // walking backwards (`prev = Math.max(prev, n)` in assignPostingNumbers): prev stays at 6, the inserted post
+  // finds no room below 4 and takes the conflict path to 11 -- the `between 3 and 4` assertion fails.
+  const at = (d: number) => new Date(EPOCH + d * DAY).toISOString();
+  const alpha = (k: number, order: number, day = k): SourceChapter => ({ sourceId: `a${k}`, number: k, title: `Chapter ${k}: Part ${k}`, scanlator: 'Alpha', order, publishedAt: at(day) });
+  const first = assignPostingNumbers(postingSequence(Array.from({ length: 10 }, (_, i) => alpha(i + 1, i + 1))));
+  const next: SourceChapter[] = [
+    alpha(1, 1), alpha(2, 2), alpha(6, 3, 2.5), alpha(3, 4),
+    { sourceId: 'x', number: 3, title: 'Chapter 3: Extra', scanlator: 'Alpha', order: 5, publishedAt: at(3.5) },
+    alpha(4, 6), alpha(5, 7), alpha(7, 8), alpha(8, 9), alpha(9, 10), alpha(10, 11),
+  ];
+  const second = assignPostingNumbers(postingSequence(next), first.rows);
+  const n = (id: string) => second.rows.find((r) => r.postId === id)!.number;
+  assert.equal(n('a6'), 6, 'a known post keeps its number wherever it is listed');
+  assert.equal(n('x'), 3.5, 'the inserted post goes between 3 and 4');
+  assert.equal(second.conflict, undefined);
+  assert.deepEqual(second.added.map((r) => [r.postId, r.number]), [['x', 3.5]]);
 });
 
 test('float32 noise does not split a number', () => {
@@ -461,6 +493,19 @@ test('planRenumber: a filename or title that only repeats the number is not a na
   // A title that names more than the number still counts.
   const titled = planRenumber([{ ...bare, title: 'Chapter 5: The Return' }], { mode: 'posting_order', posts }, {});
   assert.deepEqual([titled.moves[0].to, titled.moves[0].how], [41, 'name']);
+  // Nor is the renumber's own collision rank: the second book on 5 is `Chapter 5 (2).cbz` (renumberedFile), with
+  // the scanner's title to match, and '(2)' is Uchiyomi's count, not the file's. Reintroduce by reading
+  // baseName(b.file) as it is, or by leaving the title that equals it alone: the post titled 'Chapter 5 (2)'
+  // matches by 'name' and the `a collision rank is not a name` assertion fails.
+  const ranked: PlanPost[] = [...posts, { postId: 'part2', number: 42, from: 5, title: 'Chapter 5 (2)' }, { postId: 'two', number: 43, from: 5, title: '2' }];
+  const second: PlanBook = { ...bare, id: 'b5-2', file: renumberedFile(bare.file, 5, 2), title: 'Chapter 5 (2)' };
+  assert.equal(second.file, 'S/Chapter 5 (2).cbz');
+  const collided = planRenumber([second], { mode: 'posting_order', posts: ranked }, { listing: new Map([[5, 'plain']]) });
+  assert.deepEqual([collided.moves[0].to, collided.moves[0].how], [40, 'listing'], 'a collision rank is not a name');
+  assert.equal(collided.clean, false);
+  // A file with the rank and a title of its own is still read by its title.
+  const both = planRenumber([{ ...second, title: 'Chapter 5: The Return' }], { mode: 'posting_order', posts: ranked }, {});
+  assert.deepEqual([both.moves[0].to, both.moves[0].how], [41, 'name']);
 });
 
 test('planRenumber: two posts with the book\'s own name are an ambiguity, not a cue to try its title', () => {
