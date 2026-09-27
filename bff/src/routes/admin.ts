@@ -22,7 +22,7 @@ import { healthAllWithEvidence, setDisabled, clearBlock, pruneOrphanedHealth, is
 import { smokeTest } from '../lib/sourceProbe';
 import { startSourceCheck, checkRunning, checkProgress } from '../lib/sourceWatchdog';
 import { checkSourceLive, recordLiveResult } from '../lib/sourceCheck';
-import { currentFailures } from '../lib/sourceEvidence';
+import { currentFailures, stageLines } from '../lib/sourceEvidence';
 import { runExtensionMonitor, runExtensionCheck, extState, liveStore as extensionStore } from '../lib/extensionMonitor';
 import { readSites, writeSites } from '../lib/sources/customSites';
 import { reloadAll, listSources, getSource, detectEngine, listRemoteSources, suwayomiConfigured, suwayomiAbout, swAdapterId, withTimeout } from '../lib/sources';
@@ -3345,7 +3345,9 @@ export default async function adminRoutes(app: FastifyInstance) {
    * Every source's stored health, plus what the admin surfaces need and readers never get (#115): the last live
    * verdict (`live`) and the failures that are open and confirmed now (`failing`, lib/sourceEvidence.ts). The
    * Providers card overlays these on the public status, which stays exactly what GET /api/sources says: that one
-   * is a single cache key for every account and feeds Discover's ordering.
+   * is a single cache key for every account and feeds Discover's ordering. `evidence` is the same per-stage lines
+   * Health's rows carry, so the card and the row are drawn from one reading of `stages`; `testMs` is how long one
+   * Test may take, for the Test button's clock (the same number Health's sources check sends).
    */
   app.get('/api/admin/sources', async () => {
     const now = Date.now();
@@ -3356,7 +3358,9 @@ export default async function adminRoutes(app: FastifyInstance) {
         live: h.live_at
           ? { at: h.live_at, by: h.live_by, state: h.live_state, stage: h.live_stage, code: h.live_code, checks: h.live_checks }
           : null,
+        evidence: stageLines(h.stages),
       })),
+      testMs: env.SOURCE_TEST_TIMEOUT_MS + 8000,
     };
   });
   /**

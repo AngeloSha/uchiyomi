@@ -14,7 +14,9 @@
  */
 import { keys, t as tr } from './i18n';
 import type { HealthCheck } from './types';
-import type { SrcStatus } from './providerGroups';
+import type { ProviderStatus } from './providerGroups';
+
+export type { ProviderStatus };
 
 /**
  * The six tones.
@@ -92,18 +94,15 @@ export function healthMark(status: HealthCheck['status']): Mark {
   return { tone: m.tone, label: tr(m.label) };
 }
 
-/**
- * The statuses a source card can show. Today exactly the public source statuses; #115 widens it with
- * `'failing'` (a source whose last deliberate check failed although traffic has not blocked it), and the
- * Record below then refuses to compile until that status has a tone and a word.
- */
-export type ProviderStatus = SrcStatus;
+// The statuses a source card can show (ProviderStatus, lib/providerGroups.ts): the public source statuses plus
+// #115's `'failing'` -- a source whose last deliberate check failed although traffic has not blocked it. The
+// Record below refuses to compile until every one of them has a tone and a word.
 
 // Specific words, not the bare "Off" / "Down" / "Ready": one English word used for two meanings forces a
 // translator to pick one of them (the critic's rule for this release's keys). ⚠️ Not the bare "Blocked"
 // either: that key is a scanlation GROUP's Block toggle (SourcesSheet.tsx), translated to agree with that
 // noun, and on a source card it disagreed with "Turned off" beside it (es "Bloqueado" / "Desactivada").
-export const SOURCE_LABELS = keys('Healthy', 'Blocked by the site', 'Rate-limited', 'Not answering', 'Answers empty', 'Turned off');
+export const SOURCE_LABELS = keys('Healthy', 'Blocked by the site', 'Rate-limited', 'Not answering', 'Answers empty', 'Turned off', 'Failing');
 
 const SOURCE_MARK: Record<ProviderStatus, { tone: Tone; label: (typeof SOURCE_LABELS)[number] }> = {
   ok: { tone: 'ok', label: SOURCE_LABELS[0] },
@@ -114,6 +113,9 @@ const SOURCE_MARK: Record<ProviderStatus, { tone: Tone; label: (typeof SOURCE_LA
   // it may be a site redesign rather than a failure, and until it is tested nobody knows which.
   quiet: { tone: 'info', label: SOURCE_LABELS[4] },
   disabled: { tone: 'off', label: SOURCE_LABELS[5] },
+  // #115: a confirmed failure at a step, with no cooldown behind it. Amber, not red: the site may be fine for
+  // reading what is already here, and the stage lines under the card say which step broke.
+  failing: { tone: 'warn', label: SOURCE_LABELS[6] },
 };
 
 /** The statuses sourceMark knows, for the test that holds it to the Src type's own list. */

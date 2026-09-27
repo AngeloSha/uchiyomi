@@ -22,6 +22,14 @@
 //   To hold a notice on screen while the walk opens a dialog under it, the mouse rests on the card: a notice
 //   pauses while hovered, which is behaviour the walk relies on and so also checks.
 //
+//   sources -- #115, a failing source shows its failing stage on Providers and on Health. fake-a's search is
+//   scripted to fail (fakeSource `error`, HTTP 500), then at 390 x 844 and 1280 x 800:
+//     1. Providers -> Test fake-a: the running key shows its clock, the card lists ✗ Search, never "Working
+//        normally." beside a ✗, and its mark reads "Failing" (the public status is still 'ok');
+//     2. a reload keeps the verdict: the card's stored evidence still says ✗ Search;
+//     3. Health -> Source health lists fake-a by name with the ✗ Search line;
+//     4. with search scripted back to `ok`, Test from the Health row clears the finding.
+//
 // Screenshots go to $OUT (default shots49). LOOK at them: every check here is geometry, and geometry passes on
 // a card that is transparent, clipped or unreadable.
 import puppeteer from 'puppeteer';
@@ -31,7 +39,13 @@ const BASE = process.env.BASE || 'http://127.0.0.1:18149';
 const USER = process.env.E2E_USER || 'e2e';
 const PASS = process.env.E2E_PASS || 'e2e-passw0rd-123';
 const OUT = process.env.OUT || 'shots49';
-const PHASES = (process.env.PHASES || 'notices').split(',').map((s) => s.trim()).filter(Boolean);
+const PHASES = (process.env.PHASES || 'notices,sources').split(',').map((s) => s.trim()).filter(Boolean);
+// The fake sources' control ports, as up.sh derives them from the app's port.
+const FAKE_A = process.env.FAKE_A_URL || `http://127.0.0.1:${20_000 + (Number(new URL(BASE).port || 80) % 1000) * 2}`;
+const script = async (base, chapter, page, behaviour) => {
+  const r = await fetch(`${base}/__script`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ chapter, page, behaviour }) });
+  if (!r.ok) throw new Error(`script ${chapter}/${page} ${behaviour} -> ${r.status}`);
+};
 mkdirSync(OUT, { recursive: true });
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -303,6 +317,62 @@ async function notices(width) {
   await page.emulateMediaFeatures([{ name: 'prefers-reduced-motion', value: 'no-preference' }]);
 }
 
+/** #115: a Test of a failing source shows the failing stage by name, on Providers and on Health. */
+async function sources(width) {
+  const wide = width >= 1024;
+  await page.setViewport({ width, height: wide ? 800 : 844 });
+  const tag = `${width}`;
+  const card = '[data-source-card="fake-a"]';
+  await script(FAKE_A, 'search', 0, 'error');
+  await go('/admin/?tab=Providers', 3000);
+  await page.waitForSelector(`${card} [data-source-test="fake-a"]`, { timeout: 20_000 });
+  await page.$eval(card, (el) => el.scrollIntoView({ block: 'center' }));
+  await page.click(`${card} [data-source-test="fake-a"]`);
+  const clock = await waitFor(() => page.$eval(`${card} [data-source-test="fake-a"]`, (b) => /Testing… \d+:\d\d of up to \d+:\d\d/.test(b.textContent || '') && b.textContent), 5000, 100);
+  check(`${tag}: the running Test shows its clock against the limit`, !!clock, String(clock));
+  const failed = await waitFor(() => page.$(`${card} [data-source-evidence="test"] [data-evidence-stage="search"][data-evidence-state="fail"]`), 60_000, 300);
+  check(`${tag}: Providers -> Test lists ✗ Search`, !!failed);
+  const cardText = await page.$eval(card, (el) => el.textContent || '');
+  check(`${tag}: never "Working normally." beside a failed step`, !/Working normally\./.test(cardText), cardText.slice(0, 200));
+  const mark = await waitFor(() => page.$eval(`${card} [data-status]`, (m) => (m.textContent?.trim() === 'Failing' ? m.getAttribute('data-status') : null)), 15_000, 300);
+  check(`${tag}: the card's mark reads Failing, in amber`, mark === 'warn', String(mark));
+  await page.$eval(card, (el) => el.scrollIntoView({ block: 'center' }));
+  await shot(`${tag}-sources-1-providers-test`);
+
+  await go('/admin/?tab=Providers', 3000);
+  const stored = await waitFor(() => page.$(`${card} [data-source-evidence="stored"] [data-evidence-stage="search"][data-evidence-state="fail"]`), 15_000, 300);
+  check(`${tag}: after a reload the card still says ✗ Search`, !!stored);
+  await page.$eval(card, (el) => el.scrollIntoView({ block: 'center' }));
+  await shot(`${tag}-sources-2-providers-reload`);
+
+  await go('/admin/?tab=Health', 4000);
+  const hc = '[data-health-check="sources"]';
+  await page.waitForSelector(hc, { timeout: 30_000 });
+  await page.$eval(`${hc} button`, (b) => b.click());
+  const row = await waitFor(() => page.evaluate((hc) => {
+    const r = [...document.querySelectorAll(`${hc} [data-source-evidence]`)].map((e) => e.closest('.flex'))
+      .find((x) => x?.querySelector('p')?.textContent?.trim() === 'fake-a');
+    return r ? !!r.querySelector('[data-evidence-stage="search"][data-evidence-state="fail"]') : null;
+  }, hc), 20_000, 300);
+  check(`${tag}: Health -> Source health names fake-a with ✗ Search`, row === true, String(row));
+  await page.$eval(hc, (el) => el.scrollIntoView({ block: 'start' }));
+  await shot(`${tag}-sources-3-health`);
+
+  // Search works again: a Test from the Health row records the pass, and the finding goes.
+  await script(FAKE_A, 'search', 0, 'ok');
+  const pressed = await page.evaluate((hc) => {
+    const r = [...document.querySelectorAll(`${hc} [data-source-evidence]`)].map((e) => e.closest('.flex'))
+      .find((x) => x?.querySelector('p')?.textContent?.trim() === 'fake-a');
+    const b = r?.querySelector('[data-health-action="test"]');
+    b?.click();
+    return !!b;
+  }, hc);
+  check(`${tag}: the Health row offers Test`, pressed);
+  const gone = await waitFor(() => page.evaluate((hc) => ![...document.querySelectorAll(`${hc} [data-evidence-state="fail"]`)].length, hc), 60_000, 500);
+  check(`${tag}: a passing Test from Health clears the ✗`, !!gone);
+  await shot(`${tag}-sources-4-health-cleared`);
+}
+
 try {
   if (PHASES.includes('notices')) {
     // A series with sources, for the two Check now buttons: Walk Tale from fake-a, four chapters in.
@@ -313,6 +383,13 @@ try {
     for (const w of [390, 1024]) {
       console.log(`\n  notices @${w}`);
       await notices(w);
+    }
+  }
+  // Last: a sources run that stops half-way leaves fake-a's search failing, which no other phase should meet.
+  if (PHASES.includes('sources')) {
+    for (const w of [390, 1280]) {
+      console.log(`\n  sources @${w}`);
+      await sources(w);
     }
   }
 } catch (e) {

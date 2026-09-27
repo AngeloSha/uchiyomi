@@ -7707,8 +7707,8 @@ paths:
     get:
       tags:
         - admin
-      summary: Every source with its stored health, cooldown, the last live verdict (`live`) and its open, confirmed
-        failures per stage (`failing`).
+      summary: Every source with its stored health, cooldown, the last live verdict (`live`), its open, confirmed
+        failures per stage (`failing`) and one line per stage (`evidence`); `testMs` is how long one Test may take.
       operationId: getApiAdminSources
       description: Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
       security:

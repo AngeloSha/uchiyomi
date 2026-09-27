@@ -146,11 +146,17 @@ test('THE #115 SHAPE: a source that fails its Test is on Health, by name, with t
   assert.ok(c.testMs >= 1500, 'Health can say how long a Test may take');
 
   // GET /api/admin/sources carries it for the Providers card; the public status is untouched.
-  const list = (await inject('GET', '/api/admin/sources')).json().content;
-  const mine = list.find((r: any) => r.source_id === BALL);
+  const admin = (await inject('GET', '/api/admin/sources')).json();
+  const mine = admin.content.find((r: any) => r.source_id === BALL);
   assert.deepEqual(mine.failing.map((f: any) => [f.stage, f.by, f.kind]), [['search', 'test', 'error']]);
   assert.equal(mine.live.state, 'fail');
   assert.equal(mine.status, 'ok');
+  // The card draws its stage lines from the same reading Health's row does, and its Test clock from the same limit.
+  // Reintroduce by dropping `evidence` (or `testMs`) from the route: the card has no ✗ Search line (or no clock).
+  assert.ok(Array.isArray(mine.evidence), 'the Providers card has no stage lines');
+  assert.deepEqual(mine.evidence.map((e: any) => [e.stage, e.state]), it.evidence.map((e: any) => [e.stage, e.state]));
+  assert.equal(mine.evidence.find((e: any) => e.stage === 'search').state, 'fail', 'the Providers card has its ✗ Search line');
+  assert.equal(admin.testMs, c.testMs, 'the Test button and Health agree on how long a Test may take');
 });
 
 test('stage-aware clearing: a download does not close a search failure, a search does', { skip }, async () => {

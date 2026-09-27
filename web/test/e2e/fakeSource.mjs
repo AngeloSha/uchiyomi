@@ -12,6 +12,8 @@
 //   429                                                           /img, EVERY request, forever
 //   short:<n>                                                     /pages (n urls) AND /chapters (pages: n)
 //   omit:<a>-<b>                                                  /chapters (those numbers are not listed)
+//   error                                                         /search only ("search", page 0): HTTP 500, so
+//                                                                 the adapter throws -- #115's failing Search stage
 //
 // ⚠️ `short:` has to change BOTH routes. The downloader takes `expected = max(urls.length, chapter.pages)`
 // (lib/downloader.ts), so a listing that still declares twelve pages while /pages hands back two makes an
@@ -160,7 +162,7 @@ const server = http.createServer(async (req, res) => {
       const page = Number(body.page ?? 0);
       const behaviour = String(body.behaviour ?? body.behavior ?? '');
       if (!chapter || !Number.isInteger(page) || page < 0 || page > 12 ||
-          !/^(?:ok|tiny-webp|404|short:(?:[1-9]|1[0-2])|omit:\d+-\d+|slow:\d+|429|429:after=\d+,retryAfter=\d+)$/.test(behaviour)) {
+          !/^(?:ok|error|tiny-webp|404|short:(?:[1-9]|1[0-2])|omit:\d+-\d+|slow:\d+|429|429:after=\d+,retryAfter=\d+)$/.test(behaviour)) {
         return sendJson(res, 400, { error: 'bad_script' });
       }
       scripts.set(keyOf(chapter, page), behaviour);
@@ -173,6 +175,8 @@ const server = http.createServer(async (req, res) => {
       const row = begin(req, url, { route: 'search', query: url.searchParams.get('q') || '' });
       const behaviour = behaviourFor('search', 0);
       await delayFor(behaviour);
+      // #115: the site failing at the search step, as an extension's exception does -- a real error, not an empty page.
+      if (behaviour === 'error') { finish(row, 500); return sendJson(res, 500, { error: 'the fake site failed while searching' }); }
       const q = (url.searchParams.get('q') || '').trim().toLowerCase();
       const found = SERIES.filter((s) => !q || s.title.toLowerCase().includes(q)).map((s) => ({
         sourceId: s.sourceId, source: NAME, title: s.title,
