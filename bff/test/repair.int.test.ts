@@ -523,6 +523,11 @@ test('a source in a cooldown is silence, not an answer', { skip }, async () => {
   assert.equal(r.short.confirmed, 0);
   assert.equal((await book(id)).short_confirmed_at, null, 'a source we did not dare ask has said nothing');
   assert.deepEqual(pageCalls.filter((c) => c.includes(`::${T.short}::7`)), [], 'and it was not asked');
+  // The row's "N sources asked, M answered" counts requests made. Reintroduce by counting before ask():
+  // two cooling sources read as asked and silent.
+  const res = (await q('SELECT short_result FROM lib_books WHERE id = $1', [id]))[0].short_result;
+  assert.equal(res?.asked, 0, 'a source in a cooldown is not counted as asked');
+  assert.equal(res.why, 'source_silent');
 });
 
 test('when the followed sources have nothing longer, another site is searched, and its copy is the last one asked', { skip }, async () => {
@@ -605,6 +610,18 @@ test('a scoped run that cannot download never turns the Library ring', { skip },
   const card = listRuns().find((c: any) => c.kind === 'repair');
   assert.equal(card.downloads, false);
   assert.equal(card.label, undefined, 'an untargeted run has no one thing to name');
+  assert.equal(card.repairKind, 'steps:solver');
+});
+
+test("a one-chapter press's card says which run it is, which series and which chapter", { skip }, async () => {
+  // "Find a longer copy · Repair Short ch 5" is built from these. Reintroduce by dropping the repairKind, number
+  // or seriesId assignment in runRepair: the card cannot say it, and the Downloads view cannot hide the title
+  // of a series its viewer may not list (routes/sources.ts).
+  const id = await shortBook(5);
+  await runRepair(undefined, { only: ['short'], bookId: id, userId: null });
+  const card = listRuns().find((c: any) => c.kind === 'repair');
+  assert.deepEqual([card.repairKind, card.label, card.number, card.seriesId], ['fix_short', T.short, 5, SHORT],
+    'the card names the kind of run, the series, the chapter and the series id');
 });
 
 test('a Fix on a chapter whose folder is busy says so, and one on a chapter it will not touch says why', { skip }, async () => {
@@ -739,13 +756,27 @@ test('Fill now fetches a gap a followed source already lists, even with updates 
     const g = (await series(LISTED)).gaps_result;
     assert.equal(g.fetched, 1);
     assert.equal(g.sweep, 0);
-    // The nightly is unchanged: it still skips a paused series and still leaves a listed gap to the sweep.
+    // The nightly is unchanged: it still skips a paused series ('the nightly still leaves a paused series alone').
     const item = (await runHealthChecks()).checks.find((c: any) => c.id === 'chapter-gaps').items.find((i: any) => i.seriesId === LISTED);
     assert.equal(item, undefined, 'the hole is closed');
   } finally {
     await q('UPDATE lib_series SET auto_update = true WHERE id = $1', [LISTED]);
     await q('DELETE FROM lib_books WHERE series_id = $1 AND number = 11', [LISTED]);
     rmSync(join(DL, folderOf(T.listed), 'Chapter 11.cbz'), { force: true });
+  }
+});
+
+test('the nightly still leaves a paused series alone', { skip }, async () => {
+  // Fill now looks at a paused series because a person named it; an untargeted run must not. Reintroduce by
+  // dropping `s.auto_update AND` for every run (not only a named one): the paused series is looked at and stamped.
+  await q('UPDATE lib_series SET gaps_checked_at = now() WHERE id = ANY($1) AND id <> $2', [MINE, LISTED]);
+  await q('UPDATE lib_series SET auto_update = false WHERE id = $1', [LISTED]);
+  try {
+    const r = await runRepair(undefined, { only: ['gaps'], userId: null });
+    assert.equal(r.gaps.series, 0, 'the one series left unchecked is paused, so there is nothing to look at');
+    assert.equal((await series(LISTED)).gaps_checked_at, null, 'and it was not stamped as checked');
+  } finally {
+    await q('UPDATE lib_series SET auto_update = true WHERE id = $1', [LISTED]);
   }
 });
 
@@ -1026,7 +1057,45 @@ test('old runs are pruned, but never below fifty and never inside ninety days', 
   const left = await q('SELECT kind, started_at FROM repair_runs ORDER BY started_at DESC');
   assert.equal(left.length, HISTORY_KEEP, 'the newest fifty stay, however old; the three oldest go');
   assert.equal(left[0].kind, 'fill', 'and a young row is never one of them');
+
+  // A busy install: more than fifty runs inside ninety days. Every one of them stays, and only the old ones go.
+  // Reintroduce by pruning on the count alone (keep the newest fifty): the young rows past fifty are deleted.
   await q('DELETE FROM repair_runs');
+  const YOUNG = HISTORY_KEEP + 5;
+  for (let i = 1; i <= YOUNG; i++) {
+    await q(`INSERT INTO repair_runs (id, started_at, origin, kind, status) VALUES (gen_random_uuid(), now() - ($1 || ' days')::interval, 'manual', 'fill', 'done')`,
+      [String(i)]);
+  }
+  for (let i = 0; i < 3; i++) {
+    await q(`INSERT INTO repair_runs (id, started_at, origin, kind, status) VALUES (gen_random_uuid(), now() - ($1 || ' days')::interval, 'nightly', 'full', 'done')`,
+      [String(100 + i)]);
+  }
+  await pruneRuns();
+  const kept = await q('SELECT kind FROM repair_runs');
+  assert.equal(kept.filter((r: any) => r.kind === 'fill').length, YOUNG, 'every run inside ninety days survives, past fifty or not');
+  assert.equal(kept.filter((r: any) => r.kind === 'full').length, 0, 'and the ones past both limits go');
+  await q('DELETE FROM repair_runs');
+});
+
+test('a digest read while a run finishes is not kept', { skip }, async () => {
+  // The status route is polled every two seconds during a run, so a read that started before the run finished
+  // and returned after it is ordinary. Reintroduce by storing the memo unconditionally in runDigest: the next
+  // read is that stale copy, and the run that just ended is missing from `recent` for a minute.
+  const { runDigest, clearRunDigest } = await import('../src/lib/repairRuns');
+  await q('DELETE FROM repair_runs');
+  clearRunDigest();
+  const reading = runDigest();
+  // A run finishes while those queries are out: finishRunRecord drops the digest once its row is written. In the
+  // same tick, so the drop lands before the read comes back whatever the database's timing.
+  clearRunDigest();
+  const id = (await q(`INSERT INTO repair_runs (id, started_at, finished_at, origin, kind, status, ms)
+                       VALUES (gen_random_uuid(), now(), now(), 'manual', 'fill', 'done', 5) RETURNING id`))[0].id;
+  const during = await reading;
+  const next = await runDigest();
+  assert.notEqual(next, during, 'the digest read across the finish was kept as fresh');
+  assert.equal(next.recent[0]?.id, id, 'the run that finished during the read is in the next one');
+  await q('DELETE FROM repair_runs');
+  clearRunDigest();
 });
 
 test('the nightly cannot delete, merge or renumber anything', { skip }, () => {

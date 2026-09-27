@@ -111,7 +111,9 @@ test('the engine client giving up is our deadline too: inconclusive, never a fai
   const late = adapter({ search: async () => { throw new Error('suwayomi timeout after 30000ms'); } });
   const r = await smokeTest(late, { timeoutMs: 5000 });
   assert.equal(r.state, 'inconclusive', JSON.stringify(r.failure));
-  assert.deepEqual(r.failure, { stage: 'search', kind: 'timeout' });
+  // The engine's own words ride along, so the verdict can name the engine (sourceDiagnosis.test.ts).
+  assert.deepEqual(r.failure, { stage: 'search', kind: 'timeout', error: 'suwayomi timeout after 30000ms' });
+  assert.equal(r.checks.at(-1)!.detail, 'suwayomi timeout after 30000ms');
   assert.equal(r.timedOut, true);
   // At a later stage the same, and what passed before it stays passed.
   const pages = await smokeTest(adapter({ getPageUrls: async () => { throw new Error('suwayomi timeout after 30000ms'); } }), { timeoutMs: 5000 });
@@ -121,6 +123,40 @@ test('the engine client giving up is our deadline too: inconclusive, never a fai
   const down = await smokeTest(adapter({ search: async () => { throw new Error('suwayomi unreachable: fetch failed (ECONNREFUSED)'); } }), { timeoutMs: 5000 });
   assert.equal(down.state, 'fail');
   assert.equal(down.failure?.kind, 'error');
+});
+
+test('an engine timeout on one title or chapter is a miss, and the next one is tried', async () => {
+  // The engine client gives up at 30 s, inside the 45 s wall: time is left for the fallback, and a working source
+  // with one hanging chapter must still pass. Reintroduce by ending the run on the first engine timeout (the
+  // wall's rule, `ours(e)`, for both): each state below reads inconclusive and the fallback call is never made.
+  const { smokeTest } = await load();
+  const LATE = 'suwayomi timeout after 30000ms';
+  const pages = adapter({
+    listChapters: async () => [ch(1), ch(2), ch(3)],
+    getPageUrls: async function (this: any, id: string) { this.calls.push(`pages:${id}`); if (id === 'c3') throw new Error(LATE); return ['p']; },
+  });
+  const p = await smokeTest(pages, { timeoutMs: 5000 });
+  assert.equal(p.state, 'pass', JSON.stringify(p.failure));
+  assert.deepEqual(pages.calls.filter((c) => c.startsWith('pages:')), ['pages:c3', 'pages:c2']);
+
+  const title = adapter({ listChapters: async function (this: any, id: string) { this.calls.push(`chapters:${id}`); if (id === 'A') throw new Error(LATE); return [ch(1)]; } });
+  const t = await smokeTest(title, { timeoutMs: 5000 });
+  assert.equal(t.state, 'pass', JSON.stringify(t.failure));
+  assert.deepEqual(title.calls.filter((c) => c.startsWith('chapters:')), ['chapters:A', 'chapters:B']);
+
+  let first = true;
+  const term = adapter({ search: async function (this: any, q: string) { this.calls.push(`search:${q}`); if (first) { first = false; throw new Error(LATE); } return [{ sourceId: 'A', source: 'probe-fake', title: 'A' }]; } });
+  const s = await smokeTest(term, { timeoutMs: 5000 });
+  assert.equal(s.state, 'pass', JSON.stringify(s.failure));
+  assert.equal(term.calls.filter((c) => c.startsWith('search:')).length, 2);
+
+  // Every candidate late and none failing: inconclusive, in the engine's words. A real error among them still wins.
+  const allLate = await smokeTest(adapter({ getPageUrls: async () => { throw new Error(LATE); } }), { timeoutMs: 5000 });
+  assert.equal(allLate.state, 'inconclusive');
+  assert.deepEqual(allLate.failure, { stage: 'pages', kind: 'timeout', error: LATE });
+  const mixed = await smokeTest(adapter({ getPageUrls: async (id: string) => { throw new Error(id === 'c2' ? LATE : 'HTTP error 404'); } }), { timeoutMs: 5000 });
+  assert.equal(mixed.state, 'fail');
+  assert.deepEqual(mixed.failure, { stage: 'pages', kind: 'error', error: 'HTTP error 404' });
 });
 
 test('unnumbered chapters are named, not called missing', async () => {

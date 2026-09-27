@@ -67,8 +67,13 @@ export function extensionEngine(d: EngineCheckDeps): HealthCheck | null {
     return {
       ...base, status: 'warn',
       summary: `Not answering${d.error ? ` (${d.error})` : ''}`,
+      // The desktop's Admin → Extensions is the engine's installer, with no setup steps and no Check again: the
+      // app starts its engine itself. Reintroduce the one note for both: "not answering is a warning…" in
+      // engineHealth.test.ts finds a desktop sent to a button it does not have.
       note: 'Uchiyomi asks again every 5 minutes by itself, and its extensions come back without a restart. ' +
-        'Admin → Extensions shows what to check for your setup, and Check again there asks at once.',
+        (d.desktop
+          ? 'If it stays this way, quit and reopen Uchiyomi, which starts its extension engine again.'
+          : 'Admin → Extensions shows what to check for your setup, and Check again there asks at once.'),
       // ⚠️ Always one finding: a warning with nothing under it reads as a broken page (health.ts `verdict`).
       items: [{
         title: 'Not answering',
@@ -81,11 +86,40 @@ export function extensionEngine(d: EngineCheckDeps): HealthCheck | null {
   // Up.
   const version = d.version ? ` (v${d.version.replace(/^v/i, '')})` : '';
   const registering = d.registering ? ' It answers again; its extensions are being registered.' : '';
+  // The engine's own words, on a source that is failing now (#115's evidence): "Cloudflare bypass currently
+  // disabled". When its setting cannot be read -- just now, or ever, on an engine too old to report it -- this is
+  // still proof it cannot use its helper, and the row says so rather than "Answering". Reintroduce by answering
+  // these two branches as before: "the engine's own words are proof when its setting cannot be read" in
+  // engineHealth.test.ts reads an ok row over a failing source.
+  const refusing = d.cloudflare.filter((e) => e.bypass);
+  const noSolver = ' Uchiyomi has no Cloudflare helper of its own to share yet: set FLARESOLVERR_URL on Uchiyomi, then connect it here.';
+  const cannotUse = (why: string, connect: boolean): HealthCheck => ({
+    ...base, status: 'warn',
+    summary: 'It cannot use its Cloudflare helper',
+    note: `${why}${registering}`,
+    items: [{
+      title: 'Cloudflare helper',
+      detail: `The engine says its own Cloudflare helper is switched off: ${names(refusing)} ${s(refusing.length, 'fails', 'fail')} because of it.` +
+        (connect && !d.ourSolver ? noSolver : ''),
+      ...(connect && d.ourSolver ? { actions: ['engine_solver' as const] } : {}),
+    }],
+  });
   if (!d.solver) {
+    if (refusing.length) {
+      return cannotUse(d.ourSolver
+        ? 'Its Cloudflare helper setting could not be read just now. Connect points it at the helper Uchiyomi uses and switches it on; nothing restarts.'
+        : 'Its Cloudflare helper setting could not be read just now.', true);
+    }
     return { ...base, status: 'ok', summary: `Answering${version}`, note: `Its Cloudflare helper setting could not be read just now.${registering}`, items: [] };
   }
   const wiring = solverWiring(d.solver, d.ourSolver, d.desktop);
   if (wiring === 'unsupported') {
+    // No setting to change from here, so no Connect: it is the engine's own configuration (or a newer engine).
+    if (refusing.length) {
+      return cannotUse(d.desktop
+        ? 'This engine version does not report its Cloudflare setting, so Uchiyomi cannot switch it on from here.'
+        : "This engine version does not report its Cloudflare setting, so Uchiyomi cannot switch it on: set FLARESOLVERR_ENABLED=true and FLARESOLVERR_URL on the engine's own container, or update the engine.", false);
+    }
     return { ...base, status: 'ok', summary: `Answering${version}`, note: `This engine version does not report its Cloudflare setting.${registering}`, items: [] };
   }
   if (wiring === 'ok') {
@@ -115,10 +149,8 @@ export function extensionEngine(d: EngineCheckDeps): HealthCheck | null {
   const seen = failing.length
     ? ` ${names(failing)} ${s(failing.length, 'fails', 'fail')} because of it.`
     : fronted.length ? ` ${names(fronted)} ${s(fronted.length, 'is', 'are')} behind Cloudflare.` : '';
-  const how = d.ourSolver
-    ? ''
-    // Never on desktop: the shell always gives Uchiyomi its helper.
-    : ' Uchiyomi has no Cloudflare helper of its own to share yet: set FLARESOLVERR_URL on Uchiyomi, then connect it here.';
+  // Never on desktop: the shell always gives Uchiyomi its helper.
+  const how = d.ourSolver ? '' : noSolver;
   const finding = d.cloudflare.length > 0;
   const item: HealthItem = {
     title: 'Cloudflare helper',

@@ -65,8 +65,14 @@ export async function refreshHealthSummary(): Promise<HealthSummary> {
 
 /** The fewest milliseconds between two refreshes someone scheduled: the report reads every series' numbers. */
 export const SUMMARY_COALESCE_MS = 30_000;
+let coalesceMs = SUMMARY_COALESCE_MS;
+let summaryRun: () => Promise<unknown> = refreshHealthSummary;
 let queued: ReturnType<typeof setTimeout> | null = null;
 let lastRefresh = 0;
+/** Jobs that refresh the summary themselves when they end: while one runs, nothing else does (see holdSummaryWhile). */
+const holds: Array<() => boolean> = [];
+const held = () => holds.some((busy) => busy());
+const warn = (e: unknown) => console.warn(`[health] summary refresh: ${(e as Error)?.message || e}`);
 
 /**
  * "Something just changed what Health would say" (v0.49.0): a repair ended, a scan ran, a source was tested.
@@ -74,17 +80,60 @@ let lastRefresh = 0;
  * does rather than up to six hours later -- the first ask runs at once, and everything asked within
  * SUMMARY_COALESCE_MS after it shares ONE refresh at the end of that window. Detached and never throws.
  *
- * ⚠️ Never while a repair holds its flag: the report would be about a library halfway through being fixed,
- * and the repair asks again itself when it ends (lib/repair.ts runRepair).
+ * Two jobs change its timing, and neither loses a change someone asked about:
+ * - ⚠️ Never while a repair holds its flag: the report would be about a library halfway through being fixed. It
+ *   waits and asks again every SUMMARY_COALESCE_MS until the flag is down (the repair also asks when it ends,
+ *   lib/repair.ts runRepair, and that ask joins the one already waiting).
+ * - Never while a job registered with holdSummaryWhile runs (the source check, #115): every source a sweep
+ *   records would otherwise ask, and a forty-source sweep ran the whole report -- ten checks, one of which reads
+ *   what every series holds -- dozens of times. Asks meanwhile are let go, because the job refreshes once itself
+ *   at its end (refreshHealthSummaryNow), and that report sees them too.
  */
 export function scheduleHealthSummaryRefresh(): void {
-  if (queued) return; // one is already coming, and it will see this change too
-  const wait = Math.max(0, lastRefresh + SUMMARY_COALESCE_MS - Date.now());
+  if (queued || held()) return; // one is already coming and will see this change too, or the held job's end will
+  arm(Math.max(0, lastRefresh + coalesceMs - Date.now()));
+}
+
+function arm(wait: number): void {
   queued = setTimeout(() => {
     queued = null;
-    if (runtime.repairing) return;
+    if (held()) return; // a held job started meanwhile: its end refreshes
+    if (runtime.repairing) return arm(coalesceMs);
     lastRefresh = Date.now();
-    refreshHealthSummary().catch((e) => console.warn(`[health] summary refresh: ${(e as Error)?.message || e}`));
+    summaryRun().catch(warn);
   }, wait);
   queued.unref?.();
+}
+
+/**
+ * A job whose end is ONE refresh (refreshHealthSummaryNow) and whose steps must not each ask for one: while
+ * `busy()` answers true, scheduleHealthSummaryRefresh arms nothing and a refresh that comes due is let go.
+ */
+export function holdSummaryWhile(busy: () => boolean): void {
+  holds.push(busy);
+}
+
+/**
+ * The refresh a held job runs at its end, awaited, so that whoever reads the job's end reads the summary after
+ * it: "Check all now" answers `running: false` only once the header's mark includes what the sweep found (the web
+ * refetches the summary at that moment, and not again for a minute). Replaces whatever was queued. Under the
+ * repair flag it is put off like any other (scheduleHealthSummaryRefresh's rule), not run beside the repair.
+ * Never throws.
+ */
+export async function refreshHealthSummaryNow(): Promise<void> {
+  if (queued) { clearTimeout(queued); queued = null; }
+  if (runtime.repairing) return arm(coalesceMs);
+  lastRefresh = Date.now();
+  await summaryRun().catch(warn);
+}
+
+/**
+ * For tests: count the refreshes instead of running the report, on a shorter window. Pass nothing to put both
+ * back. Forgets the last refresh and anything queued.
+ */
+export function setSummaryRefresh(run?: () => Promise<unknown>, timing?: { everyMs?: number }): void {
+  summaryRun = run ?? refreshHealthSummary;
+  coalesceMs = run ? timing?.everyMs ?? SUMMARY_COALESCE_MS : SUMMARY_COALESCE_MS;
+  lastRefresh = 0;
+  if (queued) { clearTimeout(queued); queued = null; }
 }

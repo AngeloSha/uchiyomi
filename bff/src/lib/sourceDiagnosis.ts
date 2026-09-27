@@ -369,6 +369,14 @@ export function diagnose(f: HealthFacts, probe?: Probe, baseUrl?: string): Diagn
               : 'It lists chapters, but no pages for the chapters it tried, which usually means the reader page changed its markup or hides pages behind a script. Re-add it with auto-detect, or update the extension.',
           'admin', { silent: true, needsProbe: fl.stage === 'search' });
       }
+      // The engine client's own deadline, which the smoke test carries in its words (sourceProbe.ts outOfTime): its
+      // rule names the engine, where the sentence below would send an admin to SOURCE_TEST_TIMEOUT_MS -- a wall the
+      // engine's fixed 30 s never reaches. Reintroduce by skipping this: "an engine timeout names the engine" in
+      // sourceDiagnosis.test.ts reads the SOURCE_TEST_TIMEOUT_MS advice.
+      if (fl.error) {
+        const e = fl.error;
+        for (const [re, make] of RULES) if (re.test(e)) return make({ err: e, stage: fl.stage });
+      }
       // Our own deadline. With nothing stored to go on, say exactly that; with a current stored error, let the
       // stored rules below speak -- they name a cause, and running out of time does not contradict it.
       if (!err) {

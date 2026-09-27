@@ -14,11 +14,7 @@ import { smokeTest, probeBase, buildProbe, type SmokeResult } from './sourceProb
 import { diagnose, currentError, type Diagnosis, type DiagnosisCode, type Probe } from './sourceDiagnosis';
 import { recordLive, type SourceHealth } from './sourceHealth';
 import { liveStagesPatch, type Stage } from './sourceEvidence';
-import { refreshHealthSummary } from './healthSummary';
-import { runtime } from './runtime';
-// ⚠️ A cycle (sourceWatchdog imports this module), safe only because checkRunning is read when a record lands,
-// never while either module is loading. Keep it that way.
-import { checkRunning } from './sourceWatchdog';
+import { scheduleHealthSummaryRefresh } from './healthSummary';
 
 export interface LiveCheck {
   smoke: SmokeResult;
@@ -108,43 +104,8 @@ export async function recordLiveResult(
     checks: r.smoke.checks,
     patch: liveStagesPatch(run, by, new Date().toISOString()),
   });
-  refreshSummarySoon();
-}
-
-/**
- * The header's Health mark follows a Test or a sweep, instead of waiting up to six hours for the server's own
- * refresh. Coalesced: one refresh at most every 30 s, the first two seconds after the burst starts.
- *
- * A sweep is ONE refresh, when it ends: sourceWatchdog.ts runSourceCheck calls this once its flag is down, and
- * while the flag is up nothing here is scheduled, a Test pressed meanwhile included. Before, every source the
- * sweep recorded re-armed the timer once the last one had fired, and a forty-source sweep at up to 53 s a source
- * ran the whole report -- ten checks, one of which reads what every series holds -- dozens of times. Never under
- * the repair flag either (the critic's rule for the shared scheduler): it waits for the repair and tries again.
- * TODO(v0.49.0 integration): fold into healthSummary.ts scheduleHealthSummaryRefresh() once health-clarity lands it.
- */
-const SUMMARY_TIMING = { firstMs: 2_000, everyMs: 30_000 };
-let summaryTiming = SUMMARY_TIMING;
-let summaryRun: () => Promise<unknown> = refreshHealthSummary;
-let summaryTimer: ReturnType<typeof setTimeout> | null = null;
-let summaryAt = 0;
-function armSummary(wait: number): void {
-  summaryTimer = setTimeout(() => {
-    summaryTimer = null;
-    if (checkRunning()) return; // a sweep started meanwhile: its end refreshes
-    if (runtime.repairing) return armSummary(summaryTiming.everyMs);
-    summaryAt = Date.now();
-    void summaryRun().catch(() => {});
-  }, wait);
-  summaryTimer.unref?.();
-}
-export function refreshSummarySoon(): void {
-  if (summaryTimer || checkRunning()) return;
-  armSummary(Math.max(summaryTiming.firstMs, summaryAt + summaryTiming.everyMs - Date.now()));
-}
-/** Exposed for tests: count the refreshes instead of running the report, on a shorter clock. Pass nothing to put both back. */
-export function setSummaryRefresh(run?: () => Promise<unknown>, timing?: Partial<typeof SUMMARY_TIMING>): void {
-  summaryRun = run ?? refreshHealthSummary;
-  summaryTiming = run ? { ...SUMMARY_TIMING, ...timing } : SUMMARY_TIMING;
-  summaryAt = 0;
-  if (summaryTimer) { clearTimeout(summaryTimer); summaryTimer = null; }
+  // The header's Health mark follows a Test, instead of waiting up to six hours for the server's own refresh.
+  // During a sweep this asks nothing: the sweep holds the summary and refreshes it once, at its end
+  // (sourceWatchdog.ts runSourceCheck; lib/healthSummary.ts has the rules, the repair's included).
+  scheduleHealthSummaryRefresh();
 }

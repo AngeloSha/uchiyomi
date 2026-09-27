@@ -2415,9 +2415,9 @@ export default async function sourceRoutes(app: FastifyInstance) {
     const activity = listActivity();
     const seen = await downloadsAudience(vc(req), me, admin, {
       folders: [...jobs.keys(), ...activity.active.map((e) => e.folder), ...activity.recent.map((e) => e.folder)],
-      // By id: a run's current series. The slow archive's rows (#117) join here, and answer as `archive`
-      // filtered by `seen.series`; its shape is that step's to define.
-      seriesIds: runs.map((r) => r.current?.id ?? ''),
+      // By id: a run's current series, and the series a repair's card names. The slow archive's rows (#117) join
+      // here, and answer as `archive` filtered by `seen.series`; its shape is that step's to define.
+      seriesIds: runs.flatMap((r) => [r.current?.id ?? '', r.seriesId ?? '']),
     });
     // A card carries the series title, so it is a listing like any other: shown by the folder's series row
     // (`receives`, `cardFor`). Reintroduce by dropping `seen.folder(...)` there: "a member receives no card for
@@ -2428,10 +2428,19 @@ export default async function sourceRoutes(app: FastifyInstance) {
     return {
       content,
       // A run's "now on …" names a series as well, so it is held to the same rule: the count stays, the title
-      // of a series this viewer may not list goes. Always, not only under the 18+ hide as before v0.49.0.
-      runs: runs.map(({ by, ...r }) => ({
-        ...r, mine: !!by && by === me, ...(r.current && !seen.series(r.current.id) ? { current: undefined } : {}),
-      })),
+      // of a series this viewer may not list goes. Always, not only under the 18+ hide as before v0.49.0. A
+      // repair's `label` is a title too (a one-row Fix on an adult series): it goes with its series, and with a
+      // `current` that went. Reintroduce by passing it through: "a repair's card does not name a series the
+      // viewer hides" in downloadsView.int.test.ts reads the title.
+      runs: runs.map(({ by, ...r }) => {
+        const hideCurrent = !!r.current && !seen.series(r.current.id);
+        const hideLabel = hideCurrent || (!!r.seriesId && !seen.series(r.seriesId));
+        return {
+          ...r, mine: !!by && by === me,
+          ...(hideCurrent ? { current: undefined } : {}),
+          ...(hideLabel ? { label: undefined, number: undefined, seriesId: undefined } : {}),
+        };
+      }),
       activity: activityFor(seen, me, activity),
     };
   });

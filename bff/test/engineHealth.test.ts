@@ -53,6 +53,11 @@ test('not answering is a warning with exactly one finding, and says it keeps try
   assert.match(c.summary, /^Not answering \(suwayomi unreachable: fetch failed \(ECONNREFUSED\)\)$/);
   assert.match(c.items[0].detail, /asked 4 times since it stopped answering; 3 series that came from extensions/);
   assert.match(c.note ?? '', /every 5 minutes by itself/);
+  assert.match(c.note ?? '', /Check again there asks at once/);
+  // The desktop's Admin → Extensions is the engine's installer: no setup steps, no Check again.
+  const desk = extensionEngine(base({ state: 'unreachable', desktop: true, retry: { attempts: 2 }, linked: 3 }))!;
+  assert.doesNotMatch(desk.note ?? '', /Check again/, 'a desktop is sent to a button it does not have');
+  assert.match(desk.note ?? '', /quit and reopen Uchiyomi/);
 });
 
 /**
@@ -118,4 +123,58 @@ test('another solver, an older engine, an unread setting: all fine, and said', a
   const unread = extensionEngine(base({ solver: null }))!;
   assert.equal(unread.status, 'ok');
   assert.match(unread.summary, /^Answering \(v2\.3\.2243\)$/);
+});
+
+test("the engine's own words are proof when its setting cannot be read", async () => {
+  // Reintroduce by answering these two branches as before ('Answering' and a note): a source failing because the
+  // engine's helper is off reads as a healthy engine.
+  const { extensionEngine } = await import('../src/lib/engineHealth');
+  const refusing = [{ sourceId: 'sw:1', name: 'Manga Ball (EN)', bypass: true }];
+  const unread = extensionEngine(base({ solver: null, cloudflare: refusing }))!;
+  assert.equal(unread.status, 'warn');
+  assert.equal(unread.summary, 'It cannot use its Cloudflare helper');
+  assert.equal(findings(unread).length, 1);
+  assert.deepEqual(unread.items[0].actions, ['engine_solver'], 'Connect reads the setting first, so it is offered');
+  assert.match(unread.items[0].detail, /Manga Ball \(EN\) fails because of it\./);
+  const old = extensionEngine(base({ solver: { supported: false }, cloudflare: refusing }))!;
+  assert.equal(old.status, 'warn');
+  assert.equal(old.items[0].actions, undefined, 'an engine with no setting to set gets no Connect');
+  assert.match(old.note ?? '', /update the engine/);
+  // With no helper of its own to share, Uchiyomi says what to set first instead of offering Connect.
+  const none = extensionEngine(base({ ourSolver: '', solver: null, cloudflare: refusing }))!;
+  assert.equal(none.status, 'warn');
+  assert.equal(none.items[0].actions, undefined);
+  assert.match(none.items[0].detail, /set FLARESOLVERR_URL on Uchiyomi/);
+  assert.doesNotMatch(none.note ?? '', /Connect/);
+  // A source merely behind Cloudflare says nothing about the helper: still fine.
+  assert.equal(extensionEngine(base({ solver: null, cloudflare: [{ sourceId: 'sw:2', name: 'Night Shelf', bypass: false }] }))!.status, 'ok');
+});
+
+test('a failure that has since passed is not evidence: only what is failing now counts', async () => {
+  // #115's rules (sourceEvidence.ts currentFailures, sourceDiagnosis.ts currentError). Reintroduce the old
+  // seven-day window alone (any failAt, live_detail or last_error from the last week): the closed, the
+  // unconfirmed and the answered rows below count, and the engine's row stays amber after its sources recover.
+  const { cloudflareEvidenceOf } = await import('../src/lib/extensionEngine');
+  const now = Date.parse('2026-09-27T12:00:00Z');
+  const ago = (h: number) => new Date(now - h * 3600_000).toISOString();
+  const BYPASS = 'suwayomi: java.io.IOException: Cloudflare bypass currently disabled';
+  const row = (id: string, over: Record<string, unknown>) => ({
+    source_id: id, name: id, last_error: null, last_fail_at: null, last_ok_at: null, last_slow_at: null,
+    live_state: null, live_at: null, live_stage: null, live_detail: null, stages: null, ...over,
+  }) as any;
+  const ev = cloudflareEvidenceOf([
+    row('sw:test', { stages: { search: { failAt: ago(2), failBy: 'test', error: BYPASS, kind: 'error' } } }),
+    row('sw:closed', { stages: { search: { failAt: ago(3), failBy: 'test', error: BYPASS, kind: 'error', okAt: ago(1) } } }),
+    row('sw:once', { stages: { search: { failAt: ago(2), failBy: 'traffic', error: BYPASS, kind: 'error', streak: 1 } } }),
+    row('sw:thrice', { stages: { search: { failAt: ago(2), failBy: 'traffic', error: BYPASS, kind: 'error', streak: 3 } } }),
+    row('sw:old', { stages: { search: { failAt: ago(24 * 9), failBy: 'test', error: BYPASS, kind: 'error' } } }),
+    row('sw:live', { live_state: 'fail', live_at: ago(2), live_stage: 'pages', live_detail: BYPASS }),
+    row('sw:live-passed-since', { live_state: 'fail', live_at: ago(3), live_stage: 'pages', live_detail: BYPASS, stages: { pages: { okAt: ago(1) } } }),
+    row('sw:stored', { last_error: BYPASS, last_fail_at: ago(2) }),
+    row('sw:stored-answered', { last_error: BYPASS, last_fail_at: ago(3), last_ok_at: ago(1) }),
+    row('sw:fronted', { last_error: 'Just a moment...', last_fail_at: ago(2) }),
+  ], now);
+  assert.deepEqual(ev.map((e) => [e.sourceId, e.bypass]), [
+    ['sw:fronted', false], ['sw:live', true], ['sw:stored', true], ['sw:test', true], ['sw:thrice', true],
+  ]);
 });

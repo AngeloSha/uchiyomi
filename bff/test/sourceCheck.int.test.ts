@@ -24,7 +24,7 @@ if (DSN) {
 const skip = DSN ? false : 'set TEST_DATABASE_URL to run';
 
 const BALL = `sw:${SOURCE_IDS.mangaBall}`;
-const ODD = 'sc-odd', SLOW = 'sc-slow', STREAK = 'sc-streak', LOOKUP = 'sc-lookup';
+const ODD = 'sc-odd', SLOW = 'sc-slow', STREAK = 'sc-streak', LOOKUP = 'sc-lookup', LOOKUP_OK = 'sc-lookup-ok';
 const ENGINE_WORDS = /^suwayomi: Exception while fetching data \(\/fetchSourceManga\) : java\.lang\.Exception/;
 const ADMIN = 'sc-admin';
 
@@ -57,7 +57,7 @@ before(async () => {
     async getPageUrls() { throw new Error('page list gone'); },
   } as any);
 
-  await q('DELETE FROM source_health WHERE source_id = ANY($1::text[])', [[BALL, ODD, SLOW, STREAK, LOOKUP]]);
+  await q('DELETE FROM source_health WHERE source_id = ANY($1::text[])', [[BALL, ODD, SLOW, STREAK, LOOKUP, LOOKUP_OK]]);
   await q('DELETE FROM users WHERE username = $1', [ADMIN]);
   const [{ id: uid }] = await q<{ id: string }>(
     `INSERT INTO users (display_name, username, role, password_hash, auth_kind) VALUES ($1,$1,'admin','x','password') RETURNING id`, [ADMIN]);
@@ -72,9 +72,9 @@ before(async () => {
 
 after(async () => {
   if (!DSN) return;
-  (await import('../src/lib/sourceCheck')).setSummaryRefresh();
+  (await import('../src/lib/healthSummary')).setSummaryRefresh();
   await app?.close();
-  await q('DELETE FROM source_health WHERE source_id = ANY($1::text[])', [[BALL, ODD, SLOW, STREAK, LOOKUP]]).catch(() => {});
+  await q('DELETE FROM source_health WHERE source_id = ANY($1::text[])', [[BALL, ODD, SLOW, STREAK, LOOKUP, LOOKUP_OK]]).catch(() => {});
   await q('DELETE FROM users WHERE username = $1', [ADMIN]).catch(() => {});
   await fake?.close();
   // The pool's idle clients (30 s) and the header refresh a Test schedules would otherwise hold the process a
@@ -273,15 +273,16 @@ test('Check all now runs in the background, and its progress and result can be r
 });
 
 test('the header Health mark is refreshed once for a whole sweep, and never while the repair runs', { skip }, async () => {
-  // Reintroduce by dropping the checkRunning() guard in refreshSummarySoon (sourceCheck.ts): every source the
-  // sweep records arms the refresh again, and the whole Health report runs per source instead of once. Or by
-  // dropping the runtime.repairing check: a Test during the repair runs the report beside it.
-  const { setSummaryRefresh, checkSourceLive, recordLiveResult } = await import('../src/lib/sourceCheck');
+  // Reintroduce by dropping holdSummaryWhile(checkRunning) (sourceWatchdog.ts): every source the sweep records
+  // arms the refresh again, and the whole Health report runs per source instead of once. Or by dropping the
+  // runtime.repairing check in healthSummary.ts's timer: a Test during the repair runs the report beside it.
+  const { checkSourceLive, recordLiveResult } = await import('../src/lib/sourceCheck');
+  const { setSummaryRefresh } = await import('../src/lib/healthSummary');
   const { runSourceCheck } = await import('../src/lib/sourceWatchdog');
   const { runtime } = await import('../src/lib/runtime');
   const { getSource } = await import('../src/lib/sources');
   let runs = 0;
-  setSummaryRefresh(async () => { runs++; }, { firstMs: 0, everyMs: 20 });
+  setSummaryRefresh(async () => { runs++; }, { everyMs: 20 });
   try {
     const r = await runSourceCheck({ autoFix: false });
     assert.ok(r.sources.length >= 3, 'a sweep of several sources, one of them a second and a half long');
@@ -297,6 +298,25 @@ test('the header Health mark is refreshed once for a whole sweep, and never whil
     assert.equal(runs, 2, 'the refresh the repair held back runs once it is over');
   } finally {
     runtime.repairing = false;
+    setSummaryRefresh();
+  }
+});
+
+test("the header's mark is fresh by the time the sweep says it ended", { skip }, async () => {
+  // "Check all now" refetches the stored summary the moment it reads `running: false`, and not again for a
+  // minute. Reintroduce by flipping `running` before the refresh (or refreshing detached) in runSourceCheck's
+  // finally: the sweep has ended and no refresh has run yet.
+  const { setSummaryRefresh } = await import('../src/lib/healthSummary');
+  const { runSourceCheck, checkProgress } = await import('../src/lib/sourceWatchdog');
+  let runs = 0;
+  let sweepRunning: boolean | null = null;
+  setSummaryRefresh(async () => { await pause(50); sweepRunning = checkProgress().running; runs++; }, { everyMs: 20 });
+  try {
+    await runSourceCheck({ autoFix: false });
+    assert.equal(runs, 1, 'the summary was refreshed before the sweep said it had ended');
+    assert.equal(sweepRunning, true, 'while the sweep still read as running');
+    assert.equal(checkProgress().running, false);
+  } finally {
     setSummaryRefresh();
   }
 });
@@ -355,4 +375,21 @@ test('one add/detail lookup is one failure in a row, however many of its calls t
   assert.equal(await streakAfter(), 2);
   assert.equal(itemOf(await sourcesCheck(), LOOKUP), undefined, 'two lookups are not three failures in a row');
   assert.match((await row(LOOKUP)).stages.chapters.error, /site changed/);
+
+  // And the other half of the rule: a lookup that got its chapters is a chapters-stage success, whichever call
+  // threw. Reintroduce by testing the error first (`if (lookupError !== undefined) fail; else if (chapters.length)
+  // ok`): a lookup whose series page threw but whose chapter list answered counts toward a confirmed failure.
+  assert.ok(registerAdapter({
+    id: LOOKUP_OK, name: 'Lookup Ok Source', search: async () => [], getSeries: boom,
+    listChapters: async () => [{ sourceId: 'lc1', number: 1 }], getPageUrls: async () => [],
+  } as any));
+  // A traffic success writes into an existing row only (a row per source per search fan-out is noise), so the
+  // source has one, as any source that was ever tested or failed does.
+  await q('INSERT INTO source_health (source_id) VALUES ($1) ON CONFLICT (source_id) DO NOTHING', [LOOKUP_OK]);
+  await seriesAndChapters(getSource(LOOKUP_OK)!, 'x1');
+  for (let i = 0; i < 40 && !(await row(LOOKUP_OK))?.stages?.chapters; i++) await pause(25);
+  await pause(150);
+  const st = (await row(LOOKUP_OK)).stages.chapters;
+  assert.ok(st.okAt, 'the chapters the lookup listed are a success at that stage');
+  assert.equal(st.failAt ?? null, null, 'and the series page that threw is not a chapters failure');
 });

@@ -27,7 +27,7 @@ import { diagnose, currentError, STAGE_WORD, type DiagnosisCode } from './source
 import { openFailures, stageLines, type Stage, type StageLine, type Stages } from './sourceEvidence';
 import { haveNumbers } from './libraryNumbers';
 import { DL_ROOT, LIBRARY_ROOT, lastScanReport, QUIET_WALK, type WalkReason } from './library';
-import { countsAsMissing, downloadCensus, fsTypeOf } from './downloadCensus';
+import { countsAsMissing, downloadCensus, fsTypeOf, type Census } from './downloadCensus';
 import { applyIgnores, ignoredTail, keepIgnoresAlive, loadIgnores, noIgnores, type Finding, type IgnorableCheck, type IgnoreCtx } from './healthIgnore';
 import { chapterFileRel } from './downloader';
 import { forDesktop } from './desktop';
@@ -1296,6 +1296,27 @@ async function rootsNote(): Promise<string | undefined> {
 }
 
 /**
+ * The downloads check's notes: what it compared, and what the numbers leave out. Apart so a test can hand it a
+ * census; the check itself needs a disk and a database.
+ */
+export function downloadsNotes(
+  c: Pick<Census, 'root' | 'fsType' | 'noScan' | 'scanCapped' | 'pending' | 'removed' | 'truncated'>, strays: number,
+): string[] {
+  const s = (k: number, one: string, many: string) => (k === 1 ? one : many);
+  return [
+    `Every chapter file under ${c.root}${c.fsType ? ` (${c.fsType})` : ''}, against the library.`,
+    // v0.49.0: the card has its own Scan now. Reintroduce the Tasks route: "the downloads check points at its own
+    // Scan now" in healthNotes.test.ts reads Admin → Tasks.
+    ...(c.noScan ? ['No library scan has run since the server started; Scan now below runs one.'] : []),
+    ...(c.scanCapped ? ['The last scan stopped at its folder limit, so some folders were never looked into.'] : []),
+    ...(c.pending ? [`${c.pending} landed after the last scan began and ${s(c.pending, 'waits', 'wait')} for the next one.`] : []),
+    ...(c.removed ? [`${c.removed} belong${s(c.removed, 's', '')} to series someone removed (Admin → Removed puts one back).`] : []),
+    ...(strays ? [`${strays} folder${s(strays, ' holds', 's hold')} files of your own where the scan never reads chapters; listed, not counted.`] : []),
+    ...(c.truncated ? ['The folder is too big to check completely; the counts are a floor.'] : []),
+  ];
+}
+
+/**
  * Every chapter file in the downloads folder that is not in the library (#109), with the reason when the scan
  * knows one. Compares the disk with the database directly (lib/downloadCensus.ts), so it does not depend on the
  * scanner having noticed what it dropped -- which is exactly what it failed to do for #109, twice.
@@ -1328,15 +1349,7 @@ async function downloadsMissing(ctx: IgnoreCtx = noIgnores()): Promise<HealthChe
   const live = c.missing.filter((m) => countsAsMissing(m) && all.some((it) => it.key === `folder:${m.folder}` && !it.info));
   const n = live.reduce((k, m) => k + m.files.length, 0);
   const unread = all.filter((it) => it.key?.startsWith('unreadable:') && !it.info).length;
-  const notes = [
-    `Every chapter file under ${c.root}${c.fsType ? ` (${c.fsType})` : ''}, against the library.`,
-    ...(c.noScan ? ['No library scan has run since the server started; Admin → Tasks → Library scan runs one.'] : []),
-    ...(c.scanCapped ? ['The last scan stopped at its folder limit, so some folders were never looked into.'] : []),
-    ...(c.pending ? [`${c.pending} landed after the last scan began and ${s(c.pending, 'waits', 'wait')} for the next one.`] : []),
-    ...(c.removed ? [`${c.removed} belong${s(c.removed, 's', '')} to series someone removed (Admin → Removed puts one back).`] : []),
-    ...(strays ? [`${strays} folder${s(strays, ' holds', 's hold')} files of your own where the scan never reads chapters; listed, not counted.`] : []),
-    ...(c.truncated ? ['The folder is too big to check completely; the counts are a floor.'] : []),
-  ];
+  const notes = downloadsNotes(c, strays);
   const { items } = truncate(all);
   return {
     ...base,

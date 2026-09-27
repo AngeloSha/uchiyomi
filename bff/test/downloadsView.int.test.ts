@@ -278,6 +278,31 @@ test('the 18+ hide keeps an adult library\'s cards and chapters away until "Show
   assert.ok(shown.activity.recent.some((e: any) => e.folder === 's_dv_x'));
 });
 
+test("a repair's card does not name a series the viewer hides", { skip }, async () => {
+  // A one-row Health press on an adult series: its card's `label` is that series' title. Reintroduce by passing
+  // `label` through the jobs route untouched: the admin with the 18+ hide on reads it.
+  const { beginRun, clearRuns } = await import('../src/lib/downloadJobs');
+  await series('s_dv_rx', LIB_X);
+  try {
+    const card = beginRun('repair', ids.admin);
+    Object.assign(card, { repairKind: 'fill', label: 's_dv_rx title', seriesId: 's_dv_rx' });
+    const hidden = (await jobsFor(who().admin, { hide: true })).runs.find((r: any) => r.kind === 'repair');
+    assert.equal(hidden.label, undefined, "the title of a series the admin hides is not on the repair's card");
+    assert.equal(hidden.seriesId, undefined);
+    assert.equal(hidden.repairKind, 'fill', 'what kind of run it is stays');
+    const shown = (await jobsFor(who().admin)).runs.find((r: any) => r.kind === 'repair');
+    assert.equal(shown.label, 's_dv_rx title', 'with "Show 18+" on the card names it');
+    // A source's name has no series behind it, but a label goes whenever the run's current series does.
+    Object.assign(card, { label: 'Some Source', seriesId: undefined, current: { id: 's_dv_rx', title: 's_dv_rx' } });
+    const cur = (await jobsFor(who().admin, { hide: true })).runs.find((r: any) => r.kind === 'repair');
+    assert.equal(cur.current, undefined);
+    assert.equal(cur.label, undefined, 'the label goes with the current series it rode in on');
+  } finally {
+    clearRuns();
+    await q('DELETE FROM lib_series WHERE id = $1', ['s_dv_rx']);
+  }
+});
+
 test('a folder with a deleted twin is spoken for by its live row', { skip }, async () => {
   const { startDownloadJob } = await import('../src/routes/sources');
   // The deleted row first, by insertion, by id and by library: whichever order the lookup returns them in, it

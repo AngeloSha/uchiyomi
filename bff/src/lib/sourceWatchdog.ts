@@ -21,7 +21,8 @@ import { readSites, writeSites } from './sources/customSites';
 import { smokeTest } from './sourceProbe';
 import { Diagnosis, STAGE_WORD } from './sourceDiagnosis';
 import { clearBlock } from './sourceHealth';
-import { checkSourceLive, recordLiveResult, refreshSummarySoon } from './sourceCheck';
+import { checkSourceLive, recordLiveResult } from './sourceCheck';
+import { holdSummaryWhile, refreshHealthSummaryNow } from './healthSummary';
 import type { Stage } from './sourceEvidence';
 import { notifyAdmins } from './push';
 import { logAudit } from './audit';
@@ -110,6 +111,10 @@ export async function followMove(id: string, to: string, deps: MoveDeps = REAL):
 let running = false;
 /** True while a sweep is in flight, so the schedule and the admin button cannot overlap. */
 export const checkRunning = (): boolean => running;
+// A sweep is ONE refresh of the header's summary, at its end: nothing a source records asks for one meanwhile.
+// Reintroduce by dropping this: "the header Health mark is refreshed once for a whole sweep" in
+// sourceCheck.int.test.ts counts a refresh per source.
+holdSummaryWhile(checkRunning);
 
 /**
  * Where the current (or last) sweep is, for "Check all now" (#115). The button used to hold one request open
@@ -153,10 +158,14 @@ export async function runSourceCheck(opts: { autoFix?: boolean; by?: 'schedule' 
     progress = { ...progress, error: (e as Error)?.message || 'the check failed' };
     throw e;
   } finally {
+    // The header's Health mark, once for the whole sweep (nothing it recorded asked for one), and BEFORE the sweep
+    // says it is over: "Check all now" refetches the summary the moment it reads `running: false`, and not again
+    // for a minute, so a refresh that came after would leave the header on the pre-sweep summary. Under the repair
+    // flag it is put off instead (lib/healthSummary.ts). Reintroduce by flipping `running` first and refreshing
+    // detached: "the header's mark is fresh by the time the sweep says it ended" in sourceCheck.int.test.ts.
+    await refreshHealthSummaryNow();
     running = false;
     progress = { ...progress, running: false, current: null, finishedAt: new Date().toISOString() };
-    // The header's Health mark, once for the whole sweep: nothing it recorded scheduled one (sourceCheck.ts).
-    refreshSummarySoon();
   }
 }
 
