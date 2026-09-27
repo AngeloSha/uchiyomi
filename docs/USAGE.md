@@ -920,8 +920,13 @@ automatically.
 
 ### Managing sources
 
-Each source shows a **health** badge: `ok`, `rate-limited`, `blocked`, or `off`. From the list you can:
+Each source shows its **health** as a mark and a word (since v0.49.0; it was a capsule with the server's own
+token, in English): *Healthy*, *Rate-limited*, *Blocked by the site*, *Not answering*, *Answers empty*, *Turned
+off*, or *Failing* — a step of it failed when it was last tested, although nothing has put it in a cooldown. The
+shapes differ, so the mark reads without its colour. From the list you can:
 
+- **Test** a source now: it asks for a search, a chapter list and a page list, ignoring any cooldown, and the key
+  counts against its time limit (*Testing… 0:12 of up to 0:53*),
 - **Disable** / **Enable** a source,
 - **Clear** a temporary block (if a site rate-limited you after heavy downloading),
 - **Remove** a site you added (the built-in MangaDex can't be removed),
@@ -932,6 +937,23 @@ with the extension's name, *{n} languages*, how many are on and the worst health
 a compact row per language with its own status, series count and **Enable** / **Disable**. The count
 above the list reads *{n} sources in {m} providers* for the same reason. An extension with a single source,
 the built-in engines and sites added by URL are plain cards as before.
+
+**What a card knows about its source** (since v0.49.0, #115). A source is checked in four steps — **Search**,
+**Chapter list**, **Page list** and **Images** — and Uchiyomi keeps what each was last seen doing and who saw it:
+the Test button, the daily check, or normal use. A card whose last Test or daily check failed reads *Failing*, with
+a line per step (✗ for the one that broke, when, and the engine's or site's own error, cut to two lines with the
+rest on hover), and keeps them after a reload; one whose last check passed says so in one line. A failed Test or
+daily check marks its step failing at once; normal use does after three failures in a row at the same step. Only
+a later success at **that same step** clears it: a downloaded chapter says nothing about a broken search. A test
+that ran out of time reads *could not finish in time — not proof it is broken*, never *Failing*: raise
+`SOURCE_TEST_TIMEOUT_MS` (up to 120 s) for a source that keeps doing that behind a slow Cloudflare check. A Test
+never changes a cooldown. The same lines are on **Admin → Health** under *Source health*.
+
+**Check all now** tests every enabled source, one at a time, in the background: the button shows how far it has
+got (*Checking 7 of 40 · …*), and a check that was already running when you opened the tab is picked up. When it
+ends, a message counts the sources that need attention and those that could not finish in time. The same check
+runs by itself once a day; since v0.49.0 it notifies admins once per new or changed failure, not every day, and
+the notification opens Health.
 
 ### When a site won't work
 
@@ -964,8 +986,19 @@ thousand of them. Uchiyomi ships none and has no repository built in, so the fir
 
 What to paste, what every message means, the 25-source limit and removing a repository:
 **[Add an extension repository — step by step](extensions.md#add-an-extension-repository--step-by-step)**.
-Adult extensions are hidden until you tap **18+**. The engine they run in is part of the Docker install and a
-one-time download in the desktop app ([what you need first](extensions.md#what-you-need-first-the-extension-engine)).
+Adult extensions are hidden until you tap **18+**. The engine they run in is part of the Docker install, a
+second app on Unraid and CasaOS, and a one-time download in the desktop app
+([what you need first](extensions.md#what-you-need-first-the-extension-engine)).
+
+With no engine — turned off (`EXTENSION_ENGINE=0`), not set up, or not answering — **Admin → Extensions** is a
+setup screen instead of the catalogue (since v0.49.0): it says which of the three it is, shows the steps for your
+platform with each command ready to copy, and **Check again** asks the engine at once; the card turns into the
+catalogue by itself when it answers. Uchiyomi also keeps asking on its own, every 5 minutes, so an engine started
+later needs no restart. Under the catalogue, a *Cloudflare helper* line with **Connect** appears when the engine's
+own Cloudflare helper is off or points at `localhost`, and **Turning it off** has the steps to switch it off safely
+(on a server; the desktop app has no switch).
+Never delete the engine's data: it holds the link from every series you added through an extension to its source,
+and Uchiyomi's nightly backup does not include it ([your engine's data](extensions.md#your-engines-data)).
 
 ### The other direction: Uchiyomi *inside* Mihon or Tachimanga
 
@@ -1022,16 +1055,19 @@ button, a bookmark or a language change keeps you on the tab you were on. The fi
 
 **Content → Health** audits your library and tells you what is wrong before you run into it: series with missing
 chapters, chapters that downloaded as one or two images, the same title sitting in the library twice, chapter
-numbers that can't be real, and any source that is failing or blocked. Each check says what it found and what
-it cannot see. Hit **Re-check** to run them again.
+numbers that can't be real, any source that is failing or blocked, and the extension engine. Each check says what
+it found and what it cannot see. Hit **Re-check** to run them again.
 
-Since v0.41.0 every finding also carries the button that fixes it, and most of them fix themselves overnight
+Since v0.41.0 every finding also carries the key that fixes it, and most of them fix themselves overnight
 without you pressing anything. Since v0.48.3:
 
 - **Fix all issues**, at the top, runs the repair once with every step that has something to do — longer copies
-  for short chapters, gaps, every source's failed chapters tried again now, and the solver — after a
-  confirmation that says how much one run takes on and what it never does (delete, merge, unblock, switch off).
-  The page checks itself again when the run ends.
+  for short chapters, gaps, every source's failed chapters tried again now, and the solver. Since v0.49.0 it is a
+  row like the others, with no confirmation after the press: its plan, one line per step with that step's
+  limits, is under *How it works* before you press **Start**, with what it never does (delete, merge, switch
+  off) and, when the solver step is in it, that it ends the cooldowns of the sources that blame the solver. One
+  run takes up to 20 short chapters and 5 series with gaps (the `REPAIR_SHORT_MAX` / `REPAIR_GAPS_MAX` defaults);
+  the nightly carries on with the rest, or press it again.
 - **Open** goes to the chapter the finding is about: a short chapter opens in the reader; a gap or an impossible
   number opens the series with its list turned to that chapter and the row lit up (for a gap, the chapter just
   before it).
@@ -1040,6 +1076,41 @@ without you pressing anything. Since v0.48.3:
   shrinks stays ignored; a newly missing chapter brings it back), and an ignore whose finding has been gone for a
   week is forgotten. Short chapters use *It's fine* instead, which the nightly repair also respects. A header
   warning you dismissed stays dismissed when a check goes quiet; only a new problem, or a worse one, brings it back.
+
+**What a key does, and whether it worked** (since v0.49.0). Before, you could not tell from this page what a
+button would do, how long it would take or whether it had worked: a result was a three-second message pointing at
+another tab.
+
+- **Each card opens with what you can do there**: one line per kind of action its findings offer, saying what it
+  does, *How it works* for the detail, and how long it takes — *Usually 40 sec · At most about 3 min of searching
+  and waiting · plus at most 20 chapter downloads*. *Usually* is the middle of the last five runs of the same kind,
+  so it appears once there have been some; *at most* adds up only the waits the code limits (page lists,
+  listings, searches), and downloads are a count, because nothing limits how long one takes. Under the legend
+  come the card's own actions: **Fix all** for the repair step the card is about (*Find longer copies*, *Fill
+  gaps*, *Try every failed chapter again*, or **Reset** for *Reset the solver (3 sources)*), **Merge all** on
+  duplicates, and **Scan now** on *Library scan* and *Downloads missing from the library*, which scans the
+  library, says what it found (*Scan done: 38 series, 912 chapters*) and checks the page again. A scan can start
+  once a minute.
+- **Each finding has small keys and a status line that stays.** While it works: the step, what it is on and a
+  ticking clock, with **Stop** on a repair. Then what it did and *Took 0:42*, or why it was refused (amber) or
+  failed (red). It is still there after a reload, because it comes from the kept run rather than from a message.
+  While the page checks the result it reads *Checking the result…*.
+- **A row says beforehand what an action cannot do** — *Updates are paused for this series: Fill now fetches the
+  missing chapters once.*, *This source is switched off: Retry now resets the count but does not ask it.*, or that
+  the source is cooling down and when it can be asked again — and **what the last attempt found**, from what the
+  repair stored: *No source has a longer copy*, *Followed {source}*, *No other source lists them*, *Failing since
+  {date}* (which a Retry now no longer resets to today).
+- **While any repair runs** — yours, another admin's, the nightly — a strip at the top of the page says what it is
+  (*Repairing: Fill gaps*), who started it, the step (*Step 2 of 4 · Filling gaps · Searching other sources*),
+  what it is on, how long it has been going and usually takes, and the searches it has left, with **Stop**, which
+  ends it between two targets. A card whose step is running has a small working mark in its header. A key that
+  would start a repair waits while a chapter sweep or another repair runs, and says why.
+- **The page checks itself again when a run ends**, not when it starts, and the header's warning follows by itself;
+  so does a Test's or a scan's.
+- **Recent repairs**, at the bottom, lists the last ten runs, nightly and pressed alike: what, who, when, how long,
+  what it did, and anything it passed over and why (*Skipped: its folder is busy with another download. Try again
+  when that finishes.*). The server keeps the newest 50 runs and every run of the last 90 days. A fix on one row
+  no longer replaces the nightly's line under **Admin → Tasks** (below), which links here instead.
 
 **You don't have to go and look** (since v0.48.0). While the last report found something, an admin's top bar
 shows a warning mark beside the Updates bell — amber, or red for a problem — whose tooltip is the worst
@@ -1070,8 +1141,9 @@ on its card that says so.
 on by default, and **Admin → Tasks → Repair library** with a *Run now* — Uchiyomi does the six things that
 are reversible or provable on their own, and two more only when you switch them on, in this order:
 
-* **clears stale Cloudflare state** when sources are blaming the solver: the remembered sessions, the "could
-  not be solved" marks and any cooldown that lapsed more than a day ago. No site is contacted;
+* **clears stale Cloudflare state** when sources are blaming the solver and it answers: the remembered sessions,
+  the "could not be solved" marks and those sources' cooldowns; and it forgets any cooldown that lapsed more than
+  a day ago. No site is contacted;
 * **counts the pages** of chapter files nobody has opened (2,000 a night), which is what makes the
   short-chapter check see them at all;
 * **gives chapters that ran out of retries another chance** a week later, when the site has had time to
@@ -1105,14 +1177,21 @@ has bookmarked is refused. There is deliberately no *Fix all* for either.
 series and never renumbers anything. It also never runs beside a chapter sweep: whichever starts second
 waits ten minutes. Switching it off stops the schedule only — *Run now* and the buttons below keep working.
 
-**The buttons, one per finding.** *Fix* asks the repair to look at that one chapter now; *It's fine* records
-that it really is that short (the row goes grey with the date, and a greyed row's chip reads *Not fine* so
-you can take it back); *Fill now* searches other sources for one missing run of chapters; *Retry now* clears
-a source's attempt counts whatever their age and re-checks up to ten of its series; *Test*, *Clear block* and
-*Turn off* act on a source, with *Test*'s advice shown under the row; *Reset solver sessions* clears the
-Cloudflare cookies and "could not be solved" marks this server is holding. A check whose step the nightly can
-run also gets **Fix all** in its header. Everything a button starts is the same repair narrowed to one step,
-so it is refused while a chapter sweep is running and says so.
+**The keys, one set per finding.** *Fix* asks the repair to look at that one chapter now (since v0.49.0 not
+offered for a chapter saved with placeholder pages, which the chapter sweep re-fetches; *It's fine* is its only
+key); *It's fine* records that it really is that short (the row goes grey with the date, and a greyed row's key
+reads *Not fine* so you can take it back); *Fill now* fetches one series' missing chapters — from a source it
+already follows when one lists them (at most 20 at a time), otherwise by searching the other sources and
+following one that has most of them — and since v0.49.0 works on a series whose automatic updates are off;
+*Retry now* clears a source's attempt counts whatever their age and re-checks up to ten of its series (a source
+that is cooling down or switched off is reset but not asked, and the row says so); *Test*, *Clear block* and
+*Turn off* act on a source, with what *Test* found shown under the row. The solver card's **Reset the solver**
+clears the Cloudflare cookies and "could not be solved" marks this server is holding and ends the cooldowns of the
+sources that blame the solver — it says how many — but cannot restart the solver: while the solver is not
+answering, the card says to restart its container (on the desktop app, to quit and reopen Uchiyomi) instead. A
+check whose step the nightly can run also gets **Fix all** at the top of its card; on *Chapters that would not
+download* it gives every failed chapter another try now (before v0.49.0 it reset only week-old ones). Everything
+a key starts is the same repair narrowed to one step, so it waits while a chapter sweep is running and says so.
 
 ⚠️ **A chapter Uchiyomi replaces keeps everyone's reading position and bookmarks exactly as they were.** If
 you had "finished" the two-page notice, it stays finished — open it again to read the rest. The alternative
@@ -1134,9 +1213,36 @@ instead of sending you to fix a Cloudflare problem that ended days ago, and the 
 button on Providers, which no longer keeps an extension source's stale verdict once its live checks pass. The same greying marks the advisory rows, such as a solver or Uchiyomi version
 that is merely behind. Since v0.41.0 the same greying covers a failing source **no series uses** — on a real
 install ten of twelve not-ok sources are Discover-only noise nobody can act on — and it counts as a fault
-again the moment something uses it, or it is actually in a cooldown. When an extension server is configured
-there is one more check, *Extension source limit*, which goes amber when more sources are switched on than
-`SUWAYOMI_MAX_SOURCES` allows to register.
+again the moment something uses it, or it is actually in a cooldown, or (since v0.49.0) its failure is confirmed.
+When an extension server is configured there is one more check, *Extension source limit*, which goes amber when
+more sources are switched on than `SUWAYOMI_MAX_SOURCES` allows to register.
+
+**Source health sees a failing source** (since v0.49.0, [#115](https://github.com/AngeloSha/uchiyomi/issues/115)).
+Before, a source could fail its **Test** while its card said `ok` and this check said *All good*: the Test wrote
+nothing down, and one downloaded chapter put the source back to `ok`. Now the check reads what each of the four
+steps — search, chapter list, page list, images — was last seen doing (see *What a card knows about its source*
+under [Managing sources](#managing-sources)). A row names the source and leads with the step that broke — *Search
+failing since 2026-09-27 08:14 — This source's extension reported an error. Last tested 2026-09-27 10:02 by Test;
+3 series use it* — followed by a line for each step it has something on and, under a finding, the fix; it keeps
+its **Test**, **Clear block** and **Turn off** keys. A failure is confirmed by a failed Test or daily check at
+once, or by three failures in a row at one step in normal use, and cleared only by a later success at that same
+step. A confirmed failure is a finding even for a source no series uses: turn it off, or **Ignore** it, and the
+ignore holds until a different step starts failing. Greyed, for reference: a test that ran out of time (*not proof
+it is broken*), and a failure nothing has checked for a week (*test it again*). The summary never says *All
+sources responding normally* over any of these. The diagnosis tells the engine from the extension: *The extension
+server did not answer* means only that the engine could not be reached, timed out or refused Uchiyomi's login,
+while an extension that failed on its site, with the engine answering, reads *This source's extension reported an
+error*.
+
+**Extension engine** (since v0.49.0) is one row about the engine itself, when there is one or series depend on
+one: *Turned off* or *Not set up* (a greyed line saying how many series from extensions keep their chapters and get
+no new ones until it is back), *Not answering* (amber, with how often Uchiyomi has asked since; it keeps asking
+every 5 minutes by itself), or ready, with whether the engine's own Cloudflare helper is in use. A helper that is
+off, or points at `localhost` where no helper runs, turns the row amber while an extension source is seen behind
+Cloudflare, and is a greyed line otherwise. The row's **Open** leads to **Admin → Extensions**, where the setup
+steps, **Check again** and the helper's **Connect** are. Series from extensions that cannot update now say why
+under *Series that can no longer update*: *…can't be reached because the extension engine isn't answering*, or
+*is off*, instead of "over the source limit".
 
 ![Library health](shots/admin-health.webp)
 
@@ -1497,14 +1603,19 @@ it found when it is done.
 what it does and the two things it never does). Its schedule reads *every 24h · never during a chapter
 sweep*, or *switched off · on demand* when the switch under **Admin → Settings → Library housekeeping** is
 off — and *Run now* works either way, because nothing it does deletes, merges or renumbers anything. Like
-the sweep it is detached, so the toast only says it started; its line shows what it did when it is done and
+the sweep it is detached, so the message only says it started; its line shows what it did when it is done and
 keeps it across restarts, for example: *2000 page counts stamped, 28625 still to count · short: 3 replaced,
 5 confirmed, 12 left · gaps: 5 series, 2 followed, 9 chapters fetched · 41 failures reset · solver reset, 4
-unblocked*. A run you started from a Health button reports only the step it was asked for, a run that was
-stopped says so before its counts (*stopped for a restart*, *stopped: the download disk is at its floor*),
-and a nightly that was switched off reads *switched off*. A *Retry now* on one source also says what the
-re-check itself did, which the nightly never has to — *· 4 failures reset · 3 series re-checked, 2 chapters
-added*, and *, 5 still could not be saved* when they failed again.
+unblocked*. A run that was stopped says so before its counts (*stopped for a restart*, *stopped: the download
+disk is at its floor*), and a nightly that was switched off reads *switched off*.
+
+Since v0.49.0 that line is always the last **full** run — the nightly, or *Run now* here — marked *(nightly)* or
+*(run by hand)*. A fix pressed on one Health row used to replace it (and, after a restart, move the nightly's
+schedule); now it is under **Latest one-off fix** beneath the line, which leads to Health's *Recent repairs*, where
+every run is kept. The row also says when the next nightly is due and, while a repair runs, its step with a
+ticking clock. A *Retry now* on one source says there what the re-check itself did, which the nightly never has
+to — *· 4 failures reset · 3 series re-checked, 2 chapters added*, and *, 5 still could not be saved* when they
+failed again.
 
 The repair and **check for new chapters** refuse each other by name: pressing one while the other is going
 says *A chapter sweep is running — try again in a few minutes* or *The library repair is running — try again
@@ -1928,8 +2039,20 @@ on the computer itself, download the extension engine first, from the same tab.
 
 **A source/site won't add.** Paste the site's **base URL** (e.g. `https://example.com`), not a series page.
 Uchiyomi auto-detects the engine (Madara, MangaThemesia, Manganato); Cloudflare-protected sites are handled
-automatically by the bundled FlareSolverr. A ⛔/⚠ badge on a source means it's temporarily blocked or
-rate-limited — wait a bit, or try another source.
+automatically by the bundled FlareSolverr. *Blocked by the site* or *Rate-limited* on a source's card means it
+is in a cooldown — wait a bit, or try another source.
+
+**The Extensions tab says the extension engine isn't answering.** Its container is still starting (a minute or two
+the first time), has stopped, or `SUWAYOMI_URL` names the wrong address. The tab shows what to check for your
+platform, with the commands; **Check again** asks at once, and Uchiyomi asks by itself every 5 minutes, so the
+extensions come back without a restart once the engine answers. *Extensions are turned off* means
+`EXTENSION_ENGINE=0`; *No extension engine is set up* means `SUWAYOMI_URL` is empty. Series added through
+extensions keep their chapters meanwhile. See [extensions.md](extensions.md#what-you-need-first-the-extension-engine).
+
+**A source says *Failing*.** The mark means a step of it failed the last time it was tested, or
+three times in a row in normal use: the line under the card says which step and what went wrong. **Test** it
+again; a pass at that step clears it. A test that keeps running out of time behind Cloudflare is not a failure;
+raise `SOURCE_TEST_TIMEOUT_MS` (up to 120 s) if you want it to finish.
 
 **An extension source says `Cloudflare bypass currently disabled`.** The extension engine has no browser of
 its own and has to be told about a FlareSolverr; the compose files set `FLARESOLVERR_ENABLED` and
@@ -1938,9 +2061,10 @@ is the fix. The admin *Test* button and the Health page say the same, in these w
 engine's own Cloudflare bypass is switched off. On the Suwayomi engine's container (uchiyomi-suwayomi in
 the shipped compose files) set FLARESOLVERR_ENABLED=true and FLARESOLVERR_URL to the same solver address
 Uchiyomi uses (http://uchiyomi-flaresolverr:8191 in the shipped files), then recreate it. The v0.37.0
-compose files already set both, so an upgrade that recreates the engine is the fix there.* Running the
-engine yourself? Set both on that container — see
-[CONFIGURATION.md](CONFIGURATION.md#environment-variables).
+compose files already set both, so an upgrade that recreates the engine is the fix there.* Since v0.49.0
+**Admin → Extensions** says so under the catalogue, and **Connect** there points the engine at the solver
+Uchiyomi uses (`FLARESOLVERR_URL`) without restarting anything. Running the engine yourself? That works too, or
+set both on that container — see [CONFIGURATION.md](CONFIGURATION.md#environment-variables).
 
 **A source says it answers, but more slowly than it is given.** The source is up but keeps taking longer
 than `SOURCE_LATEST_TIMEOUT_MS` (8 s by default) to return its newest page. Since v0.37.0 the *Test* button

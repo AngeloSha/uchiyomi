@@ -1,5 +1,217 @@
 # Changelog
 
+## v0.49.0 — (date to be set)
+
+**Server downloads get a home of their own, Health says what every fix does and whether it worked, a failing
+source shows as failing, and the extension engine is easy to add and remove.** Plus no more capsule shapes:
+messages are cards at the bottom that never cover a dialog's title.
+[#115](https://github.com/AngeloSha/uchiyomi/issues/115) was reported by **@TIGamingTV**, with the screenshots
+that showed it; [#116](https://github.com/AngeloSha/uchiyomi/issues/116) and
+[#117](https://github.com/AngeloSha/uchiyomi/issues/117) by **@Jamie96ITS**; and the engine work answers
+**@TIGamingTV**'s reply on Discussion [#72](https://github.com/AngeloSha/uchiyomi/discussions/72).
+
+### Library → Downloads: everything the server fetches, in one place
+
+The downloads pill in the bottom corner is gone, and so is the *On the server* section v0.48.1 put on the
+Offline tab. Everything the server fetches, whoever started it, is under **Library → Downloads**:
+
+- **A ring on the Library tab.** While chapters come in, the Library tab's icon on a phone wears a thin ring
+  that fills as they land, with a small count of the series being fetched; on a computer the same ring is the
+  cloud button just before the Updates bell. An amber dot on it means a download failed — one of yours, or any,
+  for an admin.
+- **Series | Downloads**, a switch under the Library page's title. The address remembers which
+  (`/library/?view=downloads`), so Back and a shared link land on the same one.
+- **Each series as its cover with a ring**, like an app being installed, in up to five sections: **Running**,
+  **Queued** (waiting their turn at a busy source), **Needs attention** (a failed download, with **Try again**,
+  which fetches exactly the chapters it did not land, **Dismiss** and **Open**), **Server tasks** (the scheduled
+  check, the library repair with the step it is on, a bulk *Fetch newest*) and **Came in today**, which now
+  survives a restart of the server.
+- **Each series page** shows its own downloads in a slim band above the chapter list, whoever started them, with
+  a Cancel when it is yours to stop. Grey chapters turn into chapters as they land.
+- Discover's strip, the add dialog's *Open in library*, the command palette (*Server downloads*) and the desktop
+  app's old `/downloads` link all lead there.
+
+**The Offline tab is this device's again**: only the copies saved here for reading with no connection, and one
+line pointing to Library → Downloads. The reader's button to it says *Offline*, and the profile's section is
+*Offline downloads*.
+
+**Who sees which download.** Everyone sees the downloads of the series they can open: library access, age cap and
+the 18+ hide, the rule the series themselves follow. Before, downloads were filtered only while the 18+ hide was
+on, so a member shut out of a library still received the titles of what it was downloading. A failed download is
+shown only to whoever started it and to admins, and only they can dismiss it; before, any member could clear
+anyone's. Members who may not add series see none of it: no ring, no switch.
+
+### Messages are cards at the bottom, and nothing is a capsule
+
+- **Messages** (*Marked read*, *Fetching 3 chapters…*, *Could not save*) were capsules at the top of the screen for
+  3.2 seconds whatever they said. On a phone that is where every dialog keeps its title, and a long error was gone
+  before it was read. They are now small cards at the bottom: just above the bottom bar on a phone (above the
+  select bar in select mode; in the bar's own place while a dialog is open, so the dialog is never covered), above
+  the reader's chapter list and settings sheet, and in the bottom-right corner on a laptop (bottom-left in
+  Arabic). A message stays as long as it takes to read — longer for longer ones, at least six seconds for an
+  error — and waits while you hover over it, touch it or tab to it. ✕ dismisses it, and so does a swipe down; the
+  same message twice shows once with *×2*, and at most three show at once.
+- **Statuses are a mark and words.** The capsules on Health (*All good*, *Worth a look*), the source cards'
+  `ok` / `rate-limited` and the engine's `ready` are a shaped glyph with words: *Healthy*, *Rate-limited*, *Not
+  answering*, *Answers empty*, *Turned off*, *Blocked by the site*, *Failing*, *Engine ready*. The shapes differ,
+  so a status reads without its colour; the source capsule used to print the server's own word, in English, in
+  every language.
+- **Buttons are keys.** Health's action chips and the buttons on Providers and Extensions are rectangular keys.
+  Filter and sort chips stay as they are. The Updates bell's count is a small squared tag.
+- **Motion.** Progress rings stop turning under **Reduce effects** or the system's reduce-motion setting and show a
+  still dashed circle instead; messages then neither slide in nor show the line that drains as their time runs out.
+- **Translations.** Thirty strings that had shipped in English in every language are translated (the reader's
+  repeated-page controls, removing a Moment, the offline banner, *Saved for offline*, among others), times such
+  as *3 days ago* are said in your language, and Health and Tasks are translated too: titles, actions, schedules
+  and results (a finding's own sentence from the server is still in English).
+
+### Health: what each fix does, how long it takes, and whether it worked
+
+You could not tell from **Admin → Health** what a button would do, how, how long it would take, or whether it had
+worked. The answers were in the code and nowhere on the page.
+
+- **Before you press.** Each card opens with what you can do there: one line per action saying what it does,
+  *How it works* for the detail, and how long it takes — *Usually 40 sec · At most about 3 min of searching and
+  waiting · plus at most 20 chapter downloads*. "Usually" is the middle of the last five runs of the same kind;
+  "at most" adds up only the waits the code limits, and downloads are a count, never turned into a time.
+- **While it runs.** The finding you pressed shows the step, what it is on and a ticking clock, and its card's
+  header a small working mark. A strip at the top of Health follows any repair — yours, another admin's, the
+  nightly: the step, the series or chapter it is on, how long it has been going, how long it usually takes and the
+  searches it has left, with **Stop**. A key that would start a repair waits while a chapter sweep or another
+  repair runs, and says why, instead of being refused after the press.
+- **Afterwards.** The row keeps what the run did and *Took m:ss*, or why it was refused or failed, and it is still
+  there after a reload. The page checks itself again when the run **ends**; the v0.48 buttons re-checked the
+  moment they were pressed, when the repair had only just begun. **Recent repairs**, at the bottom, keeps the
+  runs, nightly and pressed alike: who, what, how long, what it did and what it passed over, and why (*Skipped:
+  its folder is busy with another download*).
+- **Fix all issues** is a row at the top. Its plan, with each step's limits, is under *How it works* before you
+  press **Start**, where the old confirmation showed it only afterwards, and it now says what it does: its solver
+  step ends the cooldowns of the sources that blame the solver, and the gap and short-chapter steps share one
+  budget of searches.
+- **A fix on one row no longer replaces the nightly's line.** A *Fix* on one chapter used to overwrite **Admin →
+  Tasks → Repair library** and, after a restart, move the nightly's schedule. That line is now always the last full
+  run, marked *(nightly)* or *(run by hand)*, followed by when the next one is due, the running step with its clock,
+  and the latest one-off fix, which links to Recent repairs.
+- **Keys that do what they say.** *Fill now* works on a series whose automatic updates are off, and fetches the
+  missing chapters a source it already follows lists (up to 20) instead of leaving them to the next sweep. *Fix*
+  is no longer offered for a chapter saved with placeholder pages, where it did nothing. The *Chapters that would
+  not download* card's Fix all gives every failed chapter another try now and re-checks up to ten series at once,
+  from the sources that can be asked; it used to reset only week-old ones and re-check nothing.
+  The solver reset is one action on its card that says how many sources it reaches (*Reset the solver (3
+  sources)*) and that it cannot restart the solver; while the solver is not answering, the card says to restart it
+  instead. A row says before the press what an action cannot do (*Updates are paused for this series: Fill now
+  fetches the missing chapters once*, *This source is cooling down…*), and *Failing since* survives a Retry now.
+- **Scans say what they found.** **Scan the library now**, on the *Library scan* and *Downloads missing from the
+  library* cards, and the admin home's *Scan library now* answer *Scan done: 38 series, 912 chapters* (or that a
+  scan ran less than a minute ago) and check Health again. The warning in the header clears by itself once a
+  repair, a test or a scan has fixed what it was about.
+
+### A failing source shows as failing (#115)
+
+"Manga Ball (EN)" failed its **Test** while its Providers card said `ok` and Health said *All good*. The Test wrote
+nothing down, the daily check wrote a code that nothing read, and Health read only the status that any finished
+download puts back to `ok`. The diagnosis also blamed the extension engine (*The extension server did not
+answer*), though the engine had answered, with the extension's own error.
+
+- **What each step did is kept.** A source is checked in four steps — search, chapter list, page list and images —
+  and Uchiyomi now keeps what each was last seen doing, and who saw it: the Test button, the daily check, or
+  ordinary use. A failed Test or daily check marks that step failing at once; ordinary use does after three
+  failures in a row at the same step. Only a later success at that **same** step clears it, so a downloaded chapter
+  no longer vouches for a broken search. Testing still never changes a cooldown.
+- **Providers and Health say which step broke.** The source's card reads **Failing**, with a line per step (✗
+  Search, when, and whether the Test button, the daily check or normal use saw it) and the engine's own error, and
+  it keeps them after a reload. Health's *Source health* names each source and leads with the step (*Search failing
+  since …*). A source no series uses counts as soon as its failure is confirmed; turn it off or *Ignore* it, and it
+  comes back only if another step starts failing. *All sources responding normally* is never said over a failing
+  source, or one whose test could not finish.
+- **The engine is told apart from the extension.** *The extension server did not answer* now means only that the
+  engine could not be reached, timed out or refused Uchiyomi's login (that one now says to set
+  `SUWAYOMI_USERNAME` / `SUWAYOMI_PASSWORD`). When the engine answers with the extension's own error, it reads
+  *This source's extension reported an error*, with what to try; a source that lists chapters without numbers
+  says that. *Working normally.* is never shown under a failed check.
+- **A fairer test.** It tries up to three search results before blaming a chapter list, asks for the pages of the
+  newest chapter first, and keeps every call inside its own time limit (`SOURCE_TEST_TIMEOUT_MS`): running out of
+  time reads *could not finish in time — not proof it is broken*, never *failing*. The Test key counts against that
+  limit (*Testing… 0:12 of up to 0:53*).
+- **Check all now runs in the background**, with its progress on the button (*Checking 7 of 40 · …*), and picks up
+  a check that was already running when you open Providers.
+- **One push per new failure.** The daily check notifies admins of every failure it confirms (a rate limit
+  aside), not only a short list of known causes, and once per new or changed failure rather than every morning;
+  the notification opens Health.
+
+### The extension engine: easy to add, remove and wire up (#72)
+
+It stays what it was, an optional second container beside the one image; what changes is that adding it, removing
+it and pointing it at the Cloudflare solver are no longer chores, on any platform.
+
+- **One switch on Docker Compose.** `EXTENSION_ENGINE=0` in `.env`, then `docker compose up -d`: the engine's
+  container goes, its data stays in its volume, and Uchiyomi knows extensions are off instead of reporting an
+  engine that isn't answering. Delete the line and run the same command to bring it back where it left off. It
+  needs the v0.49.0 compose files (see Upgrading).
+- **Unraid and CasaOS.** Unraid gets a template for the engine, **uchiyomi-suwayomi** in Apps (pinned,
+  memory-capped, its Cloudflare helper on); CasaOS gets an add-on,
+  [`deploy/casaos/uchiyomi-suwayomi.yml`](deploy/casaos/uchiyomi-suwayomi.yml), that joins the listing's network
+  and uses its solver. On Umbrel it is not available: an Umbrel app cannot offer an optional second container.
+- **Setup steps where you need them.** With no engine — switched off, not set up, or not answering —
+  **Admin → Extensions** says which, and shows the steps for your platform (Docker Compose, Unraid, CasaOS, Umbrel
+  or somewhere else) with each command ready to copy. **Check again** asks at once, and the card turns into the
+  extension catalogue by itself when the engine answers. It warns you never to delete the engine's data, and says
+  how many series depend on it.
+- **Uchiyomi keeps trying.** It stopped asking about four minutes after a failed start, so an engine that came up
+  later — a slow NAS, a template installed after Uchiyomi, a container restarted by hand — stayed missing until
+  someone reloaded. It now asks every 5 minutes for as long as it takes, quietly, and registers the engine's
+  sources the moment it answers; a *Reload sources* during an outage heals the same way.
+- **Health has one *Extension engine* row**: off (a greyed line while series depend on it), not answering (and how
+  often it has asked), or ready, and whether the engine's own Cloudflare helper is in use. Series from extensions
+  that cannot update say *…can't be reached because the extension engine isn't answering* (or *is off*) instead of
+  "over the source limit".
+- **The engine's Cloudflare helper, connected with one press.** When the engine's own helper is off, or points at
+  `localhost` where no helper runs, **Admin → Extensions** says so under the catalogue and offers **Connect**, which
+  sets the engine to the solver Uchiyomi uses (`FLARESOLVERR_URL`), with nothing restarted. Health's row turns amber
+  while an extension source is seen behind Cloudflare, and its Open leads there.
+- **The engine's page cache is kept empty.** The engine keeps a copy of every page it serves, with no limit,
+  inside its container, which on the host means the system disk: on one server it had grown to 17 GB and filled
+  it. Uchiyomi already has those pages in the chapter files it wrote, so it asks the engine to delete them after
+  each extension download job and every half hour while nothing downloads through it, never in the middle of a
+  chapter. Covers are left alone, and no compose change is needed.
+- **The engine's data is not in Uchiyomi's backup**, on purpose: it belongs to another container, and a copy taken
+  while it runs may not be consistent. [extensions.md](docs/extensions.md#your-engines-data) has a three-line recipe
+  for backing it up, and [MIGRATING.md](docs/MIGRATING.md#adding-or-removing-the-extension-engine) how to move it
+  between setups.
+
+<!-- v0.49.0: slow archive (#117) -->
+
+<!-- v0.49.0: posting-order numbering (#116) -->
+
+### Upgrading
+
+- **The database** gets one migration on first start, and it only adds: new tables (`download_log`,
+  `repair_runs`, `series_post_numbers`, `archive_queue`, `archive_pace`) and new columns that are nullable or have
+  a default. v0.48.4 still starts on a migrated database, so going back to it is safe.
+- **Docker Compose: download the new compose file to get the engine switch.** Updating the image does not change
+  your compose file. `curl -O https://raw.githubusercontent.com/AngeloSha/uchiyomi/main/deploy/docker-compose.yml`,
+  or add its two lines to yours ([MIGRATING.md](docs/MIGRATING.md#adding-or-removing-the-extension-engine)).
+  `EXTENSION_ENGINE` only takes `0` or `1`: it is the engine's replica count, and any other value stops
+  `docker compose up` for the whole stack.
+- ⚠️ **An empty `SUWAYOMI_URL=` now turns extensions off.** The old compose files wrote `${SUWAYOMI_URL:-…}`,
+  which puts the default back for an empty value, so the documented off switch never worked, and a `SUWAYOMI_URL=`
+  line in `.env` did nothing. The v0.49.0 files take it at its word. If your `.env` has such a line and you use
+  extensions, delete it before switching files.
+- **The Offline tab** lists only the chapters saved on that device; what the server fetches is under
+  **Library → Downloads**.
+- **For scripts** ([api.md](docs/api.md)):
+  - `GET /api/admin/tasks`: the repair's `lastRun` and `lastResult` are now the last **full** run (the nightly, or
+    Tasks → Run now). A fix pressed on one Health row is in `GET /api/admin/tasks/repair/runs` and the row's new
+    `latestOther`.
+  - `GET /api/sources/jobs` hands each viewer only the downloads of series they can browse, and a failed one only
+    to whoever started it and to admins. `DELETE /api/sources/jobs/<folder>` answers **403** to anyone else, and
+    **404**, as Cancel does, for a download the caller is not shown.
+  - `POST /api/admin/sources/check` answers **202** at once and runs in the background: the verdicts are in
+    `GET /api/admin/sources/check` once `running` is false.
+  - The rest only adds: the repair run's id in its answer, `GET /api/admin/tasks/repair/status` and `/runs`,
+    Health's `outcome`, `caveats` and source evidence, the Test's `state` and `stage`, and
+    `POST /api/admin/extensions/solver`.
+
 ## v0.48.4 — 2026-09-26
 
 **Find missing chapters no longer fails on slow sources.**

@@ -56,8 +56,10 @@ sites' terms and your local law.
 - **Library management** — several libraries, a filter panel (sort, read state, status, format, genres),
   *Select all* with bulk fetch and removal, editable metadata that survives a rescan, merge, delete, restore
   and forget.
-- **Health** — finds chapter gaps, suspiciously short chapters, bad downloads and duplicates; *Verify
-  chapter files* re-checks that what the database claims is on disk actually is.
+- **Health** — finds chapter gaps, suspiciously short chapters, bad downloads, duplicates and failing sources,
+  and names the step a source fails at. Every fix says what it does and how long it usually takes before you
+  press it, shows its progress live, and keeps what it did; *Verify chapter files* re-checks that what the
+  database claims is on disk actually is.
 - **Import what you already track** — a Mihon backup, a MangaDex list, a pasted list of titles, or your
   AniList / MyAnimeList / Kitsu list. Every match is **reviewed before it lands**, with a confidence score,
   *Change* and *Skip*, and batches you can resume.
@@ -76,6 +78,8 @@ sites' terms and your local law.
   written into the file as ComicInfo `<Translator>`.
 - **Shows you what you do not have** — chapters the sources list but your disk lacks appear as grey rows you
   can select and fetch.
+- **Library → Downloads** — everything the server is fetching, whoever started it, as covers that fill like apps
+  being installed, with what came in today; a ring on the Library tab says when something is coming in.
 - **Survives real-world sources** — it slows down when a site rate-limits instead of hammering it, and a
   chapter missing a handful of pages is kept as a **partial**, with placeholders, and repaired overnight
   rather than thrown away.

@@ -160,6 +160,13 @@ The shared source-work limits are `SOLVER_CONCURRENCY` (default `4`) and `SOLVER
 `SCAN_FIRST_ANSWER_MS` (default `2500`, since v0.48.4) is how long Find missing chapters waits before showing
 what has arrived; the rest comes in as each source answers, so no request waits on the slowest source.
 
+**Testing a source.** `SOURCE_TEST_TIMEOUT_MS` (default `45000`, 1000–120000) is how long one **Test** on Admin →
+Providers or Health, and each source in the daily check or *Check all now*, may take end to end. Since v0.49.0 it
+also bounds every call inside the test, and a test that runs out of it is reported as *could not finish in time*
+rather than as a failure: raise it for extension sources behind a slow Cloudflare check that keep reading so. The
+Test key counts against it, plus a few seconds of margin (*Testing… 0:12 of up to 0:53* at the default).
+`SOURCE_LATEST_TIMEOUT_MS` (default `8000`) is how long a source's newest page may take before it counts as slow.
+
 ## Downloading
 
 All optional; the defaults are what the live install runs. Adding a series and importing hundreds of
@@ -193,11 +200,12 @@ ever hit.
   already set both, so an upgrade that recreates the engine is the fix there.* — the shipped names are
   examples; use whatever your engine's container and solver are called. Uchiyomi's own `FLARESOLVERR_URL`
   (in the tuning list of `.env.example`) is a different setting: it is the solver the built-in engines use.
-  Since v0.49.0 an engine that lacks the two settings can be fixed without touching its container: **Connect**
-  on the *Extension engine* row of **Admin → Health** (or under the catalogue in **Admin → Extensions**) sets the
-  engine's own `flareSolverrEnabled` / `flareSolverrUrl` to Uchiyomi's `FLARESOLVERR_URL` over its API. Nothing
-  restarts, and the engine keeps the value unless its container names another solver. It is only ever done on a
-  press, and needs `FLARESOLVERR_URL` set on Uchiyomi.
+  Since v0.49.0 an engine that lacks the two settings can be fixed without touching its container: **Connect**,
+  on the *Cloudflare helper* line under the catalogue in **Admin → Extensions**, sets the engine's own
+  `flareSolverrEnabled` / `flareSolverrUrl` to Uchiyomi's `FLARESOLVERR_URL` over its API (the *Extension engine*
+  row of **Admin → Health** says when it is needed, and its Open leads there). Nothing restarts, and the engine
+  keeps the value unless its container names another solver. It is only ever done on a press, and needs
+  `FLARESOLVERR_URL` set on Uchiyomi.
 - `EXTENSION_ENGINE` (default `1`): the bundled extension engine's switch (v0.49.0). `EXTENSION_ENGINE=0` in `.env`,
   then `docker compose up -d`: Compose runs no engine container (its volume is kept) and Uchiyomi treats
   extensions as off. Delete the line, or set `1`, and run the same command to bring it back. **Compose only accepts
@@ -274,7 +282,8 @@ are reversible or provable on their own, and two more only when you switch them 
 3. **Failed chapters.** Up to 100 ledger rows that hit `CHAPTER_RETRY_CAP` more than seven days ago have
    their attempt count cleared, so the sweep tries them again now the site has calmed down. *Retry now* on
    a source does that source's rows whatever their age and then re-checks up to 10 of its series,
-   `REPAIR_PACE_MS` apart.
+   `REPAIR_PACE_MS` apart; *Fix all issues* and, since v0.49.0, the *Fix all* on Health's *Chapters that would not
+   download* card do every source's rows and re-check up to 10 series from the sources that can be asked now.
 4. **Short chapters.** `REPAIR_SHORT_MAX` one- or two-page chapters Uchiyomi downloaded itself. One copy
    from each of up to 3 sources the series follows is asked how many pages it has, plus one search if none
    of them has more; the chapter is replaced only when a copy really is longer, and marked *confirmed
@@ -311,6 +320,13 @@ asked per short chapter, 20 chapters per gap series, 8 archives opened at once, 
 chapter gets another chance, and 24 hours between two gap checks of one series. A knob that is missing,
 unparseable or out of range falls back to its default and never to zero — `REPAIR_PACE_MS` included, where
 only a deliberate `0` turns the pause off.
+
+**Runs are kept** (since v0.49.0): every run, nightly or pressed on the Health page, is a row the Health page lists
+under *Recent repairs* — the newest 50 and everything from the last 90 days are kept. Only a **full** run (the
+nightly, or *Run now* on Tasks) is the Tasks line and sets when the next nightly is due, so a fix pressed on one
+Health row neither replaces that line nor moves the schedule. *Fill now* on one series looks at it even while its
+automatic updates are off, and fetches the gap chapters a source it already follows lists (up to 20) instead of
+leaving them to the sweep; the nightly's rule above is unchanged.
 
 The repair and the chapter sweep never run at the same time — both download into the same folders — so
 whichever starts second waits ten minutes. Switching the nightly off stops the **schedule only**: *Run now*
