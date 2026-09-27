@@ -710,8 +710,9 @@ export default async function adminRoutes(app: FastifyInstance) {
         name: 'Delete read chapters',
         ...(s.cleanup_read_days === 0
           ? sched('hourly · as soon as everyone has finished')
-          : sched(s.cleanup_read_days === 1 ? 'hourly · {n} day after everyone has finished' : 'hourly · {n} days after everyone has finished',
-            { n: s.cleanup_read_days })),
+          // The singular spells its count, as the page's counted pairs do ("1 day" / "{n} days").
+          : s.cleanup_read_days === 1 ? sched('hourly · 1 day after everyone has finished')
+          : sched('hourly · {n} days after everyone has finished', { n: s.cleanup_read_days })),
         lastRun: runtime.lastCleanup || (s.cleanup_read_last_run ? new Date(s.cleanup_read_last_run).getTime() : null),
         lastResult: runtime.lastCleanupResult ?? s.cleanup_read_last_result ?? null,
         running: runtime.cleaning,

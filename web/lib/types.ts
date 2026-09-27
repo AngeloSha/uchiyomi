@@ -395,6 +395,31 @@ export interface HealthItem {
   key?: string;
   /** An admin chose to stop being told about this, and when. The item is then `info`. */
   ignored?: { at: string; by: string | null };
+  /**
+   * v0.49.0: what the last attempt at this finding found, from rows the repair stored, so it survives a
+   * reload -- rendered in the reader's language by lib/healthCopy.ts `outcomeLine`.
+   */
+  outcome?: HealthOutcome;
+  /** v0.49.0: what an action on this row will not be able to do, said before it is pressed (`caveatLine`). */
+  caveats?: HealthCaveat[];
+}
+
+/** The last attempt at a finding, per check (bff lib/health.ts `HealthOutcome`). */
+export type HealthOutcome =
+  | {
+    kind: 'gaps'; at: string | null; why: string | null; followed: string | null; coverage: number | null;
+    fetched: number; landed: number; sweep: number; capped: number; unfillable: string[]; scanned: number;
+  }
+  | {
+    kind: 'short'; at: string | null; why: string; asked?: number; answered?: number; best?: number; hunt?: string;
+    missing?: number; by?: string | null;
+  }
+  | { kind: 'failures'; firstAt: string; lastAt: string; attempts: number; resetPending: boolean };
+
+export interface HealthCaveat {
+  action: HealthAction;
+  code: 'updates_paused' | 'source_cooling_down' | 'source_off';
+  until?: string;
 }
 
 export interface HealthCheck {

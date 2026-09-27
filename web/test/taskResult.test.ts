@@ -8,7 +8,9 @@
 // fix -- a stale or unreadable catalogue looking identical to an up-to-date one.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { taskResult } from '../lib/tasks';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { SCHEDULE_KEYS, TASK_NAMES, scheduleText, taskResult } from '../lib/tasks';
 
 test('no result at all renders nothing, rather than a stray separator', () => {
   assert.equal(taskResult(null), '');
@@ -252,4 +254,45 @@ test('the repair says when it learned reading directions, and a directions-only 
   assert.doesNotMatch(taskResult({ ...base, directions: { asked: 40, learned: 0 } }), /reading direction/);
   assert.equal(taskResult({ ...base, only: ['directions'], directions: { asked: 2, learned: 0 } }), ' · 0 reading directions learned');
   assert.equal(taskResult({ ...base, only: ['directions'], directions: { asked: 1, learned: 1 } }), ' · 1 reading direction learned');
+});
+
+// ---- v0.49.0: how long, and the Tasks tab in every language ----
+
+test('a repair says how long it took, last, and the English line is otherwise unchanged', () => {
+  // Nobody could tell a nightly that takes two minutes from one that takes two hours. Reintroduce by dropping
+  // the `ms` clause: the line below ends at "reset".
+  assert.equal(taskResult({ counted: 0, only: ['failures'], failures: { reset: 7 }, ms: 125_000 }), ' · 7 failures reset · took 2 min');
+  assert.equal(taskResult({ counted: 0, only: ['failures'], failures: { reset: 7 }, ms: 0 }), ' · 7 failures reset', 'a zero time is said');
+});
+
+test('every schedule the tasks route sends is a key the page translates, with its values', () => {
+  // bff routes/admin.ts sends `scheduleKey` + `scheduleVars` beside the English `schedule`. A sentence there
+  // that is not in SCHEDULE_KEYS (and so in no locale file) shows in English in every language. Reintroduce by
+  // adding a `sched('every {h}h, quietly')` to the route: it is named below.
+  const route = readFileSync(join(__dirname, '../../bff/src/routes/admin.ts'), 'utf8');
+  const sent = [...route.matchAll(/\bsched\(\s*(?:[^'()]*\?\s*)?'([^']+)'(?:\s*:\s*'([^']+)')?/g)].flatMap((m) => [m[1], m[2]]).filter(Boolean);
+  assert.ok(sent.length >= 10, `only ${sent.length} schedule sentences found in the route -- the scan is broken`);
+  for (const k of sent) assert.ok((SCHEDULE_KEYS as readonly string[]).includes(k), `the route sends schedule "${k}", which SCHEDULE_KEYS does not carry`);
+  assert.equal(scheduleText({ scheduleKey: 'every {h}h', scheduleVars: { h: 6 }, schedule: 'every 6h' }), 'every 6h');
+  assert.equal(scheduleText({ schedule: 'every 6h' }), 'every 6h', 'an older server\'s English schedule is dropped');
+  // The task names the route sends are keys too.
+  const at = route.indexOf("app.get('/api/admin/tasks', async");
+  const list = route.slice(at, route.indexOf("app.get('/api/admin/tasks/repair/status'", at));
+  const names = [...list.matchAll(/\bname: '([^']+)',/g)].map((m) => m[1]);
+  assert.ok(at > 0 && names.length >= 8, `only ${names.length} task names found in the tasks route -- the slice is broken`);
+  for (const n of names) assert.ok((TASK_NAMES as readonly string[]).includes(n), `task name "${n}" is not in TASK_NAMES`);
+});
+
+test('the Tasks tab says nothing in bare English', () => {
+  // Reintroduce `'Already running'` without tr(): the literal scan names it.
+  const page = readFileSync(join(__dirname, '../app/admin/page.tsx'), 'utf8');
+  const tasks = page.slice(page.indexOf('function Tasks()'), page.indexOf('function DesktopBackups()'));
+  const code = tasks.replace(/\/\*[\s\S]*?\*\//g, '').split('\n').filter((l) => !l.trim().startsWith('//')).join('\n');
+  for (const lit of ['Run now', 'Running…', 'Already running', 'That task is switched off', 'Failed', 'Started', 'not run yet']) {
+    const bare = new RegExp(`(?<!tr\\()['\`]${lit.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}['\`]`);
+    assert.doesNotMatch(code, bare, `Tasks() renders "${lit}" untranslated`);
+  }
+  assert.doesNotMatch(code, /`last run \$\{/, 'Tasks() renders "last run" untranslated');
+  assert.match(code, /\{tr\(t\.name\)\}/, 'task names are not translated');
+  assert.match(code, /\{scheduleText\(t\)\}/, 'schedules are not translated');
 });

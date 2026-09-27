@@ -163,8 +163,6 @@ const NOT_PAIRED: Record<string, string> = {
  */
 const SHIPPED_UNPAIRED = [
   '+{n} chapters vs the current pick', 'All {n} chapters are already in your library', 'Best {n} days',
-  'Chapter gaps: search the sources for up to {n} series, follow one that has the missing chapters, and download them',
-  'Chapters that would not download ({n} sources): all of them get another try, up to ten series straight away and the rest with the next check',
   'Checking {n} sources — this can take a minute. You can close this; anything followed shows under Sources & translations.',
   'Delete {n} chapters from the server?', 'File {n} series',
   'From now on, an hourly job will permanently delete the file of any chapter that everyone who started it has finished, once it has been finished for {n} days. There is no undo and no recycle bin.',
@@ -174,7 +172,7 @@ const SHIPPED_UNPAIRED = [
   'Tip: hide the languages you don’t read first — only {n} sources can be switched on at once.',
   '{n} chapters behind across {m} series', '{n} days', '{n} days of reading, {t} chapters in total', '{n} languages', '{n} notes',
   '{n} of {m} chapters match', '{n} of {m} sources answered · still asking {names}', '{n} of {m} sources answered · still asking {name}',
-  '{n} pairs could not be merged', '{n} pairs merged, {m} chapters moved', '{n} series', '{n} series would move',
+  '{n} pairs could not be merged', '{n} pairs merged, {m} chapters moved',
   '{n} sources in {m} providers', '{n} versions', 'quiet — no release in {n} days', 'waiting for {g} · {n} days left',
   'failed {n} times',
 ];

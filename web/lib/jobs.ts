@@ -32,11 +32,11 @@ export type RunKind = 'sweep' | 'repair' | 'newest';
  * person reads while it runs. ONE list: the Downloads view's Server tasks card and Health's live strip both
  * name the step through `repairStepLabel`, so the same step never reads two ways on two screens.
  */
-const REPAIR_STEP_LABELS = keys(
+export const REPAIR_STEP_LABELS = keys(
   'Checking the solver', 'Counting pages', 'Retrying failed chapters', 'Looking for longer copies',
   'Filling gaps', 'Upgrading to preferred groups', 'Tidying chapter names', 'Learning reading directions',
 );
-const REPAIR_STEP_KEYS = ['solver', 'count', 'failures', 'short', 'gaps', 'groups', 'names', 'directions'] as const;
+export const REPAIR_STEP_KEYS = ['solver', 'count', 'failures', 'short', 'gaps', 'groups', 'names', 'directions'] as const;
 
 /** The step a repair is on, in words; nothing for a step this build does not know (a newer server's). */
 export function repairStepLabel(step: string | undefined): string {

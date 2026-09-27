@@ -33,6 +33,9 @@ const SURFACES = [
   // Step 6, the notices that replaced the capsule toasts.
   'components/Toast.tsx',
   'lib/notices.ts',
+  // Step 8, Health: its keys, legends and status lines, and the live strip and history.
+  'components/HealthActions.tsx',
+  'components/RepairLive.tsx',
 ];
 
 /**
@@ -58,6 +61,10 @@ const SLICES: [string, string, string, string][] = [
   // side by side on a desktop -- the downloads ring's and the Updates bell's, a capsule at "9+" until v0.49.0.
   ['app/library/page.tsx', 'Library: the Series | Downloads switch', 'function ViewSwitch(', 'function MoveToLibrary('],
   ['components/TopNav.tsx', 'TopNav: the downloads ring and the Updates count', '<DownloadsNavIcon />', '<button onClick={refresh}'],
+  // Step 8: Health's body -- the verdict marks that replaced the HEALTH_LABEL capsules, Re-check as a key, Open
+  // as a text link -- and the Tasks rows' Run now.
+  ['app/admin/page.tsx', 'Health: the cards, their marks and rows', 'function Health()', 'function DesktopUpdateNote('],
+  ['app/admin/page.tsx', 'Tasks: Run now', 'function Tasks()', 'function DesktopBackups()'],
 ];
 
 const slice = (src: string, from: string, to: string, name: string): string => {
@@ -136,7 +143,12 @@ test('the admin console\'s status badges are marks and its actions keys: the sli
   // "{tr('Extensions')}</p>" again: it starts at the not-configured card and "the engine slice holds the
   // not-configured card" fails.
   const admin = code(read('app/admin/page.tsx'));
-  const [attention, providers, toolbar, engine, repos, rows] = SLICES.filter(([f]) => f === 'app/admin/page.tsx').map(([, name, from, to]) => slice(admin, from, to, name));
+  const [attention, providers, toolbar, engine, repos, rows, health, tasks] = SLICES.filter(([f]) => f === 'app/admin/page.tsx').map(([, name, from, to]) => slice(admin, from, to, name));
+  // Health (step 8): a mark per card, Re-check a key, and nothing called HEALTH_LABEL left to be a capsule.
+  assert.match(health, /<StatusMark \{\.\.\.mark\} size="xs" \/>/, 'the Health slice has no mark');
+  assert.match(health, /className="btn-key"/, 'Re-check is not a key');
+  assert.doesNotMatch(health, /HEALTH_LABEL|HEALTH_TONE/, 'the Health capsules are back');
+  assert.match(tasks, /className="btn-key /, 'Run now is not a key');
   assert.match(attention, /<StatusMark tone=\{m\.tone\} title=\{m\.label\} \/>/, 'the Needs attention slice has no mark');
   assert.match(providers, /<StatusMark \{\.\.\.sourceMark\(st\)\} \/>/, 'the Providers slice has no mark');
   assert.match(providers, /function packageCard\(/, 'the Providers slice ends before the package card');

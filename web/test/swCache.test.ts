@@ -114,6 +114,25 @@ test('source browsing is still never cached', async () => {
   assert.ok(!apiCache || store.get(apiCache)!.size === 0, 'per-account source answers must not be stored');
 });
 
+test('the admin console is never cached, so a polled repair status cannot churn the API cache', async () => {
+  // Health polls GET /api/admin/tasks/repair/status every 2 s while a repair runs (v0.49.0). Through
+  // networkFirst each answer was stored, evicting a reader's cached pages from the 300-entry cache, and an
+  // offline replay would show a run "running" forever. Reintroduce by dropping the `/api/admin/` half of the
+  // network-only rule in sw.js: the cache holds the status answers.
+  const { handlers, store } = loadSw();
+  for (let i = 0; i < 5; i++) await doFetch(handlers, 'https://yomi.test/api/admin/tasks/repair/status');
+  await doFetch(handlers, 'https://yomi.test/api/admin/health');
+  await new Promise((r) => setTimeout(r, 20));
+  const apiCache = [...store.keys()].find((k) => k.startsWith('yomi-api-'));
+  const held = apiCache ? [...store.get(apiCache)!.keys()].filter((u) => u.includes('/api/admin/')) : [];
+  assert.deepEqual(held, [], 'admin answers were stored in the API cache');
+  // ...while the reader's own API answers are still cached, or offline re-reads break.
+  await doFetch(handlers, 'https://yomi.test/api/books/b1/pages');
+  await new Promise((r) => setTimeout(r, 20));
+  const after = [...store.keys()].find((k) => k.startsWith('yomi-api-'));
+  assert.ok(after && store.get(after)!.size > 0, 'the API cache stopped caching everything');
+});
+
 // ---- what v9 and v10 exist for: offline navigation ----------------------------------------------------
 //
 // Neither of the two rules below had a test, which is how they came to be the subject of a bug report three
