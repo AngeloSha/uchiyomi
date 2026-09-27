@@ -564,10 +564,10 @@ function Providers({ onTab }: { onTab: (t: Tab) => void }) {
     setReloading(true);
     try {
       const r = await api<{ available: number }>('/api/admin/sources/reload', { method: 'POST' });
-      toast(`Reloaded — ${r.available} source${r.available === 1 ? '' : 's'} available`, 'success');
+      toast(r.available === 1 ? tr('Reloaded — 1 source available') : tr('Reloaded — {n} sources available', { n: r.available }), 'success');
       qc.invalidateQueries({ queryKey: ['sources'] });
       qc.invalidateQueries({ queryKey: ['admin-sources'] });
-    } catch { toast('Reload failed', 'error'); }
+    } catch { toast(tr('Reload failed'), 'error'); }
     setReloading(false);
   };
   const inval = () => { qc.invalidateQueries({ queryKey: ['sources'] }); qc.invalidateQueries({ queryKey: ['admin-sources'] }); qc.invalidateQueries({ queryKey: ['admin-custom'] }); invalHealth(); };
@@ -797,7 +797,8 @@ function Providers({ onTab }: { onTab: (t: Tab) => void }) {
           <button onClick={checkAll} disabled={checking} data-source-check-all className="btn-key tabular-nums">
             {checking ? checkAllLabel(progress) : `🔍 ${tr('Check all now')}`}
           </button>
-          <button onClick={reload} disabled={reloading} className="btn-key">{reloading ? 'Reloading…' : '↻ Reload sources'}</button>
+          {/* Translated like its neighbour: it stayed English beside a translated "Check all now". */}
+          <button onClick={reload} disabled={reloading} className="btn-key">{reloading ? tr('Reloading…') : `↻ ${tr('Reload sources')}`}</button>
         </div>
       </div>
       {sweep && (
@@ -807,7 +808,8 @@ function Providers({ onTab }: { onTab: (t: Tab) => void }) {
             {sweepToast(sweep).text}
           </p>
           {sweep.sources.filter((v: any) => v.action).map((v: any) => (
-            <p key={v.id} className="mt-1 text-[11px] text-emerald-300">✓ {v.name}: {tr('followed its move to a new address')}</p>
+            // The SOURCE moved; Uchiyomi followed it ("{name}: followed its move" had the source follow itself).
+            <p key={v.id} className="mt-1 text-[11px] text-emerald-300">✓ {v.name}: {tr('moved to a new address, which Uchiyomi now uses')}</p>
           ))}
           {sweep.needsAttention.map((v: any) => (
             <p key={v.id} className="mt-1 text-[11px] text-fog-400"><span className="text-fog-200">{v.name}</span>: {v.fix || v.reason}</p>

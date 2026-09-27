@@ -75,7 +75,7 @@ export const STEP_TEXT = keys(
   // Compose
   'Open the .env file next to your docker-compose.yml and delete this line, or change its 0 to 1:',
   'Then start it. Its data was kept, so your extensions are where you left them:',
-  'In the .env file next to your docker-compose.yml, delete the {name} line if there is one with nothing after it.',
+  'In the .env file next to your docker-compose.yml, if there is a {name} line with no value after the =, delete it.',
   'A docker-compose.yml from before v0.49.0 has no switch for it; download the current one next to your .env:',
   'Then start it:',
   'See whether the engine’s container is running:',
@@ -102,7 +102,7 @@ export const STEP_TEXT = keys(
   // Somewhere else
   'Run the engine where Uchiyomi can reach it, with its data in a volume that stays. These are the settings the shipped files use:',
   'The engine has no password of its own: anyone who can reach port {port} can install extensions on it and change its settings. Keep that port on a private network, never open to the internet.',
-  'Then set {name} on Uchiyomi to its address and restart Uchiyomi:',
+  'Then set {name} on Uchiyomi to the engine’s address and restart Uchiyomi:',
   'Check that the engine is running and that Uchiyomi can reach the address in {name}.',
   'Stop the engine, then empty {name} on Uchiyomi and restart Uchiyomi.',
   // Desktop
@@ -149,7 +149,8 @@ export function onSteps(p: Platform, h: Headline): Step[] {
         ];
       }
       return [
-        { text: 'In the .env file next to your docker-compose.yml, delete the {name} line if there is one with nothing after it.', vars: { name: `${URL_VAR}=` } },
+        // "With nothing after it" could mean after the = or after the line: it is the value that is empty.
+        { text: 'In the .env file next to your docker-compose.yml, if there is a {name} line with no value after the =, delete it.', vars: { name: `${URL_VAR}=` } },
         { text: 'A docker-compose.yml from before v0.49.0 has no switch for it; download the current one next to your .env:', command: `curl -O ${RAW}/deploy/docker-compose.yml` },
         { text: 'Then start it:', command: UP },
       ];
@@ -195,7 +196,8 @@ export function onSteps(p: Platform, h: Headline): Step[] {
         // inside it. The Compose file never publishes the port (it `expose`s it to Uchiyomi's network only); this
         // command has to, for a Uchiyomi elsewhere to reach it, so it says what that opens (the s11 review).
         { text: 'The engine has no password of its own: anyone who can reach port {port} can install extensions on it and change its settings. Keep that port on a private network, never open to the internet.', vars: { port: '4567' } },
-        { text: 'Then set {name} on Uchiyomi to its address and restart Uchiyomi:', vars: { name: URL_VAR }, command: 'http://ENGINE-HOST:4567' },
+        // The ENGINE's address: "its address" read as Uchiyomi's own.
+        { text: 'Then set {name} on Uchiyomi to the engine’s address and restart Uchiyomi:', vars: { name: URL_VAR }, command: 'http://ENGINE-HOST:4567' },
       ];
   }
 }
@@ -256,7 +258,8 @@ export function headlineText(h: Headline): string {
  */
 export function stillLine(s: EngineReport): string {
   const h = headline(s);
-  if (h === 'unreachable') return tr('Still no answer: {reason}', { reason: s.error || tr('no reply') });
+  // With no reason to give it says only that: "Still no answer: no reply" said it twice.
+  if (h === 'unreachable') return s.error ? tr('Still no answer: {reason}', { reason: s.error }) : tr('Still no answer');
   // The switch and the address are read when Uchiyomi starts, and each platform's steps end in the command or
   // the Apply that restarts it -- so "still off" after the steps means the restart has not happened yet.
   return tr('Still off. Uchiyomi reads this setting when it starts; applying the change restarts it.');

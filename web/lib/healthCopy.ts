@@ -196,13 +196,16 @@ export const ACTION_COPY: Readonly<Record<string, ActionCopy>> = {
   'fixall:short': {
     label: () => tr('Find longer copies'),
     what: (c) => tr('Looks for a longer copy of up to {n} short chapters in one run, and replaces one only when a longer copy is found.', { n: lim(c, 'shortMax', 20) }),
-    how: (c) => tr('Each chapter’s followed sources are asked for their page count. Searching other sources shares one budget of {budget} searches with the gap step, and this step may use {n} of them.', { budget: lim(c, 'huntBudget', 5), n: lim(c, 'shortHuntMax', 2) }),
+    // A SERIES follows sources, not a chapter ("each chapter’s followed sources" was translated as "followed by");
+    // and the budget is "of {budget}", like the gap step's, with no counted noun to agree with it.
+    how: (c) => tr('The sources the series follows are asked for each chapter’s page count. Searches of other sources share one budget of {budget} with the gap step, and this step may use {n} of them.', { budget: lim(c, 'huntBudget', 5), n: lim(c, 'shortHuntMax', 2) }),
     eta: repairEta,
     lasting: (rec) => recordOutcome(rec),
   },
   'fixall:gaps': {
     label: () => tr('Fill gaps'),
-    what: (c) => tr('Searches for the missing chapters of up to {max} series in one run: the ones missing the most, with updates on and not looked at today, which are not necessarily the rows shown.', { max: lim(c, 'gapsMax', 5) }),
+    // "Not looked at today" did not say by whom: it is the gap step's own stamp (bff gaps_checked_at, 24 hours).
+    what: (c) => tr('Searches for the missing chapters of up to {max} series in one run: the ones missing the most chapters, with updates on and not checked in the last 24 hours, which are not necessarily the rows shown.', { max: lim(c, 'gapsMax', 5) }),
     how: (c) => tr('The searches share one budget of {budget} with the short-chapter step, which may use {n} of them. A source is followed only when it has most of the missing numbers, and at most {chapters} chapters are downloaded per series.', { budget: lim(c, 'huntBudget', 5), n: lim(c, 'shortHuntMax', 2), chapters: lim(c, 'gapChapters', 20) }),
     eta: repairEta,
     lasting: (rec) => recordOutcome(rec),
@@ -293,7 +296,7 @@ function shortLasting(rec: RepairRunRecord): { text: string; partial?: boolean }
   if (s.replaced) return { text: tr('Replaced with a longer copy') };
   if (s.confirmed) return { text: tr('Every source has the same short copy') };
   if (skip) return { text: skipLine(skip), partial: true };
-  if (s.left) return { text: tr('Left as it is: no longer copy could be reached'), partial: true };
+  if (s.left) return { text: tr('Left as it is: no source with a longer copy could be reached'), partial: true };
   return { text: tr('Nothing to do: it no longer qualifies'), partial: true };
 }
 
@@ -370,15 +373,24 @@ export function currentText(cur: RepairCurrent | null | undefined): string {
   return bits.join(' · ');
 }
 
-/** What a run is about, in a person's words: "Find a longer copy · Walk Tale · Ch. 3", "Full repair". */
-const KIND_KEYS = keys('Full repair', 'Find a longer copy', 'Fill now', 'Retry now');
-/** A one-step run pressed on a card is named by that card's action ("Fill gaps"), not by its running form. */
+/**
+ * What a run is about, in a person's words: "Longer-copy search · Walk Tale · Ch. 3", "Full repair".
+ *
+ * ⚠️ NAMES, never the keys' own labels. A run is named by what was pressed, and it used to BE the key's label --
+ * "Fill now", "Fill gaps" -- which a language that puts its keys in the imperative cannot also use as a name:
+ * Recent repairs, "Repairing: {what}" and "Latest one-off fix: {what}" read as orders ("املأ الآن"). So each
+ * gets a noun of its own, the one-chapter and the one-card run of a kind sharing it (the target tells them
+ * apart). Reintroduce by naming a run by `ACTION_COPY[…].label`: "a run's name is never a key's label" in
+ * healthCopy.test.ts names it.
+ */
+const KIND_KEYS = keys('Full repair', 'Longer-copy search', 'Gap fill', 'Failed-chapter retry', 'Solver reset');
+/** A one-step run pressed on a card: the name of what was pressed, not its running form ("Checking the solver"). */
 const ONE_STEP: Record<string, () => string> = {
-  'steps:solver': () => tr('Reset the solver'),
-  'steps:short': () => ACTION_COPY['fixall:short'].label({}),
-  'steps:gaps': () => ACTION_COPY['fixall:gaps'].label({}),
-  'steps:failures': () => ACTION_COPY['fixall:failures'].label({}),
-  'steps:failures:now': () => ACTION_COPY['fixall:failures'].label({}),
+  'steps:solver': () => tr(KIND_KEYS[4]),
+  'steps:short': () => tr(KIND_KEYS[1]),
+  'steps:gaps': () => tr(KIND_KEYS[2]),
+  'steps:failures': () => tr(KIND_KEYS[3]),
+  'steps:failures:now': () => tr(KIND_KEYS[3]),
 };
 export function kindLabel(kind: string, target?: RunTarget | null): string {
   const name = kind === 'full' ? tr(KIND_KEYS[0]) : kind === 'fix_short' ? tr(KIND_KEYS[1]) : kind === 'fill' ? tr(KIND_KEYS[2])
@@ -440,7 +452,8 @@ export function outcomeLine(o: HealthOutcome | undefined): string {
     if (o.why === 'confirmed_by_admin') return o.by ? tr('Marked fine by {name}', { name: o.by }) : tr('Marked fine by an admin');
     const bits: string[] = [];
     if (o.at) bits.push(tr('Tried {when}', { when: relativeTime(o.at) }));
-    if (o.asked) bits.push(tr('{a} of {b} sources answered', { a: o.answered ?? 0, b: o.asked }));
+    // A chapter of a series that follows one source is asked once: "1 of 1 sources answered" without its singular.
+    if (o.asked) bits.push(o.asked === 1 ? tr('{n} of 1 source answered', { n: o.answered ?? 0 }) : tr('{n} of {m} sources answered', { n: o.answered ?? 0, m: o.asked }));
     const why = SHORT_WHY_BY[o.why];
     if (why) bits.push(tr(why));
     return bits.join(' · ');

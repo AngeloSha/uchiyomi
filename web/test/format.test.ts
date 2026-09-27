@@ -108,7 +108,8 @@ test('etaLine says how long before anyone presses, rounded up, with a singular a
   assert.equal(etaLine({ minMs: 30_000, maxMs: 300_000 }), 'Up to 5 minutes', 'a lower bound under a minute is not a range');
   assert.equal(etaLine({ maxMs: 4 * HOUR }), 'Up to 4 hours', '"up to 240 minutes" is a number nobody reads as four hours');
   assert.equal(etaLine({ minMs: HOUR, maxMs: 3 * HOUR }), '1–3 hours');
-  assert.equal(etaLine({ maxMs: 300_000, lastMs: 134_000 }), 'Up to 5 minutes · Last time 2:14');
+  // How long it took, said as a duration: "Last time 2:14" read as a time of day in every language.
+  assert.equal(etaLine({ maxMs: 300_000, lastMs: 134_000 }), 'Up to 5 minutes · Took 2:14 last time');
   assert.equal(etaLine({ maxMs: NaN }), 'A few seconds');
 });
 
@@ -287,6 +288,9 @@ test('no English words wrap a relativeTime: the phrase is in the reader\'s langu
   // The ones the scan cannot see by shape: the Continue card's device line, whose words sit in another brace.
   // Reintroduce ` · on {elsewhere.name || 'another device'}{… relativeTime …}`: "the Continue card's
   // 'on <device> <when>' is English around the reader's language" fails.
-  assert.match(readFileSync(join(ROOT, 'components/cards.tsx'), 'utf8'), /tr\('on \{device\} \{when\}', \{ device: elsewhere\.name \|\| tr\('another device'\), when: relativeTime\(elsewhere\.at\) \}\)/,
+  const cards = readFileSync(join(ROOT, 'components/cards.tsx'), 'utf8');
+  assert.match(cards, /tr\('on \{device\} \{when\}', \{ device: where, when: relativeTime\(elsewhere\.at\) \}\)/,
     "the Continue card's 'on <device> <when>' is English around the reader's language");
+  assert.match(cards, /const where = elsewhere \? shownDeviceName\(elsewhere\.name\) \|\| tr\('another device'\) : '';/,
+    "the Continue card names the device with a stored English fallback (\"on Browser\") instead of the reader's words");
 });

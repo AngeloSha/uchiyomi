@@ -104,7 +104,7 @@ test('the scan itself sees the app: inline keys, keys() arrays, and nothing from
   assert.ok(keys.get('Library')?.has('components/BottomNav.tsx (keys)'), 'the bottom nav\'s keys() labels are not scanned');
   assert.ok(keys.get('Needs attention')?.has('lib/status.ts (keys)'), 'a keys() array in lib/ is not scanned');
   assert.ok(keys.has('Up to {n} minutes'), 'an inline tr() in lib/ is not scanned');
-  assert.ok(keys.has('Not asked: enough sources already had it'), 'an inline tr() in components/ is not scanned');
+  assert.ok(keys.has('Not asked: enough other sources already list this series'), 'an inline tr() in components/ is not scanned');
   const series = readFileSync(join(ROOT, 'app/series/page.tsx'), 'utf8');
   const after = series.slice(series.indexOf('accept="image/*"'));
   const later = after.match(/\btr\('((?:[^'\\\n]|\\.)*)'/);
@@ -191,12 +191,17 @@ const IRREGULAR_PAIRS: Record<string, string> = {
   'Ch. {n} · 1 older chapter not here yet': 'Ch. {a}–{b} · {n} older chapters not here yet',
   '1 page is a placeholder; the chapter sweep re-fetches it': '{n} pages are placeholders; the chapter sweep re-fetches them',
   'Ch. {n} · 1 chapter being archived slowly': 'Ch. {a}–{b} · {n} chapters being archived slowly',
+  // One try has no "since" (i18n pass 1): the singular says when it was, the plural since when.
+  'Tried once, at {time} · next try {when}': 'Tried {n} times since {time} · next try {when}',
 };
 /** Keys that look counted and are not a pair, each with why. Not a place to park a new key. */
 const NOT_PAIRED: Record<string, string> = {
   '1 to 64 letters, digits, - or _': 'a range, not a count',
   'Up to {n} hours': 'etaLine says hours only past 90 minutes, rounded up: never 1',
-  '{n} times in a row': 'shown only when consecutive > 1',
+  // One whole sentence per status (FindMissingDialog healthLine), each with its streak inside.
+  'rate-limited us {n} times in a row': 'shown only when consecutive > 1; one time is the bare status',
+  'refused us {n} times in a row': 'shown only when consecutive > 1; one time is the bare status',
+  'did not answer {n} times in a row': 'shown only when consecutive > 1; one time is the bare status',
 };
 /**
  * Plural keys that shipped before this check with no singular. Each reads "1 …s" at a count of 1 (or its

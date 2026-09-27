@@ -146,12 +146,15 @@ test('outcomes, caveats and skips read as sentences, from the stored data', () =
 });
 
 test('the history names runs the way a person would, and says when one stopped', () => {
-  assert.equal(kindLabel('fix_short', { label: 'Walk Tale', number: 3 }), 'Find a longer copy · Walk Tale · Ch. 3');
+  assert.equal(kindLabel('fix_short', { label: 'Walk Tale', number: 3 }), 'Longer-copy search · Walk Tale · Ch. 3');
   assert.equal(kindLabel('steps:gaps+short+solver:now'), 'Checking the solver, Looking for longer copies, Filling gaps');
   assert.equal(kindLabel('full'), 'Full repair');
   // A card's one-step run is named by what was pressed, not by its running form ("Checking the solver").
-  assert.equal(kindLabel('steps:solver'), 'Reset the solver');
-  assert.equal(kindLabel('steps:failures:now'), 'Try every failed chapter again');
+  assert.equal(kindLabel('steps:solver'), 'Solver reset');
+  assert.equal(kindLabel('steps:failures:now'), 'Failed-chapter retry');
+  assert.equal(kindLabel('fill', { label: 'Walk Gap' }), 'Gap fill · Walk Gap', 'a row\'s Fill now and its card\'s Fill gaps share a name');
+  assert.equal(kindLabel('steps:gaps'), 'Gap fill');
+  assert.equal(kindLabel('retry', { label: 'MangaDex' }), 'Failed-chapter retry · MangaDex');
   assert.equal(kindLabel('steps:count'), 'Counting pages');
   assert.equal(recordLine({ status: 'done', result: { counted: 0, only: ['solver'], solver: { reset: false }, ms: 12 } }), 'solver: nothing to reset');
   assert.match(recordLine({ status: 'stopped', result: { counted: 0, only: ['short'], short: { replaced: 1, confirmed: 0 } } }), /^Stopped before it finished · short: 1 replaced/);
@@ -181,6 +184,24 @@ test('a finished run reads "Done", never the library\'s "Finished" (read)', () =
   assert.doesNotMatch(read('lib/healthCopy.ts'), /tr\('Finished'\)/, 'healthCopy says the library\'s Finished');
 });
 
+test('a run\'s name is never a key\'s label: a label is an order, a name is a noun', () => {
+  // i18n pass 1 (ar): "Fill now", "Fill gaps" and "Try every failed chapter again" were ALSO the names of their
+  // runs in Recent repairs, "Repairing: {what}" and "Latest one-off fix: {what}" -- and a language whose keys are
+  // imperatives read an order there ("املأ الآن"). Reintroduce `'steps:gaps': () => ACTION_COPY['fixall:gaps'].label({})`
+  // in ONE_STEP: "steps:gaps is named by a key's label" fails.
+  const labels = new Set(Object.values(ACTION_COPY).map((c) => c.label({ n: 1 })));
+  for (const l of ['Fill now', 'Retry now', 'Fill gaps', 'Find longer copies', 'Try every failed chapter again']) {
+    assert.ok(labels.has(l), `"${l}" is no longer a key's label -- this test reads the wrong registry`);
+  }
+  for (const kind of ['full', 'fix_short', 'fill', 'retry', 'steps:solver', 'steps:short', 'steps:gaps', 'steps:failures', 'steps:failures:now']) {
+    const name = kindLabel(kind);
+    assert.ok(name && !labels.has(name) && name !== 'Reset the solver', `${kind} is named by a key's label: "${name}"`);
+  }
+  // The row's lasting line on a Fix that could not replace: "no longer copy" read as "could no longer".
+  const left = ACTION_COPY.fix_short.lasting!({ status: 'done', result: { counted: 0, short: { left: 1 } } } as RepairRunRecord);
+  assert.deepEqual(left, { text: 'Left as it is: no source with a longer copy could be reached', partial: true });
+});
+
 test('Recent repairs says each run\'s status as a word, not the raw English status', () => {
   // The mark's title is its accessible name. Reintroduce `title={r.status}` in RepairLive's HistoryRow: the source
   // assertion fails; map a status to itself: the word assertions fail.
@@ -190,6 +211,12 @@ test('Recent repairs says each run\'s status as a word, not the raw English stat
   }
   assert.equal(runStatusWord('done'), 'Done');
   assert.equal(runStatusWord('interrupted'), 'Interrupted by a restart');
+  // ONE run's status is "Running"; Library -> Downloads' heading over a list of them is its own key (i18n pass 1,
+  // ru: a plural heading and a singular status cannot share a word). Reintroduce `title={tr('Running')}` on the
+  // section: "the Downloads heading shares the run status's word" fails.
+  assert.equal(runStatusWord('running'), 'Running');
+  const view = read('components/ServerDownloadsView.tsx');
+  assert.match(view, /<Section id="running" title=\{tr\('Running now'\)\}/, 'the Downloads heading shares the run status\'s word');
   assert.match(read('components/RepairLive.tsx'), /<StatusMark tone=\{STATUS_TONE\[r\.status\] \?\? 'info'\} title=\{runStatusWord\(r\.status\)\}/,
     'the history row\'s mark is named by the raw English status');
 });

@@ -362,7 +362,7 @@ test('Scan library now says what it found, or why it did not scan, and Health is
   const keys = code(read(KEYS));
   const fn = keys.slice(keys.indexOf('export function scanState'), keys.indexOf('export function HealthRow'));
   assert.match(fn, /r\.reason === 'rate_limited'\) return \{ kind: 'refused', reason: tr\('A scan ran less than a minute ago'\) \}/);
-  assert.match(fn, /tr\('Scan done: \{series\} series, \{n\} chapters'/);
+  assert.match(fn, /tr\('Scan done: \{m\} series, \{n\} chapters'/);
   assert.match(code(read('lib/refresh.ts')), /return \{ scanned: false, reason: 'error' \};/, 'a failed scan is not told apart from a refused one');
 });
 

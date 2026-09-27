@@ -69,8 +69,11 @@ export function scanState(r: RefreshAnswer, startedAt: number): ActionState {
     if (typeof r.series !== 'number') return { kind: 'done', finishedAt: Date.now(), tookMs: took, outcome: tr('Scan started') };
     if (!r.series) return { kind: 'done', finishedAt: Date.now(), tookMs: r.ms ?? took, outcome: tr('Scan done: nothing found — check the folder layout'), partial: true };
     const books = r.books ?? 0;
-    const head = books === 1 ? tr('Scan done: {series} series, 1 chapter', { series: r.series })
-      : tr('Scan done: {series} series, {n} chapters', { series: r.series, n: books });
+    // Both counts have their singular: "series" does not change in English, but it does in the languages
+    // ("1 Serien", "1 séries"), and a library of one series is a first scan.
+    const head = r.series === 1
+      ? (books === 1 ? tr('Scan done: 1 series, 1 chapter') : tr('Scan done: 1 series, {n} chapters', { n: books }))
+      : (books === 1 ? tr('Scan done: {m} series, 1 chapter', { m: r.series }) : tr('Scan done: {m} series, {n} chapters', { m: r.series, n: books }));
     const skipped = r.skipped ? ` · ${r.skipped === 1 ? tr('1 folder skipped, see Health') : tr('{n} folders skipped, see Health', { n: r.skipped })}` : '';
     return { kind: 'done', finishedAt: Date.now(), tookMs: r.ms ?? took, outcome: head + skipped, partial: !!r.skipped };
   }
