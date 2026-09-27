@@ -63,7 +63,7 @@ export function SeriesServerDownloads({ seriesId, folder }: { seriesId: string; 
   const retry = async (numbers: number[]) => {
     try {
       const res = await api<{ folder: string; total: number }>('/api/sources/fetch', { method: 'POST', json: { seriesId, numbers } });
-      toast(fetchingToast(res.total), 'info');
+      toast(fetchingToast(res.total), 'info', { busy: true });
     } catch (e) { toast(msgOf(e, tr('Could not start.')), 'error'); }
     void kickDownloads(qc);
   };

@@ -56,7 +56,7 @@ export function useSeriesMenu(series: Series) {
       onSelect: async () => {
         try {
           await api(`/api/admin/series/${encodeURIComponent(series.id)}/check`, { method: 'POST', json: {} });
-          toast(tr('Checking for new chapters…'));
+          toast(tr('Checking for new chapters…'), 'info', { busy: true });
         } catch { toast(tr('Could not do that'), 'error'); }
       },
     }] : []),

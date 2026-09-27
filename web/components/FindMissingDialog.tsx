@@ -195,7 +195,7 @@ export function FindMissingDialog({ seriesId, onClose }: { seriesId: string; onC
       });
       setStarted(res.folder);
       qc.invalidateQueries({ queryKey: ['source-jobs'] });
-      toast(fetchingToast(numbers.length), 'info');
+      toast(fetchingToast(numbers.length), 'info', { busy: true });
     } catch (e) {
       toast(msgOf(e, tr('Could not start.')), 'error');
     } finally {
@@ -261,7 +261,7 @@ export function FindMissingDialog({ seriesId, onClose }: { seriesId: string; onC
           json: { planId: scan.data.planId, source: c.source, sourceSeriesId: c.sourceSeriesId, numbers: numbers.slice(0, max) },
         });
         setStarted(res.folder);
-        toast(fetchingToast(Math.min(numbers.length, max)), 'info');
+        toast(fetchingToast(Math.min(numbers.length, max)), 'info', { busy: true });
       } else {
         if (mode === 'follow') {
           if (!(await follow(c, false))) return;
@@ -279,7 +279,7 @@ export function FindMissingDialog({ seriesId, onClose }: { seriesId: string; onC
             ? other === 1 ? tr('1 could not be fetched now.') : tr('{m} could not be fetched now.', { m: other })
             : '';
         const downloading = res.total === 1 ? tr('Downloading 1 chapter.') : tr('Downloading {n} chapters.', { n: res.total });
-        toast(also ? joinSentences(downloading, also) : fetchingToast(res.total), 'info');
+        toast(also ? joinSentences(downloading, also) : fetchingToast(res.total), 'info', { busy: true });
       }
       qc.invalidateQueries({ queryKey: ['source-jobs'] });
       qc.invalidateQueries({ queryKey: ['series-listing', seriesId] });

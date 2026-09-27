@@ -30,6 +30,9 @@ const SURFACES = [
   'components/DownloadsRing.tsx',
   'components/ServerDownloadsView.tsx',
   'components/SeriesServerDownloads.tsx',
+  // Step 6, the notices that replaced the capsule toasts.
+  'components/Toast.tsx',
+  'lib/notices.ts',
 ];
 
 /**

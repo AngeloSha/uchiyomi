@@ -88,6 +88,16 @@ and hold it on a touchscreen, for a short menu (since v0.48.0): **Open in a new 
 opens the browser's own menu, and so does a right-click on selected text or in a text field. **Profile →
 Settings → Appearance → Right-click menus** turns them off on that device; the ⋯ buttons keep working either way.
 
+**Messages** — *Marked read*, *Fetching 3 chapters…*, *Could not save* — appear as small cards at the **bottom**
+of the screen (since v0.49.0; they used to be capsules at the top, where they covered a dialog's title). On a
+phone they sit just above the bottom bar, or above the select bar in select mode; while a dialog is open, one at
+a time takes the bottom bar's place, so the dialog is never covered; in the reader they rise above the chapter
+list or the settings sheet. On a laptop they sit in the bottom-right corner (bottom-left in Arabic), narrowing
+beside a dialog. A message stays as long as it takes to read — longer for longer ones, at least six seconds for
+an error — and waits while you hover over it, touch it or tab to it. ✕ dismisses it, and on a touchscreen so does
+swiping it down. The same message twice shows once with *×2*, and at most three show at once. A message about
+something still going on (*Checking for new chapters…*) has a small turning ring where the others have a mark.
+
 Search opens the **command palette**: one box that finds any series in the library and runs the quick actions
 (Surprise me, Updates, Refresh library and so on). With a keyboard there are three ways in: **Ctrl+K** (**⌘K**
 on a Mac) or **/** open it empty, and simply **starting to type** a title opens it with that first letter
@@ -1951,6 +1961,8 @@ off:
 - the cover blur-in and the loading shimmer;
 - card tilt;
 - the page and settings-panel transitions;
+- the slide of messages as they appear, and the line along their bottom edge that drains as their time runs out;
+- the glow and the tail on progress rings, which also stop turning and show a still dashed circle instead;
 - the accent rim on cards (each keeps its plain border).
 
 It applies the moment you flip it, is saved to your **account** (`reduceEffects` in your settings, like the
@@ -1958,7 +1970,9 @@ accent colour), so it follows you to another device, and a copy is kept on the d
 cleared when you sign out, or when the server ends your session, alongside the offline library that copy
 exists to serve, so the next person on a shared tablet gets their own setting. Signing in again brings it
 back from your account. Your system's
-*reduce motion* setting is separate: it keeps doing what it always did and does not turn this on.
+*reduce motion* setting is separate: it keeps doing what it always did and does not turn this on. Since v0.49.0
+it also stills the progress rings and messages the same way — no turning, no slide, no draining line — and a
+message can then only be dismissed with ✕, not swiped.
 
 **Behind a reverse proxy, login/cookies don't stick.** Set `PUBLIC_ORIGIN` to the exact public URL you use (e.g.
 `https://manga.example.com`) so cookies and CORS match, and serve it over HTTPS.

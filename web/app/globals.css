@@ -84,6 +84,11 @@
      where the ring draws a still dashed circle instead -- the reduced-motion rule below shortens an
      infinite animation to 0.001ms without stopping it, which makes a spinner jitter rather than rest. */
   --animate-ring: ring-spin 1.4s linear infinite;
+  /* A notice's lifetime, drained by a 2 px hairline along its bottom edge (components/Toast.tsx). The
+     duration here is a placeholder: each notice sets its own inline, from the length of what it says. It is
+     only the picture of the clock, which is JavaScript; under reduced motion or Reduce effects the hairline
+     is not drawn at all and the clock runs the same. */
+  --animate-notice-countdown: notice-countdown 1s linear forwards;
 
   @keyframes fade-up {
     0% { opacity: 0; transform: translateY(12px); }
@@ -99,6 +104,10 @@
   }
   @keyframes ring-spin {
     to { transform: rotate(360deg); }
+  }
+  @keyframes notice-countdown {
+    from { transform: scaleX(1); }
+    to { transform: scaleX(0); }
   }
 }
 

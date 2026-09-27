@@ -233,11 +233,22 @@ test('every consumer honours the switch', () => {
   assert.match(ui, /const reduced = useReduceEffects\(\);/, 'Img does not read the switch');
   assert.match(ui, /\$\{reduced\s*\? \(loaded \? 'opacity-100' : 'opacity-0'\)\s*: `transition-all duration-700 ease-out \$\{loaded \? 'scale-100 opacity-100 blur-none' : 'scale-105 opacity-0 blur-md'\}`\}/,
     'covers still sharpen in under Reduce effects (or lost the sharpen-in by default)');
-  for (const f of ['components/PageTransition.tsx', 'components/ConsoleNav.tsx']) {
+  // The notices (v0.49.0) slide up from the bottom edge; under the switch a card simply appears. Reintroduce
+  // `initial={{ opacity: 0, y: 16 }}` on NoticeCard: "components/Toast.tsx still animates in" fails.
+  for (const f of ['components/PageTransition.tsx', 'components/ConsoleNav.tsx', 'components/Toast.tsx']) {
     const src = code(read(f));
     assert.match(src, /initial=\{reduced \? false : \{ opacity: 0, y: \d+ \}\}/, `${f} still animates in under Reduce effects`);
     assert.match(src, /transition=\{reduced \? \{ duration: 0 \} : \{ duration: 0\.2\d/, `${f} still animates in under Reduce effects`);
   }
+  // …and its `reduced` is the switch OR the system's reduced-motion setting, both hooks called on every render.
+  // Reintroduce `const reduced = useReduceEffects() || useReducedMotion();`: "Toast.tsx reads the motion
+  // settings conditionally" fails -- the second hook is skipped whenever the first is true, which breaks the
+  // hooks after it on the render the switch flips.
+  const toast = code(read('components/Toast.tsx'));
+  assert.match(toast, /const plain = useReduceEffects\(\);\s*const still = useReducedMotion\(\);\s*const reduced = plain \|\| !!still;/,
+    'Toast.tsx reads the motion settings conditionally, or only one of them');
+  assert.doesNotMatch(toast, /useReduceEffects\(\)\s*(\|\||&&|\?)|useReducedMotion\(\)\s*(\|\||&&|\?)/, 'Toast.tsx reads the motion settings conditionally');
+  assert.match(toast, /exit=\{reduced \? \{ opacity: 0, transition: \{ duration: 0 \} \}/, 'Toast.tsx still slides out under Reduce effects');
 });
 
 /* ================================================================ the setting itself */

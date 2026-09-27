@@ -2,7 +2,7 @@
   "_meta": {
     "language": "zh",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 1387
+    "strings": 1389
   },
   "1 check found something": "1 项检查发现问题",
   "1 member": "1 位成员",
@@ -1390,5 +1390,7 @@
   "Upgrading to preferred groups": "正在切换到首选汉化组",
   "Waiting for {source}": "等待 {source}",
   "What the server fetches is under Library → Downloads.": "服务器获取的内容在 书库 → 下载 中。",
-  "what the server is fetching": "服务器正在获取的内容"
+  "what the server is fetching": "服务器正在获取的内容",
+  "Library refreshed": "书库已刷新",
+  "Refresh started": "已开始刷新"
 }

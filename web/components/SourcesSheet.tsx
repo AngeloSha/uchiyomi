@@ -99,17 +99,17 @@ export function useCheckNow(id: string, onDone: () => void) {
     setChecking(true);
     try {
       await api(`/api/admin/series/${id}/check`, { method: 'POST' });
-      toast('Checking for new chapters…', 'info');
+      toast(tr('Checking for new chapters…'), 'info', { busy: true, key: `check-${id}` });
       const started = Date.now();
       const tick = async () => {
         const st = await api<{ running: boolean; added?: number; waiting?: number; error?: string }>(`/api/admin/series/${id}/check`).catch(() => null);
         if (st && !st.running) {
           setChecking(false);
-          if (st.error) toast('Check failed', 'error');
+          if (st.error) toast('Check failed', 'error', { key: `check-${id}` });
           else {
             // A number held for a preferred group is not "up to date": say it is being waited for.
             const held = st.waiting ? ` · ${st.waiting} held for a preferred group` : '';
-            toast(st.added ? `Added ${st.added} new chapter${st.added === 1 ? '' : 's'}${held}` : st.waiting ? `Nothing new yet${held}` : 'Already up to date', 'success');
+            toast(st.added ? `Added ${st.added} new chapter${st.added === 1 ? '' : 's'}${held}` : st.waiting ? `Nothing new yet${held}` : 'Already up to date', 'success', { key: `check-${id}` });
             onDone();
           }
           return;
@@ -386,7 +386,7 @@ export function SourcesSheet({ id, series, groups, admin, error, isLoading, have
     try {
       await api(`/api/admin/series/${encodeURIComponent(id)}`, { method: 'PATCH', json: { borrowNames: on } });
       onSaved();
-      toast(on === null ? tr('Back to the server default') : on ? tr('Looking for chapter names…') : tr('Borrowed chapter names removed'), 'success');
+      toast(on === null ? tr('Back to the server default') : on ? tr('Looking for chapter names…') : tr('Borrowed chapter names removed'), 'success', { busy: on === true });
     } catch (e) { toast(msgOf(e, tr('Could not save')), 'error'); }
     setBorrowing(false);
   };

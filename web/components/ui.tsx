@@ -99,9 +99,11 @@ export function Sheet({ title, onClose, overBottomNav, action, footer, children 
   children: ReactNode;
 }) {
   const bodyRef = useRef<HTMLDivElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
   // A dialog on the notices' layer stack (lib/layers.ts). Only an `overBottomNav` sheet leaves the nav band
-  // free; the reader's sheets run to the bottom edge.
-  useLayer('dialog', true, { navBandFree: !!overBottomNav });
+  // free; the reader's sheets run to the bottom edge, so they hand over their panel to be measured and the
+  // notices rise above it instead of sitting on its last rows.
+  useLayer('dialog', true, { navBandFree: !!overBottomNav, ref: overBottomNav ? undefined : panelRef });
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
     document.addEventListener('keydown', onKey);
@@ -122,6 +124,7 @@ export function Sheet({ title, onClose, overBottomNav, action, footer, children 
           scroller's share, and at 390×667 the admin sources sheet's footer plus the nav padding left the
           scroller 179 px -- its second section began below the fold. */}
       <div
+        ref={panelRef}
         onClick={(e) => e.stopPropagation()}
         className={`glass flex w-full flex-col rounded-t-3xl border border-ink-700 pt-4
                    sm:mb-6 sm:max-w-xl sm:rounded-3xl ${footer ? 'max-h-[85vh]' : 'max-h-[75vh]'} ${

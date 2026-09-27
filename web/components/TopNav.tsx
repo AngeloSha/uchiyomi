@@ -43,12 +43,13 @@ export function TopNav({ onSearchFocus }: { onSearchFocus?: () => void }) {
   const refresh = async () => {
     if (refreshing) return;
     setRefreshing(true);
-    toast('Checking for new chapters…');
+    // One card: "Library refreshed" takes the place of the busy one (the same key).
+    toast(tr('Checking for new chapters…'), 'info', { busy: true, key: 'refresh' });
     await triggerRefresh();
     setTimeout(() => {
       qc.invalidateQueries({ queryKey: ['home'] });
       qc.invalidateQueries({ queryKey: ['library'] });
-      toast('Library refreshed', 'success');
+      toast(tr('Library refreshed'), 'success', { key: 'refresh' });
       setRefreshing(false);
     }, 1800);
   };

@@ -5,7 +5,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync, statSync } from 'fs';
 import { join } from 'path';
-import { attachLayer, layersNow, registerLayer } from '../lib/layers';
+import { attachLayer, layersNow, reachOf, registerLayer } from '../lib/layers';
 
 const ROOT = join(__dirname, '..');
 const read = (p: string) => readFileSync(join(ROOT, p), 'utf8');
@@ -26,7 +26,7 @@ test('registering and releasing layers moves the stack, and releasing twice is h
   // Reintroduce by releasing without recomputing the snapshot (`entries.delete(id);` alone): "releasing a
   // dialog left it on the stack" fails -- a notice would dock in the nav band for a dialog long closed.
   const start = layersNow();
-  assert.deepEqual({ ...start }, { dialog: 0, nav: 0, toolbar: 0, navBandFree: true, toolbarHeight: 0 });
+  assert.deepEqual({ ...start }, { dialog: 0, nav: 0, navHeight: 0, toolbar: 0, navBandFree: true, toolbarHeight: 0, sheetReach: 0 });
   const nav = registerLayer('nav');
   const modal = registerLayer('dialog', { navBandFree: true });
   assert.equal(layersNow().dialog, 1);
@@ -114,6 +114,44 @@ test('a measured toolbar: attachLayer reads the element now, follows every resiz
     'useLayer does not measure its ref');
 });
 
+test('a reader sheet is measured by how far up it reaches, from its layout box', () => {
+  // The notices rise above a sheet that runs to the bottom edge (lib/notices.ts 'above-sheet'). The reader's
+  // settings sheet springs up from `y: 100%`, so its painted box is below the screen when it is first
+  // measured, and a transform never resizes it, so the observer would not correct it. Reintroduce
+  // `height: Math.round(el.getBoundingClientRect().height)` for dialogs too: "the Sheet's bottom margin is
+  // not counted" fails; read the painted top instead: "a sheet mid-spring measured as its painted box" fails.
+  assert.equal(reachOf({ getBoundingClientRect: () => ({ height: 600 }), offsetTop: 844 - 600, offsetParent: { clientHeight: 844 } }), 600);
+  // A Sheet from sm up sits 1.5 rem off the bottom edge: its reach counts the margin under it.
+  assert.equal(reachOf({ getBoundingClientRect: () => ({ height: 500 }), offsetTop: 900 - 500 - 24, offsetParent: { clientHeight: 900 } }), 524,
+    'the Sheet\'s bottom margin is not counted');
+  // Mid-spring the painted box is anywhere; the layout box is where the sheet is going.
+  const springing = { getBoundingClientRect: () => ({ height: 700, top: 844 }), offsetTop: 144, offsetParent: { clientHeight: 844 } };
+  assert.equal(reachOf(springing), 700, 'a sheet mid-spring measured as its painted box');
+  // No layout parent (a fake, or a detached node): its height.
+  assert.equal(reachOf({ getBoundingClientRect: () => ({ height: 321.4 }) }), 321);
+
+  const undo = attachLayer('dialog', {}, { getBoundingClientRect: () => ({ height: 0 }), offsetTop: 211, offsetParent: { clientHeight: 844 } });
+  assert.equal(layersNow().sheetReach, 633, 'a measured dialog does not report its reach');
+  assert.equal(layersNow().navBandFree, false);
+  assert.equal(layersNow().toolbarHeight, 0, 'a sheet counted as a select bar');
+  const plain = attachLayer('dialog', { navBandFree: true });
+  assert.equal(layersNow().sheetReach, 633, 'an unmeasured dialog changed the reach');
+  undo();
+  assert.equal(layersNow().sheetReach, 0, 'a closed sheet still holds the notices up');
+  plain();
+  // And a toolbar is still measured by its height; so is the nav bar, which is neither.
+  const bar = attachLayer('toolbar', {}, { getBoundingClientRect: () => ({ height: 62 }), offsetTop: 700, offsetParent: { clientHeight: 844 } });
+  assert.equal(layersNow().toolbarHeight, 62);
+  assert.equal(layersNow().sheetReach, 0, 'a select bar counted as a sheet');
+  const nav = attachLayer('nav', {}, { getBoundingClientRect: () => ({ height: 71.2 }), offsetTop: 752, offsetParent: { clientHeight: 844 } });
+  assert.equal(layersNow().navHeight, 71, 'the nav bar is not measured by its height');
+  assert.equal(layersNow().toolbarHeight, 62, 'the nav bar counted as a select bar');
+  assert.equal(layersNow().sheetReach, 0, 'the nav bar counted as a sheet');
+  nav();
+  assert.equal(layersNow().navHeight, 0);
+  bar();
+});
+
 test('every dialog in the app is on the stack, and so are the nav and both select bars', () => {
   // A dialog missing here is one a notice will be placed over. Reintroduce by deleting `useLayer('dialog'`
   // from Modal: "components/ConfirmDialog.tsx declares a dialog but never registers it" fails.
@@ -160,11 +198,11 @@ test('every dialog in the app is on the stack, and so are the nav and both selec
   // The dialogs that keep the phone's nav band free say so; the one that does not, doesn't.
   assert.match(code(read('components/ConfirmDialog.tsx')), /useLayer\('dialog', true, \{ navBandFree: true \}\);/);
   assert.match(code(read('components/ConsoleNav.tsx')), /useLayer\('dialog', true, \{ navBandFree: true \}\);/);
-  assert.match(code(read('components/ui.tsx')), /useLayer\('dialog', true, \{ navBandFree: !!overBottomNav \}\);/, 'a reader sheet claims the nav band is free');
+  assert.match(code(read('components/ui.tsx')), /useLayer\('dialog', true, \{ navBandFree: !!overBottomNav, ref: overBottomNav \? undefined : panelRef \}\);/, 'a reader sheet claims the nav band is free');
   // The palette stays mounted while closed; registering it unconditionally would hold notices off a band
   // nothing is using.
   assert.match(code(read('components/CommandPalette.tsx')), /useLayer\('dialog', open\);/, 'the closed command palette counts as an open dialog');
-  assert.match(code(read('components/BottomNav.tsx')), /useLayer\('nav'\);/, 'the bottom nav is not on the stack');
+  assert.match(code(read('components/BottomNav.tsx')), /useLayer\('nav', true, \{ ref: barRef \}\);/, 'the bottom nav is not on the stack');
   for (const [f, cond] of [['app/library/page.tsx', 'selecting && picked.size > 0'], ['app/series/page.tsx', 'selecting && pickedCount > 0']] as const) {
     const src = code(read(f));
     assert.ok(src.includes(`useLayer('toolbar', ${cond}, { ref: toolbarRef });`), `${f}: the select bar is not on the stack while it shows`);

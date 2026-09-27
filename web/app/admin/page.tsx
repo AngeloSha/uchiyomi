@@ -163,7 +163,7 @@ function AdminHero({ onBack }: { onBack: () => void; onScan?: undefined }) {
     : tr('Everything looks healthy');
 
   const scan = async () => {
-    toast(tr('Scanning library…'));
+    toast(tr('Scanning library…'), 'info', { busy: true });
     await triggerRefresh();
     setTimeout(() => qc.invalidateQueries({ queryKey: ['admin-stats'] }), 2500);
   };
@@ -916,7 +916,7 @@ function ArtReview() {
   const startBackfill = async () => {
     try {
       const r = await api<{ total: number }>('/api/admin/art/backfill', { method: 'POST' });
-      toast(`Hunting art for ${r.total} series…`, 'success');
+      toast(`Hunting art for ${r.total} series…`, 'success', { busy: true });
       qc.invalidateQueries({ queryKey: ['admin-art-backfill'] });
     } catch (e: any) { toast(msgOf(e, 'Backfill already running?'), 'error'); }
   };

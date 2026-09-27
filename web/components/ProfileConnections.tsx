@@ -138,7 +138,7 @@ function TrackerRow({ t, refetch }: { t: TrackerStatus; refetch: () => void }) {
       // Only AniList has a backfill endpoint today; the others start syncing from the next chapter read.
       if (t.provider === 'anilist') {
         const b = await api<{ series: number }>('/api/trackers/anilist/backfill', { json: {} });
-        if (b.series) toast(tr('Syncing {n} series you have already finished…', { n: b.series }));
+        if (b.series) toast(tr('Syncing {n} series you have already finished…', { n: b.series }), 'info', { busy: true });
       }
     } catch (e: any) { toast(msgOf(e, tr('{name} did not accept that token', { name: label })), 'error'); }
     setBusy(false);

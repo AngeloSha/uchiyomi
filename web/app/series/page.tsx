@@ -1194,9 +1194,9 @@ function SeriesInner() {
     if (mode === 'previous') {
       const prev = (books?.content ?? []).filter((x) => x.number < b.number && !x.readProgress?.completed);
       if (!prev.length) { toast('Nothing before this chapter is unread'); return; }
-      toast(`Marking ${prev.length} chapter${prev.length > 1 ? 's' : ''} read…`);
+      toast(`Marking ${prev.length} chapter${prev.length > 1 ? 's' : ''} read…`, 'info', { busy: true, key: 'mark-read' });
       await setRead(prev, true);
-      toast(`Marked ${prev.length} read`, 'success');
+      toast(`Marked ${prev.length} read`, 'success', { key: 'mark-read' });
     } else {
       await setRead([b], mode === 'read');
       toast(mode === 'read' ? 'Marked read' : 'Marked unread', 'success');
@@ -1213,15 +1213,15 @@ function SeriesInner() {
   const markAllRead = async () => {
     const todo = (books?.content ?? []).filter((b) => !b.readProgress?.completed);
     if (!todo.length) { toast('Everything is already read', 'success'); return; }
-    toast(`Marking ${todo.length} chapters read…`);
+    toast(`Marking ${todo.length} chapters read…`, 'info', { busy: true, key: 'mark-read' });
     await setRead(todo, true);
-    toast(`Marked ${todo.length} chapters read`, 'success');
+    toast(`Marked ${todo.length} chapters read`, 'success', { key: 'mark-read' });
   };
 
   // The one download loop, for Save all offline and for Save offline in select mode: stops at the first
   // failure, because the usual cause is a full device and every further attempt would fail the same way.
   const saveOffline = async (todo: Book[]) => {
-    toast(tr('Saving {n} chapters offline…', { n: todo.length }));
+    toast(tr('Saving {n} chapters offline…', { n: todo.length }), 'info', { busy: true, key: 'save-offline' });
     let done = 0;
     for (const b of todo) {
       try {
@@ -1229,11 +1229,11 @@ function SeriesInner() {
         setDownloaded((s) => new Set(s).add(b.id));
         done++;
       } catch {
-        toast(tr('Stopped — device storage may be full'), 'error');
+        toast(tr('Stopped — device storage may be full'), 'error', { key: 'save-offline' });
         break;
       }
     }
-    if (done) toast(tr('Saved {n} chapters offline', { n: done }), 'success');
+    if (done) toast(tr('Saved {n} chapters offline', { n: done }), 'success', { key: 'save-offline' });
   };
   const downloadAll = async () => {
     if (downloadingAll || !books) return;
@@ -1317,7 +1317,7 @@ function SeriesInner() {
       // Ask for the jobs now: the answer carries this job, and with it the poll's 2.5 s pace (AppShell's
       // poller reads its interval off each answer) -- otherwise the band and the ring wait out a 30 s idle poll.
       void kickDownloads(qc);
-      toast(fetchingToast(res.total), 'info');
+      toast(fetchingToast(res.total), 'info', { busy: true });
       invalidateChapters();
       leaveSelect();
     } catch (e) {
@@ -1365,7 +1365,7 @@ function SeriesInner() {
         setStarted({ folder: res.folder, at: Date.now() });
         void kickDownloads(qc);
         if (i === 0) {
-          toast(fetchingToast(numbers.length), 'info');
+          toast(fetchingToast(numbers.length), 'info', { busy: true });
           invalidateChapters();
           leaveSelect();
         }

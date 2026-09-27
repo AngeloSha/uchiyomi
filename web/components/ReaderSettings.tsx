@@ -1,5 +1,6 @@
 'use client';
 import { motion } from 'framer-motion';
+import { useRef } from 'react';
 import { ReaderPrefs } from '@/lib/readerPrefs';
 import { IcX } from './icons';
 import { t as tr } from '@/lib/i18n';
@@ -35,14 +36,17 @@ export function ReaderSettings({
   onSourceDefault?: (save: boolean) => void;
 }) {
   // A sheet on the notices' layer stack (lib/layers.ts). It runs to the bottom edge, so it does not leave the
-  // nav band free -- the reader has no nav there anyway.
-  useLayer('dialog');
+  // nav band free -- the reader has no nav there anyway -- and its panel is measured, so a notice rises above
+  // it rather than covering its last rows.
+  const panelRef = useRef<HTMLDivElement>(null);
+  useLayer('dialog', true, { ref: panelRef });
   return (
     <motion.div className="fixed inset-0 z-50" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
       <div className="absolute inset-0 bg-black/60" onClick={onClose} />
       {/* Capped and scrollable: with the reading-direction and this-source rows, the sheet outgrew a short
           phone and pushed its first rows off the top. */}
       <motion.div
+        ref={panelRef}
         initial={{ y: '100%' }}
         animate={{ y: 0 }}
         exit={{ y: '100%' }}

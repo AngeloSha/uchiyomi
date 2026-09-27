@@ -6,7 +6,9 @@
  * never covers a dialog's title -- v0.48.3's lesson, where a banner painted over dialogs -- and on a phone
  * the one strip no dialog uses is the bottom-nav band (Modal, the console drawer and an `overBottomNav`
  * Sheet all leave it free). Where a notice goes therefore depends on whether a dialog is open, whether it
- * leaves that band free, whether there is a nav at all, and how tall a select toolbar above the nav is.
+ * leaves that band free, whether there is a nav at all, how tall a select toolbar above the nav is, and --
+ * in the reader, which has no nav -- how far up a sheet running to the bottom edge reaches. lib/notices.ts
+ * turns this into a place.
  *
  * Why a registry and not a CSS `body:has([aria-modal])`: the notice viewport renders in ToastProvider, above
  * AuthProvider and the app shell (app/providers.tsx), so it cannot read page state; and a `:has()` rule is
@@ -25,18 +27,29 @@ export interface Layers {
   dialog: number;
   /** Mounted bottom navs (the phone's; it hides itself from lg up). */
   nav: number;
+  /**
+   * The bottom nav's bar, measured, in px: 0 until measured, and 0 from lg up, where it is not displayed. A
+   * notice docked in the nav band takes exactly the bar's place, so it covers the bar whole.
+   */
+  navHeight: number;
   /** Fixed toolbars above the nav: the library's and a series page's select bars. */
   toolbar: number;
   /** Every open dialog leaves the bottom-nav band free (true when none is open). */
   navBandFree: boolean;
   /** The tallest registered toolbar, measured, in px; 0 until measured. */
   toolbarHeight: number;
+  /**
+   * How far up from the bottom edge the tallest open bottom sheet reaches, measured, in px; 0 when none.
+   * Only a sheet that runs to the bottom edge (the reader's) registers an element to measure, so this is
+   * the height of the one thing a notice must not sit on in a screen with no nav.
+   */
+  sheetReach: number;
 }
 
 export interface LayerInfo {
   /** A dialog that keeps the bottom-nav band clear of itself, as Modal does below lg. */
   navBandFree?: boolean;
-  /** A toolbar's measured height in px. */
+  /** A toolbar's or the nav bar's measured height, or a bottom sheet's reach, in px. */
   height?: number;
 }
 
@@ -47,7 +60,7 @@ export interface LayerHandle {
   release(): void;
 }
 
-const EMPTY: Layers = Object.freeze({ dialog: 0, nav: 0, toolbar: 0, navBandFree: true, toolbarHeight: 0 });
+const EMPTY: Layers = Object.freeze({ dialog: 0, nav: 0, navHeight: 0, toolbar: 0, navBandFree: true, toolbarHeight: 0, sheetReach: 0 });
 
 interface Entry { kind: LayerKind; navBandFree: boolean; height: number }
 const entries = new Map<number, Entry>();
@@ -56,10 +69,12 @@ let snapshot: Layers = EMPTY;
 const listeners = new Set<() => void>();
 
 function recompute(): void {
-  const next = { dialog: 0, nav: 0, toolbar: 0, navBandFree: true, toolbarHeight: 0 };
+  const next = { dialog: 0, nav: 0, navHeight: 0, toolbar: 0, navBandFree: true, toolbarHeight: 0, sheetReach: 0 };
   for (const e of entries.values()) {
     next[e.kind]++;
+    if (e.kind === 'nav') next.navHeight = Math.max(next.navHeight, e.height);
     if (e.kind === 'dialog' && !e.navBandFree) next.navBandFree = false;
+    if (e.kind === 'dialog') next.sheetReach = Math.max(next.sheetReach, e.height);
     if (e.kind === 'toolbar') next.toolbarHeight = Math.max(next.toolbarHeight, e.height);
   }
   // The snapshot object is replaced only when something it says changed. useSyncExternalStore compares by
@@ -102,20 +117,44 @@ function subscribe(l: () => void): () => void {
   return () => { listeners.delete(l); };
 }
 
-/** What attachLayer needs of an element and of ResizeObserver, so a test can hand it fakes. */
-export interface MeasuredEl { getBoundingClientRect(): { height: number } }
+/**
+ * What attachLayer needs of an element and of ResizeObserver, so a test can hand it fakes. `offsetTop` and
+ * `offsetParent` are a bottom sheet's (reachOf below): its layout box, which a CSS transform does not move.
+ */
+export interface MeasuredEl {
+  getBoundingClientRect(): { height: number };
+  offsetTop?: number;
+  offsetParent?: { clientHeight: number } | null;
+}
+
+/**
+ * How far up from the bottom edge a bottom sheet reaches: its fixed overlay's height minus the panel's top
+ * inside it. From the LAYOUT box on purpose. The reader's settings sheet springs up from `y: 100%`, and its
+ * first measurement happens while it is still below the screen; a transform moves the painted box
+ * (getBoundingClientRect's top) but not offsetTop, and it does not resize the panel, so the observer would
+ * never correct a painted-box reading. It also counts a margin under the panel (a Sheet's `sm:mb-6`).
+ */
+export function reachOf(el: MeasuredEl): number {
+  const box = el.offsetParent?.clientHeight;
+  if (box == null || el.offsetTop == null) return Math.round(el.getBoundingClientRect().height);
+  return Math.max(0, Math.round(box - el.offsetTop));
+}
+
 export type ResizeObserverLike = new (cb: () => void) => { observe(el: any): void; disconnect(): void };
 
 /**
- * Put one layer on the stack and, given an element, keep its measured height current: once now, and again
- * on every resize the observer reports. Returns the undo. useLayer's effect is exactly this; it is apart
- * from React so a test can drive the measuring with a fake element and a fake observer.
+ * Put one layer on the stack and, given an element, keep its measurement current: once now, and again on
+ * every resize the observer reports. A toolbar or the nav bar is measured by its height, a dialog (a bottom
+ * sheet) by its reach. Returns the undo. useLayer's effect is exactly this; it is apart from React so a test can drive
+ * the measuring with a fake element and a fake observer.
  */
 export function attachLayer(kind: LayerKind, info: { navBandFree?: boolean }, el?: MeasuredEl | null, RO?: ResizeObserverLike): () => void {
   const h = registerLayer(kind, { navBandFree: !!info.navBandFree });
   let ro: InstanceType<ResizeObserverLike> | null = null;
   if (el) {
-    const measure = () => h.update({ height: Math.round(el.getBoundingClientRect().height) });
+    const measure = kind === 'dialog'
+      ? () => h.update({ height: reachOf(el) })
+      : () => h.update({ height: Math.round(el.getBoundingClientRect().height) });
     measure();
     if (RO) { ro = new RO(measure); ro.observe(el); }
   }
@@ -127,7 +166,10 @@ export function attachLayer(kind: LayerKind, info: { navBandFree?: boolean }, el
  *
  * `ref` makes it measured: a toolbar passes the element it renders, and its height follows it through a
  * ResizeObserver, because the series page's select bar wraps to three rows at 390 px and the library's to
- * two, so no constant offset fits both. `navBandFree` is for dialogs that leave the phone's nav band clear.
+ * two, so no constant offset fits both. A dialog passes its panel only when it is a sheet running to the
+ * bottom edge (the reader's), so the notices can rise above it; the bottom nav passes its bar, which a
+ * notice docked in the nav band covers exactly. `navBandFree` is for dialogs that leave the phone's nav
+ * band clear.
  */
 export function useLayer(kind: LayerKind, active = true, opts: { navBandFree?: boolean; ref?: RefObject<HTMLElement | null> } = {}): void {
   const { navBandFree = false, ref } = opts;
