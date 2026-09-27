@@ -59,8 +59,10 @@ export interface TestAnswer {
   ms?: number;
 }
 
-// Declared through `keys()` because they reach tr() through the maps below (lib/i18n.ts).
-export const STAGE_LABELS = keys('Search', 'Chapter list', 'Page list', 'Images');
+// Declared through `keys()` because they reach tr() through the maps below (lib/i18n.ts). ⚠️ 'Search step', not
+// 'Search': that key is the search BUTTON's verb (de "Suchen", es "Buscar", fr "Rechercher", pt-BR "Buscar"), and a
+// stage line read "✗ Suchen" where the noun was meant -- one English word for two meanings (lib/status.ts).
+export const STAGE_LABELS = keys('Search step', 'Chapter list', 'Page list', 'Images');
 const STAGE_LABEL: Record<Stage, (typeof STAGE_LABELS)[number]> = {
   search: STAGE_LABELS[0], chapters: STAGE_LABELS[1], pages: STAGE_LABELS[2], images: STAGE_LABELS[3],
 };
@@ -99,9 +101,13 @@ export interface EvidenceView {
   fix: string | null;
 }
 
-/** The check names the smoke test uses, as words a translator has seen; anything newer is shown as sent. */
+/**
+ * The check names the smoke test uses, as words a translator has seen; anything newer is shown as sent. Its
+ * 'Search' check is the search STAGE, so it reads as the stage does, never as the search button's verb.
+ */
 const CHECK_NAMES = keys('Series page', 'Chapters', 'Pages', 'Covers');
-const checkName = (n: string): string => ((CHECK_NAMES as readonly string[]).includes(n) || n === 'Search' ? tr(n) : n);
+const checkName = (n: string): string =>
+  n === 'Search' ? stageLabel('search') : (CHECK_NAMES as readonly string[]).includes(n) ? tr(n) : n;
 
 /**
  * A live Test answer as lines, one per stage the Test covers, plus Covers when it was looked at.
@@ -159,21 +165,38 @@ function whenBy(at: string | null, by: EvidenceBy | null): string | null {
   return by && BY_LABEL[by] ? `${ago} · ${tr(BY_LABEL[by])}` : ago;
 }
 
-/** The last live verdict as one sentence: "Last tested 2h ago by the daily check". */
-export function testedLine(v: LiveVerdict | null | undefined): { tone: Tone; text: string } | null {
+/**
+ * The last live verdict as one sentence: "Last tested 2h ago by the daily check".
+ *
+ * `failing` is whether the source is failing NOW. A Test that failed is red only while it still is: once a later
+ * success at that step closed it (or it went stale), the card's mark said Healthy under a red "Last tested" --
+ * two verdicts at once -- so the old Test is then only a date, in the 'info' tone.
+ */
+export function testedLine(v: LiveVerdict | null | undefined, failing = true): { tone: Tone; text: string } | null {
   if (!v?.at) return null;
   const when = relativeTime(v.at);
   const text = v.by === 'test' ? tr('Last tested {when} with the Test button', { when })
     : v.by === 'sweep' ? tr('Last tested {when} by the daily check', { when })
     : tr('Last tested {when}', { when });
-  const tone: Tone = v.state === 'pass' ? 'ok' : v.state === 'fail' ? 'problem' : v.state === 'inconclusive' ? 'warn' : 'info';
+  const tone: Tone = v.state === 'pass' ? 'ok' : v.state === 'fail' ? (failing ? 'problem' : 'info') : v.state === 'inconclusive' ? 'warn' : 'info';
   return { tone, text };
 }
 
-/** Persisted evidence as lines: every stage, what was last seen there, when, and by what. */
-export function evidenceView(lines: StageLine[] | null | undefined, tested?: LiveVerdict | null, fix?: string | null): EvidenceView {
+/**
+ * Persisted evidence as lines: every stage, what was last seen there, when, and by what.
+ *
+ * ⚠️ Nothing at all when no stage has anything to say. Health lists switched-off sources and traffic-only
+ * cooldowns too (thirty of them, once a language is hidden), and every one of them got four "nothing recorded
+ * yet" lines. `failing` defaults to what the lines show; Providers passes its confirmed failures (testedLine).
+ */
+export function evidenceView(
+  lines: StageLine[] | null | undefined, tested?: LiveVerdict | null, fix?: string | null, failing?: boolean,
+): EvidenceView {
   const rows: EvidenceRow[] = [];
-  for (const l of lines || []) {
+  const known = (lines || []).filter((l) => STAGES.includes(l.stage));
+  const head = testedLine(tested, failing ?? known.some((l) => l.state === 'fail'));
+  if (!known.some((l) => l.state !== 'unknown')) return { head, rows, fix: fix || null };
+  for (const l of known) {
     if (!STAGES.includes(l.stage)) continue;
     if (l.state === 'fail') {
       rows.push({
@@ -187,7 +210,31 @@ export function evidenceView(lines: StageLine[] | null | undefined, tested?: Liv
       rows.push({ key: l.stage, glyph: 'none', label: stageLabel(l.stage), detail: tr('nothing recorded yet'), error: null, when: null });
     }
   }
-  return { head: testedLine(tested), rows, fix: fix || null };
+  return { head, rows, fix: fix || null };
+}
+
+/** A Health "Source health" row, as far as its evidence goes (bff lib/health.ts sourceTrouble). */
+export interface SourceHealthRow {
+  info?: boolean;
+  detail?: string;
+  evidence?: StageLine[] | null;
+  diagnosis?: { fix?: string } | null;
+}
+
+/**
+ * What a Health source row hands SourceEvidence: its stage lines, and the fix only where it is news.
+ *
+ * Not under a row that is listed for reference (`info`: switched off, used by nothing, merely untested, ignored):
+ * a switched-off source's fix is "Turn it back on", which tells the admin to undo their own decision. And not when
+ * the row's detail already ends with it, as a cooldown's does ("blocked until …; 3 series use it — <fix>"): the
+ * same sentence twice, one line apart.
+ */
+export function healthRowEvidence(it: SourceHealthRow): { lines: StageLine[] | null; fix: string | null } {
+  const fix = it.diagnosis?.fix || null;
+  return {
+    lines: it.evidence ?? null,
+    fix: fix && !it.info && !(it.detail ?? '').includes(fix) ? fix : null,
+  };
 }
 
 /** The Test button while it runs: "Testing… 0:12 of up to 0:53". The server's own wall is `testMs`. */

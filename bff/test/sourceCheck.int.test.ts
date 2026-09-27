@@ -24,7 +24,7 @@ if (DSN) {
 const skip = DSN ? false : 'set TEST_DATABASE_URL to run';
 
 const BALL = `sw:${SOURCE_IDS.mangaBall}`;
-const ODD = 'sc-odd', SLOW = 'sc-slow';
+const ODD = 'sc-odd', SLOW = 'sc-slow', STREAK = 'sc-streak', LOOKUP = 'sc-lookup';
 const ENGINE_WORDS = /^suwayomi: Exception while fetching data \(\/fetchSourceManga\) : java\.lang\.Exception/;
 const ADMIN = 'sc-admin';
 
@@ -57,7 +57,7 @@ before(async () => {
     async getPageUrls() { throw new Error('page list gone'); },
   } as any);
 
-  await q('DELETE FROM source_health WHERE source_id = ANY($1::text[])', [[BALL, ODD, SLOW]]);
+  await q('DELETE FROM source_health WHERE source_id = ANY($1::text[])', [[BALL, ODD, SLOW, STREAK, LOOKUP]]);
   await q('DELETE FROM users WHERE username = $1', [ADMIN]);
   const [{ id: uid }] = await q<{ id: string }>(
     `INSERT INTO users (display_name, username, role, password_hash, auth_kind) VALUES ($1,$1,'admin','x','password') RETURNING id`, [ADMIN]);
@@ -72,8 +72,9 @@ before(async () => {
 
 after(async () => {
   if (!DSN) return;
+  (await import('../src/lib/sourceCheck')).setSummaryRefresh();
   await app?.close();
-  await q('DELETE FROM source_health WHERE source_id = ANY($1::text[])', [[BALL, ODD, SLOW]]).catch(() => {});
+  await q('DELETE FROM source_health WHERE source_id = ANY($1::text[])', [[BALL, ODD, SLOW, STREAK, LOOKUP]]).catch(() => {});
   await q('DELETE FROM users WHERE username = $1', [ADMIN]).catch(() => {});
   await fake?.close();
   // The pool's idle clients (30 s) and the header refresh a Test schedules would otherwise hold the process a
@@ -84,7 +85,9 @@ after(async () => {
 const row = async (id: string) => (await q('SELECT * FROM source_health WHERE source_id = $1', [id]))[0];
 const sourcesCheck = async () => (await runHealthChecks()).checks.find((c) => c.id === 'sources')!;
 const itemOf = (c: any, id: string) => c.items.find((i: any) => i.sourceId === id);
-const inject = (method: string, url: string) => app.inject({ method, url, headers: { authorization: adminTok } });
+const inject = (method: string, url: string, headers: Record<string, string> = {}) =>
+  app.inject({ method, url, headers: { authorization: adminTok, ...headers } });
+const pause = (ms: number) => new Promise((res) => setTimeout(res, ms));
 
 test('THE #115 SHAPE: a source that fails its Test is on Health, by name, with the stage and the message', { skip }, async () => {
   fake.setMode({ mode: 'extension_error', source: SOURCE_IDS.mangaBall, stage: 'search' });
@@ -133,8 +136,11 @@ test('THE #115 SHAPE: a source that fails its Test is on Health, by name, with t
   // Reintroduce (5) by keeping "unused -> info" for live findings: this reads info.
   assert.notEqual(it.info, true, 'a failed Test is a finding even with no series on the source');
   assert.equal(c.status, 'warn');
-  assert.match(it.detail, /^Search failing since \d{4}-\d\d-\d\d \d\d:\d\d — This source's extension reported an error\./);
-  assert.match(it.detail, /last tested .* by Test; no series use it$/);
+  // Reintroduce the old join (`${d.reason}${tested}; ${uses}`): the detail reads "…reported an error.; last tested".
+  assert.match(it.detail,
+    /^Search failing since \d{4}-\d\d-\d\d \d\d:\d\d — This source's extension reported an error\. Last tested .* by Test; no series use it$/,
+    it.detail);
+  assert.doesNotMatch(it.detail, /\.;/, 'a period, then a semicolon');
   assert.equal(it.evidence.find((e: any) => e.stage === 'search').state, 'fail');
   assert.match(it.evidence.find((e: any) => e.stage === 'search').error, ENGINE_WORDS);
   assert.equal(it.diagnosis.code, 'extension_error');
@@ -237,7 +243,8 @@ test('an inconclusive test is greyed, never amber', { skip }, async () => {
 test('Check all now runs in the background, and its progress and result can be read', { skip }, async () => {
   // Reintroduce by awaiting the sweep in the POST (the pre-v0.49.0 route): the first answer is not running, and a
   // proxy in front of a real install would have cut the request long before.
-  const started = await inject('POST', '/api/admin/sources/check');
+  const AGENT = `sc-agent/${Date.now()}`;
+  const started = await inject('POST', '/api/admin/sources/check', { 'user-agent': AGENT });
   assert.equal(started.statusCode, 202, started.body);
   const p0 = started.json();
   assert.equal(p0.running, true);
@@ -254,4 +261,98 @@ test('Check all now runs in the background, and its progress and result can be r
   assert.ok(p.result.inconclusive.some((v: any) => v.id === SLOW), 'the slow source could not finish, and says so');
   assert.ok(p.result.needsAttention.some((v: any) => v.id === ODD));
   assert.ok(!p.result.needsAttention.some((v: any) => v.id === SLOW), 'running out of time is not "needs attention"');
+  // Who asked is on the audit line, although it is written when the sweep ends, long after the answer. Reintroduce
+  // by dropping `req` from the onDone logAudit: the line has no IP and no user agent.
+  let line: any;
+  for (let i = 0; i < 50 && !line; i++) {
+    [line] = await q(`SELECT ip, user_agent FROM audit_log WHERE event = 'source.check' ORDER BY at DESC LIMIT 1`);
+    if (line?.user_agent !== AGENT) { line = undefined; await pause(50); }
+  }
+  assert.ok(line, 'the source.check audit line lost the user agent');
+  assert.ok(line.ip, 'the source.check audit line lost the IP');
+});
+
+test('the header Health mark is refreshed once for a whole sweep, and never while the repair runs', { skip }, async () => {
+  // Reintroduce by dropping the checkRunning() guard in refreshSummarySoon (sourceCheck.ts): every source the
+  // sweep records arms the refresh again, and the whole Health report runs per source instead of once. Or by
+  // dropping the runtime.repairing check: a Test during the repair runs the report beside it.
+  const { setSummaryRefresh, checkSourceLive, recordLiveResult } = await import('../src/lib/sourceCheck');
+  const { runSourceCheck } = await import('../src/lib/sourceWatchdog');
+  const { runtime } = await import('../src/lib/runtime');
+  const { getSource } = await import('../src/lib/sources');
+  let runs = 0;
+  setSummaryRefresh(async () => { runs++; }, { firstMs: 0, everyMs: 20 });
+  try {
+    const r = await runSourceCheck({ autoFix: false });
+    assert.ok(r.sources.length >= 3, 'a sweep of several sources, one of them a second and a half long');
+    await pause(150);
+    assert.equal(runs, 1, `one refresh when the sweep ended, none per source (${runs})`);
+
+    runtime.repairing = true;
+    await recordLiveResult(ODD, await checkSourceLive(getSource(ODD)!, { by: 'test' }), 'test');
+    await pause(150);
+    assert.equal(runs, 1, 'a Test during the repair ran the Health report beside it');
+    runtime.repairing = false;
+    for (let i = 0; i < 20 && runs < 2; i++) await pause(25);
+    assert.equal(runs, 2, 'the refresh the repair held back runs once it is over');
+  } finally {
+    runtime.repairing = false;
+    setSummaryRefresh();
+  }
+});
+
+test('three failures in a row in ordinary use are a finding, two are not, and a success starts the count again', { skip }, async () => {
+  // Only the SQL in sourceHealth.ts (STAGE_MERGE) counts the streak and keeps `since`, under the row lock; the pure
+  // sourceEvidence tests run on hand-built records. So these drive the real writer. Reintroduce `'streak', 1` in
+  // STAGE_MERGE: the third failure is still not a finding. Reintroduce `'since', p->>'failAt'`: `since` follows
+  // the latest failure instead of the first. Drop `streak: 0` from a success's note: fail, fail, ok, fail is three.
+  const { registerAdapter } = await import('../src/lib/sources');
+  const none = async () => [];
+  assert.ok(registerAdapter({ id: STREAK, name: 'Streak Source', search: none, getSeries: async () => null, listChapters: none, getPageUrls: none } as any));
+  const note = async (outcome: 'ok' | 'fail') => {
+    await sh.noteStage(STREAK, 'search', outcome, { error: 'suwayomi: java.lang.Exception: site changed' });
+    await pause(5); // one note per millisecond at most: `open` compares failAt with okAt
+  };
+  await note('fail');
+  const first = (await row(STREAK)).stages.search.failAt;
+  await note('fail');
+  assert.equal(itemOf(await sourcesCheck(), STREAK), undefined, 'two failures in a row are not a finding');
+  await note('fail');
+  const h = await row(STREAK);
+  assert.equal(h.stages.search.streak, 3, 'three failures in a row were not counted as three');
+  assert.equal(h.stages.search.since, first, 'failing since the first failure of the streak, not the latest');
+  const it = itemOf(await sourcesCheck(), STREAK);
+  assert.ok(it && !it.info, 'the third is a finding');
+  assert.equal(it.evidence.find((e: any) => e.stage === 'search').by, 'traffic');
+
+  await note('ok');
+  await note('fail');
+  await note('fail');
+  const again = (await row(STREAK)).stages.search;
+  assert.equal(again.streak, 2, 'the success reset the count');
+  assert.equal(again.since > first, true, 'a failure after a success starts a new "since"');
+  assert.equal(itemOf(await sourcesCheck(), STREAK), undefined, 'fail, fail, ok, fail, fail: not three in a row');
+});
+
+test('one add/detail lookup is one failure in a row, however many of its calls threw', { skip }, async () => {
+  // Reintroduce a note per call (the .catch of getSeries AND of listChapters): one lookup is two in a row, and
+  // two lookups of a broken extension make a confirmed failure the rule says needs three.
+  const { registerAdapter, getSource } = await import('../src/lib/sources');
+  const { seriesAndChapters } = await import('../src/routes/sources');
+  const boom = async () => { throw new Error('suwayomi: java.lang.Exception: site changed'); };
+  assert.ok(registerAdapter({ id: LOOKUP, name: 'Lookup Source', search: async () => [], getSeries: boom, listChapters: boom, getPageUrls: async () => [] } as any));
+  const streakAfter = async () => {
+    // The note is fire-and-forget (a reader is waiting on this lookup): wait for it to land, then a little longer
+    // for a second one, if the code wrote two.
+    for (let i = 0; i < 40 && !(await row(LOOKUP))?.stages?.chapters; i++) await pause(25);
+    await pause(150);
+    return (await row(LOOKUP))?.stages?.chapters?.streak;
+  };
+  const one = await seriesAndChapters(getSource(LOOKUP)!, 'x1');
+  assert.deepEqual(one, { series: null, chapters: [] });
+  assert.equal(await streakAfter(), 1, 'one lookup, one failure in a row');
+  await seriesAndChapters(getSource(LOOKUP)!, 'x1');
+  assert.equal(await streakAfter(), 2);
+  assert.equal(itemOf(await sourcesCheck(), LOOKUP), undefined, 'two lookups are not three failures in a row');
+  assert.match((await row(LOOKUP)).stages.chapters.error, /site changed/);
 });

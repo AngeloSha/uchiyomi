@@ -2,7 +2,7 @@
   "_meta": {
     "language": "ru",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 1428
+    "strings": 1429
   },
   "1 check found something": "1 проверка нашла проблему",
   "1 member": "1 участник",
@@ -1431,5 +1431,6 @@
   "Checked 1 source.": "Проверен 1 источник.",
   "Checked {n} sources.": "Проверено источников: {n}.",
   "followed its move to a new address": "переезд на новый адрес учтён",
-  "could not finish in time — not proof it is broken": "не успел завершиться — это не доказывает, что он сломан"
+  "could not finish in time — not proof it is broken": "не успел завершиться — это не доказывает, что он сломан",
+  "Search step": "Поиск"
 }

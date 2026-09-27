@@ -351,6 +351,12 @@ test('our own deadline is not a verdict', () => {
   const empty = diagnose(clean, { adapterOk: false, failure: { stage: 'chapters', kind: 'empty' } });
   assert.equal(empty.code, 'markup_drift');
   assert.match(empty.fix, /no chapters/);
+  // Up to three are tried, and often fewer (one search hit; a one-chapter series): never a count it cannot know.
+  // Reintroduce "for three of them": both fail.
+  assert.match(empty.fix, /lists no chapters for the titles it tried/);
+  const noPages = diagnose(clean, { adapterOk: false, failure: { stage: 'pages', kind: 'empty' } });
+  assert.match(noPages.fix, /no pages for the chapters it tried/);
+  assert.doesNotMatch(empty.fix + noPages.fix, /three of them/);
   // An empty answer under a CURRENT Cloudflare error is the challenge page, not the markup.
   assert.equal(diagnose(facts({ lastError: 'Just a moment...' }), { adapterOk: false, failure: { stage: 'search', kind: 'empty' } }).code, 'cf_challenge');
 });

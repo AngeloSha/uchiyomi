@@ -1,5 +1,5 @@
 import { hash } from '@node-rs/argon2';
-import type { FastifyInstance, FastifyReply } from 'fastify';
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { q, one, tx } from '../lib/db';
 import { content as komga } from '../lib/backend';
@@ -3398,9 +3398,14 @@ export default async function adminRoutes(app: FastifyInstance) {
    */
   app.post('/api/admin/sources/check', async (req, reply) => {
     const userId = userIdOf(req);
+    // The audit line is written when the sweep ends, long after this answer, and req.ip reads the socket, which
+    // may be gone by then: the two things logAudit reads of a request, its IP and user agent, are taken now.
+    const h = req.headers;
+    const from = { ip: req.ip, headers: { 'x-forwarded-for': h['x-forwarded-for'], 'user-agent': h['user-agent'] } } as unknown as FastifyRequest;
     const started = !checkRunning() && startSourceCheck({ by: 'admin' }, (r) => logAudit('source.check', {
       userId,
       detail: { checked: r.sources.length, attention: r.needsAttention.length, inconclusive: r.inconclusive.length },
+      req: from,
     }));
     if (!started) return reply.code(409).send({ error: 'busy', message: 'A source check is already running.', progress: checkProgress() });
     return reply.code(202).send(checkProgress());

@@ -643,7 +643,7 @@ async function sourceTrouble(ctx: IgnoreCtx = noIgnores()): Promise<HealthCheck>
     );
     const uses = r.series ? `${r.series} series use it` : 'no series use it';
     const tested = r.live_at
-      ? `; last tested ${when(r.live_at)}${TESTED_BY[r.live_by ?? ''] ? ` ${TESTED_BY[r.live_by!]}` : ''}` : '';
+      ? `last tested ${when(r.live_at)}${TESTED_BY[r.live_by ?? ''] ? ` ${TESTED_BY[r.live_by!]}` : ''}` : '';
     let detail: string;
     let info = false;
     let members: string[] = [];
@@ -652,10 +652,13 @@ async function sourceTrouble(ctx: IgnoreCtx = noIgnores()): Promise<HealthCheck>
       info = true;
       detail = `${state}; ${uses}`;
     } else if (failing.length) {
-      // Leads with the stage: "Search failing since …" is what an admin looking for Manga Ball needs first.
-      detail = `${STAGE_LABEL[lead.stage]} failing since ${when(lead.since)} — ${d.reason}`
-        + (failing.length > 1 ? ` (also ${failing.slice(1).map((f) => STAGE_LABEL[f.stage].toLowerCase()).join(', ')})` : '')
-        + `${tested}; ${uses}`;
+      // Leads with the stage: "Search failing since …" is what an admin looking for Manga Ball needs first. The
+      // reason is a sentence of its own, so what follows it starts the next one: appended as "; last tested",
+      // it read "…needs a check from an admin.; last tested …".
+      const also = failing.length > 1 ? ` (also ${failing.slice(1).map((f) => STAGE_LABEL[f.stage].toLowerCase()).join(', ')})` : '';
+      const rest = [tested, uses].filter(Boolean).join('; ');
+      const reason = d.reason ? `${/[.!?]$/.test(d.reason) ? d.reason : `${d.reason}.`} ` : '';
+      detail = `${STAGE_LABEL[lead.stage]} failing since ${when(lead.since)}${also} — ${reason}${rest[0].toUpperCase()}${rest.slice(1)}`;
       // What an Ignore covers: the failing stages. A NEW stage failing is a new finding (healthIgnore covered()).
       members = failing.map((f) => f.stage);
     } else if (traffic(r)) {
@@ -666,7 +669,7 @@ async function sourceTrouble(ctx: IgnoreCtx = noIgnores()): Promise<HealthCheck>
     } else if (inconclusive) {
       unfinished++;
       info = true;
-      detail = `the last test ran out of time while ${STAGE_WORD[r.live_stage ?? 'search']} — not proof it is broken${tested}; ${uses}`;
+      detail = `the last test ran out of time while ${STAGE_WORD[r.live_stage ?? 'search']} — not proof it is broken${tested ? `; ${tested}` : ''}; ${uses}`;
     } else {
       untested++;
       info = true;

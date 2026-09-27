@@ -577,15 +577,20 @@ export async function seriesAndChapters(src: SourceAdapter, sourceId: string):
     // title with genuinely nothing on it looks like.
     let failed = false;
     // #115: what the lookup learned about the chapter stage is evidence for Health (non-escalating). Our own
-    // timeout is not: a slow answer is not a failing source.
-    const chapterFail = (e: any) => {
-      if (!e?.selfTimeout) void noteStage(src.id, 'chapters', 'fail', { error: String(e?.message || 'lookup failed') });
+    // timeout is not: a slow answer is not a failing source. ONE note per lookup, whichever call threw first:
+    // both ask the same site about the same title, and on a broken extension both throw, so a note per call
+    // made one lookup two failures in a row and two lookups "three in a row" (TRAFFIC_CONFIRM).
+    let lookupError: string | undefined;
+    const caught = (e: any) => {
+      failed = true;
+      if (!e?.selfTimeout) lookupError ??= String(e?.message || 'lookup failed');
     };
     const [series, chapters] = await Promise.all([
-      withTimeout(src.getSeries(sourceId), budgetFor(src, ADD_LOOKUP_TIMEOUT)).catch((e) => { failed = true; chapterFail(e); return null; }),
-      withTimeout(src.listChapters(sourceId), budgetFor(src, ADD_LOOKUP_TIMEOUT)).catch((e) => { failed = true; chapterFail(e); return [] as SourceChapter[]; }),
+      withTimeout(src.getSeries(sourceId), budgetFor(src, ADD_LOOKUP_TIMEOUT)).catch((e) => { caught(e); return null; }),
+      withTimeout(src.listChapters(sourceId), budgetFor(src, ADD_LOOKUP_TIMEOUT)).catch((e) => { caught(e); return [] as SourceChapter[]; }),
     ]);
     if (chapters.length) void noteStage(src.id, 'chapters', 'ok');
+    else if (lookupError !== undefined) void noteStage(src.id, 'chapters', 'fail', { error: lookupError });
     // Only a real answer is remembered. Caching the failure -- which this did when the cache was added --
     // turns a hiccup into a confident "No readable chapters for this title on this source. Try a different
     // source." pinned for ten minutes, so retrying inside the window returns the same wrong advice. Before

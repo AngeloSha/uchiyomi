@@ -99,7 +99,9 @@ test('#115: the Test chip holds no verdict of its own, and ticks against the lim
   // Health passes the check's limit, and draws the source rows' evidence through the shared component.
   const page = code(read(PAGE));
   assert.match(page, /<HealthActions check=\{c\.id\} item=\{it\} onDone=\{recheck\} testMs=\{c\.testMs\} \/>/);
-  assert.match(page, /\{c\.id === 'sources' && <SourceEvidence lines=\{it\.evidence\} fix=\{it\.diagnosis\?\.fix\} className="order-last basis-full" \/>\}/,
+  // Through healthRowEvidence, which drops the fix a row's detail already says and the one under a row listed for
+  // reference (lib/sourceEvidence.ts; its rules are held in sourceEvidence.test.ts).
+  assert.match(page, /\{c\.id === 'sources' && <SourceEvidence \{\.\.\.healthRowEvidence\(it\)\} className="order-last basis-full" \/>\}/,
     'Health\'s source rows do not show the stage lines');
 });
 

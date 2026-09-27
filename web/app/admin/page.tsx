@@ -1,5 +1,5 @@
 'use client';
-import { Suspense, useEffect, useState } from 'react';
+import { Suspense, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTabParam } from '@/lib/useTabParam';
 import { AdminSettings } from '@/components/AdminSettings';
@@ -30,9 +30,9 @@ import { TONE_SURFACE, engineMark, healthMark, sourceMark, type ProviderStatus }
 import Link from 'next/link';
 import { healthLinks } from '@/lib/healthLinks';
 import { useLayer } from '@/lib/layers';
-import { checkAllSources, followRunningCheck, type SourceCheckProgress } from '@/lib/sourceCheckRun';
+import { checkAllSession, type CheckAllSession, type SourceCheckProgress } from '@/lib/sourceCheckRun';
 import { SourceEvidence } from '@/components/SourceEvidence';
-import { checkAllLabel, sweepToast, testClock, type LiveVerdict, type StageLine, type TestAnswer } from '@/lib/sourceEvidence';
+import { checkAllLabel, healthRowEvidence, sweepToast, testClock, type LiveVerdict, type StageLine, type TestAnswer } from '@/lib/sourceEvidence';
 import { useTicker } from '@/lib/ticker';
 
 /**
@@ -593,33 +593,30 @@ function Providers({ onTab }: { onTab: (t: Tab) => void }) {
     toast(t.text, t.type);
     inval();
   };
-  /** Run the daily watchdog on demand. Slow on purpose: every source is probed one at a time. */
-  const checkAll = async () => {
-    setChecking(true);
-    try {
-      // In the background since v0.49.0: started, then followed until it ends (lib/sourceCheckRun.ts).
-      sweepDone(await checkAllSources(api, setProgress));
-    } catch (e: any) { toast(msgOf(e, tr('Could not run the check')), 'error'); }
-    setChecking(false);
-    setProgress(null);
-  };
-  // A sweep already running when the tab opens -- the daily one, or one another tab started -- is followed too,
-  // so the button shows where it is instead of offering a second run the server would refuse.
+  // In the background since v0.49.0: started, then followed until it ends (lib/sourceCheckRun.ts). A sweep already
+  // running when the tab opens -- the daily one, or one another tab started -- is followed too, so the button shows
+  // where it is instead of offering a second run the server would refuse. ONE owner of its answer per visit, and
+  // none once the tab is left (checkAllSession): a press kept polling after a tab switch, and the next visit's
+  // follower then gave the same notice a second time.
+  const checkRun = useRef<CheckAllSession | null>(null);
   useEffect(() => {
-    let alive = true;
-    let followed = false;
-    void (async () => {
-      try {
-        const r = await followRunningCheck(api, (p) => { if (!alive) return; followed = true; setChecking(true); setProgress(p); }, 2000, () => alive);
-        if (alive && r) sweepDone(r);
-      } catch { /* the button still works; its own run reports its own failure */ }
-      // Only a follow that took the button over hands it back: a Check all pressed meanwhile owns it itself.
-      if (alive && followed) { setChecking(false); setProgress(null); }
-    })();
-    return () => { alive = false; };
-    // Once per visit to the tab: the follow loop owns the rest.
+    const run = checkAllSession(api, {
+      progress: (p) => { setChecking(true); setProgress(p); },
+      done: sweepDone,
+      failed: (e) => toast(msgOf(e, tr('Could not run the check')), 'error'),
+      idle: () => { setChecking(false); setProgress(null); },
+    });
+    checkRun.current = run;
+    void run.follow();
+    return () => run.leave();
+    // Once per visit to the tab: the session owns the rest.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+  /** Run the daily watchdog on demand. Slow on purpose: every source is probed one at a time. */
+  const checkAll = () => {
+    setChecking(true);
+    void checkRun.current?.press();
+  };
 
   const [tested, setTested] = useState<Map<string, TestAnswer & { probe?: { finalUrl?: string } }>>(new Map());
   const [testingId, setTestingId] = useState<string | null>(null);
@@ -697,7 +694,7 @@ function Providers({ onTab }: { onTab: (t: Tab) => void }) {
       return (
         <>
           {/* A card whose last check passed and that fails nowhere needs one line, not four. */}
-          <SourceEvidence lines={h.evidence} tested={h.live} compact={!failing && h.live?.state === 'pass'} />
+          <SourceEvidence lines={h.evidence} tested={h.live} failing={failing} compact={!failing && h.live?.state === 'pass'} />
           {cooldown}
         </>
       );
@@ -2017,10 +2014,11 @@ function Health() {
                         <p className="text-[11px] text-fog-500">{it.detail}</p>
                       </div>
                       <HealthActions check={c.id} item={it} onDone={recheck} testMs={c.testMs} />
-                      {/* #115: the stage lines and the fix, through the component Providers uses too. The row's last
-                          line and its full width (`order-last basis-full`, as the Test's fix used to be): beside
-                          three action keys at 390 px the lines were a column two words wide. */}
-                      {c.id === 'sources' && <SourceEvidence lines={it.evidence} fix={it.diagnosis?.fix} className="order-last basis-full" />}
+                      {/* #115: the stage lines and the fix, through the component Providers uses too, and only
+                          where they say something (healthRowEvidence). The row's last line and its full width
+                          (`order-last basis-full`, as the Test's fix used to be): beside three action keys at
+                          390 px the lines were a column two words wide. */}
+                      {c.id === 'sources' && <SourceEvidence {...healthRowEvidence(it)} className="order-last basis-full" />}
                       {/* To the chapter the finding is about, not just its series (lib/healthLinks.ts). */}
                       {/* A duplicate pair gets one per copy, each naming its copy: two bare "Open"s cannot be told
                           apart on a phone, where there is no tooltip. */}

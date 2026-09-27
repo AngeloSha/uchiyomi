@@ -354,6 +354,9 @@ export function diagnose(f: HealthFacts, probe?: Probe, baseUrl?: string): Diagn
           'admin');
       }
       if (fl.kind === 'empty') {
+        // "The titles it tried", not "three of them": up to three are tried, and a one-chapter series or a site with
+        // one search hit gives fewer. The check's own detail carries the count.
+        //
         // A current stored Cloudflare or solver error explains an empty answer better than "the markup changed":
         // a challenge page parses to nothing too. Only a current one (the caller passes nothing stale).
         const why = err ? RULES.find(([re]) => re.test(err))?.[1]({ err }) : undefined;
@@ -362,8 +365,8 @@ export function diagnose(f: HealthFacts, probe?: Probe, baseUrl?: string): Diagn
           fl.stage === 'search'
             ? 'It answers without an error but returns nothing, which usually means the site changed its markup or is serving a challenge page. Re-test it to find out which.'
             : fl.stage === 'chapters'
-              ? 'It finds titles, but lists no chapters for three of them, which usually means the chapter list moved or changed its markup. Re-add it with auto-detect, or update the extension.'
-              : 'It lists chapters, but no pages for three of them, which usually means the reader page changed its markup or hides pages behind a script. Re-add it with auto-detect, or update the extension.',
+              ? 'It finds titles, but lists no chapters for the titles it tried, which usually means the chapter list moved or changed its markup. Re-add it with auto-detect, or update the extension.'
+              : 'It lists chapters, but no pages for the chapters it tried, which usually means the reader page changed its markup or hides pages behind a script. Re-add it with auto-detect, or update the extension.',
           'admin', { silent: true, needsProbe: fl.stage === 'search' });
       }
       // Our own deadline. With nothing stored to go on, say exactly that; with a current stored error, let the

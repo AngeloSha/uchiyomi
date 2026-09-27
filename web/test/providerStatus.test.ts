@@ -62,6 +62,8 @@ test('"Working normally." is never the page\'s own fallback', () => {
   assert.doesNotMatch(page(), /Working normally/);
   assert.match(providers(), /<SourceEvidence answer=\{t\}/, 'the card no longer shows a live Test through SourceEvidence');
   assert.match(providers(), /<SourceEvidence lines=\{h\.evidence\} tested=\{h\.live\}/, 'a reload loses the verdict: the stored evidence is not shown');
+  // A failed Test is red only while the source still fails (lib/sourceEvidence.ts testedLine, sourceEvidence.test.ts).
+  assert.match(providers(), /tested=\{h\.live\} failing=\{failing\}/, 'the card does not say whether it is still failing');
 });
 
 test('a Test, a cleared block or a switched-off source refreshes Health and the header mark too', () => {
@@ -80,6 +82,6 @@ test('the Test key ticks against the limit, and Check all says where it has got 
   assert.match(p, /testingId === s\.id \? testClock\(now - testFrom, health\?\.testMs\) : tr\('Test'\)/);
   assert.match(p, /const now = useTicker\(!!testingId\);/);
   assert.match(p, /checking \? checkAllLabel\(progress\) :/);
-  assert.match(p, /await checkAllSources\(api, setProgress\)/, 'the progress never reaches the button');
-  assert.match(p, /followRunningCheck\(api,/, 'a sweep already running when the tab opens is not followed');
+  assert.match(p, /progress: \(p\) => \{ setChecking\(true\); setProgress\(p\); \}/, 'the progress never reaches the button');
+  assert.match(p, /void run\.follow\(\);/, 'a sweep already running when the tab opens is not followed');
 });

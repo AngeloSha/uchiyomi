@@ -18,10 +18,12 @@ import {
 } from '@/lib/sourceEvidence';
 import { StatusGlyph } from './StatusMark';
 
-export function SourceEvidence({ answer, lines, tested, fix, compact, onMove, className = '' }: {
+export function SourceEvidence({ answer, lines, tested, failing, fix, compact, onMove, className = '' }: {
   answer?: TestAnswer | null;
   lines?: StageLine[] | null;
   tested?: LiveVerdict | null;
+  /** Whether the source is failing now; a failed `tested` is red only while it is (lib/sourceEvidence.ts testedLine). */
+  failing?: boolean;
   /** The admin's fix sentence for persisted evidence (Health passes item.diagnosis.fix). */
   fix?: string | null;
   /** The last-tested line alone, without the stage lines: a card whose last check passed has nothing to list. */
@@ -30,7 +32,7 @@ export function SourceEvidence({ answer, lines, tested, fix, compact, onMove, cl
   onMove?: () => void;
   className?: string;
 }) {
-  const view: EvidenceView = answer ? answerView(answer) : evidenceView(lines, tested, fix);
+  const view: EvidenceView = answer ? answerView(answer) : evidenceView(lines, tested, fix, failing);
   const rows = compact ? [] : view.rows;
   if (!view.head && !rows.length && !view.fix) return null;
   const moved = !!answer && answer.diagnosis?.code === 'moved' && !!onMove;

@@ -21,7 +21,7 @@ import { readSites, writeSites } from './sources/customSites';
 import { smokeTest } from './sourceProbe';
 import { Diagnosis, STAGE_WORD } from './sourceDiagnosis';
 import { clearBlock } from './sourceHealth';
-import { checkSourceLive, recordLiveResult } from './sourceCheck';
+import { checkSourceLive, recordLiveResult, refreshSummarySoon } from './sourceCheck';
 import type { Stage } from './sourceEvidence';
 import { notifyAdmins } from './push';
 import { logAudit } from './audit';
@@ -155,6 +155,8 @@ export async function runSourceCheck(opts: { autoFix?: boolean; by?: 'schedule' 
   } finally {
     running = false;
     progress = { ...progress, running: false, current: null, finishedAt: new Date().toISOString() };
+    // The header's Health mark, once for the whole sweep: nothing it recorded scheduled one (sourceCheck.ts).
+    refreshSummarySoon();
   }
 }
 

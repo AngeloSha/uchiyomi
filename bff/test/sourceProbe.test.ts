@@ -103,6 +103,26 @@ test('a call that outlives the wall is cut off and reads inconclusive', { timeou
   assert.deepEqual(r.failure, { stage: 'search', kind: 'timeout' });
 });
 
+test('the engine client giving up is our deadline too: inconclusive, never a failure', async () => {
+  // The Suwayomi client aborts each GraphQL request at 30 s, inside the 45 s wall, and says so as "suwayomi timeout
+  // after 30000ms" (client.ts transportError). Reintroduce by checking only `selfTimeout` in ours(): the state is
+  // 'fail', which is a confirmed failure at once -- a warn row on Health and a push from the sweep.
+  const { smokeTest } = await load();
+  const late = adapter({ search: async () => { throw new Error('suwayomi timeout after 30000ms'); } });
+  const r = await smokeTest(late, { timeoutMs: 5000 });
+  assert.equal(r.state, 'inconclusive', JSON.stringify(r.failure));
+  assert.deepEqual(r.failure, { stage: 'search', kind: 'timeout' });
+  assert.equal(r.timedOut, true);
+  // At a later stage the same, and what passed before it stays passed.
+  const pages = await smokeTest(adapter({ getPageUrls: async () => { throw new Error('suwayomi timeout after 30000ms'); } }), { timeoutMs: 5000 });
+  assert.equal(pages.state, 'inconclusive');
+  assert.deepEqual(pages.passed, ['search', 'chapters']);
+  // The engine not answering at all is not our patience: that is still an error at the stage.
+  const down = await smokeTest(adapter({ search: async () => { throw new Error('suwayomi unreachable: fetch failed (ECONNREFUSED)'); } }), { timeoutMs: 5000 });
+  assert.equal(down.state, 'fail');
+  assert.equal(down.failure?.kind, 'error');
+});
+
 test('unnumbered chapters are named, not called missing', async () => {
   // Reintroduce by dropping the UNNUMBERED write in suwayomi/sources.ts listChapters (the adapter half is pinned in
   // suwayomiAdapter.test.ts), or by ignoring it here: the kind is 'empty' and the fix points at markup.

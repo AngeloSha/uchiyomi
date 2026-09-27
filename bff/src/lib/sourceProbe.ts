@@ -48,7 +48,14 @@ export interface SmokeResult {
 const clip = (s: unknown) => String(s || '').slice(0, 80);
 const full = (s: unknown) => String(s || '').slice(0, 300);
 const messageOf = (e: unknown) => (e as Error)?.message || 'error';
-const ours = (e: unknown) => !!(e as { selfTimeout?: boolean })?.selfTimeout;
+/**
+ * The Suwayomi client's own per-request deadline (client.ts transportError). 30 s, inside the 45 s wall, so a slow
+ * extension call ran out of THAT patience first and read as a confirmed failure -- a warn row on Health and a push
+ * from the sweep -- for what is our deadline as much as the wall is.
+ */
+const ENGINE_TIMEOUT = /^suwayomi timeout after \d+ms/;
+/** Our patience ran out, not the source's: the wall (withTimeout's selfTimeout) or the engine client's deadline. */
+const ours = (e: unknown) => !!(e as { selfTimeout?: boolean })?.selfTimeout || ENGINE_TIMEOUT.test(messageOf(e));
 
 /** A wall-clock deadline, checked between stages. */
 const past = (deadline: number) => Date.now() >= deadline;
