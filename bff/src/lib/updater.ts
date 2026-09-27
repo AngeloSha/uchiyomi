@@ -42,7 +42,7 @@ export type UpdateOutcome =
  * The same bound the add path uses (routes/sources.ts). Unbounded, one hung site held the whole sweep -- the
  * loop is sequential with a 1.5s pause, so every series behind it waited on undici's 300s default.
  */
-const LIST_TIMEOUT = Number(process.env.UPDATER_LIST_TIMEOUT_MS) || 20_000;
+export const LIST_TIMEOUT = Number(process.env.UPDATER_LIST_TIMEOUT_MS) || 20_000;
 
 /**
  * Attempts (added + failed) one sweep may spend before it stops and says so.

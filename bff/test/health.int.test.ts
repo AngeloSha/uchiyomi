@@ -535,7 +535,15 @@ test('a short chapter offers Fix only for a file we downloaded, and a confirmed 
   await book(4, 1, '/library', `${S_SHORT}/Ch 04 [somescan].cbz`);
   await book(5, 2, DL_ROOT, chapterFileRel(S_SHORT, 5));
   await book(6, 1, DL_ROOT, chapterFileRel(S_SHORT, 6));
+  await book(7, 2, DL_ROOT, chapterFileRel(S_SHORT, 7));
+  await book(8, 1, DL_ROOT, chapterFileRel(S_SHORT, 8));
   await q(`UPDATE lib_books SET short_confirmed_at = now() WHERE id = $1`, [`b_${S_SHORT}_5`]);
+  // Saved with a placeholder page: the chapter sweep re-fetches it, and the repair's short step skips it.
+  await q(`UPDATE lib_books SET missing_pages = ARRAY[2] WHERE id = $1`, [`b_${S_SHORT}_7`]);
+  // "It's fine", pressed by an admin (the confirm-short route writes both).
+  await q(`UPDATE lib_books SET short_confirmed_at = now(),
+                  short_result = '{"at":"2026-09-01T00:00:00.000Z","why":"confirmed_by_admin","by":"hs-admin"}'::jsonb
+            WHERE id = $1`, [`b_${S_SHORT}_8`]);
   // A tombstoned chapter: the bytes are gone, so a page count taken before they went says nothing anybody
   // can act on. Reintroduce by dropping `b.pruned_at IS NULL` from shortChapters(): it is reported again.
   await q(`UPDATE lib_books SET pruned_at = now(), pruned_reason = 'deleted' WHERE id = $1`, [`b_${S_SHORT}_6`]);
@@ -557,7 +565,16 @@ test('a short chapter offers Fix only for a file we downloaded, and a confirmed 
     assert.ok(Date.parse(confirmed.fixed?.at) > 0, 'and says when that was decided');
     assert.deepEqual(confirmed.actions, ['confirm_short'], 'its one chip is the one that withdraws the confirmation');
     assert.equal(of(6), undefined, 'a deleted chapter is not a short chapter');
-    assert.match(c.summary, /1 confirmed short at the source/);
+    // v0.49.0. Reintroduce by offering fix_short on a row with missing_pages again: the actions below read
+    // ['fix_short', 'confirm_short'], and Fix would do nothing (stepShort filters `missing_pages IS NULL`).
+    const partial = of(7);
+    assert.deepEqual(partial.actions, ['confirm_short'], 'a chapter with placeholder pages is not offered Fix');
+    assert.deepEqual(partial.outcome, { kind: 'short', at: null, why: 'partial', missing: 1 }, 'and says why');
+    const fine = of(8);
+    assert.equal(fine.fixed?.what, 'marked fine by an admin', 'a person\'s judgement is not claimed as the repair\'s proof');
+    assert.equal(fine.outcome?.why, 'confirmed_by_admin');
+    assert.equal(fine.outcome?.by, 'hs-admin');
+    assert.match(c.summary, /2 confirmed short at the source/);
     assert.match(c.note, /Counted nightly by the repair task/, 'the note no longer says only opened chapters count');
   } finally {
     await q('DELETE FROM lib_series WHERE id = $1', [S_SHORT]);
@@ -592,23 +609,38 @@ test('a gap the repair has already looked into is greyed until its answer goes s
     const c = (await runHealthChecks()).checks.find((x: any) => x.id === 'chapter-gaps');
     return c.items.find((i: any) => i.title === 'Gaps Result Fixture');
   };
-  const stamp = async (ago: string, result: Record<string, unknown>) =>
+  // The stamp and the conclusion at the same time, as a finished run leaves them; `concluded` apart from the
+  // stamp is a run that is on this series right now.
+  const AGO: Record<string, number> = { '1 hour': 3600e3, '8 days': 8 * 864e5 };
+  const stamp = async (ago: string, result: Record<string, unknown>, concluded = ago) =>
     q(`UPDATE lib_series SET gaps_checked_at = now() - $2::interval, gaps_result = $3::jsonb WHERE id = $1`,
-      [S_GR, ago, JSON.stringify({ at: new Date().toISOString(), have_count: 5, ...result })]);
+      [S_GR, ago, JSON.stringify({ at: new Date(Date.now() - AGO[concluded]).toISOString(), have_count: 5, ...result })]);
   try {
     const first = await item();
     assert.ok(first, 'never looked at: a plain finding');
     assert.notEqual(first.info, true);
     assert.equal(first.fixed, undefined, 'nothing has been decided about it yet');
 
-    await stamp('1 hour', { why: 'no_candidate', sweep: 0 });
+    await stamp('1 hour', { why: 'no_candidate', sweep: 0, unfillable: ['4-6'], scanned: 3 });
     const asked = await item();
     assert.equal(asked.info, true, 'asked, and the answer was no: greyed');
     assert.equal(asked.fixed?.what, 'no other source lists them');
-    assert.match(asked.detail, /no other source lists them, checked \d{4}-\d{2}-\d{2}$/);
+    // v0.49.0: the conclusion is data the page translates, not an English suffix on the detail.
+    // Reintroduce the suffix and the first assertion fails; drop `outcome` and the rest do.
+    assert.equal(asked.detail, '3 missing — 4-6', 'the detail is the finding alone');
+    assert.equal(asked.outcome?.kind, 'gaps');
+    assert.equal(asked.outcome?.why, 'no_candidate');
+    assert.deepEqual(asked.outcome?.unfillable, ['4-6']);
+    assert.equal(asked.outcome?.scanned, 3);
+    assert.ok(Date.parse(asked.outcome?.at) > Date.now() - 2 * 3600e3, 'and when it was concluded');
 
     await stamp('8 days', { why: 'no_candidate', sweep: 0 });
     assert.notEqual((await item()).info, true, 'an answer older than a week is worth asking again');
+
+    // A run stamps the series BEFORE it searches, so mid-run the stamp is fresh while the stored answer is
+    // still last week's. Reintroduce by judging freshness on gaps_checked_at: this reads as settled.
+    await stamp('1 hour', { why: 'no_candidate', sweep: 0 }, '8 days');
+    assert.notEqual((await item()).info, true, "last week's answer is not made fresh by tonight's stamp");
 
     await stamp('1 hour', { why: 'cooldown', sweep: 0 });
     assert.notEqual((await item()).info, true, 'a cooldown is not an answer: nobody was asked');
@@ -621,7 +653,15 @@ test('a gap the repair has already looked into is greyed until its answer goes s
     await stamp('1 hour', { why: 'listed', sweep: 3 });
     const listed = await item();
     assert.equal(listed.info, true, 'a hole the chapter sweep is about to fill is not a finding');
-    assert.match(listed.detail, /the next chapter sweep will fetch them/);
+    assert.equal(listed.outcome?.why, 'listed');
+    assert.equal(listed.outcome?.sweep, 3);
+    assert.match(listed.fixed?.what, /the next chapter sweep will fetch them/);
+
+    // A paused series: nothing but Fill now will ever fetch its gaps, and the row says so before the press.
+    // Reintroduce by dropping the caveat: the assertion below finds none.
+    assert.equal(listed.caveats, undefined, 'updates on: no caveat');
+    await q('UPDATE lib_series SET auto_update = false WHERE id = $1', [S_GR]);
+    assert.deepEqual((await item()).caveats, [{ action: 'fill', code: 'updates_paused' }]);
   } finally {
     await q('DELETE FROM lib_series WHERE id = $1', [S_GR]);
   }
@@ -684,5 +724,51 @@ test('a duplicate pair suggests the copy with the most to lose as the one to kee
     await q('DELETE FROM read_progress WHERE user_id = $1', [uid]).catch(() => {});
     await q('DELETE FROM lib_series WHERE id = ANY($1::text[])', [[D1, D2]]).catch(() => {});
     await q('DELETE FROM users WHERE username = $1', [USER]).catch(() => {});
+  }
+});
+
+const S_FAIL = 's_health_fail';
+
+/**
+ * v0.49.0: "failing since" is the FIRST failure (first_at), not the latest attempt, and a source that cannot
+ * be asked right now says so on its Retry now before anyone presses it.
+ *
+ * Reintroduce by reading min(f.at) again: `since` is the latest attempt. Drop the caveat builder: none is found.
+ */
+test('the failures row says since when, how often, and what Retry now cannot do yet', { skip: DSN ? false : 'set TEST_DATABASE_URL to run' }, async () => {
+  const { migrate } = await import('../src/lib/migrate');
+  const { q } = await import('../src/lib/db');
+  const { runHealthChecks } = await import('../src/lib/health');
+  await migrate();
+  const SRC = 'health-fail-src';
+  await q('DELETE FROM lib_series WHERE id = $1', [S_FAIL]);
+  await q('DELETE FROM source_health WHERE source_id = $1', [SRC]);
+  await q(`INSERT INTO lib_series (id, source, title, folder) VALUES ($1,'test','Fail Fixture',$1)`, [S_FAIL]);
+  await q(`INSERT INTO chapter_failures (series_id, number, source_id, status, reason, attempts, at, first_at)
+           VALUES ($1, 1, $2, 'error', 'x', 2, now() - interval '1 hour', '2026-09-01T00:00:00Z'),
+                  ($1, 2, $2, 'error', 'y', 1, now() - interval '2 hours', NULL)`, [S_FAIL, SRC]);
+  const row = async () => (await runHealthChecks()).checks.find((c: any) => c.id === 'chapter-failures').items.find((i: any) => i.sourceId === SRC);
+  try {
+    const r = await row();
+    assert.equal(r.outcome?.kind, 'failures');
+    assert.equal(r.outcome?.firstAt, '2026-09-01T00:00:00.000Z', 'the first failure, not the latest attempt');
+    assert.match(r.detail, /since 2026-09-01/);
+    assert.equal(r.outcome?.attempts, 2);
+    assert.equal(r.outcome?.resetPending, false);
+    assert.equal(r.caveats, undefined, 'a source that can be asked has no caveat');
+
+    await q(`INSERT INTO source_health (source_id, status, consecutive, blocked_until, updated_at)
+             VALUES ($1, 'rate_limited', 1, now() + interval '30 minutes', now())`, [SRC]);
+    const blocked = await row();
+    assert.equal(blocked.caveats?.length, 1);
+    assert.equal(blocked.caveats[0].action, 'retry');
+    assert.equal(blocked.caveats[0].code, 'source_cooling_down');
+    assert.ok(Date.parse(blocked.caveats[0].until) > Date.now(), 'with when it ends');
+
+    await q(`UPDATE source_health SET blocked_until = NULL, disabled = true WHERE source_id = $1`, [SRC]);
+    assert.deepEqual((await row()).caveats, [{ action: 'retry', code: 'source_off' }]);
+  } finally {
+    await q('DELETE FROM lib_series WHERE id = $1', [S_FAIL]);
+    await q('DELETE FROM source_health WHERE source_id = $1', [SRC]);
   }
 });

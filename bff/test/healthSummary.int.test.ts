@@ -77,3 +77,28 @@ test('the Health route stores what it found, and the summary route answers from 
     await q('UPDATE server_settings SET health_summary = NULL WHERE id = 1').catch(() => {});
   }
 });
+
+test('a repair that ends refreshes the header summary, without anyone opening Health', { skip }, async () => {
+  // v0.49.0: the header's warning clears when the problem does, not up to six hours later. Reintroduce by
+  // deleting the scheduleHealthSummaryRefresh() call in runRepair's finally: the planted stale summary stays.
+  const { migrate } = await import('../src/lib/migrate');
+  const { q } = await import('../src/lib/db');
+  const { runRepair } = await import('../src/lib/repair');
+  await migrate();
+  // No outbound request for the version check; the solver step asks a solver nobody configured and moves on.
+  await q('UPDATE server_settings SET update_check = false WHERE id = 1');
+  await q(`UPDATE server_settings SET health_summary = '{"at":"2000-01-01T00:00:00.000Z","worst":"warn","count":1,"headline":"stale","key":"k","checks":[]}' WHERE id = 1`);
+  try {
+    const run = runRepair(undefined, { only: ['solver'], userId: null });
+    assert.ok(run, 'the repair started');
+    await run;
+    let at = '2000-01-01T00:00:00.000Z';
+    for (let i = 0; i < 100 && at.startsWith('2000'); i++) {
+      await new Promise((r) => setTimeout(r, 100));
+      at = (await q<{ s: any }>('SELECT health_summary AS s FROM server_settings WHERE id = 1'))[0].s?.at ?? at;
+    }
+    assert.ok(Date.parse(at) > Date.parse('2001-01-01'), `the stored summary is still the one from before the run (${at})`);
+  } finally {
+    await q('UPDATE server_settings SET health_summary = NULL, update_check = true WHERE id = 1').catch(() => {});
+  }
+});

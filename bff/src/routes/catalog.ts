@@ -12,6 +12,7 @@ import { viewCtxFor, SYSTEM_CTX, type ViewCtx, hideAdult, browsableIds, browsabl
 const vc = (req: FastifyRequest): ViewCtx => (req as any).viewCtx as ViewCtx;
 import { dominantHex } from '../lib/color';
 import { runtime } from '../lib/runtime';
+import { scheduleHealthSummaryRefresh } from '../lib/healthSummary';
 import { authenticate, roleOf, userIdOf } from '../lib/auth';
 import { warmHeroBackdrops } from './images';
 import { writeProgress, reachedEnd } from '../lib/progress';
@@ -216,8 +217,19 @@ export default async function catalogRoutes(app: FastifyInstance) {
     // ⚠️ The owned library has ONE scan, of every root, whatever library id it is handed (lib/ownedCatalog.ts):
     // one call per library started that whole scan once per library, all at the same time. Komga scans each.
     const targets = NATIVE_PROGRESS ? libs : [libs[0] ?? { id: 'lib' }];
-    await Promise.all(targets.map((l: any) => komga.scanLibrary(SYSTEM_CTX, l.id).catch(() => {})));
-    return { scanned: true, libraries: libs.length };
+    const answers = await Promise.all(targets.map((l: any) => komga.scanLibrary(SYSTEM_CTX, l.id).catch(() => null)));
+    // v0.49.0: the owned scan's counts, so "Scan library now" can say "212 series, 4,310 chapters, 1 folder
+    // skipped" rather than nothing (Komga answers no body: no counts, as before). And the header's summary
+    // catches up with what the scan found -- "folders the scan cannot index" is one of its checks.
+    // Reintroduce by answering without them: "Scan library now answers what it found" in
+    // repairRoutes.int.test.ts finds no `series`.
+    const counts = answers.find((a: any) => a && typeof a.series === 'number') as
+      { series: number; books: number; ms: number; skipped: number } | undefined;
+    scheduleHealthSummaryRefresh();
+    return {
+      scanned: true, libraries: libs.length,
+      ...(counts ? { series: counts.series, books: counts.books, ms: counts.ms, skipped: counts.skipped } : {}),
+    };
   });
 
   app.get('/api/home', async (req) => {

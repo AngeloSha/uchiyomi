@@ -1067,6 +1067,12 @@ paths:
         - library
       summary: Ask the server to refresh its cached home data.
       operationId: postApiRefresh
+      description: >-
+        Rescans the library, at most once a minute server-wide: within a minute of the last scan it answers
+        {scanned: false, reason: 'rate_limited'}. Otherwise {scanned: true, libraries}, and since v0.49.0 in
+        owned mode also the scan's counts {series, books, ms, skipped} (skipped: folders it could not index,
+        which Health lists), so Scan library now can say what it found. It also refreshes the stored Health
+        summary the header reads (coalesced, at most once every 30 s).
       security:
         - bearer: []
       responses:
@@ -5231,12 +5237,108 @@ paths:
         server_settings.repair_last_run / repair_last_result, memory winning once this process has run it).
         Its result is {ok, ms, only?, counted, uncounted, short: {looked, replaced, confirmed, left},
         gaps: {series, followed, fetched, unfillable, sweep}, failures: {reset, retried?}, solver: {reset,
-        unblocked, expired}, skipped?: 'disabled', stopped?: 'shutdown' | 'disk'}.
+        unblocked, expired}, skipped?: 'disabled', stopped?: 'shutdown' | 'disk', stepMs?, skips?, run?}.
+        Since v0.49.0 `lastRun`/`lastResult` are the last FULL run (no `only`: the nightly, or Run now here) --
+        a one-row Health fix no longer replaces them or moves the nightly's schedule -- and the repair entry
+        adds `lastOrigin` ('nightly' | 'manual' | null), `startedAt` and `run` (the running run's id, or null),
+        `nextAt` (when the nightly is armed for) and `latestOther` {id, kind, target, finishedAt, status,
+        result} (the newest scoped run, from GET /api/admin/tasks/repair/runs). Every entry also carries
+        `scheduleKey` (the schedule sentence with {placeholders}, a locale key on the web) and `scheduleVars`
+        (their values); `schedule` stays the English sentence.
       security:
         - bearer: []
       responses:
         "200":
           description: OK
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+  /api/admin/tasks/repair/status:
+    get:
+      tags:
+        - admin
+      summary: The library repair, live -- what it is on, its limits and estimates, the last runs and the next nightly.
+      operationId: getApiAdminTasksRepairStatus
+      description: >-
+        Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. Since
+        v0.49.0. Polled by the Health page every 2 s while a run is going; it reads memory and a memoised digest
+        of repair_runs, so it costs no query that grows with the library. Answers {running, sweepRunning,
+        enabled (repair_enabled), nextAt (epoch ms of the armed nightly, or null outside owned mode), run, last,
+        recent, lastFull, limits, estimates, stepTypicalMs}. `run` is null or the running run: {id, startedAt,
+        origin: 'nightly' | 'manual', mine, kind ('full' | 'fix_short' | 'fill' | 'retry' |
+        'steps:<a+b...>[:now]'), only, target {seriesId?, bookId?, sourceId?, now?, number?, label?}, steps,
+        step, stepIndex, stepStartedAt, stepMs, planned {step: n}, current {kind: series | chapter | source |
+        solver | files, seriesId?, bookId?, title?, number?, sourceId?, phase, done?, of?} | null, counts (the
+        live result so far), budget {left, of} (searches the run has left), shortReserve {left, of} | null,
+        skips[], cancelRequested}. Who started it is never sent, only `mine`; a series title (current.title,
+        target.label, a skip's target.title) is dropped when this viewer may not list that series (the 18+
+        hide), as on GET /api/sources/jobs. `last` {id, finishedAt, status, kind} is the newest finished run of
+        any kind -- how a page that pressed a one-row fix learns that ITS run (the id the run route answered)
+        ended, even one that took 5 ms; `recent` the five newest finished runs {id, finishedAt, status, kind,
+        target}; `lastFull` {id, at, ms, origin, result} the newest full run. `limits` is every bound the
+        running process uses (env overrides applied): shortMax, gapsMax, groupsMax, namesMax, countMax,
+        directionsMax, huntBudget, shortHuntMax, gapChapters, retrySeries, shortCopies, failuresMax, retryCap,
+        paceMs, pageListMs, listingRefreshMs, listTimeoutMs, huntWallMs, huntMaxSources, solverBudgetMs,
+        expiredBlockHours, repairHours. `estimates` maps a run kind to {typicalMs (median of its last five
+        finished runs, or null), runs, worstMs (the sum of the waits the code bounds -- page lists, listings,
+        searches -- or null when a planned step has no such bound), downloads (the most chapters it can
+        download, stated as a count, never folded into the time)}, for the Health chips' kinds, every kind in
+        the history, and up to ten more named in `kinds`. Statuses: running | done | stopped | failed |
+        skipped | interrupted (a run whose process died; closed when the next run starts).
+      parameters:
+        - name: kinds
+          in: query
+          required: false
+          description: Comma-separated run kinds to estimate as well, e.g. steps:failures+gaps+short+solver:now (at most ten).
+          schema:
+            type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+  /api/admin/tasks/repair/runs:
+    get:
+      tags:
+        - admin
+      summary: Every kept library repair run, newest first, or one by id.
+      operationId: getApiAdminTasksRepairRuns
+      description: >-
+        Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. Since
+        v0.49.0. Every run is kept in repair_runs -- the nightly and every Health press -- pruned to at least
+        the newest 50 rows and everything from the last 90 days. Answers {content: [{id, startedAt, finishedAt,
+        origin: 'nightly' | 'manual', username (who pressed it; null for the nightly or a deleted account),
+        mine, kind, only, target, status, ms, stepMs, result (the run's RepairResult, with skips[]), notes
+        {replaced[], confirmed[], followed[], upgraded[]}}]}. A series title in target.label or a skip is
+        dropped when this viewer may not list that series.
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          description: How many, 1 to 50 (default 20).
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 50
+        - name: id
+          in: query
+          required: false
+          description: One run, by the id POST /api/admin/tasks/repair/run answered with.
+          schema:
+            type: string
+            format: uuid
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: Malformed body or parameter
         "401":
           description: Not authenticated
         "403":
@@ -5280,6 +5382,15 @@ paths:
         {ok:false,error:'busy'}; the other direction is named too -- pressing `update` (Check for new
         chapters) while a repair runs answers {ok:false,error:'repair_running'} rather than a shared `busy`,
         which would say the sweep is still running when it is not. Counts land on GET /api/admin/tasks as the `repair` entry's `lastResult`.
+        Since v0.49.0 the answer is {ok: true, started: true, run} with the run's id (uuid): every run is kept
+        in repair_runs, only a full run (no `only`) is the Tasks entry's `lastResult`, and a scoped run's
+        progress and end are read from GET /api/admin/tasks/repair/status (`run`, then `last`/`recent`) and
+        its record from GET /api/admin/tasks/repair/runs?id=. `seriesId` with `only: ["gaps"]` (Fill now) looks
+        at the series even while its automatic updates are off, and fetches gap chapters a followed source
+        already lists (at most 20), not only after following a new one. The result may carry `skips`
+        [{step, target?, why: folder_busy | not_eligible | no_gaps | source_cooling_down | source_off |
+        solver_down | no_searches_left, until?, detail?}] saying what was passed over and why. `scan` (awaited)
+        stamps the Tasks entry's lastRun like POST /api/refresh does.
         Audit: `task.run` {task:'repair'} at the press, `library.repair` {only?, seriesId?, bookId?,
         sourceId?, summary, stopped?, replaced[], confirmed[], followed[]} when the run ends (userId null for
         the nightly), plus `book.short_fixed` per replaced chapter and `series.follow_source` per followed
@@ -7158,6 +7269,15 @@ paths:
         withdraws it, which is what a row carrying `fixed` offers); delete is POST
         /api/admin/series/{id}/chapters/delete; merge is POST /api/admin/series/{id}/merge; test, unblock and
         disable are the existing POST /api/admin/sources/{id}/... routes.
+        Since v0.49.0 an item may carry `outcome`, what the last attempt at it found, from stored rows:
+        {kind: 'gaps', at, why, followed, coverage, fetched, landed, sweep, capped, unfillable[], scanned} (the
+        gap `detail` is now '<n> missing — <ranges>' alone; the conclusion it used to end with is here), {kind:
+        'short', at, why: replaced | confirmed | no_longer_copy | source_silent | hunt_cooldown | no_searches |
+        hunt_off | download_failed | partial | confirmed_by_admin, asked?, answered?, best?, hunt?, missing?,
+        by?} or {kind: 'failures', firstAt (the first failure, which a Retry now no longer resets), lastAt,
+        attempts, resetPending}; and `caveats` [{action, code: updates_paused | source_cooling_down |
+        source_off, until?}], what an action will not be able to do, said before it is pressed. A short
+        chapter saved with placeholder pages is offered confirm_short only.
       security:
         - bearer: []
       responses:
