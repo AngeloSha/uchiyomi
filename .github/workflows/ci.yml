@@ -106,10 +106,12 @@ jobs:
   test:
     name: Tests
     runs-on: ubuntu-latest
-    # ⚠️ The integration tests run serially and the job grows with the suite: 38-39 minutes on every green run
-    # 2026-09-17..19, 54-58 minutes 2026-09-25..26 -- and v0.48.4's first run was cancelled at the old 60, one
-    # second after its last test passed. So this is about 1.5x the latest, not a round number: a hung test used
-    # to sit for GitHub's 360-minute default. Pinned by releasePipeline.test.ts, with the build jobs' timeouts.
+    # ⚠️ The job grew with the suite while the bff files ran one after another on one database: 38-39 minutes
+    # on every green run 2026-09-17..19, 54-58 minutes 2026-09-25..26 -- and v0.48.4's first run was cancelled at
+    # the old 60, one second after its last test passed. Since v0.49.0 the bff files run three at a time, each on
+    # a fresh database of its own (bff/test/run-shards.mjs), which is what brings it back down. The limit stays
+    # where the one-at-a-time run needed it, so a slow runner is not a red run: a hung test used to sit for
+    # GitHub's 360-minute default. Pinned by releasePipeline.test.ts, with the build jobs' timeouts.
     timeout-minutes: 90
     services:
       postgres:
@@ -136,11 +138,13 @@ jobs:
           node-version: 24
       # `npm ci`, not `npm install`: install may resolve differently from package-lock.json and rewrites it on
       # the runner, so a Dependabot lockfile bump (#57) was never what CI actually tested. ci fails instead.
+      # Three files at a time, each on a database of its own (see the timeout above); `npm test` is still the
+      # one-database run, for a laptop.
       - name: BFF tests
         working-directory: ./bff
         run: |
           npm ci --no-audit --no-fund
-          npm test
+          npm run test:ci
       - name: Web tests
         working-directory: ./web
         run: |
