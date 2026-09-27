@@ -25,9 +25,18 @@ export const ARCHIVE_DEFAULTS = {
    * the back-to-back fetching the archive exists to avoid.
    */
   minBreakMs: 45_000,
-  /** How often a chapter is followed by a long break as well, and how long that break is. */
+  /**
+   * How often a chapter is followed by a long break as well, and how long that break is. The chance is this
+   * much at the default rate and up to about 8 an hour; above that it shrinks with the cycle (longBreakChance()
+   * below), so a fast setting still comes out at the rate it names.
+   */
   longBreakChance: 0.1,
   longBreakMs: [20 * MIN, 45 * MIN] as [number, number],
+  /**
+   * The most of a cycle's spare time -- what is left once an average short break at the floor is paid for --
+   * the long breaks may take on average. The rest is the chapter's own.
+   */
+  longShareMax: 0.5,
   /**
    * How long a source that refused a chapter (429 or 403) is left alone, by how many times in a row it has.
    * The last rung repeats: about one attempt a day at a site that keeps saying no.
@@ -77,15 +86,57 @@ export function drawGap(range: [number, number], floorMs = 0, rand: () => number
 }
 
 /**
+ * The range a short break is drawn from: centred on `base` wherever the floor allows, never under `minBreak`,
+ * and never narrower than half of it.
+ *
+ * ⚠️ The floor is part of the draw, not a clamp after it. `max(minBreak, base x uniform[0.5, 1.5])` sent every
+ * draw below the middle to exactly minBreak once the budget was spent (a long chapter, a fast setting): half of
+ * all breaks were 45.000 s to the millisecond, the fixed interval this module exists to avoid. Here a break at
+ * the floor is uniform over [45 s, 67.5 s], and its average is max(base, 1.25 x minBreak) -- which is what
+ * expectedCycleMs counts on.
+ */
+function shortBreakRange(base: number, minBreak: number): [number, number] {
+  const lo = Math.max(minBreak, base / 2);
+  return [lo, Math.max(2 * base - lo, lo + minBreak / 2)];
+}
+
+/** The average of a short break drawn from shortBreakRange(base, minBreak). */
+const shortBreakMean = (base: number, minBreak: number): number => Math.max(base, 1.25 * minBreak);
+
+const meanLongMs = (): number => (ARCHIVE_DEFAULTS.longBreakMs[0] + ARCHIVE_DEFAULTS.longBreakMs[1]) / 2;
+
+/**
+ * The chance of a long break after a chapter at `perHour`.
+ *
+ * ARCHIVE_DEFAULTS.longBreakChance while the cycle has room for it; less once it does not. With a flat one in
+ * ten, the long breaks' share was 3.25 minutes a chapter whatever the setting: more than a whole cycle above
+ * 18 an hour, so 15, 20 and 30 an hour all came out near 13 with the shortest chapters, and near 7 with
+ * five-minute ones. Capped at half of the cycle's spare time, 30 an hour still takes a long break about once
+ * every two hours, and a chapter of up to about half a minute keeps the rate it names.
+ */
+export function longBreakChance(perHour: number, minBreakMs: number = ARCHIVE_DEFAULTS.minBreakMs): number {
+  const spare = Math.max(0, cycleMs(perHour) - shortBreakMean(0, Math.max(0, minBreakMs)));
+  return Math.min(ARCHIVE_DEFAULTS.longBreakChance, (ARCHIVE_DEFAULTS.longShareMax * spare) / meanLongMs());
+}
+
+/** The short break's centre: what is left of the cycle once the chapter and the long breaks' share are paid for. */
+function shortBreakBase(perHour: number, chapterMs: number, minBreak: number): { base: number; chance: number } {
+  const chance = longBreakChance(perHour, minBreak);
+  const base = Math.max(minBreak, cycleMs(perHour) - Math.max(0, chapterMs || 0) - chance * meanLongMs());
+  return { base, chance };
+}
+
+/**
  * The break after a chapter that took `chapterMs`, before the next one on the same source.
  *
- * The short break is what is left of the chapter's cycle once the chapter itself and the long breaks'
- * average share are paid for -- max(minBreak, cycle - chapter - chance x mean long break) -- jittered by
- * uniform[0.5, 1.5], and never under minBreak after the jitter either. One chapter in ten then ALSO gets a
- * long break of 20-45 minutes on top. On top, not instead: the short breaks have already paid for the long
- * ones' average, which is what makes the long-run rate come out at `perHour` rather than a few percent
- * over it. When a chapter overruns its cycle the floor wins and the rate simply falls below `perHour`;
- * the archive never hurries to catch up.
+ * The short break is what is left of the chapter's cycle once the chapter itself and the long breaks' average
+ * share are paid for -- max(minBreak, cycle - chapter - chance x mean long break) -- drawn from half of that to
+ * one and a half times it, and never under minBreak (shortBreakRange). Now and then (longBreakChance: one
+ * chapter in ten at the default) a chapter ALSO gets a long break of 20-45 minutes on top. On top, not
+ * instead: the short breaks have already paid for the long ones' average, which is what makes the long-run
+ * rate come out at `perHour` rather than a few percent over it. When a chapter overruns its cycle the floor
+ * wins and the rate simply falls below `perHour` (expectedCycleMs says by how much); the archive never hurries
+ * to catch up.
  *
  * `longMs` is the long part alone (0 when there is none), so a view can say which kind of break it is.
  */
@@ -97,13 +148,26 @@ export function nextBreakMs(o: {
 }): { ms: number; long: boolean; longMs: number } {
   const rand = o.rand ?? Math.random;
   const minBreak = Math.max(0, o.minBreakMs ?? ARCHIVE_DEFAULTS.minBreakMs);
-  const { longBreakChance: chance, longBreakMs: [lmin, lmax] } = ARCHIVE_DEFAULTS;
-  const longBudget = chance * (lmin + lmax) / 2;
-  const base = Math.max(minBreak, cycleMs(o.perHour) - Math.max(0, o.chapterMs || 0) - longBudget);
-  const short = Math.max(minBreak, Math.round(base * (0.5 + rand())));
+  const [lmin, lmax] = ARCHIVE_DEFAULTS.longBreakMs;
+  const { base, chance } = shortBreakBase(o.perHour, o.chapterMs, minBreak);
+  const [lo, hi] = shortBreakRange(base, minBreak);
+  const short = Math.round(lo + (hi - lo) * rand());
   const long = rand() < chance;
   const longMs = long ? Math.round(lmin + (lmax - lmin) * rand()) : 0;
   return { ms: short + longMs, long, longMs };
+}
+
+/**
+ * How long one chapter's cycle takes on average -- the chapter, its short break and the long breaks' share --
+ * for chapters that take `chapterMs`. That is the configured cycle while a chapter and a break at the floor fit
+ * in it, and chapter + 1.25 x minBreak + the long share once they do not: the achievable rate, from the same
+ * arithmetic as nextBreakMs. What an estimate made before any chapter has run (the Settings help, an ETA
+ * with no running average yet) is built from, and what ewmaCycle caps a sample against.
+ */
+export function expectedCycleMs(o: { perHour: number; chapterMs: number; minBreakMs?: number }): number {
+  const minBreak = Math.max(0, o.minBreakMs ?? ARCHIVE_DEFAULTS.minBreakMs);
+  const { base, chance } = shortBreakBase(o.perHour, o.chapterMs, minBreak);
+  return Math.max(0, o.chapterMs || 0) + shortBreakMean(base, minBreak) + chance * meanLongMs();
 }
 
 /**
@@ -157,21 +221,33 @@ const EWMA_ALPHA = 0.2;
 
 /**
  * The running average of real time per chapter on a source, breaks and waits included -- what the ETA is
- * built from, so the time lost to a busy source or a closed window shows up in it.
+ * built from, so the time lost to a busy source shows up in it.
  *
- * Each sample is capped at three configured cycles first: one night outside the window, or a restart that
- * sat out a 12-hour backoff, is not how long a chapter takes, and uncapped it would read "about 40 days"
- * for a week afterwards.
+ * `expectedMs` is expectedCycleMs for the chapter the sample is from. Each sample is capped at the longest cycle
+ * a chapter really has -- one expected cycle, the longest long break on top, and a second expected cycle of
+ * headroom for a short break drawn high and a chapter that ran slow -- so 75 minutes at the default 4 an hour.
+ * One night outside the window, or a restart that sat out a 12-hour backoff, is not how long a chapter takes:
+ * uncapped it would read "about 40 days" for a week afterwards. ⚠️ But a long break is: a cycle that took one is
+ * real and counts in full. Capped at three cycles alone, every long break at 30 an hour (6 minutes) was cut, and
+ * the ETA read a quarter to a third short; capped at three cycles AND the long break, one closed-window night at
+ * the default rate moved the average from 15 to 30 minutes, and the ETA doubled the next morning.
+ *
+ * ⚠️ The cap only limits the damage. The scheduler (lib/archive.ts) must take the time a source spent outside its
+ * window, or in a refusal's backoff, OFF a sample before it feeds it in: that time is the window's and the
+ * site's, not the chapter's, and even capped a night still moves this average from 15 to 27 minutes.
  */
-export function ewmaCycle(prev: number | null | undefined, sampleMs: number, cfgCycleMs: number): number {
-  const s = Math.min(Math.max(0, sampleMs), 3 * cfgCycleMs);
+export function ewmaCycle(prev: number | null | undefined, sampleMs: number, expectedMs: number): number {
+  const expected = Math.max(0, expectedMs);
+  const cap = expected + ARCHIVE_DEFAULTS.longBreakMs[1] + expected;
+  const s = Math.min(Math.max(0, sampleMs), cap);
   if (prev == null || !(prev > 0)) return Math.round(s);
   return Math.round(prev + EWMA_ALPHA * (s - prev));
 }
 
 /**
  * About how long until `left` chapters are in: series on one source take turns, so each of this series'
- * chapters waits for one from each of the other `sharing - 1` series queued on that source.
+ * chapters waits for one from each of the other `sharing - 1` series queued on that source. `cycleMs` is the
+ * source's running average (ewmaCycle), or expectedCycleMs before it has one.
  */
 export function etaMs(o: { left: number; sharing: number; cycleMs: number }): number {
   return Math.max(0, o.left) * Math.max(1, o.sharing) * Math.max(0, o.cycleMs);

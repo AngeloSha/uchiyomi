@@ -6,7 +6,8 @@
 //   * after an extension download job ends,
 //   * at most every 30 minutes while no extension download is in flight,
 //   * never while one is (the engine writes each page as a .tmp and renames it; a clear mid-chapter fails it),
-//   * never when there is no engine,
+//     nor in the minute after one ended, when the next chapter of the job is about to start,
+//   * never when there is no engine, nor before the engine has answered once,
 // and asks for the pages only, never the thumbnails.
 //
 // The clock is node:test's mocked Date, so a three-hour stretch runs in milliseconds and the download records
@@ -50,6 +51,7 @@ async function counted(overrides: Record<string, unknown> = {}) {
   const logged: string[] = [];
   const keeper = engineCacheKeeper({
     configured: () => true,
+    answered: () => true,
     clear: async () => { at.push(Date.now()); return true; },
     log: { info: (m: string) => logged.push(`info ${m}`), warn: (m: string) => logged.push(`warn ${m}`) },
     ...overrides,
@@ -80,7 +82,11 @@ test('the keeper asks the engine to empty its page cache, and nothing else', asy
   assert.deepEqual(suwayomiQueryErrors(CLEAR_PAGES_M), [], 'the pinned engine would refuse the clear');
 
   fake.reset();
-  const { gql } = await import('../src/lib/sources/suwayomi/client');
+  const { gql, engineAnswered } = await import('../src/lib/sources/suwayomi/client');
+  // Nothing has talked to the engine in this process yet: the production keeper leaves it alone.
+  assert.equal(engineAnswered(), false);
+  assert.equal(await engineCacheKeeper().tick(), 'unanswered', 'the production keeper ticked before the engine answered');
+  assert.equal(fake.cacheClears.length, 0, 'the keeper called an engine that had not answered yet');
   // Fill the engine's caches the way a download does: fetch a chapter's pages, and a cover.
   const manga = fake.manga('Ball Runner');
   const { fetchChapters } = (await gql<any>('mutation($m:Int!){ fetchChapters(input:{mangaId:$m}){ chapters { id } } }', { m: manga.id }));
@@ -89,7 +95,9 @@ test('the keeper asks the engine to empty its page cache, and nothing else', asy
   assert.equal((await fetch(`${fake.url}/api/v1/manga/${manga.id}/thumbnail`)).status, 200);
   assert.ok(fake.pageCache.size > 0 && fake.thumbnailCache.size === 1, 'the fake did not keep what it served');
 
-  // The production keeper, every dependency its own: the real switch, the real in-flight checks, the real client.
+  // The production keeper, every dependency its own: the real switch, the real in-flight checks, the real client
+  // -- which has now had its answers.
+  assert.equal(engineAnswered(), true, 'the client did not note that the engine answered');
   assert.equal(await engineCacheKeeper().tick(), 'cleared');
   assert.equal(fake.pageCache.size, 0, 'the pages the engine kept are still there');
   assert.equal(fake.thumbnailCache.size, 1, 'the keeper emptied the engine\'s thumbnail cache too');
@@ -206,18 +214,23 @@ test('never when there is no engine', async () => {
 });
 
 /**
- * Errors are only logged, and once: an engine still booting or gone away is tried again every five minutes,
- * quietly, and one line says when it works again. Reintroduce by logging on every failure: the log has three
- * warnings.
+ * Errors are only logged, and once: an engine gone away is tried again every five minutes, quietly, and one line
+ * says when it works again. Reintroduce by logging on every failure: the log has three warnings. Or drop the
+ * backoff (`retryAt = now + d.retryMs`): a failing engine is asked on every one-minute tick and the attempts
+ * read 5 where they should read 1.
  */
 test('a failed clear is logged once and retried every five minutes', async () => {
   mock.timers.enable({ apis: ['Date'], now: T0 });
   let fail = true;
-  const { keeper, logged } = await counted({ clear: async () => { if (fail) throw new Error('suwayomi unreachable: fetch failed'); return true; } });
+  let attempts = 0;
+  const { keeper, logged } = await counted({ clear: async () => { attempts++; if (fail) throw new Error('suwayomi unreachable: fetch failed'); return true; } });
   assert.equal(await keeper.tick(), 'failed');
   await run(keeper, 4);
+  assert.equal(attempts, 1, 'asked again before five minutes were up');
   await run(keeper, 1); // five minutes: tried again
+  assert.equal(attempts, 2, 'not tried again at five minutes');
   await run(keeper, 5); // and again
+  assert.equal(attempts, 3);
   assert.deepEqual(logged.filter((l) => l.startsWith('warn')).length, 1, logged.join('\n'));
   assert.match(logged[0], /could not clear its page cache \(suwayomi unreachable: fetch failed\)/);
   fail = false;
@@ -231,6 +244,117 @@ test('a failed clear is logged once and retried every five minutes', async () =>
 });
 
 /**
+ * Reintroduce by deleting the `answered()` check: the first tick on a fresh boot calls an engine that is still
+ * starting, and the `no request` assertion fails (and, with the real client, logs a warning on every desktop
+ * that never downloaded its engine).
+ */
+test('nothing until the engine has answered once: a JVM still starting, a desktop engine never downloaded', async () => {
+  mock.timers.enable({ apis: ['Date'], now: T0 });
+  const { beginDownload, endDownload } = await activity();
+  let answered = false;
+  const { keeper, at, logged } = await counted({ answered: () => answered });
+  assert.equal(await keeper.tick(), 'unanswered', 'the first tick went to an engine that had not answered');
+  for (let i = 0; i < 3; i++) {
+    const id = beginDownload({ folder: 'X', title: 'X', number: i, source: 'sw:1' });
+    endDownload(id, { status: 'failed', reason: 'engine not running' });
+    await run(keeper, 40);
+  }
+  assert.equal(at.length, 0, 'no request to an engine that has never answered');
+  assert.deepEqual(logged, [], 'and nothing in the log about it');
+  answered = true;
+  await run(keeper, 1);
+  assert.equal(at.length, 1, 'the first tick after it answered clears what was left');
+});
+
+/**
+ * Reintroduce by deleting the settle from `due`: the idle clear at the thirty-minute mark lands twenty seconds
+ * after one chapter of a job ended, just as the next one starts, and the `not in the gap` assertion fails.
+ */
+test('the idle clear waits out the gap between two chapters too', async () => {
+  mock.timers.enable({ apis: ['Date'], now: T0 });
+  const { beginDownload, startedDownload, endDownload } = await activity();
+  const { keeper, at } = await counted();
+  await keeper.tick();
+  advance(29 * MIN);
+  const id = beginDownload({ folder: 'Night Shelf', title: 'Night Shelf', number: 1, source: 'sw:5550003' });
+  startedDownload(id);
+  advance(50_000);
+  endDownload(id, { status: 'done', pages: 3 });
+  advance(20_000); // 30:10 -- the idle clear is due, and the job's next chapter is twenty seconds from starting
+  assert.equal(await keeper.tick(), 'waiting', 'an idle clear in the gap between two chapters');
+  assert.equal(at.length, 1, 'not in the gap');
+  advance(41_000);
+  assert.equal(await keeper.tick(), 'cleared', 'a minute after the chapter ended, with nothing after it');
+  assert.equal(at.length, 2);
+});
+
+/**
+ * The first clear on a months-old cache can run for up to the two-minute timeout, and the interval ticks every
+ * minute. Reintroduce by deleting `if (running) return 'running'`: the second tick starts a second clear over
+ * the first, and the `one clear at a time` assertion reads 2.
+ */
+test('one clear at a time, however long the first one takes', async () => {
+  mock.timers.enable({ apis: ['Date'], now: T0 });
+  const pending: Array<(ok: boolean) => void> = [];
+  const { keeper } = await counted({ clear: () => new Promise<boolean>((r) => { pending.push(r); }) });
+  const first = keeper.tick();
+  advance(MIN);
+  const second = keeper.tick();
+  await new Promise((r) => setImmediate(r));
+  assert.equal(pending.length, 1, 'one clear at a time');
+  for (const r of pending) r(true);
+  assert.equal(await second, 'running');
+  assert.equal(await first, 'cleared');
+});
+
+/**
+ * Reintroduce by dropping `a.source.startsWith(SW_PREFIX) &&` from lastExtensionDownloadEnded: every MangaDex
+ * chapter that ends counts as an extension job ending, and a clear follows a minute later.
+ */
+test('a download from a built-in source ending is not an extension job ending', async () => {
+  mock.timers.enable({ apis: ['Date'], now: T0 });
+  const { beginDownload, startedDownload, endDownload } = await activity();
+  const { keeper, at } = await counted();
+  await keeper.tick();
+  advance(5 * MIN);
+  const md = beginDownload({ folder: 'Other', title: 'Other', number: 1, source: 'mangadex' });
+  startedDownload(md);
+  advance(MIN);
+  endDownload(md, { status: 'done', pages: 3 });
+  await run(keeper, 20);
+  assert.equal(at.length, 1, 'a MangaDex chapter ending cleared the extension engine\'s cache');
+});
+
+/**
+ * A clear is stamped with the time it STARTED. A chapter that starts and ends while a long clear runs left pages
+ * the clear may not have caught, and gets a clear of its own. Reintroduce by stamping `lastClearAt = d.now()`
+ * after the clear: that chapter ended "before" the last clear, and its pages wait for the thirty-minute mark.
+ */
+test('a chapter that ends while a clear runs gets a clear of its own', async () => {
+  mock.timers.enable({ apis: ['Date'], now: T0 });
+  const { beginDownload, startedDownload, endDownload } = await activity();
+  let calls = 0;
+  const { keeper, at } = await counted({
+    clear: async () => {
+      at.push(Date.now());
+      if (calls++ === 0) {
+        // A two-minute first clear, with a whole chapter inside it.
+        advance(20_000);
+        const id = beginDownload({ folder: 'Night Shelf', title: 'Night Shelf', number: 1, source: 'sw:5550003' });
+        startedDownload(id);
+        advance(30_000);
+        endDownload(id, { status: 'done', pages: 3 });
+        advance(70_000);
+      }
+      return true;
+    },
+  });
+  assert.equal(await keeper.tick(), 'cleared');
+  await run(keeper, 2);
+  assert.equal(at.length, 2, 'the chapter that ended during the first clear got no clear of its own');
+});
+
+/**
  * The wiring: server.ts starts the keeper where the other extension schedules start, and the started keeper
  * really ticks and reaches the engine. Reintroduce by deleting `startEngineCacheKeeper(app.log)` from server.ts.
  */
@@ -239,6 +363,8 @@ test('the server starts the keeper, and a started keeper reaches the engine', as
   assert.match(server, /^\s+startEngineCacheKeeper\(app\.log\);$/m, 'server.ts no longer starts the page-cache keeper');
 
   fake.reset();
+  // The engine has answered this process (as registration's first request does at boot).
+  await (await import('../src/lib/sources/suwayomi/client')).aboutServer();
   // The interval only: the clear is a real request to the fake, on the real clock.
   mock.timers.enable({ apis: ['setInterval'] });
   const { startEngineCacheKeeper, TICK_MS } = await cache();

@@ -12,20 +12,28 @@
 //   * after an extension download job ends: once no extension download has been in flight for SETTLE_MS, so the
 //     moment between two chapters of one job does not count as the end of it;
 //   * and every EVERY_MS while none is in flight, which also covers what never counts as a job (a preview read,
-//     the completion pass's page fetches) and a cache that was already full when this version started.
+//     the completion pass's page fetches) and a cache that was already full when this version started. The
+//     same settle applies: the idle clear waits out the gap between two chapters too, which is exactly when
+//     the next one is about to start.
 //
 // ⚠️ NEVER while an extension download is in flight. The mutation deletes the whole directory
 // (File.deleteRecursively), and the engine writes each page as `<n>.tmp` before renaming it into place, so a
 // clear in the middle of a chapter turns a good page into a failed one. Removing the directory itself is safe
 // for the NEXT page: getImageResponse calls mkdirs() before every save. Both read off the v2.3.2243 bytecode, and
 // the clear measured on a throwaway engine of that image: manga-cache gone, thumbnails untouched, cachedPages true.
+// In flight is only checked as a clear STARTS: a chapter that starts during a long one (the first clear on an
+// install that has been filling for months) can lose a page to it, which the downloader's resume asks for again.
+//
+// Nothing at all until the engine has answered once (client.ts engineAnswered): a JVM still starting at boot,
+// and a desktop that never downloaded its engine (SUWAYOMI_URL is always set there), get no request and no
+// warning.
 //
 // Only cachedPages. The thumbnail caches hold covers the engine fetches again on demand, and its downloaded
 // thumbnails belong to its own library; neither grows with downloads, and neither is ours to empty.
 //
 // Errors are only logged, once per run of failures: an engine that is still booting, or has gone away, must not
 // fill the log every few minutes, and nothing else waits on this succeeding.
-import { gql as defaultGql, suwayomiConfigured, type Gql } from './client';
+import { gql as defaultGql, suwayomiConfigured, engineAnswered, type Gql } from './client';
 import { SW_PREFIX } from './sources';
 import { listActivity } from '../../downloadActivity';
 import { gateBusy } from '../../gate';
@@ -75,6 +83,8 @@ export type KeeperLog = { info(msg: string): void; warn(msg: string): void };
 export interface KeeperDeps {
   /** An engine to talk to, and not switched off (EXTENSION_ENGINE). Asked on every tick. */
   configured: () => boolean;
+  /** The engine has answered this process at least once (client.ts engineAnswered). */
+  answered: () => boolean;
   busy: () => boolean;
   lastEnded: () => number;
   clear: () => Promise<boolean>;
@@ -86,7 +96,7 @@ export interface KeeperDeps {
 }
 
 /** What one tick did, for the tests and nothing else. */
-export type TickResult = 'off' | 'running' | 'busy' | 'waiting' | 'cleared' | 'failed';
+export type TickResult = 'off' | 'unanswered' | 'running' | 'busy' | 'waiting' | 'cleared' | 'failed';
 
 /**
  * The keeper's decision, with every input injectable. `startEngineCacheKeeper` is the one production caller;
@@ -95,6 +105,7 @@ export type TickResult = 'off' | 'running' | 'busy' | 'waiting' | 'cleared' | 'f
 export function engineCacheKeeper(overrides: Partial<KeeperDeps> = {}) {
   const d: KeeperDeps = {
     configured: suwayomiConfigured,
+    answered: engineAnswered,
     busy: extensionDownloadInFlight,
     lastEnded: lastExtensionDownloadEnded,
     clear: () => clearEnginePageCache(),
@@ -114,15 +125,20 @@ export function engineCacheKeeper(overrides: Partial<KeeperDeps> = {}) {
   async function tick(): Promise<TickResult> {
     // Asked first and every time: with no engine there is nothing to call, and nothing to log about it.
     if (!d.configured()) return 'off';
+    // Nor with one that has not answered yet: a JVM still starting, or a desktop engine never downloaded.
+    if (!d.answered()) return 'unanswered';
     if (running) return 'running';
     if (d.busy()) return 'busy';
     const now = d.now();
     if (now < retryAt) return 'waiting';
     const ended = d.lastEnded();
-    // A download that ended after the last clear left pages behind; the settle keeps this from firing between
-    // two chapters of the same job.
-    const jobEnded = ended > lastClearAt && now - ended >= d.settleMs;
-    const due = now - lastClearAt >= d.everyMs;
+    // The settle keeps both kinds of clear out of the gap between two chapters of one job: no job has ended
+    // until nothing has been in flight for a minute, and an idle clear that lands in that gap lands just as
+    // the next chapter starts writing pages.
+    const settled = now - ended >= d.settleMs;
+    // A download that ended after the last clear left pages behind.
+    const jobEnded = ended > lastClearAt && settled;
+    const due = now - lastClearAt >= d.everyMs && settled;
     if (!jobEnded && !due) return 'waiting';
     running = true;
     try {

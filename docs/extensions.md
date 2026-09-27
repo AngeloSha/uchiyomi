@@ -265,7 +265,7 @@ that was never downloaded costs nothing, and one that was only runs while Uchiyo
 
 | Variable | Default | What it does |
 | --- | --- | --- |
-| `EXTENSION_ENGINE` | `1` | `0` (or `off`, `false`, `no`) doesn't run the bundled engine: Compose scales it to zero, and the app treats extensions as off. Read by both, from the same `.env` line. Only applies while `SUWAYOMI_URL` names the bundled container (`uchiyomi-suwayomi`, or `yomi-suwayomi` in the development stack). |
+| `EXTENSION_ENGINE` | `1` | `0` doesn't run the bundled engine: Compose scales it to zero, and the app treats extensions as off. Read by both, from the same `.env` line. Compose only accepts `0` or `1` here (it is the engine's replica count, and any other value stops `docker compose up` for the whole stack); the app also reads `off`, `false` and `no`, for setups that don't pass the line to Compose. Only applies while `SUWAYOMI_URL` names the bundled container (`uchiyomi-suwayomi`, or `yomi-suwayomi` in the development stack). |
 | `SUWAYOMI_URL` | the bundled engine | Where the extension engine is. Empty turns the feature off (in the v0.49.0 compose files and later). A trailing slash (or two), a query string or a fragment on this value is ignored; the scheme, host, port and any sub-path are what count. |
 | `SUWAYOMI_USERNAME` / `SUWAYOMI_PASSWORD` | empty | Only if your engine has authentication enabled. |
 | `SUWAYOMI_MAX_SOURCES` | `25` | Ceiling on how many extension sources register at once. |

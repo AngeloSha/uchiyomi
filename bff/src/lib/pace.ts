@@ -133,5 +133,33 @@ export function pagePace(
   return { gap: lo, workers: s.workers, level: pace.level, jitter, ...(s.rand ? { rand: s.rand } : {}) };
 }
 
+/**
+ * The pace a chapter resumes at after a 429 inside it (fetchPages' resume loop): each gap doubled, up to
+ * MAX_PAGE_GAP_MS, and never below where it was. A gap that already sat above the ceiling -- an adapter's own
+ * 6 s, an ARCHIVE_PAGE_GAP_MS of 5-8 s -- stays where it was: `min(g x 2, ceiling)` alone would cut it to 4 s,
+ * and the resume after a refusal may not be the fast part. A declared gap of 0 stays 0 inside this chapter (the
+ * engine paces the site); the NEXT chapter gets the server default doubled (paceFor).
+ *
+ * A slow pace's range (withSlowPace) backs off at both ends the same way, and keeps a spread: doubling alone
+ * takes the default [1500, 4000] to [3000, 4000] and then to [4000, 4000], every page exactly 4 s apart for the
+ * rest of the chapter. The low end stays at least a quarter of the top below it (or the range's own width, when
+ * that is narrower), so [3000, 4000] is where it settles. A range that was one value to begin with stays one.
+ *
+ * ⚠️ With a range, `gap` is the low end, never doubled on its own. Every page is drawGap(jitter, gap): the gap is
+ * a floor under the draw, so a gap doubled to 4000 beside a range kept at [3000, 4000] drew exactly 4000 for
+ * every page, the metronome the spread was kept to avoid. It still never drops below where it was.
+ */
+export function resumePace(
+  p: { gap: number; jitter?: [number, number] },
+  ceiling: number = MAX_PAGE_GAP_MS,
+): { gap: number; jitter?: [number, number] } {
+  const up = (g: number): number => Math.max(g, Math.min(g * 2, ceiling));
+  if (!p.jitter) return { gap: p.gap ? up(p.gap) : 0 };
+  const [lo, hi] = p.jitter;
+  const top = up(hi);
+  const low = Math.min(up(lo), top - Math.min(hi - lo, top / 4));
+  return { gap: Math.max(p.gap, low), jitter: [low, top] };
+}
+
 /** Tests only: forget every source's level, so one file's 429 does not slow the next file's chapters. */
 export function clearPace(): void { paces.clear(); }

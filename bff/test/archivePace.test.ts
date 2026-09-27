@@ -7,7 +7,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   ARCHIVE_DEFAULTS, PER_HOUR_RANGE, cycleMs, pageGapRange, drawGap, nextBreakMs, backoffUntil, inWindow,
-  windowOpensAt, ewmaCycle, etaMs,
+  windowOpensAt, ewmaCycle, etaMs, longBreakChance, expectedCycleMs,
 } from '../src/lib/archivePace';
 
 /** mulberry32: a small seeded generator, uniform over [0, 1). */
@@ -31,6 +31,7 @@ test('the defaults are the approved ones', () => {
   assert.equal(ARCHIVE_DEFAULTS.minBreakMs, 45_000);
   assert.equal(ARCHIVE_DEFAULTS.longBreakChance, 0.1);
   assert.deepEqual(ARCHIVE_DEFAULTS.longBreakMs, [20 * MIN, 45 * MIN]);
+  assert.equal(ARCHIVE_DEFAULTS.longShareMax, 0.5);
   assert.deepEqual(PER_HOUR_RANGE, [1, 30]);
   assert.equal(cycleMs(4), 15 * MIN, 'four an hour is one every fifteen minutes');
   assert.equal(cycleMs(0), 1 * HOUR, 'clamped to the range, never a division by zero');
@@ -90,6 +91,27 @@ test('a break is never under 45 s, even after a chapter that overran its whole c
   assert.ok(knob.ms >= 50 && knob.ms < 1000, `the e2e knob shortens the floor, got ${knob.ms}`);
 });
 
+test('a break at the floor is still a fresh draw: never exactly 45 s over and over', () => {
+  // The floor used to be a clamp after the jitter, `max(45 s, base x uniform[0.5, 1.5])`: once the budget was
+  // spent (base = 45 s), every draw below the middle came out at exactly 45.000 s -- half of all breaks one
+  // constant, the metronome #117 is about. Reintroduce by putting that clamp back in nextBreakMs: the
+  // `no single value` assertion fails with about 500 of 1000.
+  const rand = seeded(4545);
+  const shorts = Array.from({ length: 1000 }, () => {
+    const b = nextBreakMs({ perHour: 30, chapterMs: 10 * MIN, rand });
+    return b.ms - b.longMs;
+  });
+  const counts = new Map<number, number>();
+  for (const ms of shorts) counts.set(ms, (counts.get(ms) ?? 0) + 1);
+  const [top, most] = [...counts].sort((a, b) => b[1] - a[1])[0];
+  assert.ok(most <= 50, `no single value makes up more than 5% of the breaks: ${top} ms came ${most} times in 1000`);
+  assert.ok(shorts.every((ms) => ms >= 45_000 && ms <= 67_500), 'at the floor: between 45 s and 67.5 s');
+  // The same at the default rate once a long chapter has spent the budget (over ~11 minutes at 4 an hour).
+  const long = Array.from({ length: 1000 }, () => { const b = nextBreakMs({ perHour: 4, chapterMs: 14 * MIN, rand }); return b.ms - b.longMs; });
+  assert.ok(new Set(long).size > 900, `a fresh draw per chapter, got ${new Set(long).size} distinct in 1000`);
+  assert.ok(Math.min(...long) >= 45_000);
+});
+
 test('the short break is the budget left over, jittered by half either way', () => {
   // Four an hour with a 4-minute chapter: 15 min - 4 min - the long breaks' average share (10% of 32.5 min)
   // = 465 s, jittered to [232.5 s, 697.5 s].
@@ -118,12 +140,19 @@ test('long breaks come about one chapter in ten, 20 to 45 minutes each, on top o
   assert.ok(Math.min(...longs) < 22 * MIN && Math.max(...longs) > 43 * MIN, 'spread across the range, not clustered');
 });
 
-test('over ten thousand chapters the rate comes out at chapters-an-hour', () => {
+test('over ten thousand chapters the rate comes out at chapters-an-hour, up to the top of the range', () => {
   // The short breaks pay for the long ones' average share, and a long break is taken ON TOP of a short one,
-  // so the expected cycle is exactly the configured one. Reintroduce by dropping `- longBudget` from the
+  // so the expected cycle is exactly the configured one. Reintroduce by dropping the long share from the
   // short-break base: every chapter also pays the long breaks' share twice, four an hour comes out near 3.3,
   // and the `within 5%` assertion fails.
-  for (const [perHour, chapterMs, seed] of [[4, 4 * MIN, 1], [10, 1 * MIN, 2], [2, 10 * MIN, 3]]) {
+  //
+  // The fast settings are the other half. With a flat one-in-ten chance the long breaks cost 3.25 minutes a
+  // chapter, more than a whole cycle above 18 an hour: 30 an hour with half-minute chapters came out near 13.
+  // Reintroduce by making longBreakChance return ARCHIVE_DEFAULTS.longBreakChance whatever the rate: the 30,
+  // 20 and 12 an hour cases fail.
+  for (const [perHour, chapterMs, seed] of [
+    [4, 4 * MIN, 1], [10, 1 * MIN, 2], [2, 10 * MIN, 3], [30, 30_000, 4], [20, 1 * MIN, 5], [12, 2 * MIN, 6],
+  ]) {
     const rand = seeded(seed);
     const N = 10_000;
     let total = 0;
@@ -132,6 +161,37 @@ test('over ten thousand chapters the rate comes out at chapters-an-hour', () => 
     assert.ok(Math.abs(rate - perHour) / perHour < 0.05,
       `${perHour} an hour with ${chapterMs / MIN}-minute chapters: within 5%, got ${rate.toFixed(2)}`);
   }
+});
+
+test('the long breaks give way at fast settings, and never go away', () => {
+  assert.equal(longBreakChance(4), 0.1, 'one in ten at the default');
+  assert.equal(longBreakChance(8), 0.1, 'and up to about 8 an hour');
+  assert.ok(longBreakChance(12) < 0.1);
+  const fast = longBreakChance(30);
+  assert.ok(fast > 0.01 && fast < 0.02, `about one chapter in sixty at 30 an hour, got ${fast}`);
+  // Measured, not only computed: at 30 an hour a long break still comes about every two hours.
+  const rand = seeded(30);
+  let longs = 0;
+  for (let i = 0; i < 10_000; i++) if (nextBreakMs({ perHour: 30, chapterMs: 30_000, rand }).long) longs++;
+  assert.ok(longs > 120 && longs < 210, `${longs} long breaks in 10,000 chapters at 30 an hour`);
+});
+
+test('the expected cycle is what the breaks really come to, chapters that overrun included', () => {
+  // The Settings estimate and an ETA with no running average yet are built from expectedCycleMs, so it has to
+  // agree with nextBreakMs wherever a chapter lands: inside its cycle, where it is the configured cycle, and
+  // past it, where the floor wins and the rate falls. Reintroduce by returning cycleMs(perHour) from it: the
+  // 5-minute chapters at 30 an hour really take about 6.5 minutes a cycle and the `within 3%` assertion fails.
+  assert.equal(expectedCycleMs({ perHour: 4, chapterMs: 4 * MIN }), 15 * MIN, 'a chapter that fits: the configured cycle');
+  for (const [perHour, chapterMs, seed] of [[30, 5 * MIN, 7], [4, 14 * MIN, 8], [12, 3 * MIN, 9], [1, 0, 10]]) {
+    const rand = seeded(seed);
+    const N = 20_000;
+    let total = 0;
+    for (let i = 0; i < N; i++) total += chapterMs + nextBreakMs({ perHour, chapterMs, rand }).ms;
+    const want = expectedCycleMs({ perHour, chapterMs });
+    assert.ok(Math.abs(total / N - want) / want < 0.03,
+      `${perHour} an hour, ${chapterMs / MIN}-minute chapters: expected ${(want / MIN).toFixed(2)} min, got ${(total / N / MIN).toFixed(2)}`);
+  }
+  assert.ok(expectedCycleMs({ perHour: 30, chapterMs: 5 * MIN }) > 6 * MIN, 'a 5-minute chapter cannot come every 2 minutes');
 });
 
 test('a refusal backs off 1 h, 3 h, 12 h, then a day, and never ends inside the site\'s own cooldown', () => {
@@ -191,16 +251,60 @@ test('a closed window says when it opens, by the local clock', () => {
 });
 
 test('the running cycle follows real chapters, and one long wait cannot swamp it', () => {
-  // Reintroduce by dropping the 3x cap in ewmaCycle: the night-long sample moves the average to about
-  // 2.9 hours and the `capped at three cycles` assertion fails.
+  // Reintroduce by dropping the cap in ewmaCycle: the night-long sample moves the average to about 2.9 hours
+  // and the `capped` assertion fails. Reintroduce the looser cap of three cycles and the longest long break: a
+  // night at the default rate moves the average from 15 to 30 minutes, not 27, and the same assertion fails.
   const cfg = 15 * MIN;
   assert.equal(ewmaCycle(null, 20 * MIN, cfg), 20 * MIN, 'the first sample is the average');
   assert.equal(ewmaCycle(0, 20 * MIN, cfg), 20 * MIN);
   assert.equal(ewmaCycle(15 * MIN, 25 * MIN, cfg), 17 * MIN, 'a fifth of the way towards each new sample');
   const afterNight = ewmaCycle(15 * MIN, 14 * HOUR, cfg);
-  assert.equal(afterNight, Math.round(15 * MIN + 0.2 * (45 * MIN - 15 * MIN)), 'capped at three cycles');
-  assert.equal(ewmaCycle(null, 14 * HOUR, cfg), 45 * MIN, 'the first sample is capped too');
+  assert.equal(afterNight, Math.round(15 * MIN + 0.2 * (75 * MIN - 15 * MIN)), 'capped at two cycles and the longest long break');
+  assert.equal(ewmaCycle(null, 14 * HOUR, cfg), 75 * MIN, 'the first sample is capped too');
   assert.equal(ewmaCycle(15 * MIN, -5, cfg), Math.round(15 * MIN * 0.8), 'a clock that went backwards counts as 0');
+  // A chapter with a long break on top is a real cycle, not an outlier: counted in full.
+  assert.equal(ewmaCycle(null, 60 * MIN, cfg), 60 * MIN);
+});
+
+test('the cap never cuts a real cycle: the longest break after the slowest chapter counts in full', () => {
+  // The cap is only for time that is not a chapter's. The longest cycle nextBreakMs can make -- the short break
+  // at the top of its range and a 45-minute long break on top -- must come through whole, or every such cycle
+  // is cut and the ETA reads short. Reintroduce a cap of one cycle and the longest long break (60 minutes at the
+  // default): a 4-minute chapter's longest cycle is 60.6 minutes, and the `counts in full` assertion fails.
+  const top = 1 - 1e-12;
+  for (const [perHour, chapterMs] of [[4, 4 * MIN], [4, 30_000], [4, 20 * MIN], [30, 30_000], [30, 5 * MIN], [12, 3 * MIN], [1, 30 * MIN]]) {
+    const draws = [top, 0, top];
+    const brk = nextBreakMs({ perHour, chapterMs, rand: () => draws.shift()! });
+    assert.equal(brk.long, true);
+    const sample = chapterMs + brk.ms;
+    const expected = expectedCycleMs({ perHour, chapterMs });
+    assert.equal(ewmaCycle(null, sample, expected), sample,
+      `${perHour} an hour, ${chapterMs / 1000} s chapters: a ${(sample / MIN).toFixed(1)}-minute cycle counts in full`);
+  }
+});
+
+test('an ETA from the running cycle comes out at the time the chapters really take', () => {
+  // Every sample a real cycle, long breaks included, fed through ewmaCycle as the scheduler will; the ETA for
+  // those chapters from the running average must match the time they took. Reintroduce the old cap, three
+  // configured cycles: at 30 an hour that is 6 minutes, every long break is cut to it, and the ETA reads about
+  // a quarter short -- the `within 5%` assertion fails.
+  for (const [perHour, chapterMs, seed] of [[30, 30_000, 11], [4, 4 * MIN, 12], [30, 5 * MIN, 13]]) {
+    const rand = seeded(seed);
+    const N = 10_000;
+    const expected = expectedCycleMs({ perHour, chapterMs });
+    let avg: number | null = null;
+    let total = 0;
+    let avgSum = 0;
+    for (let i = 0; i < N; i++) {
+      const sample = chapterMs + nextBreakMs({ perHour, chapterMs, rand }).ms;
+      total += sample;
+      avg = ewmaCycle(avg, sample, expected);
+      avgSum += avg;
+    }
+    const eta = etaMs({ left: N, sharing: 1, cycleMs: avgSum / N });
+    assert.ok(Math.abs(eta - total) / total < 0.05,
+      `${perHour} an hour, ${chapterMs / 1000} s chapters: the ETA said ${(eta / HOUR).toFixed(1)} h, they took ${(total / HOUR).toFixed(1)} h`);
+  }
 });
 
 test('an ETA counts the turns the other series on the source take', () => {
