@@ -9,7 +9,8 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
-  ACTION_COPY, CHECK_TITLES, caveatLine, kindLabel, outcomeLine, planFooter, recordLine, rowState, skipLine, timeLine,
+  ACTION_COPY, CHECK_TITLES, caveatLine, fixAllWhat, kindLabel, outcomeLine, planFooter, recordLine, repairGate, rowState,
+  runStatusWord, skipLine, solverDownLine, timeLine,
 } from '../lib/healthCopy';
 import type { RepairLiveRun, RepairRunRecord } from '../lib/repairRun';
 
@@ -158,11 +159,80 @@ test('the history names runs the way a person would, and says when one stopped',
 
 test('every check the server runs has a translated title, and no two share an id', () => {
   // A new check in bff lib/health.ts without an entry here would show its English title in every language.
-  // Reintroduce by deleting 'downloads-missing' from CHECK_TITLES: the scan below names it.
+  // Reintroduce by deleting 'downloads-missing' (or #72's 'extension-engine', built in lib/engineHealth.ts under
+  // `const ID`) from CHECK_TITLES: the scan below names it.
   const src = read('../bff/src/lib/health.ts');
   const ids = new Set([...src.matchAll(/\bid: '([a-z-]+)'/g)].map((m) => m[1]));
   assert.ok(ids.size >= 12, `only ${ids.size} check ids found in health.ts -- the scan is broken`);
+  const engine = /\bconst ID = '([a-z-]+)'/.exec(read('../bff/src/lib/engineHealth.ts'));
+  assert.ok(engine, 'the engine check\'s id was not found in engineHealth.ts -- the scan is broken');
+  ids.add(engine[1]);
   for (const id of ids) assert.ok(CHECK_TITLES[id], `check '${id}' has no CHECK_TITLES entry`);
   const titles = Object.values(CHECK_TITLES);
   assert.equal(new Set(titles).size, titles.length, 'two checks share a title');
+});
+
+test('a finished run reads "Done", never the library\'s "Finished" (read)', () => {
+  // 'Finished' is the reading-status key ("Gelesen", "読了", "Прочитано"): a repair that "was read" in every language
+  // but English. Reintroduce tr('Finished') in recordLine or rowState: these fail.
+  assert.equal(recordLine({ status: 'done', result: null }), 'Done', 'a finished run with no result reads the library\'s Finished');
+  assert.deepEqual(rowState({ slot: { phase: 'ended', action: 'fill', startedAt: 1, finishedAt: 5 }, action: 'fill' }),
+    { kind: 'done', finishedAt: 5, outcome: 'Done' }, 'an ended press with no record reads the library\'s Finished');
+  assert.doesNotMatch(read('lib/healthCopy.ts'), /tr\('Finished'\)/, 'healthCopy says the library\'s Finished');
+});
+
+test('Recent repairs says each run\'s status as a word, not the raw English status', () => {
+  // The mark's title is its accessible name. Reintroduce `title={r.status}` in RepairLive's HistoryRow: the source
+  // assertion fails; map a status to itself: the word assertions fail.
+  for (const st of ['running', 'done', 'stopped', 'failed', 'skipped', 'interrupted'] as const) {
+    const w = runStatusWord(st);
+    assert.ok(w.trim() && w !== st, `'${st}' is shown as the raw status`);
+  }
+  assert.equal(runStatusWord('done'), 'Done');
+  assert.equal(runStatusWord('interrupted'), 'Interrupted by a restart');
+  assert.match(read('components/RepairLive.tsx'), /<StatusMark tone=\{STATUS_TONE\[r\.status\] \?\? 'info'\} title=\{runStatusWord\(r\.status\)\}/,
+    'the history row\'s mark is named by the raw English status');
+});
+
+test('a repair key waits while a sweep or another repair runs, and says why; its own run keeps it live', () => {
+  // The design has no queue this release: every repair-backed action is disabled while a repair or a sweep runs,
+  // with why as its title. Reintroduce `repairGate = () => ({})`: these fail (healthActions.test.ts holds every
+  // repair key, the cards' Fix all and Fix all issues to it).
+  assert.deepEqual(repairGate('repair_running', null, false), { disabled: true, disabledWhy: 'Another repair is running; this can start when it ends' });
+  assert.deepEqual(repairGate('sweep_running', null, false), { disabled: true, disabledWhy: 'A chapter sweep is running; repairs wait until it ends' });
+  const two = { id: 'r9', startedAt: 1, origin: 'nightly' as const, mine: false, kind: 'full', only: [], target: {}, steps: ['solver', 'short'], step: 'short',
+    stepIndex: 1, stepStartedAt: 1, planned: {}, current: null, budget: null, skips: [], cancelRequested: false };
+  assert.equal(repairGate('repair_running', two as RepairLiveRun, false).disabledWhy, 'Another repair is running (step 2 of 2); this can start when it ends');
+  assert.deepEqual(repairGate('repair_running', null, true), {}, 'the key whose own run is going is disabled (it is the Stop)');
+  assert.deepEqual(repairGate(null, null, false), {}, 'a key is disabled with nothing running');
+});
+
+test('the solver card says what to do while the solver is down, the desktop way on desktop', () => {
+  // Reintroduce the server wording on desktop (no isDesktop branch): the desktop app has no container to restart.
+  assert.match(solverDownLine(false), /Restart its container/);
+  assert.match(solverDownLine(true), /Quit and reopen Uchiyomi/);
+  assert.doesNotMatch(solverDownLine(true), /container/, 'the desktop app is told to restart a container');
+  assert.match(read('components/HealthActions.tsx'), /what: solverDownLine\(isDesktop\(\)\)/, 'the solver-down row does not pick its words by platform');
+});
+
+test('Fix all issues says its size in one whole sentence per count', () => {
+  // It glued a separate "{n} steps" and an ASCII full stop onto a translated sentence: "…1回で修復します。 3 ステップ."
+  // Reintroduce the glued form in FixAllIssues: the source assertion fails; drop the singular: "1 step" fails.
+  assert.equal(fixAllWhat(1), 'One repair run with the 1 step below that has something to do.');
+  assert.equal(fixAllWhat(3), 'One repair run with the 3 steps below that have something to do.');
+  assert.equal(fixAllWhat(0), ACTION_COPY.fix_all_issues.what({}), 'with no plan it is the plain line');
+  const keys = read('components/HealthActions.tsx');
+  assert.match(keys, /what: fixAllWhat\(plan\.length, ctx\),/, 'Fix all issues does not say its size through fixAllWhat');
+  assert.doesNotMatch(keys, /tr\('\{n\} steps'/, 'a count is glued onto the Fix all issues sentence again');
+});
+
+test('Connect on the Extension engine row says what it changes, and that nothing restarts', () => {
+  // #72: the one-click fix beside the engine's Health row. Its words are held to what POST
+  // /api/admin/extensions/solver does (bff lib/extensionEngine.ts connectEngineSolver).
+  const c = ACTION_COPY.engine_solver;
+  assert.equal(c.label({}), 'Connect');
+  assert.match(c.what({}), /Cloudflare helper at the one Uchiyomi uses and switches it on/);
+  assert.match(c.how!({}), /at the address in FLARESOLVERR_URL\. Nothing restarts and nothing is installed\./);
+  assert.equal(c.eta({}), 'Takes a moment');
+  assert.equal(CHECK_TITLES['extension-engine'], 'Extension engine');
 });

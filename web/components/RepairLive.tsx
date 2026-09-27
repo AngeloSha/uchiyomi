@@ -20,7 +20,7 @@ import { IcChevronRight } from '@/components/icons';
 import { t as tr } from '@/lib/i18n';
 import { durationText, formatClock, relativeTime } from '@/lib/format';
 import { repairStepLabel } from '@/lib/jobs';
-import { currentText, kindLabel, nextRunLine, phaseLine, recordLine, skipLine, whoLine } from '@/lib/healthCopy';
+import { currentText, kindLabel, nextRunLine, phaseLine, recordLine, runStatusWord, skipLine, whoLine } from '@/lib/healthCopy';
 import { useRepairRun, useRepairStatus } from '@/lib/useRepairRun';
 import { useTicker } from '@/lib/ticker';
 import type { RepairLiveRun, RepairRunRecord, RunStatus, RunTarget } from '@/lib/repairRun';
@@ -85,7 +85,8 @@ function HistoryRow({ r }: { r: RepairRunRecord }) {
   return (
     <li data-repair-run={r.id} className="py-2.5">
       <div className="flex min-w-0 items-start gap-2">
-        <StatusMark tone={STATUS_TONE[r.status] ?? 'info'} title={r.status} className="mt-0.5" />
+        {/* The mark's title is its accessible name (StatusMark): the status as a word, in the reader's language. */}
+        <StatusMark tone={STATUS_TONE[r.status] ?? 'info'} title={runStatusWord(r.status)} className="mt-0.5" />
         <div className="min-w-0 flex-1">
           <p className="break-words text-sm text-fog-100">{kindLabel(r.kind, r.target as RunTarget)}</p>
           <p className="mt-0.5 text-[11px] text-fog-500">

@@ -60,6 +60,10 @@ export function TopNav({ onSearchFocus }: { onSearchFocus?: () => void }) {
   // oval (v0.49.0 added the downloads button, which is how it was noticed). So below xl the gaps are 12 px,
   // the logo is its mark (the words stay for screen readers), and the search is the one thing that gives:
   // it takes what is left, down to its icon. Everything round keeps its 40 px (`shrink-0`).
+  // ⚠️ Down to its icon, not to a sliver of its word: squeezed to ~60 px (Russian, an admin with the Health mark,
+  // at 1024 px and at exactly 1280 px) the truncating label had 4 px, too few for an ellipsis, so a stroke of the
+  // "П" stood beside the magnifier. The button is a size container, and the label (and the ⌘K hint) show only
+  // when the button has room for them; the title and the accessible name stay.
   // web/test/e2e/layout.mjs measures the header at 1024 and 1280 px in de and ru.
   return (
     <header className="sticky top-0 z-40 hidden border-b border-ink-800/70 bg-ink-950/80 backdrop-blur-xl lg:block">
@@ -77,11 +81,11 @@ export function TopNav({ onSearchFocus }: { onSearchFocus?: () => void }) {
             );
           })}
         </nav>
-        <button type="button" onClick={onSearchFocus} title={tr('Search…')}
-          className="ms-auto flex min-w-0 max-w-72 flex-1 items-center gap-2 overflow-hidden rounded-full border border-ink-700 bg-ink-850 px-3.5 py-2 text-start transition hover:border-accent/50">
+        <button type="button" onClick={onSearchFocus} title={tr('Search…')} aria-label={tr('Search…')}
+          className="ms-auto flex min-w-0 max-w-72 flex-1 @container items-center justify-center gap-2 overflow-hidden rounded-full border border-ink-700 bg-ink-850 px-3.5 py-2 text-start transition hover:border-accent/50">
           <IcSearch width={18} height={18} className="shrink-0 text-fog-500" />
-          <span className="min-w-0 flex-1 truncate text-sm text-fog-500">{tr('Search…')}</span>
-          <kbd className="hidden shrink-0 rounded-md border border-ink-700 px-1.5 py-0.5 text-[10px] text-fog-500 xl:block">⌘K</kbd>
+          <span data-search-label className="hidden min-w-0 flex-1 truncate text-sm text-fog-500 @[4.5rem]:block">{tr('Search…')}</span>
+          <kbd data-search-kbd className="hidden shrink-0 rounded-md border border-ink-700 px-1.5 py-0.5 text-[10px] text-fog-500 xl:@[12rem]:block">⌘K</kbd>
         </button>
         {/* Secondary destination, so it sits in the right-hand cluster with Updates rather than becoming a
             sixth primary nav item -- the five on the left are the shape of the library, and Moments is a

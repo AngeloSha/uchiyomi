@@ -163,6 +163,17 @@ export function stepFindings(check: HealthCheck | undefined, step: RepairStep): 
   return check.items.filter((it) => !it.info && (it.actions ?? []).includes(want));
 }
 
+/**
+ * The solver check while the solver does not answer: not ok, and no finding offers the reset (bff lib/health.ts
+ * puts `solver_reset` only on the rows of a solver that answers its ping: resetting one that does not changes
+ * nothing). The card then offers no reset and says what to do instead (healthCopy.ts solverDownLine), and a card
+ * with no items stays expandable for it.
+ */
+export function solverDown(check: HealthCheck): boolean {
+  return check.id === 'solver' && check.status !== 'ok'
+    && !check.items.some((it) => (it.actions ?? []).includes('solver_reset'));
+}
+
 /** Fix all issues' plan: every page step some finding offers, with how many findings offer it. */
 export function pagePlan(checks: readonly HealthCheck[]): Array<{ step: RepairStep; n: number }> {
   return PAGE_STEPS.flatMap((step) => {

@@ -359,6 +359,21 @@ export function shouldReload(seen: number | null, landed: number | null): { relo
   return { reload: landed > seen, seen: landed };
 }
 
+/** What the series band last saw: the count, and the series it counted for. */
+export interface BandSeen { id: string; n: number | null }
+
+/**
+ * `shouldReload` for the band, which stays mounted when the app moves from one series to another: the series page
+ * is not keyed by id, so /series/?id=A to ?id=B in the client keeps the band and what it saw of A. Measured against
+ * A's count, B's first answer (0 -> 2 of today's landings) re-read B's chapters right after B's page read them --
+ * the very re-read the first-answer rule exists to stop. So a count belongs to its series, and a new series starts
+ * from a first answer.
+ */
+export function bandReload(seen: BandSeen | null, seriesId: string, landed: number | null): { reload: boolean; seen: BandSeen } {
+  const step = shouldReload(seen?.id === seriesId ? seen.n : null, landed);
+  return { reload: step.reload, seen: { id: seriesId, n: step.seen } };
+}
+
 /** This series' tile and its failed download, for the band above its chapter list. */
 export function bandFor<J extends DownloadJob>(s: Sections<J>, seriesId: string, folder?: string): { tile?: Tile<J>; failed?: Extract<Attention<J>, { kind: 'job' }> } {
   const ours = (id: string | null, f: string) => id === seriesId || (!!folder && f === folder);

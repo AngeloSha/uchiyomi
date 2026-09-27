@@ -2,7 +2,7 @@
   "_meta": {
     "language": "ar",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 1750
+    "strings": 1756
   },
   "1 check found something": "فحص واحد وجد شيئًا",
   "1 member": "عضو واحد",
@@ -1753,5 +1753,11 @@
   "Stop the engine, then empty {name} on Uchiyomi and restart Uchiyomi.": "أوقف المحرّك، ثم أفرغ {name} على Uchiyomi وأعد تشغيل Uchiyomi.",
   "Uchiyomi Desktop downloads the engine itself, once, from this tab.": "ينزّل Uchiyomi Desktop المحرّك بنفسه، مرة واحدة، من هذا التبويب.",
   "The engine runs only while Uchiyomi is open. There is no switch for it: one that was never downloaded costs nothing.": "لا يعمل المحرّك إلا ما دام Uchiyomi مفتوحًا. لا يوجد مفتاح لإيقافه: المحرّك الذي لم يُنزَّل قط لا يكلّف شيئًا.",
-  "No extension engine is set up": "لا يوجد محرّك إضافات مُعَدّ"
+  "No extension engine is set up": "لا يوجد محرّك إضافات مُعَدّ",
+  "Extension engine": "محرّك الإضافات",
+  "Points the extension engine’s own Cloudflare helper at the one Uchiyomi uses and switches it on, so extensions on Cloudflare-protected sites can get through.": "يوجّه مساعد Cloudflare الخاص بمحرّك الإضافات إلى المساعد الذي يستخدمه Uchiyomi ويشغّله، لكي تتمكن إضافات المواقع المحمية بـ Cloudflare من العبور.",
+  "Uchiyomi changes one setting on the engine: its Cloudflare helper, switched on, at the address in {name}. Nothing restarts and nothing is installed. It stays that way unless the engine’s own container names another helper.": "يغيّر Uchiyomi إعدادًا واحدًا في المحرّك: مساعد Cloudflare الخاص به، مشغّلًا وعلى العنوان الموجود في {name}. لا يُعاد تشغيل شيء ولا يُثبَّت شيء. ويبقى كذلك ما لم تحدّد حاوية المحرّك نفسها مساعدًا آخر.",
+  "One repair run with the 1 step below that has something to do.": "تشغيل إصلاح واحد يضم الخطوة الوحيدة أدناه التي لديها ما تفعله.",
+  "One repair run with the {n} steps below that have something to do.": "تشغيل إصلاح واحد يضم الخطوات {n} أدناه التي لديها ما تفعله.",
+  "The engine has no password of its own: anyone who can reach port {port} can install extensions on it and change its settings. Keep that port on a private network, never open to the internet.": "ليس للمحرّك كلمة مرور خاصة به: أي شخص يصل إلى المنفذ {port} يستطيع تثبيت إضافات عليه وتغيير إعداداته. أبقِ هذا المنفذ على شبكة خاصة، ولا تفتحه أبدًا على الإنترنت."
 }

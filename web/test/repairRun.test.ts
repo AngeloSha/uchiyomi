@@ -7,7 +7,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   blockedReason, cardBody, cardRecord, cardStepState, endedRunIds, itemBody, kindOfBody, pageBody, pagePlan,
-  recordFor, runTouches, type RepairLiveRun, type RepairRunRecord, type RepairStatus,
+  recordFor, runTouches, solverDown, type RepairLiveRun, type RepairRunRecord, type RepairStatus,
 } from '../lib/repairRun';
 import type { HealthCheck, HealthItem } from '../lib/types';
 
@@ -124,4 +124,18 @@ test('the history gives each row and each card its newest finished run', () => {
   assert.equal(recordFor(runs, 'short-chapters', { title: '', detail: '', bookId: 'b9' }), null);
   assert.equal(recordFor(runs, 'chapter-gaps', { title: '', detail: '', seriesId: 's' }), null, 'a chapter run was read as its series\' gap run');
   assert.equal(cardRecord(runs, 'failures')?.id, 'card', 'the failures card reads a run that was not its own (no `now`)');
+});
+
+test('the solver card is "down" only while no finding offers the reset: then it says what to do instead', () => {
+  // The server offers `solver_reset` only on the rows of a solver that answers its ping. While the ping fails the
+  // card must not offer a reset (it would change nothing) and must say what to do instead -- and an item-less card
+  // must stay expandable for that line (HealthActions.tsx hasCardActions). Reintroduce `() => false`: the down case
+  // fails; drop the reset check: "a solver that answers, with rows to reset, reads as down" fails.
+  const check = (over: Partial<HealthCheck>): HealthCheck => ({ id: 'solver', title: 'Cloudflare solver', status: 'warn', summary: '', items: [], ...over });
+  assert.equal(solverDown(check({ status: 'problem', items: [{ title: 'Not answering', detail: 'fetch failed' }] })), true, 'a solver that does not answer is not down');
+  assert.equal(solverDown(check({ status: 'warn', items: [] })), true, 'a failing solver with no rows is not down');
+  assert.equal(solverDown(check({ items: [{ title: 'MangaDex', detail: 'd', sourceId: 'mangadex', actions: ['solver_reset'] }] })), false,
+    'a solver that answers, with rows to reset, reads as down');
+  assert.equal(solverDown(check({ status: 'ok', items: [{ title: 'v1 → v2', detail: 'a newer solver is out', info: true }] })), false, 'a ready solver reads as down');
+  assert.equal(solverDown(check({ id: 'sources', status: 'problem' })), false, 'another check reads as the solver');
 });

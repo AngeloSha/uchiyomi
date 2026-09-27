@@ -12,7 +12,7 @@ import { t as tr } from '@/lib/i18n';
 import { chaptersLeft } from '@/lib/chapterRows';
 import { fetchingLabel, fetchingToast, mayCancel } from '@/lib/jobs';
 import { downloadsHref } from '@/lib/libraryView';
-import { bandFor, downloadSections, landedFor, originLabel, shouldReload, tileStatus } from '@/lib/serverDownloads';
+import { bandFor, bandReload, downloadSections, landedFor, originLabel, tileStatus, type BandSeen } from '@/lib/serverDownloads';
 import { kickDownloads, useServerDownloads } from '@/lib/useServerDownloads';
 
 /** How often at most the band re-reads the chapter list while chapters land: a sweep can land one a second. */
@@ -39,12 +39,13 @@ export function SeriesServerDownloads({ seriesId, folder }: { seriesId: string; 
   const { tile, failed } = bandFor(downloadSections(data, { admin: isAdmin }), seriesId, folder);
 
   // Reintroduce by dropping this effect: a chapter someone else's download lands stays grey until a reload.
-  // Null until the poll first answers: what decides is `shouldReload`, where a test can reach it.
+  // Null until the poll first answers: what decides is `bandReload` (shouldReload, per series), where a test can
+  // reach it. What was seen is kept WITH its series id: moving to another series in the app keeps this mounted.
   const landed = data ? landedFor(data, seriesId, folder) : null;
-  const seen = useRef<number | null>(null);
+  const seen = useRef<BandSeen | null>(null);
   const last = useRef(0);
   useEffect(() => {
-    const step = shouldReload(seen.current, landed);
+    const step = bandReload(seen.current, seriesId, landed);
     seen.current = step.seen;
     if (!step.reload) return;
     const reload = () => {

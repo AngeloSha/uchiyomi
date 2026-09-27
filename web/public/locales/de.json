@@ -2,7 +2,7 @@
   "_meta": {
     "language": "de",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 1750
+    "strings": 1756
   },
   "1 check found something": "1 Prüfung hat etwas gefunden",
   "1 member": "1 Mitglied",
@@ -1753,5 +1753,11 @@
   "Stop the engine, then empty {name} on Uchiyomi and restart Uchiyomi.": "Stoppe die Engine, leere dann {name} bei Uchiyomi und starte Uchiyomi neu.",
   "Uchiyomi Desktop downloads the engine itself, once, from this tab.": "Uchiyomi Desktop lädt die Engine selbst herunter, einmalig, von diesem Tab aus.",
   "The engine runs only while Uchiyomi is open. There is no switch for it: one that was never downloaded costs nothing.": "Die Engine läuft nur, solange Uchiyomi geöffnet ist. Es gibt keinen Schalter dafür: Eine nie heruntergeladene Engine kostet nichts.",
-  "No extension engine is set up": "Keine Erweiterungs-Engine eingerichtet"
+  "No extension engine is set up": "Keine Erweiterungs-Engine eingerichtet",
+  "Extension engine": "Erweiterungs-Engine",
+  "Points the extension engine’s own Cloudflare helper at the one Uchiyomi uses and switches it on, so extensions on Cloudflare-protected sites can get through.": "Richtet den eigenen Cloudflare-Helfer der Erweiterungs-Engine auf den von Uchiyomi aus und schaltet ihn ein, damit Erweiterungen für Cloudflare-geschützte Seiten durchkommen.",
+  "Uchiyomi changes one setting on the engine: its Cloudflare helper, switched on, at the address in {name}. Nothing restarts and nothing is installed. It stays that way unless the engine’s own container names another helper.": "Uchiyomi ändert eine Einstellung der Engine: ihren Cloudflare-Helfer, eingeschaltet, mit der Adresse aus {name}. Nichts startet neu und nichts wird installiert. So bleibt es, solange der Container der Engine nicht selbst einen anderen Helfer angibt.",
+  "One repair run with the 1 step below that has something to do.": "Ein Reparaturlauf mit dem 1 Schritt unten, der etwas zu tun hat.",
+  "One repair run with the {n} steps below that have something to do.": "Ein Reparaturlauf mit den {n} Schritten unten, die etwas zu tun haben.",
+  "The engine has no password of its own: anyone who can reach port {port} can install extensions on it and change its settings. Keep that port on a private network, never open to the internet.": "Die Engine hat kein eigenes Passwort: Wer Port {port} erreicht, kann darauf Erweiterungen installieren und ihre Einstellungen ändern. Halte diesen Port in einem privaten Netz, nie offen zum Internet."
 }

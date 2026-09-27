@@ -9,7 +9,7 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 import {
   isVolumeName, chapterLabel, chapterName, bytes, progressOf, formatClock, durationText, etaLine, etaText, untilText,
-  relativeTime, relativeTimeShort, setActiveLocale, activeLocale,
+  relativeTime, relativeTimeShort, setActiveLocale, activeLocale, wallClock,
 } from '../lib/format';
 
 test('recognises volume-style names', () => {
@@ -153,6 +153,28 @@ test('durationText falls back to its own keys where Intl has no unit style', () 
     (Intl as any).NumberFormat = real;
     setActiveLocale('en');
   }
+});
+
+test('wallClock writes a time of day the way the app\'s language does, not the browser\'s', () => {
+  // EngineSetup's retry line read "Tried 3 times since 02:05 PM" inside a German sentence: toLocaleTimeString([])
+  // follows the browser. Reintroduce `[]` for intlTag() in wallClock: the German and Japanese cases fail (this
+  // Node's own locale is English).
+  const at = new Date(2026, 8, 27, 14, 5);
+  try {
+    setActiveLocale('en');
+    assert.match(wallClock(at), /^02:05\s?PM$/);
+    setActiveLocale('de');
+    assert.equal(wallClock(at), '14:05', 'German reads the browser\'s 12-hour clock');
+    setActiveLocale('ja');
+    assert.equal(wallClock(at.toISOString()), '14:05', 'an ISO string is not read, or Japanese reads the browser\'s clock');
+    setActiveLocale('ar');
+    assert.doesNotMatch(wallClock(at), /[\u0660-\u0669]/, 'Arabic-Indic digits beside the Western ones the rest of the line uses');
+    assert.equal(wallClock('not a date'), '');
+  } finally {
+    setActiveLocale('en');
+  }
+  assert.match(readFileSync(join(__dirname, '..', 'components/EngineSetup.tsx'), 'utf8'), /time: wallClock\(retry\.since\)/, 'the retry line does not use wallClock');
+  assert.doesNotMatch(readFileSync(join(__dirname, '..', 'components/EngineSetup.tsx'), 'utf8'), /toLocaleTimeString\(\[\]/, 'the retry line follows the browser\'s language');
 });
 
 test('untilText says when something happens next', () => {

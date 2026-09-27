@@ -55,6 +55,7 @@ export function chapterName(b: { chapterName?: string | null }): string {
 // "about 2 minutes" on three tabs of one app. So there is one of each here and every surface imports it:
 //
 //   formatClock   a live stopwatch, "2:14" -- a clock needs no translation
+//   wallClock     a time of day, "14:05" / "02:05 PM", the way the app's language writes it
 //   durationText  how long, in the reader's language: "4 min", "1 hr 5 min"
 //   etaLine       how long an action usually takes: "Up to 10 minutes · Last time 2:14"
 //   etaText       how long a slow job has left: "About 3 days"
@@ -118,6 +119,17 @@ export function formatClock(ms: number): string {
   const s = total % 60;
   const ss = String(s).padStart(2, '0');
   return h ? `${h}:${String(m).padStart(2, '0')}:${ss}` : `${m}:${ss}`;
+}
+
+/**
+ * A time of day, "14:05" or "02:05 PM", in the app's language -- not the browser's. `toLocaleTimeString([])`
+ * follows the browser, so with the app in Arabic or Japanese and an English browser, EngineSetup's retry line read
+ * "Tried 3 times since 02:05 PM" inside a translated sentence (the s11 review). '' for anything that is not a date.
+ */
+export function wallClock(at: string | number | Date): string {
+  const d = new Date(at);
+  if (!Number.isFinite(d.getTime())) return '';
+  try { return d.toLocaleTimeString(intlTag(), { hour: '2-digit', minute: '2-digit' }); } catch { return d.toLocaleTimeString(); }
 }
 
 /**
