@@ -80,6 +80,8 @@ import { newSeriesId } from '../lib/ids';
 import { cleanDescription } from '../lib/htmlText';
 import { updateSeries } from '../lib/updater';
 import { busyFolders } from '../lib/bulkNewest';
+import { enqueueArchive, archiveBusy, archiveSeriesIds, archiveView, type EnqueueOutcome } from '../lib/archive';
+import { registerArchiveRoutes } from './archive';
 import { chooseReleases, groupsOf, releaseOrder } from '../lib/releases';
 import { effectivePrefsFor, readSeriesPrefs } from '../lib/scanlatorPrefs';
 import { copyToChapter, listingRows, replaceListing, type ListingCopy } from '../lib/seriesListing';
@@ -852,6 +854,11 @@ export interface AddResult {
    * a partial re-add, where `chapters` is what is still to come and the rest needs no wording.
    */
   alreadyHere?: number;
+  /**
+   * What became of `archive: true` (#117): the rest queued for the slow archive (or why not), or `later` on a
+   * detached download, which queues it once chapter one has landed and the listing is written.
+   */
+  archive?: EnqueueOutcome | 'later';
 }
 
 /**
@@ -893,6 +900,14 @@ function judgeAlsoFollow(folder: string, seriesId: string, opts: {
     });
 }
 
+/** An add's "archive the rest slowly": queued like the Library's action, and never the reason an add fails. */
+async function archiveRest(seriesId: string, a: { by: string | null; ctx: ViewCtx }): Promise<EnqueueOutcome> {
+  return enqueueArchive(seriesId, a.by, a.ctx).catch((e) => {
+    console.warn(`[add] could not queue ${seriesId} for the slow archive: ${(e as Error)?.message || e}`);
+    return 'nothing' as const;
+  });
+}
+
 /** Add one series from a source to the library (downloads chapter 1 synchronously, the rest in background).
  *  Shared by POST /api/sources/add and the bulk importer. Returns a result instead of touching the reply. */
 export async function addSeriesFromSource(opts: {
@@ -918,6 +933,12 @@ export async function addSeriesFromSource(opts: {
   req?: FastifyRequest;
   /** Which sources THIS viewer may reach; a candidate outside it is reported `unavailable` and never asked. */
   sourceAllowed?: (source: string) => boolean;
+  /**
+   * Queue the rest of the series for the slow archive once the add has settled (#117), as `by`, seen through
+   * `ctx` (lib/archive.ts enqueueArchive: the same rules as the queue route). Ignored when the selection is the
+   * whole listing: there is no rest.
+   */
+  archive?: { by: string | null; ctx: ViewCtx };
 }): Promise<AddResult> {
   const { source, sourceId, force, chapterCount, chapterFrom, autoUpdate } = opts;
   const src = source ? getSource(source) : null;
@@ -1056,6 +1077,8 @@ export async function addSeriesFromSource(opts: {
        folder, libraryId, autoUpdate !== false, source, sourceId, floor, chosen.length],
     ))[0];
     await replaceListing(id, listingRows(chapters.map((c) => ({ ...c, source: source! })), chosen, new Set(), source!, releaseOrder(prefs))).catch(() => {});
+    // After the listing: the archive's boundary is the floor just written, and what it will fetch is read from it.
+    const archive = opts.archive ? await archiveRest(id, opts.archive) : undefined;
     // The other sources are judged only now, against the listing above: it is what stands in for "what
     // we hold" on a series that holds nothing. A nothing-yet add has no download and so no card, so one
     // is minted purely to carry the results to the dialog's poll -- and only when there is something to
@@ -1076,11 +1099,13 @@ export async function addSeriesFromSource(opts: {
         await learnDirection({ id }, directionFromAniListMatch(title, a), 'anilist');
       })
       .catch(() => {});
-    return { ok: true, status: 200, title, folder, chapters: 0, started: false, nothing: true, seriesId: id };
+    return { ok: true, status: 200, title, folder, chapters: 0, started: false, nothing: true, seriesId: id, ...(archive ? { archive } : {}) };
   }
 
   if (!chosen.length) return { ok: false, status: 404, error: 'no_chapters', message: 'No readable chapters for this title on this source. Try a different source.' };
   const selected = selectChapters(chosen, chapterCount, chapterFrom);
+  // "Archive the rest slowly" has a rest only when the person picked part of the listing.
+  const archiveOpt = opts.archive && selected.length < chosen.length ? opts.archive : undefined;
 
   /**
    * What the library ALREADY holds under this folder, so an add never downloads a chapter that is here (#65).
@@ -1144,6 +1169,7 @@ export async function addSeriesFromSource(opts: {
     // By folder, as the run reads it after its own scan: the row exists by construction here, because a
     // non-empty have-set is rows joined to a series with this folder.
     const heldId = (await q<{ id: string }>('SELECT id FROM lib_series WHERE folder = $1', [folder]).catch(() => []))[0]?.id;
+    let heldArchive: AddResult['archive'];
     await q('UPDATE lib_series SET auto_update = $1, source_id = $2, source_series_id = $3, chapter_floor = $5 WHERE folder = $4',
       [autoUpdate !== false, source, sourceId, folder, floor]).catch(() => {});
     await learnDirection({ folder }, series?.readingDirection, 'source').catch(() => {});
@@ -1152,6 +1178,7 @@ export async function addSeriesFromSource(opts: {
     await setBookDates(folder, selected).catch(() => {});
     if (heldId) {
       await replaceListing(heldId, listingRows(chapters.map((c) => ({ ...c, source: source! })), chosen, new Set(), source!, releaseOrder(prefs))).catch(() => {});
+      if (archiveOpt) heldArchive = await archiveRest(heldId, archiveOpt);
       // As on the nothing-yet branch: no download means no card, so one is minted purely to carry the
       // judgement to the dialog's poll, and only when there is something to judge.
       if (opts.alsoFollow?.length) {
@@ -1172,7 +1199,10 @@ export async function addSeriesFromSource(opts: {
         await learnDirection({ folder }, directionFromAniListMatch(title, a), 'anilist');
       })
       .catch(() => {});
-    return { ok: true, status: 200, title, folder, chapters: 0, started: false, alreadyHere: selected.length, seriesId: heldId };
+    return {
+      ok: true, status: 200, title, folder, chapters: 0, started: false, alreadyHere: selected.length, seriesId: heldId,
+      ...(opts.archive ? { archive: heldArchive ?? 'nothing' } : {}),
+    };
   }
 
   // The cover is for the Downloads view, which draws this card before chapter one is scanned in and the series
@@ -1256,6 +1286,7 @@ export async function addSeriesFromSource(opts: {
       return { ok: false, status: 422, error: 'undownloadable', message: `${why} Try a different source.` };
     }
     const j0 = jobs.get(folder); if (j0) j0.done = 1;
+    let runArchive: AddResult['archive'];
     await persistScan().catch(logScanError);
     await setBookDates(folder, selected).catch(() => {});
     await setBookMeta(folder, landed).catch(() => {});
@@ -1278,6 +1309,9 @@ export async function addSeriesFromSource(opts: {
       // wrong series. Set before the listing and the judgement, because neither is waited for.
       const card = jobs.get(folder); if (card) card.seriesId = seriesId;
       await replaceListing(seriesId, listingRows(chapters.map((c) => ({ ...c, source: source! })), chosen, new Set(), source!, releaseOrder(prefs))).catch(() => {});
+      // Queued once the row, its floor and its listing exist; the archive then waits on this add's own card
+      // (jobBusy) until the chapters the person picked are in, and only then starts on the rest.
+      if (archiveOpt) runArchive = await archiveRest(seriesId, archiveOpt);
       // Only once the listing is written, and only from here: the row did not exist when the dialog was
       // answered (persistScan minted it from chapter 1 above), and the judgement measures against this
       // listing -- against `lib_books` it would see one chapter and refuse everything as `too_few_listed`
@@ -1399,7 +1433,10 @@ export async function addSeriesFromSource(opts: {
     // the run on disk is downloading half a run, and telling the dialog otherwise would put a progress
     // bar over a count the job can never reach. An awaited caller is answered after the scan above, so
     // the id is known here whatever the branch -- `existing?.id` is only the revive case (#67).
-    return { ok: true, status: 200, title, folder, chapters: toFetch.length, seriesId: seriesId ?? existing?.id };
+    return {
+      ok: true, status: 200, title, folder, chapters: toFetch.length, seriesId: seriesId ?? existing?.id,
+      ...(opts.archive ? { archive: runArchive ?? 'nothing' } : {}),
+    };
   };
 
   if (opts.wait !== false) return run();
@@ -1410,7 +1447,10 @@ export async function addSeriesFromSource(opts: {
   // anything, so on a first add persistScan has not minted the row yet. A revive already has its id;
   // everything else reads it off the job card once chapter one is scanned (`Job.seriesId`).
   void withOrigin('add', opts.userId ?? null, run).catch(() => {});
-  return { ok: true, status: 200, title, folder, chapters: toFetch.length, started: true, seriesId: existing?.id };
+  return {
+    ok: true, status: 200, title, folder, chapters: toFetch.length, started: true, seriesId: existing?.id,
+    ...(opts.archive ? { archive: archiveOpt ? 'later' as const : 'nothing' as const } : {}),
+  };
 }
 
 /**
@@ -1568,6 +1608,8 @@ export default async function sourceRoutes(app: FastifyInstance) {
   });
 
   const vc = (req: FastifyRequest): ViewCtx => (req as any).viewCtx as ViewCtx;
+  // The slow archive's routes (#117), behind the canDownload hook above like everything else here.
+  registerArchiveRoutes(app, vc);
   /** Same shape for every by-id rejection, and it does not say what is being withheld. */
   const denySource = (reply: FastifyReply) =>
     reply.code(403).send({ error: 'forbidden', message: 'That source is not available on this account.' });
@@ -2121,7 +2163,11 @@ export default async function sourceRoutes(app: FastifyInstance) {
     if (rows === null) return reply.code(503).send({ error: 'unavailable' });
     const s = rows[0];
     if (!s) return reply.code(404).send({ error: 'not_found' });
-    if (jobBusy(s.folder)) return reply.code(409).send({ error: 'busy', message: 'A download for that series is already running.' });
+    if (jobBusy(s.folder)) {
+      return reply.code(409).send({ error: 'busy', message: archiveBusy(s.folder)
+        ? 'The slow archive is fetching a chapter of this series right now. Try again in a minute.'
+        : 'A download for that series is already running.' });
+    }
 
     // The listing is refreshed first, so what is fetched is the copy the release rules choose NOW rather
     // than the one the last sweep chose: a preferences save never touches series_listing, and a person who
@@ -2397,11 +2443,12 @@ export default async function sourceRoutes(app: FastifyInstance) {
     // else's: the series a sweep is on may be in a library this viewer cannot open.
     const runs = listRuns().filter((r) => admin || (r.by !== null && r.by === me));
     const activity = listActivity();
+    // The slow archive's rows (#117), every viewer's from one shared read (lib/archive.ts, ten seconds).
+    const archived = await archiveSeriesIds().catch(() => [] as string[]);
     const seen = await downloadsAudience(vc(req), me, admin, {
       folders: [...jobs.keys(), ...activity.active.map((e) => e.folder), ...activity.recent.map((e) => e.folder)],
-      // By id: a run's current series. The slow archive's rows (#117) join here, and answer as `archive`
-      // filtered by `seen.series`; its shape is that step's to define.
-      seriesIds: runs.map((r) => r.current?.id ?? ''),
+      // By id: a run's current series, and the archive's rows.
+      seriesIds: [...runs.map((r) => r.current?.id ?? ''), ...archived],
     });
     // A card carries the series title, so it is a listing like any other: shown by the folder's series row
     // (`receives`, `cardFor`). Reintroduce by dropping `seen.folder(...)` there: "a member receives no card for
@@ -2417,6 +2464,11 @@ export default async function sourceRoutes(app: FastifyInstance) {
         ...r, mine: !!by && by === me, ...(r.current && !seen.series(r.current.id) ? { current: undefined } : {}),
       })),
       activity: activityFor(seen, me, activity),
+      // Filtered HERE, per viewer, by series id, after the shared cache -- never one viewer's answer replayed to
+      // the next. Reintroduce by answering every row: "the queue follows the viewer" in archiveRoutes.int.test.ts
+      // shows a member another library's series.
+      // A database blip there costs the view its archive line, never the downloads it is polling for.
+      archive: await archiveView(seen.series, me).catch(() => undefined),
     };
   });
 
@@ -2618,6 +2670,8 @@ export default async function sourceRoutes(app: FastifyInstance) {
       chapterCount: z.number().int().positive().optional(), chapterFrom: z.enum(['oldest', 'newest', 'none']).optional(),
       autoUpdate: z.boolean().optional(),
       alsoFollow: z.array(z.object({ source: z.string().min(1).max(200), sourceId: z.string().min(1).max(200) })).max(MAX_AUTO_CANDIDATES).optional(),
+      // "Archive the rest slowly" (#117): what the selection leaves is queued for the slow archive.
+      archive: z.boolean().optional(),
     }).safeParse(req.body ?? {});
     if (!b.success) return reply.code(400).send({ error: 'bad_request' });
     const { source, sourceId, force, chapterCount, chapterFrom, autoUpdate } = b.data;
@@ -2643,6 +2697,7 @@ export default async function sourceRoutes(app: FastifyInstance) {
     const r = await addSeriesFromSource({
       source, sourceId, force, chapterCount, chapterFrom, autoUpdate, wait: false,
       alsoFollow, userId: userIdOf(req), req, sourceAllowed: (s) => sourceAllowedFor(getSource(s), maxAge),
+      ...(b.data.archive ? { archive: { by: userIdOf(req), ctx: vc(req) } } : {}),
     });
     if (!r.ok) {
       // ⚠️ The duplicate answer names a series the caller may not be allowed to open: the check behind it
@@ -2669,6 +2724,7 @@ export default async function sourceRoutes(app: FastifyInstance) {
     return {
       ok: true, title: r.title, folder: r.folder, chapters: r.chapters, started: !!r.started, nothing: !!r.nothing,
       ...(seriesId ? { seriesId } : {}), ...(r.alreadyHere === undefined ? {} : { alreadyHere: r.alreadyHere }),
+      ...(r.archive ? { archive: r.archive } : {}),
     };
   });
 }

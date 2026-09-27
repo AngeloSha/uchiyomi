@@ -1,0 +1,1112 @@
+// The slow archive (#117): a whole back catalogue fetched over nights or days, never in a burst.
+//
+// Everything else that downloads is a burst someone is waiting on -- an add, a Fetch, the sweep's five a series
+// -- and the issue asked for the opposite: "archive this series slowly, like a person reading it". So this is a
+// queue of SERIES, never of chapters (archive_queue, one row each), worked by one scheduler that takes the
+// sources in turn, one chapter in flight per source, with a jittered break after each (archivePace.ts) and every
+// page at the slow pace (lib/pace.ts withSlowPace). What is missing is worked out on every pick from the listing
+// the sweep persists (series_listing) minus what the library holds, below the row's `boundary`. Nothing per
+// chapter is stored, so a restart has nothing to reconcile: a chapter that landed meanwhile, by the archive or
+// by anyone else, simply drops out of the next pick.
+//
+// How it shares the work with the sweep. The sweep reads GREATEST(chapter_floor, boundary) as its floor while
+// a row is queued or paused (lib/updater.ts), so the archive owns everything below the boundary and new
+// releases above it stay the sweep's. chapter_floor itself is never rewritten while an archive runs: it is what
+// the person asked for at add time, and it is the only piece of this that survives a rollback to v0.48.4, which
+// ignores these tables and goes back to its five-a-sweep backfill. A clean finish clears the floor only if it is
+// still the one the archive started from.
+//
+// What it waits for, in the order it is asked (lib/archivePlan.ts globalWait, sourceWait): a shutdown, the
+// admin's pause, the hours it may run in, a sweep or a repair or the daily source check (all bounded runs that
+// already hold the server-wide flags), the disk floor; then per source its own slot, its break or backoff, the
+// source being loaded, enabled and out of a cooldown, anybody else's download on its gate, a pace level a 429
+// earned; then per series a download already running for it. The break is reserved in archive_pace BEFORE a
+// chapter starts, so neither a restart nor a crash loop can shorten one.
+//
+// ⚠️ Each chapter runs inside withOrigin('archive') and withSlowPace, both AsyncLocalStorage scopes, and anything
+// created inside one inherits it. Timers and kicks are therefore armed through `atRoot`, a snapshot of the
+// module's import-time context where neither is set, never from inside a download.
+import { AsyncLocalStorage } from 'node:async_hooks';
+import { stat } from 'node:fs/promises';
+import { join } from 'node:path';
+import { z } from 'zod';
+import { q, one } from './db';
+import { runtime } from './runtime';
+import { getSource } from './sources';
+import { gateDepth } from './gate';
+import { paceLevel, withSlowPace } from './pace';
+import { classify } from './sourceHealth';
+import { checkRunning } from './sourceWatchdog';
+import { freeBytes, chapterFileRel } from './downloader';
+import { DL_ROOT, persistScan, setBookDates, setBookMeta } from './library';
+import { downloadWithFallback, type FallbackOutcome } from './chapterFallback';
+import { noteChapterFailure } from './chapterFailures';
+import { withOrigin } from './downloadActivity';
+import { busyFolders } from './bulkNewest';
+import { updateSeries, CHAPTER_RETRY_CAP, type Landed } from './updater';
+import { copyToChapter, type ListingCopy } from './seriesListing';
+import { heldBooks } from './chapterCleanup';
+import { seriesIsAdult, sweepAllowedFor } from './sourceHunt';
+import { notInLibrary } from './downloadCensus';
+import { visible, visibleToAll, sourceAllowedFor, Params, type ViewCtx } from './visibility';
+import { firstRunFloor } from './desktop';
+import {
+  ARCHIVE_DEFAULTS, PER_HOUR_RANGE, pageGapRange, nextBreakMs, backoffUntil, inWindow, windowOpensAt, ewmaCycle,
+  etaMs, cycleMs,
+} from './archivePace';
+import {
+  directionFor, boundaryFor, globalWait, sourceWait, attentionOf, shownDone, rowsFor,
+  type ArchiveDirection, type GlobalWait, type SeriesWait, type SourceState, type DoneNote, type Attention,
+} from './archivePlan';
+
+/** The import-time context: no origin, no slow pace. Every timer and kick is armed through it (see the header). */
+const atRoot = AsyncLocalStorage.snapshot();
+
+const MIN = 60_000;
+/** How often the scheduler looks again when nothing is due sooner. */
+const tickMs = () => Math.max(50, Number(process.env.ARCHIVE_TICK_MS) || MIN);
+/** At most this many sources have an archive chapter in flight at once (env ARCHIVE_MAX_SOURCES). */
+const maxSources = () => Math.max(1, Math.floor(Number(process.env.ARCHIVE_MAX_SOURCES) || 3));
+/**
+ * The shortest break between two chapters on one source. The owner's 45 s, unless the e2e rig asks for less
+ * (ARCHIVE_MIN_BREAK_MS, test only): a walk cannot watch a chapter land if every one is followed by 45 s.
+ */
+const minBreakMs = (): number => {
+  const raw = process.env.ARCHIVE_MIN_BREAK_MS;
+  const n = raw === undefined || raw.trim() === '' ? NaN : Number(raw);
+  return Number.isFinite(n) && n >= 0 ? n : ARCHIVE_DEFAULTS.minBreakMs;
+};
+/** A listing older than this is read again before the next chapter: a week-old list names chapters that moved. */
+const LISTING_STALE_MS = 7 * 24 * 3600_000;
+/** How many missing numbers are looked at per series per pick, for the ones already on disk to be stepped over. */
+const PICK_DEPTH = 5;
+/** Landed chapters are scanned into the library in batches: persistScan walks the whole library. */
+const SCAN_BATCH = 5;
+const SCAN_WAIT_MS = 20 * MIN;
+/** A full disk stops everything for this long before the free space is measured again. */
+const DISK_WAIT_MS = 30 * MIN;
+/** The shared rows behind every viewer's view are read at most this often. */
+const VIEW_TTL_MS = 10_000;
+
+export type ArchiveLog = { info(msg: string): void; warn(msg: string): void; error(err: unknown): void };
+const consoleLog: ArchiveLog = {
+  info: (m) => console.log(`[archive] ${m}`),
+  warn: (m) => console.warn(`[archive] ${m}`),
+  error: (e) => console.error('[archive]', e),
+};
+
+// ── state ─────────────────────────────────────────────────────────────────────────────────────────────────────
+
+let deps: { busy: (folder: string) => boolean; log: ArchiveLog } = { busy: () => false, log: consoleLog };
+let clock: () => number = () => Date.now();
+/** Tests only: replace the clock, so a break can be waited out without waiting. `null` restores it. */
+export function setArchiveClock(fn: (() => number) | null): void { clock = fn ?? (() => Date.now()); }
+
+/** A chapter (or a listing refresh) in flight, by the source it is on. One per source. */
+interface Flight { seriesId: string; number: number | null; folder: string; source: string; startedAt: number }
+const flights = new Map<string, Flight>();
+/**
+ * Chapters on disk that the library has not scanned yet, per series. They are excluded from every pick until
+ * the scan, and they are what the Updates baseline is raised by afterwards (`newRow`: no lib_books row of that
+ * number existed before it landed, so the scan will add one to the series' count).
+ */
+interface Unscanned {
+  folder: string;
+  firstAt: number;
+  items: Map<number, { landed?: Landed; chapterId?: string; publishedAt?: string; newRow: boolean }>;
+}
+const unscanned = new Map<string, Unscanned>();
+/** Numbers a scan could not index although the file is there: stepped over until a restart, never refetched. */
+const stuck = new Map<string, Set<number>>();
+/**
+ * The folders this module has put in bulkNewest's busyFolders, so jobBusy() (routes/sources.ts) refuses a Fetch
+ * or an add into a series the archive is writing, and so a restart simulated by resetArchiveMemory takes back
+ * exactly its own and nobody else's.
+ */
+const myFolders = new Set<string>();
+/** Everything detached this module started, so a test (and a shutdown) can wait for it. */
+const runs = new Set<Promise<unknown>>();
+/** What the last tick concluded, for the view: the global wait and each series' own, each with since when. */
+let lastGlobal: { wait: GlobalWait; since: number } | null = null;
+const lastWaits = new Map<string, { wait: SeriesWait; since: number }>();
+/** The source each queued series' next chapter is on, as the last tick found it: what its ETA shares. */
+const sourceOf = new Map<string, string>();
+let timer: NodeJS.Timeout | null = null;
+let started = false;
+/** Wall-clock time of the first look after boot: a kick (an enqueue, a settings change) never brings it forward. */
+let firstLookAt = 0;
+let ticking: Promise<TickReport> | null = null;
+/** Bumped by resetArchiveMemory: a run from before it must not write into the memory of the one after. */
+let generation = 0;
+
+const track = <T>(p: Promise<T>): Promise<T> => {
+  runs.add(p);
+  void p.finally(() => runs.delete(p)).catch(() => {});
+  return p;
+};
+
+/** Tests: every chapter, refresh and scan this module has started has finished. */
+export async function archiveIdle(): Promise<void> {
+  while (runs.size || ticking) {
+    await Promise.allSettled([...runs, ...(ticking ? [ticking] : [])]);
+  }
+}
+
+/**
+ * Tests: forget everything held in memory, as a restart does. What is in the database stays -- which is the
+ * point of the restart test. A run still going from before is left to finish; its generation no longer matches,
+ * so it cannot write into this memory.
+ */
+export function resetArchiveMemory(): void {
+  generation++;
+  for (const f of myFolders) busyFolders.delete(f);
+  myFolders.clear();
+  flights.clear();
+  unscanned.clear();
+  stuck.clear();
+  lastGlobal = null;
+  lastWaits.clear();
+  sourceOf.clear();
+  viewCache = null;
+  if (timer) { clearTimeout(timer); timer = null; }
+  started = false;
+  deps = { busy: () => false, log: consoleLog };
+}
+
+// ── settings ──────────────────────────────────────────────────────────────────────────────────────────────────
+
+export interface ArchiveSettings { paused: boolean; perHour: number; windowFrom: number | null; windowTo: number | null; minFreeGb: number }
+
+/** Re-read on every tick, like the repair's switch: an admin's pause takes effect without a restart. */
+export async function archiveSettings(): Promise<ArchiveSettings> {
+  const r = await one<{ paused: boolean; per_hour: number; wfrom: number | null; wto: number | null; min_free: number }>(
+    `SELECT archive_paused AS paused, archive_per_hour AS per_hour, archive_window_from AS wfrom,
+            archive_window_to AS wto, archive_min_free_gb AS min_free FROM server_settings WHERE id = 1`,
+  ).catch(() => null);
+  return {
+    paused: r?.paused === true,
+    perHour: Number(r?.per_hour) || ARCHIVE_DEFAULTS.perHour,
+    windowFrom: r?.wfrom ?? null,
+    windowTo: r?.wto ?? null,
+    minFreeGb: r?.min_free == null ? 20 : Number(r.min_free),
+  };
+}
+
+/** The columns GET /api/admin/settings adds for the Downloads section (routes/admin.ts SETTINGS_COLS). */
+export const ARCHIVE_SETTINGS_COLS = 'archive_paused, archive_per_hour, archive_window_from, archive_window_to, archive_min_free_gb';
+
+/**
+ * PATCH /api/admin/settings' archive fields, spread into its schema. Admin only by that route's own guard: the
+ * pace is the whole server's politeness towards every site, so no member sets it.
+ */
+const hour = z.number().int().min(0).max(23).nullable();
+export const ARCHIVE_SETTINGS_SHAPE = {
+  archivePaused: z.boolean().optional(),
+  archivePerHour: z.number().int().min(PER_HOUR_RANGE[0]).max(PER_HOUR_RANGE[1]).optional(),
+  archiveWindowFrom: hour.optional(),
+  archiveWindowTo: hour.optional(),
+  archiveMinFreeGb: z.number().int().min(1).max(2000).optional(),
+};
+type ArchiveSettingsBody = { [K in keyof typeof ARCHIVE_SETTINGS_SHAPE]?: z.infer<(typeof ARCHIVE_SETTINGS_SHAPE)[K]> };
+
+/**
+ * The window's two ends come together or not at all, and are both set or both cleared: one end alone is a
+ * window with no meaning, and a half-cleared one would read "from 22:00 until any time". Refused, not guessed.
+ */
+export function archiveWindowPair(b: ArchiveSettingsBody, ctx: z.RefinementCtx): void {
+  const from = b.archiveWindowFrom;
+  const to = b.archiveWindowTo;
+  if ((from === undefined) !== (to === undefined) || (from === null) !== (to === null)) {
+    ctx.addIssue({ code: 'custom', path: ['archiveWindowFrom'], message: 'archiveWindowFrom and archiveWindowTo are set, or cleared, together' });
+  }
+}
+
+/** Write what the PATCH named. Any change reaches the running scheduler at once: the view is re-read, a tick runs. */
+export async function applyArchiveSettings(b: ArchiveSettingsBody): Promise<void> {
+  let changed = false;
+  const set = async (col: string, v: unknown) => {
+    await q(`UPDATE server_settings SET ${col} = $1, updated_at = now() WHERE id = 1`, [v]);
+    changed = true;
+  };
+  if (b.archivePaused !== undefined) await set('archive_paused', b.archivePaused);
+  if (b.archivePerHour !== undefined) await set('archive_per_hour', b.archivePerHour);
+  if (b.archiveWindowFrom !== undefined) await set('archive_window_from', b.archiveWindowFrom);
+  if (b.archiveWindowTo !== undefined) await set('archive_window_to', b.archiveWindowTo);
+  if (b.archiveMinFreeGb !== undefined) await set('archive_min_free_gb', b.archiveMinFreeGb);
+  if (changed) { invalidateArchiveView(); kick(); }
+}
+
+/** Free space under the download root in GiB, one decimal, for the settings page's floor; null when unknown. */
+export async function archiveFreeGb(): Promise<number | null> {
+  const b = await freeBytes();
+  return b === null ? null : Math.round((b / 2 ** 30) * 10) / 10;
+}
+
+// ── queueing ──────────────────────────────────────────────────────────────────────────────────────────────────
+
+export type EnqueueOutcome = 'queued' | 'already' | 'nothing' | 'unrouted' | 'denied' | 'not_found';
+
+/**
+ * The listing numbers the archive may still fetch for series `alias`.series_id: available (not held for a group,
+ * not blocked), strictly below the boundary IN THE LISTING'S OWN TYPE (both are real: against a numeric, a
+ * floor of 45.3 would count chapter 45.3 as below itself), under the sweep's retry cap, and with no held book of
+ * that number -- override-aware, as the ghost rows are (lib/seriesListing.ts listingFor), and by the sweep's own
+ * held rule, so a Delete-files tombstone is not fetched back and a verify-marked missing file is.
+ */
+function eligibleSql(l: string, a: string, capParam: string): string {
+  return `${l}.status = 'available' AND ${l}.number < ${a}.boundary
+    AND COALESCE((SELECT f.attempts FROM chapter_failures f WHERE f.series_id = ${l}.series_id AND f.number = ${l}.number), 0) < ${capParam}
+    AND NOT EXISTS (
+      SELECT 1 FROM lib_books b LEFT JOIN book_overrides ov ON ov.book_id = b.id
+       WHERE b.series_id = ${l}.series_id AND COALESCE(ov.number, b.number) = ${l}.number AND ${heldBooks('b')})`;
+}
+
+/**
+ * Queue a series to be fetched slowly, on behalf of `by`, seen through `ctx`.
+ *
+ * Who may: admins, and members with canDownload (the sources plugin's own preHandler says who reaches this) for a
+ * series they may see (visible(), not browsable(): a series someone opened is not a listing), and only when
+ * every source it follows is inside their age cap -- the archive fetches from whichever copy the release rules
+ * choose, so a capped member cannot queue a series half of whose copies are on an adult source. The archive
+ * never follows or hunts a new source, so nothing a member queues changes what the sweep does for everyone, and
+ * the pace is per SOURCE: five hundred series queued on one site still share its few chapters an hour.
+ *
+ * A finished row is re-opened with its counts reset. `nothing` when the listing leaves nothing to fetch below
+ * the boundary; a series with no listing yet is queued, and its first turn reads one.
+ */
+export async function enqueueArchive(seriesId: string, by: string | null, ctx: ViewCtx): Promise<EnqueueOutcome> {
+  const p = new Params();
+  const s = await one<{ id: string; source_id: string | null; floor: number | null; extra: string[] }>(
+    `SELECT s.id, s.source_id, s.chapter_floor::real AS floor,
+            ARRAY(SELECT ss.source_id FROM series_sources ss WHERE ss.series_id = s.id) AS extra
+       FROM lib_series s WHERE s.id = ${p.add(seriesId)} AND ${visible('s', ctx, p)}`,
+    p.values as any[],
+  );
+  if (!s) return 'not_found';
+  const followed = [...new Set([s.source_id, ...(s.extra ?? [])].filter((x): x is string => !!x))];
+  const loaded = followed.filter((id) => getSource(id));
+  if (!loaded.length) return 'unrouted';
+  // Reintroduce by dropping this: "who may queue" in archiveRoutes.int.test.ts reads queued for a capped member's
+  // series on an adult source.
+  if (loaded.some((id) => !sourceAllowedFor(getSource(id), ctx.maxAgeRating))) return 'denied';
+
+  const row = await one<{ state: string }>('SELECT state FROM archive_queue WHERE series_id = $1', [seriesId]);
+  if (row && row.state !== 'done') return 'already';
+
+  const floor = s.floor == null ? null : Number(s.floor);
+  const lst = await one<{ max: number | null; min: number | null }>(
+    'SELECT max(number) AS max, min(number) AS min FROM series_listing WHERE series_id = $1', [seriesId]);
+  const boundary = boundaryFor({ floor, listedMax: lst?.max == null ? null : Number(lst.max) });
+  let direction: ArchiveDirection = 'up';
+  if (boundary != null && lst?.max != null) {
+    const left = await one<{ n: number }>(
+      `SELECT count(*)::int AS n FROM series_listing l, (SELECT $2::real AS boundary) a
+        WHERE l.series_id = $1 AND ${eligibleSql('l', 'a', '$3')}`, [seriesId, boundary, CHAPTER_RETRY_CAP]);
+    if (!left?.n) return 'nothing';
+    direction = await directionOf(seriesId, lst.min == null ? null : Number(lst.min));
+  }
+  const now = new Date(clock());
+  const ins = await q<{ series_id: string }>(
+    `INSERT INTO archive_queue (series_id, state, boundary, floor_at_start, direction, added_by, created_at)
+     VALUES ($1, 'queued', $2::real, $3::real, $4, $5, $6)
+     ON CONFLICT (series_id) DO UPDATE SET
+       state = 'queued', boundary = EXCLUDED.boundary, floor_at_start = EXCLUDED.floor_at_start,
+       direction = EXCLUDED.direction, added_by = EXCLUDED.added_by, created_at = EXCLUDED.created_at,
+       started_at = NULL, finished_at = NULL, last_at = NULL, done_count = 0, failed_count = 0, bytes = 0,
+       current_number = NULL, note = NULL
+     WHERE archive_queue.state = 'done'
+     RETURNING series_id`,
+    [seriesId, boundary, floor, direction, by, now],
+  );
+  // Nothing returned: somebody queued it between the read above and this write.
+  if (!ins.length) return 'already';
+  invalidateArchiveView();
+  kick();
+  return 'queued';
+}
+
+/** directionFor, from the database: the lowest LISTED number the library holds against the lowest listed. */
+async function directionOf(seriesId: string, listedMin: number | null): Promise<ArchiveDirection> {
+  const h = await one<{ n: number | null }>(
+    `SELECT min(l.number) AS n FROM series_listing l
+      WHERE l.series_id = $1 AND EXISTS (
+        SELECT 1 FROM lib_books b LEFT JOIN book_overrides ov ON ov.book_id = b.id
+         WHERE b.series_id = l.series_id AND COALESCE(ov.number, b.number) = l.number AND ${heldBooks('b')})`,
+    [seriesId]);
+  return directionFor({ heldMin: h?.n == null ? null : Number(h.n), listedMin });
+}
+
+export type ArchiveActOutcome = 'ok' | 'not_found' | 'forbidden' | 'done';
+
+/**
+ * Pause, resume or stop one archive. Its enqueuer may, and any admin; anyone else who can see the series is
+ * refused (403), and one who cannot is told there is nothing there (404), as for a download card. Pause and
+ * resume answer `done` on a finished archive; stop removes any row, which on a finished one is its dismissal.
+ *
+ * A chapter already in flight finishes: stopping is between chapters, never mid-write, like every Cancel here.
+ * Stopped, the boundary goes with the row, and the sweep's own backfill below the floor resumes.
+ */
+export async function archiveAct(act: 'pause' | 'resume' | 'stop', seriesId: string, who: { userId: string | null; admin: boolean; ctx: ViewCtx }): Promise<ArchiveActOutcome> {
+  const p = new Params();
+  const row = await one<{ state: string; added_by: string | null }>(
+    `SELECT a.state, a.added_by FROM archive_queue a JOIN lib_series s ON s.id = a.series_id
+      WHERE a.series_id = ${p.add(seriesId)} AND ${visible('s', who.ctx, p)}`,
+    p.values as any[],
+  );
+  if (!row) return 'not_found';
+  // Reintroduce by dropping this: "pause, resume and stop: the enqueuer or an admin" in archiveRoutes.int.test.ts
+  // reads 200 for another member's pause.
+  if (!who.admin && !(who.userId && row.added_by === who.userId)) return 'forbidden';
+  if (act === 'stop') {
+    await q('DELETE FROM archive_queue WHERE series_id = $1', [seriesId]);
+  } else {
+    if (row.state === 'done') return 'done';
+    if (act === 'pause') {
+      await q(`UPDATE archive_queue SET state = 'paused', note = jsonb_build_object('pausedAt', $2::timestamptz)
+                WHERE series_id = $1 AND state = 'queued'`, [seriesId, new Date(clock())]);
+    } else {
+      await q(`UPDATE archive_queue SET state = 'queued', note = NULL WHERE series_id = $1 AND state = 'paused'`, [seriesId]);
+    }
+  }
+  invalidateArchiveView();
+  kick();
+  return 'ok';
+}
+
+/**
+ * Forget what this process remembers about one series' archive: the landed-but-unscanned numbers, the ones a
+ * scan could not index, and why it last waited. For a renumber (#116), whose settle rewrites the series' numbers
+ * and remaps archive_queue.boundary and floor_at_start itself: numbers remembered from before would name the
+ * wrong chapters afterwards. The files stay; the next pick finds any still unscanned on disk and scans them in.
+ */
+export function archiveForget(seriesId: string): void {
+  unscanned.delete(seriesId);
+  stuck.delete(seriesId);
+  lastWaits.delete(seriesId);
+  sourceOf.delete(seriesId);
+  invalidateArchiveView();
+}
+
+/** A slow-archive chapter is being fetched into this folder right now: the fetch route's 409 says so. */
+export function archiveBusy(folder: string): boolean {
+  for (const f of flights.values()) if (f.folder === folder) return true;
+  return false;
+}
+
+/**
+ * The boundary of every active archive, for Health and the repair (#117 + health-clarity): a gap wholly below it
+ * is the archive's work in progress, not a finding. Queued and paused only; a finished archive has lifted its.
+ */
+export async function activeArchiveBoundaries(seriesIds?: readonly string[]): Promise<Map<string, number>> {
+  const rows = await q<{ series_id: string; boundary: number }>(
+    `SELECT series_id, boundary FROM archive_queue WHERE state IN ('queued', 'paused') AND boundary IS NOT NULL
+        AND ($1::text[] IS NULL OR series_id = ANY($1::text[]))`,
+    [seriesIds ? [...seriesIds] : null],
+  ).catch(() => []);
+  return new Map(rows.map((r) => [r.series_id, Number(r.boundary)]));
+}
+
+// ── the scheduler ─────────────────────────────────────────────────────────────────────────────────────────────
+
+export interface TickReport {
+  /** Why nothing ran at all, when nothing did for a server-wide reason. */
+  waiting: GlobalWait | null;
+  /** What this tick started: a chapter, or a listing read before one. */
+  started: Array<{ seriesId: string; number: number | null; source: string; kind: 'chapter' | 'listing' }>;
+  /** Why each queued series that did not start is waiting. */
+  waits: Record<string, SeriesWait>;
+  /** Series this tick found nothing left for, and so marked done. */
+  finished: string[];
+}
+
+interface QueuedRow {
+  series_id: string; boundary: number | null; direction: ArchiveDirection; added_by: string | null;
+  title: string; folder: string; summary: string | null; author: string | null; genres: string[] | null;
+  web: string | null; status: string | null; source_id: string | null; source_checked_at: Date | null;
+  renumbering: boolean; by_role: string | null; by_cap: number | null; extra: string[];
+}
+interface PaceRow { source_id: string; next_at: Date | null; backoff_level: number; backoff_until: Date | null; cycle_ms: number | null; last_at: Date | null }
+interface Candidate { number: number; title: string | null; copies: ListingCopy[] | null; publishedAt: string | null }
+
+const ms = (d: Date | string | null | undefined): number | null => (d == null ? null : new Date(d).getTime());
+
+/**
+ * Look once: start what may start, say why the rest waits, finish what has nothing left. Ticks never overlap --
+ * a call during one waits for it and then looks again -- and the scheduler's own timer re-arms after each.
+ */
+export function archiveTick(opts: TickOpts = {}): Promise<TickReport> {
+  const prev = ticking;
+  const next: Promise<TickReport> = (async () => {
+    if (prev) await prev.catch(() => {});
+    return tickOnce(opts);
+  })();
+  ticking = next;
+  void next.finally(() => { if (ticking === next) ticking = null; }).catch(() => {});
+  return next;
+}
+
+/** `rand`: where the breaks and page gaps draw from. `busy`: jobBusy, when a test drives ticks without startArchive. */
+export interface TickOpts { rand?: () => number; busy?: (folder: string) => boolean }
+
+async function tickOnce(opts: TickOpts): Promise<TickReport> {
+  const rand = opts.rand ?? Math.random;
+  const busy = opts.busy ?? deps.busy;
+  const now = clock();
+  const report: TickReport = { waiting: null, started: [], waits: {}, finished: [] };
+  maybeFlush(now);
+
+  const set = await archiveSettings();
+  // Measured only when there is a floor to keep: statfs is cheap, but not free, and 0 means no floor.
+  const free = set.minFreeGb > 0 ? await freeBytes() : null;
+  const g = globalWait({
+    stopping: runtime.stopping, paused: set.paused,
+    windowFrom: set.windowFrom, windowTo: set.windowTo, hour: new Date(now).getHours(), now, opensAt: windowOpensAt, inWindow,
+    updating: runtime.updating, repairing: runtime.repairing, checking: checkRunning(),
+    freeBytes: free, minFreeGb: set.minFreeGb,
+  });
+  if (g) {
+    lastGlobal = lastGlobal?.wait.why === g.why ? { wait: g, since: lastGlobal.since } : { wait: g, since: now };
+    report.waiting = g;
+    return report;
+  }
+  lastGlobal = null;
+
+  const rows = await q<QueuedRow>(
+    `SELECT a.series_id, a.boundary, a.direction, a.added_by,
+            s.title, s.folder, s.summary, s.author, s.genres, s.web, s.status, s.source_id, s.source_checked_at,
+            (s.numbering_pending IS NOT NULL OR s.renumber_plan IS NOT NULL) AS renumbering,
+            u.role AS by_role, u.max_age_rating AS by_cap,
+            ARRAY(SELECT ss.source_id FROM series_sources ss WHERE ss.series_id = s.id ORDER BY ss.created_at, ss.source_id) AS extra
+       FROM archive_queue a
+       JOIN lib_series s ON s.id = a.series_id
+       LEFT JOIN users u ON u.id = a.added_by
+      WHERE a.state = 'queued' AND ${visibleToAll('s')}
+      ORDER BY a.last_at ASC NULLS FIRST, a.created_at ASC, a.series_id`,
+  );
+  const seen = new Set(rows.map((r) => r.series_id));
+  for (const id of [...lastWaits.keys()]) if (!seen.has(id)) lastWaits.delete(id);
+  if (!rows.length) return report;
+
+  const needsListing = (r: QueuedRow) => r.boundary == null || (ms(r.source_checked_at) ?? 0) < now - LISTING_STALE_MS;
+  const picking = rows.filter((r) => !r.renumbering && !needsListing(r)).map((r) => r.series_id);
+  const cands = await candidatesFor(picking);
+
+  // Every source any of these may be on, read once.
+  const followedOf = (r: QueuedRow) => [...new Set([r.source_id, ...(r.extra ?? [])].filter((x): x is string => !!x))];
+  const allSources = [...new Set(rows.flatMap(followedOf))];
+  const paceRows = new Map((await q<PaceRow>(
+    'SELECT source_id, next_at, backoff_level, backoff_until, cycle_ms, last_at FROM archive_pace WHERE source_id = ANY($1::text[])',
+    [allSources])).map((r) => [r.source_id, r]));
+  const health = new Map((await q<{ source_id: string; blocked_until: Date | null; disabled: boolean }>(
+    'SELECT source_id, blocked_until, disabled FROM source_health WHERE source_id = ANY($1::text[])', [allSources])
+    .catch(() => [])).map((r) => [r.source_id, r]));
+  const stateOf = (src: string): SourceState => {
+    const pace = paceRows.get(src);
+    const h = health.get(src);
+    return {
+      loaded: !!getSource(src), disabled: h?.disabled === true, blockedUntil: ms(h?.blocked_until),
+      gate: gateDepth(src), paceLevel: paceLevel(src),
+      nextAt: ms(pace?.next_at), backoffUntil: ms(pace?.backoff_until), inFlight: flights.has(src),
+    };
+  };
+
+  const claimed = new Set<string>();
+  const wait = (r: QueuedRow, w: SeriesWait) => {
+    report.waits[r.series_id] = w;
+    const had = lastWaits.get(r.series_id);
+    lastWaits.set(r.series_id, had?.wait.why === w.why ? { wait: w, since: had.since } : { wait: w, since: now });
+  };
+
+  for (const r of rows) {
+    if (r.renumbering) { wait(r, { why: 'renumbering' }); continue; }
+    const followed = followedOf(r);
+    // The enqueuer's age cap travels with the row: a capped member's archive never takes a chapter from a
+    // source their cap shuts out, whatever the series has come to follow since. An admin, or an enqueuer whose
+    // account is gone, is the server's.
+    const cap = r.by_role === 'admin' || r.added_by == null ? null : r.by_cap;
+    const capOk = (src: string) => sourceAllowedFor(getSource(src), cap);
+
+    let S: string | null = null;
+    let pick: { number: number; title: string | null; copy: ListingCopy; publishedAt: string | null } | null = null;
+    if (needsListing(r)) {
+      // The listing is read first, as that source's turn: a boundary cannot be placed without one, and a
+      // week-old list names chapters the site may have moved.
+      S = followed.find((src) => getSource(src) && capOk(src)) ?? null;
+      if (!S) { wait(r, { why: 'source_missing' }); continue; }
+    } else {
+      const list = (cands.get(r.series_id) ?? []).filter((c) => !stuck.get(r.series_id)?.has(c.number));
+      if (!list.length) {
+        if ([...flights.values()].some((f) => f.seriesId === r.series_id)) { wait(r, { why: 'turn' }); continue; }
+        // Its last chapters are on disk but not yet in the library: scan them in first, so what is left is
+        // counted from the library and the Updates baseline is raised before the row says done.
+        if (unscanned.has(r.series_id)) await flushArchiveScan();
+        if (await finishSeries(r.series_id, now)) report.finished.push(r.series_id);
+        continue;
+      }
+      for (const c of list) {
+        // Already on disk -- landed before a restart, or by a download nobody scanned: not fetched again (the
+        // downloader would skip it anyway, but only after the source's turn was spent). Scanned in shortly.
+        if (await onDisk(r.folder, c.number)) { await noteUnscanned(r.series_id, r.folder, c.number, {}, now); continue; }
+        const copy = (c.copies ?? []).find((cp) => followed.includes(cp.source) && getSource(cp.source) && capOk(cp.source));
+        if (!copy) continue;
+        pick = { number: c.number, title: c.title, copy, publishedAt: c.publishedAt };
+        break;
+      }
+      if (!pick) {
+        const anyLoaded = followed.some((src) => getSource(src));
+        wait(r, anyLoaded && unscanned.has(r.series_id) ? { why: 'turn' } : { why: 'source_missing' });
+        continue;
+      }
+      S = pick.copy.source;
+    }
+    sourceOf.set(r.series_id, S);
+    const name = getSource(S)?.name ?? S;
+
+    // The archive's slots: one chapter per source, and at most so many sources at once.
+    if (claimed.has(S) || (!flights.has(S) && flights.size >= maxSources())) { wait(r, { why: 'turn', source: name }); continue; }
+    const sw = sourceWait(stateOf(S), now);
+    if (sw) { wait(r, { ...sw, source: name }); continue; }
+    // Reintroduce by dropping this: "it yields" in archive.int.test.ts starts the chapter of a series a Fetch is
+    // already writing.
+    if (busy(r.folder)) { wait(r, { why: 'series_busy', source: name }); continue; }
+
+    claimed.add(S);
+    lastWaits.delete(r.series_id);
+    const pace = paceRows.get(S) ?? null;
+    if (pick) {
+      report.started.push({ seriesId: r.series_id, number: pick.number, source: S, kind: 'chapter' });
+      await begin(r, S, pick.number);
+      track(runChapter(r, S, pick, followed, capOk, pace, set, rand, generation));
+    } else {
+      report.started.push({ seriesId: r.series_id, number: null, source: S, kind: 'listing' });
+      await begin(r, S, null);
+      track(runListing(r, S, generation));
+    }
+  }
+  return report;
+}
+
+/** The next few missing numbers of each series, in its direction, excluding what is already on its way. */
+async function candidatesFor(seriesIds: string[]): Promise<Map<string, Candidate[]>> {
+  const out = new Map<string, Candidate[]>();
+  if (!seriesIds.length) return out;
+  const exSid: string[] = [];
+  const exNum: number[] = [];
+  for (const [sid, u] of unscanned) for (const n of u.items.keys()) { exSid.push(sid); exNum.push(n); }
+  for (const f of flights.values()) if (f.number != null) { exSid.push(f.seriesId); exNum.push(f.number); }
+  const rows = await q<{ series_id: string; number: number; title: string | null; copies: ListingCopy[] | null; published_at: Date | null }>(
+    `SELECT x.series_id, x.number, x.title, x.copies, x.published_at FROM (
+       SELECT l.series_id, l.number, l.title, l.copies, l.published_at,
+              row_number() OVER (PARTITION BY l.series_id
+                                 ORDER BY CASE WHEN a.direction = 'down' THEN -l.number ELSE l.number END) AS rk
+         FROM series_listing l JOIN archive_queue a ON a.series_id = l.series_id
+        WHERE l.series_id = ANY($1::text[]) AND ${eligibleSql('l', 'a', '$2')}
+          AND NOT EXISTS (SELECT 1 FROM unnest($3::text[], $4::real[]) AS x(sid, n) WHERE x.sid = l.series_id AND x.n = l.number)
+     ) x WHERE x.rk <= $5 ORDER BY x.series_id, x.rk`,
+    [seriesIds, CHAPTER_RETRY_CAP, exSid, exNum, PICK_DEPTH],
+  );
+  for (const r of rows) {
+    const list = out.get(r.series_id) ?? [];
+    list.push({ number: Number(r.number), title: r.title, copies: r.copies, publishedAt: r.published_at ? new Date(r.published_at).toISOString() : null });
+    out.set(r.series_id, list);
+  }
+  return out;
+}
+
+const onDisk = (folder: string, n: number): Promise<boolean> =>
+  stat(join(DL_ROOT, chapterFileRel(folder, n))).then(() => true, () => false);
+
+/**
+ * The start of a turn, written down before anything is asked of the site: the source's next start is reserved
+ * a minimum break out, so a crash mid-chapter -- or a crash loop -- restarts into a break, never into a burst.
+ * Reintroduce by writing next_at only after the chapter: "a chapter cut off by a crash comes back into a break"
+ * in archive.int.test.ts finds nothing reserved while the chapter is in flight.
+ */
+async function begin(r: QueuedRow, S: string, number: number | null): Promise<void> {
+  const now = clock();
+  flights.set(S, { seriesId: r.series_id, number, folder: r.folder, source: S, startedAt: now });
+  busyFolders.add(r.folder);
+  myFolders.add(r.folder);
+  await q(
+    `INSERT INTO archive_pace (source_id, next_at) VALUES ($1, $2)
+     ON CONFLICT (source_id) DO UPDATE SET next_at = GREATEST(archive_pace.next_at, EXCLUDED.next_at)`,
+    [S, new Date(now + minBreakMs())],
+  ).catch((e) => deps.log.warn(`could not reserve the next start on ${S}: ${(e as Error)?.message || e}`));
+  await q(
+    `UPDATE archive_queue SET current_number = $2, started_at = COALESCE(started_at, $3), last_at = $3 WHERE series_id = $1`,
+    [r.series_id, number, new Date(now)],
+  ).catch(() => {});
+  invalidateArchiveView();
+}
+
+/** The end of a turn: the slot, the busy mark and the view, whatever happened. */
+function end(r: QueuedRow, S: string, gen: number): void {
+  if (gen !== generation) return;
+  flights.delete(S);
+  busyFolders.delete(r.folder);
+  myFolders.delete(r.folder);
+  invalidateArchiveView();
+  kick();
+}
+
+async function runListing(r: QueuedRow, S: string, gen: number): Promise<void> {
+  try {
+    // maxNew 0: listed, persisted and stamped, nothing downloaded. Never a hunt: the archive does not go looking.
+    await withOrigin('archive', r.added_by, () => updateSeries(r.series_id, 0, { hunt: false }));
+    if (r.boundary == null) {
+      const f = await one<{ floor: number | null }>('SELECT chapter_floor::real AS floor FROM lib_series WHERE id = $1', [r.series_id]);
+      const lst = await one<{ max: number | null; min: number | null }>(
+        'SELECT max(number) AS max, min(number) AS min FROM series_listing WHERE series_id = $1', [r.series_id]);
+      const boundary = boundaryFor({ floor: f?.floor == null ? null : Number(f.floor), listedMax: lst?.max == null ? null : Number(lst.max) });
+      if (boundary != null) {
+        const direction = await directionOf(r.series_id, lst?.min == null ? null : Number(lst.min));
+        await q('UPDATE archive_queue SET boundary = $2::real, direction = $3 WHERE series_id = $1 AND boundary IS NULL',
+          [r.series_id, boundary, direction]);
+      }
+    }
+  } catch (e) {
+    deps.log.warn(`reading the listing of "${r.title}" failed: ${(e as Error)?.message || e}`);
+  } finally {
+    // One request, not a chapter: the minimum rest, not a whole break.
+    await q(`UPDATE archive_pace SET next_at = $2, last_reason = 'listing' WHERE source_id = $1`,
+      [S, new Date(clock() + minBreakMs())]).catch(() => {});
+    await q('UPDATE archive_queue SET current_number = NULL WHERE series_id = $1', [r.series_id]).catch(() => {});
+    end(r, S, gen);
+  }
+}
+
+async function runChapter(
+  r: QueuedRow, S: string, pick: { number: number; title: string | null; copy: ListingCopy; publishedAt: string | null },
+  followed: string[], capOk: (src: string) => boolean, pace: PaceRow | null, set: ArchiveSettings, rand: () => number, gen: number,
+): Promise<void> {
+  const t0 = clock();
+  const n = pick.number;
+  let out: FallbackOutcome | null = null;
+  let diskFull = false;
+  let bytes = 0;
+  try {
+    // Asked BEFORE the download, so what the scan adds can be told apart from a row that was already there (a
+    // verify-marked missing file coming back is not a new chapter for the Updates count).
+    const had = await one<{ x: number }>('SELECT 1 AS x FROM lib_books WHERE series_id = $1 AND number = $2::real LIMIT 1', [r.series_id, n]);
+    const sweepRule = await sweepAllowedFor(await seriesIsAdult(r.series_id));
+    const allowed = (src: string) => sweepRule(src) && capOk(src);
+    const meta = { series: r.title, summary: r.summary ?? undefined, author: r.author ?? undefined, genres: r.genres ?? undefined, url: r.web ?? undefined, status: r.status ?? undefined };
+    try {
+      out = await withOrigin('archive', r.added_by, () => withSlowPace({ pageGapMs: pageGapRange(), rand }, () => downloadWithFallback({
+        seriesId: r.series_id, title: r.title, folder: r.folder, meta,
+        chapter: copyToChapter(pick.copy, { number: n, title: pick.title }),
+        // The listing's other copies, from followed sources the archive is not resting or fetching on: an
+        // alternate is a request to a site too, and a site in its break is not asked on the side.
+        alternates: () => alternatesOf(r.series_id, n, pick.copy, followed),
+        refusing: new Set<string>(),
+        allowed,
+        hunt: undefined,
+      })));
+    } catch (e: any) {
+      if (e?.diskFull) diskFull = true;
+      else throw e;
+    }
+    if (out && (out.kind === 'landed' || out.kind === 'partial')) {
+      bytes = await stat(join(DL_ROOT, chapterFileRel(r.folder, n))).then((s) => s.size, () => 0);
+      const landed: Landed = {
+        number: n, scanlator: out.chapterUsed.scanlator, source: out.via, title: out.chapterUsed.title,
+        ...(out.kind === 'partial' ? { missing: out.missing.map((i) => i + 1) } : {}),
+      };
+      if (gen === generation) {
+        await noteUnscanned(r.series_id, r.folder, n, {
+          landed, chapterId: out.chapterUsed.sourceId, publishedAt: out.chapterUsed.publishedAt ?? pick.publishedAt ?? undefined, newRow: !had,
+        }, clock());
+      }
+      await q(`UPDATE archive_queue SET done_count = done_count + 1, bytes = bytes + $2 WHERE series_id = $1`, [r.series_id, bytes]).catch(() => {});
+      // A chapter the site let through ends its refusal run. Taken from another followed source instead, the
+      // chosen one did NOT let it through: a refusal there still backs it off, landed or not.
+      if (out.switched) await backOff(S, { blockStatus: out.switched.why });
+      await q(`UPDATE archive_pace SET backoff_level = 0, backoff_until = NULL, last_reason = 'ok' WHERE source_id = $1`, [out.via]).catch(() => {});
+    } else if (out?.kind === 'skipped' && out.why === 'on_disk') {
+      if (gen === generation) await noteUnscanned(r.series_id, r.folder, n, {}, clock());
+    } else if (out?.kind === 'failed') {
+      await noteChapterFailure({ seriesId: r.series_id, title: r.title, number: n, sourceId: out.via, err: out.err });
+      await q('UPDATE archive_queue SET failed_count = failed_count + 1 WHERE series_id = $1', [r.series_id]).catch(() => {});
+      await backOff(out.via || S, out.err);
+    }
+  } catch (e) {
+    deps.log.warn(`"${r.title}" ch ${n}: ${(e as Error)?.message || e}`);
+  } finally {
+    const now = clock();
+    // The break that makes this look like a person: jittered, paid for by the chapter's own time, now and then
+    // a long one. None after a chapter that was already on disk -- nothing was asked of the site.
+    const skippedOnDisk = out?.kind === 'skipped' && out.why === 'on_disk';
+    const brk = skippedOnDisk ? 0 : nextBreakMs({ perHour: set.perHour, chapterMs: now - t0, rand, minBreakMs: minBreakMs() }).ms;
+    const nextAt = diskFull ? now + DISK_WAIT_MS : now + brk;
+    const lastAt = ms(pace?.last_at);
+    const sample = lastAt != null ? now - lastAt : now - t0 + brk;
+    // The running average moves only on a chapter the site was asked for: one found on disk cost it nothing.
+    const cycle = skippedOnDisk ? pace?.cycle_ms ?? null : ewmaCycle(pace?.cycle_ms ?? null, sample, cycleMs(set.perHour));
+    const reason = diskFull ? 'disk'
+      : out?.kind === 'failed' ? String(out.err?.blockStatus ?? classify(out.err) ?? 'failed')
+      : out?.kind ?? 'error';
+    // A backoff written by backOff() above outlasts the break; the break never shortens it.
+    // Reintroduce by keeping only the reservation made in begin(): "a restart keeps its place and its break" in
+    // archive.int.test.ts starts chapter two a minute after chapter one.
+    await q(
+      `INSERT INTO archive_pace (source_id, next_at, cycle_ms, last_at, last_reason) VALUES ($1, $2, $3, $4, $5)
+       ON CONFLICT (source_id) DO UPDATE SET next_at = GREATEST(EXCLUDED.next_at, archive_pace.backoff_until),
+         cycle_ms = EXCLUDED.cycle_ms, last_at = EXCLUDED.last_at, last_reason = EXCLUDED.last_reason`,
+      [S, new Date(nextAt), cycle, new Date(now), reason],
+    ).catch((e) => deps.log.warn(`could not write the break on ${S}: ${(e as Error)?.message || e}`));
+    // A chapter taken from another followed source was a request to THAT site too: it rests as long.
+    const via = out && 'via' in out ? out.via : '';
+    if (via && via !== S) {
+      await q(
+        `INSERT INTO archive_pace (source_id, next_at, last_reason) VALUES ($1, $2, $3)
+         ON CONFLICT (source_id) DO UPDATE SET next_at = GREATEST(EXCLUDED.next_at, archive_pace.next_at, archive_pace.backoff_until),
+           last_reason = EXCLUDED.last_reason`,
+        [via, new Date(nextAt), reason],
+      ).catch(() => {});
+    }
+    await q('UPDATE archive_queue SET current_number = NULL WHERE series_id = $1', [r.series_id]).catch(() => {});
+    if (diskFull) deps.log.warn(`the library disk is at the downloader's floor; the archive waits ${DISK_WAIT_MS / MIN} minutes`);
+    if (gen === generation) maybeFlush(now);
+    end(r, S, gen);
+  }
+}
+
+/**
+ * A chapter failed. A REFUSAL (403, 429: the site said no to us) leaves the source alone for longer each time
+ * in a row, 1 h, 3 h, 12 h, then a day, never less than the server's own cooldown; a site that was down gets a
+ * flat half hour. The row stays queued: a site saying "not now" is not "never", and ending the archive on it
+ * is the job card's rule for a person watching, not this one's.
+ * Reintroduce by skipping this write: "a refusal backs off and keeps the queue" in archive.int.test.ts starts
+ * a chapter half an hour later.
+ */
+async function backOff(src: string, err: any): Promise<void> {
+  const status = err?.blockStatus ?? classify(err);
+  if (status !== 'rate_limited' && status !== 'blocked' && status !== 'down') return;
+  const now = clock();
+  const cur = await one<{ backoff_level: number }>('SELECT backoff_level FROM archive_pace WHERE source_id = $1', [src]);
+  const h = await one<{ blocked_until: Date | null }>('SELECT blocked_until FROM source_health WHERE source_id = $1', [src]).catch(() => null);
+  const refused = status !== 'down';
+  const level = (cur?.backoff_level ?? 0) + (refused ? 1 : 0);
+  const until = backoffUntil(level, h?.blocked_until ?? null, now, refused ? 'refused' : 'down');
+  await q(
+    `INSERT INTO archive_pace (source_id, backoff_level, backoff_until, last_reason) VALUES ($1, $2, $3, $4)
+     ON CONFLICT (source_id) DO UPDATE SET backoff_level = $2, backoff_until = $3, last_reason = $4`,
+    [src, level, new Date(until), status],
+  );
+}
+
+/** The listing's other copies of `n` from followed sources the archive is not resting or busy on. */
+async function alternatesOf(seriesId: string, n: number, chosen: ListingCopy, followed: string[]) {
+  const row = await one<{ title: string | null; copies: ListingCopy[] }>(
+    'SELECT title, copies FROM series_listing WHERE series_id = $1 AND number = $2::real', [seriesId, n]).catch(() => null);
+  const now = clock();
+  const resting = new Set((await q<{ source_id: string }>(
+    `SELECT source_id FROM archive_pace WHERE (next_at > $1 OR backoff_until > $1) AND source_id = ANY($2::text[])`,
+    [new Date(now), followed]).catch(() => [])).map((r) => r.source_id));
+  return (row?.copies ?? [])
+    .filter((c) => c.source !== chosen.source && followed.includes(c.source) && !resting.has(c.source)
+      && !flights.has(c.source) && gateDepth(c.source).active + gateDepth(c.source).queued === 0 && paceLevel(c.source) === 0)
+    .map((c) => copyToChapter(c, { number: n, title: row!.title }));
+}
+
+/** Nothing left to fetch below the boundary: done, with what was left behind and why. */
+async function finishSeries(seriesId: string, now: number): Promise<boolean> {
+  const note = await one<DoneNote>(
+    `SELECT count(*) FILTER (WHERE l.status = 'available')::int AS capped,
+            count(*) FILTER (WHERE l.status = 'held')::int AS held,
+            count(*) FILTER (WHERE l.status = 'blocked')::int AS blocked
+       FROM series_listing l JOIN archive_queue a ON a.series_id = l.series_id
+      WHERE l.series_id = $1 AND l.number < a.boundary
+        AND NOT EXISTS (
+          SELECT 1 FROM lib_books b LEFT JOIN book_overrides ov ON ov.book_id = b.id
+           WHERE b.series_id = l.series_id AND COALESCE(ov.number, b.number) = l.number AND ${heldBooks('b')})`,
+    [seriesId]);
+  // One statement: the row ends and, when the series' floor is still the one the archive started from, the
+  // floor goes with it -- nothing is left below it for it to keep out of the sweep, and the capped numbers are
+  // the repair's weekly retry's to bring back. A floor someone changed since is theirs and stays.
+  // Reintroduce by leaving the row queued: "done with gaps" in archive.int.test.ts never finishes.
+  const r = await one<{ ended: number }>(
+    `WITH done AS (
+       UPDATE archive_queue SET state = 'done', finished_at = $2, note = $3::jsonb, current_number = NULL
+        WHERE series_id = $1 AND state = 'queued' RETURNING series_id, floor_at_start),
+     floor AS (
+       UPDATE lib_series s SET chapter_floor = NULL FROM done
+        WHERE s.id = done.series_id AND done.floor_at_start IS NOT NULL AND s.chapter_floor::real = done.floor_at_start
+        RETURNING s.id)
+     SELECT (SELECT count(*) FROM done)::int AS ended`,
+    [seriesId, new Date(now), JSON.stringify({ capped: note?.capped ?? 0, held: note?.held ?? 0, blocked: note?.blocked ?? 0 })],
+  );
+  const ended = (r?.ended ?? 0) > 0;
+  if (ended) {
+    lastWaits.delete(seriesId);
+    sourceOf.delete(seriesId);
+    invalidateArchiveView();
+  }
+  return ended;
+}
+
+// ── scanning what landed ──────────────────────────────────────────────────────────────────────────────────────
+
+async function noteUnscanned(seriesId: string, folder: string, n: number, item: { landed?: Landed; chapterId?: string; publishedAt?: string; newRow?: boolean }, now: number): Promise<void> {
+  let u = unscanned.get(seriesId);
+  if (!u) { u = { folder, firstAt: now, items: new Map() }; unscanned.set(seriesId, u); }
+  if (item.newRow === undefined) {
+    // Found on disk rather than landed here: whether it adds a row is asked of the library now.
+    const had = await one('SELECT 1 FROM lib_books WHERE series_id = $1 AND number = $2::real LIMIT 1', [seriesId, n]).catch(() => null);
+    item = { ...item, newRow: !had };
+  }
+  u.items.set(n, { landed: item.landed, chapterId: item.chapterId, publishedAt: item.publishedAt, newRow: item.newRow ?? false });
+}
+
+/** Scan when five chapters are waiting, or the oldest has waited twenty minutes. */
+function maybeFlush(now: number): void {
+  let count = 0;
+  let oldest = Infinity;
+  for (const u of unscanned.values()) { count += u.items.size; oldest = Math.min(oldest, u.firstAt); }
+  if (count && (count >= SCAN_BATCH || now - oldest >= SCAN_WAIT_MS)) void track(flushArchiveScan());
+}
+
+let flushing: Promise<void> | null = null;
+
+/**
+ * Scan what the archive landed into the library, then stamp it as the sweep stamps what it lands: release dates,
+ * group and source, and the source chapter it came from (lib_books.source_chapter_id, so a later renumber, #116,
+ * matches the file exactly). Serialised; a call during one waits for it and then scans again.
+ *
+ * ⚠️ AND RAISE THE UPDATES BASELINE by exactly the rows the scan added. /api/updates counts a favourite's
+ * chapters minus what its reader has seen (series_seen), so without this a favourite being archived would read
+ * "+96 new" every morning for a back catalogue nobody asked to be told about. Raised by the archive's own new
+ * rows only, so a real release the sweep landed beside them still counts; and never past the series' count.
+ * No push and no digest for them either: nothing here calls notifyNewChapter or sendDigest.
+ * Reintroduce by dropping the series_seen update: "archived chapters are not updates" in archive.int.test.ts
+ * sees the new count rise.
+ */
+export function flushArchiveScan(): Promise<void> {
+  const prev = flushing;
+  const next = (async () => {
+    if (prev) await prev.catch(() => {});
+    if (!unscanned.size) return;
+    const gen = generation;
+    const batch = [...unscanned.entries()].map(([sid, u]) => [sid, { ...u, items: new Map(u.items) }] as const);
+    await persistScan().catch((e) => deps.log.warn(`the library scan after archived chapters threw: ${(e as Error)?.message || e}`));
+    for (const [seriesId, u] of batch) {
+      const nums = [...u.items.keys()];
+      const items = [...u.items.values()];
+      await setBookDates(u.folder, nums.flatMap((n) => (u.items.get(n)?.publishedAt ? [{ number: n, publishedAt: u.items.get(n)!.publishedAt }] : []))).catch(() => {});
+      await setBookMeta(u.folder, items.flatMap((i) => (i.landed ? [i.landed] : []))).catch(() => {});
+      await stampChapterIds(u.folder, nums.flatMap((n) => (u.items.get(n)?.chapterId ? [{ number: n, id: u.items.get(n)!.chapterId! }] : [])));
+      const unindexed = new Set(await notInLibrary(u.folder, nums).catch(() => [] as number[]));
+      if (unindexed.size && gen === generation) {
+        const set = stuck.get(seriesId) ?? new Set<number>();
+        for (const n of unindexed) set.add(n);
+        stuck.set(seriesId, set);
+        deps.log.warn(`${unindexed.size} archived chapter(s) of ${u.folder} are on disk but the library scan did not add them; Admin -> Health lists them`);
+      }
+      const fresh = nums.filter((n) => u.items.get(n)?.newRow && !unindexed.has(n)).length;
+      if (fresh) {
+        await q(
+          `UPDATE series_seen ss SET seen_books_count = LEAST(ss.seen_books_count + $2, s.books_count)
+             FROM lib_series s WHERE ss.series_id = $1 AND s.id = ss.series_id`,
+          [seriesId, fresh],
+        ).catch((e) => deps.log.warn(`could not raise the Updates baseline of ${u.folder}: ${(e as Error)?.message || e}`));
+      }
+      if (gen === generation) {
+        const live = unscanned.get(seriesId);
+        if (live) { for (const n of nums) live.items.delete(n); if (!live.items.size) unscanned.delete(seriesId); }
+      }
+    }
+  })();
+  flushing = next;
+  void next.finally(() => { if (flushing === next) flushing = null; }).catch(() => {});
+  return next;
+}
+
+/** lib_books.source_chapter_id for what landed, by folder and RAW number, as setBookMeta stamps its columns. */
+async function stampChapterIds(folder: string, rows: Array<{ number: number; id: string }>): Promise<void> {
+  if (!rows.length) return;
+  const params: unknown[] = [folder];
+  const values = rows.map((r) => { params.push(r.number, r.id); return `($${params.length - 1}::real, $${params.length}::text)`; });
+  await q(
+    `UPDATE lib_books b SET source_chapter_id = v.cid
+       FROM (VALUES ${values.join(',')}) AS v(n, cid), lib_series s
+      WHERE s.folder = $1 AND b.series_id = s.id AND b.number = v.n AND b.source_chapter_id IS DISTINCT FROM v.cid`,
+    params,
+  ).catch(() => {});
+}
+
+// ── the loop ──────────────────────────────────────────────────────────────────────────────────────────────────
+
+/** Look again soon: after a chapter, an enqueue, a pause, a settings change. Coalesced into one tick. */
+function kick(): void {
+  if (!started) return;
+  atRoot(() => arm(Math.max(250, firstLookAt - Date.now())));
+}
+
+function arm(delay: number): void {
+  if (timer) clearTimeout(timer);
+  timer = setTimeout(() => {
+    timer = null;
+    void archiveTick().then(
+      () => { if (started && !timer) arm(tickMs()); },
+      (e) => { deps.log.error(e); if (started && !timer) arm(tickMs()); },
+    );
+  }, delay);
+  timer.unref?.();
+}
+
+/**
+ * At boot: nothing is in flight in a process that has just started, so a `current_number` left by the last one
+ * is a chapter that died with it. Its break was reserved before it started (`begin`), so it is not retried early.
+ */
+export async function archiveBoot(): Promise<void> {
+  await q('UPDATE archive_queue SET current_number = NULL WHERE current_number IS NOT NULL').catch(() => {});
+}
+
+/**
+ * Start the scheduler (server.ts, owned mode). The first look waits ten minutes after a boot, like the sweep, so
+ * a restart loop cannot become a burst and a server that has just started answers readers first (three on
+ * desktop, which is only on while someone uses it); ARCHIVE_FIRST_RUN_MS is the e2e rig's. It never starts before
+ * a persisted break or backoff has run out either: those are gates in every tick.
+ */
+export function startArchive(d: { busy: (folder: string) => boolean; log: ArchiveLog }): void {
+  deps = d;
+  started = true;
+  const raw = process.env.ARCHIVE_FIRST_RUN_MS;
+  const first = raw !== undefined && raw.trim() !== '' && Number.isFinite(Number(raw))
+    ? Math.max(0, Number(raw)) : firstRunFloor(10 * MIN, 'archive');
+  firstLookAt = Date.now() + first;
+  void track(archiveBoot());
+  d.log.info(`archive: first look in ${Math.round(first / 1000)} s`);
+  atRoot(() => arm(first));
+}
+
+// ── what a viewer is shown ────────────────────────────────────────────────────────────────────────────────────
+
+interface SharedRow {
+  seriesId: string; title: string; folder: string; state: 'queued' | 'paused' | 'done'; direction: ArchiveDirection;
+  done: number; failed: number; bytes: number; left: number | null; addedBy: string | null; primary: string | null;
+  createdAt: number; startedAt: number | null; finishedAt: number | null; note: (Partial<DoneNote> & { pausedAt?: string }) | null;
+}
+let viewCache: { at: number; rows: SharedRow[]; pace: Map<string, PaceRow>; settings: ArchiveSettings } | null = null;
+export function invalidateArchiveView(): void { viewCache = null; }
+
+/** Every archive row, unfiltered, read at most every ten seconds. Never handed to a viewer as it is. */
+async function sharedRows(): Promise<NonNullable<typeof viewCache>> {
+  const now = clock();
+  if (viewCache && now - viewCache.at < VIEW_TTL_MS) return viewCache;
+  const rows = await q<any>(
+    `SELECT a.series_id, s.title, s.folder, a.state, a.direction, a.done_count, a.failed_count, a.bytes, a.added_by, s.source_id,
+            a.created_at, a.started_at, a.finished_at, a.note,
+            CASE WHEN a.state = 'done' OR a.boundary IS NULL THEN NULL ELSE (
+              SELECT count(*)::int FROM series_listing l WHERE l.series_id = a.series_id AND ${eligibleSql('l', 'a', '$1')}) END AS left_n
+       FROM archive_queue a JOIN lib_series s ON s.id = a.series_id
+      WHERE ${visibleToAll('s')}
+      ORDER BY a.created_at, a.series_id`,
+    [CHAPTER_RETRY_CAP],
+  );
+  const shared: SharedRow[] = rows.map((r) => ({
+    seriesId: r.series_id, title: r.title, folder: r.folder, state: r.state, direction: r.direction,
+    done: Number(r.done_count) || 0, failed: Number(r.failed_count) || 0, bytes: Number(r.bytes) || 0,
+    left: r.left_n == null ? null : Number(r.left_n), addedBy: r.added_by, primary: r.source_id,
+    createdAt: ms(r.created_at) ?? now, startedAt: ms(r.started_at), finishedAt: ms(r.finished_at), note: r.note,
+  }));
+  const pace = new Map((await q<PaceRow>('SELECT source_id, next_at, backoff_level, backoff_until, cycle_ms, last_at FROM archive_pace')
+    .catch(() => [])).map((p) => [p.source_id, p]));
+  viewCache = { at: now, rows: shared, pace, settings: await archiveSettings() };
+  return viewCache;
+}
+
+export interface ArchiveSeriesView {
+  seriesId: string; title: string; state: 'queued' | 'paused' | 'done'; direction: ArchiveDirection;
+  done: number; left: number | null; failed: number; bytes: number;
+  current?: { number: number; startedAt: string };
+  nextAt?: string; etaMs?: number;
+  waiting?: { why: SeriesWait['why']; until?: string; source?: string };
+  attention?: { why: Attention['why']; since: string };
+  queuedAt: string; startedAt: string | null; finishedAt?: string; note?: DoneNote;
+}
+export interface ArchiveView {
+  paused: boolean; perHour: number; window: { from: number; to: number } | null;
+  waiting?: { why: GlobalWait['why']; until?: string };
+  series: Array<ArchiveSeriesView & { mine: boolean }>;
+}
+
+const iso = (t: number | null | undefined): string | undefined => (t == null ? undefined : new Date(t).toISOString());
+
+/** One shared row with the scheduler's memory folded in: what is in flight, why it waits, when it next goes. */
+function compose(r: SharedRow, c: NonNullable<typeof viewCache>, queuedOn: Map<string, number>, now: number): (ArchiveSeriesView & { addedBy: string | null }) | null {
+  const src = sourceOf.get(r.seriesId) ?? r.primary ?? null;
+  const pace = src ? c.pace.get(src) : undefined;
+  const flight = [...flights.values()].find((f) => f.seriesId === r.seriesId && f.number != null);
+  const w = r.state === 'queued' ? lastWaits.get(r.seriesId) : undefined;
+  const pausedAt = r.note?.pausedAt ? Date.parse(r.note.pausedAt) : null;
+  const note = r.state === 'done' && r.note ? { capped: r.note.capped ?? 0, held: r.note.held ?? 0, blocked: r.note.blocked ?? 0 } : undefined;
+  const attention = attentionOf({
+    state: r.state, now, failed: r.failed, note, finishedAt: r.finishedAt, pausedAt: Number.isFinite(pausedAt) ? pausedAt : null,
+    backoffLevel: pace?.backoff_level ?? 0, backoffSince: ms(pace?.last_at), wait: w?.wait ?? null, waitSince: w?.since ?? null,
+    global: r.state === 'queued' ? lastGlobal?.wait ?? null : null,
+  });
+  if (!shownDone({ state: r.state, finishedAt: r.finishedAt, attention, now })) return null;
+  const nextAtMs = r.state === 'queued' && pace ? Math.max(ms(pace.next_at) ?? 0, ms(pace.backoff_until) ?? 0) : 0;
+  const cyc = pace?.cycle_ms ?? cycleMs(c.settings.perHour);
+  return {
+    seriesId: r.seriesId, title: r.title, state: r.state, direction: r.direction,
+    done: r.done, left: r.left, failed: r.failed, bytes: r.bytes, addedBy: r.addedBy,
+    ...(flight ? { current: { number: flight.number!, startedAt: iso(flight.startedAt)! } } : {}),
+    ...(nextAtMs > now && !flight ? { nextAt: iso(nextAtMs) } : {}),
+    ...(r.state !== 'done' && r.left != null ? { etaMs: etaMs({ left: r.left, sharing: (src && queuedOn.get(src)) || 1, cycleMs: cyc }) } : {}),
+    ...(w ? { waiting: { why: w.wait.why, ...(w.wait.until ? { until: iso(w.wait.until) } : {}), ...(w.wait.source ? { source: w.wait.source } : {}) } } : {}),
+    ...(attention ? { attention: { why: attention.why, since: iso(attention.since)! } } : {}),
+    queuedAt: iso(r.createdAt)!, startedAt: iso(r.startedAt) ?? null,
+    ...(r.finishedAt ? { finishedAt: iso(r.finishedAt) } : {}),
+    ...(note ? { note } : {}),
+  };
+}
+
+/** The ids of every archive row, for the caller's one browsable() query over them (routes/sources.ts). */
+export async function archiveSeriesIds(): Promise<string[]> {
+  return (await sharedRows()).rows.map((r) => r.seriesId);
+}
+
+/**
+ * The `archive` object of GET /api/sources/jobs (and GET /api/sources/archive): the settings a viewer needs to
+ * read the rows, the server-wide wait, and the rows `mayBrowse` lets through. The same rule as the view's cards
+ * and activity (browsable(), by series id), applied after the shared cache, on every call (archivePlan.rowsFor).
+ */
+export async function archiveView(mayBrowse: (seriesId: string) => boolean, me: string | null): Promise<ArchiveView> {
+  const c = await sharedRows();
+  const now = clock();
+  const queuedOn = new Map<string, number>();
+  for (const r of c.rows) {
+    if (r.state !== 'queued') continue;
+    const src = sourceOf.get(r.seriesId) ?? r.primary;
+    if (src) queuedOn.set(src, (queuedOn.get(src) ?? 0) + 1);
+  }
+  const rows = c.rows.map((r) => compose(r, c, queuedOn, now)).filter((x): x is NonNullable<typeof x> => !!x);
+  const s = c.settings;
+  const g = s.paused ? { why: 'paused' as const } : lastGlobal?.wait ?? null;
+  return {
+    paused: s.paused, perHour: s.perHour,
+    window: s.windowFrom != null && s.windowTo != null && s.windowFrom !== s.windowTo ? { from: s.windowFrom, to: s.windowTo } : null,
+    ...(g ? { waiting: { why: g.why, ...(g.until ? { until: iso(g.until) } : {}) } } : {}),
+    series: rowsFor(rows, mayBrowse, me),
+  };
+}
+
+/**
+ * The series page's line (GET /api/series/:id/listing `archive`): its one row, or null. The route has already
+ * checked the viewer may see the series.
+ */
+export async function archiveSummaryFor(seriesId: string, me: string | null): Promise<{
+  state: string; done: number; left: number | null; failed: number; etaMs?: number; nextAt?: string;
+  waiting?: ArchiveSeriesView['waiting']; attention?: ArchiveSeriesView['attention']; mine: boolean;
+} | null> {
+  const v = await archiveView((id) => id === seriesId, me);
+  const r = v.series.find((x) => x.seriesId === seriesId);
+  if (!r) return null;
+  return {
+    state: r.state, done: r.done, left: r.left, failed: r.failed, mine: r.mine,
+    ...(r.etaMs !== undefined ? { etaMs: r.etaMs } : {}), ...(r.nextAt ? { nextAt: r.nextAt } : {}),
+    ...(r.waiting ? { waiting: r.waiting } : {}), ...(r.attention ? { attention: r.attention } : {}),
+  };
+}

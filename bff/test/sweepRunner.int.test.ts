@@ -145,6 +145,20 @@ test('a sweep started from the admin panel is the sweep', { skip }, async (t) =>
       assert.equal(listed(), 1);
     });
 
+    // POST /api/admin/update ran runUpdateAll bare, like "Run now" once did: a second sweep on top of this one,
+    // with `runtime.updating` -- the flag the repair and the slow archive (#117) stand aside for -- never set.
+    // Reintroduce by putting `runUpdateAll(...)` back in that route: this request starts a second sweep (the
+    // source is asked twice) and does not answer until the first is let go.
+    await t.test('POST /api/admin/update is refused while a sweep runs, rather than starting a second', async () => {
+      const req = app.inject({ method: 'POST', url: '/api/admin/update', headers: auth, payload: {} });
+      const answered = await Promise.race([req.then(() => true), new Promise<boolean>((r) => setTimeout(() => r(false), 3000))]);
+      assert.equal(answered, true, 'it answered at once instead of running a second sweep behind the first');
+      const r = await req;
+      assert.equal(r.statusCode, 409, r.body);
+      assert.equal(r.json().error, 'busy');
+      assert.equal(listed(), 1, 'refused means not started');
+    });
+
     await t.test('when it ends, the result is kept and one line is logged', async () => {
       assert.equal(summaries().length, 0, 'nothing has been said yet');
       open();
@@ -167,6 +181,17 @@ test('a sweep started from the admin panel is the sweep', { skip }, async (t) =>
       await until(() => !runtime.updating, 'the second sweep to finish');
       assert.equal(listed(), 2);
       assert.equal(summaries().length, 2);
+    });
+
+    // Favourites only, so this is one quick pass rather than a second walk of every series the database holds.
+    await t.test('POST /api/admin/update is the sweep too: its result, its summary line, its stamp', async () => {
+      const before = Date.now();
+      const r = await app.inject({ method: 'POST', url: '/api/admin/update', headers: auth, payload: { favorites: true } });
+      assert.equal(r.statusCode, 200, r.body);
+      assert.equal(typeof r.json().visited, 'number', 'the sweep result, as the route always answered');
+      assert.equal(summaries().length, 3, 'one summary line, as runSweep writes for every sweep');
+      assert.ok(runtime.lastUpdate >= before, 'and the Tasks panel sees it as the last run');
+      assert.equal(runtime.updating, false);
     });
   } finally {
     await teardown(app, q);

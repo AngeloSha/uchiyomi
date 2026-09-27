@@ -211,7 +211,7 @@ export function copyToChapter(copy: ListingCopy, row: { number: number; title: s
   };
 }
 
-export type GhostWhy = 'missing' | 'held' | 'blocked' | 'failed' | 'floor';
+export type GhostWhy = 'missing' | 'held' | 'blocked' | 'failed' | 'floor' | 'archive';
 
 export interface Ghost {
   number: number;
@@ -250,8 +250,16 @@ export interface Ghost {
  * anything. Failed before held: a number the sweep has given up on is not "waiting" for anyone -- and a
  * failure count is the one reason with a number attached that the page shows in amber. Held, then plain
  * missing, which is the sweep simply not having got to it yet.
+ *
+ * Archive before all of them (#117): a number an active slow archive will fetch -- available, under the retry
+ * cap, below its boundary -- is on its way, which is neither "older than where it was added" (a floor-less
+ * series has no such place) nor missing. Only those: a capped, held or blocked number below the boundary keeps
+ * its own reason, since the archive will not fetch it either. `archiveBoundary` is null with no active archive.
+ * Reintroduce by testing the boundary after the cap: "the series page's reason for a number an active archive
+ * will fetch" in archivePlan.test.ts reads archive for a capped number.
  */
-export function whyOf(status: ListingStatus, number: number, floor: number | null, attempts: number): GhostWhy {
+export function whyOf(status: ListingStatus, number: number, floor: number | null, attempts: number, archiveBoundary: number | null = null): GhostWhy {
+  if (archiveBoundary != null && number < archiveBoundary && status === 'available' && attempts < CHAPTER_RETRY_CAP) return 'archive';
   if (floor != null && number < floor) return 'floor';
   if (status === 'blocked') return 'blocked';
   if (attempts >= CHAPTER_RETRY_CAP) return 'failed';
@@ -303,7 +311,7 @@ export function waitDaysLeftOf(copies: ListingCopy[], patienceMs: number, now = 
  *
  * `userId` names whose marks set `read`; without it no row is marked.
  */
-export async function listingFor(seriesId: string, opts: { floor: number | null; admin: boolean; userId?: string }): Promise<{ checkedAt: string | null; content: Ghost[] }> {
+export async function listingFor(seriesId: string, opts: { floor: number | null; admin: boolean; userId?: string; archiveBoundary?: number | null }): Promise<{ checkedAt: string | null; content: Ghost[] }> {
   const s = await one<{ source_checked_at: Date | null }>('SELECT source_checked_at FROM lib_series WHERE id = $1', [seriesId]);
   const rows = await q<GhostRow>(
     `SELECT l.number, l.title, l.published_at, l.scanlator, l.groups, l.source_id, l.status, l.copies, f.attempts, f.reason,
@@ -342,7 +350,7 @@ export async function listingFor(seriesId: string, opts: { floor: number | null;
         groups: r.groups ?? [],
         sourceId: r.source_id,
         sourceName: getSource(r.source_id)?.name ?? r.source_id,
-        why: whyOf(r.status, Number(r.number), opts.floor, attempts),
+        why: whyOf(r.status, Number(r.number), opts.floor, attempts, opts.archiveBoundary ?? null),
       };
       if (attempts > 0) g.attempts = attempts;
       if (opts.admin && r.reason) g.reason = r.reason;

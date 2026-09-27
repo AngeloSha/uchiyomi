@@ -317,6 +317,33 @@ folder that is not a series yet (an add's first chapter) goes to whoever started
 `recent` survives a restart: every finished chapter is also written down (kept a week), and the last day of it,
 at most 500 entries, is read back when the server starts, with fresh `id`s.
 
+**The slow archive** (since v0.49.0, #117). `POST /api/sources/archive {seriesIds}` (1-500) queues series to be
+fetched a chapter at a time, paced per source — by default four chapters an hour per source, a random 1.5-4 s
+between pages, one page at a time, a jittered break after each chapter and now and then a long one — so a whole
+back catalogue comes in over nights or days without the site ever seeing a burst. Admins and members with
+`canDownload` may, for series they can see, when every source the series follows is inside their age limit; each
+id answers `{id, title?, outcome}` with `queued`, `already`, `nothing` (nothing left to fetch below its
+boundary), `unrouted`, `denied` or `not_found` (no title). The archive owns the listed numbers below a boundary —
+the series' floor, else a hair above the newest listed number — and the nightly sweep keeps the new releases above
+it (it reads the higher of the floor and the boundary while an archive is queued or paused); `chapter_floor` is
+never changed while it runs, and a clean finish clears a Latest-N floor only if it is still the one it started
+from. It waits for every sweep, repair and source check, for the admin's pause and hours, for the disk floor, for
+anybody else's download on the same source or series, and for a source's cooldown; a refusal (403, 429) leaves
+that source alone 1 h, 3 h, 12 h, then a day, and the series stays queued. Its chapters carry `origin: archive`,
+never count as Updates and send no notification. `POST /api/sources/archive/<seriesId>/pause` and `.../resume`,
+and `DELETE /api/sources/archive/<seriesId>` (stop, or dismiss a finished one) are for whoever queued it or an
+admin (**403** otherwise, **404** to one who cannot see the series, **409** `done` for pause and resume on a
+finished one). The queue is `archive` on `GET /api/sources/jobs` (and alone on `GET /api/sources/archive`):
+`{paused, perHour, window, waiting?, series: [...]}`, each row `{seriesId, title, state, direction, done, left,
+failed, bytes, mine, current?, nextAt?, etaMs?, waiting?, attention?, queuedAt, startedAt, finishedAt?, note?}`,
+limited to the series the viewer can browse. `POST /api/sources/add` takes `archive: true` ("Archive the rest
+slowly") and answers `archive` with the outcome, or `later` on a download, which queues the rest once the first
+chapter is in. `GET /api/series/:id/listing` gains `archive` (the series' row, or null) and ghosts with `why:
+"archive"`. The pacing is the admin's, on `PATCH /api/admin/settings`: `archivePaused`, `archivePerHour` (1-30),
+`archiveWindowFrom`/`archiveWindowTo` (0-23, together or not at all) and `archiveMinFreeGb`. `POST
+/api/admin/update` now runs as the scheduled sweep does, so it answers **409** `busy` while a sweep or a repair
+runs.
+
 `GET /api/sources/popular?source=<id>&page=<n>` is the same listing sorted by the source's OWN popularity,
 not by anything this server computes: it is the page each site already publishes, reached with a different
 sort. Every guard on the newest listing applies identically. A source that cannot offer one reports
@@ -688,6 +715,10 @@ GET    /api/sources/jobs          POST   /api/sources/add
 GET    /api/discover/trending     POST   /api/sources/fill/scan
 GET    /api/sources/fill/scan/:id POST   /api/sources/fill
 POST   /api/sources/fetch
+GET    /api/sources/archive       POST   /api/sources/archive
+POST   /api/sources/archive/:seriesId/pause
+POST   /api/sources/archive/:seriesId/resume
+DELETE /api/sources/archive/:seriesId
 ```
 
 **Filling a series' gaps.** `POST /api/sources/fill/scan` takes `{seriesId, altTitle?}` and answers with what
