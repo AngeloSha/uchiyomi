@@ -209,11 +209,17 @@ languages as the app).
 
 - **Schedules start sooner.** A computer is switched off and on far more than a server, so the first run of
   each job after a start comes sooner: the new-chapter check and the extension check after 2 minutes, the
-  Cloudflare helper check after 1, the repair, read-chapter clean-up and import clean-up after 5, and the
-  daily source check 24 hours after its last run (at least 5 minutes after start). A server keeps its 10 to
-  30 minutes. After the computer sleeps, those other jobs can run one interval late; only the backup re-aims.
+  Cloudflare helper check after 1, the slow archive's first look after 3, the repair, read-chapter clean-up and
+  import clean-up after 5, and the daily source check 24 hours after its last run (at least 5 minutes after
+  start). A server keeps its 10 to 30 minutes. After the computer sleeps, those other jobs can run one interval
+  late; only the backup re-aims.
+- **The slow archive runs only while Uchiyomi does** — the window or the tray (since v0.49.0; [the user
+  guide](USAGE.md#fetching-a-whole-series-slowly-the-slow-archive)). It never keeps the computer awake, so a PC that
+  sleeps at night is rarely inside a night-time window set under **Admin → Settings → Downloads**; a quit or a sleep
+  costs it nothing but time, since it carries on from where it was.
 - **Room.** Downloads stop when the library's drive has less than **5 GB** free (a server keeps 10), and the
-  image cache is capped at **4 GB** (16 on a server).
+  image cache is capped at **4 GB** (16 on a server). The slow archive keeps its own floor, 20 GB by default,
+  under **Admin → Settings → Downloads**.
 - **Windows-safe folder names** (Windows only): a series folder loses control characters and trailing dots and
   spaces, and the names Windows reserves — `CON`, `PRN`, `AUX`, `NUL`, `COM0`–`COM9`, `LPT0`–`LPT9`, also with
   an extension — get a `_` (`CON` becomes `CON_`). A custom site's name is treated the same when it becomes the

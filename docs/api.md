@@ -317,45 +317,62 @@ reason?, mine}`. An admin sees every run; the account that started a bulk run se
 sees any, because `current` names a series that may be in a library they cannot open (and is left out when
 the request hides that series anyway). `POST /api/sources/runs/<kind>/cancel` stops one the same way as a
 shutdown does — between series and between chapters, never mid-write — and `DELETE /api/sources/runs/<kind>`
-dismisses a finished one. Both cancels are audited as `download.cancel`.
+dismisses a finished one. Both cancels are audited as `download.cancel`. Since v0.49.0 a repair's card also
+carries `repairKind` (`fix_short`, `fill`, `retry`, `steps:<a+b…>[:now]`), `label` (the series title or source
+name a one-row Health fix is about), `number` (the chapter's, for a one-chapter fix) and `seriesId` (the series
+`label` names); `label`, `number` and `seriesId` are left out for a viewer who may not list that series, and
+whenever `current` is. A run that cannot download a chapter (a solver reset, a page count, names, directions)
+carries `downloads: false`.
 
 **Every chapter coming in** (since v0.48.1). The response also carries `activity: {active, recent}`: each chapter
 the server is downloading (`active`, oldest first) or finished in the last day (`recent`, newest first), whatever
-started it — `{id, seriesId, folder, title, number, source, origin, status, startedAt, finishedAt?, pages?, reason?,
-mine}`, where `origin` is `add`, `fetch`, `fill` (Find missing chapters), `check` (Check for new chapters, which
-is also how a newly followed source's chapters arrive), `sweep` (the scheduled check), `repair`, `bulk` (Fetch
-newest), `refetch` or `server`, and `status` is `queued` (waiting its turn at the source), `downloading`, `done`,
-`partial` or `failed`. A file already on disk is not listed. Each viewer gets the series they can browse; a
-folder that is not a series yet (an add's first chapter) goes to whoever started it and to admins. Since v0.49.0
-`recent` survives a restart: every finished chapter is also written down (kept a week), and the last day of it,
-at most 500 entries, is read back when the server starts, with fresh `id`s.
+started it — `{id, seriesId, folder, title, number, source, origin, status, startedAt, finishedAt?, pages?,
+reason?, mine}`, where `origin` is `add`, `fetch`, `fill` (Find missing chapters), `check` (Check for new chapters,
+which is also how a newly followed source's chapters arrive), `sweep` (the scheduled check), `repair`, `bulk`
+(Fetch newest), `refetch`, `server` or, since v0.49.0, `archive` (the slow archive, below), and `status` is
+`queued` (waiting its turn at the source), `downloading`, `done`, `partial` or `failed`. A file already on disk is
+not listed. Each viewer gets the series they can browse; a folder that is not a series yet (an add's first chapter)
+goes to whoever started it and to admins. Since v0.49.0 `recent` survives a restart: every finished chapter is also
+written down (kept a week), and the last day of it, at most 500 entries, is read back when the server starts, with
+fresh `id`s.
 
 **The slow archive** (since v0.49.0, #117). `POST /api/sources/archive {seriesIds}` (1-500) queues series to be
 fetched a chapter at a time, paced per source — by default four chapters an hour per source, a random 1.5-4 s
-between pages, one page at a time, a jittered break after each chapter and now and then a long one — so a whole
-back catalogue comes in over nights or days without the site ever seeing a burst. Admins and members with
-`canDownload` may, for series they can see, when every source the series follows is inside their age limit; each
-id answers `{id, title?, outcome}` with `queued`, `already`, `nothing` (nothing left to fetch below its
-boundary), `unrouted`, `denied` or `not_found` (no title). The archive owns the listed numbers below a boundary —
-the series' floor, else a hair above the newest listed number — and the nightly sweep keeps the new releases above
-it (it reads the higher of the floor and the boundary while an archive is queued or paused); `chapter_floor` is
-never changed while it runs, and a clean finish clears a Latest-N floor only if it is still the one it started
-from. It waits for every sweep, repair and source check, for the admin's pause and hours, for the disk floor, for
-anybody else's download on the same source or series, and for a source's cooldown; a refusal (403, 429) leaves
-that source alone 1 h, 3 h, 12 h, then a day, and the series stays queued. Its chapters carry `origin: archive`,
-never count as Updates and send no notification. `POST /api/sources/archive/<seriesId>/pause` and `.../resume`,
-and `DELETE /api/sources/archive/<seriesId>` (stop, or dismiss a finished one) are for whoever queued it or an
-admin (**403** otherwise, **404** to one who cannot see the series, **409** `done` for pause and resume on a
-finished one). The queue is `archive` on `GET /api/sources/jobs` (and alone on `GET /api/sources/archive`):
-`{paused, perHour, window, waiting?, series: [...]}`, each row `{seriesId, title, state, direction, done, left,
-failed, bytes, mine, current?, nextAt?, etaMs?, waiting?, attention?, queuedAt, startedAt, finishedAt?, note?}`,
-limited to the series the viewer can browse. `POST /api/sources/add` takes `archive: true` ("Archive the rest
-slowly") and answers `archive` with the outcome, or `later` on a download, which queues the rest once the first
-chapter is in. `GET /api/series/:id/listing` gains `archive` (the series' row, or null) and ghosts with `why:
-"archive"`. The pacing is the admin's, on `PATCH /api/admin/settings`: `archivePaused`, `archivePerHour` (1-30),
-`archiveWindowFrom`/`archiveWindowTo` (0-23, together or not at all) and `archiveMinFreeGb`. `POST
-/api/admin/update` now runs as the scheduled sweep does, so it answers **409** `busy` while a sweep or a repair
-runs.
+between pages, one page at a time, a jittered break after each chapter (never under 45 s) and now and then a long
+one — so a whole back catalogue comes in over nights or days without the site ever seeing a burst. Admins and
+members with `canDownload` may, for series they can see, when every source the series follows is inside their age
+limit; each id answers `{id, title?, outcome}` with `queued`, `already`, `nothing` (nothing left to fetch below its
+boundary), `unrouted` (no source of it is loaded), `denied` (a source outside the age limit) or `not_found` (no
+title — also for a series the caller cannot see). Audited as `download.archive`. The archive owns the listed
+numbers below a boundary — the series' floor, else a hair above the newest listed number; a series with no listing
+yet gets one at its first turn — and the sweep keeps the new releases above it (it reads the higher of the floor
+and the boundary while an archive is queued or paused); `chapter_floor` is never changed while it runs, and its
+finish clears a Latest-N floor only if it is still the one it started from. It never searches other sites or
+follows new ones. It waits for every sweep, repair and source check, for the admin's pause and hours, for the disk
+floor, for anybody else's download on the same source or series, and for a source's cooldown; a refusal (403, 429)
+leaves that source alone 1 h, 3 h, 12 h, then a day, and the series stays queued, and a listing that cannot be read
+is asked for again on the same ladder, per series (`waiting.why: 'listing'`, with `until`). Its chapters carry
+`origin: archive`, never count as Updates (the series' seen count rises with them) and send no notification.
+`POST /api/sources/archive/<seriesId>/pause` and `.../resume`, and `DELETE /api/sources/archive/<seriesId>` (stop,
+or dismiss a finished one; audited as `download.archive_stop`) are for whoever queued it or an admin (**403**
+otherwise, **404** to one who cannot see the series, **409** `done` for pause and resume on a finished one); a
+chapter in flight finishes either way. The queue is `archive` on `GET /api/sources/jobs` (and alone on `GET
+/api/sources/archive`): `{paused, perHour, window, waiting?, series: [...]}`, each row `{seriesId, title, state,
+direction, done, left, failed, bytes, mine, current?, nextAt?, etaMs?, waiting?, attention?, queuedAt, startedAt,
+finishedAt?, note?}`, limited to the series the viewer can browse. The rows are read at most every ten seconds,
+unfiltered, and filtered on every call, so one viewer's answer is never another's. A finished row is listed for a
+day, or until dismissed when it left chapters behind (`attention.why: 'finished_with_gaps'`, with `note {capped,
+held, blocked}`). `POST /api/sources/add` takes `archive: true` ("Archive the rest slowly") and answers `archive`
+with the outcome: `later` on a download, which queues the rest once the first chapter is in and the listing is
+written, and starts on it when the add's own chapters are in; `nothing` when the selection was the whole listing.
+`GET /api/series/:id/listing` gains `archive` (the series' row, or null) and ghosts with `why: "archive"`, and
+`POST /api/sources/fetch` answers **409** `busy` while an archive chapter of the series is in flight. The pacing is
+the admin's, on `PATCH /api/admin/settings`: `archivePaused`, `archivePerHour` (1-30),
+`archiveWindowFrom`/`archiveWindowTo` (0-23, the server's local hours, together or not at all) and
+`archiveMinFreeGb` (1-2000); `GET /api/admin/settings` reads them back as `archive_paused`, `archive_per_hour`,
+`archive_window_from`, `archive_window_to` and `archive_min_free_gb`, plus `archive_free_gb`, the GiB free under
+the download root now. `POST /api/admin/update` now runs as the scheduled sweep does, so it answers **409** `busy`
+while a sweep or a repair runs, and **500** when the sweep itself fails.
 
 `GET /api/sources/popular?source=<id>&page=<n>` is the same listing sorted by the source's OWN popularity,
 not by anything this server computes: it is the page each site already publishes, reached with a different
@@ -478,19 +495,22 @@ the two destructive ones, `delete` and `merge`, are the two the nightly repair n
 **Source health and the extension engine** (since v0.49.0). The `sources` check reads the per-stage evidence
 (#115): each of its items adds `evidence` (one line per stage, `search`, `chapters`, `pages`, `images`, each
 `{stage, state: 'ok' | 'fail' | 'unknown', at, by: 'test' | 'sweep' | 'traffic', kind: 'error' | 'empty' |
-'unnumbered', error}`), `tested` (the last Test or daily check: `{at, by, state: 'pass' | 'fail' |
-'inconclusive', stage}`), `diagnosis` (`{code, reason, fix}`, the admin half) and `series` (how many series use
-the source), and its `title` is the source's name (its id only when no name is known). A confirmed failure — a
-failed live check, or three failures in a row at one stage from traffic — is a finding whether or not a series
-uses the source, and an ignore of it covers the stages failing when it was made; a test that ran out of time and
-a failure unchecked for seven days are `info`. The check itself carries `testMs`, how long one Test may take
-(`SOURCE_TEST_TIMEOUT_MS` plus 8 s), for a client's clock. A new check, `extension-engine`, is there when an
-engine is set up or series depend on one: `ok` while it is off on purpose (one `info` item counting those
-series), `warn` with exactly one item while it does not answer, and otherwise whether its own Cloudflare helper
-is in use — an item with the new action `engine_solver` (`POST /api/admin/extensions/solver`) when the helper is
-off or points at `localhost`, a finding only while an extension source is seen behind Cloudflare. A
-`frozen-series` item for an extension series now names the engine when it is the reason (*can't be reached
-because the extension engine isn't answering* / *is off*).
+'unnumbered', error}`), `tested` (the last Test or daily check: `{at, by, state: 'pass' | 'fail' | 'inconclusive',
+stage}`), `diagnosis` (`{code, reason, fix}`, the admin half) and `series` (how many series use the source), and
+its `title` is the source's name (its id only when no name is known). A confirmed failure — a failed live check, or
+three failures in a row at one stage from traffic — is a finding whether or not a series uses the source, and an
+ignore of it covers the stages failing when it was made; a test that ran out of time and a failure unchecked for
+seven days are `info`. The check itself carries `testMs`, how long one Test may take (`SOURCE_TEST_TIMEOUT_MS` plus
+8 s), for a client's clock. A new check, `extension-engine`, is there when an engine is set up or series depend on
+one: `ok` while it is off on purpose (one `info` item counting those series), `warn` with exactly one item while it
+does not answer, and otherwise whether its own Cloudflare helper is in use — an item with the new action
+`engine_solver` (`POST /api/admin/extensions/solver`) when the helper is off or points at `localhost`, a finding
+only while an extension source is seen behind Cloudflare. When the engine's setting cannot be read (just now, or
+ever, on an engine too old to report it) while a source fails with the engine's own *Cloudflare bypass currently
+disabled*, the check is `warn` with the summary *It cannot use its Cloudflare helper*, and `engine_solver` where
+there is a setting to write and a helper (`FLARESOLVERR_URL`) to share. A `frozen-series` item for an extension
+series now names the engine when it is the reason (*can't be reached because the extension engine isn't answering*
+/ *is off*).
 
 `GET /api/admin/sources` (admin) is every source's stored health, and since v0.49.0 adds, per source, `live`
 (the last Test or daily check: `{at, by, state, stage, code, checks}`, or `null`), `failing` (the stages whose
@@ -508,8 +528,10 @@ curl -X POST -H "Authorization: Bearer $TOK" https://your-server/api/admin/libra
 It answers the scan's counts `{series, books, ms, skipped}` and, since v0.49.0, stamps the Tasks panel's
 *Library scan* line as `POST /api/refresh` does. `POST /api/refresh` (the admin home's *Scan library now*)
 rescans at most once a minute server-wide — within a minute it answers `{scanned: false, reason:
-'rate_limited'}` — and since v0.49.0 answers `{scanned: true, libraries, series, books, ms, skipped}` in owned
-mode. Both refresh the stored Health summary the header reads (coalesced, at most once every 30 s).
+'rate_limited'}` — and since v0.49.0 answers an admin `{scanned: true, libraries, series, books, ms, skipped}` in
+owned mode. Anyone else gets `{scanned: true, libraries}`: the counts are the whole library's, libraries a member
+cannot open included. Both refresh the stored Health summary the header reads (coalesced, at most once every
+30 s).
 
 ## 18+ libraries and sources
 
@@ -1422,34 +1444,34 @@ replaced and the existing `series.follow_source` for each source followed.
 
 **Since v0.49.0 every run is kept, and only a full run is the Tasks line.** The answer is `{ok: true, started:
 true, run}`, `run` being the run's id (a uuid). Every run — the nightly and every Health press — is a row in
-`repair_runs` (pruned to at least the newest 50 and everything from the last 90 days), but only a **full**
-run (no `only`: the nightly, or Tasks → Run now) writes `server_settings.repair_last_run` /
-`repair_last_result`, so `GET /api/admin/tasks`' `lastRun`/`lastResult` stay the nightly's when someone
-presses *Fix* on one chapter, and the nightly's schedule (armed after a restart from `repair_last_run`) no
-longer moves either. The `repair` entry adds `lastOrigin` (`'nightly' | 'manual' | null`), `startedAt`,
-`run` (the running run's id), `nextAt` (when the nightly is armed for) and `latestOther` (the newest scoped
-run). Every task entry carries `scheduleKey` (the schedule sentence with `{placeholders}`, a locale key on
-the web) and `scheduleVars`; `schedule` stays the English sentence. The result may carry `stepMs` and `skips:
-[{step, target?, why, until?, detail?}]` — `folder_busy`, `not_eligible` (with `detail`: `gone`,
-`confirmed`, `partial`, `not_owned`, `not_short`), `no_gaps`, `source_cooling_down` (with `until`),
-`source_off`, `solver_down`, `no_searches_left` — so a press that did nothing says why. Fill now (`seriesId`)
-looks at the series even while its automatic updates are off, and fetches the gap chapters a source it
+`repair_runs` (pruned to at least the newest 50 and everything from the last 90 days), but only a **full** run (no
+`only`: the nightly, or Tasks → Run now) writes `server_settings.repair_last_run` / `repair_last_result`, so `GET
+/api/admin/tasks`' `lastRun`/`lastResult` stay the nightly's when someone presses *Fix* on one chapter, and the
+nightly's schedule (armed after a restart from `repair_last_run`) no longer moves either. The `repair` entry adds
+`lastOrigin` (`'nightly' | 'manual' | null` — who started the run the line shows, `null` while the run history has
+not caught up with it), `startedAt`, `run` (the running run's id), `nextAt` (when the nightly is armed for) and
+`latestOther` (the newest scoped run). Every task entry carries `scheduleKey` (the schedule sentence with
+`{placeholders}`, a locale key on the web) and `scheduleVars`; `schedule` stays the English sentence. The result
+may carry `stepMs` and `skips: [{step, target?, why, until?, detail?}]` — `folder_busy`, `not_eligible` (with
+`detail`: `gone`, `confirmed`, `partial`, `not_owned`, `not_short`), `no_gaps`, `source_cooling_down` (with
+`until`), `source_off`, `solver_down`, `no_searches_left` — so a press that did nothing says why. Fill now
+(`seriesId`) looks at the series even while its automatic updates are off, and fetches the gap chapters a source it
 already follows lists (at most 20) instead of leaving them to a sweep.
 
-`GET /api/admin/tasks/repair/status` is the run, live, for the Health page (polled every 2 s while a run is
-going; memory and a memoised history digest only): `{running, sweepRunning, enabled, nextAt, run, last,
-recent, lastFull, limits, estimates, stepTypicalMs}`. `run` is `null` or `{id, startedAt, origin, mine,
-kind, only, target, steps, step, stepIndex, stepStartedAt, stepMs, planned, current {kind, seriesId?,
-bookId?, title?, number?, sourceId?, phase, done?, of?}, counts, budget {left, of}, shortReserve, skips,
-cancelRequested}` — who started it is never sent, and a series title is dropped for a viewer who may not
-list that series. `last` is the newest finished run of any kind: a page that pressed a fix watches for ITS
-id there. `limits` is every bound the process runs with (env overrides applied); `estimates` maps a run kind
-(`full`, `fix_short`, `fill`, `retry`, `steps:<a+b…>[:now]`, plus up to ten named in `?kinds=`) to
-`{typicalMs, runs, worstMs, downloads}` — `typicalMs` the median of its last five finished runs, `worstMs`
-the sum of the waits the code bounds (null when a planned step has no such bound), and downloads a count,
-never folded into the time. `GET /api/admin/tasks/repair/runs?limit=1..50&id=` lists the kept runs, newest
-first: `{content: [{id, startedAt, finishedAt, origin, username, mine, kind, only, target, status, ms,
-stepMs, result, notes}]}`. Both are admin-only.
+`GET /api/admin/tasks/repair/status` is the run, live, for the Health page (polled every 2 s while a run is going;
+memory and a memoised history digest only): `{running, sweepRunning, enabled, nextAt, run, last, recent, lastFull,
+limits, estimates, stepTypicalMs}`. `run` is `null` or `{id, startedAt, origin, mine, kind, only, target, steps,
+step, stepIndex, stepStartedAt, stepMs, planned, current {kind, seriesId?, bookId?, title?, number?, sourceId?,
+phase, done?, of?}, counts, budget {left, of}, shortReserve, skips, cancelRequested}` — who started it is never
+sent, and a series title is dropped for a viewer who may not list that series. `last` is the newest finished run of
+any kind: a page that pressed a fix watches for ITS id there. `limits` is every bound the process runs with (env
+overrides applied); `estimates` maps a run kind (`full`, `fix_short`, `fill`, `retry`, `steps:<a+b…>[:now]`, plus
+up to ten named in `?kinds=`) to `{typicalMs, runs, worstMs, downloads}` — `typicalMs` the median of its last five
+finished runs, `worstMs` the sum of the waits the code bounds (null when a planned step has no such bound), and
+downloads a count, never folded into the time. `lastFull` is the newest full run that finished, a nightly the
+switch turned away (`skipped`) included and one a restart cut off (`interrupted`) not. `GET
+/api/admin/tasks/repair/runs?limit=1..50&id=` lists the kept runs, newest first: `{content: [{id, startedAt,
+finishedAt, origin, username, mine, kind, only, target, status, ms, stepMs, result, notes}]}`. Both are admin-only.
 
 What one run may cost is bounded by `REPAIR_HOURS`, `REPAIR_COUNT_MAX`, `REPAIR_SHORT_MAX` and
 `REPAIR_GAPS_MAX` (plus `REPAIR_PACE_MS`); their defaults and ranges, and the bounds that are fixed rather
@@ -1603,7 +1625,21 @@ file's move with how its post was matched, the books no post matched (`parked`),
 answers `needs_confirm` with that plan until `confirm: true`, then `applied` (files renamed in place; book ids,
 progress, bookmarks and notes kept), `pending` (not applied yet; the series stays held) or `unchanged` (the
 numbering it already has: *Keep the source's numbers* renames nothing). **409** `busy` while chapters are being
-fetched into the folder. A manual choice is never undone by the detector.
+fetched into the folder. A manual choice is never undone by the detector. A confirmed apply that runs past a
+minute answers `pending` with `running: true` and carries on; the series' `numbering` says when it is done.
+
+Automatic numbering needs a STRONG verdict — at least 12 posts, at least half of them beyond the first on their
+number within one group, one number carrying five or more posts under at least three different names — from a
+source that reports its posting order (`ordered`: extension sources do); without the order it is a `hint` with
+`reason: 'no_order'`. An add numbers at once only when nothing is on disk under the folder: a folder that still
+holds chapters is added in the source's numbers with `pending: 'posting_order'`, for an admin to review. While a
+series waits (`pending` set), it downloads nothing: its listing is kept as it was, the sweep and a bulk *Fetch
+newest* skip it, and `POST /api/sources/fetch` and `POST /api/sources/fill` answer **409** `renumber_pending`.
+While it is numbered by posting order it takes chapters from its numbering source alone: `POST /api/sources/fill`
+from another source answers **409** `posting_order`, as does `POST /api/admin/series/:id/sources` (a follow); the
+fill scan lists the series' other followed sources with `why: 'posting_order'` and asks none of them; and the
+auto-follow results on a job card, the sweep's source hunt and chapter-name borrowing refuse with the same
+`posting_order`. The listing, the files, read marks, floors and trackers all use the posting numbers.
 
 ### Images and OPDS
 Cookie and HTTP Basic respectively, as described above.

@@ -179,7 +179,8 @@ ever hit.
   explicitly retries it.
 
 - `DOWNLOAD_CONCURRENCY` (default `2`): chapters downloaded at once, per source.
-- `DOWNLOAD_MIN_GAP_MS` (default `1200`): minimum gap between chapter downloads from the same source.
+- `DOWNLOAD_MIN_GAP_MS` (default `1200`): minimum gap between the starts of two chapter downloads from the same
+  source, doubled for each pace level a 429 has earned it (1200 → 2400 → 4800 ms).
 - `DOWNLOAD_PAGE_GAP_MS` (default `250`): pause between page requests inside one chapter, for an engine or
   pack site. A chapter is 110-130 images; fetching them back to back at ~1.9 pages a second is exactly what
   earned the 429s on mangakakalot and natomanga, and a quarter second between pages costs about 30 seconds
@@ -200,12 +201,12 @@ ever hit.
   already set both, so an upgrade that recreates the engine is the fix there.* — the shipped names are
   examples; use whatever your engine's container and solver are called. Uchiyomi's own `FLARESOLVERR_URL`
   (in the tuning list of `.env.example`) is a different setting: it is the solver the built-in engines use.
-  Since v0.49.0 an engine that lacks the two settings can be fixed without touching its container: **Connect**,
-  on the *Cloudflare helper* line under the catalogue in **Admin → Extensions**, sets the engine's own
-  `flareSolverrEnabled` / `flareSolverrUrl` to Uchiyomi's `FLARESOLVERR_URL` over its API (the *Extension engine*
-  row of **Admin → Health** says when it is needed, and its Open leads there). Nothing restarts, and the engine
-  keeps the value unless its container names another solver. It is only ever done on a press, and needs
-  `FLARESOLVERR_URL` set on Uchiyomi.
+  Since v0.49.0 an engine that lacks the two settings can be fixed without touching its container: **Connect** —
+  on the *Extension engine* row of **Admin → Health**, which says when it is needed, or on the *Cloudflare helper*
+  line under the catalogue in **Admin → Extensions** — sets the engine's own `flareSolverrEnabled` /
+  `flareSolverrUrl` to Uchiyomi's `FLARESOLVERR_URL` over its API. Nothing restarts, and the engine keeps the value
+  unless its container names another solver. It is only ever done on a press, and needs `FLARESOLVERR_URL` set on
+  Uchiyomi. An engine too old to report the setting has to be given the two on its own container.
 - `EXTENSION_ENGINE` (default `1`): the bundled extension engine's switch (v0.49.0). `EXTENSION_ENGINE=0` in `.env`,
   then `docker compose up -d`: Compose runs no engine container (its volume is kept) and Uchiyomi treats
   extensions as off. Delete the line, or set `1`, and run the same command to bring it back. **Compose only accepts
@@ -215,8 +216,9 @@ ever hit.
   development stack): an engine you run yourself is never switched off by it. Needs the v0.49.0 compose files;
   an older file ignores the line. See [extensions.md](extensions.md#turning-it-off).
 - `UCHIYOMI_PLATFORM` (optional): `compose`, `unraid`, `casaos` or `umbrel`. Only tells **Admin → Extensions**
-  which setup steps to open on; the CasaOS listing and the Unraid template set it, and Unraid's own `HOST_OS` and
-  a v0.49.0 compose file's `EXTENSION_ENGINE` are read when it is absent. Nothing else depends on it.
+  which setup steps to open on; the CasaOS listing, the Unraid template and the Umbrel package set it, and Unraid's
+  own `HOST_OS` and a v0.49.0 compose file's `EXTENSION_ENGINE` are read when it is absent. Nothing else depends
+  on it.
 - `SUWAYOMI_URL` (see [extensions.md](extensions.md#settings)): where the extension engine is; empty turns
   the feature off (in the v0.49.0 compose files and later: the older ones wrote `${SUWAYOMI_URL:-…}`, which put the
   default back for an empty value). A trailing slash (or two), a query string or a fragment on this value is ignored; the
@@ -252,6 +254,8 @@ ever hit.
   group upgrades are switched on (step 6 below).
 - `REPAIR_NAMES_MAX` (default `5`, 1–100): series one run may look for a chapter-name donor for, when name
   borrowing is switched on (step 7 below).
+- `REPAIR_DIRECTIONS_MAX` (default `500`, 1–5000): series one run asks each service — MangaDex, then AniList —
+  about their reading direction (step 8 below): at most five and ten requests a night at the default.
 - `REPAIR_PACE_MS` (default `1500`, 0 or more): the pause between two series the repair's *Retry now* step
   re-checks. `0` is a legitimate value and means no pause at all.
 - `MIN_FREE_GB` (default `10`): refuse to start a download when the download disk has less than this free.
@@ -265,11 +269,43 @@ sources** is on (the default): once per series per day, at most six candidates a
 sweep, with no more than two extra follows. Title and 90%-chapter matching apply, and a clean series never
 causes an adult source to be followed. There is intentionally no environment variable for this switch.
 
+## The slow archive
+
+Since v0.49.0 a series can be queued to come in a chapter at a time over nights or days
+([USAGE §4](USAGE.md#fetching-a-whole-series-slowly-the-slow-archive)). Its pace is set in the admin panel, not
+here — **Admin → Settings → Downloads**, and every change reaches the running archive at once, with no restart:
+
+- *Slow archive* — on unless you pause it; off pauses every archive, and nothing queued is lost.
+- *Chapters an hour, per source* — default `4`, 1–30. A break after each chapter is drawn at random around what is
+  left of that chapter's share of the hour, never under 45 seconds, and one chapter in ten (fewer above about 8 an
+  hour) is followed by a long break of 20 to 45 minutes on top, so the long-run rate comes out at the setting.
+  At the fastest settings the 45-second floor sets the pace instead, and the row's help counts what really fits.
+- *Only during set hours* — off by default; *From* and *Until* in the server's local time. 22 until 6 runs
+  overnight, and the same hour at both ends means any time.
+- *Stop when free space is below (GB)* — default `20`, 1–2000, measured under the download folder. It holds the
+  archive only: a download a person asks for still stops at `MIN_FREE_GB` (above).
+
+What no setting changes: a site that refuses a chapter (403 or 429) is left alone for 1 h, 3 h, 12 h, then a day
+at a time, never less than its own cooldown; the archive waits for every sweep, repair and source check; and it
+gives way to anybody else's download on the same site or series. Two environment variables shape it underneath, and a
+normal install needs neither:
+
+- `ARCHIVE_PAGE_GAP_MS` (default `1500,4000`): the pause between two pages of an archive chapter, drawn at random
+  from this range for every page; one number is a fixed gap. Pages go one at a time. It never goes below the gap
+  the source itself asks for, or the longer one a 429 has earned it, and a value that cannot be read means the
+  default, never no gap at all.
+- `ARCHIVE_MAX_SOURCES` (default `3`): how many sites may have an archive chapter in flight at once. Each has at
+  most one, whatever this says.
+
+`ARCHIVE_FIRST_RUN_MS`, `ARCHIVE_MIN_BREAK_MS` and `ARCHIVE_TICK_MS` exist for the end-to-end tests only: they
+shorten the wait before the first look after a start (10 minutes, 3 on the desktop app), the 45-second minimum
+break and the scheduler's one-minute look, so a test can watch a chapter land. Leave them unset.
+
 ## The nightly repair
 
 On by default, under **Admin → Settings → Library housekeeping → Repair the library nightly**, and listed as
-**Admin → Tasks → Repair library**. Once every `REPAIR_HOURS` it does the five things on the Health page that
-are reversible or provable on their own, and two more only when you switch them on, in this order:
+**Admin → Tasks → Repair library**. Once every `REPAIR_HOURS` it does the six things that are reversible or
+provable on their own, and two more only when you switch them on, in this order:
 
 1. **Cloudflare state.** If the solver answers *and* sources are blaming it, the remembered sessions and
    "could not be solved" marks are cleared and those sources come out of their cooldown; while the solver
@@ -296,7 +332,8 @@ are reversible or provable on their own, and two more only when you switch them 
    source already lists is left to the chapter sweep, and only a hole nobody lists starts a search. A
    source is followed only under the same 90%-numbering rule as every other automatic follow, and at most
    20 chapters are fetched per series. A series the run has no searches left for is not marked as checked:
-   it keeps its place and is looked at on the next run rather than skipped for a day.
+   it keeps its place and is looked at on the next run rather than skipped for a day. Since v0.49.0 a gap the slow
+   archive is working through is the archive's, and is left to it (*Fill now* on Health still fetches it at once).
 6. **Group upgrades** (since v0.47.0), **off** until **Admin → Settings → Scanlators → Upgrade chapters to a
    preferred group** is switched on. `REPAIR_GROUPS_MAX` chapters Uchiyomi downloaded itself whose group
    ranks below one your release preferences name, when that group's copy is on a source the series follows:
@@ -312,6 +349,10 @@ are reversible or provable on their own, and two more only when you switch them 
    supplies one and switching the setting off takes back exactly what was borrowed. A search that found no
    donor stands for a week. Nothing here is reported to source health: a lookup for names must never be what
    puts a source into a cooldown.
+8. **Reading directions** (since v0.48.0). For series whose reading direction nothing has said yet, MangaDex is
+   asked for the original language of the ones that follow it, then AniList for the country of origin of the ones
+   linked there — at most `REPAIR_DIRECTIONS_MAX` series from each in a run, picked at random. Only the reading
+   direction is ever written, and never over one set by hand.
 
 Fixed rather than configurable, because they are the blast radius rather than a preference: 5 searches for a
 whole run, shared by steps 3–5, of which the short step may spend at most 2 — so a library full of short
