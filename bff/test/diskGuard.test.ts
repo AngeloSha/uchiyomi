@@ -9,7 +9,7 @@
 process.env.MIN_FREE_GB = '100000000'; // no disk on earth clears this, so the guard MUST fire
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, statfsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -36,4 +36,21 @@ test('a nearly full disk refuses the download before the source is even asked', 
   assert.equal(err.blockStatus, undefined, 'no source is blamed for our disk');
   assert.equal(asked, 0, 'and the source was never asked: the refusal is entirely ours');
   rmSync(ROOT, { recursive: true, force: true });
+});
+
+test('freeBytes measures the download disk the guard measures, and fails open with null', async () => {
+  // The slow archive gates on its own, higher floor (lib/archive.ts) through this, so it has to read the
+  // same disk the same way as the guard above. Reintroduce by returning `null` from freeBytes: the guard
+  // above fails open and stops refusing, and the `measures the disk` assertion here fails too.
+  const { freeBytes } = await import('../src/lib/downloader');
+  mkdirSync(ROOT, { recursive: true }); // the test above removed it
+  const f = statfsSync(ROOT);
+  const want = Number(f.bavail) * Number(f.bsize);
+  const got = await freeBytes();
+  assert.ok(typeof got === 'number' && got > 0, `measures the disk, got ${got}`);
+  // Free space moves while the suite runs; a gibibyte either way is the same disk.
+  assert.ok(Math.abs(got - want) < 2 ** 30, `the same disk statfs sees under DL_ROOT: ${got} vs ${want}`);
+
+  rmSync(ROOT, { recursive: true, force: true });
+  assert.equal(await freeBytes(), null, 'a DL_ROOT statfs cannot read is null, which every caller treats as room');
 });

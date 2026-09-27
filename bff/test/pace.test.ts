@@ -7,6 +7,7 @@ import test, { beforeEach, after } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   noteRateLimited, paceLevel, paceFor, clearPace, setPaceClock, PACE_MAX_LEVEL, PACE_DECAY_MS, MAX_PAGE_GAP_MS,
+  pagePace, slowPace, withSlowPace,
 } from '../src/lib/pace';
 
 let now = 1_000_000;
@@ -99,12 +100,78 @@ test('decay advances the stamp rather than resetting it, so partial minutes are 
 test('a successful download does not reset the level: only time does', () => {
   // There is deliberately no "reportOk" hook here. A chapter that got through at the slower pace is
   // evidence the slower pace works, not that the fast one does. The absence is pinned by the API surface:
-  // nothing exported lowers a level except the clock and the tests-only clearPace().
+  // nothing exported lowers a level except the clock and the tests-only clearPace(). (withSlowPace only
+  // ever slows a download further, and only inside its own scope.)
   noteRateLimited(plain.id);
   const before = paceLevel(plain.id);
   assert.equal(before, 1);
   const exported = Object.keys(require('../src/lib/pace')).sort();
-  assert.deepEqual(exported, ['MAX_PAGE_GAP_MS', 'PACE_DECAY_MS', 'PACE_MAX_LEVEL', 'clearPace', 'noteRateLimited', 'paceFor', 'paceLevel', 'setPaceClock']);
+  assert.deepEqual(exported, ['MAX_PAGE_GAP_MS', 'PACE_DECAY_MS', 'PACE_MAX_LEVEL', 'clearPace', 'noteRateLimited', 'paceFor', 'paceLevel', 'pagePace', 'setPaceClock', 'slowPace', 'withSlowPace']);
   clearPace();
   assert.equal(paceLevel(plain.id), 0, 'clearPace is for tests');
+});
+
+// ── withSlowPace: the slow archive's own pace (#117) ────────────────────────────────────────────────────
+
+const SLOW = { pageGapMs: [1500, 4000] as [number, number] };
+
+test('outside withSlowPace, pagePace is paceFor exactly', () => {
+  // The archive's override must not leak into anyone else's download. Reintroduce by keeping the slow pace
+  // in a module-level variable instead of the AsyncLocalStorage (set on entry, never cleared): after the
+  // withSlowPace call below returns it is still in force, and the `nothing in force once the call
+  // returned` assertion fails -- as would `exactly as declared`, with the Suwayomi source one wide.
+  withSlowPace(SLOW, () => pagePace(ext, DEFAULTS));
+  assert.equal(slowPace(), undefined, 'nothing in force once the call returned');
+  assert.deepEqual(pagePace(ext, DEFAULTS), paceFor(ext, DEFAULTS), 'Suwayomi: exactly as declared');
+  assert.deepEqual(pagePace(ext, DEFAULTS), { gap: 0, workers: 4, level: 0 });
+  assert.deepEqual(pagePace(plain, DEFAULTS), { gap: 250, workers: 1, level: 0 });
+  noteRateLimited(plain.id);
+  assert.deepEqual(pagePace(plain, DEFAULTS), paceFor(plain, DEFAULTS), 'and slowed, the same as paceFor');
+});
+
+test('inside withSlowPace: one worker, and Suwayomi\'s gap 0 gives way to the range', () => {
+  // Reintroduce by returning `pace.workers` from pagePace under a slow pace: the Suwayomi declaration keeps
+  // its four workers and the `one wide` assertion fails with 4.
+  withSlowPace(SLOW, () => {
+    assert.deepEqual(slowPace()?.pageGapMs, [1500, 4000]);
+    const p = pagePace(ext, DEFAULTS);
+    assert.equal(p.workers, 1, 'one wide, whatever the adapter declares');
+    assert.deepEqual(p.jitter, [1500, 4000], 'a declared gap of 0 is overridden by the range');
+    assert.equal(p.gap, 1500, 'and the fixed gap is its low end');
+  });
+});
+
+test('inside withSlowPace the adapter\'s own gap, or a pace level, is still a floor', () => {
+  // The archive is meant to be slower than anything else, never faster. Reintroduce by using the range as
+  // given (`jitter = s.pageGapMs`): the adapter that declares 3000 ms gets draws from 1500, and the `never
+  // below its own gap` assertion fails.
+  withSlowPace(SLOW, () => {
+    assert.deepEqual(pagePace({ id: 'own', pageGapMs: 3000 }, DEFAULTS).jitter, [3000, 4000], 'never below its own gap');
+    assert.deepEqual(pagePace({ id: 'own', pageGapMs: 6000 }, DEFAULTS).jitter, [6000, 6000], 'a gap above the range is the gap');
+    for (let i = 0; i < 4; i++) noteRateLimited(plain.id); // level 4: 250 x 16 is over the ceiling
+    assert.deepEqual(pagePace(plain, DEFAULTS), { gap: MAX_PAGE_GAP_MS, workers: 1, level: 4, jitter: [MAX_PAGE_GAP_MS, MAX_PAGE_GAP_MS] },
+      'a slowed source keeps its doubled gap');
+  });
+});
+
+test('the slow pace follows the chapter across awaits and timers, and each caller has its own', async () => {
+  // AsyncLocalStorage, not a flag: a person's download that interleaves with the archive's must run at its
+  // own pace. Reintroduce the module-level variable of the first test here: the plain download started
+  // alongside reads the archive's range and the `has none` assertion fails.
+  const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const seen: Array<[string, unknown]> = [];
+  await Promise.all([
+    withSlowPace(SLOW, async () => {
+      await sleep(5);
+      seen.push(['archive', pagePace(ext, DEFAULTS).jitter]);
+    }),
+    (async () => {
+      await sleep(1);
+      seen.push(['person', pagePace(ext, DEFAULTS).jitter]);
+    })(),
+  ]);
+  assert.deepEqual(new Map(seen).get('archive'), [1500, 4000], 'the archive keeps its pace after an await');
+  assert.equal(new Map(seen).get('person'), undefined, 'the download alongside has none');
+  const rand = () => 0.25;
+  withSlowPace({ pageGapMs: [10, 20], rand }, () => assert.equal(pagePace(ext, DEFAULTS).rand, rand, 'a test may inject the draws'));
 });
