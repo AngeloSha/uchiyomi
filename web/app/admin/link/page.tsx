@@ -27,7 +27,7 @@ import { IcChevronLeft } from '@/components/icons';
 import { relativeTime } from '@/lib/format';
 import { t as tr } from '@/lib/i18n';
 import {
-  isOpen, needsOverride, preselect, pickedFor, verdictLabel, verdictColor, coverageLine, linkStatusLabel, linkStatusColor,
+  isOpen, needsOverride, mayRun, preselect, pickedFor, verdictLabel, verdictColor, coverageLine, linkStatusLabel, linkStatusColor,
   linkBatchStateLabel, type LinkBatch, type LinkCandidate, type LinkItem,
 } from '@/lib/linkBatch';
 
@@ -194,7 +194,9 @@ function LinkWizardInner() {
       const r = await api<{ ok: true; total: number; held?: number }>(`/api/admin/link/batches/${batchId}/run`, { json: { candidateIds: ids, override } });
       // Held back by the server (a warning sent without the override): they stay open to tick again.
       if (r.held) toast(tr('{n} left open — their chapters do not line up', { n: r.held }), 'info');
-      setRunIds(new Set(ids));
+      // Only what the server will run: a held candidate never gets a status, and waiting on it would keep
+      // this page from ever noticing the run had finished.
+      setRunIds(new Set(chosen.filter((c) => mayRun(c, override)).map((c) => c.id)));
       setSelected(new Set());
       setConfirmOverride(false);
       refetch();
@@ -202,6 +204,30 @@ function LinkWizardInner() {
     setRunning(false);
   };
   const onRun = () => (warnings > 0 ? setConfirmOverride(true) : run(false));
+
+  // The run this tab started has finished once every candidate it sent carries a status. Then: say what
+  // happened, refresh what the new links change (the grid, its source filter counts, the series pages),
+  // and go back to the library. Without this the page re-read the batch, which the server puts back to
+  // `review` while any candidate is still unticked -- the same screen as before the tap, as though nothing
+  // had been connected. A run started elsewhere (runIds null: a reload, another tab) is left alone.
+  useEffect(() => {
+    if (!runIds || !runIds.size || batch?.state === 'linking') return;
+    const sent = all.filter((c) => runIds.has(c.id));
+    if (sent.length < runIds.size || sent.some((c) => !c.status)) return;
+    const linked = sent.filter((c) => c.status === 'linked').length;
+    const failed = sent.length - linked;
+    toast(
+      failed
+        ? tr('Done — {linked} connected · {failed} not connected', { linked, failed })
+        : linked === 1 ? tr('Connected 1 source') : tr('Connected {n} sources', { n: linked }),
+      failed && !linked ? 'error' : 'success',
+    );
+    setRunIds(null);
+    for (const k of [['library'], ['library-sources'], ['series'], ['link-batches']]) qc.invalidateQueries({ queryKey: k });
+    // Back where it was started from: the edit dialog starts a batch of one series, the library a selection.
+    router.push(items.length === 1 ? `/series/?id=${items[0].series_id}` : '/library/');
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- runs per poll result; `all` is derived from it
+  }, [data, runIds]);
 
   const resume = async () => {
     try { await api(`/api/admin/link/batches/${batchId}/resume`, { method: 'POST' }); refetch(); }

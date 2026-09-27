@@ -87,6 +87,14 @@ export function ranges(nums: number[], max = 12): string {
 /** A candidate that can still be ticked: not run yet. */
 export const isOpen = (c: LinkCandidate): boolean => !c.status;
 
+/**
+ * Whether /run will actually run this candidate -- bff lib/linkBatch.ts `mayFollow`, word for word. The
+ * server silently leaves the rest open, so a "has the run finished?" check that waited on them too would
+ * wait for ever.
+ */
+export const mayRun = (c: Pick<LinkCandidate, 'verdict' | 'manual'>, override: boolean): boolean =>
+  c.verdict === 'ok' || (override && (c.verdict !== 'title_differs' || c.manual));
+
 /** Whether ticking this candidate needs the admin's "follow anyway" (the server's `override`). */
 export const needsOverride = (c: Pick<LinkCandidate, 'verdict'>): boolean => c.verdict !== 'ok';
 

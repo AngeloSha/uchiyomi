@@ -75,3 +75,19 @@ test('the edit dialog shows every linked source, its state, and unlinks a follow
   assert.match(modal, /x\.health === 'cooldown'/, 'the source state is not shown');
   assert.match(modal, /'\/api\/admin\/link\/batches', \{ json: \{ seriesIds: \[id\] \} \}/, 'no way to connect more sources from here');
 });
+
+test('a finished run goes back where it started, and waits only on what the server runs', async () => {
+  // Reported: after "Connect selected" the page stayed on the review -- the server puts the batch back to
+  // `review` while any candidate is unticked, so it looked like nothing happened. Reintroduce by deleting
+  // the effect that pushes the router: "a finished run does not leave the review" fails.
+  const { mayRun } = await import('../lib/linkBatch');
+  assert.equal(mayRun({ verdict: 'ok', manual: false }, false), true);
+  assert.equal(mayRun({ verdict: 'numbering_differs', manual: false }, false), false, 'held without the override');
+  assert.equal(mayRun({ verdict: 'numbering_differs', manual: false }, true), true);
+  assert.equal(mayRun({ verdict: 'title_differs', manual: false }, true), false, 'the server never runs this one');
+  assert.equal(mayRun({ verdict: 'title_differs', manual: true }, true), true);
+  const page = code(read('app/admin/link/page.tsx'));
+  assert.match(page, /setRunIds\(new Set\(chosen\.filter\(\(c\) => mayRun\(c, override\)\)\.map\(\(c\) => c\.id\)\)\)/, 'runIds waits on candidates the server holds back');
+  assert.match(page, /if \(sent\.length < runIds\.size \|\| sent\.some\(\(c\) => !c\.status\)\) return;/);
+  assert.match(page, /router\.push\(items\.length === 1 \? `\/series\/\?id=\$\{items\[0\]\.series_id\}` : '\/library\/'\)/, 'a finished run does not leave the review');
+});

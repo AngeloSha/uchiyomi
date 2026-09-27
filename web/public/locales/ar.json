@@ -2,7 +2,7 @@
   "_meta": {
     "language": "ar",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 1385
+    "strings": 1387
   },
   "1 check found something": "فحص واحد وجد شيئًا",
   "1 member": "عضو واحد",
@@ -1388,5 +1388,7 @@
   "switched off": "متوقف",
   "working": "يعمل",
   "{n} chapters here · {shared} of this series’ {ours} · {fresh} new": "{n} فصلًا هنا · {shared} من {ours} فصلًا لهذه السلسلة · {fresh} جديدة",
-  "{n} left open — their chapters do not line up": "بقيت {n} مفتوحة — فصولها لا تتطابق"
+  "{n} left open — their chapters do not line up": "بقيت {n} مفتوحة — فصولها لا تتطابق",
+  "Connected 1 source": "رُبط مصدر واحد",
+  "Connected {n} sources": "رُبطت {n} مصادر"
 }

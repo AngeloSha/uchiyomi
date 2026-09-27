@@ -2,7 +2,7 @@
   "_meta": {
     "language": "ja",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 1385
+    "strings": 1387
   },
   "1 check found something": "1 件のチェックで問題を検出",
   "1 member": "メンバー 1 人",
@@ -1388,5 +1388,7 @@
   "switched off": "オフ",
   "working": "正常",
   "{n} chapters here · {shared} of this series’ {ours} · {fresh} new": "ここに{n}章 · このシリーズの{ours}章中{shared}章 · 新規{fresh}章",
-  "{n} left open — their chapters do not line up": "{n}件は未処理のままです — 章番号が一致しません"
+  "{n} left open — their chapters do not line up": "{n}件は未処理のままです — 章番号が一致しません",
+  "Connected 1 source": "ソースを1件接続しました",
+  "Connected {n} sources": "ソースを{n}件接続しました"
 }
