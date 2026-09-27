@@ -22,6 +22,8 @@ import { cadenceText } from '@/lib/cadence';
 import { jobNoteLines, type JobCardNotes } from '@/lib/jobNotes';
 import { downloadsHref } from '@/lib/libraryView';
 import { PreviewReader } from '@/components/PreviewReader';
+import { ARCHIVE_PACE, archiveAddLine, archiveSwitchHelp, type EnqueueOutcome } from '@/lib/archive';
+import { useServerDownloads } from '@/lib/useServerDownloads';
 
 export interface Provider { source: string; name: string; sourceId: string; title: string; coverUrl?: string }
 interface Detail {
@@ -55,6 +57,11 @@ interface AddAnswer {
   seriesId?: string;
   /** Every chapter asked for was already in the library, so none was fetched (v0.42.0, #65). */
   alreadyHere?: number;
+  /**
+   * What became of "Archive the rest slowly" (#117): queued, `later` (a download's rest is queued once its own
+   * chapters are in), or why not. Absent when it was not asked for.
+   */
+  archive?: EnqueueOutcome | 'later';
 }
 
 export type AddSeed =
@@ -172,6 +179,9 @@ export function AddSeriesDialog({ seed, sources, mayFollow, onClose, onAdded }: 
   // simply clears the choice instead of racing the arrival of the new detail.
   const [pickChoice, setPickChoice] = useState<ChapterPick | null>(null);
   const [autoUpdate, setAutoUpdate] = useState(true);
+  // "Archive the rest slowly" (#117). Off until switched on, for every add: the rest of a series is days of
+  // fetching, and that is a choice, not a default.
+  const [archiveOn, setArchiveOn] = useState(false);
   const [adding, setAdding] = useState(false);
   // The duplicate prompt: the server's sentence, and the id of the copy it found -- present only when the
   // server was willing to hand it over, which it is not for a series this account may not open.
@@ -281,6 +291,14 @@ export function AddSeriesDialog({ seed, sources, mayFollow, onClose, onAdded }: 
   const chapterCount = pick === 'all' || pick === 'none' ? undefined : Number(pick.slice(pick.indexOf(':') + 1));
   const chapterFrom: 'oldest' | 'newest' | 'none' = pick === 'none' ? 'none' : pick.startsWith('latest:') ? 'newest' : 'oldest';
   const count = pick === 'none' ? 0 : chapterCount ?? detail?.count ?? 0;
+  // What "the rest" is: every listed chapter for Nothing yet, the listing less the pick for First or Latest N,
+  // and nothing for All -- the switch is not offered then, nor for a source that lists nothing.
+  // Reintroduce by offering it for All: "the archive switch is offered for All" in addSeriesDialog.test.ts.
+  const archiveRest = !detail || pick === 'all' ? 0 : pick === 'none' ? detail.count : Math.max(0, detail.count - (chapterCount ?? 0));
+  const archiving = archiveOn && archiveRest > 0;
+  // The pace comes with the downloads AppShell already polls; the default until it has answered.
+  const { data: downloads } = useServerDownloads();
+  const perHour = downloads?.archive?.perHour ?? ARCHIVE_PACE.perHour;
 
   const add = async (force = false) => {
     if (!picked) return;
@@ -290,7 +308,7 @@ export function AddSeriesDialog({ seed, sources, mayFollow, onClose, onAdded }: 
     const alsoFollowBody = mayFollow && alsoFollow && others.length ? others.map(({ source, sourceId }) => ({ source, sourceId })) : undefined;
     try {
       const r = await api<AddAnswer>('/api/sources/add', {
-        json: { source: picked.source, sourceId: picked.sourceId, chapterCount, chapterFrom, autoUpdate, force, alsoFollow: alsoFollowBody },
+        json: { source: picked.source, sourceId: picked.sourceId, chapterCount, chapterFrom, autoUpdate, force, alsoFollow: alsoFollowBody, ...(archiving ? { archive: true } : {}) },
         // The client has never set a timeout anywhere, so the only bound was the proxy's 120s -- which
         // turned a slow-but-working add into "Add failed. Try another source." while the download carried
         // on. The request now answers in seconds, so this is a backstop rather than the usual path. The
@@ -417,6 +435,8 @@ export function AddSeriesDialog({ seed, sources, mayFollow, onClose, onAdded }: 
               ))}
             </>
           )}
+          {/* Where the rest went, when "Archive the rest slowly" was on. */}
+          {done.archive && <p className="text-start text-[11px] leading-relaxed text-fog-400" data-archive-outcome={done.archive}>{archiveAddLine(done.archive, !!done.nothing)}</p>}
           {followBlock}
           <div className="flex gap-2">
             <button onClick={onClose} className="btn-ghost flex-1 py-2.5 text-sm">{tr('Done')}</button>
@@ -579,6 +599,19 @@ export function AddSeriesDialog({ seed, sources, mayFollow, onClose, onAdded }: 
                 {tr('Older chapters are not fetched by auto-update; fetch them from the series page when you want them.')}
               </p>
             )}
+            {/* The rest of the series, a chapter at a time over nights or days (#117). Under the pick it
+                completes, with how many, which way and about how long; never for All, which leaves no rest. */}
+            {archiveRest > 0 && (
+              <div className="mt-3" data-archive-rest>
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-sm text-fog-200">{tr('Archive the rest slowly')}</span>
+                  <Switch on={archiveOn} onChange={setArchiveOn} label={tr('Archive the rest slowly')} />
+                </div>
+                <p className="mt-1 text-[11px] leading-relaxed text-fog-500">
+                  {archiveSwitchHelp(pick === 'none' ? 'none' : chapterFrom === 'newest' ? 'latest' : 'first', archiveRest, perHour)}
+                </p>
+              </div>
+            )}
           </>)}
 
           {/* The switches depend on nothing the detail brings, so they are there from the first paint. */}
@@ -605,6 +638,8 @@ export function AddSeriesDialog({ seed, sources, mayFollow, onClose, onAdded }: 
           {count > 40 && (
             <p className="mt-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-2.5 py-1.5 text-[11px] text-amber-300">
               {tr('Grabbing many chapters at once can get you rate-limited. It pauses on its own and you can resume later.')}
+              {/* The gentle way to the same chapters, where there is a smaller pick to make. */}
+              {presets.length > 0 && <> {tr('Or fetch fewer now and archive the rest slowly.')}</>}
             </p>
           )}
           {/* The duplicate prompt. "Open it" is offered only when the server sent the id -- it withholds

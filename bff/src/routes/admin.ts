@@ -13,6 +13,7 @@ import { runFingerprintBackfill, fingerprintRemaining, fpState } from '../lib/fi
 import { runPageHashBackfill, pageHashRemaining, phState } from '../lib/pageHashJob';
 import { runBackup } from '../lib/backup';
 import { runUpdateAll, updateSeries, runSweep } from '../lib/updater';
+import { ARCHIVE_SETTINGS_COLS, ARCHIVE_SETTINGS_SHAPE, archiveWindowPair, applyArchiveSettings, archiveFreeGb } from '../lib/archive';
 import { runChapterCleanup, cleanupSettings, dueCountCached, tombstoneBooks } from '../lib/chapterCleanup';
 import { runVerify, verifyState } from '../lib/verifyFiles';
 import { runRepair, repairState, repairLiveSnapshot, REPAIR_HOURS, REPAIR_LIMITS, REPAIR_STEPS, REPAIR_SHORT_MAX, REPAIR_GAPS_MAX, type RepairSkip, type RepairStep } from '../lib/repair';
@@ -444,7 +445,18 @@ export default async function adminRoutes(app: FastifyInstance) {
 
   // Owned downloader/updater (Phase 2): pull new chapters from the source for one series or the whole library.
   app.post('/api/admin/update/:id', async (req) => withOrigin('check', userIdOf(req), () => updateSeries((req.params as { id: string }).id, Number((req.body as any)?.maxNew) || 10)));
-  app.post('/api/admin/update', async (req) => runUpdateAll({ onlyFavorites: !!(req.body as any)?.favorites, maxNew: Number((req.body as any)?.maxNew) || 10 }));
+  // Through runSweep, as the schedule and Run now are (#117): `runtime.updating` is the flag every other job --
+  // the repair, the slow archive -- stands aside for, and a bare runUpdateAll here ran without it. 409 while a
+  // sweep or a repair runs; the sweep's result, as before, when it ends.
+  // Reintroduce by calling runUpdateAll bare: "POST /api/admin/update is refused while a sweep runs" in
+  // sweepRunner.int.test.ts starts a second sweep on top of the first.
+  app.post('/api/admin/update', async (req, reply) => {
+    const run = runSweep({ onlyFavorites: !!(req.body as any)?.favorites, maxNew: Number((req.body as any)?.maxNew) || 10, by: userIdOf(req) }, app.log);
+    if (!run) return reply.code(409).send({ error: 'busy', message: 'A chapter sweep or a library repair is already running.' });
+    const r = await run;
+    if (!r) return reply.code(500).send({ error: 'failed', message: 'The update run failed. The server log has the details.' });
+    return r;
+  });
 
   app.get('/api/admin/users', async () => ({
     content: await q(`SELECT u.id, u.username, u.display_name, u.role, u.avatar, u.created_at, u.disabled, u.perms, u.totp_enabled,
@@ -464,7 +476,8 @@ export default async function adminRoutes(app: FastifyInstance) {
   // ---- server settings ----
   const SETTINGS_COLS = 'server_name, allow_registration, updater_hours, extension_hours, extension_auto_update, '
     + 'update_check, install_ping, install_ping_last, scanlator_prefs, cleanup_read, cleanup_read_days, backup_hour, auto_follow_on_failure, '
-    + 'repair_enabled, komga_ghost_chapters, adult_genres, adult_sources, source_prefs, group_upgrade, borrow_names';
+    + 'repair_enabled, komga_ghost_chapters, adult_genres, adult_sources, source_prefs, group_upgrade, borrow_names, '
+    + ARCHIVE_SETTINGS_COLS;
   // `extensions_configured` is not a column: extension_hours has a NOT NULL default, so its presence says
   // nothing about whether there is an engine to check. The settings page needs to know, or it offers two
   // controls for a job that can never run.
@@ -479,6 +492,8 @@ export default async function adminRoutes(app: FastifyInstance) {
       // thing and then go and see how much it took" is the wrong order to learn it in. Null if it cannot be
       // counted -- an unavailable figure must not stop the settings page loading.
       cleanup_read_due: await dueCountCached(row?.cleanup_read_days ?? 30).catch(() => null),
+      // The slow archive's disk floor is set against this (#117): GiB free under the download root, null unknown.
+      archive_free_gb: await archiveFreeGb().catch(() => null),
     };
   };
   /**
@@ -577,7 +592,9 @@ export default async function adminRoutes(app: FastifyInstance) {
        * default. Off takes back the names it gave every series that follows this switch.
        */
       borrowNames: z.boolean().optional(),
-    }).parse(req.body);
+      // The slow archive's pause and pacing (#117, lib/archive.ts): the window's two ends together or not at all.
+      ...ARCHIVE_SETTINGS_SHAPE,
+    }).superRefine(archiveWindowPair).parse(req.body);
     if (b.serverName !== undefined) await q('UPDATE server_settings SET server_name = $1, updated_at = now() WHERE id = 1', [b.serverName]);
     if (b.allowRegistration !== undefined) await q('UPDATE server_settings SET allow_registration = $1, updated_at = now() WHERE id = 1', [b.allowRegistration]);
     if (b.updaterHours !== undefined) await q('UPDATE server_settings SET updater_hours = $1, updated_at = now() WHERE id = 1', [b.updaterHours]);
@@ -619,6 +636,7 @@ export default async function adminRoutes(app: FastifyInstance) {
         [JSON.stringify({ priority: cleanSourceOrder(b.sourcePrefs.priority) })]);
       invalidateSourcePrefs();
     }
+    await applyArchiveSettings(b);
     await logAudit('settings.update', { userId: userIdOf(req), detail: b, req });
     return settingsRow();
   });

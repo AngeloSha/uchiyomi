@@ -586,7 +586,8 @@ test('the add dialog offers the other sources only when it already holds a list,
   assert.doesNotMatch(memo, /api</, 'others is fetched rather than taken from the list the dialog already has');
   assert.match(src, /useState<Provider\[\] \| null>\(seed\.kind === 'group' \? seed\.providers : null\)/, 'providers is no longer null for a result seed');
   assert.match(src, /const alsoFollowBody = mayFollow && alsoFollow && others\.length \? others\.map\(\(\{ source, sourceId \}\) => \(\{ source, sourceId \}\)\) : undefined;/, 'alsoFollow rides with the switch off, or carries more than the identity');
-  assert.match(src, /json: \{ source: picked\.source, sourceId: picked\.sourceId, chapterCount, chapterFrom, autoUpdate, force, alsoFollow: alsoFollowBody \}/, 'the add body does not carry alsoFollow');
+  // (#117's "Archive the rest slowly" rides after it, pinned in addSeriesDialog.test.ts.)
+  assert.match(src, /json: \{ source: picked\.source, sourceId: picked\.sourceId, chapterCount, chapterFrom, autoUpdate, force, alsoFollow: alsoFollowBody(?:, \.\.\.\(archiving \? \{ archive: true \} : \{\}\))? \}/, 'the add body does not carry alsoFollow');
   // The switch is on the options step only with candidates, remembered per device under one key.
   assert.match(src, /\{mayFollow && others\.length > 0 && \(\s*<div className="mt-3" data-also-follow>/, 'the switch shows without candidates');
   assert.match(src, /const ALSO_FOLLOW_KEY = 'uchiyomi\.alsoFollow';/, 'the per-device key changed');

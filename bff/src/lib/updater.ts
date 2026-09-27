@@ -157,13 +157,20 @@ export interface UpdateOpts {
    * nothing else stops a series part-way.
    */
   cancelled?: () => boolean;
+  /**
+   * Fetch below an active slow archive's boundary as well (#117): Health's Fill now on an archived series is a
+   * person asking for those chapters now, at normal pace, rather than waiting for the archive's turn.
+   */
+  ignoreArchiveBoundary?: boolean;
 }
 
 const nothing = (title: string, outcome: UpdateOutcome): UpdateResult =>
   ({ title, added: 0, available: 0, outcome, failed: 0, waiting: 0, switched: 0, partial: 0, landed: [], asked: false });
 
 export async function updateSeries(seriesId: string, maxNew = 10, opts: UpdateOpts = {}): Promise<UpdateResult> {
-  const s = await one<any>(`SELECT id,title,source_id,source_series_id,web,folder,summary,author,genres,status,chapter_floor,scanlator_prefs,source_prefs FROM lib_series s WHERE s.id=$1 AND ${visibleToAll('s')}`, [seriesId]);
+  const s = await one<any>(`SELECT id,title,source_id,source_series_id,web,folder,summary,author,genres,status,chapter_floor,scanlator_prefs,source_prefs,
+    (SELECT a.boundary FROM archive_queue a WHERE a.series_id = s.id AND a.state IN ('queued', 'paused')) AS archive_boundary
+    FROM lib_series s WHERE s.id=$1 AND ${visibleToAll('s')}`, [seriesId]);
   if (!s) return nothing('', 'gone');
 
   // Everything the series is followed on: the primary pair first, then series_sources in the order they
@@ -259,7 +266,13 @@ export async function updateSeries(seriesId: string, maxNew = 10, opts: UpdateOp
   // every night on the back catalogue with the new chapter queued behind it. Applied before `missing` is
   // computed, so the source_missing stamp -- "{n} behind" on the series page -- counts only what the sweep
   // would actually fetch. source_chapters still records the full count: that is what the sources said.
-  const floor = s.chapter_floor == null ? -Infinity : Number(s.chapter_floor);
+  // A slow archive (#117, lib/archive.ts) owns everything below its boundary while it is queued or paused, so the
+  // floor is the higher of the two: the sweep keeps the new releases and never races the archive for the back
+  // catalogue, and `source_missing` counts only the sweep's own work. chapter_floor itself is never rewritten.
+  // Reintroduce by reading chapter_floor alone: "the sweep and the archive split the work" in archive.int.test.ts
+  // fetches below the boundary.
+  const archiveBoundary = s.archive_boundary == null || opts.ignoreArchiveBoundary ? -Infinity : Number(s.archive_boundary);
+  const floor = Math.max(s.chapter_floor == null ? -Infinity : Number(s.chapter_floor), archiveBoundary);
   const wanted = releases.filter((c) => c.number >= floor);
   // What is on disk is never replaced, whoever released it: a copy from a better-ranked group appearing
   // later is not a missing chapter. (A deliberate "replace with the preferred group" would be its own path.)

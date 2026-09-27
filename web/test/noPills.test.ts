@@ -39,6 +39,10 @@ const SURFACES = [
   // Step 8, Health: its keys, legends and status lines, and the live strip and history.
   'components/HealthActions.tsx',
   'components/RepairLive.tsx',
+  // Step 14, the slow archive (#117): its covers, sheet, keys and band, and Admin -> Settings -> Downloads.
+  'components/ArchiveQueue.tsx',
+  'components/ArchiveSettings.tsx',
+  'lib/archive.ts',
 ];
 
 /**
@@ -71,6 +75,11 @@ const SLICES: [string, string, string, string][] = [
   // as a text link -- and the Tasks rows' Run now.
   ['app/admin/page.tsx', 'Health: the cards, their marks and rows', 'function Health()', 'function DesktopUpdateNote('],
   ['app/admin/page.tsx', 'Tasks: Run now', 'function Tasks()', 'function DesktopBackups()'],
+  // Step 14 (#117): where the slow archive is turned on -- keys, never chips, beside chips that stay.
+  ['components/AddSeriesDialog.tsx', 'Add dialog: Archive the rest slowly', '{archiveRest > 0 && (', '</>)}'],
+  ['app/library/page.tsx', 'Library: the Archive slowly key', 'onClick={archiveSelected}', "{(isAdmin || canDownload(user))"],
+  ['app/series/page.tsx', 'Series: Archive slowly in the actions', '{mayArchive && (', '{isAdmin && ('],
+  ['app/series/page.tsx', 'Series: Archive slowly on the older-chapters row', '{!archiving && mayArchive', '</span>'],
 ];
 
 const slice = (src: string, from: string, to: string, name: string): string => {

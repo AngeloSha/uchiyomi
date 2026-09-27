@@ -213,3 +213,22 @@ test('Mark all read never touches the grey rows', () => {
   assert.match(all, /books\?\.content/, 'it reads the chapters on the server');
   assert.doesNotMatch(all, /ghost|Ghost|listing/, 'and nothing about the grey rows');
 });
+
+test('the series page only starts a slow archive; watching it is the band\'s', () => {
+  // #117, the critic's ruling: one live status surface, the band above the chapter list. The Actions column
+  // and the older-chapters row offer "Archive slowly" while there is something to archive and no archive on
+  // it; a run the archive is fetching offers Show and nothing else. Reintroduce by offering Fetch all on the
+  // archive's run (drop `!archiving &&`): "the archive's run offers Fetch all" fails.
+  const page = code(read('app/series/page.tsx'));
+  assert.match(page, /const mayArchive = canDownload\(user\) && !!listing && !listing\.archive\s*&& ghosts\.some\(\(g\) => \(g\.why === 'floor' \|\| g\.why === 'missing'\) && !haveNumbers\.has\(g\.number\)\);/,
+    'Archive slowly is offered on a series already being archived, or with nothing to archive');
+  assert.match(page, /\{!archiving && canDownload\(user\) && numbers\.length > 0 && \(/, "the archive's run offers Fetch all");
+  assert.match(page, /\{!archiving && mayArchive && numbers\.length > 0 && \(/, "the archive's own run offers to start it again");
+  assert.match(page, /const numbers = filteredGhosts\.filter\(\(g\) => g\.why === r\.why &&/, 'a run hands Hide the other kind\'s numbers');
+  // The supply line's "not here yet" is what the sweep would take: the archive's numbers are not.
+  assert.match(page, /notHere: ghosts\.filter\(\(g\) => g\.why !== 'floor' && g\.why !== 'archive' && !haveNumbers\.has\(g\.number\)\)\.length,/,
+    "the supply line counts the archive's chapters as behind");
+  const band = code(read('components/SeriesServerDownloads.tsx'));
+  assert.match(band, /\{archive && <ArchiveBand item=\{archive\} view=\{data\?\.archive\} \/>\}/, 'the band has no archive line');
+  assert.match(band, /\{tile && !\(tile\.archive && archive\) && \(/, "the archive's chapter in flight is a second line beside its own");
+});

@@ -190,6 +190,7 @@ const IRREGULAR_PAIRS: Record<string, string> = {
   '{n} chapters behind in 1 series': '{n} chapters behind across {m} series',
   'Ch. {n} · 1 older chapter not here yet': 'Ch. {a}–{b} · {n} older chapters not here yet',
   '1 page is a placeholder; the chapter sweep re-fetches it': '{n} pages are placeholders; the chapter sweep re-fetches them',
+  'Ch. {n} · 1 chapter being archived slowly': 'Ch. {a}–{b} · {n} chapters being archived slowly',
 };
 /** Keys that look counted and are not a pair, each with why. Not a place to park a new key. */
 const NOT_PAIRED: Record<string, string> = {

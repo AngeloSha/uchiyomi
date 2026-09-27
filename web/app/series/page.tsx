@@ -14,7 +14,7 @@ import { SeriesCard } from '@/components/cards';
 import { useToast } from '@/components/Toast';
 import { ConfirmDialog, Modal, msgOf } from '@/components/ConfirmDialog';
 import { useAuth, canDownload } from '@/lib/auth';
-import { IcChevronLeft, IcHeart, IcStar, IcPlay, IcDownload, IcCloudDownload, IcCheck, IcTrash, IcMoments } from '@/components/icons';
+import { IcChevronLeft, IcHeart, IcStar, IcPlay, IcDownload, IcCloudDownload, IcCheck, IcTrash, IcMoments, IcHourglass } from '@/components/icons';
 import { t as tr, keys } from '@/lib/i18n';
 import { offlineOutcome } from '@/lib/notices';
 import { FindMissingDialog } from '@/components/FindMissingDialog';
@@ -39,6 +39,8 @@ import { useContextMenu } from '@/components/ContextMenu';
 import { useLayer } from '@/lib/layers';
 import { kickDownloads } from '@/lib/useServerDownloads';
 import { SeriesServerDownloads } from '@/components/SeriesServerDownloads';
+import { useArchiveEnqueue } from '@/components/ArchiveQueue';
+import { listingArchiveLine } from '@/lib/archive';
 
 /** "Marking 3 chapters read…", counted: the busy half of Mark read's one card. */
 const markingText = (n: number) => (n === 1 ? tr('Marking 1 chapter read…') : tr('Marking {n} chapters read…', { n }));
@@ -1039,7 +1041,7 @@ function SeriesInner() {
   const supplyInput = useMemo(() => ({
     sources: series?.sources ?? [],
     groups: groups.map((g) => g.name),
-    notHere: ghosts.filter((g) => g.why !== 'floor' && !haveNumbers.has(g.number)).length,
+    notHere: ghosts.filter((g) => g.why !== 'floor' && g.why !== 'archive' && !haveNumbers.has(g.number)).length,
     listedTotal: ghosts.length,
     booksCount: series?.booksCount ?? 0,
     checkedAt: supplyChecked,
@@ -1516,6 +1518,17 @@ function SeriesInner() {
   // A "Nothing yet" series: added with no chapters, the older run under its floor is the page's only
   // content and the ☁ on those rows the call to action. Nothing to read, nothing to save offline.
   const nothingYet = !!series && series.booksCount === 0;
+  // "Archive slowly" (#117): the rest of the series fetched a chapter at a time, over nights or days. Offered
+  // while the listing has something the archive could take and no archive is on it; this page only starts
+  // one -- its progress, Pause and Stop are the band's, above the chapter list.
+  const archiveEnqueue = useArchiveEnqueue();
+  const mayArchive = canDownload(user) && !!listing && !listing.archive
+    && ghosts.some((g) => (g.why === 'floor' || g.why === 'missing') && !haveNumbers.has(g.number));
+  const archiveSlowly = async () => {
+    setActing(true);
+    await archiveEnqueue([id], title);
+    setActing(false);
+  };
   const Actions = (
     <div className="mt-4 flex flex-col gap-2">
       <button onClick={() => resumeBook && router.push(`/reader/?book=${resumeBook.id}`)} disabled={nothingYet || !resumeBook} className="btn-accent w-full disabled:opacity-50">
@@ -1571,6 +1584,11 @@ function SeriesInner() {
       {canDownload(user) && (series?.booksCount ?? 0) >= 3 && (
         <button onClick={() => setFindingMissing(true)} className="mt-1 flex items-center justify-center gap-2 rounded-full border border-ink-700 py-2.5 text-sm text-fog-300">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /><path d="M11 8v6M8 11h6" /></svg>{tr('Find missing chapters')}</button>
+      )}
+      {mayArchive && (
+        <button type="button" onClick={archiveSlowly} disabled={acting} data-archive-slowly
+          className="btn-key mt-1 h-auto w-full py-2.5 text-sm font-normal text-fog-300">
+          <IcHourglass width={16} height={16} />{tr('Archive slowly')}</button>
       )}
       {isAdmin && (
         <>
@@ -1694,19 +1712,27 @@ function SeriesInner() {
             const { key, args } = runLabel(r);
             // The run's own numbers, from the same filtered list the row was built from, so "Fetch all 5"
             // fetches the five the sentence counts and not a sixth the group filter hid.
-            const numbers = filteredGhosts.filter((g) => g.why === 'floor' && g.number >= r.from && g.number <= r.to && !haveNumbers.has(g.number)).map((g) => g.number);
+            const numbers = filteredGhosts.filter((g) => g.why === r.why && g.number >= r.from && g.number <= r.to && !haveNumbers.has(g.number)).map((g) => g.number);
+            // A run the slow archive is fetching (#117) says how far it has got and offers nothing but Show:
+            // its Pause and Stop are the band's. An older-chapters run may start one instead.
+            const archiving = r.why === 'archive';
             return (
-              <div key={`run${r.from}`} className="flex flex-wrap items-center gap-x-2 gap-y-1 border-b border-ink-800/70 py-2.5 text-xs text-fog-500 lg:col-span-full">
-                <span className="me-auto">{tr(key, args)}</span>
+              <div key={`run${r.from}`} data-run={r.why} className="flex flex-wrap items-center gap-x-2 gap-y-1 border-b border-ink-800/70 py-2.5 text-xs text-fog-500 lg:col-span-full">
+                <span className="me-auto">{archiving ? [tr(key, args), listingArchiveLine(listing?.archive)].filter(Boolean).join(' · ') : tr(key, args)}</span>
                 {/* The two chips travel together: when the sentence leaves no room they wrap as one pair to
                     the end of the next line, not one chip after the sentence and one orphaned below. */}
                 <span className="ms-auto flex shrink-0 gap-1.5">
                   <button type="button" onClick={() => toggleRun(r.from, numbers)} aria-expanded={r.open} className={`chip shrink-0 px-2.5 py-1 text-[11px] ${r.open ? 'chip-active' : ''}`}>
                     {r.open ? tr('Hide') : tr('Show')}
                   </button>
-                  {canDownload(user) && numbers.length > 0 && (
+                  {!archiving && canDownload(user) && numbers.length > 0 && (
                     <button type="button" onClick={() => fetchMany(numbers)} disabled={acting} className="chip shrink-0 px-2.5 py-1 text-[11px] disabled:opacity-50">
                       <IcCloudDownload width={14} height={14} />{tr('Fetch all {n}', { n: numbers.length })}
+                    </button>
+                  )}
+                  {!archiving && mayArchive && numbers.length > 0 && (
+                    <button type="button" onClick={archiveSlowly} disabled={acting} data-archive-slowly className="btn-key h-7 shrink-0 px-2.5 text-[11px]">
+                      <IcHourglass width={14} height={14} />{tr('Archive slowly')}
                     </button>
                   )}
                 </span>

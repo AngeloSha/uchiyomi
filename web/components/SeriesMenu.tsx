@@ -1,11 +1,12 @@
 'use client';
 import { useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
-import { useAuth } from '@/lib/auth';
+import { canDownload, useAuth } from '@/lib/auth';
 import { t as tr } from '@/lib/i18n';
 import type { Series } from '@/lib/types';
 import { useToast } from './Toast';
 import { useContextMenu, type MenuItem } from './ContextMenu';
+import { useArchiveEnqueue } from './ArchiveQueue';
 
 /**
  * A series card's menu (#100): the few things worth doing without opening the series, from wherever it is on
@@ -13,13 +14,15 @@ import { useContextMenu, type MenuItem } from './ContextMenu';
  *
  * Deliberately short (the proposal's own instinct): the cards are links, so Open in a new tab and Copy link
  * stand in for what the browser's menu offered; then what the Library's Select mode already does for many
- * series, here for one; and for an admin, a check for new chapters. Offered by role, never offered and then
- * refused, and greyed rather than hidden while offline. Anything larger is the series page, one click away.
+ * series, here for one; and for an admin, a check for new chapters; for anyone who may download, the slow
+ * archive of the rest (#117). Offered by role, never offered and then refused, and greyed rather than hidden
+ * while offline. Anything larger is the series page, one click away.
  */
 export function useSeriesMenu(series: Series) {
   const qc = useQueryClient();
   const toast = useToast();
-  const { isAdmin, status } = useAuth();
+  const { isAdmin, status, user } = useAuth();
+  const archive = useArchiveEnqueue();
   const offline = status === 'offline';
   const href = `/series/?id=${encodeURIComponent(series.id)}`;
   const favourite = !!series.yomi?.favorite;
@@ -59,6 +62,11 @@ export function useSeriesMenu(series: Series) {
           toast(tr('Checking for new chapters…'), 'info', { busy: true });
         } catch { toast(tr('Could not do that'), 'error'); }
       },
+    }] : []),
+    // What is missing is the server's to work out; the notice says when there was nothing older to fetch.
+    ...(canDownload(user) ? [{
+      label: tr('Archive slowly'), divider: !isAdmin, disabled: offline,
+      onSelect: () => { void archive([series.id], series.metadata?.title || series.name); },
     }] : []),
   ];
 

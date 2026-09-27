@@ -53,6 +53,9 @@ export async function deleteSeries(id: string): Promise<{ ok: true; books: numbe
   await tx(async (qq) => {
     await qq(`UPDATE lib_series SET deleted_at = now() WHERE id = $1`, [id]);
     await qq(`DELETE FROM series_trackers WHERE series_id = $1`, [id]);
+    // A slow archive (#117) goes with it: re-added later, the series starts from what is there then, never from
+    // a boundary it had in an earlier life. The row's FK cascades only on a hard delete, and this is a soft one.
+    await qq(`DELETE FROM archive_queue WHERE series_id = $1`, [id]);
   });
   return { ok: true, books: books?.n ?? 0 };
 }
@@ -118,6 +121,9 @@ export async function mergeSeries(fromId: string, intoId: string): Promise<Merge
       [fromId, intoId],
     );
     await qq(`DELETE FROM series_seen WHERE series_id = $1`, [fromId]);
+    // The absorbed series' slow archive (#117) ends here: its boundary was in its own numbers, and the survivor
+    // is queued, or not, as itself.
+    await qq(`DELETE FROM archive_queue WHERE series_id = $1`, [fromId]);
 
     // Keyed on book_id, so the books moving is enough — no collision is possible, and every progress row
     // and every reading event survives untouched. This is the whole reason merge does not de-duplicate.

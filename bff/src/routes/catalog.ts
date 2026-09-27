@@ -20,6 +20,7 @@ import { enrichSeries, seriesSeen } from '../lib/enrich';
 import { seriesSourcesFor } from '../lib/seriesSources';
 import { readSeriesPrefs, effectivePrefsFor } from '../lib/scanlatorPrefs';
 import { listingFor, type ListingCopy } from '../lib/seriesListing';
+import { archiveSummaryFor } from '../lib/archive';
 import { markNumbers, unmarkNumbers, LISTING_MARK_MAX } from '../lib/listingProgress';
 import { pushSeriesProgressAsync } from '../lib/trackers';
 import { ghostsEnabled } from '../lib/komgaGhosts';
@@ -541,9 +542,15 @@ export default async function catalogRoutes(app: FastifyInstance) {
   app.get('/api/series/:id/listing', async (req) => {
     const { id } = req.params as { id: string };
     await komga.series(vc(req), id);
-    const f = await one<{ chapter_floor: number | null }>('SELECT chapter_floor FROM lib_series WHERE id = $1', [id]);
+    // The slow archive's boundary rides along (#117): a number it will fetch reads 'archive', and `archive` is
+    // its line on the page, or null.
+    const f = await one<{ chapter_floor: number | null; archive_boundary: number | null }>(
+      `SELECT chapter_floor, (SELECT a.boundary FROM archive_queue a WHERE a.series_id = s.id AND a.state IN ('queued', 'paused')) AS archive_boundary
+         FROM lib_series s WHERE id = $1`, [id]);
     const floor = f?.chapter_floor == null ? null : Number(f.chapter_floor);
-    return listingFor(id, { floor, admin: roleOf(req) === 'admin', userId: userIdOf(req) });
+    const archiveBoundary = f?.archive_boundary == null ? null : Number(f.archive_boundary);
+    const listing = await listingFor(id, { floor, archiveBoundary, admin: roleOf(req) === 'admin', userId: userIdOf(req) });
+    return { ...listing, archive: await archiveSummaryFor(id, userIdOf(req)).catch(() => null) };
   });
 
   /**

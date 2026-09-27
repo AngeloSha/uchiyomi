@@ -201,3 +201,27 @@ test('the downloads pill counts the chapters still to come, not the size of ever
   assert.equal(chaptersLeft([{ total: 5, done: 5 }, { total: 0, done: 0 }]), 2, 'and so does a job on its last chapter');
   assert.equal(chaptersLeft([{ total: 5, done: 7 }]), 1, 'never negative');
 });
+
+test('chapters the slow archive is fetching are a run of their own, never one line with an older-chapters run', () => {
+  // #117. With an archive on a series, the numbers it will fetch read `archive` (the server's whyOf), and a
+  // "Nothing yet" series of 200 would otherwise be 200 grey rows. A floor number in the middle (one the
+  // archive gave up on, say) ends the archive run: one sentence over both would call a chapter that failed
+  // "being archived". Reintroduce by dropping `last.why === g.why` in mergeRows: "an archive run and a floor
+  // run are two lines" fails with one run from 1 to 200.
+  const ghosts = [
+    ...Array.from({ length: 99 }, (_, i) => ghost(1 + i, 'archive')),
+    ghost(100, 'floor'),
+    ...Array.from({ length: 100 }, (_, i) => ghost(101 + i, 'archive')),
+  ];
+  const rows = mergeRows([], ghosts, true, false);
+  assert.deepEqual(rows.map((r) => (r.kind === 'run' ? `${r.why}:${r.from}-${r.to}` : r.kind)), ['archive:1-99', 'floor:100-100', 'archive:101-200'],
+    'an archive run and a floor run are two lines');
+  // Its ghosts have no caption of their own, like a floor ghost's: the run row says why.
+  assert.equal(whyLabel({ why: 'archive' }), null);
+  const [first, one] = [rows[0], mergeRows([book(6)], [ghost(5, 'archive')], true, false)[0]] as Extract<Row, { kind: 'run' }>[];
+  assert.deepEqual(runLabel(first), { key: 'Ch. {a}–{b} · {n} chapters being archived slowly', args: { a: 1, b: 99, n: 99 } });
+  assert.deepEqual(runLabel(one), { key: 'Ch. {n} · 1 chapter being archived slowly', args: { n: 5 } }, '"1 chapters being archived"');
+  // Opened, it unfolds like any run.
+  const open = mergeRows([], ghosts, true, false, new Set([1]));
+  assert.equal(open.filter((r) => r.kind === 'ghost').length, 50, 'an opened archive run does not unfold, or ignores the cap');
+});

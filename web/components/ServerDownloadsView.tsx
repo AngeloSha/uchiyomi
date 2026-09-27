@@ -22,6 +22,8 @@ import {
   type Tile,
 } from '@/lib/serverDownloads';
 import { kickDownloads, useServerDownloads } from '@/lib/useServerDownloads';
+import { archiveProgressText } from '@/lib/archive';
+import { ArchiveAttentionRow, ArchiveQueueNote, ArchiveTile } from '@/components/ArchiveQueue';
 
 // lib/serverDownloads.ts DownloadJob's fields, spelled out beside the notes so this stays the one Job type the
 // notes pin (partialSurfaces.test.ts) reads.
@@ -141,21 +143,27 @@ export function ServerDownloadsView({ focusFolder }: { focusFolder?: string | nu
       )}
       {s.queued.length > 0 && (
         <Section id="queued" title={tr('Queued')} n={s.queued.length}>
+          {/* The slow archive's pace and its server-wide pause, once there is an archive here to be paced (#117). */}
+          {data?.archive && s.queued.some((t) => t.item) && <ArchiveQueueNote view={data.archive} admin={isAdmin} />}
           <div className={GRID}>
-            {s.queued.map((t) => (
-              <DownloadTile key={`${t.archive ? 'a' : 'n'}:${t.key}`} t={t} section="queued" admin={isAdmin} nameOf={nameOf} onCancel={cancelJob}
-                focusRef={focusFolder && t.folder === focusFolder ? focusRef : undefined} />
-            ))}
+            {s.queued.map((t) => (t.item
+              ? <ArchiveTile key={`a:${t.key}`} item={t.item} view={data?.archive} />
+              : (
+                <DownloadTile key={`${t.archive ? 'a' : 'n'}:${t.key}`} t={t} section="queued" admin={isAdmin} nameOf={nameOf} onCancel={cancelJob}
+                  focusRef={focusFolder && t.folder === focusFolder ? focusRef : undefined} />
+              )))}
           </div>
         </Section>
       )}
       {s.attention.length > 0 && (
         <Section id="attention" title={tr('Needs attention')} n={s.attention.length}>
           <ul className={ROWS}>
-            {s.attention.map((a) => (
-              <AttentionRow key={a.key} a={a} nameOf={nameOf} onRetry={retry} onDismissJob={dismissJob} onDismissRun={dismissRun}
-                focusRef={focusFolder && a.kind === 'job' && a.job.folder === focusFolder ? focusRef : undefined} />
-            ))}
+            {s.attention.map((a) => (a.kind === 'archive'
+              ? <ArchiveAttentionRow key={a.key} item={a.item} view={data?.archive} admin={isAdmin} />
+              : (
+                <AttentionRow key={a.key} a={a} nameOf={nameOf} onRetry={retry} onDismissJob={dismissJob} onDismissRun={dismissRun}
+                  focusRef={focusFolder && a.kind === 'job' && a.job.folder === focusFolder ? focusRef : undefined} />
+              )))}
           </ul>
           {/* The chapter-level failures age out of this list after a day; the ledger of the ones that keep
               failing, with what to do about each, is Health's. */}
@@ -270,7 +278,7 @@ function DownloadTile({ t, section, admin, nameOf, onCancel, focusRef }: {
 }
 
 function AttentionRow({ a, nameOf, onRetry, onDismissJob, onDismissRun, focusRef }: {
-  a: Attention<Job>; nameOf: (id: string) => string;
+  a: Exclude<Attention<Job>, { kind: 'archive' }>; nameOf: (id: string) => string;
   onRetry: (seriesId: string, numbers: number[]) => void; onDismissJob: (folder: string) => void; onDismissRun: (kind: string) => void;
   focusRef?: (el: HTMLElement | null) => void;
 }) {
@@ -367,8 +375,15 @@ function TaskRow({ r, admin, onCancel, onDismiss }: { r: RunCard; admin: boolean
   );
 }
 
-/** What landed today, one cover per series: a full ring gone to a check, like an installed app. */
+/**
+ * What landed today, one cover per series: a full ring gone to a check, like an installed app. The slow
+ * archive's chapters are summed up on a line of their own (#117) -- a back catalogue listed number by number
+ * would crowd out everything else that came in -- and an archive that finished says so.
+ */
 function CameInTile({ g }: { g: ActivityGroup }) {
+  const archived = g.archived;
+  const own = g.numbers.filter((n) => !archived.includes(n));
+  const summed = archived.length > 0 || !!g.archiveFinished;
   const face = (
     <div className="grad-border relative aspect-[2/3] overflow-hidden rounded-2xl border border-ink-700/60">
       <Img src={g.seriesId ? img.seriesThumb(g.seriesId) : ''} alt="" className="h-full w-full" />
@@ -381,8 +396,14 @@ function CameInTile({ g }: { g: ActivityGroup }) {
       <p className="mt-1.5 line-clamp-2 text-xs font-medium leading-tight text-fog-200">{g.title}</p>
       {/* The time beside the chapters, the origins on their own line: "Added from Discover" alone fills a
           390 px tile, and the time is what a phone cut off when they shared one. */}
-      <p className="mt-0.5 truncate text-[11px] text-fog-400">{[chapterSpan(g.numbers), relativeTime(new Date(g.at).toISOString())].filter(Boolean).join(' · ')}</p>
-      <p className="truncate text-[11px] text-fog-500">{g.origins.map(originLabel).join(', ')}</p>
+      <p className="mt-0.5 truncate text-[11px] text-fog-400">{[chapterSpan(own), relativeTime(new Date(g.at).toISOString())].filter(Boolean).join(' · ')}</p>
+      {archived.length > 0 && (
+        <p className="line-clamp-2 text-[11px] leading-snug text-amber-300/90">
+          {archived.length === 1 ? tr('Slow archive: 1 chapter today') : tr('Slow archive: {n} chapters today', { n: archived.length })}
+        </p>
+      )}
+      {g.archiveFinished && <p className="line-clamp-2 text-[11px] leading-snug text-amber-300/90">{archiveProgressText(g.archiveFinished.entry)}</p>}
+      <p className="truncate text-[11px] text-fog-500">{g.origins.filter((o) => !(summed && o === 'archive')).map(originLabel).join(', ')}</p>
       {/* The job cards' own words for it ("2 chapters saved with pages missing"), one and many. */}
       {jobNoteLines({ partial: g.partial }).map((line, i) => <p key={i} className="text-[11px] text-fog-500">{line}</p>)}
     </div>

@@ -25,6 +25,7 @@ import { notifyAdmins } from './lib/push';
 import { runSourceCheck } from './lib/sourceWatchdog';
 import { runSweep } from './lib/updater';
 import { runRepair, setRepairNext, REPAIR_HOURS } from './lib/repair';
+import { startArchive } from './lib/archive';
 import { runChapterCleanup, unpruneRestored } from './lib/chapterCleanup';
 import { runExtensionMonitor } from './lib/extensionMonitor';
 import { startEngineCacheKeeper } from './lib/sources/suwayomi/cache';
@@ -44,7 +45,7 @@ import catalogRoutes from './routes/catalog';
 import imageRoutes, { authorizeImageRequest } from './routes/images';
 import personalRoutes from './routes/personal';
 import downloadRoutes from './routes/downloads';
-import sourceRoutes from './routes/sources';
+import sourceRoutes, { jobBusy } from './routes/sources';
 import opdsRoutes from './routes/opds';
 import komgaCompatRoutes from './routes/komgaCompat';
 import notifyRoutes from './routes/notify';
@@ -446,6 +447,14 @@ async function main() {
       setTimeout(tick, delay).unref();
     })();
   }
+
+  /**
+   * The slow archive (#117, lib/archive.ts): series queued to be fetched a chapter at a time, paced per source.
+   * It schedules itself -- a first look ten minutes after boot (three on desktop), then whenever a break ends --
+   * and stands aside for every sweep, repair and source check. `jobBusy` is how it sees a download a person
+   * started on the same series. Owned mode only, like the sweep: it writes DL_ROOT and lib_books.
+   */
+  if (OWNED) startArchive({ busy: jobBusy, log: app.log });
 
   // Drop import batches nobody will come back to (`sweepImportBatches` in routes/admin.ts owns the rule:
   // finished ones after a week, unfinished ones after a month). Daily, first run fifteen minutes after
