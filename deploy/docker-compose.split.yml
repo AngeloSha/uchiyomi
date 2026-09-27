@@ -37,6 +37,8 @@
 #                                         sudo chown 10002:10002 /mnt/backups/uchiyomi
 #                                       (named volumes, the default, need none of this)
 #   SOURCES_PATH=/path/to/sources/dist  a built source pack, mounted read-only (optional; none by default)
+#   EXTENSION_ENGINE=0               don't run the extension engine (Mihon/Tachiyomi extensions, about 800 MB);
+#                                    its data is kept, and deleting the line brings it back
 #   VAPID_PUBLIC_KEY= / VAPID_PRIVATE_KEY= / VAPID_SUBJECT=   enable web push (see docs/USAGE.md)
 
 services:
@@ -89,9 +91,12 @@ services:
       OIDC_ALLOW_SIGNUP: ${OIDC_ALLOW_SIGNUP:-false}
       OIDC_LINK_BY_USERNAME: ${OIDC_LINK_BY_USERNAME:-false}
       OIDC_ADMIN_GROUP: ${OIDC_ADMIN_GROUP:-}
-      # Extension engine (Mihon/Tachiyomi extensions), wired up by default. Set to an empty string to
-      # turn the feature off entirely. See docs/extensions.md.
-      SUWAYOMI_URL: ${SUWAYOMI_URL:-http://uchiyomi-suwayomi:4567}
+      # Extension engine (Mihon/Tachiyomi extensions), wired up by default. EXTENSION_ENGINE=0 in .env turns it
+      # off and drops its container; SUWAYOMI_URL points at a Suwayomi you run yourself instead. The single dash
+      # is deliberate: `:-` treats an empty value as unset, so the documented `SUWAYOMI_URL=` never turned
+      # anything off. See docs/extensions.md.
+      SUWAYOMI_URL: ${SUWAYOMI_URL-http://uchiyomi-suwayomi:4567}
+      EXTENSION_ENGINE: ${EXTENSION_ENGINE:-1}
       SUWAYOMI_USERNAME: ${SUWAYOMI_USERNAME:-}
       SUWAYOMI_PASSWORD: ${SUWAYOMI_PASSWORD:-}
       SUWAYOMI_MAX_SOURCES: ${SUWAYOMI_MAX_SOURCES:-25}
@@ -155,6 +160,11 @@ services:
   uchiyomi-suwayomi:
     image: ghcr.io/suwayomi/suwayomi-server:v2.3.2243
     container_name: uchiyomi-suwayomi
+    # The switch. EXTENSION_ENGINE=0 in .env, then `docker compose up -d`: this container is not run, and the app
+    # (which reads the same variable) treats extensions as off. Its data stays in the volume; delete the line and
+    # run the same command to bring it back where it left off. Never `docker compose down -v`, which deletes it.
+    deploy:
+      replicas: ${EXTENSION_ENGINE:-1}
     restart: unless-stopped
     # The engine is a JVM, and a JVM with no limit sizes its heap from the HOST's memory -- a quarter of it:
     # 15.7 GiB on a 62 GB machine, measured 2026-09-25 against this image. It idles near 780 MB, so without a

@@ -127,6 +127,33 @@ test('every CI job has a timeout, and installs from the lockfile', () => {
   for (const st of installs) assert.ok(!/\bnpm install\b/.test(st.run), `${st.job} / ${st.name} uses npm install instead of npm ci`);
 });
 
+/**
+ * What Unraid's dockerMan needs to read a template at all, shared by both templates.
+ *
+ * Walked with indexOf rather than a `<!--([\s\S]*?)-->` regex: this is XML, where `--!>` is not a terminator and
+ * `--` in the body is the actual fault, but CodeQL's js/bad-tag-filter (#28) reads any comment regex as an HTML
+ * sanitiser and re-fires on every edit of the line. A plain scan says the same thing without giving the rule a
+ * regex to misjudge, and a comment that never closes fails here by name instead of as a mismatch of two counts.
+ */
+function assertParsableTemplate(x: string, file: string): void {
+  for (let at = 0; ; ) {
+    const s = x.indexOf('<!--', at);
+    if (s < 0) break;
+    const e = x.indexOf('-->', s + 4);
+    assert.ok(e >= 0, `${file}: an XML comment that never closes: ${x.slice(s, s + 60).trim()}…`);
+    const body = x.slice(s + 4, e);
+    assert.ok(!body.includes('--'), `${file}: "--" inside an XML comment, which no parser accepts: ${body.trim().slice(0, 60)}…`);
+    at = e + 3;
+  }
+  // The same parser would also refuse a `-` glued to the closing `-->`.
+  assert.ok(!/--->/.test(x), `${file}: a comment ending in "--->" is malformed`);
+  // Both files CA moderators read must start with the XML declaration and carry one root element each.
+  assert.match(x, /^<\?xml version="1\.0"\?>\n/, `${file}: the template lacks the XML declaration`);
+  // Well-formed enough: every <Config ...> is closed on its own line.
+  const opens = (x.match(/<Config /g) || []).length, closes = (x.match(/<\/Config>/g) || []).length;
+  assert.equal(opens, closes, `${file}: an unclosed <Config> element`);
+}
+
 test('the Unraid template names every volume, the ports, and the ids, and stops gracefully', () => {
   const x = read('templates/uchiyomi.xml');
   assert.match(x, /<Repository>ghcr\.io\/angelosha\/uchiyomi<\/Repository>/);
@@ -141,9 +168,6 @@ test('the Unraid template names every volume, the ports, and the ids, and stops 
   assert.match(x, /--stop-timeout 40/, 'no stop timeout for the embedded database');
   // A Config element, not a mention: the template's own comment explains that DATABASE_URL is unset.
   assert.ok(!/Target="DATABASE_URL"/.test(x), 'the template sets DATABASE_URL, which turns the embedded database off');
-  // Well-formed enough: every <Config ...> is closed on its own line.
-  const opens = (x.match(/<Config /g) || []).length, closes = (x.match(/<\/Config>/g) || []).length;
-  assert.equal(opens, closes, 'an unclosed <Config> element');
   // ⚠️ `--` inside an XML comment is illegal (XML 1.0 §2.5), and Unraid's dockerMan parses the template with
   // a real parser. The v0.21.0 rewrite of the header comment -- the one that fixed the install steps after
   // hawwwwwk's first report -- wrote "never read -- so", and from then until v0.34.0 the file could not be
@@ -151,25 +175,7 @@ test('the Unraid template names every volume, the ports, and the ids, and stops 
   // the whole time, because none of them parsed. hawwwwwk found that too (PR #50). There is no XML parser
   // among the dependencies, so the comment bodies are checked by hand, the way a parser would refuse them.
   // Reintroduce by writing `--` back into the header comment: this names the offending comment.
-  //
-  // Walked with indexOf rather than a `<!--([\s\S]*?)-->` regex: this is XML, where `--!>` is not a
-  // terminator and `--` in the body is the actual fault, but CodeQL's js/bad-tag-filter (#28) reads any
-  // comment regex as an HTML sanitiser and re-fires on every edit of the line. A plain scan says the same
-  // thing without giving the rule a regex to misjudge, and a comment that never closes fails here by name
-  // instead of as a mismatch of two counts.
-  for (let at = 0; ; ) {
-    const s = x.indexOf('<!--', at);
-    if (s < 0) break;
-    const e = x.indexOf('-->', s + 4);
-    assert.ok(e >= 0, `an XML comment that never closes: ${x.slice(s, s + 60).trim()}…`);
-    const body = x.slice(s + 4, e);
-    assert.ok(!body.includes('--'), `"--" inside an XML comment, which no parser accepts: ${body.trim().slice(0, 60)}…`);
-    at = e + 3;
-  }
-  // The same parser would also refuse a `-` glued to the closing `-->`.
-  assert.ok(!/--->/.test(x), 'a comment ending in "--->" is malformed');
-  // Both files CA moderators read must start with the XML declaration and carry one root element each.
-  assert.match(x, /^<\?xml version="1\.0"\?>\n/, 'the template lacks the XML declaration');
+  assertParsableTemplate(x, 'templates/uchiyomi.xml');
   const ca = read('ca_profile.xml');
   assert.match(ca, /^<\?xml version="1\.0"\?>\n<CommunityApplications>[\s\S]*<\/CommunityApplications>\s*$/, 'ca_profile.xml is not a CommunityApplications document');
   // The icon must be the app's own icon, the same file the template shows; the CA listing reads ca_profile.
@@ -178,6 +184,46 @@ test('the Unraid template names every volume, the ports, and the ids, and stops 
   // The main repo is the CA template repository now; a TemplateURL at the old unraid-templates repo would
   // have Unraid refresh the template from a file that is only kept for old links.
   assert.match(x, /<TemplateURL>https:\/\/raw\.githubusercontent\.com\/AngeloSha\/uchiyomi\/main\/templates\/uchiyomi\.xml<\/TemplateURL>/, 'TemplateURL does not point at this repo');
+});
+
+/** One <Config> element of a template, by Target: its attributes and its value. */
+function configOf(x: string, target: string): { attrs: string; value: string } | null {
+  const m = x.match(new RegExp(`<Config ([^>]*Target="${target.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&')}"[^>]*)>([^<]*)</Config>`));
+  return m ? { attrs: m[1], value: m[2] } : null;
+}
+
+/**
+ * #72: the extension engine for Unraid, as a template of its own, set up the way the compose files set it up.
+ * Before it, an Unraid user had to find, pin and configure a Suwayomi container by hand, and the one shipped
+ * uncapped in every layout until v0.46.0 took a quarter of the host's memory (discussion #72).
+ *
+ * Reintroduce by deleting `--memory=1536m` from ExtraParams: the uncapped JVM is back on Unraid. Or write `--`
+ * into its header comment: dockerMan cannot parse the file (PR #50), and the helper above names it.
+ */
+test('the Unraid engine template is the bundled engine', () => {
+  const file = 'templates/uchiyomi-suwayomi.xml';
+  const x = read(file);
+  assertParsableTemplate(x, file);
+  assert.match(x, /<Repository>ghcr\.io\/suwayomi\/suwayomi-server:v[\d.]+<\/Repository>/, 'the engine image is not pinned (enginePins.test.ts holds the version)');
+  assert.match(x, /<ExtraParams>[^<]*--memory=\d+[mg]\b[^<]*<\/ExtraParams>/, 'no memory ceiling: a JVM sizes its heap from the whole server');
+  assert.match(configOf(x, 'JAVA_TOOL_OPTIONS')?.value ?? '', /-Xmx\d+[mMgG]/, "the engine's heap is not capped");
+  const data = configOf(x, '/home/suwayomi/.local/share/Tachidesk');
+  assert.ok(data && /Type="Path"/.test(data.attrs), "no Path for the engine's data: every install would lose its extensions and series links on update");
+  assert.match(data!.value, /^\/mnt\/user\/appdata\/uchiyomi-suwayomi$/, 'the engine data is not in its own appdata folder');
+  assert.ok(/Type="Port"/.test(configOf(x, '4567')?.attrs ?? ''), 'no port 4567 for Uchiyomi to reach');
+  for (const [k, v] of [['AUTO_DOWNLOAD_CHAPTERS', 'false'], ['DOWNLOAD_AS_CBZ', 'true'], ['WEB_UI_ENABLED', 'false'], ['FLARESOLVERR_ENABLED', 'true']] as const) {
+    const c = configOf(x, k);
+    assert.equal(c?.value, v, `${k} is not ${v} on the Unraid engine`);
+    assert.match(c!.attrs, new RegExp(`Default="${v}"`), `${k}'s default is not ${v}`);
+  }
+  assert.ok(configOf(x, 'FLARESOLVERR_URL'), 'no FLARESOLVERR_URL to point the engine at a solver');
+  assert.match(configOf(x, 'AUTH_PASSWORD')?.attrs ?? '', /Mask="true"/, "the engine's password is shown in clear");
+  assert.match(x, /<TemplateURL>https:\/\/raw\.githubusercontent\.com\/AngeloSha\/uchiyomi\/main\/templates\/uchiyomi-suwayomi\.xml<\/TemplateURL>/, 'TemplateURL does not point at this file');
+  // The way in: the main template's help names the engine template, and it can pass the engine's credentials.
+  const main = read('templates/uchiyomi.xml');
+  assert.match(configOf(main, 'SUWAYOMI_URL')?.attrs ?? '', /Description="[^"]*uchiyomi-suwayomi[^"]*:4567/, "the main template's SUWAYOMI_URL help does not point at the engine template");
+  assert.ok(configOf(main, 'SUWAYOMI_USERNAME'), 'the main template cannot pass the engine user name');
+  assert.match(configOf(main, 'SUWAYOMI_PASSWORD')?.attrs ?? '', /Mask="true"/, "the main template shows the engine's password in clear");
 });
 
 test('the Umbrel package is the one under review: proxy block, PUID, digest pin, data under app-data', () => {

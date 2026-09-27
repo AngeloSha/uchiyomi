@@ -11,9 +11,11 @@
 #
 # The extension engine is Suwayomi-Server, run headless -- you never use its own interface -- and it runs the
 # Mihon/Tachiyomi extensions. It ships ON, as its own container because it is a JVM, capped at 1.5 GB below.
-# MangaDex and sites you add by URL work without it: delete the uchiyomi-suwayomi service, set SUWAYOMI_URL
-# to an empty string, and the whole thing is one container plus the Cloudflare solver.
+# MangaDex and sites you add by URL work without it: put EXTENSION_ENGINE=0 in .env and run
+# `docker compose up -d`, and the whole thing is one container plus the Cloudflare solver. Its data is kept;
+# delete the line and run the same command to bring it back.
 #
+#   EXTENSION_ENGINE=0               don't run the extension engine (default 1)
 #   LIBRARY_PATH=/mnt/media/comics   your existing library (default: ./library)
 #   PUID= / PGID=                    run as the user that OWNS your library, so Uchiyomi can rename and
 #                                    delete files in it. `id -u` and `id -g`. Leave both unset and nothing
@@ -53,9 +55,12 @@ services:
       OIDC_ALLOW_SIGNUP: ${OIDC_ALLOW_SIGNUP:-false}
       OIDC_LINK_BY_USERNAME: ${OIDC_LINK_BY_USERNAME:-false}
       OIDC_ADMIN_GROUP: ${OIDC_ADMIN_GROUP:-}
-      # Extension engine (Mihon/Tachiyomi extensions). Set to an empty string to turn it off entirely and
-      # drop the container below; it is a JVM and costs about 800 MB.
-      SUWAYOMI_URL: ${SUWAYOMI_URL:-http://uchiyomi-suwayomi:4567}
+      # Extension engine (Mihon/Tachiyomi extensions). EXTENSION_ENGINE=0 in .env turns it off and drops the
+      # container below (it is a JVM and costs about 800 MB); SUWAYOMI_URL points at a Suwayomi you run yourself
+      # instead. The single dash is deliberate: `:-` treats an empty value as unset, so the documented
+      # `SUWAYOMI_URL=` never turned anything off.
+      SUWAYOMI_URL: ${SUWAYOMI_URL-http://uchiyomi-suwayomi:4567}
+      EXTENSION_ENGINE: ${EXTENSION_ENGINE:-1}
       SUWAYOMI_USERNAME: ${SUWAYOMI_USERNAME:-}
       SUWAYOMI_PASSWORD: ${SUWAYOMI_PASSWORD:-}
       SUWAYOMI_MAX_SOURCES: ${SUWAYOMI_MAX_SOURCES:-25}
@@ -108,10 +113,15 @@ services:
     expose:
       - "8191"
 
-  # Optional: Mihon/Tachiyomi extensions. Remove this service and set SUWAYOMI_URL= empty to drop it.
+  # Optional: Mihon/Tachiyomi extensions. EXTENSION_ENGINE=0 in .env drops it (see the header).
   uchiyomi-suwayomi:
     image: ghcr.io/suwayomi/suwayomi-server:v2.3.2243
     container_name: uchiyomi-suwayomi
+    # The switch. EXTENSION_ENGINE=0 in .env, then `docker compose up -d`: this container is not run, and the app
+    # (which reads the same variable) treats extensions as off. Its data stays in the volume; delete the line and
+    # run the same command to bring it back where it left off. Never `docker compose down -v`, which deletes it.
+    deploy:
+      replicas: ${EXTENSION_ENGINE:-1}
     restart: unless-stopped
     # The engine is a JVM, and a JVM with no limit sizes its heap from the HOST's memory -- a quarter of it:
     # 15.7 GiB on a 62 GB machine, measured 2026-09-25 against this image. It idles near 780 MB, so without a

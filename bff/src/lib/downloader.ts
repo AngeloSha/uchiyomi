@@ -14,7 +14,8 @@ import { classify, reportOk, reportFail, SourceStatus } from './sourceHealth';
 import { withGate } from './gate';
 import { imageExt } from './imageExt';
 import { writeAtomic } from './fsAtomic';
-import { paceFor, paceLevel, noteRateLimited, MAX_PAGE_GAP_MS } from './pace';
+import { pagePace, paceLevel, noteRateLimited, MAX_PAGE_GAP_MS } from './pace';
+import { drawGap } from './archivePace';
 import { pageName, placeholderPng, PARTIAL_MANIFEST, type PartialManifest } from './partial';
 
 /**
@@ -218,12 +219,22 @@ async function isImage(buf: Buffer): Promise<boolean> {
 const MIN_FREE_GB = process.env.MIN_FREE_GB === undefined ? 10 : Number(process.env.MIN_FREE_GB) || 0;
 async function assertFreeSpace(): Promise<void> {
   if (!(MIN_FREE_GB > 0)) return;
-  const free = await statfs(DL_ROOT).then((f) => Number(f.bavail) * Number(f.bsize)).catch(() => null);
+  const free = await freeBytes();
   if (free === null || free >= MIN_FREE_GB * 2 ** 30) return;
   throw Object.assign(
     new Error(`${(free / 2 ** 30).toFixed(1)} GiB free under ${DL_ROOT}, floor is ${MIN_FREE_GB} GiB`),
     { diskFull: true },
   );
+}
+
+/**
+ * Bytes free for downloads under DL_ROOT, or null when statfs cannot say.
+ *
+ * The guard above and the slow archive's own, higher floor (lib/archive.ts) measure the same disk the same
+ * way, and both fail open on null: a guard that cannot measure must not stop everything.
+ */
+export function freeBytes(): Promise<number | null> {
+  return statfs(DL_ROOT).then((f) => Number(f.bavail) * Number(f.bsize)).catch(() => null);
 }
 
 /**
@@ -295,9 +306,16 @@ export async function downloadChapter(input: DownloadInput, opts: { replace?: bo
 export interface PageCtx {
   /** The chapter's id on the source: what the referer is derived from when the adapter declares none. */
   chapterSourceId: string;
-  /** Starting gap and pool width. Default: `paceFor(src)`, which is the adapter's declaration at pace level 0. */
+  /** Starting gap and pool width. Default: `pagePace(src)`, which is the adapter's declaration at pace level 0. */
   gap?: number;
   workers?: number;
+  /**
+   * Draw each page's gap from this range instead of using `gap` for every page (the slow archive, via
+   * withSlowPace in lib/pace.ts). Default: whatever pagePace says, which is none outside withSlowPace.
+   */
+  jitter?: [number, number];
+  /** Tests only: where the jitter draws come from. Default Math.random. */
+  rand?: () => number;
   /**
    * false = ask each index once and report; no resume pass. The completion pass uses it: a partial
    * chapter's missing page is asked for once a night, so the source sees exactly as many requests as there
@@ -402,10 +420,13 @@ export async function fetchPages(src: SourceAdapter, urls: string[], indices: nu
   // declaration at level 0, and one worker at a doubled gap for a source that answered 429 recently. The
   // clamping of a declared width lives in paceFor: a compiled plugin that declares nonsense gets one worker,
   // not zero -- `Math.max(1, NaN)` is NaN, and an Array.from of NaN workers fetches nothing and reports a
-  // 0-page chapter as the site's fault.
-  const pace = paceFor(src, { gapMs: DL_PAGE_GAP_MS });
+  // 0-page chapter as the site's fault. Under withSlowPace (the slow archive) pagePace also hands back a
+  // range, one worker, and a gap that is never below the one it replaces.
+  const pace = pagePace(src, { gapMs: DL_PAGE_GAP_MS });
   let gap = ctx.gap ?? pace.gap;
   let workers = ctx.workers ?? pace.workers;
+  let jitter = ctx.jitter ?? pace.jitter;
+  const rand = ctx.rand ?? pace.rand ?? Math.random;
   let lastStart = -Infinity;
   let lastDone = -Infinity;
 
@@ -426,13 +447,17 @@ export async function fetchPages(src: SourceAdapter, urls: string[], indices: nu
    * into a "12 of 108 pages" failure, and earns a cooldown for behaviour that was ours. Re-checked after the
    * sleep too, since a slot reserved before the 429 landed is exactly the request the site asked us not to
    * make.
+   *
+   * With a jitter range each page draws its OWN gap, fresh, never below `gap`: one draw per chapter would
+   * still be a metronome inside it, and a metronome is what the slow archive is not meant to sound like.
    */
   const run = async (idx: number[]): Promise<void> => {
     let next = 0;
     const worker = async () => {
       while (!retryAfterMs && next < idx.length) {
         const i = idx[next++];
-        const at = Math.max(Date.now(), lastStart + gap, lastDone + gap);
+        const g = jitter ? drawGap(jitter, gap, rand) : gap;
+        const at = Math.max(Date.now(), lastStart + g, lastDone + g);
         lastStart = at;
         const wait = at - Date.now();
         if (wait > 0) {
@@ -482,6 +507,9 @@ export async function fetchPages(src: SourceAdapter, urls: string[], indices: nu
       // overlapping requests is not going to like four more. A declared gap of 0 stays 0 inside this
       // chapter (the engine paces the site); the NEXT chapter gets the server default doubled (paceFor).
       gap = gap ? Math.min(gap * 2, MAX_PAGE_GAP_MS) : 0;
+      // A slow pace backs off the same way, both ends of its range: doubled up to the ceiling, and never
+      // below where it started when it started above the ceiling -- the resume may not be the fast part.
+      if (jitter) jitter = jitter.map((g) => Math.min(g * 2, Math.max(MAX_PAGE_GAP_MS, g))) as [number, number];
       workers = 1;
     } else if (round) {
       break; // a stable shortfall with no 429: the pages are not there, and one retry was enough to know
@@ -514,9 +542,11 @@ async function fetchChapter(
   }
   if (!urls.length) throw new Error('no page urls');
 
-  const pace = paceFor(src, { gapMs: DL_PAGE_GAP_MS });
+  // pagePace, not paceFor: under withSlowPace this is where Suwayomi's gap 0 and its pool give way to the
+  // archive's one worker and random gaps. Everywhere else the two are the same thing.
+  const pace = pagePace(src, { gapMs: DL_PAGE_GAP_MS });
   const { page, ext, worst, failed, refusal } = await fetchPages(src, urls, urls.map((_, i) => i), {
-    chapterSourceId: input.chapter.sourceId, gap: pace.gap, workers: pace.workers,
+    chapterSourceId: input.chapter.sourceId, gap: pace.gap, workers: pace.workers, jitter: pace.jitter, rand: pace.rand,
   });
 
   const zip = new AdmZip();

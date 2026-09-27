@@ -213,3 +213,114 @@ test('the extension icon is carried onto the adapter', async () => {
   assert.equal(a.iconUrl, '/api/v1/source/0/icon');
   assert.equal(makeSuwayomiAdapter(LOCAL, fakeGql({})).iconUrl, undefined, 'no icon means no field, not an empty one');
 });
+
+// ---- #116: posting order and url -----------------------------------------------------------------------------
+
+/** Answer fetchChapters with only the fields the query selected, as the engine does. */
+const selecting = (rows: Array<Record<string, unknown>>, seen: string[] = [], refuse?: (q: string) => Error | null) =>
+  (async (query: string) => {
+    seen.push(query);
+    const err = refuse?.(query);
+    if (err) throw err;
+    const fields = /chapters\s*\{([^}]*)\}/.exec(query)![1].trim().split(/\s+/);
+    return { fetchChapters: { chapters: rows.map((r) => Object.fromEntries(fields.filter((f) => f in r).map((f) => [f, r[f]]))) } };
+  }) as never;
+
+// Webtoons-shaped, as the engine answers: sourceOrder ascending (1 = the oldest post), every post numbered 1.
+const PARTS = [
+  { id: 71, chapterNumber: 1, name: 'Episode 1 - Page1  (ch. 1)', uploadDate: '1570184580000', pageCount: -1, sourceOrder: 1, url: '/episode?titleNo=344018&episodeNo=1' },
+  { id: 72, chapterNumber: 1, name: 'Episode 1 - Page 2 (ch. 1)', uploadDate: '1570496478000', pageCount: -1, sourceOrder: 2, url: '/episode?titleNo=344018&episodeNo=2' },
+  { id: 90, chapterNumber: 2, name: 'E2 - 54-56 (ch. 2)', uploadDate: '1576000000000', pageCount: -1, sourceOrder: 3, url: '/episode?titleNo=344018&episodeNo=23' },
+  { id: 73, chapterNumber: 1, name: 'Episode 1 - Page 3 (ch. 1)', uploadDate: '1571142111000', pageCount: -1, sourceOrder: 4, url: '/episode?titleNo=344018&episodeNo=3' },
+];
+
+test('chapters carry the engine\'s posting order and url, and the number stays raw', async () => {
+  // Reintroduce by dropping `sourceOrder url` from FETCH_CHAPTERS: the engine then sends neither, `url` is
+  // undefined and the first deepEqual fails (and `order` falls back to the answer's positions).
+  const { makeSuwayomiAdapter } = await load();
+  const seen: string[] = [];
+  const a = makeSuwayomiAdapter(LOCAL, selecting(PARTS, seen));
+  const cs = await a.listChapters('7');
+  assert.match(seen[0], /\bsourceOrder\b/);
+  assert.deepEqual(cs.map((c) => [c.sourceId, c.url]), [
+    ['71', '/episode?titleNo=344018&episodeNo=1'], ['72', '/episode?titleNo=344018&episodeNo=2'],
+    ['73', '/episode?titleNo=344018&episodeNo=3'], ['90', '/episode?titleNo=344018&episodeNo=23'],
+  ]);
+  assert.deepEqual(cs.map((c) => c.order), [1, 2, 4, 3], 'the engine\'s sourceOrder, carried past the sort by number');
+  // Still the extension's number: 'Episode 1 - Page 2 (ch. 1)' is 1. Renumbering is the listing layer's call.
+  assert.deepEqual(cs.map((c) => c.number), [1, 1, 1, 2]);
+  assert.equal(cs[1].title, 'Episode 1 - Page 2 (ch. 1)');
+  assert.equal(cs[1].sourceNumber, undefined, 'the adapter never renumbers, so it never sets sourceNumber');
+  // A row the engine gave no usable order takes its place in the answer; a blank url is no url.
+  const odd = await makeSuwayomiAdapter(LOCAL, selecting([{ ...PARTS[0], sourceOrder: 0, url: '  ' }, { ...PARTS[1], sourceOrder: null }])).listChapters('7');
+  assert.deepEqual(odd.map((c) => [c.order, c.url]), [[1, undefined], [2, '/episode?titleNo=344018&episodeNo=2']]);
+});
+
+/** The engine's own words for a field it does not have, as client.ts rethrows them. */
+const fieldUndefined = (q: string) => /\bsourceOrder\b/.test(q)
+  ? new Error("suwayomi: Validation error (FieldUndefined@[fetchChapters/chapters/sourceOrder]) : Field 'sourceOrder' in type 'ChapterType' is undefined")
+  : null;
+
+test('an older engine that refuses sourceOrder is asked the v0.48 way, once', async () => {
+  // Reintroduce by removing the fallback in listChapters: the first call rejects with the validation error.
+  const { makeSuwayomiAdapter } = await load();
+  const seen: string[] = [];
+  const run = selecting(PARTS, seen, fieldUndefined);
+  const a = makeSuwayomiAdapter(LOCAL, run);
+  const cs = await a.listChapters('7');
+  assert.equal(seen.length, 2, 'refused once, then asked without the fields');
+  assert.doesNotMatch(seen[1], /sourceOrder|\burl\b/);
+  // The engine still answers in sourceOrder, so each row's place in the answer is its order.
+  assert.deepEqual(cs.map((c) => [c.sourceId, c.order]), [['71', 1], ['72', 2], ['73', 4], ['90', 3]]);
+  assert.equal(cs[0].url, undefined);
+  // Remembered for that engine: no second refusal per listing.
+  await a.listChapters('7');
+  await makeSuwayomiAdapter({ ...LOCAL, id: '9' }, run).listChapters('8');
+  assert.equal(seen.length, 4);
+  assert.ok(seen.slice(2).every((q) => !/sourceOrder/.test(q)));
+  // ...and only for that engine: another transport still asks for the fields.
+  const other: string[] = [];
+  await makeSuwayomiAdapter(LOCAL, selecting(PARTS, other)).listChapters('7');
+  assert.match(other[0], /\bsourceOrder\b/);
+});
+
+test('a failure that is not the engine refusing those fields is not retried', async () => {
+  // Reintroduce by retrying on any error: two calls, and the older query's answer would hide this one.
+  const { makeSuwayomiAdapter, refusedChapterFields } = await load();
+  const seen: string[] = [];
+  const boom = new Error('suwayomi: Exception while fetching data (/fetchChapters) : java.io.IOException: bad url\r\n\r\nat ...');
+  const a = makeSuwayomiAdapter(LOCAL, selecting(PARTS, seen, () => boom));
+  await assert.rejects(a.listChapters('7'), (e) => e === boom);
+  assert.equal(seen.length, 1);
+  assert.equal(refusedChapterFields(new Error('suwayomi timeout after 30000 ms')), false);
+  assert.equal(refusedChapterFields(fieldUndefined('sourceOrder')), true);
+  // Matched on the engine's words wherever they sit, so a wrapper that keeps them still falls back.
+  assert.equal(refusedChapterFields(new Error("extension failed: suwayomi: Validation error (FieldUndefined@[fetchChapters/chapters/url]) : Field 'url' in type 'ChapterType' is undefined")), true);
+});
+
+test('against the pinned engine: Istrevelia arrives with its posting order, its urls and its raw numbers', async () => {
+  // The strict fake refuses any field v2.3.2243 does not have, so this is the query itself meeting the schema.
+  const { startFakeSuwayomi, SOURCE_IDS } = await import('./fixtures/fakeSuwayomi');
+  const { makeSuwayomiAdapter } = await load();
+  const { detectSharedNumbering, postingSequence, displayTitle } = await import('../src/lib/postingOrder');
+  const fake = await startFakeSuwayomi();
+  try {
+    const run = (async (query: string, variables: Record<string, unknown> = {}) => {
+      const r = await fake.query(query, variables);
+      if (r.errors?.length) throw new Error(`suwayomi: ${r.errors[0].message}`);
+      return r.data;
+    }) as never;
+    const a = makeSuwayomiAdapter({ id: SOURCE_IDS.webtoons, name: 'Webtoons.com', lang: 'en' }, run);
+    const cs = await a.listChapters(String(fake.manga('Istrevelia').id));
+    assert.equal(cs.length, 226);
+    assert.deepEqual(fake.calls.filter((c) => c.status === 'rejected' || c.status === 'unimplemented'), []);
+    assert.deepEqual([...cs.map((c) => c.order!)].sort((x, y) => x - y), Array.from({ length: 226 }, (_, i) => i + 1));
+    assert.ok(cs.every((c) => typeof c.url === 'string' && c.url.includes('/viewer')), 'every post carries its path');
+    assert.equal(new Set(cs.map((c) => c.number)).size, 13, 'the extension\'s shared numbers, raw');
+    const first = postingSequence(cs)[0];
+    assert.deepEqual([first.number, displayTitle(first.title)], [1, 'Episode 1 - Page1']);
+    assert.equal(detectSharedNumbering(cs).verdict, 'strong');
+  } finally {
+    await fake.close();
+  }
+});

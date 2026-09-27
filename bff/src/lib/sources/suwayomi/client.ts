@@ -54,8 +54,40 @@ export function suwayomiImageHeaders(): Record<string, string> {
     : {};
 }
 
+/**
+ * The engine's service name in the shipped compose files: `uchiyomi-suwayomi` in deploy/, `yomi-suwayomi` in the
+ * development stack. EXTENSION_ENGINE only removes THAT container, so only an address naming it goes with it.
+ */
+export const BUNDLED_ENGINE_HOSTS: ReadonlySet<string> = new Set(['uchiyomi-suwayomi', 'yomi-suwayomi']);
+
+/**
+ * EXTENSION_ENGINE=0 while SUWAYOMI_URL still names the bundled container (#72).
+ *
+ * One variable has to turn off both the container and the feature: compose scales the engine to zero replicas,
+ * and without this the app would go on calling a host that no longer exists and report an engine it was told
+ * to drop as "unreachable". But the switch only speaks for the bundled container. Someone who dropped it and
+ * points SUWAYOMI_URL at a Suwayomi of their own, with the line still in .env, keeps extensions -- hence the
+ * host check rather than the flag alone.
+ *
+ * Both inputs are parameters, like suwayomiBase's: env is parsed once at load, and a test could not vary it.
+ */
+export function engineSwitchedOff(raw: string | undefined = env.SUWAYOMI_URL, on: boolean = env.EXTENSION_ENGINE): boolean {
+  if (on) return false;
+  const base = suwayomiBase(raw);
+  if (!base) return false;
+  try {
+    return BUNDLED_ENGINE_HOSTS.has(new URL(base).hostname.toLowerCase());
+  } catch {
+    return false; // not a URL at all: nothing that could be the bundled container
+  }
+}
+
+/**
+ * Is there an extension engine to talk to: an address, and not one switched off with EXTENSION_ENGINE. Every
+ * caller -- registration, the routes, Health, the scheduled checks, `gql` itself -- reads the switch through here.
+ */
 export function suwayomiConfigured(): boolean {
-  return !!env.SUWAYOMI_URL;
+  return !!env.SUWAYOMI_URL && !engineSwitchedOff();
 }
 
 /**

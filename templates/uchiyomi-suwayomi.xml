@@ -1,0 +1,41 @@
+<?xml version="1.0"?>
+<!--
+  Unraid Community Applications template for Uchiyomi's optional extension engine: Suwayomi-Server, run
+  headless, which runs the Mihon/Tachiyomi extensions for Uchiyomi. Install Uchiyomi (uchiyomi.xml) first.
+  After this starts, set Uchiyomi's SUWAYOMI_URL to http://YOUR-SERVER-IP:4567 and apply.
+
+  It is the same engine, pinned to the same version and set up the same way, as the uchiyomi-suwayomi
+  service in deploy/docker-compose.yml: a memory cap, chapter downloads off (Uchiyomi does the downloading
+  and owns the library), its own web page off, and its Cloudflare helper on. Keep the pin equal to the
+  compose files and the desktop app (bff/test/enginePins.test.ts): an engine never reads a database that a
+  newer one has migrated.
+-->
+<Container version="2">
+  <Name>uchiyomi-suwayomi</Name>
+  <Repository>ghcr.io/suwayomi/suwayomi-server:v2.3.2243</Repository>
+  <Registry>https://github.com/Suwayomi/Suwayomi-Server/pkgs/container/suwayomi-server</Registry>
+  <Network>bridge</Network>
+  <Shell>bash</Shell>
+  <Privileged>false</Privileged>
+  <Support>https://github.com/AngeloSha/uchiyomi/issues</Support>
+  <Project>https://github.com/AngeloSha/uchiyomi/blob/main/docs/extensions.md</Project>
+  <Overview>The extension engine for Uchiyomi: it runs Mihon/Tachiyomi extensions so Uchiyomi can search, follow and download from them. You never open it yourself; Uchiyomi's Admin, Extensions tab is where you add repositories and install extensions. Install Uchiyomi first. Before the first start, open the Unraid terminal and run: mkdir -p /mnt/user/appdata/uchiyomi-suwayomi and then chown 1000:1000 /mnt/user/appdata/uchiyomi-suwayomi (the engine runs as user 1000 and cannot write to a folder that belongs to root). It takes a minute or two to start the first time. Then, on the uchiyomi container, set SUWAYOMI_URL to http://YOUR-SERVER-IP:4567 and apply. It uses about 750 MB of memory while it runs and is capped at 1.5 GB. MangaDex and sites you add by address work in Uchiyomi without it. To remove it, stop it and clear SUWAYOMI_URL on Uchiyomi; keep its appdata folder if you might come back, because it holds the links for every series you added through an extension.</Overview>
+  <Requires>Uchiyomi (the uchiyomi template). A FlareSolverr for sites behind Cloudflare is recommended: the same one Uchiyomi uses.</Requires>
+  <Category>MediaServer:Books Tools:</Category>
+  <TemplateURL>https://raw.githubusercontent.com/AngeloSha/uchiyomi/main/templates/uchiyomi-suwayomi.xml</TemplateURL>
+  <Icon>https://raw.githubusercontent.com/AngeloSha/uchiyomi/main/web/public/icons/icon-512.png</Icon>
+  <!-- A JVM with no limit sizes its heap from the whole server's memory. The heap cap is JAVA_TOOL_OPTIONS below; this ceiling turns anything the heap cap does not cover into a restart. -->
+  <ExtraParams>--memory=1536m</ExtraParams>
+  <Config Name="API port" Target="4567" Default="4567" Mode="tcp" Description="The port Uchiyomi talks to: SUWAYOMI_URL is http://YOUR-SERVER-IP:4567. Its own web page is off." Type="Port" Display="always" Required="true" Mask="false">4567</Config>
+  <Config Name="Engine data" Target="/home/suwayomi/.local/share/Tachidesk" Default="/mnt/user/appdata/uchiyomi-suwayomi" Mode="rw" Description="Installed extensions, and the links for every series added through them. Never delete it. It is not in Uchiyomi's nightly backup: back it up with your appdata. Must belong to user 1000 (see the overview)." Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/uchiyomi-suwayomi</Config>
+  <Config Name="FLARESOLVERR_URL" Target="FLARESOLVERR_URL" Default="" Mode="" Description="The same FlareSolverr address as Uchiyomi's FLARESOLVERR_URL, e.g. http://192.168.1.10:8191. Without it, extension sources behind Cloudflare fail with Cloudflare bypass currently disabled." Type="Variable" Display="always" Required="false" Mask="false"></Config>
+  <Config Name="FLARESOLVERR_ENABLED" Target="FLARESOLVERR_ENABLED" Default="true" Mode="" Description="Let the engine use that FlareSolverr. It has no browser of its own." Type="Variable" Display="advanced" Required="false" Mask="false">true</Config>
+  <Config Name="JAVA_TOOL_OPTIONS" Target="JAVA_TOOL_OPTIONS" Default="-Xmx768m -XX:+UseSerialGC" Mode="" Description="The engine's heap cap, the same as the desktop app's. Raise it (and the memory limit in Extra Parameters) only for a very long extension list." Type="Variable" Display="advanced" Required="false" Mask="false">-Xmx768m -XX:+UseSerialGC</Config>
+  <Config Name="AUTO_DOWNLOAD_CHAPTERS" Target="AUTO_DOWNLOAD_CHAPTERS" Default="false" Mode="" Description="Keep false: Uchiyomi does the downloading and owns the library. True would fill this folder with a second, unmanaged copy." Type="Variable" Display="advanced" Required="false" Mask="false">false</Config>
+  <Config Name="DOWNLOAD_AS_CBZ" Target="DOWNLOAD_AS_CBZ" Default="true" Mode="" Description="Keep true." Type="Variable" Display="advanced" Required="false" Mask="false">true</Config>
+  <Config Name="WEB_UI_ENABLED" Target="WEB_UI_ENABLED" Default="false" Mode="" Description="The engine's own web page. Off: the port is on your network, and Uchiyomi is the interface." Type="Variable" Display="advanced" Required="false" Mask="false">false</Config>
+  <Config Name="TZ" Target="TZ" Default="Etc/UTC" Mode="" Description="Time zone for the engine's logs." Type="Variable" Display="advanced" Required="false" Mask="false">Etc/UTC</Config>
+  <Config Name="AUTH_MODE" Target="AUTH_MODE" Default="" Mode="" Description="Optional: basic_auth to require a user name and password on the engine's port. Then set the same two on Uchiyomi as SUWAYOMI_USERNAME and SUWAYOMI_PASSWORD. Leave empty for none." Type="Variable" Display="advanced" Required="false" Mask="false"></Config>
+  <Config Name="AUTH_USERNAME" Target="AUTH_USERNAME" Default="" Mode="" Description="With AUTH_MODE basic_auth." Type="Variable" Display="advanced" Required="false" Mask="false"></Config>
+  <Config Name="AUTH_PASSWORD" Target="AUTH_PASSWORD" Default="" Mode="" Description="With AUTH_MODE basic_auth." Type="Variable" Display="advanced" Required="false" Mask="true"></Config>
+</Container>

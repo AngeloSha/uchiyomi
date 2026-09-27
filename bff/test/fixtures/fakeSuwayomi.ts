@@ -137,6 +137,11 @@ export interface FakeCall {
   deprecated?: string[];
   error?: string;
 }
+export interface FakeCacheClear {
+  cachedPages: boolean | null;
+  cachedThumbnails: boolean | null;
+  downloadedThumbnails: boolean | null;
+}
 export interface GqlResponse<T = any> {
   data?: T;
   errors?: Array<{ message: string; locations?: Array<{ line: number; column: number }>; path?: Array<string | number>; extensions?: object }>;
@@ -159,6 +164,12 @@ export interface FakeSuwayomi {
   readonly settings: Record<string, unknown>;
   /** Every preference write that took effect: the position asked for and the key it landed on. */
   readonly prefWrites: Array<{ source: string; position: number; key: string; value: unknown }>;
+  /** The pages the engine keeps on disk because it served them (its manga-cache), by request path. */
+  readonly pageCache: Set<string>;
+  /** The covers it keeps the same way (its thumbnail cache). */
+  readonly thumbnailCache: Set<string>;
+  /** Every clearCachedImages that ran, as asked: `null` for a kind not given. */
+  readonly cacheClears: FakeCacheClear[];
   /**
    * Run a GraphQL request in-process, with the engine's validation and errors. No HTTP, so `down` and `slow` do
    * not apply here (an extension_error does).
@@ -200,6 +211,9 @@ export async function startFakeSuwayomi(opts: FakeSuwayomiOptions = {}): Promise
     extension: (pkg) => find(e.state.extensions.get(pkg), `extension ${pkg}`),
     get settings() { return e.state.settings; },
     get prefWrites() { return e.state.prefWrites; },
+    get pageCache() { return e.state.pageCache; },
+    get thumbnailCache() { return e.state.thumbnailCache; },
+    get cacheClears() { return e.state.cacheClears; },
     query: (query, variables = {}) => e.graphql({ query, variables }),
     reset: (seed) => e.reset(seed),
     stop: () => h.stop(),

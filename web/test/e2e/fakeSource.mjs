@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Dependency-free HTTP source used only by the v0.40 and v0.41 browser walks.
 //
-//   node fakeSource.mjs --name fake-a --port 18150
+//   node fakeSource.mjs --name fake-a --port 18150 [--extra v42,v49]
 //
 // Control it with POST /__script {chapter,page,behaviour}; chapter may be a chapter id, a chapter number
 // (shorthand for walk-tale-N), a SERIES id (for `omit:`), or "search" with page 0. GET /__log returns every
@@ -39,11 +39,27 @@ if (!Number.isInteger(PORT) || PORT < 1 || PORT > 65535) throw new Error(`bad --
 // neither of which a keyboard produces, which is what the v0.42.0 walk types a straight-quoted version of
 // into Remove / Delete files / Forget (issue #66). Gated because the v0.40 walk folds search results by
 // title and asserts the order of the wall, and neither earlier walk should grow a series it never asked for.
+// ⚠️ `walk-istrevelia` is opt-in the same way (`--extra v49`; extras combine as `--extra v42,v49`): issue #116's
+// shape, 226 posts on 13 numbers the way the Webtoons extension numbers Istrevelia, each carrying its posting
+// `order`, and post ids (`walk-istrevelia-<k>`, k = the post's place) rather than number ids, because many
+// posts share a number. The shape comes from the fake extension engine (bff/test/fixtures/fakeSuwayomiEngine.mjs)
+// so both rigs serve ONE Istrevelia, and it is imported only when asked for: the walks before v0.49 load
+// nothing new and see exactly the series they always did.
+const EXTRA = new Set(String(argv.get('--extra') || '').split(',').map((e) => e.trim()).filter(Boolean));
+async function istreveliaShaped() {
+  const { istreveliaPosts, webtoonsNumbers } = await import('../../../bff/test/fixtures/fakeSuwayomiEngine.mjs');
+  const posts = istreveliaPosts();
+  const numbered = webtoonsNumbers(posts, false);
+  return posts.map((p, i) => ({ k: i + 1, number: numbered[i].chapterNumber, title: numbered[i].name.trim(), publishedAt: new Date(p.uploadDate).toISOString() }));
+}
+const POSTS = EXTRA.has('v49') ? await istreveliaShaped() : null;
 const SERIES = [
   { sourceId: 'walk-tale', title: 'Walk Tale', first: 1, last: 12 },
   { sourceId: 'walk-gap', title: 'Walk Gap', first: 1, last: 14 },
   ...(NAME === 'fake-b' ? [{ sourceId: 'walk-tale-next', title: 'Walk Tale: Next', first: 13, last: 40 }] : []),
-  ...(argv.get('--extra') === 'v42' ? [{ sourceId: 'walk-quote', title: 'Ren’s Walk – Notes', first: 1, last: 3 }] : []),
+  ...(EXTRA.has('v42') ? [{ sourceId: 'walk-quote', title: 'Ren’s Walk – Notes', first: 1, last: 3 }] : []),
+  // first/last count POSTS here, which is what chapterFromId checks a post id against.
+  ...(POSTS ? [{ sourceId: 'walk-istrevelia', title: 'Walk Istrevelia', first: 1, last: POSTS.length, posts: POSTS }] : []),
 ];
 const byId = new Map(SERIES.map((s) => [s.sourceId, s]));
 
@@ -204,6 +220,15 @@ const server = http.createServer(async (req, res) => {
       // the v0.41 gap step goes looking for. `short:n` on a chapter id is declared here as well as served
       // by /pages, so the downloader's expected count agrees with what it is handed (see the header).
       const hole = /^omit:(\d+)-(\d+)$/.exec(behaviourFor(id, 0));
+      // A posts series lists every post under the number the extension would give it; `omit:` still names numbers.
+      if (s?.posts) {
+        return sendJson(res, 200, s.posts
+          .filter((p) => !hole || p.number < Number(hole[1]) || p.number > Number(hole[2]))
+          .map((p) => {
+            const short = /^short:(\d+)$/.exec(behaviourFor(`${s.sourceId}-${p.k}`, 0));
+            return { sourceId: `${s.sourceId}-${p.k}`, number: p.number, title: p.title, order: p.k, publishedAt: p.publishedAt, pages: short ? Number(short[1]) : 12, lang: 'en' };
+          }));
+      }
       return sendJson(res, s ? 200 : 404, s ? Array.from({ length: s.last - s.first + 1 }, (_, i) => s.first + i)
         .filter((number) => !hole || number < Number(hole[1]) || number > Number(hole[2]))
         .map((number) => {

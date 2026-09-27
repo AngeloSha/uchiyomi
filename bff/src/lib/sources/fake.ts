@@ -56,11 +56,20 @@ export function makeFakeSource(id: string, base: string): SourceAdapter {
     source: id,
     title: String(value?.title ?? ''),
   });
-  const chapter = (value: any): SourceChapter => ({
-    ...(value as SourceChapter),
-    sourceId: String(value?.sourceId ?? ''),
-    number: Number(value?.number),
-  });
+  const chapter = (value: any): SourceChapter => {
+    const out: SourceChapter = {
+      ...(value as SourceChapter),
+      sourceId: String(value?.sourceId ?? ''),
+      number: Number(value?.number),
+    };
+    // The stub's posting position (#116's `--extra v49` series), kept only when it is one. An absent order
+    // must stay ABSENT, not become a key holding undefined: a listing without it is one the numbering can
+    // only warn about, and the older walks' listings never had it.
+    const order = typeof value?.order === 'number' || typeof value?.order === 'string' ? Number(value.order) : NaN;
+    if (Number.isFinite(order) && order > 0) out.order = order;
+    else delete out.order;
+    return out;
+  };
 
   return {
     id,

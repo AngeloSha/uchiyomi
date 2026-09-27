@@ -77,6 +77,20 @@ const envFlag = (def: boolean) =>
     .optional()
     .transform((v) => (v === undefined || v.trim() === '' ? def : /^(1|true|yes|on)$/i.test(v.trim())));
 
+/**
+ * EXTENSION_ENGINE, the bundled extension engine's switch (#72): whether it runs. Compose reads the same variable
+ * as the engine's `deploy.replicas`, so there it is 0 or 1; here 0, off, false and no mean off, and everything
+ * else -- unset, empty, 1, a typo -- means on.
+ *
+ * ⚠️ The opposite default to envFlag on purpose. Only an unmistakable "off" may switch it off: the engine was on
+ * for every install before this variable existed, so a stray value must never take extensions away. And it is a
+ * plain string with a transform, never an enum, because a value zod refuses exits the whole server at boot.
+ *
+ * It only says what the operator asked for. Whether it applies is client.ts `engineSwitchedOff`: only while
+ * SUWAYOMI_URL still names the bundled container, so an engine you run yourself keeps working.
+ */
+export const engineSwitchOn = (v: string | undefined): boolean => !/^(0|off|false|no)$/i.test((v ?? '').trim());
+
 const schema = z.object({
   NODE_ENV: z.string().default('production'),
   PORT: z.coerce.number().default(3000),
@@ -109,6 +123,8 @@ const schema = z.object({
   // on the JVM and exposes them over GraphQL. Empty issuer = feature off, exactly like OIDC. Uchiyomi keeps
   // owning the library, reader, downloads and updates; Suwayomi only answers search/chapters/pages.
   SUWAYOMI_URL: z.string().default(''),
+  // true = run the bundled engine (the default); see engineSwitchOn above.
+  EXTENSION_ENGINE: z.string().optional().transform(engineSwitchOn),
   SUWAYOMI_USERNAME: z.string().default(''),
   SUWAYOMI_PASSWORD: z.string().default(''),
   // Suwayomi can expose hundreds of sources; cross-source search fans out to every REGISTERED source, so

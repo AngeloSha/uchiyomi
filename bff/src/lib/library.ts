@@ -8,7 +8,7 @@ import { newSeriesId, newBookId } from './ids';
 import { env } from '../env';
 import { fingerprintChapter } from './fingerprint';
 import { findRematch, applyRematch, logRematch, MIN_BOOKS } from './rematch';
-import { numFromName, naturalCmp } from './naming';
+import { numFromName, naturalCmp, chapterName } from './naming';
 import { parseComicInfoAgeRating } from './ageRating';
 import { directionFromComicInfo } from './directionSignals';
 import { reconcileListingProgress } from './listingProgress';
@@ -934,34 +934,9 @@ export async function setBookDates(folder: string, chapters: { number: number; p
   );
 }
 
-// A volume marker in front of the chapter: "Vol.3", "Volume 3 -", "Tome 3,".
-const VOLUME = String.raw`(?:(?:vol(?:ume)?|tome|band|том)\.?\s*\d+(?:\.\d+)?\s*[,:.\-–—]?\s*)?`;
-// The word a source puts before the number, in the languages sources are written in.
-const CHAPTER_WORD = String.raw`(?:(?:ch(?:apter|ap)?|episode|ep|capítulo|capitulo|cap|chapitre|kapitel|глава|розділ|chương|bölüm|bab|rozdział)\.?\s*)?`;
-// After the number, the separators between it and a real name.
-const SEPARATOR = String.raw`\s*(?:[:.\-–—|~]+\s*)?`;
-
-/**
- * The chapter's own name, when the source gave one: what is left once the volume, the chapter word and the
- * number are taken off the front. Null when nothing is left -- the title only said the number again.
- *
- * A downloaded file is named from its number alone (lib/downloader.ts explains why), so the scanner's title
- * is the number twice. Sources usually know better, and the downloader writes it into the CBZ's ComicInfo,
- * but nothing read it back. Most sources also just say "Chapter 12", in several languages and often behind a
- * volume ("Vol.3 Chapter 12", "Capítulo 12", "第12話"): each of those is the number again, and "Vol.3 Chapter
- * 12: The Return" is named "The Return".
- */
-export function chapterName(title: string | undefined | null, number: number): string | null {
-  const t = (title ?? '').trim();
-  if (!t) return null;
-  const n = String(number).replace('.', '\\.');
-  // `(?!\.?\d)`: 12 must not match the front of 120 or 12.5.
-  const re = new RegExp(`^${VOLUME}${CHAPTER_WORD}(?:第\\s*)?0*${n}(?!\\.?\\d)(?:\\s*(?:話|话|章|回|화|편))?${SEPARATOR}`, 'iu');
-  const m = re.exec(t);
-  if (!m) return t;
-  const rest = t.slice(m[0].length).trim();
-  return rest || null;
-}
+// chapterName lives in lib/naming.ts, beside numFromName, so the pure numbering logic (lib/postingOrder.ts) can
+// read a chapter's name without importing the database. Re-exported so its importers are unchanged.
+export { chapterName };
 
 /**
  * Stamp which group released the file on disk, and which adapter it came from, onto a series' books.
@@ -976,9 +951,9 @@ export function chapterName(title: string | undefined | null, number: number): s
  * and its absence writes NULL: a complete copy landing over a partial one -- a refetch, the completion
  * pass falling through to another source -- clears the mark in the same stamp that records who wrote it.
  *
- * `title` is what the source called the chapter. Its name (chapterName, above) goes to `chapter_name` -- never
- * to `title`, which is the filename's -- and only when there is one, so a copy whose source says only "Chapter
- * 12" never replaces a name an earlier copy supplied.
+ * `title` is what the source called the chapter. Its name (chapterName, lib/naming.ts) goes to `chapter_name`
+ * -- never to `title`, which is the filename's -- and only when there is one, so a copy whose source says only
+ * "Chapter 12" never replaces a name an earlier copy supplied.
  */
 export async function setBookMeta(folder: string, landed: Array<{ number: number; scanlator?: string; source?: string; missing?: number[]; title?: string }>): Promise<void> {
   const rows = landed.filter((c) => Number.isFinite(c.number));

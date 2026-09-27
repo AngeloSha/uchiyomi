@@ -38,6 +38,9 @@
 //     preference's class, and a missing one is "Expected change to <Class>"; a list value is NOT checked
 //     against entryValues; the answer rebuilds the screen;
 //   * setSettings changes only the fields given non-null, and checks no URL.
+//   * clearCachedImages deletes the directory of each kind asked for with `true` (cachedPages = manga-cache,
+//     every page the engine has served) and answers `true` for it -- also when there was nothing to delete --
+//     and `null` for each kind not asked for, `false` included; the other kinds are left alone.
 // What is modelled rather than measured is marked where it happens (the extension's own stack frames, the
 // Webtoons numbering rule, the image failure status).
 //
@@ -1188,6 +1191,14 @@ function buildState(seed) {
     /** The engine's preferenceScreenMap: sourceId → the preference list built by the last read. */
     screens: new Map(),
     prefWrites: [],
+    /**
+     * What the engine keeps on disk for images it served: every page (tempMangaCacheRoot) and every cover
+     * (tempThumbnailCacheRoot), by path. Only clearCachedImages empties them, as on the engine.
+     */
+    pageCache: new Set(),
+    thumbnailCache: new Set(),
+    /** Every clearCachedImages that ran: the three kinds as asked, null where not given. */
+    cacheClears: [],
     nextManga: 1,
     nextChapter: 1,
   };
@@ -1440,6 +1451,20 @@ export function createFakeEngine({ seed = defaultSeed(), schema = loadSchema(), 
         const pages = Array.from({ length: row.pages }, (_, i) => `/api/v1/manga/${row.mangaId}/chapter/${row.sourceOrder}/page/${i}`);
         return { pages, chapter: chapterView(row), clientMutationId: input.clientMutationId ?? null, syncConflict: null };
       },
+      clearCachedImages: ({ input }) => {
+        const asked = (v) => v === true;
+        st.cacheClears.push({ cachedPages: input.cachedPages ?? null, cachedThumbnails: input.cachedThumbnails ?? null, downloadedThumbnails: input.downloadedThumbnails ?? null });
+        if (asked(input.cachedPages)) st.pageCache.clear();
+        if (asked(input.cachedThumbnails)) st.thumbnailCache.clear();
+        // The engine's downloaded thumbnails (its own library's covers) are not modelled: nothing Uchiyomi does
+        // creates one. Deleting a directory that is not there answers true, as on the engine.
+        return {
+          cachedPages: asked(input.cachedPages) ? true : null,
+          cachedThumbnails: asked(input.cachedThumbnails) ? true : null,
+          downloadedThumbnails: asked(input.downloadedThumbnails) ? true : null,
+          clientMutationId: input.clientMutationId ?? null,
+        };
+      },
       setSettings: ({ input }) => {
         const patch = input.settings ?? {};
         if (typeof patch.maxSourcesInParallel === 'number' && patch.maxSourcesInParallel < 1) {
@@ -1594,7 +1619,10 @@ export function createFakeEngine({ seed = defaultSeed(), schema = loadSchema(), 
         if (req.method === 'GET' && path === '/__log') return json(res, 200, { mode, content: log });
         if (req.method === 'POST' && path === '/__reset') { reset(); return json(res, 200, { ok: true }); }
         if (req.method === 'GET' && path === '/__state') {
-          return json(res, 200, { mode, settings: st.settings, prefWrites: st.prefWrites, extensions: [...st.extensions.values()] });
+          return json(res, 200, {
+            mode, settings: st.settings, prefWrites: st.prefWrites, extensions: [...st.extensions.values()],
+            pageCache: st.pageCache.size, thumbnailCache: st.thumbnailCache.size, cacheClears: st.cacheClears,
+          });
         }
         return json(res, 404, { error: 'not_found' });
       }
@@ -1629,6 +1657,7 @@ export function createFakeEngine({ seed = defaultSeed(), schema = loadSchema(), 
         if ((m = /^\/api\/v1\/manga\/(\d+)\/thumbnail$/.exec(path))) {
           const manga = st.mangas.get(Number(m[1]));
           row.status = manga ? 'ok' : 'missing';
+          if (manga) st.thumbnailCache.add(path);
           return manga ? send(res, 200, 'image/png', png(manga.id)) : send(res, 404, 'text/plain', '');
         }
         if ((m = /^\/api\/v1\/manga\/(\d+)\/chapter\/(\d+)\/page\/(\d+)$/.exec(path))) {
@@ -1639,6 +1668,7 @@ export function createFakeEngine({ seed = defaultSeed(), schema = loadSchema(), 
           // Modelled: the engine's status for an image the extension could not fetch was not observable offline.
           if (failure) { row.status = 'error'; return send(res, 500, 'text/plain', `${failure.javaClass}: ${failure.javaMessage}`); }
           row.status = 'ok';
+          st.pageCache.add(path);
           return send(res, 200, 'image/png', png(chapter.id * 100 + Number(m[3])));
         }
         if ((m = /^\/api\/v1\/extension\/icon\/([\w.]+)$/.exec(path))) {
