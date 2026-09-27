@@ -20,6 +20,7 @@ import { t as tr } from './i18n';
 import { chaptersLeft } from './chapterRows';
 import { downloadsLabel, finished, type JobCard, type RunCard } from './jobs';
 import { ringFraction, type RingValue } from './ring';
+import { archiveItems, type ArchiveItem, type ArchiveView } from './archive';
 import type { AutoFollow } from './types';
 
 export type Origin = 'add' | 'fetch' | 'fill' | 'check' | 'sweep' | 'repair' | 'bulk' | 'refetch' | 'server' | 'archive';
@@ -82,6 +83,13 @@ export interface ActivityGroup {
   title: string;
   /** What landed: saved whole, or saved with pages missing. */
   numbers: number[];
+  /**
+   * Which of `numbers` the slow archive brought (#117). Came in today sums them up in one line per series
+   * ("Slow archive: 12 chapters today") rather than listing a back catalogue number by number.
+   */
+  archived: number[];
+  /** A slow archive of this series that finished today with nothing left behind: said once, on its tile. */
+  archiveFinished?: ArchiveItem;
   partial: number;
   failed: ActivityEntry[];
   origins: Origin[];
@@ -99,11 +107,12 @@ export function groupRecent(recent: readonly ActivityEntry[]): ActivityGroup[] {
     const key = e.seriesId ?? e.folder;
     let g = groups.get(key);
     if (!g) {
-      g = { key, seriesId: e.seriesId, title: e.title, numbers: [], partial: 0, failed: [], origins: [], at: 0 };
+      g = { key, seriesId: e.seriesId, title: e.title, numbers: [], archived: [], partial: 0, failed: [], origins: [], at: 0 };
       groups.set(key, g);
     }
     if (e.status === 'done' || e.status === 'partial') {
       g.numbers.push(e.number);
+      if (isArchive(e)) g.archived.push(e.number);
       if (e.status === 'partial') g.partial++;
     } else if (e.status === 'failed') g.failed.push(e);
     if (!g.origins.includes(e.origin)) g.origins.push(e.origin);
@@ -145,11 +154,13 @@ export interface DownloadJob extends JobCard {
   autoFollow?: AutoFollow;
 }
 
-/** The whole answer. `archive` joins it with #117. */
+/** The whole answer. */
 export interface SourceJobs<J extends DownloadJob = DownloadJob> {
   content: J[];
   runs?: RunCard[];
   activity?: Activity;
+  /** The slow archive's queue (#117), as this viewer may see it: lib/archive.ts reads it. */
+  archive?: ArchiveView;
 }
 
 /**
@@ -168,6 +179,12 @@ export interface Tile<J extends DownloadJob = DownloadJob> {
   entries: ActivityEntry[];
   /** The slow archive's: drawn still and amber, in Queued, never on the ring. */
   archive: boolean;
+  /**
+   * The archive's own row for this series, when the server sent one (#117): its progress, its ETA, and who
+   * may pause or stop it. A tile built from archive activity alone has none -- an archive stopped while its
+   * last chapter was still coming in.
+   */
+  item?: ArchiveItem;
   /** What the cover's ring shows: the job's done/total, or a turn while nothing says how much is left. */
   progress: RingValue;
 }
@@ -176,7 +193,9 @@ export interface Tile<J extends DownloadJob = DownloadJob> {
 export type Attention<J extends DownloadJob = DownloadJob> =
   | { kind: 'job'; key: string; seriesId: string | null; title: string; job: J; retry: number[]; dismiss: boolean }
   | { kind: 'chapters'; key: string; seriesId: string | null; title: string; failed: ActivityEntry[]; retry: number[] }
-  | { kind: 'run'; key: string; run: RunCard; dismiss: boolean };
+  | { kind: 'run'; key: string; run: RunCard; dismiss: boolean }
+  /** A slow archive whose source keeps refusing or is gone, a full disk, a week paused, or one finished with gaps. */
+  | { kind: 'archive'; key: string; seriesId: string; title: string; item: ArchiveItem };
 
 export interface Sections<J extends DownloadJob = DownloadJob> {
   running: Tile<J>[];
@@ -202,10 +221,15 @@ const uniqueSorted = (ns: readonly number[]) => [...new Set(ns)].sort((a, b) => 
  *   chapters (its line says who it waits for): covers that hop between sections on every poll read as noise.
  * - Chapters the server fetches that no job shows (the scheduled check, a followed source's check, the repair)
  *   are grouped per series: Running once one is downloading, Queued while all of them wait their turn.
- * - The slow archive's chapters are Queued, whatever they are doing.
+ * - The slow archive is Queued, whatever it is doing: one cover per archived series, from its row in the
+ *   `archive` object (lib/archive.ts archiveItems), after what is moving now, in the order they were queued.
+ *   Its chapters in flight join that cover rather than making a second one; archive activity with no row
+ *   (an archive stopped while its last chapter came in) keeps a cover of its own until it lands.
  * - Needs attention: failed job cards (the server sends them to their starter and admins only), chapters that
  *   could not be saved and did not land later (not the archive's, which retries them itself, and not a
- *   series that is being fetched again right now), and a run that ended in error.
+ *   series that is being fetched again right now), an archive the server flags, and a run that ended in error.
+ * - Came in today: what landed, one line per series, the archive's chapters summed up on it, and an archive
+ *   that finished today with nothing left behind.
  */
 export function downloadSections<J extends DownloadJob>(d: Partial<SourceJobs<J>> | undefined, { admin }: { admin: boolean }): Sections<J> {
   const jobs = d?.content ?? [];
@@ -222,9 +246,17 @@ export function downloadSections<J extends DownloadJob>(d: Partial<SourceJobs<J>
       entries: active.filter((e) => e.folder === j.folder), archive: false, progress: ringFraction(j.done, j.total),
     });
   }
+  // The archive's rows first: its chapters in flight belong on the row's own cover, never on a second one.
+  const archive = archiveItems(d?.archive, { admin });
+  const rowOf = new Map(archive.filter((a) => a.section !== 'today').map((a) => [a.seriesId, a]));
+  const onRow = new Map<string, ActivityEntry[]>();
   // Reintroduce by building these from `active` instead of `beyondJobs(...)`: a person's add is two covers.
   const groups = new Map<string, Tile<J>>();
   for (const e of beyondJobs(active, new Set(live.map((j) => j.folder)))) {
+    // Reintroduce by dropping this: "two covers for one archived series" in serverDownloads.test.ts -- one from
+    // the row, one from its chapter in flight.
+    const row = isArchive(e) && e.seriesId ? rowOf.get(e.seriesId) : undefined;
+    if (row) { onRow.set(row.seriesId, [...(onRow.get(row.seriesId) ?? []), e]); continue; }
     // The archive keyed apart, so a series the scheduled check is also on is not drawn still.
     const key = `${isArchive(e) ? 'a' : 'n'}:${e.seriesId ?? e.folder}`;
     let t = groups.get(key);
@@ -239,8 +271,18 @@ export function downloadSections<J extends DownloadJob>(d: Partial<SourceJobs<J>
     if (!t.archive && t.entries.some((e) => e.status === 'downloading')) running.push(t);
     else queued.push(t);
   }
+  for (const a of archive) {
+    if (a.section !== 'queued') continue;
+    const entries = onRow.get(a.seriesId) ?? [];
+    queued.push({
+      key: a.seriesId, seriesId: a.seriesId, folder: entries[0]?.folder ?? '', title: a.title, entries, archive: true, item: a,
+      progress: a.progress,
+    });
+  }
 
-  const busy = new Set([...running, ...queued].map((t) => t.key));
+  // "Being fetched right now": an archive that is only queued is not, or a paused one would hide a series'
+  // failed chapters from Needs attention for as long as it stays paused.
+  const busy = new Set([...running, ...queued].filter((t) => !t.item || t.entries.length > 0).map((t) => t.key));
   const attention: Attention<J>[] = [];
   const failedJobs = jobs.filter((j) => j.status === 'error').sort((a, b) => (b.finishedAt ?? 0) - (a.finishedAt ?? 0));
   for (const j of failedJobs) {
@@ -259,6 +301,9 @@ export function downloadSections<J extends DownloadJob>(d: Partial<SourceJobs<J>
       retry: g.seriesId ? uniqueSorted(g.failed.map((f) => f.number)) : [],
     });
   }
+  for (const a of archive) {
+    if (a.section === 'attention') attention.push({ kind: 'archive', key: `archive:${a.seriesId}`, seriesId: a.seriesId, title: a.title, item: a });
+  }
   for (const r of runs.filter((x) => x.status === 'error')) {
     attention.push({ kind: 'run', key: `run:${r.kind}`, run: r, dismiss: admin || !!r.mine });
   }
@@ -266,6 +311,18 @@ export function downloadSections<J extends DownloadJob>(d: Partial<SourceJobs<J>
   const tasks = runs.filter((r) => r.status !== 'error')
     .sort((a, b) => Number(b.status === 'running') - Number(a.status === 'running') || b.startedAt - a.startedAt);
   const cameIn = groupRecent(recent).filter((g) => g.numbers.length > 0);
+  // A finished archive is said on its series' tile, or on a tile of its own when nothing of it landed today.
+  for (const a of archive) {
+    if (a.section !== 'today') continue;
+    const g = cameIn.find((x) => x.seriesId === a.seriesId);
+    if (g) { g.archiveFinished = a; continue; }
+    const at = Date.parse(a.entry.finishedAt ?? '');
+    cameIn.push({
+      key: a.seriesId, seriesId: a.seriesId, title: a.title, numbers: [], archived: [], partial: 0, failed: [], origins: ['archive'],
+      at: Number.isFinite(at) ? at : 0, archiveFinished: a,
+    });
+  }
+  cameIn.sort((a, b) => b.at - a.at);
   const stopped = finished(jobs).filter((j) => j.cancelled);
   return { running, queued, attention, tasks, cameIn, stopped };
 }
@@ -311,7 +368,9 @@ export function navRing(d: Partial<SourceJobs> | undefined): NavRing {
   const serverChapters = [...s.running, ...s.queued].filter((t) => !t.job && !t.archive).reduce((n, t) => n + t.entries.length, 0);
   // Reintroduce by counting the archive's chapters here: a week-long archive turns the ring for a week.
   const active = jobs.length > 0 || serverChapters > 0 || runs.length > 0;
-  const slow = !active && s.queued.some((t) => t.archive);
+  // The still mark says the archive is WORKING: a paused one, or one the admin paused for everyone, is not.
+  // Reintroduce by dropping `live`: "a paused archive puts no mark on the ring" in serverDownloads.test.ts.
+  const slow = !active && s.queued.some((t) => t.archive && (t.item ? t.item.live : true));
   const failed = (d?.content ?? []).filter((j) => j.status === 'error').length;
   const progress: RingValue = jobs.length ? ringFraction(jobs.reduce((n, j) => n + Math.min(j.done, j.total), 0), jobs.reduce((n, j) => n + j.total, 0))
     : runs.length ? ringFraction(runs[0].done, runs[0].total)
@@ -359,14 +418,22 @@ export function shouldReload(seen: number | null, landed: number | null): { relo
   return { reload: landed > seen, seen: landed };
 }
 
-/** This series' tile and its failed download, for the band above its chapter list. */
-export function bandFor<J extends DownloadJob>(s: Sections<J>, seriesId: string, folder?: string): { tile?: Tile<J>; failed?: Extract<Attention<J>, { kind: 'job' }> } {
+/**
+ * This series' tile, its failed download and its slow archive, for the band above its chapter list. `tile` is a
+ * person's job or the server's chapters first, the archive's only when that is all there is; `archive` is the
+ * archive's row whether it is Queued or under Needs attention, which the band shows on a line of its own with
+ * Pause, Resume and Stop -- the series page's one place to watch an archive.
+ */
+export function bandFor<J extends DownloadJob>(s: Sections<J>, seriesId: string, folder?: string): {
+  tile?: Tile<J>; failed?: Extract<Attention<J>, { kind: 'job' }>; archive?: ArchiveItem;
+} {
   const ours = (id: string | null, f: string) => id === seriesId || (!!folder && f === folder);
-  // A person's job or the server's chapters first; the slow archive only when that is all there is.
   const tiles = [...s.running, ...s.queued].filter((t) => ours(t.seriesId, t.folder));
   const tile = tiles.find((t) => !t.archive) ?? tiles[0];
   const failed = s.attention.find((a): a is Extract<Attention<J>, { kind: 'job' }> => a.kind === 'job' && ours(a.seriesId, a.job.folder));
-  return { tile, failed };
+  const archive = tiles.find((t) => t.item)?.item
+    ?? s.attention.find((a): a is Extract<Attention<J>, { kind: 'archive' }> => a.kind === 'archive' && a.seriesId === seriesId)?.item;
+  return { tile, failed, archive };
 }
 
 /**

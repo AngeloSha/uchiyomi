@@ -7,6 +7,7 @@ import {
   shouldReload, tileStatus, viewState, type ActivityEntry, type DownloadJob, type SourceJobs,
 } from '../lib/serverDownloads';
 import { downloadsLabel, type RunCard } from '../lib/jobs';
+import type { ArchiveEntry } from '../lib/archive';
 
 let n = 0;
 const e = (o: Partial<ActivityEntry>): ActivityEntry => ({
@@ -273,4 +274,84 @@ test('the view says when it could not read the downloads, instead of "nothing is
   assert.equal(viewState({ data: data({}), isLoading: false, isError: false }, downloadSections(data({}), { admin: false })), 'empty');
   const d = data({ content: [job({})] });
   assert.equal(viewState({ data: d, isLoading: false, isError: true }, downloadSections(d, { admin: false })), 'list', 'an answer in hand was hidden by a refetch that failed');
+});
+
+/* ================================================================ v0.49.0: the slow archive's own rows (#117) */
+
+const arch = (o: Partial<ArchiveEntry>): ArchiveEntry => ({
+  seriesId: 'a1', title: 'Archived', state: 'queued', direction: 'up', done: 12, left: 88, failed: 0, bytes: 0, mine: true,
+  queuedAt: '2026-09-27T08:00:00Z', startedAt: '2026-09-27T08:10:00Z', ...o,
+});
+const withArchive = (series: ArchiveEntry[], o: { active?: ActivityEntry[]; recent?: ActivityEntry[]; content?: DownloadJob[]; paused?: boolean } = {}): SourceJobs =>
+  ({ ...data(o), archive: { paused: !!o.paused, perHour: 4, window: null, series } });
+
+test("the archive's own row is ONE Queued cover: its chapter in flight joins it, and it never speeds the poll or turns the ring", () => {
+  // Reintroduce by dropping the row check in downloadSections' activity loop: "two covers for one archived
+  // series" fails -- one from the row, one from its chapter in flight.
+  const flying = e({ status: 'downloading', origin: 'archive', folder: 'Src/Arch', seriesId: 'a1', title: 'Archived', number: 13 });
+  const d = withArchive([arch({ current: { number: 13, startedAt: '2026-09-27T12:00:00Z' }, etaMs: 3 * 86_400_000 }), arch({ seriesId: 'a2', title: 'Other', state: 'paused' })], { active: [flying] });
+  const s = downloadSections(d, { admin: false });
+  assert.deepEqual(s.running, [], 'a Running cover for the archive');
+  assert.deepEqual(s.queued.map((t) => [t.key, t.archive, !!t.item]), [['a1', true, true], ['a2', true, true]], 'two covers for one archived series');
+  assert.deepEqual(s.queued[0].entries.map((x) => x.number), [13], "the chapter in flight is not on its row's cover");
+  assert.equal(s.queued[0].folder, 'Src/Arch');
+  assert.equal(s.queued[0].progress, 0.12);
+  // Reintroduce by counting the archive's activity in jobsPollInterval: "polls every 2.5 s for the archive".
+  assert.equal(jobsPollInterval(d), 30_000, 'polls every 2.5 s for the archive');
+  const ring = navRing(d);
+  assert.equal(ring.count, 0, 'the archive counts on the ring');
+  assert.equal(ring.slow, true, 'no calm slow mark while only the archive works');
+  // An archive with no chapter in flight is not "being fetched right now": a paused one does not hide the
+  // series' failed chapters from Needs attention for as long as it stays paused.
+  const failedToo = downloadSections(withArchive([arch({ seriesId: 'a2', state: 'paused' })],
+    { recent: [e({ number: 3, status: 'failed', seriesId: 'a2', folder: 'Src/A2', title: 'Other', origin: 'sweep' })] }), { admin: false });
+  assert.deepEqual(failedToo.attention.map((a) => a.key), ['ch:a2'], "a paused archive hides the series' failed chapters");
+});
+
+test('a paused archive puts no mark on the ring; one taking chapters puts the still one, and never a count', () => {
+  // Reintroduce by dropping `live` from navRing's slow rule: "a paused archive puts a mark on the ring".
+  assert.equal(navRing(withArchive([arch({ state: 'paused' })])).show, false, 'a paused archive puts a mark on the ring');
+  assert.equal(navRing(withArchive([arch({})], { paused: true })).show, false, 'an archive paused for everyone puts a mark on the ring');
+  const quiet = navRing(withArchive([arch({})]));
+  assert.deepEqual([quiet.show, quiet.slow, quiet.count, quiet.progress, quiet.label], [true, true, 0, 'spin', 'Archiving slowly']);
+  // Beside a person's download the ring is theirs alone.
+  const both = navRing(withArchive([arch({})], { content: [job({ seriesId: 's1' })] }));
+  assert.deepEqual([both.slow, both.count, both.progress], [false, 1, 0.4]);
+  // A flagged archive is Needs attention's, not a reason for the mark.
+  assert.equal(navRing(withArchive([arch({ attention: { why: 'disk', since: '' } })])).show, false);
+});
+
+test('Needs attention and Came in today for the archive: flagged rows, the day\'s chapters summed up, a finished archive said once', () => {
+  const d = withArchive([
+    arch({ seriesId: 'b', title: 'Refused', attention: { why: 'backoff', since: '2026-09-27T09:00:00Z' } }),
+    arch({ seriesId: 'g', title: 'Gaps', state: 'done', left: null, note: { capped: 1, held: 0, blocked: 0 }, attention: { why: 'finished_with_gaps', since: '2026-09-27T09:00:00Z' } }),
+    arch({ seriesId: 'd', title: 'Done', state: 'done', left: null, done: 40, finishedAt: '2026-09-27T11:00:00Z' }),
+    arch({ seriesId: 'x', title: 'Done here', state: 'done', left: null, done: 3, finishedAt: '2026-09-27T11:30:00Z' }),
+  ], {
+    recent: [
+      e({ number: 1, origin: 'archive', seriesId: 'x', folder: 'X', title: 'Done here', finishedAt: Date.parse('2026-09-27T11:00:00Z') }),
+      e({ number: 2, origin: 'archive', seriesId: 'x', folder: 'X', title: 'Done here', finishedAt: Date.parse('2026-09-27T11:10:00Z') }),
+      e({ number: 9, origin: 'sweep', seriesId: 'x', folder: 'X', title: 'Done here', finishedAt: Date.parse('2026-09-27T11:20:00Z') }),
+    ],
+  });
+  const s = downloadSections(d, { admin: false });
+  assert.deepEqual(s.attention.map((a) => a.key), ['archive:b', 'archive:g'], 'a flagged archive is not under Needs attention');
+  assert.deepEqual(s.queued, [], 'a flagged archive is also a Queued cover');
+  // One tile per series: the archive's chapters and a finished archive said on it, never a second tile.
+  assert.deepEqual(s.cameIn.map((g) => g.key), ['x', 'd'], 'a finished archive is a second tile for its series');
+  const [x, done] = s.cameIn;
+  assert.deepEqual(x.archived, [1, 2], "the archive's chapters are not told apart from the sweep's");
+  assert.deepEqual(x.numbers.sort((a, b) => a - b), [1, 2, 9]);
+  assert.equal(x.archiveFinished?.seriesId, 'x', 'a finished archive is a second tile for its series');
+  assert.equal(done.archiveFinished?.entry.done, 40);
+  assert.deepEqual(done.numbers, []);
+});
+
+test('the series band finds its archive whether it is queued or flagged, and a series with none has none', () => {
+  const d = withArchive([arch({ seriesId: 'q' }), arch({ seriesId: 'f', attention: { why: 'source_missing', since: '' } })]);
+  const s = downloadSections(d, { admin: false });
+  assert.equal(bandFor(s, 'q').archive?.section, 'queued');
+  assert.equal(bandFor(s, 'q').tile?.item?.seriesId, 'q');
+  assert.equal(bandFor(s, 'f').archive?.section, 'attention', 'a flagged archive is not on its series page');
+  assert.equal(bandFor(s, 'zz').archive, undefined);
 });

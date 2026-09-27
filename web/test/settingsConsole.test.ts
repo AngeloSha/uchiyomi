@@ -201,6 +201,8 @@ test('every string the new consoles render is in all eight locale files', () => 
     'app/profile/page.tsx',
     // v0.43.0 (#70): Admin → Settings → Notifications is a console section of its own file, with 74 strings.
     'components/AdminNotifications.tsx',
+    // v0.49.0 (#117): Admin → Settings → Downloads, the slow archive's knobs.
+    'components/ArchiveSettings.tsx',
   ];
   for (const f of files) assert.ok(existsSync(join(ROOT, f)), `${f} does not exist -- a console this test covers is not built yet`);
   const keys = trKeys(files);
@@ -611,4 +613,25 @@ test('Admin → Settings notes are readable and its group inputs are named', () 
   assert.doesNotMatch(src, /text-\[10px\]/, 'text under 11 px is back on Admin → Settings');
   assert.match(chips, /text-\[11px\] font-semibold uppercase tracking-wider text-fog-500">\{tr\('Known groups'\)\}/, 'the Known groups eyebrow is not 11 px fog-500');
   assert.equal((src.match(/text-fog-600/g) ?? []).length, 1, 'fog-600 is used for more than the one decorative count');
+});
+
+test('Admin → Settings → Downloads comes after the pinned sections, and saves each knob the way the server takes it', () => {
+  // #117. Its switch reads "on" for a running archive, and the column is `archive_paused`; the window's two
+  // ends go together because the server refuses one alone. Reintroduce `save({ archivePaused: next })`: "the
+  // switch pauses the archive when it is turned on" fails; save one end alone: "one end of the window".
+  const grid = code(read('components/AdminSettings.tsx'));
+  assert.match(grid, /<ScanlatorsSection [^\n]*\/>\s*\{\}\s*<NotificationsSection \/>\s*\{\}\s*<DownloadsSection data=\{data\} save=\{save\} \/>/,
+    'the Downloads section is not after the pinned sections');
+  const src = code(read('components/ArchiveSettings.tsx'));
+  assert.match(src, /<Section id="downloads" title=\{tr\('Downloads'\)\}/, 'the section is not Downloads');
+  assert.match(src, /on=\{data\.archive_paused !== true\} onChange=\{\(next\) => save\(\{ archivePaused: !next \}\)\}/, 'the switch pauses the archive when it is turned on');
+  assert.match(src, /min=\{ARCHIVE_PACE\.perHourRange\[0\]\} max=\{ARCHIVE_PACE\.perHourRange\[1\]\}/, 'the pace row is not held to the server\'s range');
+  assert.match(src, /help=\{archivePaceHelp\(perHour\)\} onSave=\{\(n\) => save\(\{ archivePerHour: n \}\)\}/, 'the pace row does not say what it comes to');
+  assert.match(src, /save\(\{ archiveWindowFrom: n, archiveWindowTo: to \}\)/, 'one end of the window is saved alone');
+  assert.match(src, /save\(\{ archiveWindowFrom: from, archiveWindowTo: n \}\)/, 'one end of the window is saved alone');
+  assert.match(src, /\{ archiveWindowFrom: null, archiveWindowTo: null \}/, 'the window is not cleared at both ends');
+  assert.match(src, /onSave=\{\(n\) => save\(\{ archiveMinFreeGb: n \}\)\}/);
+  // Its strings are in all eight languages (the console test above lists this file too).
+  assert.ok(trKeys(['components/ArchiveSettings.tsx']).size >= 15, 'the scan found too few strings in the section');
+  for (const f of localeFiles()) assert.deepEqual(missingIn(f, trKeys(['components/ArchiveSettings.tsx'])), [], `${f} lacks a Downloads string`);
 });

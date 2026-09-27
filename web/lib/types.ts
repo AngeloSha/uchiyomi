@@ -212,8 +212,9 @@ export interface Book {
  *   blocked  every copy on offer is from a blocked group -- unblock first, it cannot be fetched
  *   failed   the downloader gave up on it (`attempts` says how many times)
  *   floor    below the series' Latest-N floor; Find missing chapters is the way to reach it
+ *   archive  an active slow archive will fetch it (#117): available, under the retry cap, below its boundary
  */
-export type GhostWhy = 'missing' | 'held' | 'blocked' | 'failed' | 'floor';
+export type GhostWhy = 'missing' | 'held' | 'blocked' | 'failed' | 'floor' | 'archive';
 
 /** A chapter the sources list that has no row in the library: what the updater knows about it, as of its last check. */
 export interface Ghost {
@@ -248,6 +249,8 @@ export interface Listing {
   /** When the updater last wrote this list, or null when it never has. Stale beats empty, so the age is shown. */
   checkedAt: string | null;
   content: Ghost[];
+  /** This series' slow archive (#117), or null; absent from a server older than v0.49.0. */
+  archive?: import('./archive').ListingArchive | null;
 }
 
 /** How often a group ships, read off the median gap of its last dated releases. `unknown` with fewer than two dates. */

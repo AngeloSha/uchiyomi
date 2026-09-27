@@ -181,3 +181,23 @@ test('an add that had nothing left to fetch says so, and a duplicate can be open
   assert.match(src, /setDup\(\{ message: body\.message \|\| tr\('You already have this title\.'\), id: body\.existing\?\.id \}\)/,
     'the duplicate\'s id is not read off the 409 body');
 });
+
+test('"Archive the rest slowly" is offered only where there is a rest, and rides on the add', () => {
+  // #117. The rest is every listed chapter for Nothing yet and the listing less the pick for First or Latest N;
+  // All leaves none, and a switch there would queue an archive with nothing to do. Reintroduce by rendering
+  // the switch whatever the pick (drop `archiveRest > 0 &&`): "the archive switch is offered for All" fails.
+  const src = code(read(DIALOG));
+  assert.match(src, /const archiveRest = !detail \|\| pick === 'all' \? 0 : pick === 'none' \? detail\.count : Math\.max\(0, detail\.count - \(chapterCount \?\? 0\)\);/,
+    'the rest is not what the pick leaves');
+  assert.match(src, /\{archiveRest > 0 && \(\s*<div className="mt-3" data-archive-rest>/, 'the archive switch is offered for All');
+  assert.match(src, /<Switch on=\{archiveOn\} onChange=\{setArchiveOn\} label=\{tr\('Archive the rest slowly'\)\} \/>/, 'the switch is not the archive one');
+  assert.match(src, /const \[archiveOn, setArchiveOn\] = useState\(false\);/, 'the archive is on before anyone asked for it');
+  // Only while the switch is shown: a switch left on under a later All pick must not queue anything.
+  assert.match(src, /const archiving = archiveOn && archiveRest > 0;/, 'a hidden switch still queues an archive');
+  assert.match(src, /\.\.\.\(archiving \? \{ archive: true \} : \{\}\)/, 'the add does not carry archive: true');
+  // The line under it is lib/archive.ts's, with the server's pace from the downloads AppShell already polls.
+  assert.match(src, /archiveSwitchHelp\(pick === 'none' \? 'none' : chapterFrom === 'newest' \? 'latest' : 'first', archiveRest, perHour\)/, 'the help does not follow the pick');
+  assert.match(src, /const perHour = downloads\?\.archive\?\.perHour \?\? ARCHIVE_PACE\.perHour;/, 'the estimate does not use the server\'s pace');
+  // And the done step says where the rest went.
+  assert.match(src, /\{done\.archive && <p [^>]*data-archive-outcome=\{done\.archive\}>\{archiveAddLine\(done\.archive, !!done\.nothing\)\}<\/p>\}/, 'the done step does not say where the rest went');
+});

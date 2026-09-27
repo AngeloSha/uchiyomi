@@ -17,6 +17,7 @@ import { useAuth, canDownload } from '@/lib/auth';
 import { AdultToggle, useAdultFilterConfigured, useAdultShown, useLibraries } from '@/components/AdultToggle';
 import { LibraryFilters, SORTS, READ_STATES, STATUSES } from '@/components/LibraryFilters';
 import { Sheet } from '@/components/ui';
+import { useArchiveEnqueue } from '@/components/ArchiveQueue';
 import { t as tr } from '@/lib/i18n';
 import { followBulkNewest, BULK_NEWEST_POLL_MS, type BulkNewestStatus } from '@/lib/bulkNewest';
 import { useLayer } from '@/lib/layers';
@@ -243,6 +244,19 @@ function LibraryInner() {
     setActing(false);
   };
 
+  /**
+   * Queue the selection for the slow archive (#117): each series' rest fetched a chapter at a time over days,
+   * never in a burst. The server works out what is missing and says it per series; the notice sums it up
+   * ("12 series queued for the slow archive · 3 had nothing older to fetch"). Library -> Downloads shows them.
+   */
+  const archiveEnqueue = useArchiveEnqueue();
+  const archiveSelected = async () => {
+    setActing(true);
+    const r = await archiveEnqueue([...picked]);
+    if (r) settle();
+    setActing(false);
+  };
+
   const sentinel = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const el = sentinel.current;
@@ -404,8 +418,11 @@ function LibraryInner() {
           {/* ⚠️ Two rows at 390 px, no more: a third row covers a third of the grid. Seven chips plus the
               count do not fit in two, so on a phone the two admin actions live behind `More` (a Sheet);
               from lg up there is room and they are chips like the rest. (The bar's bottom padding was `pb-8`
-              until v0.49.0, clearance for the floating downloads pill, which is gone.) */}
-          <div className="mx-auto flex max-w-3xl flex-wrap items-center gap-2">
+              until v0.49.0, clearance for the floating downloads pill, which is gone.) "Archive slowly" (#117)
+              is the same: a key from lg up, a row of More on a phone -- which is why More is there for anyone
+              who may download, not only admins. From lg up the row is wider than the phone's, so its eight
+              actions stay one row in English at 1024 px. */}
+          <div className="mx-auto flex max-w-3xl flex-wrap items-center gap-2 lg:max-w-5xl">
             <span className="me-auto text-sm font-medium text-fog-100">
               {fetching ? tr('Fetching {done} of {total}…', { done: fetching.done, total: fetching.total }) : tr('{n} selected', { n: picked.size })}
             </span>
@@ -417,7 +434,8 @@ function LibraryInner() {
             {canDownload(user) && <button disabled={acting} onClick={fetchNewest} className="chip text-xs disabled:opacity-50">{tr('Fetch newest')}</button>}
             {isAdmin && <button disabled={acting} onClick={() => setMoving(true)} className="chip hidden text-xs disabled:opacity-50 lg:inline-flex">{tr('Move to library')}</button>}
             {isAdmin && <button disabled={acting} onClick={() => setRemoving(true)} className="chip hidden text-xs text-rose-300 disabled:opacity-50 lg:inline-flex">{tr('Remove from library')}</button>}
-            {isAdmin && <button disabled={acting} onClick={() => setMore(true)} className="chip text-xs disabled:opacity-50 lg:hidden" aria-haspopup="dialog">{tr('More')}</button>}
+            {canDownload(user) && <button disabled={acting} onClick={archiveSelected} className="btn-key hidden lg:inline-flex">{tr('Archive slowly')}</button>}
+            {(isAdmin || canDownload(user)) && <button disabled={acting} onClick={() => setMore(true)} className="chip text-xs disabled:opacity-50 lg:hidden" aria-haspopup="dialog">{tr('More')}</button>}
             {/* Live during a Fetch newest run, unlike the other chips: a 500-series run is minutes of pacing plus
                 downloads, and a bar frozen for all of it left navigating away as the only way out. Cancel stops
                 the polling and leaves select mode; the run completes server-side. Reintroduce with a plain
@@ -433,14 +451,24 @@ function LibraryInner() {
           {/* `pb-2`: the sheet's nav clearance is 4 px short of the nav's measured height (see the series
               page), and the last row here would otherwise end 3 px under it. */}
           <div className="space-y-1 pb-2">
-            <button onClick={() => { setMore(false); setMoving(true); }}
-              className="block w-full rounded-lg px-2.5 py-2.5 text-start text-sm text-fog-100 hover:bg-ink-800/60">
-              {tr('Move to library')}
-            </button>
-            <button onClick={() => { setMore(false); setRemoving(true); }}
-              className="block w-full rounded-lg px-2.5 py-2.5 text-start text-sm text-rose-300 hover:bg-ink-800/60">
-              {tr('Remove from library')}
-            </button>
+            {canDownload(user) && (
+              <button onClick={() => { setMore(false); void archiveSelected(); }}
+                className="block w-full rounded-lg px-2.5 py-2.5 text-start text-sm text-fog-100 hover:bg-ink-800/60">
+                {tr('Archive slowly')}
+              </button>
+            )}
+            {isAdmin && (
+              <>
+                <button onClick={() => { setMore(false); setMoving(true); }}
+                  className="block w-full rounded-lg px-2.5 py-2.5 text-start text-sm text-fog-100 hover:bg-ink-800/60">
+                  {tr('Move to library')}
+                </button>
+                <button onClick={() => { setMore(false); setRemoving(true); }}
+                  className="block w-full rounded-lg px-2.5 py-2.5 text-start text-sm text-rose-300 hover:bg-ink-800/60">
+                  {tr('Remove from library')}
+                </button>
+              </>
+            )}
           </div>
         </Sheet>
       )}

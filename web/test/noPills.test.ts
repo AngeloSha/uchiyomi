@@ -33,6 +33,10 @@ const SURFACES = [
   // Step 6, the notices that replaced the capsule toasts.
   'components/Toast.tsx',
   'lib/notices.ts',
+  // Step 14, the slow archive (#117): its covers, sheet, keys and band, and Admin -> Settings -> Downloads.
+  'components/ArchiveQueue.tsx',
+  'components/ArchiveSettings.tsx',
+  'lib/archive.ts',
 ];
 
 /**
@@ -61,6 +65,11 @@ const SLICES: [string, string, string, string][] = [
   // side by side on a desktop -- the downloads ring's and the Updates bell's, a capsule at "9+" until v0.49.0.
   ['app/library/page.tsx', 'Library: the Series | Downloads switch', 'function ViewSwitch(', 'function MoveToLibrary('],
   ['components/TopNav.tsx', 'TopNav: the downloads ring and the Updates count', '<DownloadsNavIcon />', '<button onClick={refresh}'],
+  // Step 14 (#117): where the slow archive is turned on -- keys, never chips, beside chips that stay.
+  ['components/AddSeriesDialog.tsx', 'Add dialog: Archive the rest slowly', '{archiveRest > 0 && (', '</>)}'],
+  ['app/library/page.tsx', 'Library: the Archive slowly key', 'onClick={archiveSelected}', "{(isAdmin || canDownload(user))"],
+  ['app/series/page.tsx', 'Series: Archive slowly in the actions', '{mayArchive && (', '{isAdmin && ('],
+  ['app/series/page.tsx', 'Series: Archive slowly on the older-chapters row', '{!archiving && mayArchive', '</span>'],
 ];
 
 const slice = (src: string, from: string, to: string, name: string): string => {

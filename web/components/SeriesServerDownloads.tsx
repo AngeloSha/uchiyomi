@@ -14,6 +14,7 @@ import { fetchingLabel, fetchingToast, mayCancel } from '@/lib/jobs';
 import { downloadsHref } from '@/lib/libraryView';
 import { bandFor, downloadSections, landedFor, originLabel, shouldReload, tileStatus } from '@/lib/serverDownloads';
 import { kickDownloads, useServerDownloads } from '@/lib/useServerDownloads';
+import { ArchiveBand } from '@/components/ArchiveQueue';
 
 /** How often at most the band re-reads the chapter list while chapters land: a sweep can land one a second. */
 const RELOAD_EVERY_MS = 4000;
@@ -23,6 +24,9 @@ const RELOAD_EVERY_MS = 4000;
  * add or Fetch in flight, the scheduled check's chapters, the slow archive -- with a ring, one sentence, Cancel
  * when it is yours to stop, and "See all" into Library -> Downloads. A failed download of yours says why, with
  * Try again and Dismiss.
+ *
+ * The slow archive (#117) has a line of its own: its progress, what it waits for, and Pause, Resume and Stop for
+ * whoever may. This band is the one place on the series page to watch it; the page itself only starts one.
  *
  * It also turns grey rows into chapters as they land. The page used to refresh its chapter list only when a
  * job IT started ended, so a chapter the scheduled check or someone else's Fetch brought in stayed grey until a
@@ -36,7 +40,7 @@ export function SeriesServerDownloads({ seriesId, folder }: { seriesId: string; 
   const qc = useQueryClient();
   const toast = useToast();
   const { data } = useServerDownloads();
-  const { tile, failed } = bandFor(downloadSections(data, { admin: isAdmin }), seriesId, folder);
+  const { tile, failed, archive } = bandFor(downloadSections(data, { admin: isAdmin }), seriesId, folder);
 
   // Reintroduce by dropping this effect: a chapter someone else's download lands stays grey until a reload.
   // Null until the poll first answers: what decides is `shouldReload`, where a test can reach it.
@@ -57,7 +61,7 @@ export function SeriesServerDownloads({ seriesId, folder }: { seriesId: string; 
     return () => clearTimeout(t);
   }, [landed, seriesId, qc]);
 
-  if (!tile && !failed) return null;
+  if (!tile && !failed && !archive) return null;
   const call = async (path: string, method: 'POST' | 'DELETE') => {
     try { await api(path, { method }); } catch (e) { toast(msgOf(e, tr('Could not do that')), 'error'); }
     void kickDownloads(qc);
@@ -81,7 +85,8 @@ export function SeriesServerDownloads({ seriesId, folder }: { seriesId: string; 
   const href = downloadsHref(tile?.folder ?? failed?.job.folder ?? folder);
   return (
     <div data-series-downloads className="mb-3 space-y-2">
-      {tile && (
+      {/* The archive's own row draws its line below; its chapter in flight is not a second one. */}
+      {tile && !(tile.archive && archive) && (
         <div data-band-state={tile.archive ? 'archive' : 'active'} className="card flex items-center gap-3 px-3 py-2.5">
           <span className="relative grid shrink-0 place-items-center">
             <ProgressRing progress={tile.progress} size={28} tone={tile.archive ? 'amber' : 'accent'} static={tile.archive}
@@ -100,6 +105,7 @@ export function SeriesServerDownloads({ seriesId, folder }: { seriesId: string; 
           <Link href={href} className="shrink-0 text-[12px] font-medium text-accent hover:underline">{tr('See all')}</Link>
         </div>
       )}
+      {archive && <ArchiveBand item={archive} view={data?.archive} />}
       {failed && (
         <div data-band-state="failed" className="card flex flex-wrap items-center gap-x-3 gap-y-2 border-amber-500/40 px-3 py-2.5">
           <p dir="auto" className="min-w-0 flex-1 basis-48 text-[13px] leading-snug text-amber-300">
