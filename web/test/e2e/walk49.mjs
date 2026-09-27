@@ -11,7 +11,7 @@
 //   into each place and measures it against what is on screen:
 //     1. a series page: above the bottom nav (the bottom-end corner from lg up);
 //     2. select mode: above the series select bar, which wraps to three rows on a phone (measured, not a
-//        constant);
+//        constant), and above the library's, which wraps to two;
 //     3. a Modal over that bar (Delete from server): one card docked in the nav band, clear of the title --
 //        and from lg up clear of the whole panel;
 //     4. a hand-rolled centred dialog (Edit details, Check now) and a Sheet (Sources & translations, Check
@@ -214,8 +214,39 @@ async function notices(width) {
   await press('Cancel', 'div.fixed.inset-x-0');
   await releaseMouse();
   await sleep(300);
+  // A fresh notice, so there is a card to measure: the held one may have gone by now, and "no card" proved
+  // nothing about where the next one goes.
+  check(`${tag}: a notice after the dialog and the bar`, !!(await markFromMenu()));
+  await sleep(400);
   s = await scene();
-  check(`${tag}: with the dialog and the bar gone the notice is back above the nav`, wide || (s.cards.length === 0 || s.place === 'above-nav'), fmt(s));
+  check(`${tag}: with the dialog and the bar gone the notice is back above the nav`, s.cards.length > 0 && (wide
+    ? s.cards.every((c) => c.right <= s.vw - 24 + 1 && c.bottom <= s.vh - 24 + 1)
+    : s.place === 'above-nav' && !!s.nav && s.cards.every((c) => c.bottom <= s.nav.top + 0.5)), fmt(s));
+  await sleep(4500);
+
+  // 3b. the library's select bar: two rows at 390 px, measured like the series one. Its own action makes the
+  // notice (Favourite, which also leaves select mode), and the mouse rests on it while select mode comes back.
+  await go('/library');
+  await press('Select');
+  await sleep(300);
+  const pickTwo = () => page.evaluate(() => { for (const b of [...document.querySelectorAll('[data-library-grid] button.group')].slice(0, 2)) b.click(); });
+  await pickTwo();
+  await sleep(600);
+  await press('Favourite');
+  await waitFor(async () => (await scene()).cards.length > 0, 5000);
+  await holdNotice();
+  await press('Select');
+  await sleep(300);
+  await pickTwo();
+  await sleep(700);
+  s = await scene();
+  check(`${tag}: the library select bar is up`, !!s.bar, fmt(s));
+  if (!wide) check(`${tag}: the library select bar wraps to two rows at 390 px`, s.barRows === 2, fmt(s));
+  check(`${tag}: the notice sits above the library select bar, measured`, s.place === 'above-toolbar' && s.cards.length > 0 && s.cards.every((c) => c.bottom <= s.bar.top + 0.5), fmt(s));
+  await shot(`${tag}-2b-above-library-bar`);
+  await press('Cancel', 'div.fixed.inset-x-0');
+  await releaseMouse();
+  await sleep(300);
 
   // 4. Edit details (a hand-rolled centred dialog) and Sources & translations (a Sheet), each with Check now
   await go(`/series/?id=${tale.id}`);

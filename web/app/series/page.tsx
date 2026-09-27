@@ -16,6 +16,7 @@ import { ConfirmDialog, Modal, msgOf } from '@/components/ConfirmDialog';
 import { useAuth, canDownload } from '@/lib/auth';
 import { IcChevronLeft, IcHeart, IcStar, IcPlay, IcDownload, IcCloudDownload, IcCheck, IcTrash, IcMoments } from '@/components/icons';
 import { t as tr, keys } from '@/lib/i18n';
+import { offlineOutcome } from '@/lib/notices';
 import { FindMissingDialog } from '@/components/FindMissingDialog';
 import { normGroup } from '@/lib/scanlators';
 import { GHOST_CAP, mergeRows, whyLabel, runLabel, chunkNumbers, MARK_CHUNK, type Row } from '@/lib/chapterRows';
@@ -38,6 +39,9 @@ import { useContextMenu } from '@/components/ContextMenu';
 import { useLayer } from '@/lib/layers';
 import { kickDownloads } from '@/lib/useServerDownloads';
 import { SeriesServerDownloads } from '@/components/SeriesServerDownloads';
+
+/** "Marking 3 chapters read…", counted: the busy half of Mark read's one card. */
+const markingText = (n: number) => (n === 1 ? tr('Marking 1 chapter read…') : tr('Marking {n} chapters read…', { n }));
 
 // The four the scanner itself writes from ComicInfo's PublishingStatus. Kept as a suggestion list rather
 // than a hard enum, because a file can carry anything and rejecting it would reject Uchiyomi's own data.
@@ -1193,13 +1197,14 @@ function SeriesInner() {
   const markChapter = async (b: Book, mode: 'read' | 'unread' | 'previous') => {
     if (mode === 'previous') {
       const prev = (books?.content ?? []).filter((x) => x.number < b.number && !x.readProgress?.completed);
-      if (!prev.length) { toast('Nothing before this chapter is unread'); return; }
-      toast(`Marking ${prev.length} chapter${prev.length > 1 ? 's' : ''} read…`, 'info', { busy: true, key: 'mark-read' });
+      if (!prev.length) { toast(tr('Nothing before this chapter is unread')); return; }
+      // One card, in one language: the result takes the busy card's place (the same key), so both are translated.
+      toast(markingText(prev.length), 'info', { busy: true, key: 'mark-read' });
       await setRead(prev, true);
-      toast(`Marked ${prev.length} read`, 'success', { key: 'mark-read' });
+      toast(tr('Marked {n} read', { n: prev.length }), 'success', { key: 'mark-read' });
     } else {
       await setRead([b], mode === 'read');
-      toast(mode === 'read' ? 'Marked read' : 'Marked unread', 'success');
+      toast(mode === 'read' ? tr('Marked read') : tr('Marked unread'), 'success');
     }
   };
   // Deliberately the WHOLE list, not the group filter's subset: "Mark all read" is a statement about the
@@ -1212,28 +1217,35 @@ function SeriesInner() {
   // seriesPage.test.ts fails.
   const markAllRead = async () => {
     const todo = (books?.content ?? []).filter((b) => !b.readProgress?.completed);
-    if (!todo.length) { toast('Everything is already read', 'success'); return; }
-    toast(`Marking ${todo.length} chapters read…`, 'info', { busy: true, key: 'mark-read' });
+    if (!todo.length) { toast(tr('Everything is already read'), 'success'); return; }
+    toast(markingText(todo.length), 'info', { busy: true, key: 'mark-read' });
     await setRead(todo, true);
-    toast(`Marked ${todo.length} chapters read`, 'success', { key: 'mark-read' });
+    toast(todo.length === 1 ? tr('Marked 1 chapter read') : tr('Marked {n} chapters read', { n: todo.length }), 'success', { key: 'mark-read' });
   };
 
   // The one download loop, for Save all offline and for Save offline in select mode: stops at the first
   // failure, because the usual cause is a full device and every further attempt would fail the same way.
+  // ONE outcome, in the busy card's place (the same key), after the loop: stopped part-way, the error says what
+  // was saved as well. The error used to be pushed inside the loop and the success after it under the same
+  // key, which replaced the error in the same tick -- the reader saw "Saved 3 chapters offline" and never
+  // learned it had stopped. offlineOutcome (lib/notices.ts) is the decision; notices.test.ts holds it and
+  // fails on any flow that keys a success after its error.
   const saveOffline = async (todo: Book[]) => {
-    toast(tr('Saving {n} chapters offline…', { n: todo.length }), 'info', { busy: true, key: 'save-offline' });
+    toast(todo.length === 1 ? tr('Saving 1 chapter offline…') : tr('Saving {n} chapters offline…', { n: todo.length }), 'info', { busy: true, key: 'save-offline' });
     let done = 0;
+    let stopped = false;
     for (const b of todo) {
       try {
         await downloadChapter(b.id);
         setDownloaded((s) => new Set(s).add(b.id));
         done++;
       } catch {
-        toast(tr('Stopped — device storage may be full'), 'error', { key: 'save-offline' });
+        stopped = true;
         break;
       }
     }
-    if (done) toast(tr('Saved {n} chapters offline', { n: done }), 'success', { key: 'save-offline' });
+    const out = offlineOutcome(done, todo.length, stopped);
+    if (out) toast(out.msg, out.type, { key: 'save-offline' });
   };
   const downloadAll = async () => {
     if (downloadingAll || !books) return;

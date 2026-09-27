@@ -5,7 +5,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'fs';
 import { join } from 'path';
-import { downloadsHref, readView } from '../lib/libraryView';
+import { downloadsHref, readView, stripHref } from '../lib/libraryView';
 
 const ROOT = join(__dirname, '..');
 const code = (src: string): string =>
@@ -57,4 +57,14 @@ test('the underline slides only when motion is welcome', () => {
   assert.match(sw, /const plain = useReduceEffects\(\);\s*const still = useReducedMotion\(\);/);
   assert.match(sw, /layoutId="libview"/);
   assert.match(sw, /transition=\{plain \|\| still \? \{ duration: 0 \} : \{ type: 'spring'/, 'the underline slides under Reduce effects');
+});
+
+test("a Discover strip card leads to its series, or to where the Downloads view lists it, or nowhere", () => {
+  assert.equal(stripHref({ folder: 'S/A', status: 'done', seriesId: 's1' }), '/series/?id=s1');
+  assert.equal(stripHref({ folder: 'S/A', status: 'downloading' }), '/library/?view=downloads&folder=S%2FA');
+  assert.equal(stripHref({ folder: 'S/A', status: 'error' }), '/library/?view=downloads&folder=S%2FA');
+  assert.equal(stripHref({ folder: 'S/A', status: 'done', cancelled: true }), '/library/?view=downloads', 'a stopped download is listed, not highlighted');
+  // A "Nothing yet" add's carrier card (`total: 0`, only the check of other sources on it), and a finished one
+  // whose series this viewer cannot open: the view lists neither. Reintroduce by linking every card to its folder.
+  assert.equal(stripHref({ folder: 'S/A', status: 'done' }), null, 'a card the Downloads view does not list leads there anyway');
 });

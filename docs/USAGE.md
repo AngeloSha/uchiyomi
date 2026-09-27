@@ -1689,8 +1689,8 @@ standalone, full-screen app icon; **Profile → Settings → This device → Ins
 steps for the browser you are in.
 
 **Offline:** favorite a series (or use **Save all offline** / a chapter's ⬇), and those chapters are stored on the
-device for reading with no connection. The **Downloads** screen shows what's saved and a **Sync now** button;
-with **Keep favorites offline** on (**Profile → Settings → Downloads**), your favorites' next unread chapters
+device for reading with no connection. The **Offline** tab shows what's saved and a **Sync now** button;
+with **Keep favorites offline** on (**Profile → Settings → Offline downloads**), your favorites' next unread chapters
 auto-download while you're online. A cover with a
 small ⌁ badge has something saved on this device.
 
@@ -1699,7 +1699,7 @@ and retry caption remain visible offline, so a missing page is never mistaken fo
 complete chapter; syncing again after the server heals it replaces the placeholder.
 
 **Opening the app with no connection at all** — on a plane, in a tunnel — works: launch it from the home
-screen and it goes straight to **Downloads**, with a banner naming the account it is showing. Everything that
+screen and it goes straight to **Offline**, with a banner naming the account it is showing. Everything that
 needs the server (Discover, search, adding series, the admin panel) is dimmed rather than hidden, because
 there is nothing behind it until you reconnect. The moment you do, the banner clears and any reading you did
 offline is sent up.

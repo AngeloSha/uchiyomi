@@ -69,9 +69,10 @@ export default function DownloadsPage() {
   const sync = async () => {
     if (syncing) return;
     setSyncing(true);
-    toast('Syncing favorites…', 'info', { busy: true, key: 'sync' });
+    // One card, in one language: the result takes the busy card's place (the same key).
+    toast(tr('Syncing favorites…'), 'info', { busy: true, key: 'sync' });
     const n = await runSmartOffline(5);
-    toast(n ? `Downloaded ${n} chapter${n > 1 ? 's' : ''}` : 'Already up to date', 'success', { key: 'sync' });
+    toast(!n ? tr('Already up to date') : n === 1 ? tr('Downloaded 1 chapter') : tr('Downloaded {n} chapters', { n }), 'success', { key: 'sync' });
     await refresh();
     setSyncing(false);
   };

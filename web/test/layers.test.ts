@@ -208,4 +208,15 @@ test('every dialog in the app is on the stack, and so are the nav and both selec
     assert.ok(src.includes(`useLayer('toolbar', ${cond}, { ref: toolbarRef });`), `${f}: the select bar is not on the stack while it shows`);
     assert.match(src, /<div ref=\{toolbarRef\} className="fixed inset-x-0 bottom-\[calc\(5\.75rem/, `${f}: the measured element is not the select bar`);
   }
+  // The import page's sticky "Import selected" footer rests on the phone's nav like a select bar, so it is one
+  // to the notices: without it an error from that very flow sat on the button for six seconds. Reintroduce by
+  // dropping its useLayer line: "the import page's sticky footer is not on the stack" fails.
+  const imp = code(read('app/admin/import/page.tsx'));
+  assert.ok(imp.includes("useLayer('toolbar', true, { ref: footerRef });"), "the import page's sticky footer is not on the stack");
+  assert.match(imp, /<div ref=\{footerRef\} className="sticky bottom-\[calc\(5\.5rem\+env\(safe-area-inset-bottom\)\)\] [^"]*lg:bottom-0 lg:pb-4"/,
+    "the measured element is not the import page's footer, or on a laptop its 1rem off the edge is not measured with it");
+  // Every sticky footer in the app is one of these: a new one must say so here.
+  const stickies = walk(join(ROOT, 'app')).concat(walk(join(ROOT, 'components')))
+    .filter((f) => /className="[^"]*\bsticky bottom-/.test(code(readFileSync(f, 'utf8')))).map((f) => f.slice(ROOT.length + 1));
+  assert.deepEqual(stickies, ['app/admin/import/page.tsx'], 'a sticky footer the notices do not know about');
 });

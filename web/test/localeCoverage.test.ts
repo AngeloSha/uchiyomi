@@ -136,18 +136,57 @@ test('every key the app translates is in all eight locale files, non-empty, with
 /*
  * Counted strings come in pairs, `n === 1 ? tr('1 chapter') : tr('{n} chapters', { n })` -- otherwise English
  * reads "1 chapters" and no translator ever sees the singular. A count that reads as a word is a standalone
- * `1` before a word, or `{n}` / `{m}` before a plural noun. Its pair is the key with the same words before the
- * count and, after it, the same word or its other number ("chapter"/"chapters", "repository"/"repositories",
- * "skipped"/"skipped").
+ * `1` before a word, or `{n}` / `{m}` before a plural noun. Its pair is the WHOLE key with the count swapped:
+ * the same words before it, and after it the same words but for one noun in its other number, within the
+ * first three words ("1 chapter saved" / "{n} chapters saved", "1 older chapter" / "{n} older chapters"), and
+ * one verb that agrees with it ("1 needs" / "{n} need"). Only the text before the count and the first noun
+ * used to be compared, so "1 chapter behind" paired every "{n} chapters …" key in the app.
  */
 const COUNT = /(^|[\s(+—·])(1|\{[nm]\}) (\p{L}+)/gu;
 const counts = (k: string) => [...k.matchAll(COUNT)].map((m) => ({ at: m.index! + m[1].length, one: m[2] === '1', word: m[3] }));
-const sameWord = (a: string, b: string) =>
-  a === b || a.startsWith(b) || b.startsWith(a) || a === `${b.slice(0, -1)}ies` || b === `${a.slice(0, -1)}ies`;
+
+/** English number: `one` singular, `many` its plural. */
+const numberPair = (one: string, many: string) =>
+  many === `${one}s` || many === `${one}es` || (one.endsWith('y') && many === `${one.slice(0, -1)}ies`)
+  || (one.endsWith("'s") && many === `${one.slice(0, -2)}s'`);
+/** Verbs and determiners that agree with the count, singular → plural. */
+const AGREE: Record<string, string> = {
+  has: 'have', is: 'are', was: 'were', needs: 'need', comes: 'come', does: 'do', keeps: 'keep', fails: 'fail',
+  goes: 'go', lands: 'land', stays: 'stay', matches: 'match', qualifies: 'qualify', it: 'they', its: 'their', this: 'these',
+};
+/** A word and the punctuation after it, apart. */
+const split = (w: string) => { const m = /^(.*?)([.,;:!?…)]*)$/u.exec(w)!; return { core: m[1], tail: m[2] }; };
+/** Does `many` read as `one` after its count went from 1 to more: word for word, but one noun's number and one agreeing verb. */
+function tailsPair(one: string[], many: string[]): boolean {
+  if (one.length !== many.length) return false;
+  let noun = false; let verb = false;
+  for (let i = 0; i < one.length; i++) {
+    if (one[i] === many[i]) continue;
+    const a = split(one[i]); const b = split(many[i]);
+    if (a.tail !== b.tail) return false;
+    if (!noun && i < 3 && numberPair(a.core, b.core)) { noun = true; continue; }
+    if (!verb && AGREE[a.core] === b.core) { verb = true; continue; }
+    return false;
+  }
+  return true;
+}
+/** The other half of `k`'s count at `at`: a key with the same text before the count and a tail that pairs. */
+function otherHalf(all: readonly string[], k: string, at: number, one: boolean): string | undefined {
+  const before = k.slice(0, at);
+  const after = k.slice(at).replace(/^(1|\{[nm]\}) /, '').split(' ');
+  return all.find((o) => {
+    if (o === k || !o.startsWith(before)) return false;
+    const m = /^(1|\{[nm]\}) /.exec(o.slice(at));
+    if (!m || (m[1] === '1') === one) return false;
+    const theirs = o.slice(at + m[0].length).split(' ');
+    return one ? tailsPair(after, theirs) : tailsPair(theirs, after);
+  });
+}
 
 /** Pairs English inflects around the count as well as after it, named explicitly: singular → plural. */
 const IRREGULAR_PAIRS: Record<string, string> = {
   '1 is not listed yet and comes with the next check.': '{m} are not listed yet and come with the next check.',
+  '1 chapter behind': '{n} chapters behind in 1 series',
   '{n} chapters behind in 1 series': '{n} chapters behind across {m} series',
   'Ch. {n} · 1 older chapter not here yet': 'Ch. {a}–{b} · {n} older chapters not here yet',
 };
@@ -160,6 +199,8 @@ const NOT_PAIRED: Record<string, string> = {
 /**
  * Plural keys that shipped before this check with no singular. Each reads "1 …s" at a count of 1 (or its
  * count cannot reach 1). ⚠️ Frozen: fix one by adding its singular and deleting it here, never by adding to it.
+ * The last twelve were hidden by the first version of this check, which paired them with an unrelated key
+ * ("{n} chapters saved" with "1 chapter saved with pages missing"); they are as old as the rest.
  */
 const SHIPPED_UNPAIRED = [
   '+{n} chapters vs the current pick', 'All {n} chapters are already in your library', 'Best {n} days',
@@ -169,7 +210,7 @@ const SHIPPED_UNPAIRED = [
   'Delete {n} chapters from the server?', 'File {n} series',
   'From now on, an hourly job will permanently delete the file of any chapter that everyone who started it has finished, once it has been finished for {n} days. There is no undo and no recycle bin.',
   'Merge these {n} pairs?', 'Merged — {n} chapters moved', 'One pair merged, {m} chapters moved', 'Reading pace, busiest day {n} chapters',
-  'Saved {n} chapters offline', 'Saving {n} chapters offline…', 'Syncing {n} series you have already finished…',
+  'Syncing {n} series you have already finished…',
   'This one stops working in {n} days. You can revoke it sooner.',
   'Tip: hide the languages you don’t read first — only {n} sources can be switched on at once.',
   '{n} chapters behind across {m} series', '{n} days', '{n} days of reading, {t} chapters in total', '{n} languages', '{n} notes',
@@ -177,33 +218,49 @@ const SHIPPED_UNPAIRED = [
   '{n} pairs could not be merged', '{n} pairs merged, {m} chapters moved', '{n} series', '{n} series would move',
   '{n} sources in {m} providers', '{n} versions', 'quiet — no release in {n} days', 'waiting for {g} · {n} days left',
   'failed {n} times',
+  '{n} titles matched', '{n} chapters', '{n} sources', '{n} pages', '{n} chapters listed', '{n} chapters listed · none fetched yet',
+  '{n} chapters saved', '{n} chapters qualify right now.', '{n} chapters qualify today and would go on the first run.', '{n} saved pages',
+  'Fetch {n} chapters again?', '{n} fewer chapters than the current pick',
 ];
+/** What SHIPPED_UNPAIRED may hold at most: lower it with every entry fixed, never raise it. */
+const SHIPPED_UNPAIRED_MAX = 45;
 
 test('counted strings come in pairs: every "1 chapter" has its "{n} chapters", and back', () => {
   // Reintroduce by deleting the singular of a pair from the app -- `tr('Refreshed — 1 extension available')`
   // in admin/page.tsx becomes the plural for every count: "Refreshed — {n} extensions available has no
-  // singular" fails; the reverse, a lone "1 …" key, fails as "has no plural".
+  // singular" fails; the reverse, a lone "1 …" key, fails as "has no plural". Reintroduce the old looser
+  // match (the text before the count and the first noun only): "1 chapter behind" pairs every "{n} chapters
+  // …" key again, and "the guard pairs keys that are not each other's" fails.
   const keys = appKeys();
   const all = [...keys.keys()];
-  const has = (k: string, at: number, word: string, one: boolean) => all.some((o) => o !== k && o.startsWith(k.slice(0, at))
-    && counts(o).some((c) => c.at === at && c.one === one && sameWord(word, c.word)));
   const lonely: string[] = [];
   for (const k of all) {
     if (NOT_PAIRED[k] || SHIPPED_UNPAIRED.includes(k)) continue;
     if (IRREGULAR_PAIRS[k]) { if (!keys.has(IRREGULAR_PAIRS[k])) lonely.push(`${k} has no plural (${IRREGULAR_PAIRS[k]})`); continue; }
+    if (Object.values(IRREGULAR_PAIRS).includes(k)) continue;
     for (const c of counts(k)) {
       // A plural half is `{n}` before a plural noun; `{n} failed` pairs with "1 failed" but is not asked to.
       if (!c.one && !/^\p{Ll}+s$/u.test(c.word)) continue;
-      if (!has(k, c.at, c.word, !c.one)) lonely.push(`${k} has no ${c.one ? 'plural' : 'singular'}`);
+      if (!otherHalf(all, k, c.at, c.one)) lonely.push(`${k} has no ${c.one ? 'plural' : 'singular'}`);
     }
   }
   assert.deepEqual(lonely, [], `counted strings without their other half: ${lonely.join(' | ')}`);
+  // The matcher itself: the whole key, not its first noun.
+  const probe = ['1 chapter behind', '{n} chapters saved', '{n} chapters behind', '1 older chapter not here', '{n} older chapters not here',
+    '1 source needs a look', '{n} sources need a look', '1 chapter saved.', '{n} chapters saved,'];
+  assert.equal(otherHalf(probe, '{n} chapters saved', 0, false), undefined, 'the guard pairs keys that are not each other\'s');
+  assert.equal(otherHalf(probe, '{n} chapters behind', 0, false), '1 chapter behind');
+  assert.equal(otherHalf(probe, '{n} older chapters not here', 0, false), '1 older chapter not here', 'a two-word noun is not paired');
+  assert.equal(otherHalf(probe, '{n} sources need a look', 0, false), '1 source needs a look', 'the verb agreeing with the count is not allowed for');
+  assert.equal(otherHalf(probe, '1 chapter saved.', 0, true), undefined, 'punctuation that differs paired');
   // The lists only shrink: an entry whose key is gone (or was paired) is deleted, not kept as a hole.
   for (const k of [...Object.keys(NOT_PAIRED), ...SHIPPED_UNPAIRED, ...Object.keys(IRREGULAR_PAIRS)]) {
     assert.ok(keys.has(k), `${k} is no longer in the app: drop it from the list`);
   }
   for (const k of SHIPPED_UNPAIRED) {
-    const c = counts(k).filter((x) => !x.one && /^\p{Ll}+s$/u.test(x.word));
-    assert.ok(c.length && c.some((x) => !has(k, x.at, x.word, true)), `${k} has its singular now: delete it from SHIPPED_UNPAIRED`);
+    const c = counts(k).filter((x) => !x.one);
+    assert.ok(c.length && c.some((x) => !otherHalf(all, k, x.at, false)), `${k} has its singular now: delete it from SHIPPED_UNPAIRED`);
   }
+  // Frozen, and held to it: a new lone plural cannot be parked here. Lower this as entries are fixed.
+  assert.ok(SHIPPED_UNPAIRED.length <= SHIPPED_UNPAIRED_MAX, `SHIPPED_UNPAIRED grew to ${SHIPPED_UNPAIRED.length}: give the new key its singular instead`);
 });

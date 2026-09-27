@@ -100,7 +100,8 @@ test('every way that used to lead to the pill or the Offline tab leads to Librar
   // Reintroduce the Offline tab as the add dialog's fallback: addSeriesDialog.test.ts and desktopSurfaces.test.ts
   // fail too. Here: Discover's strip and its "See all", and the series band's "See all".
   const discover = code(read('app/discover/page.tsx'));
-  assert.match(discover, /href=\{j\.seriesId \? `\/series\/\?id=\$\{encodeURIComponent\(j\.seriesId\)\}` : downloadsHref\(j\.folder\)\}/, 'a strip card leads nowhere');
+  // Where each card leads is lib/libraryView.ts stripHref's (libraryView.test.ts); a card it sends nowhere is not a link.
+  assert.match(discover, /const href = stripHref\(j\);[\s\S]*?return href\s*\? <Link key=\{j\.folder\} href=\{href\}/, 'a strip card leads nowhere');
   assert.match(discover, /<Link href=\{downloadsHref\(\)\}[^>]*>\{tr\('See all'\)\}<\/Link>/, 'the strip has no way to the whole list');
   assert.match(code(read('components/SeriesServerDownloads.tsx')), /const href = downloadsHref\(/);
   assert.match(code(read('app/series/page.tsx')), /<SeriesServerDownloads seriesId=\{id\} folder=\{series\?\.folder\} \/>/, 'the series page has no band');
@@ -115,4 +116,48 @@ test('no pill clearance is left: the select bars no longer make room for a pill 
   const bar = /bottom-\[calc\(5\.75rem\+env\(safe-area-inset-bottom\)\)\] z-40[^"]*"/.exec(lib)?.[0] ?? '';
   assert.ok(bar, 'could not find the library select bar');
   assert.doesNotMatch(bar, /\bpb-8\b/, 'the library select bar still makes room for the pill');
+});
+
+test("'Downloads' names the server's view only: the reader's way to this device's chapters says Offline", () => {
+  // The critic's vocabulary ruling (v0.49.0): the Library switch keeps "Downloads"; the reader's button to
+  // /downloads/ and the profile's section are about THIS DEVICE's copies. Reintroduce tr('Downloads') on either:
+  // "a second meaning of Downloads" fails.
+  const reader = code(read('app/reader/page.tsx'));
+  assert.match(reader, /router\.push\('\/downloads\/'\)\} className="[^"]*">\{tr\('Offline'\)\}<\/button>/, "the reader's button to the Offline tab is not called Offline");
+  assert.match(code(read('components/ProfileSettings.tsx')), /<Section id="downloads" title=\{tr\('Offline downloads'\)\}/,
+    "the profile's section about this device's copies is called Downloads");
+  const users: string[] = [];
+  for (const f of ['app/reader/page.tsx', 'components/ProfileSettings.tsx', 'app/library/page.tsx', 'app/downloads/page.tsx', 'components/BottomNav.tsx', 'components/TopNav.tsx']) {
+    if (/tr\('Downloads'\)/.test(code(read(f)))) users.push(f);
+  }
+  assert.deepEqual(users, ['app/library/page.tsx'], 'a second meaning of Downloads');
+});
+
+test('the Downloads view says when it could not read the server, with a way to ask again', () => {
+  // Reintroduce the old `if (empty)` without the error branch: a 500 reads "Nothing is being fetched right now".
+  const view = code(read('components/ServerDownloadsView.tsx'));
+  assert.match(view, /const state = viewState\(\{ data, isLoading, isError \}, s\);/, 'the view decides its state on its own');
+  assert.match(view, /if \(state === 'error'\) \{[\s\S]*?onClick=\{\(\) => void refetch\(\)\}[^>]*>\{tr\('Try again'\)\}/, 'a failed read has no retry');
+});
+
+test('the desktop header fits at 1024 px: round buttons keep their 40 px, and the search is what gives', () => {
+  // v0.49.0's downloads button pushed the lg header past the window: the page scrolled sideways and the flex row
+  // squeezed each round button into a 21 px oval (Russian ran 213 px over). Reintroduce `w-72` on the search, or
+  // drop `shrink-0` from a round button: the matching assertion fails. layout.mjs measures the real thing at
+  // 1024 and 1280 px in de and ru.
+  const nav = code(read('components/TopNav.tsx'));
+  const header = nav.slice(nav.indexOf('<header'));
+  for (const m of header.matchAll(/className=\{?[`"]([^`"]*\bh-10 w-10\b[^`"]*)[`"]/g)) {
+    assert.match(m[1], /\bshrink-0\b/, `a round header button can be squeezed into an oval: ${m[1].slice(0, 80)}`);
+  }
+  assert.ok([...header.matchAll(/\bh-10 w-10\b/g)].length >= 3, 'the round buttons moved -- redo this scan');
+  assert.match(code(read('components/DownloadsRing.tsx')), /className="grid h-10 w-10 shrink-0 /, 'the downloads button can be squeezed into an oval');
+  assert.match(code(read('components/HealthAlert.tsx')), /relative grid h-10 w-10 shrink-0 /, "the Health marker can be squeezed into an oval");
+  assert.match(header, /<Link href="\/profile" className="shrink-0 /, 'the avatar can be squeezed');
+  // The search takes what is left: flexible, never a fixed 18 rem, its words truncating down to the icon.
+  assert.match(header, /className="ms-auto flex min-w-0 max-w-72 flex-1 /, 'the search is a fixed width again');
+  assert.doesNotMatch(header, /(?<![\w-])w-72\b/, 'the search is a fixed width again');
+  // Below xl: 12 px gaps, the logo's mark alone (its words kept for screen readers), and no ⌘K hint.
+  assert.match(header, /<div className="shell flex items-center gap-3 py-3 xl:gap-6">/, 'the header keeps its 24 px gaps at lg');
+  assert.match(header, /<Lockup className="text-2xl max-xl:sr-only" markSize=\{38\} \/>/, "the logo's words take their width at lg");
 });

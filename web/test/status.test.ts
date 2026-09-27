@@ -106,8 +106,15 @@ test('accent is finished, not working: only `working` turns the ring', () => {
   assert.doesNotMatch(html(createElement(StatusMark, { tone: 'accent', label: 'Saved' })), /data-ring=/, 'a finished accent mark spins');
   assert.match(html(createElement(StatusGlyph, { tone: 'accent', working: true })), /data-ring=/, 'working is not a small ring');
   assert.match(html(createElement(StatusMark, { tone: 'accent', label: 'Working…', working: true })), /data-ring=/, 'StatusMark drops `working`');
-  // The ring keeps the tone's colour on its wrapper, so a working mark is still read in its own tone.
+  // The ring is in the tone's colour, so a working mark is still read in its own tone. Its arcs colour
+  // themselves (lib/ring.ts ARC_CLASS), so the wrapper's colour alone never reached them. Reintroduce by
+  // dropping `tone={RING_TONE[tone]}` from StatusGlyph: "a working warning draws an accent ring" fails.
   assert.match(html(createElement(StatusGlyph, { tone: 'accent', working: true })), /^<span class="shrink-0 text-accent">/);
+  const warn = html(createElement(StatusGlyph, { tone: 'warn', working: true }));
+  assert.match(warn, /text-amber-400/, 'a working warning draws an accent ring');
+  assert.doesNotMatch(warn, /text-accent/, 'a working warning draws an accent ring');
+  assert.match(html(createElement(StatusGlyph, { tone: 'problem', working: true })), /text-red-400/, 'a working problem draws an accent ring');
+  assert.doesNotMatch(html(createElement(StatusGlyph, { tone: 'info', working: true })), /text-accent/, 'a working piece of news draws an accent ring');
 });
 
 test('the start-edge bar: at the logical start, and absent from a healthy or switched-off card', () => {

@@ -12,7 +12,7 @@ import { t as tr } from '@/lib/i18n';
 import { chaptersLeft } from '@/lib/chapterRows';
 import { fetchingLabel, fetchingToast, mayCancel } from '@/lib/jobs';
 import { downloadsHref } from '@/lib/libraryView';
-import { bandFor, downloadSections, landedFor, originLabel, tileStatus } from '@/lib/serverDownloads';
+import { bandFor, downloadSections, landedFor, originLabel, shouldReload, tileStatus } from '@/lib/serverDownloads';
 import { kickDownloads, useServerDownloads } from '@/lib/useServerDownloads';
 
 /** How often at most the band re-reads the chapter list while chapters land: a sweep can land one a second. */
@@ -39,12 +39,14 @@ export function SeriesServerDownloads({ seriesId, folder }: { seriesId: string; 
   const { tile, failed } = bandFor(downloadSections(data, { admin: isAdmin }), seriesId, folder);
 
   // Reintroduce by dropping this effect: a chapter someone else's download lands stays grey until a reload.
-  const landed = landedFor(data, seriesId, folder);
-  const seen = useRef(landed);
+  // Null until the poll first answers: what decides is `shouldReload`, where a test can reach it.
+  const landed = data ? landedFor(data, seriesId, folder) : null;
+  const seen = useRef<number | null>(null);
   const last = useRef(0);
   useEffect(() => {
-    if (landed <= seen.current) { seen.current = landed; return; }
-    seen.current = landed;
+    const step = shouldReload(seen.current, landed);
+    seen.current = step.seen;
+    if (!step.reload) return;
     const reload = () => {
       last.current = Date.now();
       for (const k of [['series-books', seriesId], ['series-listing', seriesId], ['series', seriesId]]) qc.invalidateQueries({ queryKey: k });

@@ -2,7 +2,7 @@
   "_meta": {
     "language": "ru",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 1389
+    "strings": 1416
   },
   "1 check found something": "1 проверка нашла проблему",
   "1 member": "1 участник",
@@ -1392,5 +1392,32 @@
   "What the server fetches is under Library → Downloads.": "То, что загружает сервер, — в разделе Библиотека → Загрузки.",
   "what the server is fetching": "что загружает сервер",
   "Library refreshed": "Библиотека обновлена",
-  "Refresh started": "Обновление запущено"
+  "Refresh started": "Обновление запущено",
+  "Could not load the downloads": "Не удалось получить список загрузок",
+  "The server did not answer. Try again in a moment.": "Сервер не ответил. Попробуйте ещё раз чуть позже.",
+  "last run {when}": "последний запуск {when}",
+  "not run yet": "ещё не запускалась",
+  "Syncing favorites…": "Синхронизация избранного…",
+  "Already up to date": "Уже всё актуально",
+  "Downloaded 1 chapter": "Скачана 1 глава",
+  "Downloaded {n} chapters": "Скачано глав: {n}",
+  "Marking 1 chapter read…": "Отмечаем 1 главу прочитанной…",
+  "Marking {n} chapters read…": "Отмечаем прочитанными глав: {n}…",
+  "Nothing before this chapter is unread": "До этой главы нет непрочитанных",
+  "Everything is already read": "Всё уже прочитано",
+  "Marked 1 chapter read": "1 глава отмечена прочитанной",
+  "Marked {n} chapters read": "Отмечено прочитанными глав: {n}",
+  "Saving 1 chapter offline…": "Сохраняем 1 главу офлайн…",
+  "Saved 1 chapter offline": "1 глава сохранена офлайн",
+  "Saved {n} of {m} offline — stopped, device storage may be full": "Сохранено офлайн {n} из {m} — остановлено, возможно, память устройства заполнена",
+  "Check failed": "Проверка не удалась",
+  "1 held for a preferred group": "1 ждёт предпочтительную группу",
+  "{n} held for a preferred group": "ждут предпочтительную группу: {n}",
+  "Added 1 new chapter": "Добавлена 1 новая глава",
+  "Added {n} new chapters": "Добавлено новых глав: {n}",
+  "Nothing new yet": "Пока ничего нового",
+  "Could not start a check": "Не удалось начать проверку",
+  "on {device} {when}": "на {device} {when}",
+  "on {device}": "на {device}",
+  "another device": "другом устройстве"
 }

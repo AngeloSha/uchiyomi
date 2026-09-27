@@ -54,6 +54,9 @@ const SLICES: [string, string, string, string][] = [
   ['app/admin/page.tsx', 'Extensions: engine status and Refresh', 'const list = cat?.content || [];', '{!status.reachable ? ('],
   ['app/admin/page.tsx', 'Extensions: repositories, languages and Update all', '<button onClick={() => setShowRepos(!reposOpen)}', '<input value={q2}'],
   ['app/admin/page.tsx', 'Extensions: catalogue rows', '{list.map((e) => (', '{!list.length && !isFetching && ('],
+  // The owner's call (fixB): Providers' own calls to action -- Add a site's Add and "Import and review matches"
+  // -- are keys too, like the Extensions repository's Add beside them.
+  ['app/admin/page.tsx', 'Providers: Add a site and Import a list', "{tr('Add a site')}</p>", '{list.length === 0 ? ('],
   // Step 5: the Library's Series | Downloads switch (its count is a squared tag), and the header's two counts
   // side by side on a desktop -- the downloads ring's and the Updates bell's, a capsule at "9+" until v0.49.0.
   ['app/library/page.tsx', 'Library: the Series | Downloads switch', 'function ViewSwitch(', 'function MoveToLibrary('],
@@ -136,7 +139,7 @@ test('the admin console\'s status badges are marks and its actions keys: the sli
   // "{tr('Extensions')}</p>" again: it starts at the not-configured card and "the engine slice holds the
   // not-configured card" fails.
   const admin = code(read('app/admin/page.tsx'));
-  const [attention, providers, toolbar, engine, repos, rows] = SLICES.filter(([f]) => f === 'app/admin/page.tsx').map(([, name, from, to]) => slice(admin, from, to, name));
+  const [attention, providers, toolbar, engine, repos, rows, calls] = SLICES.filter(([f]) => f === 'app/admin/page.tsx').map(([, name, from, to]) => slice(admin, from, to, name));
   assert.match(attention, /<StatusMark tone=\{m\.tone\} title=\{m\.label\} \/>/, 'the Needs attention slice has no mark');
   assert.match(providers, /<StatusMark \{\.\.\.sourceMark\(st\)\} \/>/, 'the Providers slice has no mark');
   assert.match(providers, /function packageCard\(/, 'the Providers slice ends before the package card');
@@ -150,6 +153,9 @@ test('the admin console\'s status badges are marks and its actions keys: the sli
   assert.equal(keys(repos), 4, 'the repository Add, Choose languages, a language\'s Hide/Show and Update all are not all keys');
   assert.doesNotMatch(repos, /value=\{q2\}|setShowAdult/, 'the repositories slice runs into the filter chips');
   assert.equal(keys(rows), 2, 'a catalogue row\'s Update and Add/Remove are not keys');
+  // Reintroduce `btn-accent` on either: the capsule scan fails, and so does this.
+  assert.match(calls, /onClick=\{addSite\}[^>]*className="btn-key btn-key-primary"/, "Add a site's Add is not a key");
+  assert.match(calls, /router\.push\('\/admin\/import\/'\)\} className="btn-key btn-key-primary w-full"/, '"Import and review matches" is not a key');
 });
 
 test('the downloads counts are squared tags: the switch\'s, the ring\'s and the Updates bell\'s beside it', () => {

@@ -778,7 +778,7 @@ function Providers({ onTab }: { onTab: (t: Tab) => void }) {
           </select>
           <input value={sname} onChange={(e) => setSname(e.target.value)} placeholder={tr('Name')} className="field min-w-[110px] flex-1" />
           <input value={sbase} onChange={(e) => setSbase(e.target.value)} placeholder="https://site.com" autoCapitalize="none" className="field min-w-[170px] flex-[2]" />
-          <button onClick={addSite} disabled={adding || !sname.trim() || !sbase.trim()} className="btn-accent px-4 text-sm disabled:opacity-50">{adding ? 'Adding…' : 'Add'}</button>
+          <button onClick={addSite} disabled={adding || !sname.trim() || !sbase.trim()} className="btn-key btn-key-primary">{adding ? 'Adding…' : 'Add'}</button>
         </div>
         <p className="mt-1.5 text-[11px] text-fog-500">Just paste a site&apos;s homepage URL — the engine is auto-detected (or pick it). Picked up instantly, no restart. Works for sites on the Madara, MangaThemesia, or Manganato engines.</p>
         {smoke && (
@@ -814,7 +814,7 @@ function Providers({ onTab }: { onTab: (t: Tab) => void }) {
         <p className="mb-3 text-[11px] text-fog-500">
           {tr('Bring your library over from another app: import a list → review matches → add. A Mihon / Tachiyomi backup, a public MangaDex list, or pasted titles; every match is shown before anything is added.')}
         </p>
-        <button onClick={() => router.push('/admin/import/')} className="btn-accent w-full py-2 text-sm">
+        <button onClick={() => router.push('/admin/import/')} className="btn-key btn-key-primary w-full">
           {tr('Import and review matches →')}
         </button>
       </div>
@@ -999,7 +999,9 @@ function ArtPicker({ row, onClose, onApplied }: { row: ArtRow; onClose: () => vo
   };
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-ink-950/70 p-4 backdrop-blur-xs" onClick={onClose}>
-      <div role="dialog" aria-modal="true" aria-label={row.title} data-lenis-prevent className="glass max-h-[88vh] w-full max-w-2xl overflow-y-auto rounded-2xl border border-ink-700 p-5" onClick={(e) => e.stopPropagation()}>
+      {/* max-w-xl, the widest a centred panel may be: from lg up the notices' column beside it is sized to clear
+          36 rem (lib/notices.ts WIDE_BESIDE_DIALOG), and at 42 rem this one's corner sat under it. */}
+      <div role="dialog" aria-modal="true" aria-label={row.title} data-lenis-prevent className="glass max-h-[88vh] w-full max-w-xl overflow-y-auto rounded-2xl border border-ink-700 p-5" onClick={(e) => e.stopPropagation()}>
         <div className="mb-3 flex items-start justify-between gap-3">
           <h3 className="font-display text-lg font-semibold leading-tight">{row.title}</h3>
           <button onClick={onClose} className="shrink-0 text-fog-500 hover:text-fog-200">✕</button>
@@ -1097,7 +1099,7 @@ function Tasks() {
                 verify line ("one folder looked unmounted…: /library-dl, 4000 checked, 312 missing…") is
                 900 px wide -- truncated, it read as a clean run on every width. */}
             <p className="col-start-1 row-start-2 min-w-0 break-words text-[11px] text-fog-500 lg:col-start-2 lg:row-start-1">
-              {t.schedule} · {t.lastRun ? `last run ${relativeTime(new Date(t.lastRun).toISOString())}` : 'not run yet'}{taskResult(t.lastResult)}
+              {t.schedule} · {t.lastRun ? tr('last run {when}', { when: relativeTime(new Date(t.lastRun).toISOString()) }) : tr('not run yet')}{taskResult(t.lastResult)}
               {typeof t.remaining === 'number' && t.remaining > 0 && (
                 <span className="text-amber-300"> · {t.remaining.toLocaleString()} waiting</span>
               )}
@@ -1199,11 +1201,11 @@ function Sessions() {
             {/* Phone folds device and ip under the name; from lg each takes its own track. */}
             <p className="col-start-1 row-start-2 min-w-0 truncate text-[11px] text-fog-500 lg:col-start-2 lg:row-start-1">
               {s.device_name || 'Device'}
-              <span className="lg:hidden"> · {s.ip || 'unknown'} · active {relativeTime(s.last_seen)}</span>
+              <span className="lg:hidden"> · {s.ip || tr('unknown ip')} · {tr('active {when}', { when: relativeTime(s.last_seen) })}</span>
             </p>
             <p className="hidden min-w-0 truncate font-mono text-[11px] text-fog-500 lg:col-start-3 lg:row-start-1 lg:block">{s.ip || 'unknown'}</p>
             <div className="col-start-2 row-span-2 row-start-1 flex shrink-0 items-center gap-2 justify-self-end lg:col-start-4 lg:row-span-1">
-              <span className="hidden text-[11px] text-fog-500 lg:inline">active {relativeTime(s.last_seen)}</span>
+              <span className="hidden text-[11px] text-fog-500 lg:inline">{tr('active {when}', { when: relativeTime(s.last_seen) })}</span>
               {/* `current` marks the caller's own session. The admin route does not send it yet, so this is
                   inert rather than wrong: without it, revoking the row you are sitting on logs you out. */}
               {s.current ? (

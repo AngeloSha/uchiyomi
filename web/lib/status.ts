@@ -15,6 +15,7 @@
 import { keys, t as tr } from './i18n';
 import type { HealthCheck } from './types';
 import type { SrcStatus } from './providerGroups';
+import type { RingTone } from './ring';
 
 /**
  * The six tones.
@@ -45,6 +46,21 @@ export const TONE_GLYPH: Record<Tone, string> = {
   info: 'text-fog-500',
   off: 'text-fog-600',
   accent: 'text-accent',
+};
+
+/**
+ * A working glyph's ring, in the tone's colour (StatusGlyph `working`). The ring colours its own arcs
+ * (lib/ring.ts ARC_CLASS) and never inherits, so a working warning drew an accent ring beside amber words
+ * until this was passed. Reintroduce by dropping `tone={RING_TONE[tone]}` there: "a working warning draws an
+ * accent ring" in status.test.ts.
+ */
+export const RING_TONE: Record<Tone, RingTone> = {
+  ok: 'accent',
+  warn: 'amber',
+  problem: 'red',
+  info: 'muted',
+  off: 'muted',
+  accent: 'accent',
 };
 
 /** The 3 px start-edge bar a card may wear (StatusEdge). */

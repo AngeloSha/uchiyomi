@@ -2,7 +2,7 @@
   "_meta": {
     "language": "de",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 1389
+    "strings": 1416
   },
   "1 check found something": "1 Prüfung hat etwas gefunden",
   "1 member": "1 Mitglied",
@@ -1392,5 +1392,32 @@
   "What the server fetches is under Library → Downloads.": "Was der Server holt, steht unter Bibliothek → Downloads.",
   "what the server is fetching": "was der Server gerade holt",
   "Library refreshed": "Bibliothek aktualisiert",
-  "Refresh started": "Aktualisierung gestartet"
+  "Refresh started": "Aktualisierung gestartet",
+  "Could not load the downloads": "Die Downloads konnten nicht geladen werden",
+  "The server did not answer. Try again in a moment.": "Der Server hat nicht geantwortet. Versuche es gleich noch einmal.",
+  "last run {when}": "zuletzt gelaufen {when}",
+  "not run yet": "noch nicht gelaufen",
+  "Syncing favorites…": "Favoriten werden synchronisiert…",
+  "Already up to date": "Bereits auf dem neuesten Stand",
+  "Downloaded 1 chapter": "1 Kapitel heruntergeladen",
+  "Downloaded {n} chapters": "{n} Kapitel heruntergeladen",
+  "Marking 1 chapter read…": "1 Kapitel wird als gelesen markiert…",
+  "Marking {n} chapters read…": "{n} Kapitel werden als gelesen markiert…",
+  "Nothing before this chapter is unread": "Vor diesem Kapitel ist nichts ungelesen",
+  "Everything is already read": "Alles ist bereits gelesen",
+  "Marked 1 chapter read": "1 Kapitel als gelesen markiert",
+  "Marked {n} chapters read": "{n} Kapitel als gelesen markiert",
+  "Saving 1 chapter offline…": "1 Kapitel wird offline gespeichert…",
+  "Saved 1 chapter offline": "1 Kapitel offline gespeichert",
+  "Saved {n} of {m} offline — stopped, device storage may be full": "{n} von {m} offline gespeichert — abgebrochen, der Gerätespeicher ist möglicherweise voll",
+  "Check failed": "Prüfung fehlgeschlagen",
+  "1 held for a preferred group": "1 wartet auf eine bevorzugte Gruppe",
+  "{n} held for a preferred group": "{n} warten auf eine bevorzugte Gruppe",
+  "Added 1 new chapter": "1 neues Kapitel hinzugefügt",
+  "Added {n} new chapters": "{n} neue Kapitel hinzugefügt",
+  "Nothing new yet": "Noch nichts Neues",
+  "Could not start a check": "Die Prüfung konnte nicht gestartet werden",
+  "on {device} {when}": "auf {device} {when}",
+  "on {device}": "auf {device}",
+  "another device": "einem anderen Gerät"
 }

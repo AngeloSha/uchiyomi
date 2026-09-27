@@ -21,7 +21,7 @@ import { AddSeriesDialog, AddSeed } from '@/components/AddSeriesDialog';
 import { AdultToggle, useAdultShown } from '@/components/AdultToggle';
 import { IcChevronLeft, IcSearch, IcSparkle, IcX } from '@/components/icons';
 import { forStrip } from '@/lib/jobs';
-import { downloadsHref } from '@/lib/libraryView';
+import { downloadsHref, stripHref } from '@/lib/libraryView';
 import { useServerDownloads } from '@/lib/useServerDownloads';
 interface SearchGroup { title: string; coverUrl?: string; inLibrary?: boolean; updatedAt?: string; providers: { source: string; name: string; sourceId: string; title: string; coverUrl?: string }[] }
 /** One source's line in a search answer (v0.40.0): what it did with the term, or that it is still being asked. */
@@ -483,35 +483,41 @@ export default function DiscoverPage() {
       {jobs.length > 0 && (
         <div className="board mt-5">
           {/* Each card opens its series once it has one, else its tile in Library -> Downloads, where it can be
-              followed, cancelled or retried. */}
-          {jobs.map((j) => (
-            <Link key={j.folder} href={j.seriesId ? `/series/?id=${encodeURIComponent(j.seriesId)}` : downloadsHref(j.folder)}
-              data-job-card className={`card block p-3 transition hover:border-accent/40 ${j.status === 'error' ? 'border-amber-500/40' : ''}`}>
-              <p className="truncate text-xs font-medium text-fog-100">{j.title}</p>
-              {j.status === 'downloading' ? (
-                <>
-                  <div className="mt-2"><ProgressBar value={j.total ? j.done / j.total : 0.02} /></div>
-                  <p className="mt-1 text-[11px] tabular-nums text-fog-500">{j.done}/{j.total}</p>
-                </>
-              ) : j.status === 'error' ? (
-                // `reason` is now written when a job fails and names the source and how far it got. This
-                // line used to show the same sentence whatever had actually happened.
-                // A download killed by a rate-limit used to vanish from this strip entirely, taking its
-                // reason with it: the row was filtered to `downloading` and `reason` was never declared.
-                <p className="mt-1 text-[11px] text-amber-300">{j.reason || tr('Fetch stopped. Try another source or wait.')}</p>
-              ) : j.cancelled ? (
-                // Stopped by its Cancel (#82): `done`, but "Fetched" in emerald would claim the whole run landed.
-                <p className="mt-1 text-[11px] text-fog-400">{j.reason || tr('Cancelled; what landed is kept.')}</p>
-              ) : j.total === 0 && j.autoFollow ? (
-                // A "Nothing yet" add that asked for the other sources leaves a card with no chapters on it,
-                // only the judgement: it is not a fetch and must not read as one. "Fetched" in emerald sat
-                // under the series a person had just declined to fetch, for five minutes.
-                <p className="mt-1 text-[11px] text-fog-500">{j.autoFollow.done ? tr('Checked other sources') : tr('Checking other sources…')}</p>
-              ) : (
-                <p className="mt-1 text-[11px] text-emerald-400">{tr('Fetched')}</p>
-              )}
-            </Link>
-          ))}
+              followed, cancelled or retried -- and nothing when that view does not list it (`stripHref`). */}
+          {jobs.map((j) => {
+            const href = stripHref(j);
+            const face = (
+              <>
+                <p className="truncate text-xs font-medium text-fog-100">{j.title}</p>
+                {j.status === 'downloading' ? (
+                  <>
+                    <div className="mt-2"><ProgressBar value={j.total ? j.done / j.total : 0.02} /></div>
+                    <p className="mt-1 text-[11px] tabular-nums text-fog-500">{j.done}/{j.total}</p>
+                  </>
+                ) : j.status === 'error' ? (
+                  // `reason` is now written when a job fails and names the source and how far it got. This
+                  // line used to show the same sentence whatever had actually happened.
+                  // A download killed by a rate-limit used to vanish from this strip entirely, taking its
+                  // reason with it: the row was filtered to `downloading` and `reason` was never declared.
+                  <p className="mt-1 text-[11px] text-amber-300">{j.reason || tr('Fetch stopped. Try another source or wait.')}</p>
+                ) : j.cancelled ? (
+                  // Stopped by its Cancel (#82): `done`, but "Fetched" in emerald would claim the whole run landed.
+                  <p className="mt-1 text-[11px] text-fog-400">{j.reason || tr('Cancelled; what landed is kept.')}</p>
+                ) : j.total === 0 && j.autoFollow ? (
+                  // A "Nothing yet" add that asked for the other sources leaves a card with no chapters on it,
+                  // only the judgement: it is not a fetch and must not read as one. "Fetched" in emerald sat
+                  // under the series a person had just declined to fetch, for five minutes.
+                  <p className="mt-1 text-[11px] text-fog-500">{j.autoFollow.done ? tr('Checked other sources') : tr('Checking other sources…')}</p>
+                ) : (
+                  <p className="mt-1 text-[11px] text-emerald-400">{tr('Fetched')}</p>
+                )}
+              </>
+            );
+            const cls = `card block p-3 ${j.status === 'error' ? 'border-amber-500/40' : ''}`;
+            return href
+              ? <Link key={j.folder} href={href} data-job-card className={`${cls} transition hover:border-accent/40`}>{face}</Link>
+              : <div key={j.folder} data-job-card className={cls}>{face}</div>;
+          })}
         </div>
       )}
       {jobs.length > 0 && (

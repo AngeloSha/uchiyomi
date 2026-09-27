@@ -181,7 +181,9 @@ function NoticeCard({ n, place, reduced, still, onDismiss }: {
       <StatusEdge tone={tone} inset="inset-y-0" />
       <div className="grid grid-cols-[1rem_minmax(0,1fr)_auto] items-start gap-3 py-3 ps-4 pe-2">
         <span className="mt-px grid h-4 place-items-center">
-          <StatusGlyph tone={tone} size={16} working={n.busy} />
+          {/* A busy notice's ring is the accent's "working" (lib/status.ts): the card's own tone is neutral news,
+              and since the ring takes its glyph's tone that would be a grey ring. */}
+          <StatusGlyph tone={n.busy ? 'accent' : tone} size={16} working={n.busy} />
         </span>
         <p className={`break-words text-[13px] leading-snug text-fog-100 ${tight ? 'line-clamp-2 lg:line-clamp-none' : ''}`}
           title={tight ? n.msg : undefined}>

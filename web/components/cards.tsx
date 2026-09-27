@@ -144,7 +144,11 @@ export function ContinueCard({ book, eager = false }: { book: Book; eager?: bool
         <p className="mb-2 text-xs text-fog-300">
           {chapterLabel(book)}
           {elsewhere && (
-            <span className="text-fog-500"> · on {elsewhere.name || 'another device'}{elsewhere.at ? ` ${relativeTime(elsewhere.at)}` : ''}</span>
+            // One sentence per language: relativeTime is the reader's language now, and "on iPhone vor 3 Tagen"
+            // was English words around a German phrase.
+            <span className="text-fog-500"> · {elsewhere.at
+              ? tr('on {device} {when}', { device: elsewhere.name || tr('another device'), when: relativeTime(elsewhere.at) })
+              : tr('on {device}', { device: elsewhere.name || tr('another device') })}</span>
           )}
         </p>
         <ProgressBar value={pct || 0.02} />

@@ -131,7 +131,13 @@ export const isArchive = (e: Pick<ActivityEntry, 'origin'>): boolean => e.origin
  */
 export interface DownloadJob extends JobCard {
   seriesId?: string;
-  /** On a failed job: what it did not land, at most 300, for Try again through POST /api/sources/fetch. */
+  /**
+   * What kind of job it is: an add, a Fetch, a fill ("Find missing chapters") or an admin's Fetch again. The
+   * server sets `left` only on a failed Fetch or add, the two whose chapters POST /api/sources/fetch can take
+   * again, so Try again is offered exactly there; this says which kind of job the others were.
+   */
+  origin?: Origin;
+  /** On a failed Fetch or add: what it did not land, at most 300, for Try again through POST /api/sources/fetch. */
   left?: number[];
   /** An add's cover as its source gave it, before the series has a thumbnail of its own. */
   cover?: { source: string; url: string };
@@ -264,6 +270,20 @@ export function downloadSections<J extends DownloadJob>(d: Partial<SourceJobs<J>
   return { running, queued, attention, tasks, cameIn, stopped };
 }
 
+/**
+ * What Library -> Downloads draws: skeletons while the first answer is on its way; an error with a retry when it
+ * could not be had -- a 500 or a timeout used to read "Nothing is being fetched right now", as if all were
+ * quiet; the empty state when there is truly nothing; else the sections. An answer already in hand wins over a
+ * refetch that failed after it. Reintroduce by dropping the error branch: "a failed read says so" in
+ * serverDownloads.test.ts reads 'empty'.
+ */
+export function viewState(q: { data?: unknown; isLoading: boolean; isError: boolean }, s: Sections<DownloadJob>): 'loading' | 'error' | 'empty' | 'list' {
+  if (!q.data && q.isLoading) return 'loading';
+  if (!q.data && q.isError) return 'error';
+  const empty = !s.running.length && !s.queued.length && !s.attention.length && !s.tasks.length && !s.cameIn.length && !s.stopped.length;
+  return empty ? 'empty' : 'list';
+}
+
 /** What the Library ring shows: the tab's icon on a phone, the button beside the Updates bell on a desktop. */
 export interface NavRing {
   /** Anything to draw at all: work running, the slow archive alone, or something that failed. */
@@ -324,6 +344,19 @@ export function jobsPollInterval(d: Partial<SourceJobs> | undefined): number {
 export function landedFor(d: Partial<SourceJobs> | undefined, seriesId: string, folder?: string): number {
   return (d?.activity?.recent ?? []).filter((e) => (e.status === 'done' || e.status === 'partial')
     && (e.seriesId === seriesId || (!!folder && e.folder === folder))).length;
+}
+
+/**
+ * Whether the series band re-reads the chapter list, and what it has now seen (`landedFor`, or null while there is
+ * no answer yet). Only once more of this series has landed than it last saw: never on the first answer -- on a
+ * cold load of a series page the downloads poll answers after the page has read its chapters itself, and
+ * today's landings are already in that read -- and not when the count drops as the day ages out. Reintroduce by
+ * comparing against 0 before the first answer: "the first answer re-reads the page" in serverDownloads.test.ts.
+ */
+export function shouldReload(seen: number | null, landed: number | null): { reload: boolean; seen: number | null } {
+  if (landed === null) return { reload: false, seen };
+  if (seen === null) return { reload: false, seen: landed };
+  return { reload: landed > seen, seen: landed };
 }
 
 /** This series' tile and its failed download, for the band above its chapter list. */

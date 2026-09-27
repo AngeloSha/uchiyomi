@@ -2,7 +2,7 @@
   "_meta": {
     "language": "zh",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 1389
+    "strings": 1416
   },
   "1 check found something": "1 项检查发现问题",
   "1 member": "1 位成员",
@@ -1392,5 +1392,32 @@
   "What the server fetches is under Library → Downloads.": "服务器获取的内容在 书库 → 下载 中。",
   "what the server is fetching": "服务器正在获取的内容",
   "Library refreshed": "书库已刷新",
-  "Refresh started": "已开始刷新"
+  "Refresh started": "已开始刷新",
+  "Could not load the downloads": "无法加载下载列表",
+  "The server did not answer. Try again in a moment.": "服务器没有响应。请稍后再试。",
+  "last run {when}": "上次运行 {when}",
+  "not run yet": "尚未运行",
+  "Syncing favorites…": "正在同步收藏…",
+  "Already up to date": "已是最新",
+  "Downloaded 1 chapter": "已下载 1 章",
+  "Downloaded {n} chapters": "已下载 {n} 章",
+  "Marking 1 chapter read…": "正在将 1 章标为已读…",
+  "Marking {n} chapters read…": "正在将 {n} 章标为已读…",
+  "Nothing before this chapter is unread": "此章之前没有未读章节",
+  "Everything is already read": "全部已读",
+  "Marked 1 chapter read": "已将 1 章标为已读",
+  "Marked {n} chapters read": "已将 {n} 章标为已读",
+  "Saving 1 chapter offline…": "正在将 1 章保存到离线…",
+  "Saved 1 chapter offline": "已将 1 章保存到离线",
+  "Saved {n} of {m} offline — stopped, device storage may be full": "已将 {m} 章中的 {n} 章保存到离线 — 已停止，设备存储空间可能已满",
+  "Check failed": "检查失败",
+  "1 held for a preferred group": "1 章在等待首选汉化组",
+  "{n} held for a preferred group": "{n} 章在等待首选汉化组",
+  "Added 1 new chapter": "新增 1 章",
+  "Added {n} new chapters": "新增 {n} 章",
+  "Nothing new yet": "暂无新内容",
+  "Could not start a check": "无法开始检查",
+  "on {device} {when}": "{when}在{device}上",
+  "on {device}": "在{device}上",
+  "another device": "另一台设备"
 }

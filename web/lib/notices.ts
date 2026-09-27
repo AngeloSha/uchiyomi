@@ -12,6 +12,7 @@
  * all: they are CSS lengths the viewport hands to two custom properties, because a select toolbar's
  * height is measured, not known (the series bar wraps to three rows at 390 px, the library's to two).
  */
+import { t as tr } from './i18n';
 import type { Layers } from './layers';
 import type { Tone } from './status';
 
@@ -146,7 +147,13 @@ export function noticeOffset(place: NoticePlace, l: Pick<Layers, 'toolbarHeight'
       wide: `calc(${l.toolbarHeight}px + 0.75rem)`,
     };
     case 'nav-band': return { phone: 'max(1.3rem, calc(env(safe-area-inset-bottom) + 0.9rem))', wide: '1.5rem' };
-    case 'above-sheet': return { phone: `calc(${l.sheetReach}px + 0.75rem)`, wide: `calc(${l.sheetReach}px + 0.75rem)` };
+    // Capped: a sheet may reach 85 % of the screen, and on a landscape phone (390 px tall, still below lg) that
+    // put a card's top above the window. So never higher than a two-line card's 4.5 rem below the top edge's
+    // safe area; there the card overlaps the sheet's top rows rather than leaving the screen.
+    case 'above-sheet': {
+      const at = `min(calc(${l.sheetReach}px + 0.75rem), calc(100dvh - 4.5rem - env(safe-area-inset-top)))`;
+      return { phone: at, wide: at };
+    }
     case 'bottom': return { phone: 'max(1rem, env(safe-area-inset-bottom))', wide: '1.5rem' };
   }
 }
@@ -154,9 +161,11 @@ export function noticeOffset(place: NoticePlace, l: Pick<Layers, 'toolbarHeight'
 /**
  * From lg up the stack is a 22 rem column in the bottom-end corner (where the downloads pill was). Beside
  * a centred dialog it narrows to the gutter the dialog leaves: the widest centred panel in the app is 36 rem
- * (a Sheet's max-w-xl; Modal is 28 or 32), so from the viewport's centre that is 18 rem, plus the corner's
- * 1.5 rem and a 0.5 rem gap. At 1024 px that is 12 rem; at 1440 the full 22. Above a reader sheet it keeps
- * its width, because it is already clear of the sheet.
+ * (a Sheet's max-w-xl, the command palette, the admin's art picker; Modal is 28 or 32), so from the viewport's
+ * centre that is 18 rem, plus the corner's 1.5 rem and a 0.5 rem gap. At 1024 px that is 12 rem; at 1440 the
+ * full 22. Above a reader sheet it keeps its width, because it is already clear of the sheet. ⚠️ A wider
+ * centred panel overlaps the column at 1024-1440 px: web/test/notices.test.ts reads every `aria-modal`
+ * panel's max-w-* and fails on one.
  */
 export const WIDE_COLUMN = 'lg:w-[22rem]';
 export const WIDE_BESIDE_DIALOG = 'lg:w-[min(22rem,calc(50vw-20rem))]';
@@ -219,4 +228,22 @@ export function createCountdown(ms: number, onEnd: () => void, setT: SetT = setT
     reset(next) { pause(); left = next; ended = false; },
     left: () => (timer === null ? left : Math.max(0, left - (clock() - started))),
   };
+}
+
+/**
+ * The one card a "Save offline" run ends with, in its busy card's place (series page). A run that stopped
+ * part-way is an error, and says what it saved as well: the stop is what needs reading, and a success pushed
+ * after it under the same key would replace it in the same tick -- which is exactly how the reader was shown
+ * "Saved 3 chapters offline" and never told the device had filled up. Null when nothing was saved and nothing
+ * stopped (an empty run). Reintroduce by answering the success whenever something was saved: "a run that
+ * stopped part-way ends as a success" in notices.test.ts.
+ */
+export function offlineOutcome(done: number, total: number, stopped: boolean): { msg: string; type: NoticeType } | null {
+  if (stopped) {
+    return done
+      ? { msg: tr('Saved {n} of {m} offline — stopped, device storage may be full', { n: done, m: total }), type: 'error' }
+      : { msg: tr('Stopped — device storage may be full'), type: 'error' };
+  }
+  if (!done) return null;
+  return { msg: done === 1 ? tr('Saved 1 chapter offline') : tr('Saved {n} chapters offline', { n: done }), type: 'success' };
 }

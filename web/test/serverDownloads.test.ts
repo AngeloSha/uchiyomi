@@ -4,7 +4,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   bandFor, beyondJobs, chapterSpan, downloadSections, groupRecent, jobsPollInterval, landedFor, navRing, originLabel,
-  tileStatus, type ActivityEntry, type DownloadJob, type SourceJobs,
+  shouldReload, tileStatus, viewState, type ActivityEntry, type DownloadJob, type SourceJobs,
 } from '../lib/serverDownloads';
 import { downloadsLabel, type RunCard } from '../lib/jobs';
 
@@ -140,6 +140,10 @@ test('the ring counts SERIES, fills with the jobs, turns for the server alone, a
   assert.equal(r.count, 3, 'the count reads chapters, not series');
   assert.equal(r.progress, 10 / 40);
   assert.equal(r.label, 'Fetching 30 chapters');
+  // The count is the covers in RUNNING: a series whose chapters all wait their turn is in Queued, not on it.
+  // Reintroduce by counting the queued series too: 4.
+  const waiting = navRing({ ...three, activity: { active: [e({ status: 'queued', origin: 'check', folder: 'Q', seriesId: 'q' })], recent: [] } });
+  assert.equal(waiting.count, 3, 'a queued series counted on the ring');
   // Activity alone (the scheduled check's chapters, no job, no sized run): it turns.
   const server = navRing(data({ active: [e({ status: 'downloading', origin: 'check' })] }));
   assert.equal(server.progress, 'spin');
@@ -166,6 +170,10 @@ test("the amber dot is a failed download, never the scheduled check's chapter fa
   assert.equal(failed.label, '1 failed');
   // A Health key that only resets the solver starts a repair run that cannot download (`downloads: false`).
   // Reintroduce by ignoring the flag: the admin's ring turns for a solver reset.
+  // The dot is for a failed DOWNLOAD card only. A run that ended in error is in Needs attention for its admin,
+  // but not a reason to keep the Library tab amber. Reintroduce by counting runs in error: the dot lights.
+  const runFailed = navRing(data({ runs: [run({ kind: 'repair', status: 'error', reason: 'disk' })] }));
+  assert.equal(runFailed.attention, false, 'a run that ended in error lit the dot');
   const scoped = navRing(data({ runs: [run({ kind: 'repair', downloads: false })] }));
   assert.equal(scoped.show, false, 'the ring turns for a repair that cannot download');
   assert.equal(navRing(data({ runs: [run({ kind: 'repair' })] })).show, true, 'a repair that can download is not on the ring');
@@ -207,15 +215,20 @@ test('Needs attention: failed downloads with Try again by what they did not land
 });
 
 test('Server tasks put the running run first; Came in today is what landed, the archive included; a Cancel is kept', () => {
+  // A download that simply finished is not "stopped": listed there, with no reason set, it would read "Cancelled;
+  // what landed is kept." Reintroduce by listing every finished card: 'Y' is there too.
   const s = downloadSections(data({
-    content: [job({ folder: 'X', status: 'done', cancelled: true, reason: 'Cancelled after 3 of 10', finishedAt: 7 })],
+    content: [
+      job({ folder: 'X', status: 'done', cancelled: true, reason: 'Cancelled after 3 of 10', finishedAt: 7 }),
+      job({ folder: 'Y', status: 'done', total: 5, done: 5, finishedAt: 8 }),
+    ],
     runs: [run({ kind: 'newest', status: 'done', startedAt: 50 }), run({ kind: 'repair', startedAt: 10 })],
     recent: [e({ number: 1, origin: 'archive', seriesId: 'a', folder: 'A', title: 'A', finishedAt: 30 }), e({ number: 2, status: 'failed', seriesId: 'b', folder: 'B' })],
   }), { admin: true });
   assert.deepEqual(s.tasks.map((r) => r.kind), ['repair', 'newest']);
   assert.deepEqual(s.cameIn.map((g) => g.key), ['a'], 'a series with only a failure came in');
   assert.deepEqual(s.cameIn[0].origins, ['archive']);
-  assert.deepEqual(s.stopped.map((j) => j.folder), ['X']);
+  assert.deepEqual(s.stopped.map((j) => j.folder), ['X'], 'a download that finished is listed as stopped');
 });
 
 test('the series band finds this series by id or folder, and watches its chapters land', () => {
@@ -232,4 +245,32 @@ test('the series band finds this series by id or folder, and watches its chapter
   // Reintroduce by counting another series' chapters: every landing anywhere re-reads this page.
   assert.equal(landedFor(d, 's1'), 2, 'a failed chapter counted as landed, or another series counted');
   assert.equal(landedFor(d, 's3'), 1);
+  // An add's first chapters land before the series has a row, so they carry no id -- only the folder, which an
+  // admin's page knows. Reintroduce by matching the id alone: those landings never re-read the page.
+  const early = data({ recent: [e({ seriesId: null, folder: 'Src/New', status: 'done' }), e({ seriesId: null, folder: 'Src/New', status: 'done', number: 2 })] });
+  assert.equal(landedFor(early, 'sNew', 'Src/New'), 2, "an add's chapters, which have no series id yet, are not watched by folder");
+  assert.equal(landedFor(early, 'sNew'), 0);
+});
+
+test('the band re-reads the chapter list when more of the series lands, never on the first answer', () => {
+  // A cold load of a series page: the downloads poll answers after the page has read its chapters, with
+  // today's landings already in that read. Reintroduce by starting from 0 (`useRef(landed)` on an empty cache):
+  // "the first answer re-reads the page".
+  assert.deepEqual(shouldReload(null, null), { reload: false, seen: null }, 'no answer yet is not a landing');
+  assert.deepEqual(shouldReload(null, 3), { reload: false, seen: 3 }, 'the first answer re-reads the page');
+  assert.deepEqual(shouldReload(3, 4), { reload: true, seen: 4 }, 'a chapter landed and the page was not re-read');
+  assert.deepEqual(shouldReload(4, 4), { reload: false, seen: 4 }, 'the same answer again re-read the page');
+  assert.deepEqual(shouldReload(4, 2), { reload: false, seen: 2 }, 'a day aging out re-read the page');
+  assert.deepEqual(shouldReload(2, 3), { reload: true, seen: 3 });
+  assert.deepEqual(shouldReload(2, null), { reload: false, seen: 2 }, 'a lost answer forgot what was seen');
+});
+
+test('the view says when it could not read the downloads, instead of "nothing is being fetched"', () => {
+  const none = downloadSections(undefined, { admin: false });
+  assert.equal(viewState({ isLoading: true, isError: false }, none), 'loading');
+  // Reintroduce by dropping the error branch: a 500 or a timeout reads as all quiet.
+  assert.equal(viewState({ isLoading: false, isError: true }, none), 'error', 'a failed read says so');
+  assert.equal(viewState({ data: data({}), isLoading: false, isError: false }, downloadSections(data({}), { admin: false })), 'empty');
+  const d = data({ content: [job({})] });
+  assert.equal(viewState({ data: d, isLoading: false, isError: true }, downloadSections(d, { admin: false })), 'list', 'an answer in hand was hidden by a refetch that failed');
 });

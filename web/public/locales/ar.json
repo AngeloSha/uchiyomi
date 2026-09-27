@@ -2,7 +2,7 @@
   "_meta": {
     "language": "ar",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 1389
+    "strings": 1416
   },
   "1 check found something": "فحص واحد وجد شيئًا",
   "1 member": "عضو واحد",
@@ -1392,5 +1392,32 @@
   "What the server fetches is under Library → Downloads.": "ما يجلبه الخادم موجود في المكتبة ← التنزيلات.",
   "what the server is fetching": "ما يجلبه الخادم",
   "Library refreshed": "تم تحديث المكتبة",
-  "Refresh started": "بدأ التحديث"
+  "Refresh started": "بدأ التحديث",
+  "Could not load the downloads": "تعذّر تحميل التنزيلات",
+  "The server did not answer. Try again in a moment.": "لم يستجب الخادم. أعد المحاولة بعد قليل.",
+  "last run {when}": "آخر تشغيل {when}",
+  "not run yet": "لم تُشغَّل بعد",
+  "Syncing favorites…": "جارٍ مزامنة المفضلة…",
+  "Already up to date": "محدَّث بالفعل",
+  "Downloaded 1 chapter": "نُزِّل فصل واحد",
+  "Downloaded {n} chapters": "نُزِّل {n} فصلًا",
+  "Marking 1 chapter read…": "جارٍ تعليم فصل واحد كمقروء…",
+  "Marking {n} chapters read…": "يجري تعليم {n} فصلًا كمقروء…",
+  "Nothing before this chapter is unread": "لا يوجد فصل غير مقروء قبل هذا الفصل",
+  "Everything is already read": "كل شيء مقروء بالفعل",
+  "Marked 1 chapter read": "عُلِّم فصل واحد كمقروء",
+  "Marked {n} chapters read": "عُلِّم {n} فصلًا كمقروء",
+  "Saving 1 chapter offline…": "جارٍ حفظ فصل واحد دون اتصال…",
+  "Saved 1 chapter offline": "حُفظ فصل واحد دون اتصال",
+  "Saved {n} of {m} offline — stopped, device storage may be full": "حُفظ {n} من {m} دون اتصال — توقّف، قد تكون ذاكرة الجهاز ممتلئة",
+  "Check failed": "فشل الفحص",
+  "1 held for a preferred group": "فصل واحد بانتظار فريق مفضّل",
+  "{n} held for a preferred group": "{n} بانتظار فريق مفضّل",
+  "Added 1 new chapter": "أُضيف فصل جديد واحد",
+  "Added {n} new chapters": "أُضيف {n} فصلًا جديدًا",
+  "Nothing new yet": "لا جديد بعد",
+  "Could not start a check": "تعذّر بدء الفحص",
+  "on {device} {when}": "على {device} {when}",
+  "on {device}": "على {device}",
+  "another device": "جهاز آخر"
 }

@@ -5,7 +5,7 @@
 // attention", the source cards' "ok" / "blocked", the engine's "ready". No background, no border, no
 // rounding -- the shape of the glyph says the status (check, diamond, triangle, open circle, dash), so it
 // still reads for an admin who cannot tell amber from red. lib/status.ts holds the tones and the words.
-import { TONE_EDGE, TONE_GLYPH, TONE_TEXT, type Tone } from '@/lib/status';
+import { RING_TONE, TONE_EDGE, TONE_GLYPH, TONE_TEXT, type Tone } from '@/lib/status';
 import { ProgressRing } from './ProgressRing';
 import { IcAlert, IcCheck } from './icons';
 
@@ -18,7 +18,7 @@ import { IcAlert, IcCheck } from './icons';
  */
 export function StatusGlyph({ tone, size = 12, working }: { tone: Tone; size?: number; working?: boolean }) {
   const cls = `shrink-0 ${TONE_GLYPH[tone]}`;
-  if (working) return <span className={cls}><ProgressRing size={size} progress="spin" /></span>;
+  if (working) return <span className={cls}><ProgressRing size={size} progress="spin" tone={RING_TONE[tone]} /></span>;
   switch (tone) {
     case 'ok':
       return <IcCheck aria-hidden width={size} height={size} strokeWidth={2.6} className={cls} />;

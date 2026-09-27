@@ -8,7 +8,7 @@ import { readFileSync, readdirSync, statSync } from 'fs';
 import { join } from 'path';
 import {
   MAX_NOTICES, NOTICE_ERROR_MIN_MS, NOTICE_MAX_MS, NOTICE_MIN_MS, WIDE_BESIDE_DIALOG, WIDE_COLUMN, announceText,
-  createCountdown, dropNotice, noticeDuration, noticeOffset, noticePlace, noticeTone, pushNotice, visibleNotices,
+  createCountdown, dropNotice, noticeDuration, noticeOffset, noticePlace, noticeTone, offlineOutcome, pushNotice, visibleNotices,
   wideWidth, type Notice, type NoticePlace,
 } from '../lib/notices';
 import type { Layers } from '../lib/layers';
@@ -25,6 +25,60 @@ function walk(dir: string, out: string[] = []): string[] {
     if (statSync(full).isDirectory()) walk(full, out);
     else if (/\.tsx?$/.test(name)) out.push(full);
   }
+  return out;
+}
+
+/**
+ * The index of the last character of the string, template or regex literal starting at `i`, or -1 when `i`
+ * starts none. A `/` is a regex when what comes before it cannot end an expression -- `.replace(/'[^']*'/, …)`
+ * in the admin page's restore error would otherwise read as strings and run the call to the end of the file.
+ */
+function literalEnd(src: string, i: number): number {
+  const ch = src[i];
+  if (ch === "'" || ch === '"' || ch === '`') {
+    let j = i + 1;
+    while (j < src.length && src[j] !== ch) j += src[j] === '\\' ? 2 : 1;
+    return j;
+  }
+  if (ch === '/' && src[i + 1] !== '/' && src[i + 1] !== '*' && /[(,=:[!&|?{};]\s*$/.test(src.slice(Math.max(0, i - 8), i))) {
+    let j = i + 1;
+    let klass = false;
+    while (j < src.length && src[j] !== '\n' && (klass || src[j] !== '/')) {
+      if (src[j] === '\\') j++;
+      else if (src[j] === '[') klass = true;
+      else if (src[j] === ']') klass = false;
+      j++;
+    }
+    return j;
+  }
+  return -1;
+}
+/** Where the call whose `(` is at `open` ends (just past its `)`), past strings, templates, regexes and nested brackets. */
+function callEnd(src: string, open: number): number {
+  let depth = 0;
+  for (let i = open; i < src.length; i++) {
+    const lit = literalEnd(src, i);
+    if (lit >= 0) { i = lit; continue; }
+    const ch = src[i];
+    if (ch === '(' || ch === '{' || ch === '[') depth++;
+    else if (ch === ')' || ch === '}' || ch === ']') { depth--; if (depth === 0) return i + 1; }
+  }
+  return src.length;
+}
+/** A call's argument list, split at its top-level commas. */
+function splitArgs(inner: string): string[] {
+  const out: string[] = [];
+  let depth = 0;
+  let from = 0;
+  for (let i = 0; i < inner.length; i++) {
+    const lit = literalEnd(inner, i);
+    if (lit >= 0) { i = lit; continue; }
+    const ch = inner[i];
+    if (ch === '(' || ch === '{' || ch === '[') depth++;
+    else if (ch === ')' || ch === '}' || ch === ']') depth--;
+    else if (ch === ',' && depth === 0) { out.push(inner.slice(from, i)); from = i + 1; }
+  }
+  out.push(inner.slice(from));
   return out;
 }
 
@@ -144,8 +198,17 @@ test('the offsets: measured, from the bottom edge, and from lg up the corner', (
   // In the nav band: exactly where the nav's bar is, and the dialog is above it.
   assert.equal(noticeOffset('nav-band', L()).phone, 'max(1.3rem, calc(env(safe-area-inset-bottom) + 0.9rem))');
   const sheet = noticeOffset('above-sheet', L({ sheetReach: 633 }));
-  assert.equal(sheet.phone, 'calc(633px + 0.75rem)', 'the notice is not above the reader sheet');
+  assert.ok(sheet.phone.includes('calc(633px + 0.75rem)'), 'the notice is not above the reader sheet');
   assert.equal(sheet.wide, sheet.phone, 'from lg up the reader\'s full-width settings sheet is covered');
+  // Capped below the top: the settings sheet reaches 85 % of the screen, and on a landscape phone (390 px tall,
+  // still below lg) a card above it started above the window. Reintroduce the bare `calc(reach + 0.75rem)`:
+  // "a notice above a tall sheet on a landscape phone leaves the screen" fails.
+  assert.match(sheet.phone, /^min\(calc\(633px \+ 0\.75rem\), calc\(100dvh - 4\.5rem - env\(safe-area-inset-top\)\)\)$/, 'a notice above a tall sheet on a landscape phone leaves the screen');
+  // What that means at 844 x 390: the sheet reaches 331.5 px, the cap is 390 - 72 = 318 px, and a two-line card
+  // (about 60 px) then starts 12 px below the top instead of 4 px above it.
+  const rem = 16;
+  const bottom = Math.min(0.85 * 390 + 0.75 * rem, 390 - 4.5 * rem);
+  assert.ok(390 - bottom - 60 >= 0, `a two-line card starts ${390 - bottom - 60}px from the top of a landscape phone`);
   for (const p of ['above-nav', 'nav-band', 'bottom'] as const) assert.equal(noticeOffset(p, L()).wide, '1.5rem', `${p}: not the lg corner`);
 });
 
@@ -170,10 +233,41 @@ test('docked in the nav band, a notice covers the nav bar exactly: its bottom, i
   assert.match(src, /\$\{band \? 'px-4' : 'px-3'\}/, 'the docked notice is not inset like the nav bar');
 });
 
+/** Tailwind's max-w-* steps, in rem. */
+const MAX_W: Record<string, number> = { xs: 20, sm: 24, md: 28, lg: 32, xl: 36, '2xl': 42, '3xl': 48, '4xl': 56, '5xl': 64 };
+/**
+ * The widest centred panel in the app, read from the source: every `aria-modal="true"` element's own max-w-*
+ * (the panel is the element, or for Modal and Sheet their panel a few lines on). Panels that are not centred
+ * are named with why, so the column's arithmetic below is held to what the dialogs really are.
+ */
+const NOT_CENTRED: Record<string, string> = {
+  'components/PreviewReader.tsx': 'fills the screen, over the notices (z-[70])',
+  'components/ReaderSettings.tsx': 'a full-width bottom sheet: the notices rise above it (above-sheet)',
+  'components/CommandPalette.tsx': 'anchored at the top, over the notices (z-[70])',
+};
+function widestCentredPanel(): { rem: number; where: string } {
+  let widest = { rem: 0, where: '' };
+  for (const f of walk(join(ROOT, 'app')).concat(walk(join(ROOT, 'components')))) {
+    const rel = f.slice(ROOT.length + 1);
+    if (NOT_CENTRED[rel]) continue;
+    const src = code(readFileSync(f, 'utf8'));
+    for (const m of src.matchAll(/\saria-modal="true"/g)) {
+      // The tag's own class list and the next few lines, where Modal's and Sheet's panels are.
+      const near = src.slice(Math.max(0, m.index! - 400), m.index! + 1200);
+      for (const w of near.matchAll(/(?<![\w-])(?:sm:|md:|lg:)?max-w-(xs|sm|md|lg|xl|2xl|3xl|4xl|5xl)\b/g)) {
+        if (MAX_W[w[1]] > widest.rem) widest = { rem: MAX_W[w[1]], where: `${rel}: max-w-${w[1]}` };
+      }
+    }
+  }
+  return widest;
+}
+
 test('from lg up the column beside a centred dialog never reaches it', () => {
-  // The widest centred panel is a Sheet's max-w-xl (36 rem); Modal is 28 or 32. The column sits 1.5 rem
-  // (`lg:end-6`) from the end edge. Reintroduce the design's `calc(50vw-19rem)`: at 1024 px its start edge
-  // is 0.5 rem into the dialog, and "the notice column overlaps a 36 rem dialog at 1024 px" fails.
+  // The widest centred panel is read from the source (widestCentredPanel): a Sheet's max-w-xl, 36 rem; Modal is
+  // 28 or 32. The column sits 1.5 rem (`lg:end-6`) from the end edge. Reintroduce the design's
+  // `calc(50vw-19rem)`: at 1024 px its start edge is 0.5 rem into the dialog, and "the notice column overlaps
+  // a 36 rem dialog at 1024 px" fails. Put the admin's art picker back at max-w-2xl (42 rem): its corner sat
+  // under the column, and "the notice column overlaps a 42 rem dialog" fails the same way.
   assert.equal(wideWidth('nav-band', 1), WIDE_BESIDE_DIALOG);
   assert.equal(wideWidth('bottom', 1), WIDE_BESIDE_DIALOG, 'a dialog with no nav left the column full width');
   assert.equal(wideWidth('above-nav', 0), WIDE_COLUMN);
@@ -184,13 +278,16 @@ test('from lg up the column beside a centred dialog never reaches it', () => {
   const toast = code(read('components/Toast.tsx'));
   assert.match(toast, /\blg:end-6\b/, 'the column is no longer 1.5 rem from the end edge -- redo this arithmetic');
   const rem = 16;
+  const panel = widestCentredPanel();
+  assert.ok(panel.rem >= 36, `the widest centred panel read is ${panel.rem} rem (${panel.where}) -- the scan is broken: a Sheet alone is 36`);
   for (const vw of [1024, 1100, 1280, 1440, 1920]) {
     const width = Math.min(cap * rem, vw / 2 - less * rem);
     const start = vw - 1.5 * rem - width;
-    const dialogEnd = vw / 2 + 18 * rem;
-    assert.ok(start >= dialogEnd + 0.5 * rem - 0.01, `the notice column overlaps a 36 rem dialog at ${vw} px (${start} < ${dialogEnd})`);
+    const dialogEnd = vw / 2 + (panel.rem / 2) * rem;
+    assert.ok(start >= dialogEnd + 0.5 * rem - 0.01, `the notice column overlaps a ${panel.rem} rem dialog at ${vw} px (${start} < ${dialogEnd}; ${panel.where})`);
     assert.ok(width >= 11 * rem, `the column is ${width}px at ${vw} px -- too narrow to read`);
   }
+  for (const rel of Object.keys(NOT_CENTRED)) assert.match(code(read(rel)), /\saria-modal="true"/, `${rel} is no longer a dialog: drop it from NOT_CENTRED`);
 });
 
 test('the tones: an error is a problem, a success the accent\'s done, anything else neutral', () => {
@@ -332,11 +429,77 @@ test('two live regions always mounted, a Dismiss with a name, and the motion swi
   const card = src.slice(src.indexOf('function NoticeCard('));
   assert.match(card, /\{!reduced && \(\s*<span aria-hidden key=\{n\.bump\}/, 'the hairline drains under Reduce effects or reduced motion');
   assert.match(card, /drag=\{still \? false : 'y'\}/, 'the card can be dragged under reduced motion');
-  assert.match(card, /<StatusGlyph tone=\{tone\} size=\{16\} working=\{n\.busy\} \/>/, 'a busy notice has no ring, or every notice has one');
+  assert.match(card, /<StatusGlyph tone=\{n\.busy \? 'accent' : tone\} size=\{16\} working=\{n\.busy\} \/>/, 'a busy notice has no ring, or every notice has one');
   // The clock is JavaScript, stopped while held.
   assert.match(card, /const paused = hover \|\| focus \|\| press \|\| hidden;/, 'a held notice keeps counting down');
   assert.match(card, /useNoticeClock\(n\.duration, n\.bump, paused, \(\) => onDismiss\(n\.id\)\);/);
   assert.doesNotMatch(src, /onAnimationEnd/, 'the notice ends on the hairline\'s animationend (0.001 ms under reduced motion)');
+});
+
+test('the four held-by-hand behaviours of a card: a merge restarts its clock, a tap never holds it, a hidden tab stops it, two lines over a dialog', () => {
+  // None of these can be run without a DOM, and the walk uses short messages and a mouse, so each is pinned in
+  // the source. Reintroduce, one at a time:
+  // - `if (seen.current !== bump) { seen.current = bump; }` (no reset): "a merged card leaves on its old
+  //   schedule" -- the ×2 card goes while its hairline has just restarted;
+  // - `onPointerEnter={() => setHover(true)}`: "one tap holds a notice for good" -- a touch fires the enter
+  //   and never the leave;
+  // - the visibilitychange listener dropped: "a notice counts down in a background tab";
+  // - `line-clamp-2` dropped: "a long notice over a dialog grows up into it".
+  const src = code(read('components/Toast.tsx'));
+  const clock = src.slice(src.indexOf('function useNoticeClock('), src.indexOf('function NoticeCard('));
+  assert.match(clock, /if \(seen\.current !== bump\) \{ seen\.current = bump; c\.reset\(ms\); \}/, 'a merged card leaves on its old schedule');
+  assert.match(clock, /if \(paused\) c\.pause\(\); else c\.run\(\);/, 'the clock ignores a hold');
+  const card = src.slice(src.indexOf('function NoticeCard('));
+  assert.match(card, /onPointerEnter=\{\(e\) => \{ if \(e\.pointerType === 'mouse'\) setHover\(true\); \}\}/, 'one tap holds a notice for good');
+  assert.match(card, /onPointerLeave=\{\(e\) => \{ if \(e\.pointerType === 'mouse'\) setHover\(false\); else setPress\(false\); \}\}/, 'one tap holds a notice for good');
+  const hidden = src.slice(src.indexOf('function usePageHidden('), src.indexOf('function useNoticeClock('));
+  assert.match(hidden, /document\.addEventListener\('visibilitychange', read\);/, 'a notice counts down in a background tab');
+  assert.match(hidden, /return \(\) => document\.removeEventListener\('visibilitychange', read\);/, 'the background-tab listener outlives its card');
+  assert.match(hidden, /setHidden\(document\.visibilityState === 'hidden'\)/, 'a notice counts down in a background tab');
+  assert.match(card, /const tight = oneAtATime\(place\);/);
+  assert.match(card, /\$\{tight \? 'line-clamp-2 lg:line-clamp-none' : ''\}/, 'a long notice over a dialog grows up into it');
+});
+
+test('one card per flow: a keyed error is never replaced by a success from the same run', () => {
+  // Save offline pushed its error inside the loop and "Saved 3 chapters offline" after it under the same key,
+  // which took the error's place in the same tick: the reader never learned the device had filled up. The
+  // outcome is one card now (offlineOutcome). Reintroduce the success whenever something was saved: "a run that
+  // stopped part-way ends as a success" fails; reintroduce the old loop in series/page.tsx: "series/page.tsx: a
+  // success with key 'save-offline' follows its error" fails.
+  const stopped = offlineOutcome(3, 10, true)!;
+  assert.equal(stopped.type, 'error', 'a run that stopped part-way ends as a success');
+  assert.equal(stopped.msg, 'Saved 3 of 10 offline — stopped, device storage may be full', 'the stop does not say what was saved');
+  assert.deepEqual(offlineOutcome(0, 10, true), { msg: 'Stopped — device storage may be full', type: 'error' });
+  assert.deepEqual(offlineOutcome(1, 1, false), { msg: 'Saved 1 chapter offline', type: 'success' }, 'one chapter reads "1 chapters"');
+  assert.deepEqual(offlineOutcome(4, 4, false), { msg: 'Saved 4 chapters offline', type: 'success' });
+  assert.equal(offlineOutcome(0, 0, false), null);
+  // And for every flow in the app: within one function, a toast keyed K with 'error' is not followed by a
+  // 'success' keyed K unless a `return` comes first (the flow ended with its error). A catch that follows a
+  // try's success is the other order, and fine.
+  const files = walk(join(ROOT, 'app')).concat(walk(join(ROOT, 'components')));
+  let keyed = 0;
+  for (const f of files) {
+    const rel = f.slice(ROOT.length + 1);
+    const src = code(readFileSync(f, 'utf8'));
+    const calls = [...src.matchAll(/\btoast\(/g)].map((m) => {
+      const at = m.index!;
+      const end = callEnd(src, at + 'toast'.length);
+      const text = src.slice(at, end);
+      const key = /key: (['`][^'`]*['`])/.exec(text)?.[1];
+      const type = /,\s*'(info|success|error)'\s*(?:,|\))/.exec(text)?.[1] ?? (/\?\s*'error'\s*:\s*'success'/.test(text) ? 'either' : 'info');
+      return { at, end, key, type };
+    }).filter((c) => c.key);
+    keyed += calls.length;
+    for (const e of calls.filter((c) => c.type === 'error' || c.type === 'either')) {
+      const later = calls.find((c) => c.at > e.end && c.key === e.key && (c.type === 'success' || c.type === 'either'));
+      if (!later) continue;
+      const between = src.slice(e.end, later.at);
+      // The flow ended with its error (a return), or the success is on another branch or in another function.
+      if (/\breturn\b|\belse\b|=>|\bfunction\b/.test(between)) continue;
+      assert.fail(`${rel}: a success with key ${e.key} follows its error in the same run -- it would take the error's place unread`);
+    }
+  }
+  assert.ok(keyed >= 10, `only ${keyed} keyed notices found -- the scan is broken`);
 });
 
 test('useToast keeps its name and its two arguments; busy is said by the caller, never guessed', () => {
@@ -352,25 +515,41 @@ test('useToast keeps its name and its two arguments; busy is said by the caller,
 
 test('every busy message says so: an ellipsis toast passes busy, and no finished one does', () => {
   // A toast that says work is going on ("Fetching 3 chapters…", "Checking for new chapters…") carries the
-  // turning ring, and the ring comes only from `busy: true`. Reintroduce by dropping `busy: true` from
-  // TopNav's refresh: "components/TopNav.tsx: a busy message without busy" fails.
+  // turning ring, and the ring comes only from `busy: true`. The whole call is read and split into its
+  // arguments: an ellipsis anywhere in the MESSAGE (a literal, a template, a tr(), either arm of a ternary)
+  // makes it a busy message, whatever follows. The first scan looked only for an ellipsis closing the call, so
+  // `toast('Syncing favorites…', 'info', …)` was never checked. Reintroduce by dropping `busy: true` from
+  // TopNav's refresh ("components/TopNav.tsx: a busy message without busy") or from the Offline tab's
+  // "Syncing favorites…" ("app/downloads/page.tsx: a busy message without busy"); give a finished message
+  // `busy: true` and "a finished message turns" fails.
   const files = walk(join(ROOT, 'app')).concat(walk(join(ROOT, 'components')));
+  // Helpers that word a busy message: "Fetching 3 chapters…", "Marking 3 chapters read…".
+  const BUSY_HELPERS = /\b(fetchingToast|markingText)\(/;
+  assert.match(code(read('lib/jobs.ts')), /export const fetchingToast = [^\n]*…/, 'fetchingToast no longer says it is busy -- update BUSY_HELPERS');
+  assert.match(code(read('app/series/page.tsx')), /const markingText = [^\n]*read…/, 'markingText no longer says it is busy -- update BUSY_HELPERS');
   let busy = 0;
+  let calm = 0;
   for (const f of files) {
     const rel = f.slice(ROOT.length + 1);
     if (rel === 'components/Toast.tsx') continue;
     const src = code(readFileSync(f, 'utf8'));
-    for (const line of src.split('\n')) {
-      if (!/\btoast\(/.test(line)) continue;
-      const call = line.slice(line.search(/\btoast\(/));
-      const saysBusy = /\bfetchingToast\(/.test(call) || /…['`]\s*(?:,\s*\{[^}]*\})?\)/.test(call);
+    for (const m of src.matchAll(/\btoast\(/g)) {
+      const open = m.index! + 'toast'.length;
+      const args = splitArgs(src.slice(open + 1, callEnd(src, open) - 1));
+      const [msg = '', , opts = ''] = args;
+      const saysBusy = BUSY_HELPERS.test(msg) || /…|\\u2026/.test(msg);
+      // A ternary may be busy on one arm only ("Looking for chapter names…" or "removed"): its busy says so.
+      const passes = /busy: (?!false\b)/.test(opts);
       if (saysBusy) {
         busy++;
-        assert.match(call, /busy: (?!false\b)/, `${rel}: a busy message without busy -- ${call.trim().slice(0, 140)}`);
-      }
+        assert.ok(passes, `${rel}: a busy message without busy -- ${msg.trim().slice(0, 140)}`);
+      } else if (/busy: true\b/.test(opts)) {
+        assert.fail(`${rel}: a finished message turns -- ${msg.trim().slice(0, 140)}`);
+      } else calm++;
     }
   }
-  assert.ok(busy >= 14, `only ${busy} busy messages found -- the scan is broken`);
+  assert.ok(busy >= 18, `only ${busy} busy messages found -- the scan is broken`);
+  assert.ok(calm >= 40, `only ${calm} other messages found -- the scan is broken`);
   // TopNav's refresh is translated now, and its result takes the busy card's place.
   const nav = code(read('components/TopNav.tsx'));
   assert.match(nav, /toast\(tr\('Checking for new chapters…'\), 'info', \{ busy: true, key: 'refresh' \}\);/, 'TopNav\'s check is untranslated or not busy');

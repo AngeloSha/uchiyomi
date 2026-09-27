@@ -25,6 +25,7 @@ import { sourceCover } from '@/components/cards';
 import { ImportMatchSheet } from '@/components/ImportMatchSheet';
 import { IcChevronLeft } from '@/components/icons';
 import { relativeTime } from '@/lib/format';
+import { useLayer } from '@/lib/layers';
 import { t as tr, keys } from '@/lib/i18n';
 import type { Src } from '@/lib/sourceGroups';
 import type { TrackerStatus } from '@/lib/types';
@@ -362,6 +363,11 @@ function ReviewCard({
   running: boolean;
   sourceName: (id: string | null) => string;
 }) {
+  // The sticky "Import selected" footer is a toolbar to the notices (lib/layers.ts): on a phone it rests on the
+  // bottom nav, where a notice would otherwise sit on it -- and "Could not start the import" stays six seconds.
+  // Measured with its padding, which on a laptop is the 1rem it keeps off the bottom edge.
+  const footerRef = useRef<HTMLDivElement>(null);
+  useLayer('toolbar', true, { ref: footerRef });
   return (
     <div className="card grad-border wide p-4">
       <p className="mb-1 text-sm font-semibold text-fog-100">{tr('{n} titles matched', { n: allCount })}<Note note={note} /></p>
@@ -398,7 +404,7 @@ function ReviewCard({
         ))}
       </div>
 
-      <div className="sticky bottom-[calc(5.5rem+env(safe-area-inset-bottom))] z-10 mt-4 lg:bottom-4">
+      <div ref={footerRef} className="sticky bottom-[calc(5.5rem+env(safe-area-inset-bottom))] z-10 mt-4 lg:bottom-0 lg:pb-4">
         <button onClick={onRun} disabled={running || selectedIds.size === 0} className="btn-accent w-full py-2.5 text-sm shadow-lift disabled:opacity-50">
           {running ? tr('Starting…') : tr('Import selected — {n}', { n: selectedIds.size })}
         </button>

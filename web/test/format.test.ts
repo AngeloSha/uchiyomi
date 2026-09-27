@@ -235,3 +235,39 @@ test('I18nProvider hands the locale to the formatters beside the dictionary', ()
   const src = readFileSync(join(__dirname, '..', 'lib', 'I18nProvider.tsx'), 'utf8');
   assert.match(src, /setActiveDict\(d\);\s*setActiveLocale\(next\);/, 'I18nProvider does not set the formatters\' locale');
 });
+
+test('no English words wrap a relativeTime: the phrase is in the reader\'s language, so its sentence is too', () => {
+  // relativeTime speaks German to a German reader since v0.49.0, so an English word beside it became
+  // "active vor 3 Stunden" and "on iPhone vor 3 Tagen". Each wrapper is one translated key with a {when}.
+  // Reintroduce `active {relativeTime(s.last_seen)}` in the admin's Sessions: "app/admin/page.tsx: English
+  // around relativeTime" fails. The one line left is inside Health(), which the Health step rewrites whole.
+  const { readdirSync, statSync } = require('fs') as typeof import('fs');
+  const walk = (dir: string, out: string[] = []): string[] => {
+    for (const name of readdirSync(dir)) {
+      const full = join(dir, name);
+      if (statSync(full).isDirectory()) walk(full, out);
+      else if (/\.tsx?$/.test(name)) out.push(full);
+    }
+    return out;
+  };
+  const ROOT = join(__dirname, '..');
+  const LEFT_FOR_HEALTH = ['{data && <> · checked {relativeTime(data.generatedAt)}</>}'];
+  const found: string[] = [];
+  for (const f of ['app', 'components', 'lib'].flatMap((d) => walk(join(ROOT, d)))) {
+    const rel = f.slice(ROOT.length + 1);
+    if (rel === 'lib/format.ts') continue;
+    for (const line of readFileSync(f, 'utf8').split('\n')) {
+      if (!line.includes('relativeTime(') || line.trim().startsWith('//') || line.trim().startsWith('*')) continue;
+      if (LEFT_FOR_HEALTH.some((l) => line.includes(l))) continue;
+      // A word written beside it: JSX text (`active {relativeTime(`) or a template (`last run ${relativeTime(`).
+      if (/[A-Za-z]\s+\{relativeTime\(/.test(line) || /`[^`]*[A-Za-z]\s+\$\{relativeTime\(/.test(line)) found.push(`${rel}: English around relativeTime -- ${line.trim().slice(0, 100)}`);
+    }
+  }
+  assert.deepEqual(found, [], `English around relativeTime: ${found.join(' | ')}`);
+  assert.ok(readFileSync(join(ROOT, 'app/admin/page.tsx'), 'utf8').includes(LEFT_FOR_HEALTH[0]), 'the Health line is gone: drop it from LEFT_FOR_HEALTH');
+  // The ones the scan cannot see by shape: the Continue card's device line, whose words sit in another brace.
+  // Reintroduce ` · on {elsewhere.name || 'another device'}{… relativeTime …}`: "the Continue card's
+  // 'on <device> <when>' is English around the reader's language" fails.
+  assert.match(readFileSync(join(ROOT, 'components/cards.tsx'), 'utf8'), /tr\('on \{device\} \{when\}', \{ device: elsewhere\.name \|\| tr\('another device'\), when: relativeTime\(elsewhere\.at\) \}\)/,
+    "the Continue card's 'on <device> <when>' is English around the reader's language");
+});

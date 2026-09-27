@@ -69,9 +69,10 @@ https://example.org/repo/index.min.json
 3. Paste the address and press **Add** (or Enter). The button reads **Checking…** and a line says *Checking the
    repository — this can take up to a minute.*: Uchiyomi has the engine read the repository and waits until its
    extensions have arrived.
-4. **Added — {n} extensions from this repository** shows for a moment at the top of the window:
+4. **Added — {n} extensions from this repository** shows for a few seconds as a card at the bottom of the window
+   (bottom-right on a laptop):
 
-   ![The message at the top of the window after the add: Added — 72 extensions from this repository](shots/crop-repo-toast.webp)
+   ![The message after the add: Added — 72 extensions from this repository](shots/crop-repo-toast.webp)
 
    The repository appears in the row, and a line under it says what to do next:
 

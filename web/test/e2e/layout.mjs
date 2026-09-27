@@ -123,7 +123,37 @@ try {
     };
   });
 
-  for (const w of [2560, 1920, 1280, 390]) {
+  // The desktop header (components/TopNav.tsx), which is outside <main> and so outside everything below: at
+  // the two narrowest desktop widths, in the languages with the longest nav labels, nothing may run past the
+  // window and no round button may be squeezed. v0.49.0's downloads button pushed Russian 213 px over at 1024,
+  // and every round button became a 21 px oval. The language is this browser's own (localStorage), put back
+  // after.
+  const HEADER_LANGS = (process.env.HEADER_LANGS || 'en,de,ru').split(',');
+  for (const w of [1024, 1280]) {
+    await page.setViewport({ width: w, height: 800 });
+    for (const lang of HEADER_LANGS) {
+      await page.evaluate((c) => localStorage.setItem('uchiyomi.lang', c), lang);
+      await page.goto(BASE + '/library', { waitUntil: 'networkidle2', timeout: 60000 }).catch(() => {});
+      await sleep(1800);
+      const h = await page.evaluate(() => {
+        const row = document.querySelector('header .shell');
+        if (!row) return null;
+        const vw = document.documentElement.clientWidth;
+        const squeezed = [...row.querySelectorAll('.h-10.w-10')].map((el) => el.getBoundingClientRect())
+          .filter((r) => r.width > 0 && (r.width < 39.5 || r.height < 39.5)).map((r) => `${Math.round(r.width)}x${Math.round(r.height)}`);
+        const past = [...row.querySelectorAll('*')].map((el) => el.getBoundingClientRect()).filter((r) => r.width > 0 && r.right > vw + 0.5).length;
+        return { over: row.scrollWidth - row.clientWidth, page: document.documentElement.scrollWidth - vw, squeezed, past, lang: document.documentElement.lang };
+      });
+      if (!h) { bad(`header @${w} ${lang}: no header to measure`); continue; }
+      if (h.lang !== lang) bad(`header @${w} ${lang}: the page is in "${h.lang}" -- the language did not switch`);
+      else if (h.over > 0 || h.page > 0 || h.past) bad(`header @${w} ${lang}: runs ${Math.max(h.over, h.page)}px past the window (${h.past} element(s) beyond it)`);
+      else if (h.squeezed.length) bad(`header @${w} ${lang}: round buttons squeezed to ${h.squeezed.join(', ')}`);
+      else ok(`header @${w} ${lang}: fits, every round button 40 px`);
+    }
+  }
+  await page.evaluate(() => localStorage.removeItem('uchiyomi.lang'));
+
+  for (const w of [2560, 1920, 1280, 1024, 390]) {
     const mobile = w < 700;
     console.log(`\n  ${w}px`);
     await page.setViewport({ width: w, height: mobile ? 844 : 1000, isMobile: mobile, hasTouch: mobile });

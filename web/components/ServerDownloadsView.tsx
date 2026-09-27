@@ -18,7 +18,8 @@ import { jobNoteLines, type JobCardNotes } from '@/lib/jobNotes';
 import { fetchingToast, mayCancel, repairStepLabel, runProgress, runTitle, type RunCard } from '@/lib/jobs';
 import { ringFraction, ringValueText } from '@/lib/ring';
 import {
-  chapterSpan, downloadSections, originLabel, tileStatus, type ActivityGroup, type Attention, type SourceJobs, type Tile,
+  chapterSpan, downloadSections, originLabel, tileStatus, viewState, type ActivityGroup, type Attention, type Origin, type SourceJobs,
+  type Tile,
 } from '@/lib/serverDownloads';
 import { kickDownloads, useServerDownloads } from '@/lib/useServerDownloads';
 
@@ -27,7 +28,7 @@ import { kickDownloads, useServerDownloads } from '@/lib/useServerDownloads';
 interface Job extends JobCardNotes {
   folder: string; title: string; total: number; done: number; status: string; reason?: string;
   startedAt?: number; finishedAt?: number; mine?: boolean; cancelRequested?: boolean; cancelled?: boolean;
-  seriesId?: string; left?: number[]; cover?: { source: string; url: string };
+  seriesId?: string; left?: number[]; cover?: { source: string; url: string }; origin?: Origin;
 }
 
 /** The Library grid's columns, one step wider: the filter sidebar is not shown beside this view. */
@@ -57,7 +58,7 @@ export function ServerDownloadsView({ focusFolder }: { focusFolder?: string | nu
   const mayAdd = canDownload(user);
   const qc = useQueryClient();
   const toast = useToast();
-  const { data: raw, isLoading } = useServerDownloads({ fresh: true });
+  const { data: raw, isLoading, isError, refetch } = useServerDownloads({ fresh: true });
   const data = raw as SourceJobs<Job> | undefined;
   const jobs = data?.content ?? [];
   const s = downloadSections(data, { admin: isAdmin });
@@ -99,15 +100,25 @@ export function ServerDownloadsView({ focusFolder }: { focusFolder?: string | nu
     el.scrollIntoView({ block: 'center' });
   }, []);
 
-  const empty = !s.running.length && !s.queued.length && !s.attention.length && !s.tasks.length && !s.cameIn.length && !s.stopped.length;
-  if (!data && isLoading) {
+  const state = viewState({ data, isLoading, isError }, s);
+  if (state === 'loading') {
     return (
       <div className={`${GRID} pt-5`} aria-busy="true">
         {Array.from({ length: 6 }).map((_, i) => <div key={i} className="skeleton aspect-[2/3] rounded-2xl" />)}
       </div>
     );
   }
-  if (empty) {
+  if (state === 'error') {
+    return (
+      <div data-downloads-error className="flex flex-col items-center px-6 py-16 text-center">
+        <IcAlert width={28} height={28} className="text-amber-300" aria-hidden />
+        <p className="mt-3 font-display text-lg font-semibold text-fog-50">{tr('Could not load the downloads')}</p>
+        <p className="mt-1 max-w-xs text-sm text-fog-400">{tr('The server did not answer. Try again in a moment.')}</p>
+        <button type="button" onClick={() => void refetch()} className="btn-key btn-key-primary mt-4">{tr('Try again')}</button>
+      </div>
+    );
+  }
+  if (state === 'empty') {
     return (
       <div data-downloads-empty>
         <EmptyState art={ART.emptyDownloads} title={tr('Nothing is being fetched right now.')}
@@ -295,6 +306,9 @@ function AttentionRow({ a, nameOf, onRetry, onDismissJob, onDismissRun, focusRef
                 otherwise jump to the front. */}
             <p dir="auto" className="mt-0.5 text-[12px] leading-relaxed text-amber-300">{a.job.reason || tr('Fetch stopped. Try another source or wait.')}</p>
             {jobNoteLines(a.job, nameOf).map((line, i) => <p key={i} className="mt-0.5 text-[11px] leading-snug text-fog-400">{line}</p>)}
+            {/* Which kind of download it was: a fill or a Fetch again has no Try again (the server sends no
+                `left` for them), and this says why the card is not like the others. */}
+            {a.job.origin && <p className="mt-0.5 text-[11px] text-fog-500">{originLabel(a.job.origin)}</p>}
           </>
         ) : (
           <>

@@ -93,7 +93,10 @@ test('the band above the chapters shows this series\' server downloads, and re-r
     && chapters.indexOf('<SeriesServerDownloads') < chapters.indexOf("{tr('Chapters')}"), 'the band is not above the chapter list');
   assert.doesNotMatch(page, /\bpe-36\b/, 'the bar still makes room for the pill');
   const band = code(read('components/SeriesServerDownloads.tsx'));
-  assert.match(band, /const landed = landedFor\(data, seriesId, folder\);/, 'the band does not re-read the chapter list');
+  assert.match(band, /const landed = data \? landedFor\(data, seriesId, folder\) : null;/, 'the band does not re-read the chapter list');
+  // When it re-reads is lib/serverDownloads.ts shouldReload's, tested there (serverDownloads.test.ts).
+  assert.match(band, /const step = shouldReload\(seen\.current, landed\);\s*seen\.current = step\.seen;\s*if \(!step\.reload\) return;/,
+    'the band decides on its own when to re-read');
   assert.match(band, /for \(const k of \[\['series-books', seriesId\], \['series-listing', seriesId\], \['series', seriesId\]\]\) qc\.invalidateQueries/, 'the band does not re-read the chapter list');
   assert.match(band, /const RELOAD_EVERY_MS = 4000;/, 'a sweep landing a chapter a second re-reads the page every second');
   assert.match(band, /const \{ data \} = useServerDownloads\(\);/, 'the band polls on its own');

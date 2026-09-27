@@ -250,10 +250,15 @@ names no series itself (a Fetch, a fill, a refetch) carries the id of the series
 finished job is swept a day after it ends (five minutes before v0.47.0); a
 **failed** one is never swept, because it is the only record that the download did not work, and it carries
 a `reason` naming the source and how far it got, and since v0.49.0 `left`: the chapters it did not land,
-ascending and at most 300, which is what a Try again sends back as `numbers` to `POST /api/sources/fetch`. An
+ascending and at most 300, which is what a Try again sends back as `numbers` to `POST /api/sources/fetch` --
+only on a failed Fetch or add (`origin` `fetch` or `add`), since a fill's and a refetch's chapters are not ones
+that route can take again. Every card carries `origin` (`add`, `fetch`, `fill` or `refetch`). An
 add's card also carries `cover: {source, url}`, its source's cover, so the Downloads view can draw it before
-the series has a thumbnail of its own. `DELETE /api/sources/jobs/<folder>` dismisses a job that has stopped:
-since v0.49.0 only its starter or an admin (**403** for anyone else, answered first), and **409** `running`
+the series has a thumbnail of its own. Its starter keeps a card wherever the series lands, without `seriesId`
+and `cover` when it lands in a library they cannot browse or above their age cap. `DELETE
+/api/sources/jobs/<folder>` dismisses a job that has stopped: since v0.49.0 only its starter or an admin
+(**403** for anyone else, answered first; **404**, as for no job at all, for a card the caller is not shown --
+Cancel answers the same way), and **409** `running`
 for one still downloading — or one whose auto-follow judgement is still running (`autoFollow.done ===
 false`), since the follows would still land while the report they belong to was gone. A card whose add named
 `alsoFollow` candidates carries `autoFollow: {done, results}` —

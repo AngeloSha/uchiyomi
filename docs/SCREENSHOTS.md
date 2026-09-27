@@ -59,8 +59,9 @@ provided. They are listed here so nobody later mistakes them for mockups.
   instance these are captured from, and `oidcEnabled()` is a pure env check, so the button cannot appear
   otherwise.
 - **The extension and sources shots** — `admin-extensions`, `crop-extensions`, `crop-repo-empty`,
-  `crop-repo-added`, `crop-repo-toast` (the success message, taken the moment the add answers: it lasts 3.2 s),
-  `ext-strip-1..3`, `admin-providers`, and the site's phone plates `phone-repo-empty`,
+  `crop-repo-added`, `crop-repo-toast` (the success notice, taken the moment the add answers: since v0.49.0 a
+  card at the bottom of the window, bottom-right on a laptop, for about 6 s), `ext-strip-1..3`,
+  `admin-providers`, and the site's phone plates `phone-repo-empty`,
   `phone-repo-added`, `phone-extensions` and `phone-sources`. Since v0.45.0 no screenshot may show a real
   extension, site or repository name (the owner's rule): the live catalogue is a legible wall of third-party site
   names, some 18+, and a shot of the repository row would show the live server's repository address. So these

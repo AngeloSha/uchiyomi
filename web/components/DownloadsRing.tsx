@@ -51,7 +51,7 @@ export function DownloadsNavIcon() {
   return (
     <Link href={downloadsHref()} title={name} aria-label={name}
       data-downloads-ring={ring.show ? (ring.slow ? 'slow' : 'active') : 'idle'}
-      className="grid h-10 w-10 place-items-center rounded-full text-fog-300 transition hover:text-accent">
+      className="grid h-10 w-10 shrink-0 place-items-center rounded-full text-fog-300 transition hover:text-accent">
       <RingIcon size="bar" {...ringProps(ring)}><IcCloudDownload width={19} height={19} /></RingIcon>
     </Link>
   );

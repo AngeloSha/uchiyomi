@@ -2251,7 +2251,7 @@ paths:
       summary: Downloads in progress and failed ones (a failed job is never swept; it carries a reason).
       operationId: getApiSourcesJobs
       description: >-
-        One card per series folder: `{folder, title, total, done, status, reason?, finishedAt?,
+        One card per series folder: `{folder, title, total, done, status, origin, reason?, finishedAt?,
         seriesId?, switched?: [{number, from, to, why?}], partial?, left?, cover?}`. `seriesId` is the library
         id of the series this job is filling: the card's own, or since v0.49.0 the id of the series row that
         holds the folder, so a Fetch, fill or refetch card names its series too. An add that starts a download
@@ -2259,11 +2259,14 @@ paths:
         until the first chapter has been scanned in, and for good on an add whose first chapter never landed).
         Since v0.49.0 every viewer gets the cards of the series they can browse (library access, age cap and
         the 18+ hide; before, cards were filtered only while the 18+ hide was on); a card whose folder is not
-        a series yet goes to the account that started it and to admins; a failed card (`status: error`) goes
-        only to the account that started it and to admins; `left` on a failed card lists the chapters it did
-        not land (ascending, at most 300), which is what a Try again sends to POST /api/sources/fetch; and an
-        add's card carries `cover: {source, url}`, its source's cover, for drawing before the series has a
-        thumbnail of its own. `switched` records a chapter completed from a
+        a series yet goes to the account that started it and to admins, and the account that started a job
+        keeps its card wherever the series lands -- without `seriesId` and `cover` when it is a series that
+        account may not browse; a failed card (`status: error`) goes only to the account that started it and
+        to admins; `origin` says what kind of job it is (`add`, `fetch`, `fill` or `refetch`); `left` on a
+        failed `fetch` or `add` card lists the chapters it did not land (ascending, at most 300), which is what
+        a Try again sends to POST /api/sources/fetch -- a fill's or a refetch's chapters are not ones that route
+        can take again, so those cards carry none; and an add's card carries `cover: {source, url}`, its
+        source's cover, for drawing before the series has a thumbnail of its own. `switched` records a chapter completed from a
         different followed source after its first copy failed; `why` is `rate_limited` when a 429 caused
         the switch and may be absent for an ordinary failure. `partial` counts chapters this job saved with
         repair placeholders. Both additions are absent when empty. An add
@@ -2319,12 +2322,19 @@ paths:
                         status: { type: string }
                         reason: { type: string }
                         finishedAt: { type: integer }
+                        origin:
+                          type: string
+                          enum: [add, fetch, fill, refetch]
+                          description: >-
+                            Since v0.49.0: what kind of job this is -- an add (and a nothing-yet add's carrier
+                            card), a Fetch, a fill from "Find missing chapters", or an admin's Fetch again.
                         seriesId:
                           type: string
                           description: >-
                             The series this job is filling: the card's own, else the series row holding the
                             folder (since v0.49.0). Absent while an add's first chapter has not been scanned
-                            in (it is answered before the row exists), and for good when it never lands.
+                            in (it is answered before the row exists), and for good when it never lands; also
+                            absent on a card shown to its starter in a series they may not browse.
                         switched:
                           type: array
                           items:
@@ -2348,9 +2358,10 @@ paths:
                           maxItems: 300
                           items: { type: number }
                           description: >-
-                            Since v0.49.0, on a failed job: the chapters it did not land, ascending -- what a Try
-                            again sends to POST /api/sources/fetch as `numbers`. Empty when every chapter landed
-                            and the library scan is what failed.
+                            Since v0.49.0, on a failed `fetch` or `add` job: the chapters it did not land,
+                            ascending -- what a Try again sends to POST /api/sources/fetch as `numbers`. Empty when
+                            every chapter landed and the library scan is what failed; absent on a fill or a
+                            refetch, whose chapters that route cannot take again.
                         cover:
                           type: object
                           required: [source, url]
@@ -2486,7 +2497,9 @@ paths:
       summary: Stop a running download after the chapter in flight.
       operationId: postApiSourcesJobsFolderCancel
       description: >-
-        Since v0.47.0 (#82). The account that started the job may, and any admin; anyone else gets 403.
+        Since v0.47.0 (#82). The account that started the job may, and any admin; anyone else gets 403 --
+        since v0.49.0 only for a job GET /api/sources/jobs hands them, and 404 for one it does not, exactly as
+        for no job at all, so the answer never says that a download is running for a title they cannot see.
         The job checks between chapters, so a file is never left half-written: what already landed stays,
         and the card ends `done` with `cancelled: true` and a `reason` saying how far it got. A re-fetch
         that set old copies aside puts back every one it did not reach. Audited as `download.cancel`.
@@ -2506,7 +2519,7 @@ paths:
         "403":
           description: "Forbidden: token scope, account permission, or a job this account did not start"
         "404":
-          description: No such job
+          description: No such job, or one this account is not shown
         "409":
           description: "Conflict: `not_running` -- the job has already stopped"
   /api/sources/runs/{kind}/cancel:
@@ -2571,7 +2584,8 @@ paths:
       operationId: deleteApiSourcesJobsFolder
       description: >-
         Since v0.49.0 only the account that started the job, or an admin, may dismiss it; anyone else gets
-        403, answered before the 409. Only a job that has stopped: 409 `running` while `status` is
+        403, answered before the 409 -- and 404 for a job GET /api/sources/jobs does not hand them, exactly as
+        for no job at all. Only a job that has stopped: 409 `running` while `status` is
         `downloading`, and likewise while the card's `autoFollow.done` is false -- a nothing-yet carrier card
         is `done` from birth, and dropping it mid-judgement would let the follows land with the report they
         belong to gone, while the dialog polled for a card that no longer existed.
@@ -2591,7 +2605,7 @@ paths:
         "403":
           description: "Forbidden: token scope, account permission, or a job this account did not start"
         "404":
-          description: No such job
+          description: No such job, or one this account is not shown
         "409":
           description: "Conflict: `running` -- the download is still going, or the auto-follow judgement has not finished"
   /api/discover/trending:

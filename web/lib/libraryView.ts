@@ -22,3 +22,18 @@ export function readView(v: string | null, mayDownload: boolean): LibraryView {
 export function downloadsHref(folder?: string | null): string {
   return folder ? `/library/?view=downloads&folder=${encodeURIComponent(folder)}` : '/library/?view=downloads';
 }
+
+/**
+ * Where a card in Discover's strip leads: its series once it has one; else its place in the Downloads view --
+ * only where that view shows it with a highlight (a download running, or one that failed), or at all (one
+ * stopped by its Cancel, listed under Came in today). Otherwise nowhere: a "Nothing yet" add's card that only
+ * carries the check of other sources, or a finished one whose series this viewer cannot open, is on no list of
+ * that view, and a link would open it on nothing. Reintroduce by linking every card to its folder: "a card the
+ * Downloads view does not list leads there anyway" in libraryView.test.ts.
+ */
+export function stripHref(j: { folder: string; status: string; seriesId?: string | null; cancelled?: boolean }): string | null {
+  if (j.seriesId) return `/series/?id=${encodeURIComponent(j.seriesId)}`;
+  if (j.status === 'downloading' || j.status === 'error') return downloadsHref(j.folder);
+  if (j.cancelled) return downloadsHref();
+  return null;
+}

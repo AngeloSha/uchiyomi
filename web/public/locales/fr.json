@@ -2,7 +2,7 @@
   "_meta": {
     "language": "fr",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 1389
+    "strings": 1416
   },
   "1 check found something": "1 vérification a trouvé quelque chose",
   "1 member": "1 membre",
@@ -1392,5 +1392,32 @@
   "What the server fetches is under Library → Downloads.": "Ce que le serveur récupère se trouve dans Bibliothèque → Téléchargements.",
   "what the server is fetching": "ce que le serveur récupère",
   "Library refreshed": "Bibliothèque actualisée",
-  "Refresh started": "Actualisation lancée"
+  "Refresh started": "Actualisation lancée",
+  "Could not load the downloads": "Impossible de charger les téléchargements",
+  "The server did not answer. Try again in a moment.": "Le serveur n’a pas répondu. Réessayez dans un instant.",
+  "last run {when}": "dernière exécution {when}",
+  "not run yet": "jamais exécutée",
+  "Syncing favorites…": "Synchronisation des favoris…",
+  "Already up to date": "Déjà à jour",
+  "Downloaded 1 chapter": "1 chapitre téléchargé",
+  "Downloaded {n} chapters": "{n} chapitres téléchargés",
+  "Marking 1 chapter read…": "Marquage d’1 chapitre comme lu…",
+  "Marking {n} chapters read…": "Marquage de {n} chapitres comme lus…",
+  "Nothing before this chapter is unread": "Rien n’est non lu avant ce chapitre",
+  "Everything is already read": "Tout est déjà lu",
+  "Marked 1 chapter read": "1 chapitre marqué comme lu",
+  "Marked {n} chapters read": "{n} chapitres marqués comme lus",
+  "Saving 1 chapter offline…": "Enregistrement d’1 chapitre hors ligne…",
+  "Saved 1 chapter offline": "1 chapitre enregistré hors ligne",
+  "Saved {n} of {m} offline — stopped, device storage may be full": "{n} sur {m} enregistrés hors ligne — arrêté, le stockage de l’appareil est peut-être plein",
+  "Check failed": "La vérification a échoué",
+  "1 held for a preferred group": "1 en attente d’un groupe préféré",
+  "{n} held for a preferred group": "{n} en attente d’un groupe préféré",
+  "Added 1 new chapter": "1 nouveau chapitre ajouté",
+  "Added {n} new chapters": "{n} nouveaux chapitres ajoutés",
+  "Nothing new yet": "Rien de nouveau pour l’instant",
+  "Could not start a check": "Impossible de lancer la vérification",
+  "on {device} {when}": "sur {device} {when}",
+  "on {device}": "sur {device}",
+  "another device": "un autre appareil"
 }
