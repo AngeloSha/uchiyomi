@@ -37,6 +37,15 @@ export interface ListingCopy {
   lang: string | null;
   pages: number | null;
   publishedAt: string | null;
+  /**
+   * The copy's OWN title (v0.49.0, #116). Copies of one number used to share the row's title, which is right for
+   * three groups' "Chapter 5" and wrong for the case #116 is about: posts that share a number and are different
+   * chapters, whose versions sheet read twenty identical lines. Absent on rows written before v0.49.0, where the
+   * row's title stands in, as it always did.
+   */
+  title?: string | null;
+  /** The number the source gave the copy, when Uchiyomi renumbered it (posting order). */
+  sourceNumber?: number;
 }
 
 export interface ListingRow {
@@ -105,6 +114,7 @@ export function listingRows(
     // group (a re-upload) must not have both entries read as chosen.
     const others = copies.filter((c) => c !== shown);
     if (order) others.sort(order);
+    // Reintroduce by dropping `title`: "every copy keeps its own title" in seriesListing.test.ts reads undefined.
     const toCopy = (c: SourceChapter): ListingCopy => ({
       sourceId: c.sourceId,
       source: c.source ?? fallbackSource,
@@ -113,6 +123,8 @@ export function listingRows(
       lang: c.lang ?? null,
       pages: typeof c.pages === 'number' && Number.isFinite(c.pages) ? c.pages : null,
       publishedAt: c.publishedAt && Number.isFinite(Date.parse(c.publishedAt)) ? c.publishedAt : null,
+      title: c.title ?? null,
+      ...(typeof c.sourceNumber === 'number' && Number.isFinite(c.sourceNumber) ? { sourceNumber: c.sourceNumber } : {}),
     });
     out.push({
       number,
@@ -194,14 +206,17 @@ export async function replaceListing(seriesId: string, rows: ListingRow[]): Prom
 /**
  * A stored copy as the downloader takes it. `groups` is the already-split list, which groupsOf reads back
  * identically (an array is authoritative), so the file's Translator tag and the lib_books.scanlator stamp
- * come out as they would have from the live listing. The title is the row's: a copy stores none of its
- * own, and the number's title is the same whichever group released it.
+ * come out as they would have from the live listing. The title is the copy's own when it has one (v0.49.0):
+ * a pick or a Replace… of one post must stamp THAT post's name, not the chosen copy's -- the row's title
+ * stands in for copies stored before copies had titles.
+ * Reintroduce by returning `row.title`: "a pick is stamped with the picked copy's title" in
+ * seriesListing.test.ts reads the row's.
  */
 export function copyToChapter(copy: ListingCopy, row: { number: number; title: string | null }): SourceChapter {
   return {
     sourceId: copy.sourceId,
     number: row.number,
-    title: row.title ?? undefined,
+    title: copy.title ?? row.title ?? undefined,
     pages: copy.pages ?? undefined,
     publishedAt: copy.publishedAt ?? undefined,
     scanlator: copy.scanlator ?? undefined,

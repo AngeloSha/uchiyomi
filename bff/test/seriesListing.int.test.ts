@@ -159,6 +159,7 @@ test('every copy of a number is kept, the chosen one first', { skip }, async () 
   assert.deepEqual(three.copies.map((c: any) => c.scanlator), ['Group B', 'Group A'], 'the chosen one first');
   assert.deepEqual(three.copies[0], {
     sourceId: 'c/3/Group B', source: PRI, groups: ['Group B'], scanlator: 'Group B', lang: null, pages: null, publishedAt: null,
+    title: 'Chapter 3',
   }, 'the shape the versions route and a pick read');
   const one = (await rows()).find((x: any) => Number(x.number) === 1);
   assert.deepEqual(one.copies.map((c: any) => c.groups), [[]], 'a copy naming no group is stored with none');

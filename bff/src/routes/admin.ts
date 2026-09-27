@@ -2,6 +2,7 @@ import { hash } from '@node-rs/argon2';
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import { z } from 'zod';
 import { q, one, tx } from '../lib/db';
+import { postingOrderSeries, POSTING_ORDER_REFUSAL } from '../lib/numbering';
 import { content as komga } from '../lib/backend';
 import { cacheBytes } from '../lib/imageCache';
 import { runtime } from '../lib/runtime';
@@ -1082,6 +1083,9 @@ export default async function adminRoutes(app: FastifyInstance) {
     }).safeParse(req.body);
     if (!b.success) return reply.code(400).send({ error: 'bad_request' });
     const { planId, source, sourceSeriesId } = b.data;
+    // Numbered by posting order (#116): a follower would never be merged (lib/updater.ts), so following one is
+    // refused with the reason rather than accepted and silently ignored.
+    if (await postingOrderSeries(id)) return reply.code(409).send({ error: 'posting_order', message: POSTING_ORDER_REFUSAL });
     const plan = getPlan(planId);
     if (!plan) return reply.code(409).send({ error: 'plan_stale', message: 'That list has moved on. Scan again.' });
     if (plan.seriesId !== id) return reply.code(400).send({ error: 'bad_request', message: 'That plan is for another series.' });

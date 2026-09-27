@@ -99,6 +99,19 @@ test('tracker progress reflects the highest completed chapter', { skip: DSN ? fa
     await q(`DELETE FROM users WHERE username = $1`, ['tracker-test-2']);
   });
 
+  await t.test('a completed 12.6 tells the tracker 12', async () => {
+    // `::int` on a real ROUNDS: 12.6 read as 13, a chapter nobody had read -- and every part of an episode a
+    // source numbers N.01..N.73 (#116) pushed N+1. Reintroduce by dropping floor() in seriesProgressFor: 13.
+    for (const [id, n] of [['b_tracker_12', 12], ['b_tracker_126', 12.6]] as const) {
+      await q(`INSERT INTO lib_books (id, series_id, source, file, title, number) VALUES ($1,$2,'test',$3,$4,$5)`,
+        [id, SERIES, `/test/tracker/${id}.cbz`, `Chapter ${n}`, n]);
+      await q(`INSERT INTO read_progress (user_id, book_id, series_id, page, completed) VALUES ($1,$2,$3,1,true)`, [userId, id, SERIES]);
+    }
+    assert.equal((await seriesProgressFor(userId, SERIES)).chapters, 12);
+    await q(`DELETE FROM read_progress WHERE book_id = ANY($1)`, [['b_tracker_12', 'b_tracker_126']]);
+    await q(`DELETE FROM lib_books WHERE id = ANY($1)`, [['b_tracker_12', 'b_tracker_126']]);
+  });
+
   await q(`DELETE FROM users WHERE username = $1`, ['tracker-test']);
   await q(`DELETE FROM lib_series WHERE id = $1`, [SERIES]);
 });

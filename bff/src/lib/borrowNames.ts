@@ -46,7 +46,8 @@ export const NAMES_RETRY_MS = 7 * 24 * 3600_000;
 const NAMES_WALL_MS = 60_000;
 const NAMES_SEARCH_MS = 20_000;
 
-export type BorrowWhy = 'off' | 'nothing_to_do' | 'too_few' | 'waiting' | 'no_donor' | 'no_names';
+/** `posting_order`: the series is numbered by posting order (#116), so no donor's numbers name its chapters. */
+export type BorrowWhy = 'off' | 'nothing_to_do' | 'too_few' | 'waiting' | 'no_donor' | 'no_names' | 'posting_order';
 export interface BorrowResult { named: number; donor?: string; why?: BorrowWhy }
 
 type NameDonor = { source?: string; sourceId?: string; none?: number };
@@ -70,10 +71,13 @@ export async function borrowingOn(own: boolean | null): Promise<boolean> {
 
 export async function borrowNamesFor(seriesId: string, opts: { now?: number; force?: boolean } = {}): Promise<BorrowResult> {
   const now = opts.now ?? Date.now();
-  const s = await one<{ id: string; title: string; source_id: string | null; borrow_names: boolean | null; name_donor: NameDonor | null }>(
-    `SELECT s.id, s.title, s.source_id, s.borrow_names, s.name_donor FROM lib_series s WHERE s.id = $1 AND ${visibleToAll('s')}`,
+  const s = await one<{ id: string; title: string; source_id: string | null; borrow_names: boolean | null; name_donor: NameDonor | null; numbering: string | null }>(
+    `SELECT s.id, s.title, s.source_id, s.borrow_names, s.name_donor, s.numbering FROM lib_series s WHERE s.id = $1 AND ${visibleToAll('s')}`,
     [seriesId]).catch(() => null);
   if (!s) return { named: 0, why: 'nothing_to_do' };
+  // A donor lends a name by NUMBER, and under posting order no other site's chapter 20 is our chapter 20. The
+  // series' own source names every post anyway: posting order is exactly the case where each has its own title.
+  if (s.numbering === 'posting_order') return { named: 0, why: 'posting_order' };
   if (!(await borrowingOn(s.borrow_names))) return { named: 0, why: 'off' };
 
   // Only LIVE chapters with no name at all. A borrowed name counts as a name: re-deciding it every night would

@@ -77,6 +77,7 @@ test('every copy of a number is kept, the chosen one first', () => {
   assert.deepEqual(three.copies.map((c) => c.scanlator), ['Group A', 'Group C', 'Group B'], 'chosen first, then the rules\' order');
   assert.deepEqual(three.copies[0], {
     sourceId: 'c/3/Group A', source: 'pri', groups: ['Group A'], scanlator: 'Group A', lang: null, pages: 10, publishedAt: '2026-09-01T00:00:00Z',
+    title: 'Chapter 3',
   });
   assert.equal(three.copies[1].publishedAt, null, 'an unparsable date is stored as no date, as the row\'s own is');
   assert.equal(three.copies[1].source, 'fol');
@@ -89,6 +90,30 @@ test('every copy of a number is kept, the chosen one first', () => {
     sourceId: 'c/3/Group B', number: 3, title: 'Chapter 3', pages: 0, publishedAt: '2026-09-02T00:00:00Z',
     scanlator: 'Group B', groups: ['Group B'], lang: 'en', source: 'pri',
   });
+});
+
+test('every copy keeps its own title, and the number the source gave it', () => {
+  // #116: posts that share a number are different chapters with different names. Stored with the row's title
+  // alone, the versions sheet read twenty identical lines. Reintroduce by dropping `title` from toCopy: undefined.
+  const tagged = [
+    ch(2, { title: 'Episode 1 - Page1', source: 'pri', sourceNumber: 1 }),
+    ch(2, { title: 'Episode 1 - Page 2', scanlator: 'Group B', source: 'pri' }),
+  ];
+  const { releases } = chooseReleases(tagged, noPrefs);
+  const [row] = listingRows(tagged, releases, new Set(), 'pri');
+  assert.deepEqual(row.copies.map((c) => c.title).sort(), ['Episode 1 - Page 2', 'Episode 1 - Page1']);
+  assert.equal(row.copies.find((c) => c.title === 'Episode 1 - Page1')!.sourceNumber, 1);
+  assert.equal('sourceNumber' in row.copies.find((c) => c.title === 'Episode 1 - Page 2')!, false, 'absent where nothing was renumbered');
+});
+
+test('a pick is stamped with the picked copy\'s title', () => {
+  // copyToChapter feeds the downloader, whose title becomes the file's chapter name: a pick of another post must
+  // not be named after the chosen one. Reintroduce by returning `row.title`: 'Episode 1 - Page1'.
+  const copy = { sourceId: 'p2', source: 'pri', groups: [], scanlator: null, lang: null, pages: null, publishedAt: null, title: 'Episode 1 - Page 2' };
+  assert.equal(copyToChapter(copy, { number: 1, title: 'Episode 1 - Page1' }).title, 'Episode 1 - Page 2');
+  // A copy stored before copies had titles takes the row's, as every copy did.
+  const { title: _t, ...old } = copy;
+  assert.equal(copyToChapter(old, { number: 1, title: 'Episode 1 - Page1' }).title, 'Episode 1 - Page1');
 });
 
 test('a number only blocked groups released is kept as blocked, with a copy to show', () => {

@@ -84,6 +84,11 @@ import { chooseReleases, groupsOf, releaseOrder } from '../lib/releases';
 import { effectivePrefsFor, readSeriesPrefs } from '../lib/scanlatorPrefs';
 import { copyToChapter, listingRows, replaceListing, type ListingCopy } from '../lib/seriesListing';
 import { haveNumbers } from '../lib/libraryNumbers';
+import {
+  addNumbering, numberingFor, numberedChapters, stampAddNumbering, registerBusyProbe, onRenumbered, POSTING_ORDER_REFUSAL,
+  type NumberingChoice,
+} from '../lib/numbering';
+import { numKey } from '../lib/postingOrder';
 import { groupStats } from '../lib/groupStats';
 import { fetchAniListArt, fetchTrendingManhwa, TrendingItem } from '../lib/anilist';
 import { learnDirection, directionFromAniListMatch } from '../lib/readingDirection';
@@ -225,6 +230,29 @@ function sweepJobs(now = Date.now()): void {
 export function jobBusy(folder: string): boolean {
   return jobs.get(folder)?.status === 'downloading' || busyFolders.has(folder);
 }
+// A renumber (lib/numbering.ts) never renames under a job that is writing into the folder, and a failed card's
+// Try again list names the chapters it lacked by number: after a renumber those are other posts, so the list
+// moves with the files -- and a number the renumber has no place for is dropped rather than fetched as the wrong
+// post.
+registerBusyProbe((folder) => jobs.get(folder)?.status === 'downloading');
+
+/**
+ * Why a manual fetch or a fill must wait, when it must (#116): a renumber is pending review or half-applied, and
+ * every chapter fetched now would land under a number the plan is about to move -- the plan would only grow. A
+ * fill from another source into a posting-order series is refused for good: that source's numbers are not ours.
+ */
+function renumberRefusal(s: { numbering?: string | null; numbering_pending?: string | null; renumber_plan?: unknown; source_id?: string | null }, source?: string) {
+  if (s.numbering_pending || s.renumber_plan) {
+    return { error: 'renumber_pending', message: 'This series is waiting to be renumbered. Review it on the series page first.' };
+  }
+  if (s.numbering === 'posting_order' && source && source !== s.source_id) return { error: 'posting_order', message: POSTING_ORDER_REFUSAL };
+  return null;
+}
+onRenumbered((folder, map) => {
+  const j = jobs.get(folder);
+  if (!j?.left?.length) return;
+  j.left = [...new Set(j.left.map((n) => map.get(numKey(n))).filter((n): n is number => n !== undefined))].sort((a, b) => a - b);
+});
 
 export interface DownloadJobInput {
   folder: string;
@@ -407,7 +435,7 @@ export function startDownloadJob(input: DownloadJobInput): { total: number } {
   void withOrigin(input.origin ?? 'fetch', input.by ?? null, async () => {
     let failures = 0;
     // What this job wrote, for the provenance stamp; a skipped copy was already on disk and is not ours.
-    const landed: Array<{ number: number; scanlator?: string; source?: string; missing?: number[]; title?: string }> = [];
+    const landed: Array<{ number: number; scanlator?: string; source?: string; missing?: number[]; title?: string; chapterId?: string }> = [];
     const settled = new Set<SourceChapter>();
     // Numbers that landed from a copy the person picked by name: stamped `picked_at` at the end, so the
     // nightly group upgrade (lib/repair.ts stepGroups) never swaps a chosen version for another group's.
@@ -478,7 +506,7 @@ export function startDownloadJob(input: DownloadJobInput): { total: number } {
       const j = jobs.get(folder);
       if (out.kind === 'landed' || out.kind === 'partial') {
         landed.push({
-          number: ch.number, scanlator: out.chapterUsed.scanlator, source: out.via, title: out.chapterUsed.title,
+          number: ch.number, scanlator: out.chapterUsed.scanlator, source: out.via, title: out.chapterUsed.title, chapterId: out.chapterUsed.sourceId,
           ...(out.kind === 'partial' ? { missing: out.missing.map((i) => i + 1) } : {}),
         });
         if (ch.pinned && !out.switched) pickedLanded.push(ch.number);
@@ -676,6 +704,16 @@ export function clearDetailCache(): void {
 }
 
 /**
+ * Forget what one source listed: an extension preference that changes how it numbers (#116) makes every cached
+ * chapter list of that source wrong at once, and the add dialog would otherwise count by the old numbers for ten
+ * minutes.
+ */
+export function clearDetailCacheFor(adapterId: string): void {
+  for (const k of [...detailCache.keys()]) if (k.startsWith(`${adapterId}:`)) detailCache.delete(k);
+  for (const k of [...previewPages.keys()]) if (k.startsWith(`${adapterId}\u0000`)) previewPages.delete(k);
+}
+
+/**
  * Reading a chapter from a source before adding the series (#91, @Squeaks72's idea, rebuilt).
  *
  * ⚠️ NO STRING FROM THE CALLER EVER REACHES A SOURCE'S PAGE FETCHER. The first version took a `chapterId` and
@@ -709,7 +747,10 @@ export async function previewChapters(ctx: ViewCtx, source: string | undefined, 
   if (!sourceAllowedFor(src, ctx.maxAgeRating)) return refused(403, 'source_denied', 'That source is not available on this account.');
   if (await isDisabled(src.id).catch(() => false)) return refused(403, 'disabled', `${src.name} is switched off.`);
   if (await blockedNow(src.id).catch(() => null)) return refused(429, 'cooldown', `${src.name} asked us to slow down. Try again later.`);
-  const { series, chapters } = await seriesAndChapters(src, sourceId);
+  const { series, chapters: raw } = await seriesAndChapters(src, sourceId);
+  // Numbered as the add would number them (#116, lib/numbering.ts), so the chapter a preview calls 20 is the
+  // chapter 20 the add lands.
+  const chapters = numberingFor(raw, 'auto').chapters;
   // One copy per number, as an add would take it; an external link (pages === 0) cannot be read here either.
   const chosen = chooseReleases(chapters, await effectivePrefsFor(null, 0)).releases.filter((c) => c.sourceId && c.pages !== 0);
   if (!chosen.length) return refused(502, 'unreadable', 'That source did not list any chapters it can serve.');
@@ -918,6 +959,12 @@ export async function addSeriesFromSource(opts: {
   req?: FastifyRequest;
   /** Which sources THIS viewer may reach; a candidate outside it is reported `unavailable` and never asked. */
   sourceAllowed?: (source: string) => boolean;
+  /**
+   * How to number the series (#116, lib/numbering.ts): `auto` (the default) numbers by posting order when the
+   * detector finds a source giving many different posts one number; `posting_order` and `source` are a person's
+   * choice from the add dialog's switch.
+   */
+  numbering?: NumberingChoice;
 }): Promise<AddResult> {
   const { source, sourceId, force, chapterCount, chapterFrom, autoUpdate } = opts;
   const src = source ? getSource(source) : null;
@@ -928,7 +975,7 @@ export async function addSeriesFromSource(opts: {
   // duplicate, has it any chapters -- so it cannot move behind the reply. Shared with `/api/sources/detail`,
   // which the add dialog calls seconds earlier for the very same two things: without that, opening the
   // dialog and pressing Add paid for four challenge solves to learn two facts.
-  const { series, chapters } = await seriesAndChapters(src, sourceId);
+  const { series, chapters: listed } = await seriesAndChapters(src, sourceId);
   // No title, no add. This used to fall back to the literal string 'Series', which becomes the folder --
   // so a `getSeries` that timed out while `listChapters` succeeded filed the title under `<Source>/Series`,
   // and the NEXT one to do that was told "already in library" and quietly merged into the same shelf.
@@ -967,6 +1014,22 @@ export async function addSeriesFromSource(opts: {
   if (existing && !existing.deleted_at) {
     return { ok: true, status: 200, title, folder, chapters: 0, seriesId: existing.id, message: 'already in library' };
   }
+  // Numbered here, before the chooser (#116): the selection, the floor, the have-set, the listing and the files
+  // the downloader names all take these numbers, so a Webtoons series whose 226 posts share 13 numbers arrives
+  // as 226 chapters rather than 13 chapters with versions. A folder already holding books is not renamed here --
+  // addNumbering adds it for review instead. Reintroduce by numbering nothing (`listed` straight through):
+  // "a Webtoons-shaped add is numbered by posting order" in numbering.int.test.ts floors the series above the
+  // source's last number (8) rather than the last post's (226).
+  const numbered = await addNumbering(listed, opts.numbering ?? 'auto', { folder, sourceId: source!, existingId: existing?.id ?? null });
+  // Tagged with their source ONCE, before the chooser: listingRows tells the chosen copy from the rest by
+  // identity (chooseReleases hands back the very objects it was given), and it used to be handed a second,
+  // freshly tagged copy of the list -- so every row an add wrote listed its chosen copy twice, and the versions
+  // sheet showed each version twice until the first sweep rewrote the listing.
+  // Reintroduce by tagging a fresh copy for listingRows again: "a Webtoons-shaped add is numbered by posting
+  // order" in numbering.int.test.ts finds two copies on a row.
+  const chapters = numbered.chapters.map((c) => ({ ...c, source: source! }));
+  // Other sources' numbers do not line up with posting numbers, so there is nothing to judge a follower by.
+  if (numbered.applied === 'posting_order' && opts.alsoFollow?.length) opts = { ...opts, alsoFollow: undefined };
   if (!force) {
     // ⚠️ `visibleToAll` stays: this asks "would adding this be a duplicate on THIS SERVER", which is a
     // property of the server, not of the person asking (the same reasoning as `inLibrary` above), so it
@@ -1055,7 +1118,8 @@ export async function addSeriesFromSource(opts: {
       [newSeriesId(), src.name, title, meta.summary || null, meta.author ?? null, meta.status ?? null, meta.genres ?? [], meta.url ?? null,
        folder, libraryId, autoUpdate !== false, source, sourceId, floor, chosen.length],
     ))[0];
-    await replaceListing(id, listingRows(chapters.map((c) => ({ ...c, source: source! })), chosen, new Set(), source!, releaseOrder(prefs))).catch(() => {});
+    await stampAddNumbering({ id }, source!, numbered.decision).catch((e) => console.warn(`[add] ${folder}: numbering not recorded: ${(e as Error)?.message || e}`));
+    await replaceListing(id, listingRows(chapters, chosen, new Set(), source!, releaseOrder(prefs))).catch(() => {});
     // The other sources are judged only now, against the listing above: it is what stands in for "what
     // we hold" on a series that holds nothing. A nothing-yet add has no download and so no card, so one
     // is minted purely to carry the results to the dialog's poll -- and only when there is something to
@@ -1108,9 +1172,15 @@ export async function addSeriesFromSource(opts: {
    * ⚠️ A failure here reads as "we hold nothing" and the add fetches everything, which is what it did
    * before this existed. Fetching twice is the old bug; skipping a chapter nobody holds would be a new one.
    */
+  // Under posting order (a series removed and added back), override-aware as the sweep's is: a book in a root the
+  // renumber could not rename holds its posting number in book_overrides (lib/numbering.ts).
   const have = new Set((await q<{ number: number }>(
-    `SELECT DISTINCT b.number FROM lib_books b JOIN lib_series s ON s.id = b.series_id
-      WHERE s.folder = $1 AND b.pruned_at IS NULL AND b.number IS NOT NULL`,
+    numbered.applied === 'posting_order'
+      ? `SELECT DISTINCT COALESCE(ov.number, b.number) AS number FROM lib_books b JOIN lib_series s ON s.id = b.series_id
+           LEFT JOIN book_overrides ov ON ov.book_id = b.id
+          WHERE s.folder = $1 AND b.pruned_at IS NULL AND b.number IS NOT NULL`
+      : `SELECT DISTINCT b.number FROM lib_books b JOIN lib_series s ON s.id = b.series_id
+          WHERE s.folder = $1 AND b.pruned_at IS NULL AND b.number IS NOT NULL`,
     [folder],
   ).catch(() => [])).map((r) => Number(r.number)));
   const toFetch = selected.filter((c) => !have.has(c.number));
@@ -1144,6 +1214,8 @@ export async function addSeriesFromSource(opts: {
     // By folder, as the run reads it after its own scan: the row exists by construction here, because a
     // non-empty have-set is rows joined to a series with this folder.
     const heldId = (await q<{ id: string }>('SELECT id FROM lib_series WHERE folder = $1', [folder]).catch(() => []))[0]?.id;
+    // The numbering before the routing, so no check can reach the row routed and not yet numbered.
+    await stampAddNumbering({ folder }, source!, numbered.decision).catch((e) => console.warn(`[add] ${folder}: numbering not recorded: ${(e as Error)?.message || e}`));
     await q('UPDATE lib_series SET auto_update = $1, source_id = $2, source_series_id = $3, chapter_floor = $5 WHERE folder = $4',
       [autoUpdate !== false, source, sourceId, folder, floor]).catch(() => {});
     await learnDirection({ folder }, series?.readingDirection, 'source').catch(() => {});
@@ -1151,7 +1223,7 @@ export async function addSeriesFromSource(opts: {
     // source's own, and the chapters they belong to are here -- they were simply fetched by somebody else.
     await setBookDates(folder, selected).catch(() => {});
     if (heldId) {
-      await replaceListing(heldId, listingRows(chapters.map((c) => ({ ...c, source: source! })), chosen, new Set(), source!, releaseOrder(prefs))).catch(() => {});
+      await replaceListing(heldId, listingRows(chapters, chosen, new Set(), source!, releaseOrder(prefs))).catch(() => {});
       // As on the nothing-yet branch: no download means no card, so one is minted purely to carry the
       // judgement to the dialog's poll, and only when there is something to judge.
       if (opts.alsoFollow?.length) {
@@ -1191,7 +1263,7 @@ export async function addSeriesFromSource(opts: {
   const run = async (): Promise<AddResult> => {
     // Which chapters this run wrote, for the provenance stamp. Only what LANDED, never the selection: a
     // copy the downloader skipped because the file was already there is somebody else's work.
-    const landed: Array<{ number: number; scanlator?: string; source?: string; missing?: number[]; title?: string }> = [];
+    const landed: Array<{ number: number; scanlator?: string; source?: string; missing?: number[]; title?: string; chapterId?: string }> = [];
     // The add has one source by definition, but it still goes through the same policy as every other
     // download path: pacing, refusal accounting and an explicit partial hold all live in the helper. There
     // are deliberately no alternates and no hunt here -- no followed series exists until chapter one has
@@ -1214,7 +1286,7 @@ export async function addSeriesFromSource(opts: {
       if (out.kind === 'landed' || out.kind === 'partial') {
         firstPages = out.pages;
         landed.push({
-          number: toFetch[0].number, scanlator: out.chapterUsed.scanlator, source: out.via, title: out.chapterUsed.title,
+          number: toFetch[0].number, scanlator: out.chapterUsed.scanlator, source: out.via, title: out.chapterUsed.title, chapterId: out.chapterUsed.sourceId,
           ...(out.kind === 'partial' ? { missing: out.missing.map((i) => i + 1) } : {}),
         });
         if (out.kind === 'partial') {
@@ -1259,6 +1331,8 @@ export async function addSeriesFromSource(opts: {
     await persistScan().catch(logScanError);
     await setBookDates(folder, selected).catch(() => {});
     await setBookMeta(folder, landed).catch(() => {});
+    // The numbering before the routing below, as on the branch above: routed means numbered.
+    await stampAddNumbering({ folder }, source!, numbered.decision).catch((e) => console.warn(`[add] ${folder}: numbering not recorded: ${(e as Error)?.message || e}`));
     // The floor the person's selection earns, computed above the "nothing left to fetch" branch so both
     // writers use the one expression -- and from `selected`, which is what was asked for.
     await q('UPDATE lib_series SET auto_update = $1, source_id = $2, source_series_id = $3, chapter_floor = $5 WHERE folder = $4',
@@ -1277,7 +1351,7 @@ export async function addSeriesFromSource(opts: {
       // dialog on the card it is already polling, rather than through a title search that can find the
       // wrong series. Set before the listing and the judgement, because neither is waited for.
       const card = jobs.get(folder); if (card) card.seriesId = seriesId;
-      await replaceListing(seriesId, listingRows(chapters.map((c) => ({ ...c, source: source! })), chosen, new Set(), source!, releaseOrder(prefs))).catch(() => {});
+      await replaceListing(seriesId, listingRows(chapters, chosen, new Set(), source!, releaseOrder(prefs))).catch(() => {});
       // Only once the listing is written, and only from here: the row did not exist when the dialog was
       // answered (persistScan minted it from chapter 1 above), and the judgement measures against this
       // listing -- against `lib_books` it would see one chapter and refuse everything as `too_few_listed`
@@ -1325,7 +1399,7 @@ export async function addSeriesFromSource(opts: {
         const j = jobs.get(folder);
         if (out.kind === 'landed' || out.kind === 'partial') {
           landed.push({
-            number: ch.number, scanlator: out.chapterUsed.scanlator, source: out.via, title: out.chapterUsed.title,
+            number: ch.number, scanlator: out.chapterUsed.scanlator, source: out.via, title: out.chapterUsed.title, chapterId: out.chapterUsed.sourceId,
             ...(out.kind === 'partial' ? { missing: out.missing.map((i: number) => i + 1) } : {}),
           });
           if (j) {
@@ -1772,7 +1846,7 @@ export default async function sourceRoutes(app: FastifyInstance) {
     const p = new Params();
     const rows = await q<any>(
       `SELECT s.id, s.title, s.folder, s.source_id, s.source_series_id, s.summary, s.author, s.genres, s.web, s.status,
-              s.chapter_floor, s.scanlator_prefs
+              s.chapter_floor, s.scanlator_prefs, s.numbering, s.numbering_source
          FROM lib_series s WHERE s.id = ${p.add(seriesId)} AND ${visible('s', vc(req), p)}`, p.values,
     ).then((r) => r, () => null);
     if (rows === null) return reply.code(503).send({ error: 'unavailable' });
@@ -1871,9 +1945,10 @@ export default async function sourceRoutes(app: FastifyInstance) {
     return st;
   }
 
-  async function runFillScan(st: FillScan, o: { s: any; seriesId: string; have: number[]; term: string; allowed: Set<string> }): Promise<void> {
+  async function runFillScan(st: FillScan, o: { s: any; seriesId: string; have: number[]; term: string; allowed: Set<string>; following?: string[] }): Promise<void> {
     const { s, seriesId, have, allowed } = o;
     const plan = st.plan;
+    const posting = s.numbering === 'posting_order' && (!s.numbering_source || s.numbering_source === s.source_id);
     const terms = [...new Set([s.title, o.term].filter(Boolean))] as string[];
     // The series' own release preferences over the global ones, with patience off: a person is choosing
     // from this list now, and holding a chapter for a group that may never post here would read as "not
@@ -1900,6 +1975,9 @@ export default async function sourceRoutes(app: FastifyInstance) {
         else {
           try { raw = (await seriesAndChapters(src, f.sourceId)).chapters; }
           catch { why = 'no_chapters'; }
+          // The series' own source, in the numbers the series keeps (#116): a posting-order series holds chapter
+          // 20, and the source's own list calls that post 2. Read-only -- the check is what persists new posts.
+          if (posting && f.pinned && raw.length) raw = await numberedChapters({ seriesId, sourceId: f.source }, raw);
         }
         // One copy per number BEFORE the list is assessed or stored in the plan. `authorise` filters the
         // stored list by number, so a plan holding two copies of chapter 5 would answer a fill of [5] with
@@ -1940,6 +2018,19 @@ export default async function sourceRoutes(app: FastifyInstance) {
         found.push(f);
         listings.push(assessOne(f));
       }
+    }
+    // Numbered by posting order: no other source's numbers line up with the series', so none is searched. The
+    // sources it follows are named with the reason, so the dialog says why they offer nothing.
+    // Reintroduce by searching anyway: "followers are not merged under posting order" in numbering.int.test.ts
+    // finds no line for the follower ("the follower is named, with the reason").
+    if (posting) {
+      for (const id of o.following ?? []) {
+        if (id !== s.source_id) also(id, getSource(id)?.name ?? id, 'posting_order');
+      }
+      await Promise.all(listings);
+      st.refusal = st.head.gaps.length || plan.candidates.some((c) => c.newer.length || c.older.length) ? null
+        : { code: 'no_gaps', message: 'Nothing is missing between the chapters you already have.' };
+      return;
     }
     // Sources that were asked and did not answer (`unreachable`), and sources never asked because enough
     // already had the title (`not_tried`). Both are shown; neither is "does not have it", and the old scan
@@ -2012,10 +2103,13 @@ export default async function sourceRoutes(app: FastifyInstance) {
     if (await blockedNow(source).catch(() => false)) return reply.code(429).send({ error: 'blocked' });
 
     const s = await one<any>(
-      `SELECT id, title, folder, summary, author, genres, web, status FROM lib_series WHERE id = $1`, [plan.seriesId]);
+      `SELECT id, title, folder, summary, author, genres, web, status, source_id, numbering, numbering_pending, renumber_plan
+         FROM lib_series WHERE id = $1`, [plan.seriesId]);
     if (!s) return reply.code(404).send({ error: 'not_found' });
 
     if (jobBusy(s.folder)) return reply.code(409).send({ error: 'busy' });
+    const renumbering = renumberRefusal(s, source);
+    if (renumbering) return reply.code(409).send(renumbering);
 
     const picked = auth.chapters;
     await logAudit('series.fill', {
@@ -2115,13 +2209,16 @@ export default async function sourceRoutes(app: FastifyInstance) {
     // browsable(), for the fill scan's reason: a fetch on a series someone opened is not a listing.
     const p = new Params();
     const rows = await q<any>(
-      `SELECT s.id, s.title, s.folder, s.summary, s.author, s.genres, s.web, s.status, s.source_id
+      `SELECT s.id, s.title, s.folder, s.summary, s.author, s.genres, s.web, s.status, s.source_id,
+              s.numbering, s.numbering_pending, s.renumber_plan
          FROM lib_series s WHERE s.id = ${p.add(seriesId)} AND ${visible('s', vc(req), p)}`, p.values,
     ).then((r) => r, () => null);
     if (rows === null) return reply.code(503).send({ error: 'unavailable' });
     const s = rows[0];
     if (!s) return reply.code(404).send({ error: 'not_found' });
     if (jobBusy(s.folder)) return reply.code(409).send({ error: 'busy', message: 'A download for that series is already running.' });
+    const renumbering = renumberRefusal(s);
+    if (renumbering) return reply.code(409).send(renumbering);
 
     // The listing is refreshed first, so what is fetched is the copy the release rules choose NOW rather
     // than the one the last sweep chose: a preferences save never touches series_listing, and a person who
@@ -2172,8 +2269,13 @@ export default async function sourceRoutes(app: FastifyInstance) {
     ]);
     // A live row, not a tombstone: a chapter the cleanup let go is fetchable again, and "already here"
     // would send the person to a row with no pages behind it.
+    // Override-aware under posting order, as the sweep's have-set is (lib/updater.ts): a book the renumber could
+    // not rename holds its posting number in book_overrides, and its raw number is some other post's now.
     const here = new Set((await q<{ number: number }>(
-      'SELECT number FROM lib_books WHERE series_id = $1 AND number = ANY($2::real[]) AND pruned_at IS NULL',
+      s.numbering === 'posting_order'
+        ? `SELECT COALESCE(ov.number, b.number) AS number FROM lib_books b LEFT JOIN book_overrides ov ON ov.book_id = b.id
+            WHERE b.series_id = $1 AND COALESCE(ov.number, b.number) = ANY($2::real[]) AND b.pruned_at IS NULL`
+        : 'SELECT number FROM lib_books WHERE series_id = $1 AND number = ANY($2::real[]) AND pruned_at IS NULL',
       [seriesId, numbers],
     )).map((r) => Number(r.number)));
 
@@ -2582,11 +2684,27 @@ export default async function sourceRoutes(app: FastifyInstance) {
     // unasked. Same for the add below, which is the button this dialog leads to (#64).
     if (!sourceAllowedFor(src, vc(req).maxAgeRating)) return denySource(reply);
     // Through the shared lookup so the add that usually follows this reuses it rather than re-solving.
-    const { series, chapters } = await seriesAndChapters(src, sourceId);
+    const { series, chapters: raw } = await seriesAndChapters(src, sourceId);
+    // Numbered as the add will number them (#116, lib/numbering.ts): a source that gives many different posts one
+    // number is counted in posting order, 1..K, and `numbering` says so -- with the other reading's count under
+    // `alt`, for the dialog's "Keep the source's numbers" switch. The cache keeps the raw list: it is shared.
+    // Reintroduce by counting `raw`: "a Webtoons-shaped add is numbered by posting order" in
+    // numbering.int.test.ts reads 13.
+    const n = numberingFor(raw, 'auto');
+    const chapters = n.chapters;
+    const prefs = await effectivePrefsFor(null, 0);
     // Counted the way the add will take them -- one copy per number, the global blacklist applied -- so
     // the dialog's "120 chapters" is the 120 the add lands and not the 200 rows the source listed.
-    const chosen = chooseReleases(chapters, await effectivePrefsFor(null, 0)).releases;
+    const chosen = chooseReleases(chapters, prefs).releases;
     const nums = chosen.map((c) => c.number);
+    const other = n.applied === 'posting_order' ? raw : numberingFor(raw, 'posting_order').chapters;
+    const altNums = n.detect.verdict === 'none' ? [] : chooseReleases(other, prefs).releases.map((c) => c.number);
+    const numbering = {
+      verdict: n.detect.verdict, ...(n.detect.reason ? { reason: n.detect.reason } : {}), applied: n.applied, ordered: n.detect.ordered,
+      posts: n.detect.posts, numbers: n.detect.numbers, biggest: n.detect.biggest, examples: n.detect.examples,
+      alt: altNums.length ? { count: altNums.length, first: Math.min(...altNums), last: Math.max(...altNums) } : null,
+      ...(isSwAdapterId(src.id) ? { extSourceId: src.id.slice(SW_PREFIX.length) } : {}),
+    };
     // Who scanlates it and how many numbers come in more than one version, from the list already in hand
     // -- no second source call. The dialog shows the top groups with their rhythm so a person can see,
     // before adding, whether the title is still being worked on and by whom; `onDisk` is 0 by construction
@@ -2603,6 +2721,7 @@ export default async function sourceRoutes(app: FastifyInstance) {
       count: chosen.length, first: nums.length ? Math.min(...nums) : null, last: nums.length ? Math.max(...nums) : null,
       groups: groupStats(chapters.map((c) => ({ number: c.number, groups: groupsOf(c), scanlator: c.scanlator, publishedAt: c.publishedAt, lang: c.lang, source })), []),
       versions,
+      numbering,
     };
   });
 
@@ -2618,6 +2737,8 @@ export default async function sourceRoutes(app: FastifyInstance) {
       chapterCount: z.number().int().positive().optional(), chapterFrom: z.enum(['oldest', 'newest', 'none']).optional(),
       autoUpdate: z.boolean().optional(),
       alsoFollow: z.array(z.object({ source: z.string().min(1).max(200), sourceId: z.string().min(1).max(200) })).max(MAX_AUTO_CANDIDATES).optional(),
+      // #116: the add dialog's numbering switch. Absent is `auto`, what every caller before v0.49.0 meant.
+      numbering: z.enum(['auto', 'source', 'posting_order']).optional(),
     }).safeParse(req.body ?? {});
     if (!b.success) return reply.code(400).send({ error: 'bad_request' });
     const { source, sourceId, force, chapterCount, chapterFrom, autoUpdate } = b.data;
@@ -2643,6 +2764,7 @@ export default async function sourceRoutes(app: FastifyInstance) {
     const r = await addSeriesFromSource({
       source, sourceId, force, chapterCount, chapterFrom, autoUpdate, wait: false,
       alsoFollow, userId: userIdOf(req), req, sourceAllowed: (s) => sourceAllowedFor(getSource(s), maxAge),
+      numbering: b.data.numbering,
     });
     if (!r.ok) {
       // ⚠️ The duplicate answer names a series the caller may not be allowed to open: the check behind it

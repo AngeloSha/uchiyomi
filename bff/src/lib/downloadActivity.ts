@@ -173,6 +173,22 @@ export function listActivity(now = Date.now()): { active: ActivityEntry[]; recen
   };
 }
 
+/**
+ * A series was renumbered (lib/numbering.ts, #116): what finished for its folder today now carries the number
+ * the same post has in the new numbering, so "Came in today" does not name chapter 2 for the file that is
+ * chapter 20 now. A number the map does not know keeps its old spelling: an entry is history, and dropping it
+ * would hide a failure nobody has looked at yet. download_log is remapped in the same transaction as the files.
+ */
+export function renumberFinished(folder: string, map: ReadonlyMap<number, number>): void {
+  const key = (n: number) => Math.round(n * 1000) / 1000;
+  for (const list of Object.values(finished)) {
+    for (const e of list) {
+      const to = e.folder === folder ? map.get(key(e.number)) : undefined;
+      if (to !== undefined) e.number = to;
+    }
+  }
+}
+
 /** For tests. Also a simulated restart's first half: lib/activityLog.ts's startActivityLog is the second. */
 export function clearActivity(): void {
   live.clear();
