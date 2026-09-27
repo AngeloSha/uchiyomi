@@ -1,0 +1,251 @@
+// #115, "Source health not working", end to end: a source that fails its Test shows on Health, by name, with the
+// stage and the engine's message -- and nothing a Test or the daily check does ever changes a cooldown.
+//
+// The reporter's screenshots, in order: Admin → Providers → Test on "Manga Ball (EN)" failed ("The extension server
+// did not answer. This is the Suwayomi extension server, not the site. Check that container."), its card still said
+// "ok", and Health said "All good". The engine had answered -- with the extension's own Java exception about the
+// site. Driven here through the real routes and the real Suwayomi adapter against the shared fake engine
+// (test/fixtures/fakeSuwayomi.ts), whose Manga Ball search answers that exception verbatim.
+//
+// Skipped automatically unless TEST_DATABASE_URL is set.
+import test, { before, after } from 'node:test';
+import assert from 'node:assert/strict';
+import { startFakeSuwayomi, SOURCE_IDS, type FakeSuwayomi } from './fixtures/fakeSuwayomi';
+
+const DSN = process.env.TEST_DATABASE_URL;
+if (DSN) {
+  process.env.DATABASE_URL = DSN;
+  process.env.JWT_SECRET = process.env.JWT_SECRET || 'test-secret-at-least-16-chars';
+  process.env.CONFIG_DIR = process.env.CONFIG_DIR || '/tmp/uchiyomi-test-config';
+  process.env.LIBRARY_BACKEND = 'owned';
+  // A sweep over a source that never answers must end in a test's time, not in 45 s.
+  process.env.SOURCE_TEST_TIMEOUT_MS = '1500';
+}
+const skip = DSN ? false : 'set TEST_DATABASE_URL to run';
+
+const BALL = `sw:${SOURCE_IDS.mangaBall}`;
+const ODD = 'sc-odd', SLOW = 'sc-slow';
+const ENGINE_WORDS = /^suwayomi: Exception while fetching data \(\/fetchSourceManga\) : java\.lang\.Exception/;
+const ADMIN = 'sc-admin';
+
+let fake: FakeSuwayomi;
+let q: <T = any>(sql: string, params?: any[]) => Promise<T[]>;
+let app: any, adminTok = '';
+let sh: typeof import('../src/lib/sourceHealth');
+let runHealthChecks: typeof import('../src/lib/health').runHealthChecks;
+/** How sc-odd fails: at search with an error nobody has seen, or at pages. */
+let oddMode: 'search' | 'pages' = 'search';
+
+before(async () => {
+  if (!DSN) return;
+  fake = await startFakeSuwayomi();
+  process.env.SUWAYOMI_URL = fake.url; // ⚠️ before any src module loads: env.ts parses it once
+  const { migrate } = await import('../src/lib/migrate');
+  ({ q } = (await import('../src/lib/db')) as any);
+  sh = await import('../src/lib/sourceHealth');
+  ({ runHealthChecks } = await import('../src/lib/health'));
+  await migrate();
+  const { registerAdapter } = await import('../src/lib/sources');
+  const { listRemoteSources, makeSuwayomiAdapter } = await import('../src/lib/sources/suwayomi/sources');
+  const remote = (await listRemoteSources()).find((s) => s.id === SOURCE_IDS.mangaBall)!;
+  registerAdapter(makeSuwayomiAdapter(remote));
+  registerAdapter({
+    id: ODD, name: 'Odd Source',
+    async search() { if (oddMode === 'search') throw new Error('the parser met something new'); return [{ sourceId: 'o1', source: ODD, title: 'Odd' }]; },
+    async getSeries(id: string) { return { sourceId: id, source: ODD, title: 'Odd' }; },
+    async listChapters() { return [{ sourceId: 'oc1', number: 1 }]; },
+    async getPageUrls() { throw new Error('page list gone'); },
+  } as any);
+
+  await q('DELETE FROM source_health WHERE source_id = ANY($1::text[])', [[BALL, ODD, SLOW]]);
+  await q('DELETE FROM users WHERE username = $1', [ADMIN]);
+  const [{ id: uid }] = await q<{ id: string }>(
+    `INSERT INTO users (display_name, username, role, password_hash, auth_kind) VALUES ($1,$1,'admin','x','password') RETURNING id`, [ADMIN]);
+  const Fastify = (await import('fastify')).default;
+  const jwt = (await import('@fastify/jwt')).default;
+  app = Fastify();
+  await app.register(jwt, { secret: process.env.JWT_SECRET! });
+  await app.register((await import('../src/routes/admin')).default);
+  await app.ready();
+  adminTok = `Bearer ${app.jwt.sign({ sub: uid, role: 'admin' })}`;
+});
+
+after(async () => {
+  if (!DSN) return;
+  await app?.close();
+  await q('DELETE FROM source_health WHERE source_id = ANY($1::text[])', [[BALL, ODD, SLOW]]).catch(() => {});
+  await q('DELETE FROM users WHERE username = $1', [ADMIN]).catch(() => {});
+  await fake?.close();
+  // The pool's idle clients (30 s) and the header refresh a Test schedules would otherwise hold the process a
+  // minute past the last test.
+  await (await import('../src/lib/db')).pool.end().catch(() => {});
+});
+
+const row = async (id: string) => (await q('SELECT * FROM source_health WHERE source_id = $1', [id]))[0];
+const sourcesCheck = async () => (await runHealthChecks()).checks.find((c) => c.id === 'sources')!;
+const itemOf = (c: any, id: string) => c.items.find((i: any) => i.sourceId === id);
+const inject = (method: string, url: string) => app.inject({ method, url, headers: { authorization: adminTok } });
+
+test('THE #115 SHAPE: a source that fails its Test is on Health, by name, with the stage and the message', { skip }, async () => {
+  fake.setMode({ mode: 'extension_error', source: SOURCE_IDS.mangaBall, stage: 'search' });
+  // As the reporter's row stood: 'ok', no cooldown, an old copy of the same words from a Discover search, and no
+  // series on it -- the case v0.41.0 greyed as "a source NOTHING uses".
+  await q(`INSERT INTO source_health (source_id, status, consecutive, last_error, last_fail_at, last_ok_at)
+           VALUES ($1, 'ok', 0, $2, now() - interval '3 days', now() - interval '2 days')`,
+    [BALL, 'suwayomi: Exception while fetching data (/fetchSourceManga) : java.lang.Exception']);
+
+  // Three impatient clicks.
+  let body: any;
+  for (let i = 0; i < 3; i++) {
+    const r = await inject('POST', `/api/admin/sources/${encodeURIComponent(BALL)}/test`);
+    assert.equal(r.statusCode, 200, r.body);
+    body = r.json();
+  }
+  assert.equal(body.ok, false);
+  assert.equal(body.state, 'fail');
+  assert.equal(body.stage, 'search');
+  assert.equal(body.recorded, true);
+  // Reintroduce the old catch-all rule and this reads upstream_down, "Check that container".
+  assert.equal(body.diagnosis.code, 'extension_error', JSON.stringify(body.diagnosis));
+  assert.doesNotMatch(body.diagnosis.fix, /Check that container/);
+  assert.match(body.checks[0].error, ENGINE_WORDS, 'the engine message reaches the admin whole');
+  assert.equal(fake.graphqlCalls('fetchSourceManga').length, 3, 'one search per click: the engine answered, so no other terms');
+
+  const h = await row(BALL);
+  // Reintroduce (2) by adding reportFail to the route: consecutive is 3 and the source is in a cooldown.
+  assert.equal(h.status, 'ok', 'a Test never changes the status');
+  assert.equal(h.consecutive, 0, 'three clicks, no escalation');
+  assert.equal(h.blocked_until, null);
+  // Reintroduce (3) by stamping checked_at from recordLive: the desktop app would postpone its daily check.
+  assert.equal(h.checked_at, null, 'a Test never moves the daily check');
+  assert.equal(h.live_state, 'fail');
+  assert.equal(h.live_stage, 'search');
+  assert.equal(h.live_by, 'test');
+  assert.equal(h.stages.search.failBy, 'test');
+  assert.match(h.stages.search.error, ENGINE_WORDS);
+
+  // Reintroduce (1) by skipping recordLiveResult in the route: the item is missing.
+  const c = await sourcesCheck();
+  const it = itemOf(c, BALL);
+  assert.ok(it, `Health lists it (${c.summary})`);
+  // Reintroduce (4) with `title: r.source_id`: the title is sw:6716343437498271985.
+  assert.equal(it.title, 'Manga Ball (EN)', 'by name, not sw:<id>');
+  // Reintroduce (5) by keeping "unused -> info" for live findings: this reads info.
+  assert.notEqual(it.info, true, 'a failed Test is a finding even with no series on the source');
+  assert.equal(c.status, 'warn');
+  assert.match(it.detail, /^Search failing since \d{4}-\d\d-\d\d \d\d:\d\d — This source's extension reported an error\./);
+  assert.match(it.detail, /last tested .* by Test; no series use it$/);
+  assert.equal(it.evidence.find((e: any) => e.stage === 'search').state, 'fail');
+  assert.match(it.evidence.find((e: any) => e.stage === 'search').error, ENGINE_WORDS);
+  assert.equal(it.diagnosis.code, 'extension_error');
+  assert.equal(it.tested.by, 'test');
+  assert.equal(it.series, 0);
+  assert.equal(it.key, `source:${BALL}`);
+  assert.deepEqual(it.actions, ['test', 'disable', 'ignore']);
+  assert.doesNotMatch(c.summary, /All sources responding normally/);
+  assert.ok(c.testMs >= 1500, 'Health can say how long a Test may take');
+
+  // GET /api/admin/sources carries it for the Providers card; the public status is untouched.
+  const list = (await inject('GET', '/api/admin/sources')).json().content;
+  const mine = list.find((r: any) => r.source_id === BALL);
+  assert.deepEqual(mine.failing.map((f: any) => [f.stage, f.by, f.kind]), [['search', 'test', 'error']]);
+  assert.equal(mine.live.state, 'fail');
+  assert.equal(mine.status, 'ok');
+});
+
+test('stage-aware clearing: a download does not close a search failure, a search does', { skip }, async () => {
+  // Reintroduce by making reportOk (or clearBlock) clear `stages` or `live_state`: the first assertion finds the
+  // failure erased by a download, which is the #115 shape itself.
+  await sh.reportOk(BALL);
+  await sh.clearBlock(BALL);
+  await sh.noteStage(BALL, 'pages', 'ok');
+  await sh.noteStage(BALL, 'images', 'ok');
+  let it = itemOf(await sourcesCheck(), BALL);
+  assert.ok(it && !it.info, 'still failing: nothing has searched successfully since');
+  assert.equal(it.evidence.find((e: any) => e.stage === 'images').state, 'ok');
+
+  // One failed Discover search in between keeps it failing, and keeps it the Test's confirmed failure.
+  await sh.noteStage(BALL, 'search', 'fail', { error: 'suwayomi: again' });
+  assert.equal((await row(BALL)).stages.search.failBy, 'test', 'a traffic failure does not demote a confirmed one');
+
+  await sh.noteStage(BALL, 'search', 'ok');
+  it = itemOf(await sourcesCheck(), BALL);
+  assert.ok(!it || it.info, 'a search that works closes it');
+});
+
+test('the sweep reports what the button reports, and pushes a failure once', { skip }, async () => {
+  // Reintroduce by filtering needsAttention through the old ACTIONABLE code set: 'unknown' is not in it and the
+  // odd source is missing. Or by dropping the previous-verdict comparison: the second sweep notifies again.
+  const { runSourceCheck } = await import('../src/lib/sourceWatchdog');
+  fake.setMode({ mode: 'extension_error', source: SOURCE_IDS.mangaBall, stage: 'search' });
+  oddMode = 'search';
+  const first = await runSourceCheck({ autoFix: false });
+  const odd = first.sources.find((v) => v.id === ODD)!;
+  assert.equal(odd.code, 'unknown');
+  assert.equal(odd.state, 'fail');
+  assert.equal(odd.stage, 'search');
+  assert.ok(first.needsAttention.some((v) => v.id === ODD), 'a failure nobody has seen before still needs attention');
+  assert.ok(first.notified.includes(ODD), 'and is pushed');
+  const ball = first.sources.find((v) => v.id === BALL)!;
+  assert.equal(ball.code, 'extension_error');
+  assert.ok(first.needsAttention.some((v) => v.id === BALL));
+  // The sweep writes the stamp the schedule reads, and never 'ok' for a failed test.
+  const h = await row(ODD);
+  assert.ok(h.checked_at);
+  assert.equal(h.check_code, 'unknown');
+  assert.equal(h.live_by, 'sweep');
+  assert.equal(h.consecutive, 0, 'and no cooldown');
+
+  const second = await runSourceCheck({ autoFix: false });
+  assert.ok(second.needsAttention.some((v) => v.id === ODD), 'still failing, still listed');
+  assert.deepEqual(second.notified, [], 'the same failure is not pushed every day');
+
+  oddMode = 'pages';
+  const third = await runSourceCheck({ autoFix: false });
+  assert.equal(third.sources.find((v) => v.id === ODD)!.stage, 'pages');
+  assert.deepEqual(third.notified, [ODD], 'failing somewhere new is news again');
+});
+
+test('an inconclusive test is greyed, never amber', { skip }, async () => {
+  // Reintroduce by recording kind 'timeout' as a stage failure (liveStagesPatch): the row becomes a warn finding.
+  const { registerAdapter, getSource } = await import('../src/lib/sources');
+  const { checkSourceLive, recordLiveResult } = await import('../src/lib/sourceCheck');
+  registerAdapter({
+    id: SLOW, name: 'Slow Source',
+    search: () => new Promise(() => {}),
+    async getSeries() { return null; }, async listChapters() { return []; }, async getPageUrls() { return []; },
+  } as any);
+  const r = await checkSourceLive(getSource(SLOW)!, { by: 'test', timeoutMs: 200 });
+  assert.equal(r.state, 'inconclusive');
+  assert.equal(r.diagnosis.code, 'timeout');
+  await recordLiveResult(SLOW, r, 'test');
+  const h = await row(SLOW);
+  assert.equal(h.live_state, 'inconclusive');
+  assert.equal(h.stages.search, undefined, 'our deadline is not a failure of the search');
+  const it = itemOf(await sourcesCheck(), SLOW);
+  assert.ok(it, 'listed');
+  assert.equal(it.info, true, 'greyed');
+  assert.match(it.detail, /ran out of time while searching/);
+});
+
+test('Check all now runs in the background, and its progress and result can be read', { skip }, async () => {
+  // Reintroduce by awaiting the sweep in the POST (the pre-v0.49.0 route): the first answer is not running, and a
+  // proxy in front of a real install would have cut the request long before.
+  const started = await inject('POST', '/api/admin/sources/check');
+  assert.equal(started.statusCode, 202, started.body);
+  const p0 = started.json();
+  assert.equal(p0.running, true);
+  assert.equal(p0.by, 'admin');
+  assert.equal((await inject('POST', '/api/admin/sources/check')).statusCode, 409, 'one at a time');
+  let p = p0;
+  for (let i = 0; i < 100 && p.running; i++) {
+    await new Promise((res) => setTimeout(res, 100));
+    p = (await inject('GET', '/api/admin/sources/check')).json();
+  }
+  assert.equal(p.running, false);
+  assert.equal(p.done, p.total);
+  assert.ok(p.total >= 3);
+  assert.ok(p.result.inconclusive.some((v: any) => v.id === SLOW), 'the slow source could not finish, and says so');
+  assert.ok(p.result.needsAttention.some((v: any) => v.id === ODD));
+  assert.ok(!p.result.needsAttention.some((v: any) => v.id === SLOW), 'running out of time is not "needs attention"');
+});

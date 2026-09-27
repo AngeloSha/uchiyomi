@@ -57,6 +57,19 @@ export interface SourceChapter {
   source?: string;
 }
 
+/**
+ * Optional adapter metadata on a `listChapters` answer (#115): how many chapters the source listed that the
+ * adapter DROPPED because they carry no usable number. Non-enumerable, so spreads, JSON and every caller that
+ * only iterates are unaffected. It lets the smoke test say "lists its chapters without numbers" instead of
+ * "lists no chapters", which sends an admin to a different fix. Absent means none were dropped, or the adapter
+ * does not say.
+ */
+export const UNNUMBERED: unique symbol = Symbol.for('uchiyomi.unnumbered');
+export const unnumberedOf = (list: unknown): number => {
+  const n = (list as { [UNNUMBERED]?: unknown } | null)?.[UNNUMBERED];
+  return typeof n === 'number' && n > 0 ? n : 0;
+};
+
 export interface SourceAdapter {
   id: string; // 'mangadex'
   name: string; // 'MangaDex'

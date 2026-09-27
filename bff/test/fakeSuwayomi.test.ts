@@ -443,7 +443,8 @@ test('down drops the connection, slow holds the answer, stop refuses it, and eac
   await gql(ABOUT);
   assert.ok(Date.now() - t0 >= 350, `answered after ${Date.now() - t0} ms`);
   // A caller that gives up first sees its own timeout; the fake notices and sends nothing.
-  await assert.rejects(gql(ABOUT, {}, 100), /TimeoutError|aborted due to timeout/);
+  // (In the product's words since #115: gql names the engine as the part that did not answer.)
+  await assert.rejects(gql(ABOUT, {}, 100), /^Error: suwayomi timeout after 100ms$/);
   await new Promise((r) => setTimeout(r, 450));
   assert.equal(fake.calls.at(-1)?.status, 'abandoned');
   fake.setMode('up');

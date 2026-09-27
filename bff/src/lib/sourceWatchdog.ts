@@ -18,12 +18,13 @@
 import { q } from './db';
 import { getSource, listSources, reloadAll } from './sources';
 import { readSites, writeSites } from './sources/customSites';
-import { smokeTest, probeBase, buildProbe } from './sourceProbe';
-import { diagnose, Diagnosis } from './sourceDiagnosis';
-import { clearBlock, SourceHealth } from './sourceHealth';
+import { smokeTest } from './sourceProbe';
+import { Diagnosis, STAGE_WORD } from './sourceDiagnosis';
+import { clearBlock } from './sourceHealth';
+import { checkSourceLive, recordLiveResult } from './sourceCheck';
+import type { Stage } from './sourceEvidence';
 import { notifyAdmins } from './push';
 import { logAudit } from './audit';
-import { env } from '../env';
 
 export interface SourceVerdict {
   id: string;
@@ -32,6 +33,12 @@ export interface SourceVerdict {
   reason: string;
   fix: string;
   ok: boolean;
+  /** pass / fail / inconclusive (our own deadline ended the test before anything failed). */
+  state: 'pass' | 'fail' | 'inconclusive';
+  /** Where it failed, or ran out of time; null on a pass. */
+  stage: Stage | null;
+  kind: string | null;
+  actor: Diagnosis['actor'];
   /** What the watchdog changed by itself, if anything. */
   action?: 'followed-move';
 }
@@ -39,29 +46,12 @@ export interface SourceVerdict {
 export interface WatchdogResult {
   checkedAt: string;
   sources: SourceVerdict[];
-  /** Verdicts an operator needs to act on. */
+  /** Verdicts an operator needs to act on: every confirmed live failure that waiting will not fix, and moves. */
   needsAttention: SourceVerdict[];
-}
-
-/** Only the codes where doing nothing is the wrong answer. `quiet` and `ok` are not problems to report. */
-const ACTIONABLE = new Set<Diagnosis['code']>([
-  'moved', 'edge_403', 'cf_challenge', 'solver_crash', 'solver_down', 'solver_timeout',
-  'markup_drift', 'unreachable', 'upstream_down',
-]);
-
-/**
- * ⚠️ `slow_streak` has to be in this list. diagnose() reads `slowStreak` before any stored-error rule, and
- * for two releases neither this SELECT nor the Test button's carried the column, so `h.slow_streak` was
- * undefined, the streak read as 0, and `too_slow` -- the verdict written for the source that vanished for a
- * day -- was reachable only from the Discover route, never from the sweep or the button. The budget goes
- * with it, because the fix sentence names the number of seconds the source keeps running out of.
- */
-async function healthOf(id: string): Promise<SourceHealth | null> {
-  return q<SourceHealth>(
-    `SELECT source_id, status, consecutive, last_error, last_fail_at, last_ok_at, blocked_until, disabled,
-            empty_streak, last_empty_at, slow_streak, updated_at FROM source_health WHERE source_id = $1`,
-    [id],
-  ).then((r) => r[0] ?? null).catch(() => null);
+  /** Tests our own deadline cut short: shown, never counted as failing, never pushed. */
+  inconclusive: SourceVerdict[];
+  /** The ids pushed to admins this run: failures that are new, or failing somewhere new, since the last check. */
+  notified: string[];
 }
 
 /**
@@ -121,73 +111,135 @@ let running = false;
 /** True while a sweep is in flight, so the schedule and the admin button cannot overlap. */
 export const checkRunning = (): boolean => running;
 
-export async function runSourceCheck(opts: { autoFix?: boolean } = {}): Promise<WatchdogResult> {
+/**
+ * Where the current (or last) sweep is, for "Check all now" (#115). The button used to hold one request open
+ * for the whole sweep -- forty sources at up to 45 s each is half an hour behind a reverse proxy that cuts
+ * it at one minute -- so the route now starts the sweep and answers at once, and the page reads this. In
+ * memory: the last result is the one this process produced, and a restart forgets it (the evidence each
+ * check recorded does not depend on it: Health reads source_health).
+ */
+export interface CheckProgress {
+  running: boolean;
+  /** 'schedule' for the daily run, 'admin' for the button. */
+  by: 'schedule' | 'admin' | null;
+  startedAt: string | null;
+  finishedAt: string | null;
+  /** Sources this sweep will look at (the enabled ones), and how many it has finished. */
+  total: number;
+  done: number;
+  /** The source being tested now. */
+  current: { id: string; name: string } | null;
+  /** The finished sweep's answer, kept until the next one starts. */
+  result: WatchdogResult | null;
+  error: string | null;
+}
+let progress: CheckProgress = {
+  running: false, by: null, startedAt: null, finishedAt: null, total: 0, done: 0, current: null, result: null, error: null,
+};
+export const checkProgress = (): CheckProgress => ({ ...progress, current: progress.current && { ...progress.current } });
+
+export async function runSourceCheck(opts: { autoFix?: boolean; by?: 'schedule' | 'admin' } = {}): Promise<WatchdogResult> {
   if (running) throw Object.assign(new Error('a source check is already running'), { busy: true });
   running = true;
+  progress = {
+    running: true, by: opts.by ?? 'schedule', startedAt: new Date().toISOString(), finishedAt: null,
+    total: 0, done: 0, current: null, result: null, error: null,
+  };
   try {
-    return await sweep(opts);
+    const r = await sweep(opts);
+    progress = { ...progress, result: r };
+    return r;
+  } catch (e) {
+    progress = { ...progress, error: (e as Error)?.message || 'the check failed' };
+    throw e;
   } finally {
     running = false;
+    progress = { ...progress, running: false, current: null, finishedAt: new Date().toISOString() };
   }
+}
+
+/**
+ * Start a sweep and return without waiting for it: the "Check all now" button. False when one is already
+ * running. `onDone` runs after it finishes (the route's audit line); a failed sweep is left in checkProgress().
+ */
+export function startSourceCheck(opts: { autoFix?: boolean; by?: 'schedule' | 'admin' } = {}, onDone?: (r: WatchdogResult) => unknown): boolean {
+  if (running) return false;
+  void runSourceCheck(opts).then((r) => onDone?.(r)).catch(() => {});
+  return true;
 }
 
 async function sweep(opts: { autoFix?: boolean }): Promise<WatchdogResult> {
   const autoFix = opts.autoFix !== false;
   const verdicts: SourceVerdict[] = [];
+  const prevOf = new Map<string, { state: string; stage: string | null; code: string | null } | null>();
 
-  for (const src of listSources()) {
-    const h = await healthOf(src.id);
-    if (h?.disabled) continue; // switched off deliberately; not a fault to report
+  const disabled = new Set(
+    (await q<{ source_id: string }>('SELECT source_id FROM source_health WHERE disabled = true').catch(() => [] as { source_id: string }[]))
+      .map((r) => r.source_id),
+  );
+  // switched off deliberately; not a fault to report
+  const sources = listSources().filter((s) => !disabled.has(s.id));
+  progress = { ...progress, total: sources.length };
 
-    const bare = src.base ? await probeBase(src.base) : undefined;
-    const smoke = await smokeTest(src);
-    // The adapter's own result and whether this source is solver-fronted are both live evidence, and both
-    // outrank a bare homepage request. Without them a Cloudflare-protected site that works perfectly reads
-    // as a 403 block, because the probe deliberately does not use the solver. `bare` stays undefined for
-    // adapters with no `base` to probe (every Suwayomi/extension source) -- `buildProbe` is what keeps
-    // `adapterOk` reaching `diagnose` regardless, and the Test button goes through the same helper, so the
-    // schedule and the button cannot disagree. ⚠️ Do not inline this as `bare && {...}`: that is the bug.
-    const probe = buildProbe(bare, smoke, src);
-    const parsedNothing = smoke.checks[0]?.ok === false && /no results/.test(smoke.checks[0]?.detail || '');
-    let d = diagnose(
-      {
-        status: h?.status ?? 'ok',
-        lastError: h?.last_error ?? null,
-        consecutive: h?.consecutive ?? 0,
-        lastOkAt: h?.last_ok_at ?? null,
-        emptyStreak: parsedNothing ? Math.max(h?.empty_streak ?? 0, 3) : (h?.empty_streak ?? 0),
-        blockedUntil: h?.blocked_until ?? null,
-        slowStreak: h?.slow_streak ?? 0,
-        budgetMs: env.SOURCE_LATEST_TIMEOUT_MS,
-        disabled: false,
-      },
-      probe,
-      src.base,
-    );
+  for (const src of sources) {
+    progress = { ...progress, current: { id: src.id, name: src.name } };
+    try {
+      // The Test button runs the same function, so the schedule and the button cannot disagree about a source.
+      const r = await checkSourceLive(src, { by: 'sweep' });
+      if (r.disabled) continue;
+      prevOf.set(src.id, r.prev);
+      let d = r.diagnosis;
+      let state = r.state;
 
-    let action: SourceVerdict['action'] | undefined;
-    if (autoFix && d.code === 'moved' && probe?.finalUrl && await followMove(src.id, probe.finalUrl)) {
-      action = 'followed-move';
-      d = { ...d, code: 'ok', reason: '', fix: '', silent: false, needsProbe: false, actor: 'none' };
+      let action: SourceVerdict['action'] | undefined;
+      if (autoFix && d.code === 'moved' && r.probe?.finalUrl && await followMove(src.id, r.probe.finalUrl)) {
+        action = 'followed-move';
+        d = { ...d, code: 'ok', reason: '', fix: '', silent: false, needsProbe: false, actor: 'none' };
+        // followMove proved the new address with a passing smoke test before keeping it.
+        state = 'pass';
+      }
+
+      // Evidence first (live_* and the stages), then the stamp the schedule reads. ⚠️ check_code is the live-aware
+      // code now: diagnose() never answers 'ok' under a failed smoke test, which is what the old code wrote.
+      await recordLiveResult(src.id, { smoke: r.smoke, state, stage: r.stage, diagnosis: d }, 'sweep');
+      await q(
+        `INSERT INTO source_health (source_id, checked_at, check_code, updated_at)
+         VALUES ($1, now(), $2, now())
+         ON CONFLICT (source_id) DO UPDATE SET checked_at = now(), check_code = $2, updated_at = now()`,
+        [src.id, d.code],
+      ).catch(() => {});
+
+      verdicts.push({
+        id: src.id, name: src.name, code: d.code, reason: d.reason, fix: d.fix, ok: state === 'pass', state,
+        stage: state === 'pass' ? null : r.stage, kind: state === 'pass' ? null : r.smoke.failure?.kind ?? null,
+        actor: d.actor, action,
+      });
+    } finally {
+      progress = { ...progress, done: progress.done + 1 };
     }
-
-    await q(
-      `INSERT INTO source_health (source_id, checked_at, check_code, updated_at)
-       VALUES ($1, now(), $2, now())
-       ON CONFLICT (source_id) DO UPDATE SET checked_at = now(), check_code = $2, updated_at = now()`,
-      [src.id, d.code],
-    ).catch(() => {});
-
-    verdicts.push({ id: src.id, name: src.name, code: d.code, reason: d.reason, fix: d.fix, ok: smoke.ok, action });
   }
 
-  const needsAttention = verdicts.filter((v) => ACTIONABLE.has(v.code));
+  // Every confirmed live failure, not a list of codes someone thought actionable: the old ACTIONABLE set left
+  // out 'unknown', so a source failing its test with an error nobody had seen before was "All sources healthy".
+  // A rate limit ('wait') is the one thing that clears itself; a moved site is always worth saying.
+  const needsAttention = verdicts.filter((v) => (v.state === 'fail' && v.actor !== 'wait') || v.code === 'moved');
+  const inconclusive = verdicts.filter((v) => v.state === 'inconclusive');
 
-  if (needsAttention.length) {
-    const lead = needsAttention[0];
+  // ONE push per new failure, not one a day. Health and the header keep saying it until someone acts; a push
+  // repeating the same news every morning is noise that teaches an admin to dismiss them.
+  const toNotify = needsAttention.filter((v) => {
+    const p = prevOf.get(v.id);
+    return !p || p.state !== 'fail' || p.stage !== v.stage || p.code !== v.code;
+  });
+  if (toNotify.length) {
+    const lead = toNotify[0];
+    const stageName = (v: SourceVerdict) => (v.stage ? STAGE_WORD[v.stage] : v.code === 'moved' ? 'moved' : 'the test');
     await notifyAdmins(
-      needsAttention.length === 1 ? `${lead.name} needs attention` : `${needsAttention.length} sources need attention`,
-      needsAttention.length === 1 ? lead.reason : needsAttention.map((v) => v.name).join(', '),
+      toNotify.length === 1 ? `${lead.name} needs attention` : `${toNotify.length} sources need attention`,
+      toNotify.length === 1
+        ? `${lead.stage ? `${cap(STAGE_WORD[lead.stage])} fails: ` : ''}${lead.reason}`
+        : toNotify.map((v) => `${v.name} (${stageName(v)})`).join(', '),
+      '/admin/?tab=Health',
     ).catch(() => {});
   }
 
@@ -195,5 +247,9 @@ async function sweep(opts: { autoFix?: boolean }): Promise<WatchdogResult> {
     checkedAt: new Date().toISOString(),
     sources: verdicts,
     needsAttention,
+    inconclusive,
+    notified: toNotify.map((v) => v.id),
   };
 }
+
+const cap = (w: string) => w.charAt(0).toUpperCase() + w.slice(1);

@@ -5,13 +5,17 @@
 // would let a rule drift away from reality while the test kept passing.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { diagnose, HealthFacts, DiagnosisCode } from '../src/lib/sourceDiagnosis';
+import { diagnose, currentError, HealthFacts, DiagnosisCode } from '../src/lib/sourceDiagnosis';
 
 // The engine's own words, as an extension source stores them: suwayomi/client.ts prefixes every GraphQL
 // error with `suwayomi: ` and the tail is the exception text verbatim from issue #54's log. A `flaresolverr:`
 // prefix is impossible here -- that comes only from Uchiyomi's own solver client, which extension sources
 // never call -- and a fixture wearing it would let the rules drift from what the table really holds.
 const ENGINE_BYPASS_OFF = 'suwayomi: java.io.IOException: Cloudflare bypass currently disabled';
+
+// #115, verbatim from the reporter's screenshot and the pinned engine (the fake engine answers the same text): the
+// engine ANSWERED, with the extension's own Java exception about the site.
+const MANGA_BALL = 'suwayomi: Exception while fetching data (/fetchSourceManga) : java.lang.Exception\r\n\r\njava.lang.Exception: java.lang.Exception\n\tat eu.kanade.tachiyomi.extension.en.mangaball.MangaBall.searchMangaParse(MangaBall.kt:120)';
 
 const facts = (p: Partial<HealthFacts> = {}): HealthFacts => ({
   status: 'down', lastError: null, consecutive: 1, lastOkAt: null,
@@ -122,6 +126,9 @@ test('NO PUBLIC SENTENCE LEAKS INFRASTRUCTURE', () => {
     ['edge_403', [facts({ lastError: 'HTTP 403 Forbidden' })]],
     ['rate_limited', [facts({ lastError: '429 too many requests' })]],
     ['upstream_down', [facts({ lastError: 'suwayomi 502' })]],
+    // #115: the engine's own answer (its message and host must not leak), and chapters with no usable number.
+    ['extension_error', [facts({ lastError: null }), { adapterOk: false, failure: { stage: 'search', kind: 'error', error: MANGA_BALL } }]],
+    ['unnumbered', [facts({ lastError: null }), { adapterOk: false, failure: { stage: 'chapters', kind: 'unnumbered' } }]],
     ['unreachable', [facts({ lastError: 'getaddrinfo ENOTFOUND example.invalid' })]],
     ['timeout', [facts({ lastError: 'timeout' })]],
     ['markup_drift', [facts({ lastError: null, emptyStreak: 5 })]],
@@ -138,7 +145,9 @@ test('NO PUBLIC SENTENCE LEAKS INFRASTRUCTURE', () => {
     seen.add(d.code);
     assert.doesNotMatch(
       d.reason,
-      /flaresolverr|chromedriver|httpconnectionpool|localhost|docker|shm_size|https?:|:\d{4,5}\b|\bHTTP \d{3}\b/i,
+      // suwayomi / java.: since #115 an engine-answered error is a live input, and its text names the engine
+      // and the extension's classes.
+      /flaresolverr|chromedriver|httpconnectionpool|localhost|docker|shm_size|https?:|:\d{4,5}\b|\bHTTP \d{3}\b|suwayomi|java\./i,
       `the public sentence for ${d.code} leaks infrastructure: "${d.reason}"`,
     );
   }
@@ -274,4 +283,84 @@ test('a genuine failure still earns a real verdict, not the slow one', () => {
   // The fix must not swallow real faults: a site refusing us is still a site refusing us.
   assert.equal(diagnose(facts({ lastError: 'HTTP 403 Forbidden', slowStreak: 0 })).code, 'edge_403');
   assert.equal(diagnose(facts({ lastError: 'getaddrinfo ENOTFOUND x', slowStreak: 0 })).code, 'unreachable');
+});
+
+// ---- #115: who failed -------------------------------------------------------------------------------------
+
+test('THE BLAMED CONTAINER (#115): the engine answering with the extension\'s error is not the engine being down', () => {
+  // Reintroduce by putting the old catch-all /^suwayomi\b/ upstream_down rule back above the /^suwayomi: / rule:
+  // the code is upstream_down and the fix sends the admin to a container that is working.
+  const clean = facts({ status: 'ok', consecutive: 0, lastError: null });
+  const d = diagnose(clean, { adapterOk: false, failure: { stage: 'search', kind: 'error', error: MANGA_BALL } });
+  assert.equal(d.code, 'extension_error');
+  assert.doesNotMatch(d.fix, /Check that container/);
+  assert.doesNotMatch(d.reason, /did not answer/);
+  assert.match(d.fix, /while searching/, 'the fix names the stage');
+  assert.match(d.fix, /Admin → Extensions/);
+  // The same words stored by traffic diagnose the same way.
+  assert.equal(diagnose(facts({ lastError: MANGA_BALL })).code, 'extension_error');
+});
+
+test('the engine not answering still blames the engine, and its 403 is not the site\'s CDN', () => {
+  // Reintroduce by moving the engine-status rule below the /\b403\b/ edge_403 rule: 'suwayomi 403' (the engine
+  // refusing our Basic auth) becomes edge_403, "the site's CDN is refusing this server".
+  for (const e of ['suwayomi unreachable: fetch failed (ECONNREFUSED)', 'suwayomi 502', 'suwayomi returned no data']) {
+    assert.equal(diagnose(facts({ lastError: e })).code, 'upstream_down', e);
+  }
+  const auth = diagnose(facts({ lastError: 'suwayomi 403' }));
+  assert.equal(auth.code, 'upstream_down');
+  assert.match(auth.fix, /SUWAYOMI_USERNAME/);
+  // Through the engine, the SITE's 403 is still the site's.
+  assert.equal(diagnose(facts({ lastError: 'suwayomi: HTTP error 403' })).code, 'edge_403');
+  assert.equal(diagnose(facts({ lastError: ENGINE_BYPASS_OFF })).code, 'cf_challenge');
+  assert.equal(diagnose(facts({ lastError: 'suwayomi: java.net.UnknownHostException: mangaball.example' })).code, 'unreachable');
+  assert.equal(diagnose(facts({ lastError: 'suwayomi: java.net.SocketTimeoutException: timeout' })).code, 'timeout');
+  const slow = diagnose(facts({ lastError: 'suwayomi timeout after 30000ms' }));
+  assert.equal(slow.code, 'timeout');
+  assert.match(slow.fix, /extension engine did not answer in time/);
+});
+
+test('a failed live test is never ok', () => {
+  // Reintroduce by dropping the failure branch and the final adapterOk === false guard: this reads D('ok') and the
+  // Providers card prints "Working normally." under a ✗ (#115).
+  const clean = facts({ status: 'ok', consecutive: 0, lastError: null });
+  const d = diagnose(clean, { adapterOk: false, failure: { stage: 'pages', kind: 'error', error: 'something new' } });
+  assert.equal(d.code, 'unknown');
+  assert.match(d.fix, /listing pages/);
+  assert.equal(diagnose(clean, { adapterOk: false }).code, 'unknown', 'a failed probe with no detail is not ok either');
+  assert.equal(diagnose(clean, { adapterOk: true }).code, 'ok');
+});
+
+test('the live error outranks a stale stored one', () => {
+  // Reintroduce by running the RULES over f.lastError before probe.failure: this reads cf_challenge from a
+  // months-old #54 string while the engine just said 404.
+  const d = diagnose(facts({ lastError: ENGINE_BYPASS_OFF }), { adapterOk: false, failure: { stage: 'search', kind: 'error', error: 'suwayomi: HTTP error 404' } });
+  assert.notEqual(d.code, 'cf_challenge');
+  assert.equal(d.code, 'extension_error');
+});
+
+test('our own deadline is not a verdict', () => {
+  // Reintroduce by treating kind 'timeout' like 'error': the code becomes 'unknown'.
+  const clean = facts({ status: 'ok', consecutive: 0, lastError: null });
+  const t = diagnose(clean, { adapterOk: false, failure: { stage: 'chapters', kind: 'timeout' } });
+  assert.equal(t.code, 'timeout');
+  assert.equal(t.needsProbe, true);
+  assert.match(t.fix, /not proof/);
+  // With a current stored cause, that cause speaks.
+  assert.equal(diagnose(facts({ lastError: 'Just a moment...' }), { adapterOk: false, failure: { stage: 'search', kind: 'timeout' } }).code, 'cf_challenge');
+  const empty = diagnose(clean, { adapterOk: false, failure: { stage: 'chapters', kind: 'empty' } });
+  assert.equal(empty.code, 'markup_drift');
+  assert.match(empty.fix, /no chapters/);
+  // An empty answer under a CURRENT Cloudflare error is the challenge page, not the markup.
+  assert.equal(diagnose(facts({ lastError: 'Just a moment...' }), { adapterOk: false, failure: { stage: 'search', kind: 'empty' } }).code, 'cf_challenge');
+});
+
+test('a stored error is current until a success comes after it', () => {
+  const base = { last_error: 'Just a moment...', last_fail_at: '2026-09-20T00:00:00Z', last_slow_at: null };
+  assert.equal(currentError({ ...base, last_ok_at: '2026-09-21T00:00:00Z' }), null, 'a success since: history');
+  assert.equal(currentError({ ...base, last_ok_at: '2026-09-19T00:00:00Z' }), 'Just a moment...');
+  assert.equal(currentError({ ...base, last_ok_at: null }), 'Just a moment...');
+  assert.equal(currentError({ ...base, last_ok_at: '2026-09-21T00:00:00Z', last_slow_at: '2026-09-22T00:00:00Z' }), 'Just a moment...',
+    'a slow answer after the success keeps it current');
+  assert.equal(currentError(null), null);
 });

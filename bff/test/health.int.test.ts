@@ -335,11 +335,13 @@ test('a source hidden by language is turned off too, however stale its health ro
   await q(`INSERT INTO source_health (source_id, status, disabled, consecutive) VALUES ($1, 'down', false, 4)`, [`sw:${ID}`]);
   try {
     const c = (await runHealthChecks()).checks.find((x: any) => x.id === 'sources');
-    const row = c.items.find((i: any) => i.title === `sw:${ID}`);
+    // By sourceId: since v0.49.0 (#115) the row is titled with the engine's name for it ('Hidden RU'), not the id.
+    const row = c.items.find((i: any) => i.sourceId === `sw:${ID}`);
     assert.ok(row, 'still listed');
+    assert.equal(row.title, 'Hidden RU', 'named, not sw:<id>');
     assert.equal(row.info, true, 'hidden by language is off');
     assert.match(row.detail, /turned off/);
-    assert.ok(!c.items.some((i: any) => !i.info && i.title === `sw:${ID}`), 'never counted as a fault');
+    assert.ok(!c.items.some((i: any) => !i.info && i.sourceId === `sw:${ID}`), 'never counted as a fault');
   } finally {
     await q('DELETE FROM source_health WHERE source_id = $1', [`sw:${ID}`]);
     await q('DELETE FROM suwayomi_sources WHERE source_id = $1', [ID]);
@@ -381,6 +383,34 @@ test('a stored error older than the last success is history, not a fix to go and
     assert.match(fresh.detail, /Cloudflare interstitial/, 'fresh: an error newer than the last success is still diagnosed');
   } finally {
     await q('DELETE FROM source_health WHERE source_id = ANY($1::text[])', [[STALE, FRESH]]);
+  }
+});
+
+test('a source that keeps outrunning its budget is listed, as Providers already says', { skip: DSN ? false : 'set TEST_DATABASE_URL to run' }, async () => {
+  // Providers marks a source with slow_streak >= 3 'quiet'; Health selected rows only by status and empty streak,
+  // so the source that vanished from Discover for a day (reportSlow's story) was on one surface and not the other.
+  // Reintroduce by dropping `OR sh.slow_streak >= 3` from sourceTrouble()'s WHERE: the slow row is missing.
+  const { migrate } = await import('../src/lib/migrate');
+  const { q } = await import('../src/lib/db');
+  const { runHealthChecks } = await import('../src/lib/health');
+  await migrate();
+  const SLOW = 'hl-slow';
+  const S_SLOW = 's_health_slow';
+  await q('DELETE FROM source_health WHERE source_id = $1', [SLOW]);
+  await q('DELETE FROM lib_series WHERE id = $1', [S_SLOW]);
+  await q(`INSERT INTO source_health (source_id, status, slow_streak, last_slow_at, last_error) VALUES ($1, 'ok', 4, now(), 'timeout after 8000ms')`, [SLOW]);
+  await q(`INSERT INTO lib_series (id, source, title, folder, books_count, source_id, source_series_id)
+           VALUES ($1, 'test', 'Slow Fixture', $1, 3, $2, 's1')`, [S_SLOW, SLOW]);
+  try {
+    const c = (await runHealthChecks()).checks.find((x: any) => x.id === 'sources');
+    const row = c.items.find((i: any) => i.sourceId === SLOW);
+    assert.ok(row, 'listed');
+    assert.notEqual(row.info, true, 'a series depends on it, so it is a finding');
+    assert.equal(row.diagnosis.code, 'too_slow', 'and the diagnosis is the slow one, with the budget');
+    assert.match(row.detail, /longer than 8s/);
+  } finally {
+    await q('DELETE FROM lib_series WHERE id = $1', [S_SLOW]);
+    await q('DELETE FROM source_health WHERE source_id = $1', [SLOW]);
   }
 });
 

@@ -126,17 +126,27 @@ test('THE DROPPED VERDICT: both the sweep and the Test button hand diagnose() th
   //
   // Reintroduce by rewriting either caller's probe line as `bare && { ...bare, adapterOk: smoke.ok, ... }`
   // (or as PR #56's `{ httpStatus: 0, ...bare, ... }` literal): the assertion names the file.
+  //
+  // Since v0.49.0 (#115) both callers go through ONE function, checkSourceLive in lib/sourceCheck.ts, which is
+  // where the probe is built; the guard reads that file for the probe and both callers for the call. Reintroduce by
+  // inlining a smokeTest + diagnose in either caller: the call-site assertion names the file.
   const lib = join(__dirname, '..', 'src');
-  for (const file of ['lib/sourceWatchdog.ts', 'routes/admin.ts']) {
+  const code = (file: string) =>
     // Code only: the comment next to the call names the wrong shape as a warning, and a guard that greps
     // the prose would flag the warning and pass the bug (deployCompose.test.ts learned the same thing).
-    const src = readFileSync(join(lib, file), 'utf8').split('\n').filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n');
-    assert.ok(src.includes('buildProbe(bare, smoke, src)'),
-      `${file} no longer builds diagnose()'s Probe through buildProbe -- the sweep and the Test button can disagree again`);
-    assert.ok(!/bare && \{/.test(src),
-      `${file} builds the Probe only when a bare probe ran, which drops adapterOk for every extension source`);
-    assert.ok(!/httpStatus: 0, \.\.\.bare/.test(src),
-      `${file} encodes "no request was made" as httpStatus 0, which the Probe type reserves for "no answer came back"`);
+    readFileSync(join(lib, file), 'utf8').split('\n').filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n');
+  const check = code('lib/sourceCheck.ts');
+  assert.ok(check.includes('buildProbe(bare, smoke, src)'),
+    "lib/sourceCheck.ts no longer builds diagnose()'s Probe through buildProbe -- the sweep and the Test button can disagree again");
+  assert.ok(!/bare && \{/.test(check),
+    'lib/sourceCheck.ts builds the Probe only when a bare probe ran, which drops adapterOk for every extension source');
+  assert.ok(!/httpStatus: 0, \.\.\.bare/.test(check),
+    'lib/sourceCheck.ts encodes "no request was made" as httpStatus 0, which the Probe type reserves for "no answer came back"');
+  for (const file of ['lib/sourceWatchdog.ts', 'routes/admin.ts']) {
+    const src = code(file);
+    assert.ok(src.includes('checkSourceLive('), `${file} no longer runs the shared live check -- it can disagree with the other caller`);
+    // (smokeTest itself stays legal in admin.ts: adding a custom site verifies it before saving.)
+    assert.ok(!/\bdiagnose\(/.test(src), `${file} diagnoses a source itself, beside the shared live check`);
   }
 });
 
@@ -155,8 +165,9 @@ test('the Test button can see a slow streak', () => {
   // Reintroduce by dropping slow_streak from the SELECT in either file: the assertion names the file. Or by
   // dropping `budgetMs` from the facts: the fix sentence goes back to "the time allowed" instead of the
   // number of seconds the admin has to raise.
+  // Since v0.49.0 both callers share checkSourceLive (lib/sourceCheck.ts), so that is the one read to guard.
   const lib = join(__dirname, '..', 'src');
-  for (const file of ['lib/sourceWatchdog.ts', 'routes/admin.ts']) {
+  for (const file of ['lib/sourceCheck.ts']) {
     const src = readFileSync(join(lib, file), 'utf8').split('\n').filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n');
     // The per-source read, not healthAll()'s: `SELECT <columns> FROM source_health WHERE source_id = $1`.
     const selects = [...src.matchAll(/SELECT([\s\S]*?)FROM source_health WHERE source_id = \$1/g)].map((m) => m[1]);

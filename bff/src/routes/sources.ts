@@ -88,7 +88,7 @@ import { groupStats } from '../lib/groupStats';
 import { fetchAniListArt, fetchTrendingManhwa, TrendingItem } from '../lib/anilist';
 import { learnDirection, directionFromAniListMatch } from '../lib/readingDirection';
 import { q, one } from '../lib/db';
-import { healthAll, isDisabled, blockedNow, reportLatest, reportFail, reportSlow, classify } from '../lib/sourceHealth';
+import { healthAll, isDisabled, blockedNow, reportLatest, reportFail, reportSlow, classify, noteStage } from '../lib/sourceHealth';
 import { diagnose, EMPTY_SUSPECT } from '../lib/sourceDiagnosis';
 import {
   gapsOf, assess, verdict, authorise, putPlan, getPlan, planKey, sweepPlans,
@@ -576,10 +576,16 @@ export async function seriesAndChapters(src: SourceAdapter, sourceId: string):
     // both `getSeries` and `listChapters` answer a timeout or a throw with null/[], which is exactly what a
     // title with genuinely nothing on it looks like.
     let failed = false;
+    // #115: what the lookup learned about the chapter stage is evidence for Health (non-escalating). Our own
+    // timeout is not: a slow answer is not a failing source.
+    const chapterFail = (e: any) => {
+      if (!e?.selfTimeout) void noteStage(src.id, 'chapters', 'fail', { error: String(e?.message || 'lookup failed') });
+    };
     const [series, chapters] = await Promise.all([
-      withTimeout(src.getSeries(sourceId), budgetFor(src, ADD_LOOKUP_TIMEOUT)).catch(() => { failed = true; return null; }),
-      withTimeout(src.listChapters(sourceId), budgetFor(src, ADD_LOOKUP_TIMEOUT)).catch(() => { failed = true; return [] as SourceChapter[]; }),
+      withTimeout(src.getSeries(sourceId), budgetFor(src, ADD_LOOKUP_TIMEOUT)).catch((e) => { failed = true; chapterFail(e); return null; }),
+      withTimeout(src.listChapters(sourceId), budgetFor(src, ADD_LOOKUP_TIMEOUT)).catch((e) => { failed = true; chapterFail(e); return [] as SourceChapter[]; }),
     ]);
+    if (chapters.length) void noteStage(src.id, 'chapters', 'ok');
     // Only a real answer is remembered. Caching the failure -- which this did when the cache was added --
     // turns a hiccup into a confident "No readable chapters for this title on this source. Try a different
     // source." pinned for ten minutes, so retrying inside the window returns the same wrong advice. Before
@@ -659,7 +665,12 @@ export async function previewPageList(ctx: ViewCtx, source: string | undefined, 
   const key = `${r.src.id}\u0000${chapter.sourceId}`;
   const hit = previewPages.get(key);
   if (hit && Date.now() - hit.at < PREVIEW_PAGES_TTL) return { src: r.src, chapter, urls: hit.urls };
-  const urls = await withTimeout(r.src.getPageUrls(chapter.sourceId), budgetFor(r.src, 20_000)).catch(() => null);
+  const urls = await withTimeout(r.src.getPageUrls(chapter.sourceId), budgetFor(r.src, 20_000)).catch((e) => {
+    // #115: page-stage evidence for Health, never a cooldown; our own timeout is not evidence.
+    if (!e?.selfTimeout) void noteStage(r.src.id, 'pages', 'fail', { error: String(e?.message || 'getPageUrls failed') });
+    return null;
+  });
+  if (urls?.length) void noteStage(r.src.id, 'pages', 'ok');
   if (!urls?.length) return refused(502, 'unreadable', 'That chapter would not load from the source.');
   if (previewPages.size >= PREVIEW_PAGES_MAX) previewPages.delete(previewPages.keys().next().value!);
   previewPages.set(key, { at: Date.now(), urls });

@@ -18,11 +18,12 @@ import { runVerify, verifyState } from '../lib/verifyFiles';
 import { runRepair, repairState, REPAIR_HOURS, REPAIR_STEPS, REPAIR_SHORT_MAX, REPAIR_GAPS_MAX, type RepairStep } from '../lib/repair';
 import { authenticate, requireAdmin, userIdOf, revokeAllSessions, revokeRefreshTokenById, passwordError } from '../lib/auth';
 import { logAudit, recentAudit } from '../lib/audit';
-import { healthAll, setDisabled, clearBlock, SourceHealth, pruneOrphanedHealth, isDisabled, blockedNow } from '../lib/sourceHealth';
-import { smokeTest, probeBase, buildProbe } from '../lib/sourceProbe';
-import { runSourceCheck, checkRunning } from '../lib/sourceWatchdog';
+import { healthAllWithEvidence, setDisabled, clearBlock, pruneOrphanedHealth, isDisabled, blockedNow } from '../lib/sourceHealth';
+import { smokeTest } from '../lib/sourceProbe';
+import { startSourceCheck, checkRunning, checkProgress } from '../lib/sourceWatchdog';
+import { checkSourceLive, recordLiveResult } from '../lib/sourceCheck';
+import { currentFailures } from '../lib/sourceEvidence';
 import { runExtensionMonitor, runExtensionCheck, extState, liveStore as extensionStore } from '../lib/extensionMonitor';
-import { diagnose } from '../lib/sourceDiagnosis';
 import { readSites, writeSites } from '../lib/sources/customSites';
 import { reloadAll, listSources, getSource, detectEngine, listRemoteSources, suwayomiConfigured, suwayomiAbout, swAdapterId, withTimeout } from '../lib/sources';
 import {
@@ -3340,7 +3341,24 @@ export default async function adminRoutes(app: FastifyInstance) {
   });
 
   // ---- provider/source health control ----
-  app.get('/api/admin/sources', async () => ({ content: await healthAll() }));
+  /**
+   * Every source's stored health, plus what the admin surfaces need and readers never get (#115): the last live
+   * verdict (`live`) and the failures that are open and confirmed now (`failing`, lib/sourceEvidence.ts). The
+   * Providers card overlays these on the public status, which stays exactly what GET /api/sources says: that one
+   * is a single cache key for every account and feeds Discover's ordering.
+   */
+  app.get('/api/admin/sources', async () => {
+    const now = Date.now();
+    return {
+      content: (await healthAllWithEvidence()).map((h) => ({
+        ...h,
+        failing: currentFailures(h.stages, now).map(({ confirmed: _c, stale: _s, ...f }) => f),
+        live: h.live_at
+          ? { at: h.live_at, by: h.live_by, state: h.live_state, stage: h.live_stage, code: h.live_code, checks: h.live_checks }
+          : null,
+      })),
+    };
+  });
   /**
    * Go and look at this source right now, and say what is wrong with it.
    *
@@ -3353,9 +3371,12 @@ export default async function adminRoutes(app: FastifyInstance) {
    * - **It does not consult the cooldown.** `blockedNow` is read in exactly two places and neither is on
    *   this path, so nothing had to be added to bypass it. Do not "fix" that for consistency: running while
    *   the source is blocked is the entire point of the button.
-   * - **It writes no health.** Adding `reportFail` here is the obvious-looking mistake: three impatient
-   *   clicks would take `consecutive` from 3 to 6 and the cooldown from 90 minutes to its ceiling. A
-   *   diagnostic must never change the diagnosis.
+   * - **It records what it found as evidence, and never changes the cooldown** (v0.49.0, #115). The verdict
+   *   goes to live_* and the per-stage evidence Health reads (lib/sourceCheck.ts). No `reportFail`: three
+   *   impatient clicks would take `consecutive` from 3 to 6 and the cooldown from 90 minutes to its ceiling. No
+   *   status, and no checked_at either: the desktop app schedules the daily check from max(checked_at)
+   *   (server.ts), so a Test that stamped it would postpone the check. Before v0.49.0 it wrote nothing at all,
+   *   which is how a source could fail its Test while Health said "All good".
    * - **Passing does not clear the block.** It reports `canClear` and leaves the decision to the admin. The
    *   smoke test stops at listing page URLs and never fetches an image byte, while the downloader's own
    *   failures are about bytes: hotlink protection, HTML served where a JPEG was promised. Green here is not
@@ -3366,24 +3387,21 @@ export default async function adminRoutes(app: FastifyInstance) {
    * Run the source watchdog now, rather than waiting for its daily sweep.
    *
    * Same code path as the schedule, including the auto-fixes, so what an admin sees here is exactly what
-   * happens unattended. It can take a while: every source is probed and smoke-tested one at a time, on
-   * purpose, because they share one Cloudflare solver.
+   * happens unattended. It can take a while -- every source is probed and smoke-tested one at a time, on
+   * purpose, because they share one Cloudflare solver -- so since v0.49.0 it runs in the background: this
+   * answers 202 with the progress at once, and GET on the same path reads it until `running` is false and
+   * `result` holds the sweep's answer. One request held open for the whole sweep was cut by reverse proxies.
    */
   app.post('/api/admin/sources/check', async (req, reply) => {
-    if (checkRunning()) return reply.code(409).send({ error: 'busy', message: 'A source check is already running.' });
-    try {
-      const r = await runSourceCheck();
-      await logAudit('source.check', {
-        userId: userIdOf(req),
-        detail: { checked: r.sources.length, attention: r.needsAttention.length },
-        req,
-      });
-      return reply.send(r);
-    } catch (e: any) {
-      if (e?.busy) return reply.code(409).send({ error: 'busy' });
-      throw e;
-    }
+    const userId = userIdOf(req);
+    const started = !checkRunning() && startSourceCheck({ by: 'admin' }, (r) => logAudit('source.check', {
+      userId,
+      detail: { checked: r.sources.length, attention: r.needsAttention.length, inconclusive: r.inconclusive.length },
+    }));
+    if (!started) return reply.code(409).send({ error: 'busy', message: 'A source check is already running.', progress: checkProgress() });
+    return reply.code(202).send(checkProgress());
   });
+  app.get('/api/admin/sources/check', async () => checkProgress());
 
   const testing = new Set<string>();
   app.post('/api/admin/sources/:id/test', async (req, reply) => {
@@ -3393,47 +3411,15 @@ export default async function adminRoutes(app: FastifyInstance) {
     if (testing.has(id)) return reply.code(409).send({ error: 'busy', message: 'That source is already being tested.' });
     testing.add(id);
     try {
-      // ⚠️ `slow_streak` must stay in this list: diagnose() reads it before any stored-error rule, and
-      // without the column the streak reads as 0 and `too_slow` can never come out of this button (it did
-      // not for two releases; only Discover, via healthAll(), could say it). The sweep's SELECT matches.
-      const h = await one<SourceHealth>(
-        `SELECT source_id, status, consecutive, last_error, last_fail_at, last_ok_at, blocked_until, disabled,
-                empty_streak, last_empty_at, slow_streak, updated_at FROM source_health WHERE source_id = $1`,
-        [id],
-      ).catch(() => null);
-      // The site first, and without the solver: when the solver is the broken part, asking it tells us
-      // nothing. This one request separates "moved", "refused" and "solver down" from each other. Not every
-      // adapter has a `base` to probe this way -- Suwayomi/extension sources never do, since the engine, not
-      // this server, talks to the site -- so `bare` stays undefined for those and the homepage-status rules
-      // simply do not apply; `buildProbe` is what still carries `adapterOk`, without which an extension
-      // source that just passed every live check falls through to whatever stale error `last_error` holds.
-      const bare = src.base ? await probeBase(src.base) : undefined;
-      const smoke = await smokeTest(src);
-      // The same helper the scheduled sweep uses, so the button and the schedule cannot disagree.
-      const probe = buildProbe(bare, smoke, src);
-      const facts = {
-        status: h?.status ?? 'ok',
-        lastError: h?.last_error ?? null,
-        consecutive: h?.consecutive ?? 0,
-        lastOkAt: h?.last_ok_at ?? null,
-        emptyStreak: h?.empty_streak ?? 0,
-        blockedUntil: h?.blocked_until ?? null,
-        slowStreak: h?.slow_streak ?? 0,
-        // The same budget Discover's latestPage runs out of, so the too_slow sentence names a real number.
-        budgetMs: env.SOURCE_LATEST_TIMEOUT_MS,
-        disabled: !!h?.disabled,
-      };
-      // A search that returns nothing without throwing IS the markup-drift signature, so let the live result
-      // speak even when the stored record is clean. This is the one fault no stored evidence ever captures.
-      const parsedNothing = smoke.checks[0]?.ok === false && /no results/.test(smoke.checks[0]?.detail || '');
-      const d = diagnose(
-        { ...facts, emptyStreak: parsedNothing ? Math.max(facts.emptyStreak, 3) : facts.emptyStreak },
-        probe,
-        src.base,
-      );
-      const blocked = !!(h?.blocked_until && new Date(h.blocked_until).getTime() > Date.now());
-      await logAudit('source.test', { userId: userIdOf(req), detail: { source: id, ok: smoke.ok, code: d.code }, req });
-      return reply.send({ ok: smoke.ok, timedOut: smoke.timedOut, checks: smoke.checks, probe, diagnosis: d, canClear: smoke.ok && blocked });
+      // The same function the scheduled sweep runs, so the button and the schedule cannot disagree.
+      const r = await checkSourceLive(src, { by: 'test' });
+      await recordLiveResult(id, r, 'test');
+      await logAudit('source.test', { userId: userIdOf(req), detail: { source: id, ok: r.smoke.ok, code: r.diagnosis.code, state: r.state, stage: r.stage }, req });
+      return reply.send({
+        ok: r.smoke.ok, timedOut: r.smoke.timedOut, checks: r.smoke.checks, probe: r.probe, diagnosis: r.diagnosis,
+        canClear: r.smoke.ok && r.blocked,
+        state: r.state, stage: r.stage, ms: r.smoke.ms, recorded: true,
+      });
     } finally {
       testing.delete(id);
     }

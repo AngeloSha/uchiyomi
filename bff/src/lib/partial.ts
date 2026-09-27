@@ -21,7 +21,7 @@ import { dirnameRel } from './relPath';
 import sharp from 'sharp';
 import { q, one } from './db';
 import { getSource, SourceChapter } from './sources';
-import { classify, reportFail, blockedNow, isDisabled } from './sourceHealth';
+import { classify, noteStage, reportFail, blockedNow, isDisabled } from './sourceHealth';
 import { writeAtomic } from './fsAtomic';
 import { downloadChapter, fetchPages, underGate, type DownloadInput } from './downloader';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -232,6 +232,7 @@ export async function completePartial(
     } catch (e) {
       const st = classify(e);
       if (st) await reportFail(src.id, st, (e as Error)?.message || 'getPageUrls failed');
+      void noteStage(src.id, 'pages', 'fail', { error: (e as Error)?.message || 'getPageUrls failed' }); // #115
     }
     if (urls && urls.length === manifest.expected) {
       // `retry: false`: the source sees exactly one request per hole, tonight and again tomorrow.

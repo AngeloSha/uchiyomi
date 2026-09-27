@@ -21,7 +21,8 @@ import { lastSuwayomiLoad } from './sources/suwayomi/register';
 import { env } from '../env';
 import { gapsOf } from './fill';
 import { CHAPTER_RETRY_CAP } from './updater';
-import { diagnose } from './sourceDiagnosis';
+import { diagnose, currentError, STAGE_WORD, type DiagnosisCode } from './sourceDiagnosis';
+import { openFailures, stageLines, type Stage, type StageLine, type Stages } from './sourceEvidence';
 import { haveNumbers } from './libraryNumbers';
 import { DL_ROOT, LIBRARY_ROOT, lastScanReport, QUIET_WALK, type WalkReason } from './library';
 import { countsAsMissing, downloadCensus, fsTypeOf } from './downloadCensus';
@@ -86,6 +87,16 @@ export interface HealthItem {
   key?: string;
   /** An admin chose to stop being told about this, and when. The item is then `info`. */
   ignored?: { at: string; by: string | null };
+
+  // ---- #115 (v0.49.0), Source health rows only. Kept together and apart from the fields other workstreams add.
+  /** What each stage was last seen doing (search, chapters, pages, images), from lib/sourceEvidence.ts. */
+  evidence?: StageLine[];
+  /** The last deliberate live check: the Test button ('test') or the daily check ('sweep'). */
+  tested?: { at: string; by: 'test' | 'sweep' | null; state: 'pass' | 'fail' | 'inconclusive' | null; stage: Stage | null };
+  /** The verdict behind the row, admin half included: one verdict on screen, from the stored evidence. */
+  diagnosis?: { code: DiagnosisCode; reason: string; fix: string };
+  /** How many series use the source (primaries and followers). */
+  series?: number;
 }
 
 export interface HealthCheck {
@@ -97,6 +108,8 @@ export interface HealthCheck {
   /** what this check cannot see — shown so nobody reads more into a green result than it deserves */
   note?: string;
   items: HealthItem[];
+  /** #115, 'sources' only: how long one Test may take (the smoke test's wall plus the homepage probe). */
+  testMs?: number;
 }
 
 export interface HealthReport {
@@ -391,7 +404,7 @@ async function chapterFailures(ctx: IgnoreCtx = noIgnores()): Promise<HealthChec
       GROUP BY f.source_id ORDER BY chapters DESC`,
   ).catch(() => { readFailed = true; return [] as any[]; });
   const all: Array<HealthItem & { members?: string[] }> = rows.map((r) => ({
-    title: r.source_id,
+    title: sourceLabel(r.source_id),
     sourceId: r.source_id,
     key: `source:${r.source_id}`,
     members: r.failing ?? [],
@@ -515,11 +528,28 @@ async function frozenSeries(ctx: IgnoreCtx = noIgnores()): Promise<HealthCheck> 
   };
 }
 
+/**
+ * A source as a person knows it: its name, not `sw:2499…` (#115: a raw id reads as "no problems" to someone
+ * looking for Manga Ball). The registered adapter's name, then the name the engine gave it when it was
+ * registered (`suwayomi_sources.name`, for one that is not loaded now), then the id. `sourceId` stays the key
+ * every action uses.
+ */
+export function sourceLabel(id: string, engineName?: string | null): string {
+  return getSource(id)?.name || engineName || id;
+}
+
+const STAGE_LABEL: Record<Stage, string> = { search: 'Search', chapters: 'Chapter list', pages: 'Page list', images: 'Images' };
+const when = (t: string | number | Date) => new Date(t).toISOString().slice(0, 16).replace('T', ' ');
+const TESTED_BY: Record<string, string> = { test: 'by Test', sweep: 'by the daily check' };
+
 async function sourceTrouble(ctx: IgnoreCtx = noIgnores()): Promise<HealthCheck> {
   const rows = await q<{
     source_id: string; status: string; consecutive: number; disabled: boolean;
     blocked_until: string | null; last_error: string | null; empty_streak: number; last_ok_at: string | null;
-    last_fail_at: string | null; last_slow_at: string | null;
+    last_fail_at: string | null; last_slow_at: string | null; slow_streak: number;
+    stages: Stages | null; live_at: string | null; live_by: 'test' | 'sweep' | null;
+    live_state: 'pass' | 'fail' | 'inconclusive' | null; live_code: string | null; live_stage: Stage | null;
+    engine_name: string | null;
     series: number;
   }>(
     `SELECT sh.source_id, sh.status, sh.consecutive,
@@ -532,7 +562,11 @@ async function sourceTrouble(ctx: IgnoreCtx = noIgnores()): Promise<HealthCheck>
             sh.empty_streak, sh.last_ok_at,
             -- When the stored error was written, so a success that came AFTER it can be told apart from one
             -- that came before (reportFail and reportSlow stamp these; nothing ever clears last_error).
-            sh.last_fail_at, sh.last_slow_at,
+            sh.last_fail_at, sh.last_slow_at, sh.slow_streak,
+            -- #115: what Test, the daily check and ordinary use have seen, per stage (lib/sourceEvidence.ts).
+            sh.stages, sh.live_at, sh.live_by, sh.live_state, sh.live_code, sh.live_stage,
+            -- The engine's name for an extension source that is not registered right now (sourceLabel).
+            (SELECT sn.name FROM suwayomi_sources sn WHERE 'sw:' || sn.source_id = sh.source_id LIMIT 1) AS engine_name,
             -- ls.source_id, NOT ls.source: the former is the adapter id ('aqua'), the latter is the
             -- display name as it was at add time ('Aqua Manga (EN)'). This compared a name to an id, so it
             -- matched nothing and every row of this check has always reported "0 series use it".
@@ -546,7 +580,8 @@ async function sourceTrouble(ctx: IgnoreCtx = noIgnores()): Promise<HealthCheck>
                      OR EXISTS (SELECT 1 FROM series_sources ss2
                                  WHERE ss2.series_id = ls.id AND ss2.source_id = sh.source_id)))::int AS series
        FROM source_health sh
-      WHERE sh.status <> 'ok' OR sh.disabled = true OR sh.empty_streak >= 3
+      WHERE sh.status <> 'ok' OR sh.disabled = true OR sh.empty_streak >= 3 OR sh.slow_streak >= 3
+         OR sh.live_state IN ('fail', 'inconclusive') OR sh.stages::text LIKE '%failAt%'
          OR EXISTS (SELECT 1 FROM suwayomi_sources ss WHERE 'sw:' || ss.source_id = sh.source_id AND NOT ss.enabled)
       ORDER BY 4 DESC, sh.consecutive DESC`,
   );
@@ -556,58 +591,109 @@ async function sourceTrouble(ctx: IgnoreCtx = noIgnores()): Promise<HealthCheck>
   // off thirty Russian sources made the page amber with thirty "problems" that were the operator's own
   // decision. They stay listed, greyed, so the count is still visible; the verdict comes from the rest.
   //
-  // The second quiet case, and the bigger one on the live server: a source NOTHING uses. Ten of twelve
-  // not-ok rows there are sources that only ever appeared in Discover, failed once, and have held this
-  // check amber ever since -- a fault nobody can fix by fixing anything, because no series depends on it.
-  // Still listed, and still a real finding the moment it is in a cooldown or somebody adds a series to it.
+  // The second quiet case, and the bigger one on the live server: a source NOTHING uses that only has TRAFFIC
+  // trouble. Ten of twelve not-ok rows there were sources that only ever appeared in Discover, failed once, and
+  // held this check amber ever since. Still listed, and still a finding the moment it is in a cooldown or
+  // somebody adds a series to it. ⚠️ Since v0.49.0 (#115) that greying no longer covers a CONFIRMED failure --
+  // a failed Test or daily check, or three failures in a row at one stage: those are findings whether or not a
+  // series uses the source, because "source health must reflect failing sources" and the one-off Discover blips
+  // that made the page cry wolf are exactly what the streak rule filters out.
   const unused = (r: typeof rows[number]) =>
     !r.disabled && r.series === 0 && !(r.blocked_until && new Date(r.blocked_until).getTime() > now);
-  const off = rows.filter((r) => r.disabled).length;
-  const idle = rows.filter((r) => !r.disabled && unused(r)).length;
-  const items: HealthItem[] = rows.map((r) => {
-      const until = r.blocked_until ? new Date(r.blocked_until).getTime() : 0;
-      // A block whose deadline has passed is not actually holding anything back; say so rather than
-      // leaving the operator thinking the source is still down.
-      const state = r.disabled
-        ? 'turned off by you'
-        : until && until < now
-          ? `block expired, will retry on next use (was ${r.status})`
-          : until
-            ? `${r.status} until ${new Date(until).toISOString().slice(0, 16).replace('T', ' ')}`
-            : r.status;
-      // The plain-language cause and its fix, rather than the raw string. This page is admin-only, so it
-      // gets the operator half of the diagnosis, which is the half that names what to actually go and do.
-      //
-      // `last_error` outlives the failure it describes: `reportOk` never clears it, so a source listed here
-      // for an empty streak, with a success more recent than its last failure, would otherwise be diagnosed
-      // from the words of its last bad afternoon and the operator sent to fix a Cloudflare problem that ended
-      // days ago. The stored-error rules run before the empty-streak one, so the stale string would even
-      // hide the live finding. When the last success is newer than the last failure, the error is history.
-      const at = (t: string | null) => (t ? new Date(t).getTime() : 0);
-      const errorIsHistory = at(r.last_ok_at) > Math.max(at(r.last_fail_at), at(r.last_slow_at));
-      const d = diagnose({
-        status: r.status as any, lastError: errorIsHistory ? null : r.last_error, consecutive: r.consecutive,
-        lastOkAt: r.last_ok_at, emptyStreak: r.empty_streak ?? 0,
-        blockedUntil: r.blocked_until, disabled: r.disabled,
-      });
+  const traffic = (r: typeof rows[number]) => r.status !== 'ok' || r.empty_streak >= 3 || r.slow_streak >= 3;
+  const WEEK = 7 * DAY_MS;
+  let off = 0, idle = 0, unfinished = 0, untested = 0;
+  const items: Array<HealthItem & { members?: string[] }> = [];
+  for (const r of rows) {
+    // Evidence counts only for a source that is loaded: an uninstalled extension's series are the frozen-series
+    // check's business, and its last test is about something that no longer exists here.
+    const loaded = !!getSource(r.source_id);
+    const open = loaded ? openFailures(r.stages, now).filter((f) => f.confirmed) : [];
+    const failing = open.filter((f) => !f.stale);
+    const inconclusive = loaded && r.live_state === 'inconclusive' && !!r.live_at && now - new Date(r.live_at).getTime() < WEEK;
+    const stale = open.length > 0 && !failing.length;
+    if (!r.disabled && !failing.length && !traffic(r) && !inconclusive && !stale) continue; // nothing to say
+
+    const until = r.blocked_until ? new Date(r.blocked_until).getTime() : 0;
+    // A block whose deadline has passed is not actually holding anything back; say so rather than
+    // leaving the operator thinking the source is still down.
+    const state = r.disabled
+      ? 'turned off by you'
+      : until && until < now
+        ? `block expired, will retry on next use (was ${r.status})`
+        : until
+          ? `${r.status} until ${when(until)}`
+          : r.status;
+    // The plain-language cause and its fix, rather than the raw string. This page is admin-only, so it gets the
+    // operator half of the diagnosis, which is the half that names what to actually go and do.
+    //
+    // `last_error` outlives the failure it describes: `reportOk` never clears it, so a source listed here for an
+    // empty streak, with a success more recent than its last failure, would otherwise be diagnosed from the words
+    // of its last bad afternoon and the operator sent to fix a Cloudflare problem that ended days ago.
+    // currentError() is that rule, shared with the Test button and the daily check.
+    const lead = failing[0];
+    const d = diagnose(
+      {
+        status: r.status as any, lastError: currentError(r), consecutive: r.consecutive,
+        lastOkAt: r.last_ok_at, emptyStreak: r.empty_streak ?? 0, blockedUntil: r.blocked_until, disabled: r.disabled,
+        slowStreak: r.slow_streak ?? 0, budgetMs: env.SOURCE_LATEST_TIMEOUT_MS,
+      },
+      // The confirmed failure is live evidence of the most specific kind: its stage and its own error.
+      lead && !r.disabled ? { adapterOk: false, failure: { stage: lead.stage, kind: lead.kind, error: lead.error } } : undefined,
+    );
+    const uses = r.series ? `${r.series} series use it` : 'no series use it';
+    const tested = r.live_at
+      ? `; last tested ${when(r.live_at)}${TESTED_BY[r.live_by ?? ''] ? ` ${TESTED_BY[r.live_by!]}` : ''}` : '';
+    let detail: string;
+    let info = false;
+    let members: string[] = [];
+    if (r.disabled) {
+      off++;
+      info = true;
+      detail = `${state}; ${uses}`;
+    } else if (failing.length) {
+      // Leads with the stage: "Search failing since …" is what an admin looking for Manga Ball needs first.
+      detail = `${STAGE_LABEL[lead.stage]} failing since ${when(lead.since)} — ${d.reason}`
+        + (failing.length > 1 ? ` (also ${failing.slice(1).map((f) => STAGE_LABEL[f.stage].toLowerCase()).join(', ')})` : '')
+        + `${tested}; ${uses}`;
+      // What an Ignore covers: the failing stages. A NEW stage failing is a new finding (healthIgnore covered()).
+      members = failing.map((f) => f.stage);
+    } else if (traffic(r)) {
+      info = unused(r);
+      if (info) idle++;
       const why = d.code === 'ok' ? '' : ` — ${d.fix || d.reason}`;
-      return {
-        title: r.source_id,
-        sourceId: r.source_id,
-        detail: `${state}; ${r.series ? `${r.series} series use it` : 'no series use it'}${why}`,
-        // Test always: it is the one action that answers "is this still true?", and it is read-only.
-        // Clear block whenever there is a block to clear, expired or not -- clearing also wipes the
-        // escalation memory (consecutive), which is what makes the next cooldown fifteen minutes instead of
-        // seventy-five. Turn off only for a source that is not already off, by either of the two routes.
-        actions: [
-          'test',
-          ...(r.blocked_until ? ['unblock' as const] : []),
-          ...(r.disabled ? [] : ['disable' as const]),
-        ] as HealthAction[],
-        // Only a real finding can be ignored: a source switched off or used by nothing is already quiet.
-        ...(r.disabled || unused(r) ? { info: true } : { key: `source:${r.source_id}` }),
-      };
+      detail = `${state}; ${uses}${why}`;
+    } else if (inconclusive) {
+      unfinished++;
+      info = true;
+      detail = `the last test ran out of time while ${STAGE_WORD[r.live_stage ?? 'search']} — not proof it is broken${tested}; ${uses}`;
+    } else {
+      untested++;
+      info = true;
+      const days = Math.floor((now - new Date(open[0].at).getTime()) / DAY_MS);
+      detail = `${STAGE_LABEL[open[0].stage]} failed ${days} days ago and nothing has checked it since — test it again; ${uses}`;
+    }
+    items.push({
+      title: sourceLabel(r.source_id, r.engine_name),
+      sourceId: r.source_id,
+      detail,
+      // Test always: it is the one action that answers "is this still true?", and it records, never escalates.
+      // Clear block whenever there is a block to clear, expired or not -- clearing also wipes the escalation
+      // memory (consecutive), which is what makes the next cooldown fifteen minutes instead of seventy-five.
+      // Turn off only for a source that is not already off, by either of the two routes.
+      actions: [
+        'test',
+        ...(r.blocked_until ? ['unblock' as const] : []),
+        ...(r.disabled ? [] : ['disable' as const]),
+      ] as HealthAction[],
+      // Only a real finding can be ignored: a source switched off, used by nothing, or merely untested is quiet.
+      ...(info ? { info: true } : { key: `source:${r.source_id}`, members }),
+      evidence: stageLines(r.stages),
+      ...(r.live_at ? { tested: { at: new Date(r.live_at).toISOString(), by: r.live_by, state: r.live_state, stage: r.live_stage } } : {}),
+      diagnosis: { code: d.code, reason: d.reason, fix: d.fix },
+      series: r.series,
     });
+  }
   const ignored = applyIgnores('sources', items, ctx);
   const live = items.filter((i) => !i.info).length;
   return {
@@ -616,13 +702,21 @@ async function sourceTrouble(ctx: IgnoreCtx = noIgnores()): Promise<HealthCheck>
     status: live ? 'warn' : 'ok',
     summary: (live
       ? `${live} source${live === 1 ? ' is' : 's are'} failing or blocked`
-      : 'All sources responding normally')
+      // Never "all responding" over a source that is failing unused, or that nobody could test to the end.
+      : idle + unfinished + untested
+        ? 'Nothing is failing that your library uses'
+        : 'All sources responding normally')
       + (off ? `; ${off} turned off by you` : '')
       + (idle ? `; ${idle} no series use` : '')
+      + (unfinished ? `; ${unfinished} could not finish a test` : '')
       + ignoredTail(ignored),
-    note: 'A blocked source usually means the site returned 403 or a Cloudflare challenge we could not solve. '
-        + 'If several fail at once and all of them mention the solver, check the solver rather than the sites. '
-        + 'A source no series uses is listed for reference only: nothing in your library depends on it.',
+    note: 'A source is failing when a Test or the daily check fails at a step (search, chapter list, page list), '
+        + 'or when ordinary use fails at the same step three times in a row; downloading images is a step of its own. '
+        + 'Only a later success at that same step clears it. Testing never changes a cooldown. '
+        + 'A blocked source usually means the site returned 403 or a Cloudflare challenge we could not solve; if several '
+        + 'fail at once and all of them mention the solver, check the solver rather than the sites. '
+        + 'A cooldown on a source no series uses is listed for reference only, and so is a test that ran out of time.',
+    testMs: env.SOURCE_TEST_TIMEOUT_MS + 8000,
     items,
   };
 }
@@ -836,7 +930,7 @@ export async function solverHealth(): Promise<HealthCheck> {
         // about a solver that is answering; on one that is not, it would be a button that reports success
         // and changes nothing, which is worse than no button. The repair's solver step refuses for the
         // same reason.
-        ...blaming.map((id) => ({ title: id, sourceId: id, detail: 'failing, and its recorded error names the solver' })),
+        ...blaming.map((id) => ({ title: sourceLabel(id), sourceId: id, detail: 'failing, and its recorded error names the solver' })),
       ],
     };
   }
@@ -872,7 +966,7 @@ export async function solverHealth(): Promise<HealthCheck> {
       // along with this source's cooldown. It cannot restart the container -- Uchiyomi has no access to
       // other containers, by design -- so the note above still names the restart as the operator's job.
       ...blaming.map((id) => ({
-        title: id,
+        title: sourceLabel(id),
         sourceId: id,
         detail: 'its last failure happened inside the solver',
         actions: ['solver_reset' as const],

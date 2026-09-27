@@ -3,6 +3,7 @@
 // report here from the one place that matters most — the chapter downloader.
 import { q, one } from './db';
 import { visibleToAll } from './visibility';
+import type { EvidenceBy, FailKind, Stage, Stages } from './sourceEvidence';
 
 export type SourceStatus = 'ok' | 'rate_limited' | 'blocked' | 'down';
 
@@ -25,6 +26,16 @@ export interface SourceHealth {
   slow_streak: number;
   last_slow_at: string | null;
   updated_at: string;
+  // ---- v0.49.0 (#115): evidence, written only by noteStage and recordLive below. Present on rows read by
+  // healthAllWithEvidence() and the per-source reads that name them; absent from healthAll(). ----
+  live_at?: string | null;
+  live_by?: 'test' | 'sweep' | null;
+  live_state?: 'pass' | 'fail' | 'inconclusive' | null;
+  live_code?: string | null;
+  live_stage?: Stage | null;
+  live_detail?: string | null;
+  live_checks?: unknown[] | null;
+  stages?: Stages;
 }
 
 /** Classify an error message / HTTP status into a health signal (or null if it's not a source-health issue). */
@@ -177,5 +188,121 @@ export async function pruneOrphanedHealth(sourceIds: string[]): Promise<number> 
   return rows.length;
 }
 
+// ⚠️ clearBlock, reportOk and the repair's lapsed-block reset (repair.ts stepSolver) are ERASERS of escalation
+// memory, and must never touch `stages` or `live_*`: evidence of a failure is only closed by a success at the same
+// stage (lib/sourceEvidence.ts). An eraser that cleared evidence is how #115's failing source read "ok" on Health.
 export const clearBlock = (sourceId: string) =>
   q(`UPDATE source_health SET status = 'ok', consecutive = 0, blocked_until = NULL, updated_at = now() WHERE source_id = $1`, [sourceId]);
+
+// ---- v0.49.0 (#115): per-stage evidence, non-escalating --------------------------------------------------------
+//
+// Everything below writes `stages` and `live_*` and NOTHING else: not status, consecutive, blocked_until,
+// last_error, last_*_at, checked_at or updated_at. Those drive cooldowns (updater blockedNow, autoFollow,
+// sourceHunt, Discover) and the desktop watchdog's schedule (server.ts reads max(checked_at)), and a diagnostic or
+// a note must change neither. sourceCheck.int.test.ts pins it.
+
+/**
+ * One stage's merge, as SQL over the stored object `o` and the patch `p` (both jsonb expressions). What a patch
+ * cannot know is decided here, under the row lock, from what the row holds at the moment of the write:
+ * - `since`: when the failure that is open now began -- kept while it stays open, restarted once it had closed;
+ * - `streak`: failures in a row (a success's patch resets it to 0);
+ * - `failBy`: a traffic failure landing on a failure a live check confirmed keeps the live check's name, so one
+ *   more failed Discover search cannot turn a confirmed failure back into a streak-of-one rumour.
+ * ⚠️ Keep the SQL merge: a read-modify-write in TypeScript would race recordLive against a traffic note on the
+ * same row, and the single UPDATE is what serialises them.
+ */
+const OPEN = (o: string) =>
+  `((${o}->>'failAt') IS NOT NULL AND ((${o}->>'okAt') IS NULL OR (${o}->>'failAt')::timestamptz > (${o}->>'okAt')::timestamptz))`;
+const STAGE_MERGE = (o: string, p: string) => `(${o} || ${p} || CASE WHEN ${p} ? 'failAt' THEN jsonb_build_object(
+    'since',  CASE WHEN ${OPEN(o)} THEN COALESCE(${o}->>'since', ${o}->>'failAt') ELSE ${p}->>'failAt' END,
+    'streak', COALESCE((${o}->>'streak')::int, 0) + 1,
+    'failBy', CASE WHEN ${p}->>'failBy' = 'traffic' AND ${OPEN(o)} AND (${o}->>'failBy') IN ('test', 'sweep')
+                   THEN ${o}->>'failBy' ELSE ${p}->>'failBy' END)
+  ELSE '{}'::jsonb END)`;
+const MERGE_PATCH = (param: string) =>
+  `source_health.stages || COALESCE((SELECT jsonb_object_agg(p.key, ${STAGE_MERGE("COALESCE(source_health.stages -> p.key, '{}'::jsonb)", 'p.value')})
+                                       FROM jsonb_each(${param}::jsonb) p), '{}'::jsonb)`;
+
+/**
+ * A successful note is skipped when this process wrote one for the same source and stage in the last five minutes
+ * and no failure since: searchAll fans one search out over every source, and a write per source per search is
+ * cost for no new fact. A failure always writes (the streak needs it) and forgets the entry, so the next success,
+ * the one that closes it, is never the one skipped. Per process, which is harmless: at worst a second write.
+ */
+const OK_NOTE_EVERY_MS = 5 * 60 * 1000;
+const okNoted = new Map<string, number>();
+const noteKey = (sourceId: string, stage: Stage) => `${sourceId}\u0000${stage}`;
+
+async function mergeStages(sourceId: string, patch: Stages, live?: {
+  by: 'test' | 'sweep'; state: 'pass' | 'fail' | 'inconclusive'; code: string | null; stage: Stage | null;
+  detail: string | null; checks: unknown[] | null;
+}, insert = true): Promise<void> {
+  // The row may not exist yet (a source nothing has ever failed or been tested). Inserted bare, then merged, so
+  // both writers share one UPDATE and one merge. Not for a traffic success: with no row there is no failure for it
+  // to close, and a row per source per search fan-out is noise ("no health row at all" still means "nothing
+  // has gone wrong here", which downloadBlame.int.test.ts relies on).
+  if (insert) await q(`INSERT INTO source_health (source_id) VALUES ($1) ON CONFLICT (source_id) DO NOTHING`, [sourceId]);
+  if (!live) {
+    await q(`UPDATE source_health SET stages = ${MERGE_PATCH('$2')} WHERE source_id = $1`, [sourceId, JSON.stringify(patch)]);
+    return;
+  }
+  await q(
+    `UPDATE source_health SET live_at = now(), live_by = $3, live_state = $4, live_code = $5, live_stage = $6,
+            live_detail = $7, live_checks = $8::jsonb, stages = ${MERGE_PATCH('$2')}
+      WHERE source_id = $1`,
+    [sourceId, JSON.stringify(patch), live.by, live.state, live.code, live.stage,
+      live.detail ? live.detail.slice(0, 300) : null, live.checks ? JSON.stringify(live.checks) : null],
+  );
+}
+
+/**
+ * What ordinary use just saw at one stage: a search, a chapter list, a page list, a chapter's bytes.
+ *
+ * Lightweight and never a verdict: one traffic failure is noise until TRAFFIC_CONFIRM in a row
+ * (lib/sourceEvidence.ts), and nothing here pushes, escalates or clears a cooldown -- the existing reportFail /
+ * reportOk calls beside each caller stay exactly as they were. Never throws: evidence is best effort, and the
+ * paths calling this are the ones readers are waiting on.
+ */
+export async function noteStage(
+  sourceId: string, stage: Stage, outcome: 'ok' | 'fail', opts: { error?: string; kind?: FailKind; by?: EvidenceBy } = {},
+): Promise<void> {
+  const key = noteKey(sourceId, stage);
+  if (outcome === 'ok') {
+    const last = okNoted.get(key);
+    if (last !== undefined && Date.now() - last < OK_NOTE_EVERY_MS) return;
+    okNoted.set(key, Date.now());
+  } else {
+    okNoted.delete(key);
+  }
+  const at = new Date().toISOString();
+  const by = opts.by ?? 'traffic';
+  const rec = outcome === 'ok'
+    ? { okAt: at, okBy: by, streak: 0 }
+    : { failAt: at, failBy: by, error: String(opts.error || 'failed').slice(0, 300), kind: opts.kind ?? 'error' };
+  await mergeStages(sourceId, { [stage]: rec }, undefined, outcome === 'fail').catch(() => {});
+}
+
+/**
+ * What a deliberate live check found: the Test button (by 'test') or the daily check and "Check all now" (by
+ * 'sweep'). Writes live_* and merges the run's stage patch (liveStagesPatch). The caller has already read the
+ * previous live state, which it needs to decide whether a failure is new.
+ */
+export async function recordLive(sourceId: string, r: {
+  by: 'test' | 'sweep'; state: 'pass' | 'fail' | 'inconclusive'; code: string | null; stage: Stage | null;
+  detail: string | null; checks: unknown[] | null; patch: Stages;
+}): Promise<void> {
+  // A failure written here must not be followed by a skipped success: forget the throttle for the failed stages.
+  for (const [stage, rec] of Object.entries(r.patch)) if (rec?.failAt) okNoted.delete(noteKey(sourceId, stage as Stage));
+  await mergeStages(sourceId, r.patch, r).catch(() => {});
+}
+
+/**
+ * healthAll() plus the evidence, for the admin surfaces only. A separate read rather than more columns on
+ * healthAll(), which the public GET /api/sources, Discover's search and the fill dialog read on every call: they
+ * need none of this, and the engine's raw error text in `stages` has no business near a reader's route.
+ */
+export const healthAllWithEvidence = () =>
+  q<SourceHealth>(`SELECT source_id, status, consecutive, last_error, last_fail_at, last_ok_at, blocked_until, disabled,
+                          empty_streak, last_empty_at, checked_at, check_code, slow_streak, last_slow_at, updated_at,
+                          live_at, live_by, live_state, live_code, live_stage, live_detail, live_checks, stages
+                     FROM source_health`);

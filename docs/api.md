@@ -167,8 +167,15 @@ its own it fetches that homepage directly, without the Cloudflare solver, and th
 (search, series, chapters, pages), returning per-step `checks`, the `probe` result and a `diagnosis`.
 Extension sources have no homepage to ask (the engine talks to the site, not this server), so for them the
 homepage step is skipped and `probe` carries no `httpStatus`: only the adapter's own result. It ignores any cooldown, which is the
-point, and it deliberately writes no health of its own: a diagnostic that changed the diagnosis would let
-repeated clicks drive a source's cooldown to its ceiling. A pass reports `canClear` rather than clearing the
+point. Since v0.49.0 it records what it found as evidence (`source_health.live_*` and the per-stage
+`stages`), which the Health page's *Source health* check reads, and it still never changes the cooldown or
+`checked_at`: a diagnostic that changed the diagnosis would let repeated clicks drive a source's cooldown to
+its ceiling. The answer adds `{state, stage, ms, recorded}`: `state` is `pass`, `fail`, or `inconclusive`
+when the test's own deadline (`SOURCE_TEST_TIMEOUT_MS`, which now bounds every call inside it) ended it before
+anything failed, and `stage` is where (`search`, `chapters`, `pages`). `diagnosis.code` is never `ok` when
+`ok` is false; it can be `extension_error` (the extension engine answered with the extension's own error)
+or `unnumbered` (chapters listed without usable numbers), and `upstream_down` now means only that the engine
+itself did not answer or refused Uchiyomi's login. A pass reports `canClear` rather than clearing the
 block itself, because the smoke test stops at listing page URLs and never fetches an image byte. The
 `probe` is always present: `{httpStatus?, finalUrl?, transport?, looksHtml?, adapterOk, needsSolver}`,
 where `httpStatus` is absent when no homepage request was made and `0` when one was made and no HTTP answer
@@ -189,7 +196,12 @@ its `fix` names the configured `SOURCE_LATEST_TIMEOUT_MS` budget in seconds (*lo
 
 `POST /api/admin/sources/check` (admin) runs the source watchdog immediately instead of waiting for its
 daily sweep. It probes every enabled source and smoke-tests its adapter, one at a time because they share a
-single Cloudflare solver, then returns a verdict per source. It applies only the two fixes that are
+single Cloudflare solver. Since v0.49.0 it runs in the background: it answers **202** with the progress at
+once, and `GET /api/admin/sources/check` reads `{running, by, startedAt, finishedAt, total, done, current,
+result, error}` until `running` is false; `result` then holds the verdict per source (each with `state`,
+`stage` and `kind`), `needsAttention` (every confirmed live failure except a rate limit, plus moved sites),
+`inconclusive` and `notified` (the ids pushed: a push goes out once per new or changed failure, not daily,
+and links to Health). It applies only the two fixes that are
 verifiable: it follows a site to a new address **after** the new one passes a smoke test (rolling back if it
 does not). Everything else is reported with a reason and a suggested fix, and admins get a push notification.
 Answers **409** while a sweep is running. It no longer touches extensions -- that is its own scheduled task,
@@ -898,7 +910,7 @@ POST   /api/sources/runs/:kind/cancel
 DELETE /api/sources/runs/:kind
 GET    /api/admin/sources         POST   /api/admin/sources/:id/:action
 POST   /api/admin/sources/:id/test
-POST   /api/admin/sources/check
+POST   /api/admin/sources/check   GET    /api/admin/sources/check
 POST   /api/admin/sources/reload  GET    /api/admin/sources/custom
 POST   /api/admin/sources/custom  DELETE /api/admin/sources/custom/:id
 PATCH  /api/admin/sources/custom/:id

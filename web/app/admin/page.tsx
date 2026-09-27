@@ -30,6 +30,7 @@ import { TONE_SURFACE, engineMark, healthMark, sourceMark, type ProviderStatus }
 import Link from 'next/link';
 import { healthLinks } from '@/lib/healthLinks';
 import { useLayer } from '@/lib/layers';
+import { checkAllSources } from '@/lib/sourceCheckRun';
 
 /**
  * `/api/sources` as an ADMIN needs it: every source the server has, adult ones included.
@@ -569,7 +570,8 @@ function Providers({ onTab }: { onTab: (t: Tab) => void }) {
   const checkAll = async () => {
     setChecking(true);
     try {
-      const r = await api<any>('/api/admin/sources/check', { method: 'POST' });
+      // In the background since v0.49.0: started, then followed until it ends (lib/sourceCheckRun.ts).
+      const r = await checkAllSources(api);
       setSweep(r);
       toast(r.needsAttention.length ? `${r.needsAttention.length} source(s) need attention` : 'All sources healthy',
         r.needsAttention.length ? 'error' : 'success');
