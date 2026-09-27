@@ -192,9 +192,14 @@ async function askOne(entry: Entry, src: SourceAdapter, term: string): Promise<v
       void reportSlow(src.id, (e as { ms?: number }).ms ?? budget);
       Object.assign(cell, { state: 'timeout', ms: Date.now() - t0, settledAt: Date.now() });
     } else {
-      void reportFail(src.id, classify(e) ?? 'down', (e as Error)?.message || 'search failed');
-      // And evidence for Health, at the stage it happened (#115). Not our own timeout: that is reportSlow's.
-      void noteStage(src.id, 'search', 'fail', { error: (e as Error)?.message || 'search failed' });
+      const error = (e as Error)?.message || 'search failed';
+      // And evidence for Health, at the stage it happened (#115) -- after the count, never beside it. The note
+      // creates the row when the source has none, and side by side that bare row could land first: to anything
+      // reading in between (the next search's cooldown check, Health, a test) a source with no failure on record.
+      // Chained, the evidence can neither get ahead of the count nor hold it up. Not our own timeout: that is
+      // reportSlow's. Reintroduce by firing the two side by side: "a refusal must count against the source" in
+      // searchAll.int.test.ts reads the bare row.
+      void reportFail(src.id, classify(e) ?? 'down', error).then(() => noteStage(src.id, 'search', 'fail', { error }));
       Object.assign(cell, { state: 'failed', ms: Date.now() - t0, settledAt: Date.now() });
     }
   } finally {

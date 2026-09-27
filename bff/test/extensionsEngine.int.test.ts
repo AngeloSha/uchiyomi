@@ -13,7 +13,7 @@ import assert from 'node:assert/strict';
 
 const DSN = process.env.TEST_DATABASE_URL;
 const OURS = 'http://uchiyomi-flaresolverr:8191';
-const SERIES = ['s_ee_one', 's_ee_two', 's_ee_gone'];
+const SERIES = ['s_ee_one', 's_ee_two', 's_ee_gone', 's_ee_merged'];
 
 async function setup() {
   const { startFakeSuwayomi, SOURCE_IDS } = await import('./fixtures/fakeSuwayomi');
@@ -44,6 +44,9 @@ async function setup() {
     await q(`INSERT INTO lib_series (id, source, title, folder, source_id, source_series_id, deleted_at)
              VALUES ($1,'test',$1,$1,$2,'1',$3)`, [id, `sw:${SOURCE_IDS.mangaBall}`, deleted ? new Date() : null]);
   }
+  // Folded into s_ee_one: its chapters are the survivor's, and nothing routes it through the engine any more.
+  await q(`INSERT INTO lib_series (id, source, title, folder, source_id, source_series_id, merged_into)
+           VALUES ('s_ee_merged','test','s_ee_merged','s_ee_merged',$1,'2','s_ee_one')`, [`sw:${SOURCE_IDS.mangaBall}`]);
   await q(`DELETE FROM users WHERE username = 'ee-admin'`);
   const admin = (await q<{ id: string }>(
     `INSERT INTO users (username, display_name, password_hash, role, auth_kind) VALUES ('ee-admin','ee-admin','x','admin','password') RETURNING id`,
@@ -79,7 +82,9 @@ test('the extension engine, as Admin → Extensions and Health see it', { skip: 
       assert.equal(down.reachable, false);
       assert.ok(down.error, 'the reason it did not answer is shown');
       assert.equal(down.platform, 'compose');
-      assert.equal(down.linkedSeries, 2, 'the series added through an extension, not the removed one');
+      // Reintroduce by counting `deleted_at IS NULL` alone (as linkedSeriesCount first did): the merged-away row is
+      // counted and this reads 3 -- and predicateHygiene.test.ts names the hand-written predicate.
+      assert.equal(down.linkedSeries, 2, 'the series added through an extension, not the removed or merged-away one');
       assert.equal(down.engine, new URL(fake.url).host);
       assert.equal(down.retry, null, 'no loop was started in this test');
       assert.ok(Date.parse(down.lastTry) > 0, 'when the last registration ran');

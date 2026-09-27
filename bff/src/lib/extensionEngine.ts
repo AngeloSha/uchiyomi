@@ -8,6 +8,7 @@
 //   * POST /api/admin/extensions/solver points the engine's own Cloudflare helper at Uchiyomi's, when an admin
 //     presses Connect -- never by itself (sources/suwayomi/engineSolver.ts says why).
 import { q, one } from './db';
+import { visibleToAll } from './visibility';
 import { env } from '../env';
 import { isDesktop } from './desktop';
 import { installPlatform } from './platform';
@@ -26,10 +27,14 @@ import { currentFailures, LIVE_STALE_MS, type Stage, type Stages } from './sourc
 /**
  * Series added through an extension, which is what the engine's data is worth: each one is routed by an id that
  * only the engine knows. The warning that names this number is the reason nobody deletes the engine's volume.
+ *
+ * Through `visibleToAll`, the rule Health's frozen-series list counts the same series by: a removed series is not
+ * waiting for the engine, and neither is one merged into another -- its chapters are the survivor's now, and the
+ * updater never routes it.
  */
 export async function linkedSeriesCount(): Promise<number> {
   const r = await one<{ n: number }>(
-    `SELECT count(*)::int AS n FROM lib_series WHERE source_id LIKE 'sw:%' AND deleted_at IS NULL`,
+    `SELECT count(*)::int AS n FROM lib_series s WHERE s.source_id LIKE 'sw:%' AND ${visibleToAll('s')}`,
   ).catch(() => null);
   return r?.n ?? 0;
 }
