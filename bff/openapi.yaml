@@ -407,9 +407,11 @@ components:
         refused a chapter and is left alone: 1 h, 3 h, 12 h, then a day), `source_busy` (somebody else's
         download is on its source), `pace` (its source answered 429 recently), `cooldown` (the source's own
         back-off), `disabled`, `source_missing`, `series_busy` (a download for the series itself is running),
-        `listing` (its listing is being read), `renumbering` (a renumber is pending for it). `attention` puts it
-        under Needs attention: `backoff` (refused twice in a row), `source_missing`, `disabled`, `disk`,
-        `stalled` (paused a week), `finished_with_gaps` (done, with `note` saying what was left behind).
+        `listing` (its listing must be read before its next chapter, and the last read gave none: read again at
+        `until`, 1 h, 3 h, 12 h, then a day apart), `renumbering` (a renumber is pending for it). `attention` puts
+        it under Needs attention: `backoff` (refused twice in a row), `source_missing` or `disabled` (for over a
+        day), `disk`, `stalled` (paused a week, or queued three days without a chapter coming in although it had
+        its turns), `finished_with_gaps` (done, with `note` saying what was left behind).
       required: [seriesId, title, state, direction, done, left, failed, bytes, mine, queuedAt, startedAt]
       properties:
         seriesId: { type: string }
