@@ -173,14 +173,29 @@ test('outrunning our own budget is recorded as slowness, never as a failure -- a
   assert.equal((await row(CF)).last_error, 'timeout after 3600ms', 'the solver source was cut at the search budget');
 });
 
-test('a source that throws is recorded as a failure; an empty answer is recorded nowhere', { skip }, async () => {
+test('a source that throws is recorded as a failure; an empty answer is recorded nowhere', { skip }, async (t) => {
   // Reintroduce by routing the catch's else-branch through reportSlow: `consecutive` reads 0 and status 'ok'.
+  // Or by firing #115's stage note beside reportFail instead of after it: the note's bare row (consecutive 0) could
+  // land first, and this read it about one run in three. The hold below makes that order lose every time: the
+  // failure count is held back half a second, so a row that can appear without its count WILL be read first.
+  const { pool } = await import('../src/lib/db');
+  const query = pool.query;
+  let held = 0;
+  t.mock.method(pool, 'query', function (text: any, params?: any[]) {
+    const run = () => (query as any).call(pool, text, params);
+    if (typeof text === 'string' && /consecutive = source_health\.consecutive \+ 1/.test(text) && params?.[0] === THROW) {
+      held++;
+      return sleep(500).then(run);
+    }
+    return run();
+  });
   const a = await lib.searchAll('Throw Term', [adapters[THROW], adapters[EMPTY]] as any, { waitMs: 3000, health: await hmap() });
   assert.equal(a.per.get(THROW)?.state, 'failed');
   const h = await row(THROW);
   assert.equal(h.consecutive, 1, 'a refusal must count against the source');
   assert.equal(h.status, 'blocked', 'a 403 classifies as blocked, exactly as the newest listing would record it');
   assert.ok(h.blocked_until, 'and earns the cooldown');
+  assert.equal(held, 1, 'the failure count went through the hold');
   assert.equal(a.per.get(EMPTY)?.state, 'empty');
   assert.equal(await rowNow(EMPTY), undefined, 'not carrying a title is not a health event');
 });

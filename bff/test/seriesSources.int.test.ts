@@ -127,7 +127,30 @@ test('a source the plan found to carry the series can be followed, and the serie
     assert.equal(plan.following.length, 0, 'the scan says nothing is followed yet');
   });
 
-  await t.test('the follow lands and answers with the new list', async () => {
+  await t.test('the follow lands and answers with the new list', async (t) => {
+    // A follow is not a check. The route starts a listing refresh, and that refresh DOES check the new source and
+    // stamps it the moment it answers -- so an answer read while the refresh ran said "never checked" or "checked
+    // just now" by a millisecond, and once #115's writes changed which pooled connection the answer got, it lost
+    // on every run on a quiet machine. Widened here so that order always loses: the answer's read of the list
+    // waits (up to a second) for the refresh's stamp. An answer read before the refresh starts waits on nothing
+    // that can come, and reads the list the follow left.
+    const { pool } = await import('../src/lib/db');
+    const query = pool.query;
+    let onStamp!: () => void;
+    const stamp = new Promise<void>((r) => { onStamp = r; });
+    /** The refresh's stamp, or `ms` without it; the timer never outlives the stamp (it would hold the file open). */
+    const stampOr = (ms: number) => new Promise<void>((r) => { const tm = setTimeout(r, ms); void stamp.then(() => { clearTimeout(tm); r(); }); });
+    let heldReads = 0;
+    t.mock.method(pool, 'query', function (text: any, params?: any[]) {
+      const run = () => (query as any).call(pool, text, params);
+      const sql = typeof text === 'string' ? text : '';
+      if (/^\s*UPDATE series_sources SET checked_at\b/.test(sql)) return run().finally(onStamp);
+      if (/^\s*SELECT\b[\s\S]*\bchecked_at\b[\s\S]*\bFROM series_sources\b/.test(sql)) {
+        heldReads++;
+        return stampOr(1000).then(run);
+      }
+      return run();
+    });
     const r = await follow({ planId: plan.planId, source: RICH, sourceSeriesId: rich.sourceSeriesId });
     assert.equal(r.statusCode, 200, r.body);
     const j = r.json();
@@ -138,7 +161,11 @@ test('a source the plan found to carry the series can be followed, and the serie
     assert.equal(extra.sourceSeriesId, rich.sourceSeriesId);
     assert.equal(extra.registered, true);
     assert.equal(extra.checkedAt, null, 'never checked yet');
-    const row = (await q('SELECT title, coverage, added_by FROM series_sources WHERE series_id = $1 AND source_id = $2', [SERIES, RICH]))[0];
+    assert.equal(heldReads, 1, 'the answer read the list once, through the hold');
+    // And the refresh the follow starts is still a real check: it asks the new source and stamps it.
+    await stampOr(5000);
+    const row = (await q('SELECT title, coverage, added_by, checked_at FROM series_sources WHERE series_id = $1 AND source_id = $2', [SERIES, RICH]))[0];
+    assert.ok(row.checked_at, 'the refresh after the follow checked the new source');
     assert.equal(row.title, 'Followed Series Deluxe Edition', 'the candidate’s own title is kept, for the picker to show');
     assert.equal(Number(row.coverage), 1);
     assert.ok(row.added_by, 'who followed it is recorded');
