@@ -208,7 +208,7 @@ export default async function catalogRoutes(app: FastifyInstance) {
     return { content: await enrichSeries(req, picks) };
   });
 
-  app.post('/api/refresh', async () => {
+  app.post('/api/refresh', async (req) => {
     const now = Date.now();
     if (now - runtime.lastScan < 60_000) return { scanned: false, reason: 'rate_limited' };
     runtime.lastScan = now;
@@ -223,7 +223,11 @@ export default async function catalogRoutes(app: FastifyInstance) {
     // catches up with what the scan found -- "folders the scan cannot index" is one of its checks.
     // Reintroduce by answering without them: "Scan library now answers what it found" in
     // repairRoutes.int.test.ts finds no `series`.
-    const counts = answers.find((a: any) => a && typeof a.series === 'number') as
+    // ⚠️ Admins only. Members press this too (home, library, the top bar, the command palette), and the counts
+    // are the WHOLE library's, restricted and 18+ libraries included: a member limited to one library would
+    // learn how big the ones they cannot open are. Reintroduce by dropping the role check: the member half of
+    // that test finds a `series` key.
+    const counts = roleOf(req) !== 'admin' ? undefined : answers.find((a: any) => a && typeof a.series === 'number') as
       { series: number; books: number; ms: number; skipped: number } | undefined;
     scheduleHealthSummaryRefresh();
     return {

@@ -103,3 +103,16 @@ test("Uchiyomi's own solver is what FLARESOLVERR_URL says, never the development
   assert.equal(ourSolverUrl({ FLARESOLVERR_URL: ' http://uchiyomi-flaresolverr:8191 ' }), 'http://uchiyomi-flaresolverr:8191');
   assert.equal(solverHost('http://127.0.0.1:41234/secret-token'), '127.0.0.1:41234', 'the audit never carries the path');
 });
+
+test("the status route's helper address never goes to a desktop page", async () => {
+  // On desktop the in-app helper's address carries its per-launch token in the path. Reintroduce by sending the url
+  // whenever the setting is supported (drop `&& !desktop` in solverView): the desktop view carries the token.
+  const { solverView } = await import('../src/lib/extensionEngine');
+  const helper = 'http://127.0.0.1:41234/tok-per-launch';
+  const desk = solverView({ supported: true, enabled: true, url: helper }, helper, true);
+  assert.equal('url' in desk, false, 'no url key on desktop');
+  assert.ok(!JSON.stringify(desk).includes('tok-per-launch'), 'and the token is nowhere in it');
+  assert.equal(desk.wiring, 'ok');
+  const server = solverView({ supported: true, enabled: true, url: 'http://uchiyomi-flaresolverr:8191' }, 'http://uchiyomi-flaresolverr:8191', false);
+  assert.equal(server.url, 'http://uchiyomi-flaresolverr:8191', 'a server admin reads where it points');
+});

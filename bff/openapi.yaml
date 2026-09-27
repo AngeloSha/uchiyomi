@@ -1070,8 +1070,9 @@ paths:
       description: >-
         Rescans the library, at most once a minute server-wide: within a minute of the last scan it answers
         {scanned: false, reason: 'rate_limited'}. Otherwise {scanned: true, libraries}, and since v0.49.0 in
-        owned mode also the scan's counts {series, books, ms, skipped} (skipped: folders it could not index,
-        which Health lists), so Scan library now can say what it found. It also refreshes the stored Health
+        owned mode, to an admin, also the scan's counts {series, books, ms, skipped} (skipped: folders it could
+        not index, which Health lists), so Scan library now can say what it found. A member is never told the
+        counts: they are the whole library's, libraries that member cannot open included. It also refreshes the stored Health
         summary the header reads (coalesced, at most once every 30 s).
       security:
         - bearer: []
@@ -2295,7 +2296,11 @@ paths:
         `cancelRequested` until the chapter in flight is done and then ends `done` with `cancelled: true`
         and a `reason` saying how far it got; and `runs` lists the server's own runs -- the chapter sweep,
         the library repair, a bulk "Fetch newest" -- as one card each, to an admin, and a bulk run to the
-        account that started it as well.
+        account that started it as well. Since v0.49.0 a repair's card also carries `repairKind` (fix_short,
+        fill, retry, steps:...), `label` (the series title or source name a one-row Health press is about),
+        `number` (the chapter's, for a one-chapter run) and `seriesId` (the series `label` names); `label`,
+        `number` and `seriesId` are left out for a viewer who may not list that series (the 18+ hide), as
+        `current` is.
         Since v0.48.1 the response also carries `activity: {active, recent}` -- every chapter the server is
         downloading or finished in the last day, whatever started it: `{id, seriesId, folder, title, number, source,
         origin: add|fetch|fill|check|sweep|repair|bulk|refetch|server, status: queued|downloading|done|partial|failed,

@@ -361,6 +361,19 @@ test('our own deadline is not a verdict', () => {
   assert.equal(diagnose(facts({ lastError: 'Just a moment...' }), { adapterOk: false, failure: { stage: 'search', kind: 'empty' } }).code, 'cf_challenge');
 });
 
+test('an engine timeout names the engine, not a wall it never reaches', () => {
+  // The smoke test carries the engine client's words on a timeout (sourceProbe.ts outOfTime). Reintroduce by not
+  // running the rules over them in diagnose(): the fix tells an admin to raise SOURCE_TEST_TIMEOUT_MS, which the
+  // engine's fixed 30 s never reaches.
+  const clean = facts({ status: 'ok', consecutive: 0, lastError: null });
+  const d = diagnose(clean, { adapterOk: false, failure: { stage: 'pages', kind: 'timeout', error: 'suwayomi timeout after 30000ms' } });
+  assert.equal(d.code, 'timeout');
+  assert.match(d.fix, /extension engine did not answer in time while/);
+  assert.doesNotMatch(d.fix, /SOURCE_TEST_TIMEOUT_MS/);
+  // Our own wall, with nothing said, keeps its sentence.
+  assert.match(diagnose(clean, { adapterOk: false, failure: { stage: 'pages', kind: 'timeout' } }).fix, /SOURCE_TEST_TIMEOUT_MS/);
+});
+
 test('a stored error is current until a success comes after it', () => {
   const base = { last_error: 'Just a moment...', last_fail_at: '2026-09-20T00:00:00Z', last_slow_at: null };
   assert.equal(currentError({ ...base, last_ok_at: '2026-09-21T00:00:00Z' }), null, 'a success since: history');

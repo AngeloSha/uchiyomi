@@ -52,10 +52,15 @@ const messageOf = (e: unknown) => (e as Error)?.message || 'error';
  * The Suwayomi client's own per-request deadline (client.ts transportError). 30 s, inside the 45 s wall, so a slow
  * extension call ran out of THAT patience first and read as a confirmed failure -- a warn row on Health and a push
  * from the sweep -- for what is our deadline as much as the wall is.
+ *
+ * ⚠️ Not the wall, though: the wall usually has time left, so an engine timeout is a MISS of one candidate (a term,
+ * a title, a chapter) and the next one is tried, exactly like an empty answer. Only when nothing succeeded and
+ * nothing really failed does it end the run, as inconclusive with the engine's own words (engineLate below).
  */
 const ENGINE_TIMEOUT = /^suwayomi timeout after \d+ms/;
-/** Our patience ran out, not the source's: the wall (withTimeout's selfTimeout) or the engine client's deadline. */
-const ours = (e: unknown) => !!(e as { selfTimeout?: boolean })?.selfTimeout || ENGINE_TIMEOUT.test(messageOf(e));
+const engineLate = (e: unknown) => ENGINE_TIMEOUT.test(messageOf(e));
+/** The wall ran out (withTimeout's selfTimeout): no time is left for another candidate. */
+const ours = (e: unknown) => !!(e as { selfTimeout?: boolean })?.selfTimeout;
 
 /** A wall-clock deadline, checked between stages. */
 const past = (deadline: number) => Date.now() >= deadline;
@@ -89,7 +94,8 @@ export function pageCandidates(chapters: SourceChapter[]): SourceChapter[] {
  * better be right):
  * - The search loop tries several terms because a site with few titles can legitimately miss one. It stops on
  *   ANY thrown error: a 403, a dead solver or an extension's exception answers the same for all four terms
- *   (Manga Ball paid for four searches of its own exception), and only an empty answer justifies another term.
+ *   (Manga Ball paid for four searches of its own exception), and only an empty answer -- or the engine client
+ *   giving up on one term (ENGINE_TIMEOUT) -- justifies another term.
  * - Chapters are asked of up to three search hits, not the first: one title with no chapters is a title, not
  *   a broken source.
  * - Pages are asked of the newest chapter first, then the middle and the oldest (pageCandidates).
@@ -115,29 +121,40 @@ export async function smokeTest(src: SourceAdapter, opts: { timeoutMs?: number }
     const state: SmokeState = failure && failure.kind !== 'timeout' ? 'fail' : timedOut ? 'inconclusive' : ok ? 'pass' : 'fail';
     return { ok, ...(timedOut ? { timedOut } : {}), checks, state, ...(failure ? { failure } : {}), passed, ms: Date.now() - t0 };
   };
-  /** Our deadline, at this stage: the run ends here, inconclusive unless something had already failed. */
-  const outOfTime = (name: string, stage: SmokeFailure['stage']): SmokeResult => {
+  /**
+   * Our deadline, at this stage: the run ends here, inconclusive unless something had already failed. `late` is the
+   * engine client's own timeout when that is what used the time: its words go on the check and the failure, so the
+   * verdict names the engine (diagnose() runs its rules over them) instead of telling an admin to raise a wall
+   * the engine's fixed 30 s never reaches.
+   */
+  const outOfTime = (name: string, stage: SmokeFailure['stage'], late?: string): SmokeResult => {
     timedOut = true;
-    checks.push({ name, ok: false, detail: 'did not finish in time', stage, kind: 'timeout' });
-    fail({ stage, kind: 'timeout' });
+    checks.push({ name, ok: false, detail: late ? clip(late) : 'did not finish in time', stage, kind: 'timeout', ...(late ? { error: full(late) } : {}) });
+    fail({ stage, kind: 'timeout', ...(late ? { error: full(late) } : {}) });
     return done();
   };
 
   // ── search ────────────────────────────────────────────────────────────────────────────────────────────
   let results: any[] = [];
   let thrown: string | undefined;
+  /** The engine's own timeout, on any candidate of the stage at hand: a miss, and the words if nothing else speaks. */
+  let late: string | undefined;
   for (const term of ['the', 'one', 'love', 'a']) {
-    if (past(deadline)) return outOfTime('Search', 'search');
+    if (past(deadline)) return outOfTime('Search', 'search', late);
     try {
       const r = await call(() => src.search(term));
       if (Array.isArray(r) && r.length) { results = r; break; }
     } catch (e) {
-      if (ours(e)) return outOfTime('Search', 'search');
+      if (ours(e)) return outOfTime('Search', 'search', late);
+      if (engineLate(e)) { late ??= messageOf(e); continue; }
       thrown = messageOf(e);
       break;
     }
   }
   if (!results.length) {
+    // Some term ran out of the engine's patience and none answered with an error: we did not see the search, and
+    // an empty answer to the others is not proof enough of drift.
+    if (thrown === undefined && late !== undefined) return outOfTime('Search', 'search', late);
     if (thrown !== undefined) {
       checks.push({ name: 'Search', ok: false, detail: clip(thrown), stage: 'search', kind: 'error', error: full(thrown) });
       fail({ stage: 'search', kind: 'error', error: full(thrown) });
@@ -159,8 +176,9 @@ export async function smokeTest(src: SourceAdapter, opts: { timeoutMs?: number }
   let firstErr: string | undefined;
   let unnumbered = 0;
   const hits = results.filter((r, i) => r?.sourceId != null && results.findIndex((x) => x?.sourceId === r.sourceId) === i).slice(0, CHAPTER_TRIES);
+  late = undefined;
   for (let i = 0; i < hits.length; i++) {
-    if (past(deadline)) return outOfTime(answered ? 'Chapters' : 'Series / chapters', 'chapters');
+    if (past(deadline)) return outOfTime(answered ? 'Chapters' : 'Series / chapters', 'chapters', late);
     try {
       const series = await call(() => src.getSeries(hits[i].sourceId));
       answered = true;
@@ -174,9 +192,16 @@ export async function smokeTest(src: SourceAdapter, opts: { timeoutMs?: number }
       if (Array.isArray(list) && list.length) { chapters = list; hitNo = i + 1; break; }
       unnumbered += unnumberedOf(list);
     } catch (e) {
-      if (ours(e)) return outOfTime(answered ? 'Chapters' : 'Series / chapters', 'chapters');
+      if (ours(e)) return outOfTime(answered ? 'Chapters' : 'Series / chapters', 'chapters', late);
+      if (engineLate(e)) { late ??= messageOf(e); continue; }
       firstErr ??= messageOf(e);
     }
+  }
+  // Nothing listed, nothing really failed, and a title ran out of the engine's patience: not seen, not a verdict.
+  // Reintroduce by returning outOfTime on the first engine timeout: 'an engine timeout on one title or chapter is
+  // a miss, and the next one is tried' in sourceProbe.test.ts reads inconclusive over a working source.
+  if (!chapters.length && firstErr === undefined && late !== undefined) {
+    return outOfTime(answered ? 'Chapters' : 'Series / chapters', 'chapters', late);
   }
   if (!answered) {
     const err = firstErr ?? 'no search hit to open';
@@ -204,8 +229,9 @@ export async function smokeTest(src: SourceAdapter, opts: { timeoutMs?: number }
   // ── pages: newest first ───────────────────────────────────────────────────────────────────────────────
   const candidates = pageCandidates(chapters);
   let pagesErr: string | undefined;
+  late = undefined;
   for (const c of candidates) {
-    if (past(deadline)) return outOfTime('Pages', 'pages');
+    if (past(deadline)) return outOfTime('Pages', 'pages', late);
     try {
       const urls = await call(() => src.getPageUrls(c.sourceId));
       if (Array.isArray(urls) && urls.length) {
@@ -214,10 +240,12 @@ export async function smokeTest(src: SourceAdapter, opts: { timeoutMs?: number }
         return done();
       }
     } catch (e) {
-      if (ours(e)) return outOfTime('Pages', 'pages');
+      if (ours(e)) return outOfTime('Pages', 'pages', late);
+      if (engineLate(e)) { late ??= messageOf(e); continue; }
       pagesErr ??= messageOf(e);
     }
   }
+  if (pagesErr === undefined && late !== undefined) return outOfTime('Pages', 'pages', late);
   const kind: SmokeKind = pagesErr !== undefined ? 'error' : 'empty';
   const detail = pagesErr ?? `none found (${candidates.length} chapter${candidates.length === 1 ? '' : 's'} tried)`;
   checks.push({ name: 'Pages', ok: false, detail: clip(detail), stage: 'pages', kind, error: full(detail) });

@@ -42,6 +42,17 @@ export interface RunCard {
    */
   label?: string;
   /**
+   * v0.49.0, the repair: which run it is (lib/repairRuns.ts kindOf: fix_short, fill, retry, steps:…), and the
+   * chapter's number when it is about one chapter -- with `label`, "Find a longer copy · Walk Tale ch 3".
+   */
+  repairKind?: string;
+  number?: number;
+  /**
+   * v0.49.0, the repair: the series `label` names, when it names one. The Downloads view drops the label for a
+   * viewer who may not list that series (the 18+ hide); a source's name has no series and is not dropped.
+   */
+  seriesId?: string;
+  /**
    * v0.49.0: `false` on a run that cannot download a chapter (a solver reset, a page count, names,
    * directions; lib/repairRuns.ts canDownload). It stays a Server task but does not turn the Library ring.
    * Absent: it may download.

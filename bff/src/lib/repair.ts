@@ -891,12 +891,21 @@ async function stepShort(r: RepairResult, opts: RepairOpts, budget: { left: numb
         // chapter being left for tomorrow is the harmless end of that.
         const unasked = bySource.size - copies.length;
 
+        let answered = 0;
+        /**
+         * Page lists really requested, for short_result's "3 sources asked, 2 answered". Counted past the guards:
+         * a source switched off or in a cooldown was not asked, and read as asked-and-silent it sends an admin
+         * to the wrong site. Reintroduce by counting before ask(): "a source in a cooldown is silence, not an
+         * answer" in repair.int.test.ts finds two asked.
+         */
+        let asked = 0;
         /** A page count, or null when the source was not asked or did not answer -- which ends any proof. */
         const ask = async (sourceId: string, chapterSourceId: string): Promise<number | null> => {
           const src = getSource(sourceId);
           if (!src || !allowed(sourceId)) return null;
           if (await isDisabled(sourceId).catch(() => false)) return null;
           if (await blockedNow(sourceId).catch(() => null)) return null;
+          asked++;
           try {
             // Nothing is reported to source_health from here. A page list asked on our own initiative must
             // never be what puts a source into a cooldown: the sweep's own failures are that signal.
@@ -914,13 +923,10 @@ async function stepShort(r: RepairResult, opts: RepairOpts, budget: { left: numb
 
         let best = book.pages;
         let bestChapter: SourceChapter | null = null;
-        let answered = 0;
-        let asked = 0;
         let silent = unasked > 0;
         for (const c of copies) {
           const chapter = copyToChapter(c, { number: book.number, title: listing?.title ?? null });
           at('asking', c.source);
-          asked++;
           const n = await ask(c.source, c.sourceId);
           if (n === null) { silent = true; continue; }
           answered++;
@@ -943,7 +949,6 @@ async function stepShort(r: RepairResult, opts: RepairOpts, budget: { left: numb
           if (h.followed) notes.followed.push(`${book.title} -> ${h.followed.source}`);
           if (h.chapter?.source) {
             at('asking', h.chapter.source);
-            asked++;
             const n = await ask(h.chapter.source, h.chapter.sourceId);
             if (n === null) silent = true;
             else { answered++; if (n > best) { best = n; bestChapter = h.chapter; } }
@@ -1655,7 +1660,10 @@ export function runRepair(log?: Log, opts: RepairOpts = {}): Promise<RepairResul
     try {
       // Best effort: startRunRecord never throws, and a run with no history row still runs.
       live.target = await startRunRecord(live);
+      card.repairKind = live.kind;
       if (live.target.label) card.label = live.target.label;
+      if (live.target.number !== undefined) card.number = live.target.number;
+      if (live.target.seriesId) card.seriesId = live.target.seriesId;
       const r = await repairLibrary(log, opts);
       r.run = live.id;
       result = r;

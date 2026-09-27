@@ -414,6 +414,16 @@ const scrubTarget = (t: RunTarget, ok: Set<string>): RunTarget =>
   (t.seriesId && !ok.has(t.seriesId) ? { ...t, label: undefined } : t);
 const scrubSkips = (skips: RepairSkip[] | undefined, ok: Set<string>): RepairSkip[] =>
   (skips ?? []).map((k) => (k.target?.seriesId && !ok.has(k.target.seriesId) ? { ...k, target: { ...k.target, title: undefined } } : k));
+/** The series a stored result's skips name, for `listable`. */
+const skipIds = (r: { skips?: RepairSkip[] } | null | undefined) => (r?.skips ?? []).map((k) => k.target?.seriesId);
+/**
+ * A stored result as this admin may read it: its skips name series too (folder_busy, no_searches_left), on the
+ * Tasks line's result, the latest one-off fix's and the status route's last full run. Reintroduce by sending any
+ * of them as stored: "an admin who hides 18+ reads no adult title in the repair's answers" in
+ * repairRoutes.int.test.ts finds the title.
+ */
+const scrubResult = <R extends { skips?: RepairSkip[] } | null | undefined>(r: R, ok: Set<string>): R =>
+  (r?.skips?.length ? { ...r, skips: scrubSkips(r.skips, ok) } : r);
 
 /** The run kinds the status route always estimates: the Health page's three chips, its cards and the nightly. */
 const ESTIMATED_KINDS = ['full', 'fix_short', 'fill', 'retry', 'steps:solver', 'steps:short', 'steps:gaps', 'steps:failures', 'steps:failures:now'];
@@ -637,9 +647,21 @@ export default async function adminRoutes(app: FastifyInstance) {
     const backupLast = runtime.lastBackup || (s?.backup_last_run ? new Date(s.backup_last_run).getTime() : null);
     // The repair's history: the Tasks line's origin and the latest one-off fix beside it (lib/repairRuns.ts).
     const digest = await runDigest().catch(() => null);
+    // Memory wins once this process has run it (see the row below); both are the last FULL run's.
+    const repairLast = repairState.finishedAt ? repairState.lastResult : (s?.repair_last_result ?? null);
+    const seen = await listable(req, [
+      digest?.latestOther?.target.seriesId, ...skipIds(digest?.latestOther?.result), ...skipIds(repairLast),
+    ]);
     const latestOther = digest?.latestOther
-      ? { ...digest.latestOther, target: scrubTarget(digest.latestOther.target, await listable(req, [digest.latestOther.target.seriesId])) }
+      ? { ...digest.latestOther, target: scrubTarget(digest.latestOther.target, seen), result: scrubResult(digest.latestOther.result, seen) }
       : null;
+    // Who started the run on the Tasks line: the history's newest full run, and only while it IS that run (the
+    // result names its run). Between a run writing its result and the history catching up, say nothing rather
+    // than the previous run's origin. Reintroduce by leaving skipped runs out of the digest's lastFull
+    // (repairRuns.ts): "the Tasks line's origin is the run it shows" in repairRoutes.int.test.ts finds no
+    // 'nightly' beside a nightly's result (and without the run check below, the manual run's before it).
+    const lastFull = digest?.lastFull;
+    const lastOrigin = lastFull && (!repairLast?.run || repairLast.run === lastFull.id) ? lastFull.origin : null;
     return { content: [
       { id: 'scan', name: 'Library scan', ...sched('on demand'), lastRun: runtime.lastScan || null, running: false },
       { id: 'update', name: 'Check for new chapters', ...sched('every {h}h', { h: s?.updater_hours ?? 6 }), lastRun: runtime.lastUpdate || null, lastResult: runtime.lastUpdateResult, running: runtime.updating },
@@ -694,8 +716,8 @@ export default async function adminRoutes(app: FastifyInstance) {
         // ⚠️ Since v0.49.0 both are the last FULL run's (the nightly, or Run now here): a one-row Health fix
         // is in the history, and in `latestOther` below, and no longer replaces this line.
         lastRun: repairState.finishedAt || (s?.repair_last_run ? new Date(s.repair_last_run).getTime() : null),
-        lastResult: repairState.finishedAt ? repairState.lastResult : (s?.repair_last_result ?? null),
-        lastOrigin: digest?.lastFull?.origin ?? null,
+        lastResult: scrubResult(repairLast, seen),
+        lastOrigin,
         running: repairState.running,
         startedAt: repairState.running ? repairState.startedAt : null,
         run: repairState.live?.id ?? null,
@@ -785,7 +807,7 @@ export default async function adminRoutes(app: FastifyInstance) {
     const snap = repairLiveSnapshot();
     const ok = await listable(req, [
       snap?.target.seriesId, snap?.current?.seriesId, ...(snap?.skips ?? []).map((k) => k.target?.seriesId),
-      ...digest.recent.map((r) => r.target.seriesId),
+      ...digest.recent.map((r) => r.target.seriesId), ...skipIds(digest.lastFull?.result),
     ]);
     let run = null;
     if (snap) {
@@ -814,7 +836,7 @@ export default async function adminRoutes(app: FastifyInstance) {
       run,
       last: repairState.last ?? (r0 && r0.finishedAt ? { id: r0.id, finishedAt: r0.finishedAt, status: r0.status, kind: r0.kind } : null),
       recent: digest.recent.map((r) => ({ ...r, target: scrubTarget(r.target, ok) })),
-      lastFull: digest.lastFull,
+      lastFull: digest.lastFull ? { ...digest.lastFull, result: scrubResult(digest.lastFull.result, ok) } : null,
       limits: REPAIR_LIMITS,
       estimates,
       stepTypicalMs: digest.stepTypicalMs,
@@ -834,7 +856,7 @@ export default async function adminRoutes(app: FastifyInstance) {
       content: content.map((r) => ({
         ...r,
         target: scrubTarget(r.target, ok),
-        ...(r.result?.skips ? { result: { ...r.result, skips: scrubSkips(r.result.skips, ok) } } : {}),
+        result: scrubResult(r.result, ok),
       })),
     };
   });

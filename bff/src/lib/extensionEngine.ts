@@ -20,6 +20,8 @@ import {
   lastSuwayomiLoad, lastSuwayomiLoadAt, onSuwayomiReconnect, retrySuwayomiNow, suwayomiRetryState,
 } from './sources/suwayomi/register';
 import { getHiddenLangs } from './sources/suwayomi/langs';
+import { currentError } from './sourceDiagnosis';
+import { currentFailures, LIVE_STALE_MS, type Stage, type Stages } from './sourceEvidence';
 
 /**
  * Series added through an extension, which is what the engine's data is worth: each one is routed by an id that
@@ -184,9 +186,9 @@ onSuwayomiReconnect(forgetEngineProbe);
 // ---- Cloudflare evidence on extension sources ---------------------------------------------------------------------
 
 /** Suwayomi's own words when its helper is off (its CloudflareInterceptor), as #54 and #115 recorded them. */
-const BYPASS_OFF = 'cloudflare bypass currently disabled';
+const BYPASS_OFF = /cloudflare bypass currently disabled/i;
 /** Any other sign that a site is behind Cloudflare. */
-const CLOUDFLARE = 'cloudflare|cf[-_]chl|just a moment|cf-mitigated';
+const CLOUDFLARE = /cloudflare|cf[-_]chl|just a moment|cf-mitigated/i;
 
 export interface CloudflareEvidence {
   sourceId: string;
@@ -195,28 +197,62 @@ export interface CloudflareEvidence {
   bypass: boolean;
 }
 
+/** One extension source's source_health row, as the evidence reads it. */
+export interface CloudflareRow {
+  source_id: string;
+  name: string;
+  last_error: string | null;
+  last_fail_at: string | Date | null;
+  last_ok_at: string | Date | null;
+  last_slow_at: string | Date | null;
+  live_state: string | null;
+  live_at: string | Date | null;
+  live_stage: string | null;
+  live_detail: string | null;
+  stages: Stages | null;
+}
+
+const at = (t: string | Date | null | undefined): number => (t ? new Date(t).getTime() || 0 : 0);
+
 /**
- * Extension sources seen behind Cloudflare in the last week, from what source_health recorded: ordinary use's
- * last error, the last live check (#115's Test and daily check), and #115's per-stage failures. A source someone
- * turned off is left out. Best-effort: a read that fails is no evidence, never an error on the Health page.
+ * What the rows say about Cloudflare, by #115's rules for what is still TRUE -- the same ones Health's source rows
+ * and Providers use, so the engine's row cannot call a source failing that those call fine:
+ * - a stage failure only while it is open, confirmed and current (sourceEvidence.ts currentFailures: a live check,
+ *   or three traffic failures in a row; nothing since at that stage; seen within a week);
+ * - the last live check's words only while it failed, within a week, and nothing at its stage has succeeded since;
+ * - ordinary use's last error only while it is current (currentError: no success after it), within a week.
+ * Before, any of those strings from the last seven days counted, so a source that had failed on a Test and then
+ * passed kept the engine's row amber for the rest of the week. Reintroduce the seven-day window alone: "a failure
+ * that has since passed is not evidence" in engineHealth.test.ts finds it counted.
+ */
+export function cloudflareEvidenceOf(rows: readonly CloudflareRow[], now = Date.now()): CloudflareEvidence[] {
+  const fresh = (t: string | Date | null) => at(t) > 0 && now - at(t) <= LIVE_STALE_MS;
+  const out: CloudflareEvidence[] = [];
+  for (const r of rows) {
+    const liveStage = r.live_stage ? r.stages?.[r.live_stage as Stage] : undefined;
+    const liveOpen = r.live_state === 'fail' && fresh(r.live_at) && !(at(liveStage?.okAt) > at(r.live_at));
+    const said = [
+      fresh(r.last_fail_at) ? currentError(r) : null,
+      liveOpen ? r.live_detail : null,
+      ...currentFailures(r.stages, now).map((f) => f.error),
+    ].filter(Boolean).join(' ');
+    const bypass = BYPASS_OFF.test(said);
+    if (bypass || CLOUDFLARE.test(said)) out.push({ sourceId: r.source_id, name: r.name, bypass });
+  }
+  return out.sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/**
+ * Extension sources seen behind Cloudflare lately (cloudflareEvidenceOf says what counts). A source someone turned
+ * off is left out. Best-effort: a read that fails is no evidence, never an error on the Health page.
  */
 export async function cloudflareEvidence(): Promise<CloudflareEvidence[]> {
-  const rows = await q<{ source_id: string; name: string; bypass: boolean }>(
-    `WITH ev AS (
-       SELECT sh.source_id, COALESCE(ss.name, sh.source_id) AS name,
-              concat_ws(' ',
-                CASE WHEN sh.last_fail_at > now() - interval '7 days' THEN sh.last_error END,
-                CASE WHEN sh.live_at > now() - interval '7 days' THEN sh.live_detail END,
-                (SELECT string_agg(st.value->>'error', ' ') FROM jsonb_each(COALESCE(sh.stages, '{}'::jsonb)) st
-                  WHERE jsonb_typeof(st.value) = 'object'
-                    AND st.value->>'failAt' > to_char((now() - interval '7 days') AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS'))
-              ) AS said
-         FROM source_health sh
-         LEFT JOIN suwayomi_sources ss ON 'sw:' || ss.source_id = sh.source_id
-        WHERE sh.source_id LIKE 'sw:%' AND NOT sh.disabled
-     )
-     SELECT source_id, name, said ~* $1 AS bypass FROM ev WHERE said ~* $2 ORDER BY name`,
-    [BYPASS_OFF, `${BYPASS_OFF}|${CLOUDFLARE}`],
-  ).catch(() => [] as Array<{ source_id: string; name: string; bypass: boolean }>);
-  return rows.map((r) => ({ sourceId: r.source_id, name: r.name, bypass: !!r.bypass }));
+  const rows = await q<CloudflareRow>(
+    `SELECT sh.source_id, COALESCE(ss.name, sh.source_id) AS name, sh.last_error, sh.last_fail_at, sh.last_ok_at,
+            sh.last_slow_at, sh.live_state, sh.live_at, sh.live_stage, sh.live_detail, sh.stages
+       FROM source_health sh
+       LEFT JOIN suwayomi_sources ss ON 'sw:' || ss.source_id = sh.source_id
+      WHERE sh.source_id LIKE 'sw:%' AND NOT sh.disabled`,
+  ).catch(() => [] as CloudflareRow[]);
+  return cloudflareEvidenceOf(rows);
 }

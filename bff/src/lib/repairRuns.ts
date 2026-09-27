@@ -163,7 +163,7 @@ export async function finishRunRecord(id: string, end: {
       end.result ? JSON.stringify(end.result) : null, end.notes ? JSON.stringify(end.notes) : null],
   ).catch(warn('recording the end'));
   await pruneRuns().catch(warn('pruning'));
-  memo = null;
+  clearRunDigest();
 }
 
 /**
@@ -216,7 +216,11 @@ export async function listRunRecords(opts: { limit?: number; id?: string; me?: s
 export interface RunDigest {
   /** The five newest FINISHED runs: how a client learns that the run it started has ended, even a 5 ms one. */
   recent: Array<Pick<RepairRunRecord, 'id' | 'finishedAt' | 'status' | 'kind' | 'target'>>;
-  /** The newest finished full run (the Tasks line's run), with who started it. */
+  /**
+   * The newest finished full run -- the Tasks line's run, whatever became of it, a nightly the switch turned
+   * away included (it writes the Tasks line too) -- with who started it. Never an `interrupted` one: a process
+   * that died mid-run wrote nothing to the Tasks line.
+   */
   lastFull: { id: string; at: number; ms: number | null; origin: RunOrigin; result: RepairResult | null } | null;
   /** The newest finished scoped run: the Tasks row's "Latest one-off fix". */
   latestOther: Pick<RepairRunRecord, 'id' | 'kind' | 'target' | 'finishedAt' | 'status' | 'result'> | null;
@@ -227,6 +231,13 @@ export interface RunDigest {
 }
 
 let memo: { at: number; digest: RunDigest } | null = null;
+/**
+ * Bumped whenever the memo is dropped. A digest whose queries started before a run finished and returned after
+ * it would otherwise be stored as fresh -- the status route is polled every two seconds while a run is going, so
+ * the overlap is ordinary -- and "Recent repairs", "Latest one-off fix" and "usually" would leave the run out for
+ * a whole MEMO_MS.
+ */
+let generation = 0;
 
 /** The middle value, or the mean of the two middle ones. */
 export function median(ns: number[]): number | null {
@@ -243,11 +254,12 @@ export function median(ns: number[]): number | null {
  */
 export async function runDigest(now = Date.now()): Promise<RunDigest> {
   if (memo && now - memo.at < MEMO_MS) return memo.digest;
+  const gen = generation;
   const [recent, lastFull, latestOther, done] = await Promise.all([
     q<Row>(`SELECT id, finished_at, status, kind, target FROM repair_runs
              WHERE finished_at IS NOT NULL ORDER BY finished_at DESC LIMIT 5`).catch(() => [] as Row[]),
     q<Row>(`SELECT id, finished_at, ms, origin, result FROM repair_runs
-             WHERE kind = 'full' AND finished_at IS NOT NULL AND status <> 'skipped' ORDER BY finished_at DESC LIMIT 1`).catch(() => [] as Row[]),
+             WHERE kind = 'full' AND finished_at IS NOT NULL AND status <> 'interrupted' ORDER BY finished_at DESC LIMIT 1`).catch(() => [] as Row[]),
     q<Row>(`SELECT id, kind, target, finished_at, status, result FROM repair_runs
              WHERE kind <> 'full' AND finished_at IS NOT NULL ORDER BY finished_at DESC LIMIT 1`).catch(() => [] as Row[]),
     q<{ kind: string; ms: number; step_ms: RepairRunRecord['stepMs']; target: RunTarget | null }>(
@@ -288,9 +300,14 @@ export async function runDigest(now = Date.now()): Promise<RunDigest> {
     typical,
     stepTypicalMs,
   };
-  memo = { at: now, digest };
+  // Reintroduce by storing unconditionally: "a digest read while a run finishes is not kept" in
+  // repair.int.test.ts reads the run's own history without it for a minute.
+  if (gen === generation) memo = { at: now, digest };
   return digest;
 }
 
-/** For tests: forget the memo. */
-export function clearRunDigest(): void { memo = null; }
+/** Forget the memo, and any digest still being read: a run finished (finishRunRecord), or a test says so. */
+export function clearRunDigest(): void {
+  generation++;
+  memo = null;
+}
