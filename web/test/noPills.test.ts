@@ -33,6 +33,9 @@ const SURFACES = [
   // Step 6, the notices that replaced the capsule toasts.
   'components/Toast.tsx',
   'lib/notices.ts',
+  // Step 10 (#115): the one verdict about a source, on Providers and Health, and its Update address key.
+  'components/SourceEvidence.tsx',
+  'lib/sourceEvidence.ts',
 ];
 
 /**
@@ -144,7 +147,9 @@ test('the admin console\'s status badges are marks and its actions keys: the sli
   assert.match(providers, /<StatusMark \{\.\.\.sourceMark\(st\)\} \/>/, 'the Providers slice has no mark');
   assert.match(providers, /function packageCard\(/, 'the Providers slice ends before the package card');
   const keys = (src: string) => (src.match(/className=\{?[`"]btn-key\b/g) || []).length;
-  assert.equal(keys(providers), 4, 'Test, Clear block, Enable/Disable and Update address are not all keys');
+  // Update address moved into SourceEvidence (#115), which offers it under the Test that found the move.
+  assert.equal(keys(providers), 3, 'Test, Clear block and Enable/Disable are not all keys');
+  assert.equal(keys(code(read('components/SourceEvidence.tsx'))), 1, 'Update address is not a key');
   assert.equal(keys(toolbar), 2, 'Check all and Reload are not both keys');
   assert.match(engine, /<StatusMark \{\.\.\.engineMark\(/, 'the Extensions slice has no mark');
   assert.match(engine, /onClick=\{refreshRepos\}[^>]*className="btn-key"/, 'Refresh is not a key');

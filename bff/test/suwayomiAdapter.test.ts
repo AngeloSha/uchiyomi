@@ -324,3 +324,24 @@ test('against the pinned engine: Istrevelia arrives with its posting order, its 
     await fake.close();
   }
 });
+
+test('chapters with no usable number are counted on the answer, not silently lost (#115)', async () => {
+  // Reintroduce by dropping the Object.defineProperty(out, UNNUMBERED, ...) in listChapters: the count reads 0 and
+  // the smoke test calls an extension that numbers nothing "lists no chapters" (sourceProbe.test.ts).
+  const { makeSuwayomiAdapter } = await load();
+  const { UNNUMBERED, unnumberedOf } = await import('../src/lib/sources/types');
+  const a = makeSuwayomiAdapter(LOCAL, fakeGql({
+    fetchChapters: { fetchChapters: { chapters: [
+      { id: 1, chapterNumber: -1, name: 'Prologue' }, { id: 2, chapterNumber: -1, name: 'Notice' }, { id: 3, chapterNumber: null, name: 'Extra' },
+    ] } },
+  }));
+  const list = await a.listChapters('7');
+  assert.deepEqual([...list], []);
+  assert.equal((list as any)[UNNUMBERED], 3);
+  assert.equal(unnumberedOf(list), 3);
+  assert.deepEqual(Object.keys(list), [], 'non-enumerable: spreads and JSON never see it');
+  assert.equal(JSON.stringify(list), '[]');
+  // A normal list carries nothing.
+  const b = makeSuwayomiAdapter(LOCAL, fakeGql({ fetchChapters: { fetchChapters: { chapters: [{ id: 1, chapterNumber: 1, name: 'One' }] } } }));
+  assert.equal(unnumberedOf(await b.listChapters('7')), 0);
+});

@@ -25,7 +25,8 @@ test('every source status the server can send has a mark, read from the Src type
   const src = readFileSync(join(ROOT, 'lib/sourceGroups.ts'), 'utf8');
   const union = src.match(/\n\s*status\?: ((?:'[a-z_]+'\s*\|?\s*)+);/);
   assert.ok(union, 'the Src status union moved');
-  const statuses = [...union![1].matchAll(/'([a-z_]+)'/g)].map((m) => m[1]).sort();
+  // Plus `failing`, the one status only the admin card shows (#115, lib/providerGroups.ts providerStatus).
+  const statuses = [...[...union![1].matchAll(/'([a-z_]+)'/g)].map((m) => m[1]), 'failing'].sort();
   assert.deepEqual([...SOURCE_STATUSES].sort(), statuses, `${statuses.filter((s) => !SOURCE_STATUSES.includes(s as any)).join(', ') || 'a status'} has no mark`);
 });
 

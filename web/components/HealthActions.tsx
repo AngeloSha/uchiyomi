@@ -22,6 +22,8 @@ import { taskResult } from '@/lib/tasks';
 import { ConfirmDialog, msgOf } from '@/components/ConfirmDialog';
 import { useToast } from '@/components/Toast';
 import { t as tr } from '@/lib/i18n';
+import { testClock } from '@/lib/sourceEvidence';
+import { useTicker } from '@/lib/ticker';
 import type { HealthAction, HealthCheck, HealthItem, RepairStep } from '@/lib/types';
 
 type Toast = (msg: string, type?: 'info' | 'success' | 'error') => void;
@@ -94,10 +96,14 @@ const keptIndex = (it: HealthItem): number => {
  * The chips for one Health item, driven entirely by `item.actions`.
  *
  * Returns a FRAGMENT, not a box: the caller's row is a `flex-wrap` container, so the chips sit beside the
- * title on a laptop and wrap under it at 390 px, and the Test chip's diagnosis takes a full line of its
- * own (`basis-full`) because a fix is a sentence, not a label.
+ * title on a laptop and wrap under it at 390 px. A Test's verdict is not rendered here: the refetched row
+ * carries it, under the title (SourceEvidence, #115).
  */
-export function HealthActions({ check, item, onDone }: { check: string; item: HealthItem; onDone: () => void | Promise<unknown> }) {
+export function HealthActions({ check, item, onDone, testMs }: {
+  check: string; item: HealthItem; onDone: () => void | Promise<unknown>;
+  /** The sources check's limit for one Test (HealthCheck.testMs), for the Test key's running clock. */
+  testMs?: number;
+}) {
   const toast = useToast();
   const [busy, setBusy] = useState<HealthAction | null>(null);
   const [asking, setAsking] = useState<'delete' | 'disable' | 'merge' | null>(null);
@@ -110,10 +116,12 @@ export function HealthActions({ check, item, onDone }: { check: string; item: He
   // "keeping of"), in the one confirmation that decides which copy of a duplicate survives a one-way
   // merge; a bare verb also cannot be reordered, and German and Japanese want the title first.
   const [keepBefore, keepAfter] = tr('Keep {title}').split('{title}');
-  // What the last Test said to do about this source. Held here rather than refetched: the diagnosis is a
-  // live verdict about a site, and the stored `last_error` behind the item's detail line can be months
-  // older than the running container.
-  const [fix, setFix] = useState<string | null>(null);
+  // No verdict is held here (#115, v0.49.0). A Test records what it found on the server, and the refetched row
+  // carries it -- item.diagnosis and the stage lines, rendered by SourceEvidence -- so there is ONE verdict on
+  // screen, and it survives a reload. The Test's own sentence used to sit here as well, beside the stored one.
+  // When the running Test began, for its clock against the server's limit: a Test can take most of a minute.
+  const [testFrom, setTestFrom] = useState(0);
+  const now = useTicker(busy === 'test');
   const actions = item.actions || [];
   if (!actions.length) return null;
 
@@ -217,12 +225,12 @@ export function HealthActions({ check, item, onDone }: { check: string; item: He
         return <Chip key={a} action={a} label={tr('Retry now')} busy={b}
           onClick={() => act(a, () => postRepair({ only: ['failures'], sourceId: item.sourceId! }, toast).then(() => {}))} />;
       case 'test':
-        return <Chip key={a} action={a} label={tr('Test')} busy={b}
+        return <Chip key={a} action={a} label={busy === 'test' ? testClock(now - testFrom, testMs) : tr('Test')} busy={b}
           onClick={() => act(a, async () => {
+            setTestFrom(Date.now());
             try {
               const r = await api<{ ok: boolean; diagnosis?: { reason?: string; fix?: string } }>(
                 `/api/admin/sources/${encodeURIComponent(item.sourceId || '')}/test`, { method: 'POST' });
-              setFix(r.diagnosis?.fix || r.diagnosis?.reason || null);
               toast(r.ok ? tr('That source is working') : (r.diagnosis?.reason || tr('That source is still failing')), r.ok ? 'success' : 'error');
             } catch (e) { toast(msgOf(e, tr('Could not test that source')), 'error'); }
           })} />;
@@ -255,11 +263,6 @@ export function HealthActions({ check, item, onDone }: { check: string; item: He
   return (
     <>
       {actions.map(chip)}
-      {/* ⚠️ `order-last` as well as `basis-full`: this is a fragment inside the caller's wrap container,
-          and a full-width item in the middle of it pushes everything declared after it -- the item's Open
-          link -- onto a third line below the diagnosis. Ordered last, the fix is the row's final line
-          wherever the caller mounts the chips. */}
-      {fix && <p className="order-last basis-full text-[11px] leading-relaxed text-fog-400">{fix}</p>}
 
       {asking === 'delete' && (
         <ConfirmDialog

@@ -6,7 +6,7 @@
 // Suwayomi's own integer ids, and fetchChapters/fetchChapterPages take those integer ids rather than any
 // source-native identifier. So a series' sourceId here is Suwayomi's manga id. That is stable for as long as
 // Suwayomi's database lives; wiping it orphans the routing, same as uninstalling an extension would.
-import type { SourceAdapter, SourceSeries, SourceChapter } from '../types';
+import { UNNUMBERED, type SourceAdapter, type SourceSeries, type SourceChapter } from '../types';
 import { gql as defaultGql, suwayomiUrl, suwayomiImageHeaders, type Gql } from './client';
 import { env } from '../../../env';
 
@@ -256,10 +256,15 @@ export function makeSuwayomiAdapter(remote: RemoteSource, run: Gql = defaultGql)
       // say who released what. Sorting stays: callers diff the list in order. The position is taken BEFORE
       // the sort and before junk rows are dropped: the engine answers in sourceOrder, so a row's place in
       // its answer is its posting order when the row does not say.
-      return list
+      const out = list
         .map((c, i) => toChapter(c, i + 1))
         .filter((c): c is SourceChapter => !!c)
         .sort((a, b) => a.number - b.number);
+      // How many rows toChapter dropped for having no usable number (#115): on the FINAL array, after the sort,
+      // so the smoke test can tell "no numbers" from "no chapters". Non-enumerable (types.ts UNNUMBERED).
+      const dropped = list.filter((c) => c?.id != null).length - out.length;
+      if (dropped > 0) Object.defineProperty(out, UNNUMBERED, { value: dropped });
+      return out;
     },
 
     async getPageUrls(chapterId) {

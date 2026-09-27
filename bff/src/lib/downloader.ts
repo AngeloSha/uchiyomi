@@ -10,7 +10,7 @@ import { getSource, SourceAdapter, SourceChapter, SourceSeries } from './sources
 import { cfSession } from './sources/flaresolverr';
 import { DL_ROOT, XML_FORBIDDEN } from './library';
 import { beginDownload, startedDownload, endDownload, holdPartial } from './downloadActivity';
-import { classify, reportOk, reportFail, SourceStatus } from './sourceHealth';
+import { classify, noteStage, reportOk, reportFail, SourceStatus } from './sourceHealth';
 import { withGate } from './gate';
 import { imageExt } from './imageExt';
 import { writeAtomic } from './fsAtomic';
@@ -535,9 +535,13 @@ async function fetchChapter(
   } catch (e) {
     const s = classify(e);
     if (s) await reportFail(input.sourceId, s, (e as Error)?.message || 'getPageUrls failed');
+    // #115: evidence whatever classify() makes of it. An extension's own exception classifies as nothing, so
+    // the cooldown never saw it and neither did Health; the stage note sees everything and escalates nothing.
+    void noteStage(input.sourceId, 'pages', 'fail', { error: (e as Error)?.message || 'getPageUrls failed' });
     throw e;
   }
   if (!urls.length) throw new Error('no page urls');
+  void noteStage(input.sourceId, 'pages', 'ok');
 
   // pagePace, not paceFor: under withSlowPace this is where Suwayomi's gap 0 and its pool give way to the
   // archive's one worker and random gaps. Everywhere else the two are the same thing.
@@ -557,6 +561,7 @@ async function fetchChapter(
   if (!n) {
     const status = refusal ?? blameFor(worst);
     await reportFail(input.sourceId, status, `0/${urls.length} pages downloaded (HTTP ${worstLabel(worst)})`);
+    void noteStage(input.sourceId, 'images', 'fail', { error: `0/${urls.length} pages downloaded (HTTP ${worstLabel(worst)})` });
     throw Object.assign(new Error('no images downloaded (blocked?)'), { blockStatus: status, status, pages: 0, expected: urls.length, worst, failedPages });
   }
   // A PARTIAL chapter must not be written as a complete one.
@@ -594,6 +599,7 @@ async function fetchChapter(
     const status = refusal ?? blameFor(worst);
     if (!blip) {
       await reportFail(input.sourceId, status, `${n}/${expected} pages downloaded (HTTP ${worstLabel(worst)})`);
+      void noteStage(input.sourceId, 'images', 'fail', { error: `${n}/${expected} pages downloaded (HTTP ${worstLabel(worst)})` });
     }
     // The hold: enough of the chapter to be worth keeping with placeholders, and the site did not say no.
     // Offered, not written -- see PartialHold. ⚠️ `!refusing` is the whole point of the second clause:
@@ -615,6 +621,10 @@ async function fetchChapter(
     );
   }
   await reportOk(input.sourceId); // a successful download clears any prior block
+  // Evidence for the two stages a whole chapter proves, and ONLY those: a download says nothing about search
+  // or the chapter list, and must not close their failures (lib/sourceEvidence.ts). reportOk above resets the
+  // cooldown as it always has, and never touches this.
+  void noteStage(input.sourceId, 'images', 'ok');
 
   zip.addFile('ComicInfo.xml', Buffer.from(comicInfo({
     series: input.meta?.series || input.meta?.title || '',

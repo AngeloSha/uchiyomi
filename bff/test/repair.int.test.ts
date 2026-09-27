@@ -712,12 +712,34 @@ test('nothing is cleared while the solver itself is not answering', { skip }, as
 test('a cooldown that lapsed more than a day ago loses its escalation memory; one that lapsed an hour ago keeps it', { skip }, async () => {
   // Reintroduce by widening the window to `blocked_until < now()`: the second assertion finds the source
   // that refused us an hour ago starting its next cooldown at fifteen minutes instead of seventy-five.
-  await q(`INSERT INTO source_health (source_id, status, consecutive, blocked_until, updated_at)
-           VALUES ($1,'blocked',5, now() - interval '2 days', now()), ($2,'blocked',5, now() - interval '1 hour', now())`, [A, B]);
+  //
+  // #115: the reset erases ESCALATION memory and nothing else. A failed Test's evidence on A must survive it, and
+  // survive Clear block too, or Health goes back to "All good" overnight while the source still fails its search.
+  // Reintroduce by adding `stages = '{}'` or `live_state = NULL` to the lapsed UPDATE (repair.ts stepSolver) or to
+  // clearBlock: the evidence assertions fail.
+  const stages = { search: { failAt: new Date(Date.now() - 3600_000).toISOString(), failBy: 'test', kind: 'error', error: 'suwayomi: boom' } };
+  await q(`INSERT INTO source_health (source_id, status, consecutive, blocked_until, updated_at, stages, live_state, live_stage, live_at, live_by)
+           VALUES ($1,'blocked',5, now() - interval '2 days', now(), $3::jsonb, 'fail', 'search', now() - interval '1 hour', 'test'),
+                  ($2,'blocked',5, now() - interval '1 hour', now(), '{}'::jsonb, NULL, NULL, NULL, NULL)`, [A, B, JSON.stringify(stages)]);
   const r = await runRepair(undefined, { only: ['solver'], userId: null });
   assert.equal(r.solver.expired, 1);
   const rows = await q('SELECT source_id, status, consecutive FROM source_health WHERE source_id = ANY($1) ORDER BY source_id', [[A, B]]);
   assert.deepEqual(rows.map((x: any) => [x.source_id, x.status, x.consecutive]), [[A, 'ok', 0], [B, 'blocked', 5]]);
+  const evidence = async () => (await q('SELECT stages, live_state, live_stage FROM source_health WHERE source_id = $1', [A]))[0];
+  let a = await evidence();
+  assert.deepEqual(a.stages, stages, 'the lapsed reset leaves the evidence alone');
+  assert.equal(a.live_state, 'fail');
+  const { clearBlock } = await import('../src/lib/sourceHealth');
+  await clearBlock(A);
+  a = await evidence();
+  assert.deepEqual(a.stages, stages, 'so does Clear block');
+  assert.equal(a.live_stage, 'search');
+  // And Health still lists it: A is a registered source here, so its evidence counts.
+  const { runHealthChecks } = await import('../src/lib/health');
+  const c = (await runHealthChecks()).checks.find((x: any) => x.id === 'sources')!;
+  const it = c.items.find((i: any) => i.sourceId === A);
+  assert.ok(it && !it.info, `still a finding after both erasers (${c.summary})`);
+  assert.match(it.detail, /^Search failing since/);
 });
 
 // ── the run itself ──────────────────────────────────────────────────────────────────────────────────────

@@ -5,7 +5,7 @@
 import { q, one } from './db';
 import { getSource, SourceChapter, withTimeout } from './sources';
 import { persistScan, setBookDates, setBookMeta, DL_ROOT } from './library';
-import { blockedNow, isDisabled } from './sourceHealth';
+import { blockedNow, isDisabled, noteStage } from './sourceHealth';
 import { noteChapterFailure } from './chapterFailures';
 import { budgetFor } from './sources/budget';
 import { notifyNewChapter } from './push';
@@ -213,8 +213,15 @@ export async function updateSeries(seriesId: string, maxNew = 10, opts: UpdateOp
     // building the list and asking it, and that is a source that did not answer, not a crash.
     const adapter = getSource(f.source);
     if (!adapter) continue;
-    const list = await withTimeout(adapter.listChapters(f.ref), budgetFor(adapter, LIST_TIMEOUT)).catch(() => null);
+    const list = await withTimeout(adapter.listChapters(f.ref), budgetFor(adapter, LIST_TIMEOUT)).catch((e) => {
+      // #115: the sweep asks every followed source every night and used to keep what it learned to itself. A
+      // throw is chapter-stage evidence (non-escalating: it never touches the cooldown); our own timeout is not.
+      if (!e?.selfTimeout) void noteStage(f.source, 'chapters', 'fail', { error: String(e?.message || 'listChapters failed') });
+      return null;
+    });
     if (!list) continue;
+    // On the RAW list, before any numbering or choosing: the source answered with chapters.
+    if (list.length) void noteStage(f.source, 'chapters', 'ok');
     answered++;
     // Copied, not annotated in place: an adapter may hand back the very array its detail cache holds, and
     // a `source` written onto those objects would be there for every later caller of the cache.

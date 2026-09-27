@@ -1,5 +1,5 @@
 'use client';
-import { Suspense, useEffect, useState } from 'react';
+import { Suspense, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTabParam } from '@/lib/useTabParam';
 import { AdminSettings } from '@/components/AdminSettings';
@@ -21,7 +21,7 @@ import { ConsoleNav } from '@/components/ConsoleNav';
 import { motion, useReducedMotion } from 'framer-motion';
 import { t as tr, keys } from '@/lib/i18n';
 import type { HealthCheck, Series } from '@/lib/types';
-import { groupProviders, type ProviderGroup, type ProviderSrc } from '@/lib/providerGroups';
+import { groupProviders, providerStatus, type ProviderGroup, type ProviderSrc } from '@/lib/providerGroups';
 import { adultShown } from '@/lib/adult';
 import { bridge, hiddenOnDesktop, isDesktop, visibleGroups, DESKTOP_HIDDEN, type EngineStatus, type UpdateStatus } from '@/lib/desktop';
 import { EngineInstall } from '@/components/EngineInstall';
@@ -30,6 +30,10 @@ import { TONE_SURFACE, engineMark, healthMark, sourceMark, type ProviderStatus }
 import Link from 'next/link';
 import { healthLinks } from '@/lib/healthLinks';
 import { useLayer } from '@/lib/layers';
+import { checkAllSession, type CheckAllSession, type SourceCheckProgress } from '@/lib/sourceCheckRun';
+import { SourceEvidence } from '@/components/SourceEvidence';
+import { checkAllLabel, healthRowEvidence, sweepToast, testClock, type LiveVerdict, type StageLine, type TestAnswer } from '@/lib/sourceEvidence';
+import { useTicker } from '@/lib/ticker';
 
 /**
  * `/api/sources` as an ADMIN needs it: every source the server has, adult ones included.
@@ -514,14 +518,30 @@ function Members() {
   );
 }
 
+/** One row of GET /api/admin/sources: the stored health plus #115's evidence (bff routes/admin.ts). */
+interface AdminSourceRow {
+  source_id: string;
+  last_error?: string | null;
+  consecutive?: number;
+  /** The open, confirmed, current failures per stage. */
+  failing?: Array<{ stage: string; since: string; error: string | null; kind: string; by: string; streak: number }>;
+  /** The last deliberate live check, or null when there has been none. */
+  live?: (LiveVerdict & { code: string | null }) | null;
+  /** One line per stage, what was last seen there. */
+  evidence?: StageLine[];
+}
+
 function Providers({ onTab }: { onTab: (t: Tab) => void }) {
   const router = useRouter();
   const toast = useToast();
   const qc = useQueryClient();
   const { data: srcs } = useQuery({ queryKey: ALL_SOURCES_KEY, queryFn: () => api<{ content: any[] }>(allSourcesUrl()) });
-  const { data: health } = useQuery({ queryKey: ['admin-sources'], queryFn: () => api<{ content: any[] }>('/api/admin/sources'), refetchInterval: 10000 });
+  const { data: health } = useQuery({ queryKey: ['admin-sources'], queryFn: () => api<{ content: AdminSourceRow[]; testMs?: number }>('/api/admin/sources'), refetchInterval: 10000 });
   const hmap = new Map((health?.content || []).map((h) => [h.source_id, h]));
-  const act = async (id: string, action: string, ok: string) => { try { await api(`/api/admin/sources/${id}/${action}`, { method: 'POST' }); toast(ok, 'success'); qc.invalidateQueries({ queryKey: ['admin-sources'] }); qc.invalidateQueries({ queryKey: ['sources'] }); } catch { toast('Failed', 'error'); } };
+  // Health reads the same evidence, and the header's mark reads Health's summary: a Test, a block cleared or a
+  // source switched off here must not leave either of them saying what they said before (#115).
+  const invalHealth = () => { qc.invalidateQueries({ queryKey: ['admin-health'] }); qc.invalidateQueries({ queryKey: ['health-summary'] }); };
+  const act = async (id: string, action: string, ok: string) => { try { await api(`/api/admin/sources/${id}/${action}`, { method: 'POST' }); toast(ok, 'success'); qc.invalidateQueries({ queryKey: ['admin-sources'] }); qc.invalidateQueries({ queryKey: ['sources'] }); invalHealth(); } catch { toast('Failed', 'error'); } };
   const { data: custom } = useQuery({ queryKey: ['admin-custom'], queryFn: () => api<{ content: any[] }>('/api/admin/sources/custom') });
   const customIds = new Set((custom?.content || []).map((c: any) => c.id));
   const [reloading, setReloading] = useState(false);
@@ -535,7 +555,7 @@ function Providers({ onTab }: { onTab: (t: Tab) => void }) {
     } catch { toast('Reload failed', 'error'); }
     setReloading(false);
   };
-  const inval = () => { qc.invalidateQueries({ queryKey: ['sources'] }); qc.invalidateQueries({ queryKey: ['admin-sources'] }); qc.invalidateQueries({ queryKey: ['admin-custom'] }); };
+  const inval = () => { qc.invalidateQueries({ queryKey: ['sources'] }); qc.invalidateQueries({ queryKey: ['admin-sources'] }); qc.invalidateQueries({ queryKey: ['admin-custom'] }); invalHealth(); };
   const [eng, setEng] = useState<'auto' | 'madara' | 'manganato' | 'mangathemesia'>('auto');
   // The (i) beside "Add a site": what a source, an extension and a site by URL are, in the explainer the
   // reader-facing sheets share. This panel is where the words are first met by whoever runs the server.
@@ -565,30 +585,55 @@ function Providers({ onTab }: { onTab: (t: Tab) => void }) {
   // running container, so a test result always wins the display.
   const [sweep, setSweep] = useState<any>(null);
   const [checking, setChecking] = useState(false);
+  // Where the sweep has got to, from its GET: "Checking 7 of 40 · Manga Ball (EN)" on the button.
+  const [progress, setProgress] = useState<SourceCheckProgress | null>(null);
+  const sweepDone = (r: any) => {
+    setSweep(r);
+    const t = sweepToast(r);
+    toast(t.text, t.type);
+    inval();
+  };
+  // In the background since v0.49.0: started, then followed until it ends (lib/sourceCheckRun.ts). A sweep already
+  // running when the tab opens -- the daily one, or one another tab started -- is followed too, so the button shows
+  // where it is instead of offering a second run the server would refuse. ONE owner of its answer per visit, and
+  // none once the tab is left (checkAllSession): a press kept polling after a tab switch, and the next visit's
+  // follower then gave the same notice a second time.
+  const checkRun = useRef<CheckAllSession | null>(null);
+  useEffect(() => {
+    const run = checkAllSession(api, {
+      progress: (p) => { setChecking(true); setProgress(p); },
+      done: sweepDone,
+      failed: (e) => toast(msgOf(e, tr('Could not run the check')), 'error'),
+      idle: () => { setChecking(false); setProgress(null); },
+    });
+    checkRun.current = run;
+    void run.follow();
+    return () => run.leave();
+    // Once per visit to the tab: the session owns the rest.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   /** Run the daily watchdog on demand. Slow on purpose: every source is probed one at a time. */
-  const checkAll = async () => {
+  const checkAll = () => {
     setChecking(true);
-    try {
-      const r = await api<any>('/api/admin/sources/check', { method: 'POST' });
-      setSweep(r);
-      toast(r.needsAttention.length ? `${r.needsAttention.length} source(s) need attention` : 'All sources healthy',
-        r.needsAttention.length ? 'error' : 'success');
-      inval();
-    } catch (e: any) { toast(msgOf(e, 'Could not run the check'), 'error'); }
-    setChecking(false);
+    void checkRun.current?.press();
   };
 
-  const [tested, setTested] = useState<Map<string, any>>(new Map());
+  const [tested, setTested] = useState<Map<string, TestAnswer & { probe?: { finalUrl?: string } }>>(new Map());
   const [testingId, setTestingId] = useState<string | null>(null);
+  // When the running Test began, for its clock against the server's own limit (`testMs`): a Test can take most
+  // of a minute on a slow or protected site, and a button that only said "Testing…" for that long read as stuck.
+  const [testFrom, setTestFrom] = useState(0);
+  const now = useTicker(!!testingId);
   const testSource = async (id: string) => {
     setTestingId(id);
+    setTestFrom(Date.now());
     try {
-      const r = await api<any>(`/api/admin/sources/${encodeURIComponent(id)}/test`, { method: 'POST' });
+      const r = await api<TestAnswer & { probe?: { finalUrl?: string } }>(`/api/admin/sources/${encodeURIComponent(id)}/test`, { method: 'POST' });
       setTested((m) => new Map(m).set(id, r));
-      toast(r.ok ? 'Working' : (r.diagnosis?.reason || 'Still failing'), r.ok ? 'success' : 'error');
+      toast(r.ok ? tr('That source is working') : (r.diagnosis?.reason || tr('That source is still failing')), r.ok ? 'success' : 'error');
       inval();
     } catch (e: any) {
-      toast(msgOf(e, 'Could not test that source'), 'error');
+      toast(msgOf(e, tr('Could not test that source')), 'error');
     }
     setTestingId(null);
   };
@@ -608,7 +653,9 @@ function Providers({ onTab }: { onTab: (t: Tab) => void }) {
 
   const removeSite = async (id: string) => { try { await api(`/api/admin/sources/custom/${id}`, { method: 'DELETE' }); toast('Removed', 'success'); inval(); } catch { toast('Failed', 'error'); } };
 
-  const list = (srcs?.content || []) as ProviderSrc[];
+  // The public status, overlaid with what only the admin rows know: a confirmed failure at a step reads
+  // 'failing' instead of the 'ok' the public status keeps until a cooldown (#115).
+  const list = ((srcs?.content || []) as ProviderSrc[]).map((s) => ({ ...s, status: providerStatus(s.status as any, hmap.get(s.id)) }));
   // One card per extension PACKAGE rather than per source: a multi-language extension is one install that
   // exposes one source per language, and 3Hentai alone put twenty-nine near-identical cards here, enabled
   // or not. A package with a single variant, and every engine, pack and custom site, renders the card it
@@ -619,50 +666,50 @@ function Providers({ onTab }: { onTab: (t: Tab) => void }) {
   const toggleGroup = (key: string) => setUnfolded((prev) => { const n = new Set(prev); if (n.has(key)) n.delete(key); else n.add(key); return n; });
 
   /**
-   * The diagnosis, then the fix, then the raw error last and small. The raw string was all there used to
-   * be: "timeout", truncated to one line, written by three different faults. Shared by the full card and
+   * What is known about this source, through the one component Health's rows use as well (SourceEvidence): the
+   * Test that just ran here, else what the server kept -- the last Test or daily check and the stage lines -- so a
+   * reload does not wipe the verdict. Then the cooldown's raw error, last and small. Shared by the full card and
    * the compact variant row, so a language variant inside a folded package can be tested and read the same way.
+   *
+   * ⚠️ "Working normally." comes only from a Test that passed (lib/sourceEvidence.ts answerView). It used to be
+   * the fallback for any diagnosis without a reason, which put it under a failed Search (#115).
    */
-  function diagnosisOf(s: ProviderSrc, st: string) {
-    const h = hmap.get(s.id) as any;
+  function evidenceOf(s: ProviderSrc, st: ProviderStatus) {
+    const h = hmap.get(s.id);
     const t = tested.get(s.id);
-    const d = t?.diagnosis;
     const unwell = st === 'blocked' || st === 'rate_limited' || st === 'down' || st === 'quiet';
-    if (!d && !(h?.last_error && unwell)) return null;
-    return (
-      <div className="mt-1.5 space-y-1">
-        {d && <p className="text-[12px] text-fog-200">{d.reason || 'Working normally.'}</p>}
-        {d?.fix && <p className="text-[11px] leading-relaxed text-fog-400">{d.fix}</p>}
-        {h?.last_error && unwell && (
-          <p className="truncate text-[11px] text-fog-600" title={h.last_error}>{h.consecutive}× · {h.last_error}</p>
-        )}
-      </div>
-    );
-  }
-  function testResultOf(s: ProviderSrc) {
-    const t = tested.get(s.id);
-    if (!t) return null;
-    return (
-      <div className={`mt-2 rounded-xl border p-2 ${t.ok ? 'border-emerald-600/30 bg-emerald-600/10' : 'border-amber-600/30 bg-amber-600/10'}`}>
-        {t.checks.map((c: any, i: number) => (
-          <p key={i} className="text-[11px] text-fog-300">{c.ok ? '✓' : '✗'} {c.name}: <span className="text-fog-500">{c.detail}</span></p>
-        ))}
-        {t.timedOut && <p className="text-[11px] text-amber-300">Gave up waiting. The site is slow or heavily protected.</p>}
-      </div>
-    );
+    const cooldown = h?.last_error && unwell
+      ? <p className="truncate text-[11px] text-fog-600" title={h.last_error}>{h.consecutive}× · {h.last_error}</p>
+      : null;
+    if (t) {
+      return (
+        <>
+          <SourceEvidence answer={t} onMove={customIds.has(s.id) ? () => moveSite(s.id) : undefined} />
+          {cooldown}
+        </>
+      );
+    }
+    const failing = !!h?.failing?.length;
+    if (h && (h.live || failing)) {
+      return (
+        <>
+          {/* A card whose last check passed and that fails nowhere needs one line, not four. */}
+          <SourceEvidence lines={h.evidence} tested={h.live} failing={failing} compact={!failing && h.live?.state === 'pass'} />
+          {cooldown}
+        </>
+      );
+    }
+    return cooldown && <div className="mt-1.5">{cooldown}</div>;
   }
   /** Test / Clear block / Enable-Disable, plus the two custom-site buttons when the source is one. */
   function controlsOf(s: ProviderSrc, st: string) {
     return (
       <>
-        <button onClick={() => testSource(s.id)} disabled={testingId === s.id} className="btn-key">
-          {testingId === s.id ? 'Testing…' : tr('Test')}
+        <button onClick={() => testSource(s.id)} disabled={testingId === s.id} data-source-test={s.id} className="btn-key tabular-nums">
+          {testingId === s.id ? testClock(now - testFrom, health?.testMs) : tr('Test')}
         </button>
         {(st === 'blocked' || st === 'rate_limited' || st === 'down') && <button onClick={() => act(s.id, 'unblock', 'Cleared')} className="btn-key">{tr('Clear block')}</button>}
         <button onClick={() => act(s.id, st === 'disabled' ? 'enable' : 'disable', st === 'disabled' ? 'Enabled' : 'Disabled')} className="btn-key">{st === 'disabled' ? 'Enable' : 'Disable'}</button>
-        {customIds.has(s.id) && tested.get(s.id)?.diagnosis?.code === 'moved' && (
-          <button onClick={() => moveSite(s.id)} className="btn-key text-accent">{tr('Update address')}</button>
-        )}
         {customIds.has(s.id) && <button onClick={() => removeSite(s.id)} className="ms-auto text-xs text-red-300 hover:underline">{tr('Remove')}</button>}
       </>
     );
@@ -675,13 +722,12 @@ function Providers({ onTab }: { onTab: (t: Tab) => void }) {
   function sourceCard(s: ProviderSrc) {
     const st: ProviderStatus = s.status ?? 'ok';
     return (
-      <div key={s.id} className="card grad-border p-4">
+      <div key={s.id} data-source-card={s.id} className="card grad-border p-4">
         <div className="flex items-center gap-2">
           <span className="flex-1 text-sm text-fog-100">{s.name}{customIds.has(s.id) && <span className="ms-2 rounded bg-ink-700 px-1.5 py-0.5 text-[10px] text-fog-400">custom</span>}</span>
           {statusMark(st)}
         </div>
-        {diagnosisOf(s, st)}
-        {testResultOf(s)}
+        {evidenceOf(s, st)}
         <div className="mt-2 flex flex-wrap gap-1.5">{controlsOf(s, st)}</div>
       </div>
     );
@@ -717,8 +763,7 @@ function Providers({ onTab }: { onTab: (t: Tab) => void }) {
                     <span className="text-[11px] text-fog-500">{tr('{n} series', { n: s.used ?? 0 })}</span>
                     <span className="ms-auto flex flex-wrap gap-1.5">{controlsOf(s, st)}</span>
                   </div>
-                  {diagnosisOf(s, st)}
-                  {testResultOf(s)}
+                  {evidenceOf(s, st)}
                 </li>
               );
             })}
@@ -734,8 +779,8 @@ function Providers({ onTab }: { onTab: (t: Tab) => void }) {
         <p className="text-sm text-fog-400">{tr('{n} sources in {m} providers', { n: list.length, m: groups.length })}</p>
         <div className="flex gap-1.5">
           {/* The same sweep that runs daily on its own, so what you see here is what happens unattended. */}
-          <button onClick={checkAll} disabled={checking} className="btn-key">
-            {checking ? 'Checking…' : '🔍 Check all now'}
+          <button onClick={checkAll} disabled={checking} data-source-check-all className="btn-key tabular-nums">
+            {checking ? checkAllLabel(progress) : `🔍 ${tr('Check all now')}`}
           </button>
           <button onClick={reload} disabled={reloading} className="btn-key">{reloading ? 'Reloading…' : '↻ Reload sources'}</button>
         </div>
@@ -743,16 +788,18 @@ function Providers({ onTab }: { onTab: (t: Tab) => void }) {
       {sweep && (
         <div className="full rounded-xl border border-ink-700 bg-ink-850/60 p-3">
           <p className="text-xs text-fog-300">
-            Checked {sweep.sources.length} source{sweep.sources.length === 1 ? '' : 's'}.
-            {sweep.needsAttention.length
-              ? ` ${sweep.needsAttention.length} need${sweep.needsAttention.length === 1 ? 's' : ''} attention.`
-              : ' Nothing needs attention.'}
+            {sweep.sources.length === 1 ? tr('Checked 1 source.') : tr('Checked {n} sources.', { n: sweep.sources.length })}{' '}
+            {sweepToast(sweep).text}
           </p>
           {sweep.sources.filter((v: any) => v.action).map((v: any) => (
-            <p key={v.id} className="mt-1 text-[11px] text-emerald-300">✓ {v.name}: followed its move to a new address</p>
+            <p key={v.id} className="mt-1 text-[11px] text-emerald-300">✓ {v.name}: {tr('followed its move to a new address')}</p>
           ))}
           {sweep.needsAttention.map((v: any) => (
             <p key={v.id} className="mt-1 text-[11px] text-fog-400"><span className="text-fog-200">{v.name}</span>: {v.fix || v.reason}</p>
+          ))}
+          {/* Our own deadline, not a verdict on the site: named, never counted as failing. */}
+          {(sweep.inconclusive || []).map((v: any) => (
+            <p key={v.id} className="mt-1 text-[11px] text-fog-500"><span className="text-fog-300">{v.name}</span>: {tr('could not finish in time — not proof it is broken')}</p>
           ))}
         </div>
       )}
@@ -1968,7 +2015,12 @@ function Health() {
                         <p className="truncate text-sm text-fog-100">{it.title}</p>
                         <p className="text-[11px] text-fog-500">{it.detail}</p>
                       </div>
-                      <HealthActions check={c.id} item={it} onDone={recheck} />
+                      <HealthActions check={c.id} item={it} onDone={recheck} testMs={c.testMs} />
+                      {/* #115: the stage lines and the fix, through the component Providers uses too, and only
+                          where they say something (healthRowEvidence). The row's last line and its full width
+                          (`order-last basis-full`, as the Test's fix used to be): beside three action keys at
+                          390 px the lines were a column two words wide. */}
+                      {c.id === 'sources' && <SourceEvidence {...healthRowEvidence(it)} className="order-last basis-full" />}
                       {/* To the chapter the finding is about, not just its series (lib/healthLinks.ts). */}
                       {/* A duplicate pair gets one per copy, each naming its copy: two bare "Open"s cannot be told
                           apart on a phone, where there is no tooltip. */}

@@ -1,4 +1,5 @@
 // Loose shapes for the Komga DTOs we consume (only the fields Uchiyomi uses).
+import type { LiveVerdict, StageLine } from './sourceEvidence';
 
 export interface UchiyomiFlags {
   favorite: boolean;
@@ -395,6 +396,17 @@ export interface HealthItem {
   key?: string;
   /** An admin chose to stop being told about this, and when. The item is then `info`. */
   ignored?: { at: string; by: string | null };
+
+  // ---- #115 (v0.49.0), Source health rows only, as bff lib/health.ts sends them. Kept together and apart from
+  // the fields other workstreams add; components/SourceEvidence.tsx reads them.
+  /** What each stage was last seen doing (search, chapters, pages, images). */
+  evidence?: StageLine[];
+  /** The last deliberate live check: the Test button ('test') or the daily check ('sweep'). */
+  tested?: LiveVerdict;
+  /** The verdict behind the row, admin half included. */
+  diagnosis?: { code: string; reason: string; fix: string };
+  /** How many series use the source (primaries and followers). */
+  series?: number;
 }
 
 export interface HealthCheck {
@@ -406,6 +418,8 @@ export interface HealthCheck {
   /** what this check cannot see -- shown so nobody reads more into a green result than it deserves */
   note?: string;
   items: HealthItem[];
+  /** #115, 'sources' only: how long one Test may take, for the Test key's running clock. */
+  testMs?: number;
 }
 
 export interface HomePayload {

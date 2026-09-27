@@ -125,6 +125,7 @@ const SERVER_ARMS = [
   "lib/sourceDiagnosis.ts: \"The Cloudflare solver's browser crashed. Chrome in Docker needs far more than the default 64 MB of shared memory: set shm_size: 1gb on the flaresolverr service and recreate it.\"",
   "lib/sourceDiagnosis.ts: 'The Cloudflare solver is not answering. Check the container is up and FLARESOLVERR_URL is right. It also leaks memory, so it wants a periodic restart.'",
   "lib/sourceDiagnosis.ts: \"The extension engine's own Cloudflare bypass is switched off. On the Suwayomi engine's container (uchiyomi-suwayomi in the shipped compose files) set FLARESOLVERR_ENABLED=true and FLARESOLVERR_URL to the same solver address Uchiyomi uses (http://uchiyomi-flaresolverr:8191 in the shipped files), then recreate it. The v0.37.0 compose files already set both, so an upgrade that recreates the engine is the fix there.\"",
+  "lib/sourceDiagnosis.ts: \"The extension engine refused Uchiyomi's login. Set SUWAYOMI_USERNAME and SUWAYOMI_PASSWORD to the engine's own basic-auth user and password (or turn its auth off), then restart Uchiyomi.\"",
   "lib/sourceDiagnosis.ts: 'This is the Suwayomi extension server, not the site. Check that container.'",
   "lib/sourceDiagnosis.ts: 'The site answers fine from this server, so the Cloudflare solver is the broken part. Check that container.'",
   "lib/sources/customSites.ts: '/config/sites.json'",
@@ -191,6 +192,8 @@ test('source diagnoses: every solver and engine fix says to restart Uchiyomi', a
     ["flaresolverr: Error solving the challenge. HTTPConnectionPool(host='localhost', port=58885): Max retries exceeded with url: /session"],
     ['suwayomi: java.io.IOException: Cloudflare bypass currently disabled'],
     ['suwayomi 500'],
+    // #115: the engine refusing Uchiyomi's login gets its own arm, which on a PC must not name the env vars.
+    ['suwayomi 401'],
     ['flaresolverr: something odd', { httpStatus: 200, adapterOk: false }],
   ];
   for (const [err, probe] of cases) {

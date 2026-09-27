@@ -87,6 +87,24 @@ test('every action the health check can offer renders one chip, with the label a
   assert.match(src, /const actions = item\.actions \|\| \[\];\n  if \(!actions\.length\) return null;/, 'an item without actions still renders a chip row');
 });
 
+test('#115: the Test chip holds no verdict of its own, and ticks against the limit while it runs', () => {
+  // The refetched row carries the verdict (item.diagnosis, the stage lines), drawn by SourceEvidence under the
+  // title: ONE verdict on screen, and it survives a reload. Reintroduce `setFix(...)` in the 'test' arm (and its
+  // useState): the chip holds a second verdict beside the row's.
+  const src = code(read(CHIPS));
+  assert.doesNotMatch(src, /setFix|const \[fix, /, 'the Test chip keeps a verdict of its own');
+  const a = arm(src, 'test');
+  assert.match(a, /label=\{busy === 'test' \? testClock\(now - testFrom, testMs\) : tr\('Test'\)\}/, 'the running Test has no clock');
+  assert.match(src, /const now = useTicker\(busy === 'test'\);/, 'the clock ticks when nothing is testing (or never)');
+  // Health passes the check's limit, and draws the source rows' evidence through the shared component.
+  const page = code(read(PAGE));
+  assert.match(page, /<HealthActions check=\{c\.id\} item=\{it\} onDone=\{recheck\} testMs=\{c\.testMs\} \/>/);
+  // Through healthRowEvidence, which drops the fix a row's detail already says and the one under a row listed for
+  // reference (lib/sourceEvidence.ts; its rules are held in sourceEvidence.test.ts).
+  assert.match(page, /\{c\.id === 'sources' && <SourceEvidence \{\.\.\.healthRowEvidence\(it\)\} className="order-last basis-full" \/>\}/,
+    'Health\'s source rows do not show the stage lines');
+});
+
 test('Ignore posts the finding\'s key and says it stays quiet until something changes', () => {
   // The server records everything the finding is about (lib/healthIgnore.ts); the page only names it.
   // Reintroduce by posting `numbers` instead of the key: a gap's ignore would cover only the hundred shown.
@@ -271,7 +289,7 @@ test('the chips are mounted beside the Health disclosure, never inside it, and t
   const mount = health.indexOf('<HealthCheckActions');
   assert.ok(hdr > 0 && close > hdr, 'the Health disclosure button is gone');
   assert.ok(mount > close, 'the check-level chips are inside the disclosure button, or before it');
-  assert.match(health, /<HealthActions check=\{c\.id\} item=\{it\} onDone=\{recheck\} \/>/, 'the per-item chips are not mounted, or do not refetch Health');
+  assert.match(health, /<HealthActions check=\{c\.id\} item=\{it\} onDone=\{recheck\}( testMs=\{c\.testMs\})? \/>/, 'the per-item chips are not mounted, or do not refetch Health');
   // ...and the header's mark with it (v0.48.3): an ignored or fixed finding must not leave the header amber.
   assert.match(health, /const recheck = \(\) => refetch\(\)\.then\(\(\) => qc\.invalidateQueries\(\{ queryKey: \['health-summary'\] \}\)\);/, 'the header mark is not refreshed after a change on the page, or the chips cannot wait for it');
   assert.doesNotMatch(health, /setMerge\(/, 'the old inline merge dialog is still in the page as a second place to merge');

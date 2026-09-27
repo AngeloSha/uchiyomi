@@ -7721,7 +7721,8 @@ paths:
     get:
       tags:
         - admin
-      summary: Every source with its stored health, cooldown and diagnosis.
+      summary: Every source with its stored health, cooldown, the last live verdict (`live`), its open, confirmed
+        failures per stage (`failing`) and one line per stage (`evidence`); `testMs` is how long one Test may take.
       operationId: getApiAdminSources
       description: Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
       security:
@@ -7734,18 +7735,39 @@ paths:
         "403":
           description: "Forbidden: token scope, account permission or age limit"
   /api/admin/sources/check:
-    post:
+    get:
       tags:
         - admin
-      summary: "Run the source watchdog now: probe and smoke-test every source, follow verified moves. 409 while
-        running."
-      operationId: postApiAdminSourcesCheck
+      summary: "Where the current or last source check is: {running, by, startedAt, finishedAt, total, done, current,
+        result, error}."
+      operationId: getApiAdminSourcesCheck
       description: Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
+        `result` is the finished sweep's answer (verdicts, needsAttention, inconclusive, notified), kept in memory
+        until the next run starts.
       security:
         - bearer: []
       responses:
         "200":
           description: OK
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+    post:
+      tags:
+        - admin
+      summary: "Start the source watchdog now, in the background: probe and smoke-test every source, follow verified
+        moves. Answers 202 with the progress; 409 while running."
+      operationId: postApiAdminSourcesCheck
+      description: Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
+        Read the progress and the result with GET on the same path. Each verdict carries state (pass, fail,
+        inconclusive), stage and kind; needsAttention is every confirmed live failure except a rate limit, plus
+        moved sites, and admins are pushed once per new or changed failure.
+      security:
+        - bearer: []
+      responses:
+        "202":
+          description: Started
         "401":
           description: Not authenticated
         "403":
@@ -7756,7 +7778,8 @@ paths:
     post:
       tags:
         - admin
-      summary: Probe one source right now, ignoring its cooldown, and diagnose it; writes no health.
+      summary: Probe one source right now, ignoring its cooldown, and diagnose it; records the verdict as evidence and
+        never changes the cooldown.
       operationId: postApiAdminSourcesIdTest
       description: >-
         Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. Answers
@@ -7770,7 +7793,11 @@ paths:
         the shipped compose names (uchiyomi-suwayomi, http://uchiyomi-flaresolverr:8191), never the
         development stack's; and since v0.37.0 this route reads the source's slow streak, so `code` can be
         `too_slow` ("This source answers, but more slowly than it is given.") here as well as from Discover's
-        health view, with a `fix` naming the configured SOURCE_LATEST_TIMEOUT_MS budget in seconds.
+        health view, with a `fix` naming the configured SOURCE_LATEST_TIMEOUT_MS budget in seconds. Since
+        v0.49.0 the answer adds {state, stage, ms, recorded}; the verdict is recorded in source_health.live_* and
+        the per-stage evidence Health reads (never status, consecutive, blocked_until or checked_at); `code` is
+        never `ok` when `ok` is false, and can be `extension_error` (the engine answered with the extension's own
+        error) or `unnumbered`.
       parameters:
         - name: id
           in: path

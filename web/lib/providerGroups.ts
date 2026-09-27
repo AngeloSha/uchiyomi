@@ -9,8 +9,34 @@ import type { Src } from './sourceGroups';
 
 export type SrcStatus = NonNullable<Src['status']>;
 
+/**
+ * What a source card can say: the public status, plus `failing` (#115, v0.49.0) -- a source whose Test or daily
+ * check failed, or that failed at the same step three times running in normal use, while no cooldown holds it.
+ * Admin-only: Discover's Src type is untouched, because GET /api/sources is one cache key for every account.
+ */
+export type ProviderStatus = SrcStatus | 'failing';
+
+/** The admin row's part providerStatus reads: GET /api/admin/sources `failing`, the open confirmed failures. */
+export interface AdminSourceRow {
+  failing?: Array<{ stage: string }> | null;
+}
+
+/**
+ * The status a Providers card wears. The public status knows only cooldowns, and any download or the nightly
+ * lapsed-block reset puts it back to 'ok', which is how "Manga Ball (EN)" failed its Test under a card that said
+ * "ok". A confirmed failure outranks 'ok' and 'quiet'; a cooldown and a switched-off source keep their own
+ * words, which already say more than "failing" would.
+ */
+export function providerStatus(pub: SrcStatus | null | undefined, row?: AdminSourceRow | null): ProviderStatus {
+  const st = pub ?? 'ok';
+  if ((st === 'ok' || st === 'quiet') && row?.failing?.length) return 'failing';
+  return st;
+}
+
 /** One row of GET /api/sources as the panel sees it: the registry entry plus the v0.33.0 provenance. */
-export interface ProviderSrc extends Src {
+export interface ProviderSrc extends Omit<Src, 'status'> {
+  /** The public status, or `failing` once the admin rows are overlaid (providerStatus). */
+  status?: ProviderStatus;
   /**
    * The extension package an `sw:` source came from. `pkgName` null means the engine did not say and
    * `name` is the display name with its language tag stripped by the server -- a guess, but the same
@@ -31,7 +57,7 @@ export interface ProviderGroup {
   /** How many of the variants are switched on (any status but `disabled`). */
   on: number;
   /** The status the header wears: the unhappiest variant's, so a blocked language colours the whole card. */
-  worst: SrcStatus;
+  worst: ProviderStatus;
 }
 
 /**
@@ -40,13 +66,13 @@ export interface ProviderGroup {
  * the state this exists to prevent. `disabled` ranks below `ok` on purpose: an extension with most
  * languages switched off and one healthy one is healthy, not off.
  */
-const SEVERITY: Record<SrcStatus, number> = { disabled: 0, ok: 1, quiet: 1, rate_limited: 2, down: 2, blocked: 2 };
+const SEVERITY: Record<ProviderStatus, number> = { disabled: 0, ok: 1, quiet: 1, failing: 2, rate_limited: 2, down: 2, blocked: 2 };
 
-const statusOf = (s: ProviderSrc): SrcStatus => s.status ?? 'ok';
+const statusOf = (s: ProviderSrc): ProviderStatus => s.status ?? 'ok';
 
 /** The unhappiest of the statuses given, by SEVERITY; ties keep the first seen. */
-export function worstStatus(statuses: SrcStatus[]): SrcStatus {
-  let worst: SrcStatus = 'ok';
+export function worstStatus(statuses: ProviderStatus[]): ProviderStatus {
+  let worst: ProviderStatus = 'ok';
   let rank = -1;
   for (const st of statuses) {
     const r = SEVERITY[st] ?? 1;

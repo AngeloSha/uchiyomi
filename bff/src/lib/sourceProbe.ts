@@ -8,87 +8,221 @@
 // sources were failing for three unrelated reasons that were indistinguishable in the database: a domain
 // that had moved twice, two sites returning 403 to this server's IP, and a solver whose own browser kept
 // crashing. One plain HTTP request to each homepage separated all three in under a second.
-import { classify } from './sourceHealth';
 import { env } from '../env';
-import type { SourceAdapter } from './sources/types';
+import { withTimeout } from './sources';
+import { unnumberedOf, type SourceAdapter, type SourceChapter } from './sources/types';
 import type { Probe } from './sourceDiagnosis';
+import type { Stage } from './sourceEvidence';
 import { coverSanity } from './sources/imgAttr';
 
-export interface Check { name: string; ok: boolean; detail: string }
-export interface SmokeResult { ok: boolean; timedOut?: boolean; checks: Check[] }
+/** How a stage failed. `timeout` is OUR deadline and makes the run inconclusive, never a failure of the source. */
+export type SmokeKind = 'error' | 'empty' | 'timeout' | 'unnumbered';
+export interface Check {
+  name: string;
+  ok: boolean;
+  /** Short, for the check list (80 characters). */
+  detail: string;
+  /** Which stage this check belongs to (lib/sourceEvidence.ts). Absent for Covers, which does not vote. */
+  stage?: Stage;
+  kind?: SmokeKind;
+  /** The error as thrown, up to 300 characters: what Health and the Providers card show as the engine's words. */
+  error?: string;
+}
+export type SmokeState = 'pass' | 'fail' | 'inconclusive';
+export interface SmokeFailure { stage: 'search' | 'chapters' | 'pages'; kind: SmokeKind; error?: string }
+export interface SmokeResult {
+  /** Every voting check passed. */
+  ok: boolean;
+  /** The run hit its deadline. */
+  timedOut?: boolean;
+  checks: Check[];
+  /** pass, fail, or inconclusive when our deadline ended it before any failure. */
+  state: SmokeState;
+  /** The first stage that failed, and how. Absent on a pass. */
+  failure?: SmokeFailure;
+  /** The stages that passed, in order. */
+  passed: Stage[];
+  ms: number;
+}
 
 const clip = (s: unknown) => String(s || '').slice(0, 80);
+const full = (s: unknown) => String(s || '').slice(0, 300);
+const messageOf = (e: unknown) => (e as Error)?.message || 'error';
+/**
+ * The Suwayomi client's own per-request deadline (client.ts transportError). 30 s, inside the 45 s wall, so a slow
+ * extension call ran out of THAT patience first and read as a confirmed failure -- a warn row on Health and a push
+ * from the sweep -- for what is our deadline as much as the wall is.
+ */
+const ENGINE_TIMEOUT = /^suwayomi timeout after \d+ms/;
+/** Our patience ran out, not the source's: the wall (withTimeout's selfTimeout) or the engine client's deadline. */
+const ours = (e: unknown) => !!(e as { selfTimeout?: boolean })?.selfTimeout || ENGINE_TIMEOUT.test(messageOf(e));
 
-/** A wall-clock deadline, checked between stages. `Promise.race` returns but does not cancel. */
+/** A wall-clock deadline, checked between stages. */
 const past = (deadline: number) => Date.now() >= deadline;
+
+/** The one check that is reported but does not vote on whether the source works. */
+const COVER_CHECK = 'Covers';
+/** How many search hits the chapter stage may try: one dud title must not fail a working source. */
+const CHAPTER_TRIES = 3;
+
+/**
+ * Newest, middle and oldest, one copy per number, highest first. The oldest chapter alone was the first
+ * thing asked for, and on a long-running series that is exactly the one a site has taken down or licensed.
+ */
+export function pageCandidates(chapters: SourceChapter[]): SourceChapter[] {
+  const byNumber = new Map<number, SourceChapter>();
+  for (const c of [...chapters].sort((a, b) => b.number - a.number)) if (!byNumber.has(c.number)) byNumber.set(c.number, c);
+  const list = [...byNumber.values()];
+  const picks = [list[0], list[Math.floor(list.length / 2)], list[list.length - 1]].filter(Boolean);
+  return picks.filter((c, i) => picks.findIndex((x) => x.sourceId === c.sourceId) === i);
+}
 
 /**
  * Exercise an adapter end to end: search -> series page -> chapters -> pages.
  *
- * Bounded by a real deadline rather than by a race the work outlives. The original raced a 30-second timer
- * against a call chain whose worst case was four search terms at up to 95 seconds each, and then kept
- * scraping after answering. Behind a button an admin can press repeatedly, that matters.
+ * Bounded by a real deadline, and since v0.49.0 EVERY adapter call is bounded by what is left of it
+ * (`withTimeout`, tagged selfTimeout). Before, the deadline was checked only between stages, so one 30-second
+ * GraphQL call started at second 44 of a 45-second wall ran to second 74. Running out of time is recorded as
+ * 'inconclusive' at the stage it happened, never as a failure: our patience is not the source's fault.
  *
- * The search loop tries several terms because a site with few titles can legitimately miss one. It now stops
- * early when the failure is *classifiable*: a 403, a rate limit or a dead solver will answer identically for
- * all four terms, so trying the rest costs four times as long to learn nothing. Only a parse-shaped failure
- * (returned nothing, threw nothing) justifies another term, and that is exactly the case this is for.
+ * The rest is about not failing a working source (#115: Health must show which stage failed, so the stage had
+ * better be right):
+ * - The search loop tries several terms because a site with few titles can legitimately miss one. It stops on
+ *   ANY thrown error: a 403, a dead solver or an extension's exception answers the same for all four terms
+ *   (Manga Ball paid for four searches of its own exception), and only an empty answer justifies another term.
+ * - Chapters are asked of up to three search hits, not the first: one title with no chapters is a title, not
+ *   a broken source.
+ * - Pages are asked of the newest chapter first, then the middle and the oldest (pageCandidates).
+ * - A chapter list whose every chapter lacks a usable number says so (`unnumbered`), because "none found"
+ *   sends an admin to the wrong fix.
  */
-/** The one check that is reported but does not vote on whether the source works. */
-const COVER_CHECK = 'Covers';
-
 export async function smokeTest(src: SourceAdapter, opts: { timeoutMs?: number } = {}): Promise<SmokeResult> {
-  const deadline = Date.now() + (opts.timeoutMs ?? env.SOURCE_TEST_TIMEOUT_MS);
+  const t0 = Date.now();
+  const deadline = t0 + (opts.timeoutMs ?? env.SOURCE_TEST_TIMEOUT_MS);
   const checks: Check[] = [];
-  const bail = (): SmokeResult => ({ ok: false, timedOut: true, checks });
+  const passed: Stage[] = [];
+  let failure: SmokeFailure | undefined;
+  let timedOut = false;
 
+  /** One adapter call, cut off at the wall. `Promise.race` returns but does not cancel: see risks in #115. */
+  const call = <T>(f: () => Promise<T>): Promise<T> => withTimeout(f(), Math.max(1, deadline - Date.now()));
+  const fail = (f: SmokeFailure) => { failure ??= f; };
+  const done = (): SmokeResult => {
+    // ⚠️ Covers are reported, never fatal. A source whose covers are wrong still fetches and reads perfectly,
+    // and marking it down would take a cosmetic fault and turn it into "this source is broken" -- which is how
+    // a health page starts crying wolf and stops being read. It shows in the check list; it does not vote.
+    const ok = !timedOut && !failure && checks.filter((c) => c.name !== COVER_CHECK).every((c) => c.ok);
+    const state: SmokeState = failure && failure.kind !== 'timeout' ? 'fail' : timedOut ? 'inconclusive' : ok ? 'pass' : 'fail';
+    return { ok, ...(timedOut ? { timedOut } : {}), checks, state, ...(failure ? { failure } : {}), passed, ms: Date.now() - t0 };
+  };
+  /** Our deadline, at this stage: the run ends here, inconclusive unless something had already failed. */
+  const outOfTime = (name: string, stage: SmokeFailure['stage']): SmokeResult => {
+    timedOut = true;
+    checks.push({ name, ok: false, detail: 'did not finish in time', stage, kind: 'timeout' });
+    fail({ stage, kind: 'timeout' });
+    return done();
+  };
+
+  // ── search ────────────────────────────────────────────────────────────────────────────────────────────
   let results: any[] = [];
-  let searchOk = false;
-  let searchDetail = 'no results — markup may not match this engine';
+  let thrown: string | undefined;
   for (const term of ['the', 'one', 'love', 'a']) {
-    if (past(deadline)) return bail();
+    if (past(deadline)) return outOfTime('Search', 'search');
     try {
-      const r = await src.search(term);
-      if (Array.isArray(r) && r.length) { results = r; searchOk = true; searchDetail = `${r.length} result(s)`; break; }
-    } catch (e: any) {
-      searchDetail = clip(e?.message || 'error');
-      // Transport-level: the next three terms give the same answer at full price.
-      if (classify(e)) break;
+      const r = await call(() => src.search(term));
+      if (Array.isArray(r) && r.length) { results = r; break; }
+    } catch (e) {
+      if (ours(e)) return outOfTime('Search', 'search');
+      thrown = messageOf(e);
+      break;
     }
   }
-  checks.push({ name: 'Search', ok: searchOk, detail: searchDetail });
-  if (!searchOk) return { ok: false, checks };
-  if (past(deadline)) return bail();
+  if (!results.length) {
+    if (thrown !== undefined) {
+      checks.push({ name: 'Search', ok: false, detail: clip(thrown), stage: 'search', kind: 'error', error: full(thrown) });
+      fail({ stage: 'search', kind: 'error', error: full(thrown) });
+    } else {
+      const detail = 'no results — markup may not match this engine';
+      checks.push({ name: 'Search', ok: false, detail, stage: 'search', kind: 'empty', error: detail });
+      fail({ stage: 'search', kind: 'empty', error: detail });
+    }
+    return done();
+  }
+  checks.push({ name: 'Search', ok: true, detail: `${results.length} result(s)`, stage: 'search' });
+  passed.push('search');
 
-  let chapters: any[] = [];
-  try {
-    const series = await src.getSeries(results[0].sourceId);
-    checks.push({ name: 'Series page', ok: !!series?.title, detail: series?.title ? clip(series.title) : 'no data' });
-    // Free: both halves are already in hand. See coverSanity for what it compares and why it is informational.
-    const cov = coverSanity(results, series);
-    checks.push({ name: COVER_CHECK, ok: cov.ok, detail: cov.detail });
-    if (past(deadline)) return bail();
-    chapters = await src.listChapters(results[0].sourceId);
+  // ── series page and chapters, over up to three hits ───────────────────────────────────────────────────
+  let chapters: SourceChapter[] = [];
+  let hitNo = 0;
+  let title: string | undefined;
+  let answered = false; // at least one getSeries answered (with or without a title)
+  let firstErr: string | undefined;
+  let unnumbered = 0;
+  const hits = results.filter((r, i) => r?.sourceId != null && results.findIndex((x) => x?.sourceId === r.sourceId) === i).slice(0, CHAPTER_TRIES);
+  for (let i = 0; i < hits.length; i++) {
+    if (past(deadline)) return outOfTime(answered ? 'Chapters' : 'Series / chapters', 'chapters');
+    try {
+      const series = await call(() => src.getSeries(hits[i].sourceId));
+      answered = true;
+      if (series?.title && !title) title = series.title;
+      // Free: both halves are already in hand. See coverSanity for what it compares and why it is informational.
+      if (i === 0) {
+        const cov = coverSanity(results, series);
+        checks.push({ name: COVER_CHECK, ok: cov.ok, detail: cov.detail });
+      }
+      const list = await call(() => src.listChapters(hits[i].sourceId));
+      if (Array.isArray(list) && list.length) { chapters = list; hitNo = i + 1; break; }
+      unnumbered += unnumberedOf(list);
+    } catch (e) {
+      if (ours(e)) return outOfTime(answered ? 'Chapters' : 'Series / chapters', 'chapters');
+      firstErr ??= messageOf(e);
+    }
+  }
+  if (!answered) {
+    const err = firstErr ?? 'no search hit to open';
+    checks.push({ name: 'Series / chapters', ok: false, detail: clip(err), stage: 'chapters', kind: 'error', error: full(err) });
+    fail({ stage: 'chapters', kind: 'error', error: full(err) });
+    return done();
+  }
+  checks.push({ name: 'Series page', ok: !!title, detail: title ? clip(title) : 'no data', stage: 'chapters', ...(title ? {} : { kind: 'empty' as const }) });
+  if (chapters.length) {
     // Numbers, not rows: a source that lists a chapter once per group would otherwise report twice the count.
     const numbers = new Set(chapters.map((c) => c.number)).size;
-    checks.push({ name: 'Chapters', ok: chapters.length > 0, detail: chapters.length ? `${numbers} chapter(s)` : 'none found' });
-  } catch (e: any) {
-    checks.push({ name: 'Series / chapters', ok: false, detail: clip(e?.message || 'error') });
+    checks.push({ name: 'Chapters', ok: true, detail: `${numbers} chapter(s)${hitNo > 1 ? ` (search hit ${hitNo})` : ''}`, stage: 'chapters' });
+    if (title) passed.push('chapters');
+    else fail({ stage: 'chapters', kind: 'empty', error: 'the series page returned no data' });
+  } else {
+    const kind: SmokeKind = firstErr !== undefined ? 'error' : unnumbered ? 'unnumbered' : 'empty';
+    const detail = kind === 'error' ? firstErr! : kind === 'unnumbered'
+      ? `none with a usable number (${unnumbered} without)`
+      : `none found (${hits.length} title${hits.length === 1 ? '' : 's'} tried)`;
+    checks.push({ name: 'Chapters', ok: false, detail: clip(detail), stage: 'chapters', kind, error: full(detail) });
+    fail({ stage: 'chapters', kind, error: full(detail) });
+    return done();
   }
 
-  if (chapters.length) {
-    if (past(deadline)) return bail();
+  // ── pages: newest first ───────────────────────────────────────────────────────────────────────────────
+  const candidates = pageCandidates(chapters);
+  let pagesErr: string | undefined;
+  for (const c of candidates) {
+    if (past(deadline)) return outOfTime('Pages', 'pages');
     try {
-      const pages = await src.getPageUrls(chapters[0].sourceId);
-      checks.push({ name: 'Pages', ok: pages.length > 0, detail: pages.length ? `${pages.length} page(s)` : 'none found' });
-    } catch (e: any) {
-      checks.push({ name: 'Pages', ok: false, detail: clip(e?.message || 'error') });
+      const urls = await call(() => src.getPageUrls(c.sourceId));
+      if (Array.isArray(urls) && urls.length) {
+        checks.push({ name: 'Pages', ok: true, detail: `${urls.length} page(s) (chapter ${c.number})`, stage: 'pages' });
+        passed.push('pages');
+        return done();
+      }
+    } catch (e) {
+      if (ours(e)) return outOfTime('Pages', 'pages');
+      pagesErr ??= messageOf(e);
     }
   }
-  // ⚠️ Covers are reported, never fatal. A source whose covers are wrong still fetches and reads perfectly,
-  // and marking it down would take a cosmetic fault and turn it into "this source is broken" -- which is how
-  // a health page starts crying wolf and stops being read. It shows in the check list; it does not vote.
-  return { ok: checks.filter((c) => c.name !== COVER_CHECK).every((c) => c.ok), checks };
+  const kind: SmokeKind = pagesErr !== undefined ? 'error' : 'empty';
+  const detail = pagesErr ?? `none found (${candidates.length} chapter${candidates.length === 1 ? '' : 's'} tried)`;
+  checks.push({ name: 'Pages', ok: false, detail: clip(detail), stage: 'pages', kind, error: full(detail) });
+  fail({ stage: 'pages', kind, error: full(detail) });
+  return done();
 }
 
 export interface ProbeResult { httpStatus: number; finalUrl?: string; transport?: string; looksHtml?: boolean }
@@ -136,8 +270,9 @@ export async function probeBase(url: string, timeoutMs = 8000): Promise<ProbeRes
  */
 export function buildProbe(
   bare: ProbeResult | undefined,
-  smoke: { ok: boolean },
+  smoke: { ok: boolean; failure?: SmokeFailure },
   src: { requiresCloudflare?: boolean },
 ): Probe {
-  return { ...bare, adapterOk: smoke.ok, needsSolver: !!src.requiresCloudflare };
+  // `failure` only when there is one: where and how the live test failed (#115) is live evidence too.
+  return { ...bare, adapterOk: smoke.ok, needsSolver: !!src.requiresCloudflare, ...(smoke.failure ? { failure: smoke.failure } : {}) };
 }
