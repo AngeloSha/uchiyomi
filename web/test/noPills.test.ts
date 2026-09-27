@@ -49,6 +49,11 @@ const SURFACES = [
   'components/NumberingSheet.tsx',
   'components/ExtensionSettings.tsx',
   'components/ChapterVersionsSheet.tsx',
+  // The web2 integration step: #116's words beside lib/archive.ts's (the numbering, the extension settings, the
+  // versions), so a class a later change builds in them is scanned too.
+  'lib/numbering.ts',
+  'lib/sourcePrefs.ts',
+  'lib/versions.ts',
 ];
 
 /**
@@ -84,14 +89,19 @@ const SLICES: [string, string, string, string][] = [
   // Step 14 (#117): where the slow archive is turned on -- keys, never chips, beside chips that stay.
   ['components/AddSeriesDialog.tsx', 'Add dialog: Archive the rest slowly', '{archiveRest > 0 && (', '</>)}'],
   ['app/library/page.tsx', 'Library: the Archive slowly key', 'onClick={archiveSelected}', "{(isAdmin || canDownload(user))"],
+  // ...and on a phone, its row in the selection's More sheet.
+  ['app/library/page.tsx', 'Library: Archive slowly in More', 'void archiveSelected(); }}', "{tr('Move to library')}"],
   ['app/series/page.tsx', 'Series: Archive slowly in the actions', '{mayArchive && (', '{isAdmin && ('],
   ['app/series/page.tsx', 'Series: Archive slowly on the older-chapters row', '{!archiving && mayArchive', '</span>'],
+  // Step 17 (#116): the add dialog's numbering notice and its switch -- a text block with a start-edge rule, beside
+  // the dialog's own chips that stay. The last function in the file: an empty `to` reads to its end.
+  ['components/AddSeriesDialog.tsx', 'Add dialog: the numbering notice', 'function AddNumberingNotice(', ''],
 ];
 
 const slice = (src: string, from: string, to: string, name: string): string => {
   const a = src.indexOf(from);
-  const b = src.indexOf(to, a + 1);
-  assert.ok(a >= 0 && b > a, `${name}: ${from} … ${to} is not where this test looks`);
+  const b = to ? src.indexOf(to, a + 1) : src.length;
+  assert.ok(a >= 0 && b > a, `${name}: ${from} … ${to || 'the end'} is not where this test looks`);
   return src.slice(a, b);
 };
 

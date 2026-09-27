@@ -133,6 +133,44 @@ test("'Downloads' names the server's view only: the reader's way to this device'
   assert.deepEqual(users, ['app/library/page.tsx'], 'a second meaning of Downloads');
 });
 
+test('a Server tasks card is named by runName, leads to its series, and for an admin to what the repair did', () => {
+  // The critic's ruling on one repair run seen from two screens: the card says the press ("Fill now · Walk Gap"),
+  // Open goes to the series (and chapter) it is about, and Recent repairs is on Health. Reintroduce `runTitle(r.kind)`
+  // as the card's name: the first assertion fails.
+  const view = code(read('components/ServerDownloadsView.tsx'));
+  const task = view.slice(view.indexOf('function TaskRow('), view.indexOf('function CameInTile('));
+  assert.match(task, /const name = runName\(r\);/, 'the card is not named by runName');
+  assert.match(task, /<p className="truncate text-sm font-medium text-fog-100" data-task-name>\{name\}<\/p>/);
+  assert.match(task, /label=\{name\}/, 'the ring is named differently from the card');
+  assert.match(task, /\{r\.seriesId && <Link href=\{seriesHref\(r\.seriesId, r\.number\)\}/, 'a one-series press has no way to its series');
+  assert.match(task, /const history = admin && r\.kind === 'repair';[\s\S]*?\{history && <Link href="\/admin\/\?tab=Health#repairs"/, 'an admin has no way to Recent repairs');
+  // A run that failed says its name the same way.
+  const failedRun = view.slice(view.indexOf("if (a.kind === 'run') {"), view.indexOf('const thumb = '));
+  assert.match(failedRun, /\{runName\(r\)\}/, 'a failed run is named differently from a running one');
+  assert.doesNotMatch(view, /runTitle\(/, 'a run is named without runName somewhere in the view');
+});
+
+test('the slow archive\'s sheet and Stop confirmation open on <body>, whatever card they are opened from', () => {
+  // The s14 review's MAJOR: the series band and the Needs attention rows are `.card`s, whose backdrop blur made each
+  // the containing block of the `fixed` Sheet and Modal inside it -- only the card dimmed, the panel over the row or
+  // off the top of the screen, the next card over its buttons. Only the Queued cover, not a card, worked, and it is
+  // the one the walk opens. Reintroduce `return (<Sheet` in ArchiveSheet, or a bare <ConfirmDialog in StopConfirm:
+  // this names it.
+  const src = code(read('components/ArchiveQueue.tsx'));
+  const opens = [...src.matchAll(/<(Sheet|ConfirmDialog|Modal)\b/g)];
+  assert.equal(opens.length, 2, 'the archive\'s dialogs moved -- update this scan');
+  for (const m of opens) {
+    const before = src.slice(0, m.index!);
+    assert.ok(before.lastIndexOf('<OnBody>') > before.lastIndexOf('</OnBody>'), `the archive's <${m[1]}> is rendered inside the card that opened it`);
+  }
+  // OnBody is a portal to <body>, nothing else.
+  assert.match(code(read('components/ui.tsx')), /export function OnBody\(\{ children \}: \{ children: ReactNode \}\) \{\s*return typeof document === 'undefined' \? null : createPortal\(children, document\.body\);\s*\}/);
+  // An archive under Needs attention that is taking a chapter (the retry after a backoff) says so on its row.
+  const row = src.slice(src.indexOf('export function ArchiveAttentionRow('), src.indexOf('export function ArchiveQueueNote('));
+  assert.match(row, /\{item\.entry\.current && <p[^>]*data-archive-current>\{tr\('Fetching Ch\. \{n\} now', \{ n: item\.entry\.current\.number \}\)\}<\/p>\}/,
+    'the chapter in flight on an attention row is shown nowhere but the sheet');
+});
+
 test('the Downloads view says when it could not read the server, with a way to ask again', () => {
   // Reintroduce the old `if (empty)` without the error branch: a 500 reads "Nothing is being fetched right now".
   const view = code(read('components/ServerDownloadsView.tsx'));

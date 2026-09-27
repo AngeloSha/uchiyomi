@@ -94,7 +94,9 @@ export function RepairRunProvider({ onEnded, children }: { onEnded: () => Promis
   const ended = useRef(onEnded);
   ended.current = onEnded;
   const prev = useRef<RepairStatus | null>(null);
+  // Runs seen to end, for which Health has been asked again (`handled`), and those for which it has ANSWERED (`settled`).
   const handled = useRef(new Set<string>());
+  const settled = useRef(new Set<string>());
   const awaitingRef = useRef(awaiting);
   awaitingRef.current = awaiting;
 
@@ -115,9 +117,13 @@ export function RepairRunProvider({ onEnded, children }: { onEnded: () => Promis
       return changed ? out : s;
     });
     // A press whose run was already seen to end (a poll landed between the run finishing and its POST
-    // answering): Health has been asked since, so it only needs its slot closed, or it would poll forever.
+    // answering): Health has been asked since, so it only needs its slot closed, or it would poll forever --
+    // closed once that answer is in, and until then waiting on it, as start() does.
     const stale = all.filter((id) => handled.current.has(id) && awaitingRef.current.includes(id));
-    if (stale.length) mark(stale, 'ended');
+    if (stale.length) {
+      mark(stale.filter((id) => settled.current.has(id)), 'ended');
+      mark(stale.filter((id) => !settled.current.has(id)), 'settling');
+    }
     const ids = all.filter((id) => !handled.current.has(id));
     if (!ids.length) return;
     for (const id of ids) handled.current.add(id);
@@ -130,6 +136,7 @@ export function RepairRunProvider({ onEnded, children }: { onEnded: () => Promis
           qc.invalidateQueries({ queryKey: ['admin-tasks'] }),
         ]);
       } finally {
+        for (const id of ids) settled.current.add(id);
         mark(ids, 'ended');
       }
     })();
@@ -154,9 +161,16 @@ export function RepairRunProvider({ onEnded, children }: { onEnded: () => Promis
       // A run that polls already saw start AND end while its POST was in flight (a window-focus refetch, the poll
       // of another run): the effect above re-checked Health for it then, when this slot had no id to match, and
       // it will not run again for it -- the refetch below brings nothing new, and React Query hands back the same
-      // data object -- so the slot would sit on "Working…", polling every 2 s. It is over: close it here.
-      if (r?.run && handled.current.has(r.run)) {
+      // data object -- so the slot would sit on "Working…", polling every 2 s. It is over: close it here -- once
+      // that re-check has ANSWERED. While it is still in flight the slot waits on it, "Checking the result…", and
+      // the effect's `finally` closes it: closed at once, the row read "Done" above the old finding for one Health
+      // round-trip (the v0.48.3 rule: a row does not wake before Health has answered).
+      if (r?.run && settled.current.has(r.run)) {
         set(key, { phase: 'ended', action, startedAt, runId: r.run, finishedAt: Date.now() });
+        return;
+      }
+      if (r?.run && handled.current.has(r.run)) {
+        set(key, { phase: 'settling', action, startedAt, runId: r.run });
         return;
       }
       set(key, { phase: 'awaiting', action, startedAt, runId: r?.run });

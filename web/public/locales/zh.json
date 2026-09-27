@@ -2,7 +2,7 @@
   "_meta": {
     "language": "zh",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 1940
+    "strings": 1952
   },
   "1 check found something": "1 项检查发现问题",
   "1 member": "1 位成员",
@@ -1473,7 +1473,6 @@
   "That task is switched off": "该任务已关闭",
   "{n} waiting": "{n} 个等待中",
   "1 folder skipped, see Health": "跳过了 1 个文件夹，见健康检查",
-  "1 step": "1 步",
   "A few minutes at most": "最多几分钟",
   "A scan is already running": "已有扫描在运行",
   "A scan ran less than a minute ago": "不到一分钟前刚扫描过",
@@ -1492,7 +1491,6 @@
   "What you can do here": "可以在这里做什么",
   "{done} of {of}": "{done}/{of}",
   "{n} folders skipped, see Health": "跳过了 {n} 个文件夹，见健康检查",
-  "{n} steps": "{n} 步",
   "1 run kept": "保留了 1 次运行",
   "Latest one-off fix: {what}": "最近一次单项修复：{what}",
   "No repair has run yet": "尚未运行过修复",
@@ -1814,7 +1812,6 @@
   "{n} chapters so far": "目前 {n} 话",
   "The server is shutting down": "服务器正在关闭",
   "Paused for everyone by an admin": "管理员已为所有人暂停",
-  "Only runs between {from} and {to}": "仅在 {from} 至 {to} 之间运行",
   "Outside the hours it may run": "不在允许运行的时段内",
   "Waiting for the scheduled check to finish": "等待定时检查完成",
   "Waiting for the library repair to finish": "等待书库修复完成",
@@ -1832,7 +1829,6 @@
   "Its source is switched off": "它的来源已关闭",
   "Its source is not available on this server": "它的来源在此服务器上不可用",
   "Waiting for another download of this series": "等待此系列的其他下载",
-  "Reading its chapter list again": "正在重新读取章节列表",
   "Waiting for its chapters to be renumbered": "等待章节重新编号",
   "1 failed too many times": "1 话失败次数过多",
   "{n} failed too many times": "{n} 话失败次数过多",
@@ -1943,5 +1939,21 @@
   "Saved. 1 series is waiting for you to review the renumbering.": "已保存。有 1 个系列等待你审核重新编号。",
   "Saved. {n} series are waiting for you to review the renumbering.": "已保存。有 {n} 个系列等待你审核重新编号。",
   "1 unchanged": "1 章不变",
-  "{n} unchanged": "{n} 章不变"
+  "{n} unchanged": "{n} 章不变",
+  "Chapter numbering": "章节编号",
+  "Shows which file becomes which chapter, and renames the files only once you confirm the plan. Reading progress, bookmarks and notes stay with their chapters.": "显示每个文件将对应哪一章，只有在你确认计划后才会重命名文件。阅读进度、书签和笔记都会跟随各自的章节。",
+  "Uchiyomi lists the source again and matches each chapter on disk to its post: by the post it was fetched from where that was recorded, otherwise by its name or its date. A chapter no post matches keeps its file, at a free number just after the chapter before it. While a renumbering waits for review, the series fetches nothing new.": "Uchiyomi 会重新读取来源，把磁盘上的每一章对应到它的帖子：有记录时按下载时的帖子对应，否则按名称或日期对应。没有匹配到帖子的章节会保留其文件，编号为紧跟在前一章之后的空闲编号。重新编号等待审核期间，该系列不会获取新章节。",
+  "Keeps the chapter numbers the source gives, and Uchiyomi stops proposing a renumbering for this series. A series it has already renumbered shows the plan back to the source’s numbers first.": "保留来源给出的章节编号，Uchiyomi 不再为此系列建议重新编号。已经重新编号的系列会先显示改回来源编号的计划。",
+  "Being archived slowly": "正在慢速归档",
+  "Numbered by posting order: no other source’s numbers line up with it": "按发布顺序编号：其他来源的编号都对不上",
+  "The slow archive is fetching these: Fill now gets them at the normal pace instead of waiting for it.": "慢速归档正在获取这些章节：“立即补齐”会以正常速度获取，不必等它。",
+  "Chapters are being fetched for this series. Try again when that ends.": "正在获取此系列的章节。完成后再试一次。",
+  "Outside the hours it may run; it starts again {when}": "不在允许运行的时段内；{when}恢复运行",
+  "Only runs between {from} and {to}, server time": "仅在 {from} 至 {to} 之间运行（服务器时间）",
+  "Its chapter list could not be read; trying again {when}": "无法读取章节列表；{when}重试",
+  "Its chapter list could not be read; trying again soon": "无法读取章节列表；稍后重试",
+  "Nothing has come in for {d}": "已有{d}没有新内容",
+  "Nothing has come in for days": "已有好几天没有新内容",
+  "Numbers these posts its own way: this series is numbered by posting order": "这些帖子的编号方式不同：此系列按发布顺序编号",
+  "this series is numbered by posting order": "此系列按发布顺序编号"
 }

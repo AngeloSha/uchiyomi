@@ -5,9 +5,16 @@
 // number. A source that gives many different posts one chapter number -- Webtoons: Istrevelia's 226 posts on 13
 // numbers -- is numbered 1..K in the order the posts came out. New adds are numbered so at once; a series already
 // in a library is renamed only when an admin has seen the plan and confirmed it.
+import { t as tr } from './i18n';
 
 export type NumberingMode = 'source' | 'posting_order';
 export type RenumberMode = 'posting_order' | 'source' | 'remap';
+/**
+ * Which plan the sheet shows: one numbering, or `next` -- the change waiting for review, else the other numbering,
+ * which is GET /api/admin/series/:id/numbering's own pick when it is asked for no mode. Health's rows open `next`:
+ * a row knows its series needs a look, and the server knows which change it is.
+ */
+export type PlanMode = RenumberMode | 'next';
 
 /** GET /api/sources/detail `numbering`: the detector's word on the listing the add dialog is about to add. */
 export interface DetailNumbering {
@@ -83,6 +90,11 @@ export interface NumberingAnswer {
   plan?: RenumberPlan;
   tracker?: boolean;
   running?: boolean;
+  /**
+   * Why a confirmed apply was refused, in the server's words: a file already at a target name, a path that would
+   * leave its library root (bff lib/numbering.ts RenumberRefused). Absent from a server that does not carry it yet.
+   */
+  error?: string;
   numbering: NumberingSummary | null;
 }
 
@@ -142,3 +154,36 @@ export function planCounts(p: RenumberPlan): { renamed: number; unchanged: numbe
 
 /** A number as a chapter label shows it: at most three decimals, no float noise (a parked book sits at 7.5). */
 export const numLabel = (n: number): string => String(Math.round(n * 1000) / 1000);
+
+/** A rename under a download writing into the folder would race the file it writes: the route says 409 `busy`. */
+const busyLine = (): string => tr('Chapters are being fetched for this series. Try again when that ends.');
+
+/**
+ * Why a confirmed renumbering is not applied yet (POST answered `pending`), in words. It used to be one sentence
+ * for every cause -- "the source may not have answered" -- so an admin with a stray file at a target name was
+ * told to retry, and retried, for a reason that was never the source: the rename still running past the request,
+ * the server's own refusal, chapters being fetched into the folder, and only then the source.
+ */
+export function pendingLine(r: Pick<NumberingAnswer, 'running' | 'error' | 'plan'>): string {
+  if (r.running) return tr('Still renaming. The series page shows the new numbers when it is done.');
+  if (r.error) return r.error;
+  if (r.plan?.reasons.includes('busy')) return busyLine();
+  return tr('It could not be applied yet. The source may not have answered; try again in a moment.');
+}
+
+/** A refused numbering request, in words: its `busy` is said here in the reader's language, the rest as sent. */
+export function refusalText(e: unknown, fallback: string): string {
+  let j: { error?: string; message?: string } = {};
+  try { j = JSON.parse((e as { body?: string } | null)?.body || '{}'); } catch { /* not JSON: the fallback */ }
+  return j.error === 'busy' ? busyLine() : j.message || fallback;
+}
+
+/**
+ * What a confirmed renumbering came to, for a Health row's status line: done, still renaming past the request (it
+ * carries on; partial, not failed), or not applied and why.
+ */
+export function numberingOutcome(r: NumberingAnswer): { text: string; ok?: false; partial?: true } {
+  if (r.state === 'applied' || r.state === 'unchanged') return { text: tr('Renumbered') };
+  if (r.running) return { text: pendingLine(r), partial: true };
+  return { text: pendingLine(r), ok: false };
+}

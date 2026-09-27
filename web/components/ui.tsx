@@ -1,5 +1,6 @@
 'use client';
 import { useState, ReactNode, useRef, useEffect, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { genreBackdrop } from '@/lib/art';
 import { useReduceEffects } from '@/lib/effects';
 import { useLayer } from '@/lib/layers';
@@ -63,6 +64,20 @@ export function useRtl(): boolean {
     return () => mo.disconnect();
   }, []);
   return rtl;
+}
+
+/**
+ * A dialog opened from inside a `.card`, moved out to <body> (v0.49.0).
+ *
+ * ⚠️ `.card` blurs its backdrop, and a `backdrop-filter` makes an element the containing block of its `fixed`
+ * descendants: a Sheet or a ConfirmDialog rendered inside a card was laid out in the CARD's box -- only the card
+ * dimmed, the panel over the row or off the top of the screen, the next card painting over its buttons -- and
+ * the Health cards' `overflow-hidden` cut it off as well. Reduce effects hid it, by removing every blur. A
+ * portal keeps the React tree (context, events) and takes the DOM out of the card. PreviewReader and
+ * ExtensionSettings portal themselves for the same reason.
+ */
+export function OnBody({ children }: { children: ReactNode }) {
+  return typeof document === 'undefined' ? null : createPortal(children, document.body);
 }
 
 /**

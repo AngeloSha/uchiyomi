@@ -4,7 +4,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   bandFor, bandReload, beyondJobs, chapterSpan, downloadSections, groupRecent, jobsPollInterval, landedFor, navRing, originLabel,
-  shouldReload, tileStatus, viewState, type ActivityEntry, type DownloadJob, type SourceJobs,
+  runName, shouldReload, tileStatus, viewState, type ActivityEntry, type DownloadJob, type SourceJobs,
 } from '../lib/serverDownloads';
 import { downloadsLabel, type RunCard } from '../lib/jobs';
 import type { ArchiveEntry } from '../lib/archive';
@@ -230,6 +230,23 @@ test('Server tasks put the running run first; Came in today is what landed, the 
   assert.deepEqual(s.cameIn.map((g) => g.key), ['a'], 'a series with only a failure came in');
   assert.deepEqual(s.cameIn[0].origins, ['archive']);
   assert.deepEqual(s.stopped.map((j) => j.folder), ['X'], 'a download that finished is listed as stopped');
+});
+
+test('a Server tasks card names a Health press by what was pressed and what it is about', () => {
+  // Every Health key starts a repair run; each read "Library repair", indistinguishable from the nightly. The server
+  // sends repairKind, label, number and seriesId (bff lib/downloadJobs.ts); the words are Health's own (kindLabel),
+  // so Recent repairs and this card never name one run two ways. Reintroduce `runTitle(r.kind)` in runName: fails.
+  assert.equal(runName(run({ kind: 'repair', repairKind: 'fix_short', label: 'Walk Tale', number: 3, seriesId: 's1' })), 'Find a longer copy · Walk Tale · Ch. 3',
+    'a Health press reads as the nightly');
+  assert.equal(runName(run({ kind: 'repair', repairKind: 'fill', label: 'Walk Gap', seriesId: 's2' })), 'Fill now · Walk Gap');
+  assert.equal(runName(run({ kind: 'repair', repairKind: 'retry', label: 'MangaDex' })), 'Retry now · MangaDex', 'a source\'s name is dropped');
+  assert.equal(runName(run({ kind: 'repair', repairKind: 'steps:gaps' })), 'Fill gaps');
+  // Hidden from a viewer who may not list the series (the 18+ hide): the press alone.
+  assert.equal(runName(run({ kind: 'repair', repairKind: 'fill' })), 'Fill now');
+  // The nightly, a full run from Tasks, and a server older than v0.49.0 keep the card's own name.
+  assert.equal(runName(run({ kind: 'repair', repairKind: 'full' })), 'Library repair');
+  assert.equal(runName(run({ kind: 'repair' })), 'Library repair');
+  assert.equal(runName(run({ kind: 'sweep', repairKind: 'fill', label: 'x' })), 'Checking for new chapters', 'a sweep is named from repair fields');
 });
 
 test('the series band finds this series by id or folder, and watches its chapters land', () => {

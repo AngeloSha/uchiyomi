@@ -43,7 +43,7 @@ import { useArchiveEnqueue } from '@/components/ArchiveQueue';
 import { listingArchiveLine } from '@/lib/archive';
 import { NumberingNotice } from '@/components/NumberingNotice';
 import { NumberingSheet } from '@/components/NumberingSheet';
-import type { RenumberMode } from '@/lib/numbering';
+import type { PlanMode } from '@/lib/numbering';
 
 /** "Marking 3 chapters read…", counted: the busy half of Mark read's one card. */
 const markingText = (n: number) => (n === 1 ? tr('Marking 1 chapter read…') : tr('Marking {n} chapters read…', { n }));
@@ -848,6 +848,8 @@ function ChapterPager({ page, pages, rows, asc, total, onPage }: { page: number;
 function SeriesInner() {
   const id = useSearchParams().get('id') || '';
   const wantCh = chParam(useSearchParams().get('ch'));
+  // Health's Open on a numbering finding (#116, lib/healthLinks.ts numberingHref): the plan, open on arrival.
+  const wantPlan = useSearchParams().get('numbering') === 'review';
   const router = useRouter();
   const qc = useQueryClient();
   const toast = useToast();
@@ -890,8 +892,22 @@ function SeriesInner() {
   const [filterOpen, setFilterOpen] = useState(false);
   const [chapterSheet, setChapterSheet] = useState<{ number: number; book?: Book; ghost?: Ghost } | null>(null);
   // The renumbering plan (#116), opened from the numbering notice or, for an admin, from the versions sheet.
-  const [numberingSheet, setNumberingSheet] = useState<RenumberMode | null>(null);
+  const [numberingSheet, setNumberingSheet] = useState<PlanMode | null>(null);
   useEffect(() => { setNumberingSheet(null); }, [id]);
+  // ...or from Health, whose link names no mode: the plan of whatever waits, as the route picks it. Once per series,
+  // for an admin (the routes are theirs), and `numbering` then leaves the address, as `ch` does below, so a reload
+  // or Back does not open it again. After the reset above, which runs first.
+  const openedPlan = useRef<string | null>(null);
+  useEffect(() => {
+    if (!wantPlan || !isAdmin || openedPlan.current === id) return;
+    openedPlan.current = id;
+    try {
+      const u = new URL(window.location.href);
+      u.searchParams.delete('numbering');
+      window.history.replaceState(window.history.state, '', `${u.pathname}${u.search}${u.hash}`);
+    } catch { /* the plan opens regardless */ }
+    setNumberingSheet('next');
+  }, [wantPlan, isAdmin, id]);
   // The older-chapters runs the reader unfolded, by the run's lowest number (chapterRows.ts). Hiding one
   // drops its ghosts from the picks: they leave the screen, and the same rule as `toggleGhosts` applies --
   // a row nobody can see cannot stay picked, or the bar keeps counting and Fetch acts on it.
@@ -1880,7 +1896,10 @@ function SeriesInner() {
           // ⚠️ The sheet closes FIRST, then the confirm opens: a Modal under a Sheet cannot be tapped.
           onReplace={(copy) => { const b = chapterSheet.book!; setChapterSheet(null); setReplacing({ book: b, copy }); }}
           // Sheet for sheet, never stacked: the versions sheet closes and the plan opens.
-          onNumbering={isAdmin && listing?.numbering?.mode !== 'posting_order' ? () => { setChapterSheet(null); setNumberingSheet('posting_order'); } : undefined}
+          // Not while a change waits for review (a remap, an undo): the notice above the list offers that plan, and
+          // confirming posting order here would overwrite it with a plan built on the wrong numbers.
+          onNumbering={isAdmin && listing?.numbering?.mode !== 'posting_order' && !listing?.numbering?.pending
+            ? () => { setChapterSheet(null); setNumberingSheet('posting_order'); } : undefined}
           onClose={() => setChapterSheet(null)} />
       )}
       {numberingSheet && isAdmin && <NumberingSheet seriesId={id} mode={numberingSheet} onClose={() => setNumberingSheet(null)} />}

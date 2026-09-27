@@ -213,8 +213,15 @@ test('CoverProgress: a veil and a ring per state, a glyph slot, a still amber ri
   assert.match(archive, /text-amber-400/);
   assert.doesNotMatch(archive, /transition-\[stroke-dashoffset\]|animate-ring/, 'the slow archive\'s ring moves');
   assert.match(archive, /<i data-slow="">/, 'the glyph slot is ignored');
+  // An archive whose chapter list is not read yet ('spin'): the still dashed circle, as its sheet and band draw it,
+  // never a turn. Reintroduce the waiting state's 'idle' for every non-number: a bare track, "nothing done".
+  const unread = html(createElement(CoverProgress, { state: 'waiting', progress: 'spin', tone: 'amber', static: true, label: 'Archiving slowly' }));
+  assert.match(unread, /data-ring="still"/, 'an archive not sized yet shows a bare track, unlike its sheet and band');
+  assert.doesNotMatch(unread, /animate-ring/, 'the slow archive\'s cover turns');
   const queued = html(createElement(CoverProgress, { state: 'waiting', label: 'Queued' }));
   assert.match(queued, /data-ring="idle"/, 'a queued cover without a fraction shows one');
+  // A queued download is not "working": without `static` a 'spin' stays the bare track, never a turn in Queued.
+  assert.match(html(createElement(CoverProgress, { state: 'waiting', progress: 'spin', label: 'Queued' })), /data-ring="idle"/, 'a queued cover turns');
   assert.match(queued, /M12 7v5l3 2/, 'a queued cover has no clock');
   const attention = html(createElement(CoverProgress, { state: 'attention', label: 'Failed' }));
   assert.match(attention, /text-red-400/);

@@ -76,6 +76,8 @@ function whyText(c: Candidate): string {
     case 'unreachable': return tr('Could not be reached (timed out or refused)');
     case 'not_tried': return tr('Not asked: enough sources already had it');
     case 'disabled': return tr('Switched off');
+    // #116: the series is numbered by posting order, so another source's chapter 20 is not this series' 20.
+    case 'posting_order': return tr('Numbers these posts its own way: this series is numbered by posting order');
     default: return tr('Not usable');
   }
 }

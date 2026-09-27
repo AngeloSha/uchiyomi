@@ -97,3 +97,9 @@ export const needsRenumberConfirm = (p: Pick<SourcePref, 'numbering'>, renumbers
 /** The Extensions tab's deep link to one source's settings: Health, the series page and the add dialog use it. */
 export const extensionSettingsHref = (extSourceId: string): string =>
   `/admin/?tab=Extensions&settings=${encodeURIComponent(extSourceId)}`;
+
+/** The extension's own source id inside an adapter id (`sw:2522335540328470744`); null for every other source. */
+export function extSourceIdOf(adapterId: string | null | undefined): string | null {
+  const m = /^sw:(-?\d{1,20})$/.exec(adapterId ?? '');
+  return m ? m[1] : null;
+}

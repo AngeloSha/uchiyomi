@@ -162,7 +162,8 @@ const VEIL: Record<Exclude<CoverState, 'done'>, string> = {
  * as an installed app's icon does, and a small check stays in the corner.
  *
  * - running: the ring shows `progress` (a fraction, or 'spin' before the job has sized itself);
- * - waiting: queued. A clock, or `glyph`; a fraction when there is one (the slow archive's progress);
+ * - waiting: queued. A clock, or `glyph`; a fraction when there is one (the slow archive's progress), and on a
+ *   `static` cover the still dashed circle for 'spin' (an archive whose chapter list is not read yet);
  * - paused: a muted track;
  * - attention: a full red ring and a warning sign;
  * - `static`: never turns or eases -- the slow archive's still amber mark (#117).
@@ -186,7 +187,9 @@ export function CoverProgress({ state, progress = 'spin', caption, label, tone, 
   const reduced = plain || !!still;
   const ring: { value: RingValue; tone: RingTone } =
     state === 'running' ? { value: progress, tone: tone ?? 'accent' }
-    : state === 'waiting' ? { value: typeof progress === 'number' ? progress : 'idle', tone: tone ?? 'accent' }
+    // A queued cover is a bare track, never a turn -- but a still one draws 'spin' as the dashed circle, which says
+    // "not sized yet" where a bare track would say "nothing done" (the archive's sheet and band draw it so too).
+    : state === 'waiting' ? { value: typeof progress === 'number' || (isStatic && progress === 'spin') ? progress : 'idle', tone: tone ?? 'accent' }
     : state === 'attention' ? { value: 1, tone: 'red' }
     : { value: 'idle', tone: 'muted' };
   const centre = glyph

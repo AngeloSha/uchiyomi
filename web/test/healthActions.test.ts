@@ -70,6 +70,10 @@ const ACTIONS: { action: string; labels: string[]; wants: RegExp }[] = [
   { action: 'unignore', labels: ["tr('Stop ignoring')"], wants: /postIgnore\(check\.id, item, false\)/ },
   // #72: the Extension engine row's one-click fix, the same route as the Extensions tab's Connect.
   { action: 'engine_solver', labels: ["tr('Connect')"], wants: /act\(a, async \(\) => \{\s*await api\('\/api\/admin\/extensions\/solver', \{ method: 'POST', json: \{\} \}\);/ },
+  // #116: Review opens the plan of whatever waits; its Confirm posts through the row (the test below). Keep the
+  // source's numbers asks the route as it stands, without confirm.
+  { action: 'renumber', labels: ["tr('Review renumbering')"], wants: /onRun: \(\) => setPlan\(\{ action: a, mode: 'next' \}\)/ },
+  { action: 'keep_numbers', labels: ["tr('Keep the source’s numbers')"], wants: /\/api\/admin\/series\/\$\{encodeURIComponent\(item\.seriesId \|\| ''\)\}\/numbering`, \{ json: \{ mode: 'source' \} \}\)/ },
 ];
 
 test('every action the health check can offer renders one key, with the label and the request it promises', () => {
@@ -138,6 +142,59 @@ test('#72: Connect on the Extension engine row answers on the row and refreshes 
   const a = arm(row, 'engine_solver');
   assert.match(a, /void qc\.invalidateQueries\(\{ queryKey: \['ext-status'\] \}\);/, 'the Extensions tab keeps the old helper state');
   assert.match(a, /tr\('Connected: the extension engine now uses Uchiyomi’s Cloudflare helper\.'\)/, 'Connect says nothing on its row');
+  // A connected engine is no finding: the row is gone when Health answers, before its line can be read. Reintroduce
+  // by dropping the notice: "Connected is said nowhere anyone sees it".
+  assert.match(a, /toast\(text, 'success'\);\s*return \{ text \};/, 'Connected is said nowhere anyone sees it');
+});
+
+test('#116: a numbering key opens the plan, and the plan\'s Confirm is the row\'s own press', () => {
+  // Nothing is renamed before the admin has seen which file becomes which chapter: Review only opens the plan, and
+  // its Confirm posts `confirm: true` through act(), so the row's status line says "Renaming…" with its clock, then
+  // what came of it, then Health again. Reintroduce the sheet posting it by itself (drop onConfirm): the row says
+  // nothing about the rename it asked for.
+  const row = rowOf(code(read(KEYS)));
+  assert.match(row, /<NumberingSheet seriesId=\{item\.seriesId\} mode=\{plan\.mode\} onClose=\{\(\) => setPlan\(null\)\}\s*onConfirm=\{\(mode\) => act\(plan\.action, \(\) => renumber\(mode\), tr\('Renaming…'\)\)\} \/>/,
+    'the plan\'s Confirm is not the row\'s press');
+  const fn = row.slice(row.indexOf('const renumber = async'), row.indexOf('const doDelete'));
+  assert.match(fn, /\{ json: \{ mode, confirm: true \} \}/, 'the plan\'s Confirm does not confirm');
+  assert.match(fn, /out = numberingOutcome\(await api<NumberingAnswer>/, 'the answer is not said in words (numberingOutcome)');
+  assert.match(fn, /catch \(e\) \{\s*return \{ text: refusalText\(e, tr\('Could not do that'\)\), ok: false \};/, 'a refusal is not said as what it is');
+  // Applied, the finding and its row are gone when Health answers: the outcome is said in a notice too, as a
+  // delete's and a merge's are. Reintroduce by dropping it: "a renumber is said nowhere anyone sees it".
+  assert.match(fn, /if \(out\.ok !== false && !out\.partial\) toast\(out\.text, 'success'\);/, 'a renumber is said nowhere anyone sees it');
+  // Keeping the source's numbers on an applied series is the way back, which renames: the plan opens instead.
+  const keep = arm(row, 'keep_numbers');
+  assert.match(keep, /if \(r\.state === 'needs_confirm'\) \{ setPlan\(\{ action: a, mode: 'source' \}\); return null; \}/, 'the way back renames without its plan');
+  assert.match(keep, /if \(r\.state !== 'unchanged'\) return numberingOutcome\(r\);\s*const text = tr\('Kept the source’s numbers'\);\s*toast\(text, 'success'\);\s*return \{ text \};/,
+    'keeping the source\'s numbers is said nowhere anyone sees it');
+  // A press that changed nothing -- the plan opened instead -- does not ask Health again. Reintroduce by dropping the
+  // early return: the row reads "Checking the result…" under an open plan.
+  const act = row.slice(row.indexOf('const act = '), row.indexOf('const renumber = async'));
+  assert.ok(act.indexOf('if (!out && !err) { setSync(null); return; }') > 0
+    && act.indexOf('if (!out && !err) { setSync(null); return; }') < act.indexOf("step: tr('Checking the result…')"), 'a press that changed nothing asks Health again');
+  assert.match(act, /\.\.\.\(out\.partial \? \{ partial: true \} : \{\}\)/, 'a rename still running reads as done');
+});
+
+test('#117: the slow archive\'s caveat reads as a plain line, the others in amber', () => {
+  // Reintroduce the one amber class for every caveat: gaps on their way read as a problem.
+  const row = rowOf(code(read(KEYS)));
+  assert.match(row, /\.map\(\(c\) => \(\{ text: caveatLine\(c\), tone: caveatTone\(c\) \}\)\)/, 'caveats are not toned');
+  assert.match(row, /data-health-caveat=\{c\.tone\} className=\{`mt-1 text-\[11px\] leading-relaxed \$\{c\.tone === 'calm' \? 'text-fog-400' : 'text-amber-300\/90'\}`\}/,
+    'a calm caveat is drawn in amber');
+});
+
+test('every dialog a Health card opens is on <body>, out of the card', () => {
+  // A Health card is a `.card`: its backdrop blur makes it the containing block of a `fixed` dialog inside it, and
+  // its overflow-hidden cuts the dialog off. Reintroduce by rendering a ConfirmDialog in place: this names it.
+  const src = code(read(KEYS));
+  const opens = [...src.matchAll(/<ConfirmDialog\b/g)].map((m) => m.index!);
+  assert.equal(opens.length, 4, 'the Health confirmations moved -- update this count');
+  for (const at of opens) {
+    const before = src.slice(0, at);
+    assert.ok(before.lastIndexOf('<OnBody>') > before.lastIndexOf('</OnBody>'), `a Health confirmation is rendered inside its card: ${src.slice(at, at + 90)}`);
+  }
+  // The plan sheet puts itself on <body> (numbering.test.ts holds NumberingSheet to it).
+  assert.match(code(read('components/NumberingSheet.tsx')), /return \(\s*<OnBody>\s*<Sheet\b/, 'the plan sheet is rendered inside the card');
 });
 
 test('#115: the Test key holds no verdict of its own, its status line says the limit, and source rows show their stages', () => {
@@ -184,17 +241,26 @@ test('a repair-backed key re-checks Health when its run ENDS, never at the press
   const hook = code(read(HOOK));
   // The one re-check after a repair: the provider's effect, once per ended run.
   assert.match(hook, /const all = endedRunIds\(prev\.current, next, awaitingRef\.current\);/, 'the page does not watch for its runs to end');
-  assert.match(hook, /mark\(ids, 'settling'\);[\s\S]*?ended\.current\(\)[\s\S]*?finally \{\n        mark\(ids, 'ended'\);/, 'rows wake before the re-check has answered');
+  assert.match(hook, /mark\(ids, 'settling'\);[\s\S]*?ended\.current\(\)[\s\S]*?finally \{\n        for \(const id of ids\) settled\.current\.add\(id\);\n        mark\(ids, 'ended'\);/, 'rows wake before the re-check has answered');
   const start = hook.slice(hook.indexOf('const start = useCallback'), hook.indexOf('const stop = useCallback'));
   assert.equal((start.match(/ended\.current\(\)/g) ?? []).length, 1, 'start() re-checks Health');
   assert.match(start, /if \(!r\?\.run\) \{[\s\S]*?await ended\.current\(\);/, 'only a server that names no run is re-checked at once');
   // Polled every 2 s while a run goes or one this page started is unread; the POST's id is what it waits on.
   assert.match(hook, /refetchInterval: \(q\) => \(q\.state\.data\?\.running \|\| waiting \? POLL_MS : false\)/);
   assert.match(hook, /set\(key, \{ phase: 'awaiting', action, startedAt, runId: r\?\.run \}\);/, 'the run id the POST answers is not kept');
-  // A run a poll saw start and end while its POST was in flight is closed at once: nothing new comes to wake the
-  // effect for it. Reintroduce by dropping the check: the slot says "Working…" and polls every 2 s for good.
-  assert.match(start, /if \(r\?\.run && handled\.current\.has\(r\.run\)\) \{\s*set\(key, \{ phase: 'ended', action, startedAt, runId: r\.run, finishedAt: Date\.now\(\) \}\);\s*return;\s*\}\s*set\(key, \{ phase: 'awaiting'/,
-    'a press whose run already ended before its POST answered waits forever');
+  // A run a poll saw start and end while its POST was in flight is closed without waiting: nothing new comes to wake
+  // the effect for it. Reintroduce by dropping both checks: the slot says "Working…" and polls every 2 s for good.
+  // But only once Health has ANSWERED for it: while that re-check is in flight the slot is "Checking the result…"
+  // and the effect's `finally` closes it. Reintroduce `handled` in the first check (the old early close): the row
+  // reads "Done" above the old finding for one round-trip, and "closes before Health answered" fails.
+  assert.match(start, /if \(r\?\.run && settled\.current\.has\(r\.run\)\) \{\s*set\(key, \{ phase: 'ended', action, startedAt, runId: r\.run, finishedAt: Date\.now\(\) \}\);\s*return;\s*\}/,
+    'a press whose run already ended before its POST answered closes before Health answered, or waits forever');
+  assert.match(start, /if \(r\?\.run && handled\.current\.has\(r\.run\)\) \{\s*set\(key, \{ phase: 'settling', action, startedAt, runId: r\.run \}\);\s*return;\s*\}\s*set\(key, \{ phase: 'awaiting'/,
+    'a press whose run is being re-checked does not wait for the answer');
+  assert.match(hook, /\} finally \{\s*for \(const id of ids\) settled\.current\.add\(id\);\s*mark\(ids, 'ended'\);/, 'what Health answered for is not kept');
+  // The effect's own late close follows the same rule. Reintroduce `if (stale.length) mark(stale, 'ended');`: fails.
+  assert.match(hook, /mark\(stale\.filter\(\(id\) => settled\.current\.has\(id\)\), 'ended'\);\s*mark\(stale\.filter\(\(id\) => !settled\.current\.has\(id\)\), 'settling'\);/,
+    'a late press closes before Health answered for its run');
   // No "Started — the Tasks line shows what it did" toast from Health: success is said on the row.
   assert.doesNotMatch(hook + code(read(KEYS)), /the Tasks line shows what it did/, 'Health still toasts "Started" and points at another tab');
 });

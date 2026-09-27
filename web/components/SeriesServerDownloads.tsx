@@ -83,11 +83,14 @@ export function SeriesServerDownloads({ seriesId, folder }: { seriesId: string; 
     : tile.archive ? tr('Archiving slowly')
     : tile.entries[0] ? originLabel(tile.entries[0].origin) : '';
   const sentence = [lead, status].filter(Boolean).join(' · ');
-  const href = downloadsHref(tile?.folder ?? failed?.job.folder ?? folder);
+  // The archive's own row draws its line below; its chapter in flight is not a second one.
+  const tileLine = !!tile && !(tile.archive && archive);
+  // `||`, not `??`: an archive row's tile with nothing in flight has the folder '' -- a string -- and `??` kept it,
+  // losing the failed download's folder to focus on.
+  const href = downloadsHref(tile?.folder || failed?.job.folder || folder);
   return (
     <div data-series-downloads className="mb-3 space-y-2">
-      {/* The archive's own row draws its line below; its chapter in flight is not a second one. */}
-      {tile && !(tile.archive && archive) && (
+      {tile && tileLine && (
         <div data-band-state={tile.archive ? 'archive' : 'active'} className="card flex items-center gap-3 px-3 py-2.5">
           <span className="relative grid shrink-0 place-items-center">
             <ProgressRing progress={tile.progress} size={28} tone={tile.archive ? 'amber' : 'accent'} static={tile.archive}
@@ -119,7 +122,8 @@ export function SeriesServerDownloads({ seriesId, folder }: { seriesId: string; 
                 {tr('Dismiss')}
               </button>
             )}
-            {!tile && <Link href={href} className="text-[12px] font-medium text-accent hover:underline">{tr('See all')}</Link>}
+            {/* Its "See all" whenever the tile's line (which has its own) is not shown -- an archive's included. */}
+            {!tileLine && <Link href={href} className="text-[12px] font-medium text-accent hover:underline">{tr('See all')}</Link>}
           </div>
         </div>
       )}

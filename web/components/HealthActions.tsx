@@ -26,12 +26,14 @@ import { ConfirmDialog, msgOf } from '@/components/ConfirmDialog';
 import { useToast } from '@/components/Toast';
 import { ActionKeys, ActionList, ActionStatus, type ActionSpec } from '@/components/ActionList';
 import { StatusMark } from '@/components/StatusMark';
+import { OnBody } from '@/components/ui';
+import { NumberingSheet } from '@/components/NumberingSheet';
 import { t as tr } from '@/lib/i18n';
 import { isDesktop } from '@/lib/desktop';
 import { IDLE, type ActionState } from '@/lib/actionState';
 import { triggerRefresh, type RefreshAnswer } from '@/lib/refresh';
 import {
-  ACTION_COPY, caveatLine, fixAllWhat, outcomeLine, planFooter, planLine, repairGate, rowState, solverDownLine, timeLine,
+  ACTION_COPY, caveatLine, caveatTone, fixAllWhat, outcomeLine, planFooter, planLine, repairGate, rowState, solverDownLine, timeLine,
   type CopyCtx,
 } from '@/lib/healthCopy';
 import {
@@ -40,9 +42,13 @@ import {
 } from '@/lib/repairRun';
 import { useRepairRun } from '@/lib/useRepairRun';
 import { testStep } from '@/lib/sourceEvidence';
+import { numberingOutcome, refusalText, type NumberingAnswer, type PlanMode, type RenumberMode } from '@/lib/numbering';
 import type { HealthAction, HealthCheck, HealthItem } from '@/lib/types';
 
 type Toast = ReturnType<typeof useToast>;
+
+/** What an action that answers at once said: done, done with something left (`partial`), or not done (`ok: false`). */
+type ActOutcome = { text: string; ok?: boolean; partial?: boolean };
 
 /**
  * Ignore one finding, or stop ignoring it (v0.48.3). The server looks the finding up again and records all of
@@ -103,6 +109,8 @@ export function HealthRow({ check, item, rowKey, links, children }: {
   // Answers-at-once actions keep their own state: pressed, asked, re-checked, then what they said.
   const [sync, setSync] = useState<{ action: HealthAction; state: ActionState; at: number } | null>(null);
   const [asking, setAsking] = useState<'delete' | 'disable' | 'merge' | null>(null);
+  // #116: the renumbering plan a numbering key opened, and which key opened it (its row state is that key's).
+  const [plan, setPlan] = useState<{ action: HealthAction; mode: PlanMode } | null>(null);
   const [keepFirst, setKeepFirst] = useState(() => keptIndex(item) === 0);
   // ONE sentence with the title inside it, split around the placeholder so the title can carry its own
   // colour -- the idiom ConfirmDialog.tsx:105-111 documents. The bare verb key + the title rendered
@@ -135,13 +143,16 @@ export function HealthRow({ check, item, rowKey, links, children }: {
 
   // `step` is the status line's words while the request runs; its clock ticks beside them (a Test's says the
   // server's limit, testStep: one can take most of a minute).
-  const act = (a: HealthAction, run: () => Promise<{ text: string; ok?: boolean } | null>, step = tr('Working…')) => {
+  const act = (a: HealthAction, run: () => Promise<ActOutcome | null>, step = tr('Working…')) => {
     const at = Date.now();
     setSync({ action: a, at, state: { kind: 'working', startedAt: at, step } });
     void (async () => {
-      let out: { text: string; ok?: boolean } | null = null;
+      let out: ActOutcome | null = null;
       let err: string | null = null;
       try { out = await run(); } catch (e) { err = msgOf(e, tr('Could not save that')); }
+      // Nothing that could change a finding was done -- a merge with no pair, or Keep the source's numbers answered
+      // with a plan to confirm first -- so there is nothing to check again, and the row goes back to its keys.
+      if (!out && !err) { setSync(null); return; }
       // Health is asked again even after a failure -- the failure may be the finding having been dealt with
       // elsewhere -- and the row stays busy until it has ANSWERED (v0.48.3).
       setSync({ action: a, at, state: { kind: 'working', startedAt: at, step: tr('Checking the result…') } });
@@ -150,8 +161,25 @@ export function HealthRow({ check, item, rowKey, links, children }: {
       if (!out) { setSync(null); return; }
       setSync({ action: a, at, state: out.ok === false
         ? { kind: 'failed', finishedAt: Date.now(), reason: out.text }
-        : { kind: 'done', finishedAt: Date.now(), tookMs: Date.now() - at, outcome: out.text } });
+        : { kind: 'done', finishedAt: Date.now(), tookMs: Date.now() - at, outcome: out.text, ...(out.partial ? { partial: true } : {}) } });
     })();
+  };
+
+  /**
+   * A renumbering confirmed in its plan (#116): posted here rather than by the sheet, so this row's status line
+   * carries it -- "Renaming…" and its clock, then what came of it (lib/numbering.ts numberingOutcome), then Health
+   * again. A refusal is said as what it is: a download into the folder, a file already at a target name.
+   */
+  const renumber = async (mode: RenumberMode): Promise<ActOutcome> => {
+    let out: ActOutcome;
+    try {
+      out = numberingOutcome(await api<NumberingAnswer>(`/api/admin/series/${encodeURIComponent(item.seriesId || '')}/numbering`, { json: { mode, confirm: true } }));
+    } catch (e) {
+      return { text: refusalText(e, tr('Could not do that')), ok: false };
+    }
+    // Applied, the finding is gone when Health answers, and its row with this line: said in a notice too.
+    if (out.ok !== false && !out.partial) toast(out.text, 'success');
+    return out;
   };
 
   const doDelete = async (): Promise<{ text: string; ok?: boolean } | null> => {
@@ -260,7 +288,32 @@ export function HealthRow({ check, item, rowKey, links, children }: {
           onRun: () => act(a, async () => {
             await api('/api/admin/extensions/solver', { method: 'POST', json: {} });
             void qc.invalidateQueries({ queryKey: ['ext-status'] });
-            return { text: tr('Connected: the extension engine now uses Uchiyomi’s Cloudflare helper.') };
+            const text = tr('Connected: the extension engine now uses Uchiyomi’s Cloudflare helper.');
+            // A connected engine is no finding: the row goes when Health answers again, taking this line with it
+            // before anyone could read it. Said in a notice too, as a delete's and a merge's are.
+            toast(text, 'success');
+            return { text };
+          }),
+        };
+      // #116, the chapter numbering check. Review opens the plan of whatever waits -- the route picks the change --
+      // and its Confirm is this row's press (`renumber` above), so nothing is renamed before the admin has seen
+      // which file becomes which chapter.
+      case 'renumber':
+        return { ...base, primary: true, label: tr('Review renumbering'), onRun: () => setPlan({ action: a, mode: 'next' }) };
+      // On a proposal, keeping the source's numbers renames nothing and answers at once. On a series already
+      // numbered by posting order it is the way back, which renames: the route answers with that plan instead
+      // (`needs_confirm`), and the plan opens for its Confirm.
+      case 'keep_numbers':
+        return {
+          ...base, label: tr('Keep the source’s numbers'),
+          onRun: () => act(a, async () => {
+            const r = await api<NumberingAnswer>(`/api/admin/series/${encodeURIComponent(item.seriesId || '')}/numbering`, { json: { mode: 'source' } });
+            if (r.state === 'needs_confirm') { setPlan({ action: a, mode: 'source' }); return null; }
+            if (r.state !== 'unchanged') return numberingOutcome(r);
+            // The proposal is dropped, and its row with it when Health answers: said in a notice too.
+            const text = tr('Kept the source’s numbers');
+            toast(text, 'success');
+            return { text };
           }),
         };
       default:
@@ -272,7 +325,10 @@ export function HealthRow({ check, item, rowKey, links, children }: {
   // the same short copy" twice, one above the other, read as two findings).
   const stored = outcomeLine(item.outcome);
   const outcome = rowNow.kind === 'done' && stored.includes(rowNow.outcome) ? '' : stored;
-  const caveats = (item.caveats ?? []).filter((c) => actions.includes(c.action)).map(caveatLine).filter(Boolean);
+  // A caveat says what a key will not be able to do, in amber -- except the slow archive's, which says the gaps are
+  // on their way and nothing is wrong (healthCopy.ts caveatTone).
+  const caveats = (item.caveats ?? []).filter((c) => actions.includes(c.action))
+    .map((c) => ({ text: caveatLine(c), tone: caveatTone(c) })).filter((c) => c.text);
 
   return (
     <div data-health-item={rowKey} data-repair-state={rowNow.kind} className={`px-4 py-2.5 ${item.info ? 'opacity-60' : ''}`}>
@@ -281,62 +337,78 @@ export function HealthRow({ check, item, rowKey, links, children }: {
         {links && <div className="flex shrink-0 flex-col items-end gap-1 pt-0.5">{links}</div>}
       </div>
       {outcome && <p data-health-outcome className="mt-1 text-[11px] leading-relaxed text-fog-400">{outcome}</p>}
-      {caveats.map((c) => <p key={c} data-health-caveat className="mt-1 text-[11px] leading-relaxed text-amber-300/90">{c}</p>)}
+      {caveats.map((c) => (
+        <p key={c.text} data-health-caveat={c.tone} className={`mt-1 text-[11px] leading-relaxed ${c.tone === 'calm' ? 'text-fog-400' : 'text-amber-300/90'}`}>{c.text}</p>
+      ))}
       {specs.length > 0 && <ActionKeys actions={specs} className="mt-2" />}
       <ActionStatus state={rowNow} />
 
+      {/* #116: the plan a numbering key opened (on <body>, itself). Its Confirm is this row's press. */}
+      {plan && item.seriesId && (
+        <NumberingSheet seriesId={item.seriesId} mode={plan.mode} onClose={() => setPlan(null)}
+          onConfirm={(mode) => act(plan.action, () => renumber(mode), tr('Renaming…'))} />
+      )}
+
+      {/* The confirmations on <body>: a Health card is a `.card`, whose backdrop blur made it the dialog's containing
+          block -- only the card dimmed, and its overflow-hidden cut the dialog off (ui.tsx OnBody). */}
       {asking === 'delete' && (
-        <ConfirmDialog
-          title={bookIds.length === 1 ? tr('Delete this chapter’s file?') : tr('Delete these chapters’ files?')}
-          confirmLabel={bookIds.length === 1 ? tr('Delete chapter') : tr('Delete chapters')}
-          danger
-          body={
-            <>
-              <p>
-                {check.id === 'outliers'
-                  ? tr('A chapter whose number cannot be right is almost always one the source mis-listed. Deleting removes the file; the chapter stays listed and everyone keeps their reading history.')
-                  : tr('Deleting removes the file. The chapter stays listed and everyone keeps their reading history.')}
-              </p>
-              <p className="mt-2">{tr('A chapter somebody has bookmarked is skipped, and so is anything in a library you built by hand. There is no undo and no recycle bin.')}</p>
-            </>
-          }
-          onConfirm={() => act('delete', doDelete)}
-          onClose={() => setAsking(null)}
-        />
+        <OnBody>
+          <ConfirmDialog
+            title={bookIds.length === 1 ? tr('Delete this chapter’s file?') : tr('Delete these chapters’ files?')}
+            confirmLabel={bookIds.length === 1 ? tr('Delete chapter') : tr('Delete chapters')}
+            danger
+            body={
+              <>
+                <p>
+                  {check.id === 'outliers'
+                    ? tr('A chapter whose number cannot be right is almost always one the source mis-listed. Deleting removes the file; the chapter stays listed and everyone keeps their reading history.')
+                    : tr('Deleting removes the file. The chapter stays listed and everyone keeps their reading history.')}
+                </p>
+                <p className="mt-2">{tr('A chapter somebody has bookmarked is skipped, and so is anything in a library you built by hand. There is no undo and no recycle bin.')}</p>
+              </>
+            }
+            onConfirm={() => act('delete', doDelete)}
+            onClose={() => setAsking(null)}
+          />
+        </OnBody>
       )}
 
       {asking === 'disable' && (
-        <ConfirmDialog
-          title={tr('Turn this source off?')}
-          confirmLabel={tr('Turn off')}
-          danger
-          body={<p>{tr('Nothing is deleted. Series that follow it stop being asked for new chapters until you turn it back on under Providers.')}</p>}
-          onConfirm={() => act('disable', doDisable)}
-          onClose={() => setAsking(null)}
-        />
+        <OnBody>
+          <ConfirmDialog
+            title={tr('Turn this source off?')}
+            confirmLabel={tr('Turn off')}
+            danger
+            body={<p>{tr('Nothing is deleted. Series that follow it stop being asked for new chapters until you turn it back on under Providers.')}</p>}
+            onConfirm={() => act('disable', doDisable)}
+            onClose={() => setAsking(null)}
+          />
+        </OnBody>
       )}
 
       {asking === 'merge' && (item.seriesIds || []).length === 2 && (
-        <ConfirmDialog
-          title={tr('Merge these two?')}
-          confirmLabel={tr('Merge')}
-          body={
-            <>
-              <p>{tr('This cannot be undone. Progress, bookmarks, ratings and tracker links move to the kept copy.')}</p>
-              <p className="mt-2">{tr('No chapter is dropped even if both copies have it, and no files are touched.')}</p>
-              <div className="mt-3 space-y-2">
-                {(item.titles || []).map((t, i) => (
-                  <label key={i} className="flex cursor-pointer items-center gap-2 rounded-lg border border-ink-700 px-3 py-2 text-sm">
-                    <input type="radio" checked={keepFirst === (i === 0)} onChange={() => setKeepFirst(i === 0)} />
-                    <span className="truncate">{keepBefore}<strong className="text-fog-100">{t}</strong>{keepAfter}</span>
-                  </label>
-                ))}
-              </div>
-            </>
-          }
-          onConfirm={() => act('merge', doMerge)}
-          onClose={() => setAsking(null)}
-        />
+        <OnBody>
+          <ConfirmDialog
+            title={tr('Merge these two?')}
+            confirmLabel={tr('Merge')}
+            body={
+              <>
+                <p>{tr('This cannot be undone. Progress, bookmarks, ratings and tracker links move to the kept copy.')}</p>
+                <p className="mt-2">{tr('No chapter is dropped even if both copies have it, and no files are touched.')}</p>
+                <div className="mt-3 space-y-2">
+                  {(item.titles || []).map((t, i) => (
+                    <label key={i} className="flex cursor-pointer items-center gap-2 rounded-lg border border-ink-700 px-3 py-2 text-sm">
+                      <input type="radio" checked={keepFirst === (i === 0)} onChange={() => setKeepFirst(i === 0)} />
+                      <span className="truncate">{keepBefore}<strong className="text-fog-100">{t}</strong>{keepAfter}</span>
+                    </label>
+                  ))}
+                </div>
+              </>
+            }
+            onConfirm={() => act('merge', doMerge)}
+            onClose={() => setAsking(null)}
+          />
+        </OnBody>
       )}
     </div>
   );
@@ -462,31 +534,33 @@ export function HealthCardActions({ check }: { check: HealthCheck }) {
     <div data-health-legend={check.id} className="border-b border-ink-800/70 px-4 pt-2">
       <ActionList actions={rows} aria-label={tr('What you can do here')} />
       {asking && (
-        <ConfirmDialog
-          title={pairs.length === 1 ? tr('Merge this pair?') : tr('Merge these {n} pairs?', { n: pairs.length })}
-          confirmLabel={tr('Merge all')}
-          body={
-            <>
-              <p>{tr('This cannot be undone. Progress, bookmarks, ratings and tracker links move to the kept copy.')}</p>
-              <ul className="mt-3 space-y-2">
-                {pairs.map((p, i) => (
-                  <li key={i} className="rounded-lg border border-ink-700 px-3 py-2">
-                    {(p.titles || []).map((t, j) => (
-                      <p key={j} className="flex min-w-0 items-center gap-2 text-sm">
-                        <span className={`truncate ${j === keptIndex(p) ? 'text-fog-100' : 'text-fog-500'}`}>{t}</span>
-                        {j === keptIndex(p) && (
-                          <span className="shrink-0 rounded bg-ink-700 px-1.5 py-0.5 text-[10px] text-fog-300">{tr('kept')}</span>
-                        )}
-                      </p>
-                    ))}
-                  </li>
-                ))}
-              </ul>
-            </>
-          }
-          onConfirm={() => { void mergeAll(); }}
-          onClose={() => setAsking(false)}
-        />
+        <OnBody>
+          <ConfirmDialog
+            title={pairs.length === 1 ? tr('Merge this pair?') : tr('Merge these {n} pairs?', { n: pairs.length })}
+            confirmLabel={tr('Merge all')}
+            body={
+              <>
+                <p>{tr('This cannot be undone. Progress, bookmarks, ratings and tracker links move to the kept copy.')}</p>
+                <ul className="mt-3 space-y-2">
+                  {pairs.map((p, i) => (
+                    <li key={i} className="rounded-lg border border-ink-700 px-3 py-2">
+                      {(p.titles || []).map((t, j) => (
+                        <p key={j} className="flex min-w-0 items-center gap-2 text-sm">
+                          <span className={`truncate ${j === keptIndex(p) ? 'text-fog-100' : 'text-fog-500'}`}>{t}</span>
+                          {j === keptIndex(p) && (
+                            <span className="shrink-0 rounded bg-ink-700 px-1.5 py-0.5 text-[10px] text-fog-300">{tr('kept')}</span>
+                          )}
+                        </p>
+                      ))}
+                    </li>
+                  ))}
+                </ul>
+              </>
+            }
+            onConfirm={() => { void mergeAll(); }}
+            onClose={() => setAsking(false)}
+          />
+        </OnBody>
       )}
     </div>
   );

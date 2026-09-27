@@ -139,7 +139,9 @@ export function ExtensionSettings({ target, onClose }: { target: SettingsTarget;
         </label>
       )}
 
-      {(isLoading || (!sourceId && !pkgFailed)) && <p className="py-4 text-sm text-fog-500">{tr('Loading…')}</p>}
+      {/* Waiting for the settings, or for the package's sources to pick one from -- not once those came back empty
+          ("This extension provides no source", below), which read "Loading…" beside it for good. */}
+      {(isLoading || (!sourceId && !pkgFailed && !pkgSources)) && <p className="py-4 text-sm text-fog-500">{tr('Loading…')}</p>}
       {(isError || pkgFailed) && (
         <p role="alert" className="py-4 text-sm text-amber-300">{msgOf(error, tr('The extension server did not answer. Try again in a moment.'))}</p>
       )}
