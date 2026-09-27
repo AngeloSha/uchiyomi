@@ -14,7 +14,7 @@ import { classify, reportOk, reportFail, SourceStatus } from './sourceHealth';
 import { withGate } from './gate';
 import { imageExt } from './imageExt';
 import { writeAtomic } from './fsAtomic';
-import { pagePace, paceLevel, noteRateLimited, MAX_PAGE_GAP_MS } from './pace';
+import { pagePace, paceLevel, noteRateLimited, resumePace } from './pace';
 import { drawGap } from './archivePace';
 import { pageName, placeholderPng, PARTIAL_MANIFEST, type PartialManifest } from './partial';
 
@@ -504,12 +504,9 @@ export async function fetchPages(src: SourceAdapter, urls: string[], indices: nu
       retryAfterMs = 0;
       // Resume slower than the burst that caused this, or the wait only buys one more page. The burst is
       // what was refused, so a widened pool narrows to one here too: an engine that said 429 to four
-      // overlapping requests is not going to like four more. A declared gap of 0 stays 0 inside this
-      // chapter (the engine paces the site); the NEXT chapter gets the server default doubled (paceFor).
-      gap = gap ? Math.min(gap * 2, MAX_PAGE_GAP_MS) : 0;
-      // A slow pace backs off the same way, both ends of its range: doubled up to the ceiling, and never
-      // below where it started when it started above the ceiling -- the resume may not be the fast part.
-      if (jitter) jitter = jitter.map((g) => Math.min(g * 2, Math.max(MAX_PAGE_GAP_MS, g))) as [number, number];
+      // overlapping requests is not going to like four more. The gap doubles up to the ceiling and never
+      // drops; a slow pace's range backs off at both ends and keeps a spread (pace.ts resumePace says how).
+      ({ gap, jitter } = resumePace({ gap, jitter }));
       workers = 1;
     } else if (round) {
       break; // a stable shortfall with no 429: the pages are not there, and one retry was enough to know

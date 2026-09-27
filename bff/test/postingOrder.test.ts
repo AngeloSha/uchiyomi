@@ -148,6 +148,9 @@ test('uncredited copies that differ only by a title, and same-day mirrors, are n
   const seasons: SourceChapter[] = [];
   for (const s of [1, 2]) for (let n = 1; n <= 40; n++) seasons.push({ sourceId: `s${s}-${n}`, number: n, title: `S${s} Chapter ${n}`, publishedAt: new Date(EPOCH + ((s - 1) * 400 + n * 7) * DAY).toISOString() });
   assert.equal(detectSharedNumbering(seasons).verdict, 'hint');
+  // Undated stacks cannot be judged by day, and a hint only warns, so they are let through. Reintroduce by
+  // judging only by days (`return days.size >= T.HINT_DAYS` in `spread`): the undated seasons read 'none'.
+  assert.equal(detectSharedNumbering(seasons.map(({ publishedAt: _p, ...c }) => c)).verdict, 'hint', 'undated seasons still warn');
   // Too short a listing is never judged.
   assert.equal(detectSharedNumbering(webtoons('istrevelia').slice(0, SHARED_NUMBERING.MIN_POSTS - 1)).verdict, 'none');
 });
@@ -234,14 +237,58 @@ test('posting numbers are stable: a deleted post is a hole, a new one goes at th
   assert.equal(fourth.conflict, undefined);
 
   // The engine re-creates its rows (new ids, same urls): every post is found by its url and keeps its number.
-  const renamed = webtoons('istrevelia').map((c) => ({ ...c, sourceId: `v2-${c.sourceId}` }));
+  // The titles and dates move too, so the url is the only thing left that says which post each one is.
+  // Reintroduce by skipping the url pass in assignPostingNumbers: all 226 come back as new posts, 227..452.
+  const renamed = webtoons('istrevelia').map((c) => ({
+    ...c, sourceId: `v2-${c.sourceId}`, title: `${displayTitle(c.title)} [remastered]`,
+    publishedAt: new Date(Date.parse(c.publishedAt!) + 3 * DAY).toISOString(),
+  }));
   const fifth = assignPostingNumbers(postingSequence(renamed), first.rows);
-  assert.equal(numberOf(fifth, `v2-${idAt(77)}`), 77);
+  assert.equal(numberOf(fifth, `v2-${idAt(77)}`), 77, 'found again by its url alone');
   assert.equal(fifth.rekeyed.length, 226);
   assert.deepEqual(fifth.added, []);
   // No url and a new id: the same title on the same day still finds it, when that pairs exactly one of each.
   const bare = webtoons('istrevelia').map(({ url: _url, ...c }) => ({ ...c, sourceId: `v3-${c.sourceId}` }));
   assert.equal(numberOf(assignPostingNumbers(postingSequence(bare), first.rows), `v3-${idAt(100)}`), 100);
+});
+
+test('a title on a day finds a post only when it pairs one stored post with one listed post', () => {
+  // Two posts called 'Q&A' on the same day are not provably either of the stored one. Reintroduce by claiming
+  // the first of each (`if (rs?.length) claim(idx[0], rs[0])` in assignPostingNumbers): qa-1 takes old-qa's
+  // number and the `neither is the stored one` assertion fails.
+  const day = new Date(EPOCH + 10 * DAY).toISOString();
+  const qa = (id: string, order: number): SourceChapter => ({ sourceId: id, number: 1, title: 'Q&A', order, publishedAt: day });
+  const stored: PostNumber[] = [{ postId: 'old-qa', number: 5, title: 'Q&A', publishedAt: day }];
+  const twins = assignPostingNumbers(postingSequence([qa('qa-1', 1), qa('qa-2', 2)]), stored);
+  assert.deepEqual(twins.rekeyed, [], 'two listed Q&As that day: neither is the stored one');
+  assert.deepEqual(twins.gone.map((r) => r.postId), ['old-qa'], 'which stays reserved as a hole');
+  assert.ok(!twins.rows.some((r) => !r.gone && r.number === 5), 'and its number is handed to neither');
+  // The other way round: two stored, one listed.
+  const two: PostNumber[] = [{ postId: 'old-1', number: 5, title: 'Q&A', publishedAt: day }, { postId: 'old-2', number: 6, title: 'Q&A', publishedAt: day }];
+  assert.deepEqual(assignPostingNumbers(postingSequence([qa('qa-1', 1)]), two).rekeyed, [], 'one listed Q&A against two stored');
+  // One of each is the post found again under a new id.
+  assert.deepEqual(assignPostingNumbers(postingSequence([qa('qa-1', 1)]), stored).rekeyed, [{ from: 'old-qa', to: 'qa-1' }]);
+});
+
+test('a copy that joins an earlier number does not pull the next new post back beside it', () => {
+  // Alpha has posted 1..10. Then Beta posts a copy of chapter 2 late, and Alpha inserts a post between 9 and
+  // 10. Reintroduce by walking with `prev = n` in assignPostingNumbers: Beta's copy takes prev back to 2, the
+  // inserted post gets 2.5 -- beside chapter 2, for good -- and the `between its neighbours` assertion fails.
+  const at = (d: number) => new Date(EPOCH + d * DAY).toISOString();
+  const alpha = (k: number, order: number): SourceChapter => ({ sourceId: `a${k}`, number: k, title: `Chapter ${k}: Part ${k}`, scanlator: 'Alpha', order, publishedAt: at(k) });
+  const first = assignPostingNumbers(postingSequence(Array.from({ length: 10 }, (_, i) => alpha(i + 1, i + 1))));
+  const next: SourceChapter[] = [
+    ...Array.from({ length: 9 }, (_, i) => alpha(i + 1, i + 1)),
+    { sourceId: 'b2', number: 2, title: 'Ch. 2 - Part 2', scanlator: 'Beta', order: 10, publishedAt: at(9.2) },
+    { sourceId: 'ins', number: 9, title: 'Chapter 9: Extra', scanlator: 'Alpha', order: 11, publishedAt: at(9.5) },
+    alpha(10, 12),
+  ];
+  const second = assignPostingNumbers(postingSequence(next), first.rows);
+  const n = (id: string) => second.rows.find((r) => r.postId === id)!.number;
+  assert.equal(n('b2'), 2, 'Beta\'s copy is a version of chapter 2');
+  assert.equal(n('ins'), 9.5, 'the inserted post goes between its neighbours, 9 and 10');
+  assert.equal(n('a10'), 10);
+  assert.equal(second.conflict, undefined);
 });
 
 test('float32 noise does not split a number', () => {
@@ -374,6 +421,61 @@ test('planRenumber: a book matched only by the old listing waits for an admin', 
   // A tombstone moves its row (and its read history) with nothing to rename.
   const gone = planRenumber([landed(ist, 2, '/dl', { pruned: true })], { mode: 'posting_order', posts }, {});
   assert.deepEqual([gone.moves[0].via, gone.moves[0].file], ['row', 'Istrevelia/Chapter 21.cbz']);
+});
+
+test('planRenumber: a release date chooses a post, but never makes a plan clean', () => {
+  // Every sweep re-stamps a book's date with the date of whichever copy the listing picks for its number
+  // (setBookDates), so a date is the listing's guess again, not the file's. Reintroduce by counting 'date' as
+  // exact (add it back to EXACT): the nameless book's plan reads clean and would apply itself unattended.
+  const ist = webtoons('istrevelia');
+  const posts = postingTarget(ist);
+  const nameless = planRenumber([landed(ist, 2, '/dl', { chapterName: null })], { mode: 'posting_order', posts }, { listing: oldListing(ist) });
+  assert.deepEqual([nameless.moves[0].to, nameless.moves[0].how], [21, 'date'], 'the date still chooses the post');
+  assert.equal(nameless.clean, false, 'a date alone never applies itself');
+  assert.deepEqual(nameless.reasons, ['listing_only']);
+
+  // A name BORROWED from another source (lib/borrowNames.ts) matched that source's chapter by number only.
+  // Reintroduce by reading chapterName whatever chapterNameSource says: the borrowed 'Blood Warning' name
+  // moves the book to post 5 by 'name', and the plan reads clean.
+  const blood = chapterName('Episode 1 - Page 5-7 [Blood Warning!] (ch. 1)', 1);
+  const borrowed = planRenumber([landed(ist, 1, '/dl', { chapterName: blood, chapterNameSource: 'mangadex' })], { mode: 'posting_order', posts }, { listing: oldListing(ist) });
+  assert.notEqual(borrowed.moves[0].how, 'name', 'a borrowed name is not evidence');
+  assert.equal(borrowed.clean, false);
+  // Its own name, the same words, is.
+  const own = planRenumber([landed(ist, 1, '/dl', { chapterName: blood })], { mode: 'posting_order', posts }, { listing: oldListing(ist) });
+  assert.deepEqual([own.moves[0].to, own.moves[0].how, own.clean], [5, 'name', true]);
+});
+
+test('planRenumber: a filename or title that only repeats the number is not a name', () => {
+  // The downloader names every file `Chapter N` and the scanner's title is the filename's, so for a book with
+  // no chapter name both only say its number again. Reintroduce by reading them with forms() instead of
+  // namedForms(): the post literally titled 'Chapter 5' matches by 'name' and the plan reads clean.
+  const posts: PlanPost[] = [
+    { postId: 'plain', number: 40, from: 5, title: 'Chapter 5' },
+    { postId: 'named', number: 41, from: 5, title: 'Chapter 5: The Return' },
+  ];
+  const bare: PlanBook = { id: 'b5', root: '/dl', file: 'S/Chapter 5.cbz', number: 5, title: 'Chapter 5' };
+  const plan = planRenumber([bare], { mode: 'posting_order', posts }, { listing: new Map([[5, 'plain']]) });
+  assert.deepEqual([plan.moves[0].to, plan.moves[0].how], [40, 'listing'], 'only the listing says which post');
+  assert.equal(plan.clean, false);
+  // A title that names more than the number still counts.
+  const titled = planRenumber([{ ...bare, title: 'Chapter 5: The Return' }], { mode: 'posting_order', posts }, {});
+  assert.deepEqual([titled.moves[0].to, titled.moves[0].how], [41, 'name']);
+});
+
+test('planRenumber: two posts with the book\'s own name are an ambiguity, not a cue to try its title', () => {
+  // After a numbering preference flip (remap) every post is a candidate. The book's chapter name 'The Gate'
+  // fits two of them; its title happens to name one. Reintroduce by falling through when the name is
+  // ambiguous (`if (unique(byName)) return unique(byName)`): the title breaks the tie and the book moves to
+  // 21 by 'name', a clean plan built on the weaker spelling.
+  const posts: PlanPost[] = [
+    { postId: 'p', number: 21, title: 'Chapter 21: The Gate' },
+    { postId: 'q', number: 22, title: 'The Gate' },
+  ];
+  const book: PlanBook = { id: 'b', root: '/dl', file: 'S/Chapter 3.cbz', number: 3, chapterName: 'The Gate', title: 'Chapter 21: The Gate' };
+  const plan = planRenumber([book], { mode: 'remap', posts }, { listing: new Map([[3, 'q']]) });
+  assert.deepEqual([plan.moves[0].to, plan.moves[0].how], [22, 'listing'], 'it falls to the listing, not to its title');
+  assert.equal(plan.clean, false);
 });
 
 test('planRenumber: the undo keeps every file', () => {

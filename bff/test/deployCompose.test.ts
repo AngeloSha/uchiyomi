@@ -312,6 +312,26 @@ test("the CasaOS add-on engine joins the listing and uses the listing's solver",
 });
 
 /**
+ * The docs' settings row for the switch. Compose feeds EXTENSION_ENGINE to `deploy.replicas`, which must be an
+ * integer: `EXTENSION_ENGINE=off` in .env stops `docker compose up -d` for the whole stack, app updates included
+ * (the docker-gated test below asks Compose). The app reads off/false/no too, but only 0 and 1 may be offered
+ * as what to put in .env. Reintroduce the first draft's "`0` (or `off`, `false`, `no`)": the `what Compose
+ * accepts` assertion fails.
+ */
+test('the docs offer only 0 and 1 for EXTENSION_ENGINE, the values Compose accepts', () => {
+  const docs = readFileSync(join(REPO, 'docs/extensions.md'), 'utf8');
+  const row = docs.split('\n').find((l) => l.startsWith('| `EXTENSION_ENGINE`'));
+  assert.ok(row, 'docs/extensions.md lost its EXTENSION_ENGINE row');
+  assert.match(row, /Compose only accepts `0` or `1`/, 'the row no longer says what Compose accepts');
+  assert.doesNotMatch(row, /`0` \(or `off`/, 'the row offers `off` as a value for .env');
+  // Nothing else a self-hoster copies from says otherwise.
+  for (const file of ['.env.example', ...FILES]) {
+    const text = readFileSync(join(REPO, file), 'utf8');
+    assert.doesNotMatch(text, /EXTENSION_ENGINE=(off|false|no)\b/i, `${file} suggests a value Compose refuses`);
+  }
+});
+
+/**
  * The two tests above read the files as text; this asks Compose itself, where it is installed (skipped in the
  * test container, which has no docker). The four files are copied to a scratch directory with an empty .env,
  * which the development file's `env_file` needs, and rendered twice: with nothing set, and with
@@ -342,6 +362,9 @@ test('Compose itself reads the switch', { skip: composeAvailable ? false : 'dock
       assert.equal(on[engine].deploy?.replicas, 1, `${file}: the engine does not run by default`);
       const off = render({ EXTENSION_ENGINE: '0', SUWAYOMI_URL: '' });
       assert.equal(off[engine].deploy?.replicas, 0, `${file}: EXTENSION_ENGINE=0 does not scale the engine to zero`);
+      // What the docs row warns about: a replica count is a number, and a word the app would accept refuses
+      // the whole file (so the docs must never offer `off` as a value for .env).
+      assert.throws(() => render({ EXTENSION_ENGINE: 'off' }), /replicas/, `${file}: Compose took EXTENSION_ENGINE=off`);
       for (const [name, svc] of Object.entries(off)) {
         if (!svc.environment || !('SUWAYOMI_URL' in svc.environment)) continue;
         assert.equal(svc.environment.SUWAYOMI_URL, '', `${file}: ${name} gets the default SUWAYOMI_URL although .env empties it`);

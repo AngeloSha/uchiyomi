@@ -90,6 +90,16 @@ export function suwayomiConfigured(): boolean {
   return !!env.SUWAYOMI_URL && !engineSwitchedOff();
 }
 
+let answered = false;
+
+/**
+ * Has the engine answered this process at least once: any GraphQL request that came back 200. Background
+ * housekeeping that talks to the engine unasked (cache.ts) waits for it, so a JVM that is still starting --
+ * or a desktop whose engine was never downloaded, where SUWAYOMI_URL is always set -- gets no request and
+ * puts no warning in the log. Never reset: an engine that answered once and then went away is worth saying so.
+ */
+export const engineAnswered = (): boolean => answered;
+
 /**
  * Run one GraphQL operation. Errors carry the HTTP status in their message on purpose: lib/sourceHealth.ts
  * `classify()` reads the message to decide blocked vs rate-limited vs down, so a failing extension server
@@ -108,6 +118,7 @@ export async function gql<T = unknown>(query: string, variables: Record<string, 
     e.status = r.status;
     throw e;
   }
+  answered = true;
   const j = (await r.json()) as { data?: T; errors?: Array<{ message?: string }> };
   if (j.errors?.length) throw new Error(`suwayomi: ${j.errors[0]?.message || 'graphql error'}`);
   if (j.data === undefined || j.data === null) throw new Error('suwayomi returned no data');

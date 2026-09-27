@@ -334,7 +334,11 @@ export function assignPostingNumbers<T extends SourceChapter>(seq: readonly T[],
     taken.add(n);
     top = Math.max(top, n);
     numbers[i] = n;
-    prev = n;
+    // Never backwards: a copy that joined an EARLIER post's number, or a stored version walked late, says
+    // nothing about where the next new post goes. `prev = n` put a post inserted after such a copy just above
+    // the old number (2.5 beside chapter 2, not 9.5 between 9 and 10), for good, since numbers are never
+    // recomputed. A known post that really went backwards then leaves no room, and takes the conflict path.
+    prev = Math.max(prev, n);
   });
 
   const rows: PostNumber[] = seq.map((c, i) => rowOf(c, numbers[i]));
@@ -377,10 +381,16 @@ export type RenumberMode = 'posting_order' | 'source' | 'remap';
  * How a book was matched to its post, strongest first. id: the file's own stamp (lib_books.source_chapter_id).
  * pick: the audited Replace… that wrote it. stored: the exact stored mapping (the undo). name: its chapter
  * name, filename or title against the post's. date: its release date. listing: only that the old
- * series_listing chose that post for its number -- a guess, so a plan that needs it is not applied unattended.
+ * series_listing chose that post for its number.
+ *
+ * date and listing are guesses, so a plan that needs either is not applied unattended (reason 'listing_only').
+ * ⚠️ A date is the listing's pick again, not the file's: every sweep re-stamps lib_books.published_at with the
+ * date of whichever copy the listing picks for that number (updater.ts -> library.ts setBookDates), and that
+ * pick can move while the file does not. It may still CHOOSE a post -- it is right more often than not -- but
+ * it is no better evidence than the listing it came from.
  */
 export type MatchHow = 'id' | 'pick' | 'stored' | 'name' | 'date' | 'listing';
-const EXACT: ReadonlySet<MatchHow> = new Set(['id', 'pick', 'stored', 'name', 'date']);
+const EXACT: ReadonlySet<MatchHow> = new Set(['id', 'pick', 'stored', 'name']);
 
 /** A lib_books row, as far as matching it needs. */
 export interface PlanBook {
@@ -393,6 +403,12 @@ export interface PlanBook {
   number: number;
   title?: string | null;
   chapterName?: string | null;
+  /**
+   * lib_books.chapter_name_source: set when `chapterName` was BORROWED from another source (lib/borrowNames.ts).
+   * A borrowed name was matched to that source's chapter by number alone, so it says nothing about which of
+   * this source's posts the file is, and the name pass does not read it.
+   */
+  chapterNameSource?: string | null;
   publishedAt?: string | null;
   /** The post the file was downloaded from, when the landing stamped it. */
   sourceChapterId?: string | null;
@@ -456,6 +472,11 @@ export interface PlanMove {
   title?: string | null;
 }
 
+/**
+ * Why a plan waits for an admin. unmatched: a book no post could be matched to is parked. listing_only: a book
+ * was matched only by a guess, its date or the old listing's pick (MatchHow). collision: books share a number
+ * in one root. tracker: the renumber would push numbers to a tracker. busy: a download is running for it.
+ */
 export type PlanReason = 'unmatched' | 'listing_only' | 'collision' | 'tracker' | 'busy';
 
 export interface RenumberPlan {
@@ -501,6 +522,15 @@ function forms(name: string | null | undefined, n: number): string[] {
   const t = displayTitle(name);
   if (!t) return [];
   return [...new Set([norm(t), norm(chapterName(t, numKey(n)) ?? '')])].filter(Boolean);
+}
+
+/**
+ * forms(), but only for a name that says more than the number. The downloader names every file `Chapter N`
+ * and the scanner's title is the filename's, so for a book with no chapter name both only repeat its number
+ * -- and a post literally titled 'Chapter N' would match them by 'name' when all that agreed was the number.
+ */
+function namedForms(name: string | null | undefined, n: number): string[] {
+  return chapterName(displayTitle(name), numKey(n)) == null ? [] : forms(name, n);
 }
 
 /**
@@ -565,11 +595,12 @@ export function planRenumber(books: readonly PlanBook[], target: RenumberTarget,
     if (untrusted(b)) return undefined;
     const open = candidates(b).filter((p) => free(b, p));
     const hits = (mine: string[]) => open.filter((p) => formsOf(p).some((f) => mine.includes(f)));
-    // Its own chapter name first; the filename and title only when the name found nothing. Two hits is an
-    // ambiguity, not a license to try a weaker spelling.
-    const byName = hits(forms(b.chapterName, b.number));
+    // Its own chapter name first (never a borrowed one); the filename and title only when the name found
+    // nothing, and only when they name more than the number. Two hits is an ambiguity, not a license to try
+    // a weaker spelling.
+    const byName = hits(b.chapterNameSource ? [] : forms(b.chapterName, b.number));
     if (byName.length) return unique(byName);
-    return unique(hits([...forms(b.title, b.number), ...forms(baseName(b.file), b.number)]));
+    return unique(hits([...namedForms(b.title, b.number), ...namedForms(baseName(b.file), b.number)]));
   });
   pass('date', (b) => {
     if (untrusted(b)) return undefined;

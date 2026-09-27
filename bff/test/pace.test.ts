@@ -7,7 +7,7 @@ import test, { beforeEach, after } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   noteRateLimited, paceLevel, paceFor, clearPace, setPaceClock, PACE_MAX_LEVEL, PACE_DECAY_MS, MAX_PAGE_GAP_MS,
-  pagePace, slowPace, withSlowPace,
+  pagePace, slowPace, withSlowPace, resumePace,
 } from '../src/lib/pace';
 
 let now = 1_000_000;
@@ -106,7 +106,7 @@ test('a successful download does not reset the level: only time does', () => {
   const before = paceLevel(plain.id);
   assert.equal(before, 1);
   const exported = Object.keys(require('../src/lib/pace')).sort();
-  assert.deepEqual(exported, ['MAX_PAGE_GAP_MS', 'PACE_DECAY_MS', 'PACE_MAX_LEVEL', 'clearPace', 'noteRateLimited', 'paceFor', 'paceLevel', 'pagePace', 'setPaceClock', 'slowPace', 'withSlowPace']);
+  assert.deepEqual(exported, ['MAX_PAGE_GAP_MS', 'PACE_DECAY_MS', 'PACE_MAX_LEVEL', 'clearPace', 'noteRateLimited', 'paceFor', 'paceLevel', 'pagePace', 'resumePace', 'setPaceClock', 'slowPace', 'withSlowPace']);
   clearPace();
   assert.equal(paceLevel(plain.id), 0, 'clearPace is for tests');
 });
@@ -174,4 +174,38 @@ test('the slow pace follows the chapter across awaits and timers, and each calle
   assert.equal(new Map(seen).get('person'), undefined, 'the download alongside has none');
   const rand = () => 0.25;
   withSlowPace({ pageGapMs: [10, 20], rand }, () => assert.equal(pagePace(ext, DEFAULTS).rand, rand, 'a test may inject the draws'));
+});
+
+test('a 429 inside a chapter never makes the rest of it faster', () => {
+  // fetchPages' resume loop doubles each gap up to MAX_PAGE_GAP_MS. A gap that already sat above the ceiling
+  // -- an ARCHIVE_PAGE_GAP_MS of 5-8 s, an adapter that declares 6 s -- must stay where it was, or the resume
+  // after a refusal is the FAST part. Reintroduce by doubling with `Math.min(g * 2, MAX_PAGE_GAP_MS)` in
+  // resumePace: [5000, 8000] comes back as [4000, 4000] and the `never below` assertion fails.
+  assert.deepEqual(resumePace({ gap: 5000, jitter: [5000, 8000] }), { gap: 5000, jitter: [5000, 8000] }, 'never below where it was');
+  assert.deepEqual(resumePace({ gap: 6000, jitter: [6000, 6000] }), { gap: 6000, jitter: [6000, 6000] }, 'an adapter\'s own 6 s stays 6 s');
+  assert.deepEqual(resumePace({ gap: 6000 }), { gap: 6000 }, 'and so does a plain download\'s');
+  // Below the ceiling it doubles, as before; a declared 0 stays 0 inside the chapter (the engine paces it).
+  assert.deepEqual(resumePace({ gap: 250 }), { gap: 500 });
+  assert.deepEqual(resumePace({ gap: 3000 }), { gap: MAX_PAGE_GAP_MS });
+  assert.deepEqual(resumePace({ gap: 0 }), { gap: 0 });
+  assert.deepEqual(resumePace({ gap: 20, jitter: [20, 40] }), { gap: 40, jitter: [40, 80] }, 'both ends doubled');
+  // Whatever goes in, neither end ever comes out lower.
+  for (const [lo, hi] of [[0, 0], [100, 100], [1500, 4000], [3000, 4000], [3900, 4100], [4000, 9000], [7000, 7000]] as const) {
+    const out = resumePace({ gap: lo, jitter: [lo, hi] });
+    assert.ok(out.gap >= lo && out.jitter![0] >= lo && out.jitter![1] >= hi, `[${lo}, ${hi}] came back as [${out.jitter}]`);
+    assert.ok(out.jitter![0] <= out.jitter![1]);
+  }
+});
+
+test('at the ceiling a range keeps a spread, so the rest of the chapter is not a metronome', () => {
+  // Doubling alone takes the default range to [3000, 4000] after one 429 and to [4000, 4000] after two: every
+  // page exactly four seconds apart for the rest of the chapter. Reintroduce by returning [up(lo), top] from
+  // resumePace: the second 429's range is [4000, 4000] and the `keeps a spread` assertion fails.
+  const once = resumePace({ gap: 1500, jitter: [1500, 4000] });
+  assert.deepEqual(once.jitter, [3000, 4000], 'the low end doubles');
+  const twice = resumePace(once);
+  assert.deepEqual(twice.jitter, [3000, 4000], 'keeps a spread of a quarter of the top');
+  assert.deepEqual(resumePace(twice).jitter, [3000, 4000], 'and settles there');
+  assert.deepEqual(resumePace({ gap: 3500, jitter: [3500, 4000] }).jitter, [3500, 4000], 'a narrower range keeps its own width');
+  assert.deepEqual(resumePace({ gap: 2000, jitter: [2000, 2000] }).jitter, [MAX_PAGE_GAP_MS, MAX_PAGE_GAP_MS], 'a fixed gap stays a fixed gap');
 });
