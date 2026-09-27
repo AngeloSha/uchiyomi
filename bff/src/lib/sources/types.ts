@@ -55,6 +55,24 @@ export interface SourceChapter {
    * it undefined, because inside one adapter it would only ever say what the caller already knows.
    */
   source?: string;
+  /**
+   * Where the post sits in the source's own list, 1 = the oldest (Suwayomi's `sourceOrder`), when the adapter
+   * can say. A position, never an id: it shifts when the site inserts or deletes a post, which is why the
+   * posting-order numbering (lib/postingOrder.ts) persists what it assigns instead of re-deriving it. Only the
+   * extension bridge sets it; `number` stays the source's own number whatever this says (#116).
+   */
+  order?: number;
+  /**
+   * The chapter's path inside the source's own catalogue (Mihon's `chapter.url`), when the adapter has one.
+   * Identity only -- a post keeps it when the engine hands it a new id -- and NEVER fetched or routed: pages
+   * are reached by `sourceId`, the one handle the server resolved itself (routes/sources.ts, previewChapters).
+   */
+  url?: string;
+  /**
+   * The number the SOURCE gave, set only on a chapter Uchiyomi renumbered (posting order, #116): `number` is
+   * then Uchiyomi's, and this keeps the source's own for display and for matching files written before.
+   */
+  sourceNumber?: number;
 }
 
 export interface SourceAdapter {
