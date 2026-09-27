@@ -29,7 +29,7 @@ import { q, one, tx } from './db';
 import { getSource, listSources } from './sources';
 import type { SourceAdapter, SourceChapter, SourceSeries } from './sources/types';
 import { budgetFor } from './sources/budget';
-import { healthAll, type SourceHealth } from './sourceHealth';
+import { healthAll, isDisabled, type SourceHealth } from './sourceHealth';
 import { searchAll } from './searchAll';
 import { chooseReleases, type ReleasePrefs } from './releases';
 import { effectivePrefsFor, readSeriesPrefs } from './scanlatorPrefs';
@@ -104,6 +104,21 @@ function distinctNames(names: Array<string | null | undefined>): string[] {
 }
 
 /**
+ * Every chapter number the series has: what its sources list, and what is on disk (an admin's number
+ * override first). ⚠️ A chapter with no number is left out in SQL: `Number(null)` is 0, and a phantom
+ * chapter 0 would count against every candidate that starts at 1.
+ */
+export async function ourNumbers(seriesId: string): Promise<number[]> {
+  const rows = await q<{ number: number }>(
+    `SELECT number FROM series_listing WHERE series_id = $1
+     UNION
+     SELECT n FROM (SELECT COALESCE(bo.number, b.number) AS n FROM lib_books b LEFT JOIN book_overrides bo ON bo.book_id = b.id
+                     WHERE b.series_id = $1) x WHERE n IS NOT NULL`,
+    [seriesId]).catch(() => []);
+  return [...new Set(rows.map((r) => Number(r.number)).filter((n) => Number.isFinite(n)))];
+}
+
+/**
  * The series as the search sees it. Null for a series that is gone, removed or merged away: following
  * onto a row nobody can open is the thing followJudged refuses too.
  *
@@ -126,18 +141,14 @@ export async function linkFactsFor(seriesId: string, opts: { learn?: boolean } =
     } catch { /* the primary is down -- which is often why this is being run; its stored names still count */ }
   }
   const stored = await altTitlesFor(seriesId, { includeDescription: on });
-  const numbers = (await q<{ number: number }>(
-    `SELECT number FROM series_listing WHERE series_id = $1
-     UNION SELECT COALESCE(bo.number, b.number) FROM lib_books b LEFT JOIN book_overrides bo ON bo.book_id = b.id WHERE b.series_id = $1`,
-    [seriesId]).catch(() => []))
-    .map((r) => Number(r.number)).filter((n) => Number.isFinite(n));
+  const numbers = await ourNumbers(seriesId);
   const followers = (await q<{ source_id: string }>('SELECT source_id FROM series_sources WHERE series_id = $1', [seriesId]).catch(() => []))
     .map((r) => r.source_id).filter((id) => id !== s.source_id);
   return {
     seriesId,
     title: s.shown,
     names: distinctNames([s.shown, s.title, ...stored, ...learned]),
-    numbers: [...new Set(numbers)],
+    numbers,
     primary: s.source_id,
     followers,
   };
@@ -457,7 +468,8 @@ export async function runLinks(
       if (aborted.has(batchId)) return;
       let status: string;
       if (!mayFollow(c, opts.override)) status = 'not_confirmed';
-      else if (!getSource(c.source)) status = 'unavailable';
+      // Not installed, or switched off by the admin: the manual follow route refuses both, and so does this.
+      else if (!getSource(c.source) || await isDisabled(c.source).catch(() => false)) status = 'unavailable';
       else {
         try {
           const coverage = c.coverage_fwd == null ? null : Math.min(c.coverage_fwd, c.coverage_back ?? c.coverage_fwd);

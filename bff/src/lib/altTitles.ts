@@ -150,8 +150,11 @@ export async function altTitleMatchingOn(): Promise<boolean> {
 
 /** Every stored name of a series, oldest first. */
 export async function altTitleRows(seriesId: string): Promise<AltTitleRow[]> {
+  // A person's word first: a search uses only the first few names (lib/linkBatch.ts LINK_TERMS_MAX), and a
+  // name an admin typed must not lose its turn to the twentieth name a description listed.
   return q<AltTitleRow>(
-    'SELECT title, norm, origin, source_id, created_at FROM series_alt_titles WHERE series_id = $1 ORDER BY created_at, norm', [seriesId],
+    `SELECT title, norm, origin, source_id, created_at FROM series_alt_titles WHERE series_id = $1
+      ORDER BY CASE origin WHEN 'admin' THEN 0 WHEN 'confirmed' THEN 1 WHEN 'merged' THEN 2 ELSE 3 END, created_at, norm`, [seriesId],
   ).catch(() => []);
 }
 
@@ -222,4 +225,21 @@ export async function carryAltTitles(run: typeof q, fromId: string, intoId: stri
   const into = await run<{ title: string }>('SELECT title FROM lib_series WHERE id = $1', [intoId]);
   const t = absorbed[0]?.title;
   if (t && normTitle(t) !== normTitle(into[0]?.title ?? '')) await recordAltTitles(intoId, [t], 'merged', { run });
+}
+
+/**
+ * A source was unlinked: the name it was confirmed under stops being one of the series' names -- unless a
+ * source still linked uses the same name. Unlinking is how a WRONG link is undone, and a name left behind
+ * would find the same wrong series again on the next Connect sources search, exactly.
+ */
+export async function forgetConfirmedFrom(seriesId: string, sourceId: string): Promise<number> {
+  const gone = await q<{ norm: string }>(
+    `DELETE FROM series_alt_titles a
+      WHERE a.series_id = $1 AND a.source_id = $2 AND a.origin = 'confirmed'
+        AND NOT EXISTS (SELECT 1 FROM series_sources ss
+                         WHERE ss.series_id = $1 AND regexp_replace(lower(COALESCE(ss.title, '')), '[^a-z0-9]+', '', 'g') = a.norm)
+      RETURNING a.norm`,
+    [seriesId, sourceId],
+  );
+  return gone.length;
 }

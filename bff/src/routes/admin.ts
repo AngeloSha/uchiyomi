@@ -69,7 +69,7 @@ import { appVersion } from '../lib/appVersion';
 import { PING_URL, buildPayload, installFacts, monthlyId, newSecret, sendForget } from '../lib/installPing';
 import { withOrigin } from '../lib/downloadActivity';
 import { linkRoutes } from './adminLink';
-import { recordAltTitles } from '../lib/altTitles';
+import { recordAltTitles, forgetConfirmedFrom } from '../lib/altTitles';
 
 type ImportJob = { running: boolean; total: number; done: number; added: number; already: number; notFound: number; failed: number; startedAt: number; details: Array<{ title: string; status: string; source?: string }> };
 let importJob: ImportJob | null = null;
@@ -1157,6 +1157,9 @@ export default async function adminRoutes(app: FastifyInstance) {
     // Reintroduce by dropping this DELETE: "unfollowing a source takes its listing rows with it" in
     // chapterActions.int.test.ts still finds the number listed.
     await q('DELETE FROM series_listing WHERE series_id = $1 AND source_id = $2', [id, sourceId]).catch(() => {});
+    // The name that source was confirmed under goes too (lib/altTitles.ts): an unlink is how a wrong link is
+    // undone, and the name would otherwise match the same wrong series on the next Connect sources search.
+    await forgetConfirmedFrom(id, sourceId).catch(() => 0);
     // The DELETE is the guarantee; the rewrite is the courtesy. A number both sources listed whose CHOSEN
     // copy was the follower's went with the rows above, so until the next check it is neither a ghost nor
     // fetchable even though the primary lists it. A listing pass with nothing to download (maxNew 0) puts
