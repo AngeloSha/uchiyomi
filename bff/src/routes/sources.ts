@@ -162,8 +162,27 @@ interface Job {
   switched?: Array<{ number: number; from: string; to: string; why: string }>;
   /** How many chapters this job saved with placeholder pages (lib/partial.ts). */
   partial?: number;
+  /**
+   * On a job that ended in error: the chapters it did not land, ascending, at most FILL_MAX_CHAPTERS -- the
+   * numbers the Downloads view's Try again sends back through POST /api/sources/fetch, which takes exactly
+   * that many (`leftOf`). What landed or was already on disk is not in it. Empty when nothing is left to
+   * ask for: every chapter landed and the library scan is what failed.
+   */
+  left?: number[];
+  /**
+   * An add's cover, as its source gave it, for the Downloads view to draw before chapter one is scanned in
+   * and the series has a thumbnail of its own. The source rides along because the cover proxy
+   * (/img/sources/cover) fetches by it.
+   */
+  cover?: { source: string; url: string };
 }
 const jobs = new Map<string, Job>();
+
+/** A failed job's chapters that did not land, for its Try again (`Job.left`). */
+function leftOf(asked: ReadonlyArray<{ number: number }>, landed: ReadonlyArray<{ number: number }>, onDisk: readonly number[]): number[] {
+  const have = new Set([...landed.map((l) => l.number), ...onDisk]);
+  return [...new Set(asked.map((c) => c.number))].filter((n) => !have.has(n)).sort((a, b) => a - b).slice(0, FILL_MAX_CHAPTERS);
+}
 
 /** How long a completed download stays listed. `jobs.delete` had exactly one call site -- the chapter-1
  *  failure path -- so a successful job was never removed and the strip filled with green cards that only a
@@ -246,31 +265,63 @@ const cancelledReason = (j: Job) => `Cancelled after ${j.done} of ${j.total} cha
 const logScanError = (e: unknown) => console.warn(`[scan] library scan threw: ${(e as Error)?.message || e}`);
 
 /**
- * The download activity (lib/downloadActivity.ts) as one viewer may see it: every chapter coming in, whatever
- * started it, for the series this viewer can browse -- the same rule as the series themselves, since a title
- * is a listing. A download for a folder that is not a series yet (an add's first chapter) is its starter's and
- * an admin's. Who started a download is not sent, only whether it was this viewer.
+ * Who may see what the Downloads view lists (v0.49.0): one rule, in one place, for job cards, the activity
+ * feed, a run's current series and -- keyed by series id rather than folder -- the slow archive's rows (#117).
+ *
+ * A folder's series row decides, through browsable(): library grants, the age cap and the 18+ hide, the same
+ * rule as the series themselves, since a title is a listing. A folder with no row yet (an add whose first
+ * chapter has not been scanned in) is its starter's and an admin's: it cannot be in anyone's library yet. One
+ * query per poll, whatever the lists hold.
+ *
+ * Before v0.49.0 job cards were filtered only while the 18+ hide was on, so a member walled off from a library
+ * by grant or age cap still received every card's title. And a failed lookup showed everything; now it reads
+ * as "no row", so each item goes to its starter and admins only -- closed, not open.
  */
-async function activityFor(ctx: ViewCtx, me: string | null, admin: boolean) {
-  const { active, recent } = listActivity();
-  const folders = [...new Set([...active, ...recent].map((e) => e.folder))];
+async function downloadsAudience(ctx: ViewCtx, me: string | null, admin: boolean, keys: { folders: Iterable<string>; seriesIds?: Iterable<string> }) {
+  const folders = [...new Set(keys.folders)];
+  const ids = [...new Set(keys.seriesIds ?? [])].filter(Boolean);
   const p = new Params();
-  const rows = folders.length
+  const rows = folders.length || ids.length
     ? await q<{ id: string; folder: string; ok: boolean }>(
-      `SELECT s.id, s.folder, (${browsable('s', ctx, p)}) AS ok FROM lib_series s WHERE s.folder = ANY(${p.add(folders)})`,
+      `SELECT s.id, s.folder, (${browsable('s', ctx, p)}) AS ok FROM lib_series s
+        WHERE s.folder = ANY(${p.add(folders)}) OR s.id = ANY(${p.add(ids)})`,
       p.values as any[],
     ).catch(() => [])
     : [];
   // A folder can have a deleted twin beside its live row (lib/library.ts persistScan): the row this viewer can
   // browse is the one that speaks for it. `browsable` already refuses a deleted or merged row.
-  const bySeries = new Map<string, { id: string; folder: string; ok: boolean }>();
-  for (const r of rows) if (!bySeries.has(r.folder) || (r.ok && !bySeries.get(r.folder)!.ok)) bySeries.set(r.folder, r);
-  const shown = (e: ActivityEntry) => {
-    const s = bySeries.get(e.folder);
-    return s ? s.ok : admin || (!!e.by && e.by === me);
+  const wanted = new Set(folders);
+  const byFolder = new Map<string, { id: string; ok: boolean }>();
+  const okIds = new Set<string>();
+  for (const r of rows) {
+    if (r.ok) okIds.add(r.id);
+    if (!wanted.has(r.folder)) continue;
+    const had = byFolder.get(r.folder);
+    if (!had || (r.ok && !had.ok)) byFolder.set(r.folder, r);
+  }
+  return {
+    /** The row that speaks for a folder, when it has one: its id, and whether this viewer may browse it. */
+    row: (folder: string) => byFolder.get(folder),
+    /** May this viewer see a download into `folder` that `by` started. */
+    folder: (folder: string, by: string | null | undefined) => {
+      const s = byFolder.get(folder);
+      return s ? s.ok : admin || (!!by && by === me);
+    },
+    /** May this viewer see series `id`: a run's current series now, the archive's rows with #117. */
+    series: (id: string) => okIds.has(id),
   };
+}
+type DownloadsAudience = Awaited<ReturnType<typeof downloadsAudience>>;
+
+/**
+ * The download activity (lib/downloadActivity.ts) as one viewer may see it: every chapter coming in, whatever
+ * started it, by the Downloads view's one rule (`downloadsAudience`). Who started a download is not sent, only
+ * whether it was this viewer.
+ */
+function activityFor(seen: DownloadsAudience, me: string | null, { active, recent }: ReturnType<typeof listActivity>) {
+  const shown = (e: ActivityEntry) => seen.folder(e.folder, e.by);
   const out = ({ by, heldAt: _h, source, ...e }: ActivityEntry) => ({
-    ...e, seriesId: bySeries.get(e.folder)?.id ?? null, source: getSource(source)?.name ?? source, mine: !!by && by === me,
+    ...e, seriesId: seen.row(e.folder)?.id ?? null, source: getSource(source)?.name ?? source, mine: !!by && by === me,
   });
   return { active: active.filter(shown).map(out), recent: recent.filter(shown).map(out) };
 }
@@ -313,6 +364,12 @@ export function startDownloadJob(input: DownloadJobInput): { total: number } {
       ...(await q<{ source_id: string }>('SELECT source_id FROM series_sources WHERE series_id = $1', [seriesId]).catch(() => [])).map((r) => r.source_id),
     ]);
     const exhausted = () => [...sources, ...followed].every((sid) => refusing.has(sid));
+    // Whichever way it failed -- a full disk, every source refusing, chapters that would not save, a scan that
+    // missed them -- a failed card says what is still to fetch (`Job.left`). Twice: the moment the loop stops,
+    // because the library scan after it can take minutes and the card already reads failed; and at the very
+    // end, where the last reasons to fail are known. Reintroduce by making this a no-op: "a job that ends in
+    // error names the chapters it did not land" in downloadsView.int.test.ts finds no `left`.
+    const noteLeft = () => { const j = jobs.get(folder); if (j?.status === 'error') j.left = leftOf(chapters, landed, onDisk); };
     /** The listing's other copies of a number, from followed sources; the helper drops the copy's own source. */
     const alternatesOf = async (n: number): Promise<SourceChapter[]> => {
       const row = await one<{ title: string | null; copies: ListingCopy[] }>(
@@ -399,6 +456,7 @@ export function startDownloadJob(input: DownloadJobInput): { total: number } {
         break;
       }
     }
+    noteLeft();
     // Settled BEFORE the scan, so a copy the hook puts back is on disk when the scanner looks.
     for (const ch of chapters) if (!settled.has(ch)) await settle(ch, false);
     await persistScan().catch((e) => console.warn(`[download] ${folder}: the library scan after the job threw: ${(e as Error)?.message || e}`));
@@ -427,6 +485,7 @@ export function startDownloadJob(input: DownloadJobInput): { total: number } {
       j.cancelled = true; j.status = 'done'; j.finishedAt = Date.now();
       j.reason = failures ? `${cancelledReason(j)} ${failures} could not be saved.` : cancelledReason(j);
     } else if (j && j.status !== 'error') { j.status = failures ? 'error' : 'done'; j.finishedAt = Date.now(); }
+    noteLeft();
   });
 
   return { total: chapters.length };
@@ -1048,7 +1107,10 @@ export async function addSeriesFromSource(opts: {
     return { ok: true, status: 200, title, folder, chapters: 0, started: false, alreadyHere: selected.length, seriesId: heldId };
   }
 
-  jobs.set(folder, { title, total: toFetch.length, done: 0, status: 'downloading', startedAt: Date.now(), ...(opts.userId ? { by: opts.userId } : {}) });
+  // The cover is for the Downloads view, which draws this card before chapter one is scanned in and the series
+  // has a thumbnail of its own.
+  jobs.set(folder, { title, total: toFetch.length, done: 0, status: 'downloading', startedAt: Date.now(), ...(opts.userId ? { by: opts.userId } : {}),
+    ...(series?.coverUrl ? { cover: { source: source!, url: series.coverUrl } } : {}) });
 
   /**
    * Everything from here is the WORK, as opposed to the decision.
@@ -1113,7 +1175,7 @@ export async function addSeriesFromSource(opts: {
       if (opts.wait === false) {
         // Detached: the caller has already been told the download started, so this card IS the failure
         // report. It is deliberately not swept -- see sweepJobs -- and is dismissed by hand.
-        const j = jobs.get(folder); if (j) { j.status = 'error'; j.reason = why; j.finishedAt = Date.now(); }
+        const j = jobs.get(folder); if (j) { j.status = 'error'; j.reason = why; j.finishedAt = Date.now(); j.left = leftOf(toFetch, [], []); }
       } else {
         // Awaited: the caller gets a real HTTP answer and has its own reporting, so leaving a card behind
         // would just be noise -- the bulk importer would strand one per failed title.
@@ -1170,6 +1232,8 @@ export async function addSeriesFromSource(opts: {
       .catch(() => {});
     void (async () => {
       let failures = 0;
+      // As in startDownloadJob: a failed add says what is still to fetch, when the loop stops and at the end.
+      const noteLeft = () => { const j = jobs.get(folder); if (j?.status === 'error') j.left = leftOf(toFetch, landed, onDisk); };
       for (const ch of toFetch.slice(1)) {
         if (jobs.get(folder)?.cancelRequested) break; // Cancel (#82): between chapters, never mid-write
         let out: Awaited<ReturnType<typeof downloadWithFallback>>;
@@ -1237,6 +1301,7 @@ export async function addSeriesFromSource(opts: {
         // the bar. The next chapter may still be healthy, so keep going as the old loop did.
         if (j) j.reason = `${failures} chapter${failures === 1 ? '' : 's'} could not be saved: ${String(out.err?.message || out.err).slice(0, 120)}`;
       }
+      noteLeft();
       await persistScan().catch(logScanError);
       await setBookDates(folder, selected).catch(() => {});
       await setBookMeta(folder, landed).catch(() => {});
@@ -1250,9 +1315,7 @@ export async function addSeriesFromSource(opts: {
       if (j && unindexed.length) {
         j.status = 'error'; j.finishedAt = Date.now();
         j.reason = notInLibraryReason(folder, unindexed);
-        return;
-      }
-      if (j && j.status !== 'error' && j.cancelRequested) {
+      } else if (j && j.status !== 'error' && j.cancelRequested) {
         j.cancelled = true; j.status = 'done'; j.finishedAt = Date.now();
         j.reason = failures ? `${cancelledReason(j)} ${failures} could not be saved.` : cancelledReason(j);
       } else if (j && j.status !== 'error') {
@@ -1262,6 +1325,7 @@ export async function addSeriesFromSource(opts: {
         j.status = failures ? 'error' : 'done';
         j.finishedAt = Date.now();
       }
+      noteLeft();
     })();
     // `chapters` is what this add will FETCH, which is why it counts `toFetch`: a re-add that finds half
     // the run on disk is downloading half a run, and telling the dialog otherwise would put a progress
@@ -2238,42 +2302,45 @@ export default async function sourceRoutes(app: FastifyInstance) {
     return { content: results.map((r) => ({ ...r, inLibrary: have.has(norm(r.title)) })) };
   });
 
+  /**
+   * What the Downloads view shows (v0.49.0): the job cards, the server's own runs and every chapter coming in.
+   * ONE contract for the view, the nav ring and the series band, all reading this one response; the slow
+   * archive (#117) joins it as `archive`, its rows held to the same `downloadsAudience` by series id.
+   */
   app.get('/api/sources/jobs', async (req) => {
     sweepJobs();
     const me = userIdOf(req);
     const admin = roleOf(req) === 'admin';
-    // Who started a job stays on the server; the list says whether it is this viewer's own, which is what
-    // decides whether the pill offers its Cancel (an admin's pill offers every one).
-    const all = [...jobs.entries()].map(([folder, { by, ...j }]) => ({ folder, ...j, mine: !!by && by === me }));
     // The server's own runs (lib/downloadJobs.ts, #82): the sweep, the repair, a bulk "Fetch newest". An
     // admin's to see and stop -- and a bulk run its starter's too, since it is their selection. Nobody
     // else's: the series a sweep is on may be in a library this viewer cannot open.
-    const runs = listRuns()
-      .filter((r) => admin || (r.by !== null && r.by === me))
-      .map(({ by, ...r }) => ({ ...r, mine: !!by && by === me }));
-    const activity = await activityFor(vc(req), me, admin);
-    if (!vc(req).hideAdultLibraries) return { content: all, runs, activity };
-    // A download job carries the series title, so the strip on Discover is a listing like any other. Jobs
-    // are keyed by folder, which is exactly what lib_series.folder holds, so the filter is one lookup. A
-    // job for a series not yet scanned in has no row and stays visible: it cannot be in a library yet.
-    const p = new Params();
-    const arr = p.add(all.map((j) => j.folder));
-    const hidden = new Set((await q<{ folder: string }>(
-      `SELECT s.folder FROM lib_series s WHERE s.folder = ANY(${arr}) AND NOT (${browsable('s', vc(req), p)})`,
-      p.values as any[],
-    ).catch(() => [])).map((r) => r.folder));
-    // A run's "now on …" names a series as well, so it is held to the same rule: the count stays, the title
-    // of a series this viewer is hiding goes.
-    const p2 = new Params();
-    const ids = p2.add(runs.map((r) => r.current?.id).filter(Boolean) as string[]);
-    const hiddenIds = new Set((await q<{ id: string }>(
-      `SELECT s.id FROM lib_series s WHERE s.id = ANY(${ids}) AND NOT (${browsable('s', vc(req), p2)})`,
-      p2.values as any[],
-    ).catch(() => [])).map((r) => r.id));
+    const runs = listRuns().filter((r) => admin || (r.by !== null && r.by === me));
+    const activity = listActivity();
+    const seen = await downloadsAudience(vc(req), me, admin, {
+      folders: [...jobs.keys(), ...activity.active.map((e) => e.folder), ...activity.recent.map((e) => e.folder)],
+      // By id: a run's current series. The slow archive's rows (#117) join here, and answer as `archive`
+      // filtered by `seen.series`; its shape is that step's to define.
+      seriesIds: runs.map((r) => r.current?.id ?? ''),
+    });
+    // A card carries the series title, so it is a listing like any other: shown by the folder's series row.
+    // A FAILED card is its starter's and an admin's on top of that: it is never swept (sweepJobs), so a
+    // member would otherwise carry everyone's failures for good, and only its starter or an admin may dismiss
+    // it. Who started a job stays on the server; `mine` says whether it is this viewer's, which is what decides
+    // Cancel and Dismiss. `seriesId` from the folder's row when the job does not name one: a Fetch, a fill or a
+    // refetch card never did, and the view needs it for a cover and a link.
+    // Reintroduce by dropping `seen.folder(...)`: "a member receives no card for a series they cannot open" in
+    // downloadsView.int.test.ts sees the other library's card.
+    const content = [...jobs.entries()]
+      .filter(([folder, j]) => seen.folder(folder, j.by) && (admin || j.status !== 'error' || (!!j.by && j.by === me)))
+      .map(([folder, { by, ...j }]) => ({ folder, ...j, seriesId: j.seriesId ?? seen.row(folder)?.id, mine: !!by && by === me }));
     return {
-      content: all.filter((j) => !hidden.has(j.folder)),
-      runs: runs.map((r) => (r.current && hiddenIds.has(r.current.id) ? { ...r, current: undefined } : r)),
-      activity,
+      content,
+      // A run's "now on …" names a series as well, so it is held to the same rule: the count stays, the title
+      // of a series this viewer may not list goes. Always, not only under the 18+ hide as before v0.49.0.
+      runs: runs.map(({ by, ...r }) => ({
+        ...r, mine: !!by && by === me, ...(r.current && !seen.series(r.current.id) ? { current: undefined } : {}),
+      })),
+      activity: activityFor(seen, me, activity),
     };
   });
 
@@ -2326,6 +2393,11 @@ export default async function sourceRoutes(app: FastifyInstance) {
     const { folder } = req.params as { folder: string };
     const j = jobs.get(folder);
     if (!j) return reply.code(404).send({ error: 'not_found' });
+    // Its starter's to dismiss, or an admin's, as Cancel is (v0.49.0). Any member who could download used to
+    // be able to clear anyone's failed card -- the only record that someone's download did not work.
+    // Reintroduce by dropping this: "only its starter or an admin may dismiss a card" in
+    // downloadsView.int.test.ts reads 200 for the other member.
+    if (roleOf(req) !== 'admin' && !(j.by && j.by === userIdOf(req))) return reply.code(403).send({ error: 'forbidden' });
     // Only something that has stopped. Dropping a running job would orphan a download that is still going
     // and leave no way to see it again. A judgement still running counts the same way: a nothing-yet
     // carrier card is `done` from birth, and dropping it mid-judgement would let the follows land (the

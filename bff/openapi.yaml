@@ -2252,11 +2252,18 @@ paths:
       operationId: getApiSourcesJobs
       description: >-
         One card per series folder: `{folder, title, total, done, status, reason?, finishedAt?,
-        seriesId?, switched?: [{number, from, to, why?}], partial?}`. `seriesId` is the library id of the
-        series this job is filling, and appears once its first chapter has been scanned in: an add that
-        starts a download is answered before that row exists, so this is where "Open in library" gets the
-        id from (it is absent until then, and for good on a job whose first chapter never landed).
-        `switched` records a chapter completed from a
+        seriesId?, switched?: [{number, from, to, why?}], partial?, left?, cover?}`. `seriesId` is the library
+        id of the series this job is filling: the card's own, or since v0.49.0 the id of the series row that
+        holds the folder, so a Fetch, fill or refetch card names its series too. An add that starts a download
+        is answered before that row exists, so this is where "Open in library" gets the id from (it is absent
+        until the first chapter has been scanned in, and for good on an add whose first chapter never landed).
+        Since v0.49.0 every viewer gets the cards of the series they can browse (library access, age cap and
+        the 18+ hide; before, cards were filtered only while the 18+ hide was on); a card whose folder is not
+        a series yet goes to the account that started it and to admins; a failed card (`status: error`) goes
+        only to the account that started it and to admins; `left` on a failed card lists the chapters it did
+        not land (ascending, at most 300), which is what a Try again sends to POST /api/sources/fetch; and an
+        add's card carries `cover: {source, url}`, its source's cover, for drawing before the series has a
+        thumbnail of its own. `switched` records a chapter completed from a
         different followed source after its first copy failed; `why` is `rate_limited` when a 429 caused
         the switch and may be absent for an ordinary failure. `partial` counts chapters this job saved with
         repair placeholders. Both additions are absent when empty. An add
@@ -2284,7 +2291,9 @@ paths:
         downloading or finished in the last day, whatever started it: `{id, seriesId, folder, title, number, source,
         origin: add|fetch|fill|check|sweep|repair|bulk|refetch|server, status: queued|downloading|done|partial|failed,
         startedAt, finishedAt?, pages?, reason?, mine}`, limited to the series this viewer can browse (a folder that
-        is not a series yet: its starter and admins).
+        is not a series yet: its starter and admins). Since v0.49.0 `recent` survives a restart: every finished
+        chapter is also written down, kept a week, and the last day of it (at most 500 entries) is read back when
+        the server starts, with fresh `id`s.
       security:
         - bearer: []
       responses:
@@ -2313,9 +2322,9 @@ paths:
                         seriesId:
                           type: string
                           description: >-
-                            The series this job is filling, once its first chapter has been scanned in.
-                            Absent before that (a download add is answered before the row exists) and on a
-                            job whose first chapter never landed.
+                            The series this job is filling: the card's own, else the series row holding the
+                            folder (since v0.49.0). Absent while an add's first chapter has not been scanned
+                            in (it is answered before the row exists), and for good when it never lands.
                         switched:
                           type: array
                           items:
@@ -2334,6 +2343,23 @@ paths:
                         cancelled:
                           type: boolean
                           description: The job stopped because of a Cancel. It ends `done`, with `reason` saying how far it got.
+                        left:
+                          type: array
+                          maxItems: 300
+                          items: { type: number }
+                          description: >-
+                            Since v0.49.0, on a failed job: the chapters it did not land, ascending -- what a Try
+                            again sends to POST /api/sources/fetch as `numbers`. Empty when every chapter landed
+                            and the library scan is what failed.
+                        cover:
+                          type: object
+                          required: [source, url]
+                          properties:
+                            source: { type: string }
+                            url: { type: string }
+                          description: >-
+                            Since v0.49.0, on an add's card: the cover its source gave, for GET
+                            /img/sources/cover, until the series has a thumbnail of its own.
                   runs:
                     type: array
                     description: >-
@@ -2341,7 +2367,8 @@ paths:
                       `repair` (the library repair; `done`/`total` count its steps and `step` names the one it
                       is on) and `newest` (a bulk "Fetch newest"). An admin sees every run, the account that
                       started a bulk run sees that one; nobody else sees any. A finished run stays listed for a
-                      day. `current` is the series it is inside, left out when this request hides that series.
+                      day. `current` is the series it is inside, left out when this viewer may not list that
+                      series (since v0.49.0 for every viewer, not only under the 18+ hide).
                     items:
                       type: object
                       additionalProperties: false
@@ -2543,10 +2570,11 @@ paths:
       summary: Dismiss a stopped job; 409 while it is still running, or while its auto-follow judgement runs.
       operationId: deleteApiSourcesJobsFolder
       description: >-
-        Only a job that has stopped: 409 `running` while `status` is `downloading`, and likewise while the
-        card's `autoFollow.done` is false -- a nothing-yet carrier card is `done` from birth, and dropping it
-        mid-judgement would let the follows land with the report they belong to gone, while the dialog polled
-        for a card that no longer existed.
+        Since v0.49.0 only the account that started the job, or an admin, may dismiss it; anyone else gets
+        403, answered before the 409. Only a job that has stopped: 409 `running` while `status` is
+        `downloading`, and likewise while the card's `autoFollow.done` is false -- a nothing-yet carrier card
+        is `done` from birth, and dropping it mid-judgement would let the follows land with the report they
+        belong to gone, while the dialog polled for a card that no longer existed.
       parameters:
         - name: folder
           in: path
@@ -2561,9 +2589,9 @@ paths:
         "401":
           description: Not authenticated
         "403":
-          description: "Forbidden: token scope, account permission or age limit"
+          description: "Forbidden: token scope, account permission, or a job this account did not start"
         "404":
-          description: Not found, or not visible to this account
+          description: No such job
         "409":
           description: "Conflict: `running` -- the download is still going, or the auto-follow judgement has not finished"
   /api/discover/trending:

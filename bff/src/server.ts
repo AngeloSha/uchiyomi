@@ -28,6 +28,7 @@ import { runRepair, REPAIR_HOURS } from './lib/repair';
 import { runChapterCleanup, unpruneRestored } from './lib/chapterCleanup';
 import { runExtensionMonitor } from './lib/extensionMonitor';
 import { startSweeper } from './lib/imageCache';
+import { startActivityLog, flushActivityLog } from './lib/activityLog';
 import { runBackup, backupDelay, stampDelay } from './lib/backup';
 import { firstRunFloor, DESKTOP_FLOORS } from './lib/desktop';
 import { KomgaError } from './lib/komga';
@@ -54,6 +55,13 @@ async function main() {
   await migrate();
   // Desktop: the one local account the window signs in as (lib/desktopUser.ts). There is no setup screen.
   if (isDesktop()) await ensureDesktopUser();
+  // What finished downloading in the last day, back into the Downloads view, and every chapter from here on
+  // written down (lib/activityLog.ts). Before any download can start, so nothing lands ahead of the day it
+  // restores. A database that cannot be read here costs the view its yesterday, never the boot.
+  await startActivityLog().then(
+    (n) => { if (n) console.log(`[activity] ${n} finished download(s) from the last day restored`); },
+    (e) => console.warn(`[activity] could not read the download log: ${(e as Error)?.message || e}`),
+  );
   const bi = loadBuiltins(); // always-on built-ins bundled in the core (MangaDex)
   const ls = loadSources(); // bespoke source plugins from SOURCES_DIR (the optional pack)
   const cs = loadCustomSites(); // user-added engine sites from /config/sites.json (built via the in-core engines)
@@ -636,7 +644,8 @@ async function main() {
     process.once(sig, () => {
       runtime.stopping = true;
       app.log.info(`${sig}: finishing the current chapter, then stopping`);
-      void app.close().finally(() => process.exit(0));
+      // The download log's last lines first: a chapter that finished a moment ago is written down, not lost.
+      void app.close().then(flushActivityLog).finally(() => process.exit(0));
       setTimeout(() => process.exit(0), 20_000).unref(); // never hang a shutdown on a slow site
     });
   }

@@ -245,13 +245,18 @@ strictly better than before, where the 429 came back only after the whole chapte
 budget.
 
 `GET /api/sources/jobs` lists downloads in progress, and a card carries `seriesId` once its first chapter
-has been scanned in — the add that started it was answered before that row existed. A finished job is swept a
-day after it ends (five minutes before v0.47.0); a
+has been scanned in — the add that started it was answered before that row existed. Since v0.49.0 a card that
+names no series itself (a Fetch, a fill, a refetch) carries the id of the series row holding its folder. A
+finished job is swept a day after it ends (five minutes before v0.47.0); a
 **failed** one is never swept, because it is the only record that the download did not work, and it carries
-a `reason` naming the source and how far it got. `DELETE /api/sources/jobs/<folder>` dismisses a job that
-has stopped, and answers **409** `running` for one still downloading — or one whose auto-follow judgement
-is still running (`autoFollow.done === false`), since the follows would still land while the report they
-belong to was gone. A card whose add named `alsoFollow` candidates carries `autoFollow: {done, results}` —
+a `reason` naming the source and how far it got, and since v0.49.0 `left`: the chapters it did not land,
+ascending and at most 300, which is what a Try again sends back as `numbers` to `POST /api/sources/fetch`. An
+add's card also carries `cover: {source, url}`, its source's cover, so the Downloads view can draw it before
+the series has a thumbnail of its own. `DELETE /api/sources/jobs/<folder>` dismisses a job that has stopped:
+since v0.49.0 only its starter or an admin (**403** for anyone else, answered first), and **409** `running`
+for one still downloading — or one whose auto-follow judgement is still running (`autoFollow.done ===
+false`), since the follows would still land while the report they belong to was gone. A card whose add named
+`alsoFollow` candidates carries `autoFollow: {done, results}` —
 `done: false` with no results while the other sources are asked, then one entry per candidate in the order
 given, `{source, name, theirTitle, followed, coverage, why}`, with `why` one of `followed`,
 `numbering_differs` (under 90% of the primary's numbers listed there or, when judged both ways, under 90%
@@ -262,6 +267,13 @@ was asked — every candidate then reads so, rather than the card finishing with
 (already following two) or `unavailable` (the primary itself, disabled, in a cooldown, not loaded, or
 outside the caller's age cap). A `none` add with candidates gets a card with `total: 0, status: "done"`
 just to carry this; it lives a day after the judgement ends, so a closed dialog loses nothing.
+
+**Who sees which card** (since v0.49.0). Every viewer gets the cards of the series they can browse — library
+access, age cap and the 18+ hide, the rule the series themselves follow — where before cards were filtered only
+while the 18+ hide was on, so a member walled off from a library still received its cards' titles. A card whose
+folder is not a series yet (an add whose first chapter has not been scanned in) goes to whoever started it and
+to admins; a **failed** card goes only to whoever started it and to admins, on top of the first rule. A run's
+`current` series is left out by the same rule, for every viewer.
 
 **Reading a chapter before adding it** (since v0.47.0, #91). `GET /api/sources/preview?source=&sourceId=` lists
 that series' chapters on the source — the add dialog's own cached listing, one copy per number — as
@@ -296,7 +308,9 @@ mine}`, where `origin` is `add`, `fetch`, `fill` (Find missing chapters), `check
 is also how a newly followed source's chapters arrive), `sweep` (the scheduled check), `repair`, `bulk` (Fetch
 newest), `refetch` or `server`, and `status` is `queued` (waiting its turn at the source), `downloading`, `done`,
 `partial` or `failed`. A file already on disk is not listed. Each viewer gets the series they can browse; a
-folder that is not a series yet (an add's first chapter) goes to whoever started it and to admins.
+folder that is not a series yet (an add's first chapter) goes to whoever started it and to admins. Since v0.49.0
+`recent` survives a restart: every finished chapter is also written down (kept a week), and the last day of it,
+at most 500 entries, is read back when the server starts, with fresh `id`s.
 
 `GET /api/sources/popular?source=<id>&page=<n>` is the same listing sorted by the source's OWN popularity,
 not by anything this server computes: it is the page each site already publishes, reached with a different
