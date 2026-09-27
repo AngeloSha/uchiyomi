@@ -91,3 +91,13 @@ test('a finished run goes back where it started, and waits only on what the serv
   assert.match(page, /if \(sent\.length < runIds\.size \|\| sent\.some\(\(c\) => !c\.status\)\) return;/);
   assert.match(page, /router\.push\(items\.length === 1 \? `\/series\/\?id=\$\{items\[0\]\.series_id\}` : '\/library\/'\)/, 'a finished run does not leave the review');
 });
+
+test('the manual search keeps asking while sources are pending, instead of reading an early answer as "nobody"', () => {
+  // Reported: the wizard's manual search returned nothing. The server answers 1.5 s after the first source
+  // with a hit -- nearly always the series' own main source, which this sheet hides -- with the rest still
+  // pending, and the sheet asked once. Reintroduce by dropping `refetchInterval`: this fails.
+  const src = code(read('components/LinkPickSheet.tsx'));
+  assert.match(src, /refetchInterval: \(qy\) => \(qy\.state\.data\?\.pending \? POLL_MS : false\)/);
+  assert.match(src, /&wait=\$\{first \? FIRST_WAIT_MS : POLL_WAIT_MS\}/, 'polls wait the long first wait');
+  assert.match(src, /pendingSources > 0\s*\?[\s\S]{0,120}tr\('Still asking \{n\} sources…'/, '"Nobody has that title" is shown while sources are still being asked');
+});

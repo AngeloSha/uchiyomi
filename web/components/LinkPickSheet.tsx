@@ -20,6 +20,19 @@ import { LinkChapterList } from '@/components/LinkChapterList';
 
 interface SourceResult { source: string; sourceId: string; title: string; coverUrl?: string }
 interface SourceGroup { source: string; name: string; lang: string | null; results: SourceResult[] }
+interface SearchAnswer { content: SourceGroup[]; pending?: number; asked?: number }
+
+/**
+ * The server answers a search 1.5 s after the FIRST source with a hit and keeps asking the rest; the answer
+ * says how many are still `pending`. For this sheet the first hit is nearly always the series' own main
+ * source -- it obviously carries the title -- and that source is hidden here, so a single request showed
+ * "Nobody has that title yet." while every other source was still being asked. So: the first request waits
+ * the long wait, later ones join the running search with a short one, and it polls while anything is
+ * pending (Discover's rule, app/discover/page.tsx).
+ */
+const FIRST_WAIT_MS = 6000;
+const POLL_WAIT_MS = 1500;
+const POLL_MS = 1500;
 
 export function LinkPickSheet({ item, onClose, onAdded }: {
   item: LinkItem;
@@ -42,11 +55,21 @@ export function LinkPickSheet({ item, onClose, onAdded }: {
   const taken = new Set([...(item.primary ? [item.primary.source] : []), ...item.following.map((f) => f.source)]);
   const { data, isFetching, error } = useQuery({
     queryKey: ['link-search-source', debounced],
-    queryFn: () => api<{ content: SourceGroup[] }>(`/api/sources/search-all?groupBy=source&q=${encodeURIComponent(debounced)}`),
+    queryFn: ({ signal, queryKey, client }) => {
+      const first = (client.getQueryState(queryKey)?.dataUpdateCount ?? 0) === 0;
+      return api<SearchAnswer>(
+        `/api/sources/search-all?groupBy=source&wait=${first ? FIRST_WAIT_MS : POLL_WAIT_MS}&q=${encodeURIComponent(debounced)}`, { signal });
+    },
     enabled: debounced.length >= 2,
     staleTime: 30_000,
+    retry: false,
+    refetchOnWindowFocus: false,
+    refetchInterval: (qy) => (qy.state.data?.pending ? POLL_MS : false),
   });
+  const pendingSources = data?.pending ?? 0;
   const groups = (data?.content ?? []).filter((g) => !taken.has(g.source));
+  // Hits exist, but only on the sources this series already reads from: say that, not "nobody has it".
+  const onlyTaken = !groups.length && (data?.content ?? []).length > 0;
 
   const check = async () => {
     if (!pending) return;
@@ -123,9 +146,19 @@ export function LinkPickSheet({ item, onClose, onAdded }: {
           ))}
         </div>
       ) : groups.length === 0 ? (
-        <p className="py-10 text-center text-sm text-fog-500">{tr('Nobody has that title yet.')}</p>
+        <p className="py-10 text-center text-sm text-fog-500" data-search-empty>
+          {pendingSources > 0
+            ? (pendingSources === 1 ? tr('Still asking 1 source…') : tr('Still asking {n} sources…', { n: pendingSources }))
+            : onlyTaken ? tr('Only found on sources this series already reads from.')
+            : tr('Nobody has that title yet.')}
+        </p>
       ) : (
         <div className="space-y-4 pb-2">
+          {pendingSources > 0 && (
+            <p className="text-center text-[11px] text-fog-500">
+              {pendingSources === 1 ? tr('Still asking 1 source…') : tr('Still asking {n} sources…', { n: pendingSources })}
+            </p>
+          )}
           {groups.map((g) => (
             <div key={g.source}>
               <p className="mb-1.5 flex items-center gap-1.5 px-0.5 text-xs font-semibold text-fog-300">

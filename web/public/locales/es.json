@@ -2,7 +2,7 @@
   "_meta": {
     "language": "es",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 1387
+    "strings": 1388
   },
   "1 check found something": "1 comprobación encontró algo",
   "1 member": "1 miembro",
@@ -1390,5 +1390,6 @@
   "{n} chapters here · {shared} of this series’ {ours} · {fresh} new": "{n} capítulos aquí · {shared} de los {ours} de esta serie · {fresh} nuevos",
   "{n} left open — their chapters do not line up": "{n} quedan abiertas: sus capítulos no coinciden",
   "Connected 1 source": "1 fuente conectada",
-  "Connected {n} sources": "{n} fuentes conectadas"
+  "Connected {n} sources": "{n} fuentes conectadas",
+  "Only found on sources this series already reads from.": "Solo aparece en fuentes que esta serie ya usa."
 }
