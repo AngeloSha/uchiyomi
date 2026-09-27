@@ -250,11 +250,12 @@ file.** An install set up before v0.46.0 gets the cap by downloading the current
   the engine itself is doing.
 - **Health checks the engine's own Cloudflare helper.** The **Extension engine** row reads the engine's
   `flareSolverrEnabled` / `flareSolverrUrl`. When the helper is off, or points at `localhost` (the engine's own
-  container, where no solver runs) while an extension source is seen failing behind Cloudflare, the row turns
-  amber with **Connect the Cloudflare helper**; otherwise it is a greyed line with the same fix. Connect (also
-  under the catalogue in **Admin → Extensions**, as *Cloudflare helper · … Connect*) sets the engine to the
-  solver Uchiyomi uses (`FLARESOLVERR_URL`) and switches it on. Nothing restarts, and the engine keeps it
-  unless its own container names another solver. It is never changed without someone pressing it.
+  container, where no solver runs), the row turns amber while an extension source is seen behind Cloudflare, and
+  is a greyed line otherwise; its **Open** leads to **Admin → Extensions**. There, under the catalogue, the
+  *Cloudflare helper* line says the same and offers **Connect**, which sets the engine to the solver Uchiyomi uses
+  (`FLARESOLVERR_URL`) and switches it on. Nothing restarts, and the engine keeps it unless its own container
+  names another solver. It is never changed without someone pressing it; with no `FLARESOLVERR_URL` on Uchiyomi
+  the line says to set that first.
 - **Series stay routed** by the source they came from, so the scheduled updater keeps pulling new chapters.
 
 Two things worth knowing:

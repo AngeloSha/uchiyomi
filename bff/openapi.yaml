@@ -7298,7 +7298,7 @@ paths:
       tags:
         - admin
       summary: "Library health checks: chapter gaps, short chapters, duplicates, failing sources, frozen series, the
-        solver, the library scan, downloads missing from the library."
+        solver, the library scan, downloads missing from the library, the extension engine."
       operationId: getApiAdminHealth
       description: >-
         Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
@@ -7326,6 +7326,18 @@ paths:
         attempts, resetPending}; and `caveats` [{action, code: updates_paused | source_cooling_down |
         source_off, until?}], what an action will not be able to do, said before it is pressed. A short
         chapter saved with placeholder pages is offered confirm_short only.
+        Since v0.49.0 (#115) the `sources` check reads per-stage evidence: each item adds `evidence` [{stage:
+        search | chapters | pages | images, state: ok | fail | unknown, at, by: test | sweep | traffic, kind:
+        error | empty | unnumbered, error}], `tested` {at, by: test | sweep, state: pass | fail | inconclusive,
+        stage} (the last live check), `diagnosis` {code, reason, fix} and `series` (how many series use the
+        source), and is titled by the source's name. A confirmed failure (a failed Test or daily check, or three
+        traffic failures in a row at one stage) is a finding even for a source no series uses; a test that ran
+        out of time and a failure unchecked for seven days are `info`. The check carries `testMs`, how long one
+        Test may take. A new check, `extension-engine` (#72), reports the extension engine: off on purpose (ok,
+        one info item), not answering (warn, exactly one item), or whether its own Cloudflare helper is in use,
+        with the new action `engine_solver` (POST /api/admin/extensions/solver) when the helper is off or points
+        at localhost -- a finding only while an extension source is seen behind Cloudflare. It is absent when no
+        engine is set up and no series depends on one.
       security:
         - bearer: []
       responses:

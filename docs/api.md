@@ -203,8 +203,9 @@ result, error}` until `running` is false; `result` then holds the verdict per so
 `inconclusive` and `notified` (the ids pushed: a push goes out once per new or changed failure, not daily,
 and links to Health). It applies only the two fixes that are
 verifiable: it follows a site to a new address **after** the new one passes a smoke test (rolling back if it
-does not). Everything else is reported with a reason and a suggested fix, and admins get a push notification.
-Answers **409** while a sweep is running. It no longer touches extensions -- that is its own scheduled task,
+does not). Everything else is reported with a reason and a suggested fix, and admins get a push notification
+for what is new. Answers **409** while a sweep is running (since v0.49.0 with its `progress`, so a client can
+follow that one instead). It no longer touches extensions -- that is its own scheduled task,
 below, because the engine has to re-read its repositories before "an update is available" means anything.
 
 `PATCH /api/admin/sources/custom/:id` (admin) changes a custom site's `base` address and nothing else. The
@@ -446,6 +447,30 @@ row that already carries `fixed` it is the withdrawal (`{confirmed: false}`); `d
 /api/admin/series/:id/chapters/delete`, `merge` is `POST /api/admin/series/:id/merge`, and `test`/`unblock`/
 `disable` are the existing `POST /api/admin/sources/:id/...` routes. Nothing on this page acts on its own:
 the two destructive ones, `delete` and `merge`, are the two the nightly repair never does.
+
+**Source health and the extension engine** (since v0.49.0). The `sources` check reads the per-stage evidence
+(#115): each of its items adds `evidence` (one line per stage, `search`, `chapters`, `pages`, `images`, each
+`{stage, state: 'ok' | 'fail' | 'unknown', at, by: 'test' | 'sweep' | 'traffic', kind: 'error' | 'empty' |
+'unnumbered', error}`), `tested` (the last Test or daily check: `{at, by, state: 'pass' | 'fail' |
+'inconclusive', stage}`), `diagnosis` (`{code, reason, fix}`, the admin half) and `series` (how many series use
+the source), and its `title` is the source's name (its id only when no name is known). A confirmed failure — a
+failed live check, or three failures in a row at one stage from traffic — is a finding whether or not a series
+uses the source, and an ignore of it covers the stages failing when it was made; a test that ran out of time and
+a failure unchecked for seven days are `info`. The check itself carries `testMs`, how long one Test may take
+(`SOURCE_TEST_TIMEOUT_MS` plus 8 s), for a client's clock. A new check, `extension-engine`, is there when an
+engine is set up or series depend on one: `ok` while it is off on purpose (one `info` item counting those
+series), `warn` with exactly one item while it does not answer, and otherwise whether its own Cloudflare helper
+is in use — an item with the new action `engine_solver` (`POST /api/admin/extensions/solver`) when the helper is
+off or points at `localhost`, a finding only while an extension source is seen behind Cloudflare. A
+`frozen-series` item for an extension series now names the engine when it is the reason (*can't be reached
+because the extension engine isn't answering* / *is off*).
+
+`GET /api/admin/sources` (admin) is every source's stored health, and since v0.49.0 adds, per source, `live`
+(the last Test or daily check: `{at, by, state, stage, code, checks}`, or `null`), `failing` (the stages whose
+failure is open, confirmed and not stale: `{stage, since, at, error, kind, by, streak}`) and `evidence` (the
+same stage lines as Health), plus a top-level `testMs`. The public `status` it carries is unchanged: Admin →
+Providers shows *Failing* by overlaying `failing` on it, while `GET /api/sources` stays one answer for every
+account.
 
 **Trigger a library scan** (admin scope)
 
@@ -1315,11 +1340,12 @@ not turn the last run into "not run yet"; a run that threw stores a NULL result,
 comes back. A shutdown stops it between batches; what it had marked stays marked, because it was true.
 
 **Repair the library.** `POST /api/admin/tasks/repair/run` (since v0.41.0; the Tasks panel's *Repair
-library*, and the *Fix* / *Fill now* / *Retry now* / *Reset solver sessions* chips on the Health tab —
+library*, and the *Fix* / *Fill now* / *Retry now* keys and the *Reset the solver* action on the Health tab —
 *It's fine* is the separate `confirm-short` route below) runs the nightly repair now. It is **detached**, like `update` and `verify`, and answers **200**
-`{ok: true, started: true}`; the counts land on `GET /api/admin/tasks` as the `repair` entry's `lastResult`.
+`{ok: true, started: true}` (since v0.49.0 with the run's id, below); a full run's counts land on `GET
+/api/admin/tasks` as the `repair` entry's `lastResult`.
 It is the only task that takes a **body**: `{only?: ('solver' | 'count' | 'failures' | 'short' | 'gaps' |
-'groups' | 'names' | 'directions')[], seriesId?, bookId?, sourceId?}`. With no body it runs all eight steps over
+'groups' | 'names' | 'directions')[], seriesId?, bookId?, sourceId?, now?}`. With no body it runs all eight steps over
 the whole library, in that order. `directions` (since v0.48.0) asks MangaDex (the original language of every
 series that follows it) and AniList (the country of origin of every linked series) about the series whose
 reading direction nothing has said yet — at most `REPAIR_DIRECTIONS_MAX` (500) series per service a night, 100
@@ -1335,7 +1361,10 @@ Each target belongs to exactly one step — `seriesId` to `gaps` (that series, i
 cooldown), `bookId` to `short` (that chapter), `sourceId` to `failures` (that source's failed chapters,
 whatever their age) — and a target sent **without** `only: ["<its step>"]` is a **400** `bad_request` with a
 message naming the step, rather than a full nightly run carrying an argument four steps ignore. `only` takes
-each step at most once.
+each step at most once. `now: true` is for the whole library only, and only where the `failures` step runs (a
+**400** otherwise): that step then resets every source's failed chapters whatever their age and re-checks up to
+10 series from the sources that can be asked now. Health's *Fix all issues* sends it, and since v0.49.0 so does
+the *Fix all* on its *Chapters that would not download* card.
 
 Two refusals, deliberately different: `{ok: false, error: 'sweep_running'}` while a chapter sweep is
 running, and `{ok: false, error: 'busy'}` while another repair is. The two jobs never overlap in either
