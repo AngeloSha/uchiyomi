@@ -18,6 +18,8 @@ import { solverPing, solverUrl } from './sources/flaresolverr';
 import { getSource } from './sources';
 import { suwayomiConfigured } from './sources/suwayomi/client';
 import { lastSuwayomiLoad } from './sources/suwayomi/register';
+import { engineState, type EngineState } from './sources/suwayomi/engineState';
+import { extensionEngineCheck } from './engineHealth';
 import { env } from '../env';
 import { gapsOf } from './fill';
 import { CHAPTER_RETRY_CAP } from './updater';
@@ -44,7 +46,9 @@ export type HealthStatus = 'ok' | 'warn' | 'problem';
  */
 export type HealthAction =
   | 'fix_short' | 'confirm_short' | 'delete' | 'fill' | 'retry' | 'test' | 'unblock' | 'disable' | 'merge' | 'solver_reset'
-  | 'ignore' | 'unignore';
+  | 'ignore' | 'unignore'
+  // #72: point the extension engine's own Cloudflare helper at Uchiyomi's (POST /api/admin/extensions/solver).
+  | 'engine_solver';
 
 export interface HealthItem {
   seriesId?: string;
@@ -596,7 +600,7 @@ async function chapterFailures(ctx: IgnoreCtx = noIgnores()): Promise<HealthChec
  * ever asked -- and the fill scan never even pins them. Live: one series, 31 chapters, frozen since its
  * extension was uninstalled twelve days earlier, and no surface anywhere said so.
  */
-async function frozenSeries(ctx: IgnoreCtx = noIgnores()): Promise<HealthCheck> {
+export async function frozenSeries(ctx: IgnoreCtx = noIgnores(), engine: EngineState = engineState()): Promise<HealthCheck> {
   let readFailed = false;
   const rows = await q<{ id: string; title: string; source_id: string | null; books_count: number; switched_off: boolean; still_enabled: boolean }>(
     // A source that is still installed but switched off (by hand, or by hiding its language) is a different
@@ -635,13 +639,21 @@ async function frozenSeries(ctx: IgnoreCtx = noIgnores()): Promise<HealthCheck> 
     // Enabled yet unregistered is the third case: dropped by SUWAYOMI_MAX_SOURCES, which the cap check
     // above names but a series page cannot see.
     r.switched_off ? 'switched off' : r.still_enabled ? forDesktop('over the source limit (SUWAYOMI_MAX_SOURCES)', 'over the source limit') : 'no longer installed';
+  // #72: with no engine answering, EVERY extension series is unrouted, and the rules above then blamed the source
+  // limit (enabled, so "over the limit") or a missing install. The engine is the reason, and the fix is the
+  // engine: its own row (engineHealth.ts) and Admin → Extensions say how to bring it back.
+  const engineWhy = (r: typeof rows[number]): string | null =>
+    !r.source_id?.startsWith('sw:') || engine === 'up' ? null
+      : engine === 'unreachable' ? 'the extension engine isn’t answering' : 'the extension engine is off';
   const found: HealthItem[] = frozen.map((r) => ({
     seriesId: r.id,
     title: r.title,
     key: `series:${r.id}`,
-    detail: r.source_id
-      ? `${r.books_count} chapters; its source ${r.source_id} is ${why(r)}`
-      : `${r.books_count} chapters; no source recorded`,
+    detail: !r.source_id
+      ? `${r.books_count} chapters; no source recorded`
+      : engineWhy(r)
+        ? `${r.books_count} chapters; its source ${r.source_id} can’t be reached because ${engineWhy(r)}`
+        : `${r.books_count} chapters; its source ${r.source_id} is ${why(r)}`,
   }));
   const ignored = applyIgnores('frozen-series', found, ctx, !readFailed);
   const stuck = found.filter((i) => !i.info).length;
@@ -664,6 +676,9 @@ async function frozenSeries(ctx: IgnoreCtx = noIgnores()): Promise<HealthCheck> 
       (covered.length ? `; ${covered.length} lost ${covered.length === 1 ? 'its' : 'their'} primary but still follow${covered.length === 1 ? 's' : ''} another` : '') +
       ignoredTail(ignored),
     note:
+      (frozen.some((r) => engineWhy(r))
+        ? 'Series that came from extensions wait for the extension engine; Admin → Extensions shows how to bring it back. '
+        : '') +
       'These read fine, but nothing can fetch new chapters for them and "find missing chapters" will not offer ' +
       'their own source. Switch the source back on, re-add the extension, or re-point the series at a source that carries it.' +
       (frozen.length > 20 ? ` ${frozen.length - 20} more not shown.` : ''),
@@ -1345,7 +1360,7 @@ export async function runHealthChecks(): Promise<HealthReport> {
   // What an admin chose to ignore (lib/healthIgnore.ts), read once for the whole run.
   const ctx = await loadIgnores();
   // Independent read-only queries: run them together rather than serially.
-  const checks = await Promise.all([
+  const checks = (await Promise.all([
     chapterGaps(held, ctx),
     shortChapters(),
     outlierChapters(held, ctx),
@@ -1358,7 +1373,9 @@ export async function runHealthChecks(): Promise<HealthReport> {
     libraryScan(),
     downloadsMissing(ctx),
     ...(suwayomiConfigured() ? [extensionCap()] : []),
-  ]);
+    // #72: the engine itself; null when there is none and nothing depends on one (lib/engineHealth.ts).
+    extensionEngineCheck().catch(() => null),
+  ])).filter((c): c is HealthCheck => c !== null);
   await keepIgnoresAlive(ctx);
   // worst first, so the page opens on whatever needs attention
   const rank: Record<HealthStatus, number> = { problem: 0, warn: 1, ok: 2 };

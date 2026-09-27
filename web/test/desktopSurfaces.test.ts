@@ -122,7 +122,9 @@ test('per-person library access is hidden on desktop, and Extensions becomes the
   assert.ok(gate > ext.indexOf('if (!status) return null;'), 'the engine card renders before the server has answered');
   // v0.45.0: the card names the shipped container (it named the development stack's); extensionRepoRow.test.ts
   // pins the rest of its copy.
-  assert.match(ext, /<code key=\{i\} className="text-fog-300">uchiyomi-suwayomi<\/code>/, 'the server\'s own Docker card changed');
+  // v0.49.0 (#72): the server's card is the setup screen (components/EngineSetup.tsx), whose steps name the shipped
+  // container; engineSetup.test.ts pins them.
+  assert.match(ext, /return <EngineSetup status=\{status\} span=\{span\} \/>;/, 'the server\'s own card is not the setup screen');
   assert.match(admin, /\{isDesktop\(\) \? ' Hide languages you don\\'t read\.' : ' Hide languages you don\\'t read, or raise SUWAYOMI_MAX_SOURCES\.'\}/, 'the source-limit line names an env var on desktop, or changed on the server');
   // The engine card is driven by the bridge only, and polls the server while the engine starts.
   const card = code(read('components/EngineInstall.tsx'));

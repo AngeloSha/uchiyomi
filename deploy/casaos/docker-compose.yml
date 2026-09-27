@@ -47,6 +47,8 @@ services:
       # (deploy/casaos/uchiyomi-suwayomi.yml), then set this to http://uchiyomi-suwayomi:4567 in CasaOS's
       # settings editor. Listed empty on purpose, so the field is there to fill in; empty = no extensions.
       SUWAYOMI_URL: ""
+      # Tells Admin → Extensions which setup steps to open on (the add-on above), and nothing else.
+      UCHIYOMI_PLATFORM: casaos
     volumes:
       # your existing comics, read-only — point this at wherever you keep them
       - /DATA/Media/Comics:/library

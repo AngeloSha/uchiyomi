@@ -29,6 +29,8 @@
 //     2. a reload keeps the verdict: the card's stored evidence still says ✗ Search;
 //     3. Health -> Source health lists fake-a by name with the ✗ Search line;
 //     4. with search scripted back to `ok`, Test from the Health row clears the finding.
+//   engine -- Admin → Extensions with the extension engine not answering, then answering (engineWalk.mjs). Needs
+//   up.sh with E2E_ENGINE=fake E2E_ENGINE_MODE=down, and ENGINE=http://127.0.0.1:<the engine's port>.
 //
 // Screenshots go to $OUT (default shots49). LOOK at them: every check here is geometry, and geometry passes on
 // a card that is transparent, clipped or unreadable.
@@ -415,6 +417,11 @@ try {
       console.log(`\n  notices @${w}`);
       await notices(w);
     }
+  }
+  // #72: the extension engine's setup screen and the way back (engineWalk.mjs; up.sh with E2E_ENGINE=fake).
+  if (PHASES.includes('engine')) {
+    const { engineWalk } = await import('./engineWalk.mjs');
+    await engineWalk({ page, api, go, press, shot, check, waitFor, sleep });
   }
   // Last: a sources run that stops half-way leaves fake-a's search failing, which no other phase should meet.
   if (PHASES.includes('sources')) {

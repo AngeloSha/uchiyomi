@@ -43,6 +43,9 @@ export function healthLinks(check: string, it: HealthItem): HealthLink[] {
     case 'duplicates':
       if (it.seriesIds?.length) return it.seriesIds.map((id, i) => ({ href: seriesHref(id), label: it.titles?.[i] }));
       break;
+    // #72: the engine's row is about no series; its setup steps, Check again and Connect are on the Extensions tab.
+    case 'extension-engine':
+      return [{ href: '/admin/?tab=Extensions' }];
   }
   return it.seriesId ? [{ href: seriesHref(it.seriesId) }] : [];
 }

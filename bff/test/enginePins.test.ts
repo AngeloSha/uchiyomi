@@ -20,7 +20,7 @@ const read = (p: string) => readFileSync(join(REPO, p), 'utf8');
 const PIN_FILE = JSON.parse(read('desktop/src/engine-pin.json'));
 const PIN: string = PIN_FILE.version;
 
-/** Every file that runs the engine from its container image. */
+/** Every file that runs the engine from its container image, or tells someone to. */
 const IMAGE_FILES = [
   'deploy/docker-compose.yml',
   'deploy/docker-compose.external-db.yml',
@@ -28,6 +28,8 @@ const IMAGE_FILES = [
   'docker-compose.yml',
   'deploy/casaos/uchiyomi-suwayomi.yml',
   'templates/uchiyomi-suwayomi.xml',
+  // The "somewhere else" step of Admin → Extensions' setup screen: the docker run it offers to copy (#72).
+  'web/lib/engineSetup.ts',
 ];
 
 test('the desktop pin is a Suwayomi release tag', () => {

@@ -136,7 +136,8 @@ const S_FROZEN = 's_health_frozen', S_ROUTED = 's_health_routed', S_OFF = 's_hea
 test('a series with no working source is listed, one with a working source is not', { skip: DSN ? false : 'set TEST_DATABASE_URL to run' }, async () => {
   const { migrate } = await import('../src/lib/migrate');
   const { q } = await import('../src/lib/db');
-  const { runHealthChecks } = await import('../src/lib/health');
+  const { runHealthChecks, frozenSeries } = await import('../src/lib/health');
+  const { noIgnores } = await import('../src/lib/healthIgnore');
   const { registerAdapter } = await import('../src/lib/sources');
   await migrate();
   registerAdapter({ id: 'health-live', name: 'Health Live', search: async () => [], getSeries: async () => null,
@@ -160,12 +161,15 @@ test('a series with no working source is listed, one with a working source is no
     const titles = check.items.map((i: any) => i.title);
     assert.ok(titles.includes('Frozen Fixture'), `the frozen series is named: ${titles.join(', ')}`);
     assert.ok(!titles.includes('Routed Fixture'), 'a series whose adapter is loaded is not');
-    assert.match(check.items.find((i: any) => i.title === 'Frozen Fixture').detail, /sw:999999999 is no longer installed/);
+    assert.ok(titles.includes('Off Fixture'), 'a series on a switched-off source is still frozen');
+    // The reasons, with the extension engine answering: this process has none, and with none every extension
+    // series waits for the engine first (the next test but one).
+    const up = await frozenSeries(noIgnores(), 'up');
+    const detail = (title: string) => up.items.find((i) => i.title === title)!.detail;
+    assert.match(detail('Frozen Fixture'), /sw:999999999 is no longer installed/);
     // Reintroduce by dropping the EXISTS subquery from frozenSeries(): "a switched-off source is said to be
     // switched off" fails, the detail reads "no longer installed" for a source that is right there.
-    assert.ok(titles.includes('Off Fixture'), 'a series on a switched-off source is still frozen');
-    assert.match(check.items.find((i: any) => i.title === 'Off Fixture').detail, /sw:health-off is switched off/,
-      'a switched-off source is said to be switched off');
+    assert.match(detail('Off Fixture'), /sw:health-off is switched off/, 'a switched-off source is said to be switched off');
   } finally {
     for (const id of [S_FROZEN, S_ROUTED, S_OFF]) await q('DELETE FROM lib_series WHERE id = $1', [id]);
     await q(`DELETE FROM suwayomi_sources WHERE source_id = 'health-off'`);
@@ -186,7 +190,8 @@ const S_COVERED = 's_health_covered', S_ORPHANED = 's_health_orphaned';
 test('a dead primary with a live follower is reference, not a warning; with a dead follower it is still frozen', { skip: DSN ? false : 'set TEST_DATABASE_URL to run' }, async () => {
   const { migrate } = await import('../src/lib/migrate');
   const { q } = await import('../src/lib/db');
-  const { runHealthChecks } = await import('../src/lib/health');
+  const { runHealthChecks, frozenSeries } = await import('../src/lib/health');
+  const { noIgnores } = await import('../src/lib/healthIgnore');
   const { registerAdapter } = await import('../src/lib/sources');
   await migrate();
   registerAdapter({ id: 'health-follower', name: 'Health Follower', search: async () => [], getSeries: async () => null,
@@ -209,10 +214,60 @@ test('a dead primary with a live follower is reference, not a warning; with a de
     const orphaned = check.items.find((i: any) => i.title === 'Orphaned Fixture');
     assert.ok(orphaned, 'a dead primary with a dead follower is listed');
     assert.notEqual(orphaned.info, true, 'and it is a real finding');
-    assert.match(orphaned.detail, /sw:777777777 is no longer installed/);
+    const up = await frozenSeries(noIgnores(), 'up');
+    assert.match(up.items.find((i) => i.title === 'Orphaned Fixture')!.detail, /sw:777777777 is no longer installed/);
     assert.equal(check.status, 'warn');
   } finally {
     for (const id of [S_COVERED, S_ORPHANED]) await q('DELETE FROM lib_series WHERE id = $1', [id]);
+  }
+});
+
+const S_ENGINE = 's_health_engine', S_GONE = 's_health_gone';
+
+/**
+ * #72: with no extension engine answering, EVERY extension series is unrouted, and an enabled source then read
+ * "over the source limit (SUWAYOMI_MAX_SOURCES)" -- advice to raise a limit that was never reached. The engine is
+ * the reason in each state it can be in; with it answering, the old rules stand.
+ *
+ * Reintroduce by making engineWhy() in frozenSeries return null (the old why() for every state): the 'off' case
+ * reads "over the source limit" again, and "the engine is the reason" fails.
+ */
+test('the engine being off is the reason, not the source limit', { skip: DSN ? false : 'set TEST_DATABASE_URL to run' }, async () => {
+  const { migrate } = await import('../src/lib/migrate');
+  const { q } = await import('../src/lib/db');
+  const { frozenSeries } = await import('../src/lib/health');
+  const { noIgnores } = await import('../src/lib/healthIgnore');
+  await migrate();
+  for (const id of [S_ENGINE, S_GONE]) await q('DELETE FROM lib_series WHERE id = $1', [id]);
+  await q(`DELETE FROM suwayomi_sources WHERE source_id = 'health-engine'`);
+  // Enabled and remembered, but not registered: exactly what every extension source is while the engine is away.
+  await q(`INSERT INTO suwayomi_sources (source_id, name, lang, enabled) VALUES ('health-engine', 'Engine Source', 'en', true)`);
+  await q(`INSERT INTO lib_series (id, source, title, folder, books_count, source_id, source_series_id)
+           VALUES ($1, 'test', 'Engine Fixture', $1, 12, 'sw:health-engine', '1')`, [S_ENGINE]);
+  await q(`INSERT INTO lib_series (id, source, title, folder, books_count, source_id, source_series_id)
+           VALUES ($1, 'test', 'Gone Fixture', $1, 3, 'gone-pack-source', '1')`, [S_GONE]);
+  try {
+    const detail = async (engine: 'off' | 'switched_off' | 'unreachable' | 'up', title: string) => {
+      const c = await frozenSeries(noIgnores(), engine);
+      return { detail: c.items.find((i) => i.title === title)!.detail, note: c.note ?? '' };
+    };
+    for (const engine of ['off', 'switched_off'] as const) {
+      const r = await detail(engine, 'Engine Fixture');
+      assert.match(r.detail, /^12 chapters; its source sw:health-engine can’t be reached because the extension engine is off$/, `the engine is the reason (${engine})`);
+      assert.doesNotMatch(r.detail, /source limit/);
+      assert.match(r.note, /^Series that came from extensions wait for the extension engine; Admin → Extensions shows how to bring it back\. /);
+    }
+    assert.match((await detail('unreachable', 'Engine Fixture')).detail, /because the extension engine isn’t answering$/);
+    const up = await detail('up', 'Engine Fixture');
+    assert.match(up.detail, /sw:health-engine is over the source limit \(SUWAYOMI_MAX_SOURCES\)/, 'with the engine up, the limit is the reason');
+    assert.doesNotMatch(up.note, /wait for the extension engine/);
+    // A source that is not an extension's is not the engine's to explain.
+    for (const engine of ['off', 'switched_off', 'unreachable', 'up'] as const) {
+      assert.match((await detail(engine, 'Gone Fixture')).detail, /gone-pack-source is no longer installed$/, `a non-extension source (${engine})`);
+    }
+  } finally {
+    for (const id of [S_ENGINE, S_GONE]) await q('DELETE FROM lib_series WHERE id = $1', [id]);
+    await q(`DELETE FROM suwayomi_sources WHERE source_id = 'health-engine'`);
   }
 });
 

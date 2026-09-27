@@ -6947,9 +6947,17 @@ paths:
     get:
       tags:
         - admin
-      summary: "Extension engine: configured, reachable, version, source counts (enabled, registered, skipped over the cap), hidden languages."
+      summary: "Extension engine: configured, reachable, version, source counts (enabled, registered, skipped over the cap), hidden languages, why it is off, the retry, the platform, linked series and its Cloudflare helper."
       operationId: getApiAdminExtensionsStatus
-      description: Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
+      description: "Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
+        Not configured: `{configured: false, reachable: false, off: 'switch' | 'unset', platform, linkedSeries}`
+        (`switch` is EXTENSION_ENGINE=0 with the bundled address). Configured: the fields above plus `engine`
+        (host:port), `platform` (desktop, compose, unraid, casaos, umbrel or unknown), `retry` ({attempts, since,
+        nextAt} while the registration retry runs, else null), `lastTry`, `linkedSeries` (series added through an
+        extension) and, when the engine answers, `solver` ({supported, enabled, wiring: ok | off | localhost |
+        other | unsupported, connectable, url}; `url` is never sent on desktop). When the engine answers but the
+        last registration missed it, this call registers its sources before replying."
+
       security:
         - bearer: []
       responses:
@@ -7128,6 +7136,32 @@ paths:
       responses:
         "200":
           description: OK
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+        "502":
+          description: The extension engine did not answer
+  /api/admin/extensions/solver:
+    post:
+      tags:
+        - admin
+      summary: Point the extension engine's own Cloudflare helper at the solver Uchiyomi uses (FLARESOLVERR_URL),
+        and switch it on.
+      operationId: postApiAdminExtensionsSolver
+      description: "Requires an admin account and a token carrying the admin scope. Scopes only ever restrict.
+        Sets the engine's flareSolverrEnabled and flareSolverrUrl; nothing restarts. Only on request, never by
+        itself. Answers `{ok, enabled, wiring}`. Audited as `extension.solver` with the solver's host, never its
+        address."
+
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: "`not_configured` (no extension engine), `no_solver` (Uchiyomi has no FLARESOLVERR_URL to
+            share) or `unsupported` (the engine has no such setting)"
         "401":
           description: Not authenticated
         "403":
