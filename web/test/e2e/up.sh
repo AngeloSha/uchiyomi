@@ -11,7 +11,9 @@
 #   KEEP=1 E2E_ADULT=1 bash web/test/e2e/up.sh   # fake-b declares itself adult: what walk42 needs
 #   E2E_EMBEDDED=1 bash web/test/e2e/up.sh   # no Postgres container: the image runs its own (DATABASE_URL unset)
 #   KEEP=1 E2E_ENGINE=fake E2E_ENGINE_MODE=down bash web/test/e2e/up.sh   # with the fake extension engine (walk49 engine)
+#   KEEP=1 E2E_ENGINE=fake E2E_ARCHIVE_FAST=1 E2E_NO_WALK=1 bash web/test/e2e/up.sh   # walk49, every phase
 #   E2E_NO_WALK=1 skips the run.mjs walk at the end (with KEEP=1: just bring an instance up to poke at)
+#   E2E_MIN_FREE_GB=0 on a host with less than 10 GiB free: the downloader's floor refuses every download under it
 #
 # The embedded leg is the proof that the one-container layout behaves like the two-container one, in the
 # only place both are actually driven end to end. CI runs both.
@@ -57,6 +59,21 @@ DATA=$(mktemp -d)
 # The same walk needs one series whose title carries characters a keyboard cannot type (#66), and it is
 # served by fake-a alone so that adding it names one provider and no fold has to be resolved.
 if [ "${E2E_ADULT:-0}" = "1" ]; then ADULT_SOURCE="fake-b"; EXTRA_A="v42"; else ADULT_SOURCE=""; EXTRA_A="none"; fi
+# What the app is started with beyond the common set, for both database layouts.
+APP_ENV=()
+# E2E_ARCHIVE_FAST=1: the slow archive's test-only timing (#117; bff lib/archive.ts, lib/archivePace.ts). With the
+# owner's defaults its first look comes ten minutes after a boot, every chapter is followed by a break of at least
+# 45 s and pages are 1.5-4 s apart, so a walk could never watch a chapter land. Here: the first look 5 s after the
+# boot, a 2 s floor under the break, pages 20-60 ms apart, a tick every 2 s. Each has its own name to override
+# (ARCHIVE_FIRST_RUN_MS=… and so on). Off by default: every walk before v0.49 runs against the real pacing.
+if [ "${E2E_ARCHIVE_FAST:-0}" = "1" ]; then
+  APP_ENV+=(-e "ARCHIVE_FIRST_RUN_MS=${ARCHIVE_FIRST_RUN_MS:-5000}" -e "ARCHIVE_MIN_BREAK_MS=${ARCHIVE_MIN_BREAK_MS:-2000}"
+    -e "ARCHIVE_PAGE_GAP_MS=${ARCHIVE_PAGE_GAP_MS:-20,60}" -e "ARCHIVE_TICK_MS=${ARCHIVE_TICK_MS:-2000}")
+fi
+# E2E_MIN_FREE_GB: the downloader's free-space floor (MIN_FREE_GB, 10 GiB when unset), measured where the app
+# downloads to -- in this rig the host's own disk. A test host with less free than that refuses every download, and
+# the walks read it as a broken feature; 0 turns the floor off. Unset: the app's own default.
+if [ -n "${E2E_MIN_FREE_GB:-}" ]; then APP_ENV+=(-e "MIN_FREE_GB=$E2E_MIN_FREE_GB"); fi
 
 cleanup() {
   [ "${KEEP:-0}" = "1" ] && { echo "kept: $NET on :$PORT, fake sources on :$FAKE_A_PORT/:$FAKE_B_PORT${ENGINE:+, fake engine on :$ENGINE_PORT} (library $LIB, data $DATA)"; return; }
@@ -117,12 +134,15 @@ if [ "$EMBEDDED" = "1" ]; then
     -e FAKE_SOURCE_URLS="fake-a=http://$FAKE_A:$FAKE_A_PORT,fake-b=http://$FAKE_B:$FAKE_B_PORT" \
     -e FAKE_SOURCE_NSFW="$ADULT_SOURCE" \
     -e DOWNLOAD_PAGE_GAP_MS=20 -e DOWNLOAD_RESUME_WAIT_MS=200,200,200 \
-    -e PUID="$(id -u)" -e PGID="$(id -g)" ${ENGINE_ENV[@]+"${ENGINE_ENV[@]}"} \
+    -e PUID="$(id -u)" -e PGID="$(id -g)" ${ENGINE_ENV[@]+"${ENGINE_ENV[@]}"} ${APP_ENV[@]+"${APP_ENV[@]}"} \
     -v "$LIB":/library -v "$DATA":/data "$IMAGE" >/dev/null
 else
   docker run -d --name "$DB" --network "$NET" \
     -e POSTGRES_PASSWORD=e2e -e POSTGRES_DB=yomi postgres:16-alpine >/dev/null
-  for _ in $(seq 1 60); do docker exec "$DB" pg_isready -q 2>/dev/null && break; sleep 1; done
+  # Over TCP, not the socket: the image's first start runs initdb against a temporary server that listens on the
+  # socket only, answers "ready", and is then stopped and started again. An app that connected in that gap died
+  # with "the database system is starting up" and the walk had no instance to drive.
+  for _ in $(seq 1 60); do docker exec "$DB" pg_isready -q -h 127.0.0.1 2>/dev/null && break; sleep 1; done
 
   docker run -d --name "$APP" --network "$NET" -p "127.0.0.1:$PORT:3000" \
     -e DATABASE_URL="postgres://postgres:e2e@$DB:5432/yomi" \
@@ -131,7 +151,7 @@ else
     -e FAKE_SOURCE_URLS="fake-a=http://$FAKE_A:$FAKE_A_PORT,fake-b=http://$FAKE_B:$FAKE_B_PORT" \
     -e FAKE_SOURCE_NSFW="$ADULT_SOURCE" \
     -e DOWNLOAD_PAGE_GAP_MS=20 -e DOWNLOAD_RESUME_WAIT_MS=200,200,200 \
-    -e PUID="$(id -u)" -e PGID="$(id -g)" ${ENGINE_ENV[@]+"${ENGINE_ENV[@]}"} \
+    -e PUID="$(id -u)" -e PGID="$(id -g)" ${ENGINE_ENV[@]+"${ENGINE_ENV[@]}"} ${APP_ENV[@]+"${APP_ENV[@]}"} \
     -v "$LIB":/library "$IMAGE" >/dev/null
 fi
 
