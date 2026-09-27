@@ -25,6 +25,8 @@ import { groupProviders, type ProviderGroup, type ProviderSrc } from '@/lib/prov
 import { adultShown } from '@/lib/adult';
 import { bridge, hiddenOnDesktop, isDesktop, visibleGroups, DESKTOP_HIDDEN, type EngineStatus, type UpdateStatus } from '@/lib/desktop';
 import { EngineInstall } from '@/components/EngineInstall';
+import { StatusEdge, StatusMark } from '@/components/StatusMark';
+import { TONE_SURFACE, engineMark, healthMark, sourceMark, type ProviderStatus } from '@/lib/status';
 import Link from 'next/link';
 import { healthLinks } from '@/lib/healthLinks';
 
@@ -71,13 +73,6 @@ const _GROUP_LABELS = keys('Server', 'People', 'Content', 'Sources');
 
 const TABS = GROUPS.flatMap((g) => g.tabs);
 type Tab = (typeof TABS)[number];
-const STATUS_STYLE: Record<string, string> = {
-  ok: 'bg-emerald-600/20 text-emerald-300', blocked: 'bg-red-600/20 text-red-300',
-  rate_limited: 'bg-amber-600/20 text-amber-300', down: 'bg-orange-600/20 text-orange-300', disabled: 'bg-ink-700 text-fog-400',
-  // Answers without error, returns nothing. Deliberately not red: it may be a site redesign rather than a
-  // failure, and until it is tested nobody knows which.
-  quiet: 'bg-fog-600/20 text-fog-300',
-};
 
 /**
  * The tab lives in the URL (`?tab=Settings`), read through `useSearchParams`, which a statically exported
@@ -366,12 +361,20 @@ function NeedsAttention({ health, className = '' }: {
         </>
       ) : (
         <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
-          {failing.map((c) => (
-            <div key={c.id} className={`rounded-2xl border px-3 py-2.5 ${HEALTH_TONE[c.status]}`}>
-              <p className="text-sm font-medium text-fog-100">{c.title}</p>
-              <p className="mt-0.5 text-[11px] text-fog-400">{c.summary}</p>
-            </div>
-          ))}
+          {failing.map((c) => {
+            // The tint alone told a problem from a warning only to someone who can tell red from amber:
+            // the glyph's shape says it too, and names it to a screen reader. The edge is StatusEdge's bar,
+            // the one every card that needs a second look wears from v0.49.0. Inset 12 px rather than the
+            // default 16: the tile is short, and 12 still clears its 16 px corners (checked at 390 and 1280).
+            const m = healthMark(c.status);
+            return (
+              <div key={c.id} className={`relative rounded-2xl border px-3 py-2.5 ${TONE_SURFACE[m.tone]}`}>
+                <StatusEdge tone={m.tone} inset="inset-y-3" />
+                <p className="flex items-center gap-1.5 text-sm font-medium text-fog-100"><StatusMark tone={m.tone} title={m.label} />{c.title}</p>
+                <p className="mt-0.5 text-[11px] text-fog-400">{c.summary}</p>
+              </div>
+            );
+          })}
         </div>
       )}
     </div>
@@ -663,18 +666,18 @@ function Providers({ onTab }: { onTab: (t: Tab) => void }) {
       </>
     );
   }
-  const statusChip = (st: string) => (
-    <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${STATUS_STYLE[st] || STATUS_STYLE.ok}`}>{st === 'rate_limited' ? 'rate-limited' : st}</span>
-  );
+  // A glyph and the words, not a capsule around the server's own token: "ok" and "rate-limited" were shown
+  // as sent, in English in every language, and a blocked source and a healthy one differed only in tint.
+  const statusMark = (st: ProviderStatus) => <StatusMark {...sourceMark(st)} />;
 
   /** The card every source has always had: one source, its status, its diagnosis, its controls. */
   function sourceCard(s: ProviderSrc) {
-    const st = (s.status ?? 'ok') as string;
+    const st: ProviderStatus = s.status ?? 'ok';
     return (
       <div key={s.id} className="card grad-border p-4">
         <div className="flex items-center gap-2">
           <span className="flex-1 text-sm text-fog-100">{s.name}{customIds.has(s.id) && <span className="ms-2 rounded bg-ink-700 px-1.5 py-0.5 text-[10px] text-fog-400">custom</span>}</span>
-          {statusChip(st)}
+          {statusMark(st)}
         </div>
         {diagnosisOf(s, st)}
         {testResultOf(s)}
@@ -698,18 +701,18 @@ function Providers({ onTab }: { onTab: (t: Tab) => void }) {
             {g.name}
             <span className="ms-2 text-[11px] text-fog-500">{tr('{n} languages', { n: g.languages.length })} · {tr('{n} on', { n: g.on })}</span>
           </span>
-          {statusChip(g.worst)}
+          {statusMark(g.worst)}
           <span className="shrink-0 text-xs text-fog-500">{isOpen ? '▴' : '▾'}</span>
         </button>
         {isOpen && (
           <ul className="mt-2 divide-y divide-ink-800">
             {g.sources.map((s) => {
-              const st = (s.status ?? 'ok') as string;
+              const st: ProviderStatus = s.status ?? 'ok';
               return (
                 <li key={s.id} className="py-2">
                   <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                     <span className="w-14 shrink-0 font-mono text-[11px] uppercase text-fog-200" title={s.name}>{s.lang || '—'}</span>
-                    {statusChip(st)}
+                    {statusMark(st)}
                     <span className="text-[11px] text-fog-500">{tr('{n} series', { n: s.used ?? 0 })}</span>
                     <span className="ms-auto flex flex-wrap gap-1.5">{controlsOf(s, st)}</span>
                   </div>
@@ -2240,9 +2243,7 @@ function Extensions({ span = '' }: { span?: string }) {
       <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
         <p className="text-xs font-semibold uppercase tracking-wider text-fog-500">{tr('Extensions')}</p>
         <div className="flex items-center gap-2">
-          <span className={`rounded-full border px-2 py-0.5 text-[10px] ${status.reachable ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300' : 'border-red-500/40 bg-red-500/10 text-red-300'}`}>
-            {status.reachable ? `ready${status.version ? ` · ${status.version}` : ''}` : 'engine unreachable'}
-          </span>
+          <StatusMark {...engineMark(status.reachable, status.version)} />
           {status.reachable && (
             <button onClick={refreshRepos} disabled={busy === '__refresh'} className="chip text-[11px] disabled:opacity-50">
               {busy === '__refresh' ? tr('Refreshing…') : `↻ ${tr('Refresh')}`}

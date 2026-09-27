@@ -123,6 +123,16 @@ test('the Docker card names the shipped container, and the Providers card does n
   assert.match(hook, /const b = bridge\(\);\s*if \(!b\?\.engine\) return;/, 'the hook asks for an engine where there is no bridge');
 });
 
+test('the engine\'s state is a mark in the viewer\'s words, not an English capsule', () => {
+  // v0.49.0 ("no more pills"): the header's `rounded-full border px-2` badge read "ready · v2.3.2243" or
+  // "engine unreachable" in every language. Reintroduce the badge
+  // (`<span className={`rounded-full border px-2 py-0.5 text-[10px] …`}>{status.reachable ? `ready…` : 'engine unreachable'}</span>`):
+  // "the engine's state is not a mark" fails (and noPills names the capsule).
+  const header = slice(ext, "{tr('Extensions')}</p>", '{status.reachable && (');
+  assert.match(header, /<StatusMark \{\.\.\.engineMark\(status\.reachable, status\.version\)\} \/>/, 'the engine\'s state is not a mark');
+  assert.doesNotMatch(header, /engine unreachable|`ready/, 'the English badge text is back');
+});
+
 test('one extension available is said in the singular', () => {
   // A repository offering exactly one extension read "1 extension repository · 1 extensions available" (v0.44.0's
   // hard-coded line had the same bug; the real engine and a one-extension repository showed it in the v0.45.0 review).

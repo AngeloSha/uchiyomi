@@ -91,3 +91,26 @@ test('the start-edge bar: at the logical start, and absent from a healthy or swi
   assert.match(edge, /aria-hidden="true"/);
   assert.match(html(createElement(StatusEdge, { tone: 'warn', inset: 'inset-y-0' })), /inset-y-0/);
 });
+
+test('Overview\'s Needs attention tiles: the tint from this vocabulary, the start edge, and a shape with a name', () => {
+  // The tiles told a problem from a warning by tint alone (the Health capsules' HEALTH_TONE). Now the tint
+  // is TONE_SURFACE's, the tile wears the same edge a Health card does, and a glyph says the verdict by
+  // shape and to a screen reader. Reintroduce the old tile (`rounded-2xl border px-3 py-2.5
+  // ${HEALTH_TONE[c.status]}` with no edge and no mark): "the tile's tint is not the status vocabulary's"
+  // fails; by dropping `relative`: the edge is placed against the whole card and "the tile is not
+  // positioned" fails.
+  const src = readFileSync(join(ROOT, 'app/admin/page.tsx'), 'utf8')
+    .replace(/\/\*[\s\S]*?\*\//g, '').split('\n').filter((l) => !l.trim().startsWith('//')).join('\n');
+  const a = src.indexOf('function NeedsAttention(');
+  const b = src.indexOf('function TabTile(', a);
+  assert.ok(a >= 0 && b > a, 'function NeedsAttention moved');
+  const tiles = src.slice(a, b);
+  assert.match(tiles, /const m = healthMark\(c\.status\);/, 'the tile does not read the check through healthMark');
+  const tile = tiles.match(/<div key=\{c\.id\} className=\{`([^`]*)`\}>/);
+  assert.ok(tile, 'the tile moved');
+  assert.match(tile![1], /\$\{TONE_SURFACE\[m\.tone\]\}/, 'the tile\'s tint is not the status vocabulary\'s');
+  assert.match(tile![1], /(^|\s)relative(\s|$)/, 'the tile is not positioned, so its edge would sit against the card');
+  assert.doesNotMatch(tiles, /HEALTH_TONE/, 'the tile still reads the Health capsules\' tints');
+  assert.match(tiles, /<StatusEdge tone=\{m\.tone\} inset="inset-y-3" \/>/, 'the tile has no start edge');
+  assert.match(tiles, /<StatusMark tone=\{m\.tone\} title=\{m\.label\} \/>\{c\.title\}/, 'the verdict has no shape or name beside the title');
+});
