@@ -129,3 +129,55 @@ test('migrate: is still idempotent, and the shipped data migrations are applied'
   const noop = await q(`SELECT id FROM schema_migrations WHERE id = '0001-noop'`);
   assert.equal(noop.length, 1, 'the shipped no-op migration did not record exactly one row');
 });
+
+// v0.49.0's promise is that a rollback to v0.48.4 still works: the old image boots on the new schema and keeps
+// writing its rows. The new tables are invisible to it, but the columns added to tables it already INSERTs into
+// are not -- one of them declared NOT NULL without a default and every old INSERT into that table fails, which
+// a fresh test database never shows, because ADD COLUMN on an empty table succeeds either way. Reintroduce by
+// dropping the default from source_health.stages in migrate.ts: the rollback assertion below names it.
+const V049_TABLES = ['download_log', 'repair_runs', 'series_post_numbers', 'archive_queue', 'archive_pace'];
+const V049_COLUMNS: Record<string, string[]> = {
+  lib_books: ['short_result', 'source_chapter_id'],
+  chapter_failures: ['first_at'],
+  source_health: ['live_at', 'live_by', 'live_state', 'live_code', 'live_stage', 'live_detail', 'live_checks', 'stages'],
+  lib_series: [
+    'numbering', 'numbering_by', 'numbering_source', 'numbering_pending', 'numbering_note', 'numbering_changed_at',
+    'renumber_plan',
+  ],
+  server_settings: [
+    'archive_paused', 'archive_per_hour', 'archive_window_from', 'archive_window_to', 'archive_min_free_gb',
+  ],
+};
+
+test('migrate: v0.49.0 only adds, and every added column lets v0.48.4 keep writing its rows', { skip }, async () => {
+  const tables = await q<{ table_name: string }>(
+    `SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND table_name = ANY($1)`,
+    [V049_TABLES],
+  );
+  assert.deepEqual(tables.map((t) => t.table_name).sort(), [...V049_TABLES].sort(), 'a v0.49.0 table is missing');
+
+  for (const [table, cols] of Object.entries(V049_COLUMNS)) {
+    const rows = await q<{ column_name: string; is_nullable: string; column_default: string | null }>(
+      `SELECT column_name, is_nullable, column_default FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = $1 AND column_name = ANY($2)`,
+      [table, cols],
+    );
+    assert.deepEqual(rows.map((r) => r.column_name).sort(), [...cols].sort(), `a v0.49.0 column of ${table} is missing`);
+    for (const r of rows) {
+      assert.ok(
+        r.is_nullable === 'YES' || r.column_default !== null,
+        `${table}.${r.column_name} is NOT NULL with no default: after a rollback, v0.48.4's INSERTs into ${table} fail`,
+      );
+    }
+  }
+
+  // The one server_settings row existed before the columns did, so it must have picked up the defaults.
+  const s = await q(
+    `SELECT archive_paused, archive_per_hour, archive_window_from, archive_window_to, archive_min_free_gb
+       FROM server_settings WHERE id = 1`,
+  );
+  assert.deepEqual(s[0], {
+    archive_paused: false, archive_per_hour: 4, archive_window_from: null, archive_window_to: null,
+    archive_min_free_gb: 20,
+  });
+});

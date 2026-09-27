@@ -237,6 +237,9 @@ const SERIES_KEYED_TABLES = [
   'favorites', 'collection_items', 'ratings', 'series_colors', 'series_art', 'series_seen', 'series_trackers',
   'series_overrides', 'notes', 'series_sources', 'series_listing', 'chapter_failures', 'tracker_progress',
   'reading_events', 'offline_downloads', 'bookmarks', 'listing_progress',
+  // v0.49.0: a series' posting-order numbers (#116) and its slow archive (#117). Both cascade from lib_series,
+  // but naming them gives the audit its counts, like every other table here.
+  'series_post_numbers', 'archive_queue',
 ] as const;
 
 export interface ForgetRefusal {

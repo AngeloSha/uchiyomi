@@ -1141,6 +1141,137 @@ CREATE TABLE IF NOT EXISTS health_ignored (
   seen_at  timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (check_id, item_key)
 );
+
+-- v0.49.0: finished downloads survive a restart (lib/activityLog.ts). One row per chapter that finished, written
+-- after the fact and read once at boot for the last day, so Came in today and the failed-chapter half of Needs
+-- attention are not empty the morning after an update. by_user is text with no reference: the sweep and the
+-- repair start downloads with no account. origin includes archive. Pruned after seven days.
+CREATE TABLE IF NOT EXISTS download_log (
+  id          bigserial PRIMARY KEY,
+  folder      text NOT NULL,
+  title       text NOT NULL,
+  number      real NOT NULL,
+  source      text NOT NULL,
+  origin      text NOT NULL,
+  by_user     text,
+  status      text NOT NULL,
+  pages       int,
+  reason      text,
+  started_at  timestamptz NOT NULL,
+  finished_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS download_log_finished ON download_log (finished_at DESC);
+
+-- v0.49.0: every library repair run, nightly or pressed on Health (lib/repairRuns.ts). The Tasks line and the
+-- nightly schedule keep reading server_settings.repair_last_run, which only a full run writes now. only_steps,
+-- not only: ONLY is reserved. The history is pruned in repairRuns.ts, never in repair.ts.
+CREATE TABLE IF NOT EXISTS repair_runs (
+  id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  started_at  timestamptz NOT NULL DEFAULT now(),
+  finished_at timestamptz,
+  origin      text NOT NULL,
+  kind        text NOT NULL,
+  only_steps  text[],
+  target      jsonb NOT NULL DEFAULT '{}'::jsonb,
+  by_user     uuid REFERENCES users(id) ON DELETE SET NULL,
+  status      text NOT NULL DEFAULT 'running',
+  ms          int,
+  step_ms     jsonb,
+  result      jsonb,
+  notes       jsonb
+);
+CREATE INDEX IF NOT EXISTS idx_repair_runs_started ON repair_runs (started_at DESC);
+-- Why a short chapter was left as it is, and when. first_at is when a chapter first failed; readers use
+-- COALESCE(first_at, at), so rows from before this column and rows a rollback writes need no backfill.
+ALTER TABLE lib_books        ADD COLUMN IF NOT EXISTS short_result jsonb;
+ALTER TABLE chapter_failures ADD COLUMN IF NOT EXISTS first_at timestamptz;
+
+-- v0.49.0 (#115): what a deliberate live check found, per stage. Test and the daily check write only these;
+-- they never touch status, consecutive, blocked_until, last_error or checked_at, so a diagnostic never
+-- changes a cooldown and never moves the desktop watchdog schedule. stages holds search, chapters, pages and
+-- images, each with okAt, failAt, error, kind and streak: only a success at the SAME stage closes a failure.
+ALTER TABLE source_health ADD COLUMN IF NOT EXISTS live_at     timestamptz;
+ALTER TABLE source_health ADD COLUMN IF NOT EXISTS live_by     text;
+ALTER TABLE source_health ADD COLUMN IF NOT EXISTS live_state  text;
+ALTER TABLE source_health ADD COLUMN IF NOT EXISTS live_code   text;
+ALTER TABLE source_health ADD COLUMN IF NOT EXISTS live_stage  text;
+ALTER TABLE source_health ADD COLUMN IF NOT EXISTS live_detail text;
+ALTER TABLE source_health ADD COLUMN IF NOT EXISTS live_checks jsonb;
+ALTER TABLE source_health ADD COLUMN IF NOT EXISTS stages      jsonb NOT NULL DEFAULT '{}'::jsonb;
+
+-- v0.49.0 (#116): series whose source numbers many posts the same are numbered by posting order. numbering is
+-- NULL (automatic), source or posting_order; numbering_by is auto or manual, and a manual choice is never
+-- flipped back. renumber_plan is the journal of a rename in flight, resumed on the next check.
+-- source_chapter_id is the source chapter a landed file came from, so the next remap is exact.
+ALTER TABLE lib_series ADD COLUMN IF NOT EXISTS numbering            text;
+ALTER TABLE lib_series ADD COLUMN IF NOT EXISTS numbering_by         text;
+ALTER TABLE lib_series ADD COLUMN IF NOT EXISTS numbering_source     text;
+ALTER TABLE lib_series ADD COLUMN IF NOT EXISTS numbering_pending    text;
+ALTER TABLE lib_series ADD COLUMN IF NOT EXISTS numbering_note       jsonb;
+ALTER TABLE lib_series ADD COLUMN IF NOT EXISTS numbering_changed_at timestamptz;
+ALTER TABLE lib_series ADD COLUMN IF NOT EXISTS renumber_plan        jsonb;
+ALTER TABLE lib_books  ADD COLUMN IF NOT EXISTS source_chapter_id    text;
+-- The stable posting-order assignment: a deleted post keeps its number as a hole (gone_at), an inserted one gets
+-- a midpoint. Not unique on number: copies of one post from two groups share it. Pseudo-posts extra:BOOKID
+-- reserve the slots of parked books.
+CREATE TABLE IF NOT EXISTS series_post_numbers (
+  series_id     text NOT NULL REFERENCES lib_series(id) ON DELETE CASCADE,
+  source_id     text NOT NULL,
+  post_id       text NOT NULL,
+  url           text,
+  number        real NOT NULL,
+  source_number real,
+  title         text,
+  published_at  timestamptz,
+  seen_at       timestamptz NOT NULL DEFAULT now(),
+  gone_at       timestamptz,
+  PRIMARY KEY (series_id, source_id, post_id)
+);
+CREATE INDEX IF NOT EXISTS series_post_numbers_num ON series_post_numbers (series_id, source_id, number);
+
+-- v0.49.0 (#117): the slow archive. One row per series, never per chapter: what is missing is worked out on
+-- each pick. The archive owns listed numbers strictly below boundary; chapter_floor is left alone and the sweep
+-- reads GREATEST of the two while a row is queued or paused. A renumber (#116) remaps boundary and
+-- floor_at_start. A stopped archive is a deleted row.
+CREATE TABLE IF NOT EXISTS archive_queue (
+  series_id      text PRIMARY KEY REFERENCES lib_series(id) ON DELETE CASCADE,
+  state          text NOT NULL DEFAULT 'queued',
+  boundary       numeric,
+  floor_at_start numeric,
+  direction      text NOT NULL DEFAULT 'up',
+  added_by       uuid REFERENCES users(id) ON DELETE SET NULL,
+  created_at     timestamptz NOT NULL DEFAULT now(),
+  started_at     timestamptz,
+  finished_at    timestamptz,
+  last_at        timestamptz,
+  done_count     int NOT NULL DEFAULT 0,
+  failed_count   int NOT NULL DEFAULT 0,
+  bytes          bigint NOT NULL DEFAULT 0,
+  current_number real,
+  note           jsonb
+);
+CREATE INDEX IF NOT EXISTS archive_queue_state ON archive_queue (state);
+-- Per source: the next start, reserved before a chapter begins so neither a restart nor a crash loop shortens
+-- a break, the refusal backoff, and the running average of real time per chapter for the estimate.
+CREATE TABLE IF NOT EXISTS archive_pace (
+  source_id     text PRIMARY KEY,
+  next_at       timestamptz,
+  backoff_level int NOT NULL DEFAULT 0,
+  backoff_until timestamptz,
+  cycle_ms      int,
+  last_at       timestamptz,
+  last_reason   text
+);
+-- The pacing an admin sets: paused, chapters per hour per source, the hours it may run in (both NULL means any
+-- time of day) and the free space it keeps. The defaults are slow on purpose: the point is to look like a reader.
+ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS archive_paused      boolean NOT NULL DEFAULT false;
+ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS archive_per_hour    int     NOT NULL DEFAULT 4;
+ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS archive_window_from int;
+ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS archive_window_to   int;
+ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS archive_min_free_gb int     NOT NULL DEFAULT 20;
+
+-- (#72 needs no schema. Everything above is additive: v0.48.4 starts on it and ignores it. No DATA_MIGRATIONS
+-- entry: existing series are renumbered lazily by their next check, and first_at is read through COALESCE.)
 `;
 
 // Serialises migrate() across processes. CREATE TABLE IF NOT EXISTS is not safe to run concurrently:
