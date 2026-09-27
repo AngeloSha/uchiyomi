@@ -54,6 +54,36 @@ export interface LinkItem {
   candidates: LinkCandidate[];
 }
 
+/** GET /api/admin/link/items/:id/chapters: what a candidate lists, beside what the series has. */
+export interface LinkChapters {
+  source: string;
+  name: string;
+  title: string | null;
+  count: number;
+  ourCount: number;
+  shared: number;
+  /** Numbers the series has that this source does not list. */
+  missing: number[];
+  chapters: { number: number; title: string | null; scanlator: string | null; publishedAt: string | null; ours: boolean }[];
+}
+
+/**
+ * Chapter numbers as runs: [1,2,3,5,7,8] → "1–3, 5, 7–8". Whole numbers join a run; a decimal (12.5)
+ * stands alone. At most `max` parts, then "+ n more", so a source missing 300 scattered numbers stays a line.
+ */
+export function ranges(nums: number[], max = 12): string {
+  const sorted = [...new Set(nums)].sort((a, b) => a - b);
+  const parts: string[] = [];
+  let i = 0;
+  while (i < sorted.length) {
+    let j = i;
+    while (j + 1 < sorted.length && Number.isInteger(sorted[j]) && sorted[j + 1] === sorted[j] + 1) j++;
+    parts.push(j > i ? `${sorted[i]}–${sorted[j]}` : String(sorted[i]));
+    i = j + 1;
+  }
+  return parts.length > max ? `${parts.slice(0, max).join(', ')} ${tr('+ {n} more', { n: parts.length - max })}` : parts.join(', ');
+}
+
 /** A candidate that can still be ticked: not run yet. */
 export const isOpen = (c: LinkCandidate): boolean => !c.status;
 

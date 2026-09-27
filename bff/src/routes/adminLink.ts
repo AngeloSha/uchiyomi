@@ -13,10 +13,13 @@ import { getSeriesRow } from '../lib/libraryAdmin';
 import { updateSeries } from '../lib/updater';
 import { MAX_FOLLOWERS } from '../lib/autoFollow';
 import { normTitle } from '../lib/titleMatch';
+import { chooseReleases } from '../lib/releases';
+import { effectivePrefsFor, readSeriesPrefs } from '../lib/scanlatorPrefs';
+import { seriesAndChapters } from './sources';
 import { altTitleRows, altTitleMatchingOn, recordAltTitles, MIN_ALT_KEY } from '../lib/altTitles';
 import {
   createLinkBatch, searchBatch, claimSearch, releaseSearch, isSearching, isLinking, abortBatch,
-  judgeManualPick, saveCandidate, runLinks, settleBatch,
+  judgeManualPick, saveCandidate, runLinks, settleBatch, mayFollow, ourNumbers,
   type LinkBatchRow, type LinkItemRow, type LinkCandidateRow,
 } from '../lib/linkBatch';
 
@@ -135,16 +138,24 @@ export async function linkRoutes(app: FastifyInstance) {
       `SELECT c.*, i.series_id, i.title AS series_title FROM link_candidates c JOIN link_items i ON i.id = c.item_id
         WHERE i.batch_id = $1 AND c.status IS NULL AND c.id = ANY($2::uuid[]) ORDER BY i.ord, c.source`,
       [id, b.data.candidateIds]);
-    if (!rows.length) return reply.code(400).send({ error: 'nothing_to_link', message: 'Nothing selected is waiting to be connected.' });
+    const override = b.data.override === true;
+    // A warning sent without the override is left OPEN, not run: marking it 'not_confirmed' would close a
+    // candidate the admin never decided on, and it could never be ticked again in this batch.
+    const runnable = rows.filter((r) => mayFollow(r, override));
+    const held = rows.length - runnable.length;
+    if (!runnable.length) {
+      return reply.code(rows.length ? 409 : 400).send(rows.length
+        ? { error: 'needs_override', message: 'The chapters of what you selected do not line up. Confirm to connect them anyway.' }
+        : { error: 'nothing_to_link', message: 'Nothing selected is waiting to be connected.' });
+    }
     // The atomic claim is the guard, as /run's on the import: a double tap finds `linking` and gets no row.
     const claimed = await one<{ id: string }>(
       `UPDATE link_batches SET state = 'linking', updated_at = now() WHERE id = $1 AND state NOT IN ('linking','searching') RETURNING id`, [id]);
     if (!claimed) return reply.code(409).send({ error: 'busy', message: 'This batch is already connecting.' });
     const userId = userIdOf(req);
-    const override = b.data.override === true;
-    await logAudit('link.batch.run', { userId, req, detail: { batchId: id, count: rows.length, override } });
-    void runLinks(id, rows, { userId, override, refresh: (sid) => { void updateSeries(sid, 0).catch(() => {}); } }).catch(() => {});
-    return { ok: true, total: rows.length };
+    await logAudit('link.batch.run', { userId, req, detail: { batchId: id, count: runnable.length, override } });
+    void runLinks(id, runnable, { userId, override, refresh: (sid) => { void updateSeries(sid, 0).catch(() => {}); } }).catch(() => {});
+    return { ok: true, total: runnable.length, held };
   });
 
   app.delete('/api/admin/link/batches/:id', async (req, reply) => {
@@ -179,6 +190,42 @@ export async function linkRoutes(app: FastifyInstance) {
     const row = await saveCandidate(item.id, j, true);
     await q('UPDATE link_batches SET updated_at = now() WHERE id = $1', [item.batch_id]).catch(() => {});
     return { ok: true, candidate: row ? { ...row, name: sourceName(row.source) } : null };
+  });
+
+  /**
+   * The chapters a source lists for a candidate, beside the series' own: what an admin looks at before
+   * confirming a link by hand. One copy per number under the series' release preferences -- the copy the
+   * sweep would take -- each marked `ours` when the series already has that number, plus the numbers the
+   * series has and this source does not. Read through the add dialog's detail cache (ten minutes), so
+   * opening it twice asks the source once.
+   */
+  app.get('/api/admin/link/items/:id/chapters', async (req, reply) => {
+    const itemId = idOf((req.params as { id?: string }).id, reply);
+    if (!itemId) return;
+    const b = z.object({ source: z.string().min(1).max(128), sourceSeriesId: z.string().min(1).max(512) }).safeParse(req.query);
+    if (!b.success) return reply.code(400).send({ error: 'bad_request' });
+    const item = await one<{ series_id: string }>('SELECT series_id FROM link_items WHERE id = $1', [itemId]);
+    if (!item) return reply.code(404).send({ error: 'not_found' });
+    const src = getSource(b.data.source);
+    if (!src) return reply.code(409).send({ error: 'unknown_source', message: 'That source is not installed.' });
+    const { series, chapters } = await seriesAndChapters(src, b.data.sourceSeriesId);
+    if (!series && !chapters.length) return reply.code(502).send({ error: 'unreachable', message: 'That source did not answer. Try again in a moment.' });
+    const prefs = await effectivePrefsFor(await readSeriesPrefs(item.series_id), 0);
+    const releases = chooseReleases(chapters, prefs).releases.sort((a, c) => a.number - c.number);
+    const ours = await ourNumbers(item.series_id);
+    // Compared at three decimals: a real column round-trips 12.1 as 12.100000381469727 on one side only.
+    const key = (n: number) => Math.round(n * 1000);
+    const mine = new Set(ours.map(key));
+    const theirs = new Set(releases.map((c) => key(c.number)));
+    return {
+      source: src.id, name: src.name, title: series?.title ?? null,
+      count: releases.length, ourCount: ours.length,
+      shared: releases.filter((c) => mine.has(key(c.number))).length,
+      missing: ours.filter((n) => !theirs.has(key(n))).sort((a, c) => a - c),
+      chapters: releases.slice(0, 3000).map((c) => ({
+        number: c.number, title: c.title ?? null, scanlator: c.scanlator ?? null, publishedAt: c.publishedAt ?? null, ours: mine.has(key(c.number)),
+      })),
+    };
   });
 
   // ---- a series' other names ------------------------------------------------------------------------

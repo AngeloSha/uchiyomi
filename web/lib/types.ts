@@ -37,6 +37,8 @@ export interface SeriesSource {
   registered: boolean;
   /** Followed by the add, not by a person (`added_by IS NULL`). Absent from an older server. */
   auto?: boolean;
+  /** How the source is doing now (source_health): switched off, in a cooldown, failing, or fine. Absent from an older server. */
+  health?: 'ok' | 'disabled' | 'cooldown' | 'failing';
 }
 
 /**

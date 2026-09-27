@@ -18,10 +18,11 @@ import { api, ApiError } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { useToast } from '@/components/Toast';
 import { ConfirmDialog, msgOf } from '@/components/ConfirmDialog';
-import { Img, ProgressBar } from '@/components/ui';
+import { Img, ProgressBar, Sheet } from '@/components/ui';
 import { SourceIcon } from '@/components/SourcePicker';
 import { sourceCover } from '@/components/cards';
 import { LinkPickSheet } from '@/components/LinkPickSheet';
+import { LinkChapterList } from '@/components/LinkChapterList';
 import { IcChevronLeft } from '@/components/icons';
 import { relativeTime } from '@/lib/format';
 import { t as tr } from '@/lib/i18n';
@@ -32,11 +33,13 @@ import {
 
 type Filter = 'all' | 'found' | 'none';
 
-function CandidateRow({ c, full, selected, onToggle }: {
+function CandidateRow({ c, full, selected, onToggle, onChapters }: {
   c: LinkCandidate;
   /** The series has as many ticked as it has free slots: an unticked box locks. */
   full: boolean;
   selected: boolean; onToggle: (id: string) => void;
+  /** Open what this source lists, beside what the series has. */
+  onChapters: (c: LinkCandidate) => void;
 }) {
   const open = isOpen(c);
   const cov = coverageLine(c);
@@ -64,12 +67,14 @@ function CandidateRow({ c, full, selected, onToggle }: {
         {cov && <p className={`text-[11px] ${c.verdict === 'ok' ? 'text-fog-500' : 'text-amber-400/80'}`}>{cov}</p>}
         {c.status && <p className={`text-[11px] ${linkStatusColor(c.status)}`}>{linkStatusLabel(c.status)}</p>}
       </div>
+      <button type="button" onClick={() => onChapters(c)} className="chip shrink-0 text-xs" data-view-chapters>{tr('Chapters')}</button>
     </div>
   );
 }
 
-function ItemCard({ it, selected, onToggle, onSearch, reviewing }: {
-  it: LinkItem; selected: Set<string>; onToggle: (id: string) => void; onSearch: (it: LinkItem) => void; reviewing: boolean;
+function ItemCard({ it, selected, onToggle, onSearch, onChapters, reviewing }: {
+  it: LinkItem; selected: Set<string>; onToggle: (id: string) => void; onSearch: (it: LinkItem) => void;
+  onChapters: (c: LinkCandidate) => void; reviewing: boolean;
 }) {
   const others = it.names.slice(1);
   return (
@@ -105,7 +110,7 @@ function ItemCard({ it, selected, onToggle, onSearch, reviewing }: {
             <p className="text-[11px] text-amber-400">{tr('Already follows two other sources — stop following one from the series page first.')}</p>
           )}
           {it.candidates.map((c) => (
-            <CandidateRow key={c.id} c={c} full={pickedFor(it, selected) >= it.freeSlots} selected={selected.has(c.id)} onToggle={onToggle} />
+            <CandidateRow key={c.id} c={c} full={pickedFor(it, selected) >= it.freeSlots} selected={selected.has(c.id)} onToggle={onToggle} onChapters={onChapters} />
           ))}
         </div>
       )}
@@ -146,6 +151,11 @@ function LinkWizardInner() {
   const [filter, setFilter] = useState<Filter>('all');
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [picking, setPicking] = useState<LinkItem | null>(null);
+  // The candidate whose chapter list is open, by id: the row is re-read from `items` on every poll, so the
+  // sheet's Select button always sees the candidate as it is now.
+  const [viewing, setViewing] = useState<string | null>(null);
+  // What THIS tab last sent to /run, for the linking card's count; null when the run started elsewhere.
+  const [runIds, setRunIds] = useState<Set<string> | null>(null);
   const [running, setRunning] = useState(false);
   const [confirmOverride, setConfirmOverride] = useState(false);
   const [discarding, setDiscarding] = useState(false);
@@ -180,7 +190,11 @@ function LinkWizardInner() {
     if (!batchId || !chosen.length) return;
     setRunning(true);
     try {
-      await api(`/api/admin/link/batches/${batchId}/run`, { json: { candidateIds: chosen.map((c) => c.id), override } });
+      const ids = chosen.map((c) => c.id);
+      const r = await api<{ ok: true; total: number; held?: number }>(`/api/admin/link/batches/${batchId}/run`, { json: { candidateIds: ids, override } });
+      // Held back by the server (a warning sent without the override): they stay open to tick again.
+      if (r.held) toast(tr('{n} left open — their chapters do not line up', { n: r.held }), 'info');
+      setRunIds(new Set(ids));
       setSelected(new Set());
       setConfirmOverride(false);
       refetch();
@@ -253,7 +267,11 @@ function LinkWizardInner() {
               {batch.stale && <button onClick={resume} className="btn-accent mt-3 w-full py-2 text-sm">{tr('Resume search')}</button>}
             </>
           ) : batch.state === 'linking' ? (
-            <p className="text-sm font-semibold text-fog-100">{tr('Connecting… {n} done', { n: batch.linked + batch.failed })}</p>
+            <p className="text-sm font-semibold text-fog-100">
+              {runIds
+                ? tr('Connecting… {done}/{total}', { done: all.filter((c) => runIds.has(c.id) && !!c.status).length, total: runIds.size })
+                : tr('Connecting…')}
+            </p>
           ) : (
             <>
               <p className="mb-1 text-sm font-semibold text-fog-100">
@@ -281,7 +299,8 @@ function LinkWizardInner() {
           </div>
           <div className="space-y-2">
             {shown.map((it) => (
-              <ItemCard key={it.id} it={it} selected={selected} onToggle={toggle} onSearch={setPicking} reviewing={reviewing} />
+              <ItemCard key={it.id} it={it} selected={selected} onToggle={toggle} onSearch={setPicking}
+                onChapters={(c) => setViewing(c.id)} reviewing={reviewing} />
             ))}
           </div>
 
@@ -296,6 +315,30 @@ function LinkWizardInner() {
       )}
 
       {picking && <LinkPickSheet item={picking} onClose={() => setPicking(null)} onAdded={() => refetch()} />}
+
+      {(() => {
+        const c = viewing ? all.find((x) => x.id === viewing) : null;
+        const it = c ? items.find((x) => x.id === c.item_id) : null;
+        if (!c || !it) return null;
+        const sel = selected.has(c.id);
+        const canTick = reviewing && isOpen(c) && (sel || pickedFor(it, selected) < it.freeSlots);
+        return (
+          <Sheet title={it.title} onClose={() => setViewing(null)} overBottomNav footer={
+            <div className="flex gap-2">
+              <button onClick={() => setViewing(null)} className="chip flex-1 py-1.5 text-xs">{tr('Close')}</button>
+              {reviewing && isOpen(c) && (
+                <button onClick={() => toggle(c.id)} disabled={!canTick}
+                  className={`flex-1 py-1.5 text-xs disabled:opacity-50 ${sel ? 'chip' : 'btn-accent'}`}>
+                  {sel ? tr('Unselect') : tr('Select this source')}
+                </button>
+              )}
+            </div>
+          }>
+            <p className={`mb-2 text-[11px] ${verdictColor(c.verdict)}`}>{verdictLabel(c.verdict)}{c.their_name ? ` · ${tr('matched via “{name}”', { name: c.their_name })}` : ''}</p>
+            <LinkChapterList itemId={it.id} source={c.source} sourceSeriesId={c.source_series_id} />
+          </Sheet>
+        );
+      })()}
 
       {confirmOverride && (
         <ConfirmDialog

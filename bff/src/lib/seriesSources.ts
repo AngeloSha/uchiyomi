@@ -32,6 +32,21 @@ export interface SeriesSource {
    * the primary: it was added, not followed.
    */
   auto: boolean;
+  /**
+   * How the source is doing right now, from source_health (v0.49.0): `disabled` by the admin, in a
+   * `cooldown` after blocking or rate-limiting us, `failing` (its last answers were errors), else `ok`. The
+   * edit dialog's link status reads it: a follower is the fallback for a primary that is down, and a
+   * fallback that is itself down is the thing worth seeing there.
+   */
+  health: 'ok' | 'disabled' | 'cooldown' | 'failing';
+}
+
+type HealthRow = { source_id: string; status: string; disabled: boolean; blocked_until: string | null };
+function healthOf(h: HealthRow | undefined, now: number): SeriesSource['health'] {
+  if (!h) return 'ok';
+  if (h.disabled) return 'disabled';
+  if (h.blocked_until && new Date(h.blocked_until).getTime() > now) return 'cooldown';
+  return h.status && h.status !== 'ok' ? 'failing' : 'ok';
 }
 
 const iso = (v: string | Date | null | undefined): string | null =>
@@ -54,6 +69,7 @@ export async function seriesSourcesFor(seriesId: string): Promise<SeriesSource[]
       chapters: s.source_chapters ?? null,
       registered: !!getSource(s.source_id),
       auto: false,
+      health: 'ok',
     });
   }
   const extras = await q<{ source_id: string; source_series_id: string; checked_at: string | null; chapters: number | null; added_by: string | null }>(
@@ -73,7 +89,17 @@ export async function seriesSourcesFor(seriesId: string): Promise<SeriesSource[]
       chapters: r.chapters ?? null,
       registered: !!getSource(r.source_id),
       auto: r.added_by == null,
+      health: 'ok',
     });
+  }
+  if (out.length) {
+    const rows = await q<HealthRow>(
+      'SELECT source_id, status, disabled, blocked_until FROM source_health WHERE source_id = ANY($1::text[])',
+      [out.map((o) => o.sourceId)],
+    ).catch(() => [] as HealthRow[]);
+    const by = new Map(rows.map((r) => [r.source_id, r]));
+    const now = Date.now();
+    for (const o of out) o.health = healthOf(by.get(o.sourceId), now);
   }
   return out;
 }

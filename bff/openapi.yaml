@@ -978,6 +978,32 @@ paths:
           description: OK
         "401":
           description: Not authenticated
+  /api/library/sources:
+    get:
+      tags:
+        - library
+      summary: The sources the viewer's library comes from, with series counts -- the library's source filters.
+      operationId: getApiLibrarySources
+      description: >-
+        `{content: [{id, name, main, any, installed}]}`, busiest first: `main` counts the series added from
+        the source, `any` the series that read from it at all (added from it, or following it as a fallback).
+        Counted over what this viewer may list (their libraries, age cap and the 18+ switch), so the numbers are
+        the ones the filtered grid shows. `installed` is false for a source whose extension is gone; its series
+        still filter. Empty on a Komga backend. Use the ids as `mainSource` / `anySource` in POST
+        /api/series/search.
+      parameters:
+        - name: adult
+          in: query
+          required: false
+          schema:
+            type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
   /api/trending:
     get:
       tags:
@@ -1100,7 +1126,11 @@ paths:
       summary: "Search and page the library: the grid, the search page, browse-by-genre and the command palette all
         use this."
       description: "A query, not a mutation: it is a POST only because the filter tree travels in a body, so a
-        read-scoped API token may call it (the one non-GET a read token can use)."
+        read-scoped API token may call it (the one non-GET a read token can use). `condition` is Komga's tree
+        (`allOf` / `anyOf` of `{key: {operator: is|isNot, value}}`) over `libraryId`, `readStatus`, `status`,
+        `genre`, `author`, and -- owned library only, since v0.49.0 -- `mainSource` (the source a series was
+        added from, by id) and `anySource` (that, or a source it follows as a fallback). An unknown key is 400
+        `unsupported_filter`."
       operationId: postApiSeriesSearch
       parameters:
         - name: adult
@@ -5804,7 +5834,9 @@ paths:
         Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. Chapters
         already downloaded from it stay; the listing rows it carried are dropped at once, so nothing can be
         fetched through it before the next check. The primary cannot be removed this way; it is not a
-        followed source.
+        followed source. Since v0.49.0 the name the source was confirmed under (a `confirmed` other name,
+        GET /api/admin/series/{id}/alt-titles) is forgotten too, unless another source still linked uses it:
+        an unlink is how a wrong link is undone, and the name would find the same series again.
       parameters:
         - name: id
           in: path
@@ -7855,7 +7887,10 @@ paths:
         `cap`. The follow is recorded with the admin as `added_by`, audited as `series.follow_source` with
         `via: link_batch` and `override`, and the source's own title is kept as a `confirmed` other name.
         The series' listing is refreshed once afterwards so the new source's chapters show at once. The
-        flip to `linking` is one conditional UPDATE: a double tap answers 409.
+        flip to `linking` is one conditional UPDATE: a double tap answers 409. A candidate that needs the
+        override and was sent without it is not run and stays open; the answer is `{ok, total, held}`, and
+        when nothing sent may run without the override it is 409 `needs_override`. A source switched off by
+        the admin reads `unavailable`.
       parameters:
         - name: id
           in: path
@@ -7893,7 +7928,7 @@ paths:
         "404":
           description: Not found
         "409":
-          description: "Conflict: still searching, or already linking"
+          description: "Conflict: still searching, already linking, or `needs_override`"
   /api/admin/link/items/{id}/candidates:
     post:
       tags:
@@ -7939,6 +7974,53 @@ paths:
           description: Not found
         "409":
           description: "Conflict: `already_followed`, `unknown_source` or `gone`"
+        "502":
+          description: "Bad gateway: the source did not answer"
+  /api/admin/link/items/{id}/chapters:
+    get:
+      tags:
+        - admin
+      summary: What a candidate source lists for one series of a batch, beside what the series has.
+      operationId: getApiAdminLinkItemsIdChapters
+      description: >-
+        Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. For
+        `source` + `sourceSeriesId` (a candidate, or a pick not yet checked): `{source, name, title, count,
+        ourCount, shared, missing, chapters: [{number, title, scanlator, publishedAt, ours}]}` -- one copy per
+        number under the series' release preferences (the copy the sweep would take), at most 3000, `ours`
+        when the series already has that number; `missing` is the numbers the series has that the source does
+        not list. Read through the add dialog's ten-minute detail cache. 409 `unknown_source` for a source
+        not installed; 502 when it did not answer.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: source
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: sourceSeriesId
+          in: query
+          required: true
+          schema:
+            type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: Bad request
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+        "404":
+          description: Not found
+        "409":
+          description: "Conflict: `unknown_source`"
         "502":
           description: "Bad gateway: the source did not answer"
   /api/admin/series/{id}/alt-titles:

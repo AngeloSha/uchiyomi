@@ -2,7 +2,7 @@
   "_meta": {
     "language": "de",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 1358
+    "strings": 1385
   },
   "1 check found something": "1 Prüfung hat etwas gefunden",
   "1 member": "1 Mitglied",
@@ -1361,5 +1361,32 @@
   "not used while matching by other names is off": "nicht genutzt, solange die Suche über andere Namen aus ist",
   "same series": "dieselbe Serie",
   "too few chapters to compare": "zu wenige Kapitel zum Vergleichen",
-  "{done}/{total}": "{done}/{total}"
+  "{done}/{total}": "{done}/{total}",
+  "+ {n} more": "+ {n} weitere",
+  "Any source": "Beliebige Quelle",
+  "Any: {name}": "Beliebig: {name}",
+  "Back to results": "Zurück zu den Ergebnissen",
+  "Connect other sources": "Weitere Quellen verbinden",
+  "Connect sources takes up to 500 series at a time.": "Quellen verbinden nimmt bis zu 500 Serien auf einmal.",
+  "Connecting… {done}/{total}": "Wird verbunden… {done}/{total}",
+  "Could not load the chapters": "Kapitel konnten nicht geladen werden",
+  "Linked sources": "Verbundene Quellen",
+  "Main source": "Hauptquelle",
+  "Main: {name}": "Haupt: {name}",
+  "New chapters are looked for on every source here; a linked one is used when the main one is down or lacks a chapter.": "Neue Kapitel werden auf allen diesen Quellen gesucht; eine verbundene wird genutzt, wenn die Hauptquelle ausfällt oder ein Kapitel fehlt.",
+  "Not on this source: {list}": "Nicht auf dieser Quelle: {list}",
+  "Select this source": "Diese Quelle auswählen",
+  "Series added from this source.": "Serien, die von dieser Quelle hinzugefügt wurden.",
+  "Series that read from this source, as their main source or a linked one.": "Serien, die von dieser Quelle lesen – als Haupt- oder verbundene Quelle.",
+  "Showing the first {n}.": "Die ersten {n} werden angezeigt.",
+  "This source lists no chapters for it.": "Diese Quelle listet keine Kapitel dafür.",
+  "Unselect": "Abwählen",
+  "failing lately": "fällt zuletzt aus",
+  "linked": "verbunden",
+  "new": "neu",
+  "paused — it blocked or rate-limited us": "pausiert – hat uns blockiert oder gedrosselt",
+  "switched off": "abgeschaltet",
+  "working": "funktioniert",
+  "{n} chapters here · {shared} of this series’ {ours} · {fresh} new": "{n} Kapitel hier · {shared} der {ours} dieser Serie · {fresh} neu",
+  "{n} left open — their chapters do not line up": "{n} bleiben offen – ihre Kapitel passen nicht"
 }

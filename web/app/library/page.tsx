@@ -14,15 +14,19 @@ import { useToast } from '@/components/Toast';
 import { Modal, ConfirmDialog, msgOf } from '@/components/ConfirmDialog';
 import { useAuth, canDownload } from '@/lib/auth';
 import { AdultToggle, useAdultFilterConfigured, useAdultShown, useLibraries } from '@/components/AdultToggle';
-import { LibraryFilters, SORTS, READ_STATES, STATUSES } from '@/components/LibraryFilters';
+import { LibraryFilters, SORTS, READ_STATES, STATUSES, useLibrarySources } from '@/components/LibraryFilters';
 import { Sheet } from '@/components/ui';
 import { t as tr } from '@/lib/i18n';
 import { followBulkNewest, BULK_NEWEST_POLL_MS, type BulkNewestStatus } from '@/lib/bulkNewest';
 
 /** Build the condition tree from the URL. Empty means no condition at all, which needs no user context. */
-function conditionFrom(read: string, status: string, genres: string[], lib: string) {
+function conditionFrom(read: string, status: string, genres: string[], lib: string, src = '', anysrc = '') {
   const all: any[] = [];
   if (lib) all.push({ libraryId: { operator: 'is', value: lib } });
+  // The two source filters (bff ownedCatalog condSql): the source a series was added from, and any source
+  // it reads from -- added from it, or linked to it as a fallback.
+  if (src) all.push({ mainSource: { operator: 'is', value: src } });
+  if (anysrc) all.push({ anySource: { operator: 'is', value: anysrc } });
   if (read) all.push({ readStatus: { operator: 'is', value: read } });
   if (status) all.push({ status: { operator: 'is', value: status } });
   for (const g of genres) all.push({ genre: { operator: 'is', value: g } });
@@ -43,6 +47,10 @@ function LibraryInner() {
   // Which library, or '' for all of them. This lists only what the viewer may open -- the endpoint filters
   // by their grants -- so the tab row doubles as an honest answer to "what do I actually have access to".
   const lib = params.get('lib') || '';
+  const src = params.get('src') || '';
+  const anysrc = params.get('anysrc') || '';
+  const { data: libSources } = useLibrarySources();
+  const sourceName = (id: string) => libSources?.find((x) => x.id === id)?.name || id;
   const { data: allLibs } = useLibraries();
   // The 18+ filter can hide series by genre on an install with no 18+ library; the reveal must still render.
   const adultFilter = useAdultFilterConfigured();
@@ -68,13 +76,13 @@ function LibraryInner() {
   // Set while a Fetch newest run is being followed: calling it stops the polling (the bar's Cancel chip).
   const stopFollowing = useRef<(() => void) | null>(null);
   const { isAdmin, user } = useAuth();
-  useEffect(() => { setSelecting(false); setPicked(new Set()); }, [read, status, genres.join(','), sortKey, lib]);
+  useEffect(() => { setSelecting(false); setPicked(new Set()); }, [read, status, genres.join(','), sortKey, lib, src, anysrc]);
   const togglePick = (id: string) =>
     setPicked((p) => { const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n; });
   // ⚠️ `lib` counts. It used to be left out because it lived in its own tab rail rather than in the sheet,
   // so selecting a library filtered the grid while the badge said nothing was filtered and the "· filtered"
   // hint stayed dark. Now that every way to narrow the shelf is in one panel, every one of them counts.
-  const activeCount = (read ? 1 : 0) + (status ? 1 : 0) + genres.length + (lib ? 1 : 0);
+  const activeCount = (read ? 1 : 0) + (status ? 1 : 0) + genres.length + (lib ? 1 : 0) + (src ? 1 : 0) + (anysrc ? 1 : 0);
 
   const setParam = (k: string, v: string) => {
     const next = new URLSearchParams(params.toString());
@@ -90,10 +98,10 @@ function LibraryInner() {
     router.replace(`/library?${n.toString()}`);
   };
 
-  const condition = useMemo(() => conditionFrom(read, status, genres, lib), [read, status, genres.join(','), lib]);
+  const condition = useMemo(() => conditionFrom(read, status, genres, lib, src, anysrc), [read, status, genres.join(','), lib, src, anysrc]);
 
   const { data, fetchNextPage, hasNextPage, isFetchingNextPage, isLoading } = useInfiniteQuery({
-    queryKey: ['library', active.key, read, status, genres.join(','), lib],
+    queryKey: ['library', active.key, read, status, genres.join(','), lib, src, anysrc],
     initialPageParam: 0,
     queryFn: ({ pageParam }) =>
       api<Page<Series>>('/api/series/search', { json: { page: pageParam, size: 40, sort: active.sort, condition } }),
@@ -228,6 +236,8 @@ function LibraryInner() {
    * match is confirmed. Admin-only, like the follow it leads to.
    */
   const connectSources = async () => {
+    // The server takes 500 at a time; "Select all" over a long scroll can hold more.
+    if (picked.size > 500) { toast(tr('Connect sources takes up to 500 series at a time.'), 'error'); return; }
     setActing(true);
     try {
       const r = await api<{ batchId: string; total: number }>('/api/admin/link/batches', { json: { seriesIds: [...picked] } });
@@ -267,7 +277,7 @@ function LibraryInner() {
               window. `data-lenis-prevent` because Lenis drives the page and would otherwise eat the wheel. */}
           <div className="sticky top-6 max-h-[calc(100dvh-3rem)] overflow-y-auto pb-8 pt-6" data-lenis-prevent>
             <LibraryFilters
-              sort={sortKey} read={read} status={status} genres={genres} lib={lib} libs={libs}
+              sort={sortKey} read={read} status={status} genres={genres} lib={lib} libs={libs} mainSrc={src} anySrc={anysrc}
               onSet={setParam}
             />
             {activeCount > 0 && (
@@ -334,6 +344,16 @@ function LibraryInner() {
             {lib && (
               <button onClick={() => setParam('lib', '')} className="chip text-xs">
                 {libs.find((l) => l.id === lib)?.name || lib} ×
+              </button>
+            )}
+            {src && (
+              <button onClick={() => setParam('src', '')} className="chip text-xs">
+                {tr('Main: {name}', { name: sourceName(src) })} ×
+              </button>
+            )}
+            {anysrc && (
+              <button onClick={() => setParam('anysrc', '')} className="chip text-xs">
+                {tr('Any: {name}', { name: sourceName(anysrc) })} ×
               </button>
             )}
             {read && (
@@ -470,7 +490,7 @@ function LibraryInner() {
       {sheet && (
         <Sheet title={tr('Filters')} onClose={() => setSheet(false)} overBottomNav>
           <LibraryFilters
-            sort={sortKey} read={read} status={status} genres={genres} lib={lib} libs={libs}
+            sort={sortKey} read={read} status={status} genres={genres} lib={lib} libs={libs} mainSrc={src} anySrc={anysrc}
             onSet={setParam}
           />
           <div className="mt-5 flex gap-2">

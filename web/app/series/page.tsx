@@ -159,6 +159,31 @@ function SeriesEditModal({ id, series, onClose, onSaved }: { id: string; series:
 
   // The same Check now as the Sources & translations sheet's chip, so the two report alike.
   const { checking, checkNow } = useCheckNow(id, onSaved);
+  const router = useRouter();
+  // Link status (v0.49.0): every source this series reads from, how each is doing, and the × that unlinks a
+  // follower -- the same DELETE as the Sources & translations sheet. The main source cannot be unlinked; it
+  // is the row the series was created from.
+  const [unlinking, setUnlinking] = useState<string | null>(null);
+  const unlink = async (sourceId: string, name: string) => {
+    setUnlinking(sourceId);
+    try {
+      await api(`/api/admin/series/${id}/sources/${encodeURIComponent(sourceId)}`, { method: 'DELETE' });
+      toast(tr('No longer following {s}', { s: name }), 'success');
+      onSaved();
+    } catch (e) { toast(msgOf(e, tr('Could not remove that')), 'error'); }
+    setUnlinking(null);
+  };
+  // Connect sources for this one series: the same search and review as the library's bulk action.
+  const [connecting, setConnecting] = useState(false);
+  const connect = async () => {
+    setConnecting(true);
+    try {
+      const r = await api<{ batchId: string }>('/api/admin/link/batches', { json: { seriesIds: [id] } });
+      router.push(`/admin/link/?batch=${r.batchId}`);
+    } catch (e) { toast(msgOf(e, tr('Could not start Connect sources')), 'error'); setConnecting(false); }
+  };
+  const linked = series.sources ?? [];
+  const followers = linked.filter((x) => !x.primary).length;
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-ink-950/70 p-4 backdrop-blur-xs" onClick={onClose}>
       <div data-lenis-prevent className="glass max-h-[88vh] w-full max-w-md overflow-y-auto rounded-2xl border border-ink-700 p-5" onClick={(e) => e.stopPropagation()}>
@@ -252,6 +277,46 @@ function SeriesEditModal({ id, series, onClose, onSaved }: { id: string; series:
               decided from. One line here so an admin who learned them in this dialog is told where they
               went rather than left to conclude they are gone. */}
           <p className="mt-3 border-t border-ink-800 pt-3 text-[11px] text-fog-600">{tr('Translation groups are ranked in Sources & translations')}</p>
+        </div>
+        <div className="mt-4 rounded-xl border border-ink-700 p-3" data-link-status>
+          <p className="mb-1 text-xs font-semibold uppercase tracking-wider text-fog-500">{tr('Linked sources')}</p>
+          <p className="mb-2 text-[11px] leading-relaxed text-fog-500">
+            {tr('New chapters are looked for on every source here; a linked one is used when the main one is down or lacks a chapter.')}
+          </p>
+          {linked.length === 0 ? (
+            <p className="text-xs text-fog-500">{tr('No source — the chapters were scanned from disk.')}</p>
+          ) : (
+            <ul className="divide-y divide-ink-800/70">
+              {linked.map((x) => (
+                <li key={x.sourceId} className="flex items-center gap-2 py-1.5 text-xs">
+                  <span className="min-w-0 flex-1">
+                    <span className="flex items-center gap-1.5">
+                      <span className={`truncate ${x.registered ? 'text-fog-100' : 'text-fog-500'}`}>{x.registered || x.name !== x.sourceId ? x.name : tr('Source not installed')}</span>
+                      <span className="chip shrink-0 px-2 py-0.5 text-[10px]">{x.primary ? tr('main') : x.auto ? tr('followed for you') : tr('linked')}</span>
+                    </span>
+                    <span className="block truncate text-[11px] text-fog-500">
+                      {!x.registered ? tr('not installed')
+                        : x.health === 'disabled' ? tr('switched off')
+                        : x.health === 'cooldown' ? tr('paused — it blocked or rate-limited us')
+                        : x.health === 'failing' ? tr('failing lately')
+                        : tr('working')}
+                      {x.chapters != null && ` · ${tr('{n} chapters listed', { n: x.chapters })}`}
+                      {x.checkedAt && ` · ${tr('checked {ago}', { ago: relativeTime(x.checkedAt) })}`}
+                    </span>
+                  </span>
+                  {!x.primary && (
+                    <button type="button" onClick={() => unlink(x.sourceId, x.name)} disabled={unlinking === x.sourceId}
+                      aria-label={tr('Stop following {s}', { s: x.name })} className="shrink-0 px-1 text-fog-500 hover:text-rose-400 disabled:opacity-50">×</button>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+          {followers < 2 && (
+            <button type="button" onClick={connect} disabled={connecting} className="mt-2 w-full rounded-full border border-ink-700 py-2 text-sm text-fog-300 disabled:opacity-50">
+              {connecting ? tr('Starting…') : tr('Connect other sources')}
+            </button>
+          )}
         </div>
         <ArtEditor label="Cover" kind="cover" busy={busy} onUpload={onUpload} onSetUrl={onSetUrl} onReset={onReset} />
         <ArtEditor label="Background" kind="banner" busy={busy} onUpload={onUpload} onSetUrl={onSetUrl} onReset={onReset} />

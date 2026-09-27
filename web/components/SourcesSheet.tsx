@@ -157,6 +157,11 @@ function SourceRow({ s, onUnfollow, unfollowing }: { s: SeriesSource; onUnfollow
           {s.chapters != null && tr('{n} chapters listed', { n: s.chapters })}
           {s.chapters != null && s.checkedAt && ' · '}
           {s.checkedAt && tr('checked {ago}', { ago: relativeTime(s.checkedAt) })}
+          {/* A fallback that is itself down is worth seeing here (the series' own source being down is why
+              one follows another at all). Nothing for a healthy one: "working" on every row is noise. */}
+          {s.registered && s.health && s.health !== 'ok' && (
+            <span className="text-amber-400"> · {s.health === 'disabled' ? tr('switched off') : s.health === 'cooldown' ? tr('paused — it blocked or rate-limited us') : tr('failing lately')}</span>
+          )}
         </span>
       </span>
       {onUnfollow && (

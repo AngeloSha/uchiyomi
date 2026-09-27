@@ -2,7 +2,7 @@
   "_meta": {
     "language": "zh",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 1358
+    "strings": 1385
   },
   "1 check found something": "1 项检查发现问题",
   "1 member": "1 位成员",
@@ -1361,5 +1361,32 @@
   "not used while matching by other names is off": "关闭按其他名称匹配时不使用",
   "same series": "同一系列",
   "too few chapters to compare": "章节太少,无法比较",
-  "{done}/{total}": "{done}/{total}"
+  "{done}/{total}": "{done}/{total}",
+  "+ {n} more": "+ 另外 {n} 个",
+  "Any source": "任意来源",
+  "Any: {name}": "任意:{name}",
+  "Back to results": "返回结果",
+  "Connect other sources": "连接其他来源",
+  "Connect sources takes up to 500 series at a time.": "连接来源一次最多 500 个系列。",
+  "Connecting… {done}/{total}": "正在连接… {done}/{total}",
+  "Could not load the chapters": "无法加载章节",
+  "Linked sources": "已连接的来源",
+  "Main source": "主来源",
+  "Main: {name}": "主:{name}",
+  "New chapters are looked for on every source here; a linked one is used when the main one is down or lacks a chapter.": "新章节会在这里的所有来源中查找;主来源不可用或缺少章节时会使用已连接的来源。",
+  "Not on this source: {list}": "此来源没有:{list}",
+  "Select this source": "选择此来源",
+  "Series added from this source.": "从此来源添加的系列。",
+  "Series that read from this source, as their main source or a linked one.": "从此来源读取的系列(作为主来源或已连接来源)。",
+  "Showing the first {n}.": "显示前 {n} 个。",
+  "This source lists no chapters for it.": "此来源没有它的章节。",
+  "Unselect": "取消选择",
+  "failing lately": "最近出错",
+  "linked": "已连接",
+  "new": "新",
+  "paused — it blocked or rate-limited us": "已暂停——它屏蔽或限流了我们",
+  "switched off": "已关闭",
+  "working": "正常",
+  "{n} chapters here · {shared} of this series’ {ours} · {fresh} new": "此处 {n} 章 · 本系列 {ours} 章中有 {shared} 章 · {fresh} 章新",
+  "{n} left open — their chapters do not line up": "{n} 个保持未处理——章节编号不一致"
 }

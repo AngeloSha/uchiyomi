@@ -16,6 +16,7 @@ import { msgOf } from '@/components/ConfirmDialog';
 import { IcSearch, IcX } from '@/components/icons';
 import { t as tr } from '@/lib/i18n';
 import { verdictLabel, type LinkCandidate, type LinkItem } from '@/lib/linkBatch';
+import { LinkChapterList } from '@/components/LinkChapterList';
 
 interface SourceResult { source: string; sourceId: string; title: string; coverUrl?: string }
 interface SourceGroup { source: string; name: string; lang: string | null; results: SourceResult[] }
@@ -30,6 +31,8 @@ export function LinkPickSheet({ item, onClose, onAdded }: {
   const [debounced, setDebounced] = useState(item.title.trim());
   useEffect(() => { const t = setTimeout(() => setDebounced(term.trim()), 300); return () => clearTimeout(t); }, [term]);
   const [pending, setPending] = useState<SourceResult | null>(null);
+  // The pick's chapter list, in place of the search results: a second Sheet on top would share one Escape.
+  const [preview, setPreview] = useState(false);
   const [busy, setBusy] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   useEffect(() => { inputRef.current?.focus(); }, []);
@@ -72,7 +75,10 @@ export function LinkPickSheet({ item, onClose, onAdded }: {
         </div>
       </div>
       <div className="flex gap-2">
-        <button onClick={() => setPending(null)} disabled={busy} className="chip flex-1 py-1.5 text-xs disabled:opacity-50">{tr('Cancel')}</button>
+        <button onClick={() => { setPending(null); setPreview(false); }} disabled={busy} className="chip flex-1 py-1.5 text-xs disabled:opacity-50">{tr('Cancel')}</button>
+        <button onClick={() => setPreview((v) => !v)} className="chip flex-1 py-1.5 text-xs" aria-pressed={preview}>
+          {preview ? tr('Back to results') : tr('Chapters')}
+        </button>
         <button onClick={check} disabled={busy} className="btn-accent flex-1 py-1.5 text-xs disabled:opacity-50">
           {busy ? tr('Checking…') : tr('Check this one')}
         </button>
@@ -102,7 +108,9 @@ export function LinkPickSheet({ item, onClose, onAdded }: {
         )}
       </div>
 
-      {debounced.length < 2 ? (
+      {preview && pending ? (
+        <LinkChapterList itemId={item.id} source={pending.source} sourceSeriesId={pending.sourceId} />
+      ) : debounced.length < 2 ? (
         <p className="py-10 text-center text-sm text-fog-500">{tr('Type at least 2 characters to search.')}</p>
       ) : error ? (
         <p className="py-10 text-center text-sm text-fog-500">{tr('Search failed — try again.')}</p>
@@ -129,7 +137,7 @@ export function LinkPickSheet({ item, onClose, onAdded }: {
                   const selected = pending?.source === g.source && pending?.sourceId === r.sourceId;
                   return (
                     <button key={r.sourceId} type="button" disabled={busy}
-                      onClick={() => setPending({ source: g.source, sourceId: r.sourceId, title: r.title, coverUrl: r.coverUrl })}
+                      onClick={() => { setPending({ source: g.source, sourceId: r.sourceId, title: r.title, coverUrl: r.coverUrl }); setPreview(false); }}
                       className="w-24 shrink-0 text-start disabled:opacity-50">
                       <Img src={sourceCover(g.source, r.coverUrl)} alt={r.title} fallbackSrc={r.coverUrl}
                         className={`aspect-[2/3] w-24 rounded-lg border ${selected ? 'border-accent ring-2 ring-accent' : 'border-ink-700'}`} />

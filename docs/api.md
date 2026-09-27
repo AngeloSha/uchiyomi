@@ -534,6 +534,7 @@ GET    /api/home                  GET    /api/featured
 GET    /api/foryou                GET    /api/trending
 GET    /api/random                GET    /api/genres
 GET    /api/genres/overview       GET    /api/libraries
+GET    /api/library/sources
 GET    /api/updates               GET    /api/adult-filter
 POST   /api/updates/seen          POST   /api/refresh
 GET    /api/series/:id            GET    /api/series/:id/books
@@ -925,6 +926,7 @@ GET    /api/admin/link/batches/:id DELETE /api/admin/link/batches/:id
 POST   /api/admin/link/batches/:id/resume
 POST   /api/admin/link/batches/:id/run
 POST   /api/admin/link/items/:id/candidates
+GET    /api/admin/link/items/:id/chapters
 GET    /api/admin/series/:id/alt-titles POST   /api/admin/series/:id/alt-titles
 DELETE /api/admin/series/:id/alt-titles/:norm
 ```
@@ -994,8 +996,12 @@ measured both ways (90 % each; one way only for a main-title-to-main-title match
 `ok`, or `numbering_differs` / `too_few` as a warning. `GET .../batches/:id` returns each series with its
 candidates, what it follows now and `freeSlots`; `POST .../items/:id/candidates {source, sourceSeriesId}`
 adds a hand-picked candidate, judged the same way; `POST .../batches/:id/run {candidateIds, override?}`
-follows the chosen ones — a warning only with `override: true` — under the two-follower cap, with the admin
-as `added_by`, and keeps the source's title as a `confirmed` other name. Nothing is downloaded. The other
+follows the chosen ones — a warning only with `override: true`, otherwise it stays open (`held`) — under the
+two-follower cap, with the admin as `added_by`, and keeps the source's title as a `confirmed` other name;
+unlinking the source forgets that name again. `GET .../items/:id/chapters?source=&sourceSeriesId=` lists what
+a candidate has beside what the series has, for checking by hand. Nothing is downloaded. The library filters by
+source with `mainSource` / `anySource` conditions on `POST /api/series/search`, and `GET /api/library/sources`
+lists the sources with how many series each is the main source of (`main`) and read from at all (`any`). The other
 names themselves are `GET`/`POST /api/admin/series/:id/alt-titles` and `DELETE .../alt-titles/:norm`; with the
 switch on they are also read from the source's description when a series is added.
 

@@ -3,8 +3,8 @@ import { z } from 'zod';
 import { q, one } from '../lib/db';
 import { junkPagesFor, setPageOverride } from '../lib/junkPages';
 import { komgaImage } from '../lib/komga';
-import { content as komga, NATIVE_PROGRESS } from '../lib/backend';
-import { UnsupportedFilter } from '../lib/ownedCatalog';
+import { content as komga, NATIVE_PROGRESS, OWNED } from '../lib/backend';
+import { UnsupportedFilter, owned } from '../lib/ownedCatalog';
 import { cleanDescription } from '../lib/htmlText';
 import { viewCtxFor, SYSTEM_CTX, type ViewCtx, hideAdult, browsableIds, browsable, Params, adultFilterConfigured } from '../lib/visibility';
 
@@ -143,6 +143,16 @@ export default async function catalogRoutes(app: FastifyInstance) {
   app.get('/api/genres/overview', async (req) => {
     const n = Math.max(1, Math.min(8, Number((req.query as { covers?: string }).covers) || 4));
     return { content: await komga.genreOverview(vc(req), n) };
+  });
+
+  // The sources the viewer's library comes from, with how many series each is the main source of and how
+  // many read from it at all: the library's "Main source" and "Any source" filters. Empty on a Komga
+  // backend, which has no notion of a source -- the filters then do not render, and never send a condition
+  // Komga would refuse.
+  app.get('/api/library/sources', async (req) => {
+    if (!OWNED) return { content: [] };
+    const rows = await owned.librarySources(vc(req));
+    return { content: rows.map((r) => ({ id: r.id, name: getSource(r.id)?.name ?? r.label ?? r.id, main: r.main, any: r.any, installed: !!getSource(r.id) })) };
   });
 
   // What everyone in the household is reading (cross-user, last 14 days).
