@@ -22,6 +22,7 @@ import { completePartial, PARTIAL_COMPLETE_MAX } from './partial';
 import { effectiveSourcePriority, rankSources } from './sourcePrefs';
 import { beginRun, endRun, stopRequested, type RunCard } from './downloadJobs';
 import { withOrigin } from './downloadActivity';
+import { decideNumbering, numberedChapters, resumeRenumber, settleNumbering, NUMBERING_COLUMNS, type Settled } from './numbering';
 
 /**
  * Why a series produced nothing this run.
@@ -36,7 +37,8 @@ export type UpdateOutcome =
   | 'gone'          // hidden, merged or deleted since the sweep started
   | 'unrouted'      // no source installed, or the row was never stamped with one
   | 'blocked'       // the source is inside a back-off window
-  | 'source_error'; // threw or timed out: the one that used to look like good news
+  | 'source_error'  // threw or timed out: the one that used to look like good news
+  | 'renumber_pending'; // held until an admin confirms a renumber (lib/numbering.ts): nothing listed, nothing fetched
 
 /**
  * The same bound the add path uses (routes/sources.ts). Unbounded, one hung site held the whole sweep -- the
@@ -78,8 +80,13 @@ async function stampChecked(seriesId: string, chapters: number | null, missing: 
   ).catch(() => {});
 }
 
-/** A chapter that landed in this run, and what setBookMeta stamps onto the book the scan mints for it. `missing` = 1-based placeholder pages of a partial (lib/partial.ts); `title` = the source's name for it. */
-export type Landed = { number: number; scanlator?: string; source?: string; missing?: number[]; title?: string };
+/**
+ * A chapter that landed in this run, and what setBookMeta stamps onto the book the scan mints for it. `missing` =
+ * 1-based placeholder pages of a partial (lib/partial.ts); `title` = the source's name for it; `chapterId` = the
+ * source chapter the file was written from, so a later remap of the series' numbers knows exactly which post
+ * the file is (lib/numbering.ts).
+ */
+export type Landed = { number: number; scanlator?: string; source?: string; missing?: number[]; title?: string; chapterId?: string };
 
 export interface UpdateResult {
   title: string;
@@ -108,6 +115,8 @@ export interface UpdateResult {
   asked: boolean;
   /** Only with `newestOnly`: what became of the newest listed release. See `NewestVerdict`. */
   newest?: NewestVerdict;
+  /** A pending numbering change this run settled or held (lib/numbering.ts): what it did, and the plan. */
+  renumber?: Settled;
 }
 
 /**
@@ -162,16 +171,37 @@ export interface UpdateOpts {
    * person asking for those chapters now, at normal pace, rather than waiting for the archive's turn.
    */
   ignoreArchiveBoundary?: boolean;
+  /**
+   * An admin has seen the plan of this series' pending numbering change and confirmed it (lib/numbering.ts
+   * requestNumbering): the run applies it even though files are renamed. Nothing else passes it -- a series in
+   * a library is never renumbered unattended.
+   */
+  confirmRenumber?: boolean;
 }
+
+/**
+ * The slow archive's boundary while it is queued or paused (#117), as a column of `lib_series s`: the sweep's floor
+ * rises to it. Read with the row, and again wherever a renumber (#116) may just have moved it.
+ */
+const ARCHIVE_BOUNDARY = `(SELECT a.boundary FROM archive_queue a WHERE a.series_id = s.id AND a.state IN ('queued', 'paused')) AS archive_boundary`;
 
 const nothing = (title: string, outcome: UpdateOutcome): UpdateResult =>
   ({ title, added: 0, available: 0, outcome, failed: 0, waiting: 0, switched: 0, partial: 0, landed: [], asked: false });
 
 export async function updateSeries(seriesId: string, maxNew = 10, opts: UpdateOpts = {}): Promise<UpdateResult> {
-  const s = await one<any>(`SELECT id,title,source_id,source_series_id,web,folder,summary,author,genres,status,chapter_floor,scanlator_prefs,source_prefs,
-    (SELECT a.boundary FROM archive_queue a WHERE a.series_id = s.id AND a.state IN ('queued', 'paused')) AS archive_boundary
-    FROM lib_series s WHERE s.id=$1 AND ${visibleToAll('s')}`, [seriesId]);
+  let s = await one<any>(`SELECT id,title,source_id,source_series_id,web,folder,summary,author,genres,status,chapter_floor,scanlator_prefs,source_prefs,
+    ${NUMBERING_COLUMNS}, ${ARCHIVE_BOUNDARY} FROM lib_series s WHERE s.id=$1 AND ${visibleToAll('s')}`, [seriesId]);
   if (!s) return nothing('', 'gone');
+  // A renumber a crash interrupted is finished before anything here reads lib_books: its files are at their new
+  // names and its rows at their old ones until then. One that cannot be finished keeps the series held.
+  if (s.renumber_plan) {
+    const done = await resumeRenumber(seriesId).then(() => true, (e) => {
+      console.warn(`[numbering] ${s.title}: the interrupted renumber could not be finished: ${(e as Error)?.message || e}`);
+      return false;
+    });
+    if (!done) return nothing(s.title, 'renumber_pending');
+    s = { ...s, ...(await one<any>(`SELECT chapter_floor, ${ARCHIVE_BOUNDARY}, ${NUMBERING_COLUMNS} FROM lib_series s WHERE s.id = $1`, [seriesId])) };
+  }
 
   // Everything the series is followed on: the primary pair first, then series_sources in the order they
   // were added. That order is the tie-break chooseReleases applies between two copies that are otherwise
@@ -189,6 +219,14 @@ export async function updateSeries(seriesId: string, maxNew = 10, opts: UpdateOp
       ? [{ source: s.source_id as string, ref: s.source_series_id as string, primary: true }] : []),
     ...extras.filter((e) => e.source_id !== s.source_id && getSource(e.source_id)).map((e) => ({ source: e.source_id, ref: e.source_series_id, primary: false })),
   ];
+  // Numbered by posting order: the series takes its chapters from the source whose posts were numbered and from
+  // nowhere else. A follower's chapter 20 is its own chapter 20 -- another site numbers these posts its own way,
+  // usually the very way this series was renumbered to get away from -- so merging it would file a different
+  // post as a version of ours. The followers stay followed; they are just not merged while this lasts.
+  // Reintroduce by keeping `followed` whole: "followers are not merged under posting order" in
+  // numbering.int.test.ts finds the follower asked for its list ("a follower is not even asked").
+  const numberingSource: string | null = s.numbering === 'posting_order' ? (s.numbering_source ?? s.source_id) : s.source_id;
+  if (s.numbering === 'posting_order') followed = followed.filter((f) => f.source === numberingSource);
   if (!followed.length) return nothing(s.title, 'unrouted');
 
   // "Fetch newest" does not ask a source the admin has switched off, for anything. The verdict below
@@ -211,9 +249,11 @@ export async function updateSeries(seriesId: string, maxNew = 10, opts: UpdateOp
   // A throw and an empty list are NOT the same answer, and collapsing them is what made a broken source
   // indistinguishable from a series with nothing new. routes/sources.ts already separates these two, with a
   // comment saying why, two files away.
-  const tagged: SourceChapter[] = [];
+  let tagged: SourceChapter[] = [];
   let blocked = 0;
   let answered = 0;
+  // The numbering source's own list, untouched: what the detector judges and what posting numbers are given to.
+  let rawNumbering: SourceChapter[] | null = null;
   for (const f of followed) {
     if (await blockedNow(f.source)) { blocked++; continue; }
     // Looked up again after the awaits above: an extension refresh can unregister an adapter between
@@ -230,6 +270,7 @@ export async function updateSeries(seriesId: string, maxNew = 10, opts: UpdateOp
     // On the RAW list, before any numbering or choosing: the source answered with chapters.
     if (list.length) void noteStage(f.source, 'chapters', 'ok');
     answered++;
+    if (f.source === numberingSource) rawNumbering = list;
     // Copied, not annotated in place: an adapter may hand back the very array its detail cache holds, and
     // a `source` written onto those objects would be there for every later caller of the cache.
     for (const c of list) tagged.push({ ...c, source: f.source });
@@ -243,6 +284,40 @@ export async function updateSeries(seriesId: string, maxNew = 10, opts: UpdateOp
   // the queue instead of sitting at its front forever. Not stamped on the cooldown path: never asked.
   if (blocked === followed.length) return nothing(s.title, 'blocked');
   if (!answered) { await stampChecked(seriesId, null, null); return { ...nothing(s.title, 'source_error'), asked: true }; }
+
+  // Numbering (#116, lib/numbering.ts), in the listing layer: before the chooser, the floor, the have-set and the
+  // stored listing, so every one of them sees the same numbers. The detector's verdict first, on the source's own
+  // list; then a pending change is settled -- applied when an admin confirmed it or nothing is on disk to rename,
+  // otherwise the series is HELD: its listing stays as it was and nothing downloads, because every chapter fetched
+  // now would land under a number the pending plan is about to move. Settled BEFORE the have-set on purpose: a
+  // renumber moves `Chapter 2.cbz` to 20, and a have-set read first would still hold 2 and skip post 2.
+  let renumber: Settled | undefined;
+  if (rawNumbering?.length && numberingSource) {
+    const decided = await decideNumbering(s, numberingSource, rawNumbering).catch(() => null);
+    if (decided) s = { ...s, ...decided };
+  }
+  if (s.numbering_pending) {
+    // Held or not, the source was asked: the series goes to the back of the sweep's queue like any other, or a
+    // series waiting for review would be the first one visited every night.
+    const held = async (r?: Settled): Promise<UpdateResult> => {
+      await q('UPDATE lib_series SET source_checked_at = now() WHERE id = $1', [seriesId]).catch(() => {});
+      return { ...nothing(s.title, 'renumber_pending'), asked: true, ...(r ? { renumber: r } : {}) };
+    };
+    if (!rawNumbering?.length || !numberingSource) return held();
+    renumber = await settleNumbering(s, numberingSource, rawNumbering, { confirm: !!opts.confirmRenumber });
+    if (renumber.state !== 'applied' && renumber.state !== 'none') return held(renumber);
+    // The apply moved chapter_floor and the slow archive's boundary into the new numbers (numbering.ts commit):
+    // both are read again, or this run's floor would hold a source number against posting numbers.
+    const moved = await one<any>(`SELECT chapter_floor, ${ARCHIVE_BOUNDARY} FROM lib_series s WHERE s.id = $1`, [seriesId]);
+    s = { ...s, ...renumber.numbering, chapter_floor: moved?.chapter_floor ?? null, archive_boundary: moved?.archive_boundary ?? null };
+  }
+  const posting = s.numbering === 'posting_order';
+  if (posting && rawNumbering && numberingSource) {
+    // The numbering source alone, followers dropped: `followed` was filtered above, but a renumber applied a
+    // moment ago started this run in source numbers, with the followers' copies already in hand.
+    const numbered = await numberedChapters({ seriesId, sourceId: numberingSource, persist: true }, rawNumbering);
+    tagged = numbered.map((c) => ({ ...c, source: numberingSource }));
+  }
 
   // One copy per number out of everything listed, by the release preferences: the series' own over the
   // global ones, with the series' patience in force -- this is the sweep, and "Check now" runs the same
@@ -282,7 +357,13 @@ export async function updateSeries(seriesId: string, maxNew = 10, opts: UpdateOp
   // again is the recovery. heldBooks in lib/chapterCleanup.ts is that rule, in one place.
   // Reintroduce by dropping the heldBooks predicate: "the sweep fetches a chapter the verify task marked
   // missing" in verifyFiles.int.test.ts asks for nothing.
-  const heldRows = await q<{ number: number; pruned_at: string | null }>(`SELECT number, pruned_at FROM lib_books WHERE series_id=$1 AND ${heldBooks()}`, [seriesId]);
+  // Override-aware under posting order: a book in a root the renumber could not rename carries its posting number
+  // in book_overrides (lib/numbering.ts), and its raw number is the source's, which means another post now.
+  // Source-numbered series compare the raw number, as they always have: these numbers came out of a listing.
+  const heldRows = await q<{ number: number; pruned_at: string | null }>(posting
+    ? `SELECT COALESCE(ov.number, b.number) AS number, b.pruned_at FROM lib_books b LEFT JOIN book_overrides ov ON ov.book_id = b.id
+        WHERE b.series_id=$1 AND ${heldBooks('b')}`
+    : `SELECT number, pruned_at FROM lib_books WHERE series_id=$1 AND ${heldBooks()}`, [seriesId]);
   const have = new Set(heldRows.map((r) => Number(r.number)));
   // The held numbers a LIVE row stands behind. The sweep needs only `have`; "Fetch newest" tells a
   // number we hold as pages apart from one we hold only as a deliberate tombstone (see the verdict below).
@@ -396,7 +477,8 @@ export async function updateSeries(seriesId: string, maxNew = 10, opts: UpdateOp
   const adult = queue.length > 0 && maxNew > 0 ? await seriesIsAdult(seriesId) : false;
   const sweepRule = await sweepAllowedFor(adult);
   const allowed = (id: string) => sweepRule(id) && (opts.sourceAllowed?.(id) ?? true);
-  const huntBudget = opts.hunt === false || opts.newestOnly ? null : (opts.hunt ?? { left: HUNT_MAX_PER_SWEEP });
+  // No hunt under posting order: a source found for the purpose numbers these posts its own way.
+  const huntBudget = opts.hunt === false || opts.newestOnly || posting ? null : (opts.hunt ?? { left: HUNT_MAX_PER_SWEEP });
   const meta = { series: s.title, summary: s.summary, author: s.author, genres: s.genres, url: s.web, status: s.status };
   // oldest-missing-first: a partial "first N" add fills forward coherently, and new releases (all > our max)
   // are still the only gap once a series is fully downloaded. (`queue` is `eligible` unless newestOnly.)
@@ -415,7 +497,7 @@ export async function updateSeries(seriesId: string, maxNew = 10, opts: UpdateOp
       out = await downloadWithFallback({
         seriesId, title: s.title, folder: s.folder, meta,
         chapter: ch.source ? ch : { ...ch, source: via },
-        alternates: async () => copiesOf(tagged, ch.number, prefs, chooseOpts).filter((c) => c !== ch),
+        alternates: async () => (posting ? [] : copiesOf(tagged, ch.number, prefs, chooseOpts).filter((c) => c !== ch)),
         refusing, allowed,
         hunt: huntBudget ? async () => (await huntSource(seriesId, ch.number, { allowed, budget: huntBudget })).chapter : undefined,
         // Twice refused by the source this very copy is on (the ledger read above): the hunt may run on a
@@ -433,7 +515,7 @@ export async function updateSeries(seriesId: string, maxNew = 10, opts: UpdateOp
       if (out.switched) switched++;
       if (out.kind === 'partial') partial++;
       landed.push({
-        number: ch.number, scanlator: out.chapterUsed.scanlator, source: out.via, title: out.chapterUsed.title,
+        number: ch.number, scanlator: out.chapterUsed.scanlator, source: out.via, title: out.chapterUsed.title, chapterId: out.chapterUsed.sourceId,
         // 1-based, as setBookMeta writes lib_books.missing_pages; the helper reports indices.
         ...(out.kind === 'partial' ? { missing: out.missing.map((i) => i + 1) } : {}),
       });
@@ -463,7 +545,7 @@ export async function updateSeries(seriesId: string, maxNew = 10, opts: UpdateOp
   // Provenance goes only onto what LANDED, never onto the whole listing: the chosen copy for a number can
   // change between runs, and the file on disk does not change with it.
   await setBookMeta(s.folder, landed).catch(() => {});
-  return { title: s.title, added, available: releases.length, outcome: 'ok', failed, waiting, switched, partial, landed, capped, folder: s.folder, chapters: releases, diskFull, asked: true, ...(newest ? { newest } : {}) };
+  return { title: s.title, added, available: releases.length, outcome: 'ok', failed, waiting, switched, partial, landed, capped, folder: s.folder, chapters: releases, diskFull, asked: true, ...(newest ? { newest } : {}), ...(renumber ? { renumber } : {}) };
 }
 
 /**
@@ -530,7 +612,7 @@ export async function runUpdateAll(opts: {
   // Tallied so the caller can say what happened. `updateSeries` throwing outright is its own outcome:
   // catching it into `{ added: 0 }` is what made "the database went away mid-sweep" read as "nothing new".
   // `skipped` is what the budget or a parked source left unvisited: not a failure, and not nothing either.
-  const outcomes: Record<UpdateOutcome | 'threw' | 'skipped', number> = { ok: 0, gone: 0, unrouted: 0, blocked: 0, source_error: 0, threw: 0, skipped: 0 };
+  const outcomes: Record<UpdateOutcome | 'threw' | 'skipped', number> = { ok: 0, gone: 0, unrouted: 0, blocked: 0, source_error: 0, renumber_pending: 0, threw: 0, skipped: 0 };
   const dated: { folder: string; chapters: SourceChapter[]; landed: Landed[] }[] = [];
   const newChapters: DigestSeries[] = [];
 

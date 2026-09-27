@@ -269,6 +269,42 @@ test('every version of every chapter, flagged chosen, blocked and on disk', { sk
       await q('DELETE FROM series_listing WHERE series_id = $1 AND number = 97', [S]);
     }
   });
+  await t.test('every version carries its own title', async () => {
+    // The sweep stores each copy's own title (v0.49.0, #116); a copy stored before that lends the row's.
+    // Reintroduce by dropping `title` from GET /versions: undefined.
+    assert.deepEqual(byNumber.get(3)!.map((c) => c.title), ['Chapter 3', 'Chapter 3']);
+    const copy = (id: string, title?: string) => ({ sourceId: id, source: PRI, groups: [], scanlator: null, lang: null, pages: null, publishedAt: null, ...(title ? { title } : {}) });
+    await q(`INSERT INTO series_listing (series_id, number, title, source_id, chosen, status, copies) VALUES ($1, 96, 'Row title', $2, $3::jsonb, 'available', $4::jsonb)`,
+      [S, PRI, JSON.stringify({ sourceId: 'p96a', number: 96 }), JSON.stringify([copy('p96a', 'E7 - 443-444'), copy('p96b', 'E7 - 445-446'), copy('p96c')])]);
+    try {
+      const again = await versions();
+      assert.deepEqual(again.json().content.find((e: any) => e.number === 96).copies.map((c: any) => c.title), ['E7 - 443-444', 'E7 - 445-446', 'Row title']);
+    } finally {
+      await q('DELETE FROM series_listing WHERE series_id = $1 AND number = 96', [S]);
+    }
+  });
+  await t.test('on disk: a file stamped with its post is that post; two posts under one group are told apart by name', async () => {
+    // Two posts of one number from one source and one group (#116) carry the same group stamp, so the stamp alone
+    // said both were on disk. Reintroduce by dropping the chapter-name check: [true, true] for 95.
+    const copy = (id: string, title: string) => ({ sourceId: id, source: PRI, groups: ['Group A'], scanlator: 'Group A', lang: null, pages: null, publishedAt: null, title });
+    const listed = (n: number) => q(`INSERT INTO series_listing (series_id, number, title, source_id, chosen, status, copies) VALUES ($1, $2, $3, $4, $5::jsonb, 'available', $6::jsonb)`,
+      [S, n, 'E7 - 443-444', PRI, JSON.stringify({ sourceId: `p${n}a`, number: n }), JSON.stringify([copy(`p${n}a`, 'E7 - 443-444'), copy(`p${n}b`, 'E7 - 445-446')])]);
+    await listed(95);
+    await listed(94);
+    await q(`INSERT INTO lib_books (id, series_id, source, file, number, title, root, scanlator, source_id, chapter_name, source_chapter_id)
+              VALUES ('b_gv_95', $1, 'T!gv', $2, 95, 'Chapter 95', $3, 'Group A', $4, 'E7 - 445-446', NULL),
+                     ('b_gv_94', $1, 'T!gv', $5, 94, 'Chapter 94', $3, 'Group A', $4, 'E7 - 443-444', 'p94b')`,
+      [S, `${FOLDER}/Chapter 95.cbz`, process.env.DL_ROOT, PRI, `${FOLDER}/Chapter 94.cbz`]);
+    try {
+      const content = (await versions()).json().content;
+      assert.deepEqual(content.find((e: any) => e.number === 95).copies.map((c: any) => c.onDisk), [false, true], 'by the name the file was saved under');
+      // The id stamp outranks everything, the name included: the file was written from p94b.
+      assert.deepEqual(content.find((e: any) => e.number === 94).copies.map((c: any) => c.onDisk), [false, true], 'by the post it was written from');
+    } finally {
+      await q(`DELETE FROM lib_books WHERE id = ANY($1)`, [['b_gv_95', 'b_gv_94']]);
+      await q('DELETE FROM series_listing WHERE series_id = $1 AND number = ANY($2::real[])', [S, [94, 95]]);
+    }
+  });
   await t.test('a number listed before v0.33.0 has an empty list, not an error', async () => {
     await q(`INSERT INTO series_listing (series_id, number, source_id, chosen, status) VALUES ($1, 99, $2, $3::jsonb, 'available')`,
       [S, PRI, JSON.stringify(ch(99, 'Group A'))]);

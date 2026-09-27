@@ -987,8 +987,10 @@ test('only the chapters that landed are stamped; a book from an earlier run keep
   const r = await updateSeries(S('stamp'), 5);
 
   assert.equal(r.added, 1);
-  // `title` rides along since the sweep started recording chapter names (setBookMeta keeps only a real one).
-  assert.deepEqual(r.landed, [{ number: 6, scanlator: 'B', source: SRC_GRP, title: 'Chapter 6' }], 'the run reports what landed, for the stamp after the scan');
+  // `title` rides along since the sweep started recording chapter names (setBookMeta keeps only a real one), and
+  // `chapterId` since v0.49.0: the post the file was written from, so a later renumber knows it exactly (#116).
+  // Reintroduce by dropping `chapterId: out.chapterUsed.sourceId` from the updater's landed.push: it is missing here.
+  assert.deepEqual(r.landed, [{ number: 6, scanlator: 'B', source: SRC_GRP, title: 'Chapter 6', chapterId: 'g6b' }], 'the run reports what landed, for the stamp after the scan');
   assert.equal((await bookRow('stamp', 5)).scanlator, 'A', 'a book that did not land keeps its stamp');
 });
 

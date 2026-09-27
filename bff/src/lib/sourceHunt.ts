@@ -81,6 +81,7 @@ export interface HuntResult {
     | 'cap'          // the series already follows MAX_FOLLOWERS sources
     | 'no_candidate' // nothing to search, or no searched source both carries the title and is this series
     | 'no_copy'      // followed, but the new source does not list the wanted number
+    | 'posting_order' // numbered by posting order (#116): no other source's numbers line up, so none is searched
     | 'followed';
 }
 
@@ -179,10 +180,14 @@ export async function huntCandidates(
   if (!(await huntOn())) return none('off');
   if (opts.budget.left <= 0) return none('cooldown');
 
-  const s = await one<{ id: string; title: string; source_id: string | null; deleted_at: string | null; merged_into: string | null; source_hunt_at: string | null }>(
-    'SELECT id, title, source_id, deleted_at, merged_into, source_hunt_at FROM lib_series WHERE id = $1', [seriesId]).catch(() => null);
+  const s = await one<{ id: string; title: string; source_id: string | null; deleted_at: string | null; merged_into: string | null; source_hunt_at: string | null; numbering: string | null }>(
+    'SELECT id, title, source_id, deleted_at, merged_into, source_hunt_at, numbering FROM lib_series WHERE id = $1', [seriesId]).catch(() => null);
   if (!s || s.deleted_at || s.merged_into) return none('no_candidate');
   title = s.title;
+  // Before the stamp and the budget: a series that cannot be hunted for costs nothing, today or any day.
+  // Reintroduce by dropping it: "followers are not merged under posting order" in numbering.int.test.ts reads
+  // another why than posting_order.
+  if (s.numbering === 'posting_order') return none('posting_order');
   const now = opts.now ?? Date.now();
   if (!opts.force && s.source_hunt_at && now - new Date(s.source_hunt_at).getTime() < HUNT_COOLDOWN_MS) return none('cooldown');
 

@@ -41,6 +41,9 @@ import { kickDownloads } from '@/lib/useServerDownloads';
 import { SeriesServerDownloads } from '@/components/SeriesServerDownloads';
 import { useArchiveEnqueue } from '@/components/ArchiveQueue';
 import { listingArchiveLine } from '@/lib/archive';
+import { NumberingNotice } from '@/components/NumberingNotice';
+import { NumberingSheet } from '@/components/NumberingSheet';
+import type { RenumberMode } from '@/lib/numbering';
 
 /** "Marking 3 chapters read…", counted: the busy half of Mark read's one card. */
 const markingText = (n: number) => (n === 1 ? tr('Marking 1 chapter read…') : tr('Marking {n} chapters read…', { n }));
@@ -886,6 +889,9 @@ function SeriesInner() {
   const [explaining, setExplaining] = useState(false);
   const [filterOpen, setFilterOpen] = useState(false);
   const [chapterSheet, setChapterSheet] = useState<{ number: number; book?: Book; ghost?: Ghost } | null>(null);
+  // The renumbering plan (#116), opened from the numbering notice or, for an admin, from the versions sheet.
+  const [numberingSheet, setNumberingSheet] = useState<RenumberMode | null>(null);
+  useEffect(() => { setNumberingSheet(null); }, [id]);
   // The older-chapters runs the reader unfolded, by the run's lowest number (chapterRows.ts). Hiding one
   // drops its ghosts from the picks: they leave the screen, and the same rule as `toggleGhosts` applies --
   // a row nobody can see cannot stay picked, or the bar keeps counting and Fetch acts on it.
@@ -1642,6 +1648,8 @@ function SeriesInner() {
   const activeFilters = (group !== ALL_GROUPS ? 1 : 0) + (showGhosts ? 0 : 1);
   const Chapters = (
     <div ref={chaptersTop} className="scroll-mt-20">
+      {/* How the chapters are numbered, when that needs saying (#116): above the band, which it can hold. */}
+      <NumberingNotice seriesId={id} numbering={listing?.numbering} isAdmin={isAdmin} onReview={setNumberingSheet} />
       {/* What the server is fetching for this series, whoever started it (v0.49.0): above the list it fills. */}
       <SeriesServerDownloads seriesId={id} folder={series?.folder} />
       {/* The heading on its own line and ONE row of four short, text-only chips under it. Measured at
@@ -1871,8 +1879,11 @@ function SeriesInner() {
           onFetch={(copy) => { const n = chapterSheet.number; setChapterSheet(null); void (copy ? pickGhost(n, copy) : fetchOne(n)); }}
           // ⚠️ The sheet closes FIRST, then the confirm opens: a Modal under a Sheet cannot be tapped.
           onReplace={(copy) => { const b = chapterSheet.book!; setChapterSheet(null); setReplacing({ book: b, copy }); }}
+          // Sheet for sheet, never stacked: the versions sheet closes and the plan opens.
+          onNumbering={isAdmin && listing?.numbering?.mode !== 'posting_order' ? () => { setChapterSheet(null); setNumberingSheet('posting_order'); } : undefined}
           onClose={() => setChapterSheet(null)} />
       )}
+      {numberingSheet && isAdmin && <NumberingSheet seriesId={id} mode={numberingSheet} onClose={() => setNumberingSheet(null)} />}
 
       {deleting && series && (
         <ConfirmDialog

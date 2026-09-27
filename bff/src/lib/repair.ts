@@ -1319,8 +1319,9 @@ interface GapsResult {
    * ⚠️ `cooldown` here can only ever mean THIS series was hunted within the last day (by the short step,
    * or by a sweep) -- never "the run ran out of searches", which stops the step before anything is
    * stamped (see below). The Health page's "searched too recently to search again" is true of it.
+   * `posting_order`: the series is numbered by posting order (#116), and no other source is searched for it.
    */
-  why: 'followed' | 'no_candidate' | 'cooldown' | 'cap' | 'off' | 'listed';
+  why: 'followed' | 'no_candidate' | 'cooldown' | 'cap' | 'off' | 'listed' | 'posting_order';
 }
 
 /**

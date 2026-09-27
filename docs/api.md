@@ -1012,6 +1012,7 @@ POST   /api/admin/series/:id/merge
 GET    /api/admin/series/deleted
 POST   /api/admin/series/:id/check
 GET    /api/admin/series/:id/check
+GET    /api/admin/series/:id/numbering POST   /api/admin/series/:id/numbering
 GET    /api/admin/art/overview    GET    /api/admin/art/candidates/:id
 POST   /api/admin/art/backfill    GET    /api/admin/art/backfill/status
 POST   /api/admin/trackers/relink GET    /api/admin/trackers/relink/status
@@ -1567,7 +1568,42 @@ GET    /api/admin/extensions/repos       POST   /api/admin/extensions/repos
 DELETE /api/admin/extensions/repos       POST   /api/admin/extensions/refresh
 GET    /api/admin/extensions/sources     POST   /api/admin/extensions/sources/:id
 POST   /api/admin/extensions/sources/bulk
+GET    /api/admin/extensions/sources/:id/preferences
+POST   /api/admin/extensions/sources/:id/preferences
 ```
+
+**An extension's own settings (v0.49.0, #116).** `GET /api/admin/extensions/sources/:id/preferences` reads the
+preference screen Mihon shows for one extension source, through the engine: `{ source { id, name, lang, pkgName,
+extensionName }, siblings, preferences, usedBy, renumbers }`. Each preference is `{ key, type (switch, checkbox,
+list, multiselect, text), title, summary, visible, enabled, value, default, entries?, entryValues?, dialogTitle?,
+dialogMessage?, numbering }`, in screen order; `numbering` marks a setting that changes the chapter numbers the
+source gives (the Webtoons extension's *Use sequential chapter numbering*). `siblings` are the extension's other
+sources, one per language, and `GET /api/admin/extensions/sources?pkg=<pkgName>` lists the same from an
+extension's package name (every row there carries `pkgName` now). `POST` with `{ key, value }` changes one
+setting, **addressed by key**: the engine addresses a write by its position on the screen, which an extension
+update can move, so the server reads the screen again, finds the key's current position and checks the value
+against the setting's type and choices before sending it. It answers `{ ok, changed, applied, remap, preferences,
+usedBy, renumbers }`; **400** `unknown_pref`, `ambiguous_pref`, `disabled` or `bad_value`, **404**
+`unknown_source`, **502** `unreachable`. A changed numbering setting marks every series from the source that uses
+its numbers (not those numbered by posting order) with `numbering_pending = 'remap'` -- `remap` is how many --
+and each then waits for an admin to confirm its renaming below. A text setting is audited by its length only:
+extensions keep logins and keys in them.
+
+**Chapter numbering (v0.49.0, #116).** A source that gives many different posts one chapter number (Webtoons:
+Istrevelia's 226 posts on 13 numbers) is numbered by posting order, 1..K. `GET /api/sources/detail` answers
+`numbering` { verdict (strong, hint, none), applied, ordered, posts, numbers, biggest, examples, alt { count,
+first, last }, extSourceId? } with `count`/`first`/`last` following `applied`; `POST /api/sources/add` takes
+`numbering: 'auto' | 'source' | 'posting_order'` (default `auto`); `GET /api/series/:id/listing` answers
+`numbering` { mode, by, pending, note, changedAt, sourceName, extSourceId? } to every viewer of the series; each
+copy in `GET /api/series/:id/versions` carries its own `title`. A series already in a library is never renamed
+unattended: `GET /api/admin/series/:id/numbering?mode=posting_order|source|remap` answers the plan -- every
+file's move with how its post was matched, the books no post matched (`parked`), shared numbers
+(`collisions`), `clean` with its `reasons`, and `tracker` -- changing nothing, and `POST
+/api/admin/series/:id/numbering` with `{ mode: 'auto' | 'source' | 'posting_order' | 'remap', confirm? }`
+answers `needs_confirm` with that plan until `confirm: true`, then `applied` (files renamed in place; book ids,
+progress, bookmarks and notes kept), `pending` (not applied yet; the series stays held) or `unchanged` (the
+numbering it already has: *Keep the source's numbers* renames nothing). **409** `busy` while chapters are being
+fetched into the folder. A manual choice is never undone by the detector.
 
 ### Images and OPDS
 Cookie and HTTP Basic respectively, as described above.

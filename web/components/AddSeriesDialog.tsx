@@ -1,6 +1,7 @@
 'use client';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { AutoFollow, AutoFollowResult, FollowWhy, GroupStat, Page, Series } from '@/lib/types';
@@ -24,6 +25,9 @@ import { downloadsHref } from '@/lib/libraryView';
 import { PreviewReader } from '@/components/PreviewReader';
 import { ARCHIVE_PACE, archiveAddLine, archiveSwitchHelp, type EnqueueOutcome } from '@/lib/archive';
 import { useServerDownloads } from '@/lib/useServerDownloads';
+import { useAuth } from '@/lib/auth';
+import { addNumberingView, numLabel, type DetailNumbering } from '@/lib/numbering';
+import { extensionSettingsHref } from '@/lib/sourcePrefs';
 
 export interface Provider { source: string; name: string; sourceId: string; title: string; coverUrl?: string }
 interface Detail {
@@ -33,6 +37,8 @@ interface Detail {
   groups?: GroupStat[];
   /** How many numbers have more than one copy. */
   versions?: number;
+  /** The detector's word on this listing (v0.49.0, #116); `count`/`first`/`last` follow `numbering.applied`. */
+  numbering?: DetailNumbering;
 }
 interface Job extends JobCardNotes {
   folder: string; title: string; total: number; done: number; status: string;
@@ -182,6 +188,13 @@ export function AddSeriesDialog({ seed, sources, mayFollow, onClose, onAdded }: 
   // "Archive the rest slowly" (#117). Off until switched on, for every add: the rest of a series is days of
   // fetching, and that is a choice, not a default.
   const [archiveOn, setArchiveOn] = useState(false);
+  // The numbering switch (#116): on is "the other reading" -- keep the source's numbers under a strong verdict,
+  // number by posting order under a hint. Held for the pick it was flipped on, so picking another source starts
+  // from that source's own verdict, derived rather than reset in an effect (the chapter choice's rule).
+  const [flippedFor, setFlippedFor] = useState<string | null>(null);
+  const pickKey = picked ? `${picked.source}\u0000${picked.sourceId}` : '';
+  const flipNumbering = !!pickKey && flippedFor === pickKey;
+  const { isAdmin } = useAuth();
   const [adding, setAdding] = useState(false);
   // The duplicate prompt: the server's sentence, and the id of the copy it found -- present only when the
   // server was willing to hand it over, which it is not for a series this account may not open.
@@ -254,6 +267,8 @@ export function AddSeriesDialog({ seed, sources, mayFollow, onClose, onAdded }: 
     retry: false,
   });
   const detail = detailQ.data;
+  // The count, range and presets the dialog shows are the numbering the add will use (lib/numbering.ts).
+  const view = detail ? addNumberingView(detail, flipNumbering) : null;
   const pick: ChapterPick = pickChoice ?? (detail && detail.count === 0 ? 'none' : 'all');
 
   // The pre-warm: a group with a choice to make looks up its first two providers as it opens, so by the
@@ -290,11 +305,12 @@ export function AddSeriesDialog({ seed, sources, mayFollow, onClose, onAdded }: 
   // for the rate-limit warning, since nothing is grabbed.
   const chapterCount = pick === 'all' || pick === 'none' ? undefined : Number(pick.slice(pick.indexOf(':') + 1));
   const chapterFrom: 'oldest' | 'newest' | 'none' = pick === 'none' ? 'none' : pick.startsWith('latest:') ? 'newest' : 'oldest';
-  const count = pick === 'none' ? 0 : chapterCount ?? detail?.count ?? 0;
+  const count = pick === 'none' ? 0 : chapterCount ?? view?.count ?? 0;
   // What "the rest" is: every listed chapter for Nothing yet, the listing less the pick for First or Latest N,
-  // and nothing for All -- the switch is not offered then, nor for a source that lists nothing.
+  // and nothing for All -- the switch is not offered then, nor for a source that lists nothing. Counted in the
+  // numbering the add will use (`view`, #116), as the count line and the presets are.
   // Reintroduce by offering it for All: "the archive switch is offered for All" in addSeriesDialog.test.ts.
-  const archiveRest = !detail || pick === 'all' ? 0 : pick === 'none' ? detail.count : Math.max(0, detail.count - (chapterCount ?? 0));
+  const archiveRest = !view || pick === 'all' ? 0 : pick === 'none' ? view.count : Math.max(0, view.count - (chapterCount ?? 0));
   const archiving = archiveOn && archiveRest > 0;
   // The pace comes with the downloads AppShell already polls; the default until it has answered.
   const { data: downloads } = useServerDownloads();
@@ -305,10 +321,15 @@ export function AddSeriesDialog({ seed, sources, mayFollow, onClose, onAdded }: 
     setAdding(true); setDup(null);
     // Only the identity of each candidate goes: the server looks each up itself and judges it against the
     // listing it has just written, so a stale title or cover from the search cannot steer the match.
-    const alsoFollowBody = mayFollow && alsoFollow && others.length ? others.map(({ source, sourceId }) => ({ source, sourceId })) : undefined;
+    // Not under posting order: another site's numbers cannot line up with posts numbered 1..K, and the server
+    // would refuse every candidate for it anyway.
+    const alsoFollowBody = mayFollow && alsoFollow && others.length && !view?.posting ? others.map(({ source, sourceId }) => ({ source, sourceId })) : undefined;
+    // `auto` unless the person flipped the switch: the server's own decision stands (lib/numbering.ts addNumbering).
+    // Reintroduce by dropping `numbering` here: "Keep the source's numbers" is shown and ignored.
+    const numbering = view?.send ?? 'auto';
     try {
       const r = await api<AddAnswer>('/api/sources/add', {
-        json: { source: picked.source, sourceId: picked.sourceId, chapterCount, chapterFrom, autoUpdate, force, alsoFollow: alsoFollowBody, ...(archiving ? { archive: true } : {}) },
+        json: { source: picked.source, sourceId: picked.sourceId, chapterCount, chapterFrom, autoUpdate, force, alsoFollow: alsoFollowBody, numbering, ...(archiving ? { archive: true } : {}) },
         // The client has never set a timeout anywhere, so the only bound was the proxy's 120s -- which
         // turned a slow-but-working add into "Add failed. Try another source." while the download carried
         // on. The request now answers in seconds, so this is a backstop rather than the usual path. The
@@ -487,7 +508,7 @@ export function AddSeriesDialog({ seed, sources, mayFollow, onClose, onAdded }: 
 
   // ---------------------------------------------------------------- options
   const summary = detail?.summary && !looksCss(detail.summary) ? detail.summary : '';
-  const presets = CHAPTER_PRESETS.filter((n) => detail && n < detail.count);
+  const presets = CHAPTER_PRESETS.filter((n) => view && n < view.count);
   // The picked provider's own cover until the detail lands, then the detail's: the same picture nearly
   // always, so nothing jumps, and the body paints at once instead of behind a bare "Loading…".
   const coverUrl = detail?.coverUrl ?? picked.coverUrl;
@@ -522,10 +543,10 @@ export function AddSeriesDialog({ seed, sources, mayFollow, onClose, onAdded }: 
               </button>
             )}
           </p>
-          {detail ? (
-            <p className="text-xs text-fog-500">
-              {detail.count} {detail.count === 1 ? tr('chapter') : tr('chapters')}
-              {detail.first != null && detail.last != null && <> · {detail.first}–{detail.last}</>}
+          {detail && view ? (
+            <p className="text-xs text-fog-500" data-detail-count>
+              {view.count} {view.count === 1 ? tr('chapter') : tr('chapters')}
+              {view.first != null && view.last != null && <> · {numLabel(view.first)}–{numLabel(view.last)}</>}
             </p>
           ) : detailQ.isError ? (
             // The picker's own words for a source that did not answer; Change is right above it.
@@ -534,6 +555,10 @@ export function AddSeriesDialog({ seed, sources, mayFollow, onClose, onAdded }: 
             <p className="text-xs text-fog-500" aria-live="polite" data-detail="loading">{tr('Loading chapter list…')}</p>
           )}
           {detail && (<>
+            {detail.numbering && view!.offer && (
+              <AddNumberingNotice n={detail.numbering} count={detail.count} view={view!} flipped={flipNumbering} sourceName={picked.name || picked.source}
+                admin={isAdmin} onFlip={(v) => { setFlippedFor(v ? pickKey : null); setPickChoice(null); }} />
+            )}
             {/* The series page's Translated by section, compressed to what fits a dialog: the five busiest
                 groups and their rhythm, so "is this being translated" is answered before the add, not after.
                 No controls -- there is no series to set preferences on yet. */}
@@ -585,7 +610,7 @@ export function AddSeriesDialog({ seed, sources, mayFollow, onClose, onAdded }: 
                 can succeed, so it is the only one offered. */}
             <label className="mb-1 mt-4 block text-xs font-semibold uppercase tracking-wider text-fog-500">{tr('Chapters to fetch now')}</label>
             <select value={pick} onChange={(e) => setPickChoice(e.target.value as ChapterPick)} className="field">
-              {detail.count > 0 && <option value="all">{tr('All ({n})', { n: detail.count })}</option>}
+              {view!.count > 0 && <option value="all">{tr('All ({n})', { n: view!.count })}</option>}
               {presets.map((n) => <option key={`first:${n}`} value={`first:${n}`}>{tr('First {n}', { n })}</option>)}
               {presets.map((n) => <option key={`latest:${n}`} value={`latest:${n}`}>{tr('Latest {n}', { n })}</option>)}
               <option value="none">{tr('Nothing yet — pick chapters later')}</option>
@@ -623,7 +648,12 @@ export function AddSeriesDialog({ seed, sources, mayFollow, onClose, onAdded }: 
           {/* Only for an admin, and only when the dialog holds other sources for this title (a trending
               search, a wall fold). The helper leads with why anyone would: the benefit is the reason #49
               was filed. "Up to two per series" is the total, not two of these. */}
-          {mayFollow && others.length > 0 && (
+          {mayFollow && others.length > 0 && view?.posting && (
+            <p className="mt-3 text-[11px] text-fog-500" data-also-follow="posting_order">
+              {tr('Other sources are not followed for a series numbered by posting order: their chapter numbers do not line up.')}
+            </p>
+          )}
+          {mayFollow && others.length > 0 && !view?.posting && (
             <div className="mt-3" data-also-follow>
               <div className="flex items-center justify-between gap-3">
                 <span className="text-sm text-fog-200">{tr('Also check the other sources that carry this title')}</span>
@@ -683,5 +713,55 @@ export function AddSeriesDialog({ seed, sources, mayFollow, onClose, onAdded }: 
         />
       )}
     </Modal>
+  );
+}
+
+/**
+ * The add dialog's numbering notice (#116): shown only when the detector has something to say and there is another
+ * reading to switch to. Under a STRONG verdict the add numbers the posts by posting order -- "226 chapters instead
+ * of 13 numbers with versions" -- and the switch keeps the source's numbers; under a HINT it offers posting order.
+ * A text block with an accent start-edge rule, not a badge.
+ */
+function AddNumberingNotice({ n, count, view, flipped, sourceName, admin, onFlip }: {
+  n: DetailNumbering;
+  /** The detail's own count: the reading the server applies unless the switch is flipped. */
+  count: number;
+  view: ReturnType<typeof addNumberingView>;
+  flipped: boolean;
+  sourceName: string;
+  admin: boolean;
+  onFlip: (v: boolean) => void;
+}) {
+  const strong = view.offer === 'keep';
+  // The two readings side by side, whichever is shown: posts counted one by one, numbers with their versions.
+  const posts = strong ? count : n.alt!.count;
+  const numbers = strong ? n.alt!.count : count;
+  const big = n.biggest;
+  return (
+    <div data-add-numbering={strong ? 'strong' : 'hint'} className="mt-2 border-s-2 border-accent/60 bg-accent/5 py-2 pe-2.5 ps-2.5">
+      <p className="text-[12px] font-semibold text-fog-100">
+        {strong ? tr('Numbered by posting order') : tr('Some posts share a chapter number')}
+      </p>
+      <p className="mt-0.5 text-[11px] leading-relaxed text-fog-400">
+        {strong
+          ? (big && big.posts > 1
+            ? tr('{source} gives many different posts the same chapter number ({posts} posts are all numbered {number}).', { source: sourceName, posts: big.posts, number: numLabel(big.number) })
+            : tr('{source} gives many different posts the same chapter number.', { source: sourceName }))
+          : tr('If they are different chapters rather than versions of one, number them by posting order.')}
+      </p>
+      {/* The two readings side by side, whichever the switch shows: the count the add lands, and the other. */}
+      {strong && (
+        <p className="mt-0.5 text-[11px] tabular-nums text-fog-300" data-add-numbering-counts>
+          {tr('Posting order: {n} · the source’s own numbers: {m}', { n: posts, m: numbers })}
+        </p>
+      )}
+      <div className="mt-1.5 flex items-center justify-between gap-3">
+        <span className="text-[12px] text-fog-200">{strong ? tr('Keep the source’s numbers') : tr('Number by posting order')}</span>
+        <Switch on={flipped} onChange={onFlip} label={strong ? tr('Keep the source’s numbers') : tr('Number by posting order')} />
+      </div>
+      {admin && n.extSourceId && (
+        <Link href={extensionSettingsHref(n.extSourceId)} className="mt-1 inline-block text-[11px] font-medium text-accent hover:underline">{tr('Source settings')}</Link>
+      )}
+    </div>
   );
 }

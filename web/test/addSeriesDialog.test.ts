@@ -187,7 +187,9 @@ test('"Archive the rest slowly" is offered only where there is a rest, and rides
   // All leaves none, and a switch there would queue an archive with nothing to do. Reintroduce by rendering
   // the switch whatever the pick (drop `archiveRest > 0 &&`): "the archive switch is offered for All" fails.
   const src = code(read(DIALOG));
-  assert.match(src, /const archiveRest = !detail \|\| pick === 'all' \? 0 : pick === 'none' \? detail\.count : Math\.max\(0, detail\.count - \(chapterCount \?\? 0\)\);/,
+  // Counted in the numbering the add will use (#116's `view`): with "Keep the source's numbers" flipped, the rest
+  // of a 226-post series is its 13 numbers less the pick, not 226.
+  assert.match(src, /const archiveRest = !view \|\| pick === 'all' \? 0 : pick === 'none' \? view\.count : Math\.max\(0, view\.count - \(chapterCount \?\? 0\)\);/,
     'the rest is not what the pick leaves');
   assert.match(src, /\{archiveRest > 0 && \(\s*<div className="mt-3" data-archive-rest>/, 'the archive switch is offered for All');
   assert.match(src, /<Switch on=\{archiveOn\} onChange=\{setArchiveOn\} label=\{tr\('Archive the rest slowly'\)\} \/>/, 'the switch is not the archive one');

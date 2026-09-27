@@ -140,6 +140,7 @@ function explain(r: Awaited<ReturnType<typeof updateSeries>>): { outcome: Newest
     case 'unrouted': return { outcome: 'skipped', reason: 'No source is installed for this series.' };
     case 'blocked': return { outcome: 'skipped', reason: 'Its source is in a cooldown. Try again later.' };
     case 'source_error': return { outcome: 'failed', reason: 'Its source did not answer.' };
+    case 'renumber_pending': return { outcome: 'skipped', reason: 'Its chapters are waiting to be renumbered. Review it on the series page.' };
     default: break;
   }
   const n = r.newest;

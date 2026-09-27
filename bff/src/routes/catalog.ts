@@ -21,6 +21,8 @@ import { seriesSourcesFor } from '../lib/seriesSources';
 import { readSeriesPrefs, effectivePrefsFor } from '../lib/scanlatorPrefs';
 import { listingFor, type ListingCopy } from '../lib/seriesListing';
 import { archiveSummaryFor } from '../lib/archive';
+import { chapterName } from '../lib/naming';
+import { numberingSummary } from '../lib/numbering';
 import { markNumbers, unmarkNumbers, LISTING_MARK_MAX } from '../lib/listingProgress';
 import { pushSeriesProgressAsync } from '../lib/trackers';
 import { ghostsEnabled } from '../lib/komgaGhosts';
@@ -549,8 +551,14 @@ export default async function catalogRoutes(app: FastifyInstance) {
          FROM lib_series s WHERE id = $1`, [id]);
     const floor = f?.chapter_floor == null ? null : Number(f.chapter_floor);
     const archiveBoundary = f?.archive_boundary == null ? null : Number(f.archive_boundary);
-    const listing = await listingFor(id, { floor, archiveBoundary, admin: roleOf(req) === 'admin', userId: userIdOf(req) });
-    return { ...listing, archive: await archiveSummaryFor(id, userIdOf(req)).catch(() => null) };
+    // How the series is numbered and why (#116): the series page's notice. Every viewer who can open the series
+    // reads it -- it explains the numbers they see; the controls beside it are the admin's.
+    const [listing, numbering, archive] = await Promise.all([
+      listingFor(id, { floor, archiveBoundary, admin: roleOf(req) === 'admin', userId: userIdOf(req) }),
+      numberingSummary(id),
+      archiveSummaryFor(id, userIdOf(req)).catch(() => null),
+    ]);
+    return { ...listing, numbering, archive };
   });
 
   /**
@@ -651,10 +659,10 @@ export default async function catalogRoutes(app: FastifyInstance) {
   app.get('/api/series/:id/versions', async (req) => {
     const { id } = req.params as { id: string };
     await komga.series(vc(req), id);
-    const rows = await q<{ number: number; source_id: string; status: string; chosen: { sourceId?: string } | null; copies: ListingCopy[] }>(
-      'SELECT number, source_id, status, chosen, copies FROM series_listing WHERE series_id = $1 ORDER BY number', [id]);
-    const books = await q<{ number: number; source_id: string | null; scanlator: string | null }>(
-      'SELECT number, source_id, scanlator FROM lib_books WHERE series_id = $1 AND pruned_at IS NULL', [id]);
+    const rows = await q<{ number: number; title: string | null; source_id: string; status: string; chosen: { sourceId?: string } | null; copies: ListingCopy[] }>(
+      'SELECT number, title, source_id, status, chosen, copies FROM series_listing WHERE series_id = $1 ORDER BY number', [id]);
+    const books = await q<{ number: number; source_id: string | null; scanlator: string | null; source_chapter_id: string | null; chapter_name: string | null }>(
+      'SELECT number, source_id, scanlator, source_chapter_id, chapter_name FROM lib_books WHERE series_id = $1 AND pruned_at IS NULL', [id]);
     const booksOf = new Map<number, typeof books>();
     for (const b of books) {
       const n = Number(b.number);
@@ -675,6 +683,11 @@ export default async function catalogRoutes(app: FastifyInstance) {
       content: rows.map((r) => {
         const number = Number(r.number);
         const here = booksOf.get(number) ?? [];
+        // Copies from one source and one group under different titles are different posts that share a number
+        // (#116), and the group stamp cannot tell them apart: the chapter name the file was saved under can.
+        const titleOf = (c: ListingCopy) => (c.title ?? r.title ?? '').trim();
+        const namesDiffer = (c: ListingCopy) => (r.copies ?? []).some((o) => o !== c && o.source === c.source
+          && keysOf(o.groups ?? []) === keysOf(c.groups ?? []) && titleOf(o) !== titleOf(c));
         return {
           number,
           copies: (r.copies ?? []).map((c) => {
@@ -686,6 +699,10 @@ export default async function catalogRoutes(app: FastifyInstance) {
               key: `${c.source}:${c.sourceId}`,
               source: c.source,
               sourceName: sourceName(c.source),
+              // The copy's own title (v0.49.0); a row stored before copies had titles lends its own.
+              // Reintroduce by dropping it: "every version carries its own title" in groupsAndVersions.int.test.ts
+              // reads undefined.
+              title: c.title ?? r.title ?? null,
               groups: c.groups ?? [],
               scanlator: c.scanlator ?? null,
               lang: c.lang ?? null,
@@ -699,8 +716,13 @@ export default async function catalogRoutes(app: FastifyInstance) {
               // NULL there, and requiring the source first left every one of them "not on disk".
               // Reintroduce by requiring `b.source_id === c.source` ahead of the stamp check: chapter 7 in
               // groupsAndVersions.int.test.ts reads [false].
-              onDisk: here.some((b) => b.scanlator
+              // A file stamped with the post it came from (v0.49.0, lib_books.source_chapter_id) is that post and no
+              // other; the stamps below are for files older than that.
+              onDisk: here.some((b) => b.source_chapter_id
+                ? b.source_chapter_id === c.sourceId && (b.source_id == null || b.source_id === c.source)
+                : b.scanlator
                 ? b.source_id === c.source && keysOf(groupsOf({ scanlator: b.scanlator })) === keys
+                  && (!namesDiffer(c) || !b.chapter_name || b.chapter_name === chapterName(titleOf(c), number))
                 : (b.source_id == null || b.source_id === c.source) && chosen),
             };
           }),

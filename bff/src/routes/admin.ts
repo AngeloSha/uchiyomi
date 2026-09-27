@@ -2,6 +2,8 @@ import { hash } from '@node-rs/argon2';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { q, one, tx } from '../lib/db';
+import { postingOrderSeries, POSTING_ORDER_REFUSAL } from '../lib/numbering';
+import numberingRoutes from './numbering';
 import { content as komga } from '../lib/backend';
 import { cacheBytes } from '../lib/imageCache';
 import { runtime } from '../lib/runtime';
@@ -432,6 +434,8 @@ const ESTIMATED_KINDS = ['full', 'fix_short', 'fill', 'retry', 'steps:solver', '
 export default async function adminRoutes(app: FastifyInstance) {
   app.addHook('preHandler', authenticate);
   app.addHook('preHandler', requireAdmin);
+  // #116's extension settings and numbering routes: a child of this plugin, so the two hooks above gate them.
+  await app.register(numberingRoutes);
 
   // Owned-library scan (Phase 1): walk the CBZ folder and upsert lib_series/lib_books. Stamps lastScan like
   // POST /api/refresh does (the Tasks row's "last run", and that route's one-a-minute rule), and asks the
@@ -1256,6 +1260,9 @@ export default async function adminRoutes(app: FastifyInstance) {
     }).safeParse(req.body);
     if (!b.success) return reply.code(400).send({ error: 'bad_request' });
     const { planId, source, sourceSeriesId } = b.data;
+    // Numbered by posting order (#116): a follower would never be merged (lib/updater.ts), so following one is
+    // refused with the reason rather than accepted and silently ignored.
+    if (await postingOrderSeries(id)) return reply.code(409).send({ error: 'posting_order', message: POSTING_ORDER_REFUSAL });
     const plan = getPlan(planId);
     if (!plan) return reply.code(409).send({ error: 'plan_stale', message: 'That list has moved on. Scan again.' });
     if (plan.seriesId !== id) return reply.code(400).send({ error: 'bad_request', message: 'That plan is for another series.' });
@@ -2520,8 +2527,9 @@ export default async function adminRoutes(app: FastifyInstance) {
   // extension server is briefly unreachable, so the page still renders something useful.
   app.get('/api/admin/extensions/sources', async (req) => {
     if (!suwayomiConfigured()) return { content: [], reachable: false };
-    const { q: term, lang } = req.query as { q?: string; lang?: string };
-    let remote: Array<{ id: string; name: string; displayName?: string | null; lang?: string | null; isNsfw?: boolean | null; supportsLatest?: boolean | null }> = [];
+    // `pkg` (#116): one extension's sources, for its settings sheet's language select.
+    const { q: term, lang, pkg } = req.query as { q?: string; lang?: string; pkg?: string };
+    let remote: Array<{ id: string; name: string; displayName?: string | null; lang?: string | null; isNsfw?: boolean | null; supportsLatest?: boolean | null; extension?: { pkgName?: string | null } | null }> = [];
     let reachable = true;
     try {
       remote = await listRemoteSources();
@@ -2546,8 +2554,9 @@ export default async function adminRoutes(app: FastifyInstance) {
         nsfw: !!s.isNsfw,
         supportsLatest: !!s.supportsLatest,
         enabled: on.has(String(s.id)),
+        pkgName: s.extension?.pkgName ?? null,
       }))
-      .filter((s) => (!needle || s.name.toLowerCase().includes(needle)) && (!lang || s.lang === lang))
+      .filter((s) => (!needle || s.name.toLowerCase().includes(needle)) && (!lang || s.lang === lang) && (!pkg || s.pkgName === pkg))
       .sort((a, b) => Number(b.enabled) - Number(a.enabled) || a.name.localeCompare(b.name));
     // The per-language overview rides along unfiltered: `q` and `lang` narrow the source list, and a
     // Languages panel that only knew about the language you had just filtered to would be no panel.

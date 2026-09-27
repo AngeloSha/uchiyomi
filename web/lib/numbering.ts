@@ -1,0 +1,144 @@
+// Posting-order numbering on the web side (#116): the shapes the server answers, and the pure decisions the add
+// dialog, the series page's notice and its plan sheet make from them.
+//
+// The server decides (bff lib/postingOrder.ts detects, lib/numbering.ts applies); nothing here re-derives a
+// number. A source that gives many different posts one chapter number -- Webtoons: Istrevelia's 226 posts on 13
+// numbers -- is numbered 1..K in the order the posts came out. New adds are numbered so at once; a series already
+// in a library is renamed only when an admin has seen the plan and confirmed it.
+
+export type NumberingMode = 'source' | 'posting_order';
+export type RenumberMode = 'posting_order' | 'source' | 'remap';
+
+/** GET /api/sources/detail `numbering`: the detector's word on the listing the add dialog is about to add. */
+export interface DetailNumbering {
+  verdict: 'strong' | 'hint' | 'none';
+  reason?: 'no_order';
+  /** How the add will number it with nothing changed: posting_order when the detector fired strongly. */
+  applied: NumberingMode;
+  ordered: boolean;
+  posts: number;
+  numbers: number;
+  biggest: { number: number; posts: number } | null;
+  examples: string[];
+  /** The other reading's count and range, for the dialog's switch; null when there is nothing to switch to. */
+  alt: { count: number; first: number; last: number } | null;
+  /** The extension source id, for the settings deep link (extension sources only). */
+  extSourceId?: string;
+}
+
+/** The detector's last word on a series' numbering source (lib_series.numbering_note). */
+export interface NumberingNote {
+  verdict: 'strong' | 'hint' | 'none';
+  reason?: 'no_order';
+  ordered: boolean;
+  posts: number;
+  numbers: number;
+  extras: number;
+  biggest: { number: number; posts: number } | null;
+  examples: string[];
+  source: string;
+  at?: string;
+}
+
+/** GET /api/series/:id/listing `numbering`: how the series is numbered, and what is waiting. */
+export interface NumberingSummary {
+  /** null: automatic (the detector has not numbered it), `source`, or `posting_order`. */
+  mode: NumberingMode | null;
+  by: 'auto' | 'manual' | null;
+  pending: RenumberMode | null;
+  note: NumberingNote | null;
+  changedAt: string | null;
+  sourceName: string | null;
+  extSourceId?: string;
+}
+
+export interface PlanMove {
+  bookId: string;
+  root: string;
+  from: number;
+  to: number;
+  fromFile: string;
+  file: string;
+  /** rename: on disk and in the library. row: a deleted chapter's row only. override: an unwritable folder keeps the file. none: nothing changes. */
+  via: 'rename' | 'row' | 'override' | 'none';
+  how?: 'id' | 'pick' | 'stored' | 'name' | 'date' | 'listing';
+  title?: string | null;
+}
+
+export interface RenumberPlan {
+  mode: RenumberMode;
+  moves: PlanMove[];
+  parked: PlanMove[];
+  collisions: Array<{ root: string; number: number; bookIds: string[] }>;
+  clean: boolean;
+  reasons: Array<'unmatched' | 'listing_only' | 'collision' | 'tracker' | 'busy'>;
+  newFloor: number | null;
+}
+
+/** GET /api/admin/series/:id/numbering. */
+export interface PlanAnswer { mode: RenumberMode; plan: RenumberPlan; tracker: boolean; numbering: NumberingSummary | null }
+/** POST /api/admin/series/:id/numbering. */
+export interface NumberingAnswer {
+  state: 'applied' | 'pending' | 'needs_confirm' | 'unchanged';
+  plan?: RenumberPlan;
+  tracker?: boolean;
+  running?: boolean;
+  numbering: NumberingSummary | null;
+}
+
+// ---- the add dialog -----------------------------------------------------------------------------------------
+
+/**
+ * What the add dialog shows and sends, from the detail and its one switch. The switch always means "the other
+ * reading": under a STRONG verdict it is "Keep the source's numbers", under a HINT "Number by posting order".
+ * `send` is what POST /api/sources/add gets: `auto` whenever the switch is untouched, so the server's own
+ * decision stands (a revived folder, a manual choice kept on its row).
+ */
+export function addNumberingView(
+  d: { count: number; first: number | null; last: number | null; numbering?: DetailNumbering },
+  flipped: boolean,
+): { count: number; first: number | null; last: number | null; posting: boolean; send: 'auto' | 'source' | 'posting_order'; offer: 'keep' | 'number' | null } {
+  const n = d.numbering;
+  const offer = !n || !n.alt || n.verdict === 'none' ? null : n.applied === 'posting_order' ? 'keep' : 'number';
+  if (!n || !offer || !flipped) {
+    return { count: d.count, first: d.first, last: d.last, posting: n?.applied === 'posting_order', send: 'auto', offer };
+  }
+  const alt = n.alt!;
+  const posting = n.applied !== 'posting_order';
+  return { count: alt.count, first: alt.first, last: alt.last, posting, send: posting ? 'posting_order' : 'source', offer };
+}
+
+// ---- the series page ----------------------------------------------------------------------------------------
+
+/**
+ * Which notice the series page shows, if any:
+ *   review   -- a change waits for an admin (the detector's proposal, or the undo): nothing downloads meanwhile;
+ *   remap    -- an extension setting moved the source's numbers under the files: same, with its own reason;
+ *   applied  -- numbered by posting order: say why the numbers are not the source's;
+ *   hint     -- some posts share a number, not strongly enough to act on: offer posting order;
+ *   null     -- nothing to say, including a series an admin chose to keep on the source's numbers.
+ */
+export type NoticeKind = 'review' | 'remap' | 'applied' | 'hint' | null;
+export function noticeKind(n: NumberingSummary | null | undefined): NoticeKind {
+  if (!n) return null;
+  if (n.pending === 'remap') return 'remap';
+  if (n.pending) return 'review';
+  if (n.mode === 'posting_order') return 'applied';
+  if (n.by === 'manual') return null;
+  if (n.note?.verdict === 'hint' || n.note?.verdict === 'strong') return 'hint';
+  return null;
+}
+
+/** The plan sheet's first line: how many files move, how many stay, and what could not be matched. */
+export function planCounts(p: RenumberPlan): { renamed: number; unchanged: number; parked: number; collisions: number } {
+  const moved = (m: PlanMove) => m.via !== 'none' && (m.to !== m.from || m.file !== m.fromFile);
+  return {
+    renamed: p.moves.filter(moved).length,
+    unchanged: p.moves.filter((m) => !moved(m)).length,
+    parked: p.parked.length,
+    collisions: p.collisions.length,
+  };
+}
+
+/** A number as a chapter label shows it: at most three decimals, no float noise (a parked book sits at 7.5). */
+export const numLabel = (n: number): string => String(Math.round(n * 1000) / 1000);
