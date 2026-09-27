@@ -1,20 +1,33 @@
 /**
  * Every chapter the server is downloading, and what came in today, whatever started it (bff
- * lib/downloadActivity.ts) -- the `activity` field of `GET /api/sources/jobs`.
+ * lib/downloadActivity.ts) -- the `activity` field of `GET /api/sources/jobs` -- and, since v0.49.0, what
+ * Library -> Downloads, the Library ring and the series band make of the whole response.
  *
  * The pill used to know only the jobs a button started, which in practice meant an add from Discover. A
  * source followed from "Find missing chapters" downloads at the series' next check; the scheduled check
  * downloads for every series; so do Check now, the repair and a bulk "Fetch newest" -- and none of it showed
  * anywhere. These are the rules for showing it, apart from the components, so a test can hold them.
+ *
+ * ⚠️ THE SLOW ARCHIVE (#117, origin `archive`) IS NOT A DOWNLOAD IN PROGRESS, as far as these rules go. It
+ * fetches a chapter every quarter of an hour or so, for days: counted like any other download it would turn
+ * the Library ring for a week, poll the server every 2.5 s for a week, and put a Running cover up for every
+ * chapter it takes. The owner's call: the ring animates for normal downloads only, and the archive lives in
+ * Queued with a still mark. So `downloadSections` puts it in Queued, `navRing` never counts or turns for it
+ * (it shows the still "slow" mark when the archive is all that works), and `jobsPollInterval` never speeds
+ * up for it. One rule, three readers, each with its own test in serverDownloads.test.ts.
  */
 import { t as tr } from './i18n';
+import { chaptersLeft } from './chapterRows';
+import { downloadsLabel, finished, type JobCard, type RunCard } from './jobs';
+import { ringFraction, type RingValue } from './ring';
+import type { AutoFollow } from './types';
 
-export type Origin = 'add' | 'fetch' | 'fill' | 'check' | 'sweep' | 'repair' | 'bulk' | 'refetch' | 'server';
+export type Origin = 'add' | 'fetch' | 'fill' | 'check' | 'sweep' | 'repair' | 'bulk' | 'refetch' | 'server' | 'archive';
 
 export interface ActivityEntry {
   id: number;
   seriesId: string | null;
-  /** The series folder: what a job card is keyed by, so the pill does not show one chapter twice. */
+  /** The series folder: what a job card is keyed by, so one chapter is never shown twice. */
   folder: string;
   title: string;
   number: number;
@@ -42,6 +55,7 @@ export function originLabel(o: Origin): string {
     case 'repair': return tr('Library repair');
     case 'bulk': return tr('Fetch newest');
     case 'refetch': return tr('Fetch again');
+    case 'archive': return tr('Slow archive');
     default: return tr('The server');
   }
 }
@@ -103,7 +117,234 @@ export function groupRecent(recent: readonly ActivityEntry[]): ActivityGroup[] {
   return [...groups.values()].filter((g) => g.numbers.length || g.failed.length).sort((a, b) => b.at - a.at);
 }
 
-/** The server downloads a job card does not already show: the pill lists each chapter once. */
+/** The server downloads a job card does not already show: each chapter is listed once. */
 export function beyondJobs(active: readonly ActivityEntry[], jobFolders: ReadonlySet<string>): ActivityEntry[] {
   return active.filter((e) => !jobFolders.has(e.folder));
+}
+
+/** The slow archive's (#117): never a download in progress to the ring, the poll or Running (see the top). */
+export const isArchive = (e: Pick<ActivityEntry, 'origin'>): boolean => e.origin === 'archive';
+
+/**
+ * A job card as `GET /api/sources/jobs` sends it since v0.49.0 (bff routes/sources.ts `Job`): the series it
+ * fills (the card's own, else the folder's row), the chapters a failed one did not land, and an add's cover.
+ */
+export interface DownloadJob extends JobCard {
+  seriesId?: string;
+  /** On a failed job: what it did not land, at most 300, for Try again through POST /api/sources/fetch. */
+  left?: number[];
+  /** An add's cover as its source gave it, before the series has a thumbnail of its own. */
+  cover?: { source: string; url: string };
+  /** The add-time auto-follow (v0.36.0) riding on the card; the only job a nothing-yet add leaves behind. */
+  autoFollow?: AutoFollow;
+}
+
+/** The whole answer. `archive` joins it with #117. */
+export interface SourceJobs<J extends DownloadJob = DownloadJob> {
+  content: J[];
+  runs?: RunCard[];
+  activity?: Activity;
+}
+
+/**
+ * One series in Running or Queued: a cover with a ring, like an app install. One tile per series, whatever
+ * brought it -- a person's job card and the chapters in flight for it are one cover, never two.
+ */
+export interface Tile<J extends DownloadJob = DownloadJob> {
+  /** seriesId, else the folder: an add's first chapter has no series row yet. */
+  key: string;
+  seriesId: string | null;
+  folder: string;
+  title: string;
+  /** A person's download (an add, a Fetch), when that is what this is. */
+  job?: J;
+  /** Its chapters the server has in flight, in the order they started. */
+  entries: ActivityEntry[];
+  /** The slow archive's: drawn still and amber, in Queued, never on the ring. */
+  archive: boolean;
+  /** What the cover's ring shows: the job's done/total, or a turn while nothing says how much is left. */
+  progress: RingValue;
+}
+
+/** A row in Needs attention: something that failed and what can be done about it. */
+export type Attention<J extends DownloadJob = DownloadJob> =
+  | { kind: 'job'; key: string; seriesId: string | null; title: string; job: J; retry: number[]; dismiss: boolean }
+  | { kind: 'chapters'; key: string; seriesId: string | null; title: string; failed: ActivityEntry[]; retry: number[] }
+  | { kind: 'run'; key: string; run: RunCard; dismiss: boolean };
+
+export interface Sections<J extends DownloadJob = DownloadJob> {
+  running: Tile<J>[];
+  queued: Tile<J>[];
+  attention: Attention<J>[];
+  /** The server's own runs: the scheduled check, the repair, a bulk Fetch newest. A failed one is in attention. */
+  tasks: RunCard[];
+  /** What landed today, one line per series (`groupRecent`), the slow archive's chapters included. */
+  cameIn: ActivityGroup[];
+  /** Downloads stopped by their Cancel: `done`, with the reason saying how far they got. */
+  stopped: J[];
+}
+
+/** What POST /api/sources/fetch takes at most in one go (the route's FILL_MAX_CHAPTERS). */
+const RETRY_MAX = 300;
+const uniqueSorted = (ns: readonly number[]) => [...new Set(ns)].sort((a, b) => a - b).slice(0, RETRY_MAX);
+
+/**
+ * Library -> Downloads, in the owner's five sections: Running, Queued (the slow archive included), Needs
+ * attention, Server tasks, Came in today.
+ *
+ * - A person's running job is ONE Running tile with its own chapters' entries, and it stays in Running between
+ *   chapters (its line says who it waits for): covers that hop between sections on every poll read as noise.
+ * - Chapters the server fetches that no job shows (the scheduled check, a followed source's check, the repair)
+ *   are grouped per series: Running once one is downloading, Queued while all of them wait their turn.
+ * - The slow archive's chapters are Queued, whatever they are doing.
+ * - Needs attention: failed job cards (the server sends them to their starter and admins only), chapters that
+ *   could not be saved and did not land later (not the archive's, which retries them itself, and not a
+ *   series that is being fetched again right now), and a run that ended in error.
+ */
+export function downloadSections<J extends DownloadJob>(d: Partial<SourceJobs<J>> | undefined, { admin }: { admin: boolean }): Sections<J> {
+  const jobs = d?.content ?? [];
+  const active = d?.activity?.active ?? [];
+  const recent = d?.activity?.recent ?? [];
+  const runs = d?.runs ?? [];
+  const running: Tile<J>[] = [];
+  const queued: Tile<J>[] = [];
+
+  const live = jobs.filter((j) => j.status === 'downloading').sort((a, b) => (a.startedAt ?? 0) - (b.startedAt ?? 0));
+  for (const j of live) {
+    running.push({
+      key: j.seriesId ?? j.folder, seriesId: j.seriesId ?? null, folder: j.folder, title: j.title, job: j,
+      entries: active.filter((e) => e.folder === j.folder), archive: false, progress: ringFraction(j.done, j.total),
+    });
+  }
+  // Reintroduce by building these from `active` instead of `beyondJobs(...)`: a person's add is two covers.
+  const groups = new Map<string, Tile<J>>();
+  for (const e of beyondJobs(active, new Set(live.map((j) => j.folder)))) {
+    // The archive keyed apart, so a series the scheduled check is also on is not drawn still.
+    const key = `${isArchive(e) ? 'a' : 'n'}:${e.seriesId ?? e.folder}`;
+    let t = groups.get(key);
+    if (!t) {
+      t = { key: e.seriesId ?? e.folder, seriesId: e.seriesId, folder: e.folder, title: e.title, entries: [], archive: isArchive(e), progress: 'spin' };
+      groups.set(key, t);
+    }
+    t.entries.push(e);
+  }
+  const byStart = (a: Tile<J>, b: Tile<J>) => (a.entries[0]?.startedAt ?? 0) - (b.entries[0]?.startedAt ?? 0);
+  for (const t of [...groups.values()].sort(byStart)) {
+    if (!t.archive && t.entries.some((e) => e.status === 'downloading')) running.push(t);
+    else queued.push(t);
+  }
+
+  const busy = new Set([...running, ...queued].map((t) => t.key));
+  const attention: Attention<J>[] = [];
+  const failedJobs = jobs.filter((j) => j.status === 'error').sort((a, b) => (b.finishedAt ?? 0) - (a.finishedAt ?? 0));
+  for (const j of failedJobs) {
+    const seriesId = j.seriesId ?? null;
+    attention.push({
+      kind: 'job', key: `job:${j.folder}`, seriesId, title: j.title, job: j,
+      // Nothing to retry by without a series: an add whose first chapter never landed has no row to fetch into.
+      retry: seriesId ? uniqueSorted(j.left ?? []) : [], dismiss: admin || !!j.mine,
+    });
+  }
+  const shownJob = new Set(failedJobs.flatMap((j) => [j.folder, j.seriesId ?? '']).filter(Boolean));
+  for (const g of groupRecent(recent.filter((e) => !isArchive(e)))) {
+    if (!g.failed.length || busy.has(g.key) || shownJob.has(g.key) || g.failed.some((f) => shownJob.has(f.folder))) continue;
+    attention.push({
+      kind: 'chapters', key: `ch:${g.key}`, seriesId: g.seriesId, title: g.title, failed: g.failed,
+      retry: g.seriesId ? uniqueSorted(g.failed.map((f) => f.number)) : [],
+    });
+  }
+  for (const r of runs.filter((x) => x.status === 'error')) {
+    attention.push({ kind: 'run', key: `run:${r.kind}`, run: r, dismiss: admin || !!r.mine });
+  }
+
+  const tasks = runs.filter((r) => r.status !== 'error')
+    .sort((a, b) => Number(b.status === 'running') - Number(a.status === 'running') || b.startedAt - a.startedAt);
+  const cameIn = groupRecent(recent).filter((g) => g.numbers.length > 0);
+  const stopped = finished(jobs).filter((j) => j.cancelled);
+  return { running, queued, attention, tasks, cameIn, stopped };
+}
+
+/** What the Library ring shows: the tab's icon on a phone, the button beside the Updates bell on a desktop. */
+export interface NavRing {
+  /** Anything to draw at all: work running, the slow archive alone, or something that failed. */
+  show: boolean;
+  progress: RingValue;
+  /** Series in Running: the number of covers that section shows, which changes far less often than a chapter count. */
+  count: number;
+  /** The amber dot: a download of this viewer's failed (every failed card, to an admin -- the server decides). */
+  attention: boolean;
+  /** Only the slow archive is working: the calm, still mark, never a turning ring. */
+  slow: boolean;
+  /** Its title and screen-reader name: "Fetching 7 chapters", "Checking for new chapters", "2 failed". */
+  label: string;
+}
+
+/**
+ * The Library ring. Fills with the running jobs' chapters (done / total over all of them); with no job, with
+ * the running run's progress once it has sized itself; otherwise it turns. Nothing to draw when nothing runs
+ * and nothing failed. A run that cannot download (`downloads: false`) and the slow archive never turn it.
+ */
+export function navRing(d: Partial<SourceJobs> | undefined): NavRing {
+  const s = downloadSections(d, { admin: false });
+  const jobs = s.running.filter((t) => t.job).map((t) => t.job!);
+  const runs = (d?.runs ?? []).filter((r) => r.status === 'running' && r.downloads !== false);
+  const serverChapters = [...s.running, ...s.queued].filter((t) => !t.job && !t.archive).reduce((n, t) => n + t.entries.length, 0);
+  // Reintroduce by counting the archive's chapters here: a week-long archive turns the ring for a week.
+  const active = jobs.length > 0 || serverChapters > 0 || runs.length > 0;
+  const slow = !active && s.queued.some((t) => t.archive);
+  const failed = (d?.content ?? []).filter((j) => j.status === 'error').length;
+  const progress: RingValue = jobs.length ? ringFraction(jobs.reduce((n, j) => n + Math.min(j.done, j.total), 0), jobs.reduce((n, j) => n + j.total, 0))
+    : runs.length ? ringFraction(runs[0].done, runs[0].total)
+    : active || slow ? 'spin'
+    : 'idle';
+  // What is moving first, then what failed: the dot is amber whatever else the ring shows, so the words say both.
+  const label = [
+    downloadsLabel(jobs.length, chaptersLeft(jobs), runs, 0, serverChapters) ?? (slow ? tr('Archiving slowly') : ''),
+    failed ? (failed === 1 ? tr('1 failed') : tr('{n} failed', { n: failed })) : '',
+  ].filter(Boolean).join(' · ');
+  return { show: active || slow || failed > 0, progress, count: active ? s.running.length : 0, attention: failed > 0, slow, label };
+}
+
+/**
+ * How often the one poller (lib/useServerDownloads.ts, mounted once in AppShell) asks: every 2.5 s while a
+ * chapter is coming in, 5 s while only one of the server's runs is going (a series and a half apart can be an
+ * hour), 30 s otherwise. The pill's rule, with the slow archive left out: it downloads for days.
+ */
+export function jobsPollInterval(d: Partial<SourceJobs> | undefined): number {
+  // Reintroduce by dropping the activity clause: the scheduled check's chapters come in at 30 s and the ring freezes.
+  if ((d?.content ?? []).some((j) => j.status === 'downloading') || (d?.activity?.active ?? []).some((e) => !isArchive(e))) return 2500;
+  if ((d?.runs ?? []).some((r) => r.status === 'running')) return 5000;
+  return 30_000;
+}
+
+/**
+ * How many of this series' chapters have landed today: the series band watches it rise, and re-reads the
+ * chapter list when it does, so a grey row turns into a chapter whoever's download brought it.
+ */
+export function landedFor(d: Partial<SourceJobs> | undefined, seriesId: string, folder?: string): number {
+  return (d?.activity?.recent ?? []).filter((e) => (e.status === 'done' || e.status === 'partial')
+    && (e.seriesId === seriesId || (!!folder && e.folder === folder))).length;
+}
+
+/** This series' tile and its failed download, for the band above its chapter list. */
+export function bandFor<J extends DownloadJob>(s: Sections<J>, seriesId: string, folder?: string): { tile?: Tile<J>; failed?: Extract<Attention<J>, { kind: 'job' }> } {
+  const ours = (id: string | null, f: string) => id === seriesId || (!!folder && f === folder);
+  // A person's job or the server's chapters first; the slow archive only when that is all there is.
+  const tiles = [...s.running, ...s.queued].filter((t) => ours(t.seriesId, t.folder));
+  const tile = tiles.find((t) => !t.archive) ?? tiles[0];
+  const failed = s.attention.find((a): a is Extract<Attention<J>, { kind: 'job' }> => a.kind === 'job' && ours(a.seriesId, a.job.folder));
+  return { tile, failed };
+}
+
+/**
+ * The one line under a Running or Queued cover, and the band's sentence: the chapter coming in and from where,
+ * or who it is waiting for. "Stopping after this chapter…" wins while a Cancel is pending.
+ */
+export function tileStatus(t: Pick<Tile, 'job' | 'entries'>): string {
+  if (t.job?.cancelRequested) return tr('Stopping after this chapter…');
+  const now = t.entries.find((e) => e.status === 'downloading');
+  if (now) return tr('Ch. {n} · {source}', { n: now.number, source: now.source });
+  const next = t.entries.find((e) => e.status === 'queued');
+  if (next) return tr('Waiting for {source}', { source: next.source });
+  return '';
 }

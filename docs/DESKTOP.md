@@ -517,7 +517,7 @@ Its server answers *not found* for each of these, so they are gone, not just out
 | Members, the per-library access line, the age caps per member | One person. Libraries themselves, 18+ libraries and age ratings stay. |
 | OPDS, the Komga-compatible API (and its "Show missing chapters in Mihon" setting), API tokens | They exist for other devices, and this server does not listen to other devices at all. |
 | Push notifications, *Install app* | The window has no push service. Notification targets — a webhook, Home Assistant, ntfy, Discord — still work, and are the way to hear about new chapters on a phone. |
-| **Save offline**, *Save all offline*, the Offline tab, the Downloads settings | They copy chapters into the browser's storage, and on this computer the chapters are already on the disk. |
+| **Save offline**, *Save all offline*, the Offline tab, the Downloads settings | They copy chapters into the browser's storage, and on this computer the chapters are already on the disk. What the app fetched from your sources is under **Library → Downloads**, where a link to the Offline tab also leads. |
 | The anonymous install count | Never sent from the desktop app, whatever a restored database says. |
 
 In the admin that means no Members or Sessions tabs (a link to either opens Overview), no Sessions tile and no

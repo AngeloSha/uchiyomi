@@ -1,9 +1,9 @@
 /**
  * The server's own downloading, as cards: the nightly sweep, the library repair and a bulk "Fetch newest".
  *
- * #82 (Wolf92s): "I can't find what's currently being downloaded." The download pill (web
- * components/DownloadsIndicator.tsx) only ever knew the jobs a person started from a button -- routes/sources.ts
- * keeps those, one card per series folder. Everything the server does by itself went through `updateSeries`
+ * #82 (Wolf92s): "I can't find what's currently being downloaded." The download pill (Library -> Downloads since
+ * v0.49.0, web components/ServerDownloadsView.tsx) only ever knew the jobs a person started from a button --
+ * routes/sources.ts keeps those, one card per series folder. Everything the server does by itself went through `updateSeries`
  * and was invisible: a sweep fetching forty chapters at three in the morning looked exactly like a quiet
  * night until the Updates shelf filled up, and there was no way to stop one that was hammering a source.
  *

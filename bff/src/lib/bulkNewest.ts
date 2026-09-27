@@ -121,7 +121,7 @@ export function startBulkNewest(input: BulkNewestInput): { total: number } | fal
   state.startedAt = new Date().toISOString();
   state.results = [];
   startedBy = input.userId;
-  // The run's card on the download pill (lib/downloadJobs.ts, #82), with a Cancel for an admin: "select all"
+  // The run's card in Library -> Downloads (lib/downloadJobs.ts, #82), with a Cancel for an admin: "select all"
   // fans this out over hundreds of series, a second and a half apart.
   const card = beginRun('newest', input.userId, input.ids.length);
   void withOrigin('bulk', input.userId ?? null, () => run(input, card)).catch((e) => {

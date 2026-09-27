@@ -204,7 +204,9 @@ test('"Save offline" and the Offline tab are hidden on desktop, and smart offlin
   assert.match(series, /\{!isDesktop\(\) && <button disabled=\{acting \|\| !saveable\.length\} onClick=\{bulkSave\}/, 'select mode offers Save offline on desktop');
   // The nav and the palette keep the entries (the server build shows them) and filter them on desktop.
   assert.deepEqual([...DESKTOP_HIDDEN.navHrefs], ['/downloads']);
-  assert.deepEqual([...DESKTOP_HIDDEN.paletteKeys], ['downloads']);
+  // 'server-downloads' (Library -> Downloads) is NOT hidden: on desktop it is the only "downloads" there is.
+  // Reintroduce by adding it here: "the desktop app loses its downloads entry" fails.
+  assert.deepEqual([...DESKTOP_HIDDEN.paletteKeys], ['downloads'], 'the desktop app loses its downloads entry');
   const nav = code(read('components/BottomNav.tsx'));
   assert.match(nav, /href: '\/downloads'/, 'the Offline tab is gone from the server build too');
   assert.match(nav, /const shown = isDesktop\(\) \? allowed\.filter\(\(i\) => !\(DESKTOP_HIDDEN\.navHrefs as readonly string\[\]\)\.includes\(i\.href\)\) : allowed;/, 'the Offline tab shows on desktop');
@@ -214,19 +216,20 @@ test('"Save offline" and the Offline tab are hidden on desktop, and smart offlin
   assert.match(code(read('components/AppShell.tsx')), /if \(status !== 'authed' \|\| !so\?\.enabled \|\| isDesktop\(\)\) return;/, 'smart offline runs on desktop');
 });
 
-test('nothing on desktop lands on the hidden Offline page: a first add opens the library, a deep link is redirected', () => {
+test('nothing on desktop lands on the hidden Offline page: a first add opens Library -> Downloads, a deep link is redirected', () => {
   // The first add on a fresh desktop, "Open in library" before the first chapter is scanned, fell back to
   // /downloads/: "Offline · No downloads yet · Tap the download icon on any chapter", pointing only at controls the
-  // app hides -- on the main first-use path. Reintroduce by dropping `isDesktop() ? '/library/' :` from the
-  // search fallback: "the add dialog's fallback opens the Offline page on desktop" fails; by deleting the
-  // page's redirect: "the Offline page renders on desktop" fails.
+  // app hides -- on the main first-use path. Since v0.49.0 both builds go to Library -> Downloads, which exists
+  // on both, so the dialog has no desktop arm and no /downloads/ at all. Reintroduce '/downloads/' in openIt: "a
+  // first add lands on the Offline tab" fails; delete the page's redirect: "the Offline page renders on desktop".
   const dlg = code(read('components/AddSeriesDialog.tsx'));
   const open = slice(dlg, 'const openIt = async', 'if (done) {');
-  assert.match(open, /router\.push\(hit \? `\/series\/\?id=\$\{hit\.id\}` : isDesktop\(\) \? '\/library\/' : '\/downloads\/'\);/, 'the add dialog\'s fallback opens the Offline page on desktop');
-  assert.match(open, /catch \{ router\.push\(isDesktop\(\) \? '\/library\/' : '\/downloads\/'\); \}/, 'the add dialog\'s error fallback opens the Offline page on desktop');
-  assert.equal((open.match(/'\/downloads\/'/g) ?? []).length, 2, 'a /downloads/ fallback without a desktop arm');
+  assert.doesNotMatch(open, /'\/downloads\/'|isDesktop\(\)/, 'a first add lands on the Offline tab');
+  assert.equal((open.match(/downloadsHref\(done\.folder\)/g) ?? []).length, 2, 'a fallback that does not go to Library -> Downloads');
+  // A deep link to the Offline page -- the reader's end-of-downloads button, an old bookmark, the tray -- goes to
+  // what "downloads" means on desktop: what the app fetched onto this PC.
   const page = code(read('app/downloads/page.tsx'));
-  assert.match(page, /const desktop = isDesktop\(\);\s*useEffect\(\(\) => \{ if \(desktop\) router\.replace\('\/library\/'\); \}, \[desktop, router\]\);/, 'a deep link to the Offline page is not redirected on desktop');
+  assert.match(page, /const desktop = isDesktop\(\);\s*useEffect\(\(\) => \{ if \(desktop\) router\.replace\('\/library\/\?view=downloads'\); \}, \[desktop, router\]\);/, 'a deep link to the Offline page is not redirected to Library -> Downloads on desktop');
   // After every hook (rules of hooks), before the page's own markup.
   const early = page.indexOf('if (desktop) return null;');
   assert.ok(early > 0, 'the Offline page renders on desktop');

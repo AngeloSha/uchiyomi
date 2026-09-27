@@ -36,6 +36,8 @@ import { supplyLine } from '@/lib/supplyLine';
 import { isDesktop } from '@/lib/desktop';
 import { useContextMenu } from '@/components/ContextMenu';
 import { useLayer } from '@/lib/layers';
+import { kickDownloads } from '@/lib/useServerDownloads';
+import { SeriesServerDownloads } from '@/components/SeriesServerDownloads';
 
 // The four the scanner itself writes from ComicInfo's PublishingStatus. Kept as a suggestion list rather
 // than a hard enum, because a file can carry anything and rejecting it would reject Uchiyomi's own data.
@@ -1312,6 +1314,9 @@ function SeriesInner() {
     try {
       const res = await api<{ folder: string; total: number }>(path, { method: 'POST', json: body });
       setStarted({ folder: res.folder, at: Date.now() });
+      // Ask for the jobs now: the answer carries this job, and with it the poll's 2.5 s pace (AppShell's
+      // poller reads its interval off each answer) -- otherwise the band and the ring wait out a 30 s idle poll.
+      void kickDownloads(qc);
       toast(fetchingToast(res.total), 'info');
       invalidateChapters();
       leaveSelect();
@@ -1329,7 +1334,7 @@ function SeriesInner() {
    * Poll the shared jobs key until the job for `folder` is no longer downloading; the job as last seen, or
    * null when the list no longer has it (over and aged out -- or, past the same five seconds `jobDone`
    * allows, never listed) or the server could not be asked three times running. Through `fetchQuery` so
-   * the pill and the page's own 2 s poll read the same answer and the requests are deduped.
+   * the Library ring, the band and this wait read the same answer and the requests are deduped.
    */
   const awaitJob = async (folder: string): Promise<SourceJob | null> => {
     const at = Date.now();
@@ -1358,6 +1363,7 @@ function SeriesInner() {
       for (const [i, chunk] of chunks.entries()) {
         const res = await api<{ folder: string; total: number }>('/api/sources/fetch', { method: 'POST', json: { seriesId: id, numbers: chunk } });
         setStarted({ folder: res.folder, at: Date.now() });
+        void kickDownloads(qc);
         if (i === 0) {
           toast(fetchingToast(numbers.length), 'info');
           invalidateChapters();
@@ -1426,23 +1432,24 @@ function SeriesInner() {
     setConfirming(null);
   };
 
-  // While the job this page started is downloading, poll the shared jobs key every 2 s (the
-  // FindMissingDialog pattern) and refresh the two chapter queries when it stops, so ghosts turn into rows
-  // without a reload. ⚠️ `dataUpdatedAt` is compared against the moment the job started: the key is shared
-  // with the downloads pill, so the first render after the POST sees that pill's CACHED list -- from before
-  // the job existed -- and "the job is not in the list" would otherwise read as "the job has finished".
+  // While the job this page started is downloading, read the shared jobs key and refresh the chapter queries
+  // when it stops, so ghosts turn into rows without a reload. No poll of its own (v0.49.0): AppShell's one
+  // poller asks every 2.5 s while a job downloads, and startJob kicks it the moment the job exists. A second
+  // observer with its own interval would double the requests. ⚠️ `dataUpdatedAt` is compared against the
+  // moment the job started: the key is shared with the Library ring, so the first render after the POST sees
+  // its CACHED list -- from before the job existed -- and "the job is not in the list" would otherwise read as
+  // "the job has finished".
   const jobs = useQuery({
     queryKey: ['source-jobs'],
     queryFn: () => api<{ content: SourceJob[] }>('/api/sources/jobs'),
     enabled: !!started,
-    refetchInterval: 2000,
   });
   const job = started ? jobs.data?.content?.find((j) => j.folder === started.folder) : undefined;
   const jobFresh = !!started && jobs.dataUpdatedAt >= started.at;
   // A fresh list without the job means it is over and has aged out -- or a poll that was already in flight
   // when the POST landed answered without it. Five seconds tells those apart: a job that has not appeared
-  // by then is not going to. (`Date.now()` here is re-evaluated on every 2 s poll, which is what makes it
-  // a clock rather than a constant.)
+  // by then is not going to. (`Date.now()` here is re-evaluated on every poll, which is what makes it a
+  // clock rather than a constant.)
   const jobDone = jobFresh && (job ? job.status !== 'downloading' : Date.now() - started.at > 5000);
   useEffect(() => {
     if (!jobDone) return;
@@ -1605,6 +1612,8 @@ function SeriesInner() {
   const activeFilters = (group !== ALL_GROUPS ? 1 : 0) + (showGhosts ? 0 : 1);
   const Chapters = (
     <div ref={chaptersTop} className="scroll-mt-20">
+      {/* What the server is fetching for this series, whoever started it (v0.49.0): above the list it fills. */}
+      <SeriesServerDownloads seriesId={id} folder={series?.folder} />
       {/* The heading on its own line and ONE row of four short, text-only chips under it. Measured at
           390 px: with icons and the two long chips this was five chips on two rows plus two sentences;
           the four fit one row in English, and `flex-wrap` (never nowrap) is the safety valve for German
@@ -1720,9 +1729,7 @@ function SeriesInner() {
   // tappable.
   const Toolbar = selecting && pickedCount > 0 && (
     <div ref={toolbarRef} className="fixed inset-x-0 bottom-[calc(5.75rem+env(safe-area-inset-bottom))] z-40 border-t border-ink-700 bg-ink-950/95 px-4 pb-3 pt-3 backdrop-blur-xl lg:bottom-0 lg:pb-[max(0.75rem,env(safe-area-inset-bottom))]">
-      {/* pe-36 on phones keeps the chips clear of the downloads pill (fixed bottom-20 end-3), which floats
-          over this bar's lower band while a source job is running. */}
-      <div className="mx-auto flex max-w-3xl flex-wrap items-center gap-2 pe-36 lg:pe-0">
+      <div className="mx-auto flex max-w-3xl flex-wrap items-center gap-2">
         <span className="me-auto text-sm font-medium text-fog-100">{acting ? '…' : tr('{n} selected', { n: pickedCount })}</span>
         <button disabled={acting || !pickedCount} onClick={() => bulkMark(true)} className="chip text-xs disabled:opacity-50">{tr('Mark read')}</button>
         <button disabled={acting || !pickedCount} onClick={() => bulkMark(false)} className="chip text-xs disabled:opacity-50">{tr('Mark unread')}</button>

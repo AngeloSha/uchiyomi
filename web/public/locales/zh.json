@@ -2,7 +2,7 @@
   "_meta": {
     "language": "zh",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 1360
+    "strings": 1387
   },
   "1 check found something": "1 项检查发现问题",
   "1 member": "1 位成员",
@@ -1363,5 +1363,32 @@
   "Not answering": "无响应",
   "Answers empty": "返回为空",
   "Turned off": "已关闭",
-  "Blocked by the site": "被网站屏蔽"
+  "Blocked by the site": "被网站屏蔽",
+  "Archiving slowly": "正在慢速归档",
+  "Chapters that keep failing are listed under Admin → Health.": "反复失败的章节列在 管理 → 健康检查 中。",
+  "Checking the solver": "正在检查验证求解器",
+  "Ch. {n} · {source}": "第{n}话 · {source}",
+  "Counting pages": "正在统计页数",
+  "Filling gaps": "正在补齐缺口",
+  "Learning reading directions": "正在识别阅读方向",
+  "Looking for longer copies": "正在寻找更完整的版本",
+  "new chapters": "新章节",
+  "Nothing is being fetched right now.": "目前没有正在获取的内容。",
+  "pages you saved": "你保存的页面",
+  "Queued": "排队中",
+  "random series": "随机系列",
+  "Refresh library": "刷新书库",
+  "Retrying failed chapters": "正在重试失败的章节",
+  "Running": "进行中",
+  "scan for new chapters": "扫描新章节",
+  "Series you add, chapters you fetch and what the scheduled check finds show up here as they come in.": "你添加的系列、获取的章节以及定时检查找到的内容，到达后都会显示在这里。",
+  "Server downloads": "服务器下载",
+  "Server tasks": "服务器任务",
+  "Slow archive": "慢速归档",
+  "Started {time} ago": "{time}前开始",
+  "Tidying chapter names": "正在整理章节名称",
+  "Upgrading to preferred groups": "正在切换到首选汉化组",
+  "Waiting for {source}": "等待 {source}",
+  "What the server fetches is under Library → Downloads.": "服务器获取的内容在 书库 → 下载 中。",
+  "what the server is fetching": "服务器正在获取的内容"
 }

@@ -1,5 +1,6 @@
 'use client';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import Link from 'next/link';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { ART } from '@/lib/art';
@@ -19,16 +20,9 @@ import { foldByTitle, type WallProvider } from '@/lib/wall';
 import { AddSeriesDialog, AddSeed } from '@/components/AddSeriesDialog';
 import { AdultToggle, useAdultShown } from '@/components/AdultToggle';
 import { IcChevronLeft, IcSearch, IcSparkle, IcX } from '@/components/icons';
-import type { AutoFollow } from '@/lib/types';
 import { forStrip } from '@/lib/jobs';
-
-interface Job {
-  folder: string; title: string; total: number; done: number; status: string; reason?: string;
-  /** When it ended, and whether a Cancel ended it (#82): such a job is `done` but did not fetch everything. */
-  finishedAt?: number; cancelled?: boolean;
-  /** The add-time auto-follow (v0.36.0) riding on the card; the only job a nothing-yet add leaves behind. */
-  autoFollow?: AutoFollow;
-}
+import { downloadsHref } from '@/lib/libraryView';
+import { useServerDownloads } from '@/lib/useServerDownloads';
 interface SearchGroup { title: string; coverUrl?: string; inLibrary?: boolean; updatedAt?: string; providers: { source: string; name: string; sourceId: string; title: string; coverUrl?: string }[] }
 /** One source's line in a search answer (v0.40.0): what it did with the term, or that it is still being asked. */
 interface SearchSourceLine { id: string; name: string; state: 'ok' | 'empty' | 'timeout' | 'failed' | 'skipped' | 'pending'; ms?: number; why?: 'disabled' | 'cooldown' }
@@ -352,14 +346,10 @@ export default function DiscoverPage() {
   }, [canPage]);
 
   // ---------------------------------------------------------------- jobs
-  const { data: jobsData } = useQuery({
-    queryKey: ['source-jobs'],
-    queryFn: () => api<{ content: Job[] }>('/api/sources/jobs'),
-    enabled: mayAdd,
-    // Polled hard only while something is actually downloading. It used to poll every four seconds forever.
-    refetchInterval: (qy) => ((qy.state.data?.content ?? []).some((j) => j.status === 'downloading') ? 2500 : 30_000),
-  });
-  // A finished job stays on the server for a day now (the download pill lists them, #82); this strip keeps
+  // The shared jobs answer, read from the cache AppShell's one poller keeps fresh (lib/useServerDownloads.ts):
+  // a poll of this page's own would double the requests while an add downloads.
+  const { data: jobsData } = useServerDownloads();
+  // A finished job stays on the server for a day now (Library -> Downloads lists them, #82); this strip keeps
   // showing the last few minutes of them, as it always did (lib/jobs.ts `forStrip`).
   const jobs = forStrip(jobsData?.content ?? []);
 
@@ -492,8 +482,11 @@ export default function DiscoverPage() {
 
       {jobs.length > 0 && (
         <div className="board mt-5">
+          {/* Each card opens its series once it has one, else its tile in Library -> Downloads, where it can be
+              followed, cancelled or retried. */}
           {jobs.map((j) => (
-            <div key={j.folder} className={`card p-3 ${j.status === 'error' ? 'border-amber-500/40' : ''}`}>
+            <Link key={j.folder} href={j.seriesId ? `/series/?id=${encodeURIComponent(j.seriesId)}` : downloadsHref(j.folder)}
+              data-job-card className={`card block p-3 transition hover:border-accent/40 ${j.status === 'error' ? 'border-amber-500/40' : ''}`}>
               <p className="truncate text-xs font-medium text-fog-100">{j.title}</p>
               {j.status === 'downloading' ? (
                 <>
@@ -517,9 +510,14 @@ export default function DiscoverPage() {
               ) : (
                 <p className="mt-1 text-[11px] text-emerald-400">{tr('Fetched')}</p>
               )}
-            </div>
+            </Link>
           ))}
         </div>
+      )}
+      {jobs.length > 0 && (
+        <p className="mt-2 text-end">
+          <Link href={downloadsHref()} className="text-xs font-medium text-accent hover:underline">{tr('See all')}</Link>
+        </p>
       )}
 
       <div className="mb-3 mt-6 flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">

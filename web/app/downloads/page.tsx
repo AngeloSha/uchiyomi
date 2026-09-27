@@ -11,7 +11,8 @@ import { IcTrash, IcPlay, IcDownload, IcWifiOff, IcRefresh } from '@/components/
 import { t as tr } from '@/lib/i18n';
 import { useRouter } from 'next/navigation';
 import { isDesktop, serverReachableHint } from '@/lib/desktop';
-import { ServerDownloads } from '@/components/ServerDownloads';
+import { canDownload, useAuth } from '@/lib/auth';
+import { downloadsHref } from '@/lib/libraryView';
 
 export default function DownloadsPage() {
   const [items, setItems] = useState<OfflineChapter[]>([]);
@@ -21,11 +22,13 @@ export default function DownloadsPage() {
   const [syncing, setSyncing] = useState(false);
   const toast = useToast();
   const router = useRouter();
+  const { user, status } = useAuth();
   // Desktop hides the Offline tab and "Save offline" (the chapters are on this disk already), so this page there
   // is an empty "No downloads yet" pointing at controls the app does not show. A deep link to it -- the reader's
-  // end-of-downloads button, an old bookmark -- goes to the library instead.
+  // end-of-downloads button, an old bookmark -- goes to what "downloads" means on a desktop: what the app
+  // fetched onto this PC, Library -> Downloads (v0.49.0; the library itself before there was such a view).
   const desktop = isDesktop();
-  useEffect(() => { if (desktop) router.replace('/library/'); }, [desktop, router]);
+  useEffect(() => { if (desktop) router.replace('/library/?view=downloads'); }, [desktop, router]);
 
   const refresh = async () => {
     setItems(await listDownloads());
@@ -108,8 +111,14 @@ export default function DownloadsPage() {
         )}
       </header>
 
-      {/* The server's downloads, above this device's: nothing else shows what came in overnight (#82 follow-up). */}
-      <ServerDownloads online={online} />
+      {/* This page is this device's copies, and only them (v0.49.0). What the server fetches moved to Library ->
+          Downloads; one line says so, for whoever learned to look here since v0.48.1 -- and only online and
+          signed in, since offline there is no server to show, and it asks the server nothing itself. */}
+      {online && status === 'authed' && canDownload(user) && (
+        <p data-server-downloads-pointer className="px-5 pt-3 text-xs text-fog-500 lg:px-0">
+          <Link href={downloadsHref()} className="hover:text-fog-200 hover:underline">{tr('What the server fetches is under Library → Downloads.')}</Link>
+        </p>
+      )}
 
       {loaded && items.length === 0 ? (
         <EmptyState art={ART.emptyDownloads} title={tr('No downloads yet')}

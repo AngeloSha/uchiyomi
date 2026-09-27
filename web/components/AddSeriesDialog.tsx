@@ -20,7 +20,7 @@ import { fetchingLabel } from '@/lib/jobs';
 import { normTitle } from '@/lib/normTitle';
 import { cadenceText } from '@/lib/cadence';
 import { jobNoteLines, type JobCardNotes } from '@/lib/jobNotes';
-import { isDesktop } from '@/lib/desktop';
+import { downloadsHref } from '@/lib/libraryView';
 import { PreviewReader } from '@/components/PreviewReader';
 
 export interface Provider { source: string; name: string; sourceId: string; title: string; coverUrl?: string }
@@ -330,14 +330,15 @@ export function AddSeriesDialog({ seed, sources, mayFollow, onClose, onAdded }: 
       // and accept an EXACT normalised match.
       // ⚠️ Never `?? p.content[0]`. That fallback turned "not found" into a confident wrong navigation --
       // it opened whatever the search happened to return, and two series on the owner's own install
-      // normalise to the same title. The downloads page is the honest answer: the job is right there.
-      // ⚠️ Desktop has no downloads page (the Offline tab is hidden there, and its empty state points at controls
-      // the app hides): the library, where the series appears once its first chapter is in.
+      // normalise to the same title. Library -> Downloads is the honest answer: the add is right there, its
+      // cover filling, pointed at by `folder` (v0.49.0). Until then this went to the Offline tab -- this
+      // device's copies, where a server download had no business -- and on desktop, which hides that tab,
+      // to the library, where nothing showed until the first chapter was in. One view serves both builds now.
       const p = await api<Page<Series>>('/api/series/search', { json: { fullTextSearch: done.title, size: 5 } });
       const hit = p.content.find((s) => normTitle(s.metadata?.title || s.name) === normTitle(done.title));
       qc.invalidateQueries({ queryKey: ['library'] });
-      router.push(hit ? `/series/?id=${hit.id}` : isDesktop() ? '/library/' : '/downloads/');
-    } catch { router.push(isDesktop() ? '/library/' : '/downloads/'); }
+      router.push(hit ? `/series/?id=${hit.id}` : downloadsHref(done.folder));
+    } catch { router.push(downloadsHref(done.folder)); }
   };
 
   // ---------------------------------------------------------------- done

@@ -79,7 +79,24 @@ test('Fetch all posts its chunks one after the other, each after the previous jo
   assert.doesNotMatch(body, /await startJob\(/, 'one toast for the run, not one per chunk');
   const wait = fn(page, 'awaitJob');
   assert.match(wait, /status !== 'downloading'/, 'the wait ends when the job is no longer downloading');
-  assert.match(wait, /\['source-jobs'\]/, 'through the shared jobs key, so the pill reads the same answer');
+  assert.match(wait, /\['source-jobs'\]/, 'through the shared jobs key, so the Library ring and the band read the same answer');
+});
+
+test('the band above the chapters shows this series\' server downloads, and re-reads the list as chapters land', () => {
+  // v0.49.0. The page used to refresh its chapters only when a job IT started ended, so a chapter the scheduled
+  // check or someone else's Fetch landed stayed grey until a reload. Reintroduce by dropping the landedFor
+  // effect from the band: "the band does not re-read the chapter list" fails. Reintroduce `pe-36` on the
+  // select bar: "the bar still makes room for the pill" fails.
+  const page = code(read('app/series/page.tsx'));
+  const chapters = page.slice(page.indexOf('const Chapters = ('));
+  assert.ok(chapters.indexOf('<SeriesServerDownloads seriesId={id} folder={series?.folder} />') >= 0
+    && chapters.indexOf('<SeriesServerDownloads') < chapters.indexOf("{tr('Chapters')}"), 'the band is not above the chapter list');
+  assert.doesNotMatch(page, /\bpe-36\b/, 'the bar still makes room for the pill');
+  const band = code(read('components/SeriesServerDownloads.tsx'));
+  assert.match(band, /const landed = landedFor\(data, seriesId, folder\);/, 'the band does not re-read the chapter list');
+  assert.match(band, /for \(const k of \[\['series-books', seriesId\], \['series-listing', seriesId\], \['series', seriesId\]\]\) qc\.invalidateQueries/, 'the band does not re-read the chapter list');
+  assert.match(band, /const RELOAD_EVERY_MS = 4000;/, 'a sweep landing a chapter a second re-reads the page every second');
+  assert.match(band, /const \{ data \} = useServerDownloads\(\);/, 'the band polls on its own');
 });
 
 test('a series with no chapters keeps its run open across Newest and Oldest', () => {

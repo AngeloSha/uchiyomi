@@ -26,6 +26,10 @@ const SURFACES = [
   'components/ActionList.tsx',
   'lib/ring.ts',
   'lib/status.ts',
+  // Step 5, the Downloads view that replaced the pill: the ring's mapper, the view, the series band.
+  'components/DownloadsRing.tsx',
+  'components/ServerDownloadsView.tsx',
+  'components/SeriesServerDownloads.tsx',
 ];
 
 /**
@@ -47,6 +51,10 @@ const SLICES: [string, string, string, string][] = [
   ['app/admin/page.tsx', 'Extensions: engine status and Refresh', 'const list = cat?.content || [];', '{!status.reachable ? ('],
   ['app/admin/page.tsx', 'Extensions: repositories, languages and Update all', '<button onClick={() => setShowRepos(!reposOpen)}', '<input value={q2}'],
   ['app/admin/page.tsx', 'Extensions: catalogue rows', '{list.map((e) => (', '{!list.length && !isFetching && ('],
+  // Step 5: the Library's Series | Downloads switch (its count is a squared tag), and the header's two counts
+  // side by side on a desktop -- the downloads ring's and the Updates bell's, a capsule at "9+" until v0.49.0.
+  ['app/library/page.tsx', 'Library: the Series | Downloads switch', 'function ViewSwitch(', 'function MoveToLibrary('],
+  ['components/TopNav.tsx', 'TopNav: the downloads ring and the Updates count', '<DownloadsNavIcon />', '<button onClick={refresh}'],
 ];
 
 const slice = (src: string, from: string, to: string, name: string): string => {
@@ -125,7 +133,7 @@ test('the admin console\'s status badges are marks and its actions keys: the sli
   // "{tr('Extensions')}</p>" again: it starts at the not-configured card and "the engine slice holds the
   // not-configured card" fails.
   const admin = code(read('app/admin/page.tsx'));
-  const [attention, providers, toolbar, engine, repos, rows] = SLICES.map(([, name, from, to]) => slice(admin, from, to, name));
+  const [attention, providers, toolbar, engine, repos, rows] = SLICES.filter(([f]) => f === 'app/admin/page.tsx').map(([, name, from, to]) => slice(admin, from, to, name));
   assert.match(attention, /<StatusMark tone=\{m\.tone\} title=\{m\.label\} \/>/, 'the Needs attention slice has no mark');
   assert.match(providers, /<StatusMark \{\.\.\.sourceMark\(st\)\} \/>/, 'the Providers slice has no mark');
   assert.match(providers, /function packageCard\(/, 'the Providers slice ends before the package card');
@@ -139,6 +147,20 @@ test('the admin console\'s status badges are marks and its actions keys: the sli
   assert.equal(keys(repos), 4, 'the repository Add, Choose languages, a language\'s Hide/Show and Update all are not all keys');
   assert.doesNotMatch(repos, /value=\{q2\}|setShowAdult/, 'the repositories slice runs into the filter chips');
   assert.equal(keys(rows), 2, 'a catalogue row\'s Update and Add/Remove are not keys');
+});
+
+test('the downloads counts are squared tags: the switch\'s, the ring\'s and the Updates bell\'s beside it', () => {
+  // The Updates count beside the new desktop ring was a round tag that became a capsule at "9+": three count
+  // shapes side by side. Reintroduce `rounded-full` on it: the capsule scan above fails ("TopNav … capsule")
+  // and so does this.
+  const top = slice(code(read('components/TopNav.tsx')), '<DownloadsNavIcon />', '<button onClick={refresh}', 'TopNav');
+  const count = /<span data-updates-count className="([^"]*)"/.exec(top);
+  assert.ok(count, 'the Updates count is not where this test looks');
+  assert.match(count![1], /rounded-\[4px\]/, 'the Updates count is not squared');
+  assert.doesNotMatch(count![1], /rounded-full/, 'the Updates count is a capsule');
+  const sw = slice(code(read('app/library/page.tsx')), 'function ViewSwitch(', 'function MoveToLibrary(', 'ViewSwitch');
+  assert.match(sw, /role="tablist"/, 'the switch slice does not hold the switch');
+  assert.match(sw, /rounded-\[4px\][^"]*tabular-nums/, 'the switch\'s count is not a squared tag');
 });
 
 test('the filter and sort chips stay exactly as they are', () => {

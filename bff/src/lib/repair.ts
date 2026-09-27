@@ -274,7 +274,7 @@ export const repairState: {
 } = { running: false, startedAt: null, finishedAt: null, lastResult: null };
 
 /**
- * The running repair's card on the download pill (lib/downloadJobs.ts, #82), set by runRepair. Its Cancel is
+ * The running repair's card in Library -> Downloads (lib/downloadJobs.ts, #82), set by runRepair. Its Cancel is
  * obeyed everywhere a shutdown is: between series, between chapters, between steps -- never mid-write.
  */
 let activeCard: RunCard | null = null;

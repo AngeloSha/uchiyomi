@@ -2,7 +2,7 @@
   "_meta": {
     "language": "pt-BR",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 1360
+    "strings": 1387
   },
   "1 check found something": "1 verificação encontrou algo",
   "1 member": "1 membro",
@@ -1363,5 +1363,32 @@
   "Not answering": "Não responde",
   "Answers empty": "Responde vazio",
   "Turned off": "Desativada",
-  "Blocked by the site": "Bloqueada pelo site"
+  "Blocked by the site": "Bloqueada pelo site",
+  "Archiving slowly": "Arquivando devagar",
+  "Chapters that keep failing are listed under Admin → Health.": "Os capítulos que continuam falhando estão em Administração → Diagnóstico.",
+  "Checking the solver": "Verificando o solucionador",
+  "Ch. {n} · {source}": "Cap. {n} · {source}",
+  "Counting pages": "Contando páginas",
+  "Filling gaps": "Preenchendo lacunas",
+  "Learning reading directions": "Descobrindo o sentido de leitura",
+  "Looking for longer copies": "Procurando cópias mais longas",
+  "new chapters": "capítulos novos",
+  "Nothing is being fetched right now.": "Nada está sendo buscado agora.",
+  "pages you saved": "páginas que você salvou",
+  "Queued": "Na fila",
+  "random series": "série aleatória",
+  "Refresh library": "Atualizar a biblioteca",
+  "Retrying failed chapters": "Tentando de novo os capítulos que falharam",
+  "Running": "Em andamento",
+  "scan for new chapters": "procurar capítulos novos",
+  "Series you add, chapters you fetch and what the scheduled check finds show up here as they come in.": "As séries que você adiciona, os capítulos que você busca e o que a verificação agendada encontra aparecem aqui conforme chegam.",
+  "Server downloads": "Downloads do servidor",
+  "Server tasks": "Tarefas do servidor",
+  "Slow archive": "Arquivo lento",
+  "Started {time} ago": "Iniciado há {time}",
+  "Tidying chapter names": "Arrumando os nomes dos capítulos",
+  "Upgrading to preferred groups": "Trocando para os grupos preferidos",
+  "Waiting for {source}": "Aguardando {source}",
+  "What the server fetches is under Library → Downloads.": "O que o servidor busca fica em Biblioteca → Downloads.",
+  "what the server is fetching": "o que o servidor está buscando"
 }

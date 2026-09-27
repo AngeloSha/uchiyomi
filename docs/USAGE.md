@@ -449,27 +449,50 @@ not hunt behind the person's back.
 
 ### What is downloading, and stopping it
 
-Anything the server is fetching shows as a small pill in the bottom corner (*Fetching {n} chapters*); tap it for
-the list. Each download you started has a **Cancel**, and an admin sees one on everybody's. Cancel stops it
-**after the chapter in flight** — a file is never left half-written — so the pill says *Stopping after this
-chapter…* for as long as that chapter takes; what already arrived stays, and the card then says how far it got.
-A re-fetch you cancel puts back every old copy it had set aside and not yet replaced.
+Everything the server is fetching, whoever started it, is under **Library → Downloads** (since v0.49.0; it used
+to be a small pill in the bottom corner). While something comes in, the **Library** tab's icon on a phone wears
+a thin ring that fills as the chapters land, with a small count of the series being fetched; on a computer the
+same ring sits on the cloud button just before the Updates bell, which also leads there. An amber dot on it
+means a download of yours failed (any download, for an admin). The **slow archive** never turns the ring: while
+it is all that runs, the ring is a still, amber mark with an hourglass. On the Library page, the **Series |
+Downloads** switch under the title changes between your series and this view; the address remembers which, so
+Back and a shared link land on the same one.
 
-Since v0.47.0 an admin also sees what the server does **by itself**, one card per run: *Checking for new
-chapters* (the scheduled update, or *Run now*), *Library repair* and a bulk *Fetch newest* — how many series
-it has been through, how many chapters it saved, which series it is on, and a Cancel that stops it the same
-way. Whoever started a bulk *Fetch newest* sees that one too. The strip on Discover still shows only the last
-few minutes.
+The view shows each series as its cover with a ring, like an app being installed, in up to five sections:
 
-**Every chapter coming in, whatever started it** (since v0.48.1). Under the cards, **Downloading now** lists
-each chapter the server is fetching that no card above already shows — a source you followed from *Find missing
-chapters* downloads at the series' next check, and the scheduled check, *Check for new chapters*, the repair and
-*Fetch newest* all download chapters of their own — with the series, the chapter, what started it and whether it
-is still waiting its turn at the source. **Came in today** lists what arrived, one line per series. The same two
-lists sit at the top of the **Offline** tab under **On the server**, where they are also there when nothing is
-running, with any chapter that could not be saved and why. You see the series you can open; a brand-new add's
-first chapter is shown to whoever added it and to admins. The rest of the Offline tab is something else: copies
-saved on this device for reading offline.
+- **Running** — what is downloading now: your adds and Fetches (the ring fills with *chapters done / chapters
+  asked for*), and the series the server is fetching by itself — the scheduled check, *Check for new chapters*,
+  a source you followed from *Find missing chapters*, the repair, *Fetch newest* (the ring turns). Under each
+  cover: the chapter coming in and from where, or *Waiting for {source}* between chapters.
+- **Queued** — series whose chapters are all waiting their turn at a busy source, and the slow archive.
+- **Needs attention** — a download that failed, with why, **Try again** (fetches exactly the chapters it did
+  not land), **Dismiss** and **Open**; chapters that could not be saved and did not arrive later from another
+  source; a server task that stopped with an error. Chapters that keep failing are Health's to track (Admin →
+  Health).
+- **Server tasks** — the scheduled check, the library repair (with the step it is on) and a bulk *Fetch newest*:
+  how far each has got, how many chapters it saved, which series it is on and when it started.
+- **Came in today** — what arrived, one cover per series, with the chapters, what started it and when. It
+  survives a restart of the server.
+
+Each download you started has a **Cancel** (the round × on its cover), and an admin sees one on everybody's.
+Cancel stops it **after the chapter in flight** — a file is never left half-written — so the cover says
+*Stopping after this chapter…* for as long as that chapter takes; what already arrived stays, and the download
+is then listed under Came in today saying how far it got. A re-fetch you cancel puts back every old copy it had
+set aside and not yet replaced. A server task has a Cancel too, for an admin and for whoever started a bulk
+*Fetch newest*.
+
+Each series page shows its own downloads in a slim band above the chapter list, whoever started them, with a
+Cancel when it is yours to stop and **See all** into Library → Downloads; grey chapters turn into chapters as
+they land. Discover's strip still shows the last few minutes of adds, each leading to its series or its cover
+in the view.
+
+**Who sees what.** You see the series you can open; a brand-new add whose first chapter has not landed yet is
+shown to whoever added it and to admins. A failed download is shown only to whoever started it and to admins,
+and only they can dismiss it. Server tasks are an admin's, plus a bulk *Fetch newest* for whoever started it.
+Members who may not add series see none of this: no ring, no switch.
+
+The **Offline** tab is something else: only the copies saved **on this device** for reading offline. It no
+longer lists what the server fetches; one line there points to Library → Downloads.
 
 ### Chapters the sources have that you don't
 

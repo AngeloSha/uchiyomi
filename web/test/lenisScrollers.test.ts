@@ -31,7 +31,6 @@ const OVERLAYS = [
   'components/ReaderSettings.tsx',     // the reader's own sheet, which is not the shared one
   'components/ConfirmDialog.tsx',
   'components/ConsoleNav.tsx',
-  'components/DownloadsIndicator.tsx',
   'components/CommandPalette.tsx',
 ];
 

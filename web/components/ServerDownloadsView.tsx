@@ -1,0 +1,376 @@
+'use client';
+import { useCallback, useRef, useState } from 'react';
+import Link from 'next/link';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { api, img } from '@/lib/api';
+import { useAuth, canDownload } from '@/lib/auth';
+import { useToast } from '@/components/Toast';
+import { msgOf } from '@/components/ConfirmDialog';
+import { Img } from '@/components/ui';
+import { sourceCover } from '@/components/cards';
+import { CoverProgress, ProgressRing } from '@/components/ProgressRing';
+import { EmptyState } from '@/components/EmptyState';
+import { IcAlert, IcHourglass, IcX } from '@/components/icons';
+import { ART } from '@/lib/art';
+import { t as tr } from '@/lib/i18n';
+import { durationText, relativeTime } from '@/lib/format';
+import { jobNoteLines, type JobCardNotes } from '@/lib/jobNotes';
+import { fetchingToast, mayCancel, repairStepLabel, runProgress, runTitle, type RunCard } from '@/lib/jobs';
+import { ringFraction, ringValueText } from '@/lib/ring';
+import {
+  chapterSpan, downloadSections, originLabel, tileStatus, type ActivityGroup, type Attention, type SourceJobs, type Tile,
+} from '@/lib/serverDownloads';
+import { kickDownloads, useServerDownloads } from '@/lib/useServerDownloads';
+
+// lib/serverDownloads.ts DownloadJob's fields, spelled out beside the notes so this stays the one Job type the
+// notes pin (partialSurfaces.test.ts) reads.
+interface Job extends JobCardNotes {
+  folder: string; title: string; total: number; done: number; status: string; reason?: string;
+  startedAt?: number; finishedAt?: number; mine?: boolean; cancelRequested?: boolean; cancelled?: boolean;
+  seriesId?: string; left?: number[]; cover?: { source: string; url: string };
+}
+
+/** The Library grid's columns, one step wider: the filter sidebar is not shown beside this view. */
+const GRID = 'grid grid-cols-3 gap-x-3 gap-y-5 px-4 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 lg:gap-x-4 lg:px-0 xl:grid-cols-7 2xl:grid-cols-8 3xl:grid-cols-9 4xl:grid-cols-10';
+/** Needs attention, Server tasks and the stopped downloads: one card each, side by side where there is room. */
+const ROWS = 'grid gap-3 px-4 lg:grid-cols-2 lg:px-0 2xl:grid-cols-3';
+/** Came in today shows this many covers before "Show all {n}": a big morning is a hundred series. */
+const CAME_IN_FIRST = 24;
+
+/**
+ * Library -> Downloads (v0.49.0): everything the server is fetching, whoever started it, as the owner asked for
+ * it -- each series its cover with a ring filling like an app install, in five sections: Running, Queued (the
+ * slow archive included), Needs attention, Server tasks, Came in today. It took over from the floating pill,
+ * which showed the same things in a 20rem popover, and from the Offline tab's "On the server", which put the
+ * server's downloads on a page about this device's copies.
+ *
+ * What goes where is lib/serverDownloads.ts `downloadSections`, where a test can reach it; this only draws it.
+ * The data is the one ['source-jobs'] query AppShell polls, asked again when the view opens.
+ *
+ * Who sees what is the server's: a member gets the series they can open, their own failed downloads and their
+ * own bulk runs, and is offered Cancel and Dismiss on their own work only; an admin sees and acts on all of it.
+ *
+ * No scroller of its own -- the page scrolls -- so nothing here needs `data-lenis-prevent`.
+ */
+export function ServerDownloadsView({ focusFolder }: { focusFolder?: string | null }) {
+  const { user, isAdmin } = useAuth();
+  const mayAdd = canDownload(user);
+  const qc = useQueryClient();
+  const toast = useToast();
+  const { data: raw, isLoading } = useServerDownloads({ fresh: true });
+  const data = raw as SourceJobs<Job> | undefined;
+  const jobs = data?.content ?? [];
+  const s = downloadSections(data, { admin: isAdmin });
+  const [allCameIn, setAllCameIn] = useState(false);
+  // Names for the "took chapter 12 from …" lines. Asked for only once a card has a switch to name, and only by a
+  // viewer who may download, which is who the route answers.
+  const { data: sources } = useQuery({
+    queryKey: ['sources'],
+    queryFn: () => api<{ content: { id: string; name: string }[] }>('/api/sources'),
+    staleTime: 60_000,
+    enabled: mayAdd && jobs.some((j) => !!j.switched?.length),
+  });
+  const nameOf = (id: string) => sources?.content.find((x) => x.id === id)?.name ?? id;
+
+  const call = async (path: string, method: 'POST' | 'DELETE') => {
+    try { await api(path, { method }); } catch (e) { toast(msgOf(e, tr('Could not do that')), 'error'); }
+    void kickDownloads(qc);
+  };
+  const cancelJob = (folder: string) => call(`/api/sources/jobs/${encodeURIComponent(folder)}/cancel`, 'POST');
+  const dismissJob = (folder: string) => call(`/api/sources/jobs/${encodeURIComponent(folder)}`, 'DELETE');
+  const cancelRun = (kind: string) => call(`/api/sources/runs/${kind}/cancel`, 'POST');
+  const dismissRun = (kind: string) => call(`/api/sources/runs/${kind}`, 'DELETE');
+  // Try again is a Fetch of what did not land: the same route, the same checks (the series' visibility, its
+  // listing, the 300 cap, a 409 while the series is busy), and a new job that takes the failed card's place.
+  const retry = async (seriesId: string, numbers: number[]) => {
+    try {
+      const res = await api<{ folder: string; total: number }>('/api/sources/fetch', { method: 'POST', json: { seriesId, numbers } });
+      toast(fetchingToast(res.total), 'info');
+    } catch (e) { toast(msgOf(e, tr('Could not start.')), 'error'); }
+    void kickDownloads(qc);
+  };
+
+  // The tile an "Open in library" was sent to, scrolled into view once: the add dialog lands here when the
+  // series has no row yet to open.
+  const scrolled = useRef(false);
+  const focusRef = useCallback((el: HTMLElement | null) => {
+    if (!el || scrolled.current) return;
+    scrolled.current = true;
+    el.scrollIntoView({ block: 'center' });
+  }, []);
+
+  const empty = !s.running.length && !s.queued.length && !s.attention.length && !s.tasks.length && !s.cameIn.length && !s.stopped.length;
+  if (!data && isLoading) {
+    return (
+      <div className={`${GRID} pt-5`} aria-busy="true">
+        {Array.from({ length: 6 }).map((_, i) => <div key={i} className="skeleton aspect-[2/3] rounded-2xl" />)}
+      </div>
+    );
+  }
+  if (empty) {
+    return (
+      <div data-downloads-empty>
+        <EmptyState art={ART.emptyDownloads} title={tr('Nothing is being fetched right now.')}
+          sub={tr('Series you add, chapters you fetch and what the scheduled check finds show up here as they come in.')} />
+      </div>
+    );
+  }
+  const cameIn = allCameIn ? s.cameIn : s.cameIn.slice(0, CAME_IN_FIRST);
+  return (
+    <div className="space-y-8 pb-10 pt-5" data-downloads-view>
+      {s.running.length > 0 && (
+        <Section id="running" title={tr('Running')} n={s.running.length}>
+          <div className={GRID}>
+            {s.running.map((t) => (
+              <DownloadTile key={t.key} t={t} section="running" admin={isAdmin} nameOf={nameOf} onCancel={cancelJob}
+                focusRef={focusFolder && t.folder === focusFolder ? focusRef : undefined} />
+            ))}
+          </div>
+        </Section>
+      )}
+      {s.queued.length > 0 && (
+        <Section id="queued" title={tr('Queued')} n={s.queued.length}>
+          <div className={GRID}>
+            {s.queued.map((t) => (
+              <DownloadTile key={`${t.archive ? 'a' : 'n'}:${t.key}`} t={t} section="queued" admin={isAdmin} nameOf={nameOf} onCancel={cancelJob}
+                focusRef={focusFolder && t.folder === focusFolder ? focusRef : undefined} />
+            ))}
+          </div>
+        </Section>
+      )}
+      {s.attention.length > 0 && (
+        <Section id="attention" title={tr('Needs attention')} n={s.attention.length}>
+          <ul className={ROWS}>
+            {s.attention.map((a) => (
+              <AttentionRow key={a.key} a={a} nameOf={nameOf} onRetry={retry} onDismissJob={dismissJob} onDismissRun={dismissRun}
+                focusRef={focusFolder && a.kind === 'job' && a.job.folder === focusFolder ? focusRef : undefined} />
+            ))}
+          </ul>
+          {/* The chapter-level failures age out of this list after a day; the ledger of the ones that keep
+              failing, with what to do about each, is Health's. */}
+          {isAdmin && s.attention.some((a) => a.kind === 'chapters') && (
+            <p className="mx-4 mt-2 text-[12px] text-fog-500 lg:mx-0">
+              <Link href="/admin/?tab=Health" className="hover:text-fog-200 hover:underline">{tr('Chapters that keep failing are listed under Admin → Health.')}</Link>
+            </p>
+          )}
+        </Section>
+      )}
+      {s.tasks.length > 0 && (
+        <Section id="tasks" title={tr('Server tasks')} n={s.tasks.length}>
+          <ul className={ROWS}>
+            {s.tasks.map((r) => (
+              <TaskRow key={r.kind} r={r} admin={isAdmin} onCancel={cancelRun} onDismiss={dismissRun} />
+            ))}
+          </ul>
+        </Section>
+      )}
+      {(s.cameIn.length > 0 || s.stopped.length > 0) && (
+        <Section id="today" title={tr('Came in today')} n={s.cameIn.length}>
+          {s.cameIn.length > 0 && (
+            <div className={GRID}>
+              {cameIn.map((g) => <CameInTile key={g.key} g={g} />)}
+            </div>
+          )}
+          {!allCameIn && s.cameIn.length > CAME_IN_FIRST && (
+            <div className="mt-4 px-4 lg:px-0">
+              <button type="button" onClick={() => setAllCameIn(true)} className="btn-key">{tr('Show all {n}', { n: s.cameIn.length })}</button>
+            </div>
+          )}
+          {/* A download stopped by its Cancel: what landed is above; this is how far it got, and its Dismiss. */}
+          {s.stopped.length > 0 && (
+            <ul className={`${ROWS} mt-4`}>
+              {s.stopped.map((j) => (
+                <li key={j.folder} className="card flex items-start gap-3 px-4 py-3">
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm text-fog-100">{j.title}</p>
+                    <p dir="auto" className="mt-0.5 text-[12px] text-fog-400">{j.reason || tr('Cancelled; what landed is kept.')}</p>
+                  </div>
+                  {(isAdmin || j.mine) && (
+                    <button type="button" onClick={() => dismissJob(j.folder)} className="btn-key">{tr('Dismiss')}</button>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+        </Section>
+      )}
+    </div>
+  );
+}
+
+function Section({ id, title, n, children }: { id: string; title: string; n: number; children: React.ReactNode }) {
+  return (
+    <section data-downloads-section={id} aria-labelledby={`dl-${id}`}>
+      <h2 id={`dl-${id}`} className="mb-3 flex items-baseline gap-2 px-5 font-display text-base font-semibold text-fog-100 lg:px-0 lg:text-lg">
+        {title}<span className="text-sm font-medium tabular-nums text-fog-500">{n}</span>
+      </h2>
+      {children}
+    </section>
+  );
+}
+
+/** A cover for a Running or Queued tile: the series' thumbnail, else an add's source cover before its first scan. */
+function coverOf(t: Pick<Tile<Job>, 'seriesId' | 'job'>): { src: string; fallback?: string } {
+  if (t.seriesId) return { src: img.seriesThumb(t.seriesId) };
+  if (!t.job?.cover) return { src: '' };
+  const { source, url } = t.job.cover;
+  return { src: sourceCover(source, url), fallback: url };
+}
+
+function DownloadTile({ t, section, admin, nameOf, onCancel, focusRef }: {
+  t: Tile<Job>; section: 'running' | 'queued'; admin: boolean; nameOf: (id: string) => string;
+  onCancel: (folder: string) => void; focusRef?: (el: HTMLElement | null) => void;
+}) {
+  const job = t.job;
+  const cover = coverOf(t);
+  const status = tileStatus(t);
+  // A person's download says how far it has got in the ring; the server's own chapters and the archive say what
+  // started them, since "Scheduled check" or "Slow archive" is what tells two such covers apart.
+  const caption = job && job.total > 0 ? `${Math.min(job.done, job.total)}/${job.total}` : undefined;
+  const origin = t.archive ? tr('Slow archive') : !job && t.entries[0] ? originLabel(t.entries[0].origin) : '';
+  const label = [t.title, job ? ringValueText(job.done, job.total) : '', status, origin].filter(Boolean).join(' · ');
+  const face = (
+    <div className={`grad-border relative aspect-[2/3] overflow-hidden rounded-2xl border ${focusRef ? 'border-accent ring-2 ring-accent/60' : 'border-ink-700/60'}`}>
+      <Img src={cover.src} fallbackSrc={cover.fallback} alt="" className="h-full w-full" />
+      <CoverProgress state={section === 'running' ? 'running' : 'waiting'} progress={t.progress} caption={caption} label={label}
+        tone={t.archive ? 'amber' : undefined} static={t.archive}
+        glyph={t.archive ? <IcHourglass width={18} height={18} /> : undefined} />
+    </div>
+  );
+  return (
+    <div ref={focusRef} data-download-tile data-state={section} data-folder={t.folder} className="relative min-w-0">
+      {t.seriesId ? <Link href={`/series/?id=${encodeURIComponent(t.seriesId)}`} className="block">{face}</Link> : face}
+      {job && mayCancel(job, admin) && (
+        // Round, and the size of a fingertip: stops the download after the chapter in flight, never mid-file.
+        <button type="button" onClick={() => onCancel(job.folder)} title={tr('Cancel')} aria-label={`${tr('Cancel')} · ${t.title}`}
+          className="absolute end-1.5 top-1.5 z-10 grid h-7 w-7 place-items-center rounded-full bg-ink-950/85 text-fog-200 ring-1 ring-white/15 transition hover:text-rose-300">
+          <IcX width={14} height={14} />
+        </button>
+      )}
+      <p className="mt-1.5 line-clamp-2 text-xs font-medium leading-tight text-fog-200">{t.title}</p>
+      {status && <p className={`mt-0.5 truncate text-[11px] ${job?.cancelRequested ? 'text-fog-300' : 'text-fog-500'}`}>{status}</p>}
+      {origin && <p className="truncate text-[11px] text-fog-500">{origin}</p>}
+      {/* What the job did that the ring cannot show: a chapter taken from another source, one saved short. */}
+      {job && jobNoteLines(job, nameOf).map((line, i) => (
+        <p key={i} className="mt-0.5 text-[11px] leading-snug text-fog-400">{line}</p>
+      ))}
+    </div>
+  );
+}
+
+function AttentionRow({ a, nameOf, onRetry, onDismissJob, onDismissRun, focusRef }: {
+  a: Attention<Job>; nameOf: (id: string) => string;
+  onRetry: (seriesId: string, numbers: number[]) => void; onDismissJob: (folder: string) => void; onDismissRun: (kind: string) => void;
+  focusRef?: (el: HTMLElement | null) => void;
+}) {
+  if (a.kind === 'run') {
+    const r = a.run;
+    return (
+      <li data-attention="run" className="card flex items-start gap-3 px-4 py-3">
+        <span className="mt-0.5 grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-amber-500/10 text-amber-300"><IcAlert width={18} height={18} /></span>
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-sm font-medium text-fog-100">{runTitle(r.kind)}</p>
+          <p dir="auto" className="mt-0.5 text-[12px] leading-relaxed text-amber-300">{r.reason || tr('Stopped.')}</p>
+          {runProgress(r) && <p className="mt-0.5 text-[11px] tabular-nums text-fog-500">{runProgress(r)}</p>}
+          {a.dismiss && (
+            <div className="mt-2 flex flex-wrap gap-2">
+              <button type="button" onClick={() => onDismissRun(r.kind)} className="btn-key">{tr('Dismiss')}</button>
+            </div>
+          )}
+        </div>
+      </li>
+    );
+  }
+  const thumb = a.seriesId ? { src: img.seriesThumb(a.seriesId) } : a.kind === 'job' ? coverOf({ seriesId: null, job: a.job }) : { src: '' };
+  return (
+    <li ref={focusRef} data-attention={a.kind} data-folder={a.kind === 'job' ? a.job.folder : undefined}
+      className={`card flex items-start gap-3 px-4 py-3 ${focusRef ? 'border-accent/60 ring-2 ring-accent/40' : ''}`}>
+      <Img src={thumb.src} fallbackSrc={thumb.fallback} alt="" className="h-[60px] w-10 shrink-0 rounded-md" />
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-sm font-medium text-fog-100">{a.title}</p>
+        {a.kind === 'job' ? (
+          <>
+            {/* The reason has always been recorded; the strip used to say only "Download stopped." for every cause.
+                `dir="auto"`: it is the server's sentence, in English, and in an Arabic page its full stop would
+                otherwise jump to the front. */}
+            <p dir="auto" className="mt-0.5 text-[12px] leading-relaxed text-amber-300">{a.job.reason || tr('Fetch stopped. Try another source or wait.')}</p>
+            {jobNoteLines(a.job, nameOf).map((line, i) => <p key={i} className="mt-0.5 text-[11px] leading-snug text-fog-400">{line}</p>)}
+          </>
+        ) : (
+          <>
+            {a.failed.slice(0, 3).map((f) => (
+              <p key={f.id} className="mt-0.5 text-[12px] leading-relaxed text-amber-300">
+                {tr('Ch. {n} could not be saved', { n: f.number })}{f.reason ? `: ${f.reason}` : ''}
+              </p>
+            ))}
+            {a.failed.length > 3 && <p className="mt-0.5 text-[11px] text-fog-500">{tr('and {n} more', { n: a.failed.length - 3 })}</p>}
+            <p className="mt-0.5 text-[11px] text-fog-500">{[...new Set(a.failed.map((f) => originLabel(f.origin)))].join(', ')}</p>
+          </>
+        )}
+        <div className="mt-2 flex flex-wrap gap-2">
+          {a.seriesId && a.retry.length > 0 && (
+            <button type="button" onClick={() => onRetry(a.seriesId!, a.retry)} className="btn-key">{tr('Try again')}</button>
+          )}
+          {a.kind === 'job' && a.dismiss && (
+            <button type="button" onClick={() => onDismissJob(a.job.folder)} className="btn-key">{tr('Dismiss')}</button>
+          )}
+          {a.seriesId && <Link href={`/series/?id=${encodeURIComponent(a.seriesId)}`} className="btn-key">{tr('Open')}</Link>}
+        </div>
+      </div>
+    </li>
+  );
+}
+
+function TaskRow({ r, admin, onCancel, onDismiss }: { r: RunCard; admin: boolean; onCancel: (kind: string) => void; onDismiss: (kind: string) => void }) {
+  const running = r.status === 'running';
+  const mine = admin || !!r.mine;
+  const step = r.kind === 'repair' && running ? repairStepLabel(r.step) : '';
+  return (
+    <li data-task={r.kind} data-state={r.status} className="card flex items-start gap-3 px-4 py-3">
+      <ProgressRing progress={running ? ringFraction(r.done, r.total) : r.status === 'done' ? 1 : 'idle'} size="bar"
+        tone={r.status === 'cancelled' ? 'muted' : 'accent'} label={runTitle(r.kind)} valueText={runProgress(r)} className="mt-0.5" />
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-sm font-medium text-fog-100">{runTitle(r.kind)}</p>
+        {step && <p className="mt-0.5 truncate text-[12px] text-fog-300">{step}</p>}
+        {runProgress(r) && <p className="mt-0.5 text-[11px] tabular-nums text-fog-500">{runProgress(r)}</p>}
+        {running && r.current?.title && <p className="mt-0.5 truncate text-[11px] text-fog-400">{tr('Now: {title}', { title: r.current.title })}</p>}
+        <p className="mt-0.5 text-[11px] text-fog-500">
+          {running
+            ? tr('Started {time} ago', { time: durationText(Date.now() - r.startedAt) })
+            : relativeTime(new Date(r.finishedAt ?? r.startedAt).toISOString())}
+        </p>
+        {running && r.cancelRequested && <p className="mt-0.5 text-[11px] text-fog-300">{tr('Stopping after this chapter…')}</p>}
+        {r.status === 'cancelled' && <p className="mt-0.5 text-[11px] text-fog-400">{tr('Cancelled; what landed is kept.')}</p>}
+        {r.status === 'done' && r.reason && <p dir="auto" className="mt-0.5 text-[11px] text-fog-400">{r.reason}</p>}
+      </div>
+      {mine && running && !r.cancelRequested && (
+        <button type="button" onClick={() => onCancel(r.kind)} className="btn-key">{tr('Cancel')}</button>
+      )}
+      {mine && !running && (
+        <button type="button" onClick={() => onDismiss(r.kind)} className="btn-key">{tr('Dismiss')}</button>
+      )}
+    </li>
+  );
+}
+
+/** What landed today, one cover per series: a full ring gone to a check, like an installed app. */
+function CameInTile({ g }: { g: ActivityGroup }) {
+  const face = (
+    <div className="grad-border relative aspect-[2/3] overflow-hidden rounded-2xl border border-ink-700/60">
+      <Img src={g.seriesId ? img.seriesThumb(g.seriesId) : ''} alt="" className="h-full w-full" />
+      <CoverProgress state="done" label={`${g.title} · ${chapterSpan(g.numbers)}`} />
+    </div>
+  );
+  return (
+    <div data-came-in className="min-w-0">
+      {g.seriesId ? <Link href={`/series/?id=${encodeURIComponent(g.seriesId)}`} className="block">{face}</Link> : face}
+      <p className="mt-1.5 line-clamp-2 text-xs font-medium leading-tight text-fog-200">{g.title}</p>
+      {/* The time beside the chapters, the origins on their own line: "Added from Discover" alone fills a
+          390 px tile, and the time is what a phone cut off when they shared one. */}
+      <p className="mt-0.5 truncate text-[11px] text-fog-400">{[chapterSpan(g.numbers), relativeTime(new Date(g.at).toISOString())].filter(Boolean).join(' · ')}</p>
+      <p className="truncate text-[11px] text-fog-500">{g.origins.map(originLabel).join(', ')}</p>
+      {/* The job cards' own words for it ("2 chapters saved with pages missing"), one and many. */}
+      {jobNoteLines({ partial: g.partial }).map((line, i) => <p key={i} className="text-[11px] text-fog-500">{line}</p>)}
+    </div>
+  );
+}

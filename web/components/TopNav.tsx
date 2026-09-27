@@ -10,6 +10,7 @@ import { api } from '@/lib/api';
 import { useAuth, canDownload } from '@/lib/auth';
 import { Avatar } from './Avatar';
 import { HealthMarker } from './HealthAlert';
+import { DownloadsNavIcon } from './DownloadsRing';
 import { useToast } from './Toast';
 import { keys, t as tr } from '@/lib/i18n';
 
@@ -83,9 +84,13 @@ export function TopNav({ onSearchFocus }: { onSearchFocus?: () => void }) {
         </Link>
         {/* Admins only, and only while the last Health report was not clean (#101). */}
         <HealthMarker />
+        {/* What the server is fetching (v0.49.0, the pill's successor): just before the bell, so the two
+            "something came in" buttons sit together. A viewer who may not download gets nothing here. */}
+        <DownloadsNavIcon />
         <Link href="/updates" title={tr('Updates')} className="relative grid h-10 w-10 place-items-center rounded-full border border-ink-700 text-fog-300 hover:text-accent">
           <IcBell width={19} height={19} />
-          {updCount > 0 && <span className="absolute -right-0.5 -top-0.5 grid h-4 min-w-4 place-items-center rounded-full bg-accent px-1 text-[10px] font-bold text-black">{updCount > 9 ? '9+' : updCount}</span>}
+          {/* A squared tag, like the downloads ring's count beside it: a round one grows into a capsule at "9+". */}
+          {updCount > 0 && <span data-updates-count className="absolute -end-1.5 -top-1 grid h-4 min-w-4 place-items-center rounded-[4px] bg-accent px-[3px] text-[10px] font-bold leading-none tabular-nums text-black">{updCount > 9 ? '9+' : updCount}</span>}
         </Link>
         <button onClick={refresh} title={tr('Check for new chapters')}
           className={`grid h-10 w-10 place-items-center rounded-full border border-ink-700 text-fog-300 transition hover:text-accent ${refreshing ? 'animate-spin text-accent' : ''}`}>

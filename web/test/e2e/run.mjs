@@ -176,7 +176,9 @@ try {
   };
 
   // ---------------------------------------------------------------- every screen
-  for (const [name, path] of [['home', '/'], ['library', '/library'], ['search', '/search'],
+  // `serverdl` is Library -> Downloads (v0.49.0), what the server is fetching; `downloads` is the Offline tab,
+  // this device's copies only since then.
+  for (const [name, path] of [['home', '/'], ['library', '/library'], ['serverdl', '/library/?view=downloads'], ['search', '/search'],
                               ['collections', '/collections'], ['downloads', '/downloads'],
                               ['profile', '/profile'], ['admin', '/admin']]) {
     console.log(`\n  ${path}`);
@@ -195,6 +197,28 @@ try {
     else ok(`${path} rendered`);
 
     if (consoleErrors.length > before) bad(`${path}: ${consoleErrors.length - before} console error(s)`);
+
+    // The Offline tab is this device's copies and nothing else (v0.49.0): the server's downloads moved to
+    // Library -> Downloads, and one line points there. Reintroduce <ServerDownloads> on the page: "the Offline
+    // tab still shows the server's downloads" fails.
+    if (name === 'downloads') {
+      const dl = await page.evaluate(() => ({
+        server: /On the server|Downloading now/.test(document.body.innerText || '') || !!document.querySelector('[data-downloads-view]'),
+        pointer: !!document.querySelector('[data-server-downloads-pointer] a[href*="view=downloads"]'),
+      }));
+      if (dl.server) bad('the Offline tab still shows the server\'s downloads');
+      else if (!dl.pointer) bad('the Offline tab does not point to Library -> Downloads');
+      else ok('the Offline tab is this device only, and points to Library -> Downloads');
+    }
+    if (name === 'serverdl') {
+      const v = await page.evaluate(() => ({
+        tab: [...document.querySelectorAll('[role=tab]')].find((t) => t.getAttribute('aria-selected') === 'true')?.getAttribute('data-view-tab') ?? null,
+        view: !!document.querySelector('[data-downloads-view], [data-downloads-empty]'),
+        grid: !!document.querySelector('[data-library-grid]'),
+      }));
+      if (v.tab !== 'downloads' || !v.view || v.grid) bad(`/library/?view=downloads is not the Downloads view (${JSON.stringify(v)})`);
+      else ok('/library/?view=downloads shows the Downloads view, with its tab selected');
+    }
   }
 
   // ---------------------------------------------------------------- the library actually lists things
@@ -548,6 +572,10 @@ try {
     console.log('\n  cold boot, no network');
     await page.setOfflineMode(true);
     networkCut = true;
+    // Offline there is no server to ask what it is fetching, and the one poller must not try (v0.49.0).
+    let jobsAsked = 0;
+    const countJobs = (r) => { if (new URL(r.url()).pathname.startsWith('/api/sources/jobs')) jobsAsked++; };
+    page.on('request', countJobs);
     try {
       // 1. Launch the way the installed app does: the manifest's start_url.
       await page.goto(`${BASE}/`, { waitUntil: 'domcontentloaded', timeout: 60000 });
@@ -556,7 +584,11 @@ try {
         signedOut: !!document.querySelector('input[type=password]'),
         path: location.pathname,
         readerLinks: document.querySelectorAll('a[href*="/reader"]').length,
+        pointer: !!document.querySelector('[data-server-downloads-pointer]'),
       }));
+      page.off('request', countJobs);
+      jobsAsked ? bad(`offline, the app asked the server what it is fetching ${jobsAsked} time(s)`) : ok('offline, nothing asks the server what it is fetching');
+      if (home.pointer) bad('offline, the Offline tab points to Library -> Downloads, which needs the server');
       await shot('26-coldboot-downloads');
       if (home.signedOut) bad('a cold boot with no network showed the sign-in page');
       else if (!/\/downloads/.test(home.path)) bad(`a cold boot with no network landed on ${home.path}, not the downloads`);
@@ -677,7 +709,7 @@ try {
   // The reader is measured here and nowhere else: layout.mjs cannot reach it, because its PAGES are static
   // paths and the reader needs a book id. Its header gained a chapter button that used to be desktop-only,
   // which is exactly the kind of change that pushes a 390px header sideways.
-  const phonePages = [['home', '/'], ['library', '/library'], ['moments', '/moments']];
+  const phonePages = [['home', '/'], ['library', '/library'], ['serverdl', '/library/?view=downloads'], ['moments', '/moments']];
   if (readerBook) phonePages.push(['reader', `/reader/?book=${encodeURIComponent(readerBook)}`]);
   for (const [name, path] of phonePages) {
     await page.goto(BASE + path, { waitUntil: 'networkidle2', timeout: 60000 }).catch(() => {});
@@ -1378,6 +1410,25 @@ try {
           /turned off for your account/i.test(t)
             ? ok('typing the URL says so plainly')
             : bad(`/discover/ did not explain itself to a denied account: ${t.slice(0, 120).replace(/\s+/g, ' ')}`);
+
+          // Library -> Downloads is the server's downloads, which the route refuses this account (v0.49.0): no
+          // Series | Downloads switch, no ring on either nav, no link to the view, and the address shows the
+          // series. Reintroduce by dropping the canDownload gate on the switch: "a Downloads tab" fails.
+          await page.goto(`${BASE}/library/?view=downloads`, { waitUntil: 'networkidle2', timeout: 60000 }).catch(() => {});
+          await sleep(2500);
+          await shot('nodl-library');
+          const lib = await page.evaluate(() => ({
+            tab: [...document.querySelectorAll('[role=tab]')].some((t) => /downloads/i.test(t.getAttribute('data-view-tab') || '')),
+            link: !!document.querySelector('a[href*="view=downloads"]'),
+            ring: !!document.querySelector('[data-downloads-ring]'),
+            grid: !!document.querySelector('[data-library-grid]'),
+            view: !!document.querySelector('[data-downloads-view], [data-downloads-empty]'),
+          }));
+          if (lib.tab) bad('a member who may not download is offered a Downloads tab on the Library');
+          else if (lib.link) bad('a member who may not download is offered a link to Library -> Downloads');
+          else if (lib.ring) bad('a member who may not download wears the downloads ring');
+          else if (!lib.grid || lib.view) bad(`/library/?view=downloads is not the series grid for a member who may not download (${JSON.stringify(lib)})`);
+          else ok('no Downloads tab, ring or link, and ?view=downloads shows the series');
         }
 
         // Back to the admin account so anything after this behaves.

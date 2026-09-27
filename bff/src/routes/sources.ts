@@ -120,7 +120,7 @@ interface Job {
   title: string; total: number; done: number;
   status: 'downloading' | 'done' | 'error';
   reason?: string;
-  /** When it started, for the pill's "Finished today" list (#82). */
+  /** When it started, for Library -> Downloads (#82). */
   startedAt?: number;
   /** When it stopped, so a finished one can age out. A FAILED one never does: it is the only record. */
   finishedAt?: number;
@@ -187,8 +187,8 @@ function leftOf(asked: ReadonlyArray<{ number: number }>, landed: ReadonlyArray<
 /** How long a completed download stays listed. `jobs.delete` had exactly one call site -- the chapter-1
  *  failure path -- so a successful job was never removed and the strip filled with green cards that only a
  *  restart cleared. Swept lazily on read rather than on a timer: the client polls this often enough.
- *  A day since #82 (it was five minutes): "what did it fetch this morning" is a question the pill's
- *  Finished list answers now, while Discover's strip still shows only the last few minutes (web lib/jobs.ts). */
+ *  A day since #82 (it was five minutes): "what did it fetch this morning" is a question Library -> Downloads
+ *  answers now, while Discover's strip still shows only the last few minutes (web lib/jobs.ts). */
 const DONE_TTL = 24 * 3600_000;
 function sweepJobs(now = Date.now()): void {
   for (const [folder, j] of jobs) {

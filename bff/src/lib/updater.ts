@@ -659,7 +659,7 @@ export function runSweep(opts: SweepOpts & { by?: string | null }, log: SweepLog
   if (runtime.updating || runtime.repairing) return false;
   // Set before the first await, so two starts in the same turn of the event loop cannot both get through.
   runtime.updating = true;
-  // The run's card on the download pill (lib/downloadJobs.ts, #82): the sweep writes its progress there and
+  // The run's card in Library -> Downloads (lib/downloadJobs.ts, #82): the sweep writes its progress there and
   // stops when an admin presses its Cancel. `by` is who pressed Run now; the schedule is nobody.
   const { by, ...sweepOpts } = opts ?? {};
   const card = beginRun('sweep', by ?? null);
