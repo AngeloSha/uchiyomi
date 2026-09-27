@@ -6,6 +6,7 @@ import { IcHome, IcGrid, IcSearch, IcDownload, IcUser, IcPlus } from './icons';
 import { useAuth, canDownload } from '@/lib/auth';
 import { keys, t as tr } from '@/lib/i18n';
 import { isDesktop, DESKTOP_HIDDEN } from '@/lib/desktop';
+import { useLayer } from '@/lib/layers';
 
 // `keys()` is the identity function; it exists so these reach the translation extractor, which
 // cannot see a label rendered as `tr(label)`. This nav shipped untranslated once already.
@@ -25,6 +26,8 @@ const items = [
 export function BottomNav() {
   const path = usePathname();
   const { user, status } = useAuth();
+  // On the notices' layer stack (lib/layers.ts): with the nav up, a notice sits above it rather than under it.
+  useLayer('nav');
   // Offline, only Downloads leads anywhere: every other tab is assembled from the server. They stay VISIBLE
   // and go inert rather than disappearing -- a nav that loses four of its six items reads as the app having
   // broken, which is the opposite of what an offline mode should communicate.

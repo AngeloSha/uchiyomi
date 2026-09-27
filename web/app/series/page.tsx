@@ -35,6 +35,7 @@ import { GroupAvatar } from '@/components/GroupAvatar';
 import { supplyLine } from '@/lib/supplyLine';
 import { isDesktop } from '@/lib/desktop';
 import { useContextMenu } from '@/components/ContextMenu';
+import { useLayer } from '@/lib/layers';
 
 // The four the scanner itself writes from ComicInfo's PublishingStatus. Kept as a suggestion list rather
 // than a hard enum, because a file can carry anything and rejecting it would reject Uchiyomi's own data.
@@ -1269,6 +1270,10 @@ function SeriesInner() {
   // `b.owned &&` back: pick a /library chapter and the delete says "0 deleted" -- or nothing.
   const deletable = pickedBookList.filter((b) => !b.pruned);
   const pickedCount = pickedBookList.length + pickedGhostList.length;
+  // The select bar on the notices' layer stack (lib/layers.ts), measured: it wraps to three rows at 390 px,
+  // and a notice has to rise above whichever height it has.
+  const toolbarRef = useRef<HTMLDivElement>(null);
+  useLayer('toolbar', selecting && pickedCount > 0, { ref: toolbarRef });
 
   const invalidateChapters = () => {
     for (const k of [['series-books', id], ['series-listing', id], ['series-versions', id], ['series-groups', id], ['series-scanlators', id], ['series', id], ['home'], ['source-jobs']]) qc.invalidateQueries({ queryKey: k });
@@ -1707,7 +1712,7 @@ function SeriesInner() {
   // bottom class back to `bottom-0` and picking every row on a phone: only the first row of chips is
   // tappable.
   const Toolbar = selecting && pickedCount > 0 && (
-    <div className="fixed inset-x-0 bottom-[calc(5.75rem+env(safe-area-inset-bottom))] z-40 border-t border-ink-700 bg-ink-950/95 px-4 pb-3 pt-3 backdrop-blur-xl lg:bottom-0 lg:pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+    <div ref={toolbarRef} className="fixed inset-x-0 bottom-[calc(5.75rem+env(safe-area-inset-bottom))] z-40 border-t border-ink-700 bg-ink-950/95 px-4 pb-3 pt-3 backdrop-blur-xl lg:bottom-0 lg:pb-[max(0.75rem,env(safe-area-inset-bottom))]">
       {/* pe-36 on phones keeps the chips clear of the downloads pill (fixed bottom-20 end-3), which floats
           over this bar's lower band while a source job is running. */}
       <div className="mx-auto flex max-w-3xl flex-wrap items-center gap-2 pe-36 lg:pe-0">

@@ -13,6 +13,7 @@ import { IcSearch, IcSparkle, IcRefresh, IcBell, IcDownload, IcGrid, IcMoments }
 import { t as tr } from '@/lib/i18n';
 import { hiddenOnDesktop, DESKTOP_HIDDEN } from '@/lib/desktop';
 import { isTypingTarget, seedFor, typeToSearchKey, typeToSearchOn } from '@/lib/typeToSearch';
+import { useLayer } from '@/lib/layers';
 
 interface Action { key: string; label: string; hint?: string; icon: React.ReactNode; run: () => void | Promise<void> }
 
@@ -25,6 +26,8 @@ export function CommandPalette({ open, seed = '', onClose }: { open: boolean; se
   const [sel, setSel] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
   const seq = useRef(0);
+  // On the notices' layer stack while open (lib/layers.ts). It stays mounted while closed, hence `open`.
+  useLayer('dialog', open);
 
   // Reset on open (to the typed-to-open character, if any) and focus the input. A layout effect, focusing
   // in the same commit that mounts the input: with type-to-search the NEXT keystroke is usually already on

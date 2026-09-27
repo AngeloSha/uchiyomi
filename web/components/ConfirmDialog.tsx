@@ -10,6 +10,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { t as tr } from '@/lib/i18n';
 import { confirmsTitle } from '@/lib/confirmTitle';
+import { useLayer } from '@/lib/layers';
 
 export function Modal({
   title,
@@ -23,6 +24,9 @@ export function Modal({
   wide?: boolean;
 }) {
   const ref = useRef<HTMLDivElement>(null);
+  // On the notices' layer stack (lib/layers.ts), as a dialog that keeps the phone's nav band free -- see the
+  // padding below -- so a notice can dock there instead of over this title.
+  useLayer('dialog', true, { navBandFree: true });
   // Read through a ref so the effect below can depend on nothing. Callers pass `onClose={() => ...}`, a new
   // function identity on every render, so an effect depending on it re-ran after every keystroke.
   const closeRef = useRef(onClose);

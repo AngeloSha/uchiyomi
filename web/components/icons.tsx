@@ -98,6 +98,10 @@ export const IcInfo = (p: P) => (
 export const IcAlert = (p: P) => (
   <svg {...base(p)}><path d="M12 3.5 2.5 20h19L12 3.5Z" /><path d="M12 10v4.5" /><path d="M12 17.5h.01" /></svg>
 );
+// Waiting its turn: a queued cover in the Downloads view, a refused action that will run later.
+export const IcClock = (p: P) => (
+  <svg {...base(p)}><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></svg>
+);
 export const IcFilter = (p: P) => (
   <svg {...base(p)}><path d="M4 5h16" /><path d="M7 12h10" /><path d="M10 19h4" /></svg>
 );

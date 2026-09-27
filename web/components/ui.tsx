@@ -2,6 +2,7 @@
 import { useState, ReactNode, useRef, useEffect, useCallback } from 'react';
 import { genreBackdrop } from '@/lib/art';
 import { useReduceEffects } from '@/lib/effects';
+import { useLayer } from '@/lib/layers';
 import { t as tr } from '@/lib/i18n';
 
 /** Series backdrop: the BFF composites a wide, blurred, darkened full-bleed ambient from the series art
@@ -98,6 +99,9 @@ export function Sheet({ title, onClose, overBottomNav, action, footer, children 
   children: ReactNode;
 }) {
   const bodyRef = useRef<HTMLDivElement>(null);
+  // A dialog on the notices' layer stack (lib/layers.ts). Only an `overBottomNav` sheet leaves the nav band
+  // free; the reader's sheets run to the bottom edge.
+  useLayer('dialog', true, { navBandFree: !!overBottomNav });
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
     document.addEventListener('keydown', onKey);

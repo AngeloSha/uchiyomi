@@ -8,6 +8,7 @@ import {
   DEFAULT_LOCALE, detectLocale, dirOf, isLocale, loadDict, setActiveDict, storeLocale, storedLocale,
   translate, type Locale,
 } from './i18n';
+import { setActiveLocale } from './format';
 
 type Ctx = {
   lang: Locale;
@@ -35,8 +36,10 @@ export function I18nProvider({ children }: { children: ReactNode }) {
   const apply = useCallback(async (next: Locale) => {
     const d = await loadDict(next);
     // Published to the module before the state update, so anything rendering in the same tick already sees
-    // the new strings rather than one frame of the old ones.
+    // the new strings rather than one frame of the old ones. The locale goes with them: durations and "5
+    // minutes ago" are formatted by Intl in lib/format.ts, not looked up in the dictionary.
     setActiveDict(d);
+    setActiveLocale(next);
     setDict(d);
     setLangState(next);
     if (typeof document !== 'undefined') {

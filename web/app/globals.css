@@ -79,6 +79,11 @@
   --animate-fade-up: fade-up 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
   --animate-shimmer: shimmer 1.6s infinite;
   --animate-pulse-soft: pulse-soft 1.4s ease-in-out infinite;
+  /* The progress ring's indeterminate turn (components/ProgressRing.tsx). It turns the ring's ROOT <svg>, a
+     transform the compositor runs alone; and it is never applied under reduced motion or Reduce effects,
+     where the ring draws a still dashed circle instead -- the reduced-motion rule below shortens an
+     infinite animation to 0.001ms without stopping it, which makes a spinner jitter rather than rest. */
+  --animate-ring: ring-spin 1.4s linear infinite;
 
   @keyframes fade-up {
     0% { opacity: 0; transform: translateY(12px); }
@@ -91,6 +96,9 @@
   @keyframes pulse-soft {
     0%, 100% { opacity: 1; }
     50% { opacity: 0.55; }
+  }
+  @keyframes ring-spin {
+    to { transform: rotate(360deg); }
   }
 }
 
@@ -222,6 +230,24 @@
   }
   .chip-active {
     @apply border-transparent bg-accent-soft text-accent;
+  }
+  /* Action keys (v0.49.0, "no more pills"). The owner asked for the capsule shapes to go from actions and
+     statuses; these are the rectangular buttons that replace them -- 8 px corners, 32 px tall, the same ink
+     as a chip so a page does not change weight. `.chip` / `.chip-active` above stay exactly as they are:
+     filter and sort chips keep their shape, and web/test/noPills.test.ts pins both bodies. */
+  .btn-key {
+    @apply inline-flex h-8 shrink-0 items-center justify-center gap-1.5 rounded-lg border border-ink-600
+           bg-ink-800/70 px-3 text-xs font-medium text-fog-100 transition hover:border-accent/60 hover:text-accent
+           active:translate-y-px disabled:cursor-default disabled:opacity-45 disabled:hover:border-ink-600
+           disabled:hover:text-fog-100;
+  }
+  .btn-key-primary {
+    @apply border-transparent bg-accent text-black hover:border-transparent hover:text-black
+           disabled:hover:border-transparent disabled:hover:text-black;
+    box-shadow: 0 6px 24px -10px rgb(var(--accent) / 0.7);
+  }
+  .btn-key-danger {
+    @apply hover:border-rose-400/60 hover:text-rose-300;
   }
   .card {
     @apply rounded-3xl border border-ink-700/70 bg-ink-850/70 backdrop-blur;

@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { motion } from 'framer-motion';
 import { useReduceEffects } from '@/lib/effects';
+import { useLayer } from '@/lib/layers';
 import { t as tr } from '@/lib/i18n';
 
 export interface NavGroup<T extends string> {
@@ -143,6 +144,8 @@ function GroupSheet<T extends string>({ groups, ariaLabel, current, footer, onPi
   onClose: () => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
+  // A dialog on the notices' layer stack (lib/layers.ts); its panel pads the phone's nav band clear, as Modal does.
+  useLayer('dialog', true, { navBandFree: true });
   // Through a ref so the effect runs once: the caller's `onClose` is a new function on every render.
   const closeRef = useRef(onClose);
   closeRef.current = onClose;

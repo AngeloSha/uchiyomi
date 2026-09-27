@@ -18,6 +18,7 @@ import { LibraryFilters, SORTS, READ_STATES, STATUSES } from '@/components/Libra
 import { Sheet } from '@/components/ui';
 import { t as tr } from '@/lib/i18n';
 import { followBulkNewest, BULK_NEWEST_POLL_MS, type BulkNewestStatus } from '@/lib/bulkNewest';
+import { useLayer } from '@/lib/layers';
 
 /** Build the condition tree from the URL. Empty means no condition at all, which needs no user context. */
 function conditionFrom(read: string, status: string, genres: string[], lib: string) {
@@ -67,6 +68,10 @@ function LibraryInner() {
   const [fetching, setFetching] = useState<{ done: number; total: number } | null>(null);
   // Set while a Fetch newest run is being followed: calling it stops the polling (the bar's Cancel chip).
   const stopFollowing = useRef<(() => void) | null>(null);
+  // The select bar on the notices' layer stack (lib/layers.ts), measured: its chips wrap to two rows on a
+  // phone, and a notice has to rise above whichever height it has.
+  const toolbarRef = useRef<HTMLDivElement>(null);
+  useLayer('toolbar', selecting && picked.size > 0, { ref: toolbarRef });
   const { isAdmin, user } = useAuth();
   useEffect(() => { setSelecting(false); setPicked(new Set()); }, [read, status, genres.join(','), sortKey, lib]);
   const togglePick = (id: string) =>
@@ -369,7 +374,7 @@ function LibraryInner() {
           returns to the bottom. Reintroduce with `bottom-0`: on a 390 px phone the Cancel chip is under
           the nav. */}
       {selecting && picked.size > 0 && (
-        <div className="fixed inset-x-0 bottom-[calc(5.75rem+env(safe-area-inset-bottom))] z-40 border-t border-ink-700 bg-ink-950/95 px-4 pb-8 pt-3 backdrop-blur-xl lg:bottom-0 lg:pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+        <div ref={toolbarRef} className="fixed inset-x-0 bottom-[calc(5.75rem+env(safe-area-inset-bottom))] z-40 border-t border-ink-700 bg-ink-950/95 px-4 pb-8 pt-3 backdrop-blur-xl lg:bottom-0 lg:pb-[max(0.75rem,env(safe-area-inset-bottom))]">
           {/* ⚠️ Two rows at 390 px, no more: a third row covers a third of the grid. Seven chips plus the
               count do not fit in two, so on a phone the two admin actions live behind `More` (a Sheet);
               from lg up there is room and they are chips like the rest. The series page reserves `pe-36`
