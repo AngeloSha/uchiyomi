@@ -54,7 +54,11 @@ export interface FakePref {
 export interface FakeChapter {
   name: string;
   url: string;
-  /** -1 is the engine's "no number". Ignored on a `numbering: 'webtoons'` source. */
+  /**
+   * -1 (or absent) is the engine's "no number" -- for a name with no digits in it. The engine parses a number
+   * out of a name like "Ch.10 Finale" when the extension gives none, and the fake does not, so such a seed is
+   * refused: give the number. Ignored on a `numbering: 'webtoons'` source.
+   */
   chapterNumber?: number;
   scanlator?: string | null;
   /** Epoch milliseconds. */

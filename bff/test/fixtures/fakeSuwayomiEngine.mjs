@@ -40,6 +40,16 @@
 //   * setSettings changes only the fields given non-null, and checks no URL.
 // What is modelled rather than measured is marked where it happens (the extension's own stack frames, the
 // Webtoons numbering rule, the image failure status).
+//
+// ⚠️ NOT FOR REPOSITORY FLOWS. setSettings stores extensionRepos, and fetchExtensions / extensions answer the
+// seeded catalogue whatever the repositories say. The real engine applies an added repository asynchronously,
+// lists its own spelling after a restart, and marks an installed extension no repository offers as obsolete --
+// three behaviours extensionRepos.int.test.ts measured and models, each of which hid a shipped bug behind a
+// fake that ignored it. A test of adding, removing or refreshing repositories uses that file's fake, not this.
+//
+// Not modelled either: graphql-java's overlap and uniqueness rules (FieldsConflict, duplicate arguments,
+// fields, fragments, variables or directives, a directive in the wrong place). A query that breaks one is
+// refused by the engine and answered here, so do not lean on the fake to catch those.
 import http from 'node:http';
 import { readFileSync } from 'node:fs';
 import { deflateSync } from 'node:zlib';
@@ -518,6 +528,9 @@ export function validate(schema, doc, deprecated = []) {
           if (s.arguments.length) add('UnknownArgument', fpath, `Unknown field argument '${s.arguments[0].name}'`, s.arguments[0].loc);
           continue;
         }
+        // Introspection: the engine answers it and this fake does not serve it, so it is the fake's gap
+        // (NotImplemented at execution), never a refusal worded as the engine's.
+        if ((s.name === '__schema' || s.name === '__type') && parent === schema.roots.query) continue;
         const def = schema.kind(parent) === 'UNION' ? undefined : schema.fields(parent).get(s.name);
         if (!def) { add('FieldUndefined', fpath, `Field '${s.name}' in type '${parent}' is undefined`, s.loc); continue; }
         if (def.deprecated !== undefined) deprecated.push(`${parent}.${s.name}`);
@@ -708,15 +721,19 @@ class VariableError extends Error {
 }
 
 /** Runtime coercion of one JSON variable value, with graphql-java's messages. */
-function coerceInput(schema, v, type, varName, loc) {
+function coerceInput(schema, v, type, varName, loc, inList = false) {
   const invalid = (msg) => new VariableError(`Variable '${varName}' has an invalid value: ${msg}`, loc);
   if (type.kind === 'NON_NULL') {
-    if (v === null || v === undefined) throw invalid(`Variable '${varName}' has coerced Null value for NonNull type '${printType(type)}'`);
-    return coerceInput(schema, v, type.of, varName, loc);
+    // A null inside a list is worded without the variable's name ("Coerced Null value for NonNull type
+    // 'String!'"), a null variable with it -- both as the engine words them.
+    if (v === null || v === undefined) {
+      throw invalid(inList ? `Coerced Null value for NonNull type '${printType(type)}'` : `Variable '${varName}' has coerced Null value for NonNull type '${printType(type)}'`);
+    }
+    return coerceInput(schema, v, type.of, varName, loc, inList);
   }
   if (v === null || v === undefined) return null;
   if (type.kind === 'LIST') {
-    return Array.isArray(v) ? v.map((x) => coerceInput(schema, x, type.of, varName, loc)) : [coerceInput(schema, v, type.of, varName, loc)];
+    return Array.isArray(v) ? v.map((x) => coerceInput(schema, x, type.of, varName, loc, true)) : [coerceInput(schema, v, type.of, varName, loc, true)];
   }
   const name = type.name;
   const kind = schema.kind(name);
@@ -728,7 +745,7 @@ function coerceInput(schema, v, type, varName, loc) {
     }
     const out = {};
     for (const [fn, fd] of fields) {
-      if (Object.hasOwn(v, fn)) out[fn] = coerceInput(schema, v[fn], fd.type, varName, loc);
+      if (Object.hasOwn(v, fn)) out[fn] = coerceInput(schema, v[fn], fd.type, varName, loc, inList);
       else if (fd.type.kind === 'NON_NULL' && !fd.hasDefault) throw invalid(`Field '${fn}' of variable '${varName}' has coerced Null value for NonNull type '${fd.typeString}'`);
     }
     return out;
@@ -739,7 +756,8 @@ function coerceInput(schema, v, type, varName, loc) {
   }
   switch (name) {
     case 'Int':
-      if (typeof v !== 'number' || !Number.isInteger(v) || v > 2147483647 || v < -2147483648) throw invalid(`Expected a value that can be converted to type 'Int' but it was a '${JAVA_TYPE(v)}'`);
+      if (Number.isInteger(v) && (v > 2147483647 || v < -2147483648)) throw invalid(`Expected value to be in the integer range, but it was a '${v}'`);
+      if (typeof v !== 'number' || !Number.isInteger(v)) throw invalid(`Expected a value that can be converted to type 'Int' but it was a '${JAVA_TYPE(v)}'`);
       return v;
     case 'Float':
       if (typeof v !== 'number') throw invalid(`Expected a value that can be converted to type 'Float' but it was a '${JAVA_TYPE(v)}'`);
@@ -886,6 +904,7 @@ async function execute(schema, doc, { operationName, variables, root }) {
   async function field(parentType, parent, nodes, path) {
     const node = nodes[0];
     if (node.name === '__typename') return parentType;
+    if (node.name === '__schema' || node.name === '__type') throw new NotImplemented(`introspection (${node.name})`);
     const def = schema.fields(parentType).get(node.name);
     const args = {};
     for (const a of node.arguments) {
@@ -1183,6 +1202,16 @@ function buildState(seed) {
       m.id = st.nextManga++;
       m.sourceId = s.id;
       m.chapters ??= [];
+      // The engine re-parses the name of every chapter its extension left unnumbered (ChapterRecognition):
+      // "Ch.10 Finale" at -1 comes back as 10, measured on the Local source. This fake does not model that
+      // parser, so a seed that would need it is refused instead of answered -1 where the engine says 10.
+      if (s.numbering !== 'webtoons') {
+        for (const c of m.chapters) {
+          if ((c.chapterNumber ?? -1) === -1 && /\d/.test(c.name)) {
+            throw new FakeBug(`${m.title}: "${c.name}" has no chapterNumber, and the engine would parse one from its name; give it explicitly`);
+          }
+        }
+      }
       st.mangas.set(m.id, m);
     }
     st.sources.set(s.id, s);

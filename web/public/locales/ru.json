@@ -2,7 +2,7 @@
   "_meta": {
     "language": "ru",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 1359
+    "strings": 1360
   },
   "1 check found something": "1 проверка нашла проблему",
   "1 member": "1 участник",
@@ -1362,5 +1362,6 @@
   "Rate-limited": "Частота ограничена",
   "Not answering": "Не отвечает",
   "Answers empty": "Пустые ответы",
-  "Turned off": "Отключена"
+  "Turned off": "Отключён",
+  "Blocked by the site": "Заблокирован сайтом"
 }

@@ -5,7 +5,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync, statSync } from 'fs';
 import { join } from 'path';
-import { layersNow, registerLayer } from '../lib/layers';
+import { attachLayer, layersNow, registerLayer } from '../lib/layers';
 
 const ROOT = join(__dirname, '..');
 const read = (p: string) => readFileSync(join(ROOT, p), 'utf8');
@@ -75,6 +75,45 @@ test('the snapshot is the same object until something it says changes', () => {
   t.release();
 });
 
+test('a measured toolbar: attachLayer reads the element now, follows every resize, and lets go', () => {
+  // The critic's fix for the constant 11.25rem offset: the select bar wraps to three rows at 390 px. Nothing
+  // in the browser runs here, so the element and the observer are fakes the test drives. Reintroduce by
+  // dropping the observer (`if (RO) { … }`): "a resize did not move the toolbar height" fails; by never
+  // measuring (`if (el)` → `if (false)`): "the toolbar was never measured" fails.
+  let height = 62.4;
+  const el = { getBoundingClientRect: () => ({ height }) };
+  const observers: { cb: () => void; watched: unknown[]; off: boolean }[] = [];
+  class FakeRO {
+    o: { cb: () => void; watched: unknown[]; off: boolean };
+    constructor(cb: () => void) { this.o = { cb, watched: [], off: false }; observers.push(this.o); }
+    observe(e: unknown) { this.o.watched.push(e); }
+    disconnect() { this.o.off = true; }
+  }
+  const undo = attachLayer('toolbar', {}, el, FakeRO);
+  assert.equal(layersNow().toolbar, 1);
+  assert.equal(layersNow().toolbarHeight, 62, 'the toolbar was never measured');
+  assert.equal(observers.length, 1, 'no ResizeObserver watches the toolbar');
+  assert.deepEqual(observers[0].watched, [el], 'the observer watches something other than the toolbar');
+  height = 104; // the series bar wrapped to a third row
+  observers[0].cb();
+  assert.equal(layersNow().toolbarHeight, 104, 'a resize did not move the toolbar height');
+  undo();
+  assert.equal(observers[0].off, true, 'the observer outlives the toolbar');
+  assert.equal(layersNow().toolbar, 0);
+  assert.equal(layersNow().toolbarHeight, 0);
+  // A dialog has no element to measure, and its nav-band flag goes through.
+  const d = attachLayer('dialog', { navBandFree: true });
+  assert.equal(layersNow().dialog, 1);
+  assert.equal(layersNow().navBandFree, true);
+  d();
+  // useLayer is that function on the element it was given, with the browser's observer. Reintroduce
+  // `const el = null` (or pass `undefined` for the observer): "useLayer does not measure its ref" fails.
+  const src = code(read('lib/layers.ts'));
+  const hook = src.slice(src.indexOf('export function useLayer('), src.indexOf('export function useLayers('));
+  assert.match(hook, /return attachLayer\(kind, \{ navBandFree \}, ref\?\.current, typeof ResizeObserver !== 'undefined' \? ResizeObserver : undefined\);/,
+    'useLayer does not measure its ref');
+});
+
 test('every dialog in the app is on the stack, and so are the nav and both select bars', () => {
   // A dialog missing here is one a notice will be placed over. Reintroduce by deleting `useLayer('dialog'`
   // from Modal: "components/ConfirmDialog.tsx declares a dialog but never registers it" fails.
@@ -91,6 +130,33 @@ test('every dialog in the app is on the stack, and so are the nav and both selec
     assert.ok(registered >= declared, `${rel} declares a dialog but never registers it, so notices land on its buttons`);
     assert.match(src, /import \{ useLayer \} from '@\/lib\/layers';/, `${rel} does not import useLayer`);
   }
+  // A dialog also hides behind a hand-rolled overlay: a `fixed inset-0` root with no aria-modal (Edit series,
+  // Add to collection, Edit chapter, the art picker, New collection, the reader's settings all were). Each
+  // such root is one more dialog the file must register. Only the roots below are not dialogs. Reintroduce by
+  // deleting `useLayer('dialog');` from ChapterEditModal: "app/series/page.tsx has 3 full-screen overlays
+  // but registers 2 dialogs" fails.
+  const NOT_DIALOGS: Record<string, string> = {
+    'components/ContextMenu.tsx': 'the invisible click-catcher behind a context menu, which closes on any click',
+    'app/reader/page.tsx': 'the reader itself, a page that fills the screen, and its loading fallback',
+  };
+  const overlays = (src: string) => [...src.matchAll(/className=(?:"([^"]*)"|\{`([^`]*)`\})/g)]
+    .map((m) => (m[1] ?? m[2]).split(/\s+/))
+    .filter((c) => c.includes('fixed') && c.includes('inset-0')).length;
+  let roots = 0;
+  for (const f of files) {
+    const rel = f.slice(ROOT.length + 1);
+    const src = code(readFileSync(f, 'utf8'));
+    const n = overlays(src);
+    if (!n) continue;
+    roots += n;
+    if (NOT_DIALOGS[rel]) continue;
+    const registered = (src.match(/useLayer\('dialog'/g) || []).length;
+    assert.ok(registered >= n, `${rel} has ${n} full-screen overlays but registers ${registered} dialogs, so notices land on their buttons`);
+    assert.match(src, /import \{ useLayer \} from '@\/lib\/layers';/, `${rel} does not import useLayer`);
+  }
+  assert.ok(roots >= 12, `only ${roots} full-screen overlays found -- the scan is broken`);
+  for (const rel of Object.keys(NOT_DIALOGS)) assert.ok(overlays(code(read(rel))) > 0, `${rel} no longer has an overlay; drop it from NOT_DIALOGS`);
+
   // The dialogs that keep the phone's nav band free say so; the one that does not, doesn't.
   assert.match(code(read('components/ConfirmDialog.tsx')), /useLayer\('dialog', true, \{ navBandFree: true \}\);/);
   assert.match(code(read('components/ConsoleNav.tsx')), /useLayer\('dialog', true, \{ navBandFree: true \}\);/);

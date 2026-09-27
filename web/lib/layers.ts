@@ -102,6 +102,26 @@ function subscribe(l: () => void): () => void {
   return () => { listeners.delete(l); };
 }
 
+/** What attachLayer needs of an element and of ResizeObserver, so a test can hand it fakes. */
+export interface MeasuredEl { getBoundingClientRect(): { height: number } }
+export type ResizeObserverLike = new (cb: () => void) => { observe(el: any): void; disconnect(): void };
+
+/**
+ * Put one layer on the stack and, given an element, keep its measured height current: once now, and again
+ * on every resize the observer reports. Returns the undo. useLayer's effect is exactly this; it is apart
+ * from React so a test can drive the measuring with a fake element and a fake observer.
+ */
+export function attachLayer(kind: LayerKind, info: { navBandFree?: boolean }, el?: MeasuredEl | null, RO?: ResizeObserverLike): () => void {
+  const h = registerLayer(kind, { navBandFree: !!info.navBandFree });
+  let ro: InstanceType<ResizeObserverLike> | null = null;
+  if (el) {
+    const measure = () => h.update({ height: Math.round(el.getBoundingClientRect().height) });
+    measure();
+    if (RO) { ro = new RO(measure); ro.observe(el); }
+  }
+  return () => { ro?.disconnect(); h.release(); };
+}
+
 /**
  * Register this component's layer while it is mounted and `active`.
  *
@@ -113,15 +133,7 @@ export function useLayer(kind: LayerKind, active = true, opts: { navBandFree?: b
   const { navBandFree = false, ref } = opts;
   useEffect(() => {
     if (!active) return;
-    const h = registerLayer(kind, { navBandFree });
-    const el = ref?.current;
-    let ro: ResizeObserver | null = null;
-    if (el) {
-      const measure = () => h.update({ height: Math.round(el.getBoundingClientRect().height) });
-      measure();
-      if (typeof ResizeObserver !== 'undefined') { ro = new ResizeObserver(measure); ro.observe(el); }
-    }
-    return () => { ro?.disconnect(); h.release(); };
+    return attachLayer(kind, { navBandFree }, ref?.current, typeof ResizeObserver !== 'undefined' ? ResizeObserver : undefined);
   }, [kind, active, navBandFree, ref]);
 }
 

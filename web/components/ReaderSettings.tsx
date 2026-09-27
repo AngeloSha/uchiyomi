@@ -3,6 +3,7 @@ import { motion } from 'framer-motion';
 import { ReaderPrefs } from '@/lib/readerPrefs';
 import { IcX } from './icons';
 import { t as tr } from '@/lib/i18n';
+import { useLayer } from '@/lib/layers';
 
 function Row({ label, children }: { label: string; children: React.ReactNode }) {
   return (
@@ -33,6 +34,9 @@ export function ReaderSettings({
   /** Save the current mode/theme/spread as that source's default, or clear it when `false` is passed. */
   onSourceDefault?: (save: boolean) => void;
 }) {
+  // A sheet on the notices' layer stack (lib/layers.ts). It runs to the bottom edge, so it does not leave the
+  // nav band free -- the reader has no nav there anyway.
+  useLayer('dialog');
   return (
     <motion.div className="fixed inset-0 z-50" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
       <div className="absolute inset-0 bg-black/60" onClick={onClose} />
@@ -43,6 +47,7 @@ export function ReaderSettings({
         animate={{ y: 0 }}
         exit={{ y: '100%' }}
         transition={{ type: 'spring', stiffness: 360, damping: 36 }}
+        role="dialog" aria-modal="true" aria-label={tr('Reader')}
         data-lenis-prevent
         className="absolute inset-x-0 bottom-0 max-h-[85dvh] overflow-y-auto overscroll-contain rounded-t-4xl border-t border-ink-700 bg-ink-900/95 px-5 pt-4 backdrop-blur-xl pb-[max(1.5rem,calc(env(safe-area-inset-bottom)+1rem))]"
       >

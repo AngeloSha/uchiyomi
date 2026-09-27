@@ -3,6 +3,8 @@
 // to markup with react-dom/server. Every guard names the edit that makes it fail.
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'fs';
+import { join } from 'path';
 import * as React from 'react';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
@@ -200,4 +202,60 @@ test('keys: one busy key disables its whole group, shows a ring, and keeps its v
   assert.match(buttons[1][1], /data-health-action="retry"/);
   const calm = html(createElement(ActionKeys, { actions: [fill] }));
   assert.doesNotMatch(calm, /disabled/);
+});
+
+/** The first <button> in an element tree, walking props.children the way React would render them. */
+function findButton(node: unknown): React.ReactElement<any> | null {
+  if (Array.isArray(node)) {
+    for (const n of node) { const b = findButton(n); if (b) return b; }
+    return null;
+  }
+  if (!node || typeof node !== 'object' || !('props' in (node as any))) return null;
+  const el = node as React.ReactElement<any>;
+  if (el.type === 'button') return el;
+  return findButton(el.props.children);
+}
+/** Every <button> in an element tree. */
+function findButtons(node: unknown, out: React.ReactElement<any>[] = []): React.ReactElement<any>[] {
+  if (Array.isArray(node)) { for (const n of node) findButtons(n, out); return out; }
+  if (!node || typeof node !== 'object' || !('props' in (node as any))) return out;
+  const el = node as React.ReactElement<any>;
+  if (el.type === 'button') out.push(el);
+  else findButtons(el.props.children, out);
+  return out;
+}
+
+test('Stop stops: while working with onStop the button calls onStop, and otherwise onRun', () => {
+  // A markup render cannot see a handler, so the rows are called as the functions they are (neither calls a
+  // hook) and the <button> is read off the returned tree. Reintroduce `onClick={a.onRun}` on either button:
+  // "Stop starts the action again" fails -- pressing Stop on a running repair would start a second one.
+  const onRun = () => {};
+  const onStop = () => {};
+  const spec = { ...fill, onRun };
+  const working: ActionState = { kind: 'working', startedAt: T0, onStop };
+  const rowBtn = (state: ActionState) => findButton(ActionRow({ ...spec, state }));
+  assert.equal(rowBtn(working)!.props.onClick, onStop, 'ActionRow: Stop starts the action again');
+  assert.equal(rowBtn({ kind: 'working', startedAt: T0 })!.props.onClick, onRun, 'ActionRow: a working row with no onStop calls something other than onRun');
+  for (const state of [{ kind: 'idle' }, { kind: 'done', finishedAt: T0, outcome: 'x' }, { kind: 'failed', reason: 'x' }] as ActionState[]) {
+    assert.equal(rowBtn(state)!.props.onClick, onRun, `ActionRow: ${state.kind} does not run the action`);
+  }
+  const keyBtns = (state: ActionState) => findButtons(ActionKeys({ actions: [{ ...spec, state }, { ...spec, id: 'retry' }] }));
+  const [stop, sibling] = keyBtns(working);
+  assert.equal(stop.props.onClick, onStop, 'ActionKeys: Stop starts the action again');
+  assert.equal(sibling.props.onClick, onRun);
+  assert.equal(sibling.props.disabled, true, 'a sibling of a running key can be pressed');
+  assert.equal(keyBtns({ kind: 'idle' })[0].props.onClick, onRun, 'ActionKeys: an idle key does not run the action');
+  assert.equal(keyBtns({ kind: 'done', finishedAt: T0, outcome: 'x' })[0].props.onClick, onRun);
+});
+
+test('only a working row reads the clock: idle and finished rows cost no timer', () => {
+  // ticker.ts exists so a page of forty idle Health rows costs nothing (#71). A server render never
+  // subscribes, so this is read from source. Reintroduce `useTicker(true)`: "an idle row ticks every
+  // second" fails.
+  const src = readFileSync(join(__dirname, '..', 'components', 'ActionList.tsx'), 'utf8')
+    .replace(/\/\*[\s\S]*?\*\//g, '').split('\n').filter((l) => !l.trim().startsWith('//')).join('\n');
+  const calls = [...src.matchAll(/useTicker\(([^)]*)\)/g)].map((m) => m[1]);
+  assert.deepEqual(calls, ['working'], 'an idle row ticks every second');
+  const body = src.slice(src.indexOf('export function ActionStatus('), src.indexOf('export function ActionList('));
+  assert.match(body, /const working = s\.kind === 'working';\s*const now = useTicker\(working\);/, 'an idle row ticks every second');
 });

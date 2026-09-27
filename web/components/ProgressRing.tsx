@@ -100,8 +100,12 @@ export function ProgressRing({ progress, size = 'row', tone = 'accent', label, v
  * and `attention` is a 6 px amber dot for something that failed. Everything visual is aria-hidden; the
  * state reaches a screen reader as `srLabel`, inside the link's own name, rather than as a progressbar
  * nested in a link.
+ *
+ * `static` and `glyph` are the slow archive's calm mark (#117): the owner asked that the Library ring
+ * animate only for normal downloads, so while only the archive works the ring is still (no turn, no easing)
+ * and `glyph` sits where the count would -- a count, when there is one, wins the corner.
  */
-export function RingIcon({ children, progress, count, tone = 'accent', size, srLabel, attention }: {
+export function RingIcon({ children, progress, count, tone = 'accent', size, srLabel, attention, static: isStatic, glyph }: {
   children: ReactNode;
   progress: RingValue;
   count?: number;
@@ -109,6 +113,8 @@ export function RingIcon({ children, progress, count, tone = 'accent', size, srL
   size: 'nav' | 'bar';
   srLabel?: string;
   attention?: boolean;
+  static?: boolean;
+  glyph?: ReactNode;
 }) {
   // An idle nav tab is just its icon; an idle desktop button keeps its round outline as the track.
   const ring = progress !== 'idle' || size === 'bar';
@@ -118,7 +124,12 @@ export function RingIcon({ children, progress, count, tone = 'accent', size, srL
       {children}
       {ring && (
         <span aria-hidden className={`pointer-events-none absolute ${size === 'nav' ? '-inset-1' : '-inset-[10.5px]'}`}>
-          <ProgressRing progress={progress} size={size} tone={tone} />
+          <ProgressRing progress={progress} size={size} tone={tone} static={isStatic} />
+        </span>
+      )}
+      {!n && glyph && (
+        <span aria-hidden data-ring-glyph className={`absolute -end-2.5 -top-2 grid place-items-center leading-none ${ARC_CLASS[tone]}`}>
+          {glyph}
         </span>
       )}
       {n && (

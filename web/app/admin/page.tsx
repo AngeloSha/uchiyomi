@@ -29,6 +29,7 @@ import { StatusEdge, StatusMark } from '@/components/StatusMark';
 import { TONE_SURFACE, engineMark, healthMark, sourceMark, type ProviderStatus } from '@/lib/status';
 import Link from 'next/link';
 import { healthLinks } from '@/lib/healthLinks';
+import { useLayer } from '@/lib/layers';
 
 /**
  * `/api/sources` as an ADMIN needs it: every source the server has, adult ones included.
@@ -654,13 +655,13 @@ function Providers({ onTab }: { onTab: (t: Tab) => void }) {
   function controlsOf(s: ProviderSrc, st: string) {
     return (
       <>
-        <button onClick={() => testSource(s.id)} disabled={testingId === s.id} className="chip text-xs disabled:opacity-50">
+        <button onClick={() => testSource(s.id)} disabled={testingId === s.id} className="btn-key">
           {testingId === s.id ? 'Testing…' : tr('Test')}
         </button>
-        {(st === 'blocked' || st === 'rate_limited' || st === 'down') && <button onClick={() => act(s.id, 'unblock', 'Cleared')} className="chip text-xs">{tr('Clear block')}</button>}
-        <button onClick={() => act(s.id, st === 'disabled' ? 'enable' : 'disable', st === 'disabled' ? 'Enabled' : 'Disabled')} className="chip text-xs">{st === 'disabled' ? 'Enable' : 'Disable'}</button>
+        {(st === 'blocked' || st === 'rate_limited' || st === 'down') && <button onClick={() => act(s.id, 'unblock', 'Cleared')} className="btn-key">{tr('Clear block')}</button>}
+        <button onClick={() => act(s.id, st === 'disabled' ? 'enable' : 'disable', st === 'disabled' ? 'Enabled' : 'Disabled')} className="btn-key">{st === 'disabled' ? 'Enable' : 'Disable'}</button>
         {customIds.has(s.id) && tested.get(s.id)?.diagnosis?.code === 'moved' && (
-          <button onClick={() => moveSite(s.id)} className="chip text-xs text-accent">{tr('Update address')}</button>
+          <button onClick={() => moveSite(s.id)} className="btn-key text-accent">{tr('Update address')}</button>
         )}
         {customIds.has(s.id) && <button onClick={() => removeSite(s.id)} className="ms-auto text-xs text-red-300 hover:underline">{tr('Remove')}</button>}
       </>
@@ -733,10 +734,10 @@ function Providers({ onTab }: { onTab: (t: Tab) => void }) {
         <p className="text-sm text-fog-400">{tr('{n} sources in {m} providers', { n: list.length, m: groups.length })}</p>
         <div className="flex gap-1.5">
           {/* The same sweep that runs daily on its own, so what you see here is what happens unattended. */}
-          <button onClick={checkAll} disabled={checking} className="chip shrink-0 text-xs disabled:opacity-50">
+          <button onClick={checkAll} disabled={checking} className="btn-key">
             {checking ? 'Checking…' : '🔍 Check all now'}
           </button>
-          <button onClick={reload} disabled={reloading} className="chip shrink-0 text-xs disabled:opacity-50">{reloading ? 'Reloading…' : '↻ Reload sources'}</button>
+          <button onClick={reload} disabled={reloading} className="btn-key">{reloading ? 'Reloading…' : '↻ Reload sources'}</button>
         </div>
       </div>
       {sweep && (
@@ -970,6 +971,8 @@ function ArtReview() {
 }
 
 function ArtPicker({ row, onClose, onApplied }: { row: ArtRow; onClose: () => void; onApplied: () => void }) {
+  // A dialog on the notices' layer stack (lib/layers.ts): it toasts while open ("Failed to apply").
+  useLayer('dialog');
   const toast = useToast();
   const [busy, setBusy] = useState(false);
   const { data, isLoading } = useQuery({
@@ -996,7 +999,7 @@ function ArtPicker({ row, onClose, onApplied }: { row: ArtRow; onClose: () => vo
   };
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-ink-950/70 p-4 backdrop-blur-xs" onClick={onClose}>
-      <div data-lenis-prevent className="glass max-h-[88vh] w-full max-w-2xl overflow-y-auto rounded-2xl border border-ink-700 p-5" onClick={(e) => e.stopPropagation()}>
+      <div role="dialog" aria-modal="true" aria-label={row.title} data-lenis-prevent className="glass max-h-[88vh] w-full max-w-2xl overflow-y-auto rounded-2xl border border-ink-700 p-5" onClick={(e) => e.stopPropagation()}>
         <div className="mb-3 flex items-start justify-between gap-3">
           <h3 className="font-display text-lg font-semibold leading-tight">{row.title}</h3>
           <button onClick={onClose} className="shrink-0 text-fog-500 hover:text-fog-200">✕</button>
@@ -2245,7 +2248,7 @@ function Extensions({ span = '' }: { span?: string }) {
         <div className="flex items-center gap-2">
           <StatusMark {...engineMark(status.reachable, status.version)} />
           {status.reachable && (
-            <button onClick={refreshRepos} disabled={busy === '__refresh'} className="chip text-[11px] disabled:opacity-50">
+            <button onClick={refreshRepos} disabled={busy === '__refresh'} className="btn-key">
               {busy === '__refresh' ? tr('Refreshing…') : `↻ ${tr('Refresh')}`}
             </button>
           )}
@@ -2294,7 +2297,7 @@ function Extensions({ span = '' }: { span?: string }) {
                     onKeyDown={(e) => { if (e.key === 'Enter' && !addingRepo) void addRepo(); }}
                     aria-label={tr('Repository address')} autoCapitalize="none" autoCorrect="off" spellCheck={false} inputMode="url"
                     className="min-w-0 flex-1 rounded-lg border border-ink-700 bg-ink-850 px-2.5 py-1.5 text-xs text-fog-100 outline-hidden focus:border-accent" />
-                  <button onClick={addRepo} disabled={addingRepo || !repoUrl.trim()} className="btn-accent shrink-0 px-3 py-1.5 text-xs disabled:opacity-50">
+                  <button onClick={addRepo} disabled={addingRepo || !repoUrl.trim()} className="btn-key btn-key-primary">
                     {addingRepo ? tr('Checking…') : tr('Add')}
                   </button>
                 </div>
@@ -2325,7 +2328,7 @@ function Extensions({ span = '' }: { span?: string }) {
                 {tr('Next: choose extensions from the list below and press Add on each one you want.')}{' '}
                 <span className="text-fog-400">{tr('Tip: hide the languages you don’t read first — only {n} sources can be switched on at once.', { n: status.cap ?? 25 })}</span>
               </p>
-              <button onClick={() => setShowLangs(true)} className="chip shrink-0 text-[11px]">{tr('Choose languages')}</button>
+              <button onClick={() => setShowLangs(true)} className="btn-key">{tr('Choose languages')}</button>
             </div>
           )}
 
@@ -2358,7 +2361,7 @@ function Extensions({ span = '' }: { span?: string }) {
                         <button
                           onClick={() => (on ? (l.used > 0 ? setHiding(l) : toggleLang(l, false)) : toggleLang(l, true))}
                           disabled={working}
-                          className={`shrink-0 rounded-full px-2.5 py-1 text-[11px] transition disabled:opacity-50 ${on ? 'bg-ink-700 text-fog-300 hover:text-fog-100' : 'bg-accent text-white'}`}>
+                          className={`btn-key ${on ? '' : 'btn-key-primary'}`}>
                           {working ? '…' : on ? 'Hide' : 'Show'}
                         </button>
                       )}
@@ -2411,7 +2414,7 @@ function Extensions({ span = '' }: { span?: string }) {
                 <span className="text-amber-200/60"> · a newer version is available from its repository</span>
               </p>
               <button onClick={updateAll} disabled={!!busy}
-                className="shrink-0 rounded-full bg-amber-500/25 px-3 py-1 text-[11px] font-medium text-amber-100 transition hover:bg-amber-500/40 disabled:opacity-50">
+                className="btn-key border-amber-500/40 bg-amber-500/20 text-amber-100 hover:border-amber-400/70 hover:text-amber-50">
                 {busy === '__updateall' ? 'Updating…' : 'Update all'}
               </button>
             </div>
@@ -2456,12 +2459,12 @@ function Extensions({ span = '' }: { span?: string }) {
                 </div>
                 {e.hasUpdate && (
                   <button onClick={() => act(e, 'update')} disabled={busy === e.pkgName}
-                    className="shrink-0 rounded-full bg-amber-500/20 px-2.5 py-1 text-[11px] text-amber-200 disabled:opacity-50">
+                    className="btn-key border-amber-500/40 bg-amber-500/15 text-amber-200 hover:border-amber-400/70 hover:text-amber-100">
                     {busy === e.pkgName ? '…' : 'Update'}
                   </button>
                 )}
                 <button onClick={() => act(e, e.installed ? 'uninstall' : 'install')} disabled={busy === e.pkgName}
-                  className={`shrink-0 rounded-full px-2.5 py-1 text-[11px] transition disabled:opacity-50 ${e.installed ? 'bg-ink-700 text-fog-300 hover:text-fog-100' : 'bg-accent text-white'}`}>
+                  className={`btn-key ${e.installed ? 'btn-key-danger' : 'btn-key-primary'}`}>
                   {busy === e.pkgName ? '…' : e.installed ? 'Remove' : 'Add'}
                 </button>
               </div>

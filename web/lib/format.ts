@@ -60,6 +60,7 @@ export function chapterName(b: { chapterName?: string | null }): string {
 //   etaText       how long a slow job has left: "About 3 days"
 //   untilText     when something happens next: "in 20 minutes"
 //   relativeTime  how long ago: "5m ago" (English, unchanged) / "vor 5 Minuten"
+//   relativeTimeShort  the same, where a column has room for the amount only: "5m" / "5 Min."
 
 let locale = 'en';
 /** Built Intl formatters, per locale and unit; cleared when the language changes. */
@@ -230,6 +231,42 @@ export function relativeTime(iso?: string | null): string {
   const days = Math.round(h / 24);
   if (days < 30) return `${days}d ago`;
   return new Date(iso).toLocaleDateString();
+}
+
+/**
+ * How long ago, as the amount alone: "3d", "5m", "now" -- the series page's desktop chapter grid, whose date
+ * column has room for "3d" and not "3d ago" (app/series/page.tsx `RowDate`).
+ *
+ * ⚠️ Its own function, never relativeTime's sentence with " ago" cut off: that cut was the grid's code, and
+ * once every other language spoke through Intl it matched nothing, so the grid showed "il y a 3 jours" and
+ * "vor 3 Tagen" where "3d" was already too wide. English is that cut, byte for byte ("3d", "now"); every
+ * other language is Intl's narrow unit ("3 T", "3j", "3天") and Intl's own word for now. A date in the future
+ * reads "now" in every language, as it always has in English; older than a month is the date, as in both
+ * forms before.
+ */
+export function relativeTimeShort(iso?: string | null): string {
+  if (!iso) return '';
+  if (locale === 'en') {
+    const long = relativeTime(iso);
+    return long === 'just now' ? 'now' : long.replace(/ ago$/, '');
+  }
+  const d = new Date(iso).getTime();
+  try {
+    if (!Number.isFinite(d)) throw new Error('not a date');
+    const m = Math.round((Date.now() - d) / 60000);
+    const narrow = (unit: Unit, n: number) =>
+      cached(`n:${unit}`, () => new Intl.NumberFormat(intlTag(), { style: 'unit', unit, unitDisplay: 'narrow' })).format(n);
+    if (m < 1) return cached('rel:now', () => new Intl.RelativeTimeFormat(intlTag(), { numeric: 'auto', style: 'narrow' })).format(0, 'second');
+    if (m < 60) return narrow('minute', m);
+    const h = Math.round(m / 60);
+    if (h < 24) return narrow('hour', h);
+    const days = Math.round(h / 24);
+    if (days < 30) return narrow('day', days);
+    return new Date(d).toLocaleDateString(intlTag());
+  } catch {
+    // An old WebView without unit styles, or a date that is not one: the sentence, which is wider but right.
+    return relativeTime(iso);
+  }
 }
 
 /** relativeTime for every language but English: the same steps, said by Intl, in either direction. */

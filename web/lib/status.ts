@@ -24,7 +24,8 @@ import type { SrcStatus } from './providerGroups';
  * - info: neutral facts, a source that answers empty;
  * - off: switched off on purpose;
  * - accent: an action that is working or has finished -- the accent, like Settings' "✓ Saved", so a
- *   finished repair does not read as a health verdict.
+ *   finished repair does not read as a health verdict. Its glyph is the finished one (a check in a ring);
+ *   the turning ring is StatusGlyph's `working`, asked for by name, never implied by the tone.
  */
 export type Tone = 'ok' | 'warn' | 'problem' | 'info' | 'off' | 'accent';
 
@@ -99,8 +100,10 @@ export function healthMark(status: HealthCheck['status']): Mark {
 export type ProviderStatus = SrcStatus;
 
 // Specific words, not the bare "Off" / "Down" / "Ready": one English word used for two meanings forces a
-// translator to pick one of them (the critic's rule for this release's keys).
-export const SOURCE_LABELS = keys('Healthy', 'Blocked', 'Rate-limited', 'Not answering', 'Answers empty', 'Turned off');
+// translator to pick one of them (the critic's rule for this release's keys). ⚠️ Not the bare "Blocked"
+// either: that key is a scanlation GROUP's Block toggle (SourcesSheet.tsx), translated to agree with that
+// noun, and on a source card it disagreed with "Turned off" beside it (es "Bloqueado" / "Desactivada").
+export const SOURCE_LABELS = keys('Healthy', 'Blocked by the site', 'Rate-limited', 'Not answering', 'Answers empty', 'Turned off');
 
 const SOURCE_MARK: Record<ProviderStatus, { tone: Tone; label: (typeof SOURCE_LABELS)[number] }> = {
   ok: { tone: 'ok', label: SOURCE_LABELS[0] },

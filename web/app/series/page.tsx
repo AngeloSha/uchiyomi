@@ -6,7 +6,7 @@ import { useSearchParams, useRouter } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, img } from '@/lib/api';
 import { Book, Ghost, Listing, Page, Series, VersionCopy, Versions } from '@/lib/types';
-import { chapterLabel, chapterName, isVolumeName, relativeTime } from '@/lib/format';
+import { chapterLabel, chapterName, isVolumeName, relativeTime, relativeTimeShort } from '@/lib/format';
 import { listDownloads, downloadChapter, deleteDownload } from '@/lib/downloads';
 import { applyCover, clearCover } from '@/lib/theme';
 import { Img, Backdrop, Rail, SectionTitle } from '@/components/ui';
@@ -79,6 +79,9 @@ function autoDirectionLabel(d: Series['detectedDirection']): string {
 }
 
 function SeriesEditModal({ id, series, onClose, onSaved }: { id: string; series: Series; onClose: () => void; onSaved: () => void }) {
+  // On the notices' layer stack (lib/layers.ts), as Modal is: this hand-rolled dialog toasts while open
+  // ("Could not save"), and a notice placed as if nothing were open would sit on its lower buttons.
+  useLayer('dialog');
   const toast = useToast();
   const [title, setTitle] = useState(series.metadata?.title || series.name || '');
   const [summary, setSummary] = useState(series.metadata?.summary || series.booksMetadata?.summary || '');
@@ -162,7 +165,7 @@ function SeriesEditModal({ id, series, onClose, onSaved }: { id: string; series:
   const { checking, checkNow } = useCheckNow(id, onSaved);
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-ink-950/70 p-4 backdrop-blur-xs" onClick={onClose}>
-      <div data-lenis-prevent className="glass max-h-[88vh] w-full max-w-md overflow-y-auto rounded-2xl border border-ink-700 p-5" onClick={(e) => e.stopPropagation()}>
+      <div role="dialog" aria-modal="true" aria-label={tr('Edit series')} data-lenis-prevent className="glass max-h-[88vh] w-full max-w-md overflow-y-auto rounded-2xl border border-ink-700 p-5" onClick={(e) => e.stopPropagation()}>
         <div className="mb-3 flex items-start justify-between gap-3">
           <h3 className="font-display text-lg font-semibold leading-tight">{tr('Edit series')}</h3>
           <button onClick={onClose} className="shrink-0 text-fog-500 hover:text-fog-200">✕</button>
@@ -266,6 +269,7 @@ interface CollectionRow { id: string; name: string; accent: string | null; item_
 
 /** "Add to collection" sheet: pick an existing list or create one inline. */
 function CollectionSheet({ seriesId, onClose }: { seriesId: string; onClose: () => void }) {
+  useLayer('dialog');
   const toast = useToast();
   const qc = useQueryClient();
   const [name, setName] = useState('');
@@ -289,7 +293,7 @@ function CollectionSheet({ seriesId, onClose }: { seriesId: string; onClose: () 
   };
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-ink-950/70 p-4 backdrop-blur-xs" onClick={onClose}>
-      <div className="glass w-full max-w-sm rounded-2xl border border-ink-700 p-5" onClick={(e) => e.stopPropagation()}>
+      <div role="dialog" aria-modal="true" aria-label={tr('Add to collection')} className="glass w-full max-w-sm rounded-2xl border border-ink-700 p-5" onClick={(e) => e.stopPropagation()}>
         <div className="mb-3 flex items-start justify-between gap-3">
           <h3 className="font-display text-lg font-semibold">{tr('Add to collection')}</h3>
           <button onClick={onClose} className="shrink-0 text-fog-500 hover:text-fog-200">✕</button>
@@ -414,6 +418,7 @@ function RenameFolderModal({ id, folder, title, onClose, onSaved }: {
 }
 
 function ChapterEditModal({ book, onClose, onSaved }: { book: Book; onClose: () => void; onSaved: () => void }) {
+  useLayer('dialog');
   const toast = useToast();
   const [number, setNumber] = useState(String(book.number ?? ''));
   const [title, setTitle] = useState(book.metadata?.title || book.name || '');
@@ -438,7 +443,7 @@ function ChapterEditModal({ book, onClose, onSaved }: { book: Book; onClose: () 
 
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-ink-950/70 p-4 backdrop-blur-xs" onClick={onClose}>
-      <div className="glass w-full max-w-sm rounded-2xl border border-ink-700 p-5" onClick={(e) => e.stopPropagation()}>
+      <div role="dialog" aria-modal="true" aria-label={tr('Edit chapter')} className="glass w-full max-w-sm rounded-2xl border border-ink-700 p-5" onClick={(e) => e.stopPropagation()}>
         <div className="mb-3 flex items-start justify-between gap-3">
           <h3 className="font-display text-lg font-semibold leading-tight">{tr('Edit chapter')}</h3>
           <button onClick={onClose} className="shrink-0 text-fog-500 hover:text-fog-200">✕</button>
@@ -534,14 +539,16 @@ function RowCaption({ group, via, versions, tone = 'text-fog-500', pruned, lead,
  * word is what the column can spare there, and the number still reads as a date beside the others. Older
  * chapters show the locale date in both forms, as the column always has. `lg` is where the list becomes
  * the grid. Two spans rather than a media query in JS: the first paint of a static export knows no width.
+ *
+ * ⚠️ The short form is lib/format.ts `relativeTimeShort`, not this sentence with " ago" cut off: every
+ * language but English says the sentence through Intl ("vor 3 Tagen"), where the cut matched nothing and
+ * the grid showed the whole of it.
  */
 function RowDate({ iso, className = '' }: { iso: string; className?: string }) {
-  const long = relativeTime(iso);
-  const short = long === 'just now' ? 'now' : long.replace(/ ago$/, '');
   return (
     <span className={`shrink-0 text-[11px] text-fog-500 ${className}`}>
-      <span className="lg:hidden">{long}</span>
-      <span className="hidden lg:inline">{short}</span>
+      <span className="lg:hidden">{relativeTime(iso)}</span>
+      <span className="hidden lg:inline">{relativeTimeShort(iso)}</span>
     </span>
   );
 }

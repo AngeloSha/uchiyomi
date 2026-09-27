@@ -9,7 +9,7 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 import {
   isVolumeName, chapterLabel, chapterName, bytes, progressOf, formatClock, durationText, etaLine, etaText, untilText,
-  relativeTime, setActiveLocale, activeLocale,
+  relativeTime, relativeTimeShort, setActiveLocale, activeLocale,
 } from '../lib/format';
 
 test('recognises volume-style names', () => {
@@ -191,6 +191,39 @@ test('relativeTime speaks every other language through Intl, in both directions'
     assert.equal(relativeTime(ago(3 * HOUR)), '3 時間前');
     setActiveLocale('ar');
     assert.match(relativeTime(ago(5 * MIN)), /5/, 'Western digits in Arabic');
+  } finally {
+    setActiveLocale('en');
+  }
+});
+
+test('relativeTimeShort: English is the grid\'s "3d" byte for byte, every other language Intl\'s narrow unit', () => {
+  // The series page's desktop grid had room for "3d" and made it by cutting " ago" off relativeTime's
+  // sentence; with Intl speaking every other language the cut matched nothing and the grid showed "vor 3
+  // Tagen". Reintroduce that cut for every language (`relativeTime(iso).replace(/ ago$/, '')`): "the desktop
+  // grid shows the whole German sentence" fails.
+  const cut = (iso: string | null) => { const l = relativeTimeV0484(iso); return l === 'just now' ? 'now' : l.replace(/ ago$/, ''); };
+  const cases = [null, '', 'not a date', ago(-5 * MIN), ago(0), ago(20_000), ago(5 * MIN), ago(59 * MIN), ago(61 * MIN),
+    ago(5 * HOUR), ago(23 * HOUR), ago(25 * HOUR), ago(3 * DAY), ago(29 * DAY), ago(45 * DAY)];
+  try {
+    setActiveLocale('en');
+    for (const iso of cases) assert.equal(relativeTimeShort(iso), cut(iso), `English changed for ${iso}`);
+    assert.equal(relativeTimeShort(ago(3 * DAY)), '3d');
+    assert.equal(relativeTimeShort(ago(20_000)), 'now');
+    setActiveLocale('de');
+    const de = relativeTimeShort(ago(3 * DAY));
+    assert.notEqual(de, relativeTime(ago(3 * DAY)), 'the desktop grid shows the whole German sentence');
+    assert.equal(de, new Intl.NumberFormat('de-u-nu-latn', { style: 'unit', unit: 'day', unitDisplay: 'narrow' }).format(3));
+    assert.equal(relativeTimeShort(ago(5 * MIN)), new Intl.NumberFormat('de-u-nu-latn', { style: 'unit', unit: 'minute', unitDisplay: 'narrow' }).format(5));
+    assert.equal(relativeTimeShort(ago(20_000)), 'jetzt');
+    assert.equal(relativeTimeShort(ago(-3 * DAY)), 'jetzt', 'a future date reads as now, as it does in English');
+    assert.equal(relativeTimeShort(null), '');
+    for (const [lang, sentence] of [['fr', /il y a/], ['es', /hace/], ['ru', /назад/], ['ar', /قبل/], ['pt-BR', /há/]] as const) {
+      setActiveLocale(lang);
+      const s = relativeTimeShort(ago(3 * DAY));
+      assert.doesNotMatch(s, sentence, `${lang}: the grid says the sentence ("${s}")`);
+      assert.match(s, /3/, `${lang}: Western digits`);
+      assert.ok(s.length < relativeTime(ago(3 * DAY)).length, `${lang}: "${s}" is no shorter than the sentence`);
+    }
   } finally {
     setActiveLocale('en');
   }

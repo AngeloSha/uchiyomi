@@ -131,13 +131,16 @@ test('a row caption carries its text as a title, and the desktop grid shows the 
   // what the ellipsis hid, and "3d" gives the caption the word back. Reintroduce by dropping `title=` from
   // RowCaption's <p>: "the caption has a title" fails; or by rendering one span with relativeTime in both
   // forms: "the grid gets the short form" fails.
+  // v0.49.0: the short form is lib/format.ts relativeTimeShort (format.test.ts holds its words). Cutting
+  // " ago" off the sentence matched nothing once every other language spoke through Intl, and the grid said
+  // "vor 3 Tagen". Reintroduce that cut: "the grid cuts the sentence" fails.
   const page = code(read('app/series/page.tsx'));
   const cap = page.slice(page.indexOf('function RowCaption('), page.indexOf('function RowDate('));
   assert.match(cap, /<p className=\{`mt-0\.5 truncate[^>]*title=\{title\}/, 'the caption has a title');
   const date = page.slice(page.indexOf('function RowDate('), page.indexOf('function ChapterRow('));
-  assert.match(date, /replace\(\/ ago\$\/, ''\)/, 'the short form drops the word');
-  assert.match(date, /className="hidden lg:inline">\{short\}/, 'the grid gets the short form');
-  assert.match(date, /className="lg:hidden">\{long\}/, 'the phone keeps the long one');
+  assert.doesNotMatch(date, /replace\(\/ ago/, 'the grid cuts the sentence');
+  assert.match(date, /className="hidden lg:inline">\{relativeTimeShort\(iso\)\}/, 'the grid gets the short form');
+  assert.match(date, /className="lg:hidden">\{relativeTime\(iso\)\}/, 'the phone keeps the long one');
 });
 
 // ---- #69: read marks on the grey rows (chapters the server does not hold) -------------------------------

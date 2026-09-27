@@ -182,6 +182,24 @@ test('RingIcon: a squared count, an amber dot, nothing at all on an idle nav tab
   assert.match(idleBar, /data-ring="idle"/, 'the idle desktop button lost its outline track');
 });
 
+test('RingIcon: a static ring is the slow archive\'s still mark, with its glyph in the count\'s corner', () => {
+  // The owner: "Library ring during a slow archive: a calm, still slow mark. The ring animates only for
+  // normal downloads." Reintroduce by not passing `static` through to the ring: "the Library ring turns
+  // during a slow archive" fails.
+  const slow = html(createElement(RingIcon, { progress: 'spin', size: 'nav', tone: 'amber', static: true, glyph: createElement('i', { 'data-slow': '' }), children: 'icon' }));
+  assert.doesNotMatch(slow, /animate-ring/, 'the Library ring turns during a slow archive');
+  assert.match(slow, /data-ring="still"/, 'the Library ring turns during a slow archive');
+  const filling = html(createElement(RingIcon, { progress: 0.4, size: 'nav', tone: 'amber', static: true, children: 'icon' }));
+  assert.doesNotMatch(filling, /transition-\[stroke-dashoffset\]|animate-ring/, 'a static Library ring eases its fill');
+  assert.match(slow, /<span aria-hidden="true" data-ring-glyph="true" class="[^"]*text-amber-400[^"]*"><i data-slow=""><\/i><\/span>/, 'the slow mark has no glyph');
+  // A count wins the corner: the glyph is for the archive alone.
+  const both = html(createElement(RingIcon, { progress: 'spin', size: 'nav', count: 3, glyph: createElement('i', { 'data-slow': '' }), children: 'icon' }));
+  assert.doesNotMatch(both, /data-ring-glyph/, 'the glyph covers the count');
+  assert.match(both, /data-ring-count/);
+  // And a normal download still turns.
+  assert.match(html(createElement(RingIcon, { progress: 'spin', size: 'nav', children: 'icon' })), /animate-ring/);
+});
+
 test('CoverProgress: a veil and a ring per state, a glyph slot, a still amber ring for the slow archive, a check when done', () => {
   const running = html(createElement(CoverProgress, { state: 'running', progress: 0.4, caption: '4/10', label: 'Fetching 4 of 10 chapters' }));
   assert.match(running, /role="img" aria-label="Fetching 4 of 10 chapters"/);

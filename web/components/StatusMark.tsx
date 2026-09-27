@@ -9,9 +9,16 @@ import { TONE_EDGE, TONE_GLYPH, TONE_TEXT, type Tone } from '@/lib/status';
 import { ProgressRing } from './ProgressRing';
 import { IcAlert, IcCheck } from './icons';
 
-/** The glyph alone, aria-hidden: the words beside it (or the mark's aria-label) carry the meaning. */
-export function StatusGlyph({ tone, size = 12 }: { tone: Tone; size?: number }) {
+/**
+ * The glyph alone, aria-hidden: the words beside it (or the mark's aria-label) carry the meaning.
+ *
+ * `working` is the one moving glyph, a small turning ring (still under Reduce effects or reduced motion),
+ * and it is asked for by name. ⚠️ Not a tone: 'accent' also means FINISHED ("✓ Saved", a notice that
+ * something worked), and a glyph that spun for every accent would turn forever beside "Done".
+ */
+export function StatusGlyph({ tone, size = 12, working }: { tone: Tone; size?: number; working?: boolean }) {
   const cls = `shrink-0 ${TONE_GLYPH[tone]}`;
+  if (working) return <span className={cls}><ProgressRing size={size} progress="spin" /></span>;
   switch (tone) {
     case 'ok':
       return <IcCheck aria-hidden width={size} height={size} strokeWidth={2.6} className={cls} />;
@@ -36,28 +43,35 @@ export function StatusGlyph({ tone, size = 12 }: { tone: Tone; size?: number }) 
         </svg>
       );
     case 'accent':
-      // Working: a small turning ring (still, under Reduce effects or reduced motion).
-      return <span className={cls}><ProgressRing size={size} progress="spin" /></span>;
+      // Finished: a check in a ring, the accent's "done" -- its own shape, so a finished action never reads
+      // as the plain check of a health verdict.
+      return (
+        <svg aria-hidden width={size} height={size} viewBox="0 0 12 12" className={cls}>
+          <circle cx="6" cy="6" r="5" fill="none" stroke="currentColor" strokeWidth="1.2" />
+          <path d="M3.7 6.1 5.3 7.7 8.4 4.5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      );
   }
 }
 
 /**
  * The mark: a glyph and its words, in the tone's colour. Without `label` it is a glyph alone and needs a
- * `title`, which becomes its accessible name.
+ * `title`, which becomes its accessible name. `working` turns the glyph into the small ring.
  */
-export function StatusMark({ tone, label, size = 'sm', title, className }: {
+export function StatusMark({ tone, label, size = 'sm', title, className, working }: {
   tone: Tone;
   label?: string;
   size?: 'xs' | 'sm' | 'md';
   title?: string;
   className?: string;
+  working?: boolean;
 }) {
   const text = size === 'xs' ? 'text-[10px]' : size === 'md' ? 'text-xs' : 'text-[11px]';
   const glyph = size === 'xs' ? 10 : size === 'md' ? 13 : 12;
   return (
     <span data-status={tone} title={title} {...(label ? {} : { role: 'img', 'aria-label': title })}
       className={`inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap font-medium leading-none ${text} ${TONE_TEXT[tone]} ${className ?? ''}`}>
-      <StatusGlyph tone={tone} size={glyph} />
+      <StatusGlyph tone={tone} size={glyph} working={working} />
       {label && <span>{label}</span>}
     </span>
   );

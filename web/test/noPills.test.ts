@@ -1,13 +1,14 @@
 // "No more pills" (v0.49.0): the owner asked for the capsule shapes to go from actions, statuses and
 // notices -- and for the filter and sort chips to stay exactly as they are.
 //
-// A capsule is a fully rounded box with horizontal padding: `rounded-full` and `px-…` on one element, or a
-// shared class that is one (`.chip`, `.btn-accent`, `.btn-ghost` in app/globals.css). A dot (`h-1.5 w-1.5
-// rounded-full`, no padding) is a circle, not a capsule, and stays allowed.
+// A capsule is anything `rounded-full` that is not a circle, or a shared class that is one (`.chip`,
+// `.btn-accent`, `.btn-ghost` in app/globals.css). A circle names equal sides (`h-1.5 w-1.5`, `h-8 w-8`,
+// `size-2`) and has no inline padding or minimum width: a dot or a round icon button stays allowed. A
+// `min-w-[16px] rounded-full` count is a capsule the moment it says "9+".
 //
 // SURFACES is the list of redesigned files, SLICES the redesigned parts of files that also hold chips which
-// stay (a filter row, an action the owner has not ruled on). Each later v0.49.0 step adds the surfaces it
-// redesigns (the notices, the Downloads view, Health's rows, …) here in the same commit.
+// stay (a filter row). Each later v0.49.0 step adds the surfaces it redesigns (the notices, the Downloads
+// view, Health's rows, …) here in the same commit.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'fs';
@@ -31,14 +32,21 @@ const SURFACES = [
  * `[file, name, from, to]`: the code between the two markers. A marker that moved fails by name rather than
  * letting the scan read an empty string and pass.
  *
- * The admin console's status badges (step 3). Health()'s own capsules belong to the Health step, which adds
- * its slice when it redesigns them; the Providers panel's Test / Check all keys and the Extensions header's
- * Refresh are actions the owner has not ruled on, so the slices end before them.
+ * The admin console's status badges (step 3) and its action keys: the owner ruled that only filter and sort
+ * chips keep the chip shape, so the Providers panel's Test / Clear block / Enable / Update address / Check
+ * all / Reload and the Extensions tab's Refresh, Add, languages, Update all, Update, Add and Remove are
+ * `.btn-key`s. The Extensions tab's 18+ and Added toggles are filters and stay chips, so its slices stop
+ * short of them. Health()'s own capsules belong to the Health step, which adds its slice when it redesigns
+ * them.
  */
 const SLICES: [string, string, string, string][] = [
   ['app/admin/page.tsx', 'Overview: Needs attention', 'function NeedsAttention(', 'function TabTile('],
-  ['app/admin/page.tsx', 'Providers: source status', 'const statusMark = ', '<div className="board">'],
-  ['app/admin/page.tsx', 'Extensions: engine status', "{tr('Extensions')}</p>", '{status.reachable && ('],
+  ['app/admin/page.tsx', 'Providers: source cards and their keys', 'function controlsOf(', '<div className="board">'],
+  ['app/admin/page.tsx', 'Providers: Check all and Reload', "{tr('{n} sources in {m} providers'", '{sweep && ('],
+  // Anchored on the header's own code: the first "{tr('Extensions')}</p>" is the not-configured card's.
+  ['app/admin/page.tsx', 'Extensions: engine status and Refresh', 'const list = cat?.content || [];', '{!status.reachable ? ('],
+  ['app/admin/page.tsx', 'Extensions: repositories, languages and Update all', '<button onClick={() => setShowRepos(!reposOpen)}', '<input value={q2}'],
+  ['app/admin/page.tsx', 'Extensions: catalogue rows', '{list.map((e) => (', '{!list.length && !isFetching && ('],
 ];
 
 const slice = (src: string, from: string, to: string, name: string): string => {
@@ -68,7 +76,34 @@ function componentClasses(): Map<string, string> {
   return out;
 }
 
-const isCapsule = (classes: string) => /(^|\s|:)rounded-full(\s|$)/.test(classes) && /(^|\s|:)px-/.test(classes);
+/** A class list's utilities without their variants (`lg:px-2` → `px-2`). */
+const utilities = (classes: string) => classes.split(/\s+/).filter(Boolean).map((c) => c.slice(c.lastIndexOf(':') + 1));
+const isCapsule = (classes: string) => {
+  const u = utilities(classes);
+  if (!u.includes('rounded-full')) return false;
+  if (u.some((c) => /^(px|ps|pe|min-w)-/.test(c))) return true;
+  if (u.some((c) => /^size-/.test(c))) return false;
+  const h = u.filter((c) => /^h-/.test(c)).map((c) => c.slice(2));
+  const w = u.filter((c) => /^w-/.test(c)).map((c) => c.slice(2));
+  // A circle names its sides, and names them equal.
+  return !h.some((x) => w.includes(x));
+};
+
+test('the capsule detector: padding, a minimum width or unequal sides make rounded-full a capsule', () => {
+  // The first detector wanted `px-` beside `rounded-full`, so the round count the owner ruled out (a
+  // `min-w-[16px] rounded-full text-center` tag that grows into a pill at "9+") passed. Reintroduce that
+  // rule: "a min-width count is a capsule" fails.
+  assert.ok(isCapsule('absolute rounded-full px-1 text-[9px]'));
+  assert.ok(isCapsule('min-w-[16px] rounded-full bg-accent text-center text-[10px]'), 'a min-width count is a capsule');
+  assert.ok(isCapsule('rounded-full ps-2 pe-3'), 'logical padding is padding');
+  assert.ok(isCapsule('h-5 w-9 rounded-full'), 'a 20 x 36 lozenge is a capsule');
+  assert.ok(isCapsule('lg:rounded-full lg:px-3'), 'a variant hides the capsule');
+  assert.ok(isCapsule('rounded-full bg-ink-700 py-1 text-[11px]'), 'a fully rounded label with no sides named grows with its text');
+  assert.ok(!isCapsule('h-1.5 w-1.5 shrink-0 rounded-full bg-amber-400'), 'a dot is a capsule');
+  assert.ok(!isCapsule('-my-1.5 grid h-8 w-8 place-items-center rounded-full'), 'a round icon button is a capsule');
+  assert.ok(!isCapsule('size-2 rounded-full bg-accent'));
+  assert.ok(!isCapsule('rounded-lg px-3'), 'a rounded rectangle is a capsule');
+});
 
 test('no capsule in the redesigned surfaces: no rounded-full with padding, no pill-shaped shared class', () => {
   // Reintroduce the round count on the Library tab (`rounded-full px-1` on RingIcon's count tag), or a
@@ -83,16 +118,27 @@ test('no capsule in the redesigned surfaces: no rounded-full with padding, no pi
   }
 });
 
-test('the admin console\'s status badges are marks: the slices hold what they claim to', () => {
+test('the admin console\'s status badges are marks and its actions keys: the slices hold what they claim to', () => {
   // A slice that silently lost its content (a marker matched something earlier) would scan nothing and pass.
-  // Reintroduce by renaming `statusMark` back to `statusChip`: "Providers: source status: … is not where
-  // this test looks" fails -- the scan above goes first and says so too.
+  // Reintroduce by renaming `statusMark` back to `statusChip`: "Providers: source cards and their keys: … is
+  // not where this test looks" fails -- the scan above goes first and says so too. Anchor the engine slice on
+  // "{tr('Extensions')}</p>" again: it starts at the not-configured card and "the engine slice holds the
+  // not-configured card" fails.
   const admin = code(read('app/admin/page.tsx'));
-  const [attention, providers, engine] = SLICES.map(([, name, from, to]) => slice(admin, from, to, name));
+  const [attention, providers, toolbar, engine, repos, rows] = SLICES.map(([, name, from, to]) => slice(admin, from, to, name));
   assert.match(attention, /<StatusMark tone=\{m\.tone\} title=\{m\.label\} \/>/, 'the Needs attention slice has no mark');
   assert.match(providers, /<StatusMark \{\.\.\.sourceMark\(st\)\} \/>/, 'the Providers slice has no mark');
   assert.match(providers, /function packageCard\(/, 'the Providers slice ends before the package card');
+  const keys = (src: string) => (src.match(/className=\{?[`"]btn-key\b/g) || []).length;
+  assert.equal(keys(providers), 4, 'Test, Clear block, Enable/Disable and Update address are not all keys');
+  assert.equal(keys(toolbar), 2, 'Check all and Reload are not both keys');
   assert.match(engine, /<StatusMark \{\.\.\.engineMark\(/, 'the Extensions slice has no mark');
+  assert.match(engine, /onClick=\{refreshRepos\}[^>]*className="btn-key"/, 'Refresh is not a key');
+  assert.doesNotMatch(engine, /No extension engine is set up|refreshAll = \(\) =>/, 'the engine slice holds the not-configured card');
+  assert.ok(engine.split('\n').length < 20, `the engine slice is ${engine.split('\n').length} lines: a marker moved`);
+  assert.equal(keys(repos), 4, 'the repository Add, Choose languages, a language\'s Hide/Show and Update all are not all keys');
+  assert.doesNotMatch(repos, /value=\{q2\}|setShowAdult/, 'the repositories slice runs into the filter chips');
+  assert.equal(keys(rows), 2, 'a catalogue row\'s Update and Add/Remove are not keys');
 });
 
 test('the filter and sort chips stay exactly as they are', () => {

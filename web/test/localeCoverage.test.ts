@@ -132,3 +132,78 @@ test('every key the app translates is in all eight locale files, non-empty, with
     assert.deepEqual(broken, [], `${f} does not keep the key's placeholders: ${broken.slice(0, 10).join(' | ')}`);
   }
 });
+
+/*
+ * Counted strings come in pairs, `n === 1 ? tr('1 chapter') : tr('{n} chapters', { n })` -- otherwise English
+ * reads "1 chapters" and no translator ever sees the singular. A count that reads as a word is a standalone
+ * `1` before a word, or `{n}` / `{m}` before a plural noun. Its pair is the key with the same words before the
+ * count and, after it, the same word or its other number ("chapter"/"chapters", "repository"/"repositories",
+ * "skipped"/"skipped").
+ */
+const COUNT = /(^|[\s(+—·])(1|\{[nm]\}) (\p{L}+)/gu;
+const counts = (k: string) => [...k.matchAll(COUNT)].map((m) => ({ at: m.index! + m[1].length, one: m[2] === '1', word: m[3] }));
+const sameWord = (a: string, b: string) =>
+  a === b || a.startsWith(b) || b.startsWith(a) || a === `${b.slice(0, -1)}ies` || b === `${a.slice(0, -1)}ies`;
+
+/** Pairs English inflects around the count as well as after it, named explicitly: singular → plural. */
+const IRREGULAR_PAIRS: Record<string, string> = {
+  '1 is not listed yet and comes with the next check.': '{m} are not listed yet and come with the next check.',
+  '{n} chapters behind in 1 series': '{n} chapters behind across {m} series',
+  'Ch. {n} · 1 older chapter not here yet': 'Ch. {a}–{b} · {n} older chapters not here yet',
+};
+/** Keys that look counted and are not a pair, each with why. Not a place to park a new key. */
+const NOT_PAIRED: Record<string, string> = {
+  '1 to 64 letters, digits, - or _': 'a range, not a count',
+  'Up to {n} hours': 'etaLine says hours only past 90 minutes, rounded up: never 1',
+  '{n} times in a row': 'shown only when consecutive > 1',
+};
+/**
+ * Plural keys that shipped before this check with no singular. Each reads "1 …s" at a count of 1 (or its
+ * count cannot reach 1). ⚠️ Frozen: fix one by adding its singular and deleting it here, never by adding to it.
+ */
+const SHIPPED_UNPAIRED = [
+  '+{n} chapters vs the current pick', 'All {n} chapters are already in your library', 'Best {n} days',
+  'Chapter gaps: search the sources for up to {n} series, follow one that has the missing chapters, and download them',
+  'Chapters that would not download ({n} sources): all of them get another try, up to ten series straight away and the rest with the next check',
+  'Checking {n} sources — this can take a minute. You can close this; anything followed shows under Sources & translations.',
+  'Delete {n} chapters from the server?', 'File {n} series',
+  'From now on, an hourly job will permanently delete the file of any chapter that everyone who started it has finished, once it has been finished for {n} days. There is no undo and no recycle bin.',
+  'Merge these {n} pairs?', 'Merged — {n} chapters moved', 'One pair merged, {m} chapters moved', 'Reading pace, busiest day {n} chapters',
+  'Saved {n} chapters offline', 'Saving {n} chapters offline…', 'Syncing {n} series you have already finished…',
+  'This one stops working in {n} days. You can revoke it sooner.',
+  'Tip: hide the languages you don’t read first — only {n} sources can be switched on at once.',
+  '{n} chapters behind across {m} series', '{n} days', '{n} days of reading, {t} chapters in total', '{n} languages', '{n} notes',
+  '{n} of {m} chapters match', '{n} of {m} sources answered · still asking {names}', '{n} of {m} sources answered · still asking {name}',
+  '{n} pairs could not be merged', '{n} pairs merged, {m} chapters moved', '{n} series', '{n} series would move',
+  '{n} sources in {m} providers', '{n} versions', 'quiet — no release in {n} days', 'waiting for {g} · {n} days left',
+  'failed {n} times',
+];
+
+test('counted strings come in pairs: every "1 chapter" has its "{n} chapters", and back', () => {
+  // Reintroduce by deleting the singular of a pair from the app -- `tr('Refreshed — 1 extension available')`
+  // in admin/page.tsx becomes the plural for every count: "Refreshed — {n} extensions available has no
+  // singular" fails; the reverse, a lone "1 …" key, fails as "has no plural".
+  const keys = appKeys();
+  const all = [...keys.keys()];
+  const has = (k: string, at: number, word: string, one: boolean) => all.some((o) => o !== k && o.startsWith(k.slice(0, at))
+    && counts(o).some((c) => c.at === at && c.one === one && sameWord(word, c.word)));
+  const lonely: string[] = [];
+  for (const k of all) {
+    if (NOT_PAIRED[k] || SHIPPED_UNPAIRED.includes(k)) continue;
+    if (IRREGULAR_PAIRS[k]) { if (!keys.has(IRREGULAR_PAIRS[k])) lonely.push(`${k} has no plural (${IRREGULAR_PAIRS[k]})`); continue; }
+    for (const c of counts(k)) {
+      // A plural half is `{n}` before a plural noun; `{n} failed` pairs with "1 failed" but is not asked to.
+      if (!c.one && !/^\p{Ll}+s$/u.test(c.word)) continue;
+      if (!has(k, c.at, c.word, !c.one)) lonely.push(`${k} has no ${c.one ? 'plural' : 'singular'}`);
+    }
+  }
+  assert.deepEqual(lonely, [], `counted strings without their other half: ${lonely.join(' | ')}`);
+  // The lists only shrink: an entry whose key is gone (or was paired) is deleted, not kept as a hole.
+  for (const k of [...Object.keys(NOT_PAIRED), ...SHIPPED_UNPAIRED, ...Object.keys(IRREGULAR_PAIRS)]) {
+    assert.ok(keys.has(k), `${k} is no longer in the app: drop it from the list`);
+  }
+  for (const k of SHIPPED_UNPAIRED) {
+    const c = counts(k).filter((x) => !x.one && /^\p{Ll}+s$/u.test(x.word));
+    assert.ok(c.length && c.some((x) => !has(k, x.at, x.word, true)), `${k} has its singular now: delete it from SHIPPED_UNPAIRED`);
+  }
+});

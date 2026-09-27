@@ -7,7 +7,7 @@ import { join } from 'path';
 import * as React from 'react';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { HEALTH_LABELS, SOURCE_STATUSES, engineMark, healthMark, sourceMark, TONE_TEXT, type Tone } from '../lib/status';
+import { HEALTH_LABELS, SOURCE_LABELS, SOURCE_STATUSES, engineMark, healthMark, sourceMark, TONE_TEXT, type Tone } from '../lib/status';
 import { StatusEdge, StatusGlyph, StatusMark } from '../components/StatusMark';
 
 // Under tsx the components compile to the classic `React.createElement` (tsconfig's `jsx: preserve` is for
@@ -35,12 +35,30 @@ test('the source marks: a quiet source is not red, and the words are specific', 
   // 'problem': this fails.
   assert.notEqual(sourceMark('quiet').tone, 'problem', 'a quiet source reads as broken');
   assert.deepEqual(sourceMark('ok'), { tone: 'ok', label: 'Healthy' });
-  assert.deepEqual(sourceMark('blocked'), { tone: 'problem', label: 'Blocked' });
+  assert.deepEqual(sourceMark('blocked'), { tone: 'problem', label: 'Blocked by the site' });
   assert.deepEqual(sourceMark('rate_limited'), { tone: 'warn', label: 'Rate-limited' });
   assert.deepEqual(sourceMark('down'), { tone: 'problem', label: 'Not answering' });
   assert.deepEqual(sourceMark('disabled'), { tone: 'off', label: 'Turned off' });
   assert.deepEqual(sourceMark(undefined), { tone: 'ok', label: 'Healthy' }, 'a source without a status is not healthy, as the card reads it');
   assert.deepEqual(sourceMark('new_thing' as any), { tone: 'ok', label: 'Healthy' });
+});
+
+test('a source card\'s words agree with the noun "source" in the languages that inflect for it', () => {
+  // The bare 'Blocked' key belongs to a scanlation group's Block toggle and agrees with THAT noun, so on a
+  // source card es read "Bloqueado" beside "Desactivada", and ru "Отключена" beside the masculine
+  // "Источники". Reintroduce 'Blocked' in SOURCE_LABELS (or the old ru "Отключена"): the language that
+  // disagrees fails by name.
+  const blockedKey = SOURCE_LABELS[1];
+  const offKey = SOURCE_LABELS[5];
+  const agree: Record<string, RegExp> = { es: /a$/, 'pt-BR': /a$/, fr: /ée$/, ru: /н$/ };
+  for (const [lang, ending] of Object.entries(agree)) {
+    const dict = JSON.parse(readFileSync(join(ROOT, 'public/locales', `${lang}.json`), 'utf8')) as Record<string, string>;
+    const blocked = dict[blockedKey].split(' ')[0];
+    const off = dict[offKey].split(' ')[0];
+    assert.match(blocked, ending, `${lang}: "${blocked}" does not agree with the source noun (or with "${off}")`);
+    assert.match(off, ending, `${lang}: "${off}" does not agree with the source noun (or with "${blocked}")`);
+  }
+  assert.notEqual(blockedKey, 'Blocked', 'a source shares the scanlation group\'s "Blocked" key');
 });
 
 test('the Health and engine marks', () => {
@@ -78,7 +96,18 @@ test('the shapes differ, so the status reads without its colour', () => {
     assert.ok(!seen.has(s), `${tone} and ${seen.get(s)} share a shape`);
     seen.set(s, tone);
   }
-  assert.match(html(createElement(StatusGlyph, { tone: 'accent' })), /data-ring=/, 'working is not a small ring');
+});
+
+test('accent is finished, not working: only `working` turns the ring', () => {
+  // lib/status.ts calls accent "working or has finished", and a success notice is accent. Reintroduce the
+  // ring for the accent tone (`case 'accent': return <ProgressRing … progress="spin" />`): "a finished
+  // accent mark spins" fails -- every success notice would carry a turning ring.
+  assert.doesNotMatch(html(createElement(StatusGlyph, { tone: 'accent' })), /data-ring=/, 'a finished accent mark spins');
+  assert.doesNotMatch(html(createElement(StatusMark, { tone: 'accent', label: 'Saved' })), /data-ring=/, 'a finished accent mark spins');
+  assert.match(html(createElement(StatusGlyph, { tone: 'accent', working: true })), /data-ring=/, 'working is not a small ring');
+  assert.match(html(createElement(StatusMark, { tone: 'accent', label: 'Working…', working: true })), /data-ring=/, 'StatusMark drops `working`');
+  // The ring keeps the tone's colour on its wrapper, so a working mark is still read in its own tone.
+  assert.match(html(createElement(StatusGlyph, { tone: 'accent', working: true })), /^<span class="shrink-0 text-accent">/);
 });
 
 test('the start-edge bar: at the logical start, and absent from a healthy or switched-off card', () => {

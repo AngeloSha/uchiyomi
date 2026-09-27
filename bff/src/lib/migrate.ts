@@ -1232,12 +1232,15 @@ CREATE INDEX IF NOT EXISTS series_post_numbers_num ON series_post_numbers (serie
 -- v0.49.0 (#117): the slow archive. One row per series, never per chapter: what is missing is worked out on
 -- each pick. The archive owns listed numbers strictly below boundary; chapter_floor is left alone and the sweep
 -- reads GREATEST of the two while a row is queued or paused. A renumber (#116) remaps boundary and
--- floor_at_start. A stopped archive is a deleted row.
+-- floor_at_start. A stopped archive is a deleted row. boundary and floor_at_start are real, the type of the
+-- listing numbers they are compared with: against numeric, Postgres compares a real as float8, so a floor of
+-- 45.3 would count listed chapter 45.3 as strictly below itself and the archive and the sweep would both
+-- claim it.
 CREATE TABLE IF NOT EXISTS archive_queue (
   series_id      text PRIMARY KEY REFERENCES lib_series(id) ON DELETE CASCADE,
   state          text NOT NULL DEFAULT 'queued',
-  boundary       numeric,
-  floor_at_start numeric,
+  boundary       real,
+  floor_at_start real,
   direction      text NOT NULL DEFAULT 'up',
   added_by       uuid REFERENCES users(id) ON DELETE SET NULL,
   created_at     timestamptz NOT NULL DEFAULT now(),

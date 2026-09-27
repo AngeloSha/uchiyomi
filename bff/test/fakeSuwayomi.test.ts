@@ -16,7 +16,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
-  startFakeSuwayomi, suwayomiQueryErrors, SOURCE_IDS, PKG, SEQUENTIAL_KEY, type FakeSuwayomi,
+  startFakeSuwayomi, suwayomiQueryErrors, defaultSeed, SOURCE_IDS, PKG, SEQUENTIAL_KEY, type FakeSuwayomi,
 } from './fixtures/fakeSuwayomi';
 
 process.env.JWT_SECRET ||= 'test-secret-at-least-16-chars';
@@ -141,7 +141,7 @@ test('AN UNKNOWN FIELD IS REFUSED, in the engine\'s words, and never executed', 
     ["Validation error (FieldUndefined@[source/preferences/key]) : Field 'key' in type 'Preference' is undefined"]);
 });
 
-test('unknown arguments, input fields, enum values and types, and mismatched variables are refused too', () => {
+test('unknown arguments, input fields, enum values and types, and mismatched variables are refused too', async () => {
   const cases: Array<[string, string]> = [
     ['{ sources(bogusArg: 1) { nodes { id } } }', "Validation error (UnknownArgument@[sources]) : Unknown field argument 'bogusArg'"],
     ['mutation { fetchSourceManga(input:{source:"1",type:SEARCH,page:1,bogus:1}) { mangas { id } } }',
@@ -161,8 +161,24 @@ test('unknown arguments, input fields, enum values and types, and mismatched var
     ['{ sources { nodes { id ... on ExtensionType { pkgName } } } }',
       "Validation error (InvalidFragmentType@[sources/nodes]) : Fragment cannot be spread here as objects of type 'SourceType' can never be of type 'ExtensionType'"],
     ['{ sources { nodes { id } }', "Invalid syntax with offending token '<EOF>' at line 1 column 27"],
+    // A named fragment's fields are checked against its type condition, wherever it is spread. Reintroduce by
+    // skipping fragment definitions in validate(): the fake answers "FAKE ENGINE: SourceType.bogus …", which
+    // is false -- the engine refuses it.
+    ['{ sources { nodes { id ...F } } } fragment F on SourceType { name bogus }',
+      "Validation error (FieldUndefined@[F/bogus]) : Field 'bogus' in type 'SourceType' is undefined"],
   ];
   for (const [query, message] of cases) assert.deepEqual(suwayomiQueryErrors(query).slice(0, 1), [message], query);
+
+  // An input object sent as a VARIABLE is checked field by field at coercion, not at validation: a typo in it
+  // is refused before anything runs. #116's preference write passes its change this way. Reintroduce by
+  // letting coerceInput accept unknown keys: the mutation runs and "a misspelt input field ran" fails.
+  fake.reset();
+  const typo = await raw('mutation($i:FetchSourceMangaInput!){ fetchSourceManga(input:$i){ mangas { id } } }',
+    { i: { source: SOURCE_IDS.mangaBall, type: 'POPULAR', page: 1, extra: 1 } });
+  assert.deepEqual(typo.body, { errors: [{
+    message: "The variables input contains a field name 'extra' that is not defined for input object type 'FetchSourceMangaInput' ",
+  }] }, 'a misspelt input field ran');
+  assert.equal(fake.graphqlCalls('fetchSourceManga').at(-1)?.status, 'error');
 });
 
 test('variables are coerced the way the engine coerces them', async () => {
@@ -175,6 +191,14 @@ test('variables are coerced the way the engine coerces them', async () => {
   // A 64-bit id sent as a JSON number is refused, not rounded: the engine wants the string.
   assert.deepEqual((await bad({ s: 6716343437498271985, p: 1 })).errors[0].message,
     "Variable 's' has an invalid value: Expected a String input, but it was a 'Integer'");
+  // Measured on v2.3.2243 (the review's extra cases): an Int out of range, and a null inside a list, have
+  // their own wording.
+  assert.deepEqual((await bad({ s: SOURCE_IDS.mangaBall, p: 3000000000 })).errors[0].message,
+    "Variable 'p' has an invalid value: Expected value to be in the integer range, but it was a '3000000000'",
+    'an out-of-range Int is worded as a type mismatch');
+  const repos = await raw('mutation($r:[String!]){ setSettings(input:{settings:{extensionRepos:$r}}) { settings { flareSolverrEnabled } } }', { r: ['a', null] });
+  assert.deepEqual(repos.body.errors[0].message, "Variable 'r' has an invalid value: Coerced Null value for NonNull type 'String!'",
+    'a null inside a list is worded as a null variable');
   const ok = await bad({ s: SOURCE_IDS.mangaBall, p: 1 });
   assert.equal(ok.errors, undefined);
   assert.equal(ok.data.fetchSourceManga.mangas.length, 1);
@@ -471,4 +495,28 @@ test('a valid field the fake does not serve is refused as the FAKE\'s gap, never
   assert.equal(fake.calls.at(-1)?.status, 'unimplemented');
   const args = await raw('{ sources(first: 2) { nodes { id } } }');
   assert.match(args.body.errors[0].message, /^FAKE ENGINE: Query\.sources\(first\) is valid/);
+  // Introspection is answered by the engine; here it is the fake's gap, never a refusal worded as the
+  // engine's. Reintroduce by letting validate() look __schema up on Query: FieldUndefined comes back and this
+  // fails.
+  for (const q of ['{ __schema { queryType { name } } }', '{ __type(name: "SourceType") { name } }']) {
+    const r = await raw(q);
+    assert.match(r.body.errors[0].message, /^FAKE ENGINE: introspection \(__(schema|type)\) is valid/, `${q} is refused as the engine would not`);
+  }
+});
+
+test('a seed chapter the engine would number from its name is refused, not answered -1', async () => {
+  // The engine parses "Ch.10 Finale" at -1 into 10 (ChapterRecognition, measured on the Local source); the
+  // fake does not model the parser. Reintroduce by dropping the check in buildState: the fake starts, and
+  // answers -1 where the engine says 10.
+  const seed = defaultSeed();
+  seed.sources[2].mangas[0].chapters.push({ name: 'Ch.10 Finale', url: '/title/ball-runner/10', chapterNumber: -1 });
+  const started = await startFakeSuwayomi({ seed }).then((f) => f, (e: Error) => e);
+  if (!(started instanceof Error)) await started.close(); // an open server would hold the run open
+  assert.ok(started instanceof Error, 'a seed the engine would number from its name started, and answers -1 where the engine says 10');
+  assert.match(started.message, /"Ch\.10 Finale" has no chapterNumber, and the engine would parse one from its name/);
+  // A name with no number stays -1, as on the engine ("Extra Story").
+  const plain = defaultSeed();
+  plain.sources[2].mangas[0].chapters.push({ name: 'Extra Story', url: '/title/ball-runner/extra' });
+  const f = await startFakeSuwayomi({ seed: plain });
+  await f.close();
 });

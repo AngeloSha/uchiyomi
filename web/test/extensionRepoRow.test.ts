@@ -128,7 +128,9 @@ test('the engine\'s state is a mark in the viewer\'s words, not an English capsu
   // "engine unreachable" in every language. Reintroduce the badge
   // (`<span className={`rounded-full border px-2 py-0.5 text-[10px] …`}>{status.reachable ? `ready…` : 'engine unreachable'}</span>`):
   // "the engine's state is not a mark" fails (and noPills names the capsule).
-  const header = slice(ext, "{tr('Extensions')}</p>", '{status.reachable && (');
+  // From the header's own code: the first "{tr('Extensions')}</p>" is the not-configured card's.
+  const header = slice(ext, 'const list = cat?.content || [];', '{status.reachable && (');
+  assert.doesNotMatch(header, /No extension engine is set up/, 'the header slice starts at the not-configured card');
   assert.match(header, /<StatusMark \{\.\.\.engineMark\(status\.reachable, status\.version\)\} \/>/, 'the engine\'s state is not a mark');
   assert.doesNotMatch(header, /engine unreachable|`ready/, 'the English badge text is back');
 });
