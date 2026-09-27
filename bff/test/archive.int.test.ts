@@ -8,7 +8,12 @@
 //     disk floor, a shutdown; per source to anybody else's download on the gate, a pace level, a cooldown, a
 //     disabled or missing source; per series to a download already running for it -- and a series on another
 //     source still goes;
-//   - a refusal backs off 1 h then 3 h and keeps the queue, and a chapter the site lets through ends the run;
+//   - a refusal backs off 1 h then 3 h and keeps the queue, and a chapter the site lets through ends the run; an
+//     alternate asked inside a failed chapter rests and backs off too;
+//   - a listing that cannot be read is asked for less and less often, and flagged after three days; chapters coming
+//     in and a resume start those three days again;
+//   - numbers a scan could not index are stepped over without ending the archive early;
+//   - the running cycle is the chapter's time, not the window's or a backoff's;
 //   - the sweep and the archive split the work at the boundary, chapter_floor is left alone, and a clean
 //     finish clears a floor only if it is still the one the archive started from;
 //   - done with gaps says what was left behind, and lifts the boundary;
@@ -19,7 +24,7 @@
 // waiting. Skipped unless TEST_DATABASE_URL is set.
 import test, { before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, rmSync, existsSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, rmSync, existsSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -48,8 +53,10 @@ const skip = DSN ? false : 'set TEST_DATABASE_URL to run';
 
 const LIB = 'lib_arch';
 const S = (k: string) => `s_arch_${k}`;
-const A = 'arch-a', B = 'arch-b', R = 'arch-refuse', CHK = 'arch-check', GONE = 'arch-gone';
+const A = 'arch-a', B = 'arch-b', R = 'arch-refuse', R2 = 'arch-refuse2', CHK = 'arch-check', GONE = 'arch-gone';
 const MIN = 60_000;
+const HOUR = 60 * MIN;
+const DAY = 24 * HOUR;
 
 let q: any, one: any, runtime: any, arch: typeof import('../src/lib/archive'), updateSeries: typeof import('../src/lib/updater')['updateSeries'];
 let withGate: typeof import('../src/lib/gate')['withGate'], noteRateLimited: any, clearPace: any, setDisabled: any, clearBlock: any;
@@ -67,7 +74,11 @@ const holds = new Map<string, Promise<void>>();
  * Sources whose pages are refused. 403, not 429: a 429 with no Retry-After is waited out for five seconds three
  * times inside the chapter (lib/downloader.ts), which is the downloader's test, not this one; both are refusals.
  */
-const refusing = new Set<string>([R]);
+const refusing = new Set<string>([R, R2]);
+/** How many times each series' listing was asked for, by its source_series_id. */
+const listAsks = new Map<string, number>();
+/** Series whose listing read throws, as a site that is down does. */
+const listThrows = new Set<string>();
 
 const PIXEL = Buffer.concat([Buffer.from('89504e470d0a1a0a', 'hex'), Buffer.alloc(400, 7)]);
 const realFetch = globalThis.fetch;
@@ -84,7 +95,11 @@ function adapter(id: string, extra: Record<string, unknown> = {}) {
     id, name: `Arch ${id}`, ...extra,
     async search() { if (id === CHK && checkGate) await checkGate.promise; return []; },
     async getSeries(sid: string) { return { sourceId: sid, source: id, title: sid }; },
-    async listChapters(sid: string) { return (listed.get(sid) ?? []).map((n) => ({ number: n, title: `Chapter ${n}`, sourceId: `${sid}/c${n}` })); },
+    async listChapters(sid: string) {
+      listAsks.set(sid, (listAsks.get(sid) ?? 0) + 1);
+      if (listThrows.has(sid)) throw new Error('503 Service Unavailable');
+      return (listed.get(sid) ?? []).map((n) => ({ number: n, title: `Chapter ${n}`, sourceId: `${sid}/c${n}` }));
+    },
     async getPageUrls(chId: string) {
       asked.push(chId);
       const h = holds.get(chId);
@@ -158,7 +173,7 @@ before(async () => {
   await migrate();
   // The check's source first: the daily source check walks the registry in order.
   registerAdapter(adapter(CHK) as any);
-  for (const id of [A, B, R]) registerAdapter(adapter(id) as any);
+  for (const id of [A, B, R, R2]) registerAdapter(adapter(id) as any);
   await q(`INSERT INTO libraries (id, name, path) VALUES ($1,'Arch',$1) ON CONFLICT (id) DO NOTHING`, [LIB]);
   await q(`DELETE FROM users WHERE username = 'arch-admin'`);
   adminId = (await q(`INSERT INTO users (username, display_name, password_hash, role, auth_kind) VALUES ('arch-admin','arch-admin','x','admin','password') RETURNING id`))[0].id;
@@ -337,8 +352,202 @@ test('a series whose source is gone waits, and says so', { skip }, async () => {
   const t = await tick();
   assert.deepEqual(t.started, []);
   assert.equal(t.waits[s.id]?.why, 'source_missing');
-  const v = await arch.archiveView(() => true, adminId);
-  assert.equal(v.series.find((x) => x.seriesId === s.id)?.attention?.why, 'source_missing', 'and Needs attention shows it');
+  let v = await arch.archiveView(() => true, adminId);
+  // Reintroduce by flagging a missing source at once (attentionOf): this reads source_missing -- as every extension
+  // reload would.
+  assert.equal(v.series.find((x) => x.seriesId === s.id)?.attention, undefined, 'not on the first look: a reload is not a problem');
+  now += DAY;
+  assert.equal((await tick()).waits[s.id]?.why, 'source_missing');
+  v = await arch.archiveView(() => true, adminId);
+  assert.equal(v.series.find((x) => x.seriesId === s.id)?.attention?.why, 'source_missing', 'a day on, Needs attention shows it');
+});
+
+test('a listing that cannot be read is asked for less and less often, and flagged after three days', { skip }, async () => {
+  // A series its site lists nothing for (moved, delisted), and one whose site is down: neither has a listing, so
+  // neither has a boundary, and each read of it is its source's turn.
+  const e = await series('nolist', A, []);
+  const d = await series('downlist', B, []);
+  listThrows.add(d.ref);
+  const rand = () => 0.99;
+  try {
+    assert.equal(await arch.enqueueArchive(e.id, adminId, adminCtx), 'queued');
+    assert.equal(await arch.enqueueArchive(d.id, adminId, adminCtx), 'queued');
+    assert.equal((await row(e.id)).boundary, null, 'no listing, no boundary yet');
+    const queuedAt = now;
+    listAsks.clear();
+    let waits: Record<string, { why: string; until?: number }> = {};
+    // An hour of the scheduler's own rhythm, a look a minute.
+    for (let i = 0; i < 60; i++) {
+      const t = await tick({ rand });
+      await arch.archiveIdle();
+      if (i === 0) {
+        assert.deepEqual(t.started.map((x) => `${x.seriesId}:${x.kind}`).sort(), [`${d.id}:listing`, `${e.id}:listing`].sort());
+        // Reintroduce by resting the minimum after a read that gave nothing: A is free again in 45 s.
+        const rest = new Date((await pace(A)).next_at).getTime() - now;
+        assert.ok(rest >= 10 * MIN, `the source rests a whole break after a read that gave nothing (${Math.round(rest / 1000)} s)`);
+      }
+      if (i === 1) waits = t.waits;
+      now += MIN;
+    }
+    // Reintroduce by dropping the ladder in tickOnce: each is read at every break, four times in the hour.
+    assert.ok((listAsks.get(e.ref) ?? 0) <= 2, `an empty listing is asked for at most twice in an hour (${listAsks.get(e.ref)})`);
+    assert.ok((listAsks.get(d.ref) ?? 0) <= 2, `a failing one too (${listAsks.get(d.ref)})`);
+    assert.equal(waits[e.id]?.why, 'listing', 'and it says why it waits');
+    assert.equal(waits[e.id]?.until, queuedAt + HOUR, 'read again an hour after the first read');
+    assert.equal(waits[d.id]?.why, 'listing');
+    assert.equal((await row(e.id)).state, 'queued', 'a listing that is not there today may be tomorrow');
+
+    // The ladder: 1 h, 3 h, 12 h, then a day, kept on the row (a restart keeps it).
+    const rungs: number[] = [];
+    for (let i = 0; i < 5; i++) {
+      now = Date.parse((await row(e.id)).note.listingRetryAt);
+      const before = listAsks.get(e.ref) ?? 0;
+      await tick({ rand });
+      await arch.archiveIdle();
+      assert.equal(listAsks.get(e.ref), before + 1, 'read once at its time');
+      rungs.push(Date.parse((await row(e.id)).note.listingRetryAt) - now);
+      if (i === 1) {
+        // A restart: the ladder is on the row, so the next read does not come any sooner.
+        arch.resetArchiveMemory();
+        now += MIN;
+        assert.equal((await tick({ rand })).waits[e.id]?.why, 'listing', 'a restart does not bring the next read forward');
+        await arch.archiveIdle();
+        assert.equal(listAsks.get(e.ref), before + 1);
+      }
+    }
+    assert.deepEqual(rungs.map((x) => x / HOUR), [3, 12, 24, 24, 24], 'after the first hour: 3 h, 12 h, then a day');
+    // 64 hours in: had its turns, nothing came of them, not yet three days.
+    const shown = async (id: string) => (await arch.archiveView(() => true, adminId)).series.find((x) => x.seriesId === id);
+    assert.ok(now - queuedAt < 3 * DAY);
+    assert.equal((await shown(e.id))?.attention, undefined, 'under three days');
+    now = queuedAt + 3 * DAY + MIN;
+    // Reintroduce by dropping the queued 'stalled' rule (attentionOf): nothing under Needs attention, ever.
+    assert.deepEqual((await shown(e.id))?.attention, { why: 'stalled', since: new Date(queuedAt).toISOString() }, 'three days of turns with nothing in');
+    assert.equal((await shown(d.id))?.attention?.why, 'stalled');
+
+    // The listing comes back: read at its next turn, the boundary placed, the flag and the ladder gone.
+    listed.set(e.ref, [1, 2]);
+    now = Date.parse((await row(e.id)).note.listingRetryAt);
+    await tick({ rand });
+    await arch.archiveIdle();
+    const back = await row(e.id);
+    assert.ok(Math.abs(Number(back.boundary) - 2.001) < 1e-4, `the boundary is placed (${back.boundary})`);
+    assert.equal(back.note.listingRetryAt, undefined);
+    assert.equal(back.note.progressAt, new Date(now).toISOString(), 'a listing at last is progress');
+    assert.equal((await shown(e.id))?.attention, undefined);
+    const t2 = await step({ rand });
+    assert.deepEqual(t2.started.filter((x) => x.seriesId === e.id).map((x) => x.number), [1], 'and its first chapter follows');
+  } finally {
+    listThrows.delete(d.ref);
+    await arch.archiveIdle();
+  }
+});
+
+test('chapters coming in, and a resume, start the three days again', { skip }, async () => {
+  const s = await series('steady', A, [1, 2, 3, 4, 5, 6]);
+  assert.equal(await arch.enqueueArchive(s.id, adminId, adminCtx), 'queued');
+  const shown = async () => (await arch.archiveView(() => true, adminId)).series.find((x) => x.seriesId === s.id);
+  // A chapter a day for four days: slow, but moving.
+  for (let day = 1; day <= 4; day++) {
+    assert.deepEqual((await tick()).started.map((x) => x.number), [day]);
+    await arch.archiveIdle();
+    now += DAY;
+    // Reintroduce by dropping the progress stamp on a landed chapter (runChapter): day three reads stalled.
+    assert.equal((await shown())?.attention, undefined, `day ${day}: a chapter came in, so it is not stalled`);
+  }
+  // Paused ten days, then resumed: the pause was a person's, not the series' failure.
+  const who = { userId: adminId, admin: true, ctx: adminCtx };
+  assert.equal(await arch.archiveAct('pause', s.id, who), 'ok');
+  now += 10 * DAY;
+  assert.equal((await shown())?.attention?.why, 'stalled', 'paused for over a week');
+  assert.equal(await arch.archiveAct('resume', s.id, who), 'ok');
+  // Reintroduce by clearing the note on resume (archiveAct): this reads stalled, from progress ten days old.
+  assert.equal((await shown())?.attention, undefined, 'resumed: its three days start again');
+});
+
+test('numbers a scan could not index are stepped over, and the rest of the catalogue is still fetched', { skip }, async () => {
+  const s = await series('stuck', A, [1, 2, 3, 4, 5, 6, 7]);
+  // Chapters 1-5 are on disk, and the library will not index them (a trigger drops their rows, as a folder the
+  // scan cannot take would): five in a row, the whole of one pick.
+  for (const n of [1, 2, 3, 4, 5]) writeFileSync(join(DL, s.folder, `Chapter ${n}.cbz`), 'not a zip');
+  await q(`CREATE OR REPLACE FUNCTION arch_stuck_refuse() RETURNS trigger LANGUAGE plpgsql AS $$
+           BEGIN IF NEW.series_id = '${s.id}' AND NEW.number <= 5 THEN RETURN NULL; END IF; RETURN NEW; END $$`);
+  await q('DROP TRIGGER IF EXISTS arch_stuck_refuse ON lib_books');
+  await q('CREATE TRIGGER arch_stuck_refuse BEFORE INSERT ON lib_books FOR EACH ROW EXECUTE FUNCTION arch_stuck_refuse()');
+  try {
+    assert.equal(await arch.enqueueArchive(s.id, adminId, adminCtx), 'queued');
+    const t1 = await tick();
+    assert.deepEqual(t1.started, [], 'the five on disk are not fetched again');
+    await arch.flushArchiveScan();
+    assert.deepEqual(await q('SELECT number FROM lib_books WHERE series_id = $1', [s.id]), [], 'and the library did not take them');
+    const t2 = await step();
+    // Reintroduce by filtering the stuck numbers after the query (candidatesFor): the pick is empty, and this
+    // finishes the series with 6 and 7 never asked for.
+    assert.deepEqual(t2.finished, [], 'five stuck numbers do not end the archive');
+    assert.deepEqual(t2.started.map((x) => x.number), [6]);
+    assert.deepEqual(await drain(s.id), [7]);
+    assert.deepEqual(onDiskNums(s.folder), [1, 2, 3, 4, 5, 6, 7]);
+    assert.deepEqual((await q('SELECT number FROM lib_books WHERE series_id = $1 ORDER BY number', [s.id])).map((b: any) => Number(b.number)), [6, 7]);
+  } finally {
+    await q('DROP TRIGGER IF EXISTS arch_stuck_refuse ON lib_books');
+    await q('DROP FUNCTION IF EXISTS arch_stuck_refuse()');
+  }
+});
+
+test("the running cycle is the chapter's time: a backoff and a night outside the window are left out", { skip }, async () => {
+  const rand = () => 0.99;
+  const { nextBreakMs } = await import('../src/lib/archivePace');
+  // What 0.99 draws at four an hour after a chapter that took no time on this clock (17.5 minutes): the first
+  // cycle on a source is its chapter and its break.
+  const brk = nextBreakMs({ perHour: 4, chapterMs: 0, rand, minBreakMs: 45_000 }).ms;
+
+  // A refusal, an hour's backoff, then the chapter. The source's break (17.5 min) is the pace; the 42.5 minutes of
+  // backoff beyond it are the site's.
+  const b = await series('cycleback', R, [1, 2]);
+  assert.equal(await arch.enqueueArchive(b.id, adminId, adminCtx), 'queued');
+  assert.deepEqual((await tick({ rand })).started.map((x) => x.number), [1]);
+  await arch.archiveIdle();
+  let p = await pace(R);
+  assert.equal(p.cycle_ms, brk, 'the first cycle is the chapter and its break');
+  assert.equal(new Date(p.backoff_until).getTime(), now + HOUR, 'an hour of backoff');
+  refusing.delete(R);
+  try {
+    clearPace();
+    await clearBlock(R);
+    now += HOUR + MIN;
+    assert.deepEqual((await tick({ rand })).started.map((x) => x.number), [1]);
+    await arch.archiveIdle();
+    p = await pace(R);
+    // Reintroduce by feeding the whole span (61 minutes) to ewmaCycle: the average jumps by minutes, not 12 s.
+    assert.equal(p.cycle_ms, Math.round(brk + 0.2 * MIN), 'the sample is the break and the minute after the backoff');
+  } finally {
+    refusing.add(R);
+    await arch.archiveAct('stop', b.id, { userId: adminId, admin: true, ctx: adminCtx });
+  }
+
+  // A window of 10:00-11:00: a chapter at 10:50, the next at 10:01 the morning after. The ten minutes before it
+  // shut and the minute after it opened are the pace; the 23 hours between are the window's.
+  const w = await series('cyclenight', A, [1, 2, 3]);
+  const day = new Date(Date.now() + 2 * DAY);
+  day.setHours(10, 50, 0, 0);
+  now = day.getTime();
+  await q('UPDATE server_settings SET archive_window_from = 10, archive_window_to = 11 WHERE id = 1');
+  try {
+    assert.equal(await arch.enqueueArchive(w.id, adminId, adminCtx), 'queued');
+    const mine = async () => (await tick({ rand })).started.filter((x) => x.seriesId === w.id).map((x) => x.number);
+    assert.deepEqual(await mine(), [1]);
+    await arch.archiveIdle();
+    const c1 = (await pace(A)).cycle_ms;
+    assert.equal(c1, brk);
+    now += 23 * HOUR + 11 * MIN;
+    assert.deepEqual(await mine(), [2]);
+    await arch.archiveIdle();
+    // Reintroduce by leaving the window out of outsideCycleMs' call: the sample is 23 hours, and only ewmaCycle's
+    // cap stands between the night and the average.
+    assert.equal((await pace(A)).cycle_ms, Math.round(c1 + 0.2 * (11 * MIN - c1)), 'the night is the window\'s, not the chapter\'s');
+  } finally {
+    await q('UPDATE server_settings SET archive_window_from = NULL, archive_window_to = NULL WHERE id = 1');
+  }
 });
 
 test('a refusal backs off and keeps the queue; a chapter let through ends the run', { skip }, async () => {
@@ -388,6 +597,29 @@ test('a refusal backs off and keeps the queue; a chapter let through ends the ru
     r = await row(s.id);
     assert.equal(r.done_count, 1);
   } finally { refusing.add(R); }
+});
+
+test('an alternate asked inside a failed chapter rests and backs off as the chosen source does', { skip }, async () => {
+  const s = await series('alt', R, [1, 2]);
+  // The same series followed on a second site, which refuses too.
+  listed.set('alt-ref2', [1, 2]);
+  await q(`INSERT INTO series_sources (series_id, source_id, source_series_id) VALUES ($1, $2, 'alt-ref2') ON CONFLICT DO NOTHING`, [s.id, R2]);
+  assert.equal((await updateSeries(s.id, 0)).outcome, 'ok');
+  const copies = (await one('SELECT copies FROM series_listing WHERE series_id = $1 AND number = 1', [s.id])).copies;
+  assert.deepEqual(copies.map((c: any) => c.source).sort(), [R, R2].sort(), 'both sites list chapter one');
+  assert.equal(await arch.enqueueArchive(s.id, adminId, adminCtx), 'queued');
+  const t = await tick({ rand: () => 0.99 });
+  assert.deepEqual(t.started.map((x) => `${x.source}:${x.number}`), [`${R}:1`]);
+  await arch.archiveIdle();
+  assert.ok(asked.includes('alt-ref2/c1'), 'the alternate was asked for the chapter');
+  assert.equal((await pace(R)).backoff_level, 1);
+  // Reintroduce by resting and backing off only the chosen source (runChapter): this finds no row for R2, and
+  // the next tick may start another series' chapter on the site that has just said no.
+  const p2 = await pace(R2);
+  assert.ok(p2, 'the alternate has its own rest');
+  assert.ok(new Date(p2.next_at).getTime() >= now + 10 * MIN, 'the same break as the chosen source');
+  assert.equal(p2.backoff_level, 1, "its refusal backs it off as the chosen source's does");
+  assert.ok(new Date(p2.backoff_until).getTime() >= now + HOUR - 1000, 'an hour');
 });
 
 test('the sweep and the archive split the work at the boundary; the floor is left alone', { skip }, async () => {

@@ -9,10 +9,10 @@ process.env.JWT_SECRET ||= 'test-secret-at-least-16-chars';
 process.env.CONFIG_DIR ||= '/tmp/uchiyomi-test-config';
 
 import {
-  directionFor, boundaryFor, globalWait, sourceWait, attentionOf, shownDone, rowsFor, STALLED_MS, DONE_SHOWN_MS,
-  type SourceState,
+  directionFor, boundaryFor, globalWait, sourceWait, attentionOf, shownDone, rowsFor, listingRetryAt, outsideCycleMs,
+  STALLED_MS, DONE_SHOWN_MS, NO_PROGRESS_MS, SOURCE_GONE_MS, type SourceState,
 } from '../src/lib/archivePlan';
-import { inWindow } from '../src/lib/archivePace';
+import { inWindow, ARCHIVE_DEFAULTS } from '../src/lib/archivePace';
 
 // seriesListing imports the database module, which refuses to load without DATABASE_URL: imported after it.
 let whyOf: typeof import('../src/lib/seriesListing')['whyOf'];
@@ -91,8 +91,10 @@ test('the per-source gates: each on its own, and the more telling reason first',
 
 const att = (over: Partial<Parameters<typeof attentionOf>[0]> = {}) => attentionOf({
   state: 'queued', now: NOW, failed: 0, note: null, finishedAt: null, pausedAt: null, backoffLevel: 0,
-  backoffSince: null, wait: null, waitSince: null, global: null, ...over,
+  backoffSince: null, wait: null, waitSince: null, global: null, progressSince: null, lastTurnAt: null, ...over,
 });
+const HOUR = 3600_000;
+const DAY = 24 * HOUR;
 
 test('what needs a person: a finish with gaps, a source that keeps refusing or has gone, a forgotten pause, the disk', () => {
   assert.equal(att(), null);
@@ -101,12 +103,60 @@ test('what needs a person: a finish with gaps, a source that keeps refusing or h
   assert.equal(att({ state: 'done', finishedAt: NOW, failed: 2 })?.why, 'finished_with_gaps');
   assert.equal(att({ backoffLevel: 1 }), null, 'one refusal is one bad hour');
   assert.equal(att({ backoffLevel: 2, backoffSince: NOW - 1000 })?.why, 'backoff');
-  assert.equal(att({ wait: { why: 'source_missing' }, waitSince: NOW - 5 })?.why, 'source_missing');
-  assert.equal(att({ wait: { why: 'disabled' } })?.why, 'disabled');
+  assert.deepEqual(att({ wait: { why: 'source_missing' }, waitSince: NOW - SOURCE_GONE_MS }), { why: 'source_missing', since: NOW - SOURCE_GONE_MS });
+  assert.equal(att({ wait: { why: 'disabled' }, waitSince: NOW - 2 * DAY })?.why, 'disabled');
+  // Reintroduce by flagging a missing or disabled source at once: these read source_missing and disabled.
+  assert.equal(att({ wait: { why: 'source_missing' }, waitSince: NOW - 5 }), null, 'an extension reload is not a problem');
+  assert.equal(att({ wait: { why: 'disabled' }, waitSince: NOW - (SOURCE_GONE_MS - 1000) }), null, 'switched off for less than a day');
+  assert.equal(att({ wait: { why: 'disabled' } }), null, 'nor one whose wait started nobody knows when');
   assert.equal(att({ wait: { why: 'break' } }), null, 'a break is the archive working');
   assert.equal(att({ global: { why: 'disk' } })?.why, 'disk');
   assert.equal(att({ state: 'paused', pausedAt: NOW - 3600_000 }), null);
   assert.equal(att({ state: 'paused', pausedAt: NOW - STALLED_MS })?.why, 'stalled', 'paused and forgotten hides the back catalogue');
+});
+
+test('no progress for three days while queued: flagged when it had its turns, not when it waited for one', () => {
+  const since = NOW - NO_PROGRESS_MS;
+  // Every turn since its last progress fetched nothing: a listing that keeps failing, chapters that keep failing.
+  // Reintroduce by dropping the queued rule: this reads null, and a series that has asked its site for a dead
+  // listing for days shows nothing under Needs attention.
+  assert.deepEqual(att({ progressSince: since, lastTurnAt: NOW - HOUR }), { why: 'stalled', since }, 'turns taken, nothing in');
+  assert.equal(att({ progressSince: since + 60_000, lastTurnAt: NOW - HOUR }), null, 'a minute short of three days');
+  // Five hundred series on one site at four an hour take days to come round: waiting for a turn is the pace.
+  assert.equal(att({ progressSince: NOW - 10 * DAY, lastTurnAt: null }), null, 'never had a turn yet: queued behind the others');
+  assert.equal(att({ progressSince: NOW - 10 * DAY, lastTurnAt: NOW - 11 * DAY }), null, 'no turn since its last progress');
+  // The more telling reasons come first.
+  assert.equal(att({ progressSince: since, lastTurnAt: NOW - HOUR, backoffLevel: 2 })?.why, 'backoff');
+  assert.equal(att({ progressSince: since, lastTurnAt: NOW - HOUR, global: { why: 'disk' } })?.why, 'disk');
+  // A paused one keeps its own rule: a week, from when it was paused.
+  assert.equal(att({ state: 'paused', pausedAt: NOW - HOUR, progressSince: since, lastTurnAt: NOW - HOUR }), null);
+});
+
+test('a listing that could not be read is read again 1 h, 3 h, 12 h, then a day apart', () => {
+  const L = ARCHIVE_DEFAULTS.backoffMs;
+  // Reintroduce by staying on the first rung: every read after the first is an hour apart, forever.
+  assert.deepEqual([1, 2, 3, 4, 5, 9].map((n) => listingRetryAt(n, NOW, L) - NOW), [HOUR, 3 * HOUR, 12 * HOUR, DAY, DAY, DAY], 'the ladder, then a day');
+  assert.equal(listingRetryAt(0, NOW, L) - NOW, HOUR, 'a count that went missing is the first rung, never no wait');
+});
+
+test("a cycle sample keeps the chapter's time and loses the window's and the backoff's", () => {
+  const base = { breakEnd: null, backoffUntil: null, windowFrom: null, windowTo: null, inWindow };
+  const at = (h: number, m = 0) => Date.UTC(2026, 8, 27, h, m);
+  // TZ=UTC in the test runner; the window is in local hours, and these are local hours there.
+  assert.equal(outsideCycleMs({ ...base, from: at(10), to: at(11) }), 0, 'no window, no backoff: all of it is the pace');
+  // A window of 10:00-11:00: a chapter at 10:50, the next at 10:01 the day after. The 23 hours it was shut are
+  // the window's; the ten minutes before it shut and the minute after it opened are the pace.
+  // Reintroduce by returning the backoff part alone: this reads 0 and the night goes into the average.
+  const night = outsideCycleMs({ ...base, windowFrom: 10, windowTo: 11, from: at(10, 50), to: at(10, 50) + 23 * HOUR + 11 * 60_000 });
+  assert.equal(night, 23 * HOUR, "the 23 hours it was shut are the window's");
+  // A 1 h backoff over a 17-minute break: the 43 minutes beyond the break are the site's; the break is the pace.
+  assert.equal(outsideCycleMs({ ...base, from: at(12), to: at(13, 1), breakEnd: at(12, 17), backoffUntil: at(13) }), 43 * 60_000);
+  assert.equal(outsideCycleMs({ ...base, from: at(12), to: at(13), breakEnd: at(12, 30), backoffUntil: at(12, 20) }), 0, 'a backoff inside its break adds nothing');
+  assert.equal(outsideCycleMs({ ...base, from: at(12), to: at(13), breakEnd: at(11), backoffUntil: at(11, 30) }), 0, 'one that ended before the span');
+  // Both at once is counted once: a backoff running on into the closed window.
+  const both = outsideCycleMs({ ...base, windowFrom: 10, windowTo: 13, from: at(12), to: at(15), breakEnd: at(12, 10), backoffUntil: at(14) });
+  assert.equal(both, 50 * 60_000 + 2 * HOUR, '12:10-13:00 backoff in the window, 13:00-15:00 the window shut');
+  assert.equal(outsideCycleMs({ ...base, from: at(12), to: at(11) }), 0, 'a span that runs backwards is nothing');
 });
 
 test('a finished archive is shown for a day, or until dismissed when something was left behind', () => {

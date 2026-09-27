@@ -1,6 +1,7 @@
 // The slow archive's decisions (#117) that need no database: which way a series is filled, where its boundary
-// sits, why the whole archive or one series is waiting, what needs a person's attention, and which rows a
-// viewer is shown.
+// sits, why the whole archive or one series is waiting, what needs a person's attention, when a listing that
+// could not be read is read again, how much of a cycle was not the archive's own pace, and which rows a viewer
+// is shown.
 //
 // lib/archive.ts owns the state -- the queue, the per-source pace rows, the chapters in flight -- and asks
 // these functions what the state means. They take everything as arguments (the clock included), so the unit
@@ -94,7 +95,8 @@ export function globalWait(o: {
  * - `cooldown`: its source is in the server's own back-off (source_health.blocked_until).
  * - `disabled` / `source_missing`: the admin switched its source off, or no adapter is loaded for it.
  * - `series_busy`: a download for the series itself is running (a Fetch, an add's own loop).
- * - `listing`: its listing is being read again before the next chapter.
+ * - `listing`: its listing has to be read before its next chapter, and the last read gave none (the site failed,
+ *   or lists nothing for it): it is read again at `until`, further apart each time (listingRetryAt).
  * - `renumbering`: a renumber (#116) is pending for the series; its numbers are about to change.
  */
 export type SeriesWaitWhy =
@@ -142,14 +144,33 @@ export interface Attention { why: AttentionWhy; since: number }
 
 /** A paused archive this old is flagged: paused and forgotten, it hides the back catalogue from the sweep. */
 export const STALLED_MS = 7 * 24 * 3600_000;
+/**
+ * A queued archive that has kept taking its turns this long with nothing to show for them is flagged: every
+ * read of its listing failed, or every chapter it asked for did.
+ */
+export const NO_PROGRESS_MS = 3 * 24 * 3600_000;
+/** A source missing or switched off this long is flagged. Shorter is an extension reload, or an admin's minute. */
+export const SOURCE_GONE_MS = 24 * 3600_000;
 
 /** What finished with something left behind, and why each was left. */
 export interface DoneNote { capped: number; held: number; blocked: number }
 
 /**
  * Needs attention, or not. A finished archive with anything left behind stays there until dismissed (DELETE);
- * a queued one is flagged when its source keeps refusing (two in a row: one refusal is one bad hour), has gone
- * away or been switched off, or when the disk floor has stopped everything; a paused one after a week.
+ * a queued one is flagged when the disk floor has stopped everything, when its source has been gone or switched
+ * off for a day, when its source keeps refusing (two in a row: one refusal is one bad hour), or when it has made
+ * no progress for three days although it had its turns; a paused one after a week.
+ *
+ * `progressSince`: when the series last moved forward -- a chapter came in, its first listing placed the
+ * boundary, it was queued or resumed. `lastTurnAt`: when it last had its source's turn (archive_queue.last_at).
+ * ⚠️ A turn is not progress: every read of a listing that keeps failing, and every chapter that keeps failing,
+ * is a turn, and counting turns as progress is how a series that asked its site for a dead listing once a
+ * minute for days looked healthy. But a series that has had NO turn since its last progress is waiting behind
+ * the others on its source -- five hundred series on one site at four an hour take days each to come round --
+ * which is the archive working as the admin set it, not a stall.
+ *
+ * ⚠️ `waitSince` is kept in memory, so a restart starts a missing source's day again. Flagged a day late after a
+ * restart is the price; flagged at once, every extension reload put series under Needs attention.
  */
 export function attentionOf(o: {
   state: 'queued' | 'paused' | 'done';
@@ -163,6 +184,8 @@ export function attentionOf(o: {
   wait: SeriesWait | null | undefined;
   waitSince: number | null;
   global: GlobalWait | null | undefined;
+  progressSince: number | null;
+  lastTurnAt: number | null;
 }): Attention | null {
   if (o.state === 'done') {
     const gaps = (o.note?.capped ?? 0) + (o.note?.held ?? 0) + (o.note?.blocked ?? 0);
@@ -172,9 +195,66 @@ export function attentionOf(o: {
     return o.pausedAt != null && o.now - o.pausedAt >= STALLED_MS ? { why: 'stalled', since: o.pausedAt } : null;
   }
   if (o.global?.why === 'disk') return { why: 'disk', since: o.waitSince ?? o.now };
-  if (o.wait?.why === 'source_missing' || o.wait?.why === 'disabled') return { why: o.wait.why, since: o.waitSince ?? o.now };
+  // Reintroduce by dropping the age check: "a series whose source is gone waits, and says so" in
+  // archive.int.test.ts flags it on the first look.
+  if ((o.wait?.why === 'source_missing' || o.wait?.why === 'disabled') && o.waitSince != null && o.now - o.waitSince >= SOURCE_GONE_MS) {
+    return { why: o.wait.why, since: o.waitSince };
+  }
   if (o.backoffLevel >= 2) return { why: 'backoff', since: o.backoffSince ?? o.now };
+  // Reintroduce by dropping this: "no progress for three days while queued" in archivePlan.test.ts reads null, and
+  // a series that has asked its site for a dead listing for days shows nothing under Needs attention.
+  if (o.progressSince != null && o.now - o.progressSince >= NO_PROGRESS_MS && o.lastTurnAt != null && o.lastTurnAt > o.progressSince) {
+    return { why: 'stalled', since: o.progressSince };
+  }
   return null;
+}
+
+/**
+ * How long a series whose listing could not be read waits before the next read: 1 h, 3 h, 12 h, then a day for
+ * every failure after that -- the refusal ladder (archivePace.ts backoffMs), since a listing that is not there is
+ * asked about as rarely as a site that says no. `fails` counts the failed reads in a row, this one included.
+ *
+ * Per SERIES, not per source: a site that lists nothing for one series (moved, delisted) still serves the others
+ * queued on it, and a whole site that is down fails their chapters too, which back the source off on their own.
+ */
+export function listingRetryAt(fails: number, now: number, ladder: readonly number[]): number {
+  const step = ladder[Math.min(Math.max(1, Math.floor(fails)), ladder.length) - 1] ?? 0;
+  return now + step;
+}
+
+/**
+ * How much of the time between two chapters on one source, [from, to), was the window's or the site's rather
+ * than the archive's own pace: the hours outside the window it may run in, and the part of a refusal's backoff
+ * that outlasted the break after the chapter before (`breakEnd`, archive_pace.next_at; `backoffUntil`). Taken off
+ * a cycle sample before it reaches the running average (archivePace.ts ewmaCycle): a night outside the window, or
+ * an hour of backoff, is not how long a chapter takes, and even capped, one night took the default rate's average
+ * from 15 minutes to over 20.
+ *
+ * A stretch that is both is counted once. The break itself stays in: it is the pace. Not counted out: the admin's
+ * pause, a sweep or a repair holding everything, a restart -- rarer, and the cap in ewmaCycle bounds them.
+ * Walked an hour at a time in local time (the window is in local hours); past a month the rest counts as outside.
+ */
+export function outsideCycleMs(o: {
+  from: number; to: number;
+  breakEnd: number | null; backoffUntil: number | null;
+  windowFrom: number | null; windowTo: number | null;
+  inWindow: (hour: number, from: number | null, to: number | null) => boolean;
+}): number {
+  if (!(o.to > o.from)) return 0;
+  const bStart = Math.max(o.from, o.breakEnd ?? o.from);
+  const bEnd = o.backoffUntil == null ? -Infinity : Math.min(o.to, o.backoffUntil);
+  const backoffIn = (a: number, b: number) => Math.max(0, Math.min(b, bEnd) - Math.max(a, bStart));
+  if (o.windowFrom == null || o.windowTo == null || o.windowFrom === o.windowTo) return backoffIn(o.from, o.to);
+  let out = 0;
+  let a = o.from;
+  for (let i = 0; a < o.to && i < 31 * 24; i++) {
+    const next = new Date(a);
+    next.setMinutes(60, 0, 0); // the next local hour boundary, DST included
+    const b = Math.min(o.to, next.getTime());
+    out += o.inWindow(new Date(a).getHours(), o.windowFrom, o.windowTo) ? backoffIn(a, b) : b - a;
+    a = b;
+  }
+  return out + Math.max(0, o.to - a);
 }
 
 /** How long a finished archive with nothing left behind stays on the Downloads view. */

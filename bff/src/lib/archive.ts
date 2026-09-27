@@ -55,7 +55,7 @@ import {
   etaMs, cycleMs,
 } from './archivePace';
 import {
-  directionFor, boundaryFor, globalWait, sourceWait, attentionOf, shownDone, rowsFor,
+  directionFor, boundaryFor, globalWait, sourceWait, attentionOf, shownDone, rowsFor, listingRetryAt, outsideCycleMs,
   type ArchiveDirection, type GlobalWait, type SeriesWait, type SourceState, type DoneNote, type Attention,
 } from './archivePlan';
 
@@ -365,7 +365,10 @@ export async function archiveAct(act: 'pause' | 'resume' | 'stop', seriesId: str
       await q(`UPDATE archive_queue SET state = 'paused', note = jsonb_build_object('pausedAt', $2::timestamptz)
                 WHERE series_id = $1 AND state = 'queued'`, [seriesId, new Date(clock())]);
     } else {
-      await q(`UPDATE archive_queue SET state = 'queued', note = NULL WHERE series_id = $1 AND state = 'paused'`, [seriesId]);
+      // Resumed is a fresh start: its three days without progress (attentionOf) count from now, and a listing that
+      // failed is read at its next turn rather than on the ladder it was paused on.
+      await q(`UPDATE archive_queue SET state = 'queued', note = jsonb_build_object('progressAt', $2::text)
+                WHERE series_id = $1 AND state = 'paused'`, [seriesId, new Date(clock()).toISOString()]);
     }
   }
   invalidateArchiveView();
@@ -419,8 +422,15 @@ export interface TickReport {
   finished: string[];
 }
 
+/**
+ * archive_queue.note on a queued row: when it last moved forward (a chapter came in, its first listing placed the
+ * boundary, it was resumed; created_at before any of those), and the ladder of a listing that could not be read.
+ * A paused row's note is {pausedAt}, a finished one's the DoneNote; each replaces this.
+ */
+interface QueuedNote { progressAt?: string; listingFails?: number; listingRetryAt?: string }
+
 interface QueuedRow {
-  series_id: string; boundary: number | null; direction: ArchiveDirection; added_by: string | null;
+  series_id: string; boundary: number | null; direction: ArchiveDirection; added_by: string | null; note: QueuedNote | null;
   title: string; folder: string; summary: string | null; author: string | null; genres: string[] | null;
   web: string | null; status: string | null; source_id: string | null; source_checked_at: Date | null;
   renumbering: boolean; by_role: string | null; by_cap: number | null; extra: string[];
@@ -472,7 +482,7 @@ async function tickOnce(opts: TickOpts): Promise<TickReport> {
   lastGlobal = null;
 
   const rows = await q<QueuedRow>(
-    `SELECT a.series_id, a.boundary, a.direction, a.added_by,
+    `SELECT a.series_id, a.boundary, a.direction, a.added_by, a.note,
             s.title, s.folder, s.summary, s.author, s.genres, s.web, s.status, s.source_id, s.source_checked_at,
             (s.numbering_pending IS NOT NULL OR s.renumber_plan IS NOT NULL) AS renumbering,
             u.role AS by_role, u.max_age_rating AS by_cap,
@@ -533,8 +543,14 @@ async function tickOnce(opts: TickOpts): Promise<TickReport> {
       // week-old list names chapters the site may have moved.
       S = followed.find((src) => getSource(src) && capOk(src)) ?? null;
       if (!S) { wait(r, { why: 'source_missing' }); continue; }
+      // A read that gave no listing is not repeated at the source's next turn: the series waits on its own ladder
+      // (runListing), and the other series on the site go in the meantime.
+      // Reintroduce by dropping this: "a listing that cannot be read is asked for less and less often" in
+      // archive.int.test.ts asks the site for it every few minutes.
+      const retryAt = ms(r.note?.listingRetryAt);
+      if (retryAt != null && retryAt > now) { wait(r, { why: 'listing', until: retryAt, source: getSource(S)?.name ?? S }); continue; }
     } else {
-      const list = (cands.get(r.series_id) ?? []).filter((c) => !stuck.get(r.series_id)?.has(c.number));
+      const list = cands.get(r.series_id) ?? [];
       if (!list.length) {
         if ([...flights.values()].some((f) => f.seriesId === r.series_id)) { wait(r, { why: 'turn' }); continue; }
         // Its last chapters are on disk but not yet in the library: scan them in first, so what is left is
@@ -580,13 +596,20 @@ async function tickOnce(opts: TickOpts): Promise<TickReport> {
     } else {
       report.started.push({ seriesId: r.series_id, number: null, source: S, kind: 'listing' });
       await begin(r, S, null);
-      track(runListing(r, S, generation));
+      track(runListing(r, S, set, rand, generation));
     }
   }
   return report;
 }
 
-/** The next few missing numbers of each series, in its direction, excluding what is already on its way. */
+/**
+ * The next few missing numbers of each series, in its direction, excluding what is already on its way and what a
+ * scan could not index. Excluded IN the query, so the PICK_DEPTH it takes are all numbers that can be fetched:
+ * filtered afterwards, five stuck numbers in a row left an empty list, and the series was finished early with the
+ * rest of its back catalogue never asked for.
+ * Reintroduce by filtering `stuck` after the query: "numbers a scan could not index are stepped over" in
+ * archive.int.test.ts finishes the series with chapters 6 and 7 still missing.
+ */
 async function candidatesFor(seriesIds: string[]): Promise<Map<string, Candidate[]>> {
   const out = new Map<string, Candidate[]>();
   if (!seriesIds.length) return out;
@@ -594,6 +617,7 @@ async function candidatesFor(seriesIds: string[]): Promise<Map<string, Candidate
   const exNum: number[] = [];
   for (const [sid, u] of unscanned) for (const n of u.items.keys()) { exSid.push(sid); exNum.push(n); }
   for (const f of flights.values()) if (f.number != null) { exSid.push(f.seriesId); exNum.push(f.number); }
+  for (const [sid, nums] of stuck) for (const n of nums) { exSid.push(sid); exNum.push(n); }
   const rows = await q<{ series_id: string; number: number; title: string | null; copies: ListingCopy[] | null; published_at: Date | null }>(
     `SELECT x.series_id, x.number, x.title, x.copies, x.published_at FROM (
        SELECT l.series_id, l.number, l.title, l.copies, l.published_at,
@@ -649,11 +673,33 @@ function end(r: QueuedRow, S: string, gen: number): void {
   kick();
 }
 
-async function runListing(r: QueuedRow, S: string, gen: number): Promise<void> {
+/**
+ * Read a series' listing as its source's turn: the first read places a boundary, a later one refreshes a list a
+ * week old.
+ *
+ * ⚠️ What the read gave decides what follows. A read that gave nothing -- the site failed or timed out (updateSeries
+ * says `source_error`), it lists nothing for the series (a moved or delisted series: the boundary is still null),
+ * the source was in a cooldown, or the read threw -- used to be followed by the same 45 s rest as a good one, and
+ * the next tick asked again: about 1,400 requests a day to a site for a listing that is not there, and a row that
+ * stayed "queued" with no reason shown. Now the SOURCE rests a whole break, as after a chapter, and the SERIES waits
+ * on its own ladder (listingRetryAt: 1 h, 3 h, 12 h, then a day) kept on its row, so a restart keeps it too. Three
+ * days of that and Needs attention shows it (attentionOf, 'stalled'). The row stays queued: a listing that comes
+ * back is picked up at the next read, as a site that stops refusing is.
+ */
+async function runListing(r: QueuedRow, S: string, set: ArchiveSettings, rand: () => number, gen: number): Promise<void> {
+  const t0 = clock();
+  // The source answered, and the series now has a boundary to work below (a refresh already had one).
+  let got = false;
+  // This read placed the boundary: the series' first step forward.
+  let placed = false;
   try {
     // maxNew 0: listed, persisted and stamped, nothing downloaded. Never a hunt: the archive does not go looking.
-    await withOrigin('archive', r.added_by, () => updateSeries(r.series_id, 0, { hunt: false }));
-    if (r.boundary == null) {
+    const res = await withOrigin('archive', r.added_by, () => updateSeries(r.series_id, 0, { hunt: false }));
+    if (res.outcome !== 'ok') {
+      deps.log.warn(`the listing of "${r.title}" could not be read (${res.outcome})`);
+    } else if (r.boundary != null) {
+      got = true;
+    } else {
       const f = await one<{ floor: number | null }>('SELECT chapter_floor::real AS floor FROM lib_series WHERE id = $1', [r.series_id]);
       const lst = await one<{ max: number | null; min: number | null }>(
         'SELECT max(number) AS max, min(number) AS min FROM series_listing WHERE series_id = $1', [r.series_id]);
@@ -662,17 +708,53 @@ async function runListing(r: QueuedRow, S: string, gen: number): Promise<void> {
         const direction = await directionOf(r.series_id, lst?.min == null ? null : Number(lst.min));
         await q('UPDATE archive_queue SET boundary = $2::real, direction = $3 WHERE series_id = $1 AND boundary IS NULL',
           [r.series_id, boundary, direction]);
+        got = placed = true;
+      } else {
+        deps.log.warn(`the source of "${r.title}" lists no chapters for it`);
       }
     }
   } catch (e) {
     deps.log.warn(`reading the listing of "${r.title}" failed: ${(e as Error)?.message || e}`);
   } finally {
-    // One request, not a chapter: the minimum rest, not a whole break.
-    await q(`UPDATE archive_pace SET next_at = $2, last_reason = 'listing' WHERE source_id = $1`,
-      [S, new Date(clock() + minBreakMs())]).catch(() => {});
+    const now = clock();
+    // A listing that came back is one request, not a chapter: the minimum rest. One that did not rests the source
+    // a whole break, as a chapter would, so a site that is failing is not asked again within the minute by the
+    // next series queued on it.
+    // Reintroduce by resting the minimum whatever came back: "a listing that cannot be read" in archive.int.test.ts
+    // finds the source free again in 45 s.
+    const rest = got ? minBreakMs() : nextBreakMs({ perHour: set.perHour, chapterMs: now - t0, rand, minBreakMs: minBreakMs() }).ms;
+    await q(`UPDATE archive_pace SET next_at = $2, last_reason = $3 WHERE source_id = $1`,
+      [S, new Date(now + rest), got ? 'listing' : 'no_listing']).catch(() => {});
+    await noteListing(r.series_id, got, placed, now);
     await q('UPDATE archive_queue SET current_number = NULL WHERE series_id = $1', [r.series_id]).catch(() => {});
     end(r, S, gen);
   }
+}
+
+/**
+ * The listing ladder on the series' row (archive_queue.note, QueuedNote): cleared by a read that gave a listing --
+ * the first one, which placed the boundary, is progress -- and one step higher after a read that did not, with
+ * when to read again. Queued rows only: a pause replaces the note, and a resume starts afresh anyway.
+ */
+async function noteListing(seriesId: string, got: boolean, placed: boolean, now: number): Promise<void> {
+  const at = new Date(now).toISOString();
+  if (got) {
+    await q(
+      `UPDATE archive_queue SET note = (COALESCE(note, '{}'::jsonb) - 'listingFails' - 'listingRetryAt')
+              || CASE WHEN $2 THEN jsonb_build_object('progressAt', $3::text) ELSE '{}'::jsonb END
+        WHERE series_id = $1 AND state = 'queued'`,
+      [seriesId, placed, at],
+    ).catch(() => {});
+    return;
+  }
+  const row = await one<{ note: QueuedNote | null }>('SELECT note FROM archive_queue WHERE series_id = $1', [seriesId]).catch(() => null);
+  const fails = (Number(row?.note?.listingFails) || 0) + 1;
+  const retry = new Date(listingRetryAt(fails, now, ARCHIVE_DEFAULTS.backoffMs)).toISOString();
+  await q(
+    `UPDATE archive_queue SET note = COALESCE(note, '{}'::jsonb) || jsonb_build_object('listingFails', $2::int, 'listingRetryAt', $3::text)
+      WHERE series_id = $1 AND state = 'queued'`,
+    [seriesId, fails, retry],
+  ).catch((e) => deps.log.warn(`could not write when to read the listing again: ${(e as Error)?.message || e}`));
 }
 
 async function runChapter(
@@ -684,6 +766,9 @@ async function runChapter(
   let out: FallbackOutcome | null = null;
   let diskFull = false;
   let bytes = 0;
+  // Every source this chapter asked, with what it failed with (undefined: it answered). The chosen copy's, and
+  // each alternate downloadWithFallback turned to after it: every one of them was a request to a site.
+  const asked = new Map<string, unknown>();
   try {
     // Asked BEFORE the download, so what the scan adds can be told apart from a row that was already there (a
     // verify-marked missing file coming back is not a new chapter for the Updates count).
@@ -701,6 +786,7 @@ async function runChapter(
         refusing: new Set<string>(),
         allowed,
         hunt: undefined,
+        onAsked: (src, err) => { asked.set(src, err); },
       })));
     } catch (e: any) {
       if (e?.diskFull) diskFull = true;
@@ -717,10 +803,15 @@ async function runChapter(
           landed, chapterId: out.chapterUsed.sourceId, publishedAt: out.chapterUsed.publishedAt ?? pick.publishedAt ?? undefined, newRow: !had,
         }, clock());
       }
-      await q(`UPDATE archive_queue SET done_count = done_count + 1, bytes = bytes + $2 WHERE series_id = $1`, [r.series_id, bytes]).catch(() => {});
+      // A chapter in is progress: its three days without any (attentionOf) start again.
+      await q(`UPDATE archive_queue SET done_count = done_count + 1, bytes = bytes + $2,
+                note = COALESCE(note, '{}'::jsonb) || jsonb_build_object('progressAt', $3::text) WHERE series_id = $1`,
+      [r.series_id, bytes, new Date(clock()).toISOString()]).catch(() => {});
       // A chapter the site let through ends its refusal run. Taken from another followed source instead, the
-      // chosen one did NOT let it through: a refusal there still backs it off, landed or not.
+      // chosen one did NOT let it through: a refusal there still backs it off, landed or not -- and so does one
+      // from an alternate asked on the way.
       if (out.switched) await backOff(S, { blockStatus: out.switched.why });
+      await backOffAlternates(asked, [S, out.via]);
       await q(`UPDATE archive_pace SET backoff_level = 0, backoff_until = NULL, last_reason = 'ok' WHERE source_id = $1`, [out.via]).catch(() => {});
     } else if (out?.kind === 'skipped' && out.why === 'on_disk') {
       if (gen === generation) await noteUnscanned(r.series_id, r.folder, n, {}, clock());
@@ -728,6 +819,7 @@ async function runChapter(
       await noteChapterFailure({ seriesId: r.series_id, title: r.title, number: n, sourceId: out.via, err: out.err });
       await q('UPDATE archive_queue SET failed_count = failed_count + 1 WHERE series_id = $1', [r.series_id]).catch(() => {});
       await backOff(out.via || S, out.err);
+      await backOffAlternates(asked, [S, out.via]);
     }
   } catch (e) {
     deps.log.warn(`"${r.title}" ch ${n}: ${(e as Error)?.message || e}`);
@@ -738,30 +830,46 @@ async function runChapter(
     const skippedOnDisk = out?.kind === 'skipped' && out.why === 'on_disk';
     const brk = skippedOnDisk ? 0 : nextBreakMs({ perHour: set.perHour, chapterMs: now - t0, rand, minBreakMs: minBreakMs() }).ms;
     const nextAt = diskFull ? now + DISK_WAIT_MS : now + brk;
+    // One cycle on this source: from the end of its last chapter to the end of this one, less what was the window's
+    // or the site's rather than the pace's (archivePlan.ts outsideCycleMs) -- the hours outside the window, a
+    // backoff beyond its break. The running average is how long a chapter takes, and the ETA is built from it.
+    // Reintroduce by feeding the whole span: "the running cycle is the chapter's time" in archive.int.test.ts reads
+    // an average pulled up by the night and by the backoff.
     const lastAt = ms(pace?.last_at);
-    const sample = lastAt != null ? now - lastAt : now - t0 + brk;
+    const sample = lastAt != null
+      ? now - lastAt - outsideCycleMs({
+        from: lastAt, to: t0, breakEnd: ms(pace?.next_at), backoffUntil: ms(pace?.backoff_until),
+        windowFrom: set.windowFrom, windowTo: set.windowTo, inWindow,
+      })
+      : now - t0 + brk;
     // The running average moves only on a chapter the site was asked for: one found on disk cost it nothing.
     const cycle = skippedOnDisk ? pace?.cycle_ms ?? null : ewmaCycle(pace?.cycle_ms ?? null, sample, cycleMs(set.perHour));
     const reason = diskFull ? 'disk'
       : out?.kind === 'failed' ? String(out.err?.blockStatus ?? classify(out.err) ?? 'failed')
       : out?.kind ?? 'error';
-    // A backoff written by backOff() above outlasts the break; the break never shortens it.
+    // next_at is the break alone. A backoff written by backOff() above stays in backoff_until, which every gate
+    // reads beside it (sourceWait, alternatesOf, the view), so the break never shortens it -- and kept apart, the
+    // next chapter's cycle can tell the break (the pace) from the backoff beyond it (the site's).
     // Reintroduce by keeping only the reservation made in begin(): "a restart keeps its place and its break" in
     // archive.int.test.ts starts chapter two a minute after chapter one.
     await q(
       `INSERT INTO archive_pace (source_id, next_at, cycle_ms, last_at, last_reason) VALUES ($1, $2, $3, $4, $5)
-       ON CONFLICT (source_id) DO UPDATE SET next_at = GREATEST(EXCLUDED.next_at, archive_pace.backoff_until),
+       ON CONFLICT (source_id) DO UPDATE SET next_at = EXCLUDED.next_at,
          cycle_ms = EXCLUDED.cycle_ms, last_at = EXCLUDED.last_at, last_reason = EXCLUDED.last_reason`,
       [S, new Date(nextAt), cycle, new Date(now), reason],
     ).catch((e) => deps.log.warn(`could not write the break on ${S}: ${(e as Error)?.message || e}`));
-    // A chapter taken from another followed source was a request to THAT site too: it rests as long.
+    // Every other site this chapter asked -- the one it was taken from, an alternate that failed on the way -- was
+    // a request too: each rests as long.
+    // Reintroduce by resting only the source it landed from: "an alternate asked inside a failed chapter" in
+    // archive.int.test.ts finds the alternate free at once.
     const via = out && 'via' in out ? out.via : '';
-    if (via && via !== S) {
+    for (const src of new Set([...asked.keys(), via])) {
+      if (!src || src === S) continue;
       await q(
         `INSERT INTO archive_pace (source_id, next_at, last_reason) VALUES ($1, $2, $3)
-         ON CONFLICT (source_id) DO UPDATE SET next_at = GREATEST(EXCLUDED.next_at, archive_pace.next_at, archive_pace.backoff_until),
+         ON CONFLICT (source_id) DO UPDATE SET next_at = GREATEST(EXCLUDED.next_at, archive_pace.next_at),
            last_reason = EXCLUDED.last_reason`,
-        [via, new Date(nextAt), reason],
+        [src, new Date(nextAt), reason],
       ).catch(() => {});
     }
     await q('UPDATE archive_queue SET current_number = NULL WHERE series_id = $1', [r.series_id]).catch(() => {});
@@ -793,6 +901,21 @@ async function backOff(src: string, err: any): Promise<void> {
      ON CONFLICT (source_id) DO UPDATE SET backoff_level = $2, backoff_until = $3, last_reason = $4`,
     [src, level, new Date(until), status],
   );
+}
+
+/**
+ * The alternates a chapter asked, each backed off for what it failed with, as the chosen copy's source is: a site
+ * that refused on the side is left alone as long as one that refused the chosen copy. `skip`: the chosen source
+ * and the failure's own `via` (their own backOff call covers them), or the source the chapter was taken from (it
+ * let it through).
+ * Reintroduce by backing off only the chosen source: "an alternate asked inside a failed chapter" in
+ * archive.int.test.ts finds the alternate with no backoff.
+ */
+async function backOffAlternates(asked: Map<string, unknown>, skip: readonly string[]): Promise<void> {
+  for (const [src, err] of asked) {
+    if (skip.includes(src) || err === undefined) continue;
+    await backOff(src, err).catch((e) => deps.log.warn(`could not back off ${src}: ${(e as Error)?.message || e}`));
+  }
 }
 
 /** The listing's other copies of `n` from followed sources the archive is not resting or busy on. */
@@ -985,7 +1108,8 @@ export function startArchive(d: { busy: (folder: string) => boolean; log: Archiv
 interface SharedRow {
   seriesId: string; title: string; folder: string; state: 'queued' | 'paused' | 'done'; direction: ArchiveDirection;
   done: number; failed: number; bytes: number; left: number | null; addedBy: string | null; primary: string | null;
-  createdAt: number; startedAt: number | null; finishedAt: number | null; note: (Partial<DoneNote> & { pausedAt?: string }) | null;
+  createdAt: number; startedAt: number | null; finishedAt: number | null; lastAt: number | null;
+  note: (Partial<DoneNote> & QueuedNote & { pausedAt?: string }) | null;
 }
 let viewCache: { at: number; rows: SharedRow[]; pace: Map<string, PaceRow>; settings: ArchiveSettings } | null = null;
 export function invalidateArchiveView(): void { viewCache = null; }
@@ -996,7 +1120,7 @@ async function sharedRows(): Promise<NonNullable<typeof viewCache>> {
   if (viewCache && now - viewCache.at < VIEW_TTL_MS) return viewCache;
   const rows = await q<any>(
     `SELECT a.series_id, s.title, s.folder, a.state, a.direction, a.done_count, a.failed_count, a.bytes, a.added_by, s.source_id,
-            a.created_at, a.started_at, a.finished_at, a.note,
+            a.created_at, a.started_at, a.finished_at, a.last_at, a.note,
             CASE WHEN a.state = 'done' OR a.boundary IS NULL THEN NULL ELSE (
               SELECT count(*)::int FROM series_listing l WHERE l.series_id = a.series_id AND ${eligibleSql('l', 'a', '$1')}) END AS left_n
        FROM archive_queue a JOIN lib_series s ON s.id = a.series_id
@@ -1008,7 +1132,7 @@ async function sharedRows(): Promise<NonNullable<typeof viewCache>> {
     seriesId: r.series_id, title: r.title, folder: r.folder, state: r.state, direction: r.direction,
     done: Number(r.done_count) || 0, failed: Number(r.failed_count) || 0, bytes: Number(r.bytes) || 0,
     left: r.left_n == null ? null : Number(r.left_n), addedBy: r.added_by, primary: r.source_id,
-    createdAt: ms(r.created_at) ?? now, startedAt: ms(r.started_at), finishedAt: ms(r.finished_at), note: r.note,
+    createdAt: ms(r.created_at) ?? now, startedAt: ms(r.started_at), finishedAt: ms(r.finished_at), lastAt: ms(r.last_at), note: r.note,
   }));
   const pace = new Map((await q<PaceRow>('SELECT source_id, next_at, backoff_level, backoff_until, cycle_ms, last_at FROM archive_pace')
     .catch(() => [])).map((p) => [p.source_id, p]));
@@ -1041,13 +1165,18 @@ function compose(r: SharedRow, c: NonNullable<typeof viewCache>, queuedOn: Map<s
   const w = r.state === 'queued' ? lastWaits.get(r.seriesId) : undefined;
   const pausedAt = r.note?.pausedAt ? Date.parse(r.note.pausedAt) : null;
   const note = r.state === 'done' && r.note ? { capped: r.note.capped ?? 0, held: r.note.held ?? 0, blocked: r.note.blocked ?? 0 } : undefined;
+  const progressAt = r.state === 'queued' ? Date.parse(r.note?.progressAt ?? '') : NaN;
   const attention = attentionOf({
     state: r.state, now, failed: r.failed, note, finishedAt: r.finishedAt, pausedAt: Number.isFinite(pausedAt) ? pausedAt : null,
     backoffLevel: pace?.backoff_level ?? 0, backoffSince: ms(pace?.last_at), wait: w?.wait ?? null, waitSince: w?.since ?? null,
     global: r.state === 'queued' ? lastGlobal?.wait ?? null : null,
+    progressSince: Number.isFinite(progressAt) ? progressAt : r.createdAt, lastTurnAt: r.lastAt,
   });
   if (!shownDone({ state: r.state, finishedAt: r.finishedAt, attention, now })) return null;
-  const nextAtMs = r.state === 'queued' && pace ? Math.max(ms(pace.next_at) ?? 0, ms(pace.backoff_until) ?? 0) : 0;
+  // When it next goes: its source's break or backoff, or its own listing ladder when that is what it waits on.
+  const nextAtMs = r.state === 'queued'
+    ? Math.max(pace ? Math.max(ms(pace.next_at) ?? 0, ms(pace.backoff_until) ?? 0) : 0, w?.wait.why === 'listing' ? w.wait.until ?? 0 : 0)
+    : 0;
   const cyc = pace?.cycle_ms ?? cycleMs(c.settings.perHour);
   return {
     seriesId: r.seriesId, title: r.title, state: r.state, direction: r.direction,

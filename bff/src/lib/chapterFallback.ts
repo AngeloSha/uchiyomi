@@ -67,6 +67,12 @@ export interface FallbackInput {
    * pass uses this to require fewer holes than the canonical file, so rejecting a worse copy is crash-safe.
    */
   acceptPartial?: (hold: PartialHold, via: string) => boolean;
+  /**
+   * Told of every copy asked, once it has answered: `err` is what it failed with, undefined when it landed or was
+   * already on disk. The slow archive (lib/archive.ts) rests and backs off every site a chapter asked, not only
+   * the one the outcome names: an alternate that refused on the way is a site that said no too.
+   */
+  onAsked?: (source: string, err: unknown) => void;
 }
 
 export type FallbackOutcome =
@@ -110,9 +116,11 @@ export async function downloadWithFallback(f: FallbackInput): Promise<FallbackOu
   let best = null as { hold: PartialHold; via: string; chapter: SourceChapter } | null;
 
   const attempt = async (ch: SourceChapter, src: string, chosen = false): Promise<{ file: string; pages: number } | null | 'failed'> => {
+    let done: { file: string; pages: number } | null;
     try {
-      return await downloadChapter({ sourceId: src, seriesFolder: f.folder, chapter: ch, meta: f.meta }, { replace: f.replace });
+      done = await downloadChapter({ sourceId: src, seriesFolder: f.folder, chapter: ch, meta: f.meta }, { replace: f.replace });
     } catch (e: any) {
+      f.onAsked?.(src, e);
       // The library disk at its floor is nobody's fault here, and no other source can fix it.
       if (e?.diskFull) throw e;
       // ⚠️ Any blame on the SOURCE -- a refusal, or the connection gone under a large shortfall -- takes
@@ -124,6 +132,9 @@ export async function downloadWithFallback(f: FallbackInput): Promise<FallbackOu
       if (chosen) first = last;
       return 'failed';
     }
+    // Outside the try: a caller's hook that throws is not a download that failed.
+    f.onAsked?.(src, undefined);
+    return done;
   };
   const switched = () => ({ from: via, why: first ? whyOf(first.err) : 'refusing' });
   const tookFrom = (to: string, missing: number[]) => console.log(
