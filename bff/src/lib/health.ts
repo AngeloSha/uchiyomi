@@ -87,6 +87,19 @@ export interface HealthItem {
   key?: string;
   /** An admin chose to stop being told about this, and when. The item is then `info`. */
   ignored?: { at: string; by: string | null };
+  /**
+   * v0.49.0: what the last attempt at this finding found, as data the page renders in the reader's language
+   * -- "tried today 03:12: 3 sources asked, 2 answered, no longer copy", "still missing 6-8: no other source
+   * lists them", "failing since 12 Sep, reset for another try". The gap `detail` no longer carries the
+   * repair's conclusion as an English suffix; it is here. `fixed` stays, for what greys the row.
+   */
+  outcome?: HealthOutcome;
+  /**
+   * v0.49.0: what an action on this row will and will not do, said BEFORE it is pressed -- "updates are
+   * paused: Fill now fetches these once", "the source is cooling down until 14:20: Retry now resets the
+   * count but cannot ask it yet".
+   */
+  caveats?: HealthCaveat[];
 
   // ---- #115 (v0.49.0), Source health rows only. Kept together and apart from the fields other workstreams add.
   /** What each stage was last seen doing (search, chapters, pages, images), from lib/sourceEvidence.ts. */
@@ -97,6 +110,63 @@ export interface HealthItem {
   diagnosis?: { code: DiagnosisCode; reason: string; fix: string };
   /** How many series use the source (primaries and followers). */
   series?: number;
+}
+
+/**
+ * The last attempt at a finding, per check. Every field comes from a stored row the repair wrote (gaps_result,
+ * lib_books.short_result, chapter_failures), so it survives a reload and a restart.
+ */
+export type HealthOutcome =
+  | {
+      kind: 'gaps';
+      /** When the repair concluded, not when it stamped the series (that is before the search). */
+      at: string | null;
+      /** huntCandidates' verdict, as lib/repair.ts stores it: followed | no_candidate | cap | off | cooldown | listed. */
+      why: string | null;
+      followed: string | null;
+      coverage: number | null;
+      /** Gap chapters that landed, and every chapter the fetch landed. */
+      fetched: number;
+      landed: number;
+      /** Gap chapters a followed source lists, left for the sweep. */
+      sweep: number;
+      capped: number;
+      /** Ranges nobody lists, as "11-13". */
+      unfillable: string[];
+      /** Gap numbers the search was about. */
+      scanned: number;
+    }
+  | {
+      kind: 'short';
+      at: string | null;
+      /**
+       * The repair's verdict (replaced | confirmed | no_longer_copy | source_silent | hunt_cooldown | no_searches |
+       * hunt_off | download_failed), `partial` for a chapter saved with placeholder pages, or `confirmed_by_admin`.
+       */
+      why: string;
+      asked?: number;
+      answered?: number;
+      best?: number;
+      hunt?: string;
+      /** For `partial`: how many pages are placeholders. */
+      missing?: number;
+      by?: string | null;
+    }
+  | {
+      kind: 'failures';
+      /** The oldest first failure among the source's chapters, and the latest attempt. */
+      firstAt: string;
+      lastAt: string;
+      attempts: number;
+      /** Every row is back at zero attempts: a reset is waiting for the sweep (or a re-check) to try them. */
+      resetPending: boolean;
+    };
+
+/** What an action on a row will not be able to do, and why. `until` for a cooldown. */
+export interface HealthCaveat {
+  action: HealthAction;
+  code: 'updates_paused' | 'source_cooling_down' | 'source_off';
+  until?: string;
 }
 
 export interface HealthCheck {
@@ -156,6 +226,7 @@ interface StoredGaps {
   followed?: string | null;
   coverage?: number | null;
   fetched?: number;
+  landed?: number;
   sweep?: number;
   capped?: number;
   unfillable?: string[];
@@ -169,6 +240,8 @@ interface HeldSeries {
   numbers: number[];
   gapsCheckedAt: string | null;
   gapsResult: StoredGaps | null;
+  /** Automatic updates on: off, nothing but Fill now will ever fetch its gaps (a caveat on that row). */
+  autoUpdate: boolean;
 }
 
 /**
@@ -185,8 +258,8 @@ interface HeldSeries {
  * this one pass, so the cost is paid once per report, not twice.
  */
 async function heldBySeries(): Promise<HeldSeries[]> {
-  const series = await q<{ id: string; title: string; gaps_checked_at: string | null; gaps_result: StoredGaps | null }>(
-    `SELECT ls.id, ls.title, ls.gaps_checked_at, ls.gaps_result
+  const series = await q<{ id: string; title: string; gaps_checked_at: string | null; gaps_result: StoredGaps | null; auto_update: boolean }>(
+    `SELECT ls.id, ls.title, ls.gaps_checked_at, ls.gaps_result, ls.auto_update
        FROM lib_series ls WHERE ${visibleToAll('ls')} ORDER BY ls.title`,
   );
   const out: HeldSeries[] = [];
@@ -197,6 +270,7 @@ async function heldBySeries(): Promise<HeldSeries[]> {
       numbers: await haveNumbers(s.id),
       gapsCheckedAt: s.gaps_checked_at,
       gapsResult: s.gaps_result ?? null,
+      autoUpdate: s.auto_update !== false,
     });
   }
   return out;
@@ -263,7 +337,12 @@ async function chapterGaps(held: HeldSeries[], ctx: IgnoreCtx = noIgnores()): Pr
   const items: Array<HealthItem & { members?: string[] }> = rows.map((r) => {
     const ranges = rangeText(r.gaps);
     const g = r.s.gapsResult;
-    const checked = r.s.gapsCheckedAt ? new Date(r.s.gapsCheckedAt) : null;
+    // ⚠️ When the CONCLUSION was reached (gaps_result.at), not when the series was stamped: the stamp is
+    // written before the search (lib/repair.ts stepGaps), so while a run is on this series the stamp is
+    // new and the stored result is still the previous run's -- and greyed "fresh" on the stamp, last
+    // week's answer read as tonight's. The stamp is the fallback for a result that predates `at`.
+    const checked = g?.at && Number.isFinite(Date.parse(g.at)) ? new Date(g.at)
+      : r.s.gapsCheckedAt ? new Date(r.s.gapsCheckedAt) : null;
     const fresh = !!checked && Date.now() - checked.getTime() < GAPS_FRESH_MS;
     // A conclusion is about the library as it was when the search ran. One more chapter has landed since,
     // so the hole may have moved: ask again rather than keep showing last night's answer.
@@ -282,10 +361,30 @@ async function chapterGaps(held: HeldSeries[], ctx: IgnoreCtx = noIgnores()): Pr
     return {
       seriesId: r.s.id,
       title: r.s.title,
-      detail: `${r.missing} missing — ${ranges.length > 90 ? ranges.slice(0, 90) + '…' : ranges}`
-        + (checked && what ? `; ${what}, checked ${checked.toISOString().slice(0, 10)}` : ''),
+      // The conclusion is `outcome` now, rendered by the page in the reader's language; the detail is the
+      // finding alone.
+      detail: `${r.missing} missing — ${ranges.length > 90 ? ranges.slice(0, 90) + '…' : ranges}`,
       numbers: r.numbers,
       actions: ['fill'] as HealthAction[],
+      ...(g ? {
+        outcome: {
+          kind: 'gaps' as const,
+          at: checked ? checked.toISOString() : null,
+          why: g.why ?? null,
+          followed: g.followed ?? null,
+          coverage: typeof g.coverage === 'number' ? g.coverage : null,
+          fetched: Number(g.fetched) || 0,
+          landed: Number(g.landed) || 0,
+          sweep: Number(g.sweep) || 0,
+          capped: Number(g.capped) || 0,
+          unfillable: Array.isArray(g.unfillable) ? g.unfillable.map(String) : [],
+          scanned: Number(g.scanned) || 0,
+        },
+      } : {}),
+      // Fill now works on a paused series (it names the series, lib/repair.ts), but nothing else will ever
+      // fetch its gaps: the row says so before anyone presses. Reintroduce by dropping it: "a paused series'
+      // gap carries the updates_paused caveat" in health.int.test.ts fails.
+      ...(!r.s.autoUpdate ? { caveats: [{ action: 'fill' as const, code: 'updates_paused' as const }] } : {}),
       // Ignored while every missing run lies inside a run that was missing when it was ignored: a gap that
       // shrinks (or splits) stays quiet, a newly missing chapter is a new finding. As runs, not one entry per
       // number: a single chapter numbered 9001 by mistake is a gap of nine thousand (lib/healthIgnore.ts).
@@ -324,10 +423,11 @@ async function shortChapters(): Promise<HealthCheck> {
   // verify task), and a page count taken before they went says nothing about anything anybody can fix.
   const rows = await q<{
     id: string; series_id: string; title: string; folder: string; number: number; pages: number;
-    root: string | null; file: string; short_confirmed_at: string | null;
+    root: string | null; file: string; short_confirmed_at: string | null; missing_pages: number[] | null;
+    short_result: { at?: string; why?: string; asked?: number; answered?: number; best?: number; hunt?: string; by?: string | null } | null;
   }>(
     `SELECT b.id, b.series_id, ls.title, ls.folder, b.number::float8 AS number, b.pages, b.root, b.file,
-            b.short_confirmed_at
+            b.short_confirmed_at, b.missing_pages, b.short_result
        FROM lib_books b JOIN lib_series ls ON ls.id = b.series_id AND ${visibleToAll('ls')}
       WHERE b.pages BETWEEN 1 AND 2 AND b.number = floor(b.number) AND b.pruned_at IS NULL
       ORDER BY ls.title, b.number`,
@@ -338,6 +438,25 @@ async function shortChapters(): Promise<HealthCheck> {
     // library is never ours to replace -- for that, the only honest chip is "It's fine".
     const owned = r.root === DL_ROOT && r.file === chapterFileRel(r.folder, Number(r.number));
     const confirmed = r.short_confirmed_at ? new Date(r.short_confirmed_at) : null;
+    // Saved with placeholder pages (lib/partial.ts): the chapter sweep re-fetches those, up to 10 a night,
+    // and the repair's short step skips the chapter (`missing_pages IS NULL`), so "Fix" on it did nothing at
+    // all. Offered "It's fine" only, and the outcome says why. Reintroduce by offering fix_short again:
+    // "a chapter with placeholder pages is not offered Fix" in health.int.test.ts fails.
+    const partial = Array.isArray(r.missing_pages) && r.missing_pages.length > 0;
+    const res = r.short_result;
+    const byAdmin = res?.why === 'confirmed_by_admin';
+    const outcome: HealthOutcome | null = partial
+      ? { kind: 'short', at: null, why: 'partial', missing: r.missing_pages!.length }
+      : res?.why
+      ? {
+          kind: 'short', at: res.at ?? null, why: String(res.why),
+          ...(typeof res.asked === 'number' ? { asked: res.asked } : {}),
+          ...(typeof res.answered === 'number' ? { answered: res.answered } : {}),
+          ...(typeof res.best === 'number' ? { best: res.best } : {}),
+          ...(res.hunt ? { hunt: String(res.hunt) } : {}),
+          ...(res.by !== undefined ? { by: res.by } : {}),
+        }
+      : null;
     return {
       seriesId: r.series_id,
       bookId: r.id,
@@ -346,9 +465,13 @@ async function shortChapters(): Promise<HealthCheck> {
       detail: `Chapter ${r.number} has ${r.pages} page${r.pages === 1 ? '' : 's'}`,
       // Confirmed rows keep exactly one chip, and it is the one that undoes the confirmation: the repair
       // skips a chapter somebody has already called short, so "Fix" on one would do nothing at all.
-      actions: confirmed ? ['confirm_short'] : owned ? ['fix_short', 'confirm_short'] : ['confirm_short'],
+      actions: confirmed || partial ? ['confirm_short'] : owned ? ['fix_short', 'confirm_short'] : ['confirm_short'],
+      ...(outcome ? { outcome } : {}),
       ...(confirmed
-        ? { info: true, fixed: { at: confirmed.toISOString(), what: 'confirmed short at the source' } }
+        ? {
+            info: true,
+            fixed: { at: confirmed.toISOString(), what: byAdmin ? 'marked fine by an admin' : 'confirmed short at the source' },
+          }
         : {}),
     };
   };
@@ -385,22 +508,30 @@ async function shortChapters(): Promise<HealthCheck> {
 async function chapterFailures(ctx: IgnoreCtx = noIgnores()): Promise<HealthCheck> {
   let readFailed = false;
   const rows = await q<{
-    source_id: string; chapters: number; series: number; since: string; attempts: number; capped: number;
+    source_id: string; chapters: number; series: number; since: string; last_at: string; attempts: number; capped: number;
     latest_title: string; latest_number: number; latest_status: string; latest_reason: string | null; failing: string[];
+    blocked_until: string | null; disabled: boolean;
   }>(
+    // `since` is the FIRST failure (first_at, v0.49.0; `at` is the latest attempt and a Retry now moves it
+    // to now). COALESCE for rows from before the column, and rows a v0.48.4 rollback writes.
+    // The source's own health row joins for the Retry caveats: a cooldown (and until when) or switched off.
     `SELECT f.source_id,
             -- What an ignore of this source's row covers: a newly failing chapter is a new finding.
             array_agg(f.series_id || ':' || f.number ORDER BY f.series_id, f.number) AS failing,
             count(*)::int AS chapters,
             count(DISTINCT f.series_id)::int AS series,
-            min(f.at) AS since,
+            min(COALESCE(f.first_at, f.at)) AS since,
+            max(f.at) AS last_at,
             max(f.attempts)::int AS attempts,
             count(*) FILTER (WHERE f.attempts >= ${CHAPTER_RETRY_CAP})::int AS capped,
             (array_agg(ls.title  ORDER BY f.at DESC))[1] AS latest_title,
             (array_agg(f.number  ORDER BY f.at DESC))[1] AS latest_number,
             (array_agg(f.status  ORDER BY f.at DESC))[1] AS latest_status,
-            (array_agg(f.reason  ORDER BY f.at DESC))[1] AS latest_reason
+            (array_agg(f.reason  ORDER BY f.at DESC))[1] AS latest_reason,
+            max(h.blocked_until) FILTER (WHERE h.blocked_until > now()) AS blocked_until,
+            COALESCE(bool_or(h.disabled), false) AS disabled
        FROM chapter_failures f JOIN lib_series ls ON ls.id = f.series_id AND ${visibleToAll('ls')}
+       LEFT JOIN source_health h ON h.source_id = f.source_id
       GROUP BY f.source_id ORDER BY chapters DESC`,
   ).catch(() => { readFailed = true; return [] as any[]; });
   const all: Array<HealthItem & { members?: string[] }> = rows.map((r) => ({
@@ -412,6 +543,18 @@ async function chapterFailures(ctx: IgnoreCtx = noIgnores()): Promise<HealthChec
     // their age and re-checks up to ten of the source's series. The nightly does the same thing on its own
     // for rows that have sat at the cap for a week -- this is "the site is back up, try now".
     actions: ['retry'] as HealthAction[],
+    outcome: {
+      kind: 'failures' as const,
+      firstAt: new Date(r.since).toISOString(),
+      lastAt: new Date(r.last_at).toISOString(),
+      attempts: r.attempts,
+      resetPending: r.attempts === 0,
+    },
+    // What Retry now will not be able to do right now: it resets the counts either way, but it asks nothing
+    // of a source in a cooldown or switched off (lib/repair.ts stepFailures). Said before it is pressed.
+    ...(r.blocked_until
+      ? { caveats: [{ action: 'retry' as const, code: 'source_cooling_down' as const, until: new Date(r.blocked_until).toISOString() }] }
+      : r.disabled ? { caveats: [{ action: 'retry' as const, code: 'source_off' as const }] } : {}),
     detail:
       `${r.chapters} chapter${r.chapters === 1 ? '' : 's'} in ${r.series} series since ` +
       `${new Date(r.since).toISOString().slice(0, 10)}, tried up to ${r.attempts} time${r.attempts === 1 ? '' : 's'}` +

@@ -569,7 +569,9 @@ export const owned = {
 
   setReadProgress: async () => {}, // owned: read_progress is the source of truth (no native store to mirror to)
 
-  scanLibrary: async () => { await persistScan(); },
+  // Answers the scan's counts (v0.49.0): POST /api/refresh -- the admin hero's "Scan library now" -- says what
+  // it found instead of a bare "scanned".
+  scanLibrary: async () => persistScan(),
 
   seriesThumbPath: (id: string) => `/img/lib/series/${encodeURIComponent(id)}/thumb`,
   bookThumbPath: (id: string) => `/img/lib/books/${encodeURIComponent(id)}/thumb`,

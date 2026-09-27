@@ -432,7 +432,15 @@ script: `actions` is an ordered list of `fix_short`, `confirm_short`, `delete`, 
 are the ids those actions need; `number`/`numbers` are the chapters it is about (a gap item carries at most
 100 numbers, an impossible-number item at most 20 ids); and `fixed` `{at, what}` says what has already been
 decided or found — `confirmed short at the source`, or what the repair's gap search concluded — which is
-what greys the row. `fix_short`, `fill`, `retry` and `solver_reset` are `POST /api/admin/tasks/repair/run`
+what greys the row. Since v0.49.0 an item may also carry `outcome` — what the last attempt found, from
+stored rows: `{kind: 'gaps', at, why, followed, coverage, fetched, landed, sweep, capped, unfillable, scanned}`
+(the gap `detail` is now `<n> missing — <ranges>` alone; the conclusion it used to end with lives here),
+`{kind: 'short', at, why, asked?, answered?, best?, hunt?, missing?, by?}` (why a short chapter was left, or
+`partial` for one saved with placeholder pages, which is offered `confirm_short` only), or `{kind:
+'failures', firstAt, lastAt, attempts, resetPending}` (`firstAt` is the first failure, which a Retry now no
+longer resets) — and `caveats: [{action, code, until?}]`, what an action will not be able to do, said before
+it is pressed (`fill`: `updates_paused`; `retry`: `source_cooling_down` with `until`, or `source_off`).
+`fix_short`, `fill`, `retry` and `solver_reset` are `POST /api/admin/tasks/repair/run`
 with the matching `only` and target; `confirm_short` is `POST /api/admin/books/:id/confirm-short`, and on a
 row that already carries `fixed` it is the withdrawal (`{confirmed: false}`); `delete` is `POST
 /api/admin/series/:id/chapters/delete`, `merge` is `POST /api/admin/series/:id/merge`, and `test`/`unblock`/
@@ -444,6 +452,12 @@ the two destructive ones, `delete` and `merge`, are the two the nightly repair n
 ```bash
 curl -X POST -H "Authorization: Bearer $TOK" https://your-server/api/admin/library/scan
 ```
+
+It answers the scan's counts `{series, books, ms, skipped}` and, since v0.49.0, stamps the Tasks panel's
+*Library scan* line as `POST /api/refresh` does. `POST /api/refresh` (the admin home's *Scan library now*)
+rescans at most once a minute server-wide — within a minute it answers `{scanned: false, reason:
+'rate_limited'}` — and since v0.49.0 answers `{scanned: true, libraries, series, books, ms, skipped}` in owned
+mode. Both refresh the stored Health summary the header reads (coalesced, at most once every 30 s).
 
 ## 18+ libraries and sources
 
@@ -906,6 +920,7 @@ PATCH  /api/admin/users/:id       DELETE /api/admin/users/:id
 GET    /api/admin/sessions        DELETE /api/admin/sessions/:id
 GET    /api/admin/audit           GET    /api/admin/tasks
 POST   /api/admin/tasks/:id/run   POST   /api/admin/library/scan
+GET    /api/admin/tasks/repair/status  GET    /api/admin/tasks/repair/runs
 POST   /api/admin/update          POST   /api/admin/update/:id
 GET    /api/sources/popular      GET    /img/sources/icon/:id
 DELETE /api/sources/jobs/:folder  POST   /api/sources/jobs/:folder/cancel
@@ -1343,6 +1358,37 @@ expired}, skipped?: 'disabled', stopped?: 'shutdown' | 'disk'}`. Audit: `task.ru
 press and `library.repair {only?, seriesId?, bookId?, sourceId?, summary, stopped?, replaced[], confirmed[],
 followed[]}` when the run ends (`user_id` NULL for the nightly), plus `book.short_fixed` for each chapter
 replaced and the existing `series.follow_source` for each source followed.
+
+**Since v0.49.0 every run is kept, and only a full run is the Tasks line.** The answer is `{ok: true, started:
+true, run}`, `run` being the run's id (a uuid). Every run — the nightly and every Health press — is a row in
+`repair_runs` (pruned to at least the newest 50 and everything from the last 90 days), but only a **full**
+run (no `only`: the nightly, or Tasks → Run now) writes `server_settings.repair_last_run` /
+`repair_last_result`, so `GET /api/admin/tasks`' `lastRun`/`lastResult` stay the nightly's when someone
+presses *Fix* on one chapter, and the nightly's schedule (armed after a restart from `repair_last_run`) no
+longer moves either. The `repair` entry adds `lastOrigin` (`'nightly' | 'manual' | null`), `startedAt`,
+`run` (the running run's id), `nextAt` (when the nightly is armed for) and `latestOther` (the newest scoped
+run). Every task entry carries `scheduleKey` (the schedule sentence with `{placeholders}`, a locale key on
+the web) and `scheduleVars`; `schedule` stays the English sentence. The result may carry `stepMs` and `skips:
+[{step, target?, why, until?, detail?}]` — `folder_busy`, `not_eligible` (with `detail`: `gone`,
+`confirmed`, `partial`, `not_owned`, `not_short`), `no_gaps`, `source_cooling_down` (with `until`),
+`source_off`, `solver_down`, `no_searches_left` — so a press that did nothing says why. Fill now (`seriesId`)
+looks at the series even while its automatic updates are off, and fetches the gap chapters a source it
+already follows lists (at most 20) instead of leaving them to a sweep.
+
+`GET /api/admin/tasks/repair/status` is the run, live, for the Health page (polled every 2 s while a run is
+going; memory and a memoised history digest only): `{running, sweepRunning, enabled, nextAt, run, last,
+recent, lastFull, limits, estimates, stepTypicalMs}`. `run` is `null` or `{id, startedAt, origin, mine,
+kind, only, target, steps, step, stepIndex, stepStartedAt, stepMs, planned, current {kind, seriesId?,
+bookId?, title?, number?, sourceId?, phase, done?, of?}, counts, budget {left, of}, shortReserve, skips,
+cancelRequested}` — who started it is never sent, and a series title is dropped for a viewer who may not
+list that series. `last` is the newest finished run of any kind: a page that pressed a fix watches for ITS
+id there. `limits` is every bound the process runs with (env overrides applied); `estimates` maps a run kind
+(`full`, `fix_short`, `fill`, `retry`, `steps:<a+b…>[:now]`, plus up to ten named in `?kinds=`) to
+`{typicalMs, runs, worstMs, downloads}` — `typicalMs` the median of its last five finished runs, `worstMs`
+the sum of the waits the code bounds (null when a planned step has no such bound), and downloads a count,
+never folded into the time. `GET /api/admin/tasks/repair/runs?limit=1..50&id=` lists the kept runs, newest
+first: `{content: [{id, startedAt, finishedAt, origin, username, mine, kind, only, target, status, ms,
+stepMs, result, notes}]}`. Both are admin-only.
 
 What one run may cost is bounded by `REPAIR_HOURS`, `REPAIR_COUNT_MAX`, `REPAIR_SHORT_MAX` and
 `REPAIR_GAPS_MAX` (plus `REPAIR_PACE_MS`); their defaults and ranges, and the bounds that are fixed rather

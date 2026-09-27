@@ -15,8 +15,10 @@ import { runBackup } from '../lib/backup';
 import { runUpdateAll, updateSeries, runSweep } from '../lib/updater';
 import { runChapterCleanup, cleanupSettings, dueCountCached, tombstoneBooks } from '../lib/chapterCleanup';
 import { runVerify, verifyState } from '../lib/verifyFiles';
-import { runRepair, repairState, REPAIR_HOURS, REPAIR_STEPS, REPAIR_SHORT_MAX, REPAIR_GAPS_MAX, type RepairStep } from '../lib/repair';
-import { authenticate, requireAdmin, userIdOf, revokeAllSessions, revokeRefreshTokenById, passwordError } from '../lib/auth';
+import { runRepair, repairState, repairLiveSnapshot, REPAIR_HOURS, REPAIR_LIMITS, REPAIR_STEPS, REPAIR_SHORT_MAX, REPAIR_GAPS_MAX, type RepairSkip, type RepairStep } from '../lib/repair';
+import { listRunRecords, runDigest, type RunTarget } from '../lib/repairRuns';
+import { worstCase } from '../lib/repairEstimate';
+import { authenticate, requireAdmin, userIdOf, roleOf, revokeAllSessions, revokeRefreshTokenById, passwordError } from '../lib/auth';
 import { logAudit, recentAudit } from '../lib/audit';
 import { healthAllWithEvidence, setDisabled, clearBlock, pruneOrphanedHealth, isDisabled, blockedNow } from '../lib/sourceHealth';
 import { smokeTest } from '../lib/sourceProbe';
@@ -39,7 +41,7 @@ import sharp from 'sharp';
 import { ART_DIR, artFile, artOverview } from '../lib/seriesArt';
 import { writePreflight } from '../lib/fsGuard';
 // Admin stats report on the whole library by definition; this route is already behind requireAdmin.
-import { NO_LIBRARIES, SYSTEM_CTX, visibleToAll, sanitiseAdultList, sanitiseSourceIds, invalidateAdultFilter } from '../lib/visibility';
+import { NO_LIBRARIES, SYSTEM_CTX, visibleToAll, sanitiseAdultList, sanitiseSourceIds, invalidateAdultFilter, browsableIds, viewCtxFor, hideAdult } from '../lib/visibility';
 import { cleanSourceOrder, invalidateSourcePrefs } from '../lib/sourcePrefs';
 import { borrowNamesFor, clearBorrowedNames } from '../lib/borrowNames';
 import { addSeriesFromSource, findBestMatch, resolveCandidate, norm, jobBusy, startDownloadJob, FILL_MAX_CHAPTERS, REFRESH_BUDGET_MS } from './sources';
@@ -59,7 +61,7 @@ import { ADAPTERS, PROVIDERS, LIST_STATUSES, TRACKER_LIST_MAX, type Provider, ty
 import { open as unseal } from '../lib/secretbox';
 import { findingOf, runHealthChecks } from '../lib/health';
 import { IGNORABLE_CHECKS, ignoreFinding, unignoreFinding } from '../lib/healthIgnore';
-import { readHealthSummary, storeHealthSummary } from '../lib/healthSummary';
+import { readHealthSummary, scheduleHealthSummaryRefresh, storeHealthSummary } from '../lib/healthSummary';
 import { titlesFromMangadexList, entriesFromMangadexList } from '../lib/mangadexList';
 import { fetchAniListArt, fetchAniListCandidates, fetchAnimeBanner } from '../lib/anilist';
 import { READING_DIRECTIONS } from '../lib/komgaDto';
@@ -397,12 +399,37 @@ async function keepRestricted(qq: typeof q, userId: string): Promise<void> {
   }
 }
 
+/**
+ * Which of these series this admin may see NAMED (v0.49.0): a repair run's target and current series are a
+ * listing, so they follow /api/sources/jobs' rule for a run's "now on ..." -- the count stays, the title of a
+ * series the viewer may not list (the 18+ hide, above all) goes. One query, and none when there is nothing.
+ */
+async function listable(req: FastifyRequest, ids: Array<string | undefined>): Promise<Set<string>> {
+  const list = ids.filter((x): x is string => !!x);
+  if (!list.length) return new Set();
+  return browsableIds(list, await viewCtxFor(userIdOf(req), roleOf(req), { hideAdult: hideAdult(req) }));
+}
+const scrubTarget = (t: RunTarget, ok: Set<string>): RunTarget =>
+  (t.seriesId && !ok.has(t.seriesId) ? { ...t, label: undefined } : t);
+const scrubSkips = (skips: RepairSkip[] | undefined, ok: Set<string>): RepairSkip[] =>
+  (skips ?? []).map((k) => (k.target?.seriesId && !ok.has(k.target.seriesId) ? { ...k, target: { ...k.target, title: undefined } } : k));
+
+/** The run kinds the status route always estimates: the Health page's three chips, its cards and the nightly. */
+const ESTIMATED_KINDS = ['full', 'fix_short', 'fill', 'retry', 'steps:solver', 'steps:short', 'steps:gaps', 'steps:failures', 'steps:failures:now'];
+
 export default async function adminRoutes(app: FastifyInstance) {
   app.addHook('preHandler', authenticate);
   app.addHook('preHandler', requireAdmin);
 
-  // Owned-library scan (Phase 1): walk the CBZ folder and upsert lib_series/lib_books.
-  app.post('/api/admin/library/scan', async () => persistScan());
+  // Owned-library scan (Phase 1): walk the CBZ folder and upsert lib_series/lib_books. Stamps lastScan like
+  // POST /api/refresh does (the Tasks row's "last run", and that route's one-a-minute rule), and asks the
+  // header summary to catch up with what the scan found (v0.49.0).
+  app.post('/api/admin/library/scan', async () => {
+    runtime.lastScan = Date.now();
+    const r = await persistScan();
+    scheduleHealthSummaryRefresh();
+    return r;
+  });
 
   // Owned downloader/updater (Phase 2): pull new chapters from the source for one series or the whole library.
   app.post('/api/admin/update/:id', async (req) => withOrigin('check', userIdOf(req), () => updateSeries((req.params as { id: string }).id, Number((req.body as any)?.maxNew) || 10)));
@@ -586,7 +613,17 @@ export default async function adminRoutes(app: FastifyInstance) {
   });
 
   // ---- scheduled tasks ----
-  app.get('/api/admin/tasks', async () => {
+  /**
+   * A task's schedule three ways (v0.49.0): `schedule` in English exactly as before, for the API; and the
+   * English sentence as a KEY with its values, which the page translates (web/public/locales, keyed by the
+   * English string like every other tr() key). A new schedule sentence here is a new locale key there.
+   */
+  const sched = (key: string, vars: Record<string, string | number> = {}) => ({
+    schedule: key.replace(/\{(\w+)\}/g, (_, k: string) => String(vars[k])),
+    scheduleKey: key,
+    scheduleVars: vars,
+  });
+  app.get('/api/admin/tasks', async (req) => {
     const s = await one<{ updater_hours: number; backup_hour: number; backup_last_run: string | null; backup_last_result: any; extension_hours: number; extension_auto_update: boolean; extension_last_run: string | null; extension_last_result: any; cleanup_read: boolean; cleanup_read_days: number; cleanup_read_last_run: string | null; cleanup_read_last_result: any; verify_last_run: string | null; verify_last_result: any; repair_enabled: boolean; repair_last_run: string | null; repair_last_result: any }>(
       `SELECT updater_hours, backup_hour, backup_last_run, backup_last_result,
               extension_hours, extension_auto_update, extension_last_run, extension_last_result,
@@ -597,14 +634,19 @@ export default async function adminRoutes(app: FastifyInstance) {
     );
     // the backup's last run is persisted, so prefer the DB value over the in-memory one (which resets on restart)
     const backupLast = runtime.lastBackup || (s?.backup_last_run ? new Date(s.backup_last_run).getTime() : null);
+    // The repair's history: the Tasks line's origin and the latest one-off fix beside it (lib/repairRuns.ts).
+    const digest = await runDigest().catch(() => null);
+    const latestOther = digest?.latestOther
+      ? { ...digest.latestOther, target: scrubTarget(digest.latestOther.target, await listable(req, [digest.latestOther.target.seriesId])) }
+      : null;
     return { content: [
-      { id: 'scan', name: 'Library scan', schedule: 'on demand', lastRun: runtime.lastScan || null, running: false },
-      { id: 'update', name: 'Check for new chapters', schedule: `every ${s?.updater_hours ?? 6}h`, lastRun: runtime.lastUpdate || null, lastResult: runtime.lastUpdateResult, running: runtime.updating },
-      { id: 'backup', name: 'Backup database & config', schedule: `daily at ${String(s?.backup_hour ?? 3).padStart(2, '0')}:00`, lastRun: backupLast, lastResult: runtime.lastBackupResult ?? s?.backup_last_result ?? null, running: runtime.backingUp },
+      { id: 'scan', name: 'Library scan', ...sched('on demand'), lastRun: runtime.lastScan || null, running: false },
+      { id: 'update', name: 'Check for new chapters', ...sched('every {h}h', { h: s?.updater_hours ?? 6 }), lastRun: runtime.lastUpdate || null, lastResult: runtime.lastUpdateResult, running: runtime.updating },
+      { id: 'backup', name: 'Backup database & config', ...sched('daily at {hh}:00', { hh: String(s?.backup_hour ?? 3).padStart(2, '0') }), lastRun: backupLast, lastResult: runtime.lastBackupResult ?? s?.backup_last_result ?? null, running: runtime.backingUp },
       {
         id: 'fingerprint',
         name: 'Fingerprint library files',
-        schedule: 'in the background, rechecked every 6h',
+        ...sched('in the background, rechecked every 6h'),
         lastRun: fpState.finishedAt,
         lastResult: fpState.finishedAt ? { done: fpState.done, failed: fpState.failed, ms: fpState.ms } : null,
         running: fpState.running,
@@ -613,7 +655,7 @@ export default async function adminRoutes(app: FastifyInstance) {
       {
         id: 'pagehash',
         name: 'Find repeated pages',
-        schedule: 'in the background, rechecked every 6h',
+        ...sched('in the background, rechecked every 6h'),
         lastRun: phState.finishedAt,
         lastResult: phState.finishedAt
           ? { chapters: phState.chapters, pages: phState.pages, failed: phState.failed, ms: phState.ms }
@@ -627,7 +669,7 @@ export default async function adminRoutes(app: FastifyInstance) {
       {
         id: 'verify',
         name: 'Verify chapter files',
-        schedule: 'on demand \u00b7 after a database-only restore',
+        ...sched('on demand · after a database-only restore'),
         // Persisted like the cleanup's, so a restart keeps the last run. Memory wins once this process has
         // run it -- including a run that threw (finishedAt set, lastResult null): falling through to the
         // stored row there would put an older healthy result back on the panel over a walk that died.
@@ -642,15 +684,22 @@ export default async function adminRoutes(app: FastifyInstance) {
       {
         id: 'repair',
         name: 'Repair library',
-        schedule: s?.repair_enabled === false
-          ? 'switched off · on demand'
-          : `every ${REPAIR_HOURS}h · never during a chapter sweep`,
+        ...(s?.repair_enabled === false
+          ? sched('switched off · on demand')
+          : sched('every {h}h · never during a chapter sweep', { h: REPAIR_HOURS })),
         // Memory wins once this process has run it, including a run that threw (finishedAt set, lastResult
         // null): the verify's precedent above says why falling through to the stored row there would put an
         // older healthy result back on the panel over a run that died.
+        // ⚠️ Since v0.49.0 both are the last FULL run's (the nightly, or Run now here): a one-row Health fix
+        // is in the history, and in `latestOther` below, and no longer replaces this line.
         lastRun: repairState.finishedAt || (s?.repair_last_run ? new Date(s.repair_last_run).getTime() : null),
         lastResult: repairState.finishedAt ? repairState.lastResult : (s?.repair_last_result ?? null),
+        lastOrigin: digest?.lastFull?.origin ?? null,
         running: repairState.running,
+        startedAt: repairState.running ? repairState.startedAt : null,
+        run: repairState.live?.id ?? null,
+        nextAt: repairState.nextAt,
+        latestOther,
         // What one run takes on at most, so the Health page's "Fix all issues" can say so rather than guess.
         caps: { short: REPAIR_SHORT_MAX, gaps: REPAIR_GAPS_MAX },
       },
@@ -660,9 +709,11 @@ export default async function adminRoutes(app: FastifyInstance) {
       ...(s?.cleanup_read ? [{
         id: 'cleanup',
         name: 'Delete read chapters',
-        schedule: (s.cleanup_read_days === 0
-          ? 'hourly \u00b7 as soon as everyone has finished'
-          : `hourly \u00b7 ${s.cleanup_read_days} day${s.cleanup_read_days === 1 ? '' : 's'} after everyone has finished`),
+        ...(s.cleanup_read_days === 0
+          ? sched('hourly · as soon as everyone has finished')
+          // The singular spells its count, as the page's counted pairs do ("1 day" / "{n} days").
+          : s.cleanup_read_days === 1 ? sched('hourly · 1 day after everyone has finished')
+          : sched('hourly · {n} days after everyone has finished', { n: s.cleanup_read_days })),
         lastRun: runtime.lastCleanup || (s.cleanup_read_last_run ? new Date(s.cleanup_read_last_run).getTime() : null),
         lastResult: runtime.lastCleanupResult ?? s.cleanup_read_last_result ?? null,
         running: runtime.cleaning,
@@ -675,7 +726,7 @@ export default async function adminRoutes(app: FastifyInstance) {
       ...(suwayomiConfigured() ? [{
         id: 'extensions',
         name: 'Extension updates',
-        schedule: `every ${s?.extension_hours ?? 6}h` + (s?.extension_auto_update === false ? ' \u00b7 check only' : ''),
+        ...sched(s?.extension_auto_update === false ? 'every {h}h · check only' : 'every {h}h', { h: s?.extension_hours ?? 6 }),
         lastRun: extState.lastRun || (s?.extension_last_run ? new Date(s.extension_last_run).getTime() : null),
         lastResult: extState.lastResult ?? s?.extension_last_result ?? null,
         running: extState.running,
@@ -715,10 +766,87 @@ export default async function adminRoutes(app: FastifyInstance) {
       message: 'sourceId only applies to the failures step (send only: ["failures"])',
     });
 
+  /**
+   * The library repair, live (v0.49.0): what the running run is on, how far it has got and what it skipped,
+   * plus the limits and estimates the Health page's action rows show BEFORE a press, the last runs, and when
+   * the nightly is next. Polled every two seconds while a run is going, so it reads memory and the history's
+   * memoised digest (lib/repairRuns.ts) -- one settings read aside, no query grows with the library.
+   * `?kinds=a,b` asks for estimates of further run kinds (a "Fix all issues" plan), at most ten.
+   */
+  app.get('/api/admin/tasks/repair/status', async (req) => {
+    const me = userIdOf(req);
+    const extra = String((req.query as { kinds?: string } | undefined)?.kinds ?? '')
+      .split(',').map((k) => k.trim()).filter((k) => /^[a-z_+:]{1,80}$/.test(k)).slice(0, 10);
+    const [digest, settings] = await Promise.all([
+      runDigest(),
+      one<{ on: boolean }>('SELECT repair_enabled AS "on" FROM server_settings WHERE id = 1').catch(() => null),
+    ]);
+    const snap = repairLiveSnapshot();
+    const ok = await listable(req, [
+      snap?.target.seriesId, snap?.current?.seriesId, ...(snap?.skips ?? []).map((k) => k.target?.seriesId),
+      ...digest.recent.map((r) => r.target.seriesId),
+    ]);
+    let run = null;
+    if (snap) {
+      const { by, current, target, skips, ...rest } = snap;
+      run = {
+        ...rest,
+        mine: !!by && by === me,
+        target: scrubTarget(target, ok),
+        current: current?.seriesId && !ok.has(current.seriesId) ? { ...current, title: undefined } : current,
+        skips: scrubSkips(skips, ok),
+      };
+    }
+    // Conservative: any source behind Cloudflare stretches a page list and a listing to the solver's budget.
+    const solver = listSources().some((a) => a.requiresCloudflare);
+    const estimates: Record<string, { typicalMs: number | null; runs: number; worstMs: number | null; downloads: number }> = {};
+    for (const kind of new Set([...ESTIMATED_KINDS, ...Object.keys(digest.typical), ...extra])) {
+      const w = worstCase(kind, REPAIR_LIMITS, { solver });
+      estimates[kind] = { typicalMs: digest.typical[kind]?.typicalMs ?? null, runs: digest.typical[kind]?.runs ?? 0, worstMs: w.boundedMs, downloads: w.downloads };
+    }
+    const r0 = digest.recent[0];
+    return {
+      running: repairState.running,
+      sweepRunning: runtime.updating,
+      enabled: settings?.on !== false,
+      nextAt: repairState.nextAt,
+      run,
+      last: repairState.last ?? (r0 && r0.finishedAt ? { id: r0.id, finishedAt: r0.finishedAt, status: r0.status, kind: r0.kind } : null),
+      recent: digest.recent.map((r) => ({ ...r, target: scrubTarget(r.target, ok) })),
+      lastFull: digest.lastFull,
+      limits: REPAIR_LIMITS,
+      estimates,
+      stepTypicalMs: digest.stepTypicalMs,
+    };
+  });
+
+  /** Every kept repair run, newest first (lib/repairRuns.ts): Health's "Recent repairs", or one run by id. */
+  app.get('/api/admin/tasks/repair/runs', async (req, reply) => {
+    const p = z.object({
+      limit: z.coerce.number().int().min(1).max(50).optional(),
+      id: z.string().uuid().optional(),
+    }).safeParse(req.query ?? {});
+    if (!p.success) return reply.code(400).send({ error: 'bad_request', message: p.error.issues[0]?.message ?? 'Bad query' });
+    const content = await listRunRecords({ ...p.data, me: userIdOf(req) });
+    const ok = await listable(req, content.flatMap((r) => [r.target.seriesId, ...(r.result?.skips ?? []).map((k) => k.target?.seriesId)]));
+    return {
+      content: content.map((r) => ({
+        ...r,
+        target: scrubTarget(r.target, ok),
+        ...(r.result?.skips ? { result: { ...r.result, skips: scrubSkips(r.result.skips, ok) } } : {}),
+      })),
+    };
+  });
+
   app.post('/api/admin/tasks/:id/run', async (req, reply) => {
     const { id } = req.params as { id: string };
     await logAudit('task.run', { userId: userIdOf(req), detail: { task: id }, req });
-    if (id === 'scan') return { ok: true, ...(await persistScan()) };
+    if (id === 'scan') {
+      runtime.lastScan = Date.now();
+      const r = await persistScan();
+      scheduleHealthSummaryRefresh();
+      return { ok: true, ...r };
+    }
     if (id === 'repair') {
       const b = repairBody.safeParse(req.body ?? {});
       if (!b.success) return reply.code(400).send({ error: 'bad_request', message: b.error.issues[0]?.message ?? 'Bad body' });
@@ -735,7 +863,11 @@ export default async function adminRoutes(app: FastifyInstance) {
       const run = runRepair(app.log, { ...b.data, userId: userIdOf(req) ?? null });
       if (!run) return { ok: false, error: 'busy' };
       run.catch(() => {}); // runRepair logs it and clears the result; this only stops an unhandled rejection
-      return { ok: true, started: true };
+      // The run's id (v0.49.0), set synchronously by runRepair: the page watches GET
+      // /api/admin/tasks/repair/status for THIS id to leave `running` and land in `last`/`recent`, which is
+      // how it knows its own run ended -- a one-row fix no longer moves the Tasks line it used to watch.
+      // Reintroduce by dropping it: "the run answer names the run" in repairRoutes.int.test.ts fails.
+      return { ok: true, started: true, run: repairState.live?.id };
     }
     if (id === 'verify') {
       // ⚠️ Never awaited, like the sweep and the cleanup. One stat per row over a network share is minutes
@@ -1430,7 +1562,13 @@ export default async function adminRoutes(app: FastifyInstance) {
       [id],
     );
     if (!book) return reply.code(404).send({ error: 'not_found' });
-    await q('UPDATE lib_books SET short_confirmed_at = CASE WHEN $2 THEN now() ELSE NULL END WHERE id = $1', [id, confirmed]);
+    // short_result (v0.49.0) says who decided and when, so the greyed row reads "marked fine by an admin"
+    // rather than "confirmed short at the source" -- the repair's proof is a different claim. Withdrawn with
+    // the stamp: the chapter is an open finding again, and the repair's next look writes its own.
+    await q(`UPDATE lib_books SET short_confirmed_at = CASE WHEN $2 THEN now() ELSE NULL END,
+                    short_result = CASE WHEN $2 THEN jsonb_build_object('at', now(), 'why', 'confirmed_by_admin',
+                                   'by', (SELECT u.username FROM users u WHERE u.id::text = $3)) ELSE NULL END
+              WHERE id = $1`, [id, confirmed, userIdOf(req) ?? '']);
     await logAudit('book.short_confirmed', {
       userId: userIdOf(req),
       detail: { id, seriesId: book.series_id, title: book.title, number: Number(book.number), pages: book.pages, confirmed },

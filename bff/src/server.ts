@@ -24,7 +24,7 @@ import { refreshHealthSummary } from './lib/healthSummary';
 import { notifyAdmins } from './lib/push';
 import { runSourceCheck } from './lib/sourceWatchdog';
 import { runSweep } from './lib/updater';
-import { runRepair, REPAIR_HOURS } from './lib/repair';
+import { runRepair, setRepairNext, REPAIR_HOURS } from './lib/repair';
 import { runChapterCleanup, unpruneRestored } from './lib/chapterCleanup';
 import { runExtensionMonitor } from './lib/extensionMonitor';
 import { startEngineCacheKeeper } from './lib/sources/suwayomi/cache';
@@ -400,9 +400,10 @@ async function main() {
    * ⚠️ Never beside a chapter sweep, in either direction: the sweep tick above waits ten minutes for a
    * repair, this one waits ten minutes for a sweep, and both jobs refuse to start on top of the other.
    *
-   * Its own interval (REPAIR_HOURS, default 24) counted from the END of the last completed run, which is
+   * Its own interval (REPAIR_HOURS, default 24) counted from the END of the last completed FULL run, which is
    * persisted -- so a deploy does not push the next repair out by a whole day, the way the sweep's first
-   * run used to be pushed out by six hours. The floor is thirty minutes rather than the sweep's ten: this
+   * run used to be pushed out by six hours. (Only a full run writes repair_last_run since v0.49.0: a one-row
+   * Health fix pressed at 23:00 used to push the next nightly after a restart to 23:00 the day after.) The floor is thirty minutes rather than the sweep's ten: this
    * job opens two thousand archives, and a server that has just booted should be answering readers first.
    * Owned mode only: everything it repairs lives in lib_books and DL_ROOT, which a Komga-backed install
    * does not have. `OWNED`, for the reason given at the sweep above.
@@ -428,6 +429,8 @@ async function main() {
         // Outside the re-arm below, so a run that threw does not end the schedule.
         app.log.error(e as any);
       }
+      // Told to the Health page and the Tasks row ("next run in 21 h") every time the timer is armed.
+      setRepairNext(Date.now() + next);
       setTimeout(tick, next).unref();
     };
     void (async () => {
@@ -439,6 +442,7 @@ async function main() {
       const delay = Math.max(firstRunFloor(30 * 60 * 1000, 'repair'), last + REPAIR_HOURS * 60 * 60 * 1000 - Date.now());
       app.log.info(`repair: first run in ${Math.round(delay / 60000)} min`
         + (last ? ` (last completed ${new Date(last).toISOString()})` : ' (no completed run on record)'));
+      setRepairNext(Date.now() + delay);
       setTimeout(tick, delay).unref();
     })();
   }

@@ -152,7 +152,8 @@ export function ActionRow(a: ActionSpec) {
                 <IcChevronRight aria-hidden width={12} height={12} className="transition group-open:rotate-90" />
               </span>
             </summary>
-            <p className="mt-1 max-w-prose leading-relaxed">{a.how}</p>
+            {/* One step per line when a row explains several (Health's Fix all issues). */}
+            <p className="mt-1 max-w-prose whitespace-pre-line leading-relaxed">{a.how}</p>
           </details>
         )}
         {a.eta && <p className="mt-1 text-[11px] tabular-nums text-fog-500">{a.eta}</p>}

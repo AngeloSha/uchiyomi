@@ -1,89 +1,54 @@
 'use client';
-// The one-click half of Admin -> Health (v0.41.0).
+// The one-click half of Admin -> Health (v0.41.0), rebuilt in v0.49.0 so every action says what it does, how,
+// how long it usually takes, and whether it worked.
 //
-// Health has always been able to name a problem and never to do anything about it: "Suspiciously short
-// chapters 14", "Chapter gaps 40", "Chapters that would not download 183" with an Open link beside each,
-// and every remedy somewhere else in the console. The nightly repair now does everything that is
-// reversible or provable on its own; these chips are the same work asked for by hand, on ONE row, plus
-// the two things the nightly deliberately never does -- merging duplicates and deleting a chapter whose
-// number is impossible -- which stay a human's decision behind a confirmation.
+// Health has always been able to name a problem; since v0.41.0 it can act on one. The nightly repair does
+// everything that is reversible or provable on its own; these keys are the same work asked for by hand, on
+// ONE row, plus the two things the nightly deliberately never does -- merging duplicates and deleting a
+// chapter whose number is impossible -- which stay a human's decision behind a confirmation.
 //
-// ⚠️ Nothing here is its own remediation route. Every chip posts to a route that already existed (or to
-// the repair with `only` narrowed to one step and one id), so the rules that protect data -- a bookmarked
-// chapter is never deleted, a merge is one-way and carries progress, a repair refuses to run beside a
-// chapter sweep -- live in one place and apply however the work was started.
+// The owner could not tell what a key did, how, how long, or whether it was working. So (v0.49.0):
+// - each card opens with a LEGEND of its actions (ActionList): what, how, usually how long; the card-wide
+//   actions -- Fix all, Reset the solver, Merge all, Scan now -- are full rows of it with their own status;
+// - each finding gets small rectangular keys (ActionKeys, no chips) and an always-visible status line
+//   (ActionStatus): working with its step and a ticking clock, then what it did and how long it took;
+// - a repair-backed key runs through lib/useRepairRun.tsx, which re-checks Health when the run ENDS, not
+//   when it starts, and keeps the outcome from the run history -- still on the row after a reload.
 //
-// The chips live here rather than in app/admin/page.tsx because that file is already 2,200 lines and the
-// branching is real: ten actions, three confirmations and a diagnosis panel.
-import { useEffect, useRef, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+// ⚠️ Nothing here is its own remediation route. Every key posts to a route that already existed (or to the
+// repair with `only` narrowed to one step and one id), so the rules that protect data -- a bookmarked chapter
+// is never deleted, a merge is one-way and carries progress, a repair refuses to run beside a chapter sweep
+// -- live in one place and apply however the work was started.
+import { useState, type ReactNode } from 'react';
 import { api } from '@/lib/api';
-import { taskResult } from '@/lib/tasks';
 import { ConfirmDialog, msgOf } from '@/components/ConfirmDialog';
 import { useToast } from '@/components/Toast';
+import { ActionKeys, ActionList, ActionStatus, type ActionSpec } from '@/components/ActionList';
+import { StatusMark } from '@/components/StatusMark';
 import { t as tr } from '@/lib/i18n';
-import { testClock } from '@/lib/sourceEvidence';
-import { useTicker } from '@/lib/ticker';
-import type { HealthAction, HealthCheck, HealthItem, RepairStep } from '@/lib/types';
+import { isDesktop } from '@/lib/desktop';
+import { IDLE, type ActionState } from '@/lib/actionState';
+import { triggerRefresh, type RefreshAnswer } from '@/lib/refresh';
+import {
+  ACTION_COPY, blockedLine, caveatLine, outcomeLine, planFooter, planLine, rowState, timeLine, type CopyCtx,
+} from '@/lib/healthCopy';
+import {
+  CARD_STEP, cardBody, cardRecord, cardStepState, isRepairAction, itemBody, kindOfBody, pageBody,
+  pagePlan, pageRecord, recordFor, runTouches, stepFindings, type RepairEstimate, type RepairStatus,
+} from '@/lib/repairRun';
+import { useRepairRun } from '@/lib/useRepairRun';
+import { testStep } from '@/lib/sourceEvidence';
+import type { HealthAction, HealthCheck, HealthItem } from '@/lib/types';
 
-type Toast = (msg: string, type?: 'info' | 'success' | 'error') => void;
-interface RepairBody { only: RepairStep[]; seriesId?: string; bookId?: string; sourceId?: string; now?: boolean }
-
-/**
- * Ask the repair to run one step, for one thing.
- *
- * ⚠️ A refusal is a 200 with `ok: false`, exactly as the Tasks panel's Run now is, and the two refusals
- * mean opposite things to the person reading them: `sweep_running` is "come back in a few minutes" (the
- * repair and the chapter sweep never overlap, by design) while `busy` is "it is already doing this". A
- * shared "Failed" for both sent an admin looking for a broken button in the first case.
- */
-async function postRepair(body: RepairBody, toast: Toast, started = tr('Started — the Tasks line shows what it did')): Promise<boolean> {
-  try {
-    const r = await api<{ ok?: boolean; error?: string; started?: boolean }>('/api/admin/tasks/repair/run', { method: 'POST', json: body });
-    if (r?.ok === false) {
-      toast(r.error === 'sweep_running' ? tr('A chapter sweep is running — try again in a few minutes')
-        : r.error === 'busy' ? tr('The repair is already running')
-        : tr('Could not start the repair'), 'error');
-      return false;
-    }
-    // Detached, like Verify chapter files: the counts cannot be in this answer, and "Started" followed by
-    // nothing changing is what #34 reported as "the run now buttons don't work". Say where to look.
-    toast(started, 'success');
-    return true;
-  } catch (e) {
-    toast(msgOf(e, tr('Could not start the repair')), 'error');
-    return false;
-  }
-}
+type Toast = ReturnType<typeof useToast>;
 
 /**
- * Ignore one finding, or stop ignoring it (v0.48.3). The server looks the finding up again and records all of it;
- * nothing is deleted, so there is no confirmation -- "Stop ignoring" is the way back.
+ * Ignore one finding, or stop ignoring it (v0.48.3). The server looks the finding up again and records all of
+ * it; nothing is deleted, so there is no confirmation -- "Stop ignoring" is the way back.
  */
-async function postIgnore(check: string, item: HealthItem, ignored: boolean, toast: Toast): Promise<void> {
-  try {
-    await api('/api/admin/health/ignore', { method: 'POST', json: { check, key: item.key, ignored } });
-    toast(ignored ? tr('Ignored — it stays quiet until something about it changes') : tr('Back on the list'), 'success');
-  } catch (e) {
-    toast(msgOf(e, tr('Could not save that')), 'error');
-  }
-}
-
-/** One action. Disabled while its own request is in flight, never while a sibling's is. */
-function Chip({ action, label, busy, danger, onClick }: {
-  action: string; label: string; busy: boolean; danger?: boolean; onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      data-health-action={action}
-      onClick={onClick}
-      disabled={busy}
-      className={`chip shrink-0 text-xs disabled:opacity-50 ${danger ? 'hover:border-red-400/50 hover:text-red-300' : 'hover:border-accent/50 hover:text-accent'}`}
-    >
-      {label}
-    </button>
-  );
+async function postIgnore(check: string, item: HealthItem, ignored: boolean): Promise<string> {
+  await api('/api/admin/health/ignore', { method: 'POST', json: { check, key: item.key, ignored } });
+  return ignored ? tr('Ignored — it stays quiet until something about it changes') : tr('Back on the list');
 }
 
 /** Which of the pair the merge keeps: the server's suggestion, or the first id when it did not send one. */
@@ -92,188 +57,230 @@ const keptIndex = (it: HealthItem): number => {
   return i < 0 ? 0 : i;
 };
 
+/** The estimate for a run kind, from the status route, for "usually … · at most …". */
+const estOf = (status: RepairStatus | undefined, kind: string): RepairEstimate | null => status?.estimates?.[kind] ?? null;
+
+/** What a scan said, as a status line: the counts, a refusal, or the failure. Shared by the hero and Health. */
+export function scanState(r: RefreshAnswer, startedAt: number): ActionState {
+  const took = Date.now() - startedAt;
+  if (r.scanned) {
+    if (typeof r.series !== 'number') return { kind: 'done', finishedAt: Date.now(), tookMs: took, outcome: tr('Scan started') };
+    if (!r.series) return { kind: 'done', finishedAt: Date.now(), tookMs: r.ms ?? took, outcome: tr('Scan done: nothing found — check the folder layout'), partial: true };
+    const books = r.books ?? 0;
+    const head = books === 1 ? tr('Scan done: {series} series, 1 chapter', { series: r.series })
+      : tr('Scan done: {series} series, {n} chapters', { series: r.series, n: books });
+    const skipped = r.skipped ? ` · ${r.skipped === 1 ? tr('1 folder skipped, see Health') : tr('{n} folders skipped, see Health', { n: r.skipped })}` : '';
+    return { kind: 'done', finishedAt: Date.now(), tookMs: r.ms ?? took, outcome: head + skipped, partial: !!r.skipped };
+  }
+  if (r.reason === 'rate_limited') return { kind: 'refused', reason: tr('A scan ran less than a minute ago') };
+  if (r.reason === 'in_flight') return { kind: 'refused', reason: tr('A scan is already running') };
+  return { kind: 'failed', finishedAt: Date.now(), reason: tr('Scan failed') };
+}
+
 /**
- * The chips for one Health item, driven entirely by `item.actions`.
+ * One finding's row: its words (the caller's children -- title, detail, and #115's evidence), what the last
+ * attempt found, what an action will not be able to do, the keys, and the status line.
  *
- * Returns a FRAGMENT, not a box: the caller's row is a `flex-wrap` container, so the chips sit beside the
- * title on a laptop and wrap under it at 390 px. A Test's verdict is not rendered here: the refetched row
- * carries it, under the title (SourceEvidence, #115).
+ * ⚠️ `data-health-item` is what the browser walk finds a key's row by (closest()), and the row is keyed by
+ * lib/healthKeys.ts: its state -- a Fix working, a Test's verdict -- must follow the finding when a re-check
+ * removes the row above it.
  */
-export function HealthActions({ check, item, onDone, testMs }: {
-  check: string; item: HealthItem; onDone: () => void | Promise<unknown>;
-  /** The sources check's limit for one Test (HealthCheck.testMs), for the Test key's running clock. */
-  testMs?: number;
+export function HealthRow({ check, item, rowKey, links, children }: {
+  check: HealthCheck;
+  item: HealthItem;
+  rowKey: string;
+  links?: ReactNode;
+  children: ReactNode;
 }) {
   const toast = useToast();
-  const [busy, setBusy] = useState<HealthAction | null>(null);
+  const rr = useRepairRun();
+  const { status, slots } = rr;
+  const slotKey = `item:${check.id}:${rowKey}`;
+  const slot = slots[slotKey];
+  // Answers-at-once actions keep their own state: pressed, asked, re-checked, then what they said.
+  const [sync, setSync] = useState<{ action: HealthAction; state: ActionState; at: number } | null>(null);
   const [asking, setAsking] = useState<'delete' | 'disable' | 'merge' | null>(null);
-  // Which copy of a duplicate pair survives. Seeded from the server's suggestion (more live chapters, more
-  // readers, older row) so the common case is one tap, and still a choice.
   const [keepFirst, setKeepFirst] = useState(() => keptIndex(item) === 0);
   // ONE sentence with the title inside it, split around the placeholder so the title can carry its own
-  // colour -- the idiom ConfirmDialog.tsx:105-111 already documents. The bare verb key + the title rendered
-  // "KeepSolo Leveling" in English and "الإبقاء علىSolo Leveling" in Arabic (الإبقاء على is the fragment
-  // "keeping of"), in the one confirmation that decides which copy of a duplicate survives a one-way
-  // merge; a bare verb also cannot be reordered, and German and Japanese want the title first.
+  // colour -- the idiom ConfirmDialog.tsx:105-111 documents. The bare verb key + the title rendered
+  // "KeepSolo Leveling" in English and "الإبقاء علىSolo Leveling" in Arabic, in the one confirmation that
+  // decides which copy of a duplicate survives a one-way merge.
   const [keepBefore, keepAfter] = tr('Keep {title}').split('{title}');
   // No verdict is held here (#115, v0.49.0). A Test records what it found on the server, and the refetched row
-  // carries it -- item.diagnosis and the stage lines, rendered by SourceEvidence -- so there is ONE verdict on
-  // screen, and it survives a reload. The Test's own sentence used to sit here as well, beside the stored one.
-  // When the running Test began, for its clock against the server's limit: a Test can take most of a minute.
-  const [testFrom, setTestFrom] = useState(0);
-  const now = useTicker(busy === 'test');
-  const actions = item.actions || [];
-  if (!actions.length) return null;
+  // carries it -- item.diagnosis and the stage lines, drawn by SourceEvidence among the row's children -- so there
+  // is ONE verdict on screen, and it survives a reload. The Test's own fix sentence used to sit here as well.
 
-  // Every chip ends the same way: the row's request, one toast, then Health is asked again -- a chip that
-  // leaves a fixed item on screen reads as a chip that did nothing. The refetch runs even after a failure,
-  // because the failure may itself be the item having already been dealt with elsewhere.
-  // ⚠️ The row stays busy until Health has ANSWERED again, not merely been asked (v0.48.3): the re-check takes
-  // seconds, and a chip that woke up at once over an unchanged row -- Ignore still saying Ignore -- read as a
-  // chip that did nothing, and invited a second press.
-  const act = (a: HealthAction, run: () => Promise<void>) => {
-    if (busy) return;
-    setBusy(a);
+  const actions: HealthAction[] = (item.actions || []).filter((a) => a !== 'solver_reset');
+  const bookIds = item.bookIds?.length ? item.bookIds : item.bookId ? [item.bookId] : [];
+  // A chapter already said to be fine is listed as `info` with a `fixed` stamp; its key is the way back out.
+  const confirmed = !!item.fixed || !!item.info;
+
+  // The run about this row: one this page started for it, or any run on it right now (a card's Fix all, the
+  // nightly, another admin's press).
+  const touch = runTouches(status?.run, check.id, item);
+  const live = status?.run && (touch || (slot?.runId && status.run.id === slot.runId)) ? status.run : null;
+  const repairAction = (slot?.action as HealthAction | undefined) ?? actions.find(isRepairAction);
+  const record = slot?.runId ? rr.record(slot.runId) ?? recordFor(rr.runs, check.id, item) : recordFor(rr.runs, check.id, item);
+  const repairState = rowState({
+    slot, run: live, record, action: repairAction ?? 'fix_short',
+    onStop: live && touch === 'target' ? () => { void rr.stop(slotKey); } : undefined,
+  });
+  // The newest of the two is the row's line.
+  const useSync = !!sync && sync.state.kind !== 'idle' && (repairState.kind === 'idle' || sync.at >= (slot?.startedAt ?? live?.startedAt ?? record?.finishedAt ?? 0));
+  const rowNow: ActionState = useSync ? sync!.state : repairState;
+  const rowAction: HealthAction | undefined = useSync ? sync!.action : repairAction;
+
+  // `step` is the status line's words while the request runs; its clock ticks beside them (a Test's says the
+  // server's limit, testStep: one can take most of a minute).
+  const act = (a: HealthAction, run: () => Promise<{ text: string; ok?: boolean } | null>, step = tr('Working…')) => {
+    const at = Date.now();
+    setSync({ action: a, at, state: { kind: 'working', startedAt: at, step } });
     void (async () => {
-      try { await run(); } finally { await onDone(); setBusy(null); }
+      let out: { text: string; ok?: boolean } | null = null;
+      let err: string | null = null;
+      try { out = await run(); } catch (e) { err = msgOf(e, tr('Could not save that')); }
+      // Health is asked again even after a failure -- the failure may be the finding having been dealt with
+      // elsewhere -- and the row stays busy until it has ANSWERED (v0.48.3).
+      setSync({ action: a, at, state: { kind: 'working', startedAt: at, step: tr('Checking the result…') } });
+      await rr.recheck().catch(() => {});
+      if (err) { setSync({ action: a, at, state: { kind: 'failed', finishedAt: Date.now(), reason: err } }); toast(err, 'error'); return; }
+      if (!out) { setSync(null); return; }
+      setSync({ action: a, at, state: out.ok === false
+        ? { kind: 'failed', finishedAt: Date.now(), reason: out.text }
+        : { kind: 'done', finishedAt: Date.now(), tookMs: Date.now() - at, outcome: out.text } });
     })();
   };
 
-  const bookIds = item.bookIds?.length ? item.bookIds : item.bookId ? [item.bookId] : [];
-  // A chapter the admin has already said is fine is listed as `info` with a `fixed` stamp; its chip is the
-  // way back out, or a mistaken "It's fine" would be permanent from this page.
-  const confirmed = !!item.fixed || !!item.info;
-
-  const doDelete = async () => {
-    try {
-      const res = await api<{ applied: number; skipped: { id: string; reason: string }[] }>(
-        `/api/admin/series/${encodeURIComponent(item.seriesId || '')}/chapters/delete`,
-        { method: 'POST', json: { bookIds } },
-      );
-      // One line per reason present, and `bookmarked` LEADS. On this page the rows are chapters whose
-      // number is impossible, so the only one the admin can act on is the chapter somebody has a bookmark
-      // inside: that bookmark points at a page number, and the answer is to ask the reader, not to retry.
-      // The rest (`unlink_failed`, `outside_root`, `already_pruned` after a race) share one line, because
-      // the fix for all of them is the server log.
-      const count = (reason: string) => res.skipped.filter((x) => x.reason === reason).length;
-      const bookmarked = count('bookmarked');
-      const notOwned = count('not_owned');
-      const other = res.skipped.length - bookmarked - notOwned;
-      const lines = [
-        { n: bookmarked, text: tr('{n} skipped: bookmarked by a reader', { n: bookmarked }) },
-        { n: notOwned, text: tr('{n} skipped: not downloaded by Uchiyomi', { n: notOwned }) },
-        { n: other, text: tr('{n} could not be deleted', { n: other }) },
-      ].filter((l) => l.n > 0);
-      // ⚠️ A delete that deleted nothing is not a success: a green "0 deleted" over unchanged rows is what
-      // a refused delete used to look like, and the reason is what the admin needs in front of them.
-      if (res.applied === 0 && lines.length) {
-        const [head, ...rest] = lines;
-        toast(head.text, 'error');
-        for (const l of rest) toast(l.text, 'info');
-      } else {
-        toast(tr('{n} deleted', { n: res.applied }), 'success');
-        for (const l of lines) toast(l.text, 'info');
-      }
-    } catch (e) { toast(msgOf(e, tr('Could not delete those')), 'error'); }
+  const doDelete = async (): Promise<{ text: string; ok?: boolean } | null> => {
     setAsking(null);
+    const res = await api<{ applied: number; skipped: { id: string; reason: string }[] }>(
+      `/api/admin/series/${encodeURIComponent(item.seriesId || '')}/chapters/delete`,
+      { method: 'POST', json: { bookIds } },
+    );
+    // One line per reason present, and `bookmarked` LEADS: on this page the rows are chapters whose number is
+    // impossible, and the one skip the admin can act on is a reader's bookmark inside one.
+    const count = (reason: string) => res.skipped.filter((x) => x.reason === reason).length;
+    const bookmarked = count('bookmarked');
+    const notOwned = count('not_owned');
+    const other = res.skipped.length - bookmarked - notOwned;
+    const lines = [
+      { n: bookmarked, text: tr('{n} skipped: bookmarked by a reader', { n: bookmarked }) },
+      { n: notOwned, text: tr('{n} skipped: not downloaded by Uchiyomi', { n: notOwned }) },
+      { n: other, text: tr('{n} could not be deleted', { n: other }) },
+    ].filter((l) => l.n > 0);
+    // ⚠️ A delete that deleted nothing is not a success: a green "0 deleted" over unchanged rows is what a
+    // refused delete used to look like, and the reason is what the admin needs in front of them.
+    if (res.applied === 0 && lines.length) return { text: lines.map((l) => l.text).join(' · '), ok: false };
+    // The row goes when Health answers again, taking its status line with it: the count is said in a notice too.
+    toast(tr('{n} deleted', { n: res.applied }), 'success');
+    return { text: [tr('{n} deleted', { n: res.applied }), ...lines.map((l) => l.text)].join(' · ') };
   };
 
-  const doMerge = async () => {
+  const doMerge = async (): Promise<{ text: string } | null> => {
+    setAsking(null);
     const ids = item.seriesIds || [];
-    if (ids.length !== 2) return;
+    if (ids.length !== 2) return null;
     const keep = keepFirst ? ids[0] : ids[1];
     const gone = keepFirst ? ids[1] : ids[0];
-    try {
-      const r = await api<{ moved: number }>(`/api/admin/series/${encodeURIComponent(gone)}/merge`, { method: 'POST', json: { into: keep } });
-      toast(r.moved === 1 ? tr('Merged — one chapter moved') : tr('Merged — {n} chapters moved', { n: r.moved }), 'success');
-    } catch (e) { toast(msgOf(e, tr('Could not merge')), 'error'); }
-    setAsking(null);
+    const r = await api<{ moved: number }>(`/api/admin/series/${encodeURIComponent(gone)}/merge`, { method: 'POST', json: { into: keep } });
+    const text = r.moved === 1 ? tr('Merged — one chapter moved') : tr('Merged — {n} chapters moved', { n: r.moved });
+    // The pair leaves the page when Health answers, so this is said in a notice as well as on the row.
+    toast(text, 'success');
+    return { text };
   };
 
-  const doDisable = async () => {
-    try {
-      await api(`/api/admin/sources/${encodeURIComponent(item.sourceId || '')}/disable`, { method: 'POST' });
-      toast(tr('That source is switched off'), 'success');
-    } catch (e) { toast(msgOf(e, tr('Could not switch that source off')), 'error'); }
+  const doDisable = async (): Promise<{ text: string }> => {
     setAsking(null);
+    await api(`/api/admin/sources/${encodeURIComponent(item.sourceId || '')}/disable`, { method: 'POST' });
+    return { text: tr('That source is switched off') };
   };
 
-  const chip = (a: HealthAction) => {
-    // Every chip on the row goes quiet while any one of them is in flight, not just the one that was
-    // tapped: `act` refuses a second request anyway, so an enabled-looking sibling is a button that does
-    // nothing -- and on a short-chapter row the two chips ("Fix", "It's fine") contradict each other.
-    const b = !!busy;
+  const ctx: CopyCtx = { limits: status?.limits, check };
+  const blocked = rr.blocked;
+  const busyHere = rowNow.kind === 'starting' || rowNow.kind === 'working';
+
+  const spec = (a: HealthAction): ActionSpec | null => {
+    const copy = ACTION_COPY[a];
+    if (!copy) return null;
+    const mine = rowAction === a ? rowNow : IDLE;
+    const base = { id: a, what: copy.what(ctx), state: mine, buttonProps: { 'data-health-action': a } as ActionSpec['buttonProps'] };
+    // A repair key waits while a sweep or ANOTHER repair runs, and says why -- pressed anyway, the server
+    // refuses, which used to be the only way to find out.
+    const repairGate = isRepairAction(a) && !!blocked && !(busyHere && rowAction === a)
+      ? { disabled: true, disabledWhy: blockedLine(blocked, status?.run) } : {};
     switch (a) {
       case 'fix_short':
-        return <Chip key={a} action={a} label={tr('Fix')} busy={b}
-          onClick={() => act(a, () => postRepair({ only: ['short'], bookId: item.bookId! }, toast).then(() => {}))} />;
-      case 'confirm_short':
-        return <Chip key={a} action={a} label={confirmed ? tr('Not fine') : tr('It’s fine')} busy={b}
-          onClick={() => act(a, async () => {
-            try {
-              await api(`/api/admin/books/${encodeURIComponent(item.bookId || '')}/confirm-short`, { method: 'POST', json: { confirmed: !confirmed } });
-              toast(confirmed ? tr('Back on the list — the next repair will look for a longer copy') : tr('Marked as fine — the repair will leave it alone'), 'success');
-            } catch (e) { toast(msgOf(e, tr('Could not save that')), 'error'); }
-          })} />;
-      case 'delete':
-        return <Chip key={a} action={a} label={bookIds.length === 1 ? tr('Delete chapter') : tr('Delete chapters')} busy={b}
-          danger onClick={() => setAsking('delete')} />;
+        return { ...base, ...repairGate, label: tr('Fix'), onRun: () => { const b = itemBody(a, item); if (b) void rr.start(slotKey, a, b); } };
       case 'fill':
-        return <Chip key={a} action={a} label={tr('Fill now')} busy={b}
-          onClick={() => act(a, () => postRepair({ only: ['gaps'], seriesId: item.seriesId! }, toast).then(() => {}))} />;
+        return { ...base, ...repairGate, label: tr('Fill now'), onRun: () => { const b = itemBody(a, item); if (b) void rr.start(slotKey, a, b); } };
       case 'retry':
-        return <Chip key={a} action={a} label={tr('Retry now')} busy={b}
-          onClick={() => act(a, () => postRepair({ only: ['failures'], sourceId: item.sourceId! }, toast).then(() => {}))} />;
+        return { ...base, ...repairGate, label: tr('Retry now'), onRun: () => { const b = itemBody(a, item); if (b) void rr.start(slotKey, a, b); } };
+      case 'confirm_short':
+        return {
+          ...base, label: confirmed ? tr('Not fine') : tr('It’s fine'),
+          onRun: () => act(a, async () => {
+            await api(`/api/admin/books/${encodeURIComponent(item.bookId || '')}/confirm-short`, { method: 'POST', json: { confirmed: !confirmed } });
+            return { text: confirmed ? tr('Back on the list — the next repair will look for a longer copy') : tr('Marked as fine — the repair will leave it alone') };
+          }),
+        };
+      case 'delete':
+        return { ...base, danger: true, label: bookIds.length === 1 ? tr('Delete chapter') : tr('Delete chapters'), onRun: () => setAsking('delete') };
       case 'test':
-        return <Chip key={a} action={a} label={busy === 'test' ? testClock(now - testFrom, testMs) : tr('Test')} busy={b}
-          onClick={() => act(a, async () => {
-            setTestFrom(Date.now());
-            try {
-              const r = await api<{ ok: boolean; diagnosis?: { reason?: string; fix?: string } }>(
-                `/api/admin/sources/${encodeURIComponent(item.sourceId || '')}/test`, { method: 'POST' });
-              toast(r.ok ? tr('That source is working') : (r.diagnosis?.reason || tr('That source is still failing')), r.ok ? 'success' : 'error');
-            } catch (e) { toast(msgOf(e, tr('Could not test that source')), 'error'); }
-          })} />;
+        return {
+          ...base, label: tr('Test'),
+          onRun: () => act(a, async () => {
+            const r = await api<{ ok: boolean; diagnosis?: { reason?: string; fix?: string } }>(
+              `/api/admin/sources/${encodeURIComponent(item.sourceId || '')}/test`, { method: 'POST' });
+            return r.ok ? { text: tr('That source is working') } : { text: r.diagnosis?.reason || tr('That source is still failing'), ok: false };
+          }, testStep(check.testMs)),
+        };
       case 'unblock':
-        return <Chip key={a} action={a} label={tr('Clear block')} busy={b}
-          onClick={() => act(a, async () => {
-            try {
-              await api(`/api/admin/sources/${encodeURIComponent(item.sourceId || '')}/unblock`, { method: 'POST' });
-              toast(tr('Block cleared'), 'success');
-            } catch (e) { toast(msgOf(e, tr('Could not clear that block')), 'error'); }
-          })} />;
+        return {
+          ...base, label: tr('Clear block'),
+          onRun: () => act(a, async () => {
+            await api(`/api/admin/sources/${encodeURIComponent(item.sourceId || '')}/unblock`, { method: 'POST' });
+            return { text: tr('Block cleared') };
+          }),
+        };
       case 'disable':
-        return <Chip key={a} action={a} label={tr('Turn off')} busy={b} danger onClick={() => setAsking('disable')} />;
+        return { ...base, danger: true, label: tr('Turn off'), onRun: () => setAsking('disable') };
       case 'merge':
-        return <Chip key={a} action={a} label={tr('Merge')} busy={b} onClick={() => setAsking('merge')} />;
-      case 'solver_reset':
-        return <Chip key={a} action={a} label={tr('Reset solver sessions')} busy={b}
-          onClick={() => act(a, () => postRepair({ only: ['solver'] }, toast).then(() => {}))} />;
+        return { ...base, label: tr('Merge'), onRun: () => setAsking('merge') };
       case 'ignore':
-        return <Chip key={a} action={a} label={tr('Ignore')} busy={b}
-          onClick={() => act(a, () => postIgnore(check, item, true, toast))} />;
+        return { ...base, label: tr('Ignore'), onRun: () => act(a, async () => ({ text: await postIgnore(check.id, item, true) })) };
       case 'unignore':
-        return <Chip key={a} action={a} label={tr('Stop ignoring')} busy={b}
-          onClick={() => act(a, () => postIgnore(check, item, false, toast))} />;
+        return { ...base, label: tr('Stop ignoring'), onRun: () => act(a, async () => ({ text: await postIgnore(check.id, item, false) })) };
       default:
         return null;
     }
   };
+  const specs = actions.map(spec).filter((s): s is ActionSpec => !!s);
+  // The stored outcome, unless the status line under the keys already says the same thing ("Every source has
+  // the same short copy" twice, one above the other, read as two findings).
+  const stored = outcomeLine(item.outcome);
+  const outcome = rowNow.kind === 'done' && stored.includes(rowNow.outcome) ? '' : stored;
+  const caveats = (item.caveats ?? []).filter((c) => actions.includes(c.action)).map(caveatLine).filter(Boolean);
 
   return (
-    <>
-      {actions.map(chip)}
+    <div data-health-item={rowKey} data-repair-state={rowNow.kind} className={`px-4 py-2.5 ${item.info ? 'opacity-60' : ''}`}>
+      <div className="flex min-w-0 items-start gap-3">
+        <div className="min-w-0 flex-1">{children}</div>
+        {links && <div className="flex shrink-0 flex-col items-end gap-1 pt-0.5">{links}</div>}
+      </div>
+      {outcome && <p data-health-outcome className="mt-1 text-[11px] leading-relaxed text-fog-400">{outcome}</p>}
+      {caveats.map((c) => <p key={c} data-health-caveat className="mt-1 text-[11px] leading-relaxed text-amber-300/90">{c}</p>)}
+      {specs.length > 0 && <ActionKeys actions={specs} className="mt-2" />}
+      <ActionStatus state={rowNow} />
 
       {asking === 'delete' && (
         <ConfirmDialog
           title={bookIds.length === 1 ? tr('Delete this chapter’s file?') : tr('Delete these chapters’ files?')}
           confirmLabel={bookIds.length === 1 ? tr('Delete chapter') : tr('Delete chapters')}
           danger
-          busy={busy === 'delete'}
           body={
             <>
               <p>
-                {check === 'outliers'
+                {check.id === 'outliers'
                   ? tr('A chapter whose number cannot be right is almost always one the source mis-listed. Deleting removes the file; the chapter stays listed and everyone keeps their reading history.')
                   : tr('Deleting removes the file. The chapter stays listed and everyone keeps their reading history.')}
               </p>
@@ -290,7 +297,6 @@ export function HealthActions({ check, item, onDone, testMs }: {
           title={tr('Turn this source off?')}
           confirmLabel={tr('Turn off')}
           danger
-          busy={busy === 'disable'}
           body={<p>{tr('Nothing is deleted. Series that follow it stop being asked for new chapters until you turn it back on under Providers.')}</p>}
           onConfirm={() => act('disable', doDisable)}
           onClose={() => setAsking(null)}
@@ -301,7 +307,6 @@ export function HealthActions({ check, item, onDone, testMs }: {
         <ConfirmDialog
           title={tr('Merge these two?')}
           confirmLabel={tr('Merge')}
-          busy={busy === 'merge'}
           body={
             <>
               <p>{tr('This cannot be undone. Progress, bookmarks, ratings and tracker links move to the kept copy.')}</p>
@@ -320,51 +325,117 @@ export function HealthActions({ check, item, onDone, testMs }: {
           onClose={() => setAsking(null)}
         />
       )}
-    </>
+    </div>
   );
 }
 
-/**
- * Which repair step a whole check's Fix all runs.
- *
- * ⚠️ There is deliberately no entry for `duplicates` or `outliers`. The nightly never merges, deletes,
- * tombstones or renumbers anything, and a "Fix all" that quietly did would be the one button in this
- * console capable of destroying a household's library in a tap.
- */
-const FIX_ALL: Record<string, RepairStep> = {
-  'short-chapters': 'short',
-  'chapter-gaps': 'gaps',
-  'chapter-failures': 'failures',
-  solver: 'solver',
-};
+/** Checks whose findings a scan can clear, which get a "Scan the library now" row. */
+const SCAN_CHECKS = ['library-scan', 'downloads-missing'];
+
+/** Whether a check has anything for its card body to offer beyond its findings: the page's expandable rule. */
+export function hasCardActions(check: HealthCheck): boolean {
+  const step = CARD_STEP[check.id];
+  return (!!step && stepFindings(check, step).length > 0) || SCAN_CHECKS.includes(check.id) || solverDown(check)
+    || (check.id === 'duplicates' && check.items.some((it) => !it.info && (it.seriesIds || []).length === 2));
+}
+
+/** The solver check while the solver does not answer: no reset is offered, and the row says what to do instead. */
+const solverDown = (check: HealthCheck) => check.id === 'solver' && check.status !== 'ok'
+  && !check.items.some((it) => (it.actions ?? []).includes('solver_reset'));
 
 /**
- * The header-level actions for a whole check: Fix all, and Merge all for duplicates.
- *
- * ⚠️ Mounted as a SIBLING of the card's disclosure button, never inside it: a button inside a button is
- * invalid HTML, and browsers repair it by moving the inner one out of the header entirely. It also comes
- * after the disclosure in the DOM, because the end-to-end walk clicks the first button in the card to
- * open it.
+ * A card's body opens with this: one legend row per kind of action its findings carry (what, how, usually how
+ * long), then the card-wide actions as full rows with their own status -- Fix all (the card's one repair
+ * step), Reset the solver, Merge all, Scan the library now.
  */
-export function HealthCheckActions({ check, onDone }: { check: HealthCheck; onDone: () => void }) {
+export function HealthCardActions({ check }: { check: HealthCheck }) {
   const toast = useToast();
-  const [busy, setBusy] = useState(false);
+  const rr = useRepairRun();
+  const { status, slots } = rr;
   const [asking, setAsking] = useState(false);
-  const step = FIX_ALL[check.id];
-  // `info` items are statements, not findings: a source that is switched off, a gap nobody lists. A check
-  // holding only those has nothing to fix, and offering the button anyway starts a run that does nothing.
+  const [merge, setMerge] = useState<ActionState>(IDLE);
+  const [scan, setScan] = useState<ActionState>(IDLE);
+  const ctx: CopyCtx = { limits: status?.limits, check };
   const findings = check.items.filter((it) => !it.info);
   const pairs = check.id === 'duplicates' ? findings.filter((it) => (it.seriesIds || []).length === 2) : [];
-  if (!findings.length) return null;
-  if (!step && !pairs.length) return null;
+
+  const rows: ActionSpec[] = [];
+  // The legend: every kind of action a finding here offers, once, with no button of its own (the keys are on
+  // the findings). The solver reset is card-wide, below.
+  const kinds = [...new Set(check.items.flatMap((it) => it.actions ?? []))].filter((a) => a !== 'solver_reset');
+  for (const a of kinds) {
+    const copy = ACTION_COPY[a];
+    if (!copy) continue;
+    const est = isRepairAction(a) ? estOf(status, a) : null;
+    rows.push({ id: `legend:${a}`, label: a === 'delete' ? tr('Delete chapters') : copy.label(ctx), what: copy.what({ ...ctx, est }), how: copy.how?.({ ...ctx, est }), eta: copy.eta({ ...ctx, est }) });
+  }
+
+  const step = CARD_STEP[check.id];
+  const stepRows = step ? stepFindings(check, step) : [];
+  if (step && stepRows.length) {
+    const key = step === 'solver' ? 'solver_reset' : `fixall:${step}`;
+    const copy = ACTION_COPY[key];
+    const body = cardBody(step);
+    const kind = kindOfBody(body);
+    const slotKey = `card:${check.id}`;
+    const slot = slots[slotKey];
+    const run = status?.run && ((slot?.runId && status.run.id === slot.runId) || status.run.kind === kind) ? status.run : null;
+    const record = slot?.runId ? rr.record(slot.runId) ?? cardRecord(rr.runs, step) : cardRecord(rr.runs, step);
+    const state = rowState({ slot, run, record, action: key, onStop: run ? () => { void rr.stop(slotKey); } : undefined });
+    const busy = state.kind === 'starting' || state.kind === 'working';
+    const c = { ...ctx, est: estOf(status, kind), n: stepRows.length };
+    rows.push({
+      id: key, label: copy.label(c), what: copy.what(c), how: copy.how?.(c), eta: copy.eta(c), state, primary: true,
+      runLabel: step === 'solver' ? tr('Reset') : tr('Fix all'),
+      disabled: !!rr.blocked && !busy, disabledWhy: blockedLine(rr.blocked, status?.run),
+      onRun: () => { void rr.start(slotKey, key, body); },
+      buttonProps: { 'data-health-fix-all': check.id } as ActionSpec['buttonProps'],
+    });
+  }
+  if (solverDown(check)) {
+    rows.push({
+      id: 'solver_down', label: tr('Reset the solver'),
+      what: isDesktop()
+        ? tr('The Cloudflare helper is not answering. Quit and reopen Uchiyomi; a reset from here would change nothing.')
+        : tr('The solver is not answering. Restart its container; a reset from here would change nothing.'),
+    });
+  }
+  if (pairs.length) {
+    const copy = ACTION_COPY.merge_all;
+    rows.push({
+      id: 'merge_all', label: copy.label(ctx), what: copy.what(ctx), eta: copy.eta(ctx), state: merge, runLabel: tr('Merge all'),
+      onRun: () => setAsking(true), buttonProps: { 'data-health-merge-all': check.id } as ActionSpec['buttonProps'],
+    });
+  }
+  if (SCAN_CHECKS.includes(check.id)) {
+    const copy = ACTION_COPY.scan;
+    rows.push({
+      id: 'scan', label: copy.label(ctx), what: copy.what(ctx), eta: copy.eta(ctx), state: scan, runLabel: tr('Scan now'),
+      onRun: () => {
+        const at = Date.now();
+        setScan({ kind: 'working', startedAt: at, step: tr('Scanning library…') });
+        void (async () => {
+          const r = await triggerRefresh();
+          const out = scanState(r, at);
+          if (out.kind === 'done') setScan({ kind: 'working', startedAt: at, step: tr('Checking the result…') });
+          await rr.recheck().catch(() => {});
+          setScan(out);
+        })();
+      },
+      buttonProps: { 'data-health-scan': check.id } as ActionSpec['buttonProps'],
+    });
+  }
+  if (!rows.length) return null;
 
   const mergeAll = async () => {
-    setBusy(true);
+    const at = Date.now();
+    setAsking(false);
+    setMerge({ kind: 'working', startedAt: at, step: tr('Merging…') });
     let merged = 0;
     let moved = 0;
     let failed = 0;
-    // Sequential, not Promise.all: each merge rewrites rows on both series, and two of them landing at
-    // once on a pair that shares a series (an AniList id matching three rows) would race for the survivor.
+    // Sequential, not Promise.all: each merge rewrites rows on both series, and two of them landing at once
+    // on a pair that shares a series (an AniList id matching three rows) would race for the survivor.
     for (const p of pairs) {
       const ids = p.seriesIds!;
       const keep = ids[keptIndex(p)];
@@ -375,47 +446,21 @@ export function HealthCheckActions({ check, onDone }: { check: HealthCheck; onDo
         moved += r.moved || 0;
       } catch { failed++; }
     }
-    toast(merged === 1 ? tr('One pair merged, {m} chapters moved', { m: moved }) : tr('{n} pairs merged, {m} chapters moved', { n: merged, m: moved }), failed ? 'info' : 'success');
-    // ⚠️ Its own toast, in red. Folded into the line above it read as a footnote on a success, and the
-    // pairs that did NOT merge are the ones still sitting on the page.
+    const line = merged === 1 ? tr('One pair merged, {m} chapters moved', { m: moved }) : tr('{n} pairs merged, {m} chapters moved', { n: merged, m: moved });
+    // ⚠️ The pairs that did NOT merge are the ones still on the page: said in red, on its own, not folded in.
     if (failed) toast(failed === 1 ? tr('One pair could not be merged') : tr('{n} pairs could not be merged', { n: failed }), 'error');
-    setBusy(false);
-    setAsking(false);
-    onDone();
+    setMerge({ kind: 'working', startedAt: at, step: tr('Checking the result…') });
+    await rr.recheck().catch(() => {});
+    setMerge({ kind: 'done', finishedAt: Date.now(), tookMs: Date.now() - at, outcome: line, partial: !!failed });
   };
 
   return (
-    <div className="flex shrink-0 items-center gap-1.5 pe-4">
-      {step && (
-        <button
-          type="button"
-          data-health-fix-all={check.id}
-          disabled={busy}
-          onClick={() => {
-            setBusy(true);
-            void postRepair({ only: [step] }, toast).finally(() => { setBusy(false); onDone(); });
-          }}
-          className="chip shrink-0 text-xs hover:border-accent/50 hover:text-accent disabled:opacity-50"
-        >
-          {tr('Fix all')}
-        </button>
-      )}
-      {!!pairs.length && (
-        <button
-          type="button"
-          data-health-merge-all={check.id}
-          disabled={busy}
-          onClick={() => setAsking(true)}
-          className="chip shrink-0 text-xs hover:border-accent/50 hover:text-accent disabled:opacity-50"
-        >
-          {tr('Merge all')}
-        </button>
-      )}
+    <div data-health-legend={check.id} className="border-b border-ink-800/70 px-4 pt-2">
+      <ActionList actions={rows} aria-label={tr('What you can do here')} />
       {asking && (
         <ConfirmDialog
           title={pairs.length === 1 ? tr('Merge this pair?') : tr('Merge these {n} pairs?', { n: pairs.length })}
           confirmLabel={tr('Merge all')}
-          busy={busy}
           body={
             <>
               <p>{tr('This cannot be undone. Progress, bookmarks, ratings and tracker links move to the kept copy.')}</p>
@@ -443,130 +488,74 @@ export function HealthCheckActions({ check, onDone }: { check: HealthCheck; onDo
   );
 }
 
-/** The repair's row in GET /api/admin/tasks, as far as "Fix all issues" reads it. */
-interface RepairTask { id: string; running?: boolean; lastRun?: number | null; lastResult?: any; caps?: { short: number; gaps: number } }
-
-/** The steps "Fix all issues" can run, in the order the repair runs them (REPAIR_STEPS in bff/src/lib/repair.ts). */
-const PAGE_STEPS: RepairStep[] = ['solver', 'failures', 'short', 'gaps'];
 /**
- * The chip each step's findings carry. A step joins the plan only when some finding offers it: the solver check
- * offers its reset only while the solver answers (the step refuses otherwise), and the Health payload is capped,
- * so counting a card's rows would count what it happened to show.
+ * The small, non-interactive mark in a card's header while a run is on its step: "working · 3 of 20". The
+ * card can be closed; this is how it still says the work is going.
  */
-const STEP_ACTION: Record<string, HealthAction> = { short: 'fix_short', gaps: 'fill', failures: 'retry', solver: 'solver_reset' };
+export function CardProgress({ checkId }: { checkId: string }) {
+  const { status } = useRepairRun();
+  const s = cardStepState(status?.run, checkId);
+  if (!s || s.state !== 'running') return null;
+  const label = s.planned ? tr('{done} of {of}', { done: Math.min(s.planned, (s.done ?? 0) + 1), of: s.planned }) : tr('Working…');
+  return <StatusMark tone="accent" working label={label} size="xs" />;
+}
 
 /**
- * "Fix all issues" for the whole Health page (v0.48.3).
+ * "Fix all issues" for the whole Health page (v0.48.3), as one action row (v0.49.0): ONE run of the repair with
+ * every page step that has something to do -- the same steps the cards' Fix all rows run, so nothing here is a
+ * new remedy. Its plan, with each step's caps, is under "How it works" BEFORE the press, where the old
+ * confirmation hid it until after; the failures step asks for `now`.
  *
- * The owner: "there is no button to fix all issues at once". There were four, one per card, and pressing a
- * second while the first was running only got "the repair is already running". This is ONE run of the repair
- * with every step that has something to do -- the same steps the cards' Fix all chips run, so nothing here is a
- * new remedy -- behind a confirmation that says what it will do, how much one run takes on, and what it never
- * touches. For the failures it asks for `now`: every source's failed chapters tried again, as each source's
- * Retry now would (without it the step only reconsiders rows a week old).
- *
- * ⚠️ Health is checked again when a run ENDS -- this one, or one that was already going when the page opened,
- * or one that finished while the page was elsewhere -- not when it starts. The tasks list is polled while the
- * repair runs, whoever started it, and the moment it stops the page asks Health again.
+ * ⚠️ Health is checked again when the run ENDS (lib/useRepairRun.tsx), not when it starts.
  */
-export function HealthFixAll({ checks, onDone }: { checks: HealthCheck[]; onDone: () => void | Promise<unknown> }) {
-  const toast = useToast();
-  const [asking, setAsking] = useState(false);
-  const [posting, setPosting] = useState(false);
-  /** The repair's `lastRun` when OUR run was started; undefined while we are not waiting on one. */
-  const [waitingFrom, setWaitingFrom] = useState<number | null | undefined>(undefined);
-  const waiting = waitingFrom !== undefined;
-  const { data: tasks } = useQuery({
-    queryKey: ['admin-tasks'],
-    queryFn: () => api<{ content: RepairTask[] }>('/api/admin/tasks'),
-    // While OUR run is starting, and while ANY repair is running: a run begun elsewhere, or before a tab
-    // switch, must still end in a re-check instead of leaving this reading "Fixing…" for good.
-    refetchInterval: (q) => (waiting || q.state.data?.content?.find((t) => t.id === 'repair')?.running ? 4000 : false),
-  });
-  const repair = tasks?.content?.find((t) => t.id === 'repair');
-  const running = !!repair?.running;
-  const done = useRef(onDone);
-  done.current = onDone;
-  const wasRunning = useRef(running);
-
-  useEffect(() => {
-    const ended = wasRunning.current && !running;
-    wasRunning.current = running;
-    const oursEnded = waiting && !!repair && !repair.running && (repair.lastRun ?? null) !== waitingFrom;
-    if (!ended && !oursEnded) return;
-    void done.current();
-    if (!oursEnded) return;
-    setWaitingFrom(undefined);
-    // A run that threw leaves no result at all: that is not "finished".
-    const line = taskResult(repair!.lastResult).replace(/^\s*·\s*/, '');
-    if (!repair!.lastResult || repair!.lastResult.stopped) {
-      toast(`${tr('The repair stopped before it finished')}${line ? ` · ${line}` : ''}`, 'error');
-    } else {
-      toast(line || tr('The repair finished'), 'success');
-    }
-  }, [waiting, waitingFrom, repair, running, toast]);
-
-  // What there is to do: a step some finding offers. `info` rows are statements, not findings.
-  const plan = PAGE_STEPS.flatMap((step) => {
-    const c = checks.find((x) => FIX_ALL[x.id] === step);
-    const n = c ? c.items.filter((it) => !it.info && (it.actions ?? []).includes(STEP_ACTION[step])).length : 0;
-    return n ? [{ step, n }] : [];
-  });
-  if (!plan.length && !waiting && !running) return null;
-  const caps = repair?.caps ?? { short: 20, gaps: 5 };
-
-  const start = async () => {
-    setPosting(true);
-    const from = repair?.lastRun ?? null;
-    const ok = await postRepair(
-      { only: plan.map((p) => p.step), ...(plan.some((p) => p.step === 'failures') ? { now: true } : {}) },
-      toast, tr('Fixing — this page updates when it is done'),
-    );
-    setPosting(false);
-    setAsking(false);
-    if (ok) setWaitingFrom(from);
+export function FixAllIssues({ checks }: { checks: HealthCheck[] }) {
+  const rr = useRepairRun();
+  const { status, slots } = rr;
+  const plan = pagePlan(checks);
+  const slot = slots.page;
+  const body = pageBody(plan);
+  const kind = kindOfBody(body);
+  const run = status?.run && ((slot?.runId && status.run.id === slot.runId) || (status.run.kind === kind && plan.length > 1)) ? status.run : null;
+  const record = slot?.runId ? rr.record(slot.runId) ?? pageRecord(rr.runs) : pageRecord(rr.runs);
+  const state = rowState({ slot, run, record, action: 'fix_all_issues', onStop: run ? () => { void rr.stop('page'); } : undefined });
+  if (!plan.length && state.kind === 'idle') return null;
+  const ctx: CopyCtx = { limits: status?.limits };
+  // Usually: this plan's own history when there is one; otherwise the sum of its steps' estimates (the
+  // searches are shared, so "at most" is generous rather than short).
+  const own = estOf(status, kind);
+  const parts = plan.map((p) => estOf(status, kindOfBody(cardBody(p.step))));
+  const est: RepairEstimate | null = own?.typicalMs != null ? own : parts.some(Boolean) ? {
+    typicalMs: null, runs: 0,
+    worstMs: parts.reduce<number | null>((a, e) => (a === null || e?.worstMs == null ? null : a + e.worstMs), 0),
+    downloads: parts.reduce((a, e) => a + (e?.downloads ?? 0), 0),
+  } : own;
+  const copy = ACTION_COPY.fix_all_issues;
+  const lines = plan.map((p) => `• ${planLine(p.step, { ...ctx, n: p.n })}`);
+  const caps = tr('One run takes up to {short} short chapters and {gaps} series with gaps. The nightly repair carries on with the rest, or press Fix all issues again.',
+    { short: ctx.limits?.shortMax ?? 20, gaps: ctx.limits?.gapsMax ?? 5 });
+  const busy = state.kind === 'starting' || state.kind === 'working';
+  const spec: ActionSpec = {
+    id: 'fix_all_issues',
+    label: copy.label(ctx),
+    what: plan.length ? `${copy.what(ctx)} ${plan.length === 1 ? tr('1 step') : tr('{n} steps', { n: plan.length })}.` : copy.what(ctx),
+    how: [...lines, caps, planFooter(plan.map((p) => p.step))].join('\n'),
+    eta: timeLineOr(est),
+    state,
+    primary: true,
+    runLabel: tr('Start'),
+    disabled: !plan.length || (!!rr.blocked && !busy),
+    disabledWhy: blockedLine(rr.blocked, status?.run),
+    onRun: () => { void rr.start('page', 'fix_all_issues', body); },
+    buttonProps: { 'data-health-fix-all-page': '' } as ActionSpec['buttonProps'],
   };
-
-  // What one run really does, per step -- not "every row on the card": the payload is capped, and the gap step
-  // chooses its own series (followed ones, not searched in the last day).
-  const line: Record<string, (n: number) => string> = {
-    short: () => tr('Short chapters: look for a longer copy of up to {n} of them, and replace one only when a longer copy is found', { n: caps.short }),
-    gaps: () => tr('Chapter gaps: search the sources for up to {n} series, follow one that has the missing chapters, and download them', { n: caps.gaps }),
-    failures: (n) => tr('Chapters that would not download ({n} sources): all of them get another try, up to ten series straight away and the rest with the next check', { n }),
-    solver: () => tr('Cloudflare solver: start its sessions afresh'),
-  };
-
   return (
-    <>
-      <button
-        type="button"
-        data-health-fix-all-page
-        disabled={posting || waiting || running}
-        onClick={() => setAsking(true)}
-        className="chip shrink-0 text-xs hover:border-accent/50 hover:text-accent disabled:opacity-50"
-      >
-        {waiting || running ? tr('Fixing…') : tr('Fix all issues')}
-      </button>
-      {asking && (
-        <ConfirmDialog
-          title={tr('Fix everything the repair can fix?')}
-          confirmLabel={tr('Fix all issues')}
-          busy={posting}
-          body={
-            <>
-              <ul className="space-y-2">
-                {plan.map((p) => (
-                  <li key={p.step} className="rounded-lg border border-ink-700 px-3 py-2 text-sm text-fog-100">{line[p.step](p.n)}</li>
-                ))}
-              </ul>
-              <p className="mt-3">{tr('One run takes up to {short} short chapters and {gaps} series with gaps. The nightly repair carries on with the rest, or press Fix all issues again.', caps)}</p>
-              <p className="mt-2 text-fog-500">{tr('Nothing is deleted or merged, and no source is unblocked or switched off: those stay on their own rows.')}</p>
-            </>
-          }
-          onConfirm={() => { void start(); }}
-          onClose={() => setAsking(false)}
-        />
-      )}
-    </>
+    <div data-health-fix-all-issues className="card grad-border full px-4 py-1">
+      <ActionList actions={[spec]} />
+    </div>
   );
+}
+
+/** The estimate line, or a plain bound before the status route has answered. */
+function timeLineOr(e: RepairEstimate | null): string {
+  return timeLine(e) || tr('A few minutes at most');
 }

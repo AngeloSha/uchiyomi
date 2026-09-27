@@ -189,6 +189,7 @@ const IRREGULAR_PAIRS: Record<string, string> = {
   '1 chapter behind': '{n} chapters behind in 1 series',
   '{n} chapters behind in 1 series': '{n} chapters behind across {m} series',
   'Ch. {n} · 1 older chapter not here yet': 'Ch. {a}–{b} · {n} older chapters not here yet',
+  '1 page is a placeholder; the chapter sweep re-fetches it': '{n} pages are placeholders; the chapter sweep re-fetches them',
 };
 /** Keys that look counted and are not a pair, each with why. Not a place to park a new key. */
 const NOT_PAIRED: Record<string, string> = {
@@ -204,8 +205,6 @@ const NOT_PAIRED: Record<string, string> = {
  */
 const SHIPPED_UNPAIRED = [
   '+{n} chapters vs the current pick', 'All {n} chapters are already in your library', 'Best {n} days',
-  'Chapter gaps: search the sources for up to {n} series, follow one that has the missing chapters, and download them',
-  'Chapters that would not download ({n} sources): all of them get another try, up to ten series straight away and the rest with the next check',
   'Checking {n} sources — this can take a minute. You can close this; anything followed shows under Sources & translations.',
   'Delete {n} chapters from the server?', 'File {n} series',
   'From now on, an hourly job will permanently delete the file of any chapter that everyone who started it has finished, once it has been finished for {n} days. There is no undo and no recycle bin.',
@@ -223,7 +222,7 @@ const SHIPPED_UNPAIRED = [
   'Fetch {n} chapters again?', '{n} fewer chapters than the current pick',
 ];
 /** What SHIPPED_UNPAIRED may hold at most: lower it with every entry fixed, never raise it. */
-const SHIPPED_UNPAIRED_MAX = 45;
+const SHIPPED_UNPAIRED_MAX = 43;
 
 test('counted strings come in pairs: every "1 chapter" has its "{n} chapters", and back', () => {
   // Reintroduce by deleting the singular of a pair from the app -- `tr('Refreshed — 1 extension available')`

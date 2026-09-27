@@ -7,14 +7,20 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, ApiError, img } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { triggerRefresh } from '@/lib/refresh';
-import { taskResult } from '@/lib/tasks';
+import { scheduleText, taskResult } from '@/lib/tasks';
 import { bytes, relativeTime } from '@/lib/format';
 import { useToast } from '@/components/Toast';
 import { ConfirmDialog, Modal, msgOf } from '@/components/ConfirmDialog';
 import { Avatar } from '@/components/Avatar';
 import { IcChevronLeft, IcChevronRight, IcTrash, IcPlus, IcRefresh, IcInfo } from '@/components/icons';
 import { SourcesExplainer } from '@/components/SourcesExplainer';
-import { HealthActions, HealthCheckActions, HealthFixAll } from '@/components/HealthActions';
+import { CardProgress, FixAllIssues, HealthCardActions, HealthRow, hasCardActions, scanState } from '@/components/HealthActions';
+import { RepairHistory, RepairLiveStrip, RepairTaskLines } from '@/components/RepairLive';
+import { ActionStatus } from '@/components/ActionList';
+import { RepairRunProvider } from '@/lib/useRepairRun';
+import { checkTitle } from '@/lib/healthCopy';
+import { keysFor } from '@/lib/healthKeys';
+import type { ActionState } from '@/lib/actionState';
 import { Backdrop, Img } from '@/components/ui';
 import { SeriesCard } from '@/components/cards';
 import { ConsoleNav } from '@/components/ConsoleNav';
@@ -145,7 +151,6 @@ function AdminInner() {
  * counts are still there, just demoted to the line that supports it.
  */
 function AdminHero({ onBack }: { onBack: () => void; onScan?: undefined }) {
-  const toast = useToast();
   const qc = useQueryClient();
   const { data: stats } = useQuery({ queryKey: ['admin-stats'], queryFn: () => api<any>('/api/admin/stats') });
   const { data: health } = useQuery({
@@ -166,10 +171,16 @@ function AdminHero({ onBack }: { onBack: () => void; onScan?: undefined }) {
     : bad ? tr('{n} checks found something', { n: bad })
     : tr('Everything looks healthy');
 
+  // The scan's answer, under the button (v0.49.0): it used to be dropped, so a scan refused because one ran a
+  // minute ago looked exactly like one that found nothing. Then Health is checked again, and its header mark.
+  const [scanned, setScanned] = useState<ActionState | null>(null);
   const scan = async () => {
-    toast(tr('Scanning library…'), 'info', { busy: true });
-    await triggerRefresh();
-    setTimeout(() => qc.invalidateQueries({ queryKey: ['admin-stats'] }), 2500);
+    const at = Date.now();
+    setScanned({ kind: 'working', startedAt: at, step: tr('Scanning library…') });
+    const r = await triggerRefresh();
+    setScanned(scanState(r, at));
+    await Promise.all([qc.invalidateQueries({ queryKey: ['admin-stats'] }), qc.invalidateQueries({ queryKey: ['admin-health'] })]);
+    await qc.invalidateQueries({ queryKey: ['health-summary'] });
   };
 
   // Separate singular keys rather than a plural library. Nine languages with one count each does not justify
@@ -225,9 +236,10 @@ function AdminHero({ onBack }: { onBack: () => void; onScan?: undefined }) {
 
         <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.5, delay: 0.08, ease: [0.22, 0.61, 0.36, 1] }} className="mt-5">
-          <button onClick={scan} className="btn-accent px-5 py-2.5 text-sm">
-            <IcRefresh width={16} height={16} />{tr('Scan library now')}
+          <button onClick={scan} disabled={scanned?.kind === 'working'} data-hero-scan className="btn-accent px-5 py-2.5 text-sm disabled:opacity-60">
+            <IcRefresh width={16} height={16} />{scanned?.kind === 'working' ? tr('Scanning library…') : tr('Scan library now')}
           </button>
+          {scanned && scanned.kind !== 'working' && <div data-hero-scan-result className="max-w-xl"><ActionStatus state={scanned} /></div>}
         </motion.div>
       </div>
     </div>
@@ -1105,16 +1117,17 @@ function Tasks() {
       if (r?.ok === false) {
         toast(r.error === 'sweep_running' ? tr('A chapter sweep is running — try again in a few minutes')
           : r.error === 'repair_running' ? tr('The library repair is running — try again in a few minutes')
-          : r.error === 'busy' ? 'Already running'
-          : r.error === 'not_enabled' ? 'That task is switched off'
-          : 'Failed', 'error');
+          : r.error === 'busy' ? tr('Already running')
+          : r.error === 'not_enabled' ? tr('That task is switched off')
+          : tr('Failed'), 'error');
       }
       // ⚠️ The scan is the one task that runs to completion before answering, and it answers with its
       // counts. Toasting "Started" for it hid the only fact that mattered: in #34 a library scanned to zero
       // series and the reporter's summary was "the run now buttons don't work" -- because from the outside,
       // "Started" followed by nothing changing is indistinguishable from a button that does nothing.
       else if (typeof r?.series === 'number') {
-        toast(r.series ? `Scan done: ${r.series} series, ${r.books ?? 0} chapters` : 'Scan done: nothing found — check the folder layout', r.series ? 'success' : 'error');
+        const s = scanState({ scanned: true, series: r.series, books: r.books }, Date.now());
+        toast(s.kind === 'done' ? s.outcome : '', r.series ? 'success' : 'error');
       }
       // The verify task is detached (one stat per chapter over a share is minutes, and a request that long
       // dies at the proxy while the walk goes on), so its counts cannot be in this answer. The one place
@@ -1125,9 +1138,9 @@ function Tasks() {
       // rather than a bare "Started": a nightly run counts two thousand files and can replace a chapter,
       // and none of that is in this answer.
       else if (id === 'repair' && r?.started) toast(tr('Started — the Tasks line shows what it did'), 'success');
-      else toast('Started', 'success');
+      else toast(tr('Started'), 'success');
       qc.invalidateQueries({ queryKey: ['admin-tasks'] });
-    } catch { toast('Failed', 'error'); }
+    } catch { toast(tr('Failed'), 'error'); }
   };
   // Chronological, per-row actions: a list, not a card grid. But an explicit column template rather than
   // `justify-between`, which at 1592px left a lake of nothing between a task's name and its own button.
@@ -1137,7 +1150,7 @@ function Tasks() {
       <div className="card grad-border full divide-y divide-ink-800/70 overflow-hidden">
         {(data?.content || []).map((t: any) => (
           <div key={t.id} className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 px-4 py-3.5 lg:grid-cols-[minmax(0,20rem)_minmax(0,1fr)_auto]">
-            <p className="col-start-1 row-start-1 min-w-0 truncate text-sm text-fog-100">{t.name}</p>
+            <p className="col-start-1 row-start-1 min-w-0 truncate text-sm text-fog-100">{tr(t.name)}</p>
             {/* Phone stacks the schedule under the name; from lg it takes a track of its own. */}
             {/* ⚠️ `remaining` is shown because the backlog is the one number that tells you whether a task is
                 keeping up. The server has always sent it and nothing displayed it, so a job that had quietly
@@ -1146,13 +1159,21 @@ function Tasks() {
                 verify line ("one folder looked unmounted…: /library-dl, 4000 checked, 312 missing…") is
                 900 px wide -- truncated, it read as a clean run on every width. */}
             <p className="col-start-1 row-start-2 min-w-0 break-words text-[11px] text-fog-500 lg:col-start-2 lg:row-start-1">
-              {t.schedule} · {t.lastRun ? tr('last run {when}', { when: relativeTime(new Date(t.lastRun).toISOString()) }) : tr('not run yet')}{taskResult(t.lastResult)}
+              {scheduleText(t)} · {t.lastRun ? tr('last run {when}', { when: relativeTime(new Date(t.lastRun).toISOString()) }) : tr('not run yet')}
+              {/* The repair's line is the last FULL run's since v0.49.0 (the nightly, or Run now here): say which. */}
+              {t.lastRun && t.lastOrigin === 'nightly' ? ` ${tr('(nightly)')}` : t.lastRun && t.lastOrigin === 'manual' ? ` ${tr('(run by hand)')}` : ''}
+              {taskResult(t.lastResult)}
               {typeof t.remaining === 'number' && t.remaining > 0 && (
-                <span className="text-amber-300"> · {t.remaining.toLocaleString()} waiting</span>
+                <span className="text-amber-300"> · {tr('{n} waiting', { n: t.remaining.toLocaleString() })}</span>
               )}
             </p>
+            {t.id === 'repair' && (
+              <div className="col-start-1 row-start-3 min-w-0 lg:col-start-2 lg:row-start-2">
+                <RepairTaskLines nextAt={t.nextAt} latestOther={t.latestOther} running={!!t.running} />
+              </div>
+            )}
             <button onClick={() => run(t.id)} disabled={t.running}
-              className="chip col-start-2 row-span-2 row-start-1 shrink-0 justify-self-end text-xs disabled:opacity-50 lg:col-start-3 lg:row-span-1">{t.running ? 'Running…' : 'Run now'}</button>
+              className="btn-key col-start-2 row-span-2 row-start-1 justify-self-end lg:col-start-3 lg:row-span-1">{t.running ? tr('Running…') : tr('Run now')}</button>
           </div>
         ))}
       </div>
@@ -1275,13 +1296,6 @@ function Sessions() {
 // and this page mounts them, so declaring the shapes here would have meant that component importing from a
 // Next route file which imports the component straight back. `info` items -- a source you switched off, a
 // short chapter you already confirmed -- are rendered dimmed so the eye lands on the real findings.
-
-const HEALTH_TONE: Record<HealthCheck['status'], string> = {
-  problem: 'border-red-500/40 bg-red-500/10 text-red-300',
-  warn: 'border-amber-500/40 bg-amber-500/10 text-amber-300',
-  ok: 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300',
-};
-const HEALTH_LABEL: Record<HealthCheck['status'], string> = { problem: 'Needs attention', warn: 'Worth a look', ok: 'All good' };
 
 /** Read-only audit of the library: gaps, truncated downloads, duplicates, and failing sources. */
 interface DeletedRow {
@@ -1941,103 +1955,108 @@ function Health() {
   });
   const checks = data?.checks || [];
   const bad = checks.filter((c) => c.status !== 'ok').length;
-  // After anything on this page changes a finding -- a fix, an ignore -- the page is checked again, and the
-  // header's mark with it: the refetch stores a new summary, and the header reads that summary.
+  // After anything on this page changes a finding -- a repair that ENDED, an ignore -- the page is checked
+  // again, and the header's mark with it: the refetch stores a new summary, and the header reads that summary.
   const qc = useQueryClient();
   const recheck = () => refetch().then(() => qc.invalidateQueries({ queryKey: ['health-summary'] }));
 
   // One card per check, and a failing one earns the full width of the board -- the same severity rule the
-  // overview uses, so the shape of the panel is the verdict.
+  // overview uses, so the shape of the panel is the verdict. The repair provider holds the live run and its
+  // history for every row, card and the page's own Fix all issues (lib/useRepairRun.tsx).
   return (
-    <div className="board">
-      {/* Wraps: at phone width the sentence and two chips do not fit on one line (v0.48.3). */}
-      <div className="full flex flex-wrap items-center justify-between gap-3">
-        <p className="text-xs text-fog-500">
-          {!data ? 'Checking your library…'
-            : bad ? `${bad} of ${checks.length} checks found something`
-            : 'Everything looks healthy'}
-          {data && <> · checked {relativeTime(data.generatedAt)}</>}
-        </p>
-        <div className="flex shrink-0 items-center gap-2">
-          <HealthFixAll checks={checks} onDone={recheck} />
-          <button onClick={() => refetch()} disabled={isFetching} className="chip shrink-0 text-xs disabled:opacity-50">
-            {isFetching ? 'Checking…' : 'Re-check'}
+    <RepairRunProvider onEnded={recheck}>
+      <div className="board">
+        {/* Wraps: at phone width the sentence and the key do not fit on one line (v0.48.3). */}
+        <div className="full flex flex-wrap items-center justify-between gap-3">
+          <p className="text-xs text-fog-500">
+            {!data ? tr('Checking your library…')
+              : bad ? tr('Checks that found something: {n} of {m}', { n: bad, m: checks.length })
+              : tr('Everything looks healthy')}
+            {data && <> · {tr('checked {when}', { when: relativeTime(data.generatedAt) })}</>}
+          </p>
+          <button type="button" onClick={() => refetch()} disabled={isFetching} className="btn-key">
+            <IcRefresh aria-hidden width={14} height={14} />{isFetching ? tr('Checking…') : tr('Re-check')}
           </button>
         </div>
-      </div>
 
-      {checks.map((c) => {
-        const isOpen = open === c.id;
-        // Notes explain important states that are deliberately not findings. A readable partial chapter,
-        // for example, is absent from the active failure ledger but this note is the only place Health says
-        // where it appears and when it is repaired. Keep those cards expandable even when `items` is empty.
-        const expandable = !!c.items.length || !!c.note;
-        return (
-          <div key={c.id} data-health-check={c.id} className={`card grad-border overflow-hidden ${c.status !== 'ok' ? 'full' : ''}`}>
-            {/* ⚠️ The check-level chips are a SIBLING of the disclosure, never a child of it: a button
-                inside a button is invalid HTML and the browser hoists the inner one out of the header
-                altogether. They also come after it, because the end-to-end walk opens a card by clicking
-                the first button inside `[data-health-check="…"]`. */}
-            <div className="flex items-center">
+        <RepairLiveStrip />
+        <FixAllIssues checks={checks} />
+
+        {checks.map((c) => {
+          const isOpen = open === c.id;
+          // Notes explain important states that are deliberately not findings. A readable partial chapter, for
+          // example, is absent from the active failure ledger but this note is the only place Health says where
+          // it appears and when it is repaired. Keep those cards expandable even when `items` is empty -- and
+          // a card with an action of its own (Scan the library now) too.
+          const expandable = !!c.items.length || !!c.note || hasCardActions(c);
+          const mark = healthMark(c.status);
+          const rowKeys = keysFor(c.id, c.items);
+          return (
+            <div key={c.id} data-health-check={c.id} className={`card grad-border relative overflow-hidden ${c.status !== 'ok' ? 'full' : ''}`}>
+              <StatusEdge tone={mark.tone} />
+              {/* ⚠️ The disclosure is the FIRST button in the card: the end-to-end walks open a card by
+                  clicking the first button inside `[data-health-check="…"]`. Every action lives in the body. */}
               <button
                 type="button"
                 onClick={() => setOpen(isOpen ? null : c.id)}
                 aria-expanded={expandable ? isOpen : undefined}
                 aria-controls={expandable ? `health-${c.id}-details` : undefined}
                 disabled={!expandable}
-                className="flex min-w-0 flex-1 flex-wrap items-center gap-x-3 gap-y-1.5 px-4 py-3.5 text-start disabled:cursor-default"
+                className="flex w-full min-w-0 items-center gap-x-3 px-4 py-3.5 text-start disabled:cursor-default"
               >
-                <span className={`shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-medium ${HEALTH_TONE[c.status]}`}>
-                  {HEALTH_LABEL[c.status]}
-                </span>
                 <div className="min-w-0 flex-1">
-                  <p className="text-sm text-fog-100">{c.title}</p>
-                  <p className="text-[11px] text-fog-500">{c.summary}</p>
+                  <p className="flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-1">
+                    <span className="text-sm text-fog-100">{checkTitle(c)}</span>
+                    <StatusMark {...mark} size="xs" />
+                    <CardProgress checkId={c.id} />
+                  </p>
+                  <p className="mt-0.5 text-[11px] text-fog-500">{c.summary}</p>
                 </div>
                 {expandable && (
-                  <span className="shrink-0 text-xs text-fog-500">{isOpen ? 'Hide' : 'Show'}</span>
+                  <>
+                    <span className="sr-only">{isOpen ? tr('Hide details') : tr('Show details')}</span>
+                    <span aria-hidden className="inline-grid shrink-0 text-fog-500 rtl:-scale-x-100">
+                      <IcChevronRight width={16} height={16} className={`transition ${isOpen ? 'rotate-90' : ''}`} />
+                    </span>
+                  </>
                 )}
               </button>
-              <HealthCheckActions check={c} onDone={recheck} />
-            </div>
-            {c.id === 'update' && <DesktopUpdateNote />}
+              {c.id === 'update' && <DesktopUpdateNote />}
 
-            {isOpen && (
-              <div id={`health-${c.id}-details`} className="border-t border-ink-800/70">
-                {c.note && <p data-health-note className="px-4 pt-3 text-[11px] leading-relaxed text-fog-500">{c.note}</p>}
-                <div className="divide-y divide-ink-800/70">
-                  {/* Wraps rather than truncating the row: a source item carries Test, Clear block and
-                      Turn off, which at 390 px is more than fits beside a title, and the Test chip's fix
-                      is a sentence that takes a line of its own inside this same wrap container. */}
-                  {c.items.map((it, i) => (
-                    <div key={`${c.id}-${i}`} className={`flex flex-wrap items-center gap-x-3 gap-y-1.5 px-4 py-2.5 ${it.info ? 'opacity-60' : ''}`}>
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate text-sm text-fog-100">{it.title}</p>
+              {isOpen && (
+                <div id={`health-${c.id}-details`} className="border-t border-ink-800/70">
+                  <HealthCardActions check={c} />
+                  {c.note && <p data-health-note className="px-4 pt-3 text-[11px] leading-relaxed text-fog-500">{c.note}</p>}
+                  <div className="divide-y divide-ink-800/70">
+                    {c.items.map((it, i) => (
+                      <HealthRow key={rowKeys[i]} rowKey={rowKeys[i]} check={c} item={it}
+                        // To the chapter the finding is about, not just its series (lib/healthLinks.ts). A duplicate
+                        // pair gets one per copy, each naming its copy: two bare "Open"s cannot be told apart on a
+                        // phone, where there is no tooltip. Text links, not chips: they go somewhere, they do nothing.
+                        links={healthLinks(c.id, it).map((l) => (
+                          <Link key={l.href} href={l.href} className="max-w-[11rem] truncate text-xs text-accent hover:underline"
+                            title={l.label} aria-label={l.label ? `${tr('Open')}: ${l.label}` : undefined}>
+                            {l.label ? `${tr('Open')} · ${l.label}` : tr('Open')} ›
+                          </Link>
+                        ))}>
+                        <p className="break-words text-sm text-fog-100">{it.title}</p>
                         <p className="text-[11px] text-fog-500">{it.detail}</p>
-                      </div>
-                      <HealthActions check={c.id} item={it} onDone={recheck} testMs={c.testMs} />
-                      {/* #115: the stage lines and the fix, through the component Providers uses too, and only
-                          where they say something (healthRowEvidence). The row's last line and its full width
-                          (`order-last basis-full`, as the Test's fix used to be): beside three action keys at
-                          390 px the lines were a column two words wide. */}
-                      {c.id === 'sources' && <SourceEvidence {...healthRowEvidence(it)} className="order-last basis-full" />}
-                      {/* To the chapter the finding is about, not just its series (lib/healthLinks.ts). */}
-                      {/* A duplicate pair gets one per copy, each naming its copy: two bare "Open"s cannot be told
-                          apart on a phone, where there is no tooltip. */}
-                      {healthLinks(c.id, it).map((l) => (
-                        <Link key={l.href} href={l.href} className="chip max-w-[11rem] shrink-0 truncate text-xs" title={l.label} aria-label={l.label ? `${tr('Open')}: ${l.label}` : undefined}>
-                          {l.label ? `${tr('Open')} · ${l.label}` : tr('Open')}
-                        </Link>
-                      ))}
-                    </div>
-                  ))}
+                        {/* #115: the stage lines and the fix, through the component Providers uses too, and only
+                            where they say something (healthRowEvidence). Among the row's words, above its keys: the
+                            source rows have no Open link beside them, so the lines take the row's full width. */}
+                        {c.id === 'sources' && <SourceEvidence {...healthRowEvidence(it)} />}
+                      </HealthRow>
+                    ))}
+                  </div>
                 </div>
-              </div>
-            )}
-          </div>
-        );
-      })}
-    </div>
+              )}
+            </div>
+          );
+        })}
+
+        <RepairHistory />
+      </div>
+    </RepairRunProvider>
   );
 }
 

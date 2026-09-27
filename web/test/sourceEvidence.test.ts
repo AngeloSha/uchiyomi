@@ -12,7 +12,7 @@ import * as React from 'react';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import {
-  answerView, evidenceView, healthRowEvidence, testClock, checkAllLabel, sweepToast, STAGE_LABELS, BY_LABELS, GLYPH_WORDS,
+  answerView, evidenceView, healthRowEvidence, testClock, testStep, checkAllLabel, sweepToast, STAGE_LABELS, BY_LABELS, GLYPH_WORDS,
   type StageLine, type TestAnswer,
 } from '../lib/sourceEvidence';
 import { SourceEvidence } from '../components/SourceEvidence';
@@ -173,6 +173,9 @@ test('the Search stage is a noun of its own, not the search button\'s verb', () 
 test('the running Test\'s clock, Check all\'s progress and its toast', () => {
   assert.equal(testClock(12_400, 53_000), 'Testing… 0:12 of up to 0:53');
   assert.equal(testClock(12_400), 'Testing… 0:12');
+  // Health's Test key keeps its verb; its status line carries the limit beside the row's own clock.
+  assert.equal(testStep(53_000), 'Testing… up to 0:53');
+  assert.equal(testStep(undefined), 'Working…', 'no limit known: the generic words, not "up to 0:00"');
   assert.equal(checkAllLabel({ total: 40, done: 6, current: { name: 'Manga Ball (EN)' } }), 'Checking 7 of 40 · Manga Ball (EN)');
   assert.equal(checkAllLabel({ total: 40, done: 40, current: null }), 'Checking 40 of 40');
   assert.equal(checkAllLabel(null), 'Checking…');

@@ -1,4 +1,8 @@
 // Browser acceptance walk for v0.41.0 — the Health page that fixes itself, and the nightly Repair task.
+// Rewritten for v0.49.0: the keys run through lib/useRepairRun.tsx, so the walk follows each press by its
+// run id and the row's `data-repair-state` (working with a ticking clock, then done with "Took m:ss" and what
+// it did, still there after a reload), never by the old "the Tasks line shows what it did" toast -- and a
+// one-row fix no longer moves the Tasks line, which now belongs to the last FULL run.
 //
 // Run against a kept web/test/e2e/up.sh instance at WIDTH=1280 and WIDTH=390, on an instance of its own:
 // like walk40.mjs it adds series and leaves them there, and the two walks want the SAME title in different
@@ -88,21 +92,30 @@ async function addFromA(sourceId, title, body = {}) {
   return job;
 }
 const taskRow = async (id) => ((await api('/api/admin/tasks')).content || []).find((t) => t.id === id) || null;
-const repairStamp = async () => (await taskRow('repair'))?.lastRun ?? 0;
-/** Wait for a repair that finished after `since` and hand back its stored result. */
-async function repairAfter(since, label, ms = 180_000) {
-  const row = await waitFor(async () => {
-    const t = await taskRow('repair');
-    return t && !t.running && (t.lastRun ?? 0) > since ? t : null;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+/**
+ * The first finished run in the history that `match` accepts and that started at or after `since` (v0.49.0).
+ * ⚠️ Not the Tasks row's lastRun: that is the last FULL run now, and a one-row fix never moves it.
+ */
+async function runWhere(match, since, label, ms = 180_000) {
+  const rec = await waitFor(async () => {
+    const runs = (await api('/api/admin/tasks/repair/runs?limit=20').catch(() => null))?.content || [];
+    return runs.find((r) => r.startedAt >= since && r.finishedAt && r.status !== 'running' && match(r)) || null;
   }, ms, 400);
-  if (!row) { bad(`${label}: no repair finished within ${Math.round(ms / 1000)}s`); return null; }
-  return row.lastResult;
+  if (!rec) bad(`${label}: no repair finished within ${Math.round(ms / 1000)}s`);
+  return rec;
 }
+/** Start a run through the API and hand back its stored result, found by the id the POST answered. */
 async function runRepair(json, label) {
-  const since = await repairStamp();
   const started = await api('/api/admin/tasks/repair/run', { method: 'POST', json });
-  check(started?.ok === true && started?.started === true, `${label}: the run started`, `${label}: the run answered ${JSON.stringify(started)}`);
-  return repairAfter(since, label);
+  check(started?.ok === true && started?.started === true && UUID.test(started?.run || ''), `${label}: the run started and named itself`,
+    `${label}: the run answered ${JSON.stringify(started)}`);
+  const rec = await waitFor(async () => {
+    const r = (await api(`/api/admin/tasks/repair/runs?id=${started?.run}`).catch(() => null))?.content?.[0];
+    return r && r.finishedAt ? r : null;
+  }, 180_000, 400);
+  if (!rec) { bad(`${label}: run ${started?.run} did not finish`); return null; }
+  return rec.result;
 }
 /** One sweep, run to completion, with fake-a's 429 cooldown cleared first so it is asked again. */
 async function sweep(label) {
@@ -156,7 +169,9 @@ try {
     if (message.type() === 'error' && !/401|404|409|429/.test(message.text())) consoleErrors.push(`[${phase}] ${message.text().slice(0, 180)}`);
   });
   page.on('pageerror', (error) => consoleErrors.push(`[${phase}] ${String(error).slice(0, 180)}`));
-  const shot = (name) => page.screenshot({ path: `${OUT}/${String(++shotNo).padStart(2, '0')}-${PHONE ? 'phone' : 'desk'}-${name}.png` });
+  // A beat before each shot: straight after a scrollIntoView the newly exposed blurred cards are not painted
+  // yet, and the shot shows them as empty boxes.
+  const shot = async (name) => { await sleep(400); return page.screenshot({ path: `${OUT}/${String(++shotNo).padStart(2, '0')}-${PHONE ? 'phone' : 'desk'}-${name}.png` }); };
   const bodyText = () => page.evaluate(() => document.body.innerText || '');
 
   // ---- Health page helpers ------------------------------------------------------------------------
@@ -177,13 +192,15 @@ try {
   const openCheck = async (id) => {
     const first = await page.$(`[data-health-check="${id}"] button`);
     if (!first) { bad(`Health has no ${id} card`); return false; }
-    if (!(await page.$(`#health-${id}-details`))) { await first.click(); await sleep(300); }
+    // Centred first: at 390 px a card's header near the bottom sits under the fixed nav, and a click at its
+    // centre lands on the nav's Discover tab instead.
+    if (!(await page.$(`#health-${id}-details`))) { await first.evaluate((n) => n.scrollIntoView({ block: 'center' })); await first.click(); await sleep(300); }
     return !!(await page.$(`#health-${id}-details`));
   };
   /**
-   * The chip for ONE item: HealthActions renders a fragment straight into the item's row, so a chip's
-   * parentElement IS its row and carries that row's title and detail. Matching on the row text is what
-   * tells "Chapter 3 has 2 pages" from "Chapter 4 has 2 pages" inside one card.
+   * The key for ONE finding: its row is `closest('[data-health-item]')` (v0.49.0; the keys sit in their own
+   * ActionKeys group now, not straight in the row). Matching on the row text is what tells "Chapter 3 has 2
+   * pages" from "Chapter 4 has 2 pages" inside one card.
    */
   const itemChip = async (checkId, action, re) => {
     const handle = await page.evaluateHandle((checkId, action, source) => {
@@ -191,10 +208,21 @@ try {
       const card = document.querySelector(`[data-health-check="${checkId}"]`);
       if (!card) return null;
       return [...card.querySelectorAll(`button[data-health-action="${action}"]`)]
-        .find((b) => rx.test(b.parentElement?.textContent || '')) || null;
+        .find((b) => rx.test(b.closest('[data-health-item]')?.textContent || '')) || null;
     }, checkId, action, re.source);
     return handle.asElement();
   };
+  /** A finding's row state and its status line, or null when the row is gone. */
+  const rowNow = (checkId, re) => page.evaluate((checkId, source) => {
+    const rx = new RegExp(source, 'i');
+    const card = document.querySelector(`[data-health-check="${checkId}"]`);
+    const row = card && [...card.querySelectorAll('[data-health-item]')].find((r) => rx.test(r.textContent || ''));
+    if (!row) return null;
+    const p = row.querySelector('[data-action-status] p');
+    // The clock is its own aria-hidden span: read apart from the words, or "Ch. 3" + "0:05" reads "Ch. 30:05".
+    const clock = [...(p?.children || [])].filter((c) => c.tagName === 'SPAN' && c.getAttribute('aria-hidden')).pop()?.textContent || '';
+    return { state: row.getAttribute('data-repair-state'), line: row.querySelector('[data-action-status]')?.textContent || '', clock };
+  }, checkId, re.source);
   const clickChip = async (checkId, action, re, label) => {
     const el = await itemChip(checkId, action, re);
     if (!el) { bad(`${label}: no ${action} chip on a row matching ${re}`); return false; }
@@ -270,7 +298,16 @@ try {
   check(!!fix3 && !!fine3, 'chapter 3 is listed with Fix and It’s fine', `chapter 3 chips: fix=${!!fix3} confirm=${!!fine3}`);
   check(/It’s fine/.test(await fine3?.evaluate((n) => n.textContent) || ''), 'the confirm chip reads It’s fine before anything is confirmed',
     `confirm chip reads ${JSON.stringify(await fine3?.evaluate((n) => n.textContent))}`);
-  await shot('health-short');
+  // The card opens with its legend: what each action does and how long it usually takes, before any press.
+  const legend = await page.evaluate(() => document.querySelector('[data-health-legend="short-chapters"]')?.textContent || '');
+  check(/Looks for a longer copy/.test(legend) && /Usually|At most/.test(legend),
+    'the short-chapter card says what Fix does and how long it takes, before the press', `legend: ${JSON.stringify(legend.slice(0, 300))}`);
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await shot('health-top');
+  await (await page.$('[data-health-legend="short-chapters"]'))?.evaluate((n) => n.scrollIntoView({ block: 'start' }));
+  await shot('health-legend');
+  check(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    `${WIDTH}px: the open legend and keys cause no horizontal scroll`, `${WIDTH}px: the open legend overflowed horizontally`);
 
   // ---- 5. a chapter the source refuses twice is hunted on the third sweep --------------------------
   phase = 'failures';
@@ -305,24 +342,47 @@ try {
   await Promise.all(['fake-a', 'fake-b'].map((id) => api(`/api/admin/sources/${id}/unblock`, { method: 'POST' })));
   // A reader finished the two-page notice. USAGE promises the replacement leaves that mark alone.
   if (book3) await api(`/api/books/${book3.id}/progress`, { method: 'PUT', json: { page: 2, completed: true, seriesId: taleId } });
+  // fake-b's copy of chapter 3 downloads slowly, so the row is seen WORKING, with its clock ticking.
+  await script(STUB_B, 3, 0, 'slow:1500');
   const mark = Date.now();
   await openHealth();
   await openCheck('short-chapters');
-  const since2 = await repairStamp();
+  // What the row said, in order, and when the press's POST and the status polls answered: printed when the
+  // working check fails, because "never seen working" alone cannot tell a slow answer from a missing poll.
+  const seen = [];
+  const note = (what) => { if (seen[seen.length - 1]?.what !== what) seen.push({ at: Date.now() - mark, what }); };
+  const onResponse = (res) => { if (/\/api\/admin\/tasks\/repair\/(run|status)/.test(res.url())) note(`${res.request().method()} ${new URL(res.url()).pathname} ${res.status()}`); };
+  page.on('response', onResponse);
   const pressed = await clickChip('short-chapters', 'fix_short', /Chapter 3 has 2 pages/, 'Fix');
   if (pressed) {
-    // Only the success sentence passes. The two refusals ("A chapter sweep is running", "already running")
-    // are matched as well so that a refused press is REPORTED as the refusal it was, rather than as a
-    // missing toast — but they are not an acceptable answer here: nothing else is running at this point.
-    const toast = await waitFor(async () => {
-      const t = await bodyText();
-      const m = /the Tasks line shows what it did|A chapter sweep is running|already running|Could not start the repair/i.exec(t);
-      return m ? m[0] : '';
-    }, 15_000);
-    check(/the Tasks line shows what it did/i.test(toast || ''), 'Fix said where to look for the result',
-      `Fix's toast was ${toast ? JSON.stringify(toast) : 'never shown'}`);
+    note('pressed');
+    const working = await waitFor(async () => {
+      const r = await rowNow('short-chapters', /Chapter 3 has 2 pages/);
+      note(`${r?.state}: ${r?.line}`.replace(/\d+:\d\d$/, 'm:ss'));
+      return r?.state === 'working' && /^0:(0[2-9]|[1-5]\d)$/.test(r.clock) && !/Checking the result/.test(r.line) ? r : null;
+    }, 30_000, 200);
+    check(!!working, `Fix shows the row working, with its step and a ticking clock: ${JSON.stringify(working?.line)}`,
+      `the Fix row was never seen working with a clock: ${JSON.stringify(seen)}`);
+    check(!!(await page.$('[data-repair-live] [data-repair-stop]')), 'the live strip at the top offers Stop while it runs', 'no live strip with Stop while the repair ran');
+    check(!/the Tasks line shows what it did/i.test(await bodyText()), 'no "Started — the Tasks line…" toast', 'Health still toasts where to look');
+    if (working) {
+      await (await page.$('[data-health-check="short-chapters"] [data-repair-state="working"]'))?.evaluate((n) => n.scrollIntoView({ block: 'center' }));
+      await shot('health-working');
+      await page.evaluate(() => window.scrollTo(0, 0));
+      await shot('health-live-strip');
+    }
   }
-  const fixRun = await repairAfter(since2, 'Fix');
+  const fixRec = await runWhere((r) => r.kind === 'fix_short' && r.target?.bookId === book3?.id, mark, 'Fix');
+  page.off('response', onResponse);
+  const fixRun = fixRec?.result;
+  await script(STUB_B, 3, 0, 'ok');
+  // ⚠️ The row reads done (or is gone, the chapter no longer short) only after the run ENDED and Health
+  // answered again -- never at the press, when the chapter still had two pages.
+  const after3 = await waitFor(async () => {
+    const r = await rowNow('short-chapters', /Chapter 3 has 2 pages/);
+    return !r || r.state === 'done' ? (r || { gone: true }) : null;
+  }, 30_000, 300);
+  check(!!after3, `once the run ended the row read ${after3?.gone ? 'gone (fixed)' : 'done'}`, `the Fix row after its run: ${JSON.stringify(await rowNow('short-chapters', /Chapter 3 has 2 pages/))}`);
   check(fixRun?.short?.replaced === 1 && fixRun?.short?.confirmed === 0,
     'the Fix replaced exactly one chapter and confirmed none', `short: ${JSON.stringify(fixRun?.short)}`);
   const pages3 = book3 ? await api(`/api/books/${book3.id}/pages`) : [];
@@ -347,17 +407,28 @@ try {
   phase = 'confirm';
   await openHealth();
   await openCheck('short-chapters');
-  const since3 = await repairStamp();
+  const mark3 = Date.now();
   const pressed4 = await clickChip('short-chapters', 'fix_short', /Chapter 4 has 2 pages/, 'Fix chapter 4');
-  const confirmRun = pressed4 ? await repairAfter(since3, 'Fix chapter 4') : null;
+  const confirmRun = pressed4 ? (await runWhere((r) => r.kind === 'fix_short' && r.target?.bookId === book4?.id, mark3, 'Fix chapter 4'))?.result : null;
   check(confirmRun?.short?.confirmed === 1 && confirmRun?.short?.replaced === 0,
     'no source has more than two pages of chapter 4, so it is marked confirmed short',
     `short: ${JSON.stringify(confirmRun?.short)}`);
   const item4 = await healthItem('short-chapters', /Chapter 4 has 2 pages/);
   check(item4?.info === true && /confirmed short at the source/i.test(item4?.fixed?.what || ''),
     'the chapter is greyed and says it is confirmed short at the source', `item: ${JSON.stringify(item4)}`);
-  await recheck();
+  // After a RELOAD the row still says what the Fix did and how long it took: the run history, not memory.
+  await openHealth();
   await openCheck('short-chapters');
+  const kept = await waitFor(async () => {
+    const r = await rowNow('short-chapters', /Chapter 4 has 2 pages/);
+    return r?.state === 'done' && /Took \d+:\d\d/.test(r.line) ? r : null;
+  }, 15_000, 300);
+  check(!!kept && /same short copy/i.test(kept.line), `after a reload the row still reads ${JSON.stringify(kept?.line)}`,
+    `after a reload chapter 4's row reads ${JSON.stringify(await rowNow('short-chapters', /Chapter 4 has 2 pages/))}`);
+  if (kept) {
+    await (await page.$('[data-health-check="short-chapters"] [data-repair-state="done"]'))?.evaluate((n) => n.scrollIntoView({ block: 'center' }));
+    await shot('health-done-after-reload');
+  }
   const notFine = await itemChip('short-chapters', 'confirm_short', /Chapter 4 has 2 pages/);
   check(/Not fine/.test(await notFine?.evaluate((n) => n.textContent) || ''),
     'a confirmed chapter offers Not fine', `the confirmed row's chip reads ${JSON.stringify(await notFine?.evaluate((n) => n.textContent))}`);
@@ -393,9 +464,8 @@ try {
   check(!!gapItem && Array.isArray(gapItem.numbers) && gapItem.numbers.join(',') === '6,7,8',
     'the gap names the three chapters nobody holds', `gap item: ${JSON.stringify(gapItem)}`);
   const gapMark = Date.now();
-  const since4 = await repairStamp();
   const filled = await clickChip('chapter-gaps', 'fill', /Walk Gap/, 'Fill now');
-  const gapRun = filled ? await repairAfter(since4, 'Fill now') : null;
+  const gapRun = filled ? (await runWhere((r) => r.kind === 'fill' && r.target?.seriesId === gapId, gapMark, 'Fill now'))?.result : null;
   check(gapRun?.gaps?.series === 1 && gapRun?.gaps?.followed === 1 && gapRun?.gaps?.fetched === 3,
     'one series searched, one source followed, three chapters fetched', `gaps: ${JSON.stringify(gapRun?.gaps)}`);
   const gapBooks = gapId ? await booksOf(gapId) : [];
@@ -414,6 +484,27 @@ try {
   check(gapImages.length === 36, 'exactly the three missing chapters were downloaded', `fake-b served ${gapImages.length} Walk Gap images (3 x 12 expected)`);
   await shot('health-gap-filled');
 
+  // ---- a refusal says so on its row: two scans inside a minute ---------------------------------------
+  phase = 'refused';
+  await openHealth();
+  if (await openCheck('library-scan')) {
+    const scanKey = await page.$('[data-health-check="library-scan"] button[data-health-scan]');
+    const scanRow = () => page.evaluate(() => {
+      const row = document.querySelector('[data-health-check="library-scan"] [data-action-row="scan"]');
+      return row ? { state: row.getAttribute('data-action-state'), text: row.textContent || '' } : null;
+    });
+    if (scanKey) {
+      await scanKey.evaluate((n) => n.scrollIntoView({ block: 'center' }));
+      await scanKey.click();
+      const first = await waitFor(async () => { const r = await scanRow(); return r && r.state !== 'working' && r.state !== 'idle' ? r : null; }, 60_000, 300);
+      check(first?.state === 'done' && /Scan done/.test(first.text), 'Scan the library now says what it found', `first scan: ${JSON.stringify(first)}`);
+      await scanKey.click();
+      const second = await waitFor(async () => { const r = await scanRow(); return r && r.state === 'refused' ? r : null; }, 30_000, 300);
+      check(/less than a minute ago/.test(second?.text || ''), 'a second scan inside a minute is refused, in amber, on its row', `second scan: ${JSON.stringify(await scanRow())}`);
+      await shot('health-refused');
+    } else bad('the Library scan card has no Scan now key');
+  } else bad('the Library scan card does not open');
+
   // ---- 6. a solver-only run, and the line it writes -------------------------------------------------
   phase = 'solver';
   const solverRun = await runRepair({ only: ['solver'] }, 'solver');
@@ -430,10 +521,14 @@ try {
       c.tagName === 'P' && (c.textContent || '').trim() === 'Repair library'));
     return row ? row.innerText || '' : '';
   });
-  const onText = await rowText();
+  const onText = await waitFor(async () => { const t = await rowText(); return /Latest one-off fix/.test(t) ? t : ''; }, 15_000) || await rowText();
   check(/never during a chapter sweep/.test(onText), 'the Tasks row says it never runs beside a sweep', `Repair library row: ${JSON.stringify(onText)}`);
-  check(/solver: nothing to reset/i.test(onText), 'the result line reports the solver even when nothing was reset', `result line: ${JSON.stringify(onText)}`);
+  // v0.49.0: every run in this walk was a one-row or one-step fix, so the Tasks line -- the last FULL run's --
+  // has not moved, and the fixes are under "Latest one-off fix", linking to Health's history.
+  check(/not run yet/.test(onText), 'the Tasks line is still the nightly\'s: no full run has happened', `Repair library row: ${JSON.stringify(onText)}`);
+  check(/Latest one-off fix:[^\n]*solver: nothing to reset/i.test(onText), 'the latest one-off fix is the solver run, and says so even when nothing was reset', `result line: ${JSON.stringify(onText)}`);
   check(!/page counts stamped/i.test(onText), 'and says nothing about the steps that never ran', `result line: ${JSON.stringify(onText)}`);
+  check(!!(await page.$('a[href="/admin/?tab=Health#repairs"]')), 'the one-off fix links to Health\'s Recent repairs', 'no link to Recent repairs from Tasks');
   await shot('tasks-repair');
 
   await page.goto(`${BASE}/admin/?tab=Settings`, { waitUntil: 'networkidle2', timeout: 60_000 });
@@ -453,7 +548,7 @@ try {
     `Repair library row with the switch off: ${JSON.stringify(offText || await rowText())}`);
   // Off is the schedule only: a run somebody asks for still starts, because nothing it does is destructive.
   const offRun = await api('/api/admin/tasks/repair/run', { method: 'POST', json: { only: ['solver'] } });
-  check(offRun?.ok === true && offRun?.started === true, 'Run now still works with the nightly switched off', `answer: ${JSON.stringify(offRun)}`);
+  check(offRun?.ok === true && offRun?.started === true && UUID.test(offRun?.run || ''), 'Run now still works with the nightly switched off', `answer: ${JSON.stringify(offRun)}`);
   await api('/api/admin/settings', { method: 'PATCH', json: { repairEnabled: true } });
 
   // ---- the page itself ------------------------------------------------------------------------------
@@ -464,6 +559,13 @@ try {
       'a target that belongs to another step is refused with the step named',
       `mixed body answered ${e.status} ${JSON.stringify(e.body)}`));
   await openHealth();
+  // Every card with findings open, so the width check sees the legends and keys at their widest.
+  for (const id of ['short-chapters', 'chapter-gaps', 'chapter-failures', 'sources', 'library-scan']) {
+    if (await page.$(`[data-health-check="${id}"]`)) await openCheck(id);
+  }
+  const history = await page.$('[data-repair-history] button');
+  if (history) { await history.evaluate((n) => n.scrollIntoView({ block: 'center' })); await history.click(); await sleep(300); }
+  check(((await page.$$('[data-repair-run]')) || []).length >= 4, 'Recent repairs lists the runs of this walk', 'Recent repairs is empty');
   check(consoleErrors.length === 0, 'zero browser-console errors', `browser console: ${consoleErrors.slice(0, 8).join(' | ')}`);
   check(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
     `${WIDTH}px walk has no horizontal scroll`, `${WIDTH}px walk overflowed horizontally`);

@@ -245,6 +245,15 @@ export function testClock(elapsedMs: number, testMs?: number | null): string {
     : tr('Testing… {elapsed}', { elapsed });
 }
 
+/**
+ * A Test on a Health row while it runs, as its status line's words: "Testing… up to 0:53", with the row's own
+ * ticking clock beside them (components/ActionList.tsx ActionStatus). On Health the key keeps its verb and the
+ * clock is the status line's, so the limit goes into the words instead of a second clock on the key.
+ */
+export function testStep(testMs?: number | null): string {
+  return testMs && testMs > 0 ? tr('Testing… up to {max}', { max: formatClock(testMs) }) : tr('Working…');
+}
+
 /** GET /api/admin/sources/check while it runs, as the Check all button's words: "Checking 7 of 40 · Manga Ball (EN)". */
 export function checkAllLabel(p: { total: number; done: number; current: { name: string } | null } | null | undefined): string {
   if (!p || !p.total) return tr('Checking…');

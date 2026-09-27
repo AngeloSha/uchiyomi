@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { q, one } from './db';
 import { runHealthChecks, type HealthReport, type HealthStatus } from './health';
+import { runtime } from './runtime';
 
 /**
  * The Health report, boiled down to what the header needs (#101, @Squeaks72's proposal).
@@ -60,4 +61,30 @@ export async function readHealthSummary(): Promise<HealthSummary | null> {
 /** Run the checks and store what they found: the server's own schedule. */
 export async function refreshHealthSummary(): Promise<HealthSummary> {
   return storeHealthSummary(await runHealthChecks());
+}
+
+/** The fewest milliseconds between two refreshes someone scheduled: the report reads every series' numbers. */
+export const SUMMARY_COALESCE_MS = 30_000;
+let queued: ReturnType<typeof setTimeout> | null = null;
+let lastRefresh = 0;
+
+/**
+ * "Something just changed what Health would say" (v0.49.0): a repair ended, a scan ran, a source was tested.
+ * THE one way to ask for the stored summary to catch up, so the header's warning clears when the problem
+ * does rather than up to six hours later -- the first ask runs at once, and everything asked within
+ * SUMMARY_COALESCE_MS after it shares ONE refresh at the end of that window. Detached and never throws.
+ *
+ * ⚠️ Never while a repair holds its flag: the report would be about a library halfway through being fixed,
+ * and the repair asks again itself when it ends (lib/repair.ts runRepair).
+ */
+export function scheduleHealthSummaryRefresh(): void {
+  if (queued) return; // one is already coming, and it will see this change too
+  const wait = Math.max(0, lastRefresh + SUMMARY_COALESCE_MS - Date.now());
+  queued = setTimeout(() => {
+    queued = null;
+    if (runtime.repairing) return;
+    lastRefresh = Date.now();
+    refreshHealthSummary().catch((e) => console.warn(`[health] summary refresh: ${(e as Error)?.message || e}`));
+  }, wait);
+  queued.unref?.();
 }

@@ -36,6 +36,17 @@ export interface RunCard {
   current?: { id: string; title: string };
   /** The repair's current step (lib/repair.ts REPAIR_STEPS). */
   step?: string;
+  /**
+   * v0.49.0, the repair: what a one-row Health press is about -- a series title, or a source's name -- so a
+   * card that says "Library repair" can say which one. The web puts the action's own name in front of it.
+   */
+  label?: string;
+  /**
+   * v0.49.0: `false` on a run that cannot download a chapter (a solver reset, a page count, names,
+   * directions; lib/repairRuns.ts canDownload). It stays a Server task but does not turn the Library ring.
+   * Absent: it may download.
+   */
+  downloads?: false;
   /** Someone asked it to stop: it does, after the chapter in flight. */
   cancelRequested?: boolean;
   reason?: string;

@@ -61,6 +61,7 @@ const T = {
 
 let q: any, pool: any, runRepair: any, repairState: any, runtime: any, haveNumbers: any, HAVE_SQL: any;
 let persistScan: any, gapsOf: any, clearPace: () => void;
+let repairLiveSnapshot: any, listRuns: any, busyFolders: Set<string>, runHealthChecks: any;
 
 // ── the fake sources ────────────────────────────────────────────────────────────────────────────────────
 /** source -> title -> the chapter numbers that source lists for it. A title it has no entry for is unknown. */
@@ -76,6 +77,8 @@ const missingPage = new Set<string>();
 /** Every page list asked for, and every search: what the run actually cost the sources. */
 let pageCalls: string[] = [];
 let searches: string[] = [];
+/** A page list that waits: `reached` fires when it is asked, and it answers once `open` resolves. */
+let pageGate: { id: string; reached: () => void; open: Promise<void> } | null = null;
 /** Whether the stub solver says it is ready. */
 let solverReady = true;
 let solver: Server | null = null;
@@ -108,6 +111,7 @@ const adapter = (id: string) => ({
   },
   async getPageUrls(chapterId: string) {
     pageCalls.push(chapterId);
+    if (pageGate?.id === chapterId) { pageGate.reached(); await pageGate.open; }
     if (throwPages.has(chapterId)) throw new Error('the site did not answer');
     const n = pagesFor.get(chapterId) ?? 2;
     return Array.from({ length: n }, (_, i) => `https://example.invalid/${encodeURIComponent(chapterId)}/${i}.png`);
@@ -206,7 +210,10 @@ before(async () => {
   await migrate();
   resetCatalog();
   for (const id of SOURCES) sources.registerAdapter(adapter(id) as any);
-  ({ runRepair, repairState } = (await import('../src/lib/repair')) as any);
+  ({ runRepair, repairState, repairLiveSnapshot } = (await import('../src/lib/repair')) as any);
+  ({ listRuns } = (await import('../src/lib/downloadJobs')) as any);
+  ({ busyFolders } = (await import('../src/lib/bulkNewest')) as any);
+  ({ runHealthChecks } = (await import('../src/lib/health')) as any);
   ({ runtime } = await import('../src/lib/runtime'));
   ({ haveNumbers, HAVE_SQL } = (await import('../src/lib/libraryNumbers')) as any);
   ({ persistScan } = (await import('../src/lib/library')) as any);
@@ -553,6 +560,90 @@ test('a chapter in the read library, and one under a name the downloader would n
   assert.equal(r.short.looked, 0, 'neither file is ours to replace: a re-fetch could not even land on the same row');
 });
 
+test('while a short chapter is being asked about, the status names the step, the chapter and the phase', { skip }, async () => {
+  // v0.49.0: one live object, written by the steps and read by the status route and the run's card.
+  // Reintroduce by removing the `at('asking', ...)` call before each copy's page list in stepShort: the
+  // phase below reads 'listing' (the series-level line), and "which source is it asking" is gone.
+  const id = await shortBook(3);
+  let reached!: () => void;
+  const atGate = new Promise<void>((go) => { reached = go; });
+  let open!: () => void;
+  pageGate = { id: cid(A, T.short, 3), reached, open: new Promise<void>((go) => { open = go; }) };
+  const running = runRepair(undefined, { only: ['short'], bookId: id, userId: null });
+  try {
+    await atGate;
+    const snap = repairLiveSnapshot();
+    assert.equal(snap.kind, 'fix_short');
+    assert.equal(snap.target.label, T.short, 'the target is named once, at the start');
+    assert.equal(snap.step, 'short');
+    assert.equal(snap.current?.bookId, id, 'the chapter it is on');
+    assert.equal(snap.current?.phase, 'asking', 'and what it is doing with it');
+    assert.equal(snap.current?.sourceId, A, 'asking whom: its own source first');
+    assert.equal(snap.planned.short, 1, 'the step sized itself');
+    assert.deepEqual(snap.budget, { left: 5, of: 5 }, 'no search spent yet');
+    assert.deepEqual(snap.shortReserve, { left: 2, of: 2 }, "and the short step's share of them");
+    // The card on Library -> Downloads reads the same assignments, so the two never disagree.
+    const card = listRuns().find((c: any) => c.kind === 'repair');
+    assert.equal(card.step, 'short');
+    assert.deepEqual(card.current, { id: SHORT, title: T.short });
+    assert.equal(card.label, T.short, 'the card says which series a one-row fix is about');
+    assert.equal(card.downloads, undefined, 'a Fix may download, so it may turn the ring');
+  } finally {
+    open();
+    pageGate = null;
+    await running;
+  }
+  assert.equal(repairLiveSnapshot(), null, 'and it is gone when the run ends');
+});
+
+test('a scoped run that cannot download never turns the Library ring', { skip }, async () => {
+  // Reintroduce by dropping `card.downloads = false` in runRepair: the card below says it may download, and
+  // every "Reset the solver" pressed on Health turns the ring as if chapters were coming in.
+  await runRepair(undefined, { only: ['solver'], userId: null });
+  const card = listRuns().find((c: any) => c.kind === 'repair');
+  assert.equal(card.downloads, false);
+  assert.equal(card.label, undefined, 'an untargeted run has no one thing to name');
+});
+
+test('a Fix on a chapter whose folder is busy says so, and one on a chapter it will not touch says why', { skip }, async () => {
+  // Reintroduce by reverting to the silent `continue` on a busy folder in stepShort: the run reads as one
+  // that found nothing, which is what "Fix did nothing" looked like before v0.49.0.
+  const id = await shortBook(4);
+  pagesFor.set(cid(B, T.short, 4), 12);
+  busyFolders.add(folderOf(T.short));
+  try {
+    const r = await runRepair(undefined, { only: ['short'], bookId: id, userId: null });
+    assert.equal(r.short.looked, 0);
+    assert.deepEqual(r.skips?.map((k: any) => [k.step, k.why, k.target?.bookId]), [['short', 'folder_busy', id]]);
+  } finally {
+    busyFolders.delete(folderOf(T.short));
+  }
+  // Saved with a placeholder page: the chapter sweep re-fetches those, and the short step leaves them alone.
+  await q('UPDATE lib_books SET missing_pages = ARRAY[2] WHERE id = $1', [id]);
+  const partial = await runRepair(undefined, { only: ['short'], bookId: id, userId: null });
+  assert.deepEqual(partial.skips?.map((k: any) => [k.why, k.detail]), [['not_eligible', 'partial']]);
+  assert.equal((await book(id)).pages, 2, 'and nothing was replaced');
+});
+
+test('a short chapter left unfixed records when and why, and Health says it', { skip }, async () => {
+  // Reintroduce by dropping the short_result write in stepShort's "left" branch: the column stays null and
+  // the Health row carries no outcome.
+  const id = await shortBook(12);
+  pagesFor.set(cid(A, T.short, 12), 2);
+  throwPages.add(cid(B, T.short, 12));
+  const t0 = Date.now();
+  const r = await runRepair(undefined, { only: ['short'], bookId: id, userId: null });
+  assert.equal(r.short.left, 1);
+  const res = (await q('SELECT short_result FROM lib_books WHERE id = $1', [id]))[0].short_result;
+  assert.equal(res?.why, 'source_silent', 'a copy did not answer, so nothing could be proven');
+  assert.equal(res.asked, 2);
+  assert.equal(res.answered, 1);
+  assert.ok(Date.parse(res.at) >= t0 - 1000, 'and it says when');
+  const item = (await runHealthChecks()).checks.find((c: any) => c.id === 'short-chapters').items.find((i: any) => i.bookId === id);
+  assert.equal(item.outcome?.kind, 'short');
+  assert.equal(item.outcome?.why, 'source_silent', 'the page reads it back');
+});
+
 // ── (c) gaps ────────────────────────────────────────────────────────────────────────────────────────────
 
 test('a source that brackets the hole is followed and the missing chapters are fetched, while one that cannot fill it is not', { skip }, async () => {
@@ -630,6 +721,47 @@ test('a series the run has no search left for keeps its place in the queue inste
     'and nothing claims it was "searched too recently" on the strength of a search that never ran');
 });
 
+test('Fill now fetches a gap a followed source already lists, even with updates paused', { skip }, async () => {
+  // Reintroduce by putting `s.auto_update AND` back for a named series (nothing is looked at), or by dropping
+  // `opts.seriesId && sweepable.length` from the fetch (nothing is fetched and the row ends "listed").
+  await q('UPDATE lib_series SET auto_update = false WHERE id = $1', [LISTED]);
+  setCatalog(A, T.listed, range(1, 20)); // the followed source lists 11, which the library lacks
+  try {
+    const r = await runRepair(undefined, { only: ['gaps'], seriesId: LISTED, userId: null });
+    assert.equal(r.gaps.series, 1, 'a paused series is still looked at when a person names it');
+    assert.equal(r.gaps.fetched, 1, 'and its listed gap is fetched now, not left to a sweep that never comes');
+    assert.deepEqual(searches, [], 'from the source it follows: no search');
+    assert.equal(r.gaps.sweep, 0, 'nothing is left for the sweep');
+    const got = await q('SELECT id FROM lib_books WHERE series_id = $1 AND number = 11 AND pruned_at IS NULL', [LISTED]);
+    assert.equal(got.length, 1, 'chapter 11 is on the shelf');
+    const g = (await series(LISTED)).gaps_result;
+    assert.equal(g.fetched, 1);
+    assert.equal(g.sweep, 0);
+    // The nightly is unchanged: it still skips a paused series and still leaves a listed gap to the sweep.
+    const item = (await runHealthChecks()).checks.find((c: any) => c.id === 'chapter-gaps').items.find((i: any) => i.seriesId === LISTED);
+    assert.equal(item, undefined, 'the hole is closed');
+  } finally {
+    await q('UPDATE lib_series SET auto_update = true WHERE id = $1', [LISTED]);
+    await q('DELETE FROM lib_books WHERE series_id = $1 AND number = 11', [LISTED]);
+    rmSync(join(DL, folderOf(T.listed), 'Chapter 11.cbz'), { force: true });
+  }
+});
+
+test('Fill now on a series with nothing to fill, or one that is gone, says so', { skip }, async () => {
+  const NOGAP = 's_rep_nogap';
+  await seedSeries(NOGAP, 'Repair No Gap');
+  try {
+    for (const n of [1, 2, 3]) await seedBook(`b_nogap_${n}`, NOGAP, 'Repair No Gap', n);
+    const none = await runRepair(undefined, { only: ['gaps'], seriesId: NOGAP, userId: null });
+    assert.deepEqual(none.skips?.map((k: any) => k.why), ['no_gaps'], 'the hole closed since the page loaded');
+    const gone = await runRepair(undefined, { only: ['gaps'], seriesId: 's_rep_no_such', userId: null });
+    assert.deepEqual(gone.skips?.map((k: any) => [k.why, k.detail]), [['not_eligible', 'gone']]);
+  } finally {
+    await q('DELETE FROM lib_books WHERE series_id = $1', [NOGAP]);
+    await q('DELETE FROM lib_series WHERE id = $1', [NOGAP]);
+  }
+});
+
 // ── (d) download failures ───────────────────────────────────────────────────────────────────────────────
 
 const ledger = (seriesId: string, number: number, attempts: number, ageDays: number, source = A) =>
@@ -656,12 +788,49 @@ test('naming a source resets its ledger whatever the age and re-checks the serie
   assert.ok(searches.length === 0, 'a re-check is the ordinary sweep for that series, not a search');
 });
 
-test('a source in a cooldown has its ledger reset but nothing is re-checked behind it', { skip }, async () => {
+test('a source in a cooldown has its ledger reset but nothing is re-checked behind it, and the run says why', { skip }, async () => {
+  // Reintroduce by deleting the skip() beside the cooldown's early return in stepFailures: `skips` is empty
+  // and "Retry now" on a cooling source reads as a retry that found nothing.
   await ledger(FAIL, 1, 3, 0);
   await blockSource(A);
   const r = await runRepair(undefined, { only: ['failures'], sourceId: A, userId: null });
   assert.equal(r.failures.reset, 1);
   assert.equal(r.failures.retried, undefined, 'asking a source that is refusing us would just be a second refusal');
+  assert.equal(r.skips?.length, 1);
+  assert.equal(r.skips[0].why, 'source_cooling_down');
+  assert.equal(r.skips[0].target?.sourceId, A);
+  assert.ok(Date.parse(r.skips[0].until) > Date.now(), 'with when the cooldown ends');
+});
+
+test('Retry now keeps when the chapter first failed', { skip }, async () => {
+  // Rows as v0.48.4 wrote them: no first_at, and `at` the latest attempt. Chapter 40 and 41: no source lists
+  // them, so the re-check behind the reset cannot land them (a landed chapter clears its own ledger row).
+  // Reintroduce by removing `first_at = COALESCE(...)` from the ledger's ON CONFLICT in lib/chapterFailures.ts
+  // (chapter 40's first_at stays null), or from the reset UPDATE in stepFailures (chapter 41's does, and its
+  // "since" becomes the moment of the reset).
+  const { noteChapterFailure } = await import('../src/lib/chapterFailures');
+  await q(`INSERT INTO chapter_failures (series_id, number, source_id, status, reason, attempts, at)
+           VALUES ($1, 40, $2, 'error', '429', 1, now() - interval '9 days'),
+                  ($1, 41, $2, 'error', '429', 1, now() - interval '9 days')`, [FAIL, A]);
+  const nineDays = (await q(`SELECT at FROM chapter_failures WHERE series_id = $1 AND number = 41`, [FAIL]))[0].at;
+  const iso = (d: any) => (d ? new Date(d).toISOString() : null);
+  const row = async (n: number) => (await q('SELECT first_at, at, attempts FROM chapter_failures WHERE series_id = $1 AND number = $2', [FAIL, n]))[0];
+
+  await noteChapterFailure({ seriesId: FAIL, title: T.fail, number: 40, sourceId: A, err: new Error('429') });
+  const again = await row(40);
+  assert.equal(again.attempts, 2);
+  assert.equal(iso(again.first_at), iso(nineDays), 'a later failure keeps the first one, even on a row older than the column');
+
+  await runRepair(undefined, { only: ['failures'], sourceId: A, userId: null });
+  const reset = await row(41);
+  assert.equal(reset.attempts, 0, 'reset');
+  assert.equal(iso(reset.first_at), iso(nineDays), 'the reset keeps when it first failed');
+  assert.ok(new Date(reset.at).getTime() > Date.now() - 60_000, 'while `at` is the reset itself');
+
+  const item = (await runHealthChecks()).checks.find((c: any) => c.id === 'chapter-failures').items.find((i: any) => i.sourceId === A);
+  assert.equal(item.outcome?.firstAt, iso(nineDays), 'Health reads "since" from the first failure');
+  assert.match(item.detail, new RegExp(`since ${iso(nineDays)!.slice(0, 10)}`));
+  assert.equal(item.outcome?.resetPending, true, 'and knows the reset is waiting for a try');
 });
 
 test("Fix all issues tries every source's failures now, never hunting, and never for a source that is switched off", { skip }, async () => {
@@ -744,16 +913,25 @@ test('a cooldown that lapsed more than a day ago loses its escalation memory; on
 
 // ── the run itself ──────────────────────────────────────────────────────────────────────────────────────
 
-test('one repair at a time, never beside a sweep, and the last result survives a restart', { skip }, async () => {
-  // Reintroduce by dropping the UPDATE of repair_last_run/repair_last_result in runRepair: the persisted
-  // assertion below finds the row empty and a restart would report the job as never run.
+test('one repair at a time, never beside a sweep, and a scoped run is kept in the history, not on the Tasks line', { skip }, async () => {
+  // Reintroduce by making isFullRun answer true for every run (the pre-v0.49.0 unconditional write): the
+  // "untouched" assertions below find a one-step run's result on the Tasks line and the nightly moved.
+  await q(`UPDATE server_settings SET repair_last_run = '2026-01-02T03:04:05Z', repair_last_result = '{"ok":true,"counted":7}'::jsonb WHERE id = 1`);
   const running = runRepair(undefined, { only: ['solver'], userId: null });
   assert.equal(runRepair(undefined, { only: ['solver'], userId: null }), false, 'a second run is refused, synchronously');
   const r = await running;
   assert.equal(repairState.running, false);
+  assert.match(String(r.run), /^[0-9a-f-]{36}$/, 'the run has an id');
+  const rec = (await q('SELECT kind, status, origin, ms, result, finished_at FROM repair_runs WHERE id = $1', [r.run]))[0];
+  assert.equal(rec?.kind, 'steps:solver');
+  assert.equal(rec.status, 'done');
+  assert.equal(rec.origin, 'manual', 'a run somebody asked for, even with no account behind it');
+  assert.equal(rec.result.ms, r.ms, 'kept, so the Health page still has it after a restart');
+  assert.ok(rec.finished_at);
+  assert.deepEqual(repairState.last, { id: r.run, finishedAt: repairState.last.finishedAt, status: 'done', kind: 'steps:solver' });
   const row = (await q('SELECT repair_last_run, repair_last_result FROM server_settings WHERE id = 1'))[0];
-  assert.ok(row.repair_last_run);
-  assert.equal(row.repair_last_result.ms, r.ms, 'persisted, so the Tasks panel still has it after a restart');
+  assert.equal(row.repair_last_result.counted, 7, "a scoped run leaves the full run's result on the Tasks line");
+  assert.equal(new Date(row.repair_last_run).toISOString(), '2026-01-02T03:04:05.000Z', "and the nightly's schedule where it was");
 
   runtime.updating = true;
   try {
@@ -771,7 +949,9 @@ test('a shutdown between two chapters ends the run, and the reason is what gets 
     const r = await runRepair(undefined, { only: ['short', 'gaps'], userId: null });
     assert.equal(r.stopped, 'shutdown');
     assert.equal(r.short.looked, 0, 'nothing was started that could not be finished');
-    assert.equal((await q('SELECT repair_last_result FROM server_settings WHERE id = 1'))[0].repair_last_result.stopped, 'shutdown');
+    const rec = (await q('SELECT status, result FROM repair_runs WHERE id = $1', [r.run]))[0];
+    assert.equal(rec.status, 'stopped');
+    assert.equal(rec.result.stopped, 'shutdown', 'the reason is what the history keeps');
   } finally {
     runtime.stopping = false;
   }
@@ -784,6 +964,22 @@ test('the nightly switch stops the scheduled run and not a person pressing the b
   assert.equal(nightly.skipped, 'disabled');
   const asked = await runRepair(undefined, { only: ['solver'], userId: null });
   assert.equal(asked.skipped, undefined, 'nothing this job does is destructive, so a deliberate press runs');
+});
+
+test('a full run is the Tasks line, and it survives a restart', { skip }, async () => {
+  // A full nightly the switch turned away: the one full run this file can make without asking MangaDex and
+  // AniList for reading directions. Reintroduce by dropping the UPDATE of repair_last_run/repair_last_result
+  // in runRepair: the persisted assertion finds the row still holding the planted result, and a restart
+  // would report the job as never run.
+  await q(`UPDATE server_settings SET repair_enabled = false, repair_last_run = NULL, repair_last_result = '{"ok":true,"counted":7}'::jsonb WHERE id = 1`);
+  const r = await runRepair(undefined);
+  assert.equal(r.skipped, 'disabled');
+  const row = (await q('SELECT repair_last_run, repair_last_result FROM server_settings WHERE id = 1'))[0];
+  assert.ok(row.repair_last_run, 'a full run moves the Tasks line');
+  assert.equal(row.repair_last_result.skipped, 'disabled', 'with its own result');
+  assert.equal(repairState.lastResult?.run, r.run, 'in memory too');
+  const rec = (await q('SELECT kind, status, origin FROM repair_runs WHERE id = $1', [r.run]))[0];
+  assert.deepEqual([rec.kind, rec.status, rec.origin], ['full', 'skipped', 'nightly']);
 });
 
 test('a scan that finds the same file leaves a confirmed-short chapter confirmed, and one that finds new bytes does not', { skip }, async () => {
@@ -801,6 +997,34 @@ test('a scan that finds the same file leaves a confirmed-short chapter confirmed
   utimesSync(abs, new Date(Date.now() + 60_000), new Date(Date.now() + 60_000));
   await persistScan();
   assert.equal((await book(id)).short_confirmed_at, null, 'different bytes were never proven to be anything');
+});
+
+test('the history deletes nothing but its own old rows', { skip }, () => {
+  // lib/repairRuns.ts holds the one DELETE the repair's bookkeeping needs (the prune), which is why it is not
+  // in repair.ts. Reintroduce by deleting from any other table there: this names the statement.
+  const src = read(join(__dirname, '..', 'src', 'lib', 'repairRuns.ts'), 'utf8');
+  const deletes = [...src.matchAll(/\bDELETE\s+FROM\s+(\w+)/gi)].map((m) => m[1]);
+  assert.ok(deletes.length >= 1, 'the prune is there');
+  assert.deepEqual([...new Set(deletes)], ['repair_runs'], `lib/repairRuns.ts deletes from ${deletes.join(', ')}`);
+  for (const pattern of [/\brm\(/, /unlink/, /rename\(/, /mergeSeries/, /tombstoneBooks/, /pruned_at\s*=/, /book_overrides/]) {
+    assert.equal(pattern.test(src), false, `lib/repairRuns.ts matches ${pattern}`);
+  }
+});
+
+test('old runs are pruned, but never below fifty and never inside ninety days', { skip }, async () => {
+  // Reintroduce by pruning on age alone: a quiet install loses its whole history after three months.
+  const { pruneRuns, HISTORY_KEEP } = await import('../src/lib/repairRuns');
+  await q('DELETE FROM repair_runs');
+  for (let i = 0; i < HISTORY_KEEP + 2; i++) {
+    await q(`INSERT INTO repair_runs (id, started_at, origin, kind, status) VALUES (gen_random_uuid(), now() - ($1 || ' days')::interval, 'nightly', 'full', 'done')`,
+      [String(100 + i)]);
+  }
+  await q(`INSERT INTO repair_runs (id, started_at, origin, kind, status) VALUES (gen_random_uuid(), now() - interval '1 day', 'manual', 'fill', 'done')`);
+  await pruneRuns();
+  const left = await q('SELECT kind, started_at FROM repair_runs ORDER BY started_at DESC');
+  assert.equal(left.length, HISTORY_KEEP, 'the newest fifty stay, however old; the three oldest go');
+  assert.equal(left[0].kind, 'fill', 'and a young row is never one of them');
+  await q('DELETE FROM repair_runs');
 });
 
 test('the nightly cannot delete, merge or renumber anything', { skip }, () => {
