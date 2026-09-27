@@ -107,17 +107,24 @@ test('no English is left bare in the repository flow', () => {
   assert.deepEqual(bare, [], `bare English in the repository flow: ${bare.join(' | ')}`);
 });
 
-test('the Docker card names the shipped container, and the Providers card does not call a missing download a fault', () => {
-  // Reintroduce by putting `docker compose up -d yomi-suwayomi` back (the development stack's name): the
-  // first assertion fails. By dropping the `engine === 'absent'` arm of ExtensionsLink: "not installed yet"
-  // fails, and desktop's first visit reads "The extension engine isn't running" again.
+test('with no engine the tab is the setup screen, and the Providers card says why without calling a missing download a fault', () => {
+  // v0.49.0 (#72): the not-configured card was one sentence for every platform ("If you turned it off by emptying
+  // SUWAYOMI_URL, put that line back"), wrong for a Compose admin who set EXTENSION_ENGINE=0 and for Unraid and
+  // CasaOS where no engine ever ran. It is components/EngineSetup.tsx now, and its steps are pinned by
+  // engineSetup.test.ts (shipped names only, never `yomi-suwayomi`). Reintroduce the old card: "the setup screen"
+  // fails. Drop the `engine === 'absent'` arm of ExtensionsLink: "not installed yet" fails, and desktop's first
+  // visit reads as a fault again. Collapse the three server arms back into one: its assertion names the arm.
   const card = slice(ext, 'if (!status.configured) {', 'const refreshAll = () =>');
-  assert.match(card, /<code key=\{i\} className="text-fog-300">uchiyomi-suwayomi<\/code>/, 'the card does not name the shipped container');
-  assert.doesNotMatch(card, /[>\s]yomi-suwayomi[<\s]/, 'the card names the development stack\'s container');
-  assert.match(card, /\.split\(\/\(\\\{name\\\}\|\\\{command\\\}\)\/\)/, 'the placeholders are split in a fixed order a translation cannot move');
+  assert.match(card, /return <EngineSetup status=\{status\} span=\{span\} \/>;/, 'the setup screen');
+  assert.doesNotMatch(card, /emptying SUWAYOMI_URL|put that line back/, 'the old one-sentence card is back');
+  // Set up and not answering: the same screen inside the panel, under its header and status mark.
+  assert.match(ext, /\{!status\.reachable \? \(\s*<EngineSetup status=\{status\} bare \/>\s*\) : \(/, 'the unreachable panel is not the setup screen');
+  assert.doesNotMatch(ext, /Can&apos;t reach the extension engine/, 'the untranslated unreachable line is back');
   const link = slice(admin, 'function ExtensionsLink(', 'function ArtReview(');
   assert.match(link, /: down && engine === 'absent' \? tr\('Not installed yet — download it under Extensions'\)/, 'not installed yet');
-  assert.match(link, /: down \? tr\('The extension engine isn’t running'\)/, 'the server build lost its own line');
+  assert.match(link, /: down && status\.off === 'switch' \? tr\('Extensions are turned off'\)/, 'switched off on purpose');
+  assert.match(link, /: down && status\.off === 'unset' \? tr\('No extension engine is set up'\)/, 'never set up');
+  assert.match(link, /: down \? tr\('The extension engine isn’t answering'\)/, 'set up and not answering');
   const hook = slice(admin, 'function useDesktopEngineState(', 'function ExtensionsLink(');
   assert.match(hook, /useState<EngineStatus\['state'\] \| null>\(null\)/, 'the hook answers something before the shell does');
   assert.match(hook, /const b = bridge\(\);\s*if \(!b\?\.engine\) return;/, 'the hook asks for an engine where there is no bridge');
@@ -154,6 +161,8 @@ test('the repository flow is translated in all eight languages', () => {
     ...trKeys(slice(ext, 'if (!status.configured) {', 'const refreshAll = () =>')),
     ...trKeys(slice(admin, 'function ExtensionsLink(', 'function ArtReview(')),
     ...trKeys(read('components/EngineInstall.tsx')),
+    ...trKeys(read('components/EngineSetup.tsx')),
+    ...trKeys(read('lib/engineSetup.ts')),
   ]);
   assert.ok(keys.size >= 40, `only ${keys.size} strings found -- the scan is broken`);
   const dir = join(ROOT, 'public/locales');

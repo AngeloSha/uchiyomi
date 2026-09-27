@@ -56,14 +56,20 @@ docker compose up -d
 **On CasaOS?** Use [`deploy/casaos/docker-compose.yml`](../deploy/casaos/docker-compose.yml) instead — import
 it as a custom app and it appears with an icon like any store app. Two differences from the file above: it
 runs Postgres as its own `uchiyomi-db` container rather than inside the app, and it leaves out the extension
-engine. For Mihon/Tachiyomi extensions, add `uchiyomi-suwayomi` from
-[`deploy/docker-compose.yml`](../deploy/docker-compose.yml) and set `SUWAYOMI_URL`; then add an extension
-repository ([step by step](extensions.md#add-an-extension-repository--step-by-step)). Set `PUBLIC_ORIGIN` to the
-address you actually open (the manifest defaults to `http://localhost:8080`) or logins will not stick.
+engine. For Mihon/Tachiyomi extensions, import the add-on
+[`deploy/casaos/uchiyomi-suwayomi.yml`](../deploy/casaos/uchiyomi-suwayomi.yml) the same way (its tips give the
+one folder command to run first), then set `SUWAYOMI_URL` to `http://uchiyomi-suwayomi:4567` in Uchiyomi's
+settings; then add an extension repository ([step by step](extensions.md#add-an-extension-repository--step-by-step)).
+**Admin → Extensions** shows these steps too while no engine is set up. Set `PUBLIC_ORIGIN` to the address you
+actually open (the manifest defaults to `http://localhost:8080`) or logins will not stick.
 
 **On Unraid?** Uchiyomi is in **Community Applications** — search for *uchiyomi* on the **Apps** tab and
 install it like anything else. One container, database included; set PUID/PGID to the owner of your library
-so renames work.
+so renames work. For Mihon/Tachiyomi extensions, install **uchiyomi-suwayomi** from Apps as well
+([`templates/uchiyomi-suwayomi.xml`](../templates/uchiyomi-suwayomi.xml): the extension engine, pinned and
+memory-capped), create its folder first (`mkdir -p /mnt/user/appdata/uchiyomi-suwayomi && chown 1000:1000
+/mnt/user/appdata/uchiyomi-suwayomi` in the Unraid terminal), then set Uchiyomi's advanced *SUWAYOMI_URL* to
+`http://YOUR-SERVER-IP:4567`. Admin → Extensions walks through the same steps.
 
 The template behind that listing is [`templates/uchiyomi.xml`](../templates/uchiyomi.xml) in this
 repository, which is laid out as a Community Applications template repository (`templates/` plus the
@@ -90,7 +96,7 @@ extension engine is not part of it.
 |---|---|
 | `uchiyomi` | the app: the API, the PWA it serves, and the embedded Postgres database |
 | `uchiyomi-flaresolverr` | Cloudflare solver — **started automatically**; sources that need it use it with no config, and since v0.37.0 so does the extension engine |
-| `uchiyomi-suwayomi` | the extension engine, so Mihon / Tachiyomi extensions work once you add an extension repository ([step by step](extensions.md#add-an-extension-repository--step-by-step)); the compose file points it at the solver above (`FLARESOLVERR_ENABLED` / `FLARESOLVERR_URL` on this container) |
+| `uchiyomi-suwayomi` | the extension engine, so Mihon / Tachiyomi extensions work once you add an extension repository ([step by step](extensions.md#add-an-extension-repository--step-by-step)); the compose file points it at the solver above (`FLARESOLVERR_ENABLED` / `FLARESOLVERR_URL` on this container). Optional: `EXTENSION_ENGINE=0` in `.env` and `docker compose up -d` leave it out and keep its data ([turning it off](extensions.md#turning-it-off)) |
 
 ```bash
 docker compose logs -f uchiyomi  # watch it boot

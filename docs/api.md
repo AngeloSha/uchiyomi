@@ -1423,9 +1423,27 @@ overview as `langs` (sources, enabled, series that came from them, hidden), unaf
 filters, and `GET /api/admin/extensions/status` reports `registered`, `skipped` and `cap` so the
 `SUWAYOMI_MAX_SOURCES` overflow is visible rather than a line in the boot log.
 
+`GET /api/admin/extensions/status` is also what Admin → Extensions' setup screen reads (v0.49.0, #72). With no
+engine to talk to it answers `{ configured: false, reachable: false, off, platform, linkedSeries }`: `off` is
+`switch` (`EXTENSION_ENGINE=0` while `SUWAYOMI_URL` names the bundled container) or `unset` (no address),
+`platform` is the install the steps open on (`desktop`, `compose`, `unraid`, `casaos`, `umbrel` or `unknown`,
+from `UCHIYOMI_PLATFORM`, Unraid's `HOST_OS` and the compose files' `EXTENSION_ENGINE`), and `linkedSeries`
+counts the series added through an extension. With one it adds `engine` (host and port), `platform`, `retry`
+(`{ attempts, since, nextAt }` while the registration retry runs: every 5 minutes after the first few, until
+the engine answers; otherwise `null`), `lastTry`, `linkedSeries` and, when the engine answers, `solver`
+(`{ supported, enabled, wiring, connectable, url }`, `wiring` one of `ok`, `off`, `localhost`, `other`,
+`unsupported`; `url` is never sent on desktop, where it carries the in-app helper's token). When the engine
+answers but the last registration missed it, the call registers its sources before replying, which is what
+makes the setup screen's **Check again** a plain refetch. `POST /api/admin/extensions/solver` points the
+engine's own Cloudflare helper at the solver Uchiyomi uses (`FLARESOLVERR_URL`) and switches it on -- only when
+asked, never by itself -- answering `{ ok, enabled, wiring }`, or **400** `not_configured` / `no_solver` (Uchiyomi
+has no `FLARESOLVERR_URL` to share) / `unsupported`, or **502** `unreachable`; it is audited as
+`extension.solver` with the solver's host only.
+
 ```
 GET    /api/admin/extensions/status      GET    /api/admin/extensions/catalog
 POST   /api/admin/extensions/catalog/:pkgName
+POST   /api/admin/extensions/solver
 POST   /api/admin/extensions/update-all
 GET    /api/admin/extensions/repos       POST   /api/admin/extensions/repos
 DELETE /api/admin/extensions/repos       POST   /api/admin/extensions/refresh

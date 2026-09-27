@@ -31,6 +31,7 @@ import {
 } from '../lib/sources/suwayomi/extensions';
 import { getHiddenLangs, setSourcesEnabled, adoptExtensionSources, langOverview } from '../lib/sources/suwayomi/langs';
 import { lastSuwayomiLoad } from '../lib/sources/suwayomi/register';
+import { engineStatusReport, connectEngineSolver } from '../lib/extensionEngine';
 import { env } from '../env';
 import { readFile, writeFile, mkdir, rm, rename, stat } from 'fs/promises';
 import { dirname, resolve } from 'path';
@@ -2327,29 +2328,10 @@ export default async function adminRoutes(app: FastifyInstance) {
   // extension's sources become Uchiyomi sources. Nothing here downloads an APK into this process. (This
   // comment used to claim the opposite -- that installing was a link out to Suwayomi's UI -- which stopped
   // being true the day the catalogue block below was written.)
-  app.get('/api/admin/extensions/status', async () => {
-    if (!suwayomiConfigured()) return { configured: false, reachable: false };
-    let version: string | null = null;
-    let reachable = false;
-    let error: string | undefined;
-    try {
-      version = (await suwayomiAbout()).version;
-      reachable = true;
-    } catch (e) {
-      error = (e as Error)?.message || 'unreachable';
-    }
-    const counts = await one<{ enabled: number; known: number }>(
-      `SELECT count(*) FILTER (WHERE enabled)::int AS enabled, count(*)::int AS known FROM suwayomi_sources`,
-    );
-    // `enabled` is what the operator asked for; `registered` is what search actually reaches. They differ
-    // by `skipped` whenever the cap bites, and until the panel showed all three that gap was invisible.
-    const load = lastSuwayomiLoad();
-    return {
-      configured: true, reachable, version, error, enabled: counts?.enabled ?? 0, known: counts?.known ?? 0,
-      registered: load?.registered ?? 0, skipped: load?.skipped ?? 0, cap: env.SUWAYOMI_MAX_SOURCES,
-      hiddenLangs: await getHiddenLangs().catch(() => [] as string[]),
-    };
-  });
+  // What the engine is doing and why, for the Extensions tab and its setup screen (#72): lib/extensionEngine.ts.
+  // ⚠️ It registers the engine's sources when it answers again after a registration that missed it, so the
+  // setup screen's "Check again" -- a refetch of this -- brings the extensions back at once.
+  app.get('/api/admin/extensions/status', async () => engineStatusReport());
 
   // Every extension route from here down answers 400 rather than a confusing 502 when there is no engine.
   const needExt = (reply: FastifyReply) =>
@@ -2523,6 +2505,20 @@ export default async function adminRoutes(app: FastifyInstance) {
     } catch (e) {
       return reply.code(502).send({ error: 'unreachable', message: (e as Error)?.message || 'Could not refresh.' });
     }
+  });
+
+  /**
+   * Point the engine's own Cloudflare helper at the one Uchiyomi uses, and switch it on (#72, #54): Health's
+   * "Connect the Cloudflare helper" and the Extensions tab's Connect. Only ever on a press -- it changes a setting
+   * on someone's engine (lib/sources/suwayomi/engineSolver.ts). The audit names the solver's host, never its
+   * address: on desktop that carries the in-app helper's token.
+   */
+  app.post('/api/admin/extensions/solver', async (req, reply) => {
+    if (needExt(reply)) return;
+    const r = await connectEngineSolver();
+    if (!r.ok) return reply.code(r.status).send({ error: r.error, message: r.message });
+    await logAudit('extension.solver', { userId: userIdOf(req), detail: r.audit, req });
+    return { ok: true, enabled: r.enabled, wiring: r.wiring };
   });
 
   app.post('/api/admin/extensions/catalog/:pkgName', async (req, reply) => {

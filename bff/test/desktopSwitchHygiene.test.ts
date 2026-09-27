@@ -57,6 +57,10 @@ const IS_DESKTOP_ALLOWED = new Set([
   'lib/backup.ts', // the bundled pg_dump with the password in its env, and config.zip instead of tar
   'lib/libraryAdmin.ts', // realpath containment, case-only renames, on-disk spelling of typed paths
   'routes/sources.ts', // the add reuses the folder's stored/on-disk spelling on case-insensitive disks
+  // #72 (v0.49.0): the extension engine's setup and its Health row.
+  'lib/platform.ts', // the desktop app is its own platform: its engine is a download, not a container
+  'lib/extensionEngine.ts', // the engine's helper address carries the in-app helper's token on desktop: never sent
+  'lib/engineHealth.ts', // a desktop engine never downloaded is no row at all; its helper on 127.0.0.1 is right
 ]);
 
 test('UCHIYOMI_DESKTOP is read in lib/desktop.ts and nowhere else', () => {

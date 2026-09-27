@@ -25,6 +25,8 @@ import { groupProviders, type ProviderGroup, type ProviderSrc } from '@/lib/prov
 import { adultShown } from '@/lib/adult';
 import { bridge, hiddenOnDesktop, isDesktop, visibleGroups, DESKTOP_HIDDEN, type EngineStatus, type UpdateStatus } from '@/lib/desktop';
 import { EngineInstall } from '@/components/EngineInstall';
+import { EngineSetup, EngineReadyFoot } from '@/components/EngineSetup';
+import type { EngineReport } from '@/lib/engineSetup';
 import { StatusEdge, StatusMark } from '@/components/StatusMark';
 import { TONE_SURFACE, engineMark, healthMark, sourceMark, type ProviderStatus } from '@/lib/status';
 import Link from 'next/link';
@@ -876,7 +878,10 @@ function ExtensionsLink({ onTab }: { onTab: (t: Tab) => void }) {
     : down && engine === 'installing' ? tr('Installing the extension engine…')
     : down && (engine === 'starting' || engine === 'running') ? tr('Starting the extension engine…')
     : down && engine === 'failed' ? tr('The extension engine could not be installed.')
-    : down ? tr('The extension engine isn’t running')
+    // #72: why, on the server build: switched off on purpose, never set up, or set up and not answering.
+    : down && status.off === 'switch' ? tr('Extensions are turned off')
+    : down && status.off === 'unset' ? tr('No extension engine is set up')
+    : down ? tr('The extension engine isn’t answering')
     : status.enabled === 1 ? tr('1 source enabled')
     : tr('{n} sources enabled', { n: status.enabled ?? 0 });
   return (
@@ -2021,8 +2026,9 @@ function DesktopUpdateNote() {
   );
 }
 
-interface ExtStatus {
-  configured: boolean; reachable: boolean; version?: string | null; error?: string; enabled?: number; known?: number;
+/** The engine's own fields (why it is off, the retry, the platform, its Cloudflare helper) are EngineReport's. */
+interface ExtStatus extends EngineReport {
+  enabled?: number; known?: number;
   /** what search actually reaches; differs from `enabled` by `skipped` when SUWAYOMI_MAX_SOURCES bites */
   registered?: number; skipped?: number; cap?: number; hiddenLangs?: string[];
 }
@@ -2111,25 +2117,8 @@ function Extensions({ span = '' }: { span?: string }) {
   if (isDesktop() && !(status.configured && status.reachable)) return <EngineInstall span={span} />;
 
   if (!status.configured) {
-    return (
-      <div className={`card grad-border p-4 ${span}`}>
-        <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-fog-500">{tr('Extensions')}</p>
-        {/* Reached only when SUWAYOMI_URL is empty (turned off, or an install with no engine such as CasaOS):
-            a stopped container with the URL still set is the "Can't reach" line further down. It used to name
-            `yomi-suwayomi`, the development stack's container; the shipped compose files call it
-            `uchiyomi-suwayomi`. */}
-        <p className="text-[11px] leading-relaxed text-fog-500">
-          {tr('No extension engine is set up for this server.')}{' '}
-          {/* Split on the placeholders, keeping them, so a translation may put them in either order. */}
-          {tr('The standard Docker install runs one in the {name} container. If you turned it off by emptying SUWAYOMI_URL, put that line back in .env and run {command}.')
-            .split(/(\{name\}|\{command\})/).map((part, i) => (
-              part === '{name}' ? <code key={i} className="text-fog-300">uchiyomi-suwayomi</code>
-                : part === '{command}' ? <code key={i} className="text-fog-300">docker compose up -d</code>
-                  : part
-            ))}
-        </p>
-      </div>
-    );
+    // Off (EXTENSION_ENGINE=0), or no engine set up at all: how to add it on this platform (#72).
+    return <EngineSetup status={status} span={span} />;
   }
 
   const refreshAll = () => {
@@ -2258,10 +2247,8 @@ function Extensions({ span = '' }: { span?: string }) {
       </div>
 
       {!status.reachable ? (
-        <p className="text-[11px] text-fog-500">
-          Can&apos;t reach the extension engine{status.error ? ` (${status.error})` : ''}. Uchiyomi keeps working; extensions
-          are just unavailable until it&apos;s back.
-        </p>
+        // Set up, and not answering: what to check on this platform, the retry and Check again (#72).
+        <EngineSetup status={status} bare />
       ) : (
         <>
           <p className="mb-2 text-[11px] leading-relaxed text-fog-500">
@@ -2478,6 +2465,7 @@ function Extensions({ span = '' }: { span?: string }) {
             )}
             {isFetching && !list.length && <p className="py-2 text-[11px] text-fog-600">{tr('Loading…')}</p>}
           </div>
+          <EngineReadyFoot status={status} desktop={isDesktop()} />
         </>
       )}
     </div>

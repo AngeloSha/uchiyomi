@@ -193,8 +193,25 @@ ever hit.
   already set both, so an upgrade that recreates the engine is the fix there.* — the shipped names are
   examples; use whatever your engine's container and solver are called. Uchiyomi's own `FLARESOLVERR_URL`
   (in the tuning list of `.env.example`) is a different setting: it is the solver the built-in engines use.
+  Since v0.49.0 an engine that lacks the two settings can be fixed without touching its container: **Connect**
+  on the *Extension engine* row of **Admin → Health** (or under the catalogue in **Admin → Extensions**) sets the
+  engine's own `flareSolverrEnabled` / `flareSolverrUrl` to Uchiyomi's `FLARESOLVERR_URL` over its API. Nothing
+  restarts, and the engine keeps the value unless its container names another solver. It is only ever done on a
+  press, and needs `FLARESOLVERR_URL` set on Uchiyomi.
+- `EXTENSION_ENGINE` (default `1`): the bundled extension engine's switch (v0.49.0). `EXTENSION_ENGINE=0` in `.env`,
+  then `docker compose up -d`: Compose runs no engine container (its volume is kept) and Uchiyomi treats
+  extensions as off. Delete the line, or set `1`, and run the same command to bring it back. **Compose only accepts
+  `0` or `1`**: it is the engine's replica count, and any other value stops `docker compose up` for the whole stack.
+  (The app itself also reads `off`, `false` and `no`, for setups that do not pass the line to Compose.) It only
+  applies while `SUWAYOMI_URL` names the bundled container (`uchiyomi-suwayomi`, or `yomi-suwayomi` in the
+  development stack): an engine you run yourself is never switched off by it. Needs the v0.49.0 compose files;
+  an older file ignores the line. See [extensions.md](extensions.md#turning-it-off).
+- `UCHIYOMI_PLATFORM` (optional): `compose`, `unraid`, `casaos` or `umbrel`. Only tells **Admin → Extensions**
+  which setup steps to open on; the CasaOS listing and the Unraid template set it, and Unraid's own `HOST_OS` and
+  a v0.49.0 compose file's `EXTENSION_ENGINE` are read when it is absent. Nothing else depends on it.
 - `SUWAYOMI_URL` (see [extensions.md](extensions.md#settings)): where the extension engine is; empty turns
-  the feature off. A trailing slash (or two), a query string or a fragment on this value is ignored; the
+  the feature off (in the v0.49.0 compose files and later: the older ones wrote `${SUWAYOMI_URL:-…}`, which put the
+  default back for an empty value). A trailing slash (or two), a query string or a fragment on this value is ignored; the
   scheme, host, port and any sub-path are what count — the same normalised base is used for the covers the
   engine hands over and for the cover proxy's check of them, so a stray `//` no longer turns every
   extension cover into a placeholder.

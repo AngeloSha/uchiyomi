@@ -22,6 +22,9 @@
 //   To hold a notice on screen while the walk opens a dialog under it, the mouse rests on the card: a notice
 //   pauses while hovered, which is behaviour the walk relies on and so also checks.
 //
+//   engine -- Admin → Extensions with the extension engine not answering, then answering (engineWalk.mjs). Needs
+//   up.sh with E2E_ENGINE=fake E2E_ENGINE_MODE=down, and ENGINE=http://127.0.0.1:<the engine's port>.
+//
 // Screenshots go to $OUT (default shots49). LOOK at them: every check here is geometry, and geometry passes on
 // a card that is transparent, clipped or unreadable.
 import puppeteer from 'puppeteer';
@@ -345,6 +348,11 @@ try {
       console.log(`\n  notices @${w}`);
       await notices(w);
     }
+  }
+  // #72: the extension engine's setup screen and the way back (engineWalk.mjs; up.sh with E2E_ENGINE=fake).
+  if (PHASES.includes('engine')) {
+    const { engineWalk } = await import('./engineWalk.mjs');
+    await engineWalk({ page, api, go, press, shot, check, waitFor, sleep });
   }
 } catch (e) {
   check('the walk ran to the end', false, String(e?.stack || e));
