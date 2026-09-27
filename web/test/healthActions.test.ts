@@ -68,6 +68,8 @@ const ACTIONS: { action: string; labels: string[]; wants: RegExp }[] = [
   // v0.48.3: the owner's "no button to ignore this warning so it never repeats again".
   { action: 'ignore', labels: ["tr('Ignore')"], wants: /postIgnore\(check\.id, item, true\)/ },
   { action: 'unignore', labels: ["tr('Stop ignoring')"], wants: /postIgnore\(check\.id, item, false\)/ },
+  // #72: the Extension engine row's one-click fix, the same route as the Extensions tab's Connect.
+  { action: 'engine_solver', labels: ["tr('Connect')"], wants: /act\(a, async \(\) => \{\s*await api\('\/api\/admin\/extensions\/solver', \{ method: 'POST', json: \{\} \}\);/ },
 ];
 
 test('every action the health check can offer renders one key, with the label and the request it promises', () => {
@@ -111,6 +113,31 @@ test('the solver reset is one card-wide action, gated on a finding that offers i
   const run = code(read(RUN));
   assert.match(run, /export function stepFindings[\s\S]*?!it\.info && \(it\.actions \?\? \[\]\)\.includes\(want\)/, 'info rows or rows without the step\'s key count as something to fix');
   assert.match(run, /return step === 'failures' \? \{ only: \[step\], now: true \} : \{ only: \[step\] \};/, 'the failures card does not send now');
+});
+
+test('every repair-backed key, card Fix all and Fix all issues waits while a sweep or another repair runs', () => {
+  // No queue this release (design decision 6): each is disabled, saying why, until the running one ends. The rule
+  // is healthCopy.ts repairGate (healthCopy.test.ts); this holds every key to it. Reintroduce `const gate = {};` in
+  // HealthRow, or the old `disabled: !!rr.blocked` without a title on a card: the matching assertion fails.
+  const src = code(read(KEYS));
+  const row = rowOf(src);
+  assert.match(row, /const gate = isRepairAction\(a\) \? repairGate\(blocked, status\?\.run, busyHere && rowAction === a\) : \{\};/,
+    'a finding\'s repair key is not gated on a running sweep or repair');
+  for (const a of ['fix_short', 'fill', 'retry']) assert.match(arm(row, a), /\.\.\.base, \.\.\.gate,/, `the '${a}' key ignores the gate`);
+  const card = src.slice(src.indexOf('export function HealthCardActions'), src.indexOf('export function CardProgress'));
+  assert.match(card, /\.\.\.repairGate\(rr\.blocked, status\?\.run, busy\),/, 'a card\'s Fix all is not gated');
+  const page = src.slice(src.indexOf('export function FixAllIssues'));
+  assert.match(page, /const gate = repairGate\(rr\.blocked, status\?\.run, busy\);/, 'Fix all issues is not gated');
+  assert.match(page, /disabled: !plan\.length \|\| !!gate\.disabled,\s*disabledWhy: gate\.disabledWhy,/, 'Fix all issues does not say why it waits');
+});
+
+test('#72: Connect on the Extension engine row answers on the row and refreshes the Extensions tab', () => {
+  // Reintroduce the arm without invalidating ['ext-status']: the Extensions tab says the helper is off for up to 30 s
+  // after Health connected it.
+  const row = rowOf(code(read(KEYS)));
+  const a = arm(row, 'engine_solver');
+  assert.match(a, /void qc\.invalidateQueries\(\{ queryKey: \['ext-status'\] \}\);/, 'the Extensions tab keeps the old helper state');
+  assert.match(a, /tr\('Connected: the extension engine now uses Uchiyomi’s Cloudflare helper\.'\)/, 'Connect says nothing on its row');
 });
 
 test('#115: the Test key holds no verdict of its own, its status line says the limit, and source rows show their stages', () => {
@@ -164,6 +191,10 @@ test('a repair-backed key re-checks Health when its run ENDS, never at the press
   // Polled every 2 s while a run goes or one this page started is unread; the POST's id is what it waits on.
   assert.match(hook, /refetchInterval: \(q\) => \(q\.state\.data\?\.running \|\| waiting \? POLL_MS : false\)/);
   assert.match(hook, /set\(key, \{ phase: 'awaiting', action, startedAt, runId: r\?\.run \}\);/, 'the run id the POST answers is not kept');
+  // A run a poll saw start and end while its POST was in flight is closed at once: nothing new comes to wake the
+  // effect for it. Reintroduce by dropping the check: the slot says "Working…" and polls every 2 s for good.
+  assert.match(start, /if \(r\?\.run && handled\.current\.has\(r\.run\)\) \{\s*set\(key, \{ phase: 'ended', action, startedAt, runId: r\.run, finishedAt: Date\.now\(\) \}\);\s*return;\s*\}\s*set\(key, \{ phase: 'awaiting'/,
+    'a press whose run already ended before its POST answered waits forever');
   // No "Started — the Tasks line shows what it did" toast from Health: success is said on the row.
   assert.doesNotMatch(hook + code(read(KEYS)), /the Tasks line shows what it did/, 'Health still toasts "Started" and points at another tab');
 });

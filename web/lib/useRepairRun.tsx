@@ -151,6 +151,14 @@ export function RepairRunProvider({ onEnded, children }: { onEnded: () => Promis
         toast(reason, 'error');
         return;
       }
+      // A run that polls already saw start AND end while its POST was in flight (a window-focus refetch, the poll
+      // of another run): the effect above re-checked Health for it then, when this slot had no id to match, and
+      // it will not run again for it -- the refetch below brings nothing new, and React Query hands back the same
+      // data object -- so the slot would sit on "Working…", polling every 2 s. It is over: close it here.
+      if (r?.run && handled.current.has(r.run)) {
+        set(key, { phase: 'ended', action, startedAt, runId: r.run, finishedAt: Date.now() });
+        return;
+      }
       set(key, { phase: 'awaiting', action, startedAt, runId: r?.run });
       if (!r?.run) {
         // A server older than v0.49.0 names no run: nothing to watch for, so read Health again now.

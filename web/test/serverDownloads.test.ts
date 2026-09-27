@@ -3,7 +3,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  bandFor, beyondJobs, chapterSpan, downloadSections, groupRecent, jobsPollInterval, landedFor, navRing, originLabel,
+  bandFor, bandReload, beyondJobs, chapterSpan, downloadSections, groupRecent, jobsPollInterval, landedFor, navRing, originLabel,
   shouldReload, tileStatus, viewState, type ActivityEntry, type DownloadJob, type SourceJobs,
 } from '../lib/serverDownloads';
 import { downloadsLabel, type RunCard } from '../lib/jobs';
@@ -263,6 +263,18 @@ test('the band re-reads the chapter list when more of the series lands, never on
   assert.deepEqual(shouldReload(4, 2), { reload: false, seen: 2 }, 'a day aging out re-read the page');
   assert.deepEqual(shouldReload(2, 3), { reload: true, seen: 3 });
   assert.deepEqual(shouldReload(2, null), { reload: false, seen: 2 }, 'a lost answer forgot what was seen');
+});
+
+test('what the band saw belongs to its series: moving to another series in the app is a first answer again', () => {
+  // The band stays mounted from /series/?id=A to ?id=B (the page is not keyed by id). Reintroduce the bare count
+  // (shouldReload(seen.n, landed) whatever the id): B's first answer, 2 against A's 0, re-reads B's chapters right
+  // after B's page read them -- "a new series' first answer re-reads its page" fails.
+  assert.deepEqual(bandReload({ id: 'A', n: 0 }, 'B', 2), { reload: false, seen: { id: 'B', n: 2 } }, "a new series' first answer re-reads its page");
+  assert.deepEqual(bandReload({ id: 'A', n: 5 }, 'B', 1), { reload: false, seen: { id: 'B', n: 1 } });
+  assert.deepEqual(bandReload({ id: 'B', n: 1 }, 'B', 2), { reload: true, seen: { id: 'B', n: 2 } }, 'a landing on the new series is missed');
+  assert.deepEqual(bandReload({ id: 'A', n: 2 }, 'A', 3), { reload: true, seen: { id: 'A', n: 3 } }, 'a landing on the same series is missed');
+  assert.deepEqual(bandReload(null, 'A', 3), { reload: false, seen: { id: 'A', n: 3 } }, 'the first answer on a cold load re-reads the page');
+  assert.deepEqual(bandReload({ id: 'A', n: 3 }, 'B', null), { reload: false, seen: { id: 'B', n: null } }, "A's count is kept for B while there is no answer");
 });
 
 test('the view says when it could not read the downloads, instead of "nothing is being fetched"', () => {

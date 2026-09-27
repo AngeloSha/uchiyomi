@@ -20,6 +20,7 @@
 // is never deleted, a merge is one-way and carries progress, a repair refuses to run beside a chapter sweep
 // -- live in one place and apply however the work was started.
 import { useState, type ReactNode } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { ConfirmDialog, msgOf } from '@/components/ConfirmDialog';
 import { useToast } from '@/components/Toast';
@@ -30,11 +31,12 @@ import { isDesktop } from '@/lib/desktop';
 import { IDLE, type ActionState } from '@/lib/actionState';
 import { triggerRefresh, type RefreshAnswer } from '@/lib/refresh';
 import {
-  ACTION_COPY, blockedLine, caveatLine, outcomeLine, planFooter, planLine, rowState, timeLine, type CopyCtx,
+  ACTION_COPY, caveatLine, fixAllWhat, outcomeLine, planFooter, planLine, repairGate, rowState, solverDownLine, timeLine,
+  type CopyCtx,
 } from '@/lib/healthCopy';
 import {
   CARD_STEP, cardBody, cardRecord, cardStepState, isRepairAction, itemBody, kindOfBody, pageBody,
-  pagePlan, pageRecord, recordFor, runTouches, stepFindings, type RepairEstimate, type RepairStatus,
+  pagePlan, pageRecord, recordFor, runTouches, solverDown, stepFindings, type RepairEstimate, type RepairStatus,
 } from '@/lib/repairRun';
 import { useRepairRun } from '@/lib/useRepairRun';
 import { testStep } from '@/lib/sourceEvidence';
@@ -93,6 +95,7 @@ export function HealthRow({ check, item, rowKey, links, children }: {
   children: ReactNode;
 }) {
   const toast = useToast();
+  const qc = useQueryClient();
   const rr = useRepairRun();
   const { status, slots } = rr;
   const slotKey = `item:${check.id}:${rowKey}`;
@@ -204,17 +207,15 @@ export function HealthRow({ check, item, rowKey, links, children }: {
     if (!copy) return null;
     const mine = rowAction === a ? rowNow : IDLE;
     const base = { id: a, what: copy.what(ctx), state: mine, buttonProps: { 'data-health-action': a } as ActionSpec['buttonProps'] };
-    // A repair key waits while a sweep or ANOTHER repair runs, and says why -- pressed anyway, the server
-    // refuses, which used to be the only way to find out.
-    const repairGate = isRepairAction(a) && !!blocked && !(busyHere && rowAction === a)
-      ? { disabled: true, disabledWhy: blockedLine(blocked, status?.run) } : {};
+    // A repair key waits while a sweep or ANOTHER repair runs, and says why (healthCopy.ts repairGate).
+    const gate = isRepairAction(a) ? repairGate(blocked, status?.run, busyHere && rowAction === a) : {};
     switch (a) {
       case 'fix_short':
-        return { ...base, ...repairGate, label: tr('Fix'), onRun: () => { const b = itemBody(a, item); if (b) void rr.start(slotKey, a, b); } };
+        return { ...base, ...gate, label: tr('Fix'), onRun: () => { const b = itemBody(a, item); if (b) void rr.start(slotKey, a, b); } };
       case 'fill':
-        return { ...base, ...repairGate, label: tr('Fill now'), onRun: () => { const b = itemBody(a, item); if (b) void rr.start(slotKey, a, b); } };
+        return { ...base, ...gate, label: tr('Fill now'), onRun: () => { const b = itemBody(a, item); if (b) void rr.start(slotKey, a, b); } };
       case 'retry':
-        return { ...base, ...repairGate, label: tr('Retry now'), onRun: () => { const b = itemBody(a, item); if (b) void rr.start(slotKey, a, b); } };
+        return { ...base, ...gate, label: tr('Retry now'), onRun: () => { const b = itemBody(a, item); if (b) void rr.start(slotKey, a, b); } };
       case 'confirm_short':
         return {
           ...base, label: confirmed ? tr('Not fine') : tr('It’s fine'),
@@ -250,6 +251,18 @@ export function HealthRow({ check, item, rowKey, links, children }: {
         return { ...base, label: tr('Ignore'), onRun: () => act(a, async () => ({ text: await postIgnore(check.id, item, true) })) };
       case 'unignore':
         return { ...base, label: tr('Stop ignoring'), onRun: () => act(a, async () => ({ text: await postIgnore(check.id, item, false) })) };
+      // #72: the Extension engine row. The same route as the Extensions tab's Connect; a refusal (no helper of
+      // Uchiyomi's own, an engine too old to have the setting, no answer) is a 4xx/5xx with its message, which
+      // act() puts on the row. The Extensions tab reads the engine's state again too.
+      case 'engine_solver':
+        return {
+          ...base, primary: true, label: tr('Connect'),
+          onRun: () => act(a, async () => {
+            await api('/api/admin/extensions/solver', { method: 'POST', json: {} });
+            void qc.invalidateQueries({ queryKey: ['ext-status'] });
+            return { text: tr('Connected: the extension engine now uses Uchiyomi’s Cloudflare helper.') };
+          }),
+        };
       default:
         return null;
     }
@@ -339,10 +352,6 @@ export function hasCardActions(check: HealthCheck): boolean {
     || (check.id === 'duplicates' && check.items.some((it) => !it.info && (it.seriesIds || []).length === 2));
 }
 
-/** The solver check while the solver does not answer: no reset is offered, and the row says what to do instead. */
-const solverDown = (check: HealthCheck) => check.id === 'solver' && check.status !== 'ok'
-  && !check.items.some((it) => (it.actions ?? []).includes('solver_reset'));
-
 /**
  * A card's body opens with this: one legend row per kind of action its findings carry (what, how, usually how
  * long), then the card-wide actions as full rows with their own status -- Fix all (the card's one repair
@@ -387,18 +396,13 @@ export function HealthCardActions({ check }: { check: HealthCheck }) {
     rows.push({
       id: key, label: copy.label(c), what: copy.what(c), how: copy.how?.(c), eta: copy.eta(c), state, primary: true,
       runLabel: step === 'solver' ? tr('Reset') : tr('Fix all'),
-      disabled: !!rr.blocked && !busy, disabledWhy: blockedLine(rr.blocked, status?.run),
+      ...repairGate(rr.blocked, status?.run, busy),
       onRun: () => { void rr.start(slotKey, key, body); },
       buttonProps: { 'data-health-fix-all': check.id } as ActionSpec['buttonProps'],
     });
   }
   if (solverDown(check)) {
-    rows.push({
-      id: 'solver_down', label: tr('Reset the solver'),
-      what: isDesktop()
-        ? tr('The Cloudflare helper is not answering. Quit and reopen Uchiyomi; a reset from here would change nothing.')
-        : tr('The solver is not answering. Restart its container; a reset from here would change nothing.'),
-    });
+    rows.push({ id: 'solver_down', label: tr('Reset the solver'), what: solverDownLine(isDesktop()) });
   }
   if (pairs.length) {
     const copy = ACTION_COPY.merge_all;
@@ -534,17 +538,18 @@ export function FixAllIssues({ checks }: { checks: HealthCheck[] }) {
   const caps = tr('One run takes up to {short} short chapters and {gaps} series with gaps. The nightly repair carries on with the rest, or press Fix all issues again.',
     { short: ctx.limits?.shortMax ?? 20, gaps: ctx.limits?.gapsMax ?? 5 });
   const busy = state.kind === 'starting' || state.kind === 'working';
+  const gate = repairGate(rr.blocked, status?.run, busy);
   const spec: ActionSpec = {
     id: 'fix_all_issues',
     label: copy.label(ctx),
-    what: plan.length ? `${copy.what(ctx)} ${plan.length === 1 ? tr('1 step') : tr('{n} steps', { n: plan.length })}.` : copy.what(ctx),
+    what: fixAllWhat(plan.length, ctx),
     how: [...lines, caps, planFooter(plan.map((p) => p.step))].join('\n'),
     eta: timeLineOr(est),
     state,
     primary: true,
     runLabel: tr('Start'),
-    disabled: !plan.length || (!!rr.blocked && !busy),
-    disabledWhy: blockedLine(rr.blocked, status?.run),
+    disabled: !plan.length || !!gate.disabled,
+    disabledWhy: gate.disabledWhy,
     onRun: () => { void rr.start('page', 'fix_all_issues', body); },
     buttonProps: { 'data-health-fix-all-page': '' } as ActionSpec['buttonProps'],
   };

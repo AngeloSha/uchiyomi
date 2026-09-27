@@ -26,7 +26,10 @@
 //   the navigate key is normalised to a trailing slash: the export is written with `trailingSlash: true`, so
 //   `/downloads` -> `/downloads/` is a redirect the SERVER performs, and offline there is no server to do it.
 //   Every v9 SHELL entry is keyed without the slash, so this bump is load-bearing too.
-const VERSION = 'v10';
+// v11 (v0.49.0): /api/admin/* is network-only now (the rule below). Every admin answer a v10 worker stored went
+//   into the capped API cache -- Health polls the repair's status every 2 s while a run goes -- and nothing reads
+//   those entries any more, so they would sit there, crowding out a reader's cached re-reads, until a bump.
+const VERSION = 'v11';
 const SHELL = `yomi-shell-${VERSION}`;
 const STATIC = `yomi-static-${VERSION}`;
 const IMG = `yomi-img-${VERSION}`;

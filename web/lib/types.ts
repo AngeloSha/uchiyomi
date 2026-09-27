@@ -363,7 +363,9 @@ export interface Page<T> {
 export type HealthAction =
   | 'fix_short' | 'confirm_short' | 'delete' | 'fill' | 'retry'
   | 'test' | 'unblock' | 'disable' | 'merge' | 'solver_reset'
-  | 'ignore' | 'unignore';
+  | 'ignore' | 'unignore'
+  // #72: point the extension engine's own Cloudflare helper at Uchiyomi's (POST /api/admin/extensions/solver).
+  | 'engine_solver';
 
 /** One step of the nightly repair (`bff/src/lib/repair.ts`), as `POST /api/admin/tasks/repair/run` takes it. */
 export type RepairStep = 'solver' | 'count' | 'failures' | 'short' | 'gaps' | 'groups' | 'names' | 'directions';

@@ -46,10 +46,12 @@ test('switched off on Compose: take the switch line out and start it, never "emp
   // Not answering: look, start, read the log -- all on the shipped container.
   assert.deepEqual(onSteps('compose', 'unreachable').map((s) => s.command),
     ['docker compose ps uchiyomi-suwayomi', 'docker compose up -d', 'docker compose logs --tail 50 uchiyomi-suwayomi']);
-  // Turning it off: the one line, then the one command -- and the volume named, so nobody deletes it.
+  // Turning it off: the one line, then the one command -- and the volume named, so nobody deletes it. Named the
+  // way `docker volume ls` shows it: Compose puts the project's name in front, and a command naming the bare
+  // `uchiyomi_suwayomi` makes a new, empty volume (the s11 review). Reintroduce the bare name: this fails.
   const off = offSteps('compose');
   assert.deepEqual(off.map((s) => s.command), ['EXTENSION_ENGINE=0', 'docker compose up -d']);
-  assert.equal(off[1].vars?.volume, 'uchiyomi_suwayomi');
+  assert.equal(off[1].vars?.volume, '<project>_uchiyomi_suwayomi', 'the volume is named without its Compose project prefix');
 });
 
 /**
@@ -81,8 +83,15 @@ test('Umbrel says it is not available, with nothing to run', () => {
   assert.equal(dataPlace('umbrel'), null, 'no data to warn about where it cannot run');
 });
 
-test('somewhere else: the shipped protections in one command', () => {
-  const run = onSteps('other', 'unset')[0].command ?? '';
+test('somewhere else: the shipped protections in one command, and what publishing its port opens', () => {
+  // The engine answers anyone who reaches its port, and this command publishes it (the Compose file never does).
+  // Reintroduce the command without its warning step: "says nothing about the open port" fails.
+  const steps = onSteps('other', 'unset');
+  const warn = steps.findIndex((s) => /no password of its own/.test(s.text));
+  assert.equal(warn, 1, 'the docker run says nothing about the open port it publishes');
+  assert.equal(steps[warn].vars?.port, '4567');
+  assert.equal(steps[warn].command, undefined);
+  const run = steps[0].command ?? '';
   for (const part of ['--memory=1536m', '-Xmx768m', 'AUTO_DOWNLOAD_CHAPTERS=false', 'DOWNLOAD_AS_CBZ=true', 'WEB_UI_ENABLED=false',
     'FLARESOLVERR_ENABLED=true', '-v uchiyomi_suwayomi:/home/suwayomi/.local/share/Tachidesk', 'ghcr.io/suwayomi/suwayomi-server:v2.3.2243']) {
     assert.ok(run.includes(part), `the docker run lacks ${part}`);
@@ -106,7 +115,7 @@ test('the page opens on the platform the server guessed, and says which state it
 });
 
 test('the data warning names the place and counts what is at stake', () => {
-  assert.equal(dataPlace('compose'), 'uchiyomi_suwayomi');
+  assert.equal(dataPlace('compose'), '<project>_uchiyomi_suwayomi', 'the warning names a volume Compose never made');
   assert.equal(dataPlace('unraid'), '/mnt/user/appdata/uchiyomi-suwayomi');
   assert.equal(dataPlace('casaos'), '/DATA/AppData/uchiyomi-suwayomi');
   assert.match(dataWarning(1), /it keeps 1 series linked to its source/);

@@ -30,7 +30,7 @@ import type { RepairCurrent, RepairEstimate, RepairLiveRun, RepairPhase, RepairR
 const CHECK_TITLE_KEYS = keys(
   'Chapter gaps', 'Suspiciously short chapters', 'Chapters that would not download', 'Series that can no longer update',
   'Source health', 'Duplicate series', 'Impossible chapter numbers', 'Cloudflare solver', 'Version',
-  'Extension source limit', 'Library scan', 'Downloads missing from the library',
+  'Extension source limit', 'Library scan', 'Downloads missing from the library', 'Extension engine',
 );
 export const CHECK_TITLES: Readonly<Record<string, (typeof CHECK_TITLE_KEYS)[number]>> = {
   'chapter-gaps': CHECK_TITLE_KEYS[0],
@@ -45,6 +45,8 @@ export const CHECK_TITLES: Readonly<Record<string, (typeof CHECK_TITLE_KEYS)[num
   'extension-cap': CHECK_TITLE_KEYS[9],
   'library-scan': CHECK_TITLE_KEYS[10],
   'downloads-missing': CHECK_TITLE_KEYS[11],
+  // #72 (bff lib/engineHealth.ts): the one row about the extension engine itself.
+  'extension-engine': CHECK_TITLE_KEYS[12],
 };
 
 export function checkTitle(c: Pick<HealthCheck, 'id' | 'title'>): string {
@@ -146,9 +148,9 @@ export const ACTION_COPY: Readonly<Record<string, ActionCopy>> = {
   test: {
     label: () => tr('Test'),
     what: () => tr('Asks this source for a search, a chapter list and a page list right now, and says which part failed.'),
-    // #115 puts the probe's own limit on the sources check (`testMs`); until it does, the server's default
-    // test timeout plus the probe's margin.
-    eta: (c) => etaLine({ maxMs: (c.check as (HealthCheck & { testMs?: number }) | undefined)?.testMs ?? 53_000 }),
+    // The probe's own limit, which #115 puts on the sources check (`testMs`); before the check has answered, the
+    // server's default test timeout plus the probe's margin.
+    eta: (c) => etaLine({ maxMs: c.check?.testMs ?? 53_000 }),
   },
   unblock: {
     label: () => tr('Clear block'),
@@ -171,6 +173,15 @@ export const ACTION_COPY: Readonly<Record<string, ActionCopy>> = {
     what: () => tr('Ends the cooldown of the sources that blame the solver and clears what Uchiyomi remembers about its sessions. It also forgets cooldowns that ended more than a day ago. It cannot restart the solver itself.'),
     eta: repairEta,
     lasting: (rec) => recordOutcome(rec),
+  },
+  // #72: the Extension engine row, when the engine's own Cloudflare helper is off or points at localhost and
+  // Uchiyomi has a helper to share. The same route as the Extensions tab's Connect: two GraphQL calls to the
+  // engine (read its settings, then write them), each bounded by the engine client's own timeout.
+  engine_solver: {
+    label: () => tr('Connect'),
+    what: () => tr('Points the extension engine’s own Cloudflare helper at the one Uchiyomi uses and switches it on, so extensions on Cloudflare-protected sites can get through.'),
+    how: () => tr('Uchiyomi changes one setting on the engine: its Cloudflare helper, switched on, at the address in {name}. Nothing restarts and nothing is installed. It stays that way unless the engine’s own container names another helper.', { name: 'FLARESOLVERR_URL' }),
+    eta: moment,
   },
   ignore: {
     label: () => tr('Ignore'),
@@ -214,11 +225,22 @@ export const ACTION_COPY: Readonly<Record<string, ActionCopy>> = {
   },
   fix_all_issues: {
     label: () => tr('Fix all issues'),
+    // With the plan's size, FixAllIssues says fixAllWhat(n) instead: one whole sentence per count.
     what: () => tr('One repair run with every step below that has something to do.'),
     eta: repairEta,
     lasting: (rec) => recordOutcome(rec),
   },
 };
+
+/**
+ * What Fix all issues does, counted: ONE sentence per count, never a translated sentence with a count glued on --
+ * "…1回で修復します。 3 ステップ." read a Latin full stop after the Japanese one. Without a plan, the plain line.
+ */
+export function fixAllWhat(n: number, c: CopyCtx = {}): string {
+  if (n === 1) return tr('One repair run with the 1 step below that has something to do.');
+  if (n > 1) return tr('One repair run with the {n} steps below that have something to do.', { n });
+  return ACTION_COPY.fix_all_issues.what(c);
+}
 
 /** The words of one step inside Fix all issues, with its caps. */
 export function planLine(step: string, c: CopyCtx): string {
@@ -248,7 +270,9 @@ export function recordLine(rec: Pick<RepairRunRecord, 'status' | 'result'>): str
     case 'failed': return tr('The repair failed; the server log says why');
     case 'interrupted': return tr('Interrupted by a restart');
     case 'skipped': return tr('Skipped: the nightly repair is switched off');
-    default: return line || tr('Finished');
+    // ⚠️ 'Done', not 'Finished': that key is the library's read-status filter, "Gelesen", "読了" -- a repair that
+    // "was read" in every language but English.
+    default: return line || tr('Done');
   }
 }
 
@@ -498,7 +522,7 @@ export function rowState(o: {
   if (slot?.phase === 'settling') return { kind: 'working', startedAt: slot.startedAt, step: tr('Checking the result…') };
   const rec = record;
   if (!rec) {
-    return slot?.phase === 'ended' ? { kind: 'done', finishedAt: slot.finishedAt ?? Date.now(), outcome: tr('Finished') } : { kind: 'idle' };
+    return slot?.phase === 'ended' ? { kind: 'done', finishedAt: slot.finishedAt ?? Date.now(), outcome: tr('Done') } : { kind: 'idle' };
   }
   if (rec.status === 'failed' || rec.status === 'interrupted') return { kind: 'failed', finishedAt: rec.finishedAt ?? undefined, reason: recordLine(rec) };
   if (rec.status === 'skipped') return { kind: 'refused', reason: recordLine(rec) };
@@ -513,6 +537,17 @@ export function refusalLine(error: string | undefined): string {
     : tr('Could not start the repair');
 }
 
+/**
+ * A repair-backed key while a chapter sweep or ANOTHER repair runs: disabled, with why as its title -- pressed
+ * anyway, the server refuses, which used to be the only way to find out. `own`: the run going is this key's own
+ * press, whose key stays live (it is the Stop).
+ */
+export function repairGate(
+  blocked: 'sweep_running' | 'repair_running' | null, run: RepairLiveRun | null | undefined, own: boolean,
+): { disabled?: true; disabledWhy?: string } {
+  return blocked && !own ? { disabled: true, disabledWhy: blockedLine(blocked, run) } : {};
+}
+
 /** Why a repair-backed key is disabled right now, as its title. */
 export function blockedLine(why: 'sweep_running' | 'repair_running' | null, run?: RepairLiveRun | null): string {
   if (why === 'sweep_running') return tr('A chapter sweep is running; repairs wait until it ends');
@@ -521,6 +556,32 @@ export function blockedLine(why: 'sweep_running' | 'repair_running' | null, run?
     return where ? tr('Another repair is running ({where}); this can start when it ends', { where }) : tr('Another repair is running; this can start when it ends');
   }
   return '';
+}
+
+/**
+ * A kept run's status as a word, for its mark in Recent repairs -- the mark's title and its accessible name. The
+ * raw status ('done', 'failed') was English in every language.
+ */
+export function runStatusWord(status: RepairRunRecord['status']): string {
+  switch (status) {
+    case 'running': return tr('Running');
+    case 'done': return tr('Done');
+    case 'stopped': return tr('Stopped before it finished');
+    case 'failed': return tr('Failed');
+    case 'skipped': return tr('Skipped');
+    case 'interrupted': return tr('Interrupted by a restart');
+  }
+  return tr('Done');
+}
+
+/**
+ * The solver card while the solver does not answer: why no reset is offered, and what to do instead. The desktop
+ * app's helper is part of the app, so there the answer is to reopen it, never a container.
+ */
+export function solverDownLine(desktop: boolean): string {
+  return desktop
+    ? tr('The Cloudflare helper is not answering. Quit and reopen Uchiyomi; a reset from here would change nothing.')
+    : tr('The solver is not answering. Restart its container; a reset from here would change nothing.');
 }
 
 /** When the nightly runs next, for the Tasks row and the history's heading. */

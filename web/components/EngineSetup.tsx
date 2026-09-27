@@ -14,7 +14,7 @@ import { useEffect, useState, type ReactNode } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { t as tr } from '@/lib/i18n';
-import { relativeTime, untilText } from '@/lib/format';
+import { relativeTime, untilText, wallClock } from '@/lib/format';
 import { msgOf } from '@/components/ConfirmDialog';
 import { ProgressRing } from '@/components/ProgressRing';
 import {
@@ -176,8 +176,8 @@ export function EngineSetup({ status, span = '', bare = false }: { status: Engin
   const retry = status.retry;
   const retryLine = retry
     ? (retry.attempts === 1
-      ? tr('Tried 1 time since {time} · next try {when}', { time: clock(retry.since), when: untilText(Date.parse(retry.nextAt) - Date.now()) })
-      : tr('Tried {n} times since {time} · next try {when}', { n: retry.attempts, time: clock(retry.since), when: untilText(Date.parse(retry.nextAt) - Date.now()) }))
+      ? tr('Tried 1 time since {time} · next try {when}', { time: wallClock(retry.since), when: untilText(Date.parse(retry.nextAt) - Date.now()) })
+      : tr('Tried {n} times since {time} · next try {when}', { n: retry.attempts, time: wallClock(retry.since), when: untilText(Date.parse(retry.nextAt) - Date.now()) }))
     : waiting && status.lastTry ? tr('Last tried {ago}', { ago: relativeTime(status.lastTry) }) : null;
 
   const body = (
@@ -225,12 +225,6 @@ export function EngineSetup({ status, span = '', bare = false }: { status: Engin
       {body}
     </div>
   );
-}
-
-/** "14:05", in the viewer's own clock. */
-function clock(iso: string): string {
-  const d = new Date(iso);
-  return Number.isFinite(d.getTime()) ? d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
 }
 
 /**

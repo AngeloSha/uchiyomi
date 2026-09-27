@@ -101,6 +101,7 @@ export const STEP_TEXT = keys(
   'Not available on Umbrel: an Umbrel app can’t add an optional second container. MangaDex and sites you add by address work without it.',
   // Somewhere else
   'Run the engine where Uchiyomi can reach it, with its data in a volume that stays. These are the settings the shipped files use:',
+  'The engine has no password of its own: anyone who can reach port {port} can install extensions on it and change its settings. Keep that port on a private network, never open to the internet.',
   'Then set {name} on Uchiyomi to its address and restart Uchiyomi:',
   'Check that the engine is running and that Uchiyomi can reach the address in {name}.',
   'Stop the engine, then empty {name} on Uchiyomi and restart Uchiyomi.',
@@ -119,6 +120,14 @@ export interface Step {
 
 const ENGINE = 'uchiyomi-suwayomi';
 const URL_VAR = 'SUWAYOMI_URL';
+/**
+ * The engine's volume on Compose, as `docker volume ls` shows it. Compose puts the project's name (the folder's,
+ * by default) in front of every volume the file declares, so the file's `uchiyomi_suwayomi` is
+ * `uchiyomi_uchiyomi_suwayomi` in a folder called uchiyomi -- and a command that names the bare
+ * `uchiyomi_suwayomi` makes a new, EMPTY volume of that name without an error. The s11 review caught the docs'
+ * backup recipe doing exactly that; the same `<project>_` form as docs/MIGRATING.md.
+ */
+const COMPOSE_VOLUME = '<project>_uchiyomi_suwayomi';
 const UP = 'docker compose up -d';
 
 /** How to bring the engine (back) on `p`, for the state the page is in. */
@@ -182,6 +191,10 @@ export function onSteps(p: Platform, h: Headline): Step[] {
             + '-e AUTO_DOWNLOAD_CHAPTERS=false -e DOWNLOAD_AS_CBZ=true -e WEB_UI_ENABLED=false '
             + `-e FLARESOLVERR_ENABLED=true -e FLARESOLVERR_URL=http://YOUR-SOLVER:8191 ${ENGINE_IMAGE}`,
         },
+        // ⚠️ The engine answers anyone who reaches its port, and installing an extension is running someone's code
+        // inside it. The Compose file never publishes the port (it `expose`s it to Uchiyomi's network only); this
+        // command has to, for a Uchiyomi elsewhere to reach it, so it says what that opens (the s11 review).
+        { text: 'The engine has no password of its own: anyone who can reach port {port} can install extensions on it and change its settings. Keep that port on a private network, never open to the internet.', vars: { port: '4567' } },
         { text: 'Then set {name} on Uchiyomi to its address and restart Uchiyomi:', vars: { name: URL_VAR }, command: 'http://ENGINE-HOST:4567' },
       ];
   }
@@ -193,7 +206,7 @@ export function offSteps(p: Platform): Step[] {
     case 'compose':
       return [
         { text: 'Add this line to the .env file next to your docker-compose.yml:', command: 'EXTENSION_ENGINE=0' },
-        { text: 'Then apply it. The engine’s container goes away; its data stays in the {volume} volume:', vars: { volume: 'uchiyomi_suwayomi' }, command: UP },
+        { text: 'Then apply it. The engine’s container goes away; its data stays in the {volume} volume:', vars: { volume: COMPOSE_VOLUME }, command: UP },
       ];
     case 'unraid':
       return [{ text: 'On the Docker tab, stop {name} (or remove it), then empty {setting} on the uchiyomi container and apply.', vars: { name: ENGINE, setting: URL_VAR } }];
@@ -213,7 +226,7 @@ export function offSteps(p: Platform): Step[] {
  */
 export function dataPlace(p: Platform): string | null {
   switch (p) {
-    case 'compose': return 'uchiyomi_suwayomi';
+    case 'compose': return COMPOSE_VOLUME;
     case 'unraid': return `/mnt/user/appdata/${ENGINE}`;
     case 'casaos': return `/DATA/AppData/${ENGINE}`;
     case 'other': return '/home/suwayomi/.local/share/Tachidesk';
