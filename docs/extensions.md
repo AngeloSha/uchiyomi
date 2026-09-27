@@ -22,12 +22,12 @@ Where it comes from depends on how you run Uchiyomi:
 
 | You run | The engine |
 |---|---|
-| **Docker** (the standard [`deploy/docker-compose.yml`](../deploy/docker-compose.yml), and the development stack) | Already there: the `uchiyomi-suwayomi` container starts with the rest. Nothing to set up. |
+| **Docker** (the standard [`deploy/docker-compose.yml`](../deploy/docker-compose.yml), and the development stack) | Already there: the `uchiyomi-suwayomi` container starts with the rest. Nothing to set up. `EXTENSION_ENGINE=0` in `.env` turns it off ([Turning it off](#turning-it-off)). |
 | **Uchiyomi Desktop, on this computer** | A download of about 200 MB, once: **Admin → Extensions** → **Download the extension engine (about 200 MB)**. Step by step in [the desktop guide](DESKTOP.md#add-your-first-sources). |
 | **Uchiyomi Desktop, connected to your server** | Your server's. Nothing runs on the computer; the Extensions tab is the server's own. |
-| **CasaOS** | Not part of that listing. **Admin → Extensions** says *No extension engine is set up for this server*; add the `uchiyomi-suwayomi` service from [`deploy/docker-compose.yml`](../deploy/docker-compose.yml) and set `SUWAYOMI_URL` ([INSTALL.md](INSTALL.md#one-click-installs)). |
-| **Unraid** | Not in the template: set the advanced *SUWAYOMI_URL* to a Suwayomi server you run (and point that one at your FlareSolverr, as the template's help text says). |
-| **Umbrel** | Not part of that package. |
+| **CasaOS** | An add-on beside the listing. Import [`deploy/casaos/uchiyomi-suwayomi.yml`](../deploy/casaos/uchiyomi-suwayomi.yml) as a custom app (its tips give the one folder command to run first), then set `SUWAYOMI_URL` to `http://uchiyomi-suwayomi:4567` in Uchiyomi's settings. |
+| **Unraid** | A template of its own: install **uchiyomi-suwayomi** from Apps ([`templates/uchiyomi-suwayomi.xml`](../templates/uchiyomi-suwayomi.xml): pinned, memory-capped, chapter downloads off, Cloudflare helper on). Set its *FLARESOLVERR_URL* to the solver Uchiyomi uses, then set Uchiyomi's advanced *SUWAYOMI_URL* to `http://YOUR-SERVER-IP:4567`. |
+| **Umbrel** | Not available. An Umbrel app cannot offer an optional second container, and putting the engine in the package would cost every Umbrel install about 800 MB whether it uses extensions or not. MangaDex and sites you add by address work there as everywhere. |
 
 When the engine is there, the top of **Admin → Extensions** shows a green `ready` badge with its version.
 With the engine turned off on Docker (`SUWAYOMI_URL` empty) the tab says so and how to bring it back:
@@ -221,6 +221,10 @@ file.** An install set up before v0.46.0 gets the cap by downloading the current
   FLARESOLVERR_URL to the same solver address Uchiyomi uses (http://uchiyomi-flaresolverr:8191 in the
   shipped files), then recreate it. The v0.37.0 compose files already set both, so an upgrade that recreates
   the engine is the fix there.*
+- **The engine's page cache is kept empty.** The engine keeps a copy of every page it serves, with no limit, in
+  its container (not in its volume: on the host's system disk). Uchiyomi already has those pages in the CBZ it
+  wrote, so it asks the engine to delete them after each extension download job, and every half hour while
+  nothing is downloading through it; never in the middle of a chapter. Covers are left alone.
 - **If the engine is down, Uchiyomi is fine.** It boots normally, the built-in engines keep working, the panel
   says it is unreachable, and extension-backed series simply do not update until it is back.
 - **Series stay routed** by the source they came from, so the scheduled updater keeps pulling new chapters.
@@ -237,17 +241,31 @@ Two things worth knowing:
 
 ## Turning it off
 
-On Docker: set `SUWAYOMI_URL=` (empty) in `.env` and restart the app; the Extensions tab then says no engine is
-set up, and nothing else changes. To reclaim the memory as well, delete the `uchiyomi-suwayomi` service from
-your compose file (`yomi-suwayomi` in the development stack) and run `docker compose up -d --remove-orphans`.
-`docker compose stop` only lasts until the next `docker compose up`, which starts it again. The desktop app has no switch for it: an engine that was never
-downloaded costs nothing, and one that was only runs while Uchiyomi does.
+On Docker: put `EXTENSION_ENGINE=0` in `.env` next to your compose file and run `docker compose up -d`. The
+engine's container goes away, its memory with it, and Uchiyomi (which reads the same line) treats extensions as
+off; nothing else changes. Its data stays in the `uchiyomi_suwayomi` volume, so deleting the line and running the
+same command brings it back where it left off. Never `docker compose down -v` while you might come back: that
+deletes the volume, and with it the links for every series you added through an extension.
+
+- The switch needs the v0.49.0 compose file or later. An older file ignores the line: download the current
+  [`deploy/docker-compose.yml`](../deploy/docker-compose.yml), or add its two lines to yours (`deploy:` /
+  `replicas: ${EXTENSION_ENGINE:-1}` under the engine, `EXTENSION_ENGINE: ${EXTENSION_ENGINE:-1}` in the app's
+  environment).
+- `docker compose pull` still downloads the engine's image while it is off; `docker image rm` reclaims it.
+- An empty `SUWAYOMI_URL=` in `.env` turns extensions off in the app too (since the v0.49.0 compose files; the
+  older ones put the default back, which is why it never worked), but leaves the container running.
+- An engine you run yourself is not affected by the switch: it only turns off the bundled container.
+
+`docker compose stop` only lasts until the next `docker compose up`, which starts it again. On Unraid and CasaOS,
+stop or remove the engine's container and empty `SUWAYOMI_URL`. The desktop app has no switch for it: an engine
+that was never downloaded costs nothing, and one that was only runs while Uchiyomi does.
 
 ## Settings
 
 | Variable | Default | What it does |
 | --- | --- | --- |
-| `SUWAYOMI_URL` | the bundled engine | Where the extension engine is. Empty turns the feature off. A trailing slash (or two), a query string or a fragment on this value is ignored; the scheme, host, port and any sub-path are what count. |
+| `EXTENSION_ENGINE` | `1` | `0` (or `off`, `false`, `no`) doesn't run the bundled engine: Compose scales it to zero, and the app treats extensions as off. Read by both, from the same `.env` line. Only applies while `SUWAYOMI_URL` names the bundled container (`uchiyomi-suwayomi`, or `yomi-suwayomi` in the development stack). |
+| `SUWAYOMI_URL` | the bundled engine | Where the extension engine is. Empty turns the feature off (in the v0.49.0 compose files and later). A trailing slash (or two), a query string or a fragment on this value is ignored; the scheme, host, port and any sub-path are what count. |
 | `SUWAYOMI_USERNAME` / `SUWAYOMI_PASSWORD` | empty | Only if your engine has authentication enabled. |
 | `SUWAYOMI_MAX_SOURCES` | `25` | Ceiling on how many extension sources register at once. |
 | `SUWAYOMI_PAGE_CONCURRENCY` | `4` | Pages of one chapter fetched from the engine at once (1-8). The engine rate-limits the site itself, so extension downloads skip the one-at-a-time pacing that scraped sites need; a 429 from the engine drops back to one for the rest of the chapter. |

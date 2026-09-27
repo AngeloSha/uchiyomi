@@ -79,6 +79,16 @@ const BATTERY = [
   { query: '{ ... on Query { aboutServer { name } } }' },
   { query: 'query { __typename sources { __typename } }' },
   { query: '{ aboutServer { __typename name version revision } }' },
+  // clearCachedImages (the page-cache keeper, lib/sources/suwayomi/cache.ts): what it answers, and how it refuses
+  { query: 'mutation { clearCachedImages(input:{cachedPages:true}) { cachedPages cachedThumbnails downloadedThumbnails clientMutationId } }' },
+  { query: 'mutation { clearCachedImages(input:{cachedPages:true, clientMutationId:"u"}) { cachedPages clientMutationId } }' },
+  { query: 'mutation { clearCachedImages(input:{cachedPages:false}) { cachedPages cachedThumbnails downloadedThumbnails } }' },
+  { query: 'mutation { clearCachedImages(input:{}) { cachedPages cachedThumbnails downloadedThumbnails } }' },
+  { query: 'mutation($i:ClearCachedImagesInput!){ clearCachedImages(input:$i) { cachedPages } }', variables: { i: { cachedPages: true } } },
+  { query: 'mutation { clearCachedImages(input:{cachedPage:true}) { cachedPages } }' },
+  { query: 'mutation { clearCachedImages { cachedPages } }' },
+  { query: 'mutation { clearCachedImages(input:{cachedPages:true}) }' },
+  { query: 'mutation { clearCachedImages(input:{cachedPages:"yes"}) { cachedPages } }' },
   // the built-in Local source, present on every engine
   { query: '{ source(id: "0") { id name displayName lang iconUrl isNsfw supportsLatest baseUrl isConfigurable contentWarning homeUrl preferences { __typename } extension { pkgName name } } }' },
   'not json',

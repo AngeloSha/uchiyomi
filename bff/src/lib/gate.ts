@@ -52,6 +52,17 @@ export async function withGate<T>(key: string, fn: () => Promise<T>, opts: GateO
   }
 }
 
+/**
+ * Whether any key starting with `prefix` has an operation running or waiting. A lane only exists while it has
+ * one (it is deleted as it empties), so its presence is the answer. The extension engine's page-cache keeper
+ * (lib/sources/suwayomi/cache.ts) asks it for 'sw:', which also catches the completion pass's page fetches:
+ * those run under the gate but are never recorded as downloads.
+ */
+export function gateBusy(prefix: string): boolean {
+  for (const k of lanes.keys()) if (k.startsWith(prefix)) return true;
+  return false;
+}
+
 /** Testing/introspection helper: how many operations are in flight or queued for a key. */
 export function gateDepth(key: string): { active: number; queued: number } {
   const l = lanes.get(key);

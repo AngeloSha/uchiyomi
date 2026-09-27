@@ -43,6 +43,10 @@ services:
       FLARESOLVERR_URL: http://uchiyomi-flaresolverr:8191
       SOURCES_DIR: /sources
       CUSTOM_SITES_FILE: /config/sites.json
+      # Mihon/Tachiyomi extensions. This listing ships no extension engine; import the add-on beside it
+      # (deploy/casaos/uchiyomi-suwayomi.yml), then set this to http://uchiyomi-suwayomi:4567 in CasaOS's
+      # settings editor. Listed empty on purpose, so the field is there to fill in; empty = no extensions.
+      SUWAYOMI_URL: ""
     volumes:
       # your existing comics, read-only — point this at wherever you keep them
       - /DATA/Media/Comics:/library
@@ -110,8 +114,8 @@ x-casaos:
     - https://raw.githubusercontent.com/AngeloSha/uchiyomi/main/docs/shots/home.webp
     - https://raw.githubusercontent.com/AngeloSha/uchiyomi/main/docs/shots/library.webp
     - https://raw.githubusercontent.com/AngeloSha/uchiyomi/main/docs/shots/discover.webp
-    # Not admin-extensions: this listing ships no extension engine (see docs/extensions.md), and the Health page
-    # is a screen every CasaOS install has.
+    # Not admin-extensions: this listing ships no extension engine (it is an add-on, uchiyomi-suwayomi.yml beside
+    # this file), and the Health page is a screen every CasaOS install has.
     - https://raw.githubusercontent.com/AngeloSha/uchiyomi/main/docs/shots/admin-health.webp
   title:
     en_US: Uchiyomi
@@ -156,6 +160,10 @@ x-casaos:
         sudo mkdir -p /DATA/AppData/uchiyomi/{downloads,config,cache,backups}
         sudo chown -R 10002:10002 /DATA/AppData/uchiyomi
         ```
+
+        **Mihon/Tachiyomi extensions** are an optional add-on: after installing, import `uchiyomi-suwayomi.yml`
+        from Uchiyomi's `deploy/casaos` folder as a custom app, then set `SUWAYOMI_URL` here to
+        `http://uchiyomi-suwayomi:4567`.
   port_map: "8080"
   scheme: http
   index: /

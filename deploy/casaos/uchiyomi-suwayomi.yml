@@ -1,0 +1,97 @@
+# Uchiyomi's optional extension engine, as a CasaOS add-on.
+#
+# The Uchiyomi listing (docker-compose.yml beside this file) ships without it: it is a JVM of about 750 MB, and
+# MangaDex and sites you add by address work without it. This adds it next to an installed Uchiyomi:
+#
+#   1. Install Uchiyomi first. This joins its network (`uchiyomi`), where the solver and the app are.
+#   2. Once, on the CasaOS box:
+#        sudo mkdir -p /DATA/AppData/uchiyomi-suwayomi
+#        sudo chown 1000:1000 /DATA/AppData/uchiyomi-suwayomi
+#      The engine runs as uid 1000 and cannot write to the root-owned folder CasaOS would create.
+#   3. App Store -> Custom Install -> Import, and paste this file.
+#   4. In Uchiyomi's settings, set SUWAYOMI_URL to http://uchiyomi-suwayomi:4567 and save.
+#
+# The service is the same as the uchiyomi-suwayomi service in deploy/docker-compose.yml, and pinned to the same
+# engine (bff/test/enginePins.test.ts keeps every pin equal). To remove it, uninstall it and empty SUWAYOMI_URL.
+# Keep /DATA/AppData/uchiyomi-suwayomi if you might come back: it holds the links for every series added through
+# an extension, and Uchiyomi's nightly backup does not include it.
+name: uchiyomi-suwayomi
+
+services:
+  uchiyomi-suwayomi:
+    container_name: uchiyomi-suwayomi
+    hostname: uchiyomi-suwayomi
+    image: ghcr.io/suwayomi/suwayomi-server:v2.3.2243
+    # A JVM with no limit sizes its heap from the whole machine's memory. The heap cap is JAVA_TOOL_OPTIONS below;
+    # this ceiling turns what the heap cap does not cover (metaspace, threads, native buffers) into a restart.
+    mem_limit: 1536m
+    environment:
+      TZ: ${TZ:-Etc/UTC}
+      JAVA_TOOL_OPTIONS: "-Xmx768m -XX:+UseSerialGC"
+      # Uchiyomi does the downloading and owns the library; the engine must never write a copy of its own.
+      AUTO_DOWNLOAD_CHAPTERS: "false"
+      DOWNLOAD_AS_CBZ: "true"
+      # Nothing opens the engine's own web page; Uchiyomi's Admin -> Extensions is the interface.
+      WEB_UI_ENABLED: "false"
+      # The listing's solver. Suwayomi has no browser of its own, and without this a site behind Cloudflare
+      # fails with "Cloudflare bypass currently disabled".
+      FLARESOLVERR_ENABLED: "true"
+      FLARESOLVERR_URL: http://uchiyomi-flaresolverr:8191
+    volumes:
+      - /DATA/AppData/uchiyomi-suwayomi:/home/suwayomi/.local/share/Tachidesk
+    expose:
+      - "4567"
+    healthcheck:
+      # The image has bash but no curl, wget or nc. 401 counts as alive (authentication switched on), and a JVM
+      # takes a while to come up.
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/4567; printf 'GET /api/v1/settings/about HTTP/1.0\\r\\n\\r\\n' >&3; head -1 <&3 | grep -qE ' (200|401) '"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 90s
+    restart: unless-stopped
+    networks:
+      - uchiyomi
+
+networks:
+  # Uchiyomi's own network, created by its listing: joined, never created here, so removing this add-on leaves
+  # Uchiyomi exactly as it was.
+  uchiyomi:
+    name: uchiyomi
+    external: true
+
+x-casaos:
+  architectures:
+    - amd64
+    - arm64
+  main: uchiyomi-suwayomi
+  author: AngeloSha
+  developer: AngeloSha
+  category: Media
+  icon: https://raw.githubusercontent.com/AngeloSha/uchiyomi/main/web/public/icons/icon-512.png
+  title:
+    en_US: Uchiyomi extension engine
+  tagline:
+    en_US: Mihon/Tachiyomi extensions for Uchiyomi
+  description:
+    en_US: |
+      The optional extension engine for Uchiyomi: Suwayomi-Server, run headless, which runs Mihon/Tachiyomi
+      extensions so Uchiyomi can search, follow and download from them. You never open it yourself; add
+      repositories and install extensions in Uchiyomi's Admin -> Extensions. It uses about 750 MB of memory
+      while it runs and is capped at 1.5 GB.
+  tips:
+    before_install:
+      en_US: |
+        Install **Uchiyomi** first: this joins its network.
+
+        **Run this once before installing.** The engine runs as uid 1000, and the folder CasaOS creates for an
+        app belongs to root:
+
+        ```
+        sudo mkdir -p /DATA/AppData/uchiyomi-suwayomi
+        sudo chown 1000:1000 /DATA/AppData/uchiyomi-suwayomi
+        ```
+
+        Then, in Uchiyomi's settings, set `SUWAYOMI_URL` to `http://uchiyomi-suwayomi:4567`. It takes a minute or
+        two to start the first time. Never delete /DATA/AppData/uchiyomi-suwayomi while you use extensions: it
+        holds the links for every series added through one, and Uchiyomi's nightly backup does not include it.

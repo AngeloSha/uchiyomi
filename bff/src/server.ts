@@ -27,6 +27,7 @@ import { runSweep } from './lib/updater';
 import { runRepair, REPAIR_HOURS } from './lib/repair';
 import { runChapterCleanup, unpruneRestored } from './lib/chapterCleanup';
 import { runExtensionMonitor } from './lib/extensionMonitor';
+import { startEngineCacheKeeper } from './lib/sources/suwayomi/cache';
 import { startSweeper } from './lib/imageCache';
 import { runBackup, backupDelay, stampDelay } from './lib/backup';
 import { firstRunFloor, DESKTOP_FLOORS } from './lib/desktop';
@@ -487,6 +488,11 @@ async function main() {
       app.log.info(`extensions: first check in ${Math.round(delay / 60000)} min`);
       setTimeout(tick, delay).unref();
     })();
+
+    // The engine keeps a copy of every page it serves and never deletes one; left alone it filled a host's
+    // system disk (17 GB, 2026-09-27). Emptied after each extension download job and every half hour while
+    // nothing is downloading through it, never mid-chapter (lib/sources/suwayomi/cache.ts).
+    startEngineCacheKeeper(app.log);
   }
 
   // Nightly backup, aligned to a wall-clock hour and re-read from settings each time the timer is armed.

@@ -472,3 +472,39 @@ test('a valid field the fake does not serve is refused as the FAKE\'s gap, never
   const args = await raw('{ sources(first: 2) { nodes { id } } }');
   assert.match(args.body.errors[0].message, /^FAKE ENGINE: Query\.sources\(first\) is valid/);
 });
+
+/**
+ * clearCachedImages, as measured on a throwaway v2.3.2243 (the nine cases in conformFakeSuwayomi.mjs): each kind
+ * asked for with `true` is emptied and answers true, also when there was nothing to delete; a kind not asked
+ * for, or asked for with false, answers null and keeps what it holds. The page-cache keeper
+ * (lib/sources/suwayomi/cache.ts, engineCache.test.ts) relies on exactly this.
+ *
+ * Reintroduce by having the fake empty the thumbnail cache on a pages-only clear: the thumbnailCache assertion
+ * fails, and so would the keeper's own test.
+ */
+test('clearCachedImages empties what it is asked to, and only that', async () => {
+  fake.reset();
+  const ball = fake.manga('Ball Runner');
+  const { gql } = await client();
+  const ch = await gql<any>('mutation($m:Int!){ fetchChapters(input:{mangaId:$m}){ chapters { id } } }', { m: ball.id });
+  const pages = await gql<any>('mutation($c:Int!){ fetchChapterPages(input:{chapterId:$c}){ pages } }', { c: ch.fetchChapters.chapters[0].id });
+  await fetch(fake.url + pages.fetchChapterPages.pages[0]);
+  await fetch(`${fake.url}/api/v1/manga/${ball.id}/thumbnail`);
+  assert.equal(fake.pageCache.size, 1);
+  assert.equal(fake.thumbnailCache.size, 1);
+
+  const none = await raw('mutation { clearCachedImages(input:{cachedPages:false}) { cachedPages cachedThumbnails downloadedThumbnails } }');
+  assert.deepEqual(none.body, { data: { clearCachedImages: { cachedPages: null, cachedThumbnails: null, downloadedThumbnails: null } } });
+  assert.equal(fake.pageCache.size, 1, 'cachedPages:false emptied the page cache');
+
+  const pagesOnly = await raw('mutation { clearCachedImages(input:{cachedPages:true, clientMutationId:"u"}) { cachedPages cachedThumbnails downloadedThumbnails clientMutationId } }');
+  assert.deepEqual(pagesOnly.body, { data: { clearCachedImages: { cachedPages: true, cachedThumbnails: null, downloadedThumbnails: null, clientMutationId: 'u' } } });
+  assert.equal(fake.pageCache.size, 0);
+  assert.equal(fake.thumbnailCache.size, 1, 'a pages-only clear emptied the thumbnail cache');
+  // Again, with nothing left to delete: still true.
+  assert.equal((await raw('mutation { clearCachedImages(input:{cachedPages:true}) { cachedPages } }')).body.data.clearCachedImages.cachedPages, true);
+  assert.deepEqual(fake.cacheClears.map((c) => c.cachedPages), [false, true, true]);
+
+  const refused = await raw('mutation { clearCachedImages(input:{cachedPage:true}) { cachedPages } }');
+  assert.match(refused.body.errors[0].message, /^Validation error \(WrongType@\[clearCachedImages\]\) : argument 'input' with value .* contains a field not in 'ClearCachedImagesInput': 'cachedPage'$/);
+});
