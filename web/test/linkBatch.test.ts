@@ -101,3 +101,13 @@ test('the manual search keeps asking while sources are pending, instead of readi
   assert.match(src, /&wait=\$\{first \? FIRST_WAIT_MS : POLL_WAIT_MS\}/, 'polls wait the long first wait');
   assert.match(src, /pendingSources > 0\s*\?[\s\S]{0,120}tr\('Still asking \{n\} sources…'/, '"Nobody has that title" is shown while sources are still being asked');
 });
+
+test('the typed search runs on Enter, never per keystroke', () => {
+  // Reported: typing a title into the wizard's search returned nothing. A 300 ms debounce fanned every
+  // partial term out to every source, and the finished title queued behind them in the shared search
+  // slots. Reintroduce by putting a setTimeout(setDebounced) effect back on `term`: this fails.
+  const src = code(read('components/LinkPickSheet.tsx'));
+  assert.doesNotMatch(src, /setTimeout\(\(\) => setDebounced/, 'the search is debounced per keystroke again');
+  assert.match(src, /<form role="search" onSubmit=\{\(e\) => \{ e\.preventDefault\(\); search\(term\); \}\}/);
+  assert.match(src, /onClick=\{\(\) => search\(n\)\}/, 'a name chip does not search');
+});

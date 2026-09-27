@@ -20,7 +20,8 @@ import { LinkChapterList } from '@/components/LinkChapterList';
 
 interface SourceResult { source: string; sourceId: string; title: string; coverUrl?: string }
 interface SourceGroup { source: string; name: string; lang: string | null; results: SourceResult[] }
-interface SearchAnswer { content: SourceGroup[]; pending?: number; asked?: number }
+interface SourceLine { id: string; name: string; state: 'ok' | 'empty' | 'timeout' | 'failed' | 'skipped' | 'pending'; why?: 'disabled' | 'cooldown' }
+interface SearchAnswer { content: SourceGroup[]; pending?: number; asked?: number; sources?: SourceLine[] }
 
 /**
  * The server answers a search 1.5 s after the FIRST source with a hit and keeps asking the rest; the answer
@@ -40,9 +41,15 @@ export function LinkPickSheet({ item, onClose, onAdded }: {
   onAdded: () => void;
 }) {
   const toast = useToast();
+  // What is in the box, and what was searched. ⚠️ Searched on Enter (or a name chip), never per keystroke:
+  // every term is a fan-out to every source, and the server's search slots are shared and first-come. A
+  // 300 ms debounce searched "so", "solo", "solo lev"… each asking every extension, and the title the admin
+  // finished typing queued behind all of them -- behind Cloudflare sources with a 90-second budget each --
+  // so its first answer came back empty. Discover searches on submit for the same reason.
   const [term, setTerm] = useState(item.title);
   const [debounced, setDebounced] = useState(item.title.trim());
-  useEffect(() => { const t = setTimeout(() => setDebounced(term.trim()), 300); return () => clearTimeout(t); }, [term]);
+  const search = (t: string) => { setTerm(t); setDebounced(t.trim()); };
+  const dirty = term.trim() !== debounced;
   const [pending, setPending] = useState<SourceResult | null>(null);
   // The pick's chapter list, in place of the search results: a second Sheet on top would share one Escape.
   const [preview, setPreview] = useState(false);
@@ -70,6 +77,12 @@ export function LinkPickSheet({ item, onClose, onAdded }: {
   const groups = (data?.content ?? []).filter((g) => !taken.has(g.source));
   // Hits exist, but only on the sources this series already reads from: say that, not "nobody has it".
   const onlyTaken = !groups.length && (data?.content ?? []).length > 0;
+  // Why an empty answer is empty, from the server's per-source lines: "nobody has it" is only true of the
+  // sources that were asked AND answered. The rest did not answer, or were not asked (off, or in a cooldown).
+  const lines = data?.sources ?? [];
+  const noAnswer = lines.filter((l) => l.state === 'timeout' || l.state === 'failed').length;
+  const skipped = lines.filter((l) => l.state === 'skipped').length;
+  const answered = lines.filter((l) => l.state === 'ok' || l.state === 'empty').length;
 
   const check = async () => {
     if (!pending) return;
@@ -114,18 +127,20 @@ export function LinkPickSheet({ item, onClose, onAdded }: {
   return (
     <Sheet title={item.title} onClose={onClose} overBottomNav footer={footer}>
       <div className="sticky top-0 z-10 -mx-4 mb-3 bg-ink-950/90 px-4 pb-2 pt-1 backdrop-blur-xs">
-        <div className="flex items-center gap-2 rounded-xl border border-ink-700 bg-ink-900/60 px-3 py-2 focus-within:border-accent">
+        <form role="search" onSubmit={(e) => { e.preventDefault(); search(term); }}
+          className="flex items-center gap-2 rounded-xl border border-ink-700 bg-ink-900/60 px-3 py-2 focus-within:border-accent">
           <IcSearch width={17} height={17} className="text-fog-500" />
           <input ref={inputRef} value={term} onChange={(e) => setTerm(e.target.value)} placeholder={tr('Search sources…')}
-            autoCapitalize="none" className="w-full bg-transparent text-sm text-fog-50 outline-hidden placeholder:text-fog-500" />
+            enterKeyHint="search" autoCapitalize="none" className="w-full bg-transparent text-sm text-fog-50 outline-hidden placeholder:text-fog-500" />
           {term && (
-            <button onClick={() => setTerm('')} className="text-fog-500" aria-label={tr('Clear')}><IcX width={15} height={15} /></button>
+            <button type="button" onClick={() => setTerm('')} className="text-fog-500" aria-label={tr('Clear')}><IcX width={15} height={15} /></button>
           )}
-        </div>
+          <button type="submit" disabled={term.trim().length < 2 || !dirty} className="chip shrink-0 px-2.5 py-0.5 text-[11px] disabled:opacity-40">{tr('Search')}</button>
+        </form>
         {item.names.length > 1 && (
           <div className="mt-2 flex flex-wrap gap-1.5">
             {item.names.map((n) => (
-              <button key={n} type="button" onClick={() => setTerm(n)} className={`chip text-[11px] ${term === n ? 'chip-active' : ''}`}>{n}</button>
+              <button key={n} type="button" onClick={() => search(n)} className={`chip text-[11px] ${debounced === n.trim() ? 'chip-active' : ''}`}>{n}</button>
             ))}
           </div>
         )}
@@ -151,6 +166,11 @@ export function LinkPickSheet({ item, onClose, onAdded }: {
             ? (pendingSources === 1 ? tr('Still asking 1 source…') : tr('Still asking {n} sources…', { n: pendingSources }))
             : onlyTaken ? tr('Only found on sources this series already reads from.')
             : tr('Nobody has that title yet.')}
+          {pendingSources === 0 && (noAnswer > 0 || skipped > 0) && (
+            <span className="mt-1 block text-[11px] text-fog-600">
+              {tr('{a} answered · {n} did not answer · {s} not asked (off or paused)', { a: answered, n: noAnswer, s: skipped })}
+            </span>
+          )}
         </p>
       ) : (
         <div className="space-y-4 pb-2">
