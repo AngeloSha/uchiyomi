@@ -9,14 +9,13 @@
 import test, { before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer, type Server } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync, readFileSync, utimesSync } from 'node:fs';
 import { readFileSync as read } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 const DSN = process.env.TEST_DATABASE_URL;
-/** The stub solver's port. Fixed rather than ephemeral because FLARESOLVERR_URL is read at module load. */
-const SOLVER_PORT = 18291;
 let ROOT = '', DL = '', LIB_ROOT = '';
 if (DSN) {
   ROOT = mkdtempSync(join(tmpdir(), 'yomi-rep-'));
@@ -37,7 +36,6 @@ if (DSN) {
   process.env.REPAIR_PACE_MS = '0';
   // Two, so the count step's cap is observable at all: three files, two counted, one left for tomorrow.
   process.env.REPAIR_COUNT_MAX = '2';
-  process.env.FLARESOLVERR_URL = `http://127.0.0.1:${SOLVER_PORT}`;
 }
 const skip = DSN ? false : 'set TEST_DATABASE_URL to run';
 
@@ -204,6 +202,16 @@ function resetCatalog(): void {
 
 before(async () => {
   if (!DSN) return;
+  // The stub solver comes up FIRST, on a port the system picks, and FLARESOLVERR_URL names it before any module
+  // that reads it at load (lib/sources/flaresolverr.ts) is imported. A fixed port hung every other run that
+  // shared the network namespace (the lanes' int suites all run beside one Postgres container).
+  solver = createServer((_req, res) => {
+    if (!solverReady) { res.writeHead(503); res.end('down'); return; }
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ msg: 'FlareSolverr is ready', version: '3.3.21' }));
+  });
+  await new Promise<void>((go) => solver!.listen(0, '127.0.0.1', go));
+  process.env.FLARESOLVERR_URL = `http://127.0.0.1:${(solver.address() as AddressInfo).port}`;
   const { migrate } = await import('../src/lib/migrate');
   ({ q, pool } = (await import('../src/lib/db')) as any);
   const sources = await import('../src/lib/sources');
@@ -253,12 +261,6 @@ before(async () => {
   await q(`UPDATE lib_books SET pruned_at = now(), pruned_reason = 'missing' WHERE id = 'b_have_5'`);
   await q(`INSERT INTO book_overrides (book_id, number) VALUES ('b_have_6', 8)`);
 
-  solver = createServer((_req, res) => {
-    if (!solverReady) { res.writeHead(503); res.end('down'); return; }
-    res.writeHead(200, { 'content-type': 'application/json' });
-    res.end(JSON.stringify({ msg: 'FlareSolverr is ready', version: '3.3.21' }));
-  });
-  await new Promise<void>((go) => solver!.listen(SOLVER_PORT, '127.0.0.1', go));
 });
 
 beforeEach(async () => {
