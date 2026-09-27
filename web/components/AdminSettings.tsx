@@ -409,6 +409,11 @@ function SchedulesSection({ data, save }: { data: any; save: Save }) {
       <SwitchRow label={tr('Look for failed chapters on other sources')}
         help={tr('When a chapter cannot be saved from the sources this series follows, search the others once a day and follow the one that has it')}
         on={data.auto_follow_on_failure !== false} onChange={(next) => save({ autoFollowOnFailure: next })} />
+      {/* v0.49.0: other names (bff lib/altTitles.ts). OFF by default, which `=== true` reads as: a server
+          that does not send the key yet is a server that matches by the one title, as before. */}
+      <SwitchRow label={tr('Match sources by other names')}
+        help={tr('Read the other names a source lists in its description (English and romanised only) and use them when connecting sources. A name must match exactly, and the chapter numbers must line up.')}
+        on={data.alt_title_matching === true} onChange={(next) => save({ altTitleMatching: next })} />
     </Section>
   );
 }

@@ -61,7 +61,7 @@ function LibraryInner() {
   const [acting, setActing] = useState(false);
   const [moving, setMoving] = useState(false);
   const [removing, setRemoving] = useState(false);
-  // The phone's overflow for the two admin actions (see the bar below).
+  // The phone's overflow for the admin actions (see the bar below).
   const [more, setMore] = useState(false);
   // The Fetch newest job as last polled, while it runs: what the bar's label counts up with.
   const [fetching, setFetching] = useState<{ done: number; total: number } | null>(null);
@@ -222,6 +222,22 @@ function LibraryInner() {
     setActing(false);
   };
 
+  /**
+   * Connect sources (bff lib/linkBatch.ts): search every other source for the selection, under every name
+   * each series goes by, and open the review. Nothing is followed here -- the review page is where every
+   * match is confirmed. Admin-only, like the follow it leads to.
+   */
+  const connectSources = async () => {
+    setActing(true);
+    try {
+      const r = await api<{ batchId: string; total: number }>('/api/admin/link/batches', { json: { seriesIds: [...picked] } });
+      setSelecting(false);
+      setPicked(new Set());
+      router.push(`/admin/link/?batch=${r.batchId}`);
+    } catch (e) { toast(msgOf(e, tr('Could not start Connect sources')), 'error'); }
+    setActing(false);
+  };
+
   const sentinel = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const el = sentinel.current;
@@ -371,7 +387,7 @@ function LibraryInner() {
       {selecting && picked.size > 0 && (
         <div className="fixed inset-x-0 bottom-[calc(5.75rem+env(safe-area-inset-bottom))] z-40 border-t border-ink-700 bg-ink-950/95 px-4 pb-8 pt-3 backdrop-blur-xl lg:bottom-0 lg:pb-[max(0.75rem,env(safe-area-inset-bottom))]">
           {/* ⚠️ Two rows at 390 px, no more: a third row covers a third of the grid. Seven chips plus the
-              count do not fit in two, so on a phone the two admin actions live behind `More` (a Sheet);
+              count do not fit in two, so on a phone the admin actions live behind `More` (a Sheet);
               from lg up there is room and they are chips like the rest. The series page reserves `pe-36`
               for the downloads pill (fixed bottom-20 end-3, floating over this bar's lower band while a
               fetch runs); here that end padding costs two whole rows at 390 px, so the bar pads its BOTTOM
@@ -387,6 +403,7 @@ function LibraryInner() {
                 page's Fetch: a member who may not download does not see it. */}
             {canDownload(user) && <button disabled={acting} onClick={fetchNewest} className="chip text-xs disabled:opacity-50">{tr('Fetch newest')}</button>}
             {isAdmin && <button disabled={acting} onClick={() => setMoving(true)} className="chip hidden text-xs disabled:opacity-50 lg:inline-flex">{tr('Move to library')}</button>}
+            {isAdmin && <button disabled={acting} onClick={connectSources} className="chip hidden text-xs disabled:opacity-50 lg:inline-flex">{tr('Connect sources')}</button>}
             {isAdmin && <button disabled={acting} onClick={() => setRemoving(true)} className="chip hidden text-xs text-rose-300 disabled:opacity-50 lg:inline-flex">{tr('Remove from library')}</button>}
             {isAdmin && <button disabled={acting} onClick={() => setMore(true)} className="chip text-xs disabled:opacity-50 lg:hidden" aria-haspopup="dialog">{tr('More')}</button>}
             {/* Live during a Fetch newest run, unlike the other chips: a 500-series run is minutes of pacing plus
@@ -407,6 +424,10 @@ function LibraryInner() {
             <button onClick={() => { setMore(false); setMoving(true); }}
               className="block w-full rounded-lg px-2.5 py-2.5 text-start text-sm text-fog-100 hover:bg-ink-800/60">
               {tr('Move to library')}
+            </button>
+            <button onClick={() => { setMore(false); void connectSources(); }}
+              className="block w-full rounded-lg px-2.5 py-2.5 text-start text-sm text-fog-100 hover:bg-ink-800/60">
+              {tr('Connect sources')}
             </button>
             <button onClick={() => { setMore(false); setRemoving(true); }}
               className="block w-full rounded-lg px-2.5 py-2.5 text-start text-sm text-rose-300 hover:bg-ink-800/60">

@@ -26,6 +26,7 @@ import { cadenceLine, cadenceText } from '@/lib/cadence';
 import { activityStatus, weeksOf } from '@/lib/activity';
 import { namesGroups } from '@/lib/supplyLine';
 import { preferFirst } from '@/lib/sourceOrder';
+import { AltTitlesEditor } from '@/components/AltTitlesEditor';
 
 // The patience field, and only that: `w-14`, not the page's `w-full` field class, so "Patience [ 2 ] days ·
 // Currently 2" and the two buttons share one row -- on a phone the footer sits under the sheet's cap and
@@ -502,6 +503,7 @@ export function SourcesSheet({ id, series, groups, admin, error, isLoading, have
             <button type="button" onClick={onFindMissing} className="chip text-xs">{tr('Add one from Find missing chapters')}</button>
           </div>
         )}
+        {isAdmin && <AltTitlesEditor seriesId={id} />}
         {isAdmin && series?.borrowNamesEffective !== undefined && (
           <div className="mt-3">
             <label className="flex items-start gap-2 text-[11px] leading-relaxed text-fog-500">

@@ -920,12 +920,19 @@ GET    /api/admin/import/batches/:id DELETE /api/admin/import/batches/:id
 POST   /api/admin/import/batches/:id/resume
 POST   /api/admin/import/batches/:id/run
 PATCH  /api/admin/import/candidates/:cid
+GET    /api/admin/link/batches    POST   /api/admin/link/batches
+GET    /api/admin/link/batches/:id DELETE /api/admin/link/batches/:id
+POST   /api/admin/link/batches/:id/resume
+POST   /api/admin/link/batches/:id/run
+POST   /api/admin/link/items/:id/candidates
+GET    /api/admin/series/:id/alt-titles POST   /api/admin/series/:id/alt-titles
+DELETE /api/admin/series/:id/alt-titles/:norm
 ```
 
 **Server settings.** `GET /api/admin/settings` is the one row: `server_name`, `allow_registration`,
 `updater_hours`, `extension_hours`, `extension_auto_update`, `update_check`, `install_ping`, `install_ping_last`,
 `cleanup_read`, `cleanup_read_days`, `backup_hour`, `scanlator_prefs`, `auto_follow_on_failure`,
-`repair_enabled`, `source_prefs`, `group_upgrade`, `borrow_names`, plus `extensions_configured` (computed). `auto_follow_on_failure` defaults to true and
+`repair_enabled`, `source_prefs`, `group_upgrade`, `borrow_names`, `alt_title_matching`, plus `extensions_configured` (computed). `auto_follow_on_failure` defaults to true and
 controls the bounded once-per-series-per-day source hunt after an ordinary scheduled-download failure; it
 never makes an interactive Add/Fetch hunt and never runs after a refusal. `PATCH
 /api/admin/settings` takes any subset of `serverName` (1–64 chars), `allowRegistration`, `updaterHours`
@@ -935,6 +942,8 @@ backup — the pending timer is re-armed at once, so the change applies to the n
 after; `GET /api/admin/tasks` shows the backup's `schedule` as `daily at HH:00` from the same column),
 `scanlatorPrefs` and `sourcePrefs` (both below), `groupUpgrade` (the repair's group upgrades, off by default),
 `borrowNames` (chapter names from another source, off by default; switching it off clears the names it wrote),
+`altTitleMatching` (other names, off by default: read a source's description for the names a series goes by
+and match other sources under them, exactly — see Connect sources below),
 `autoFollowOnFailure`, and `repairEnabled` (the nightly library repair, on by
 default — switching it off stops the schedule only, since nothing it does deletes, merges or renumbers
 anything). Each field is written on its own, an out-of-range value is a **400** and nothing is written, and
@@ -974,6 +983,21 @@ push goes, whether or not push is configured. A delivery is retried once on a ne
 never on another 4xx; after 10 consecutive failures the target is switched off and the admins are told once.
 The audit rows `notify.target.create` / `.update` / `.delete` / `.test` carry ids, names, the host and the
 names of the fields changed — never an address or a token.
+
+**Connect sources** (`/api/admin/link/*`, since v0.49.0) follows other sources for many series at once,
+with a review in between — the library's select bar starts it. `POST /api/admin/link/batches {seriesIds}`
+(1–500) searches, in the background and one batch at a time server-wide, every source a series does not
+already read from, under its title and up to three of its other names. A hit is kept only when one of our
+names EQUALS (normalised to a-z0-9) its title or — with `alt_title_matching` on — one of the names its own
+description lists; containment never counts, and an other name needs five characters. Its numbering is then
+measured both ways (90 % each; one way only for a main-title-to-main-title match on ten or more numbers):
+`ok`, or `numbering_differs` / `too_few` as a warning. `GET .../batches/:id` returns each series with its
+candidates, what it follows now and `freeSlots`; `POST .../items/:id/candidates {source, sourceSeriesId}`
+adds a hand-picked candidate, judged the same way; `POST .../batches/:id/run {candidateIds, override?}`
+follows the chosen ones — a warning only with `override: true` — under the two-follower cap, with the admin
+as `added_by`, and keeps the source's title as a `confirmed` other name. Nothing is downloaded. The other
+names themselves are `GET`/`POST /api/admin/series/:id/alt-titles` and `DELETE .../alt-titles/:norm`; with the
+switch on they are also read from the source's description when a series is added.
 
 The bulk importer's body takes `titles`, `autoUpdate`, `chapterCount` and `chapterFrom`, with the same
 meaning as on `/api/sources/add` (`chapterFrom: "newest"` takes the latest N and floors the series; the

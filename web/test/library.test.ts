@@ -359,12 +359,14 @@ test('the select bar fits two rows on a phone: admin actions fold behind More', 
   const phoneOnly = chips.filter((c) => /\blg:hidden\b/.test(c));
   const wideOnly = chips.filter((c) => /\bhidden\b.*\blg:inline-flex\b/.test(c));
   assert.equal(phoneOnly.length, 1, 'expected exactly one phone-only More chip');
-  assert.equal(wideOnly.length, 2, 'expected the two admin chips to be wide-screen only');
+  // Three since v0.49.0: Move to library, Connect sources, Remove from library.
+  assert.equal(wideOnly.length, 3, 'expected the three admin chips to be wide-screen only');
   const phoneChips = chips.length - wideOnly.length;
   assert.ok(phoneChips <= 6, `${phoneChips} chips reach the phone bar; more than six wraps to a third row at 390 px`);
   // And the sheet closes before either dialog opens: a Sheet (z-60) paints over a Modal (z-50).
   assert.match(code(src), /setMore\(false\); setMoving\(true\)/, 'Move to library opens its modal under the sheet');
   assert.match(code(src), /setMore\(false\); setRemoving\(true\)/, 'Remove opens its dialog under the sheet');
+  assert.match(code(src), /setMore\(false\); void connectSources\(\)/, 'Connect sources is not in the phone sheet');
 });
 
 test('every string the select bar renders is in the locale files, singulars included', () => {

@@ -1141,6 +1141,84 @@ CREATE TABLE IF NOT EXISTS health_ignored (
   seen_at  timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (check_id, item_key)
 );
+
+-- v0.49.0: the other names a series goes by (lib/altTitles.ts). A series is stored under ONE title, and a
+-- source that files it under another name -- the romanised Korean, the official English, the fan English --
+-- was invisible to every cross-source lookup. One row per name, keyed on its normalised form, so the same
+-- name spelt twice is one row. origin says where it came from: description (read out of a source's own
+-- description, only while alt_title_matching is on), admin (typed by hand), confirmed (the title a source
+-- uses, taken when an admin confirmed a link to it) or merged (the absorbed row's title on a merge).
+-- source_id names the source a description or confirmed name came from.
+CREATE TABLE IF NOT EXISTS series_alt_titles (
+  series_id  text NOT NULL REFERENCES lib_series(id) ON DELETE CASCADE,
+  norm       text NOT NULL,
+  title      text NOT NULL,
+  origin     text NOT NULL,
+  source_id  text,
+  added_by   uuid REFERENCES users(id) ON DELETE SET NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (series_id, norm)
+);
+CREATE INDEX IF NOT EXISTS series_alt_titles_norm_idx ON series_alt_titles (norm);
+
+-- v0.49.0: the admin opt-in for other names. Off by default: while off, no description is parsed for names
+-- and only the names an admin typed or confirmed are searched.
+ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS alt_title_matching boolean NOT NULL DEFAULT false;
+
+-- v0.49.0: Connect sources (lib/linkBatch.ts), the library's bulk way to follow other sources. Shaped like
+-- the import review: a batch searches, an admin reviews every candidate, and only what they tick is
+-- followed. State lives here rather than in memory so a restart or a closed tab keeps the review.
+--   state  searching = asking the sources, review = waiting on the admin, linking = following the picks,
+--          done = nothing left to follow.
+CREATE TABLE IF NOT EXISTS link_batches (
+  id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id     uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  state       text NOT NULL DEFAULT 'searching',
+  total       int  NOT NULL DEFAULT 0,
+  searched    int  NOT NULL DEFAULT 0,
+  linked      int  NOT NULL DEFAULT 0,
+  failed      int  NOT NULL DEFAULT 0,
+  created_at  timestamptz NOT NULL DEFAULT now(),
+  updated_at  timestamptz NOT NULL DEFAULT now()
+);
+-- One row per series in the batch. names is every name the search used; asked and unreachable count the
+-- sources it put the question to and the ones that did not answer, so "nothing found" can say how hard it
+-- looked. state pending = not searched yet, done = searched, error = the series could not be read.
+CREATE TABLE IF NOT EXISTS link_items (
+  id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  batch_id    uuid NOT NULL REFERENCES link_batches(id) ON DELETE CASCADE,
+  ord         int  NOT NULL,
+  series_id   text NOT NULL REFERENCES lib_series(id) ON DELETE CASCADE,
+  title       text NOT NULL,
+  names       text[] NOT NULL DEFAULT '{}',
+  state       text NOT NULL DEFAULT 'pending',
+  asked       int  NOT NULL DEFAULT 0,
+  unreachable int  NOT NULL DEFAULT 0,
+  UNIQUE (batch_id, ord)
+);
+-- One row per source a series was found on.
+--   verdict       ok = a name matches exactly and the numbering lines up both ways; numbering_differs = the
+--                 name matches but the numbering does not; title_differs = no name matches (a hand-picked
+--                 candidate only; the search never keeps one).
+--   our_name / their_name  the pair of names that matched, so the row can say "matched via".
+--   manual        an admin added this candidate from the search sheet.
+--   status        set once the run reached it: linked, cap, gone, unavailable, or an error code.
+CREATE TABLE IF NOT EXISTS link_candidates (
+  id               uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  item_id          uuid NOT NULL REFERENCES link_items(id) ON DELETE CASCADE,
+  source           text NOT NULL,
+  source_series_id text NOT NULL,
+  their_title      text,
+  cover            text,
+  our_name         text,
+  their_name       text,
+  coverage_fwd     real,
+  coverage_back    real,
+  verdict          text NOT NULL,
+  manual           boolean NOT NULL DEFAULT false,
+  status           text,
+  UNIQUE (item_id, source)
+);
 `;
 
 // Serialises migrate() across processes. CREATE TABLE IF NOT EXISTS is not safe to run concurrently:

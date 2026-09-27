@@ -5099,6 +5099,16 @@ paths:
                     Run the library repair nightly (REPAIR_HOURS, default 24h). On by default. Switching it
                     off stops the schedule only -- POST /api/admin/tasks/repair/run and the Health page's
                     chips are unaffected, because nothing it does deletes, merges or renumbers anything.
+                altTitleMatching:
+                  type: boolean
+                  description: >-
+                    Match other sources under the other names a series goes by. Off by default. On, a
+                    source's own description is read for its "Alternative Titles / Associated Names / Other
+                    names:" line (Latin-script names only) and the names are kept on the series; Connect
+                    sources (POST /api/admin/link/batches) then searches under them and accepts a candidate
+                    whose title or listed names EQUAL one of ours after normalisation -- never by
+                    containment -- with the chapter numbering measured both ways. Off stops parsed names
+                    being used at once; names an admin typed or confirmed are always used.
                 komgaGhostChapters:
                   description: >-
                     List the chapters this server does not hold on the Komga-compatible API: the ones the
@@ -7675,6 +7685,363 @@ paths:
           description: Not found
         "409":
           description: "Conflict: decision:'auto' requested but the resolve pass found no match for this row"
+  /api/admin/link/batches:
+    get:
+      tags:
+        - admin
+      summary: Every Connect sources batch, newest first, with its counts.
+      operationId: getApiAdminLinkBatches
+      description: >-
+        Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. Up to 50
+        batches as `{content: [{id, state, total, searched, linked, failed, created_at, updated_at, stale}]}`.
+        `state` is `searching`, `review`, `linking` or `done`; `stale` is true for a batch that reads
+        `searching` while nobody in this process is searching it (a restart) -- call /resume. Swept daily:
+        seven days after it last changed once `done`, thirty days otherwise.
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+    post:
+      tags:
+        - admin
+      summary: Start Connect sources for a set of series -- search every other source for each, under every name it goes by.
+      operationId: postApiAdminLinkBatches
+      description: >-
+        Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. Nothing is
+        followed yet. In the background, each series is searched on every registered source except its
+        primary and the sources it already follows, under its title and up to three of its other names
+        (series_alt_titles; a name read from a description only while `alt_title_matching` is on, and with
+        it on the primary's own description is read first). Every exact-name hit per source, and the source's
+        own top hit, is judged: a candidate is kept only when one of our names EQUALS its title or, with the
+        switch on, one of the names its own description lists (normalised: lower case, a-z0-9; an other name
+        needs at least five characters). Its numbering is then measured both ways -- `ok` when it lists 90 %
+        of our numbers and we list 90 % of its (one way only for a main-title-to-main-title match on a
+        listing of ten or more); `numbering_differs` or `too_few` otherwise. One batch searches at a time
+        server-wide. Answers `{batchId, total, skipped}`: `skipped` lists ids that are not live series.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [seriesIds]
+              properties:
+                seriesIds:
+                  type: array
+                  minItems: 1
+                  maxItems: 500
+                  items:
+                    type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: "Bad request, or `nothing_to_link` when none of the ids is a live series"
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+        "409":
+          description: "Conflict: `busy`, another batch is searching"
+  /api/admin/link/batches/{id}:
+    get:
+      tags:
+        - admin
+      summary: A Connect sources batch, its series and their candidates.
+      operationId: getApiAdminLinkBatchesId
+      description: >-
+        Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. `batch`
+        carries `stale` and `maxFollowers`. Each item is a series: `series_id, title, names` (every name
+        searched), `state` (`pending`, `done`, `error`), `asked` and `unreachable` (sources asked, and those
+        that did not answer), `primary` ({source, name} or null), `following` (the sources it follows now,
+        read live), `freeSlots` (how many more it may follow), and `candidates`: `{id, source, name,
+        source_series_id, their_title, cover, our_name, their_name, coverage_fwd, coverage_back, verdict,
+        manual, status}`. `verdict` is `ok`, `numbering_differs`, `too_few` or `title_differs` (only on a
+        hand-picked candidate). `status` is null until a run reached it, then `linked`, `cap`, `primary`,
+        `gone`, `unavailable`, `not_confirmed` or `error`. A batch left `linking` by a restart is handed back
+        as `review` (or `done`) on this call. A malformed id is 404.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+        "404":
+          description: Not found
+    delete:
+      tags:
+        - admin
+      summary: Discard a Connect sources batch. Sources already followed stay followed.
+      operationId: deleteApiAdminLinkBatchesId
+      description: >-
+        Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. A search or
+        run still going for the batch stops before its next series or candidate, and the search guard is
+        released at once. Idempotent; a malformed id is 404.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+        "404":
+          description: "Not found: the id is not a uuid"
+  /api/admin/link/batches/{id}/resume:
+    post:
+      tags:
+        - admin
+      summary: Resume the search of a batch a restart left `searching`.
+      operationId: postApiAdminLinkBatchesIdResume
+      description: >-
+        Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. Series
+        already searched keep their candidates; only the pending ones are searched. Idempotent while this
+        process is searching the batch.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+        "404":
+          description: Not found
+        "409":
+          description: "Conflict: not searching, or another batch is searching"
+  /api/admin/link/batches/{id}/run:
+    post:
+      tags:
+        - admin
+      summary: Follow the chosen candidates. Never downloads a chapter.
+      operationId: postApiAdminLinkBatchesIdRun
+      description: >-
+        Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. Follows
+        each named candidate that has not been run, in the background (poll the batch). An `ok` candidate is
+        followed; a `numbering_differs` or `too_few` one only with `override: true` (the admin's answer to
+        "these do not line up -- follow anyway?"), a `title_differs` one only when it was picked by hand AND
+        `override` is true; otherwise its status reads `not_confirmed`. Each follow is one transaction under
+        the series row's lock and the follower cap (two besides the primary): a pick past the cap reads
+        `cap`. The follow is recorded with the admin as `added_by`, audited as `series.follow_source` with
+        `via: link_batch` and `override`, and the source's own title is kept as a `confirmed` other name.
+        The series' listing is refreshed once afterwards so the new source's chapters show at once. The
+        flip to `linking` is one conditional UPDATE: a double tap answers 409.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [candidateIds]
+              properties:
+                candidateIds:
+                  type: array
+                  minItems: 1
+                  maxItems: 1500
+                  items:
+                    type: string
+                    format: uuid
+                override:
+                  type: boolean
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: "Bad request, or `nothing_to_link` when no named candidate is waiting"
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+        "404":
+          description: Not found
+        "409":
+          description: "Conflict: still searching, or already linking"
+  /api/admin/link/items/{id}/candidates:
+    post:
+      tags:
+        - admin
+      summary: Add a candidate an admin picked by hand to one series of a batch.
+      operationId: postApiAdminLinkItemsIdCandidates
+      description: >-
+        Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. The pair is
+        judged on the server by the same rule as the search's finds and saved with `manual: true` whatever the
+        verdict, so the review can say why it is amber. Answers `{ok, candidate}`. The series' primary or a
+        source it already follows is 409 `already_followed`; a source that is not installed 409
+        `unknown_source`; a series no longer in the library 409 `gone`; a source that did not answer 502.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [source, sourceSeriesId]
+              properties:
+                source:
+                  type: string
+                sourceSeriesId:
+                  type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: Bad request
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+        "404":
+          description: Not found
+        "409":
+          description: "Conflict: `already_followed`, `unknown_source` or `gone`"
+        "502":
+          description: "Bad gateway: the source did not answer"
+  /api/admin/series/{id}/alt-titles:
+    get:
+      tags:
+        - admin
+      summary: The other names a series goes by.
+      operationId: getApiAdminSeriesIdAltTitles
+      description: >-
+        Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. Answers
+        `{matching, content: [{title, norm, origin, source_id, sourceName, created_at}]}`: `matching` is the
+        `alt_title_matching` switch; `origin` is `description` (read from a source's description, used only
+        while the switch is on), `admin` (typed by hand), `confirmed` (the title a source uses, kept when an
+        admin followed it) or `merged` (the title of a series merged into this one).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+        "404":
+          description: Not found
+    post:
+      tags:
+        - admin
+      summary: Add another name for a series.
+      operationId: postApiAdminSeriesIdAltTitles
+      description: >-
+        Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. Stored as
+        `admin`; a name already stored under another origin becomes `admin`. A name whose normalised form
+        (a-z0-9) is shorter than five characters is 400 `too_short`; the series' own title is 400
+        `same_as_title`.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title]
+              properties:
+                title:
+                  type: string
+                  maxLength: 200
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: "Bad request, `too_short` or `same_as_title`"
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+        "404":
+          description: Not found
+  /api/admin/series/{id}/alt-titles/{norm}:
+    delete:
+      tags:
+        - admin
+      summary: Forget one of a series' other names.
+      operationId: deleteApiAdminSeriesIdAltTitlesNorm
+      description: >-
+        Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. `norm` is
+        the name's normalised key as GET returns it. A name read from a description comes back the next time
+        that description is read while the switch is on.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: norm
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+        "404":
+          description: Not found
   /api/admin/sources:
     get:
       tags:

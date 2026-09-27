@@ -447,6 +447,7 @@ function findOrder(): string[] {
 // type keeps its old address for anyone who imported it from here.
 import { pickBest, pickBestScored, type MatchConfidence } from '../lib/titleMatch';
 import { withOrigin, listActivity, type Origin, type ActivityEntry } from '../lib/downloadActivity';
+import { learnAltTitles } from '../lib/altTitles';
 export type { MatchConfidence };
 
 /**
@@ -929,6 +930,10 @@ export async function addSeriesFromSource(opts: {
        folder, libraryId, autoUpdate !== false, source, sourceId, floor, chosen.length],
     ))[0];
     await replaceListing(id, listingRows(chapters.map((c) => ({ ...c, source: source! })), chosen, new Set(), source!, releaseOrder(prefs))).catch(() => {});
+    // The other names the source's own description lists (lib/altTitles.ts), from the RAW description --
+    // cleanDescription folds the lines the parser reads by. Only while the admin switch is on; never waited
+    // on the add's behalf, and never able to fail it.
+    void learnAltTitles(id, series?.summary, source!).catch(() => {});
     // The other sources are judged only now, against the listing above: it is what stands in for "what
     // we hold" on a series that holds nothing. A nothing-yet add has no download and so no card, so one
     // is minted purely to carry the results to the dialog's poll -- and only when there is something to
@@ -1025,6 +1030,7 @@ export async function addSeriesFromSource(opts: {
     await setBookDates(folder, selected).catch(() => {});
     if (heldId) {
       await replaceListing(heldId, listingRows(chapters.map((c) => ({ ...c, source: source! })), chosen, new Set(), source!, releaseOrder(prefs))).catch(() => {});
+      void learnAltTitles(heldId, series?.summary, source!).catch(() => {});
       // As on the nothing-yet branch: no download means no card, so one is minted purely to carry the
       // judgement to the dialog's poll, and only when there is something to judge.
       if (opts.alsoFollow?.length) {
@@ -1148,6 +1154,7 @@ export async function addSeriesFromSource(opts: {
       // wrong series. Set before the listing and the judgement, because neither is waited for.
       const card = jobs.get(folder); if (card) card.seriesId = seriesId;
       await replaceListing(seriesId, listingRows(chapters.map((c) => ({ ...c, source: source! })), chosen, new Set(), source!, releaseOrder(prefs))).catch(() => {});
+      void learnAltTitles(seriesId, series?.summary, source!).catch(() => {});
       // Only once the listing is written, and only from here: the row did not exist when the dialog was
       // answered (persistScan minted it from chapter 1 above), and the judgement measures against this
       // listing -- against `lib_books` it would see one chapter and refuse everything as `too_few_listed`

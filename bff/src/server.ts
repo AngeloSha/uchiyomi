@@ -38,6 +38,7 @@ import { appVersion } from './lib/appVersion';
 import { buildPayload, installFacts, sendPing } from './lib/installPing';
 import authRoutes from './routes/auth';
 import adminRoutes, { sweepImportBatches } from './routes/admin';
+import { sweepLinkBatches } from './lib/linkBatch';
 import catalogRoutes from './routes/catalog';
 import imageRoutes, { authorizeImageRequest } from './routes/images';
 import personalRoutes from './routes/personal';
@@ -444,6 +445,9 @@ async function main() {
       try {
         const r = await sweepImportBatches();
         if (r.removed) app.log.info(`import batches: swept ${r.removed}`);
+        // Connect sources batches (lib/linkBatch.ts) keep the same rule on the same tick.
+        const l = await sweepLinkBatches();
+        if (l.removed) app.log.info(`link batches: swept ${l.removed}`);
       } catch (e) {
         app.log.error(e as any);
       }

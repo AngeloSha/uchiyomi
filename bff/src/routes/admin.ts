@@ -68,6 +68,8 @@ import { randomBytes } from 'crypto';
 import { appVersion } from '../lib/appVersion';
 import { PING_URL, buildPayload, installFacts, monthlyId, newSecret, sendForget } from '../lib/installPing';
 import { withOrigin } from '../lib/downloadActivity';
+import { linkRoutes } from './adminLink';
+import { recordAltTitles } from '../lib/altTitles';
 
 type ImportJob = { running: boolean; total: number; done: number; added: number; already: number; notFound: number; failed: number; startedAt: number; details: Array<{ title: string; status: string; source?: string }> };
 let importJob: ImportJob | null = null;
@@ -399,6 +401,8 @@ async function keepRestricted(qq: typeof q, userId: string): Promise<void> {
 export default async function adminRoutes(app: FastifyInstance) {
   app.addHook('preHandler', authenticate);
   app.addHook('preHandler', requireAdmin);
+  // Connect sources and a series' other names (routes/adminLink.ts), behind the two hooks above.
+  await linkRoutes(app);
 
   // Owned-library scan (Phase 1): walk the CBZ folder and upsert lib_series/lib_books.
   app.post('/api/admin/library/scan', async () => persistScan());
@@ -425,7 +429,7 @@ export default async function adminRoutes(app: FastifyInstance) {
   // ---- server settings ----
   const SETTINGS_COLS = 'server_name, allow_registration, updater_hours, extension_hours, extension_auto_update, '
     + 'update_check, install_ping, install_ping_last, scanlator_prefs, cleanup_read, cleanup_read_days, backup_hour, auto_follow_on_failure, '
-    + 'repair_enabled, komga_ghost_chapters, adult_genres, adult_sources, source_prefs, group_upgrade, borrow_names';
+    + 'repair_enabled, komga_ghost_chapters, adult_genres, adult_sources, source_prefs, group_upgrade, borrow_names, alt_title_matching';
   // `extensions_configured` is not a column: extension_hours has a NOT NULL default, so its presence says
   // nothing about whether there is an engine to check. The settings page needs to know, or it offers two
   // controls for a job that can never run.
@@ -538,6 +542,12 @@ export default async function adminRoutes(app: FastifyInstance) {
        * default. Off takes back the names it gave every series that follows this switch.
        */
       borrowNames: z.boolean().optional(),
+      /**
+       * Other names (lib/altTitles.ts). Off by default. On, a source's description is read for the names a
+       * series goes by, and Connect sources searches and matches under them -- always exactly, never by
+       * containment. Off stops the parsed names being used at once; names an admin typed or confirmed stay.
+       */
+      altTitleMatching: z.boolean().optional(),
     }).parse(req.body);
     if (b.serverName !== undefined) await q('UPDATE server_settings SET server_name = $1, updated_at = now() WHERE id = 1', [b.serverName]);
     if (b.allowRegistration !== undefined) await q('UPDATE server_settings SET allow_registration = $1, updated_at = now() WHERE id = 1', [b.allowRegistration]);
@@ -570,6 +580,7 @@ export default async function adminRoutes(app: FastifyInstance) {
     // not whenever that window happens to lapse.
     if (b.adultGenres !== undefined || b.adultSources !== undefined) invalidateAdultFilter();
     if (b.groupUpgrade !== undefined) await q('UPDATE server_settings SET group_upgrade = $1, updated_at = now() WHERE id = 1', [b.groupUpgrade]);
+    if (b.altTitleMatching !== undefined) await q('UPDATE server_settings SET alt_title_matching = $1, updated_at = now() WHERE id = 1', [b.altTitleMatching]);
     if (b.borrowNames !== undefined) {
       await q('UPDATE server_settings SET borrow_names = $1, updated_at = now() WHERE id = 1', [b.borrowNames]);
       // "Stop doing that" means the names it wrote go too; a series switched on for itself keeps its own.
@@ -1121,6 +1132,9 @@ export default async function adminRoutes(app: FastifyInstance) {
       [id, source, sourceSeriesId, cand.title || null, cand.coverage, userIdOf(req)],
     );
     await logAudit('series.follow_source', { userId: userIdOf(req), detail: { id, title: row.title, source, sourceSeriesId, coverage: cand.coverage }, req });
+    // A person just confirmed this source carries the series, so the name it uses is one of the series' own
+    // names now (lib/altTitles.ts) -- the next search for another source may find it under that name.
+    if (cand.title) await recordAltTitles(id, [cand.title], 'confirmed', { sourceId: source, userId: userIdOf(req) }).catch(() => 0);
     // The listing again, now with this source in it, as an unfollow does (below): the chapters it has that the
     // series lacks show up on the series page at once, as rows to fetch, instead of at the next sweep -- which
     // is when the owner expected them and saw nothing (v0.48.3). Not waited for: a Cloudflare source can take

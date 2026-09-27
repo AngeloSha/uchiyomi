@@ -18,6 +18,7 @@ import { allWritable, containedPath } from './fsGuard';
 import { tombstoneBooks } from './chapterCleanup';
 import { LIBRARY_ROOT, DL_ROOT, listChapters } from './library';
 import { reconcileListingProgress } from './listingProgress';
+import { carryAltTitles } from './altTitles';
 import { join, dirname, relative, resolve, sep, isAbsolute } from 'path';
 import { isDesktop } from './desktop';
 import { toStoredRel, dirnameRel } from './relPath';
@@ -162,6 +163,10 @@ export async function mergeSeries(fromId: string, intoId: string): Promise<Merge
     );
     await qq(`DELETE FROM listing_progress WHERE series_id = $1`, [fromId]);
     await reconcileListingProgress({ run: qq, seriesId: intoId });
+    // The other names (lib/altTitles.ts) go with the chapters, and the absorbed row's own title becomes one
+    // of them: an admin who merged two rows has said the two titles are one work, which is exactly the
+    // knowledge a search under the other title needs. The survivor keeps its own row where both had a name.
+    await carryAltTitles(qq, fromId, intoId);
 
     // Point the absorbed row at its survivor instead of deleting it: its folder still exists on disk, and
     // persistScan needs this to keep putting those files under the merged series.
@@ -236,7 +241,7 @@ const BOOK_KEYED_TABLES = [...BOOK_KEYED_USER_TABLES, 'book_overrides', 'page_ha
 const SERIES_KEYED_TABLES = [
   'favorites', 'collection_items', 'ratings', 'series_colors', 'series_art', 'series_seen', 'series_trackers',
   'series_overrides', 'notes', 'series_sources', 'series_listing', 'chapter_failures', 'tracker_progress',
-  'reading_events', 'offline_downloads', 'bookmarks', 'listing_progress',
+  'reading_events', 'offline_downloads', 'bookmarks', 'listing_progress', 'series_alt_titles', 'link_items',
 ] as const;
 
 export interface ForgetRefusal {
