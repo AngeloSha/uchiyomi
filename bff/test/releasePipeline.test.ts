@@ -118,6 +118,14 @@ test('every CI job has a timeout, and installs from the lockfile', () => {
   // And not a timeout the job cannot meet: Tests took 54-58 minutes on every green run 2026-09-25..26, and
   // v0.48.4's first run was cancelled at a 60-minute limit with all 1988 tests passed.
   assert.ok(ci.jobs.test['timeout-minutes'] >= 80, 'the test job timeout is below what a green run needs');
+  // What keeps a green run inside that limit since v0.49.0: the bff files run a few at a time, each on a fresh
+  // database of its own (test/run-shards.mjs), not one after another on one database. Reintroduce by putting
+  // `npm test` back in the BFF step: this names it.
+  const bffStep = (ci.jobs.test.steps ?? []).find((st: any) => st.name === 'BFF tests');
+  assert.ok(bffStep, 'the BFF tests step went missing');
+  assert.match(String(bffStep.run), /\bnpm run test:ci\b/, 'CI runs the bff files one at a time on one database again');
+  const pkg = JSON.parse(read('bff/package.json'));
+  assert.equal(pkg.scripts['test:ci'], 'node test/run-shards.mjs', 'test:ci no longer runs the files on databases of their own');
   // `npm install` may resolve differently from package-lock.json and rewrites it on the runner, so a
   // Dependabot lockfile bump was never what CI tested; `npm ci` refuses a lockfile that disagrees.
   // Reintroduce by changing one `npm ci` back to `npm install`: this names the step.

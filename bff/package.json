@@ -10,7 +10,8 @@
     "build": "tsc -p tsconfig.json",
     "start": "node dist/server.js",
     "dev": "tsx watch src/server.ts",
-    "test": "node --import tsx --test --test-concurrency=1 \"test/*.test.ts\""
+    "test": "node --import tsx --test --test-concurrency=1 \"test/*.test.ts\"",
+    "test:ci": "node test/run-shards.mjs"
   },
   "dependencies": {
     "@fastify/compress": "^9.2.0",
