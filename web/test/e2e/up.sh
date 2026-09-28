@@ -82,14 +82,16 @@ if [ -n "${E2E_MIN_FREE_GB:-}" ]; then APP_ENV+=(-e "MIN_FREE_GB=$E2E_MIN_FREE_G
 
 cleanup() {
   [ "${KEEP:-0}" = "1" ] && { echo "kept: $NET on :$PORT, fake sources on :$FAKE_A_PORT/:$FAKE_B_PORT${ENGINE:+, fake engine on :$ENGINE_PORT} (library $LIB, data $DATA)"; return; }
-  docker rm -f "$APP" "$DB" "$FAKE_A" "$FAKE_B" "$ENGINE_C" >/dev/null 2>&1 || true
+  # -v: postgres:16-alpine declares its data directory a volume, and every run left that anonymous volume behind
+  # (about 49 MB); nothing else here has one to leave.
+  docker rm -f -v "$APP" "$DB" "$FAKE_A" "$FAKE_B" "$ENGINE_C" >/dev/null 2>&1 || true
   docker network rm "$NET" >/dev/null 2>&1 || true
   # /data is written by the container as PUID (our own uid), so a plain rm works.
   rm -rf "$LIB" "$DATA"
 }
 trap cleanup EXIT INT TERM
 
-docker rm -f "$APP" "$DB" "$FAKE_A" "$FAKE_B" "$ENGINE_C" >/dev/null 2>&1 || true
+docker rm -f -v "$APP" "$DB" "$FAKE_A" "$FAKE_B" "$ENGINE_C" >/dev/null 2>&1 || true
 docker network rm "$NET" >/dev/null 2>&1 || true
 docker network create --subnet "$SUBNET" "$NET" >/dev/null
 

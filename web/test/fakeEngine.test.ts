@@ -125,3 +125,12 @@ test('up.sh starts the engine on a port no other instance of the rig uses, and w
   const w49Base = Number(w49[1].replace(/_/g, ''));
   for (const [p, , , e] of rows) assert.equal(w49Base + (p % 1000), e, `walk49 looks for ${p}'s engine on ${w49Base + (p % 1000)}, up.sh starts it on ${e}`);
 });
+
+test("up.sh removes its containers with their anonymous volumes", () => {
+  // postgres:16-alpine declares a volume, so every instance's database left an anonymous one behind (about 49 MB a
+  // run) when up.sh removed its containers without -v. Reintroduce by dropping -v from either rm: the line is named.
+  const sh = readFileSync(join(__dirname, 'e2e', 'up.sh'), 'utf8');
+  const rms = sh.split('\n').filter((l) => /^\s*docker rm\b/.test(l));
+  assert.equal(rms.length, 2, 'up.sh removes its containers in some other way now: read it here');
+  for (const l of rms) assert.match(l, /^\s*docker rm (-f -v|-v -f|-fv|-vf) /, `up.sh leaves its containers' volumes behind: ${l.trim()}`);
+});
