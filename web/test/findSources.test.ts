@@ -68,9 +68,11 @@ test("'not tried' is never 'nothing found': four groups, each in the run's order
     res('i', { why: 'too_few' }),
     res('j', { why: 'no_source' }),
     res('k', { why: 'no_answer' }),
+    // Searched, and only the source it already follows lists it (the server's reason since its review).
+    res('l', { why: 'followed_already' }),
   ]);
   assert.deepEqual(g.found.map((r) => r.seriesId), ['a', 'h']);
-  assert.deepEqual(g.nothing.map((r) => r.seriesId), ['b', 'd', 'k'], 'a series never searched reads as nothing found');
+  assert.deepEqual(g.nothing.map((r) => r.seriesId), ['b', 'd', 'k', 'l'], 'a series never searched reads as nothing found');
   assert.deepEqual(g.skipped.map((r) => r.seriesId), ['e', 'f', 'i', 'j'], 'a series nobody searched for reads as nothing found');
   assert.deepEqual(g.notTried.map((r) => r.seriesId), ['c', 'g']);
   assert.deepEqual(notTriedIds(run({ status: 'stopped', results: [res('c', { why: 'not_tried' }), res('b', { why: 'no_match' })] })), ['c']);
@@ -78,7 +80,7 @@ test("'not tried' is never 'nothing found': four groups, each in the run's order
 
 test('every reason is a sentence, and "not tried" says so rather than "not found"', () => {
   // Reintroduce a missing case (drop 'full' from findWhyLine): it reads the fallback "Nothing found" and fails here.
-  const whys = ['no_match', 'refused', 'full', 'posting_order', 'too_few', 'no_source', 'no_answer', 'not_tried'];
+  const whys = ['no_match', 'followed_already', 'refused', 'full', 'posting_order', 'too_few', 'no_source', 'no_answer', 'not_tried'];
   const lines = whys.map(findWhyLine);
   for (const [i, why] of whys.entries()) {
     assert.ok(lines[i] && lines[i] !== why && !/\b[a-z]+_[a-z]+\b/.test(lines[i]), `'${why}' has no words`);
@@ -478,6 +480,10 @@ test('m2/m3: every reason in its own words -- too few chapters, no source to ask
   assert.equal(findWhyLine('too_few'), 'Too few chapters to compare (fewer than 3)', "'too_few' is not said as the review words it");
   assert.equal(findWhyLine('no_source'), 'No other source could be asked', "'no_source' is not said as the review words it");
   assert.equal(findWhyLine('no_answer'), 'No other source answered', "'no_answer' is not said as the review words it");
+  // The server's extra reason (its review's nit): "no other source lists it" would be false -- the one it follows does.
+  // Drop its case: it reads the fallback "Nothing found".
+  assert.equal(findWhyLine('followed_already'), 'No other source lists it besides the one it already follows',
+    "'followed_already' reads as nothing found");
   assert.equal(findWhyLine('refused'), 'Found a possible match, but it did not pass the title and chapter-number check');
   assert.equal(findWhyLine('not_tried'), 'Not tried: the search was stopped, ran out of time or was interrupted by a restart before it got there',
     'not_tried leaves the restart out');

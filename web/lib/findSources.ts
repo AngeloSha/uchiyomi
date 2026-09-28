@@ -46,10 +46,13 @@ export interface AltTitle {
  * - `no_source`: no other source could be asked (switched off, cooling down, or left out);
  * - `no_answer`: other sources were asked, and none of them answered;
  * - `no_match`: searched, and no source that answered lists it under its title or other names;
+ * - `followed_already`: searched, and no source that answered lists it -- but the one it already follows does, so it is
+ *   not "no other source lists it" (the server's own reason since its review, in the same group as `no_match`);
  * - `refused`: a candidate was found and failed the title and chapter-number check;
  * - `not_tried`: never reached -- a stop, the run's time limit or a restart cut the run short. NOT searched.
  */
-export type FindWhy = 'posting_order' | 'no_match' | 'full' | 'refused' | 'too_few' | 'no_source' | 'no_answer' | 'not_tried';
+export type FindWhy =
+  | 'posting_order' | 'no_match' | 'followed_already' | 'full' | 'refused' | 'too_few' | 'no_source' | 'no_answer' | 'not_tried';
 
 export interface FindFollowed { sourceId: string; name: string; chapters: number | null }
 
@@ -151,6 +154,7 @@ export function findEta(n: number | null | undefined): string {
 export function findWhyLine(why: string | null | undefined): string {
   switch (why) {
     case 'no_match': return tr('No other source lists it under its title or other names');
+    case 'followed_already': return tr('No other source lists it besides the one it already follows');
     case 'refused': return tr('Found a possible match, but it did not pass the title and chapter-number check');
     case 'full': return tr('Already follows as many other sources as a series may');
     case 'posting_order': return tr('Numbered by posting order: no other source’s numbers line up with it');
