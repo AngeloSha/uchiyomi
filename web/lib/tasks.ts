@@ -28,6 +28,11 @@ export function scheduleText(t: { schedule?: string; scheduleKey?: string; sched
   return t.scheduleKey ? tr(t.scheduleKey, t.scheduleVars) : (t.schedule ?? '');
 }
 
+/**
+ * What a repair step left as it was, for the next run to try again: a copy that could not be reached, a download
+ * that failed, a group's copy that was shorter. A bare "12 left" read as "12 still to do".
+ */
+const leftUnchanged = (n: number): string => (n === 1 ? tr('1 left unchanged') : tr('{n} left unchanged', { n }));
 
 /**
  * The one-line outcome shown beside a background task in Admin.
@@ -59,39 +64,53 @@ export function taskResult(r: any): string {
     const ran = (step: string) => !only || only.includes(step);
     const bits: string[] = [];
     if (r.stopped === 'shutdown') bits.push(tr('stopped for a restart'));
-    if (r.stopped === 'disk') bits.push(tr('stopped: the download disk is at its floor'));
+    // The downloader's MIN_FREE_GB, in the words of its setting ("Stop when free space is below"): "at its
+    // floor" was our jargon, and the translators had to guess which floor.
+    if (r.stopped === 'disk') bits.push(tr('stopped: free space on the download disk is below the minimum'));
     // Cancel on the download pill (#82): the counts after it are as far as it got.
     if (r.stopped === 'cancelled') bits.push(tr('cancelled'));
     if (ran('count')) {
       // `uncounted` is the backlog: 30,000 chapter files have never been opened, so the first weeks of
       // nightly runs are a drain and "2000 stamped" alone looks like the job has finished.
       const stamped = r.counted === 1 ? tr('1 page count stamped') : tr('{n} page counts stamped', { n: r.counted });
-      bits.push(r.uncounted ? `${stamped}, ${tr('{n} still to count', { n: r.uncounted })}` : stamped);
+      const left = r.uncounted === 1 ? tr('1 still to count') : tr('{n} still to count', { n: r.uncounted });
+      bits.push(r.uncounted ? `${stamped}, ${left}` : stamped);
     }
     if (ran('short')) {
       const s = r.short || {};
       // `confirmed` is not a failure: it is the answer "every source really does serve two pages here",
       // and it is why the finding stops coming back. `left` is the honest remainder -- a copy that threw,
       // a source in a cooldown -- and without it a run that proved nothing reads as a run that fixed it.
-      const line = tr('short: {r} replaced, {c} confirmed', { r: s.replaced ?? 0, c: s.confirmed ?? 0 });
-      bits.push(s.left ? `${line}, ${tr('{n} left', { n: s.left })}` : line);
+      // ⚠️ One count per key, each with its singular: "1 substituídos, 1 confirmados" was the one key for both.
+      const replaced = s.replaced ?? 0;
+      const confirmed = s.confirmed ?? 0;
+      const line = [
+        replaced === 1 ? tr('short: 1 replaced') : tr('short: {n} replaced', { n: replaced }),
+        confirmed === 1 ? tr('1 confirmed') : tr('{n} confirmed', { n: confirmed }),
+      ].join(', ');
+      bits.push(s.left ? `${line}, ${leftUnchanged(s.left)}` : line);
     }
     if (ran('gaps')) {
       const g = r.gaps || {};
       const series = g.series ?? 0;
       const fetched = g.fetched ?? 0;
+      // `followed` counts SERIES that followed a new source (bff RepairResult), which a bare "2 followed" left
+      // for the translators to guess.
+      const followed = g.followed ?? 0;
       bits.push([
         series === 1 ? tr('gaps: 1 series') : tr('gaps: {n} series', { n: series }),
-        tr('{n} followed', { n: g.followed ?? 0 }),
+        followed === 1 ? tr('1 followed a new source') : tr('{n} followed a new source', { n: followed }),
         fetched === 1 ? tr('1 chapter fetched') : tr('{n} chapters fetched', { n: fetched }),
       ].join(', '));
     }
     // Group upgrades (#81) are off unless switched on, and a line that said "groups: off" every night would be
-    // noise about a feature nobody chose; with the switch on, it says what the step did.
+    // noise about a feature nobody chose; with the switch on, it says what the step did. Named after its setting
+    // ("Upgrade chapters to a preferred group"): a bare "groups" read as any grouping at all.
     if (ran('groups') && r.groups && !r.groups.off) {
       const g = r.groups;
-      const line = tr('groups: {n} replaced', { n: g.replaced ?? 0 });
-      bits.push(g.left ? `${line}, ${tr('{n} left', { n: g.left })}` : line);
+      const n = g.replaced ?? 0;
+      const line = n === 1 ? tr('group upgrades: 1 replaced') : tr('group upgrades: {n} replaced', { n });
+      bits.push(g.left ? `${line}, ${leftUnchanged(g.left)}` : line);
     }
     // Reading directions (#102) are learned quietly most nights once a library has been through it once, so the
     // clause appears when one was learned -- and always on a run that asked for nothing else, where an empty
@@ -116,7 +135,8 @@ export function taskResult(r: any): string {
         const checked = t.series === 1 ? tr('1 series re-checked') : tr('{n} series re-checked', { n: t.series });
         const added = t.added === 1 ? tr('1 chapter added') : tr('{n} chapters added', { n: t.added });
         const re = `${checked}, ${added}`;
-        bits.push(t.failed ? `${re}, ${tr('{n} still could not be saved', { n: t.failed })}` : re);
+        const still = t.failed === 1 ? tr('1 still could not be saved') : tr('{n} still could not be saved', { n: t.failed });
+        bits.push(t.failed ? `${re}, ${still}` : re);
       }
     }
     if (ran('solver')) {
@@ -125,7 +145,8 @@ export function taskResult(r: any): string {
       // source is blaming it, so "nothing" is the normal, healthy outcome -- omitting the clause entirely
       // made a solver-only run render as an empty line, which is a button that did nothing.
       const bit = [s.reset ? tr('solver reset') : tr('solver: nothing to reset')];
-      if (s.unblocked) bit.push(tr('{n} unblocked', { n: s.unblocked }));
+      // `unblocked` counts sources (the ones blaming the solver, bff stepSolver).
+      if (s.unblocked) bit.push(s.unblocked === 1 ? tr('1 source unblocked') : tr('{n} sources unblocked', { n: s.unblocked }));
       if (s.expired) bit.push(s.expired === 1 ? tr('1 old block cleared') : tr('{n} old blocks cleared', { n: s.expired }));
       bits.push(bit.join(', '));
     }
@@ -148,11 +169,16 @@ export function taskResult(r: any): string {
       bits.push(r.unmounted.length === 1 ? tr('one folder looked unmounted and was left alone: {list}', { list })
         : tr('{count} folders looked unmounted and were left alone: {list}', { count: r.unmounted.length, list }));
     }
-    bits.push(tr('{n} checked', { n: r.checked }), r.missing ? tr('{n} missing, marked for the next sweep', { n: r.missing }) : tr('none missing'));
+    bits.push(r.checked === 1 ? tr('1 checked') : tr('{n} checked', { n: r.checked }),
+      !r.missing ? tr('none missing')
+        : r.missing === 1 ? tr('1 missing, marked for the next sweep') : tr('{n} missing, marked for the next sweep', { n: r.missing }));
     // The read library is not Uchiyomi's to re-fetch (a re-fetch lands under the download folder, on a new
     // row), so those are counted for the admin and left alone -- and said, or the count above would be
-    // read as "the read library is fine".
-    if (r.readLibraryMissing) bits.push(tr('{n} missing in the read library, not marked', { n: r.readLibraryMissing }));
+    // read as "the read library is fine". ⚠️ Said as "a library you built by hand", the words the rest of the
+    // app uses for it: "the read library" read as "the library of read chapters", and three drafts said that.
+    const own = r.readLibraryMissing ?? 0;
+    if (own) bits.push(own === 1 ? tr('1 missing in a library you built by hand, not marked')
+      : tr('{n} missing in a library you built by hand, not marked', { n: own }));
     if (r.stopped === 'shutdown') bits.push(tr('stopped for a restart'));
     return ` \u00b7 ${bits.join(', ')}`;
   }
@@ -170,8 +196,8 @@ export function taskResult(r: any): string {
     // A run that stopped because EVERY due chapter's folder was missing along with its file is the download
     // volume not being mounted; the chapters it left are the ones still due. Without this line the result
     // reads as a quiet "0 chapters deleted" when the only fix is to mount the share, after which the next
-    // run takes them.
-    if (r.stopped === 'unmounted') bits.push(tr("stopped: every due chapter's folder is missing, is the download volume mounted?"));
+    // run takes them. ("Due" alone, due for what, was the translators' guess: it is spelled out.)
+    if (r.stopped === 'unmounted') bits.push(tr('stopped: every chapter due for deletion is missing its folder; is the download volume mounted?'));
     return ` \u00b7 ${bits.join(', ')}`;
   }
   if (typeof r.added === 'number') {
@@ -195,12 +221,20 @@ export function taskResult(r: any): string {
     // A check that could not read the repositories is NOT a quiet check. Saying "0 updated" for it is the
     // shape of the original bug, one layer up.
     if (!r.refreshed) return ` \u00b7 ${tr('could not read the repositories')}${r.refreshError ? `: ${r.refreshError}` : ''}`;
-    const bits: string[] = [tr('{n} updated', { n: r.updated?.length ?? 0 })];
-    if (r.failed?.length) bits.push(tr('{n} failed', { n: r.failed.length }));
-    if (!r.autoUpdate && r.updatesAvailable?.length) bits.push(tr('{n} waiting (auto-update off)', { n: r.updatesAvailable.length }));
-    if (r.obsolete?.length) bits.push(tr('{n} obsolete', { n: r.obsolete.length }));
-    if (r.reinstalled?.length) bits.push(tr('{n} reinstalled', { n: r.reinstalled.length }));
-    if (r.deferred) bits.push(tr('waiting for the library sweep'));
+    // Each count with its singular: one extension is the usual night, and "1 atualizadas" is what a lone
+    // plural key reads as in a language whose participle agrees.
+    const updated = r.updated?.length ?? 0;
+    const bits: string[] = [updated === 1 ? tr('1 updated') : tr('{n} updated', { n: updated })];
+    if (r.failed?.length) bits.push(r.failed.length === 1 ? tr('1 failed') : tr('{n} failed', { n: r.failed.length }));
+    const waiting = r.updatesAvailable?.length ?? 0;
+    if (!r.autoUpdate && waiting) bits.push(waiting === 1 ? tr('1 waiting (auto-update off)') : tr('{n} waiting (auto-update off)', { n: waiting }));
+    const obsolete = r.obsolete?.length ?? 0;
+    if (obsolete) bits.push(obsolete === 1 ? tr('1 obsolete') : tr('{n} obsolete', { n: obsolete }));
+    const reinstalled = r.reinstalled?.length ?? 0;
+    if (reinstalled) bits.push(reinstalled === 1 ? tr('1 reinstalled') : tr('{n} reinstalled', { n: reinstalled }));
+    // Deferred because a chapter sweep is running (bff extensionMonitor): the job every other line calls the
+    // chapter sweep, not a "library sweep" that reads as the Library scan.
+    if (r.deferred) bits.push(tr('waiting for the chapter sweep to end'));
     return ` \u00b7 ${bits.join(', ')}`;
   }
   return '';

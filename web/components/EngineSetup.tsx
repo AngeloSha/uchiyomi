@@ -166,7 +166,8 @@ export function EngineSetup({ status, span = '', bare = false }: { status: Engin
       const now = qc.getQueryData<EngineReport>(['ext-status']) ?? status;
       if (!(now.configured && now.reachable)) setStill(stillLine(now));
     } catch (e) {
-      setStill(tr('Still no answer: {reason}', { reason: msgOf(e, tr('no reply')) }));
+      const why = msgOf(e, '');
+      setStill(why ? tr('Still no answer: {reason}', { reason: why }) : tr('Still no answer'));
     } finally {
       setChecking(false);
     }
@@ -175,8 +176,9 @@ export function EngineSetup({ status, span = '', bare = false }: { status: Engin
   const waiting = h === 'unreachable';
   const retry = status.retry;
   const retryLine = retry
+    // One try has no "since": it was AT that time.
     ? (retry.attempts === 1
-      ? tr('Tried 1 time since {time} · next try {when}', { time: wallClock(retry.since), when: untilText(Date.parse(retry.nextAt) - Date.now()) })
+      ? tr('Tried once, at {time} · next try {when}', { time: wallClock(retry.since), when: untilText(Date.parse(retry.nextAt) - Date.now()) })
       : tr('Tried {n} times since {time} · next try {when}', { n: retry.attempts, time: wallClock(retry.since), when: untilText(Date.parse(retry.nextAt) - Date.now()) }))
     : waiting && status.lastTry ? tr('Last tried {ago}', { ago: relativeTime(status.lastTry) }) : null;
 

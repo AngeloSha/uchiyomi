@@ -330,8 +330,8 @@ export function downloadSections<J extends DownloadJob>(d: Partial<SourceJobs<J>
 
 /**
  * A run's name on its Server tasks card. The scheduled check, a bulk Fetch newest and a full repair go by their
- * kind; a repair a Health key started says what was pressed and what it is about -- "Fill now · Walk Gap", "Find
- * a longer copy · Walk Tale · Ch. 3" -- in Health's own words (healthCopy.ts kindLabel), so this card and Recent
+ * kind; a repair a Health key started says what kind of run it is and what it is about -- "Gap fill · Walk Gap",
+ * "Longer-copy search · Walk Tale · Ch. 3" -- in Health's own words (healthCopy.ts kindLabel), so this card and Recent
  * repairs never name one run two ways. Every Health key starts a repair run, and a card reading "Library repair"
  * for each could not be told from the nightly. With no series the viewer may list (the server drops the label
  * for the 18+ hide) it is the press alone, "Fill now"; a server older than v0.49.0 sends no kind at all.

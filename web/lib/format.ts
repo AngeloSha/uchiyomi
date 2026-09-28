@@ -57,7 +57,7 @@ export function chapterName(b: { chapterName?: string | null }): string {
 //   formatClock   a live stopwatch, "2:14" -- a clock needs no translation
 //   wallClock     a time of day, "14:05" / "02:05 PM", the way the app's language writes it
 //   durationText  how long, in the reader's language: "4 min", "1 hr 5 min"
-//   etaLine       how long an action usually takes: "Up to 10 minutes · Last time 2:14"
+//   etaLine       how long an action usually takes: "Up to 10 minutes · Took 2:14 last time"
 //   etaText       how long a slow job has left: "About 3 days"
 //   untilText     when something happens next: "in 20 minutes"
 //   relativeTime  how long ago: "5m ago" (English, unchanged) / "vor 5 Minuten"
@@ -160,7 +160,7 @@ export interface Eta {
 
 /**
  * How long an action usually takes, said before anyone presses it: "A few seconds", "Under a minute",
- * "Up to 10 minutes", "1–5 minutes", "Up to 3 hours", and " · Last time 2:14" when there was one.
+ * "Up to 10 minutes", "1–5 minutes", "Up to 3 hours", and " · Took 2:14 last time" when there was one.
  *
  * Rounded UP to the minute, because an estimate that says "up to 4 minutes" about a run that takes 4:20 has
  * told the person it is stuck. Past an hour and a half the unit is hours: "up to 240 minutes" is a number
@@ -182,7 +182,8 @@ export function etaLine(e: Eta): string {
     out = min >= 60_000 && a < b ? tr('{a}–{b} minutes', { a, b })
       : b === 1 ? tr('Up to 1 minute') : tr('Up to {n} minutes', { n: b });
   }
-  if (e.lastMs != null && Number.isFinite(e.lastMs) && e.lastMs > 0) out += ` · ${tr('Last time {clock}', { clock: formatClock(e.lastMs) })}`;
+  // "Last time 2:14" read as a time of day in every language: {clock} is how long it took (m:ss).
+  if (e.lastMs != null && Number.isFinite(e.lastMs) && e.lastMs > 0) out += ` · ${tr('Took {clock} last time', { clock: formatClock(e.lastMs) })}`;
   return out;
 }
 

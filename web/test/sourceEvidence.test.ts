@@ -180,8 +180,9 @@ test('the running Test\'s clock, Check all\'s progress and its toast', () => {
   assert.equal(checkAllLabel({ total: 40, done: 40, current: null }), 'Checking 40 of 40');
   assert.equal(checkAllLabel(null), 'Checking…');
   assert.deepEqual(sweepToast({ needsAttention: [1], inconclusive: [] }), { text: '1 source needs attention', type: 'error' });
-  assert.deepEqual(sweepToast({ needsAttention: [1, 2], inconclusive: [1] }), { text: '2 sources need attention · 1 could not finish in time', type: 'error' });
-  assert.deepEqual(sweepToast({ needsAttention: [], inconclusive: [1, 2] }), { text: '2 could not finish in time', type: 'info' });
+  assert.deepEqual(sweepToast({ needsAttention: [1, 2], inconclusive: [1] }), { text: '2 sources need attention · 1 source could not finish in time', type: 'error' });
+  // Alone, this part is the whole toast: it names what could not finish, or a gendered language has to guess.
+  assert.deepEqual(sweepToast({ needsAttention: [], inconclusive: [1, 2] }), { text: '2 sources could not finish in time', type: 'info' });
   assert.deepEqual(sweepToast({ needsAttention: [], inconclusive: [] }), { text: 'All sources healthy', type: 'success' });
 });
 
@@ -208,7 +209,7 @@ test('every word this says is in all eight languages, the counted pairs included
   // Reintroduce by deleting "Chapter list" from one locale: that language fails by name.
   const words = [
     ...STAGE_LABELS, ...BY_LABELS, ...GLYPH_WORDS, 'Failing',
-    '1 source needs attention', '{n} sources need attention', '1 could not finish in time', '{n} could not finish in time',
+    '1 source needs attention', '{n} sources need attention', '1 source could not finish in time', '{n} sources could not finish in time',
     'Testing… {elapsed} of up to {max}', 'Checking {done} of {total}', 'Last tested {when} with the Test button',
   ];
   for (const lang of ['ar', 'de', 'es', 'fr', 'ja', 'pt-BR', 'ru', 'zh']) {

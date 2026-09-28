@@ -133,7 +133,9 @@ export function ServerDownloadsView({ focusFolder }: { focusFolder?: string | nu
   return (
     <div className="space-y-8 pb-10 pt-5" data-downloads-view>
       {s.running.length > 0 && (
-        <Section id="running" title={tr('Running')} n={s.running.length}>
+        // 'Running now', not 'Running': that word is one repair run's status (healthCopy runStatusWord), and a
+        // heading over a list is a plural in the languages that mark number.
+        <Section id="running" title={tr('Running now')} n={s.running.length}>
           <div className={GRID}>
             {s.running.map((t) => (
               <DownloadTile key={t.key} t={t} section="running" admin={isAdmin} nameOf={nameOf} onCancel={cancelJob}

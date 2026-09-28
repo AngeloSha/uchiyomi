@@ -41,7 +41,7 @@ export async function engineWalk({ page, api, go, press, shot, check, waitFor, s
     await go(url, 3000);
     let s = await waitFor(async () => { const v = await setup(); return v?.state === 'unreachable' ? v : null; }, 20_000);
     check(`${tag}: the setup screen says the engine isn't answering`, !!s && /isn’t answering/.test(s.text), JSON.stringify(s)?.slice(0, 300));
-    check(`${tag}: with when it was last asked`, !!s && /Tried \d+ times since|Tried 1 time since|Last tried/.test(s.text), s?.text.slice(0, 300));
+    check(`${tag}: with when it was last asked`, !!s && /Tried \d+ times since|Tried once, at|Last tried/.test(s.text), s?.text.slice(0, 300));
     check(`${tag}: the platform chips and a command to copy`, !!s && s.chips === 5 && s.commands.some((c) => /docker compose/.test(c)), JSON.stringify(s?.commands));
     check(`${tag}: its ring turns while it waits`, s?.ring === 'spin', s?.ring);
     check(`${tag}: no sideways scroll`, !!s && s.overflow <= 0, String(s?.overflow));

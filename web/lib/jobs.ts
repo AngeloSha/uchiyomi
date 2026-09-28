@@ -69,7 +69,7 @@ export interface RunCard {
    * v0.49.0, the repair (bff lib/downloadJobs.ts): which run it is -- `full`, or a Health press (`fix_short`,
    * `fill`, `retry`, `steps:…`) -- and what a one-row press is about: `label` (the series title or the source's
    * name), `number` (the chapter's) and `seriesId` (the series `label` names). The Server tasks card is named from
-   * them, "Find a longer copy · Walk Tale · Ch. 3" (lib/serverDownloads.ts runName). The server leaves `label`,
+   * them, "Longer-copy search · Walk Tale · Ch. 3" (lib/serverDownloads.ts runName). The server leaves `label`,
    * `number` and `seriesId` out for a viewer who may not list that series (the 18+ hide), as it does `current`.
    */
   repairKind?: string;

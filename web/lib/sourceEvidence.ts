@@ -267,7 +267,9 @@ export function sweepToast(r: { needsAttention?: unknown[]; inconclusive?: unkno
   const late = r?.inconclusive?.length ?? 0;
   const parts: string[] = [];
   if (n) parts.push(n === 1 ? tr('1 source needs attention') : tr('{n} sources need attention', { n }));
-  if (late) parts.push(late === 1 ? tr('1 could not finish in time') : tr('{n} could not finish in time', { n: late }));
+  // The noun is said: with nobody needing attention this part is the whole toast, and "1 could not finish" had
+  // no referent to agree with.
+  if (late) parts.push(late === 1 ? tr('1 source could not finish in time') : tr('{n} sources could not finish in time', { n: late }));
   if (!parts.length) return { text: tr('All sources healthy'), type: 'success' };
   return { text: parts.join(' · '), type: n ? 'error' : 'info' };
 }

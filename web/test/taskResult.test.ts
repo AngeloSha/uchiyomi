@@ -77,11 +77,12 @@ test('a verify run that found read-library files gone says so, without claiming 
   // The read library is not Uchiyomi's to re-fetch (a re-fetch lands under the download folder, on a new
   // row), so the task counts those and leaves them alone -- and must say so, or "12 checked, none missing"
   // over a read library with three files gone reads as "the read library is fine". Reintroduce by dropping
-  // the `readLibraryMissing` line.
+  // the `readLibraryMissing` line. It is "a library you built by hand" on screen, the app's words for it:
+  // "the read library" was translated as "the library of read chapters" in three languages.
   const r = taskResult({ checked: 12, missing: 0, readLibraryMissing: 3, unmounted: [] });
   assert.match(r, /none missing/);
-  assert.match(r, /3 missing in the read library, not marked/);
-  assert.doesNotMatch(taskResult({ checked: 12, missing: 0, readLibraryMissing: 0, unmounted: [] }), /read library/, 'nothing missing there says nothing about it');
+  assert.match(r, /3 missing in a library you built by hand, not marked/);
+  assert.doesNotMatch(taskResult({ checked: 12, missing: 0, readLibraryMissing: 0, unmounted: [] }), /built by hand/, 'nothing missing there says nothing about it');
 });
 
 test('a backup that measured nothing says so instead of showing a contented size', () => {
@@ -113,7 +114,7 @@ test('an extension check reports what it did, including what it deliberately did
   assert.match(messy, /1 failed/);
   assert.match(messy, /1 obsolete/);
   assert.match(messy, /1 reinstalled/);
-  assert.match(messy, /waiting for the library sweep/);
+  assert.match(messy, /waiting for the chapter sweep to end/, 'the deferral names the chapter sweep, the job every other line names');
 });
 
 test('a quiet extension check does not claim things are waiting when auto-update is on', () => {
@@ -135,8 +136,8 @@ test('a repair reports all five sections, with the backlog it has not reached ye
     failures: { reset: 41 },
     solver: { reset: true, unblocked: 4, expired: 0 },
   });
-  assert.equal(r, ' · 2000 page counts stamped, 28625 still to count · short: 3 replaced, 5 confirmed, 12 left'
-    + ' · gaps: 5 series, 2 followed, 9 chapters fetched · 41 failures reset · solver reset, 4 unblocked');
+  assert.equal(r, ' · 2000 page counts stamped, 28625 still to count · short: 3 replaced, 5 confirmed, 12 left unchanged'
+    + ' · gaps: 5 series, 2 followed a new source, 9 chapters fetched · 41 failures reset · solver reset, 4 sources unblocked');
 });
 
 test('a repair counts in singulars when the count is one', () => {
@@ -148,7 +149,7 @@ test('a repair counts in singulars when the count is one', () => {
     failures: { reset: 1 },
     solver: { reset: false, unblocked: 0, expired: 1 },
   });
-  assert.equal(r, ' · 1 page count stamped · short: 0 replaced, 0 confirmed · gaps: 1 series, 0 followed, 1 chapter fetched'
+  assert.equal(r, ' · 1 page count stamped · short: 0 replaced, 0 confirmed · gaps: 1 series, 0 followed a new source, 1 chapter fetched'
     + ' · 1 failure reset · solver: nothing to reset, 1 old block cleared');
 });
 
@@ -210,7 +211,7 @@ test('a repair that stopped early says so before its counts', () => {
   const disk = taskResult({
     counted: 0, uncounted: 900, stopped: 'disk', only: ['count'],
   });
-  assert.equal(disk, ' · stopped: the download disk is at its floor · 0 page counts stamped, 900 still to count');
+  assert.equal(disk, ' · stopped: free space on the download disk is below the minimum · 0 page counts stamped, 900 still to count');
 });
 
 test('a repair that is switched off says so, instead of five empty sections', () => {
@@ -237,11 +238,12 @@ test('group upgrades say what they did when switched on, and nothing when off (#
     failures: { reset: 0 }, solver: { reset: false, unblocked: 0, expired: 0 },
   };
   // Off is the default, and "groups: off" on every night's line would be noise about a feature nobody chose.
-  assert.doesNotMatch(taskResult({ ...base, groups: { off: true, looked: 0, replaced: 0, left: 0 } }), /groups/);
+  assert.doesNotMatch(taskResult({ ...base, groups: { off: true, looked: 0, replaced: 0, left: 0 } }), /group/);
   // A result from before v0.47.0 has no `groups` at all.
-  assert.doesNotMatch(taskResult(base), /groups/);
-  assert.match(taskResult({ ...base, groups: { looked: 3, replaced: 2, left: 1 } }), / · groups: 2 replaced, 1 left/);
-  assert.equal(taskResult({ counted: 0, uncounted: 0, only: ['groups'], groups: { looked: 1, replaced: 1, left: 0 } }), ' · groups: 1 replaced');
+  assert.doesNotMatch(taskResult(base), /group/);
+  // Named after its setting ("Upgrade chapters to a preferred group"): a bare "groups" read as any grouping.
+  assert.match(taskResult({ ...base, groups: { looked: 3, replaced: 2, left: 1 } }), / · group upgrades: 2 replaced, 1 left unchanged/);
+  assert.equal(taskResult({ counted: 0, uncounted: 0, only: ['groups'], groups: { looked: 1, replaced: 1, left: 0 } }), ' · group upgrades: 1 replaced');
   // A cancelled run (the download pill, #82) leads with it, like the other stops.
   assert.match(taskResult({ ...base, stopped: 'cancelled' }), /^ · cancelled · /);
 });

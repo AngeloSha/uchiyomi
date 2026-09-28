@@ -60,6 +60,17 @@ function codeOf(e: unknown): string | null {
   try { return e instanceof ApiError ? (JSON.parse(e.body)?.error ?? null) : null; } catch { return null; }
 }
 
+/**
+ * What a source did lately, as ONE sentence per status with its streak inside: "refused us 3 times in a row". The
+ * streak used to be glued after the verb in English order, which a verb-final language (de, ja) cannot say.
+ */
+function healthLine(h: NonNullable<Candidate['health']>): string {
+  const n = h.consecutive;
+  if (h.status === 'rate_limited') return n > 1 ? tr('rate-limited us {n} times in a row', { n }) : tr('rate-limited us');
+  if (h.status === 'blocked') return n > 1 ? tr('refused us {n} times in a row', { n }) : tr('refused us');
+  return n > 1 ? tr('did not answer {n} times in a row', { n }) : tr('did not answer');
+}
+
 /** Why a source was not offered, in words rather than a code. */
 function whyText(c: Candidate): string {
   switch (c.why) {
@@ -74,7 +85,8 @@ function whyText(c: Candidate): string {
     case 'no_chapters': return tr('Listed no chapters');
     case 'blocked': return tr('Temporarily unavailable');
     case 'unreachable': return tr('Could not be reached (timed out or refused)');
-    case 'not_tried': return tr('Not asked: enough sources already had it');
+    // "It" is the series (bff fill.ts `not_tried`): enough OTHER sources listed it, so this one was never asked.
+    case 'not_tried': return tr('Not asked: enough other sources already list this series');
     case 'disabled': return tr('Switched off');
     // #116: the series is numbered by posting order, so another source's chapter 20 is not this series' 20.
     case 'posting_order': return tr('Numbers these posts its own way: this series is numbered by posting order');
@@ -372,9 +384,7 @@ export function FindMissingDialog({ seriesId, onClose }: { seriesId: string; onC
             successful download clears the streak. The person decides, with the record in front of them. */}
         {c.health && (
           <p className="mt-1 text-xs text-amber-300">
-            {tr('Recently unreliable')} · {c.health.status === 'rate_limited' ? tr('rate-limited us')
-              : c.health.status === 'blocked' ? tr('refused us') : tr('did not answer')}
-            {c.health.consecutive > 1 && ` ${tr('{n} times in a row').replace('{n}', String(c.health.consecutive))}`}
+            {tr('Recently unreliable')} · {healthLine(c.health)}
             {!c.health.lastOkAt && ` · ${tr('never completed a download here')}`}
           </p>
         )}
