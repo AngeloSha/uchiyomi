@@ -194,6 +194,9 @@ test('every diagnosis the server can reach reads as its English: each reason by 
     ['empty streak', facts(null, { emptyStreak: 3 })],
     ['unknown', facts('something nobody has seen')],
     ['unexplained', facts(null), { adapterOk: false }],
+    // v0.49.1: the site's own offline notice, stored as its classified error (bff lib/sources/offline.ts) and seen live.
+    ['site offline', facts('site_offline: the site says it is offline ("Aqua Manga is temporarily offline")')],
+    ['site offline, live', facts(null), live('search', 'site_offline', 'site_offline: the site says it is offline ("Aqua Manga is temporarily offline")')],
   ];
   const seen = new Set<string>();
   for (const [what, f, probe, base] of cases) {

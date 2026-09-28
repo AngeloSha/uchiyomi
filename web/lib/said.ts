@@ -176,6 +176,7 @@ const REASON_WORDS: Record<string, () => string> = {
   upstream_down: () => tr('The extension engine did not answer.'),
   extension_error: () => tr('This source\'s extension reported an error.'),
   unnumbered: () => tr('This source lists chapters without numbers Uchiyomi can use.'),
+  site_offline: () => tr('The site says it is offline (its own page)'),
   unknown: NEEDS_ADMIN,
 };
 
@@ -703,6 +704,7 @@ const WORDS: Record<string, (p: P) => string | null> = {
     : tr('It keeps taking longer than the time allowed to return its newest page. Raise SOURCE_LATEST_TIMEOUT_MS if the wait is acceptable; otherwise the site itself, or the Cloudflare solver in front of it, is the slow part.')),
   'fix.unknown': () => tr('The recorded error does not match anything known. Re-test it for a live verdict.'),
   'fix.unexplained': () => tr('The live test failed, and nothing recorded explains it. Re-test it and read the failing step.'),
+  'fix.siteOffline': () => tr('Wait for the site to come back, or find other sources for its series.'),
 };
 
 /** A numbering row's source, by name; "Its source" when there was none to name. */

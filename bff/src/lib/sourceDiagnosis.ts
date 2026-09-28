@@ -153,7 +153,7 @@ export type FixCode =
   | 'fix.extensionFailed' | 'fix.timeout' | 'fix.disabled' | 'fix.moved' | 'fix.unreachableAt' | 'fix.cdnAnswered403'
   | 'fix.nothingToDo' | 'fix.solverBroken' | 'fix.markupChanged' | 'fix.unknownLive' | 'fix.unnumbered'
   | 'fix.emptySearch' | 'fix.emptyChapters' | 'fix.emptyPages' | 'fix.testTimeout' | 'fix.tooSlow' | 'fix.unknown'
-  | 'fix.unexplained';
+  | 'fix.unexplained' | 'fix.siteOffline';
 
 /** A fix: its English, and its code with what fills it. */
 interface Fix { text: string; said: Said }
@@ -183,7 +183,7 @@ const whileStage = (c: RuleCtx) => (c.stage ? ` while ${STAGE_WORD[c.stage]}` : 
  * wrong. Waiting is the fix for the site; for its series, Health offers Find other sources (the row's action).
  */
 const SITE_OFFLINE = () => D('site_offline', 'The site says it is offline (its own page)',
-  'Wait for the site to come back, or find other sources for its series.', 'admin');
+  fixed('fix.siteOffline', 'Wait for the site to come back, or find other sources for its series.'), 'admin');
 
 /**
  * Stored-error rules, most specific first. **The ordering is the whole game.**

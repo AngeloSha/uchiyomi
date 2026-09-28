@@ -2,7 +2,7 @@
   "_meta": {
     "language": "pt-BR",
     "note": "Machine-assisted translation, reviewed for tone but not by a native speaker. Corrections are very welcome: edit this file and open a pull request. Keys are the English source strings, so a missing entry falls back to English.",
-    "strings": 2423
+    "strings": 2425
   },
   "1 check found something": "1 verificação encontrou algo",
   "1 member": "1 membro",
@@ -2426,5 +2426,7 @@
   "Ready (v{version}); its Cloudflare helper is not answering": "Pronto (v{version}); o assistente do Cloudflare dele não está respondendo",
   "Ready; its Cloudflare helper is not answering": "Pronto; o assistente do Cloudflare dele não está respondendo",
   "It is connected to Uchiyomi’s own Cloudflare helper, which is not answering (the Cloudflare solver row says what to do). Extension sources on Cloudflare-protected sites fail until it answers again.": "Ele está conectado ao assistente do Cloudflare do próprio Uchiyomi, que não está respondendo (a linha “Solucionador do Cloudflare” diz o que fazer). As fontes de extensão em sites protegidos pelo Cloudflare falham até que ele volte a responder.",
-  "Its confirmed renumber is being applied now.": "A renumeração confirmada dela está sendo aplicada agora."
+  "Its confirmed renumber is being applied now.": "A renumeração confirmada dela está sendo aplicada agora.",
+  "The site says it is offline (its own page)": "O site diz que está fora do ar (a própria página dele)",
+  "Wait for the site to come back, or find other sources for its series.": "Espere o site voltar ou encontre outras fontes para as séries dele."
 }
