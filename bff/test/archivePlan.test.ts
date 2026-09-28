@@ -10,7 +10,7 @@ process.env.CONFIG_DIR ||= '/tmp/uchiyomi-test-config';
 
 import {
   directionFor, boundaryFor, globalWait, sourceWait, attentionOf, shownDone, rowsFor, listingRetryAt, outsideCycleMs,
-  STALLED_MS, DONE_SHOWN_MS, NO_PROGRESS_MS, SOURCE_GONE_MS, type SourceState,
+  shownGlobalWait, STALLED_MS, DONE_SHOWN_MS, NO_PROGRESS_MS, SOURCE_GONE_MS, type SourceState,
 } from '../src/lib/archivePlan';
 import { inWindow, ARCHIVE_DEFAULTS } from '../src/lib/archivePace';
 
@@ -91,7 +91,7 @@ test('the per-source gates: each on its own, and the more telling reason first',
 
 const att = (over: Partial<Parameters<typeof attentionOf>[0]> = {}) => attentionOf({
   state: 'queued', now: NOW, failed: 0, note: null, finishedAt: null, pausedAt: null, backoffLevel: 0,
-  backoffSince: null, wait: null, waitSince: null, global: null, progressSince: null, lastTurnAt: null, ...over,
+  backoffSince: null, wait: null, waitSince: null, global: null, progressSince: null, idleTurns: 0, ...over,
 });
 const HOUR = 3600_000;
 const DAY = 24 * HOUR;
@@ -115,21 +115,37 @@ test('what needs a person: a finish with gaps, a source that keeps refusing or h
   assert.equal(att({ state: 'paused', pausedAt: NOW - STALLED_MS })?.why, 'stalled', 'paused and forgotten hides the back catalogue');
 });
 
-test('no progress for three days while queued: flagged when it had its turns, not when it waited for one', () => {
+test('no progress for three days while queued: flagged when its turns kept coming to nothing, not when it waited for one', () => {
   const since = NOW - NO_PROGRESS_MS;
-  // Every turn since its last progress fetched nothing: a listing that keeps failing, chapters that keep failing.
+  // Every turn since its last progress ended with nothing: a listing that keeps failing, chapters that keep failing.
   // Reintroduce by dropping the queued rule: this reads null, and a series that has asked its site for a dead
   // listing for days shows nothing under Needs attention.
-  assert.deepEqual(att({ progressSince: since, lastTurnAt: NOW - HOUR }), { why: 'stalled', since }, 'turns taken, nothing in');
-  assert.equal(att({ progressSince: since + 60_000, lastTurnAt: NOW - HOUR }), null, 'a minute short of three days');
+  assert.deepEqual(att({ progressSince: since, idleTurns: 5 }), { why: 'stalled', since }, 'turns taken, nothing in');
+  assert.equal(att({ progressSince: since + 60_000, idleTurns: 5 }), null, 'a minute short of three days');
   // Five hundred series on one site at four an hour take days to come round: waiting for a turn is the pace.
-  assert.equal(att({ progressSince: NOW - 10 * DAY, lastTurnAt: null }), null, 'never had a turn yet: queued behind the others');
-  assert.equal(att({ progressSince: NOW - 10 * DAY, lastTurnAt: NOW - 11 * DAY }), null, 'no turn since its last progress');
+  assert.equal(att({ progressSince: NOW - 10 * DAY, idleTurns: 0 }), null, 'never had a turn yet: queued behind the others');
+  // ...and so is the turn that finally comes: counted from when a turn STARTED, a chapter in flight after the wait
+  // read stalled until it landed, and one refusal (a bad hour) until the next turn, days later (#117 review).
+  // Reintroduce `idleTurns >= 1`: the second of these reads stalled.
+  assert.equal(att({ progressSince: NOW - 4 * DAY, idleTurns: 0 }), null, 'its first turn after the wait is still in flight');
+  assert.equal(att({ progressSince: NOW - 4 * DAY, idleTurns: 1 }), null, 'one refusal after the wait is one bad hour');
+  assert.equal(att({ progressSince: NOW - 4 * DAY, idleTurns: 2 })?.why, 'stalled', 'two turns in a row with nothing to show');
   // The more telling reasons come first.
-  assert.equal(att({ progressSince: since, lastTurnAt: NOW - HOUR, backoffLevel: 2 })?.why, 'backoff');
-  assert.equal(att({ progressSince: since, lastTurnAt: NOW - HOUR, global: { why: 'disk' } })?.why, 'disk');
+  assert.equal(att({ progressSince: since, idleTurns: 5, backoffLevel: 2 })?.why, 'backoff');
+  assert.equal(att({ progressSince: since, idleTurns: 5, global: { why: 'disk' } })?.why, 'disk');
   // A paused one keeps its own rule: a week, from when it was paused.
-  assert.equal(att({ state: 'paused', pausedAt: NOW - HOUR, progressSince: since, lastTurnAt: NOW - HOUR }), null);
+  assert.equal(att({ state: 'paused', pausedAt: NOW - HOUR, progressSince: since, idleTurns: 5 }), null);
+});
+
+test("the whole archive's wait, as a viewer is shown it: never a reason the settings have since taken away", () => {
+  const on = { paused: false, windowFrom: null, windowTo: null };
+  // Reintroduce `last` as it is: a 'paused' from before a Resume all reads on after it.
+  assert.equal(shownGlobalWait(on, { why: 'paused' }), null, 'a stale pause after Resume all');
+  assert.deepEqual(shownGlobalWait({ ...on, paused: true }, null), { why: 'paused' }, 'the pause the settings say');
+  assert.equal(shownGlobalWait(on, { why: 'window', until: NOW + HOUR }), null, 'a window since cleared');
+  assert.deepEqual(shownGlobalWait({ ...on, windowFrom: 1, windowTo: 7 }, { why: 'window', until: NOW + HOUR }), { why: 'window', until: NOW + HOUR });
+  assert.deepEqual(shownGlobalWait(on, { why: 'check' }), { why: 'check' }, "what the settings do not decide stays the last look's");
+  assert.equal(shownGlobalWait(on, null), null);
 });
 
 test('a listing that could not be read is read again 1 h, 3 h, 12 h, then a day apart', () => {
@@ -150,7 +166,8 @@ test("a cycle sample keeps the chapter's time and loses the window's and the bac
   const night = outsideCycleMs({ ...base, windowFrom: 10, windowTo: 11, from: at(10, 50), to: at(10, 50) + 23 * HOUR + 11 * 60_000 });
   assert.equal(night, 23 * HOUR, "the 23 hours it was shut are the window's");
   // A 1 h backoff over a 17-minute break: the 43 minutes beyond the break are the site's; the break is the pace.
-  assert.equal(outsideCycleMs({ ...base, from: at(12), to: at(13, 1), breakEnd: at(12, 17), backoffUntil: at(13) }), 43 * 60_000);
+  assert.equal(outsideCycleMs({ ...base, from: at(12), to: at(13, 1), breakEnd: at(12, 17), backoffUntil: at(13) }), 43 * 60_000,
+    'a 1 h backoff over a 17-minute break: only the 43 minutes beyond the break are the site\'s');
   assert.equal(outsideCycleMs({ ...base, from: at(12), to: at(13), breakEnd: at(12, 30), backoffUntil: at(12, 20) }), 0, 'a backoff inside its break adds nothing');
   assert.equal(outsideCycleMs({ ...base, from: at(12), to: at(13), breakEnd: at(11), backoffUntil: at(11, 30) }), 0, 'one that ended before the span');
   // Both at once is counted once: a backoff running on into the closed window.

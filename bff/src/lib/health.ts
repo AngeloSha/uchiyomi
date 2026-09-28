@@ -31,6 +31,8 @@ import { countsAsMissing, downloadCensus, fsTypeOf, type Census } from './downlo
 import { applyIgnores, ignoredTail, keepIgnoresAlive, loadIgnores, noIgnores, type Finding, type IgnorableCheck, type IgnoreCtx } from './healthIgnore';
 import { chapterFileRel } from './downloader';
 import { forDesktop } from './desktop';
+import { activeArchiveBoundaries } from './archiveBoundaries';
+import type { NumberingNote } from './numbering';
 
 export type HealthStatus = 'ok' | 'warn' | 'problem';
 
@@ -48,7 +50,12 @@ export type HealthAction =
   | 'fix_short' | 'confirm_short' | 'delete' | 'fill' | 'retry' | 'test' | 'unblock' | 'disable' | 'merge' | 'solver_reset'
   | 'ignore' | 'unignore'
   // #72: point the extension engine's own Cloudflare helper at Uchiyomi's (POST /api/admin/extensions/solver).
-  | 'engine_solver';
+  | 'engine_solver'
+  // #116, the numbering check: `renumber` shows the file-by-file plan of the series' pending (or proposed)
+  // numbering change and applies it on a confirmation (GET, then POST {mode, confirm: true}, to
+  // /api/admin/series/{id}/numbering); `keep_numbers` records the admin's choice of the source's own numbers
+  // (POST {mode: 'source'}) -- nothing renamed for a proposal, the undo's plan for a series already renumbered.
+  | 'renumber' | 'keep_numbers';
 
 export interface HealthItem {
   seriesId?: string;
@@ -125,7 +132,12 @@ export type HealthOutcome =
       kind: 'gaps';
       /** When the repair concluded, not when it stamped the series (that is before the search). */
       at: string | null;
-      /** huntCandidates' verdict, as lib/repair.ts stores it: followed | no_candidate | cap | off | cooldown | listed. */
+      /**
+       * huntCandidates' verdict, as lib/repair.ts stores it: followed | no_candidate | cap | off | cooldown | listed |
+       * posting_order (#116: the series is numbered by posting order, and no other source can fill it). Or
+       * `archiving` (#117), from no search at all: every missing number lies below the boundary of the series'
+       * active slow archive, which is fetching them. `at` is null then, and the counts are zero.
+       */
       why: string | null;
       followed: string | null;
       coverage: number | null;
@@ -166,10 +178,13 @@ export type HealthOutcome =
       resetPending: boolean;
     };
 
-/** What an action on a row will not be able to do, and why. `until` for a cooldown. */
+/**
+ * What an action on a row will not be able to do, and why. `until` for a cooldown. `archiving` (#117): the gap is
+ * being fetched by the series' slow archive, and Fill now fetches it at once, at normal pace, instead.
+ */
 export interface HealthCaveat {
   action: HealthAction;
-  code: 'updates_paused' | 'source_cooling_down' | 'source_off';
+  code: 'updates_paused' | 'source_cooling_down' | 'source_off' | 'archiving';
   until?: string;
 }
 
@@ -246,6 +261,8 @@ interface HeldSeries {
   gapsResult: StoredGaps | null;
   /** Automatic updates on: off, nothing but Fill now will ever fetch its gaps (a caveat on that row). */
   autoUpdate: boolean;
+  /** The boundary of the series' active slow archive (#117), which owns every listed number below it; null for none. */
+  archiveBoundary: number | null;
 }
 
 /**
@@ -266,6 +283,8 @@ async function heldBySeries(): Promise<HeldSeries[]> {
     `SELECT ls.id, ls.title, ls.gaps_checked_at, ls.gaps_result, ls.auto_update
        FROM lib_series ls WHERE ${visibleToAll('ls')} ORDER BY ls.title`,
   );
+  // One read for every archive: a handful of rows, where a per-series query would double the page's cost.
+  const archiving = await activeArchiveBoundaries();
   const out: HeldSeries[] = [];
   for (const s of series) {
     out.push({
@@ -275,6 +294,7 @@ async function heldBySeries(): Promise<HeldSeries[]> {
       gapsCheckedAt: s.gaps_checked_at,
       gapsResult: s.gaps_result ?? null,
       autoUpdate: s.auto_update !== false,
+      archiveBoundary: archiving.get(s.id) ?? null,
     });
   }
   return out;
@@ -314,9 +334,18 @@ function gapConclusion(g: StoredGaps): string {
     case 'off': return 'searching other sources is switched off';
     case 'cooldown': return 'searched too recently to search again';
     case 'listed': return 'a source you already follow lists them, so the next chapter sweep will fetch them';
+    // #116: another site numbers these posts its own way, so nothing is searched for (lib/sourceHunt.ts).
+    case 'posting_order': return 'this series is numbered by posting order, so no other source is searched';
     default: return 'checked';
   }
 }
+
+/**
+ * The repair's verdicts that mean "asked, and the answer was no": conditions another run tonight cannot change on
+ * its own -- nobody else lists the chapters, the series already follows as many sources as it may, searching is
+ * switched off, or (#116) the series is numbered by posting order, which no other site's numbers line up with.
+ */
+const ANSWERED = new Set(['no_candidate', 'cap', 'off', 'posting_order']);
 
 /**
  * Missing runs of chapter numbers: either the source never had them, or a download failed.
@@ -351,17 +380,30 @@ async function chapterGaps(held: HeldSeries[], ctx: IgnoreCtx = noIgnores()): Pr
     // A conclusion is about the library as it was when the search ran. One more chapter has landed since,
     // so the hole may have moved: ask again rather than keep showing last night's answer.
     const unchanged = !!g && g.have_count === r.s.numbers.length;
-    // "Asked, and the answer was no." All three are conditions another run tonight cannot change on its
-    // own: nobody else lists the chapters, the series already follows as many sources as it may, or
-    // searching is switched off. A cooldown is NOT in this list, deliberately and for the same reason the
-    // repair will not confirm a short chapter on one: not having asked is not an answer.
-    const answered = !!g && ['no_candidate', 'cap', 'off'].includes(String(g.why));
+    // "Asked, and the answer was no." A cooldown is NOT in the list (ANSWERED), deliberately and for the same
+    // reason the repair will not confirm a short chapter on one: not having asked is not an answer.
+    const answered = !!g && ANSWERED.has(String(g.why));
     // Every missing chapter is already listed on a source we follow, so this is the chapter sweep's job.
     // ⚠️ Still only while the conclusion is fresh: a hole the sweep was going to fetch a fortnight ago and
     // still has not is a finding again, not a promise.
     const sweepsIt = !!g && typeof g.sweep === 'number' && r.missing > 0 && g.sweep >= r.missing;
-    const info = fresh && ((answered && unchanged) || sweepsIt);
+    // #117: the series' slow archive owns every listed number below its boundary and is fetching them a few an
+    // hour, so a hole wholly below it is the archive's work in progress, not a finding -- and not a search, which
+    // is why the repair's gap step leaves such a series alone (lib/repair.ts stepGaps). Its outcome says so in
+    // place of whatever an older search concluded. A hole reaching above the boundary stays a finding: the sweep
+    // owns that part. Reintroduce by dropping `archived`: "a gap below an active archive's boundary is the
+    // archive's" in health.int.test.ts finds a live finding.
+    const boundary = r.s.archiveBoundary ?? undefined;
+    const archived = boundary !== undefined && r.gaps.every((x) => x.hi < boundary);
+    const info = archived || (fresh && ((answered && unchanged) || sweepsIt));
     const what = g ? gapConclusion(g) : null;
+    // What Fill now will do that the row would not otherwise say: fetch at once, at normal pace, numbers the
+    // archive was going to fetch slowly (it passes ignoreArchiveBoundary, lib/repair.ts), and fetch a paused
+    // series' gaps, which nothing else ever will.
+    const caveats: HealthCaveat[] = [
+      ...(!r.s.autoUpdate ? [{ action: 'fill' as const, code: 'updates_paused' as const }] : []),
+      ...(boundary !== undefined && r.gaps.some((x) => x.lo < boundary) ? [{ action: 'fill' as const, code: 'archiving' as const }] : []),
+    ];
     return {
       seriesId: r.s.id,
       title: r.s.title,
@@ -370,7 +412,12 @@ async function chapterGaps(held: HeldSeries[], ctx: IgnoreCtx = noIgnores()): Pr
       detail: `${r.missing} missing — ${ranges.length > 90 ? ranges.slice(0, 90) + '…' : ranges}`,
       numbers: r.numbers,
       actions: ['fill'] as HealthAction[],
-      ...(g ? {
+      ...(archived ? {
+        outcome: {
+          kind: 'gaps' as const, at: null, why: 'archiving', followed: null, coverage: null,
+          fetched: 0, landed: 0, sweep: 0, capped: 0, unfillable: [], scanned: 0,
+        },
+      } : g ? {
         outcome: {
           kind: 'gaps' as const,
           at: checked ? checked.toISOString() : null,
@@ -388,20 +435,22 @@ async function chapterGaps(held: HeldSeries[], ctx: IgnoreCtx = noIgnores()): Pr
       // Fill now works on a paused series (it names the series, lib/repair.ts), but nothing else will ever
       // fetch its gaps: the row says so before anyone presses. Reintroduce by dropping it: "a paused series'
       // gap carries the updates_paused caveat" in health.int.test.ts fails.
-      ...(!r.s.autoUpdate ? { caveats: [{ action: 'fill' as const, code: 'updates_paused' as const }] } : {}),
+      ...(caveats.length ? { caveats } : {}),
       // Ignored while every missing run lies inside a run that was missing when it was ignored: a gap that
       // shrinks (or splits) stays quiet, a newly missing chapter is a new finding. As runs, not one entry per
       // number: a single chapter numbered 9001 by mistake is a gap of nine thousand (lib/healthIgnore.ts).
       key: `series:${r.s.id}`,
       members: r.gaps.map((g) => `${g.lo}-${g.hi}`),
-      ...(checked && what ? { fixed: { at: checked.toISOString(), what } } : {}),
+      // An older search's answer is not what is happening to an archived hole: the outcome above is.
+      ...(checked && what && !archived ? { fixed: { at: checked.toISOString(), what } } : {}),
       ...(info ? { info: true } : {}),
     };
   });
   const ignored = applyIgnores('chapter-gaps', items, ctx);
   const { items: shown, hidden } = truncate(items);
   const live = items.filter((i) => !i.info).length;
-  const quiet = items.length - live - ignored;
+  const archiving = items.filter((i) => i.info && !i.ignored && i.outcome?.kind === 'gaps' && i.outcome.why === 'archiving').length;
+  const quiet = items.length - live - ignored - archiving;
   return {
     id: 'chapter-gaps',
     title: 'Chapter gaps',
@@ -410,11 +459,104 @@ async function chapterGaps(held: HeldSeries[], ctx: IgnoreCtx = noIgnores()): Pr
       ? `${live} series ${live === 1 ? 'has' : 'have'} missing chapters`
       : 'No gaps that need attention')
       + (quiet ? `; ${quiet} already looked into` : '')
+      + (archiving ? `; ${archiving} being archived slowly` : '')
       + ignoredTail(ignored),
     note:
       'Gaps are normal when a source skipped a number or a series is still being downloaded. "Fill now" runs the ' +
       'repair\'s gap search for one series: it looks for another source that carries our numbering on both sides of ' +
       'the hole, follows it and fetches. A series it has already asked about is greyed with what it found.' +
+      (hidden ? ` ${hidden} more not shown.` : ''),
+    items: shown,
+  };
+}
+
+/** How long a series numbered by posting order on its own is listed (for reference) after the change. */
+const NUMBERED_SHOWN_MS = 14 * DAY_MS;
+
+/**
+ * Chapter numbering (#116): series whose chapters wait for a numbering change an admin has to see first, and the
+ * ones Uchiyomi numbered by posting order on its own lately.
+ *
+ * A series in a library is never renamed unattended (the owner's rule for v0.49.0, lib/numbering.ts): the detector
+ * finding a source that gives many different posts one number marks it `numbering_pending`, and from then on it
+ * downloads nothing until someone reviews the plan -- which, before this check, only its own series page said. So
+ * each waiting series is a finding here, by name, with `renumber` (the plan, then its confirmation) and, for a
+ * change nobody asked for, `keep_numbers` (the source's numbers, as a choice the detector never undoes). A renumber
+ * a crash interrupted and the next check could not finish holds the series the same way, and is a finding with no
+ * key to press: the check that finishes it is the way out. Numbered automatically in the last two weeks and a
+ * detector's hint on a source-numbered series are listed too; a strong verdict an admin chose to ignore, for
+ * reference. Absent when no series has anything to say about its numbering.
+ */
+async function numberingCheck(): Promise<HealthCheck | null> {
+  const rows = await q<{
+    id: string; title: string; source_name: string | null; source_id: string | null;
+    numbering: 'source' | 'posting_order' | null; numbering_by: 'auto' | 'manual' | null; numbering_source: string | null;
+    numbering_pending: 'posting_order' | 'source' | 'remap' | null; numbering_note: NumberingNote | null;
+    journal: boolean; changed_at: string | null;
+  }>(
+    `SELECT ls.id, ls.title, ls.source AS source_name, ls.source_id, ls.numbering, ls.numbering_by, ls.numbering_source,
+            ls.numbering_pending, ls.numbering_note, (ls.renumber_plan IS NOT NULL) AS journal, ls.numbering_changed_at AS changed_at
+       FROM lib_series ls
+      WHERE ${visibleToAll('ls')}
+        AND (ls.numbering IS NOT NULL OR ls.numbering_pending IS NOT NULL OR ls.renumber_plan IS NOT NULL
+             OR ls.numbering_note->>'verdict' IN ('strong', 'hint'))
+      ORDER BY ls.title`,
+  ).catch(() => []);
+  if (!rows.length) return null;
+  const now = Date.now();
+  const items: HealthItem[] = [];
+  for (const r of rows) {
+    const note = r.numbering_note;
+    const src = r.numbering_source ?? note?.source ?? r.source_id;
+    // The source as a person knows it: the loaded adapter's name, else the name the series was added under when
+    // this is its own source (an extension the engine is not serving right now), else the id.
+    const name = (src && getSource(src)?.name) || (src && src === r.source_id ? r.source_name : null) || src || 'Its source';
+    const shared = note && note.posts ? `${name} gives ${note.extras} of ${note.posts} posts a number another post has`
+      + (note.biggest ? ` (${note.biggest.posts} are all ${note.biggest.number})` : '') : `${name} gives many different posts the same number`;
+    const base = { seriesId: r.id, title: r.title, ...(src ? { sourceId: src } : {}) };
+    const held = 'Nothing downloads for this series until then.';
+    const auto = r.numbering_by !== 'manual';
+    let item: HealthItem | null = null;
+    if (r.journal) {
+      item = { ...base, detail: `A renumber was interrupted before it finished; the next check of this series finishes it. ${held}` };
+    } else if (r.numbering_pending === 'remap') {
+      item = { ...base, detail: `An extension setting changed ${name}'s chapter numbers; the chapters on disk wait to be matched to the new ones. ${held}`, actions: ['renumber'] };
+    } else if (r.numbering_pending === 'posting_order') {
+      item = auto
+        ? { ...base, detail: `${shared}; numbering them by posting order waits for your review. ${held}`, actions: ['renumber', 'keep_numbers'] }
+        : { ...base, detail: `Numbering by posting order, as asked, waits to be applied. ${held}`, actions: ['renumber'] };
+    } else if (r.numbering_pending === 'source') {
+      item = { ...base, detail: `Going back to ${name}'s own numbers waits to be applied. ${held}`, actions: ['renumber'] };
+    } else if (r.numbering === 'posting_order' && auto) {
+      const at = r.changed_at ? Date.parse(r.changed_at) : NaN;
+      if (Number.isFinite(at) && now - at < NUMBERED_SHOWN_MS) {
+        item = { ...base, detail: `${shared}; numbered by posting order since ${new Date(at).toISOString().slice(0, 10)}.`, actions: ['keep_numbers'], info: true };
+      }
+    } else if (r.numbering !== 'posting_order' && note?.verdict === 'hint' && auto) {
+      item = { ...base, detail: `${shared}; they may be different chapters listed as versions of one.`, actions: ['renumber', 'keep_numbers'] };
+    } else if (r.numbering === 'source' && !auto && note?.verdict === 'strong') {
+      item = { ...base, detail: `${shared}; you chose to keep the source's own numbers.`, actions: ['renumber'], info: true };
+    }
+    if (item) items.push(item);
+  }
+  if (!items.length) return null;
+  const live = items.filter((i) => !i.info).length;
+  const numbered = items.filter((i) => i.info && i.actions?.includes('keep_numbers')).length;
+  const { items: shown, hidden } = truncate(items);
+  return {
+    id: 'numbering',
+    title: 'Chapter numbering',
+    status: verdict(items),
+    summary: (live
+      ? `${live} series ${live === 1 ? 'waits' : 'wait'} for a numbering review`
+      : 'No numbering change waits for a review')
+      + (numbered ? `; ${numbered} numbered by posting order lately` : ''),
+    note:
+      'Some sources give many different posts the same chapter number (Webtoons numbers a post by the episode it belongs ' +
+      'to). A new series from such a source is numbered by posting order; one already in your library is renumbered only ' +
+      'when you confirm its plan, and downloads nothing until then. Renaming keeps every file, and reading progress stays ' +
+      'with its chapter. "Keep the source\'s numbers" records your choice; the source\'s own "sequential chapter numbering" ' +
+      'setting, under Admin → Extensions, is the other way out.' +
       (hidden ? ` ${hidden} more not shown.` : ''),
     items: shown,
   };
@@ -1375,6 +1517,8 @@ export async function runHealthChecks(): Promise<HealthReport> {
   // Independent read-only queries: run them together rather than serially.
   const checks = (await Promise.all([
     chapterGaps(held, ctx),
+    // #116: null when no series has anything to say about its numbering.
+    numberingCheck(),
     shortChapters(),
     outlierChapters(held, ctx),
     duplicateSeries(ctx),

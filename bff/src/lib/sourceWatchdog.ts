@@ -143,6 +143,12 @@ let progress: CheckProgress = {
 };
 export const checkProgress = (): CheckProgress => ({ ...progress, current: progress.current && { ...progress.current } });
 
+/** How long a sweep's end waits for its summary refresh before it says it is over anyway. */
+const END_REFRESH_MS = 30_000;
+let endRefreshMs = END_REFRESH_MS;
+/** Tests: a shorter bound on the end-of-sweep refresh; pass nothing to put the default back. */
+export function setSweepRefreshBound(ms?: number): void { endRefreshMs = ms ?? END_REFRESH_MS; }
+
 export async function runSourceCheck(opts: { autoFix?: boolean; by?: 'schedule' | 'admin' } = {}): Promise<WatchdogResult> {
   if (running) throw Object.assign(new Error('a source check is already running'), { busy: true });
   running = true;
@@ -163,7 +169,16 @@ export async function runSourceCheck(opts: { autoFix?: boolean; by?: 'schedule' 
     // for a minute, so a refresh that came after would leave the header on the pre-sweep summary. Under the repair
     // flag it is put off instead (lib/healthSummary.ts). Reintroduce by flipping `running` first and refreshing
     // detached: "the header's mark is fresh by the time the sweep says it ended" in sourceCheck.int.test.ts.
-    await refreshHealthSummaryNow();
+    // The source being tested is over before the report is read, and the wait for the report is BOUNDED: it reads
+    // what every series holds, and one that never came back (a stalled mount under the downloads census) kept the
+    // sweep flag up until a restart -- the daily check refused, every summary ask let go (integration-1 review).
+    // Reintroduce the bare await: "a report that never returns still ends the sweep" in sourceCheck.int.test.ts.
+    progress = { ...progress, current: null };
+    let timer: NodeJS.Timeout | undefined;
+    await Promise.race([
+      refreshHealthSummaryNow(),
+      new Promise<void>((res) => { timer = setTimeout(res, endRefreshMs); timer.unref?.(); }),
+    ]).finally(() => clearTimeout(timer));
     running = false;
     progress = { ...progress, running: false, current: null, finishedAt: new Date().toISOString() };
   }

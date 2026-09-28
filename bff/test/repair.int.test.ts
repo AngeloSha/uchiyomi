@@ -414,6 +414,10 @@ test('a follower with more pages replaces a short chapter, and everyone keeps th
   const r = await runRepair(undefined, { only: ['short'], userId: null });
   assert.deepEqual(r.short, { looked: 1, replaced: 1, confirmed: 0, left: 0 });
   assert.equal((await book(id)).pages, 12, 'the row carries the count of the bytes that landed');
+  // And the post it was written from (#116): the versions view and every later remap trust that stamp first.
+  // Reintroduce by dropping `chapterId` from replaceShort's restampBook: the row names no copy (or the short one).
+  assert.equal((await q('SELECT source_chapter_id FROM lib_books WHERE id = $1', [id]))[0].source_chapter_id, cid(B, T.short, 3),
+    'a short fix restamps the chapter id');
   assert.equal(entries(join(DL, folderOf(T.short), 'Chapter 3.cbz')).filter((n) => n.endsWith('.png')).length, 12);
   const prog = (await q('SELECT page, completed FROM read_progress WHERE book_id = $1', [id]))[0];
   assert.deepEqual(prog, { page: 2, completed: true }, 'a reader who finished the two-page notice keeps their mark');
@@ -761,6 +765,34 @@ test('Fill now fetches a gap a followed source already lists, even with updates 
     assert.equal(item, undefined, 'the hole is closed');
   } finally {
     await q('UPDATE lib_series SET auto_update = true WHERE id = $1', [LISTED]);
+    await q('DELETE FROM lib_books WHERE series_id = $1 AND number = 11', [LISTED]);
+    rmSync(join(DL, folderOf(T.listed), 'Chapter 11.cbz'), { force: true });
+  }
+});
+
+test("the nightly leaves an archived gap to the archive, and Fill now fetches below an active archive's boundary", { skip }, async () => {
+  // #117 x health-clarity: Repair Listed's gap (11) lies below the boundary of an active slow archive, which owns it
+  // and is fetching it a few an hour. The nightly leaves the series alone and does not stamp it -- so it comes back
+  // the night the archive is done. Reintroduce by dropping the skip in stepGaps: "the nightly leaves an archived
+  // gap to the archive" finds the series stamped. Fill now is a person asking for these now, at normal pace:
+  // reintroduce by dropping `ignoreArchiveBoundary` from its fetch -- "Fill now fetches below an active archive's
+  // boundary" finds nothing fetched, since the sweep's floor rises to the boundary.
+  await q('UPDATE lib_series SET gaps_checked_at = now() WHERE id = ANY($1) AND id <> $2', [MINE, LISTED]);
+  await q(`INSERT INTO archive_queue (series_id, state, boundary) VALUES ($1, 'queued', 20.001)`, [LISTED]);
+  setCatalog(A, T.listed, range(1, 20)); // the followed source lists 11, which the library lacks
+  try {
+    const nightly = await runRepair(undefined, { only: ['gaps'], userId: null });
+    assert.equal(nightly.gaps.series, 0, 'the nightly leaves an archived gap to the archive');
+    assert.equal((await series(LISTED)).gaps_checked_at, null, 'and does not stamp it, so it is looked at once the archive is done');
+    assert.deepEqual(searches, [], 'nothing was searched for it');
+
+    const r = await runRepair(undefined, { only: ['gaps'], seriesId: LISTED, userId: null });
+    assert.equal(r.gaps.series, 1, 'a person naming it is looked at');
+    assert.equal(r.gaps.fetched, 1, "Fill now fetches below an active archive's boundary");
+    const got = await q('SELECT id FROM lib_books WHERE series_id = $1 AND number = 11 AND pruned_at IS NULL', [LISTED]);
+    assert.equal(got.length, 1, 'chapter 11 is on the shelf');
+  } finally {
+    await q('DELETE FROM archive_queue WHERE series_id = $1', [LISTED]);
     await q('DELETE FROM lib_books WHERE series_id = $1 AND number = 11', [LISTED]);
     rmSync(join(DL, folderOf(T.listed), 'Chapter 11.cbz'), { force: true });
   }

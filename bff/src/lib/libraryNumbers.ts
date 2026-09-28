@@ -18,9 +18,14 @@
 //     so it is not a gap either. A 'missing' tombstone the verify task wrote is NOT held: that file went
 //     without anyone deciding so, and fetching it again is the whole point.
 //
+// And one that is not about a book at all (v0.49.0, #116): a series numbered by posting order keeps the number of
+// a post its source DELETED as a hole (series_post_numbers.gone_at), so nothing after it moves. Nothing can fill
+// that hole -- the post is gone, and no other site's numbers line up with posting order -- so it counts as held:
+// a gap on the Health page and a search for the repair would be a finding nobody could ever clear.
+//
 // The SELECT is exported as well as the helper because the repair reads it per series inside a loop that
-// already holds the row, and because a caller joining it into a larger query must get the same two rules
-// rather than a hand-written copy of them.
+// already holds the row, and because a caller joining it into a larger query must get the same rules rather
+// than a hand-written copy of them.
 import { q } from './db';
 import { heldBooks } from './chapterCleanup';
 
@@ -30,11 +35,18 @@ import { heldBooks } from './chapterCleanup';
  * driver hands a `real` back as a JS number only through a float8 cast -- a half-chapter 12.5 read as
  * `12.5` here and as `12.5000019` after a round trip through `real` is the kind of difference that makes
  * gapsOf disagree with itself.
+ * Reintroduce the books alone (drop the UNION): "a post the source deleted is a hole, not a gap" in
+ * health.int.test.ts reads the hole as a gap.
  */
 export const HAVE_SQL = (alias = 'b'): string =>
   `SELECT COALESCE(o.number, ${alias}.number)::float8 AS number
      FROM lib_books ${alias} LEFT JOIN book_overrides o ON o.book_id = ${alias}.id
-    WHERE ${alias}.series_id = $1 AND ${heldBooks(alias)}`;
+    WHERE ${alias}.series_id = $1 AND ${heldBooks(alias)}
+   UNION ALL
+   SELECT hole.number::float8 AS number
+     FROM series_post_numbers hole JOIN lib_series hs ON hs.id = hole.series_id
+    WHERE hole.series_id = $1 AND hole.gone_at IS NOT NULL AND hs.numbering = 'posting_order'
+      AND hole.source_id = COALESCE(hs.numbering_source, hs.source_id)`;
 
 /** The held numbers of one series, finite and unsorted -- what gapsOf, assess and the outlier check take. */
 export async function haveNumbers(seriesId: string): Promise<number[]> {

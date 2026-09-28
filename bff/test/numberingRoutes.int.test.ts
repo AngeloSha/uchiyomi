@@ -38,13 +38,17 @@ const WEB = 'nr-web';
 const HELD = 's_nr_held', FHELD = 'Webtoons (nr)/Held';
 const KEEP = 's_nr_keep', FKEEP = 'Webtoons (nr)/Keep';
 const REMAP = 's_nr_remap', FREMAP = 'Webtoons (nr)/Remap';
-const ALL = [HELD, KEEP, REMAP];
+const NOOP = 's_nr_noop', FNOOP = 'Webtoons (nr)/Noop';
+const VISIT = 's_nr_visit', FVISIT = 'Webtoons (nr)/Visit';
+const ALL = [HELD, KEEP, REMAP, NOOP, VISIT];
 
 const POSTS = DSN ? istreveliaPosts() : [];
 const EPISODES = DSN ? webtoonsNumbers(POSTS, false) : [];
 const SEQUENTIAL = DSN ? webtoonsNumbers(POSTS, true) : [];
 /** The extension's "Use sequential chapter numbering" switch, as this test adapter models it. */
 let sequential = false;
+/** Set, the next listing call says it has arrived and waits to be let go: a check held inside its series. */
+let gate: { arrived: () => void; wait: Promise<void> } | null = null;
 const post = (k: number, seq = sequential) => {
   const n = (seq ? SEQUENTIAL : EPISODES)[k - 1];
   return { sourceId: `nr-${k}`, number: n.chapterNumber, title: n.name, publishedAt: new Date(POSTS[k - 1].uploadDate).toISOString(), order: k, pages: 1 };
@@ -63,7 +67,12 @@ before(async () => {
     id: WEB, name: 'Webtoons (nr)',
     async search() { return []; },
     async getSeries(sid: string) { return { sourceId: sid, source: WEB, title: 'Istrevelia' }; },
-    async listChapters() { return POSTS.map((_: unknown, i: number) => post(i + 1)); },
+    async listChapters() {
+      const g = gate;
+      gate = null;
+      if (g) { g.arrived(); await g.wait; }
+      return POSTS.map((_: unknown, i: number) => post(i + 1));
+    },
     async getPageUrls() { return []; },
     async latest() { return []; },
   } as any);
@@ -90,7 +99,7 @@ after(async () => {
   await app?.close();
   await q('DELETE FROM lib_series WHERE id = ANY($1)', [ALL]).catch(() => {});
   await q('DELETE FROM libraries WHERE id = $1', [LIB]).catch(() => {});
-  await q(`DELETE FROM users WHERE username = ANY($1)`, [['nr-admin', 'nr-member']]).catch(() => {});
+  await q(`DELETE FROM users WHERE username = ANY($1)`, [['nr-admin', 'nr-member', 'nr-capped']]).catch(() => {});
   rmSync(ROOT, { recursive: true, force: true });
 });
 
@@ -210,4 +219,87 @@ test('a remap queued by an extension setting is planned by name and applied on c
   assert.deepEqual([row.numbering, row.numbering_by, row.numbering_pending], [null, null, null], 'still the source\'s numbers, and nothing left to review');
   const again = await inject('POST', `/api/admin/series/${REMAP}/numbering`, { mode: 'remap', confirm: true });
   assert.equal(again.json().state, 'unchanged', 'a remap with nothing queued does nothing');
+});
+
+test('a remap that renames nothing settles by itself', { skip }, async () => {
+  // An extension setting that changed nothing for this series (its posts keep their numbers) queued a remap on it
+  // anyway, and every series of the source stopped downloading until an admin confirmed each one (#116 review).
+  // Every book is matched by its own name and keeps its number: nothing to see, so nothing to confirm.
+  // Reintroduce by holding every remap for a confirmation (settleNumbering): the check answers renumber_pending.
+  sequential = false;
+  await seedSeries(NOOP, FNOOP, { numbering_pending: 'remap' });
+  for (const [raw, k] of HELD_BOOKS) await seedBook(NOOP, FNOOP, raw, k);
+  const { updateSeries } = await import('../src/lib/updater');
+  const up = await updateSeries(NOOP, 0);
+  assert.equal(up.outcome, 'ok', 'a remap that renames nothing settles by itself');
+  assert.equal(up.renumber?.state, 'applied');
+  assert.equal((await rowOf(NOOP)).numbering_pending, null);
+  assert.deepEqual(filesIn(FNOOP), ['Chapter 1.cbz', 'Chapter 2.cbz', 'Chapter 3.cbz'], 'nothing renamed');
+  const stamps = (await q('SELECT number::float8 AS n, source_chapter_id AS c FROM lib_books WHERE series_id = $1 ORDER BY number', [NOOP]))
+    .map((r: any) => [Number(r.n), r.c]);
+  assert.deepEqual(stamps, [[1, 'nr-1'], [2, 'nr-21'], [3, 'nr-42']], 'which post each file is, written down');
+});
+
+test('a renumber waits for a check inside the series', { skip }, async () => {
+  // busyFolders and the activity list only cover a chapter downloading. A check that has read its listing and
+  // have-set but is not downloading yet would fetch into the old numbers after the renames (#116 review).
+  sequential = false;
+  await seedSeries(VISIT, FVISIT, { numbering_pending: 'posting_order', numbering_source: WEB });
+  for (const [raw, k] of HELD_BOOKS) await seedBook(VISIT, FVISIT, raw, k);
+  const { updateSeries } = await import('../src/lib/updater');
+  const { requestNumbering } = await import('../src/lib/numbering');
+  /** A check of the series, held inside it at its listing until `open`. */
+  const checking = async () => {
+    let open!: () => void, arrived!: () => void;
+    const there = new Promise<void>((r) => { arrived = r; });
+    gate = { arrived, wait: new Promise<void>((r) => { open = r; }) };
+    const run = updateSeries(VISIT, 0);
+    await there;
+    return { run, open };
+  };
+
+  let c = await checking();
+  try {
+    // Reintroduce by dropping the route's `runsInside` test: 200 `pending` (the settle below still refuses).
+    const r = await inject('POST', `/api/admin/series/${VISIT}/numbering`, { mode: 'posting_order', confirm: true });
+    assert.equal(r.statusCode, 409, `a check inside the series: the confirmation is refused -- ${r.body}`);
+    assert.equal(r.json().error, 'busy');
+  } finally {
+    c.open();
+  }
+  assert.equal((await c.run).outcome, 'renumber_pending', 'the check itself only holds the series');
+
+  // The moment between the route's test and the confirmed run's own settle: the run that would rename waits too.
+  c = await checking();
+  try {
+    const r = await requestNumbering(VISIT, 'posting_order', { confirm: true });
+    assert.equal(r?.state, 'pending', 'another run inside the series: nothing renamed under it');
+    assert.match(r?.error ?? '', /being checked right now/, 'and the answer says why');
+  } finally {
+    c.open();
+  }
+  await c.run;
+  assert.deepEqual(filesIn(FVISIT), ['Chapter 1.cbz', 'Chapter 2.cbz', 'Chapter 3.cbz']);
+
+  // With the check gone, the same confirmation goes through.
+  const ok = await inject('POST', `/api/admin/series/${VISIT}/numbering`, { mode: 'posting_order', confirm: true });
+  assert.equal(ok.statusCode, 200, ok.body);
+  assert.equal(ok.json().state, 'applied');
+  assert.deepEqual(filesIn(FVISIT), ['Chapter 1.cbz', 'Chapter 21.cbz', 'Chapter 42.cbz']);
+});
+
+test('every viewer of a series reads its numbering; one walled off from it reads nothing', { skip }, async () => {
+  // The notice on the series page is for everyone who reads it, not only admins (#116 review: only the admin's read
+  // was tested). A capped member walled off from the series by its age rating is told there is nothing there.
+  const l = await inject('GET', `/api/series/${HELD}/listing`, undefined, member);
+  assert.equal(l.statusCode, 200, l.body);
+  assert.deepEqual([l.json().numbering?.mode, l.json().numbering?.pending], ['posting_order', null], 'a member reads the numbering too');
+  const capped = `Bearer ${app.jwt.sign({ sub: (await q(
+    `INSERT INTO users (username, display_name, password_hash, role, auth_kind, max_age_rating) VALUES ('nr-capped','nr-capped','x','user','password',16) RETURNING id`))[0].id, role: 'user' })}`;
+  await q('UPDATE lib_series SET age_rating = 18 WHERE id = $1', [HELD]);
+  try {
+    assert.equal((await inject('GET', `/api/series/${HELD}/listing`, undefined, capped)).statusCode, 404, 'walled off: nothing there');
+  } finally {
+    await q('UPDATE lib_series SET age_rating = NULL WHERE id = $1', [HELD]);
+  }
 });

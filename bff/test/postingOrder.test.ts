@@ -15,7 +15,7 @@ import {
   SHARED_NUMBERING, numKey, displayTitle, nameKey, detectSharedNumbering, postingSequence, assignPostingNumbers,
   planRenumber, renumberedFile, EXTRA_PREFIX, type PlanBook, type PlanPost, type PostNumber,
 } from '../src/lib/postingOrder';
-import { chapterName, numFromName } from '../src/lib/naming';
+import { chapterName, numFromName, HEALED_NAME } from '../src/lib/naming';
 import type { SourceChapter } from '../src/lib/sources/types';
 
 const FIXTURE = JSON.parse(readFileSync(join(__dirname, 'fixtures', 'webtoons-posts.json'), 'utf8')) as Record<string, {
@@ -272,8 +272,8 @@ test('a title on a day finds a post only when it pairs one stored post with one 
 
 test('a copy that joins an earlier number does not pull the next new post back beside it', () => {
   // Alpha has posted 1..10. Then Beta posts a copy of chapter 2 late, and Alpha inserts a post between 9 and
-  // 10. Reintroduce by walking with `prev = n` in assignPostingNumbers: Beta's copy takes prev back to 2, the
-  // inserted post gets 2.5 -- beside chapter 2, for good -- and the `between its neighbours` assertion fails.
+  // 10. Reintroduce the number just walked as the lower bound in assignPostingNumbers: Beta's copy takes it back to
+  // 2, the inserted post gets 2.5 -- beside chapter 2, for good -- and the `between its neighbours` assertion fails.
   const at = (d: number) => new Date(EPOCH + d * DAY).toISOString();
   const alpha = (k: number, order: number): SourceChapter => ({ sourceId: `a${k}`, number: k, title: `Chapter ${k}: Part ${k}`, scanlator: 'Alpha', order, publishedAt: at(k) });
   const first = assignPostingNumbers(postingSequence(Array.from({ length: 10 }, (_, i) => alpha(i + 1, i + 1))));
@@ -291,8 +291,8 @@ test('a copy that joins an earlier number does not pull the next new post back b
   assert.equal(second.conflict, undefined);
 
   // Stored now, the late copy is a known post, and still a version: a post inserted right after it goes between
-  // 9 and 9.5. Reintroduce by not counting a matched copy that joins its slot as a version (drop `version = true`
-  // from the matched branch): prev goes back to 2, and the `right after the stored copy` assertion reads 2.5.
+  // 9 and 9.5 -- the highest number walked below its bound is 9, whatever the copy just before it says. Reintroduce
+  // the number just walked: the bound goes back to 2, and the `right after the stored copy` assertion reads 2.5.
   const later = [...next.slice(0, 10), { sourceId: 'ins2', number: 9, title: 'Chapter 9: Omake', scanlator: 'Alpha', order: 10.5, publishedAt: at(9.3) }, ...next.slice(10)];
   const third = assignPostingNumbers(postingSequence(later), second.rows);
   const n3 = (id: string) => third.rows.find((r) => r.postId === id)!.number;
@@ -304,9 +304,9 @@ test('a copy that joins an earlier number does not pull the next new post back b
 
 test('a known post the listing now shows earlier still says where the next new post goes', () => {
   // Alpha has posted 1..10. The site re-dates chapter 6 to between 2 and 3, and Alpha inserts a post after 3.
-  // Chapter 6 keeps its number; chapter 3, walked after it, is where the walk is again. Reintroduce by never
-  // walking backwards (`prev = Math.max(prev, n)` in assignPostingNumbers): prev stays at 6, the inserted post
-  // finds no room below 4 and takes the conflict path to 11 -- the `between 3 and 4` assertion fails.
+  // Chapter 6 keeps its number, and being above the inserted post's bound (4) it does not raise it. Reintroduce by
+  // taking the highest number walked, below the bound or not, in assignPostingNumbers: the bound stays at 6, the
+  // inserted post finds no room below 4 and takes the conflict path to 11 -- the `between 3 and 4` assertion fails.
   const at = (d: number) => new Date(EPOCH + d * DAY).toISOString();
   const alpha = (k: number, order: number, day = k): SourceChapter => ({ sourceId: `a${k}`, number: k, title: `Chapter ${k}: Part ${k}`, scanlator: 'Alpha', order, publishedAt: at(day) });
   const first = assignPostingNumbers(postingSequence(Array.from({ length: 10 }, (_, i) => alpha(i + 1, i + 1))));
@@ -321,6 +321,25 @@ test('a known post the listing now shows earlier still says where the next new p
   assert.equal(n('x'), 3.5, 'the inserted post goes between 3 and 4');
   assert.equal(second.conflict, undefined);
   assert.deepEqual(second.added.map((r) => [r.postId, r.number]), [['x', 3.5]]);
+});
+
+test('an inserted post goes after every post the listing shows before it, in whichever order they now stand', () => {
+  // fixL2b review: the site re-dates chapter 2 to after chapter 3, and Alpha inserts a post right after chapter 2.
+  // Every post the listing shows before it -- 1, 3 and 2 -- stays before it, so it goes between 3 and 4. Reintroduce
+  // the number just walked as the lower bound in assignPostingNumbers: 2.5, before chapter 3, for good.
+  const at = (d: number) => new Date(EPOCH + d * DAY).toISOString();
+  const alpha = (k: number, order: number, day = k): SourceChapter => ({ sourceId: `a${k}`, number: k, title: `Chapter ${k}: Part ${k}`, scanlator: 'Alpha', order, publishedAt: at(day) });
+  const first = assignPostingNumbers(postingSequence(Array.from({ length: 6 }, (_, i) => alpha(i + 1, i + 1))));
+  const next: SourceChapter[] = [
+    alpha(1, 1), alpha(3, 2), alpha(2, 3, 3.2),
+    { sourceId: 'y', number: 2, title: 'Chapter 2: Extra', scanlator: 'Alpha', order: 4, publishedAt: at(3.4) },
+    alpha(4, 5), alpha(5, 6), alpha(6, 7),
+  ];
+  const second = assignPostingNumbers(postingSequence(next), first.rows);
+  const n = (id: string) => second.rows.find((r) => r.postId === id)!.number;
+  assert.equal(n('a2'), 2, 'a known post keeps its number wherever it is listed');
+  assert.equal(n('y'), 3.5, 'after 1, 3 and 2, before 4');
+  assert.equal(second.conflict, undefined);
 });
 
 test('float32 noise does not split a number', () => {
@@ -476,6 +495,33 @@ test('planRenumber: a release date chooses a post, but never makes a plan clean'
   // Its own name, the same words, is.
   const own = planRenumber([landed(ist, 1, '/dl', { chapterName: blood })], { mode: 'posting_order', posts }, { listing: oldListing(ist) });
   assert.deepEqual([own.moves[0].to, own.moves[0].how, own.clean], [5, 'name', true]);
+});
+
+test('planRenumber: a name the listing healed chooses a post, but never makes a plan clean', () => {
+  // A book with no name of its own had one healed onto it from the listing's CHOSEN copy (lib/seriesListing.ts,
+  // chapter_name_source HEALED_NAME): the listing's guess, as a release date is -- the copy it chose need not be the
+  // one on disk. Reintroduce by reading it in the name pass (exempt HEALED_NAME from `b.chapterNameSource ? []`):
+  // the move reads 'name' and the plan clean, and it would apply itself where a date would not.
+  const ist = webtoons('istrevelia');
+  const posts = postingTarget(ist);
+  const blood = chapterName('Episode 1 - Page 5-7 [Blood Warning!] (ch. 1)', 1);
+  const healed = planRenumber([landed(ist, 1, '/dl', { chapterName: blood, chapterNameSource: HEALED_NAME, publishedAt: null })], { mode: 'posting_order', posts }, { listing: oldListing(ist) });
+  assert.deepEqual([healed.moves[0].to, healed.moves[0].how], [5, 'listing'], 'the healed name still chooses its post');
+  assert.equal(healed.clean, false, 'a healed name never applies itself');
+  assert.deepEqual(healed.reasons, ['listing_only']);
+});
+
+test("planRenumber: a file's own part marker is its name; only the renumber's collision rank is not", () => {
+  // fixL2b review: `Prologue (2).cbz` is a user's file, part two of the prologue, and its '(2)' is its own words --
+  // renumberedFile only ever writes `Chapter <n> (<k>)`. Reintroduce the loose ` \(\d+\)$` in ownName: the file is
+  // read as 'Prologue' and moved to that post, with a plan that reads clean.
+  const posts: PlanPost[] = [
+    { postId: 'part1', number: 29, from: 2, title: 'Prologue' },
+    { postId: 'part2', number: 30, from: 2, title: 'Prologue (2)' },
+  ];
+  const book: PlanBook = { id: 'pro2', root: '/dl', file: 'S/Prologue (2).cbz', number: numFromName('Prologue (2).cbz'), title: 'Prologue (2)' };
+  const plan = planRenumber([book], { mode: 'posting_order', posts }, {});
+  assert.deepEqual([plan.moves[0].postId, plan.moves[0].how], ['part2', 'name'], "a file's own part marker is its name");
 });
 
 test('planRenumber: a filename or title that only repeats the number is not a name', () => {

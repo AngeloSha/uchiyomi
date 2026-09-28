@@ -139,11 +139,19 @@ export async function smokeTest(src: SourceAdapter, opts: { timeoutMs?: number }
   let thrown: string | undefined;
   /** The engine's own timeout, on any candidate of the stage at hand: a miss, and the words if nothing else speaks. */
   let late: string | undefined;
+  /**
+   * Some candidate of the stage at hand ANSWERED, with nothing in it. Then an engine timeout on another is one
+   * miss among empty answers, and the empty verdict stands (markup drift): inconclusive is for a stage where no
+   * candidate answered at all. Before, one cold extension's first call running out of the engine's 30 s made a
+   * source whose markup broke read "inconclusive" for good (integration-1 review).
+   */
+  let empty = false;
   for (const term of ['the', 'one', 'love', 'a']) {
     if (past(deadline)) return outOfTime('Search', 'search', late);
     try {
       const r = await call(() => src.search(term));
       if (Array.isArray(r) && r.length) { results = r; break; }
+      empty = true;
     } catch (e) {
       if (ours(e)) return outOfTime('Search', 'search', late);
       if (engineLate(e)) { late ??= messageOf(e); continue; }
@@ -152,9 +160,10 @@ export async function smokeTest(src: SourceAdapter, opts: { timeoutMs?: number }
     }
   }
   if (!results.length) {
-    // Some term ran out of the engine's patience and none answered with an error: we did not see the search, and
-    // an empty answer to the others is not proof enough of drift.
-    if (thrown === undefined && late !== undefined) return outOfTime('Search', 'search', late);
+    // Every term that did not fail ran out of the engine's patience: we did not see the search. One that answered
+    // empty was seen, and so is the drift. Reintroduce by dropping `!empty`: "one engine timeout among empty
+    // answers is still empty" in sourceProbe.test.ts reads inconclusive.
+    if (thrown === undefined && late !== undefined && !empty) return outOfTime('Search', 'search', late);
     if (thrown !== undefined) {
       checks.push({ name: 'Search', ok: false, detail: clip(thrown), stage: 'search', kind: 'error', error: full(thrown) });
       fail({ stage: 'search', kind: 'error', error: full(thrown) });
@@ -177,6 +186,7 @@ export async function smokeTest(src: SourceAdapter, opts: { timeoutMs?: number }
   let unnumbered = 0;
   const hits = results.filter((r, i) => r?.sourceId != null && results.findIndex((x) => x?.sourceId === r.sourceId) === i).slice(0, CHAPTER_TRIES);
   late = undefined;
+  empty = false;
   for (let i = 0; i < hits.length; i++) {
     if (past(deadline)) return outOfTime(answered ? 'Chapters' : 'Series / chapters', 'chapters', late);
     try {
@@ -191,6 +201,7 @@ export async function smokeTest(src: SourceAdapter, opts: { timeoutMs?: number }
       const list = await call(() => src.listChapters(hits[i].sourceId));
       if (Array.isArray(list) && list.length) { chapters = list; hitNo = i + 1; break; }
       unnumbered += unnumberedOf(list);
+      empty = true;
     } catch (e) {
       if (ours(e)) return outOfTime(answered ? 'Chapters' : 'Series / chapters', 'chapters', late);
       if (engineLate(e)) { late ??= messageOf(e); continue; }
@@ -200,7 +211,7 @@ export async function smokeTest(src: SourceAdapter, opts: { timeoutMs?: number }
   // Nothing listed, nothing really failed, and a title ran out of the engine's patience: not seen, not a verdict.
   // Reintroduce by returning outOfTime on the first engine timeout: 'an engine timeout on one title or chapter is
   // a miss, and the next one is tried' in sourceProbe.test.ts reads inconclusive over a working source.
-  if (!chapters.length && firstErr === undefined && late !== undefined) {
+  if (!chapters.length && firstErr === undefined && late !== undefined && !empty) {
     return outOfTime(answered ? 'Chapters' : 'Series / chapters', 'chapters', late);
   }
   if (!answered) {
@@ -230,6 +241,7 @@ export async function smokeTest(src: SourceAdapter, opts: { timeoutMs?: number }
   const candidates = pageCandidates(chapters);
   let pagesErr: string | undefined;
   late = undefined;
+  empty = false;
   for (const c of candidates) {
     if (past(deadline)) return outOfTime('Pages', 'pages', late);
     try {
@@ -239,13 +251,14 @@ export async function smokeTest(src: SourceAdapter, opts: { timeoutMs?: number }
         passed.push('pages');
         return done();
       }
+      empty = true;
     } catch (e) {
       if (ours(e)) return outOfTime('Pages', 'pages', late);
       if (engineLate(e)) { late ??= messageOf(e); continue; }
       pagesErr ??= messageOf(e);
     }
   }
-  if (pagesErr === undefined && late !== undefined) return outOfTime('Pages', 'pages', late);
+  if (pagesErr === undefined && late !== undefined && !empty) return outOfTime('Pages', 'pages', late);
   const kind: SmokeKind = pagesErr !== undefined ? 'error' : 'empty';
   const detail = pagesErr ?? `none found (${candidates.length} chapter${candidates.length === 1 ? '' : 's'} tried)`;
   checks.push({ name: 'Pages', ok: false, detail: clip(detail), stage: 'pages', kind, error: full(detail) });

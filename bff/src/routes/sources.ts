@@ -957,12 +957,24 @@ function judgeAlsoFollow(folder: string, seriesId: string, opts: {
     });
 }
 
-/** An add's "archive the rest slowly": queued like the Library's action, and never the reason an add fails. */
-async function archiveRest(seriesId: string, a: { by: string | null; ctx: ViewCtx }): Promise<EnqueueOutcome> {
-  return enqueueArchive(seriesId, a.by, a.ctx).catch((e) => {
+/**
+ * An add's "archive the rest slowly": queued like the Library's action, and never the reason an add fails.
+ *
+ * `later` when the add left the series' numbering for an admin's review (#116: a folder that already holds books
+ * is never renumbered blind): the row is queued, but its boundary is placed only once the renumber has settled,
+ * in the numbers the series keeps (lib/archive.ts enqueueArchive) -- the critic's "never enqueue while
+ * numbering_pending is set: the answer is `later`". Reintroduce by answering the enqueue's own `queued`: "a revived
+ * folder waits for its review" in numbering.int.test.ts reads queued.
+ */
+async function archiveRest(seriesId: string, a: { by: string | null; ctx: ViewCtx }): Promise<EnqueueOutcome | 'later'> {
+  const out = await enqueueArchive(seriesId, a.by, a.ctx).catch((e) => {
     console.warn(`[add] could not queue ${seriesId} for the slow archive: ${(e as Error)?.message || e}`);
     return 'nothing' as const;
   });
+  if (out !== 'queued') return out;
+  const held = await one<{ held: boolean }>(
+    'SELECT (numbering_pending IS NOT NULL OR renumber_plan IS NOT NULL) AS held FROM lib_series WHERE id = $1', [seriesId]).catch(() => null);
+  return held?.held ? 'later' : out;
 }
 
 /** Add one series from a source to the library (downloads chapter 1 synchronously, the rest in background).
@@ -1165,7 +1177,11 @@ export async function addSeriesFromSource(opts: {
     // is minted purely to carry the results to the dialog's poll -- and only when there is something to
     // judge, as "nothing was fetched, queued or created" is what a plain nothing-yet add promises.
     if (opts.alsoFollow?.length) {
-      jobs.set(folder, { title, total: 0, done: 0, status: 'done', startedAt: Date.now(), origin: 'add' });
+      // Its starter's, as every card an add makes: the Downloads view hands a card to whoever started it wherever
+      // it lands (an 18+ library an admin hides, a library a member cannot browse), and the dialog polls this one
+      // for the follow results. Reintroduce by dropping `by`: "a carrier card is its starter's" in
+      // downloadsView.int.test.ts finds no card.
+      jobs.set(folder, { title, total: 0, done: 0, status: 'done', startedAt: Date.now(), origin: 'add', ...(opts.userId ? { by: opts.userId } : {}) });
       judgeAlsoFollow(folder, id, opts);
     }
     if (series?.coverUrl) {
@@ -1271,7 +1287,7 @@ export async function addSeriesFromSource(opts: {
       // As on the nothing-yet branch: no download means no card, so one is minted purely to carry the
       // judgement to the dialog's poll, and only when there is something to judge.
       if (opts.alsoFollow?.length) {
-        jobs.set(folder, { title, total: 0, done: 0, status: 'done', seriesId: heldId, startedAt: Date.now(), origin: 'add' });
+        jobs.set(folder, { title, total: 0, done: 0, status: 'done', seriesId: heldId, startedAt: Date.now(), origin: 'add', ...(opts.userId ? { by: opts.userId } : {}) });
         judgeAlsoFollow(folder, heldId, opts);
       }
     }
@@ -2297,6 +2313,14 @@ export default async function sourceRoutes(app: FastifyInstance) {
     // proxy's timeout first while the job starts anyway. Ten seconds covers every direct source; past that
     // the stale listing serves and the refresh finishes in the background for the next click.
     await withTimeout(updateSeries(seriesId, 0), REFRESH_BUDGET_MS).catch(() => {});
+    // Asked again after the refresh: it is where the detector first marks a series whose source gives many posts one
+    // number (#116), and the first Fetch after an upgrade -- before any sweep -- went on from the raw listing into a
+    // series that was held from that moment. Reintroduce by checking only before the refresh: "the refresh that
+    // holds a series holds its fetch" in numbering.int.test.ts starts a job.
+    const settled = await one<{ numbering: string | null; numbering_pending: string | null; renumber_plan: unknown; source_id: string | null }>(
+      'SELECT numbering, numbering_pending, renumber_plan, source_id FROM lib_series WHERE id = $1', [seriesId]).catch(() => null);
+    const heldNow = settled ? renumberRefusal(settled) : null;
+    if (heldNow) return reply.code(409).send(heldNow);
     if (b.data.floored && plain.length) {
       // Whole numbers become every listed chapter they cover. A whole number nothing lists stays in the list,
       // so it is reported `not_listed` like any other; the cap holds over what it expanded to.

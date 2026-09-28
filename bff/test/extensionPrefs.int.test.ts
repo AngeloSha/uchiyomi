@@ -177,3 +177,35 @@ test('an engine that does not answer is a 502, not an empty sheet', { skip }, as
     fake!.setMode('up');
   }
 });
+
+test("an extension's own exception is not the engine being down", { skip }, async () => {
+  // The engine answered, with the exception the extension's preference screen threw: the misattribution #115 exists
+  // to fix, on the settings sheet (#116 review). Reintroduce the one 502 (routes/numbering.ts engineFailure): this
+  // reads 'unreachable', "the extension server did not answer", over an engine that did.
+  fake!.reset();
+  fake!.source(WT).fail.preferences = 'Unable to build the settings of this source';
+  try {
+    const r = await get();
+    assert.equal(r.statusCode, 502, r.body);
+    assert.equal(r.json().error, 'extension_error', "an extension's own exception is not the engine being down");
+    assert.equal(r.json().message, 'The extension failed: Unable to build the settings of this source');
+  } finally {
+    fake!.reset();
+  }
+});
+
+test('a numbering setting the engine did not take queues nothing', { skip }, async () => {
+  // Only a setting the engine really took moves the numbers: a write it answered and did not store queued a remap on
+  // every series of the source, each held until an admin confirmed it (#116 review). Reintroduce by dropping
+  // `w.applied` from the route's remap: the plain series is marked.
+  fake!.reset();
+  fake!.source(WT).preferences.find((p) => p.key === SEQUENTIAL_KEY)!.keeps = true;
+  try {
+    const r = await post({ key: SEQUENTIAL_KEY, value: true });
+    assert.equal(r.statusCode, 200, r.body);
+    assert.deepEqual([r.json().changed, r.json().applied, r.json().remap], [true, false, 0], 'asked, and not taken');
+    assert.deepEqual(await pending(), { [PLAIN]: null, [POSTED]: null, [OTHER]: null, [GONE]: null }, 'a write the engine did not take queues nothing');
+  } finally {
+    fake!.reset();
+  }
+});

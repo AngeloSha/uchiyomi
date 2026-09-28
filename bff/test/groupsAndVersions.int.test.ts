@@ -305,6 +305,24 @@ test('every version of every chapter, flagged chosen, blocked and on disk', { sk
       await q('DELETE FROM series_listing WHERE series_id = $1 AND number = ANY($2::real[])', [S, [94, 95]]);
     }
   });
+  await t.test('a stamp that names no listed copy falls back to the group', async () => {
+    // A chapter-id stamp from before the engine re-created its ids (a reinstall), or one that outlived a replacement,
+    // names none of the number's copies: it says nothing about which copy the file is, and the group stamp still
+    // can (#116 review). Reintroduce by trusting any stamp in GET /versions: [false, false], no copy on disk.
+    const copy = (id: string, group: string) => ({ sourceId: id, source: PRI, groups: [group], scanlator: group, lang: null, pages: null, publishedAt: null, title: 'Chapter 93' });
+    await q(`INSERT INTO series_listing (series_id, number, title, source_id, chosen, status, copies) VALUES ($1, 93, 'Chapter 93', $2, $3::jsonb, 'available', $4::jsonb)`,
+      [S, PRI, JSON.stringify({ sourceId: 'p93a', number: 93 }), JSON.stringify([copy('p93a', 'Group A'), copy('p93b', 'Group B')])]);
+    await q(`INSERT INTO lib_books (id, series_id, source, file, number, title, root, scanlator, source_id, source_chapter_id)
+              VALUES ('b_gv_93', $1, 'T!gv', $2, 93, 'Chapter 93', $3, 'Group B', $4, 'an-id-the-engine-no-longer-has')`,
+      [S, `${FOLDER}/Chapter 93.cbz`, process.env.DL_ROOT, PRI]);
+    try {
+      const content = (await versions()).json().content;
+      assert.deepEqual(content.find((e: any) => e.number === 93).copies.map((c: any) => c.onDisk), [false, true], 'a stamp that names no listed copy falls back to the group');
+    } finally {
+      await q(`DELETE FROM lib_books WHERE id = 'b_gv_93'`);
+      await q('DELETE FROM series_listing WHERE series_id = $1 AND number = 93', [S]);
+    }
+  });
   await t.test('a number listed before v0.33.0 has an empty list, not an error', async () => {
     await q(`INSERT INTO series_listing (series_id, number, source_id, chosen, status) VALUES ($1, 99, $2, $3::jsonb, 'available')`,
       [S, PRI, JSON.stringify(ch(99, 'Group A'))]);

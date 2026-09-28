@@ -50,6 +50,7 @@ import { logAudit } from './audit';
 import { containedPath } from './fsGuard';
 import { countPages } from './pageCount';
 import { haveNumbers } from './libraryNumbers';
+import { activeArchiveBoundaries, allBelow } from './archiveBoundaries';
 import { DL_ROOT, persistScan, setBookDates, setBookMeta } from './library';
 import { restampBook } from './partial';
 import { chapterFileRel, downloadChapter, type DownloadInput } from './downloader';
@@ -1025,7 +1026,7 @@ async function replaceShort(
   // came from the source's page list, and the count that gets stored has to come from the bytes that
   // landed. (The count step writes `pages` too, but only into a blank row -- `AND pages = 0` -- from a
   // file nobody had measured; the two never write the same row for the same reason.)
-  await restampBook(book.id, abs, missing, { source: via, scanlator: chapter.scanlator });
+  await restampBook(book.id, abs, missing, { source: via, scanlator: chapter.scanlator, chapterId: chapter.sourceId });
   const now = await one<{ pages: number }>('SELECT pages FROM lib_books WHERE id = $1', [book.id]);
   const readers = await one<{ n: number }>('SELECT count(*)::int AS n FROM read_progress WHERE book_id = $1', [book.id]).catch(() => null);
   await logAudit('book.short_fixed', {
@@ -1226,7 +1227,7 @@ async function replaceWithGroup(
   // A restamp that throws must not take the rest of the night's repair with it: the new file is whole on
   // disk, and the count step re-measures a row whose numbers are stale.
   try {
-    await restampBook(book.id, abs, [], { source: via, scanlator: group });
+    await restampBook(book.id, abs, [], { source: via, scanlator: group, chapterId: copy.sourceId });
   } catch (e) {
     log?.warn(`repair: "${book.title}" ch ${book.number} was replaced but could not be restamped: ${(e as Error)?.message || e}`);
   }
@@ -1356,6 +1357,13 @@ async function stepGaps(r: RepairResult, opts: RepairOpts, budget: { left: numbe
         ${opts.seriesId ? 'AND s.id = $1' : "AND (s.gaps_checked_at IS NULL OR s.gaps_checked_at < now() - interval '24 hours')"}`,
     opts.seriesId ? [opts.seriesId] : [],
   );
+  // A series whose every missing number lies below its active slow archive's boundary (#117) is the archive's
+  // work in progress: it is fetching exactly those, a few an hour, and Health says "being archived" of them. The
+  // nightly leaves it alone -- no search of other sites, no fetch at full speed, and no gaps_checked_at stamp, so
+  // it comes back the night the archive is done -- unless a person named it (Fill now), which fetches them now.
+  // Reintroduce by dropping the skip: "the nightly leaves an archived gap to the archive" in repair.int.test.ts
+  // finds the series stamped.
+  const archiving = opts.seriesId ? new Map<string, number>() : await activeArchiveBoundaries(candidates.map((s) => s.id));
   // One small indexed read per candidate. It is the only way to apply the override and tombstone rules
   // (lib/libraryNumbers.ts) per series, and a few hundred of them once a night is not a load worth
   // flattening into a query nobody can read.
@@ -1366,6 +1374,7 @@ async function stepGaps(r: RepairResult, opts: RepairOpts, budget: { left: numbe
     if (!gaps.length) continue;
     const gapNums: number[] = [];
     for (const g of gaps) for (let n = g.lo; n <= g.hi; n++) gapNums.push(n);
+    if (allBelow(gapNums, archiving.get(s.id))) continue;
     ranked.push({ ...s, have, missing: gapNums.length, gapNums });
   }
   ranked.sort((a, b) => b.missing - a.missing);
@@ -1468,7 +1477,12 @@ async function stepGaps(r: RepairResult, opts: RepairOpts, budget: { left: numbe
       at('fetching');
       busyFolders.add(s.folder);
       try {
-        const up = await updateSeries(s.id, REPAIR_GAP_CHAPTERS, { hunt: false, cancelled });
+        // Fill now fetches below an active slow archive's boundary too (#117): the person asked for these
+        // chapters now, at normal pace, rather than at the archive's turn -- and without it the sweep's floor
+        // rises to the boundary and this fetches nothing while the row reads "listed". The nightly keeps the
+        // boundary: what lies below it is the archive's. Reintroduce by dropping the option: "Fill now fetches
+        // below an active archive's boundary" in repair.int.test.ts fetches nothing.
+        const up = await updateSeries(s.id, REPAIR_GAP_CHAPTERS, { hunt: false, cancelled, ignoreArchiveBoundary: !!opts.seriesId });
         const fetched = up.landed.filter((l) => gapSet.has(Math.floor(l.number)));
         out.fetched = fetched.length;
         // ⚠️ Two different numbers, and both are reported. The fetch is the ordinary sweep of the

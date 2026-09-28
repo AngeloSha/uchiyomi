@@ -22,7 +22,7 @@
 //   * planRenumber:          which file on disk is which post, and where each one moves.
 import type { SourceChapter } from './sources/types';
 import { groupsOf, normGroup } from './releases';
-import { chapterName } from './naming';
+import { chapterName, HEALED_NAME } from './naming';
 
 /**
  * The detector's thresholds, measured against the real lists (test/fixtures/webtoons-posts.json) and against
@@ -305,29 +305,36 @@ export function assignPostingNumbers<T extends SourceChapter>(seq: readonly T[],
   const numbers: number[] = new Array(seq.length);
   const added: PostNumber[] = [];
   const conflict: Array<{ postId: string; after: number; before: number; number: number }> = [];
-  let prev = 0;
   seq.forEach((c, i) => {
     const slotKey = `${numKey(c.number)}|${nameKey(c)}`;
     const g = groupKey(c);
     const slot = slots.get(slotKey);
     let n: number;
     // A copy of an earlier post (a version) shares that post's number wherever it turns up in the walk.
-    let version = false;
     if (matched[i]) {
       n = numKey(matched[i]!.number);
       if (!slot) slots.set(slotKey, { number: n, groups: new Set([g]) });
-      else if (slot.number === n) { slot.groups.add(g); version = true; }
+      else if (slot.number === n) slot.groups.add(g);
     } else {
       if (slot && !slot.groups.has(g)) {
         n = slot.number;
         slot.groups.add(g);
-        version = true;
       } else {
+        // Between the nearest KNOWN post after it and the highest number already walked that is still below that
+        // one: every post the listing shows before this one stays before it, whatever order the known posts now
+        // stand in. The number just walked alone got two cases wrong, each fixed at the other's expense (#116
+        // review): a late VERSION of chapter 2 put the post after it at 2.5, not between 9 and 10; and a known
+        // post the listing now shows LATER (a2 after a3) put the post after it at 2.5 instead of 3.5 -- for good,
+        // since numbers are never recomputed. A known post shown EARLIER (a6 between a2 and a3) is above the bound
+        // and never lowers it either: the post inserted after a3 is 3.5, not the conflict path's 11.
+        // Reintroduce the number just walked: "an inserted post goes after every post the listing shows before
+        // it" in postingOrder.test.ts reads 2.5.
         const before = nextKnown[i];
-        let at = before === undefined ? Math.floor(top) + 1 : freeBetween(prev, before, taken);
+        const low = before === undefined ? 0 : Math.max(0, ...numbers.slice(0, i).filter((x) => x < before));
+        let at = before === undefined ? Math.floor(top) + 1 : freeBetween(low, before, taken);
         if (at === undefined) {
           at = Math.floor(top) + 1;
-          conflict.push({ postId: c.sourceId, after: prev, before: before as number, number: at });
+          conflict.push({ postId: c.sourceId, after: low, before: before as number, number: at });
         }
         n = at;
         if (!slot) slots.set(slotKey, { number: n, groups: new Set([g]) });
@@ -337,13 +344,6 @@ export function assignPostingNumbers<T extends SourceChapter>(seq: readonly T[],
     taken.add(n);
     top = Math.max(top, n);
     numbers[i] = n;
-    // A version says nothing about where the next new post goes: it joined an EARLIER post's number, wherever it
-    // was posted. Moving `prev` back to it put a post inserted after a late copy just above the old number (2.5
-    // beside chapter 2, not 9.5 between 9 and 10), for good, since numbers are never recomputed. ⚠️ Only a
-    // version: a known post of its own that the listing now shows earlier (a6 re-dated between a2 and a3) does
-    // say where the posts after it go. `prev = max(prev, n)` kept prev at 6 there, so a post inserted after a3
-    // found no room below a4 and took the conflict path to the end of the series (11, not 3.5).
-    if (!version) prev = n;
   });
 
   const rows: PostNumber[] = seq.map((c, i) => rowOf(c, numbers[i]));
@@ -393,6 +393,9 @@ export type RenumberMode = 'posting_order' | 'source' | 'remap';
  * date of whichever copy the listing picks for that number (updater.ts -> library.ts setBookDates), and that
  * pick can move while the file does not. It may still CHOOSE a post -- it is right more often than not -- but
  * it is no better evidence than the listing it came from.
+ * So is a chapter name the listing HEALED onto a book that had none (lib/seriesListing.ts, `chapter_name_source`
+ * HEALED_NAME): the name of whichever copy the listing chose for the number when the heal ran. It too may choose a
+ * post, after every name a file carries itself, and it is recorded as 'listing'.
  */
 export type MatchHow = 'id' | 'pick' | 'stored' | 'name' | 'date' | 'listing';
 const EXACT: ReadonlySet<MatchHow> = new Set(['id', 'pick', 'stored', 'name']);
@@ -409,9 +412,10 @@ export interface PlanBook {
   title?: string | null;
   chapterName?: string | null;
   /**
-   * lib_books.chapter_name_source: set when `chapterName` was BORROWED from another source (lib/borrowNames.ts).
-   * A borrowed name was matched to that source's chapter by number alone, so it says nothing about which of
-   * this source's posts the file is, and the name pass does not read it.
+   * lib_books.chapter_name_source: set when `chapterName` is not the file's own. A name BORROWED from another source
+   * (lib/borrowNames.ts: the donor's id) was matched to that source's chapter by number alone, so it says nothing
+   * about which of this source's posts the file is, and no pass reads it. A name the listing HEALED onto the book
+   * (lib/seriesListing.ts: HEALED_NAME) is the listing's pick, as a date is: only the healed-name pass reads it.
    */
   chapterNameSource?: string | null;
   publishedAt?: string | null;
@@ -458,6 +462,11 @@ export interface PlanContext {
   tracker?: boolean;
   /** A download is running for the folder. */
   busy?: boolean;
+  /**
+   * The apply persists a posting assignment (always for 'posting_order'; a posting-order series' remap too), so the
+   * parked books' numbers are reserved in it as pseudo-posts (`extras`). Default: mode === 'posting_order'.
+   */
+  reserveParked?: boolean;
 }
 
 export interface PlanMove {
@@ -526,8 +535,12 @@ const baseName = (file: string): string => {
  * A file's own name for itself: its base name without renumberedFile's collision rank. `Chapter 5 (2)` is the
  * second book on 5, and '(2)' is Uchiyomi's count, not something the file or its post says -- read as a name,
  * it matched a post titled 'Chapter 5 (2)' (a two-part episode on Webtoons) by 'name', and the plan read clean.
+ * ⚠️ Only renumberedFile's own shape, `Chapter <n> (<k>)`: any other trailing '(2)' is the file's own words -- a
+ * user's 'Prologue (2)' is part two of the prologue -- and stripping it named the file after a different post.
+ * Reintroduce the loose ` \(\d+\)$`: "a file's own part marker is its name" in postingOrder.test.ts matches the
+ * wrong post.
  */
-const ownName = (file: string): string => baseName(file).replace(/ \(\d+\)$/, '');
+const ownName = (file: string): string => baseName(file).replace(/^(Chapter -?[\d.]+) \(\d+\)$/, '$1');
 
 /** A name, as written and with its number taken off, both normalised; '' dropped. */
 function forms(name: string | null | undefined, n: number): string[] {
@@ -616,6 +629,15 @@ export function planRenumber(books: readonly PlanBook[], target: RenumberTarget,
     const file = ownName(b.file);
     const title = b.title?.trim() === baseName(b.file) ? file : b.title;
     return unique(hits([...namedForms(title, b.number), ...namedForms(file, b.number)]));
+  });
+  // A name the listing healed onto the book (chapterNameSource HEALED_NAME): the listing's guess, like a date -- it
+  // may choose a post, after every name a file carries itself, and the plan then waits for an admin ('listing_only').
+  // Reintroduce by reading it in the name pass: "a healed name chooses a post, but never makes a plan clean" in
+  // postingOrder.test.ts reads 'name' and a clean plan.
+  pass('listing', (b) => {
+    if (b.chapterNameSource !== HEALED_NAME || untrusted(b)) return undefined;
+    const mine = forms(b.chapterName, b.number);
+    return mine.length ? unique(candidates(b).filter((p) => free(b, p) && formsOf(p).some((f) => mine.includes(f)))) : undefined;
   });
   pass('date', (b) => {
     if (untrusted(b)) return undefined;
@@ -734,7 +756,7 @@ export function planRenumber(books: readonly PlanBook[], target: RenumberTarget,
   if (ctx.tracker) reasons.push('tracker');
   if (ctx.busy) reasons.push('busy');
 
-  const extras: PostNumber[] = mode !== 'posting_order' ? [] : parked.map((m) => {
+  const extras: PostNumber[] = !(ctx.reserveParked ?? mode === 'posting_order') ? [] : parked.map((m) => {
     const b = bookById.get(m.bookId)!;
     return {
       postId: EXTRA_PREFIX + b.id, url: null, number: m.to, sourceNumber: numKey(b.number),

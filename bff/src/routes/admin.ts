@@ -874,11 +874,18 @@ export default async function adminRoutes(app: FastifyInstance) {
     if (!p.success) return reply.code(400).send({ error: 'bad_request', message: p.error.issues[0]?.message ?? 'Bad query' });
     const content = await listRunRecords({ ...p.data, me: userIdOf(req) });
     const ok = await listable(req, content.flatMap((r) => [r.target.seriesId, ...(r.result?.skips ?? []).map((k) => k.target?.seriesId)]));
+    // `notes` names series by title alone ("<title> ch 5 (3 -> 20)", "<title> -> source"), with no id to hold each
+    // one to the listing rule, so an admin who hides 18+ gets none of them rather than an adult title among them
+    // (integration-1 review). The page never reads them; a script that wants them asks with "Show 18+" on.
+    // Reintroduce by sending them as stored: "an admin who hides 18+ reads no adult title" in
+    // repairRoutes.int.test.ts finds the title in the history.
+    const noNotes = hideAdult(req);
     return {
       content: content.map((r) => ({
         ...r,
         target: scrubTarget(r.target, ok),
         result: scrubResult(r.result, ok),
+        ...(noNotes ? { notes: null } : {}),
       })),
     };
   });

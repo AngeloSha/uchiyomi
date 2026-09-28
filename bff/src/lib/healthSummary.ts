@@ -72,6 +72,12 @@ let lastRefresh = 0;
 /** Jobs that refresh the summary themselves when they end: while one runs, nothing else does (see holdSummaryWhile). */
 const holds: Array<() => boolean> = [];
 const held = () => holds.some((busy) => busy());
+/**
+ * An ask was let go while a held job ran. Its end refresh covers every ask made BEFORE that refresh starts reading
+ * -- and none made while it reads: it may already have read past the change. So the flag is cleared as the end
+ * refresh starts, and an ask that sets it again meanwhile gets a refresh of its own afterwards.
+ */
+let missed = false;
 const warn = (e: unknown) => console.warn(`[health] summary refresh: ${(e as Error)?.message || e}`);
 
 /**
@@ -90,14 +96,15 @@ const warn = (e: unknown) => console.warn(`[health] summary refresh: ${(e as Err
  *   at its end (refreshHealthSummaryNow), and that report sees them too.
  */
 export function scheduleHealthSummaryRefresh(): void {
-  if (queued || held()) return; // one is already coming and will see this change too, or the held job's end will
+  if (queued) return; // one is already coming and will see this change too
+  if (held()) { missed = true; return; } // the held job's end will -- or, if it has begun reading, a refresh after it
   arm(Math.max(0, lastRefresh + coalesceMs - Date.now()));
 }
 
 function arm(wait: number): void {
   queued = setTimeout(() => {
     queued = null;
-    if (held()) return; // a held job started meanwhile: its end refreshes
+    if (held()) { missed = true; return; } // a held job started meanwhile: its end refreshes
     if (runtime.repairing) return arm(coalesceMs);
     lastRefresh = Date.now();
     summaryRun().catch(warn);
@@ -122,9 +129,19 @@ export function holdSummaryWhile(busy: () => boolean): void {
  */
 export async function refreshHealthSummaryNow(): Promise<void> {
   if (queued) { clearTimeout(queued); queued = null; }
+  missed = false;
+  // Reintroduce by running beside the repair: "a sweep that ends during a repair leaves its refresh to the repair's
+  // end" in sourceCheck.int.test.ts counts a refresh while the repair runs.
   if (runtime.repairing) return arm(coalesceMs);
   lastRefresh = Date.now();
   await summaryRun().catch(warn);
+  // Asked while this read: this report may already have read past the change, so it gets one of its own -- armed
+  // like any other, and so run once the held job has let go (integration-1 review). Reintroduce by dropping it:
+  // "an ask during the sweep's own refresh is not lost" in sourceCheck.int.test.ts stores the older state.
+  if (missed) {
+    missed = false;
+    arm(Math.max(0, lastRefresh + coalesceMs - Date.now()));
+  }
 }
 
 /**
@@ -135,5 +152,6 @@ export function setSummaryRefresh(run?: () => Promise<unknown>, timing?: { every
   summaryRun = run ?? refreshHealthSummary;
   coalesceMs = run ? timing?.everyMs ?? SUMMARY_COALESCE_MS : SUMMARY_COALESCE_MS;
   lastRefresh = 0;
+  missed = false;
   if (queued) { clearTimeout(queued); queued = null; }
 }

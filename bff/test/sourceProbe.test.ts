@@ -159,6 +159,25 @@ test('an engine timeout on one title or chapter is a miss, and the next one is t
   assert.deepEqual(mixed.failure, { stage: 'pages', kind: 'error', error: 'HTTP error 404' });
 });
 
+test('one engine timeout among empty answers is still empty: inconclusive is for a stage nothing answered', async () => {
+  // Integration-1 review: a cold extension's first call is the one most likely to run out of the engine's 30 s, and
+  // with the others answering empty the source whose markup broke read "inconclusive" for good. Reintroduce by
+  // dropping `!empty` from a stage's outOfTime: each stage below reads inconclusive.
+  const { smokeTest } = await load();
+  const LATE = 'suwayomi timeout after 30000ms';
+  let first = true;
+  const search = await smokeTest(adapter({ search: async () => { if (first) { first = false; throw new Error(LATE); } return []; } }), { timeoutMs: 5000 });
+  assert.equal(search.state, 'fail', 'search: one late term, three empty ones');
+  assert.deepEqual([search.failure?.stage, search.failure?.kind], ['search', 'empty']);
+  const chapters = await smokeTest(adapter({ listChapters: async (id: string) => { if (id === 'A') throw new Error(LATE); return []; } }), { timeoutMs: 5000 });
+  assert.deepEqual([chapters.state, chapters.failure?.stage, chapters.failure?.kind], ['fail', 'chapters', 'empty'], 'chapters: one late title, one empty');
+  const pages = await smokeTest(adapter({
+    listChapters: async () => [ch(1), ch(2), ch(3)],
+    getPageUrls: async (id: string) => { if (id === 'c3') throw new Error(LATE); return []; },
+  }), { timeoutMs: 5000 });
+  assert.deepEqual([pages.state, pages.failure?.stage, pages.failure?.kind], ['fail', 'pages', 'empty'], 'pages: the newest late, the others empty');
+});
+
 test('unnumbered chapters are named, not called missing', async () => {
   // Reintroduce by dropping the UNNUMBERED write in suwayomi/sources.ts listChapters (the adapter half is pinned in
   // suwayomiAdapter.test.ts), or by ignoring it here: the kind is 'empty' and the fix points at markup.

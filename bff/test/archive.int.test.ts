@@ -550,6 +550,26 @@ test("the running cycle is the chapter's time: a backoff and a night outside the
   }
 });
 
+test('a chapter slower than its share of the hour counts in full in the running cycle', { skip }, async () => {
+  // A sample is capped against what a chapter of THAT length costs at the rate (expectedCycleMs), not the hour's bare
+  // share: capped at the share, an 80-minute chapter at four an hour read 75 minutes, and the ETA ran short. The
+  // archfix review's integration note. Reintroduce the share as the cap in runChapter (ewmaCycle(..., 3_600_000 /
+  // set.perHour)): this reads 75 minutes.
+  const rand = () => 0.99;
+  const s = await series('slowch', A, [1, 2]);
+  assert.equal(await arch.enqueueArchive(s.id, adminId, adminCtx), 'queued');
+  const release = hold(`${s.ref}/c1`);
+  try {
+    assert.deepEqual((await tick({ rand })).started.map((x) => x.number), [1]);
+    now += 80 * MIN;
+  } finally {
+    release();
+    await arch.archiveIdle();
+  }
+  const cycle = Number((await pace(A)).cycle_ms);
+  assert.ok(cycle >= 80 * MIN, `a chapter slower than its share of the hour counts in full (${Math.round(cycle / MIN)} min)`);
+});
+
 test('a refusal backs off and keeps the queue; a chapter let through ends the run', { skip }, async () => {
   const s = await series('refuse', R, [1, 2, 3]);
   assert.equal(await arch.enqueueArchive(s.id, adminId, adminCtx), 'queued');
@@ -760,4 +780,312 @@ test('deleting or merging a series drops its archive', { skip }, async () => {
   assert.equal(await arch.enqueueArchive(m1.id, adminId, adminCtx), 'queued');
   await mergeSeries(m1.id, m2.id);
   assert.equal(await row(m1.id), null, 'merged away: its archive goes');
+});
+
+// ── #116 x #117: a renumber and the archive (the critic's "issue-116 vs issue-117") ─────────────────────────────
+
+test('no archive chapter while a renumber is pending; queued behind one, its boundary waits for the new numbers', { skip }, async () => {
+  const s = await series('renum', A, [1, 2, 3, 4]);
+  assert.equal(await arch.enqueueArchive(s.id, adminId, adminCtx), 'queued');
+  await q(`UPDATE lib_series SET numbering_pending = 'posting_order' WHERE id = $1`, [s.id]);
+  try {
+    // Reintroduce by dropping the renumbering gate in tickOnce: chapter one starts under a number the pending
+    // plan is about to move (the s13 review's reintroduction #5, which nothing caught).
+    const t = await tick();
+    assert.deepEqual(t.started, [], 'no archive chapter while a renumber is pending');
+    assert.equal(t.waits[s.id]?.why, 'renumbering');
+    await arch.archiveIdle();
+    assert.deepEqual(onDiskNums(s.folder), []);
+
+    // Queued while one is pending: no boundary yet, since one placed now would be in the numbers the renumber
+    // replaces. Reintroduce by placing it anyway (enqueueArchive): this reads 4.001.
+    await arch.archiveAct('stop', s.id, { userId: adminId, admin: true, ctx: adminCtx });
+    assert.equal(await arch.enqueueArchive(s.id, adminId, adminCtx), 'queued');
+    assert.equal((await row(s.id)).boundary, null, 'queued behind a pending renumber: no boundary until it settles');
+    // Settled: its first turn reads the listing in the numbers the series keeps, and places the boundary there.
+    await q(`UPDATE lib_series SET numbering_pending = NULL WHERE id = $1`, [s.id]);
+    const t2 = await tick();
+    assert.deepEqual(t2.started.map((x) => `${x.seriesId}:${x.kind}`), [`${s.id}:listing`]);
+    await arch.archiveIdle();
+    assert.ok(Math.abs(Number((await row(s.id)).boundary) - 4.001) < 1e-4, 'placed once the numbers settled');
+  } finally {
+    await q(`UPDATE lib_series SET numbering_pending = NULL WHERE id = $1`, [s.id]);
+  }
+});
+
+test('a renumber moves the archive: its direction is settled again from the renumbered listing', { skip }, async () => {
+  // The commit remaps the boundary and the floor itself (lib/numbering.ts) and marks the row `renumbered`; which way
+  // it fills is decided from the listing, which the commit deletes and the check after it writes again.
+  const s = await series('redir', A, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], { held: [6, 7, 8, 9, 10] });
+  await q(`INSERT INTO archive_queue (series_id, state, boundary, direction, note) VALUES ($1, 'queued', 6, 'up', $2::jsonb)`,
+    [s.id, JSON.stringify({ renumbered: new Date(now).toISOString() })]);
+  // Reintroduce by keeping the direction: this starts chapter 1, an interior hole under the held block.
+  const t = await tick();
+  const r = await row(s.id);
+  assert.equal(r.direction, 'down', 'a renumber moves the archive: its direction follows the new numbers');
+  assert.equal(r.note?.renumbered, undefined, 'settled once');
+  assert.deepEqual(t.started.filter((x) => x.seriesId === s.id).map((x) => x.number), [5], 'down from the held block\'s own edge');
+  await arch.archiveIdle();
+});
+
+test('a look between a renumber and its listing reads the listing, and never finishes the archive', { skip }, async () => {
+  // A renumber deletes the series' listing, and the check that applied it writes the new one a moment later. A look in
+  // between found no candidate and FINISHED the archive -- boundary lifted, floor cleared, the back catalogue left to
+  // the sweep's five a night. Reintroduce by dropping `!listed.has` from needsListing: the series is finished.
+  const s = await series('between', A, [1, 2, 3]);
+  assert.equal(await arch.enqueueArchive(s.id, adminId, adminCtx), 'queued');
+  await q('DELETE FROM series_listing WHERE series_id = $1', [s.id]);
+  const t = await tick();
+  assert.deepEqual(t.finished, [], 'a missing listing is not "nothing left"');
+  assert.deepEqual(t.started.map((x) => `${x.seriesId}:${x.kind}`), [`${s.id}:listing`], 'it is read first, as a missing boundary is');
+  await arch.archiveIdle();
+  assert.equal((await row(s.id)).state, 'queued');
+  const t2 = await step();
+  assert.deepEqual(t2.started.filter((x) => x.seriesId === s.id).map((x) => x.number), [1], 'and its chapters go on from it');
+});
+
+test('a refresh that leaves no listing is a read that gave nothing', { skip }, async () => {
+  // After a renumber deleted its listing, a source that answers with no chapters leaves none: the updater keeps the
+  // last listing, and there is none to keep. Counted as read on the answer alone, the series was asked for its
+  // listing again at every break. Reintroduce `got = true` for a refresh in runListing: no ladder on the row.
+  const s = await series('emptyrefresh', A, [1, 2, 3]);
+  assert.equal(await arch.enqueueArchive(s.id, adminId, adminCtx), 'queued');
+  assert.ok((await row(s.id)).boundary != null, 'a boundary, so its next read is a refresh');
+  await q('DELETE FROM series_listing WHERE series_id = $1', [s.id]);
+  listed.set(s.ref, []);
+  const t = await tick({ rand: () => 0.99 });
+  assert.deepEqual(t.started.map((x) => `${x.seriesId}:${x.kind}`), [`${s.id}:listing`]);
+  await arch.archiveIdle();
+  const note = (await row(s.id)).note;
+  assert.equal(note?.listingFails, 1, 'a refresh that leaves no listing is a read that gave nothing');
+  assert.ok(note?.listingRetryAt, 'read again on the ladder, not at the next break');
+  assert.equal((await row(s.id)).state, 'queued');
+});
+
+test('a chapter the archive landed and has not scanned yet is in the plan a renumber builds', { skip }, async () => {
+  // The archive scans what it lands in batches; a plan is built from lib_books. A file with no row yet kept its old
+  // name through the renames and was scanned in afterwards under a number that is another post's by then.
+  // Reintroduce by dropping the onBeforeRenumberPlan registration in lib/archive.ts: the plan has no book.
+  const { planFor } = await import('../src/lib/numbering');
+  const s = await series('plan', A, [1, 2, 3]);
+  assert.equal(await arch.enqueueArchive(s.id, adminId, adminCtx), 'queued');
+  await tick();
+  await arch.archiveIdle();
+  assert.deepEqual(onDiskNums(s.folder), [1]);
+  assert.deepEqual(await q('SELECT id FROM lib_books WHERE series_id = $1', [s.id]), [], 'landed, and waiting for its batch scan');
+  const p = await planFor(s.id, 'posting_order');
+  assert.ok(p, 'a plan');
+  const books = await q<{ id: string; source_chapter_id: string | null }>('SELECT id, source_chapter_id FROM lib_books WHERE series_id = $1', [s.id]);
+  assert.equal(books.length, 1, 'scanned in before the plan read the books');
+  assert.equal(books[0].source_chapter_id, `${s.ref}/c1`, 'stamped with the chapter it came from, through setBookMeta');
+  assert.deepEqual(p!.plan.moves.map((m) => [m.bookId, m.how]), [[books[0].id, 'id']], 'and matched by that stamp');
+});
+
+test('a confirmed renumber scans in what the archive landed before its apply reads the books', { skip }, async () => {
+  // The same rule at the apply itself (settleNumbering), which a confirmation reaches without anyone having read
+  // the plan first. Reintroduce by dropping settleNumbering's beforePlan: the apply builds its plan with no book.
+  const { requestNumbering } = await import('../src/lib/numbering');
+  const s = await series('settle', A, [1, 2, 3]);
+  assert.equal(await arch.enqueueArchive(s.id, adminId, adminCtx), 'queued');
+  await tick();
+  await arch.archiveIdle();
+  assert.deepEqual(onDiskNums(s.folder), [1]);
+  assert.deepEqual(await q('SELECT id FROM lib_books WHERE series_id = $1', [s.id]), [], 'landed, and waiting for its batch scan');
+  const r = await requestNumbering(s.id, 'posting_order', { confirm: true, userId: adminId });
+  assert.equal(r?.state, 'applied', JSON.stringify(r));
+  const books = await q<{ id: string }>('SELECT id FROM lib_books WHERE series_id = $1', [s.id]);
+  assert.equal(books.length, 1, 'scanned in before the apply read the books');
+  assert.deepEqual(r?.plan?.moves.map((m: any) => m.bookId), [books[0].id], 'and moved with the rest');
+});
+
+test('a stop scans in what it landed, and what landed is not counted as left', { skip }, async () => {
+  const s = await series('stopscan', A, [1, 2, 3]);
+  assert.equal(await arch.enqueueArchive(s.id, adminId, adminCtx), 'queued');
+  await tick();
+  await arch.archiveIdle();
+  // Reintroduce by answering the stored count (compose): "1 of 3" over chapter one on disk reads 3 left.
+  const shown = (await arch.archiveView(() => true, adminId)).series.find((x) => x.seriesId === s.id);
+  assert.equal(shown?.left, 2, 'left counts what is still to come');
+  assert.deepEqual(await q('SELECT id FROM lib_books WHERE series_id = $1', [s.id]), []);
+  // Reintroduce by dropping the flush in archiveAct('stop'): the series page reads 0 chapters for twenty minutes.
+  assert.equal(await arch.archiveAct('stop', s.id, { userId: adminId, admin: true, ctx: adminCtx }), 'ok');
+  assert.equal((await q('SELECT id FROM lib_books WHERE series_id = $1', [s.id])).length, 1, 'a stop scans in what it landed');
+});
+
+test("a renumber's end is on the archive at once: what it remembered for the series is forgotten", { skip }, async () => {
+  // After the commit the numbers the archive remembered for the series -- its waits, its stuck and landed numbers --
+  // are in the numbers of before. Reintroduce by dropping the onRenumbered registration in lib/archive.ts: the view
+  // says it waits for the renumber until the next look.
+  const { requestNumbering } = await import('../src/lib/numbering');
+  const s = await series('forget', A, [1, 2, 3]);
+  assert.equal(await arch.enqueueArchive(s.id, adminId, adminCtx), 'queued');
+  await q(`UPDATE lib_series SET numbering_pending = 'posting_order' WHERE id = $1`, [s.id]);
+  assert.equal((await tick()).waits[s.id]?.why, 'renumbering');
+  const shown = async () => (await arch.archiveView(() => true, adminId)).series.find((x) => x.seriesId === s.id);
+  assert.equal((await shown())?.waiting?.why, 'renumbering');
+  const r = await requestNumbering(s.id, 'posting_order', { confirm: true, userId: adminId });
+  assert.equal(r?.state, 'applied', JSON.stringify(r));
+  assert.notEqual((await shown())?.waiting?.why, 'renumbering', "a renumber's end is on the archive at once");
+});
+
+test('what the archive scans in is not left, and the view says so at once', { skip }, async () => {
+  // The view counts `left` from the shared rows and subtracts what landed and is not scanned yet. Once the batch scan
+  // has put a chapter in the library nothing is subtracted, so the rows are read again: a cached count read one
+  // chapter too many until it expired. Reintroduce by dropping invalidateArchiveView() at the end of
+  // flushArchiveScan: this reads 3 left.
+  const s = await series('rescan', A, [1, 2, 3]);
+  assert.equal(await arch.enqueueArchive(s.id, adminId, adminCtx), 'queued');
+  await tick();
+  await arch.archiveIdle();
+  const left = async () => (await arch.archiveView(() => true, adminId)).series.find((x) => x.seriesId === s.id)?.left;
+  assert.equal(await left(), 2, 'landed, not scanned yet: not left');
+  await arch.flushArchiveScan();
+  assert.equal((await q('SELECT id FROM lib_books WHERE series_id = $1', [s.id])).length, 1, 'scanned in');
+  assert.equal(await left(), 2, 'once it is scanned in, still not left');
+});
+
+test('a turn after days of waiting is not a stall, in flight or refused once', { skip }, async () => {
+  // Five hundred series on one site take days each to come round. Counted from when a turn STARTS, a chapter in
+  // flight after such a wait read "stalled" until it landed, and one refusal until the next turn, days later (the
+  // archfix review). Reintroduce the turn's start as the rule (compose: idleTurns 2 whenever last_at is after the
+  // last progress): the in-flight assertion reads stalled.
+  const shown = async (id: string) => (await arch.archiveView(() => true, adminId)).series.find((x) => x.seriesId === id);
+  const s = await series('patient', A, [1, 2, 3, 4]);
+  assert.equal(await arch.enqueueArchive(s.id, adminId, adminCtx), 'queued');
+  await tick();
+  await arch.archiveIdle();
+  now += 4 * DAY;
+  const release = hold(`${s.ref}/c2`);
+  try {
+    assert.deepEqual((await tick()).started.map((x) => x.number), [2]);
+    assert.equal((await shown(s.id))?.current?.number, 2);
+    assert.equal((await shown(s.id))?.attention, undefined, 'its first turn after the wait is in flight, not stalled');
+  } finally {
+    release();
+    await arch.archiveIdle();
+  }
+  assert.equal((await row(s.id)).note?.idleTurns, 0, 'a chapter in starts the count again');
+});
+
+test('one refusal after days of waiting is a bad hour, not a stall', { skip }, async () => {
+  // The other half of the archfix review's finding: one failed turn after such a wait flagged the series until its
+  // next turn, days away. Reintroduce `idleTurns >= 1` in attentionOf (or the turn's start as the rule): stalled.
+  const shown = async (id: string) => (await arch.archiveView(() => true, adminId)).series.find((x) => x.seriesId === id);
+  refusing.delete(R2);
+  const r2 = await series('patientr', R2, [1, 2, 3]);
+  try {
+    assert.equal(await arch.enqueueArchive(r2.id, adminId, adminCtx), 'queued');
+    await step();
+  } finally { refusing.add(R2); }
+  assert.deepEqual(onDiskNums(r2.folder), [1]);
+  now += 4 * DAY;
+  clearPace(); await clearBlock(R2);
+  const t = await step();
+  assert.deepEqual(t.started.filter((x) => x.seriesId === r2.id).map((x) => x.number), [2]);
+  assert.equal((await row(r2.id)).note?.idleTurns, 1, 'a failed chapter is a turn with nothing to show');
+  assert.equal((await shown(r2.id))?.attention, undefined, 'one refusal after the wait is one bad hour');
+});
+
+test('an alternate that refused on the way to a landing backs off too', { skip }, async () => {
+  // The archfix review's reintroduction survived: nothing tested the landed path's backOffAlternates. R refuses,
+  // R2 refuses, A serves the chapter. Reintroduce by dropping it on the landed path: R2 is not backed off.
+  const s = await series('alt3', R, [1, 2]);
+  listed.set('alt3-ref2', [1, 2]);
+  listed.set('alt3-ref3', [1, 2]);
+  await q(`INSERT INTO series_sources (series_id, source_id, source_series_id, created_at) VALUES ($1, $2, 'alt3-ref2', now() - interval '1 minute'), ($1, $3, 'alt3-ref3', now())
+           ON CONFLICT DO NOTHING`, [s.id, R2, A]);
+  assert.equal((await updateSeries(s.id, 0)).outcome, 'ok');
+  assert.equal(await arch.enqueueArchive(s.id, adminId, adminCtx), 'queued');
+  const t = await tick({ rand: () => 0.99 });
+  assert.deepEqual(t.started.map((x) => `${x.source}:${x.number}`), [`${R}:1`]);
+  await arch.archiveIdle();
+  assert.deepEqual(onDiskNums(s.folder), [1], 'the third site served it');
+  assert.ok(asked.includes('alt3-ref2/c1') && asked.includes('alt3-ref3/c1'), 'both alternates were asked');
+  assert.equal((await pace(R))?.backoff_level, 1, 'the chosen source refused');
+  assert.equal((await pace(R2))?.backoff_level, 1, 'an alternate that refused on the way to a landing backs off too');
+  const pa = await pace(A);
+  assert.equal(pa?.backoff_level ?? 0, 0, 'the one that served it has no backoff');
+  assert.ok(new Date(pa.next_at).getTime() >= now + 10 * MIN, 'and rests as long as the chosen one');
+});
+
+test('before its source has a running cycle, the estimate is what a typical chapter costs at the rate', { skip }, async () => {
+  // The fallback is expectedCycleMs of a minute-long chapter (the web's own estimate assumes the same minute), not
+  // the hour's bare share: at 30 an hour a chapter and its shortest break outrun two minutes. The archfix review's
+  // integration note. Reintroduce the share in compose (cyc = 3_600_000 / perHour): four chapters read 8 minutes.
+  const { expectedCycleMs } = await import('../src/lib/archivePace');
+  const s = await series('etafast', A, [1, 2, 3, 4]);
+  assert.equal(await arch.enqueueArchive(s.id, adminId, adminCtx), 'queued');
+  await arch.applyArchiveSettings({ archivePerHour: 30 });
+  try {
+    const shown = (await arch.archiveView(() => true, adminId)).series.find((x) => x.seriesId === s.id);
+    const cycle = expectedCycleMs({ perHour: 30, chapterMs: 60_000, minBreakMs: 45_000 });
+    assert.ok(cycle > 2 * MIN, `PREMISE: at 30 an hour a chapter and its break outrun the share (${Math.round(cycle / 1000)} s)`);
+    assert.equal(shown?.etaMs, Math.round(4 * cycle), 'before its source has a running cycle, a typical chapter at the rate');
+  } finally {
+    await arch.applyArchiveSettings({ archivePerHour: 4 });
+  }
+});
+
+test('with a time window, the estimate is calendar time', { skip }, async () => {
+  // The running cycle leaves the hours outside the window out (outsideCycleMs), so an estimate from it alone is running
+  // time. Reintroduce by dropping the window's share in compose: four chapters at 01-07 read a quarter of the time.
+  const { expectedCycleMs } = await import('../src/lib/archivePace');
+  const s = await series('eta', A, [1, 2, 3, 4]);
+  assert.equal(await arch.enqueueArchive(s.id, adminId, adminCtx), 'queued');
+  await arch.applyArchiveSettings({ archiveWindowFrom: 1, archiveWindowTo: 7 });
+  try {
+    const shown = (await arch.archiveView(() => true, adminId)).series.find((x) => x.seriesId === s.id);
+    // Before the source has a running cycle: what a typical minute-long chapter costs at four an hour (the web's too).
+    const cycle = expectedCycleMs({ perHour: 4, chapterMs: 60_000, minBreakMs: 45_000 });
+    assert.equal(shown?.etaMs, Math.round((4 * cycle) / (6 / 24)), 'with a time window, the estimate is calendar time');
+  } finally {
+    await arch.applyArchiveSettings({ archiveWindowFrom: null, archiveWindowTo: null });
+  }
+});
+
+test("a missing source's day is kept on the row, so a restart does not start it again", { skip }, async () => {
+  // In memory only, every restart started the day again -- and the desktop app restarts with the app, so its missing
+  // source never reached a day (the archfix review). Reintroduce by dropping the goneSince note (tickOnce `wait`):
+  // after the restart the series is not flagged.
+  const s = await series('gone2', A, [1, 2]);
+  assert.equal(await arch.enqueueArchive(s.id, adminId, adminCtx), 'queued');
+  await q(`UPDATE series_listing SET copies = (SELECT jsonb_agg(c || jsonb_build_object('source', $2::text)) FROM jsonb_array_elements(copies) c)
+            WHERE series_id = $1`, [s.id, GONE]);
+  assert.equal((await tick()).waits[s.id]?.why, 'source_missing');
+  assert.ok((await row(s.id)).note?.goneSince, 'since when is on the row');
+  arch.resetArchiveMemory();
+  now += DAY;
+  assert.equal((await tick()).waits[s.id]?.why, 'source_missing');
+  const shown = (await arch.archiveView(() => true, adminId)).series.find((x) => x.seriesId === s.id);
+  assert.equal(shown?.attention?.why, 'source_missing', 'a day on, restart or not, Needs attention shows it');
+});
+
+test('after Resume all the view no longer says paused, before any look', { skip }, async () => {
+  // Reintroduce by answering the last look's wait as it is (archiveView): the view says paused after the resume.
+  const s = await series('resumeall', A, [1, 2]);
+  assert.equal(await arch.enqueueArchive(s.id, adminId, adminCtx), 'queued');
+  await arch.applyArchiveSettings({ archivePaused: true });
+  try {
+    assert.equal((await tick()).waiting?.why, 'paused');
+    assert.equal((await arch.archiveView(() => true, adminId)).waiting?.why, 'paused');
+  } finally {
+    await arch.applyArchiveSettings({ archivePaused: false });
+  }
+  assert.equal((await arch.archiveView(() => true, adminId)).waiting, undefined, 'resumed: nothing says paused');
+});
+
+test('a listing ladder a failed refresh left ends once the listing reads fresh again', { skip }, async () => {
+  // A failed REFRESH stamps the source as checked (updater.ts), so the listing reads fresh and chapters go on from it;
+  // the ladder was left on the row and a failed read a week on resumed at its old rung (the archfix review).
+  // Reintroduce by dropping the clearing in tickOnce: the ladder is still on the row.
+  const s = await series('ladder', A, [1, 2]);
+  assert.equal(await arch.enqueueArchive(s.id, adminId, adminCtx), 'queued');
+  await q(`UPDATE archive_queue SET note = jsonb_build_object('listingFails', 2, 'listingRetryAt', $2::text) WHERE series_id = $1`,
+    [s.id, new Date(now + 3 * HOUR).toISOString()]);
+  const t = await tick();
+  assert.deepEqual(t.started.filter((x) => x.seriesId === s.id).map((x) => x.number), [1], 'its chapters go on from the listing it has');
+  await arch.archiveIdle();
+  const note = (await row(s.id)).note ?? {};
+  assert.equal(note.listingFails, undefined, 'the ladder is over');
+  assert.equal(note.listingRetryAt, undefined);
 });

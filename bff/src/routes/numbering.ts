@@ -22,7 +22,8 @@ import { logAudit } from '../lib/audit';
 import { visibleToAll } from '../lib/visibility';
 import { suwayomiConfigured, swAdapterId } from '../lib/sources';
 import { readSourcePrefs, writeSourcePref, PrefError, type SourcePref } from '../lib/sources/suwayomi/prefs';
-import { folderBusy, numberingSummary, planFor, requestNumbering } from '../lib/numbering';
+import { CHECKING_NOW, folderBusy, numberingSummary, planFor, requestNumbering } from '../lib/numbering';
+import { runsInside } from '../lib/updater';
 import type { RenumberMode } from '../lib/postingOrder';
 import { clearDetailCacheFor } from './sources';
 
@@ -38,10 +39,21 @@ const notConfigured = (reply: FastifyReply) =>
 /**
  * The engine's answer to `source(id)` for an id it does not have is graphql-java's "declared as a non null type"
  * error with no data (measured, v2.3.2243): that is a 404, not the engine being down.
+ *
+ * An engine that ANSWERED, with the extension's own exception (gql's `suwayomi: <message>`, lib/sources/suwayomi/
+ * client.ts), is `extension_error` with the first line of it: the misattribution #115 exists to fix -- "the
+ * extension server did not answer" over an engine that did, sending an admin to restart a healthy container.
+ * `unreachable` is kept for the engine not answering at all. Reintroduce the one 502: "an extension's own
+ * exception is not the engine being down" in extensionPrefs.int.test.ts reads unreachable.
  */
 const engineFailure = (reply: FastifyReply, e: unknown) => {
   const msg = (e as Error)?.message || '';
   if (/non null type|NullPointerException/i.test(msg)) return reply.code(404).send({ error: 'unknown_source', message: 'The extension server has no such source.' });
+  if (msg.startsWith('suwayomi: ')) {
+    // The first line, without graphql-java's "Exception while fetching data (/source/preferences) : " in front.
+    const said = msg.slice('suwayomi: '.length).split('\n')[0].replace(/^Exception while fetching data \([^)]*\) : /, '').trim().slice(0, 300);
+    return reply.code(502).send({ error: 'extension_error', message: `The extension failed: ${said}` });
+  }
   return reply.code(502).send({ error: 'unreachable', message: 'The extension server did not answer. Try again in a moment.' });
 };
 
@@ -95,7 +107,11 @@ export default async function numberingRoutes(app: FastifyInstance) {
       // Every cached chapter list of this source was counted under the old setting: the add dialog would go on
       // showing the old numbers for ten minutes.
       clearDetailCacheFor(adapterId);
-      if (w.before.numbering) {
+      // Only a setting the engine really took moves the numbers: a write it answered but did not apply (the value
+      // read back is the old one) queued a remap on every series of the source for nothing, each held until an
+      // admin confirmed it (#116 review). Reintroduce by dropping `w.applied`: "a numbering setting the engine did
+      // not take queues nothing" in extensionPrefs.int.test.ts finds the series marked ("asked, and not taken").
+      if (w.before.numbering && w.applied) {
         // The source's numbers move under every series that uses them. Posting-order series keep theirs: their
         // numbers are the posts' own, and a post keeps its id whatever the extension calls it. Reintroduce by
         // dropping this UPDATE: "a numbering setting queues a remap" in extensionPrefs.int.test.ts finds the
@@ -149,6 +165,10 @@ export default async function numberingRoutes(app: FastifyInstance) {
     if (b.data.confirm && folderBusy(s.folder)) {
       return reply.code(409).send({ error: 'busy', message: 'Chapters are being fetched for this series. Try again when that ends.' });
     }
+    // The same for a run inside the series that is not downloading yet -- the sweep or a check reading its listing:
+    // it would fetch into the old numbers after the renames (#116 review). Reintroduce by dropping it: "a renumber
+    // waits for a check inside the series" in numberingRoutes.int.test.ts is answered 200 `pending`, not 409.
+    if (b.data.confirm && runsInside(id) > 0) return reply.code(409).send({ error: 'busy', message: CHECKING_NOW });
     const work = requestNumbering(id, b.data.mode, { confirm: b.data.confirm, userId: userIdOf(req) });
     // A confirmed apply lists the source and renames every file; a slow source must not turn into a proxy
     // timeout that reads as a failure while the rename carries on. Past the budget it is `pending`, and the page

@@ -289,6 +289,45 @@ test('a worse alternate is rejected before it can replace the canonical partial'
   assert.deepEqual((await row(6)).missing_pages, [4], 'the canonical one-hole marker survived');
 });
 
+test('a chapter completed from another copy is stamped with that copy', { skip }, async () => {
+  // The completion pass lands a whole copy from another source when its own cannot fill the hole: a landing, and
+  // lib_books.source_chapter_id must name the post the new file was written from (#116 review), or the versions
+  // view and every later remap trust the replaced copy's id. Reintroduce by dropping `chapterId` from the landed
+  // branch's restampBook in completePartial: the old copy's id stays.
+  const b = await partial(9);
+  await q('UPDATE lib_books SET source_chapter_id = $2 WHERE id = $1', [b.id, 'c9']);
+  failing.add('c9/3'); // its own copy still cannot fill the hole
+  const out = await completePartial(b, { alternates: async () => [{ source: ALT, sourceId: 'alt9', number: 9 }] });
+  assert.equal(out, 'completed');
+  const after = (await q('SELECT source_id, source_chapter_id, missing_pages FROM lib_books WHERE id = $1', [b.id]))[0];
+  assert.deepEqual([after.source_id, after.missing_pages], [ALT, null]);
+  assert.equal(after.source_chapter_id, 'alt9', 'a chapter completed from another copy is stamped with that copy');
+});
+
+test('a chapter improved by another copy that is still not whole is stamped with that copy too', { skip }, async () => {
+  // The completion's other landing: a copy with fewer holes replaces ours without filling every one ('improved').
+  // Reintroduce by dropping `chapterId` from the partial branch's restampBook in completePartial: the old id stays.
+  pageCount.set('c11', 10);
+  failing.add('c11/3');
+  failing.add('c11/5');
+  const err = await downloadChapter({ sourceId: SRC, seriesFolder: FOLDER, chapter: { sourceId: 'c11', number: 11 }, meta: { series: 'Partial Complete' } })
+    .then(() => null, (e: any) => e);
+  assert.deepEqual(err?.partial?.missing, [3, 5], 'two holes in ten: the hold is offered');
+  const w = await err.partial.write();
+  await persistScan();
+  await setBookMeta(FOLDER, [{ number: 11, source: SRC, missing: w.missing.map((i: number) => i + 1) }]);
+  await q('DELETE FROM source_health WHERE source_id = $1', [SRC]);
+  const b = await row(11);
+  await q('UPDATE lib_books SET source_chapter_id = $2 WHERE id = $1', [b.id, 'c11']);
+  pageCount.set('alt11', 10);
+  failing.add('alt11/5'); // the other copy lacks one page of the two
+  const out = await completePartial(b, { alternates: async () => [{ source: ALT, sourceId: 'alt11', number: 11 }] });
+  assert.equal(out, 'improved');
+  const after = (await q('SELECT source_id, source_chapter_id, missing_pages FROM lib_books WHERE id = $1', [b.id]))[0];
+  assert.deepEqual([after.source_id, after.missing_pages], [ALT, [6]]);
+  assert.equal(after.source_chapter_id, 'alt11', 'a chapter improved by another copy is stamped with that copy');
+});
+
 test('a corrupt manifest keeps the missing-page marker for a later retry', { skip }, async () => {
   const b = await partial(7);
   const zip = new AdmZip(abs(7));

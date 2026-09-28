@@ -188,7 +188,28 @@ const ARCHIVE_BOUNDARY = `(SELECT a.boundary FROM archive_queue a WHERE a.series
 const nothing = (title: string, outcome: UpdateOutcome): UpdateResult =>
   ({ title, added: 0, available: 0, outcome, failed: 0, waiting: 0, switched: 0, partial: 0, landed: [], asked: false });
 
+/**
+ * How many runs of updateSeries are inside each series right now: the sweep, a check, a listing refresh, Fill, a
+ * bulk fetch, the slow archive's listing. A renumber (#116) is carried out only by the one run inside its series
+ * (lib/numbering.ts settleNumbering), and a confirmation is refused while any run is (routes/numbering.ts):
+ * busyFolders and the activity list cover only the moments a chapter is downloading, and a run that read its
+ * listing and have-set before the renames would fetch into the old numbers after them (#116 review).
+ */
+const inside = new Map<string, number>();
+export function runsInside(seriesId: string): number { return inside.get(seriesId) ?? 0; }
+
 export async function updateSeries(seriesId: string, maxNew = 10, opts: UpdateOpts = {}): Promise<UpdateResult> {
+  inside.set(seriesId, runsInside(seriesId) + 1);
+  try {
+    return await visitSeries(seriesId, maxNew, opts);
+  } finally {
+    const left = runsInside(seriesId) - 1;
+    if (left > 0) inside.set(seriesId, left);
+    else inside.delete(seriesId);
+  }
+}
+
+async function visitSeries(seriesId: string, maxNew: number, opts: UpdateOpts): Promise<UpdateResult> {
   let s = await one<any>(`SELECT id,title,source_id,source_series_id,web,folder,summary,author,genres,status,chapter_floor,scanlator_prefs,source_prefs,
     ${NUMBERING_COLUMNS}, ${ARCHIVE_BOUNDARY} FROM lib_series s WHERE s.id=$1 AND ${visibleToAll('s')}`, [seriesId]);
   if (!s) return nothing('', 'gone');
