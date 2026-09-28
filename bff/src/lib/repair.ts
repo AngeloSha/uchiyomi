@@ -1018,7 +1018,13 @@ async function replaceShort(
     const hold = e?.partial;
     // A refusal (403/429) is the site saying no, and a chapter saved from a refusal would be a shorter
     // file dressed up as progress. `blockStatus` is set only when the SOURCE is at fault.
-    if (!hold || e?.blockStatus || hold.pages <= book.pages) return false;
+    if (!hold || e?.blockStatus || hold.pages <= book.pages) {
+      // Not kept, so its entry in the downloads ends now rather than after HOLD_MS as a download still running,
+      // as replaceWithGroup's below (v0.49.1). Reintroduce by dropping it: "a copy the short step does not keep"
+      // in repair.int.test.ts finds it active.
+      hold?.drop?.();
+      return false;
+    }
     await hold.write();
     missing = hold.missing;
   }
@@ -1219,6 +1225,10 @@ async function replaceWithGroup(
     const landed = await downloadChapter({ sourceId: via, seriesFolder: book.folder, chapter, meta }, { replace: true });
     if (!landed) return false;
   } catch (e: any) {
+    // Refused, so its entry in the downloads ends now, as not kept: left open it waited out downloadActivity's
+    // HOLD_MS as a download still running (the v0.49.0 fix in downloadWithFallback, missed here). Reintroduce by
+    // dropping it: "a short copy the upgrade refuses" in groupUpgrade.int.test.ts finds it active.
+    e?.partial?.drop?.();
     if (e?.diskFull) return 'disk';
     return false;
   }

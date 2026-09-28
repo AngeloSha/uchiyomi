@@ -90,6 +90,31 @@ test('a helper that is off: a warning with Connect while sources are seen behind
   assert.match(local.items[0].detail, /points at localhost, where no helper runs/);
 });
 
+/**
+ * v0.49.1: connected to Uchiyomi's own solver, the engine gets past Cloudflare only while that solver answers, and the
+ * row said it could beside the solver's own row saying it was not answering. Reintroduce by answering "Ready, and it
+ * can get past Cloudflare" whatever the solver said (drop the `solverAnswering === false` branch): the first
+ * assertion reads it.
+ */
+test('a solver that is not answering: the engine row says so too, never that it can get past Cloudflare', async () => {
+  const { extensionEngine } = await import('../src/lib/engineHealth');
+  const quiet = extensionEngine(base({ solverAnswering: false }))!;
+  assert.doesNotMatch(quiet.summary, /can get past Cloudflare/, 'a solver that is not answering is a way past Cloudflare');
+  assert.equal(quiet.summary, 'Ready (v2.3.2243); its Cloudflare helper is not answering');
+  assert.equal(quiet.status, 'ok', 'the solver row is the warning: nothing is seen failing here');
+  assert.equal(findings(quiet).length, 0);
+  assert.match(quiet.items[0].detail, /the Cloudflare solver row says what to do/);
+  assert.equal(quiet.items[0].actions, undefined, 'it is connected already: Connect would change nothing');
+  const seen = extensionEngine(base({ solverAnswering: false, cloudflare: [{ sourceId: 'sw:2', name: 'Night Shelf', bypass: false }] }))!;
+  assert.equal(seen.status, 'warn', 'a source seen behind Cloudflare makes it a finding');
+  assert.equal(seen.summary, 'Its Cloudflare helper is not answering');
+  assert.equal(findings(seen).length, 1);
+  assert.match(seen.items[0].detail, /Night Shelf is behind Cloudflare\./);
+  // Answering, or not asked (the engine points elsewhere): as before.
+  assert.match(extensionEngine(base({ solverAnswering: true }))!.summary, /^Ready, and it can get past Cloudflare/);
+  assert.match(extensionEngine(base({ solverAnswering: null }))!.summary, /^Ready, and it can get past Cloudflare/);
+});
+
 test('no solver of our own to share: no Connect, and the detail says what to set first', async () => {
   const { extensionEngine } = await import('../src/lib/engineHealth');
   const c = extensionEngine(base({ ourSolver: '', solver: { supported: true, enabled: false, url: '' }, cloudflare: [{ sourceId: 'sw:1', name: 'A', bypass: true }] }))!;

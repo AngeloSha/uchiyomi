@@ -59,7 +59,9 @@ const S14 = 's_nb_kept', FOLDER14 = 'Webtoons (test)/Istrevelia Kept';
 // A journal found by a run while another runs it (integration-2 review, a blocker).
 const S17 = 's_nb_race', FOLDER17 = 'Webtoons (test)/Istrevelia Race';
 const S18 = 's_nb_resumed', FOLDER18 = 'Webtoons (test)/Istrevelia Resumed Twice';
-const ALL = [S, S2, S3, S4, S5, S7, S8, S9, S10, S11, S12, S13, S14, S15, S16, S17, S18];
+// Health's numbering row while a confirmed renumber applies (v0.49.1).
+const S19 = 's_nb_applying', FOLDER19 = 'Webtoons (test)/Istrevelia Applying';
+const ALL = [S, S2, S3, S4, S5, S7, S8, S9, S10, S11, S12, S13, S14, S15, S16, S17, S18, S19];
 /** How many times the follower was asked for its chapter list. */
 let folAsked = 0;
 const PIXEL = Buffer.concat([Buffer.from('89504e470d0a1a0a', 'hex'), Buffer.alloc(400, 7)]);
@@ -782,8 +784,16 @@ test('a resume that waited behind another finishes the journal from where that o
   assert.equal((await q(`SELECT renumber_plan->>'phase' AS phase FROM lib_series WHERE id = $1`, [S18]))[0].phase, 'rename', 'PREMISE: a journal in its first phase');
   const stop = stopFirst();
   let crashed = false;
+  // v0.49.1: the second takes over after the first failed, and the first's mark on the folder went with it. Reintroduce
+  // by taking the mark only when the folder is free (runJournal's markFolder answering `!busyFolders.has`): nothing
+  // marks it while the second renames.
+  const { busyFolders } = await import('../src/lib/bulkNewest');
+  let busyWhileTakenOver: boolean | null = null;
   numbering.renumberHooks.afterFirstPhase = stop.hook;
-  numbering.renumberHooks.afterSecondPhase = () => { if (!crashed) { crashed = true; throw new Error('simulated crash'); } };
+  numbering.renumberHooks.afterSecondPhase = () => {
+    if (!crashed) { crashed = true; throw new Error('simulated crash'); }
+    busyWhileTakenOver = busyFolders.has(FOLDER18);
+  };
   let first: any, second: any;
   try {
     const resuming = updater.updateSeries(S18, 0);
@@ -799,10 +809,42 @@ test('a resume that waited behind another finishes the journal from where that o
   }
   assert.equal(first?.outcome, 'renumber_pending', 'PREMISE: the first resume failed after its renames');
   assert.equal(second?.outcome, 'ok', 'the second finished it');
+  assert.equal(busyWhileTakenOver, true, 'a resume that took over after a failed one renames with the folder marked busy');
+  assert.equal(busyFolders.has(FOLDER18), false, 'and takes the mark away when it is done');
   assert.equal(bytesIn(FOLDER18, 'Chapter 21.cbz'), 'post 21 bytes', 'a resume that waited behind another finishes the journal from where that one left it');
   assert.equal(bytesIn(FOLDER18, 'Chapter 2.cbz'), 'post 2 bytes');
   assert.deepEqual(filesIn(FOLDER18), ['Chapter 2.cbz', 'Chapter 21.cbz']);
   assert.deepEqual(await marksOf(S18), [63]);
   const row = (await q('SELECT numbering, numbering_pending, renumber_plan FROM lib_series WHERE id = $1', [S18]))[0];
   assert.deepEqual([row.numbering, row.numbering_pending, row.renumber_plan], ['posting_order', null, null]);
+});
+
+test('while a confirmed renumber applies, Health says it is being applied, not that it was interrupted', { skip }, async () => {
+  // Its journal is on the row from the first rename to the commit, and Health's numbering row read every journal as
+  // one a crash left: "interrupted" while the renumber was still applying (v0.49.1). Reintroduce by answering
+  // "interrupted" for every journal (drop the renumberRunning branch in health.ts numberingCheck): the first assertion.
+  const { runHealthChecks } = await import('../src/lib/health');
+  const row = async () => (await runHealthChecks()).checks.find((c: any) => c.id === 'numbering')?.items.find((i: any) => i.seriesId === S19);
+  await seedChain(S19, FOLDER19);
+  const stop = stopFirst();
+  numbering.renumberHooks.afterFirstPhase = stop.hook;
+  let during: any, applied: any;
+  try {
+    const applying = numbering.requestNumbering(S19, 'posting_order', { confirm: true, userId: adminId });
+    await reach(stop.there, applying);
+    assert.ok((await q('SELECT renumber_plan FROM lib_series WHERE id = $1', [S19]))[0].renumber_plan, 'PREMISE: its journal is on the row');
+    during = await row();
+    stop.open();
+    applied = await applying;
+  } finally {
+    stop.open();
+    numbering.renumberHooks.afterFirstPhase = undefined;
+  }
+  assert.doesNotMatch(during?.detail ?? '', /interrupted/, 'a renumber still applying reads as interrupted');
+  assert.match(during?.detail ?? '', /^Its confirmed renumber is being applied now\. Nothing downloads for this series until then\.$/);
+  assert.equal(during?.info, true, 'greyed: nothing waits for anyone, and it ends by itself');
+  assert.equal(during?.actions, undefined);
+  assert.equal(applied?.state, 'applied', 'PREMISE: and then it applied');
+  // A journal nothing runs is still a crash's: the next check finishes it (health.int.test.ts pins that wording).
+  assert.equal(numbering.renumberRunning(S19), false, 'nothing runs it once it is done');
 });

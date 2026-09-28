@@ -61,10 +61,22 @@ export interface LoadResult {
 // record of "skipped 30 over the limit" was one console.warn at boot, which is exactly where nobody looks
 // when search quietly stops covering half their sources; the status route and the health page read it now.
 let last: LoadResult | null = null;
-let lastAt: number | null = null;
 export const lastSuwayomiLoad = (): LoadResult | null => last;
-/** When the most recent load began (epoch ms), whichever way it went: Admin → Extensions' "last tried". */
-export const lastSuwayomiLoadAt = (): number | null => lastAt;
+
+/**
+ * The most recent attempt to reach the engine, whoever made it, and whether it answered: a load (the boot, a
+ * reload, the retry, the status route's self-heal), the status route's own look (every Check again, every poll of
+ * the setup card) and Health's probe. Admin → Extensions' "Last tried".
+ *
+ * ⚠️ It used to be the last LOAD. An engine that stopped answering after a good one starts no retry, so right after
+ * Check again the card named that load, hours back, as its last try -- a success, beside "not answering" (v0.49.1).
+ * `at` is when the attempt began; an older one that ends later does not replace a newer one.
+ */
+let lastTry: { at: number; ok: boolean } | null = null;
+export function noteSuwayomiTry(ok: boolean, at: number = Date.now()): void {
+  if (!lastTry || at >= lastTry.at) lastTry = { at, ok };
+}
+export const lastSuwayomiTry = (): { at: number; ok: boolean } | null => lastTry;
 
 /**
  * Called at boot, from reloadAll() and by the retry below. Returns a summary rather than throwing, so a dead
@@ -78,8 +90,10 @@ export async function loadSuwayomiSources(
   list: () => Promise<RemoteSource[]> = listRemoteSources,
   opts: { quiet?: boolean } = {},
 ): Promise<LoadResult> {
-  lastAt = Date.now();
+  const at = Date.now();
   last = await load(list, !!opts.quiet);
+  // Not configured is no attempt: nothing was asked.
+  if (last.configured) noteSuwayomiTry(last.reachable, at);
   // Registered, however it came about (a retry, a reload, Check again): any retry still waiting is done.
   if (last.reachable) connected(last);
   return last;

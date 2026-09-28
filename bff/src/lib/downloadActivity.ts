@@ -93,6 +93,15 @@ export function onFinished(fn: FinishedListener): () => void {
   return () => { const i = listeners.indexOf(fn); if (i >= 0) listeners.splice(i, 1); };
 }
 
+/** Told when a chapter that came in with pages missing is whole now (`healFinished`), as the folder and number. */
+type HealedListener = (folder: string, number: number) => void;
+const healedListeners: HealedListener[] = [];
+/** Hear about each chapter healed (lib/activityLog.ts rewrites its rows). The same rules as onFinished. */
+export function onHealed(fn: HealedListener): () => void {
+  healedListeners.push(fn);
+  return () => { const i = healedListeners.indexOf(fn); if (i >= 0) healedListeners.splice(i, 1); };
+}
+
 /** An incomplete chapter nobody wrote: how it ends, whether its caller said so (`drop`) or HOLD_MS ran out. */
 const notKept = (x: ActivityEntry) => endDownload(x.id, { status: 'failed', reason: `${x.reason}; not kept` });
 
@@ -126,6 +135,8 @@ export function endDownload(id: number, outcome: { status: 'done' | 'partial' | 
   if (!x) return;
   live.delete(id);
   if (outcome === 'skipped') return;
+  // The same chapter, whole this time: written over the file an earlier download left with holes in it.
+  if (outcome.status === 'done') healFinished(x.folder, x.number);
   const { heldAt: _held, ...rest } = x;
   const done: ActivityEntry = { ...rest, ...outcome, finishedAt: Date.now() };
   finished[capClass(done.origin)].push(done);
@@ -183,6 +194,33 @@ export function listActivity(now = Date.now()): { active: ActivityEntry[]; recen
   };
 }
 
+const numKey = (n: number) => Math.round(n * 1000) / 1000;
+
+/**
+ * A chapter that came in with pages missing today is whole now: the completion pass filled its holes
+ * (lib/partial.ts), or a later download wrote it whole (endDownload). Each entry of it that says `partial` ends as
+ * landed, and loses the "saved with N pages missing" it no longer is: Came in today went on saying "1 chapter saved
+ * with pages missing" after a repair had healed that chapter (v0.49.1). The rows in download_log follow
+ * (lib/activityLog.ts). Returns how many entries changed.
+ */
+export function healFinished(folder: string, number: number): number {
+  let n = 0;
+  for (const list of Object.values(finished)) {
+    for (const e of list) {
+      if (e.status !== 'partial' || e.folder !== folder || numKey(e.number) !== numKey(number)) continue;
+      e.status = 'done';
+      delete e.reason;
+      n++;
+    }
+  }
+  if (n) {
+    for (const fn of healedListeners) {
+      try { fn(folder, number); } catch (err) { console.warn(`[activity] a healed-chapter listener threw: ${(err as Error)?.message || err}`); }
+    }
+  }
+  return n;
+}
+
 /**
  * A series was renumbered (lib/numbering.ts, #116): what finished for its folder today now carries the number
  * the same post has in the new numbering, so "Came in today" does not name chapter 2 for the file that is
@@ -190,10 +228,9 @@ export function listActivity(now = Date.now()): { active: ActivityEntry[]; recen
  * would hide a failure nobody has looked at yet. download_log is remapped in the same transaction as the files.
  */
 export function renumberFinished(folder: string, map: ReadonlyMap<number, number>): void {
-  const key = (n: number) => Math.round(n * 1000) / 1000;
   for (const list of Object.values(finished)) {
     for (const e of list) {
-      const to = e.folder === folder ? map.get(key(e.number)) : undefined;
+      const to = e.folder === folder ? map.get(numKey(e.number)) : undefined;
       if (to !== undefined) e.number = to;
     }
   }

@@ -72,6 +72,8 @@ const throwPages = new Set<string>();
 const twoGroups = new Set<string>();
 /** `chapterId/index` pairs the site answers 404 for, so a download arrives nearly whole. */
 const missingPage = new Set<string>();
+/** `chapterId/index` pairs whose request throws, as a connection dropped under it: the SOURCE is blamed. */
+const droppedPage = new Set<string>();
 /** Every page list asked for, and every search: what the run actually cost the sources. */
 let pageCalls: string[] = [];
 let searches: string[] = [];
@@ -124,6 +126,7 @@ globalThis.fetch = (async (u: any, init?: any) => {
   if (url.includes('example.invalid')) {
     const m = url.match(/example\.invalid\/([^/]+)\/(\d+)\.png$/);
     if (m && missingPage.has(`${decodeURIComponent(m[1])}/${m[2]}`)) return new Response('gone', { status: 404 });
+    if (m && droppedPage.has(`${decodeURIComponent(m[1])}/${m[2]}`)) throw new TypeError('fetch failed');
     return new Response(PIXEL, { status: 200, headers: { 'content-type': 'image/png' } });
   }
   return realFetch(u, init);
@@ -198,6 +201,7 @@ function resetCatalog(): void {
   throwPages.clear();
   twoGroups.clear();
   missingPage.clear();
+  droppedPage.clear();
 }
 
 before(async () => {
@@ -559,6 +563,24 @@ test('a copy that arrives with one page missing still replaces a two-page chapte
   assert.equal(r.short.replaced, 1, 'nine real pages beat two');
   assert.deepEqual((await book(id)).missing_pages, [5], 'and the one placeholder is on the row, 1-based');
   assert.equal((await book(id)).pages, 10, 'the file is ten pages long, one of them a placeholder');
+});
+
+test('a copy the short step does not keep leaves the downloads at once', { skip }, async () => {
+  // Nine of ten pages with the connection dropping under the tenth: offered as a hold, and refused, since a copy is
+  // never saved short from a source at fault. It was never dropped, so it waited out downloadActivity's HOLD_MS as a
+  // download still running: ten minutes of a spinning Library ring (v0.49.1, the linger v0.49.0 fixed in
+  // downloadWithFallback). Reintroduce by dropping the `drop` in replaceShort: it is active.
+  const { listActivity } = await import('../src/lib/downloadActivity');
+  const id = await shortBook(15);
+  pagesFor.set(cid(A, T.short, 15), 2);
+  pagesFor.set(cid(B, T.short, 15), 10);
+  droppedPage.add(`${cid(B, T.short, 15)}/4`);
+  const r = await runRepair(undefined, { only: ['short'], bookId: id, userId: null });
+  assert.equal(r.short.replaced, 0, 'PREMISE: not kept');
+  const ours = (e: { folder: string; number: number }) => e.folder === folderOf(T.short) && e.number === 15;
+  assert.deepEqual(listActivity().active.filter(ours), [], 'a copy the short step does not keep is still downloading');
+  assert.match(listActivity().recent.find(ours)?.reason ?? '', /1 page missing; not kept/, 'it ended as not kept');
+  assert.equal((await book(id)).pages, 2, 'and the chapter on disk is as it was');
 });
 
 test('a chapter in the read library, and one under a name the downloader would never write, are never replaced', { skip }, async () => {

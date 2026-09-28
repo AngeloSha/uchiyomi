@@ -53,6 +53,8 @@ const asked: string[] = [];
 const followerPages = new Map<number, number>();
 /** FOLLOWER numbers whose page images answer 404: the download fails. */
 const brokenImages = new Set<number>();
+/** FOLLOWER `number/page` images that answer 404 alone: the copy arrives nearly whole, offered as a hold. */
+const brokenPages = new Set<string>();
 
 function source(id: string, group: string) {
   return {
@@ -127,8 +129,8 @@ before(async () => {
   await q('UPDATE server_settings SET scanlator_prefs = $1::jsonb WHERE id = 1',
     [JSON.stringify({ priority: [GOOD], blocked: [], patienceDays: 0 })]);
   globalThis.fetch = (async (u: any) => {
-    const m = /\/gu-follower\/(\d+)\//.exec(String(u));
-    if (m && brokenImages.has(Number(m[1]))) return new Response('gone', { status: 404 });
+    const m = /\/gu-follower\/(\d+)\/(\d+)\.png$/.exec(String(u));
+    if (m && (brokenImages.has(Number(m[1])) || brokenPages.has(`${m[1]}/${m[2]}`))) return new Response('gone', { status: 404 });
     return new Response(PIXEL, { status: 200, headers: { 'content-type': 'image/png' } });
   }) as typeof fetch;
 });
@@ -138,6 +140,7 @@ beforeEach(async () => {
   asked.length = 0;
   followerPages.clear();
   brokenImages.clear();
+  brokenPages.clear();
   await switchOn(false);
   await q('DELETE FROM source_health WHERE source_id = ANY($1::text[])', [[PRIMARY, FOLLOWER]]);
   // The step looks at the whole library, so an earlier test's series would be the one it swaps.
@@ -260,4 +263,22 @@ test('a failed swap keeps the file and waits a week', { skip }, async () => {
   // Reintroduce by dropping the upgrade_tried_at clause: FOLLOWER:1 is asked, and the chapter swaps.
   assert.ok(!asked.includes(`${FOLLOWER}:1`), `a failed swap was tried again the next night: ${asked}`);
   assert.equal((await row('fail', 1)).scanlator, OTHER);
+});
+
+test('a short copy the upgrade refuses leaves the downloads at once', { skip }, async () => {
+  // The preferred group's copy arrives a page short: offered as a hold, and refused -- a partial is a downgrade. It
+  // was never dropped, so it waited out downloadActivity's HOLD_MS as a download still running: ten minutes of a
+  // spinning Library ring (v0.49.1, the linger v0.49.0 fixed in downloadWithFallback). Reintroduce by dropping the
+  // `drop` in replaceWithGroup's catch: it is active.
+  const { listActivity } = await import('../src/lib/downloadActivity');
+  await switchOn(true);
+  await series('refused');
+  await q('UPDATE lib_books SET scanlator = $2 WHERE series_id = $1 AND number <> 1', [S('refused'), GOOD]);
+  brokenPages.add('1/3'); // four of five: at the partial floor, so a hold is offered
+  const r = await run();
+  assert.equal(r.groups.replaced, 0, 'PREMISE: refused');
+  assert.deepEqual(readFileSync(fileOf('refused', 1)), HELD, 'PREMISE: the chapter on disk is untouched');
+  const ours = (e: { folder: string; number: number }) => e.folder === S('refused') && e.number === 1;
+  assert.deepEqual(listActivity().active.filter(ours), [], 'a short copy the upgrade refuses is still downloading');
+  assert.match(listActivity().recent.find(ours)?.reason ?? '', /1 page missing; not kept/, 'it ended as not kept');
 });

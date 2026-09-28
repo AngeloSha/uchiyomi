@@ -82,7 +82,10 @@ const minBreakMs = (): number => {
 const LISTING_STALE_MS = 7 * 24 * 3600_000;
 /** How many missing numbers are looked at per series per pick, for the ones already on disk to be stepped over. */
 const PICK_DEPTH = 5;
-/** Landed chapters are scanned into the library in batches: persistScan walks the whole library. */
+/**
+ * Landed chapters are scanned into the library in batches: persistScan walks the whole library. The first one an
+ * archive lands for a series is the exception, scanned in at once (runChapter).
+ */
 const SCAN_BATCH = 5;
 const SCAN_WAIT_MS = 20 * MIN;
 /** A full disk stops everything for this long before the free space is measured again. */
@@ -120,7 +123,8 @@ const flights = new Map<string, Flight>();
 interface Unscanned {
   folder: string;
   firstAt: number;
-  items: Map<number, { landed?: Landed; publishedAt?: string; newRow: boolean }>;
+  /** `now`: a series' first landing, being scanned in at once (runChapter); archiveScanPending names it. */
+  items: Map<number, { landed?: Landed; publishedAt?: string; newRow: boolean; now?: boolean }>;
 }
 const unscanned = new Map<string, Unscanned>();
 /** Numbers a scan could not index although the file is there: stepped over until a restart, never refetched. */
@@ -907,9 +911,21 @@ async function runChapter(
         }, clock());
       }
       // A chapter in is progress: its three days without any (attentionOf) start again, and so do its idle turns.
-      await q(`UPDATE archive_queue SET done_count = done_count + 1, bytes = bytes + $2,
-                note = COALESCE(note, '{}'::jsonb) || jsonb_build_object('progressAt', $3::text, 'idleTurns', 0) WHERE series_id = $1`,
-      [r.series_id, bytes, new Date(clock()).toISOString()]).catch(() => {});
+      const counted = await q<{ n: number }>(`UPDATE archive_queue SET done_count = done_count + 1, bytes = bytes + $2,
+                note = COALESCE(note, '{}'::jsonb) || jsonb_build_object('progressAt', $3::text, 'idleTurns', 0) WHERE series_id = $1
+                RETURNING done_count AS n`,
+      [r.series_id, bytes, new Date(clock()).toISOString()]).catch(() => [] as Array<{ n: number }>);
+      // The first chapter an archive lands for a series is scanned in at once; the rest wait for a batch (maybeFlush).
+      // Until the batch, a series added with nothing but its archive read "0 chapters · none fetched yet" under a band
+      // saying "1 of 14", and Came in today showed its tile with no cover (v0.49.1). Not awaited: the source's break
+      // and pace are this chapter's to write, whatever the scan takes.
+      // Reintroduce by leaving it to the batch: "the first chapter an archive lands" in archive.int.test.ts finds no
+      // book row.
+      if (Number(counted[0]?.n) === 1 && gen === generation) {
+        const item = unscanned.get(r.series_id)?.items.get(n);
+        if (item) item.now = true;
+        void track(flushArchiveScan());
+      }
       // A chapter the site let through ends its refusal run. Taken from another followed source instead, the
       // chosen one did NOT let it through: a refusal there still backs it off, landed or not -- and so does one
       // from an alternate asked on the way.
@@ -1087,6 +1103,17 @@ async function noteUnscanned(seriesId: string, folder: string, n: number, item: 
     item = { ...item, newRow: !had };
   }
   u.items.set(n, { landed: item.landed, publishedAt: item.publishedAt, newRow: item.newRow ?? false });
+}
+
+/**
+ * A series' first chapter from the archive, landed and still being scanned in at once (runChapter). The downloads view
+ * lists it only once the library holds it (routes/sources.ts activityFor): a library scan takes seconds on a large
+ * library, and listed at once it put a tile with no cover in Came in today, and the series page re-read its chapters
+ * on the landing and still found none (v0.49.1). A later chapter waits for its batch in plain sight, as before.
+ */
+export function archiveScanPending(folder: string, number: number): boolean {
+  for (const u of unscanned.values()) if (u.folder === folder && u.items.get(number)?.now) return true;
+  return false;
 }
 
 /** Scan when five chapters are waiting, or the oldest has waited twenty minutes. */

@@ -2422,7 +2422,8 @@ paths:
         the server starts, with fresh `id`s. Also since v0.49.0 (#117) the response carries `archive`
         (ArchiveView): the slow archive's queue, its rows limited to the series this viewer can browse and
         filtered per request (never one viewer's answer replayed to another); its chapters are in `activity`
-        with origin `archive`.
+        with origin `archive`. Since v0.49.1 a `partial` chapter that is whole now reads `done`, and the slow
+        archive's first chapter of a series is listed once the library holds it.
       security:
         - bearer: []
       responses:
@@ -7410,7 +7411,8 @@ paths:
         Not configured: `{configured: false, reachable: false, off: 'switch' | 'unset', platform, linkedSeries}`
         (`switch` is EXTENSION_ENGINE=0 with the bundled address). Configured: the fields above plus `engine`
         (host:port), `platform` (desktop, compose, unraid, casaos, umbrel or unknown), `retry` ({attempts, since,
-        nextAt} while the registration retry runs, else null), `lastTry`, `linkedSeries` (series added through an
+        nextAt} while the registration retry runs, else null), `lastTry` and `lastTryOk` (the last attempt to reach
+        the engine, this call's own look included, and whether it answered), `linkedSeries` (series added through an
         extension) and, when the engine answers, `solver` ({supported, enabled, wiring: ok | off | localhost |
         other | unsupported, connectable, url}; `url` is never sent on desktop). When the engine answers but the
         last registration missed it, this call registers its sources before replying."

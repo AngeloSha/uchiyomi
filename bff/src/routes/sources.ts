@@ -80,7 +80,7 @@ import { newSeriesId } from '../lib/ids';
 import { cleanDescription } from '../lib/htmlText';
 import { updateSeries } from '../lib/updater';
 import { busyFolders } from '../lib/bulkNewest';
-import { enqueueArchive, archiveBusy, archiveSeriesIds, archiveView, type EnqueueOutcome } from '../lib/archive';
+import { enqueueArchive, archiveBusy, archiveScanPending, archiveSeriesIds, archiveView, type EnqueueOutcome } from '../lib/archive';
 import { registerArchiveRoutes } from './archive';
 import { chooseReleases, groupsOf, releaseOrder } from '../lib/releases';
 import { effectivePrefsFor, readSeriesPrefs } from '../lib/scanlatorPrefs';
@@ -395,10 +395,14 @@ export function speakingRows(rows: ReadonlyArray<{ id: string; folder: string; o
  */
 function activityFor(seen: DownloadsAudience, me: string | null, { active, recent }: ReturnType<typeof listActivity>) {
   const shown = (e: ActivityEntry) => seen.folder(e.folder, e.by);
+  // A series' first chapter from the slow archive is listed once the library holds it (lib/archive.ts
+  // archiveScanPending). Reintroduce by listing it at once: "listed in the downloads once the library holds it" in
+  // archive.int.test.ts finds it listed while its scan is held.
+  const inLibrary = (e: ActivityEntry) => e.origin !== 'archive' || !archiveScanPending(e.folder, e.number);
   const out = ({ by, heldAt: _h, source, ...e }: ActivityEntry) => ({
     ...e, seriesId: seen.openId(e.folder) ?? null, source: getSource(source)?.name ?? source, mine: !!by && by === me,
   });
-  return { active: active.filter(shown).map(out), recent: recent.filter(shown).map(out) };
+  return { active: active.filter(shown).map(out), recent: recent.filter((e) => shown(e) && inLibrary(e)).map(out) };
 }
 
 /**

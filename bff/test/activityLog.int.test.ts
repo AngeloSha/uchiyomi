@@ -100,6 +100,32 @@ test('what finished is written down, and a restart reads it back into the feed',
   act.clearActivity();
 });
 
+test('a chapter made whole later is landed in the log too, so a restart does not bring the holes back', { skip }, async () => {
+  // v0.49.1: the feed heals a chapter the completion pass (or a later download) made whole; its row in download_log
+  // must follow, or the next restart reads "saved with pages missing" back into Came in today. Reintroduce by not
+  // registering onHealed in startActivityLog: the row still reads partial.
+  const act = await import('../src/lib/downloadActivity');
+  const log = await import('../src/lib/activityLog');
+  await q('DELETE FROM download_log');
+  act.clearActivity();
+  await log.startActivityLog();
+  const id = act.withOrigin('sweep', null, () => act.beginDownload({ folder: 'log/heal', title: 'Log heal', number: 4.5, source: 'log-src' }));
+  const hold = { missing: [1, 2], write: async () => ({ pages: 12, missing: [1, 2] }) };
+  act.holdPartial(id, hold);
+  await hold.write();
+  // Healed straight away: the rewrite queues behind the row's own insert.
+  assert.equal(act.healFinished('log/heal', 4.5), 1, 'PREMISE: the feed healed it');
+  await log.flushActivityLog();
+  const rows = await q(`SELECT number, status, reason FROM download_log WHERE folder = 'log/heal'`);
+  assert.deepEqual(rows.map((r: any) => [Number(r.number), r.status, r.reason]), [[4.5, 'done', null]], 'the log still says partial');
+  act.clearActivity();
+  await log.startActivityLog();
+  assert.deepEqual((await recent()).filter((e) => e.folder === 'log/heal').map((e) => [e.status, e.reason]), [['done', undefined]],
+    'a restart brought "saved with pages missing" back');
+  act.clearActivity();
+  await q('DELETE FROM download_log');
+});
+
 test('rows older than a week are pruned, and only the last day comes back', { skip }, async () => {
   const act = await import('../src/lib/downloadActivity');
   const log = await import('../src/lib/activityLog');

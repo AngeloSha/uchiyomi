@@ -10,14 +10,32 @@
 // Skipped automatically unless TEST_DATABASE_URL is set (CI provides a throwaway Postgres service).
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { createServer } from 'node:http';
 
 const DSN = process.env.TEST_DATABASE_URL;
-const OURS = 'http://uchiyomi-flaresolverr:8191';
+/** Uchiyomi's own solver (FLARESOLVERR_URL): the fake below, so Health can ping what Connect points the engine at. */
+let OURS = '';
 const SERIES = ['s_ee_one', 's_ee_two', 's_ee_gone', 's_ee_merged'];
+
+/** A FlareSolverr as its root answers a ping, and nothing more; `stop` is the container gone. */
+async function startFakeSolver() {
+  const srv = createServer((_req, res) => {
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ msg: 'FlareSolverr is ready!', version: '3.4.6' }));
+  });
+  await new Promise<void>((r) => srv.listen(0, '127.0.0.1', r));
+  const { port } = srv.address() as { port: number };
+  let open = true;
+  // Keep-alive sockets included: a closed server still answers on a connection fetch kept open.
+  const stop = () => (open ? new Promise<void>((r) => { open = false; srv.closeAllConnections(); srv.close(() => r()); }) : Promise.resolve());
+  return { url: `http://127.0.0.1:${port}`, stop };
+}
 
 async function setup() {
   const { startFakeSuwayomi, SOURCE_IDS } = await import('./fixtures/fakeSuwayomi');
   const fake = await startFakeSuwayomi();
+  const solver = await startFakeSolver();
+  OURS = solver.url;
   // ⚠️ Before anything from src: env.ts reads these once.
   process.env.DATABASE_URL = DSN;
   process.env.SUWAYOMI_URL = fake.url;
@@ -59,11 +77,11 @@ async function setup() {
   const auth = { authorization: `Bearer ${app.jwt.sign({ sub: admin, role: 'admin' })}` };
   const status = async () => (await app.inject({ method: 'GET', url: '/api/admin/extensions/status', headers: auth })).json();
   const connect = () => app.inject({ method: 'POST', url: '/api/admin/extensions/solver', headers: auth, payload: {} });
-  return { fake, q, reg, app, status, connect, SOURCE_IDS };
+  return { fake, solver, q, reg, app, status, connect, SOURCE_IDS };
 }
 
 test('the extension engine, as Admin → Extensions and Health see it', { skip: DSN ? false : 'set TEST_DATABASE_URL to run' }, async (t) => {
-  const { fake, q, reg, app, status, connect, SOURCE_IDS } = await setup();
+  const { fake, solver, q, reg, app, status, connect, SOURCE_IDS } = await setup();
   const quiet = [console.warn, console.log] as const;
   console.warn = () => {};
   console.log = () => {};
@@ -87,7 +105,8 @@ test('the extension engine, as Admin → Extensions and Health see it', { skip: 
       assert.equal(down.linkedSeries, 2, 'the series added through an extension, not the removed or merged-away one');
       assert.equal(down.engine, new URL(fake.url).host);
       assert.equal(down.retry, null, 'no loop was started in this test');
-      assert.ok(Date.parse(down.lastTry) > 0, 'when the last registration ran');
+      assert.ok(Date.parse(down.lastTry) > 0, 'when it last tried');
+      assert.equal(down.lastTryOk, false, 'and that it did not answer');
       assert.equal(down.solver, undefined, 'nothing to say about the helper of an engine that does not answer');
 
       await fake.start();
@@ -97,6 +116,31 @@ test('the extension engine, as Admin → Extensions and Health see it', { skip: 
       assert.equal(reg.lastSuwayomiLoad()?.reachable, true);
       assert.deepEqual(back.solver, { supported: true, enabled: false, wiring: 'off', connectable: true, url: 'http://localhost:8191' },
         'a fresh engine: its helper off, at its default address');
+    });
+
+    /**
+     * v0.49.1: "Last tried" was the last registration. An engine that stops answering after a good one starts no retry,
+     * so right after Check again the card named that registration, hours back, as its last try. Reintroduce by
+     * answering the last load's time again (`lastSuwayomiLoadAt`, or noteSuwayomiTry out of engineStatusReport): the
+     * look this call made is not the one named.
+     */
+    await t.test('Last tried is the last attempt to reach the engine, and says how it went', async () => {
+      const loaded = await reg.loadSuwayomiSources();
+      assert.equal(loaded.reachable, true, 'PREMISE: a registration that found the engine');
+      const loadedAt = Date.now();
+      await new Promise((r) => setTimeout(r, 25));
+      await fake.stop();
+      try {
+        const s = await status();
+        assert.equal(s.reachable, false);
+        assert.equal(s.retry, null, 'PREMISE: no retry runs after a good registration');
+        assert.ok(Date.parse(s.lastTry) > loadedAt, `the look this call made is the last try, not the registration before it (${s.lastTry})`);
+        assert.equal(s.lastTryOk, false, 'and it did not answer');
+      } finally {
+        await fake.start();
+      }
+      const back = await status();
+      assert.equal(back.lastTryOk, true, 'the engine back: the last try answered');
     });
 
     await t.test('while the retry runs, the page can say how often it asked and when it asks next', async () => {
@@ -132,7 +176,7 @@ test('the extension engine, as Admin → Extensions and Health see it', { skip: 
       assert.deepEqual(calls.map((c) => c.fields?.[0]), ['settings', 'setSettings'], 'read first, then write');
       assert.ok(calls.every((c) => c.status === 'ok'), 'the engine accepted both');
       const audit = await q<{ detail: any }>(`SELECT detail FROM audit_log WHERE event = 'extension.solver' ORDER BY at DESC LIMIT 1`);
-      assert.deepEqual(audit[0].detail, { wasEnabled: false, host: 'uchiyomi-flaresolverr:8191' });
+      assert.deepEqual(audit[0].detail, { wasEnabled: false, host: new URL(OURS).host });
       assert.ok(!JSON.stringify(audit[0].detail).includes('http'), 'the audit carries the host, never the address');
       assert.equal((await status()).solver.wiring, 'ok');
     });
@@ -220,6 +264,29 @@ test('the extension engine, as Admin → Extensions and Health see it', { skip: 
       assert.equal(fixed?.status, 'ok', 'Connect forgot the cached look, so the row clears at once');
       assert.match(fixed!.summary, /^Ready, and it can get past Cloudflare/);
     });
+
+    /**
+     * v0.49.1: after Connect the engine's way past Cloudflare IS Uchiyomi's solver, and the engine row said "it can get
+     * past Cloudflare" beside the solver row's "Not answering". Reintroduce by leaving the solver out of the engine row
+     * (drop `solverAnswering` from extensionEngineCheck): the engine row reads it can.
+     */
+    await t.test("with Uchiyomi's solver down, Health's engine row and solver row say the same", async () => {
+      const { extensionEngineCheck } = await import('../src/lib/engineHealth');
+      const { solverHealth } = await import('../src/lib/health');
+      const { forgetEngineProbe } = await import('../src/lib/extensionEngine');
+      const { forgetSolverPing } = await import('../src/lib/sources/flaresolverr');
+      assert.equal(fake.settings.flareSolverrUrl, OURS, 'PREMISE: the engine is connected to our solver');
+      await solver.stop();
+      forgetEngineProbe();
+      forgetSolverPing();
+      const [engineRow, solverRow] = await Promise.all([extensionEngineCheck(), solverHealth()]);
+      assert.match(solverRow.summary, /^Not answering/, 'PREMISE: the solver row says it is down');
+      assert.doesNotMatch(engineRow!.summary, /can get past Cloudflare/, 'the engine row says it can get past Cloudflare beside a solver that is down');
+      assert.match(engineRow!.summary, /its Cloudflare helper is not answering/i);
+      // Manga Ball is still seen failing behind Cloudflare (the test before this one): a finding, not a greyed line.
+      assert.equal(engineRow!.status, 'warn');
+      assert.match(engineRow!.items[0].detail, /Cloudflare solver row/);
+    });
   } finally {
     console.warn = quiet[0];
     console.log = quiet[1];
@@ -228,6 +295,7 @@ test('the extension engine, as Admin → Extensions and Health see it', { skip: 
     await q('DELETE FROM lib_series WHERE id = ANY($1)', [SERIES]).catch(() => {});
     await q(`DELETE FROM source_health WHERE source_id LIKE 'sw:%'`).catch(() => {});
     await fake.close();
+    await solver.stop();
     const { pool } = await import('../src/lib/db');
     await pool.end().catch(() => {});
   }

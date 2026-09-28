@@ -18,7 +18,7 @@ import {
   getEngineSolver, ourSolverUrl, setEngineSolver, solverHost, solverWiring, type EngineSolver, type SolverWiring,
 } from './sources/suwayomi/engineSolver';
 import {
-  lastSuwayomiLoad, lastSuwayomiLoadAt, onSuwayomiReconnect, retrySuwayomiNow, suwayomiRetryState,
+  lastSuwayomiLoad, lastSuwayomiTry, noteSuwayomiTry, onSuwayomiReconnect, retrySuwayomiNow, suwayomiRetryState,
 } from './sources/suwayomi/register';
 import { getHiddenLangs } from './sources/suwayomi/langs';
 import { currentError } from './sourceDiagnosis';
@@ -83,12 +83,15 @@ export async function engineStatusReport() {
   let version: string | null = null;
   let reachable = false;
   let error: string | undefined;
+  const askedAt = Date.now();
   try {
     version = (await aboutServer()).version;
     reachable = true;
   } catch (e) {
     error = (e as Error)?.message || 'unreachable';
   }
+  // This look is a try of its own: Check again is this call, and so is every poll of the setup card.
+  noteSuwayomiTry(reachable, askedAt);
   if (reachable && !lastSuwayomiLoad()?.reachable) await retrySuwayomiNow().catch(() => null);
   let solver: SolverView | undefined;
   if (reachable) {
@@ -101,11 +104,14 @@ export async function engineStatusReport() {
   // `enabled` is what the operator asked for; `registered` is what search actually reaches. They differ
   // by `skipped` whenever the cap bites, and until the panel showed all three that gap was invisible.
   const load = lastSuwayomiLoad();
+  // The last attempt to reach the engine and how it went (register.ts noteSuwayomiTry), never the last load alone.
+  const tried = lastSuwayomiTry();
   return {
     configured: true, reachable, version, error, enabled: counts?.enabled ?? 0, known: counts?.known ?? 0,
     registered: load?.registered ?? 0, skipped: load?.skipped ?? 0, cap: env.SUWAYOMI_MAX_SOURCES,
     hiddenLangs: await getHiddenLangs().catch(() => [] as string[]),
-    engine: engineHost(), platform, retry: suwayomiRetryState(), lastTry: iso(lastSuwayomiLoadAt()), linkedSeries,
+    engine: engineHost(), platform, retry: suwayomiRetryState(), lastTry: iso(tried?.at ?? null), lastTryOk: tried?.ok ?? null,
+    linkedSeries,
     ...(solver ? { solver } : {}),
   };
 }
@@ -172,12 +178,16 @@ export function engineProbe(now: number = Date.now()): Promise<EngineProbe> {
   if (memo && now - memo.at < PROBE_TTL_MS) return memo.p;
   // gql's own timeout, whatever each helper asks for: this is the one caller that must not wait.
   const run = (<T,>(query: string, variables: Record<string, unknown> = {}) => gql<T>(query, variables, PROBE_TIMEOUT_MS)) as Gql;
-  const p = Promise.allSettled([aboutServer(run), getEngineSolver(run, PROBE_TIMEOUT_MS)]).then(([about, solver]) => ({
-    reachable: about.status === 'fulfilled',
-    version: about.status === 'fulfilled' ? about.value.version : null,
-    error: about.status === 'rejected' ? String((about.reason as Error)?.message || about.reason || 'unreachable') : null,
-    solver: about.status === 'fulfilled' && solver.status === 'fulfilled' ? solver.value : null,
-  }));
+  const askedAt = Date.now();
+  const p = Promise.allSettled([aboutServer(run), getEngineSolver(run, PROBE_TIMEOUT_MS)]).then(([about, solver]) => {
+    noteSuwayomiTry(about.status === 'fulfilled', askedAt);
+    return {
+      reachable: about.status === 'fulfilled',
+      version: about.status === 'fulfilled' ? about.value.version : null,
+      error: about.status === 'rejected' ? String((about.reason as Error)?.message || about.reason || 'unreachable') : null,
+      solver: about.status === 'fulfilled' && solver.status === 'fulfilled' ? solver.value : null,
+    };
+  });
   memo = { at: now, p };
   return p;
 }

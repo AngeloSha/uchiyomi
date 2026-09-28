@@ -151,3 +151,27 @@ export async function solverPing(timeoutMs = 5000): Promise<{ ok: boolean; versi
     return { ok: false, error: String(e?.cause?.code || e?.name || e?.message || 'unreachable') };
   }
 }
+
+/** How long one ping answers for everyone who asks. */
+export const PING_SHARED_MS = 10_000;
+let shared: { at: number; p: Promise<{ ok: boolean; version?: string; error?: string }> } | null = null;
+
+/**
+ * `solverPing`, asked once for everyone who asks within PING_SHARED_MS (concurrent callers share the one in flight).
+ *
+ * Health reads the solver twice: its Cloudflare solver row, and the extension engine row, whose engine gets past
+ * Cloudflare only through this same solver once Connect pointed it here. Two pings a moment apart could disagree, and
+ * the page said "can get past Cloudflare" in one row beside "not answering" in the other (v0.49.1). The repair's
+ * solver step still pings for itself: it decides whether to clear anything, and that wants the answer of now.
+ */
+export function solverPingShared(now: number = Date.now()): Promise<{ ok: boolean; version?: string; error?: string }> {
+  if (shared && now - shared.at < PING_SHARED_MS) return shared.p;
+  const p = solverPing();
+  shared = { at: now, p };
+  return p;
+}
+
+/** Tests: the next shared ping asks the solver again. */
+export function forgetSolverPing(): void {
+  shared = null;
+}
