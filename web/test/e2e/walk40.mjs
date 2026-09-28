@@ -301,6 +301,12 @@ try {
     const badge = await waitFor(async () => /1 page missing/.test(await bodyText()), 12_000);
     check(!!badge, 'series row shows 1 page missing', 'series row did not show its partial badge');
     await page.goto(`${BASE}/reader/?book=${encodeURIComponent(book9.id)}&page=3`, { waitUntil: 'networkidle2', timeout: 60_000 });
+    // ⚠️ The reader draws the chapter under its "Loading chapter…" cover until it is ready (reader/page.tsx `!ready`),
+    // and innerText reads the caption straight through that cover: at 390 the check passed, and the screenshot
+    // showed nothing but the cover. The caption is judged, and shot, once a page is drawn and the cover has gone.
+    const loaded = await waitFor(() => page.evaluate(() => !!document.querySelector('img[alt^="Page "]') && ![...document.querySelectorAll('div')]
+      .some((el) => el.offsetParent !== null && (el.textContent || '').trim() === 'Loading chapter…')), 20_000);
+    check(!!loaded, 'the reader finished loading chapter 9', 'the reader still showed "Loading chapter…" (or no page) after 20 s');
     const caption = await waitFor(async () => /Page 3 could not be fetched/.test(await bodyText()) && /retried automatically/.test(await bodyText()), 15_000);
     check(!!caption, 'reader captions the page 3 placeholder', 'reader did not caption the missing page');
     await shot('partial-reader');

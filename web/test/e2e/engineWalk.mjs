@@ -3,7 +3,7 @@
 // Needs an instance started with the fake engine, down, and a solver address to share:
 //   KEEP=1 E2E_ENGINE=fake E2E_ENGINE_MODE=down E2E_NET=… E2E_PORT=… bash web/test/e2e/up.sh
 //   cd web && BASE=http://127.0.0.1:<port> ENGINE=http://127.0.0.1:<engine port> PHASES=engine npm run test:e2e:v049
-// (up.sh prints the engine's port; it is the second fake source's plus one.)
+// (up.sh prints the engine's port: 23000 plus the app port's last three digits.)
 //
 // At 390 and 1280: the setup screen names the state, shows the retry line, the platform chips and a command to
 // copy, with no sideways page scroll; Check again leaves "Still no answer"; under reduced motion its ring is

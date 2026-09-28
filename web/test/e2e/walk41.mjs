@@ -356,10 +356,13 @@ try {
   const pressed = await clickChip('short-chapters', 'fix_short', /Chapter 3 has 2 pages/, 'Fix');
   if (pressed) {
     note('pressed');
+    // Its step is the run's own line ("Downloading the longer copy · Walk Tale · Ch. 3"), never the generic
+    // "Working…" the row shows from the press until the status poll has the run -- which at 390 was still up when
+    // the clock passed 0:02, and passed for a step -- nor the "Checking the result…" after it ended.
     const working = await waitFor(async () => {
       const r = await rowNow('short-chapters', /Chapter 3 has 2 pages/);
       note(`${r?.state}: ${r?.line}`.replace(/\d+:\d\d$/, 'm:ss'));
-      return r?.state === 'working' && /^0:(0[2-9]|[1-5]\d)$/.test(r.clock) && !/Checking the result/.test(r.line) ? r : null;
+      return r?.state === 'working' && /^0:(0[2-9]|[1-5]\d)$/.test(r.clock) && !/^(Working|Checking the result)…/.test(r.line) ? r : null;
     }, 30_000, 200);
     check(!!working, `Fix shows the row working, with its step and a ticking clock: ${JSON.stringify(working?.line)}`,
       `the Fix row was never seen working with a clock: ${JSON.stringify(seen)}`);

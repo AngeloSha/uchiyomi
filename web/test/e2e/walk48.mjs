@@ -58,7 +58,19 @@ const api = async (path, opts = {}) => {
   if (!r.ok) throw new Error(`${opts.method || 'GET'} ${path} -> ${r.status} ${await r.text()}`);
   return r.json();
 };
-await api('/api/refresh', { method: 'POST', body: '{}' });
+// ⚠️ A scan runs at most once a minute (bff routes/catalog.ts answers `{ scanned: false, reason: 'rate_limited' }`
+// inside it), and up.sh asks for one as it starts the instance. A walk started within that minute was refused,
+// never read the answer, and waited 30 s for two series no scan was looking for. So: ask until a scan runs.
+let scan = null;
+const refusals = [];
+for (let i = 0; i < 20; i++) {
+  scan = await api('/api/refresh', { method: 'POST', body: '{}' });
+  if (scan?.scanned) break;
+  refusals.push(scan?.reason);
+  await sleep(5000);
+}
+if (!scan?.scanned) { console.error(`the library scan never ran: ${JSON.stringify(scan)}`); process.exit(1); }
+console.log(`  the library scan ran${refusals.length ? ` after ${refusals.length} refused (${[...new Set(refusals)].join(', ')})` : ''}`);
 let found = [];
 for (let i = 0; i < 30 && found.length < 2; i++) {
   await sleep(1000);

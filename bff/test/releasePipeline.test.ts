@@ -23,6 +23,9 @@ import { parse as parseYaml } from 'yaml';
 const REPO = join(__dirname, '..', '..');
 const read = (p: string) => readFileSync(join(REPO, p), 'utf8');
 const code = (s: string) => s.split('\n').filter((l) => !l.trim().startsWith('#')).join('\n');
+// A value matched literally inside a RegExp: every special character escaped, the backslash too. Escaping only the
+// dots is what CodeQL flags as an incomplete escape (js/incomplete-sanitization).
+const reLiteral = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 test('arm64 is built on an arm64 runner, never emulated, and merged into one index', () => {
   const y = read('.github/workflows/release.yml');
@@ -336,7 +339,7 @@ test('the desktop app is built beside the images, never in front of them, and pu
   const run: string = pub.steps.map((s: any) => String(s.run ?? '')).join('\n');
   // Every feed is checked against the installers it names (sizes and SHA-512) before anything is uploaded.
   for (const f of ['desktop-dist-win-x64/latest.yml', 'desktop-dist-mac-arm64/latest-mac.yml', 'desktop-dist-mac-x64/latest-mac.yml']) {
-    assert.match(run, new RegExp(`check-feed\\.mjs dist/${f.replace(/[.]/g, '\\.')}`), `${f} is not checked before upload`);
+    assert.match(run, new RegExp(`check-feed\\.mjs dist/${reLiteral(f)}`), `${f} is not checked before upload`);
   }
   assert.match(run, /merge-latest-mac\.mjs --out feeds\/latest-mac\.yml/, 'the two macOS feeds are not merged');
   assert.match(run, /--version "\$dv"/);
@@ -511,9 +514,9 @@ test('the extension engine is published on a prerelease the app pins, and a pinn
   assert.deepEqual(wf.on.push.tags, ['engine-v*']);
   assert.ok('workflow_dispatch' in wf.on);
   assert.match(pin.tag, /^engine-v/, 'the pin names a v* tag: release.yml would build images for it');
-  assert.match(pin.tag, new RegExp(`^engine-${pin.version.replace(/\./g, '\\.')}(-\\d+)?$`), 'the engine tag does not name the Suwayomi version');
+  assert.match(pin.tag, new RegExp(`^engine-${reLiteral(pin.version)}(-\\d+)?$`), 'the engine tag does not name the Suwayomi version');
   const packMjs = read('desktop/engine/pack.mjs');
-  assert.match(packMjs, new RegExp(`version: '${pin.version.replace(/\./g, '\\.')}'`), 'pack.mjs builds a different Suwayomi than the pin names');
+  assert.match(packMjs, new RegExp(`version: '${reLiteral(pin.version)}'`), 'pack.mjs builds a different Suwayomi than the pin names');
   // One pack per platform the app ships, each built on its own OS.
   const legs = wf.jobs.pack.strategy.matrix.include.map((m: any) => m.platform).sort();
   assert.deepEqual(legs, Object.keys(pin.packs).sort());
@@ -609,13 +612,11 @@ test('pin-engine pins what the release actually serves, and only from a prerelea
   const srv = createServer((req, res) => {
     const u = req.url || '';
     if (u === '/api') { res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ tag_name: 'engine-v2.3.2243', prerelease })); return; }
-    const name = u.replace(/^\/dl\//, '');
-    if (name.endsWith('.sha256') && packs[name.slice(0, -7)]) {
-      const f = name.slice(0, -7);
-      res.end(`${f === lie ? '0'.repeat(64) : sha(packs[f])}  ${f}\n`);
-      return;
-    }
-    if (packs[name]) { res.end(packs[name]); return; }
+    // The pack is found in the table and the .sha256 line names it from there: nothing of the request's own text is
+    // written back (echoing the path is what CodeQL reads as reflected XSS, js/reflected-xss, test server or not).
+    const f = Object.keys(packs).find((k) => u === `/dl/${k}` || u === `/dl/${k}.sha256`);
+    if (f && u.endsWith('.sha256')) { res.end(`${f === lie ? '0'.repeat(64) : sha(packs[f])}  ${f}\n`); return; }
+    if (f) { res.end(packs[f]); return; }
     res.statusCode = 404; res.end();
   });
   await new Promise<void>((r) => srv.listen(0, '127.0.0.1', () => r()));

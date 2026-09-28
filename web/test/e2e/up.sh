@@ -43,7 +43,10 @@ EMBEDDED=${E2E_EMBEDDED:-0}
 # leg on PORT+1; fixed 18150/18151 made those two otherwise-correct runs fight over a host port.
 FAKE_A_PORT=${E2E_FAKE_A_PORT:-$((20000 + (PORT % 1000) * 2))}
 FAKE_B_PORT=${E2E_FAKE_B_PORT:-$((FAKE_A_PORT + 1))}
-ENGINE_PORT=${E2E_ENGINE_PORT:-$((FAKE_B_PORT + 1))}
+# The engine's from a range of its own: the fake sources hold 20000-21999 (two per app port) and walk43's webhook
+# listener 22000-22999. It was FAKE_B_PORT + 1 -- the next app port's fake-a port -- so an instance with the engine
+# stopped the one started on PORT+1 from binding its first fake source.
+ENGINE_PORT=${E2E_ENGINE_PORT:-$((23000 + PORT % 1000))}
 # E2E_ENGINE=fake: the strict fake Suwayomi v2.3.2243 (bff/test/fixtures/fakeSuwayomiEngine.mjs) as the extension
 # engine, in E2E_ENGINE_MODE (up, down, slow, extension_error; /__mode switches it later). Unset: no engine at
 # all, SUWAYOMI_URL empty -- the "No extension engine is set up" state (#72).

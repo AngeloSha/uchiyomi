@@ -147,7 +147,9 @@ test('probe: redirects only to http(s), at most ten; a certificate refused on a 
   assert.ok(!n.visited.some((u) => u.startsWith('file:')), 'the file: hop was never followed');
   const loop = await probeServer('http://loop.example', { fetch: n.fetch });
   assert.deepEqual([loop.error, loop.detail], ['unreachable', 'ERR_TOO_MANY_REDIRECTS']);
-  assert.ok(n.visited.filter((u) => u.startsWith('http://loop.example')).length <= 11);
+  // Counted by the parsed origin: a prefix check on the address text would also count http://loop.example.other
+  // (CodeQL js/incomplete-url-substring-sanitization).
+  assert.ok(n.visited.filter((u) => new URL(u).origin === 'http://loop.example').length <= 11);
   const up = await probeServer('http://up.example', { fetch: n.fetch });
   assert.deepEqual([up.error, up.failedHost], ['cert', 'self.example']);
   const slow = await probeServer('https://slow.example', { fetch: n.fetch, timeoutMs: 50 });
@@ -271,7 +273,8 @@ test('main.js: the probe goes hop by hop (net.request), never through fetch; a n
 /** welcome.html's own script against a minimal DOM; `clock` drives Date.now(), `timers` collects setTimeout. */
 function welcomePage(info) {
   const html = read('src/welcome.html');
-  const script = /<script>([\s\S]*?)<\/script>/.exec(html)[1];
+  // Case-insensitive, as HTML is: a tag filter that misses <SCRIPT> is what CodeQL flags (js/bad-tag-filter).
+  const script = /<script>([\s\S]*?)<\/script>/i.exec(html)[1];
   const els = new Map();
   const classes = () => { const s = new Set(); return { add: (c) => s.add(c), remove: (c) => s.delete(c), contains: (c) => s.has(c), toggle: (c, on) => ((on ?? !s.has(c)) ? s.add(c) : s.delete(c)) }; };
   const el = (id) => {

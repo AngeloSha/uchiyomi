@@ -6,7 +6,8 @@
 // of a dependency or of TypeScript fails here before it fails inside a container.
 import test, { before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { spawn, type ChildProcess } from 'child_process';
+import { execFileSync, spawn, type ChildProcess } from 'child_process';
+import { readFileSync } from 'fs';
 import { join } from 'path';
 
 const SCRIPT = join(__dirname, 'e2e', 'fakeEngine.mjs');
@@ -83,4 +84,44 @@ test('a bad /__mode is refused with the choices, and /__reset restores the seed'
   assert.equal((await fetch(`${base}/__reset`, { method: 'POST' })).status, 200);
   assert.deepEqual(await (await fetch(`${base}/__mode`)).json(), { mode: 'up' });
   assert.equal((await gql(ABOUT)).status, 200);
+});
+
+test('up.sh starts the engine on a port no other instance of the rig uses, and walk49 looks for it there', () => {
+  // Parallel lanes run instances side by side, one E2E_PORT each. The engine's port used to be FAKE_B_PORT + 1, which
+  // is the NEXT app port's fake-a port: an instance with the engine kept the one on PORT+1 from binding its first
+  // fake source. Reintroduce by deriving ENGINE_PORT from FAKE_B_PORT again: "... collides with ..." names both.
+  const e2e = (f: string) => readFileSync(join(__dirname, 'e2e', f), 'utf8');
+  const sh = e2e('up.sh');
+  const lines = ['PORT', 'FAKE_A_PORT', 'FAKE_B_PORT', 'ENGINE_PORT'].map((v) => {
+    const m = new RegExp(`^${v}=.*$`, 'm').exec(sh);
+    assert.ok(m, `up.sh no longer sets ${v} on a line of its own`);
+    return m[0];
+  });
+  // up.sh's own lines, run by bash for every app port (the rig keys every port on PORT % 1000), with the E2E_*_PORT
+  // overrides emptied: `${X:-default}` then takes the default, as it does when they are unset.
+  const unset = { E2E_FAKE_A_PORT: '', E2E_FAKE_B_PORT: '', E2E_ENGINE_PORT: '' };
+  const rows = execFileSync('bash', ['-c', `for E2E_PORT in $(seq 18000 18999); do ${lines.join('; ')}; echo "$PORT $FAKE_A_PORT $FAKE_B_PORT $ENGINE_PORT"; done`],
+    { encoding: 'utf8', env: { ...process.env, ...unset } }).trim().split('\n').map((l) => l.split(' ').map(Number));
+  assert.equal(rows.length, 1000);
+  // walk43's webhook listener takes a port per instance too.
+  const hook = /const HOOK_PORT = Number\(process\.env\.HOOK_PORT \|\| ([\d_]+) \+ \(appPort % 1000\)\);/.exec(e2e('walk43.mjs'));
+  assert.ok(hook, 'walk43.mjs derives its webhook port some other way now: read it here');
+  const hookBase = Number(hook[1].replace(/_/g, ''));
+  const held = new Map<number, string>();
+  for (const [p, a, b] of rows) {
+    held.set(a, `${p}'s fake-a`);
+    held.set(b, `${p}'s fake-b`);
+    held.set(hookBase + (p % 1000), `${p}'s walk43 webhook listener`);
+  }
+  const engines = new Set<number>();
+  for (const [p, , , e] of rows) {
+    assert.ok(!held.has(e), `${p}'s engine port ${e} collides with ${held.get(e)}`);
+    assert.ok(!engines.has(e), `two instances put their engine on ${e}`);
+    engines.add(e);
+  }
+  // walk49's numbering phase works the engine's port out from the app's by itself: it must land where up.sh put it.
+  const w49 =/const ENGINE = process\.env\.ENGINE \|\| `http:\/\/127\.0\.0\.1:\$\{([\d_]+) \+ \(APP_PORT % 1000\)\}`;/.exec(e2e('walk49.mjs'));
+  assert.ok(w49, 'walk49.mjs derives the engine port some other way now: read it here');
+  const w49Base = Number(w49[1].replace(/_/g, ''));
+  for (const [p, , , e] of rows) assert.equal(w49Base + (p % 1000), e, `walk49 looks for ${p}'s engine on ${w49Base + (p % 1000)}, up.sh starts it on ${e}`);
 });

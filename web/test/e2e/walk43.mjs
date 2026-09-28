@@ -338,6 +338,11 @@ try {
   check(await page.evaluate(() => document.documentElement.classList.contains('reduce-effects')
     && !document.querySelector('.fx-mesh,.fx-grain,.fx-vignette')),
   'it applies at once, on the page the switch is on', 'the class or the layers waited for a reload');
+  // The shot waits for the switch to say on, then for its knob and track to finish their transition: taken the
+  // moment the account read true, one at 390 still drew the switch off beside "Saved" (the slide had just begun).
+  const switchOn = await waitFor(() => page.$eval(SWITCH, (b) => b.getAttribute('aria-checked') === 'true').catch(() => false), 5_000, 100);
+  check(!!switchOn, 'the switch itself reads on', 'the switch still read off after the account saved reduceEffects: true');
+  await sleep(300);
   await shot('profile-reduce-effects-on');
   await visit('/library');
   await sleep(800);
