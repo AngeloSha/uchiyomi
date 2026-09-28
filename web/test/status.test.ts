@@ -23,7 +23,9 @@ test('every source status the server can send has a mark, read from the Src type
   // and not here would render as "Healthy". TypeScript refuses a missing Record entry; this holds the list
   // at run time too. Reintroduce by deleting `quiet` from SOURCE_MARK: "quiet has no mark" fails.
   const src = readFileSync(join(ROOT, 'lib/sourceGroups.ts'), 'utf8');
-  const union = src.match(/\n\s*status\?: ((?:'[a-z_]+'\s*\|?\s*)+);/);
+  // One member, then `| member` for each further one: no optional separator inside a repeat, so the pattern cannot
+  // backtrack its way through a long line (CodeQL js/redos flagged the `(?:'x'\s*\|?\s*)+` form).
+  const union = src.match(/\n\s*status\?: ('[a-z_]+'(?:\s*\|\s*'[a-z_]+')*);/);
   assert.ok(union, 'the Src status union moved');
   // Plus `failing`, the one status only the admin card shows (#115, lib/providerGroups.ts providerStatus).
   const statuses = [...[...union![1].matchAll(/'([a-z_]+)'/g)].map((m) => m[1]), 'failing'].sort();

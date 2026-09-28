@@ -62,7 +62,7 @@ test("the desktop app's engine pack is built from the pinned release", () => {
   for (const a of assets) assert.ok(a.includes(`-${PIN}-`), `desktop/engine/pack.mjs downloads ${a}, which is not the ${PIN} release`);
   // The pack is published under a prerelease tag named for the engine (engine-v…, or engine-v…-2 for a rebuilt
   // pack of the same engine), and the app downloads from that tag's release.
-  assert.match(PIN_FILE.tag, new RegExp(`^engine-${PIN.replace(/\./g, '\\.')}(-\\d+)?$`), `engine-pin.json's tag ${PIN_FILE.tag} is not a pack of ${PIN}`);
+  assert.match(PIN_FILE.tag, new RegExp(`^engine-${PIN.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(-\\d+)?$`), `engine-pin.json's tag ${PIN_FILE.tag} is not a pack of ${PIN}`);
   assert.ok(String(PIN_FILE.baseUrl).endsWith(`/releases/download/${PIN_FILE.tag}`), "engine-pin.json downloads from a release other than its own tag's");
 });
 
