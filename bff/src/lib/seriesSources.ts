@@ -33,7 +33,7 @@ export interface SeriesSource {
    */
   auto: boolean;
   /**
-   * How the source is doing right now, from source_health (v0.49.0): `disabled` by the admin, in a
+   * How the source is doing right now, from source_health: `disabled` by the admin, in a
    * `cooldown` after blocking or rate-limiting us, `failing` (its last answers were errors), else `ok`. The
    * edit dialog's link status reads it: a follower is the fallback for a primary that is down, and a
    * fallback that is itself down is the thing worth seeing there.

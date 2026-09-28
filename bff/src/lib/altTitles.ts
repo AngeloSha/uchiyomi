@@ -9,8 +9,8 @@
 // ⚠️ THE RULE IS EXACT. Two names are the same name when their normalised keys are EQUAL -- never when one
 // contains the other, never by word overlap. A contains-match is what a sequel shares with its parent
 // ("Tokyo Ghoul:re" / "Tokyo Ghoul"), and other-name lists are where spin-offs, the novel and the anime are
-// most often listed beside the manhwa. Every match made here is then also held to the numbering check both
-// ways (lib/linkBatch.ts), because an exact name is still only a name.
+// most often listed beside the manhwa. A match through an other name is then always held to the numbering
+// check both ways (lib/autoFollow.ts judgeCandidate), because an exact name is still only a name.
 //
 // Latin script only. Every other script normalises to the empty string under normTitle (letters and digits
 // a-z0-9), so a Korean or Japanese name could never be compared anyway -- and an empty key must never be

@@ -38,6 +38,7 @@ import { assess, verdict, followable, MIN_HAVE, MIN_COVERAGE } from './fill';
 import { logAudit } from './audit';
 import type { SourceChapter } from './sources/types';
 import { normTitle } from './titleMatch';
+import { parseAltTitles, MIN_ALT_KEY } from './altTitles';
 
 /** How many sources a series may FOLLOW, on top of its primary. */
 export const MAX_FOLLOWERS = 2;
@@ -157,6 +158,11 @@ export interface Judgement {
    * what keeps the hunt at two lookups per judged candidate rather than three.
    */
   chapters?: SourceChapter[];
+  /**
+   * The name out of the candidate's own description that matched one of ours, when its title did not and
+   * the caller asked for descriptions to be read (`descriptionNames`, Connect sources). Absent otherwise.
+   */
+  matchedVia?: string;
 }
 
 // The same key as `norm` in routes/sources.ts, now from the one lib both share (v0.40.0, lib/titleMatch.ts);
@@ -219,11 +225,17 @@ export function titleMatches(theirs: string, primary: { title: string; altTitles
  * and any throw or timeout is `unreachable`: routes/sources.ts's seriesAndChapters swallows both into
  * null/[] for its own reasons, which is exactly what would make a source that did not answer read as
  * "numbering differs", so it is not used here.
+ *
+ * `descriptionNames` (Connect sources, lib/linkBatch.ts): when the candidate's title does not match, the
+ * other names its own description lists (lib/altTitles.ts parseAltTitles) are read, and one that EQUALS one
+ * of ours -- never by containment, and only with a key of MIN_ALT_KEY or more -- counts as a title match.
+ * Such a match is never trusted like a title: it is always measured both ways, as a `contains` match is.
+ * Off for every other caller, whose rule is unchanged.
  */
 export async function judgeCandidate(
   primary: PrimaryFacts,
   candidate: FollowCandidate,
-  opts: { prefs?: ReleasePrefs; health?: Map<string, SourceHealth>; lookupMs?: number; now?: number } = {},
+  opts: { prefs?: ReleasePrefs; health?: Map<string, SourceHealth>; lookupMs?: number; now?: number; descriptionNames?: boolean } = {},
 ): Promise<Judgement> {
   const src = getSource(candidate.source);
   const base = {
@@ -241,6 +253,7 @@ export async function judgeCandidate(
   if (primary.numbers.length < MIN_HAVE) return { ...base, why: 'too_few_listed' };
 
   let theirTitle: string | null;
+  let summary: string | null | undefined;
   let raw: SourceChapter[];
   try {
     const [series, chapters] = await bounded(
@@ -248,6 +261,7 @@ export async function judgeCandidate(
       budgetFor(src, opts.lookupMs ?? AUTO_FOLLOW_LOOKUP_MS),
     );
     theirTitle = series?.title?.trim() || null;
+    summary = series?.summary;
     raw = chapters ?? [];
   } catch {
     return { ...base, why: 'unreachable' };
@@ -256,8 +270,16 @@ export async function judgeCandidate(
   // the very same answer as transient (`no_title`, 503): a source that cannot say what this is right now
   // has not been reached in any sense that matters, and must not be followed on numbering alone.
   if (!theirTitle) return { ...base, why: 'unreachable' };
-  const match = titleMatch(theirTitle, primary);
+  let match = titleMatch(theirTitle, primary);
+  let matchedVia: string | undefined;
+  if (!match && opts.descriptionNames) {
+    const ours = new Set([primary.title, ...(primary.altTitles ?? [])].map((t) => normTitle(t)).filter((k) => k.length >= MIN_ALT_KEY));
+    matchedVia = parseAltTitles(summary).find((n) => ours.has(normTitle(n)));
+    // An other name is a name, not the title: measured both ways, exactly as a containment is (below).
+    if (matchedVia) match = 'contains';
+  }
   if (!match) return { ...base, theirTitle, why: 'title_differs' };
+  const via = matchedVia ? { matchedVia } : {};
 
   // One copy per number, under the same preferences the add chose its own copies with: a source whose
   // every copy of a number is from a blocked group does not list that number, as far as the sweep is
@@ -274,9 +296,9 @@ export async function judgeCandidate(
   const decided = Math.min(a.coverage, back);
   const coverage = Math.round(decided * 100) / 100;
   if (!followable({ coverage: a.coverage, why: verdict(a, nums.length) }) || back < MIN_COVERAGE) {
-    return { ...base, theirTitle, coverage, why: 'numbering_differs', chapters: raw };
+    return { ...base, theirTitle, coverage, why: 'numbering_differs', chapters: raw, ...via };
   }
-  return { ...base, theirTitle, coverage, why: 'ok', chapters: raw };
+  return { ...base, theirTitle, coverage, why: 'ok', chapters: raw, ...via };
 }
 
 export interface AutoFollowOpts {

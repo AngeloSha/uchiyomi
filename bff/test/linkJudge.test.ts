@@ -1,6 +1,7 @@
-// Connect sources' judgement (lib/linkBatch.ts judgeLink, mayFollow, hitsToJudge), with fake adapters and
-// no database: the release preferences are handed in, and the switch that decides whether descriptions are
-// read is an argument. The batch lifecycle itself needs Postgres and is not exercised here.
+// Connect sources' judgement, with fake adapters and no database. Since the review of #119 the batch judges
+// through autoFollow's judgeCandidate -- the one judge every automatic follow uses -- with one opt-in
+// (`descriptionNames`), and lib/linkBatch.ts only decides which verdicts are worth showing (toLinkJudgement)
+// and which a run may follow (mayFollow). Health and preferences are handed in, so nothing reads Postgres.
 //
 // The hazard is the one lib/autoFollow.ts exists for: a candidate that is a sequel or a spin-off lists every
 // number the parent does, and following it files the wrong book's chapters under this series.
@@ -11,8 +12,9 @@ process.env.DATABASE_URL ||= 'postgres://unused:unused@127.0.0.1:1/unused';
 process.env.JWT_SECRET ||= 'test-secret-at-least-16-chars';
 process.env.CONFIG_DIR ||= '/tmp/uchiyomi-test-config';
 /* eslint-disable @typescript-eslint/no-var-requires */
-const { judgeLink, mayFollow, hitsToJudge } = require('../src/lib/linkBatch') as typeof import('../src/lib/linkBatch');
-const { registerAdapter } = require('../src/lib/sources') as typeof import('../src/lib/sources');
+const { toLinkJudgement, mayFollow, hitsToJudge, sourcesToAsk, LINK_MAX_SOURCES } = require('../src/lib/linkBatch') as typeof import('../src/lib/linkBatch');
+const { judgeCandidate } = require('../src/lib/autoFollow') as typeof import('../src/lib/autoFollow');
+const { registerAdapter, listSources } = require('../src/lib/sources') as typeof import('../src/lib/sources');
 /* eslint-enable @typescript-eslint/no-var-requires */
 
 const PREFS = { priority: [], blocked: [], patienceMs: 0 };
@@ -37,71 +39,100 @@ before(() => {
   registerAdapter(fake('lj-volumes', 'Only I Level Up', 'Alternative Titles: Solo Leveling', range(1, 14)) as any);
   registerAdapter(fake('lj-down', 'Solo Leveling', '', [], { throws: true }) as any);
   registerAdapter(fake('lj-stranger', 'Tower of God', 'Alternative Titles: Sinui Tap', range(1, 200)) as any);
+  registerAdapter(fake('lj-short', 'The Master', 'Alternative Titles: Gosu', range(1, 50)) as any);
 });
 
 const ours = { names: ['Solo Leveling'], numbers: range(1, 200) };
-const judge = (source: string, readDescriptions = true, facts = ours) =>
-  judgeLink(facts, { source, sourceSeriesId: 'x' }, { prefs: PREFS, readDescriptions, lookupMs: 2000 });
+/** judgeCandidate as the batch calls it, then the batch's own reading of the verdict. */
+async function judge(source: string, descriptionNames = true, facts = ours) {
+  const j = await judgeCandidate(
+    { title: facts.names[0], altTitles: facts.names.slice(1), numbers: facts.numbers },
+    { source, sourceId: 'x' },
+    { prefs: PREFS, health: new Map(), lookupMs: 2000, descriptionNames },
+  );
+  return { j, row: toLinkJudgement(j, facts, PREFS) };
+}
 
 test('a source that lists our title among its other names is found, and says which name matched', async () => {
-  const j = await judge('lj-alt');
-  assert.equal(j.verdict, 'ok');
-  assert.equal(j.theirTitle, 'Only I Level Up');
-  assert.equal(j.ourName, 'Solo Leveling');
-  assert.equal(j.theirName, 'Solo Leveling');
-  assert.equal(j.coverageFwd, 1);
-  assert.equal(j.coverageBack, 1);
+  const { j, row } = await judge('lj-alt');
+  assert.equal(j.why, 'ok');
+  assert.equal(j.matchedVia, 'Solo Leveling');
+  assert.equal(row?.verdict, 'ok');
+  assert.equal(row?.theirTitle, 'Only I Level Up');
+  assert.equal(row?.ourName, 'Solo Leveling');
+  assert.equal(row?.theirName, 'Solo Leveling');
+  assert.equal(row?.coverageFwd, 1);
+  assert.equal(row?.coverageBack, 1);
 });
 
 test('with the switch off, the description is not read and the same source does not match', async () => {
-  // Reintroduce by parsing descriptions unconditionally: this reads ok.
-  assert.equal((await judge('lj-alt', false)).verdict, 'title_differs');
-  // The main title still matches without it.
-  assert.equal((await judge('lj-same', false)).verdict, 'ok');
+  // Reintroduce by parsing descriptions unconditionally in judgeCandidate: every other caller -- the add's
+  // auto-follow, the hunt -- would start matching by description names too.
+  assert.equal((await judge('lj-alt', false)).j.why, 'title_differs');
+  assert.equal((await judge('lj-same', false)).row?.verdict, 'ok', 'the main title still matches without it');
 });
 
 test('one of OUR other names matching their title is found too', async () => {
-  const j = await judge('lj-volumes', false, { names: ['Solo Leveling', 'Only I Level Up'], numbers: range(1, 14) });
-  assert.equal(j.verdict, 'ok');
-  assert.equal(j.ourName, 'Only I Level Up');
+  const { row } = await judge('lj-volumes', false, { names: ['Solo Leveling', 'Only I Level Up'], numbers: range(1, 14) });
+  assert.equal(row?.verdict, 'ok');
+  assert.equal(row?.ourName, 'Only I Level Up');
 });
 
-test('a sequel is refused: its names contain ours but never equal them', async () => {
-  // "Solo Leveling: Ragnarok" contains "Solo Leveling"; its other name is not ours either.
-  assert.equal((await judge('lj-sequel')).verdict, 'title_differs');
+test('a sequel is never offered: a name that only CONTAINS ours, numbered differently, is not a review row', async () => {
+  // "Solo Leveling: Ragnarok" 1..60 contains "Solo Leveling": judgeCandidate measures it both ways and
+  // refuses it; the review must not show it as "connect anyway" either. Reintroduce by keeping every
+  // numbering_differs in toLinkJudgement: this reads a row.
+  const { j, row } = await judge('lj-sequel');
+  assert.equal(j.why, 'numbering_differs');
+  assert.equal(row, null);
 });
 
-test('a work whose description names ours but whose numbering runs far past it is only a warning', async () => {
-  // An exact other-name match on a 400-chapter listing against our 200: we list half of theirs. The
-  // numbering is measured BOTH ways for an other-name match, so it is not ok -- the admin may still override.
-  // Reintroduce by allowing the one-way shortcut for other-name matches: this reads ok.
-  const j = await judge('lj-sequel-named');
-  assert.equal(j.verdict, 'numbering_differs');
-  assert.equal(j.coverageFwd, 1);
-  assert.equal(j.coverageBack, 0.5);
+test('a work whose description names ours but whose numbering runs far past it is amber, and never run', async () => {
+  // An exact other-name match on a 400-chapter listing against our 200: we list half of theirs. A match
+  // through a description name is always measured BOTH ways. Reintroduce by letting it take the one-way
+  // shortcut in judgeCandidate: this reads ok.
+  const { row } = await judge('lj-sequel-named');
+  assert.equal(row?.verdict, 'numbering_differs');
+  assert.equal(row?.coverageFwd, 1);
+  assert.equal(row?.coverageBack, 0.5);
+  assert.equal(mayFollow(row!), false, 'a run would follow it');
 });
 
-test('a name match numbered differently is a warning, a source that is down is unreachable', async () => {
-  assert.equal((await judge('lj-volumes')).verdict, 'numbering_differs', '14 volumes against 200 chapters');
-  assert.equal((await judge('lj-down')).verdict, 'unreachable');
-  assert.equal((await judge('lj-stranger')).verdict, 'title_differs');
-  assert.equal((await judge('lj-not-registered')).verdict, 'unreachable');
+test('a name match numbered differently is amber; a source that is down, a stranger, or not loaded is no row', async () => {
+  assert.equal((await judge('lj-volumes')).row?.verdict, 'numbering_differs', '14 volumes against 200 chapters');
+  assert.equal((await judge('lj-down')).j.why, 'unreachable');
+  assert.equal((await judge('lj-down')).row, null);
+  assert.equal((await judge('lj-stranger')).row, null);
+  assert.equal((await judge('lj-not-registered')).j.why, 'unavailable');
 });
 
-test('too few numbers on our side cannot be measured, and says so', async () => {
-  assert.equal((await judge('lj-same', true, { names: ['Solo Leveling'], numbers: [1, 2] })).verdict, 'too_few');
+test('a description name shorter than MIN_ALT_KEY never matches', async () => {
+  // "Gosu" is a word, not an identity. Reintroduce by dropping the key-length guard in judgeCandidate.
+  const { j } = await judge('lj-short', true, { names: ['Gosu'], numbers: range(1, 50) });
+  assert.equal(j.why, 'title_differs');
 });
 
-test('only ok is followed without the override; a name mismatch only when picked by hand AND overridden', () => {
-  // Reintroduce by returning true for numbering_differs without the override: the run follows a warning
-  // nobody confirmed.
-  assert.equal(mayFollow({ verdict: 'ok', manual: false }, false), true);
-  assert.equal(mayFollow({ verdict: 'numbering_differs', manual: false }, false), false);
-  assert.equal(mayFollow({ verdict: 'numbering_differs', manual: false }, true), true);
-  assert.equal(mayFollow({ verdict: 'too_few', manual: false }, true), true);
-  assert.equal(mayFollow({ verdict: 'title_differs', manual: false }, true), false);
-  assert.equal(mayFollow({ verdict: 'title_differs', manual: true }, false), false);
-  assert.equal(mayFollow({ verdict: 'title_differs', manual: true }, true), true);
+test('only ok is followed by a run; there is no override', () => {
+  // Review of #119: one confirmation used to cover every selected warning in every series. Reintroduce by
+  // letting mayFollow take numbering_differs: a run follows the wrong book in bulk.
+  assert.equal(mayFollow({ verdict: 'ok' }), true);
+  assert.equal(mayFollow({ verdict: 'numbering_differs' }), false);
+  assert.equal(mayFollow({ verdict: 'too_few' }), false);
+  assert.equal(mayFollow({ verdict: 'title_differs' }), false);
+});
+
+test('sources are asked in scan order, without the ones already read from or resting, and only so many', () => {
+  const now = Date.now();
+  const health = new Map<string, any>([
+    ['lj-down', { source_id: 'lj-down', disabled: true, blocked_until: null }],
+    ['lj-stranger', { source_id: 'lj-stranger', disabled: false, blocked_until: new Date(now + 60_000).toISOString() }],
+  ]);
+  const order = sourcesToAsk({ primary: 'lj-same', followers: ['lj-alt'] }, health, listSources(), now);
+  assert.ok(!order.includes('lj-same'), 'the primary is asked');
+  assert.ok(!order.includes('lj-alt'), 'a source already followed is asked');
+  assert.ok(!order.includes('lj-down'), 'a disabled source is asked');
+  assert.ok(!order.includes('lj-stranger'), 'a source in a cooldown is asked');
+  assert.ok(order.length <= LINK_MAX_SOURCES);
 });
 
 test('per source, every exact-name hit is judged first, then the source\'s own top hit, two at most', () => {

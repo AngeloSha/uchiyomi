@@ -6327,7 +6327,7 @@ paths:
         Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. Chapters
         already downloaded from it stay; the listing rows it carried are dropped at once, so nothing can be
         fetched through it before the next check. The primary cannot be removed this way; it is not a
-        followed source. Since v0.49.0 the name the source was confirmed under (a `confirmed` other name,
+        followed source. The name the source was confirmed under (a `confirmed` other name,
         GET /api/admin/series/{id}/alt-titles) is forgotten too, unless another source still linked uses it:
         an unlink is how a wrong link is undone, and the name would find the same series again.
       parameters:
@@ -8490,20 +8490,26 @@ paths:
     post:
       tags:
         - admin
-      summary: Start Connect sources for a set of series -- search every other source for each, under every name it goes by.
+      summary: Start Connect sources for a set of series -- a paced background search for other sources that carry each.
       operationId: postApiAdminLinkBatches
       description: >-
         Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. Nothing is
-        followed yet. In the background, each series is searched on every registered source except its
-        primary and the sources it already follows, under its title and up to three of its other names
-        (series_alt_titles; a name read from a description only while `alt_title_matching` is on, and with
-        it on the primary's own description is read first). Every exact-name hit per source, and the source's
-        own top hit, is judged: a candidate is kept only when one of our names EQUALS its title or, with the
-        switch on, one of the names its own description lists (normalised: lower case, a-z0-9; an other name
-        needs at least five characters). Its numbering is then measured both ways -- `ok` when it lists 90 %
-        of our numbers and we list 90 % of its (one way only for a main-title-to-main-title match on a
-        listing of ten or more); `numbering_differs` or `too_few` otherwise. One batch searches at a time
-        server-wide. Answers `{batchId, total, skipped}`: `skipped` lists ids that are not live series.
+        followed yet. Series that cannot take a follower are left out and listed in `skipped` as `{id, why}`:
+        `gone` (removed or merged), `posting_order` (numbered by posting order, #116) or `full` (already
+        follows two sources besides its primary). The rest are searched in the background as a paced job, one
+        batch at a time server-wide and one series at a time, 1.5 s apart; the job waits while the chapter
+        sweep or the library repair runs and stops at a series boundary on shutdown (the batch then reads
+        `stale`). Per series, source health is read again and the sources it does not already read from are
+        asked in scan order (its own language first), skipping any switched off or in a cooldown -- at most 8
+        sources and 12 searches, under a two-minute wall -- and it stops as soon as its free follower slots
+        are filled with followable candidates. Searches call the adapter directly and report nothing to
+        source health, so they never cause a cooldown and never take Discover's search slots. Each name
+        searched is the title and up to three other names (series_alt_titles; a name read from a description
+        only while `alt_title_matching` is on). Hits are judged by the same rule as the add-time auto-follow
+        and the nightly hunt (judgeCandidate): `ok` when it would be followed; `numbering_differs` when a name
+        matches EXACTLY but the chapter numbers do not line up (kept for review, never run in bulk). With the
+        switch on, a name in the candidate's own description that equals one of ours counts as a name match,
+        always measured both ways. Answers `{batchId, total, skipped}`.
       requestBody:
         required: true
         content:
@@ -8524,7 +8530,7 @@ paths:
         "200":
           description: OK
         "400":
-          description: "Bad request, or `nothing_to_link` when none of the ids is a live series"
+          description: "Bad request, or `nothing_to_link` (with `skipped`) when no series can take a follower"
         "401":
           description: Not authenticated
         "403":
@@ -8539,15 +8545,18 @@ paths:
       operationId: getApiAdminLinkBatchesId
       description: >-
         Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. `batch`
-        carries `stale` and `maxFollowers`. Each item is a series: `series_id, title, names` (every name
-        searched), `state` (`pending`, `done`, `error`), `asked` and `unreachable` (sources asked, and those
-        that did not answer), `primary` ({source, name} or null), `following` (the sources it follows now,
-        read live), `freeSlots` (how many more it may follow), and `candidates`: `{id, source, name,
-        source_series_id, their_title, cover, our_name, their_name, coverage_fwd, coverage_back, verdict,
-        manual, status}`. `verdict` is `ok`, `numbering_differs`, `too_few` or `title_differs` (only on a
-        hand-picked candidate). `status` is null until a run reached it, then `linked`, `cap`, `primary`,
-        `gone`, `unavailable`, `not_confirmed` or `error`. A batch left `linking` by a restart is handed back
-        as `review` (or `done`) on this call. A malformed id is 404.
+        carries `stale`, `maxFollowers` and `waiting` (`sweep` or `repair` while the search waits for one, else
+        null). Each item is a series: `series_id, title, names` (every name searched), `state` (`pending`,
+        `done`, `skipped`, `error`), `note` (why a `skipped` one was not searched: `posting_order`, `full` or
+        `too_few`), `asked` and `unreachable` (sources asked, and those that did not answer), `primary`
+        ({source, name} or null), `following` (the sources it follows now, read live), `freeSlots` (how many
+        more it may follow), and `candidates`: `{id, source, name, source_series_id, their_title, cover,
+        our_name, their_name, coverage_fwd, coverage_back, verdict, manual, status}`. `verdict` is `ok` or
+        `numbering_differs`. `status` is null while open, then `linked`, `cap`, `primary`, `gone`,
+        `unavailable`, `already_followed`, `posting_order` or `error`. Every read first closes the open
+        candidates whose source the series has followed since (`already_followed`) or whose series has been
+        numbered by posting order since. A batch left `linking` by a restart is handed back as `review` (or
+        `done`) on this call. A malformed id is 404.
       parameters:
         - name: id
           in: path
@@ -8624,22 +8633,22 @@ paths:
     post:
       tags:
         - admin
-      summary: Follow the chosen candidates. Never downloads a chapter.
+      summary: Follow the chosen `ok` candidates. Never downloads a chapter.
       operationId: postApiAdminLinkBatchesIdRun
       description: >-
         Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. Follows
-        each named candidate that has not been run, in the background (poll the batch). An `ok` candidate is
-        followed; a `numbering_differs` or `too_few` one only with `override: true` (the admin's answer to
-        "these do not line up -- follow anyway?"), a `title_differs` one only when it was picked by hand AND
-        `override` is true; otherwise its status reads `not_confirmed`. Each follow is one transaction under
-        the series row's lock and the follower cap (two besides the primary): a pick past the cap reads
-        `cap`. The follow is recorded with the admin as `added_by`, audited as `series.follow_source` with
-        `via: link_batch` and `override`, and the source's own title is kept as a `confirmed` other name.
-        The series' listing is refreshed once afterwards so the new source's chapters show at once. The
-        flip to `linking` is one conditional UPDATE: a double tap answers 409. A candidate that needs the
-        override and was sent without it is not run and stays open; the answer is `{ok, total, held}`, and
-        when nothing sent may run without the override it is 409 `needs_override`. A source switched off by
-        the admin reads `unavailable`.
+        each named `ok` candidate that is still open, in the background (poll the batch). There is no
+        override: any other candidate named is left open and counted in `held` -- a `numbering_differs` one
+        is followed only on its own, through POST /api/admin/link/candidates/{id}/follow. Each follow is one
+        transaction under the series row's lock: INSERT only, so a source the series already follows reads
+        `already_followed` and is never re-pointed; a series numbered by posting order since reads
+        `posting_order`; a pick past the follower cap (two besides the primary) reads `cap`; a source not
+        installed or switched off reads `unavailable`. The follow is recorded with the admin as `added_by`,
+        audited as `series.follow_source` with `via: link_batch`, and the source's own title is kept as a
+        `confirmed` other name. Afterwards the connected series' listings are refreshed one at a time, 1.5 s
+        apart, and not at all while a sweep or repair runs (the sweep reads them anyway). The flip to
+        `linking` is one conditional UPDATE: a double tap answers 409. Answers `{ok, total, held, ids}`
+        (`ids`: the candidates it runs); when nothing named may run it is 409 `not_followable`.
       parameters:
         - name: id
           in: path
@@ -8661,8 +8670,6 @@ paths:
                   items:
                     type: string
                     format: uuid
-                override:
-                  type: boolean
       security:
         - bearer: []
       responses:
@@ -8677,7 +8684,55 @@ paths:
         "404":
           description: Not found
         "409":
-          description: "Conflict: still searching, already linking, or `needs_override`"
+          description: "Conflict: still searching, already linking, or `not_followable`"
+  /api/admin/link/candidates/{id}/follow:
+    post:
+      tags:
+        - admin
+      summary: Follow ONE candidate after looking at its chapters -- the only way a `numbering_differs` one is followed.
+      operationId: postApiAdminLinkCandidatesIdFollow
+      description: >-
+        Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. Body
+        `{confirm: true}`. The pair is judged again first (two lookups, source health read now), since a
+        candidate may be weeks old: it must still match one of the series' names (`ok` or an exact-name
+        `numbering_differs`), or it is 409 `changed`. Then followed as a run follows (INSERT only, the
+        posting-order and cap checks under the row lock), audited with `via: link_preview` and `override:
+        true` when the numbering does not line up, and the series' listing is queued for a paced refresh.
+        Answers `{ok, status: 'linked'}`.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [confirm]
+              properties:
+                confirm:
+                  type: boolean
+                  enum: [true]
+      security:
+        - bearer: []
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: "Bad request: `confirm: true` missing"
+        "401":
+          description: Not authenticated
+        "403":
+          description: "Forbidden: token scope, account permission or age limit"
+        "404":
+          description: "Not found: the candidate, or its series is gone"
+        "409":
+          description: "Conflict: `closed`, `busy`, `changed`, `posting_order`, `unavailable`, `already_followed`, `cap` or `primary`"
+        "502":
+          description: "Bad gateway: the source did not answer"
   /api/admin/link/items/{id}/candidates:
     post:
       tags:
@@ -8685,11 +8740,15 @@ paths:
       summary: Add a candidate an admin picked by hand to one series of a batch.
       operationId: postApiAdminLinkItemsIdCandidates
       description: >-
-        Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. The pair is
-        judged on the server by the same rule as the search's finds and saved with `manual: true` whatever the
-        verdict, so the review can say why it is amber. Answers `{ok, candidate}`. The series' primary or a
-        source it already follows is 409 `already_followed`; a source that is not installed 409
-        `unknown_source`; a series no longer in the library 409 `gone`; a source that did not answer 502.
+        Requires an admin account and a token carrying the admin scope. Scopes only ever restrict. Refused
+        before any lookup whenever a follow would be: 409 `posting_order` for a series numbered by posting
+        order, `full` with no free follower slot, `already_followed` for the primary or a source it follows,
+        `too_few` when it lists fewer than three numbers, `unknown_source` for a source not installed. Then
+        judged by the same rule as the search's finds (judgeCandidate, health read now) and saved with
+        `manual: true` when it is `ok` or an exact-name `numbering_differs`; otherwise 409 `title_differs`,
+        `not_this_series` (its name only contains ours and its numbering differs) or `unavailable`, and 502
+        when the source did not answer. `cover` is optional, shown on the review row. Answers `{ok,
+        candidate}`.
       parameters:
         - name: id
           in: path
@@ -8708,6 +8767,9 @@ paths:
                   type: string
                 sourceSeriesId:
                   type: string
+                cover:
+                  type: string
+                  nullable: true
       security:
         - bearer: []
       responses:
@@ -8720,9 +8782,9 @@ paths:
         "403":
           description: "Forbidden: token scope, account permission or age limit"
         "404":
-          description: Not found
+          description: "Not found: the item, or its series is gone"
         "409":
-          description: "Conflict: `already_followed`, `unknown_source` or `gone`"
+          description: "Conflict: `posting_order`, `full`, `already_followed`, `too_few`, `unknown_source`, `unavailable`, `title_differs` or `not_this_series`"
         "502":
           description: "Bad gateway: the source did not answer"
   /api/admin/link/items/{id}/chapters:

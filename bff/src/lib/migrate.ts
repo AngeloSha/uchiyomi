@@ -1275,11 +1275,12 @@ ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS archive_min_free_gb int    
 
 -- (#72 needs no schema. Everything above is additive: v0.48.4 starts on it and ignores it. No DATA_MIGRATIONS
 -- entry: existing series are renumbered lazily by their next check, and first_at is read through COALESCE.)
--- v0.49.0: the other names a series goes by (lib/altTitles.ts). A series is stored under ONE title, and a
--- source that files it under another name -- the romanised Korean, the official English, the fan English --
--- was invisible to every cross-source lookup. One row per name, keyed on its normalised form, so the same
--- name spelt twice is one row. origin says where it came from: description (read out of a source's own
--- description, only while alt_title_matching is on), admin (typed by hand), confirmed (the title a source
+
+-- Connect sources: the other names a series goes by (lib/altTitles.ts). A series is stored under ONE title,
+-- and a source that files it under another name -- the romanised Korean, the official English, the fan
+-- English -- was invisible to every cross-source lookup. One row per name, keyed on its normalised form, so
+-- the same name spelt twice is one row. origin says where it came from: description (read out of a source's
+-- own description, only while alt_title_matching is on), admin (typed by hand), confirmed (the title a source
 -- uses, taken when an admin confirmed a link to it) or merged (the absorbed row's title on a merge).
 -- source_id names the source a description or confirmed name came from.
 CREATE TABLE IF NOT EXISTS series_alt_titles (
@@ -1294,12 +1295,12 @@ CREATE TABLE IF NOT EXISTS series_alt_titles (
 );
 CREATE INDEX IF NOT EXISTS series_alt_titles_norm_idx ON series_alt_titles (norm);
 
--- v0.49.0: the admin opt-in for other names. Off by default: while off, no description is parsed for names
--- and only the names an admin typed or confirmed are searched.
+-- Connect sources: the admin opt-in for other names. Off by default: while off, no description is parsed for
+-- names and only the names an admin typed or confirmed are searched.
 ALTER TABLE server_settings ADD COLUMN IF NOT EXISTS alt_title_matching boolean NOT NULL DEFAULT false;
 
--- v0.49.0: Connect sources (lib/linkBatch.ts), the library's bulk way to follow other sources. Shaped like
--- the import review: a batch searches, an admin reviews every candidate, and only what they tick is
+-- Connect sources (lib/linkBatch.ts), the library's bulk way to follow other sources. Shaped like the import
+-- review: a paced background job searches, an admin reviews every candidate, and only what they tick is
 -- followed. State lives here rather than in memory so a restart or a closed tab keeps the review.
 --   state  searching = asking the sources, review = waiting on the admin, linking = following the picks,
 --          done = nothing left to follow.
@@ -1316,7 +1317,10 @@ CREATE TABLE IF NOT EXISTS link_batches (
 );
 -- One row per series in the batch. names is every name the search used; asked and unreachable count the
 -- sources it put the question to and the ones that did not answer, so "nothing found" can say how hard it
--- looked. state pending = not searched yet, done = searched, error = the series could not be read.
+-- looked. state pending = not searched yet, done = searched, skipped = not searched (note says why),
+-- error = the series could not be read.
+--   note   why a series was not searched, or stopped early: posting_order (#116: no other source's numbers
+--          line up), full (already follows MAX_FOLLOWERS), too_few (lists too few numbers to compare).
 CREATE TABLE IF NOT EXISTS link_items (
   id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   batch_id    uuid NOT NULL REFERENCES link_batches(id) ON DELETE CASCADE,
@@ -1329,13 +1333,15 @@ CREATE TABLE IF NOT EXISTS link_items (
   unreachable int  NOT NULL DEFAULT 0,
   UNIQUE (batch_id, ord)
 );
+ALTER TABLE link_items ADD COLUMN IF NOT EXISTS note text;
 -- One row per source a series was found on.
---   verdict       ok = a name matches exactly and the numbering lines up both ways; numbering_differs = the
---                 name matches but the numbering does not; title_differs = no name matches (a hand-picked
---                 candidate only; the search never keeps one).
+--   verdict       ok = autoFollow's judgeCandidate would follow it (the name matches and the numbering lines
+--                 up); numbering_differs = a name matches EXACTLY but the numbering does not. Only ok is
+--                 followed by a run; numbering_differs only one at a time, from its chapter list.
 --   our_name / their_name  the pair of names that matched, so the row can say "matched via".
 --   manual        an admin added this candidate from the search sheet.
---   status        set once the run reached it: linked, cap, gone, unavailable, or an error code.
+--   status        set once it is closed: linked, cap, gone, unavailable, primary, already_followed,
+--                 posting_order, or an error code.
 CREATE TABLE IF NOT EXISTS link_candidates (
   id               uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   item_id          uuid NOT NULL REFERENCES link_items(id) ON DELETE CASCADE,
