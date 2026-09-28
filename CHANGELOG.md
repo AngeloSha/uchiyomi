@@ -1,6 +1,6 @@
 # Changelog
 
-## v0.49.0 — (date to be set)
+## v0.49.0 — 2026-09-28
 
 **Server downloads get a home of their own, Health says what every fix does and whether it worked, a failing
 source shows as failing, a whole series can come in slowly over nights or days, a source that gives many
