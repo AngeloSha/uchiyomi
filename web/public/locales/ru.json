@@ -2488,7 +2488,7 @@
   "Find other sources (1 series)": "Найти другие источники (1 серия)",
   "Find other sources ({n} series)": "Найти другие источники (серий: {n})",
   "No other source lists it besides the one it already follows": "Кроме уже отслеживаемого источника, ни один другой её не показывает",
-  "No source followed": "Источники не добавлены",
+  "No source followed": "Новых отслеживаемых источников нет",
   "its source": "источник серии",
   "1 not switched on: over the source limit": "Не включён из-за лимита источников: 1",
   "every chapter file in the downloads folder is in the library (1 checked)": "все файлы глав в папке загрузок есть в библиотеке (проверен: 1)",
