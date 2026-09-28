@@ -3,8 +3,12 @@
 //   KEEP=1 E2E_ENGINE=fake E2E_ARCHIVE_FAST=1 E2E_NO_WALK=1 E2E_NET=uchiyomi-e2e-49 E2E_PORT=18149 \
 //     E2E_SUBNET=10.222.9.0/24 bash web/test/e2e/up.sh
 //   cd web && E2E_ARCHIVE_FAST=1 BASE=http://127.0.0.1:18149 PHASES=notices,archive,numbering,sources,engine \
-//     ENGINE=http://127.0.0.1:20300 npm run test:e2e:v049                  # every phase
+//     ENGINE=http://127.0.0.1:23149 npm run test:e2e:v049                  # every phase
 //   cd web && BASE=http://127.0.0.1:18149 PHASES=notices npm run test:e2e:v049
+//
+// WIDTH is not read here, unlike the older walks: each phase sets its own viewports and runs at both -- notices at
+// 390 and 1024, archive, numbering and sources at 390 and 1280, engine (engineWalk.mjs) at 390 and 1280. One run
+// covers the phone and the wide layout; a WIDTH on the command line changes nothing.
 //
 // ⚠️ E2E_ARCHIVE_FAST=1 goes on BOTH commands of the every-phase run. On up.sh it starts the app with the slow
 // archive's test timing; the walk reads the same flag from its own environment, and only with it runs the archive
@@ -15,11 +19,11 @@
 // feature.
 //
 // The default PHASES are the ones a plain up.sh stack can serve: notices, archive, sources. numbering and engine
-// need the fake extension engine (E2E_ENGINE=fake); its control port is the second fake source's plus one
-// (20300 above), which numbering derives by itself and engine takes as ENGINE. PHASES may name only the five
-// phases below: any other name is a failed check, so a typo cannot pass as a green run. The release plan's other
-// phases live elsewhere: its downloads checks are run.mjs's (the walk up.sh runs by itself), and Health clarity is
-// walk41's.
+// need the fake extension engine (E2E_ENGINE=fake); its control port is 23000 plus the app port's last three digits
+// (23149 above, as up.sh derives it), which numbering derives by itself and engine takes as ENGINE. PHASES may name
+// only the five phases below: any other name is a failed check, so a typo cannot pass as a green run. The release
+// plan's other phases live elsewhere: its downloads checks are run.mjs's (the walk up.sh runs by itself), and Health
+// clarity is walk41's.
 //
 // Phases:
 //
@@ -37,7 +41,11 @@
 //     6. under the system's reduced motion: no turning ring (a still one), no draining hairline -- and the
 //        turn and the hairline are there without it.
 //   To hold a notice on screen while the walk opens a dialog under it, the mouse rests on the card: a notice
-//   pauses while hovered, which is behaviour the walk relies on and so also checks.
+//   pauses while hovered, which is behaviour the walk relies on and so also checks. ⚠️ A card that moves leaves
+//   the mouse behind and runs out: a select bar lifts it, a Modal docks it in the nav band, the reader (no nav)
+//   drops it to the bottom edge and each reader sheet lifts it again. So the walk rests on it again after every such
+//   move, and a held card is measured only fully shown (opacity 1): a fading card passes every geometry check, and
+//   one was gone from the reader's chapter-sheet shot.
 //
 //   archive -- the slow archive (#117): where it is turned on and where it is watched. At 390: Discover -> the add
 //   dialog's "Archive the rest slowly" (offered for Nothing yet, never for All), the done step's line, the still
@@ -106,9 +114,10 @@ const PASS = process.env.E2E_PASS || 'e2e-passw0rd-123';
 const OUT = process.env.OUT || 'shots49';
 const PHASES = (process.env.PHASES || 'notices,archive,sources').split(',').map((s) => s.trim()).filter(Boolean);
 // The fake sources' and the fake engine's control ports, as up.sh derives them from the app's port.
-const FAKE_A_PORT = 20_000 + (Number(new URL(BASE).port || 80) % 1000) * 2;
+const APP_PORT = Number(new URL(BASE).port || 80);
+const FAKE_A_PORT = 20_000 + (APP_PORT % 1000) * 2;
 const FAKE_A = process.env.FAKE_A_URL || `http://127.0.0.1:${FAKE_A_PORT}`;
-const ENGINE = process.env.ENGINE || `http://127.0.0.1:${FAKE_A_PORT + 2}`;
+const ENGINE = process.env.ENGINE || `http://127.0.0.1:${23_000 + (APP_PORT % 1000)}`;
 const script = async (base, chapter, page, behaviour) => {
   const r = await fetch(`${base}/__script`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ chapter, page, behaviour }) });
   if (!r.ok) throw new Error(`script ${chapter}/${page} ${behaviour} -> ${r.status}`);
@@ -256,7 +265,9 @@ const detailCount = () => page.$eval('[data-detail-count]', (e) => e.textContent
 const scene = () => page.evaluate(() => {
   const box = (el) => { if (!el) return null; const r = el.getBoundingClientRect(); return { top: r.top, bottom: r.bottom, left: r.left, right: r.right, width: r.width, height: r.height }; };
   const vp = document.querySelector('[data-notices]');
-  const cards = [...(vp?.children ?? [])].map((c) => ({ ...box(c), text: c.textContent, type: c.getAttribute('data-notice'), busy: c.hasAttribute('data-busy') }));
+  // How much of the card is drawn: a card on its way out stays in the DOM while it fades (AnimatePresence).
+  const shown = (el) => { let o = 1; for (let e = el; e; e = e.parentElement) o *= Number(getComputedStyle(e).opacity); return o; };
+  const cards = [...(vp?.children ?? [])].map((c) => ({ ...box(c), text: c.textContent, type: c.getAttribute('data-notice'), busy: c.hasAttribute('data-busy'), opacity: shown(c) }));
   const full = (r) => r.width >= innerWidth - 1 && r.height >= innerHeight - 1;
   const dialogs = [...document.querySelectorAll('[role="dialog"][aria-modal="true"]')].map((d) => {
     const panel = full(d.getBoundingClientRect()) && d.firstElementChild ? d.firstElementChild : d;
@@ -275,9 +286,12 @@ const scene = () => page.evaluate(() => {
   };
 });
 const overlap = (a, b) => !!a && !!b && a.left < b.right - 0.5 && b.left < a.right - 0.5 && a.top < b.bottom - 0.5 && b.top < a.bottom - 0.5;
-const fmt = (s) => JSON.stringify({ place: s.place, cards: s.cards.map((c) => [Math.round(c.top), Math.round(c.bottom), Math.round(c.left), Math.round(c.right), c.text?.slice(0, 30)]), dialogs: s.dialogs.map((d) => ({ l: d.label, p: d.panel && [Math.round(d.panel.top), Math.round(d.panel.bottom), Math.round(d.panel.left), Math.round(d.panel.right)], t: d.title && [Math.round(d.title.top), Math.round(d.title.bottom)] })), bar: s.bar && [Math.round(s.bar.top), Math.round(s.bar.bottom)], barRows: s.barRows, nav: s.nav && [Math.round(s.nav.top), Math.round(s.nav.bottom), Math.round(s.nav.left), Math.round(s.nav.right)] });
+const fmt = (s) => JSON.stringify({ place: s.place, cards: s.cards.map((c) => [Math.round(c.top), Math.round(c.bottom), Math.round(c.left), Math.round(c.right), c.text?.slice(0, 30), `opacity ${+c.opacity.toFixed(3)}`]), dialogs: s.dialogs.map((d) => ({ l: d.label, p: d.panel && [Math.round(d.panel.top), Math.round(d.panel.bottom), Math.round(d.panel.left), Math.round(d.panel.right)], t: d.title && [Math.round(d.title.top), Math.round(d.title.bottom)] })), bar: s.bar && [Math.round(s.bar.top), Math.round(s.bar.bottom)], barRows: s.barRows, nav: s.nav && [Math.round(s.nav.top), Math.round(s.nav.bottom), Math.round(s.nav.left), Math.round(s.nav.right)] });
 
-/** Rest the mouse on the newest notice: it pauses while hovered, so it outlives what the walk opens next. */
+/**
+ * Rest the mouse on the newest notice: it pauses while hovered, so it outlives what the walk opens next. Again after
+ * anything that moves the card: moved from under the mouse it is no longer hovered, and its clock runs on.
+ */
 const holdNotice = async () => {
   const s = await scene();
   const c = s.cards.at(-1);
@@ -297,6 +311,7 @@ const checkOverDialog = (s, what, wide) => {
   check(`${what}: a dialog is open`, !!d?.panel, fmt(s));
   check(`${what}: exactly one notice shows`, s.cards.length === 1, fmt(s));
   const c = s.cards[0];
+  check(`${what}: ...fully drawn, not fading out`, c?.opacity === 1, fmt(s));
   check(`${what}: the notice does not cover the dialog's title`, !!c && !!d?.title && !overlap(c, d.title), fmt(s));
   if (wide) {
     check(`${what}: from lg up the notice is clear of the whole dialog`, !!c && !overlap(c, d?.panel), fmt(s));
@@ -351,16 +366,21 @@ async function notices(width) {
   await sleep(300);
   await page.evaluate(() => { for (const b of [...document.querySelectorAll('[id^="ch-"] button[aria-pressed]')].slice(0, 2)) b.click(); });
   await sleep(800);
+  // The bar lifted the card from under the mouse: rest on it where it is now.
+  await holdNotice();
+  await sleep(200);
   s = await scene();
   check(`${tag}: the select bar is up`, !!s.bar, fmt(s));
   if (!wide) check(`${tag}: the series select bar wraps to three rows at 390 px`, s.barRows === 3, fmt(s));
   check(`${tag}: the notice sits above the select bar, measured`, s.place === 'above-toolbar' && s.cards.length > 0 && s.cards.every((c) => c.bottom <= s.bar.top + 0.5), fmt(s));
-  check(`${tag}: a hovered notice stays`, s.cards.length > 0);
+  check(`${tag}: a hovered notice stays, fully drawn`, s.cards.length > 0 && s.cards.every((c) => c.opacity === 1), fmt(s));
   await shot(`${tag}-2-above-select-bar`);
 
   // 3. a Modal over the select bar
   await press('Delete from server');
   await sleep(700);
+  await holdNotice(); // docked in the nav band now, away from the mouse
+  await sleep(200);
   s = await scene();
   checkOverDialog(s, `${tag}: Delete from server (a Modal)`, wide);
   await shot(`${tag}-3-modal-over-select-bar`);
@@ -394,10 +414,13 @@ async function notices(width) {
   await sleep(300);
   await pickTwo();
   await sleep(700);
+  await holdNotice();
+  await sleep(200);
   s = await scene();
   check(`${tag}: the library select bar is up`, !!s.bar, fmt(s));
   if (!wide) check(`${tag}: the library select bar wraps to two rows at 390 px`, s.barRows === 2, fmt(s));
-  check(`${tag}: the notice sits above the library select bar, measured`, s.place === 'above-toolbar' && s.cards.length > 0 && s.cards.every((c) => c.bottom <= s.bar.top + 0.5), fmt(s));
+  check(`${tag}: the notice sits above the library select bar, measured, fully drawn`, s.place === 'above-toolbar' && s.cards.length > 0
+    && s.cards.every((c) => c.opacity === 1 && c.bottom <= s.bar.top + 0.5), fmt(s));
   await shot(`${tag}-2b-above-library-bar`);
   await press('Cancel', 'div.fixed.inset-x-0');
   await releaseMouse();
@@ -439,25 +462,42 @@ async function notices(width) {
   // Into the reader by the app's own router, so the notice survives the page change.
   await page.evaluate(() => document.querySelector('[id^="ch-"] button[aria-pressed], [id^="ch-"] > div > button')?.click());
   await waitFor(() => page.evaluate(() => location.pathname.startsWith('/reader')), 8000);
-  await sleep(1500);
+  // The reader has no nav, so the card dropped to the bottom edge from under the mouse: rested on again while the
+  // reader's "Loading chapter…" cover is up, and the sheets are opened only once a page is drawn and it has gone.
+  const readerReady = () => page.evaluate(() => !!document.querySelector('img[alt^="Page "]') && ![...document.querySelectorAll('div')]
+    .some((el) => el.offsetParent !== null && (el.textContent || '').trim() === 'Loading chapter…'));
+  check(`${tag}: the reader finished loading the chapter`, !!(await waitFor(async () => { await holdNotice(); return readerReady(); }, 20_000, 250)));
+  await sleep(500);
+  await holdNotice();
   // Everything in the reader by DOM clicks: the mouse stays on the notice, and Escape there leaves the reader.
   // The reader's own settings sheet springs up from below: measured by its layout box, not its painted one.
+  // Each sheet lifts the card from under the mouse, so the walk rests on it again before measuring.
   const SLIDERS = 'button:has(path[d="M4 6h10M18 6h2M4 12h2M10 12h10M4 18h7M15 18h5"])';
+  // The top bar hides itself 3.8 s after the reader opens (reader/page.tsx), taking the sheet's button with it, and
+  // a slow load can use that up: a tap on the page brings it back.
+  if (!(await page.$(SLIDERS))) { await page.mouse.click(width / 2, (wide ? 768 : 844) / 2); await sleep(900); await holdNotice(); }
   await page.evaluate((sel) => document.querySelector(sel)?.click(), SLIDERS);
   await sleep(900);
+  await holdNotice();
+  await sleep(300);
   s = await scene();
   const settings = s.dialogs.at(-1);
   check(`${tag}: the reader's settings sheet is open`, settings?.label === 'Reader', fmt(s));
-  check(`${tag}: the notice rises above the reader's settings sheet`, s.place === 'above-sheet' && s.cards.length === 1 && s.cards[0].bottom <= (settings?.panel?.top ?? 0) + 0.5, fmt(s));
+  check(`${tag}: the notice rises above the reader's settings sheet, fully drawn`, s.place === 'above-sheet' && s.cards.length === 1
+    && s.cards[0].opacity === 1 && s.cards[0].bottom <= (settings?.panel?.top ?? 0) + 0.5, fmt(s));
   await shot(`${tag}-6-reader-settings`);
   await page.evaluate(() => document.querySelector('[role="dialog"][aria-label="Reader"] h3 + button')?.click());
   await sleep(700);
+  await holdNotice();
   await page.evaluate(() => document.querySelector('button[aria-label="Chapters"]')?.click());
   await sleep(800);
+  await holdNotice();
+  await sleep(300);
   s = await scene();
   const chapters = s.dialogs.at(-1);
   check(`${tag}: the reader's chapter sheet is open`, chapters?.label === 'Chapters', fmt(s));
-  check(`${tag}: the notice rises above the chapter sheet`, s.place === 'above-sheet' && s.cards.length === 1 && s.cards[0].bottom <= (chapters?.panel?.top ?? 0) + 0.5, fmt(s));
+  check(`${tag}: the notice rises above the chapter sheet, fully drawn`, s.place === 'above-sheet' && s.cards.length === 1
+    && s.cards[0].opacity === 1 && s.cards[0].bottom <= (chapters?.panel?.top ?? 0) + 0.5, fmt(s));
   check(`${tag}: ...clear of its title`, s.cards.length === 1 && !overlap(s.cards[0], chapters?.title), fmt(s));
   await shot(`${tag}-7-reader-chapter-sheet`);
   await page.evaluate(() => document.querySelector('[role="dialog"][aria-label="Chapters"] button[aria-label="Close"]')?.click());
