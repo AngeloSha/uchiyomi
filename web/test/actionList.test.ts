@@ -259,3 +259,13 @@ test('only a working row reads the clock: idle and finished rows cost no timer',
   const body = src.slice(src.indexOf('export function ActionStatus('), src.indexOf('export function ActionList('));
   assert.match(body, /const working = s\.kind === 'working';\s*const now = useTicker\(working\);/, 'an idle row ticks every second');
 });
+
+test("a status line keeps its words' own direction: the server's English reason stays left to right in Arabic", () => {
+  // 390-ar-health-row-failed-why.png: a failed Test's reason -- the server's sentence -- printed ".This source needs
+  // a check from an admin" in an Arabic page. A translated line resolves to its own language by the same rule.
+  // Reintroduce the plain `<span className="min-w-0 break-words">`: "the status line takes the page's direction" fails.
+  const failed = html(createElement(ActionStatus, { state: { kind: 'failed', reason: 'This source needs a check from an admin.' } }));
+  assert.match(failed, /<span dir="auto" class="min-w-0 break-words">This source needs a check from an admin\.<\/span>/, "the status line takes the page's direction");
+  const done = html(createElement(ActionStatus, { state: { kind: 'done', finishedAt: T0, tookMs: 2_000, outcome: 'Replaced with a longer copy' } }));
+  assert.match(done, /<span dir="auto" class="min-w-0 break-words">Replaced with a longer copy<\/span>/, "the status line takes the page's direction");
+});

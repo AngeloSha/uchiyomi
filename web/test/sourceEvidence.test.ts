@@ -220,3 +220,26 @@ test('every word this says is in all eight languages, the counted pairs included
     }
   }
 });
+
+test("the server's and the source's words keep their own direction: the verdict, a check's detail, the error and the fix", () => {
+  // #115's evidence in Arabic (390-ar-health-row-failed-why.png): "0/12 pages downloaded (HTTP 404)" printed as
+  // "pages downloaded (HTTP 404) 0/12", and the fix's full stop sat at its start. They are the server's and the
+  // source's English, not translated. Reintroduce the error's `<p className="line-clamp-2 …">` without dir="auto":
+  // "the source's error takes the page's direction" fails by name; likewise the fix, the verdict and the detail.
+  const IMG = '0/12 pages downloaded (HTTP 404)';
+  const FIX = 'This source needs a check from an admin.';
+  const images: StageLine = { stage: 'images', state: 'fail', at: new Date(Date.now() - 420_000).toISOString(), by: 'traffic', kind: 'error', error: IMG };
+  const health = renderToStaticMarkup(createElement(SourceEvidence, { lines: [...stored.slice(0, 3), images], fix: FIX }));
+  assert.match(health, /<p dir="auto" class="line-clamp-2[^"]*" title="0\/12 pages downloaded \(HTTP 404\)">0\/12 pages downloaded \(HTTP 404\)<\/p>/,
+    "the source's error takes the page's direction");
+  assert.match(health, /<p dir="auto" class="[^"]*">This source needs a check from an admin\.<\/p>/, "the admin's fix takes the page's direction");
+  // Every error line, not just the one checked above.
+  const errors = [...health.matchAll(/<p ([^>]*)class="line-clamp-2/g)];
+  assert.equal(errors.length, 2, 'the fixture\'s two errors are not both drawn');
+  for (const e of errors) assert.match(e[1], /dir="auto"/, "the source's error takes the page's direction");
+  // A live Test: the server's verdict, and each check's own words inside the translated stage label's line.
+  const failed = renderToStaticMarkup(createElement(SourceEvidence, { answer: ballTest() }));
+  assert.match(failed, /<span dir="auto" class="min-w-0">This source(?:'|&#x27;)s extension reported an error\.<\/span>/, "the server's verdict takes the page's direction");
+  const passed = renderToStaticMarkup(createElement(SourceEvidence, { answer: passing }));
+  assert.match(passed, /<span class="text-fog-500"> · <bdi>12 result\(s\)<\/bdi><\/span>/, "a check's detail joins the translated label's run");
+});

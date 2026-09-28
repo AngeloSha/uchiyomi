@@ -478,3 +478,18 @@ test('every string the Health keys, legends and live strip render is in all eigh
     assert.deepEqual(missing, [], `${missing.length} strings are missing from ${f}: ${missing.slice(0, 12).join(' | ')}`);
   }
 });
+
+test("Health prints the server's words in their own direction: every finding's title and detail, a card's summary and note", () => {
+  // The final screenshot review, in Arabic (390-ar-health-row-failed-why.png): the server's English -- not
+  // translated, and not to be -- took the page's right-to-left direction, so a sentence printed its full stop at
+  // its start (".This source needs a check from an admin") and a closing bracket flipped. Reintroduce the plain
+  // `<p className="text-[11px] text-fog-500">{it.detail}</p>`: "a finding's detail takes the page's direction" fails.
+  const src = code(read(PAGE));
+  const health = src.slice(src.indexOf('function Health()'), src.indexOf('function DesktopUpdateNote('));
+  const printed: [string, string][] = [["a finding's title", 'it.title'], ["a finding's detail", 'it.detail'], ["a card's summary", 'c.summary'], ["a card's note", 'c.note']];
+  for (const [what, expr] of printed) {
+    const at = [...health.matchAll(new RegExp(`<p\\b([^>]*)>\\{${expr.replace('.', '\\.')}\\}</p>`, 'g'))];
+    assert.ok(at.length > 0, `${what} is no longer printed in a <p> of its own -- update this test`);
+    for (const m of at) assert.match(m[1], /\bdir="auto"/, `${what} takes the page's direction, its full stop at its start in Arabic`);
+  }
+});

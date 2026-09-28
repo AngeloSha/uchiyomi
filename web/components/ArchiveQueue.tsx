@@ -252,7 +252,7 @@ export function ArchiveTile({ item, view }: { item: ArchiveItem; view?: ArchiveV
 export function ArchiveAttentionRow({ item, view, admin }: { item: ArchiveItem; view?: ArchiveView | null; admin: boolean }) {
   const [open, setOpen] = useState(false);
   return (
-    <li data-attention="archive" className="card flex items-start gap-3 px-4 py-3">
+    <li data-attention="archive" className="card flex min-w-0 items-start gap-3 px-4 py-3">
       <Img src={img.seriesThumb(item.seriesId)} alt="" className="h-[60px] w-10 shrink-0 rounded-md" />
       <div className="min-w-0 flex-1">
         <p className="truncate text-sm font-medium text-fog-100">{item.title}</p>

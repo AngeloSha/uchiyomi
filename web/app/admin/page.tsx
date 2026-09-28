@@ -2022,7 +2022,7 @@ function Health() {
                     <StatusMark {...mark} size="xs" />
                     <CardProgress checkId={c.id} />
                   </p>
-                  <p className="mt-0.5 text-[11px] text-fog-500">{c.summary}</p>
+                  <p dir="auto" className="mt-0.5 text-[11px] text-fog-500">{c.summary}</p>
                 </div>
                 {expandable && (
                   <>
@@ -2038,21 +2038,25 @@ function Health() {
               {isOpen && (
                 <div id={`health-${c.id}-details`} className="border-t border-ink-800/70">
                   <HealthCardActions check={c} />
-                  {c.note && <p data-health-note className="px-4 pt-3 text-[11px] leading-relaxed text-fog-500">{c.note}</p>}
+                  {c.note && <p data-health-note dir="auto" className="px-4 pt-3 text-[11px] leading-relaxed text-fog-500">{c.note}</p>}
                   <div className="divide-y divide-ink-800/70">
                     {c.items.map((it, i) => (
                       <HealthRow key={rowKeys[i]} rowKey={rowKeys[i]} check={c} item={it}
                         // To the chapter the finding is about, not just its series (lib/healthLinks.ts). A duplicate
                         // pair gets one per copy, each naming its copy: two bare "Open"s cannot be told apart on a
                         // phone, where there is no tooltip. Text links, not chips: they go somewhere, they do nothing.
+                        // Two lines, never cut: "Öffnen · Einstellungen der Q…" hid which settings it opens (the
+                        // arrow is held to the last word by a no-break space).
                         links={healthLinks(c.id, it).map((l) => (
-                          <Link key={l.href} href={l.href} className="max-w-[11rem] truncate text-xs text-accent hover:underline"
+                          <Link key={l.href} href={l.href} className="line-clamp-2 max-w-[11rem] break-words text-end text-xs text-accent hover:underline"
                             title={l.label} aria-label={l.label ? `${tr('Open')}: ${l.label}` : undefined}>
-                            {l.label ? `${tr('Open')} · ${l.label}` : tr('Open')} ›
+                            {l.label ? `${tr('Open')} · ${l.label}` : tr('Open')}{'\u00a0'}›
                           </Link>
                         ))}>
-                        <p className="break-words text-sm text-fog-100">{it.title}</p>
-                        <p className="text-[11px] text-fog-500">{it.detail}</p>
+                        {/* The server's own words, in English (a title in any script): `dir="auto"`, or in an Arabic
+                            page a sentence's full stop and closing bracket land at its start. */}
+                        <p dir="auto" className="break-words text-sm text-fog-100">{it.title}</p>
+                        <p dir="auto" className="text-[11px] text-fog-500">{it.detail}</p>
                         {/* #115: the stage lines and the fix, through the component Providers uses too, and only
                             where they say something (healthRowEvidence). Among the row's words, above its keys: the
                             source rows have no Open link beside them, so the lines take the row's full width. */}

@@ -10,6 +10,11 @@
 //
 // The source's own error text is shown in full but clamped to two lines, with all of it in the title attribute:
 // an engine's Java exception can be three hundred characters, and a phone row is not the place for all of them.
+//
+// Every line that prints the server's or the source's words -- the verdict, a check's detail, the error, the fix --
+// keeps its own direction (`dir="auto"`, or <bdi> inside a translated line). They are English and are not
+// translated; in an Arabic page "0/12 pages downloaded (HTTP 404)" read "pages downloaded (HTTP 404) 0/12", and
+// the fix's full stop sat at its start.
 import { t as tr } from '@/lib/i18n';
 import { TONE_TEXT } from '@/lib/status';
 import {
@@ -41,7 +46,7 @@ export function SourceEvidence({ answer, lines, tested, failing, fix, compact, o
       {view.head && (
         <p data-evidence-head className={`flex items-start gap-1.5 text-[12px] leading-snug ${view.head.tone === 'ok' ? 'text-fog-200' : TONE_TEXT[view.head.tone]}`}>
           <span className="mt-[2px]"><StatusGlyph tone={view.head.tone} size={11} /></span>
-          <span className="min-w-0">{view.head.text}</span>
+          <span dir="auto" className="min-w-0">{view.head.text}</span>
         </p>
       )}
       {!!rows.length && (
@@ -54,18 +59,18 @@ export function SourceEvidence({ answer, lines, tested, failing, fix, compact, o
                 <p>
                   <span className="text-fog-200">{r.label}</span>
                   <span className="sr-only"> ({glyphWord(r.glyph)})</span>
-                  {r.detail && <span className="text-fog-500"> · {r.detail}</span>}
+                  {r.detail && <span className="text-fog-500"> · <bdi>{r.detail}</bdi></span>}
                   {r.when && <span className="text-fog-600"> · {r.when}</span>}
                 </p>
                 {r.error && (
-                  <p className="line-clamp-2 break-words font-mono text-[10.5px] text-fog-500" title={r.error}>{r.error}</p>
+                  <p dir="auto" className="line-clamp-2 break-words font-mono text-[10.5px] text-fog-500" title={r.error}>{r.error}</p>
                 )}
               </div>
             </li>
           ))}
         </ul>
       )}
-      {view.fix && <p className="text-[11px] leading-relaxed text-fog-400">{view.fix}</p>}
+      {view.fix && <p dir="auto" className="text-[11px] leading-relaxed text-fog-400">{view.fix}</p>}
       {moved && (
         <button type="button" onClick={onMove} className="btn-key text-accent">{tr('Update address')}</button>
       )}

@@ -36,8 +36,15 @@ interface Job extends JobCardNotes {
 
 /** The Library grid's columns, one step wider: the filter sidebar is not shown beside this view. */
 const GRID = 'grid grid-cols-3 gap-x-3 gap-y-5 px-4 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 lg:gap-x-4 lg:px-0 xl:grid-cols-7 2xl:grid-cols-8 3xl:grid-cols-9 4xl:grid-cols-10';
-/** Needs attention, Server tasks and the stopped downloads: one card each, side by side where there is room. */
-const ROWS = 'grid gap-3 px-4 lg:grid-cols-2 lg:px-0 2xl:grid-cols-3';
+/**
+ * Needs attention, Server tasks and the stopped downloads: one card each, side by side where there is room.
+ *
+ * ⚠️ `grid-cols-1` below lg, never an implicit column. An implicit `auto` column grows to its widest card's
+ * min-content, and a `truncate` line is as wide as its whole text: at 390 px a German one-row repair ("Suche nach
+ * längeren Kopien · Walk Tale · Kap. 4") pushed the page 135 px sideways and its Abbrechen off the screen.
+ * `repeat(1, minmax(0, 1fr))` holds the column to the page, so the name truncates as it was meant to.
+ */
+const ROWS = 'grid grid-cols-1 gap-3 px-4 lg:grid-cols-2 lg:px-0 2xl:grid-cols-3';
 /** Came in today shows this many covers before "Show all {n}": a big morning is a hundred series. */
 const CAME_IN_FIRST = 24;
 
@@ -202,7 +209,7 @@ export function ServerDownloadsView({ focusFolder }: { focusFolder?: string | nu
           {s.stopped.length > 0 && (
             <ul className={`${ROWS} mt-4`}>
               {s.stopped.map((j) => (
-                <li key={j.folder} className="card flex items-start gap-3 px-4 py-3">
+                <li key={j.folder} className="card flex min-w-0 items-start gap-3 px-4 py-3">
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-sm text-fog-100">{j.title}</p>
                     <p dir="auto" className="mt-0.5 text-[12px] text-fog-400">{j.reason || tr('Cancelled; what landed is kept.')}</p>
@@ -288,7 +295,7 @@ function AttentionRow({ a, nameOf, onRetry, onDismissJob, onDismissRun, focusRef
   if (a.kind === 'run') {
     const r = a.run;
     return (
-      <li data-attention="run" className="card flex items-start gap-3 px-4 py-3">
+      <li data-attention="run" className="card flex min-w-0 items-start gap-3 px-4 py-3">
         <span className="mt-0.5 grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-amber-500/10 text-amber-300"><IcAlert width={18} height={18} /></span>
         <div className="min-w-0 flex-1">
           <p className="truncate text-sm font-medium text-fog-100">{runName(r)}</p>
@@ -306,7 +313,7 @@ function AttentionRow({ a, nameOf, onRetry, onDismissJob, onDismissRun, focusRef
   const thumb = a.seriesId ? { src: img.seriesThumb(a.seriesId) } : a.kind === 'job' ? coverOf({ seriesId: null, job: a.job }) : { src: '' };
   return (
     <li ref={focusRef} data-attention={a.kind} data-folder={a.kind === 'job' ? a.job.folder : undefined}
-      className={`card flex items-start gap-3 px-4 py-3 ${focusRef ? 'border-accent/60 ring-2 ring-accent/40' : ''}`}>
+      className={`card flex min-w-0 items-start gap-3 px-4 py-3 ${focusRef ? 'border-accent/60 ring-2 ring-accent/40' : ''}`}>
       <Img src={thumb.src} fallbackSrc={thumb.fallback} alt="" className="h-[60px] w-10 shrink-0 rounded-md" />
       <div className="min-w-0 flex-1">
         <p className="truncate text-sm font-medium text-fog-100">{a.title}</p>
@@ -355,7 +362,7 @@ function TaskRow({ r, admin, onCancel, onDismiss }: { r: RunCard; admin: boolean
   // series) -- and what any repair did is kept under Health's Recent repairs, an admin's way to it.
   const history = admin && r.kind === 'repair';
   return (
-    <li data-task={r.kind} data-state={r.status} className="card flex items-start gap-3 px-4 py-3">
+    <li data-task={r.kind} data-state={r.status} className="card flex min-w-0 items-start gap-3 px-4 py-3">
       <ProgressRing progress={running ? ringFraction(r.done, r.total) : r.status === 'done' ? 1 : 'idle'} size="bar"
         tone={r.status === 'cancelled' ? 'muted' : 'accent'} label={name} valueText={runProgress(r)} className="mt-0.5" />
       <div className="min-w-0 flex-1">

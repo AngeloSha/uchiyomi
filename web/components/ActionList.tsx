@@ -104,7 +104,9 @@ export function ActionStatus({ state, bare, className }: {
         <div data-action-status={s.kind} className={className}>
           <p className={`mt-1.5 flex min-w-0 items-center gap-1.5 text-[11px] tabular-nums ${TONE_TEXT[sum.tone]}`}>
             {!bare && <StateGlyph state={s} size={12} />}
-            <span className="min-w-0 break-words">{sum.text}</span>
+            {/* `dir="auto"`: a failure's reason is often the server's English sentence (a Test's diagnosis), which
+                in an Arabic page printed its full stop first. A translated line resolves to its own language. */}
+            <span dir="auto" className="min-w-0 break-words">{sum.text}</span>
             {sum.clock && <span aria-hidden className="ms-auto shrink-0 text-fog-500">{sum.clock}</span>}
           </p>
           {p !== null && (

@@ -90,7 +90,7 @@ export function OnBody({ children }: { children: ReactNode }) {
  * `data-lenis-prevent` on the scroller is not optional: Lenis drives smooth scrolling for the whole app, and
  * without it a flick inside the sheet scrolls the chapter behind it instead.
  */
-export function Sheet({ title, onClose, overBottomNav, action, footer, children }: {
+export function Sheet({ title, onClose, overBottomNav, action, footer, wrapTitle, children }: {
   title: string;
   onClose: () => void;
   /** Something small beside the close button: the (i) that opens the explainer, for instance. */
@@ -111,6 +111,12 @@ export function Sheet({ title, onClose, overBottomNav, action, footer, children 
    * nothing on screen to suggest anything was missing. 5.5rem is the bar plus its own safe-area inset.
    */
   overBottomNav?: boolean;
+  /**
+   * A title that is a phrase, not a name: it wraps onto a second line rather than being cut. The renumbering
+   * plan's German "Nach Erscheinungsreihenfolge nummerieren" read "…numme…" at 390 px, its verb gone. Off by
+   * default, so a long series title stays one line.
+   */
+  wrapTitle?: boolean;
   children: ReactNode;
 }) {
   const bodyRef = useRef<HTMLDivElement>(null);
@@ -149,7 +155,7 @@ export function Sheet({ title, onClose, overBottomNav, action, footer, children 
                    }`}
       >
         <div className="mb-3 flex items-center justify-between gap-3 px-4">
-          <h2 className="min-w-0 truncate font-display text-base font-semibold text-fog-50">{title}</h2>
+          <h2 className={`min-w-0 ${wrapTitle ? 'line-clamp-2 break-words' : 'truncate'} font-display text-base font-semibold text-fog-50`}>{title}</h2>
           <span className="flex shrink-0 items-center gap-2">
             {action}
             <button onClick={onClose} aria-label={tr('Close')}

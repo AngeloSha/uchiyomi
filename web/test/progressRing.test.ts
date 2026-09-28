@@ -19,6 +19,8 @@ import {
   stillDash,
 } from '../lib/ring';
 import { CoverProgress, ProgressRing, RingIcon } from '../components/ProgressRing';
+import { LibraryTabIcon } from '../components/DownloadsRing';
+import type { NavRing } from '../lib/serverDownloads';
 
 // Under tsx the components compile to the classic `React.createElement` (tsconfig's `jsx: preserve` is for
 // Next), which they look up as a global when they render.
@@ -240,4 +242,21 @@ test('the cover veil appears and leaves without motion under either setting', ()
   assert.match(body, /const plain = useReduceEffects\(\);\s*const still = useReducedMotion\(\);\s*const reduced = plain \|\| !!still;/);
   assert.match(body, /initial=\{reduced \? false : \{ opacity: 0 \}\}/, 'the veil fades in under Reduce effects');
   assert.match(body, /transition=\{reduced \? \{ duration: 0 \} : \{ duration: 0\.45/, 'the veil fades out under Reduce effects');
+});
+
+test("the ringed Library tab keeps the plain tabs' box: its icon's wrapper is a grid, never an inline box", () => {
+  // The final screenshot review: whenever the ring showed (a download, the amber dot, the archive's still mark) the
+  // bottom nav grew 6 px -- its top from y=751 to 745 -- and "Library" sat 3 px below the other labels. The plain
+  // tabs' icon is a block <svg> (Tailwind's preflight), so their icon span has no line box; the ringed tab put an
+  // inline <span> there, and the line box it opened added the strut's descent under the baseline. Reintroduce the
+  // bare `<span data-downloads-ring=…>`: "the ringed tab's icon opens a line box" fails by name.
+  const ring = (over: Partial<NavRing>): NavRing => ({ show: true, progress: 0.4, count: 2, attention: false, slow: false, label: 'Fetching 2 chapters', ...over });
+  for (const [what, r] of [['downloading', ring({})], ['a failed dot', ring({ progress: 'idle', count: 0, attention: true })], ['the archive\'s still mark', ring({ progress: 'spin', count: 0, slow: true })]] as const) {
+    const tab = html(createElement(LibraryTabIcon, { ring: r, children: createElement('svg', { width: 22, height: 22 }) }));
+    const root = /^<span ([^>]*)>/.exec(tab)?.[1] ?? '';
+    assert.match(root, /data-downloads-ring="[a-z]+"/, `${what}: the ring's wrapper lost the attribute the walks find it by`);
+    assert.match(root, /class="grid"/, `${what}: the ringed tab's icon opens a line box, and the nav grows 6 px`);
+    // Inside, the ring is a grid item too: nothing in the tab's flow but the 22 px icon; the rest is absolute.
+    assert.match(tab, /^<span [^>]*><span class="relative inline-grid place-items-center" data-ring-icon="nav"><svg width="22" height="22"><\/svg>/, `${what}: something sits in the tab's flow beside its icon`);
+  }
 });

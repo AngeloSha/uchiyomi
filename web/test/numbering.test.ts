@@ -7,12 +7,19 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'fs';
 import { join } from 'path';
+import * as React from 'react';
+import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
+import { Sheet } from '../components/ui';
 import {
   CHECKING_NOW, addNoticeHeading, addNumberingView, noticeKind, numberingOutcome, planCounts, planErrorText, numLabel, pendingLine, refusalText,
   type DetailNumbering, type NumberingSummary, type RenumberPlan,
 } from '../lib/numbering';
 import { prefControl, prefErrorText, prefSummary, toggleChoice, needsRenumberConfirm, entryLabel, extensionSettingsHref } from '../lib/sourcePrefs';
 import { copyTitlesDiffer, postsShareNumber, normCopyTitle } from '../lib/versions';
+
+// Under tsx the components compile to the classic `React.createElement`, looked up as a global.
+(globalThis as any).React = React;
 
 const ROOT = join(__dirname, '..');
 const read = (p: string) => readFileSync(join(ROOT, p), 'utf8');
@@ -304,4 +311,17 @@ test('the settings sheet writes by key, warns in the row, and asks its second wo
   assert.match(ext, /\{settingsFor && status\.reachable && <ExtensionSettings target=\{settingsFor\} onClose=\{\(\) => setSettingsFor\(null\)\} \/>\}/);
   // The hook sits with the other state, before the early returns (hooks keep their order).
   assert.ok(ext.indexOf('useExtensionSettingsParam()') < ext.indexOf('if (!status) return null;'), 'the deep-link hook runs after an early return');
+});
+
+test("the plan sheet's title wraps onto a second line rather than being cut", () => {
+  // 390-de-numbering-plan-sheet.png: "Nach Erscheinungsreihenfolge numme…" -- the verb, which says what Confirm
+  // does, cut off. Reintroduce the Sheet's one-line `truncate` for every title, or drop `wrapTitle` from the plan
+  // sheet: "the plan sheet's title is cut to one line" fails by name.
+  const title = (wrapTitle?: boolean) => /<h2 class="([^"]*)">/.exec(renderToStaticMarkup(createElement(Sheet, {
+    title: 'Nach Erscheinungsreihenfolge nummerieren', onClose: () => {}, overBottomNav: true, wrapTitle, children: 'x',
+  })))?.[1] ?? '';
+  assert.match(title(true), /\bline-clamp-2\b/, "a wrapping sheet title is cut to one line, or runs past two");
+  assert.doesNotMatch(title(true), /\btruncate\b/, "a wrapping sheet title is cut to one line");
+  assert.match(title(), /\btruncate\b/, 'every other sheet title wraps now: a long series title would take two lines');
+  assert.match(code(read('components/NumberingSheet.tsx')), /<Sheet title=\{title\} onClose=\{close\} overBottomNav wrapTitle\b/, "the plan sheet's title is cut to one line");
 });

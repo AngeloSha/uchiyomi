@@ -28,10 +28,17 @@ export function ringProps(ring: NavRing): { progress: NavRing['progress']; count
   };
 }
 
-/** The phone's Library tab icon, wearing the ring. Absolutely placed, so the nav keeps its 92 px. */
+/**
+ * The phone's Library tab icon, wearing the ring. The ring, the count and the dot are absolutely placed, and the
+ * wrapper is a GRID, so the tab's box is the plain tabs' box: the 22 px icon and nothing else.
+ *
+ * ⚠️ Never an inline wrapper. The other tabs' icon is a block `<svg>` (Tailwind's preflight), so their icon span
+ * has no line box; an inline <span> here opened one, and its strut's descent under the baseline made this tab
+ * 6 px taller -- the whole bar grew upward and "Library" sat 3 px below the other labels whenever the ring showed.
+ */
 export function LibraryTabIcon({ ring, children }: { ring: NavRing; children: ReactNode }) {
   return (
-    <span data-downloads-ring={ring.show ? (ring.slow ? 'slow' : ring.progress === 'idle' ? 'idle' : 'active') : undefined}>
+    <span className="grid" data-downloads-ring={ring.show ? (ring.slow ? 'slow' : ring.progress === 'idle' ? 'idle' : 'active') : undefined}>
       <RingIcon size="nav" {...ringProps(ring)}>{children}</RingIcon>
     </span>
   );

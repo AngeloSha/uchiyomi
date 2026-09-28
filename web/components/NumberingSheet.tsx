@@ -92,7 +92,7 @@ export function NumberingSheet({ seriesId, mode, onClose, onConfirm }: {
   const close = () => { if (!applying) onClose(); };
   return (
     <OnBody>
-      <Sheet title={title} onClose={close} overBottomNav
+      <Sheet title={title} onClose={close} overBottomNav wrapTitle
         footer={plan && (
           <div className="pb-1">
             {error && <p role="alert" className="mb-2 text-[12px] text-amber-300">{error}</p>}

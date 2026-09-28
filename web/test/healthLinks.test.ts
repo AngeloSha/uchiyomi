@@ -104,3 +104,18 @@ test('the series page opens the plan Health links to, once, for an admin', () =>
   // After the reset on a new series, which would otherwise close it straight away.
   assert.ok(page.indexOf('useEffect(() => { setNumberingSheet(null); }, [id]);') < page.indexOf('const openedPlan = useRef'), 'the reset closes the plan it opened');
 });
+
+test("Health's Open links wrap onto a second line rather than being cut", () => {
+  // 390-de-health-numbering-row.png: "Öffnen · Einstellungen der Q…" -- which settings, the link no longer said.
+  // Reintroduce `max-w-[11rem] truncate` on the link: "a Health link is cut to one line" fails by name.
+  const page = readFileSync(join(__dirname, '..', 'app', 'admin', 'page.tsx'), 'utf8');
+  const links = page.slice(page.indexOf('links={healthLinks(c.id, it).map((l) => ('), page.indexOf('))}>', page.indexOf('links={healthLinks(c.id, it).map((l) => (')));
+  const cls = /<Link key=\{l\.href\} href=\{l\.href\} className="([^"]*)"/.exec(links)?.[1];
+  assert.ok(cls, "Health's links moved -- update this test");
+  assert.doesNotMatch(cls!, /\btruncate\b/, 'a Health link is cut to one line');
+  assert.match(cls!, /\bline-clamp-2\b/, 'a Health link can grow past two lines, or is cut to one');
+  assert.match(cls!, /\bbreak-words\b/);
+  assert.match(cls!, /\bmax-w-\[11rem\]/, 'the links column can take the finding\'s words\' width');
+  // The arrow stays with the last word: a no-break space, so "›" never starts the second line on its own.
+  assert.match(links, /\{'\\u00a0'\}›/, 'the arrow can wrap onto a line of its own');
+});

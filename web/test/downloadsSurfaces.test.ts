@@ -219,3 +219,38 @@ test('the desktop header fits at 1024 px: round buttons keep their 40 px, and th
   assert.match(header, /<div className="shell flex items-center gap-3 py-3 xl:gap-6">/, 'the header keeps its 24 px gaps at lg');
   assert.match(header, /<Lockup className="text-2xl max-xl:sr-only" markSize=\{38\} \/>/, "the logo's words take their width at lg");
 });
+
+test('the card rows of Library -> Downloads hold one column to the page: grid-cols-1, and cards that may shrink', () => {
+  // The final screenshot review: at 390 px, while a Health one-row repair ran, Server tasks pushed the page sideways
+  // (48 px in English, 135 px in German with Abbrechen wholly off the screen, 27 px in Arabic). ROWS had no column
+  // template below lg, so its implicit `auto` column grew to the min-content of a `truncate` task name -- its whole
+  // text. Reintroduce `const ROWS = 'grid gap-3 px-4 lg:grid-cols-2 …'`: "an implicit column" fails by name.
+  const view = code(read('components/ServerDownloadsView.tsx'));
+  const rows = /const ROWS = '([^']*)';/.exec(view)?.[1];
+  assert.ok(rows, 'ROWS is gone from the Downloads view -- update this test');
+  assert.ok(rows!.split(/\s+/).includes('grid-cols-1'), 'the card rows have an implicit column, as wide as a truncated name');
+  // The covers' grid has its count from the smallest screen up; every list in the view is one of the two.
+  const grid = /const GRID = '([^']*)';/.exec(view)?.[1];
+  assert.ok(grid?.split(/\s+/).includes('grid-cols-3'), 'the covers\' grid has an implicit column');
+  const lists = [...view.matchAll(/<(?:ul|div) className=\{`?\$?\{?(ROWS|GRID)\}?/g)].map((m) => m[1]);
+  assert.ok(lists.filter((l) => l === 'ROWS').length >= 3 && lists.filter((l) => l === 'GRID').length >= 3, 'a section of the view lays out on its own grid');
+  // And each card in those lists may shrink below its text, the view's and the archive's alike: the guard that
+  // holds even if a column went back to `auto`.
+  for (const [file, src] of [['ServerDownloadsView', view], ['ArchiveQueue', code(read('components/ArchiveQueue.tsx'))]] as const) {
+    const cards = [...src.matchAll(/<li\b[^>]*?className=\{?[`"](card flex[^`"]*)[`"]/g)].map((m) => m[1]);
+    assert.ok(cards.length >= (file === 'ArchiveQueue' ? 1 : 4), `${file}: its card rows moved -- redo this scan`);
+    for (const c of cards) assert.match(c, /\bmin-w-0\b/, `${file}: a card row cannot shrink below its text: ${c}`);
+  }
+});
+
+test("the series band's count is its own bidi run: in Arabic it never joins the source's name", () => {
+  // 390-ar-series-band-active.png: "… · fake-a1/3". The sentence ends in a source's Latin name, and without
+  // isolation the digits joined that name's left-to-right run, so the count's start margin fell on the far side.
+  // Reintroduce the plain `ms-1.5 tabular-nums text-fog-500` span: "the count joins the source's name" fails.
+  const band = code(read('components/SeriesServerDownloads.tsx'));
+  const count = /\{job && job\.total > 0 && <span className="([^"]*)">\{Math\.min\(job\.done, job\.total\)\}\/\{job\.total\}<\/span>\}/.exec(band);
+  assert.ok(count, 'the band\'s count moved -- update this test');
+  assert.match(count![1], /\[unicode-bidi:isolate\]/, "the count joins the source's name in a right-to-left page");
+  assert.match(count![1], /\bms-1\.5\b/, 'the count lost its gap');
+  assert.doesNotMatch(count![1], /\b(ml|mr|pl|pr)-/, 'the gap is on a physical side, the wrong one in Arabic');
+});
