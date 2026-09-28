@@ -91,6 +91,8 @@ chapters*.
 - **The slow archive's first chapter** of a series with nothing in the library yet is scanned in at once, and
   listed in Library → Downloads once the library holds it; such a series read *0 chapters* under a band saying *1
   of 14*.
+- **The slow archive's count keeps its total.** While a chapter it had fetched was being scanned into the library,
+  the cover and the series sheet could say *1 of 13* for a series of 14, until the next refresh.
 - **A renumbering being applied** read *interrupted* under Health's *Chapter numbering* until it finished. It says
   it is being applied now.
 - **A paused archive.** The series page no longer says a paused archive's chapters are *being archived slowly*,
