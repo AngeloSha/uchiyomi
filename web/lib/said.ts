@@ -518,7 +518,9 @@ const WORDS: Record<string, (p: P) => string | null> = {
   'engine.waiting': (p) => (num(p, 'n') === 1
     ? tr('1 series that came from extensions keeps its chapters and gets no new ones until it is back')
     : tr('{n} series that came from extensions keep their chapters and get no new ones until it is back', { n: num(p, 'n') })),
-  'engine.switchedOff': () => tr('Turned off'),
+  // Not the source status "Turned off" (lib/status.ts SOURCE_LABELS): that one agrees with a source, and read
+  // "Désactivée" above "le moteur".
+  'engine.switchedOff': () => tr('Switched off'),
   'engine.notSetUp': () => tr('Not set up'),
   'engine.offNote': () => tr('Admin → Extensions shows how to bring it back. Its data is kept while it is off.'),
   'engine.fromExtensions': () => tr('Series from extensions'),

@@ -265,6 +265,23 @@ test('a source that could not be named is "its source" inside a sentence, and op
   }
 });
 
+test("the engine's switched-off state has its own words, never a source card's", () => {
+  // "Turned off" is a source's (lib/status.ts SOURCE_LABELS), and French, Spanish and Portuguese agree it with a source:
+  // the Extension engine row read "Désactivée" above "le moteur" (the v0.49.1 translation review). Reintroduce
+  // tr('Turned off') for engine.switchedOff: "the engine takes a source's word" fails.
+  const fr = JSON.parse(readFileSync(join(__dirname, '..', 'public', 'locales', 'fr.json'), 'utf8'));
+  try {
+    setActiveLocale('fr');
+    setActiveDict(fr);
+    assert.notEqual(saidText({ code: 'engine.switchedOff' }, '\0'), fr['Turned off'], "the engine takes a source's word");
+    assert.equal(saidText({ code: 'engine.switchedOff' }, '\0'), 'Désactivé', 'the engine is not masculine in French');
+  } finally {
+    setActiveLocale('en');
+    setActiveDict({});
+  }
+  assert.equal(saidText({ code: 'engine.switchedOff' }, '\0'), 'Switched off');
+});
+
 test('a line is joined the reader\'s way, and a code this build does not know leaves all of it in English', () => {
   const parts: Said[] = [
     { code: 'gaps.live', params: { n: 3 } }, { code: 'gaps.quiet', params: { n: 2 } }, { code: 'ignored', params: { n: 1 } },

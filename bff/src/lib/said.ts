@@ -346,7 +346,9 @@ const EN = {
   // ---- The extension engine (#72, lib/engineHealth.ts)
   'engine.waiting': ({ n }: { n: number }) =>
     `${n} series that came from extensions ${s(n, 'keeps its', 'keep their')} chapters and ${s(n, 'gets', 'get')} no new ones until it is back`,
-  'engine.switchedOff': () => 'Turned off',
+  // Its own words, never a source card's "Turned off": a language that agrees the word with its noun gave the engine a
+  // source's gender ("Désactivée", "Desactivada"; the v0.49.1 translation review).
+  'engine.switchedOff': () => 'Switched off',
   'engine.notSetUp': () => 'Not set up',
   'engine.offNote': () => 'Admin → Extensions shows how to bring it back. Its data is kept while it is off.',
   'engine.fromExtensions': () => 'Series from extensions',

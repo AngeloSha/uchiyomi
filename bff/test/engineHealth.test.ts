@@ -33,7 +33,8 @@ test('switched off with series that came from extensions: an info line, never a 
   assert.equal(c.id, 'extension-engine');
   assert.equal(c.title, 'Extension engine');
   assert.equal(c.status, 'ok', 'off on purpose is not a fault; the per-series rows already warn');
-  assert.equal(c.summary, 'Turned off');
+  // v0.49.1: the engine's own words, no longer a source card's "Turned off" (gendered for a source in fr, es, pt-BR).
+  assert.equal(c.summary, 'Switched off');
   assert.equal(findings(c).length, 0);
   assert.match(c.items[0].detail, /^12 series that came from extensions keep their chapters and get no new ones until it is back$/);
   const one = extensionEngine(base({ state: 'off', linked: 1 }))!;

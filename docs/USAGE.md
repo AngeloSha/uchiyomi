@@ -1541,7 +1541,7 @@ of *Series that can no longer update* whose reason is its source; the run and it
 checks.
 
 **Extension engine** (since v0.49.0) is one row about the engine itself, when there is one or series depend on
-one: *Turned off* or *Not set up* (a greyed line saying how many series from extensions keep their chapters and get
+one: *Switched off* or *Not set up* (a greyed line saying how many series from extensions keep their chapters and get
 no new ones until it is back), *Not answering* (amber, with how often Uchiyomi has asked since; it keeps asking
 every 5 minutes by itself), or ready, with whether the engine's own Cloudflare helper is in use. A helper that is
 off, or points at `localhost` where no helper runs, turns the row amber while an extension source is seen behind

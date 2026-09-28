@@ -70,7 +70,7 @@ test('the engine switched off on purpose', { skip: DSN ? false : 'set TEST_DATAB
       const engine = report.checks.find((c) => c.id === 'extension-engine');
       assert.ok(engine, 'the engine row is there while series depend on it');
       assert.equal(engine!.status, 'ok');
-      assert.equal(engine!.summary, 'Turned off');
+      assert.equal(engine!.summary, 'Switched off');
       const frozen = report.checks.find((c) => c.id === 'frozen-series')!;
       const row = frozen.items.find((i) => i.seriesId === SERIES[0]);
       assert.ok(row, 'a series from a switched-off engine is still listed as waiting');

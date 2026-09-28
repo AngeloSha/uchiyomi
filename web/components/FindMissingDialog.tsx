@@ -77,7 +77,9 @@ function whyText(c: Candidate): string {
     case 'unreachable': return tr('Could not be reached (timed out or refused)');
     // "It" is the series (bff fill.ts `not_tried`): enough OTHER sources listed it, so this one was never asked.
     case 'not_tried': return tr('Not asked: enough other sources already list this series');
-    case 'disabled': return tr('Switched off');
+    // The source card's word for a source switched off (lib/status.ts SOURCE_LABELS), which agrees with a source; the
+    // engine has "Switched off" to itself (lib/said.ts engine.switchedOff).
+    case 'disabled': return tr('Turned off');
     // #116: the series is numbered by posting order, so another source's chapter 20 is not this series' 20.
     case 'posting_order': return tr('Numbers these posts its own way: this series is numbered by posting order');
     default: return tr('Not usable');
